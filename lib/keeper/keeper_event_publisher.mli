@@ -1,63 +1,17 @@
 (** Keeper_event_publisher — MASC Event_bus publishers for runtime events.
 
-    Publishes MASC workspace events (broadcasts, heartbeats,
-    board posts, task transitions, keeper lifecycle, audit) to the
-    **MASC-owned** Event_bus.  Events follow dot-separated
-    snake_case naming per OAS Custom-name convention:
-    [masc.broadcast], [masc.heartbeat], [masc.keeper.lifecycle],
-    ...
+    Publishes the current keeper lifecycle and runtime audit events to the
+    **MASC-owned** Event_bus. Events follow the OAS Custom-name convention.
 
     Every publish routes to {!Event_bus_slots.get_masc} so the OAS/MASC
     layer boundary is preserved.  OAS's [event_bus.mli:103-107]
     explicitly warns against publishing domain events onto OAS's bus.
 
-    Wire format on SSE output keeps colon separators
-    ([masc.broadcast]) for dashboard compatibility — translation
-    is done by the SSE relay, not here.
+    SSE wire-name translation is done by the relay, not here.
 
     @since 2.90.0 (bus-separated since 2.353.0) *)
 
-(** {1 Active publishers} *)
-
-val publish_broadcast :
-  agent_name:string -> content:string -> unit
-(** Publishes [masc.broadcast] with payload
-    [{agent_name, content, timestamp}]. *)
-
-val publish_heartbeat :
-  agent_name:string ->
-  turn:int ->
-  context_pct:float ->
-  unit
-(** Publishes [masc.heartbeat] with payload
-    [{agent_name, turn, context_pct, timestamp}]. *)
-
-val publish_task_transition :
-  agent_name:string ->
-  task_id:string ->
-  transition:Masc_domain.task_action ->
-  unit
-(** Publishes [masc.task_transition] with payload
-    [{agent_name, task_id, transition, timestamp}].
-
-    [transition] is the canonical {!Masc_domain.task_action} variant
-    (#8605 family) — typos at call sites fail to compile.
-    Wire format ([["claim"]] / [["start"]] / [["done"]] / ...)
-    preserved via {!Masc_domain.task_action_to_string}.  Sibling
-    refactor of #8846 (Workspace-side hook for the same transition
-    vocabulary). *)
-
-(** {1 Keeper snapshot + lifecycle} *)
-
-val publish_keeper_snapshot :
-  keeper_name:string ->
-  generation:int ->
-  context_ratio:float ->
-  message_count:int ->
-  unit
-(** Publishes [masc.keeper.snapshot] with payload
-    [{keeper_name, generation, context_ratio, message_count, timestamp}].
-    Emitted alongside SSE broadcast in [keeper_keepalive]. *)
+(** {1 Keeper lifecycle} *)
 
 val publish_keeper_lifecycle :
   event:Keeper_lifecycle_events.lifecycle_event ->

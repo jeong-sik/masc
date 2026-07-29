@@ -8,7 +8,6 @@ import { findKeeper } from '../../lib/keeper-utils'
 import { formatDuration } from '../../lib/format-time'
 import {
   keeperActivityDisplay,
-  keeperDisplayModel,
   keeperDisplayRuntime,
 } from '../../lib/keeper-runtime-display'
 import {
@@ -40,7 +39,6 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
   const ctxRatio = keeper.context_ratio
   const ctxPct = ctxRatio != null ? Math.round(ctxRatio * 100) : null
   const generation = keeper.generation
-  const model = keeperDisplayModel(keeper)
   const runtime = keeperDisplayRuntime(keeper)
   const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
   if (runtime) loadRuntimeCatalog()
@@ -96,13 +94,6 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
         <div class="flex items-center gap-1.5 text-sm min-w-0">
           <span class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-wider">SPEC</span>
           <span class="text-3xs text-[var(--color-fg-secondary)] font-mono truncate max-w-80" title=${runtimeSpecTitle}>${runtimeSpecState}</span>
-        </div>
-      ` : null}
-
-      ${model ? html`
-        <div class="flex items-center gap-1.5 text-sm">
-          <span class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-wider">${model.label}</span>
-          <span class="text-sm text-[var(--color-fg-primary)] font-mono truncate max-w-50">${model.value}</span>
         </div>
       ` : null}
 

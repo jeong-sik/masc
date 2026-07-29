@@ -188,25 +188,26 @@ let test_usage_does_not_create_context_snapshot () =
         };
     }
   in
-  let snapshot =
-    Operator_control_context_snapshot.missing_keeper_context_snapshot ()
+  let json =
+    `Assoc
+      (Keeper_context_observation_projection.missing_context_fields ())
   in
   Alcotest.(check bool)
     "fixture is deliberately above the assigned model budget"
     true
     (meta.runtime.usage.last_input_tokens > model_budget);
-  Alcotest.(check (option (float 0.0001)))
-    "usage is not context ratio" None snapshot.context_ratio;
-  Alcotest.(check (option int))
-    "usage is not context tokens" None snapshot.context_tokens;
-  Alcotest.(check (option int))
-    "model budget is not an observed context max" None snapshot.context_max;
-  Alcotest.(check (option string))
-    "fallback source is not fabricated" None snapshot.context_source;
-  let json =
-    `Assoc
-      (Operator_control_context_snapshot.keeper_context_snapshot_fields snapshot)
-  in
+  Alcotest.(check bool)
+    "usage is not context ratio" true
+    Yojson.Safe.Util.(json |> member "context_ratio" |> equal `Null);
+  Alcotest.(check bool)
+    "usage is not context tokens" true
+    Yojson.Safe.Util.(json |> member "context_tokens" |> equal `Null);
+  Alcotest.(check bool)
+    "model budget is not an observed context max" true
+    Yojson.Safe.Util.(json |> member "context_max" |> equal `Null);
+  Alcotest.(check bool)
+    "fallback source is not fabricated" true
+    Yojson.Safe.Util.(json |> member "context_source" |> equal `Null);
   Alcotest.(check string)
     "missing measurement kind" "not_observed"
     Yojson.Safe.Util.(
@@ -222,59 +223,20 @@ let test_usage_does_not_create_context_snapshot () =
       |> member "reason"
       |> to_string)
   ;
-  let usage =
-    match
-      Operator_control_context_snapshot.keeper_last_turn_usage_of_meta meta
-    with
-    | Some usage -> usage
-    | None -> Alcotest.fail "last-turn usage was lost"
-  in
-  Alcotest.(check int) "usage input retained" 790_360 usage.input_tokens;
-  Alcotest.(check int) "usage output retained" 17 usage.output_tokens;
-  Alcotest.(check int) "usage total retained" 790_377 usage.total_tokens;
   let usage_json =
-    Operator_control_context_snapshot.keeper_last_turn_usage_to_json
-      (Some usage)
+    Keeper_context_observation_projection.last_turn_usage_json_of_meta meta
   in
   Alcotest.(check int) "usage JSON input retained" 790_360
     Yojson.Safe.Util.(usage_json |> member "input_tokens" |> to_int);
+  Alcotest.(check int) "usage JSON output retained" 17
+    Yojson.Safe.Util.(usage_json |> member "output_tokens" |> to_int);
+  Alcotest.(check int) "usage JSON total retained" 790_377
+    Yojson.Safe.Util.(usage_json |> member "total_tokens" |> to_int);
   Alcotest.(check string) "usage JSON source is explicit"
     "keeper_runtime_usage"
     Yojson.Safe.Util.(usage_json |> member "source" |> to_string)
 
-let test_complete_context_measurement_is_trusted () =
-  let snapshot =
-    Operator_control_context_snapshot.keeper_context_snapshot_from_metrics_json
-      (`Assoc
-        [ "snapshot_source", `String "keeper_context_status"
-        ; "context_ratio", `Float 0.42
-        ; "context_tokens", `Int 42_000
-        ; "context_max", `Int 100_000
-        ])
-  in
-  match snapshot with
-  | None -> Alcotest.fail "complete context measurement was rejected"
-  | Some snapshot ->
-    Alcotest.(check (option (float 0.0001)))
-      "trusted ratio" (Some 0.42) snapshot.context_ratio;
-    Alcotest.(check (option int))
-      "trusted tokens" (Some 42_000) snapshot.context_tokens;
-    Alcotest.(check (option int))
-      "trusted max" (Some 100_000) snapshot.context_max
-
-let test_partial_context_measurement_is_not_trusted () =
-  let snapshot =
-    Operator_control_context_snapshot.keeper_context_snapshot_from_metrics_json
-      (`Assoc
-        [ "snapshot_source", `String "keeper_context_status"
-        ; "context_ratio", `Float 0.42
-        ; "context_tokens", `Int 42_000
-        ])
-  in
-  Alcotest.(check bool) "partial measurement rejected" true
-    (Option.is_none snapshot)
-
-let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
+let test_snapshot_keeps_context_unobserved_and_usage_separate () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -336,17 +298,6 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
       (match Keeper_meta_store.write_meta config updated_meta with
       | Ok () -> ()
       | Error err -> Alcotest.fail err);
-      let metrics_store = Keeper_types_support.keeper_metrics_store config keeper_name in
-      Dated_jsonl.append metrics_store
-        (`Assoc
-          [
-            ("ts", `String (Masc_domain.now_iso ()));
-            ("channel", `String "heartbeat");
-            ("snapshot_source", `String "keeper_context_status");
-            ("context_ratio", `Float 0.1274375);
-            ("context_tokens", `Int 16312);
-            ("context_max", `Int 128000);
-          ]);
       Operator_control.invalidate_snapshot_cache ();
       let json =
         Operator_control.snapshot_json ~view:"summary"
@@ -362,216 +313,26 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
         | Some keeper -> keeper
         | None -> Alcotest.fail "expected keeper in snapshot"
       in
-      let latest_metrics_snapshot =
-        Dated_jsonl.read_recent_lines metrics_store 8
-        (* read_recent_lines returns chronological order; inspect newest first. *)
-        |> List.rev
-        |> List.find_map (fun line ->
-               try
-                 let json = Yojson.Safe.from_string line in
-                 match Safe_ops.json_string_opt "snapshot_source" json with
-                 | Some "keeper_context_status" ->
-                     Option.bind (Safe_ops.json_float_opt "context_ratio" json)
-                       (fun ratio ->
-                         Option.bind (Safe_ops.json_int_opt "context_tokens" json)
-                           (fun tokens ->
-                             Option.map
-                               (fun max_ctx -> (ratio, tokens, max_ctx))
-                               (Safe_ops.json_int_opt "context_max" json)))
-                 | _ -> None
-               with Yojson.Json_error _ -> None)
-      in
-      let metrics_ratio, metrics_tokens, metrics_max =
-        match latest_metrics_snapshot with
-        | Some snapshot -> snapshot
-        | None -> Alcotest.fail "expected keeper_context_status metrics snapshot"
-      in
-      let snapshot_ratio =
-        Yojson.Safe.Util.(keeper |> member "context_ratio" |> to_float)
-      in
-      let snapshot_tokens =
-        Yojson.Safe.Util.(keeper |> member "context_tokens" |> to_int)
-      in
-      let snapshot_max =
-        Yojson.Safe.Util.(keeper |> member "context_max" |> to_int)
-      in
-      Alcotest.(check (float 0.000001)) "latest metrics ratio retained"
-        metrics_ratio snapshot_ratio;
-      Alcotest.(check int) "latest metrics tokens retained"
-        metrics_tokens snapshot_tokens;
-      Alcotest.(check int) "latest metrics max retained"
-        metrics_max snapshot_max;
-      Alcotest.(check string) "metrics source retained" "keeper_context_status"
-        Yojson.Safe.Util.(keeper |> member "context_source" |> to_string);
-      Alcotest.(check bool) "metrics tokens differ from usage fallback" true
-        (snapshot_tokens <> updated_meta.runtime.usage.last_input_tokens);
-      Alcotest.(check bool) "nested context payload omitted" true
-        (Yojson.Safe.Util.member "context" keeper = `Null))
-
-let context_test_meta ~name ~last_input_tokens =
-  let base =
-    match
-      Masc_test_deps.meta_of_json_fixture
-        (`Assoc [ "name", `String name ])
-    with
-    | Ok meta -> meta
-    | Error error -> Alcotest.fail error
-  in
-  { base with
-    runtime =
-      { base.runtime with
-        usage = { base.runtime.usage with last_input_tokens }
-      }
-  }
-;;
-
-let init_context_test_runtime () =
-  let root = Masc_test_deps.find_project_root () in
-  let config_path = Filename.concat root "config/runtime.toml" in
-  match Runtime.init_default ~config_path with
-  | Ok () -> ()
-  | Error error -> Alcotest.failf "Runtime.init_default failed: %s" error
-;;
-
-let write_raw_metrics_row config keeper_name row =
-  let store = Keeper_types_support.keeper_metrics_store config keeper_name in
-  Dated_jsonl.append store (`Assoc [ "fixture", `Bool true ]);
-  let only_entry label directory =
-    match Sys.readdir directory |> Array.to_list with
-    | [ entry ] -> Filename.concat directory entry
-    | entries ->
-      Alcotest.failf
-        "expected one %s entry under %s, found %d"
-        label
-        directory
-        (List.length entries)
-  in
-  let month_dir = only_entry "month" (Dated_jsonl.base_dir store) in
-  let path = only_entry "day file" month_dir in
-  Fs_compat.save_file path (row ^ "\n");
-  path
-;;
-
-let test_context_snapshot_missing_metrics_is_typed_unavailable () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-       init_context_test_runtime ();
-       let config = Workspace.default_config base_dir in
-       let meta =
-         context_test_meta ~name:"metrics-missing" ~last_input_tokens:790_360
-       in
-       (match
-          Operator_control_context_snapshot.latest_keeper_context_snapshot_from_files
-            config
-            meta.name
-        with
-        | Ok None -> ()
-        | Ok (Some _) -> Alcotest.fail "missing metrics store returned a snapshot"
-        | Error _ -> Alcotest.fail "missing metrics store returned a read failure");
-       let snapshot =
-         Operator_control_context_snapshot.keeper_context_snapshot_of_meta config meta
-       in
-       Alcotest.(check (option (float 0.0001))) "no context ratio" None
-         snapshot.context_ratio;
-       Alcotest.(check (option int)) "no context token fallback" None
-         snapshot.context_tokens;
-       Alcotest.(check (option int)) "no context max fallback" None
-         snapshot.context_max;
-       Alcotest.(check (option string)) "no fabricated source" None
-         snapshot.context_source;
-       let json =
-         `Assoc
-           (Operator_control_context_snapshot.keeper_context_snapshot_fields snapshot)
-       in
-       let unavailable =
-         Yojson.Safe.Util.member "context_metrics_unavailable" json
-       in
-       Alcotest.(check string) "typed missing observation" "not_observed"
-         Yojson.Safe.Util.(unavailable |> member "kind" |> to_string);
-       Alcotest.(check string)
-         "exact missing reason" "context_measurement_missing"
-         Yojson.Safe.Util.(unavailable |> member "reason" |> to_string))
-;;
-
-let test_context_snapshot_malformed_metrics_is_unavailable () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-       init_context_test_runtime ();
-       let config = Workspace.default_config base_dir in
-       let meta = context_test_meta ~name:"metrics-malformed" ~last_input_tokens:991 in
-       let path = write_raw_metrics_row config meta.name "{not-json" in
-       (match
-          Operator_control_context_snapshot.latest_keeper_context_snapshot_from_files
-            config
-            meta.name
-        with
-        | Error
-            (Operator_control_context_snapshot.Malformed_metrics_row
-              { path = error_path; line_number = None; _ }) ->
-          Alcotest.(check string) "exact malformed row path" path error_path
-        | Error _ -> Alcotest.fail "unexpected metrics read error"
-        | Ok _ -> Alcotest.fail "malformed metrics row was silently accepted");
-       let snapshot =
-         Operator_control_context_snapshot.keeper_context_snapshot_of_meta config meta
-       in
-       Alcotest.(check (option int)) "no metadata token fallback" None
-         snapshot.context_tokens;
-       Alcotest.(check (option string)) "no fabricated source" None
-         snapshot.context_source;
-       let json =
-         `Assoc
-           (Operator_control_context_snapshot.keeper_context_snapshot_fields snapshot)
-       in
-       let unavailable =
-         Yojson.Safe.Util.member "context_metrics_unavailable" json
-       in
-       Alcotest.(check string) "typed decode failure" "malformed_json"
-         Yojson.Safe.Util.(unavailable |> member "kind" |> to_string);
-       Alcotest.(check string) "decode failure path" path
-         Yojson.Safe.Util.(unavailable |> member "path" |> to_string))
-;;
-
-let test_context_snapshot_storage_failure_is_unavailable () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-       init_context_test_runtime ();
-       let config = Workspace.default_config base_dir in
-       let meta = context_test_meta ~name:"metrics-storage-error" ~last_input_tokens:557 in
-       let metrics_dir = Keeper_types_support.keeper_metrics_dir config meta.name in
-       Fs_compat.mkdir_p (Filename.dirname metrics_dir);
-       Fs_compat.save_file metrics_dir "not a directory";
-       let snapshot =
-         Operator_control_context_snapshot.keeper_context_snapshot_of_meta config meta
-       in
-       Alcotest.(check (option int)) "no metadata token fallback" None
-         snapshot.context_tokens;
-       let json =
-         `Assoc
-           (Operator_control_context_snapshot.keeper_context_snapshot_fields snapshot)
-       in
-       let unavailable =
-         Yojson.Safe.Util.member "context_metrics_unavailable" json
-       in
-       Alcotest.(check string) "typed storage failure" "storage_read_failed"
-         Yojson.Safe.Util.(unavailable |> member "kind" |> to_string);
-       Alcotest.(check string) "exact storage reason" "not_a_directory"
-         Yojson.Safe.Util.(unavailable |> member "reason" |> to_string);
-       Alcotest.(check string) "exact storage path" metrics_dir
-         Yojson.Safe.Util.(unavailable |> member "path" |> to_string))
-;;
-
+      Alcotest.(check bool) "unowned ratio is ignored" true
+        Yojson.Safe.Util.(keeper |> member "context_ratio" |> equal `Null);
+      Alcotest.(check bool) "unowned tokens are ignored" true
+        Yojson.Safe.Util.(keeper |> member "context_tokens" |> equal `Null);
+      Alcotest.(check bool) "unowned max is ignored" true
+        Yojson.Safe.Util.(keeper |> member "context_max" |> equal `Null);
+      Alcotest.(check bool) "unowned source is ignored" true
+        Yojson.Safe.Util.(keeper |> member "context_source" |> equal `Null);
+      Alcotest.(check string) "missing owner remains explicit" "not_observed"
+        Yojson.Safe.Util.(
+          keeper
+          |> member "context_metrics_unavailable"
+          |> member "kind"
+          |> to_string);
+      Alcotest.(check int) "last-turn usage remains separate" 6_637_033
+        Yojson.Safe.Util.(
+          keeper
+          |> member "last_turn_usage"
+          |> member "input_tokens"
+          |> to_int))
 
 let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
   Eio_main.run @@ fun env ->
@@ -1138,20 +899,34 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
       Fs_compat.mkdir_p metrics_dir;
       Dated_jsonl.append metrics_store
         (`Assoc
-          [
+          (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+          @ [
             ("ts", `String (Masc_domain.now_iso ()));
+            ("ts_unix", `Float (Time_compat.now ()));
+            ("trace_id", `String "trace-lightweight-audit");
+            ("generation", `Int 0);
             ("channel", `String "turn");
+            ("turn_mode", `String "tool_use");
+            ("latency_ms", `Int 1);
+            ("handoff_performed", `Bool false);
             ("tool_call_count", `Int 2);
             ("tools_used", `List [ `String "masc_status"; `String "masc_tasks" ]);
-          ]);
+          ]));
       Dated_jsonl.append metrics_store
         (`Assoc
-          [
+          (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+          @ [
             ("ts", `String (Masc_domain.now_iso ()));
+            ("ts_unix", `Float (Time_compat.now ()));
+            ("trace_id", `String "trace-lightweight-audit");
+            ("generation", `Int 0);
             ("channel", `String "turn");
+            ("turn_mode", `String "text_response");
+            ("latency_ms", `Int 1);
+            ("handoff_performed", `Bool false);
             ("tool_call_count", `Int 0);
             ("tools_used", `List []);
-          ]);
+          ]));
       let meta =
         match Keeper_meta_store.read_meta config keeper_name with
         | Ok (Some meta) -> meta
@@ -1159,15 +934,13 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
         | Error err -> Alcotest.fail err
       in
       let first_audit =
-        Operator_control_snapshot.cached_tool_audit_json ~lightweight:true
-          config meta
+        Operator_control_snapshot_tool_audit.cached_tool_audit_json config meta
       in
       Alcotest.(check bool) "lightweight audit returns fallback immediately" true
         (Yojson.Safe.Util.member "tool_audit_source" first_audit = `Null);
       let rec wait_for_metrics attempts =
         let audit =
-          Operator_control_snapshot.cached_tool_audit_json ~lightweight:true
-            config meta
+          Operator_control_snapshot_tool_audit.cached_tool_audit_json config meta
         in
         match Yojson.Safe.Util.member "tool_audit_source" audit with
         | `String "keeper_metrics" -> audit
@@ -1196,12 +969,16 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
       Alcotest.(check string) "lightweight tool audit source retained"
         "keeper_metrics"
         Yojson.Safe.Util.(keeper |> member "tool_audit_source" |> to_string);
-      Alcotest.(check int) "lightweight tool audit count retained" 2
+      Alcotest.(check int) "latest turn with no tools stays zero" 0
         Yojson.Safe.Util.(keeper |> member "latest_tool_call_count" |> to_int);
-      Alcotest.(check (list string)) "lightweight latest tool names retained"
+      Alcotest.(check (list string)) "latest tool names stay latest-only"
+        []
+        Yojson.Safe.Util.
+          (keeper |> member "latest_tool_names" |> to_list |> List.map to_string);
+      Alcotest.(check (list string)) "recent tool names retain current rows"
         [ "masc_status"; "masc_tasks" ]
         Yojson.Safe.Util.
-          (keeper |> member "latest_tool_names" |> to_list |> List.map to_string))
+          (keeper |> member "recent_tool_names" |> to_list |> List.map to_string))
 
 let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest () =
   Eio_main.run @@ fun env ->
@@ -1246,24 +1023,40 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
       in
       Alcotest.(check bool) "keeper up ok" true ok;
       Keeper_keepalive.stop_keepalive keeper_name;
-      let decision_path = Keeper_types_support.keeper_decision_log_path config keeper_name in
-      Fs_compat.append_jsonl decision_path
+      let metrics_store =
+        Keeper_types_support.keeper_metrics_store config keeper_name
+      in
+      Dated_jsonl.append metrics_store
         (`Assoc
-          [
+          (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+          @ [
             ("ts", `String (Masc_domain.now_iso ()));
-            ("selected_mode", `String "tool_use");
+            ("ts_unix", `Float (Time_compat.now ()));
+            ("trace_id", `String "trace-lightweight-recent-tools");
+            ("generation", `Int 0);
+            ("channel", `String "turn");
+            ("turn_mode", `String "tool_use");
+            ("latency_ms", `Int 1);
+            ("handoff_performed", `Bool false);
             ("tool_call_count", `Int 2);
             ("tools_used", `List [ `String "masc_status"; `String "masc_tasks" ]);
-          ]);
+          ]));
       for _ = 1 to 20 do
-        Fs_compat.append_jsonl decision_path
+        Dated_jsonl.append metrics_store
           (`Assoc
-            [
+            (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+            @ [
               ("ts", `String (Masc_domain.now_iso ()));
-              ("selected_mode", `String "text_response");
+              ("ts_unix", `Float (Time_compat.now ()));
+              ("trace_id", `String "trace-lightweight-recent-tools");
+              ("generation", `Int 0);
+              ("channel", `String "turn");
+              ("turn_mode", `String "text_response");
+              ("latency_ms", `Int 1);
+              ("handoff_performed", `Bool false);
               ("tool_call_count", `Int 0);
               ("tools_used", `List []);
-            ])
+            ]))
       done;
       let meta =
         match Keeper_meta_store.read_meta config keeper_name with
@@ -1272,12 +1065,14 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
         | Error err -> Alcotest.fail err
       in
       ignore
-        (Operator_control_snapshot.cached_tool_audit_json ~lightweight:true
-           config meta);
+        (Operator_control_snapshot_tool_audit.cached_tool_audit_json
+           config
+           meta);
       let rec wait_for_recent_tools attempts =
         let audit =
-          Operator_control_snapshot.cached_tool_audit_json ~lightweight:true
-            config meta
+          Operator_control_snapshot_tool_audit.cached_tool_audit_json
+            config
+            meta
         in
         let recent =
           Yojson.Safe.Util.(audit |> member "recent_tool_names" |> to_list)
@@ -1490,25 +1285,9 @@ let () =
             `Quick
             test_usage_does_not_create_context_snapshot
         ; Alcotest.test_case
-            "missing ledger is typed unavailable"
+            "snapshot keeps context unobserved and usage separate"
             `Quick
-            test_context_snapshot_missing_metrics_is_typed_unavailable
-        ; Alcotest.test_case
-            "complete measurement is trusted"
-            `Quick
-            test_complete_context_measurement_is_trusted
-        ; Alcotest.test_case
-            "partial measurement is not trusted"
-            `Quick
-            test_partial_context_measurement_is_not_trusted
-        ; Alcotest.test_case
-            "malformed row is typed unavailable"
-            `Quick
-            test_context_snapshot_malformed_metrics_is_unavailable
-        ; Alcotest.test_case
-            "storage failure is typed unavailable"
-            `Quick
-            test_context_snapshot_storage_failure_is_unavailable
+            test_snapshot_keeps_context_unobserved_and_usage_separate
         ] );
       ( "last_compaction_ago_s removal"
       , [ Alcotest.test_case

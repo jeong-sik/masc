@@ -33,22 +33,7 @@ let work_kind_of_turn_mode = function
 let turn_mode_of_json (json : Yojson.Safe.t) : turn_mode option =
   match Safe_ops.json_string_opt "turn_mode" json with
   | Some raw -> turn_mode_of_string raw
-  | None ->
-      (match Safe_ops.json_string_opt "selected_mode" json with
-       | Some raw -> turn_mode_of_string raw
-       | None ->
-           match Safe_ops.json_string_opt "work_kind" json with
-           | Some "tool_use" -> Some Tool_use
-           | Some "noop" -> Some Noop
-           | Some "text_turn" -> Some Text_response
-           | _ -> None)
+  | None -> None
 
 let work_kind_of_json (json : Yojson.Safe.t) : string option =
-  match turn_mode_of_json json with
-  | Some mode -> Some (work_kind_of_turn_mode mode)
-  | None ->
-      (match Safe_ops.json_string_opt "work_kind" json with
-       | Some raw ->
-           let value = String.trim raw in
-           if value = "" then None else Some value
-       | None -> None)
+  turn_mode_of_json json |> Option.map work_kind_of_turn_mode

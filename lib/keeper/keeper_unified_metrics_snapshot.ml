@@ -15,7 +15,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(turn_cost : float)
     ~(turn_generation : int)
     ~(channel : Keeper_world_observation.keeper_cycle_channel)
-    ~(snapshot_source : string)
     ~(checkpoint_bytes : int)
     ~(message_count : int)
     ~(handoff_json : Yojson.Safe.t option)
@@ -34,6 +33,8 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
       Some (scheduled_autonomous_outcome_for_result result)
     else None
   in
+  let tools_used = Keeper_agent_result.tool_names result in
+  let tool_call_count = Keeper_agent_result.tool_call_count result in
   let metrics_store = Keeper_types_support.keeper_metrics_store config meta.name in
   let usage_json =
     if result.usage_reported then
@@ -88,7 +89,8 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
       ();
   let snapshot =
     `Assoc
-      [
+      (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+      @ [
         ("ts", `String (now_iso ()));
         ("ts_unix", `Float now_ts);
         ("channel", `String (Keeper_world_observation.channel_to_string channel));
@@ -96,8 +98,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         ("agent_name", `String meta.agent_name);
         ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
         ("generation", `Int turn_generation);
-        ("model_used", `Null);
-        ("resolved_model_id", `Null);
         ("prompt_fingerprint", `String result.prompt_metrics.fingerprint);
         ("prompt", Keeper_agent_run.prompt_metrics_to_json result.prompt_metrics);
         ("ctx_composition", Keeper_agent_run.ctx_composition_to_json result.ctx_composition);
@@ -112,17 +112,10 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         ("cost_usd", cost_json);
         ("checkpoint_bytes", `Int checkpoint_bytes);
         ("message_count", `Int message_count);
-        ("continuity_state", `Null);
-        ("compacted", `Bool false);
-        ("compaction_trigger", `Null);
-        ("compaction_trigger_detail", `Null);
         ("turn_mode", `String (turn_mode_to_string turn_mode));
+        ("tool_call_count", `Int tool_call_count);
+        ("tools_used", `List (List.map (fun tool -> `String tool) tools_used));
         ( "scheduled_autonomous_outcome",
-          match scheduled_autonomous_outcome with
-          | Some outcome ->
-              `String (proactive_cycle_outcome_to_string outcome)
-          | None -> `Null );
-        ( "proactive_outcome",
           match scheduled_autonomous_outcome with
           | Some outcome ->
               `String (proactive_cycle_outcome_to_string outcome)
@@ -144,7 +137,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
          match result.runtime_observation with
          | Some observation -> redacted_runtime_observation_to_json observation
          | None -> `Null);
-        ("snapshot_source", `String snapshot_source);
         ("memory_check", memory_check_default_json ());
         ("handoff_performed",
          `Bool
@@ -171,7 +163,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
          | Some t ->
            Keeper_hooks_oas.inference_telemetry_to_runtime_json t
          | None -> `Null);
-      ]
+      ])
   in
   Dated_jsonl.append metrics_store snapshot;
   ()

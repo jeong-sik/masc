@@ -17,15 +17,17 @@ let latest_metrics_json ~metrics_store =
   match
     List.rev parsed
     |> List.find_opt (fun json ->
-      match Json_util.assoc_member_opt "runtime" json with
-      | Some (`Assoc _) -> true
-      | _ -> false)
+      match
+        Keeper_metrics_record.kind_of_json json,
+        Json_util.assoc_member_opt "runtime" json
+      with
+      | Some Keeper_metrics_record.Turn, Some (`Assoc _) -> true
+      | Some Keeper_metrics_record.Turn, _
+      | Some Keeper_metrics_record.Heartbeat, _
+      | None, _ -> false)
   with
   | Some json -> Some json
-  | None ->
-      (match List.rev parsed with
-       | json :: _ -> Some json
-       | [] -> None)
+  | None -> None
 
 let first_some candidates =
   List.find_map Fun.id candidates

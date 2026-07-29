@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { formatPct1, formatTokens, formatTokPerSec, isFiniteMetricValue } from '../lib/format-number'
+import { formatTokens, formatTokPerSec, isFiniteMetricValue } from '../lib/format-number'
 import { Eyebrow } from './common/eyebrow'
 import { StatTile } from './common/stat-tile'
 import type { Keeper, KeeperMetricPoint } from '../types'
@@ -57,16 +57,12 @@ export function DetailCard({ class: cx, children }: {
 // ── Operational Health ───────────────────────────────────
 
 export function OperationalHealth({ keeper }: { keeper: Keeper }) {
-  const mw = keeper.metrics_window
   const hb = keeper.last_heartbeat
-  const compSavedRatio = mw?.compaction_saved_ratio
-  const avgSaved = mw?.avg_compaction_saved_tokens
+  const lastCompactionSaved = keeper.last_compaction_saved_tokens
 
   const hbTone: KpiTone = !hb ? 'default' : 'ok'
-  const compTone: KpiTone = compSavedRatio == null ? 'default'
-    : compSavedRatio >= 0.4 ? 'ok' : compSavedRatio >= 0.2 ? 'warn' : 'bad'
 
-  const hasAny = hb || compSavedRatio != null
+  const hasAny = hb || lastCompactionSaved != null
   if (!hasAny) return null
 
   return html`
@@ -79,11 +75,10 @@ export function OperationalHealth({ keeper }: { keeper: Keeper }) {
             <span class="text-xs font-mono ${KPI_VALUE_TONE[hbTone]}">${hb.replace('T', ' ').slice(0, 19)}</span>
           </div>
         ` : null}
-        ${compSavedRatio != null ? html`
-          <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE[compTone]} flex flex-col gap-0.5 v2-monitoring-card">
-            <${Eyebrow}>압축 절감률</${Eyebrow}>
-            <span class="text-sm font-mono tabular-nums ${KPI_VALUE_TONE[compTone]}">${formatPct1(compSavedRatio)}</span>
-            ${avgSaved != null ? html`<${MutedSpan}>avg ${formatTokens(avgSaved)} saved</${MutedSpan}>` : null}
+        ${lastCompactionSaved != null ? html`
+          <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE.default} flex flex-col gap-0.5 v2-monitoring-card">
+            <${Eyebrow}>마지막 압축 절약</${Eyebrow}>
+            <span class="text-sm font-mono tabular-nums ${KPI_VALUE_TONE.default}">${formatTokens(lastCompactionSaved)}</span>
           </div>
         ` : null}
       </div>

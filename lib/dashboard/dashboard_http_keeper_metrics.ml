@@ -1,5 +1,5 @@
-(** Dashboard_http_keeper_metrics — keeper metrics types, 24h bucket stats,
-    gen window stats, history summary, and helper utilities.
+(** Dashboard_http_keeper_metrics — keeper metrics window types,
+    generation stats, history summary, and helper utilities.
 
     {b Note for code auditors}: this module does {b not} access a SQL
     database — the helpers here are pure parsers / aggregators over
@@ -23,28 +23,26 @@ let normalize_model_name s =
 
 type keeper_gen_window_stats = {
   mutable turns: int;
+  mutable usage_points: int;
   mutable input_tokens: int;
   mutable output_tokens: int;
   mutable total_tokens: int;
   mutable handoffs: int;
-  mutable compactions: int;
   mutable first_ts: float;
   mutable last_ts: float;
-  models: (string, int) Hashtbl.t;
   tools: (string, int) Hashtbl.t;
 }
 
 let create_keeper_gen_window_stats () : keeper_gen_window_stats =
   {
     turns = 0;
+    usage_points = 0;
     input_tokens = 0;
     output_tokens = 0;
     total_tokens = 0;
     handoffs = 0;
-    compactions = 0;
     first_ts = 0.0;
     last_ts = 0.0;
-    models = Hashtbl.create 8;
     tools = Hashtbl.create 8;
   }
 
@@ -61,146 +59,6 @@ let truncate_text ~(max_len : int) (s : string) : string =
   | String_util.Truncated { prefix; suffix; _ } -> prefix ^ suffix
 
 let contains_ci = String_util.contains_substring_ci
-
-type keeper_24h_bucket_stats = {
-  mutable sample_points: int;
-  mutable context_ratio_sum: float;
-  mutable proactive_points: int;
-  mutable proactive_fallback_count: int;
-}
-
-let create_keeper_24h_bucket_stats () : keeper_24h_bucket_stats =
-  {
-    sample_points = 0;
-    context_ratio_sum = 0.0;
-    proactive_points = 0;
-    proactive_fallback_count = 0;
-  }
-
-let metrics_row_has_context_snapshot (j : Yojson.Safe.t) : bool =
-  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key j) in
-  let has_int = function
-    | `Int _ -> true
-    | _ -> false
-  in
-  let has_ratio = function
-    | `Float _ | `Int _ -> true
-    | _ -> false
-  in
-  has_ratio (m "context_ratio")
-  && has_int (m "context_tokens")
-  && has_int (m "context_max")
-  && has_int (m "message_count")
-
-let keeper_metrics_24h_json
-    ~(metrics_lines : string list)
-    ~(now_ts : float) : Yojson.Safe.t * Yojson.Safe.t =
-  let window_sec = Masc_time_constants.day in
-  let start_ts = now_ts -. window_sec in
-  let lines = metrics_lines in
-  let buckets : (int, keeper_24h_bucket_stats) Hashtbl.t = Hashtbl.create 64 in
-  let sample_points = ref 0 in
-  let proactive_points = ref 0 in
-  let proactive_fallback_count = ref 0 in
-  List.iter
-    (fun line ->
-      try
-        let j = Yojson.Safe.from_string line in
-        let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-        if ts_unix >= start_ts && ts_unix <= (now_ts +. 60.0)
-           && metrics_row_has_context_snapshot j
-        then begin
-          incr sample_points;
-          let bucket_ts =
-            int_of_float (floor (ts_unix /. Masc_time_constants.hour) *. Masc_time_constants.hour)
-          in
-          let b =
-            match Hashtbl.find_opt buckets bucket_ts with
-            | Some row -> row
-            | None ->
-                let row = create_keeper_24h_bucket_stats () in
-                Hashtbl.replace buckets bucket_ts row;
-                row
-          in
-          let context_ratio = Safe_ops.json_float ~default:0.0 "context_ratio" j in
-          b.sample_points <- b.sample_points + 1;
-          b.context_ratio_sum <- b.context_ratio_sum +. context_ratio;
-          let channel = Safe_ops.json_string ~default:"turn" "channel" j in
-          let is_scheduled_autonomous =
-            match Keeper_world_observation.channel_of_string channel with
-            | Some c -> Keeper_world_observation.is_autonomous c
-            | None -> false
-          in
-          if is_scheduled_autonomous then begin
-            incr proactive_points;
-            b.proactive_points <- b.proactive_points + 1;
-            let proactive_obj = Option.value ~default:`Null (Json_util.assoc_member_opt "proactive" j) in
-            let fallback_applied =
-              Safe_ops.json_bool ~default:false "fallback_applied" proactive_obj
-            in
-            if fallback_applied then begin
-              incr proactive_fallback_count;
-              b.proactive_fallback_count <- b.proactive_fallback_count + 1;
-            end
-          end
-        end
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Server.info "keeper log parse: %s" (Printexc.to_string exn))
-    lines;
-  let rows =
-    buckets
-    |> Hashtbl.to_seq
-    |> List.of_seq
-    |> List.sort (fun (ta, _) (tb, _) -> compare ta tb)
-    |> List.map (fun (bucket_ts, b) ->
-         let context_ratio_avg =
-           if b.sample_points = 0 then 0.0
-           else b.context_ratio_sum /. float_of_int b.sample_points
-         in
-         let proactive_fallback_rate =
-           if b.proactive_points = 0 then 0.0
-           else
-             float_of_int b.proactive_fallback_count
-             /. float_of_int b.proactive_points
-         in
-         `Assoc [
-           ("bucket_ts_unix", `Int bucket_ts);
-           ("sample_points", `Int b.sample_points);
-           ("context_ratio_avg", `Float context_ratio_avg);
-           ("proactive_points", `Int b.proactive_points);
-           ("proactive_fallback_count", `Int b.proactive_fallback_count);
-           ("proactive_fallback_rate", `Float proactive_fallback_rate);
-           ("proactive_template_fallback_count", `Int b.proactive_fallback_count);
-           ("proactive_template_fallback_rate", `Float proactive_fallback_rate);
-           ("proactive_template_fallback_numerator", `Int b.proactive_fallback_count);
-           ("proactive_template_fallback_denominator", `Int b.proactive_points);
-         ])
-  in
-  let bucket_count = List.length rows in
-  let proactive_fallback_rate =
-    if !proactive_points = 0 then 0.0
-    else
-      float_of_int !proactive_fallback_count
-      /. float_of_int !proactive_points
-  in
-  let summary =
-    `Assoc [
-      ("window_hours", `Float 24.0);
-      ("source_lines", `Int (List.length metrics_lines));
-      ("sample_points", `Int !sample_points);
-      ("bucket_count", `Int bucket_count);
-      ("from_ts_unix", `Float start_ts);
-      ("to_ts_unix", `Float now_ts);
-      ("coverage_hours", `Float (float_of_int bucket_count));
-      ("proactive_points", `Int !proactive_points);
-      ("proactive_fallback_count", `Int !proactive_fallback_count);
-      ("proactive_fallback_rate", `Float proactive_fallback_rate);
-      ("proactive_template_fallback_count", `Int !proactive_fallback_count);
-      ("proactive_template_fallback_rate", `Float proactive_fallback_rate);
-      ("proactive_template_fallback_numerator", `Int !proactive_fallback_count);
-      ("proactive_template_fallback_denominator", `Int !proactive_points);
-    ]
-  in
-  (`List rows, summary)
 
 let keeper_history_summary_json
     ~(all_keeper_names : string list)

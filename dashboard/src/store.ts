@@ -335,11 +335,10 @@ export const fusionRunsError = signal<string | null>(null)
 
 // --- OAS monitoring state ---
 
-import type { OasAgentEvent, OasHealthSummary, OasKeeperSnapshot } from './types/oas'
+import type { OasAgentEvent, OasHealthSummary } from './types/oas'
 
 import {
   OAS_AGENT_EVENT_BUFFER,
-  OAS_KEEPER_SNAPSHOT_MAX,
   HEARTBEAT_STALE_MS,
   SHELL_TTL_MS,
 } from './config/constants'
@@ -347,8 +346,6 @@ import { RingBuffer } from './lib/ring-buffer'
 
 const oasAgentEventsRing = new RingBuffer<OasAgentEvent>(OAS_AGENT_EVENT_BUFFER)
 export const oasAgentEvents = signal<OasAgentEvent[]>([])
-export const oasKeeperSnapshots = signal<Map<string, OasKeeperSnapshot>>(new Map())
-export const oasLastKeeperTick = signal<number | null>(null)
 export const oasTotalEvents = signal(0)
 export const oasReplayLoadedEvents = signal(0)
 export const oasReplayTotalMatchingEvents = signal(0)
@@ -369,8 +366,6 @@ export const oasLastEvidenceTs = signal<number | null>(null)
 export function resetOasRuntimeSignals(): void {
   oasAgentEventsRing.clear()
   oasAgentEvents.value = []
-  oasKeeperSnapshots.value = new Map()
-  oasLastKeeperTick.value = null
   oasTotalEvents.value = 0
   oasReplayLoadedEvents.value = 0
   oasReplayTotalMatchingEvents.value = 0
@@ -502,32 +497,8 @@ export function recordOasEvidenceRefs(input: {
   }
 }
 
-export function updateOasKeeperSnapshot(snapshot: OasKeeperSnapshot): void {
-  const next = new Map<string, OasKeeperSnapshot>(oasKeeperSnapshots.value)
-  next.set(snapshot.keeper_name, snapshot)
-  // Prune oldest if exceeding max
-  if (next.size > OAS_KEEPER_SNAPSHOT_MAX) {
-    let oldest: string | null = null
-    let oldestTs = Infinity
-    for (const [name, snap] of next) {
-      if (snap.timestamp < oldestTs) {
-        oldest = name
-        oldestTs = snap.timestamp
-      }
-    }
-    if (oldest) next.delete(oldest)
-  }
-  oasKeeperSnapshots.value = next
-  if (Number.isFinite(snapshot.timestamp)) {
-    const nextTickMs = Math.round(snapshot.timestamp * 1000)
-    oasLastKeeperTick.value = Math.max(oasLastKeeperTick.value ?? 0, nextTickMs)
-  }
-}
-
 export const oasHealthSummary: ReadonlySignal<OasHealthSummary> = computed(() => ({
   agentEventsCount: oasAgentEvents.value.length,
-  keeperSnapshotsCount: oasKeeperSnapshots.value.size,
-  lastKeeperTick: oasLastKeeperTick.value,
   totalEvents: oasTotalEvents.value,
   replayLoadedEvents: oasReplayLoadedEvents.value,
   replayTotalMatchingEvents: oasReplayTotalMatchingEvents.value,

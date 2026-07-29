@@ -34,7 +34,7 @@ function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boolean {
   const et = entry.eventType ?? 'unknown'
   switch (filter) {
     case 'heartbeat':
-      return et === 'keeper_heartbeat' || et === 'oas_keeper_snapshot'
+      return et === 'keeper_heartbeat'
     case 'message':
       return et === 'broadcast' || et === 'board_post' || et === 'board_comment'
     case 'oas_turn':
@@ -55,7 +55,6 @@ function eventKindBadgeTone(entry: JournalEntry): EventBadgeTone {
   const eventType = entry.eventType
   switch (eventType) {
     case 'keeper_heartbeat':
-    case 'oas_keeper_snapshot':
       return 'ok'
     case 'oas_turn':
       return 'info'
@@ -90,7 +89,6 @@ function eventKindBadgeTone(entry: JournalEntry): EventBadgeTone {
 function eventKindLabel(eventType: JournalEventType | undefined): string {
   switch (eventType) {
     case 'keeper_heartbeat': return 'HB'
-    case 'oas_keeper_snapshot': return 'OAS'
     case 'oas_turn': return 'TURN'
     case 'oas_tool': return 'TOOL'
     case 'oas_context': return 'CTX'

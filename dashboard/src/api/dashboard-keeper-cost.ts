@@ -104,7 +104,6 @@ export interface KeeperDecision {
   choice: string | null
   reason: string | null
   context: KeeperDecisionContext | null
-  model_used: string | null
   latency_ms: number | null
   cost_usd: number | null
   input_tokens: number | null
@@ -178,7 +177,6 @@ function decodeKeeperDecision(raw: unknown): KeeperDecision | null {
     choice: asNullableString(raw.choice),
     reason: asNullableString(raw.reason),
     context: decodeKeeperDecisionContext(raw.context),
-    model_used: null,
     latency_ms: asNumber(raw.latency_ms) ?? null,
     cost_usd: asNumber(raw.cost_usd) ?? null,
     input_tokens: asNumber(raw.input_tokens) ?? null,

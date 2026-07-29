@@ -670,7 +670,6 @@ let test_status_reports_normalized_options () =
     ; "fast", `Bool false
     ; "include_metrics_overview", `Bool false
     ; "include_history_tail", `Bool false
-    ; "include_compaction_history", `Bool false
     ]
   in
   let context_enabled = status_json_with_args config (`Assoc common_fields) in
@@ -683,10 +682,6 @@ let test_status_reports_normalized_options () =
     "tail messages runtime default"
     (Some Masc.Keeper_status_options_defaults.tail_messages)
     (json_int_field "tail_messages" default_options);
-  Alcotest.(check (option int))
-    "tail compactions runtime default"
-    (Some Masc.Keeper_status_options_defaults.tail_compactions)
-    (json_int_field "tail_compactions" default_options);
   Alcotest.(check (option int))
     "tail bytes runtime default"
     (Some Masc.Keeper_status_options_defaults.tail_bytes)
@@ -714,7 +709,6 @@ let test_status_reports_normalized_options () =
       (`Assoc
         [ "name", `String name
         ; "fast", `Bool true
-        ; "tail_compactions", `Int 1
         ; ( "tail_bytes"
           , `Int Masc.Keeper_status_options_defaults.min_tail_bytes )
         ])
@@ -729,15 +723,10 @@ let test_status_reports_normalized_options () =
       (`Assoc
         [ "name", `String name
         ; "fast", `Bool true
-        ; "tail_compactions", `Int 7
         ; "tail_bytes", `Int 8_000
         ])
   in
   let second_options = json_assoc_field "status_options" second_window in
-  Alcotest.(check (option int))
-    "tail compaction window is reported"
-    (Some 7)
-    (json_int_field "tail_compactions" second_options);
   Alcotest.(check (option int))
     "tail byte window is reported"
     (Some 8_000)

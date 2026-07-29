@@ -31,14 +31,12 @@ type tail_order = Keeper_status_options_defaults.tail_order =
 type status_options =
   { tail_turns : int
   ; tail_messages : int
-  ; tail_compactions : int
   ; tail_bytes : int
   ; tail_order : tail_order
   ; fast : bool
   ; include_context : bool
   ; include_metrics_overview : bool
   ; include_history_tail : bool
-  ; include_compaction_history : bool
   }
 
 let normalize_status_name = String.trim
@@ -200,14 +198,6 @@ let status_options_of_fields fields =
       ~minimum:Keeper_status_options_defaults.min_tail_messages
       ~maximum:Keeper_status_options_defaults.max_tail_messages
   in
-  let* tail_compactions =
-    optional_int_argument
-      fields
-      Keeper_status_options_defaults.Argument.tail_compactions
-      ~default:Keeper_status_options_defaults.tail_compactions
-      ~minimum:Keeper_status_options_defaults.min_tail_compactions
-      ~maximum:Keeper_status_options_defaults.max_tail_compactions
-  in
   let* tail_bytes =
     optional_int_argument
       fields
@@ -234,23 +224,15 @@ let status_options_of_fields fields =
       Keeper_status_options_defaults.Argument.include_history_tail
       ~default:(not fast)
   in
-  let* include_compaction_history =
-    optional_bool_argument
-      fields
-      Keeper_status_options_defaults.Argument.include_compaction_history
-      ~default:(not fast)
-  in
   Ok
     { tail_turns
     ; tail_messages
-    ; tail_compactions
     ; tail_bytes
     ; tail_order
     ; fast
     ; include_context
     ; include_metrics_overview
     ; include_history_tail
-    ; include_compaction_history
     }
 
 let apply_tail_order order items =
@@ -346,14 +328,12 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
       let
         { tail_turns
         ; tail_messages
-        ; tail_compactions
         ; tail_bytes
         ; tail_order
         ; fast
         ; include_context
         ; include_metrics_overview
         ; include_history_tail
-        ; include_compaction_history
         }
         = options
       in
@@ -453,7 +433,14 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            let (parsed, _) =
              Fs_compat.parse_jsonl_lines ~source:"keeper_metrics" lines
            in
-           `List (apply_tail_order tail_order parsed)
+           let current =
+             List.filter
+               (fun json ->
+                 Option.is_some
+                   (Keeper_metrics_record.kind_of_json json))
+               parsed
+           in
+           `List (apply_tail_order tail_order current)
          in
          let metrics_window_lines =
            if include_metrics_overview then
@@ -464,9 +451,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          in
          let metrics_overview =
            if include_metrics_overview then
-             summarize_metrics_lines
-               metrics_window_lines
-               ~default_generation:m.runtime.nonce
+             summarize_metrics_lines metrics_window_lines
            else
              empty_metrics_summary
          in
@@ -563,60 +548,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
               fragment_count,
               filtered_count )
          in
-         let compaction_history_tail =
-           if not include_compaction_history then
-             (`List [], 0)
-           else
-             let n =
-               max
-                 Keeper_status_options_defaults.min_compaction_scan_lines
-                 (tail_compactions
-                  * Keeper_status_options_defaults.compaction_lines_per_event)
-             in
-             let lines = Dated_jsonl.read_recent_lines metrics_store n in
-             let events_rev =
-               List.fold_left
-                 (fun acc line ->
-                   try
-                     let j = Yojson.Safe.from_string line in
-                     let compacted = Safe_ops.json_bool ~default:false "compacted" j in
-                     if not compacted then acc
-                     else
-                       let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-                       let age_s =
-                         if ts_unix > 0.0 then Some (max 0.0 (now_ts -. ts_unix)) else None
-                       in
-                       let before_tokens = Safe_ops.json_int ~default:0 "compaction_before_tokens" j in
-                       let after_tokens = Safe_ops.json_int ~default:0 "compaction_after_tokens" j in
-                       let saved_tokens = max 0 (before_tokens - after_tokens) in
-                       let item =
-                         `Assoc [
-                           ("kind", `String "context");
-                           ("channel", `String (Safe_ops.json_string ~default:"turn" "channel" j));
-                           ("ts_unix", `Float ts_unix);
-                           ("age_s", Json_util.float_opt_to_json age_s);
-                           ("trace_id", `String (Safe_ops.json_string ~default:"" "trace_id" j));
-                           ("generation", `Int (Safe_ops.json_int ~default:m.runtime.nonce "generation" j));
-                           ("context_before_tokens", `Int before_tokens);
-                           ("context_after_tokens", `Int after_tokens);
-                           ("context_saved_tokens", `Int saved_tokens);
-                           ( "context_trigger",
-                             match Safe_ops.json_string_opt "compaction_trigger" j with
-                             | Some reason when String.trim reason <> "" -> `String reason
-                             | _ -> `Null );
-                         ]
-                       in
-                       item :: acc
-                   with Yojson.Json_error _ -> acc)
-                 [] lines
-             in
-             let events = List.rev events_rev in
-             let total = List.length events in
-             let start = max 0 (total - tail_compactions) in
-             let tail = List.filteri (fun i _ -> i >= start) events in
-             (`List (apply_tail_order tail_order tail), total)
-        in
-        let allowed_tools = keeper_model_tool_names () in
+         let allowed_tools = keeper_model_tool_names () in
         let last_autonomous = String.trim m.runtime.last_autonomous_action_at in
         let tool_audit_snapshot =
           match latest_tool_audit_snapshot_from_files config ~keeper_name:m.name with
@@ -810,13 +742,11 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("status_options", `Assoc [
              ("tail_turns", `Int tail_turns);
              ("tail_messages", `Int tail_messages);
-             ("tail_compactions", `Int tail_compactions);
              ("tail_bytes", `Int tail_bytes);
              ("fast", `Bool fast);
              ("include_context", `Bool include_context);
              ("include_metrics_overview", `Bool include_metrics_overview);
              ("include_history_tail", `Bool include_history_tail);
-             ("include_compaction_history", `Bool include_compaction_history);
              ("tail_order", `String (tail_order_to_string tail_order));
            ]);
            ("context_budget", context_budget);
@@ -839,8 +769,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("history_fragment_count", `Int history_fragment_count);
            ("history_fragment_filtered_count", `Int history_fragment_filtered_count);
            ("history_fragment_filter_enabled", `Bool history_filter_fragments);
-           ("compaction_history_tail", fst compaction_history_tail);
-           ("compaction_history_count", `Int (snd compaction_history_tail));
            ("storage_paths", `Assoc [
              ("meta", `String (keeper_meta_path config m.name));
              ("metrics", `String (Dated_jsonl.base_dir metrics_store));

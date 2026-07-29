@@ -137,7 +137,6 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
             ("include_context", `Bool false);
             ("include_metrics_overview", `Bool true);
             ("include_history_tail", `Bool false);
-            ("include_compaction_history", `Bool false);
           ]
       in
       let* status_json =

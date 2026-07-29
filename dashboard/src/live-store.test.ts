@@ -144,7 +144,7 @@ describe('journalEventKindLabel', () => {
   })
 
   it('falls back to "keeper" for keepers kind without matching eventType', () => {
-    expect(journalEventKindLabel(makeEntry({ eventType: 'oas_keeper_snapshot', kind: 'keepers' }))).toBe('keeper')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'unknown', kind: 'keepers' }))).toBe('keeper')
   })
 
   it('returns "system" as final fallback', () => {

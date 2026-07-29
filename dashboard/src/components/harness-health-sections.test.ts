@@ -515,16 +515,15 @@ function makeHandoff(overrides: Partial<HandoffEvent> = {}): HandoffEvent {
     next_generation: 4,
     prev_trace_id: 'oldtrace0000',
     new_trace_id: 'newtrace9999',
-    to_model: 'claude-sonnet',
     ...overrides,
   }
 }
 
 describe('filterHandoffEvents', () => {
   const items: HandoffEvent[] = [
-    makeHandoff({ keeper_name: 'keeper-alpha', to_model: 'claude-sonnet', trace_id: 'alpha-trace-aaaa', prev_trace_id: 'prev-alpha', new_trace_id: 'new-alpha' }),
-    makeHandoff({ keeper_name: 'keeper-beta', to_model: 'glm-4.6', trace_id: 'beta-trace-bbbb', prev_trace_id: 'prev-beta', new_trace_id: 'new-beta' }),
-    makeHandoff({ keeper_name: 'keeper-gamma', to_model: null, trace_id: 'gamma-trace-cccc', prev_trace_id: null, new_trace_id: null }),
+    makeHandoff({ keeper_name: 'keeper-alpha', trace_id: 'alpha-trace-aaaa', prev_trace_id: 'prev-alpha', new_trace_id: 'new-alpha' }),
+    makeHandoff({ keeper_name: 'keeper-beta', trace_id: 'beta-trace-bbbb', prev_trace_id: 'prev-beta', new_trace_id: 'new-beta' }),
+    makeHandoff({ keeper_name: 'keeper-gamma', trace_id: 'gamma-trace-cccc', prev_trace_id: null, new_trace_id: null }),
   ]
 
   it('returns the input reference when query is empty', () => {
@@ -540,11 +539,6 @@ describe('filterHandoffEvents', () => {
     expect(result.map(r => r.keeper_name)).toEqual(['keeper-beta'])
   })
 
-  it('does not match by concrete to_model substring', () => {
-    const result = filterHandoffEvents(items, 'glm')
-    expect(result).toHaveLength(0)
-  })
-
   it('matches by trace_id substring', () => {
     const result = filterHandoffEvents(items, 'gamma-trace')
     expect(result.map(r => r.keeper_name)).toEqual(['keeper-gamma'])
@@ -558,10 +552,6 @@ describe('filterHandoffEvents', () => {
   it('matches by new_trace_id substring', () => {
     const result = filterHandoffEvents(items, 'new-beta')
     expect(result.map(r => r.keeper_name)).toEqual(['keeper-beta'])
-  })
-
-  it('handles null to_model safely', () => {
-    expect(filterHandoffEvents(items, 'keeper-gamma')).toHaveLength(1)
   })
 
   it('returns empty when no field matches', () => {

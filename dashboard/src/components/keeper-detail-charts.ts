@@ -5,68 +5,25 @@ import { ProgressBar } from './common/progress-bar'
 import { Eyebrow } from './common/eyebrow'
 import { StatusChip } from './common/status-chip'
 import type { Keeper, KeeperMetricPoint } from '../types'
-import {
-  ctxColor,
-  CTX_CRITICAL_PCT,
-  CTX_WARN_PCT,
-  CTX_COLOR_WARN,
-} from './keeper-detail-ctx-utils'
+import { ctxColor } from './keeper-detail-ctx-utils'
 import { MutedSpan, DetailCard, DetailRow } from './keeper-detail-kpi'
 
 // ── Context Chart ────────────────────────────────────────
 
 export function ContextChart({ keeper }: { keeper: Keeper }) {
-  const series = keeper.metrics_series ?? []
-  if (series.length < 2) {
-    const ratio = keeper.context_ratio ?? keeper.context?.context_ratio ?? null
-    if (ratio == null) {
-      return html`
-        <${DetailCard} class="flex items-center gap-3 mb-5">
-          <${MutedSpan}>컨텍스트 미관측</${MutedSpan}>
-        <//>`
-    }
-    const pct = ratio * 100
-    const color = ctxColor(pct)
+  const ratio = keeper.context_ratio ?? keeper.context?.context_ratio ?? null
+  if (ratio == null) {
     return html`
       <${DetailCard} class="flex items-center gap-3 mb-5">
-        <${ProgressBar} pct=${pct} size="md" trackTone="dim" trackClass="flex-1" class=${`bg-[${color}]`} />
-        <span class="text-sm font-semibold tabular-nums text-[var(--color-fg-secondary)]">${pct.toFixed(1)}%</span>
+        <${MutedSpan}>컨텍스트 미관측</${MutedSpan}>
       <//>`
   }
-
-  const W = 200, H = 60, pad = 2
-  const n = series.length
-  const pts = series.map((p: KeeperMetricPoint, i: number) => {
-    const x = pad + (i / (n - 1)) * (W - 2 * pad)
-    const y = H - pad - (p.context_ratio ?? 0) * (H - 2 * pad)
-    return { x, y, p }
-  })
-  const polyline = pts.map(({ x, y }) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
-  const lastRatio = ((series[series.length - 1] as KeeperMetricPoint)?.context_ratio ?? 0) * 100
-  const lineColor = ctxColor(lastRatio)
-
+  const pct = ratio * 100
+  const color = ctxColor(pct)
   return html`
     <${DetailCard} class="flex items-center gap-3 mb-5">
-      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)]" role="img" aria-label="컨텍스트 비율 스파크라인" style="background:var(--bg-deepest);">
-        <line x1="${pad}" y1="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" stroke="var(--color-line-3)" stroke-dasharray="3,3" stroke-width="0.5"/>
-        <line x1="${pad}" y1="${(H - pad - (CTX_WARN_PCT / 100) * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - (CTX_WARN_PCT / 100) * (H - 2 * pad)).toFixed(1)}" stroke="var(--color-line-3)" stroke-dasharray="3,3" stroke-width="0.5"/>
-        <line x1="${pad}" y1="${(H - pad - (CTX_CRITICAL_PCT / 100) * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - (CTX_CRITICAL_PCT / 100) * (H - 2 * pad)).toFixed(1)}" stroke="${CTX_COLOR_WARN}" stroke-dasharray="3,3" stroke-width="0.5"/>
-        ${pts.filter(({ p }) => p.is_handoff).map(({ x }) => html`
-          <line x1="${x.toFixed(1)}" y1="${pad}" x2="${x.toFixed(1)}" y2="${H - pad}" stroke="var(--color-status-err)" stroke-width="1.5" opacity="0.7"/>
-        `)}
-        <polyline points="${polyline}" fill="none" stroke="${lineColor}" stroke-width="1.5"/>
-        ${pts.filter(({ p }) => p.is_compaction).map(({ x, y, p }) => {
-          const trigger = p.compaction_trigger ?? 'unknown'
-          const saved = p.compaction_saved_tokens ?? 0
-          const tip = saved > 0 ? `${trigger} · ${formatTokens(saved)} saved` : trigger
-          return html`
-            <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="var(--purple)" style="cursor:pointer">
-              <title>${tip}</title>
-            </circle>
-          `
-        })}
-      </svg>
-      <span class="text-sm font-semibold tabular-nums text-[var(--color-fg-secondary)]">${lastRatio.toFixed(1)}%</span>
+      <${ProgressBar} pct=${pct} size="md" trackTone="dim" trackClass="flex-1" class=${`bg-[${color}]`} />
+      <span class="text-sm font-semibold tabular-nums text-[var(--color-fg-secondary)]">${pct.toFixed(1)}%</span>
     <//>`
 }
 

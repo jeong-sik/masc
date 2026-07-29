@@ -6,7 +6,6 @@ import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { kSlot, kSigil } from '../keeper-badge'
 import {
-  keeperDisplayModel,
   keeperDisplayRuntime,
   keeperDisplayStatus,
 } from '../../lib/keeper-runtime-display'
@@ -157,11 +156,6 @@ export function statePillTone(tone: FleetTone): 'run' | 'warn' | 'bad' | 'busy' 
   if (tone === 'bad') return 'bad'
   if (tone === 'busy') return 'busy'
   return 'off'
-}
-
-/** Current model label, intentionally routed through the redaction boundary. */
-export function keeperModelLabel(keeper: Keeper): string | null {
-  return keeperDisplayModel(keeper)?.value ?? null
 }
 
 /** Current runtime label for the header/rail. */

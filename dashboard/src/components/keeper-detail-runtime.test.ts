@@ -277,9 +277,6 @@ describe('RuntimeSignals', () => {
           { tool: 'masc_board_post', count: 7 },
           { tool: 'masc_status', count: 4 },
         ],
-        top_models: [
-          { model: 'gpt-5', count: 5 },
-        ],
         top_work_kinds: [
           { kind: 'planning', count: 3 },
         ],
@@ -289,10 +286,8 @@ describe('RuntimeSignals', () => {
     render(h(RuntimeSignals, { keeper }))
 
     expect(screen.getByText('주요 도구')).toBeInTheDocument()
-    expect(screen.queryByText('주요 모델')).not.toBeInTheDocument()
     expect(screen.getByText('주요 작업 종류')).toBeInTheDocument()
     expect(screen.getByText('masc_board_post')).toBeInTheDocument()
-    expect(screen.queryByText('gpt-5')).not.toBeInTheDocument()
     expect(screen.getByText('planning')).toBeInTheDocument()
   })
 
@@ -302,23 +297,22 @@ describe('RuntimeSignals', () => {
       status: 'active',
       metrics_window: {
         fallback_rate: 0.12,
-        model_fallback_rate: 0.05,
-        compaction_saved_ratio: 0.4,
+        intervention_share: 0.4,
       },
     }
 
     render(h(RuntimeSignals, { keeper }))
 
     // Before filtering: labels from multiple groups are visible.
-    expect(screen.getByText('전체 폴백')).toBeInTheDocument()
-    expect(screen.getByText('컴팩션 절감')).toBeInTheDocument()
+    expect(screen.getByText('런타임 폴백')).toBeInTheDocument()
+    expect(screen.getByText('개입 비중')).toBeInTheDocument()
 
-    const input = screen.getByPlaceholderText('신호 지표 필터 (예: 폴백, 컴팩션)') as HTMLInputElement
-    fireEvent.input(input, { target: { value: '컴팩션' } })
+    const input = screen.getByPlaceholderText('신호 지표 필터 (예: 폴백, 개입)') as HTMLInputElement
+    fireEvent.input(input, { target: { value: '개입' } })
 
     // Non-matching labels are gone, matching ones remain.
-    expect(screen.queryByText('전체 폴백')).not.toBeInTheDocument()
-    expect(screen.getByText('컴팩션 절감')).toBeInTheDocument()
+    expect(screen.queryByText('런타임 폴백')).not.toBeInTheDocument()
+    expect(screen.getByText('개입 비중')).toBeInTheDocument()
   })
 
   it('shows the filter-specific empty state when no rows match', () => {
@@ -332,7 +326,7 @@ describe('RuntimeSignals', () => {
 
     render(h(RuntimeSignals, { keeper }))
 
-    const input = screen.getByPlaceholderText('신호 지표 필터 (예: 폴백, 컴팩션)') as HTMLInputElement
+    const input = screen.getByPlaceholderText('신호 지표 필터 (예: 폴백, 개입)') as HTMLInputElement
     fireEvent.input(input, { target: { value: 'nonexistent-zzz' } })
 
     expect(screen.getByText(/필터 결과 없음/)).toBeInTheDocument()

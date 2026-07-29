@@ -358,29 +358,9 @@ function entryTurnGroupingDescriptor(entry: TelemetryEntry): {
   }
 }
 
-/** Per-keeper polling artifacts that fill the 100-entry window with no
- *  per-event signal: keeper_metric/heartbeat snapshots and the matching
- *  oas_event/masc:keeper:{snapshot,lifecycle} relays. We classify them as
- *  one fleet-wide "heartbeat" category so all instances collapse into a
- *  single group regardless of (a) which keeper emitted it or
- *  (b) whether they are consecutive in the stream — see #13002 for the
- *  before/after screenshot. */
-const FLEET_POLLING_OAS_EVENT_TYPES = new Set([
-  'masc:keeper:snapshot',
-  'masc:keeper:lifecycle',
-  'oas:masc:keeper:snapshot',
-  'oas:masc:keeper:lifecycle',
-])
-
 function isFleetPollingEntry(entry: TelemetryEntry): boolean {
-  if (entry.source === 'keeper_metric' && asNullableString(entry.channel) === 'heartbeat') {
-    return true
-  }
-  if (entry.source === 'oas_event') {
-    const eventType = asNullableString(entry.event_type) ?? asNullableString(entry.type)
-    if (eventType != null && FLEET_POLLING_OAS_EVENT_TYPES.has(eventType)) return true
-  }
-  return false
+  return entry.source === 'keeper_metric'
+    && asNullableString(entry.channel) === 'heartbeat'
 }
 
 function entryGroupingDescriptor(entry: TelemetryEntry): {
@@ -390,9 +370,7 @@ function entryGroupingDescriptor(entry: TelemetryEntry): {
 } | null {
   if (isFleetPollingEntry(entry)) {
     return {
-      // Fleet-wide single key so ALL polling artifacts (heartbeat + snapshot
-      // + lifecycle, across every keeper) merge into one group regardless of
-      // arrival order.
+      // Fleet-wide single key so current heartbeat rows merge across keepers.
       key: 'heartbeat:fleet',
       category: 'heartbeat',
       label: 'fleet heartbeat',

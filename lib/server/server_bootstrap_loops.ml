@@ -1136,8 +1136,8 @@ let start_keeper_loops_owned
     loop (Eio.Time.now clock)
   in
   (* Create and install the MASC-owned Event_bus alongside OAS's.
-     MASC domain events (masc.broadcast, masc.heartbeat, masc.keeper.*,
-     masc.harness.*, ...) publish here per OAS event_bus.mli:103-107
+     MASC domain events (masc.keeper.*, masc.harness.*, ...) publish here per
+     OAS event_bus.mli:103-107
      boundary. Dashboard SSE consumers see both channels as one stream
      — the relay translates masc.* →
      masc:* on the wire for backward compatibility. *)

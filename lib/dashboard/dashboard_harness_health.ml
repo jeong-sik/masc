@@ -60,7 +60,6 @@ type handoff_event =
   ; next_generation : int option
   ; prev_trace_id : string option
   ; new_trace_id : string option
-  ; to_model : string option
   }
 
 let max_runtime_events = 12
@@ -546,29 +545,45 @@ let read_wake_payload_events ?since ?until () =
 ;;
 
 let handoff_event_of_metrics_json json =
-  let handoff =
-    match Safe_ops.json_member_opt "handoff" json with
-    | Some value -> value
-    | None -> `Assoc []
+  let nonempty_string key source =
+    match Safe_ops.json_string_opt key source with
+    | Some value ->
+        let value = String.trim value in
+        if value = "" then None else Some value
+    | None -> None
   in
-  if not (Safe_ops.json_bool ~default:false "performed" handoff)
-  then None
-  else (
-    let next_generation =
-      match Safe_ops.json_int_opt "to_generation" handoff with
-      | Some value -> Some value
-      | None -> Safe_ops.json_int_opt "new_generation" handoff
-    in
-    Some
-      { timestamp = Safe_ops.json_float ~default:0.0 "ts_unix" json
-      ; keeper_name = string_field json "name"
-      ; trace_id = string_field json "trace_id"
-      ; generation = Safe_ops.json_int ~default:0 "generation" json
-      ; next_generation
-      ; prev_trace_id = Safe_ops.json_string_opt "prev_trace_id" handoff
-      ; new_trace_id = Safe_ops.json_string_opt "new_trace_id" handoff
-      ; to_model = Safe_ops.json_string_opt "to_model" handoff
-      })
+  match Keeper_metrics_record.kind_of_json json with
+  | Some Keeper_metrics_record.Turn ->
+      (match
+         Safe_ops.json_bool_opt "handoff_performed" json,
+         Json_util.assoc_member_opt "handoff" json
+       with
+       | Some false, _ -> None
+       | Some true, Some (`Assoc _ as handoff) ->
+           (match
+              Safe_ops.json_float_opt "ts_unix" json,
+              nonempty_string "name" json,
+              nonempty_string "trace_id" json,
+              Safe_ops.json_int_opt "generation" json
+            with
+            | Some timestamp, Some keeper_name, Some trace_id, Some generation ->
+                Some
+                  { timestamp
+                  ; keeper_name
+                  ; trace_id
+                  ; generation
+                  ; next_generation =
+                      Safe_ops.json_int_opt "to_generation" handoff
+                  ; prev_trace_id =
+                      nonempty_string "prev_trace_id" handoff
+                  ; new_trace_id =
+                      nonempty_string "new_trace_id" handoff
+                  }
+            | _ -> None)
+       | Some true, _
+       | None, _ -> None)
+  | Some Keeper_metrics_record.Heartbeat
+  | None -> None
 ;;
 
 let handoff_event_json (event : handoff_event) =
@@ -580,7 +595,6 @@ let handoff_event_json (event : handoff_event) =
     ; "next_generation", Json_util.int_opt_to_json event.next_generation
     ; "prev_trace_id", Json_util.string_opt_to_json event.prev_trace_id
     ; "new_trace_id", Json_util.string_opt_to_json event.new_trace_id
-    ; "to_model", Json_util.string_opt_to_json event.to_model
     ]
 ;;
 

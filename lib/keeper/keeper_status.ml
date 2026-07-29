@@ -61,25 +61,8 @@ let handle_keeper_list ctx args : tool_result =
           in
           let metrics_store = Keeper_types_support.keeper_metrics_store ctx.config m.name in
           let metrics_window_lines = Dated_jsonl.read_recent_lines metrics_store 120 in
-          let last_metrics =
-            match List.rev metrics_window_lines with
-            | line :: _ -> (try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
-            | [] -> None
-          in
           let metrics_overview =
-            summarize_metrics_lines metrics_window_lines ~default_generation:m.runtime.nonce
-          in
-          let context_json =
-            match last_metrics with
-            | None -> `Assoc [("source", `String "none")]
-            | Some metrics ->
-              `Assoc [
-                ("source", `String "metrics");
-                ("context_ratio", `Float (Safe_ops.json_float "context_ratio" metrics));
-                ("context_tokens", `Int (Safe_ops.json_int "context_tokens" metrics));
-                ("context_max", `Int (Safe_ops.json_int "context_max" metrics));
-                ("message_count", `Int (Safe_ops.json_int "message_count" metrics));
-              ]
+            summarize_metrics_lines metrics_window_lines
           in
           let runtime_blocker_fields =
             runtime_blocker_fields_json ctx.config m
@@ -160,7 +143,12 @@ let handle_keeper_list ctx args : tool_result =
               ("mention_reactive_turn_count", `Int m.runtime.mention_reactive_turn_count);
               ("noop_turn_count", `Int m.runtime.noop_turn_count);
               ("autonomous_action_count", `Int m.runtime.autonomous_action_count);
-              ("context", context_json);
+            ]
+            @ Keeper_context_observation_projection.missing_context_fields ()
+            @ [
+              ( "last_turn_usage"
+              , Keeper_context_observation_projection.last_turn_usage_json_of_meta
+                  m );
               ("metrics_overview", metrics_summary_to_json metrics_overview);
               ("storage_paths", `Assoc [
                 ("meta", `String (keeper_meta_path ctx.config m.name));

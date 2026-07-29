@@ -5,7 +5,6 @@ import {
   keeperFleetTone,
   keeperStatusTone,
   statePillTone,
-  keeperModelLabel,
   keeperRuntimeLabel,
   keeperPhaseLabel,
   phaseTokenFromKeeper,
@@ -99,15 +98,6 @@ describe('statePillTone', () => {
     expect(statePillTone('bad')).toBe('bad')
     expect(statePillTone('busy')).toBe('busy')
     expect(statePillTone('idle')).toBe('off')
-  })
-})
-
-describe('keeperModelLabel', () => {
-  it('does not expose raw keeper model fields', () => {
-    expect(keeperModelLabel(mk({ active_model_label: 'A', active_model: 'B', model: 'C' }))).toBeNull()
-    expect(keeperModelLabel(mk({ active_model: 'B', model: 'C' }))).toBeNull()
-    expect(keeperModelLabel(mk({ model: 'C' }))).toBeNull()
-    expect(keeperModelLabel(mk({}))).toBeNull()
   })
 })
 

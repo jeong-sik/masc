@@ -2,8 +2,6 @@ module U = Yojson.Safe.Util
 include Operator_pending_confirm
 include Operator_digest
 
-include Operator_control_context_snapshot
-
 (* Keeper runtime identity fields extracted to
    [Operator_control_snapshot_identity_fields] (godfile decomp). *)
 let non_empty_trimmed_string_opt = Operator_control_snapshot_identity_fields.non_empty_trimmed_string_opt
@@ -43,13 +41,6 @@ let recent_messages_json config =
   |> fun rows -> `List rows
 ;;
 
-let merge_tool_name_lists = Operator_control_snapshot_tool_names.merge_tool_name_lists
-let tool_names_of_recent_json = Operator_control_snapshot_tool_names.tool_names_of_recent_json
-let collect_recent_tool_names = Operator_control_snapshot_tool_names.collect_recent_tool_names
-let lightweight_tool_audit_fallback_json = Operator_control_snapshot_tool_audit.lightweight_tool_audit_fallback_json
-let recent_tool_names_from_files = Operator_control_snapshot_tool_audit.recent_tool_names_from_files
-let keeper_tool_audit_fields = Operator_control_snapshot_tool_audit.keeper_tool_audit_fields
-let cached_tool_audit_json = Operator_control_snapshot_tool_audit.cached_tool_audit_json
 let _keeper_snapshot_max_concurrency =
   match Sys.getenv_opt "MASC_KEEPER_SNAPSHOT_CONCURRENCY" with
   | Some s ->
@@ -303,7 +294,11 @@ let keepers_json
                            ~now_ts
                     in
                     let t_audit = Time_compat.now () in
-                    let audit_json = cached_tool_audit_json ~lightweight config meta in
+                    let audit_json =
+                      Operator_control_snapshot_tool_audit.cached_tool_audit_json
+                        config
+                        meta
+                    in
                     let recent_tool_names =
                       Json_util.get_string_list audit_json "recent_tool_names"
                     in
@@ -364,10 +359,8 @@ let keepers_json
                         | Some p -> `String (Keeper_state_machine.phase_to_string p)
                         | None -> `Null
                     in
-                    let context_snapshot =
-                      if lightweight
-                      then missing_keeper_context_snapshot ()
-                      else keeper_context_snapshot_of_meta config meta
+                    let context_snapshot_fields =
+                      Keeper_context_observation_projection.missing_context_fields ()
                     in
                     let runtime_trust =
                       let t_trust = Time_compat.now () in
@@ -475,21 +468,29 @@ let keepers_json
                                      Keeper_types_support.keeper_metrics_store config name
                                    in
                                    let lines = Dated_jsonl.read_recent_lines store 5 in
+                                   let parsed, _ =
+                                     Fs_compat.parse_jsonl_lines
+                                       ~source:"operator_recent_keeper_metrics"
+                                       lines
+                                   in
                                    `List
-                                     (List.filter_map
-                                        (fun line ->
-                                           try Some (Yojson.Safe.from_string line) with
-                                           | Yojson.Json_error _ -> None)
-                                        lines))
+                                     (List.filter
+                                        (fun json ->
+                                           Option.is_some
+                                             (Keeper_metrics_record
+                                              .kind_of_json
+                                                json))
+                                        parsed))
                                  else `List []
                                in
                                dt_activity := Time_compat.now () -. t_act;
                                result )
                            ]
-                         @ keeper_context_snapshot_fields context_snapshot
+                         @ context_snapshot_fields
                          @ [ ( "last_turn_usage"
-                             , keeper_last_turn_usage_of_meta meta
-                               |> keeper_last_turn_usage_to_json )
+                             , Keeper_context_observation_projection
+                               .last_turn_usage_json_of_meta
+                                 meta )
                            ]
                          @ Keeper_status_bridge.runtime_blocker_fields_json config meta
                          @ Keeper_status_bridge.attention_fields_json config meta

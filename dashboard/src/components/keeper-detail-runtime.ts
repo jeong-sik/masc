@@ -854,31 +854,15 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
     {
       title: '폴백',
       rows: [
-        { label: '전체 폴백', value: formatPct1(mw?.fallback_rate) },
-        { label: '런타임 폴백', value: formatPct1(mw?.model_fallback_rate) },
-        { label: '프로액티브 폴백', value: formatPct1(mw?.proactive_fallback_rate) },
+        { label: '런타임 폴백', value: formatPct1(mw?.fallback_rate) },
       ],
     },
     {
       title: '자율 행동 & 반응',
       rows: [
         { label: '멘션 반응', value: fmtCount(keeper.mention_reactive_turn_count) },
-      ],
-    },
-    {
-      title: '드리프트 보정',
-      rows: [
-        { label: '보정 횟수', value: fmtCount(mw?.drift_applied_count) },
-        { label: '보정 비율', value: formatPct1(mw?.drift_applied_rate) },
         { label: '개입 비중', value: formatPct1(mw?.intervention_share) },
         { label: '턴당 개입', value: fmtFixed(mw?.intervention_per_turn, 2) },
-      ],
-    },
-    {
-      title: '컴팩션',
-      rows: [
-        { label: '컴팩션 절감', value: formatPct1(mw?.compaction_saved_ratio) },
-        { label: '평균 절감 토큰', value: fmtFixed(mw?.avg_compaction_saved_tokens, 0) },
       ],
     },
   ]
@@ -916,7 +900,7 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
               <${TextInput}
                 type="search"
                 class="flex-1 min-w-0 !py-1.5 !px-2 !text-2xs"
-                placeholder="신호 지표 필터 (예: 폴백, 컴팩션)"
+                placeholder="신호 지표 필터 (예: 폴백, 개입)"
                 ariaLabel="런타임 신호 지표 필터"
                 value=${signalQuery}
                 onInput=${(event: Event) => {

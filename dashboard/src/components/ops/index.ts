@@ -91,24 +91,6 @@ function renderContextMetricsDiagnostic(diagnostic: ContextMetricsDiagnostic) {
       </li>
     `
   }
-  if (error.kind === 'invalid_payload') {
-    return html`
-      <li
-        class="grid gap-1 text-sm text-[var(--color-fg-primary)]"
-        data-testid="ops-context-metrics-diagnostic"
-        data-error-kind=${error.kind}
-      >
-        <strong>${sourceLabel} ${keeper.name}</strong>
-        <span>invalid context metrics diagnostic</span>
-        ${error.reported_kind ? html`<span>kind: ${error.reported_kind}</span>` : null}
-        ${error.reported_reason ? html`<span>reason: ${error.reported_reason}</span>` : null}
-      </li>
-    `
-  }
-
-  const location = error.kind === 'malformed_json' && error.line_number !== null
-    ? `${error.path}:${error.line_number}`
-    : error.path
   return html`
     <li
       class="grid gap-1 text-sm text-[var(--color-fg-primary)]"
@@ -116,9 +98,9 @@ function renderContextMetricsDiagnostic(diagnostic: ContextMetricsDiagnostic) {
       data-error-kind=${error.kind}
     >
       <strong>${sourceLabel} ${keeper.name}</strong>
-      <span>${error.reason}</span>
-      ${location ? html`<span>${location}</span>` : null}
-      <span>${error.detail}</span>
+      <span>invalid context metrics diagnostic</span>
+      ${error.reported_kind ? html`<span>kind: ${error.reported_kind}</span>` : null}
+      ${error.reported_reason ? html`<span>reason: ${error.reported_reason}</span>` : null}
     </li>
   `
 }

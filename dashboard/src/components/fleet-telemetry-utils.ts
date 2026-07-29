@@ -142,7 +142,6 @@ export function uniqueStrings(values: Array<string | null | undefined>): string[
 }
 
 function keeperModel(keeper: Keeper): string {
-  const latest = latestRuntimeMetric(keeper)
   const evidence = [
     keeper.active_model_label,
     keeper.last_model_used_label,
@@ -151,8 +150,6 @@ function keeperModel(keeper: Keeper): string {
     keeper.primary_model,
     keeper.model,
     keeper.trust?.execution_summary?.provider_selected_model,
-    latest?.runtime_selected_model,
-    latest?.model_used,
   ]
   return evidence.some(value => normalizeModelText(value) != null)
     ? REDACTED_RUNTIME_MODEL_LABEL
@@ -166,12 +163,9 @@ function latestRuntimeMetric(keeper: Keeper) {
     if (!point) continue
     if (
       normalizeText(point.runtime_id)
-      || normalizeText(point.runtime_selected_model)
       || normalizeText(point.runtime_outcome)
       || typeof point.runtime_attempt_count === 'number'
       || point.fallback_applied
-      || normalizeText(point.fallback_from)
-      || normalizeText(point.fallback_to)
     ) {
       return point
     }

@@ -226,7 +226,6 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
   if (!isRecord(raw)) return null
   const name = asString(raw.name)
   if (!name) return null
-  const contextRaw = isRecord(raw.context) ? raw.context : undefined
   const hasModelLabel = Boolean(asString(raw.model) ?? asString(raw.active_model) ?? asString(raw.primary_model))
   return {
     name,
@@ -237,10 +236,10 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     registered: asBoolean(raw.registered),
     agent_name: asString(raw.agent_name),
     status: asString(raw.status),
-    context_ratio: asNumber(raw.context_ratio) ?? asNumber(contextRaw?.context_ratio) ?? null,
-    context_tokens: asNumber(raw.context_tokens) ?? asNumber(contextRaw?.context_tokens) ?? null,
-    context_max: asNumber(raw.context_max) ?? asNumber(contextRaw?.context_max) ?? null,
-    context_source: asString(raw.context_source) ?? asString(contextRaw?.source) ?? null,
+    context_ratio: null,
+    context_tokens: null,
+    context_max: null,
+    context_source: null,
     context_metrics_unavailable: normalizeKeeperContextMetricsUnavailable(raw.context_metrics_unavailable),
     last_turn_usage: normalizeKeeperLastTurnUsage(raw.last_turn_usage),
     generation: asNumber(raw.generation),

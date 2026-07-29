@@ -20,12 +20,11 @@ import {
   noteOasReplayWindow,
   resetOasRuntimeSignals,
   pushOasAgentEvent,
-  updateOasKeeperSnapshot,
   recordOasLlmCall,
   recordOasError,
   recordOasEvidenceRefs,
 } from './store'
-import type { OasAgentEvent, OasKeeperSnapshot } from './types/oas'
+import type { OasAgentEvent } from './types/oas'
 
 function resetOasSignals() {
   resetOasRuntimeSignals()
@@ -113,19 +112,6 @@ describe('oasHealthSummary', () => {
     expect(oasHealthSummary.value.agentEventsCount).toBe(2)
   })
 
-  it('tracks keeper snapshots and uses backend tick time', () => {
-    const snap: OasKeeperSnapshot = {
-      keeper_name: 'runtime-keeper',
-      timestamp: 100,
-      generation: 1,
-      context_ratio: 0.2,
-      message_count: 5,
-    } as OasKeeperSnapshot
-    updateOasKeeperSnapshot(snap)
-    expect(oasHealthSummary.value.keeperSnapshotsCount).toBe(1)
-    expect(oasHealthSummary.value.lastKeeperTick).toBe(100_000)
-  })
-
   it('starts with zero totals', () => {
     resetOasSignals()
     const s = oasHealthSummary.value
@@ -136,8 +122,6 @@ describe('oasHealthSummary', () => {
     expect(s.totalLlmCalls).toBe(0)
     expect(s.totalErrors).toBe(0)
     expect(s.agentEventsCount).toBe(0)
-    expect(s.keeperSnapshotsCount).toBe(0)
-    expect(s.lastKeeperTick).toBeNull()
     expect(s.lastLlmCallTs).toBeNull()
     expect(s.lastErrorTs).toBeNull()
     expect(s.evidenceRefsCount).toBe(0)

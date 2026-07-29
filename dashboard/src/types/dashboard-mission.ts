@@ -359,17 +359,6 @@ export interface OperatorSessionSnapshot {
   recent_events?: Record<string, unknown>[]
 }
 
-export const OPERATOR_CONTEXT_METRICS_STORAGE_READ_FAILURE_REASONS = [
-  'invalid_offset',
-  'not_a_directory',
-  'invalid_layout_entry',
-  'non_regular_file',
-  'io_error',
-] as const
-
-export type OperatorContextMetricsStorageReadFailureReason =
-  typeof OPERATOR_CONTEXT_METRICS_STORAGE_READ_FAILURE_REASONS[number]
-
 export type OperatorContextMetricsUnavailable = KeeperContextMetricsUnavailable
 
 export interface OperatorKeeperSnapshot {

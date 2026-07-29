@@ -1,18 +1,14 @@
 (** MASC Event_bus publishers for runtime events.
 
-    Publishes MASC workspace events (broadcasts, heartbeats, board
-    posts, task transitions, keeper lifecycle, audit) to the MASC-owned
-    Event_bus. Events follow dot-separated snake_case naming per OAS
-    Custom-name convention: [masc.broadcast], [masc.heartbeat],
-    [masc.keeper.lifecycle], ...
+    Publishes the current keeper lifecycle and runtime audit events to the
+    MASC-owned Event_bus. Events follow dot-separated snake_case naming per
+    OAS Custom-name convention.
 
     Every publish routes to [Event_bus_slots.get_masc ()] so the OAS/MASC
     layer boundary is preserved. OAS's [event_bus.mli:103-107]
     explicitly warns against publishing domain events onto OAS's bus.
 
-    Wire format on SSE output keeps colon separators ("masc.broadcast")
-    for dashboard compatibility — the translation is done by the SSE
-    relay, not here.
+    SSE wire-name translation is owned by the relay, not this module.
 
     @since 2.90.0 (bus-separated since 2.353.0) *)
 
@@ -24,57 +20,6 @@ let masc_publish event =
   | Some mb -> Agent_sdk_metrics_bridge.publish mb event
   | None ->
     Log.Misc.warn "MASC observation event was not published: event bus is not initialized"
-
-(** Publish a broadcast event to the shared Event_bus. *)
-let publish_broadcast ~agent_name ~content =
-  let payload = `Assoc [
-    ("agent_name", `String agent_name);
-    ("content", `String content);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.broadcast", payload)))
-
-(** Publish a heartbeat event to the shared Event_bus. *)
-let publish_heartbeat ~agent_name ~turn ~context_pct =
-  let payload = `Assoc [
-    ("agent_name", `String agent_name);
-    ("turn", `Int turn);
-    ("context_pct", `Float context_pct);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.heartbeat", payload)))
-
-(** Publish a task state change event to the shared Event_bus.
-    #8605 family: [transition] is the canonical [Masc_domain.task_action]
-    variant -- typos at call sites fail to compile. JSON wire format
-    ("claim" / "start" / "done" / ...) is preserved via
-    [Masc_domain.task_action_to_string]. Sibling refactor of #8846 (the
-    Workspace-side hook for the same transition vocabulary). *)
-let publish_task_transition ~agent_name ~task_id
-    ~(transition : Masc_domain.task_action) =
-  let payload = `Assoc [
-    ("agent_name", `String agent_name);
-    ("task_id", `String task_id);
-    ("transition", `String (Masc_domain.task_action_to_string transition));
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.task_transition", payload)))
-
-(** {1 Keeper Snapshot Events} *)
-
-(** Publish a keeper snapshot event to the OAS Event_bus.
-    Emitted alongside SSE broadcast in keeper_keepalive. *)
-let publish_keeper_snapshot ~keeper_name
-    ~generation ~context_ratio ~message_count =
-  let payload = `Assoc [
-    ("keeper_name", `String keeper_name);
-    ("generation", `Int generation);
-    ("context_ratio", `Float context_ratio);
-    ("message_count", `Int message_count);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("masc.keeper.snapshot", payload)))
 
 (** {1 Keeper Lifecycle Events} *)
 

@@ -3,18 +3,16 @@
 
     Standalone module (no upward [include]).
     {!Dashboard_http_keeper_detail} does
-    [include Dashboard_http_keeper_metrics] to make the 7
+    [include Dashboard_http_keeper_metrics] to make the
     runtime-visible entries available in the keeper-detail JSON
     builder.
 
-    Internal: 14 helpers stay private — token / similarity / text
+    Internal helpers stay private — token / similarity / text
     helpers ([String_util.utf8_prefix], [truncate_text],
     [contains_ci], 2 normalize regexes,
     [normalize_similarity_text], [token_set_of_text],
     [jaccard_similarity_text], [take_last]),
-    [type keeper_24h_bucket_stats] + builder, the 24h JSON
-    helpers ([keeper_metrics_24h_json],
-    [keeper_history_summary_json]). *)
+    plus [keeper_history_summary_json]. *)
 
 (** {1 Model name normalization (runtime-visible)} *)
 
@@ -28,14 +26,13 @@ val normalize_model_name : string -> string
 
 type keeper_gen_window_stats = {
   mutable turns : int;
+  mutable usage_points : int;
   mutable input_tokens : int;
   mutable output_tokens : int;
   mutable total_tokens : int;
   mutable handoffs : int;
-  mutable compactions : int;
   mutable first_ts : float;
   mutable last_ts : float;
-  models : (string, int) Hashtbl.t;
   tools : (string, int) Hashtbl.t;
 }
 (** Per-keeper rolling-window statistics record.  All counters
@@ -75,24 +72,6 @@ val top_count_name_and_count :
 (** [top_count_name_and_count tbl] returns [Some (name, count)]
     for the highest-count entry, [None] when [tbl] is empty.
     Convenience for the "primary model / tool" badge. *)
-
-(** {1 Metrics-row classification (runtime-visible)} *)
-
-val metrics_row_has_context_snapshot : Yojson.Safe.t -> bool
-(** [metrics_row_has_context_snapshot row] is true when [row] carries
-    turn/heartbeat context fields used by context health panels. Sparse
-    [tool_event] rows intentionally do not qualify. *)
-
-(** {1 24h-window aggregation (runtime-visible)} *)
-
-val keeper_metrics_24h_json :
-  metrics_lines:string list ->
-  now_ts:float ->
-  Yojson.Safe.t * Yojson.Safe.t
-(** [keeper_metrics_24h_json ~metrics_lines ~now_ts] aggregates
-    metrics from the past 24 hours (window = [now_ts - 86400] to
-    [now_ts]) into a 2-tuple of JSON payloads (per-keeper +
-    fleet-wide).  Used by the keeper-detail dashboard endpoint. *)
 
 val keeper_history_summary_json :
   all_keeper_names:string list ->

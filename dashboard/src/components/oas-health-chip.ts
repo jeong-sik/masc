@@ -4,16 +4,14 @@
 import { html } from 'htm/preact'
 import { useComputed, useSignal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
-import { oasHealthSummary, oasAgentEvents, oasKeeperSnapshots } from '../store'
+import { oasHealthSummary, oasAgentEvents } from '../store'
 import { ensureOasRuntimeReplay, loadMoreOasEvents } from '../oas-runtime-store'
 import { SectionCard } from './common/card'
 import { StatTile } from './common/stat-tile'
 import { EmptyState } from './common/feedback-state'
 import { formatRelativeAgeMs } from '../lib/format-time'
 import { OAS_OPENTELEMETRY_UI_URL } from '../config/constants'
-import type { OasAgentEvent, OasHealthSummary, OasKeeperSnapshot } from '../types/oas'
-
-const STALE_MS = 60_000
+import type { OasAgentEvent, OasHealthSummary } from '../types/oas'
 
 function formatLastTick(tick: number | null): string {
   if (tick == null) return '—'
@@ -45,17 +43,6 @@ function describeAgentEvent(evt: OasAgentEvent): string {
       return `${label}${summary ? ` · ${summary}` : ''}`
     }
   }
-}
-
-/** Pick the N most recently updated keepers from a snapshot map.
- *  Exposed for unit testing. */
-function topKeepers(
-  snapshots: Map<string, OasKeeperSnapshot>,
-  limit: number,
-): OasKeeperSnapshot[] {
-  return Array.from(snapshots.values())
-    .sort((a, b) => b.timestamp - a.timestamp)
-    .slice(0, limit)
 }
 
 function describeTotalEventsDetail(summary: Pick<OasHealthSummary,
@@ -92,11 +79,6 @@ function describeEvidenceDetail(summary: Pick<OasHealthSummary,
 export function OasHealthChip() {
   const summary = useComputed(() => oasHealthSummary.value)
   const recentEvents = useComputed(() => oasAgentEvents.value.slice(0, 3))
-  const recentKeepers = useComputed(() => topKeepers(oasKeeperSnapshots.value, 3))
-  const isStale = useComputed(() => {
-    const tick = summary.value.lastKeeperTick
-    return tick == null || Date.now() - tick > STALE_MS
-  })
   const isLoadingMore = useSignal(false)
   const replayError = useSignal<string | null>(null)
 
@@ -151,7 +133,7 @@ export function OasHealthChip() {
 
   return html`
     <${SectionCard} label="OAS 런타임">
-      <div class="v2-shell-panel grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+      <div class="v2-shell-panel grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
         ${replayError.value ? html`
           <${StatTile}
             label="Replay"
@@ -187,22 +169,9 @@ export function OasHealthChip() {
           value=${String(summary.value.agentEventsCount)}
           delta=${{ direction: 'flat', text: '자율성 트레이스' }}
         />
-        <${StatTile}
-          label="Keeper 스냅샷"
-          value=${String(summary.value.keeperSnapshotsCount)}
-          status=${summary.value.keeperSnapshotsCount > 0 ? 'ok' : undefined}
-          delta=${{ direction: summary.value.keeperSnapshotsCount > 0 ? 'up' as const : 'flat' as const, text: '활성 keeper' }}
-        />
-        <${StatTile}
-          label="최근 tick"
-          value=${formatLastTick(summary.value.lastKeeperTick)}
-          status=${isStale.value ? 'warn' : 'ok'}
-          delta=${{ direction: isStale.value ? 'down' as const : 'up' as const, text: isStale.value ? '신호 끊김' : '수신 중' }}
-        />
       </div>
-      ${recentEvents.value.length > 0 || recentKeepers.value.length > 0 ? html`
-        <div class="v2-shell-detail mt-3 pt-3 border-t border-[var(--color-border-default)] grid md:grid-cols-2 gap-4">
-          ${recentEvents.value.length > 0 ? html`
+      ${recentEvents.value.length > 0 ? html`
+        <div class="v2-shell-detail mt-3 pt-3 border-t border-[var(--color-border-default)]">
             <div>
               <div class="text-3xs text-[var(--color-fg-muted)] tracking-wider uppercase font-medium mb-2">
                 최근 자율성 이벤트
@@ -231,27 +200,6 @@ export function OasHealthChip() {
                 </button>
               ` : null}
             </div>
-          ` : null}
-          ${recentKeepers.value.length > 0 ? html`
-            <div>
-              <div class="text-3xs text-[var(--color-fg-muted)] tracking-wider uppercase font-medium mb-2">
-                활성 Keeper
-              </div>
-              <ul class="space-y-1">
-                ${recentKeepers.value.map(snap => html`
-                  <li class="v2-shell-row flex items-baseline justify-between gap-2 text-2xs">
-                    <span class="text-[var(--color-fg-primary)] truncate">
-                      <span class="font-mono text-[var(--color-fg-disabled)]">${snap.keeper_name}</span>
-                      <span class="text-[var(--color-fg-muted)]"> · gen ${snap.generation} · ${Math.round(snap.context_ratio * 100)}%</span>
-                    </span>
-                    <span class="text-[var(--color-fg-muted)] tabular-nums shrink-0">
-                      ${formatLastTick(snap.timestamp * 1000)}
-                    </span>
-                  </li>
-                `)}
-              </ul>
-            </div>
-          ` : null}
         </div>
       ` : null}
       ${OAS_OPENTELEMETRY_UI_URL ? html`<div class="mt-2 text-right">

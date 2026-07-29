@@ -2609,7 +2609,6 @@ describe('hydrateKeeperStatus', () => {
       include_context: false,
       include_metrics_overview: false,
       include_history_tail: false,
-      include_compaction_history: false,
       tail_turns: 0,
       tail_messages: 0,
     })
@@ -2649,7 +2648,6 @@ describe('loadFullKeeperHistory', () => {
       include_context: false,
       include_metrics_overview: false,
       include_history_tail: true,
-      include_compaction_history: false,
       tail_turns: 0,
       tail_messages: KEEPER_HISTORY_TAIL_MESSAGES,
     })

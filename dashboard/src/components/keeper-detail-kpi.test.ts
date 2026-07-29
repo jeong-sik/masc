@@ -19,12 +19,7 @@ function metricPoint(overrides: Partial<KeeperMetricPoint>): KeeperMetricPoint {
     generation: 1,
     channel: 'turn',
     is_handoff: false,
-    is_compaction: false,
-    compaction_saved_tokens: 0,
-    compaction_trigger: null,
-    model_used: 'runtime',
     cost_usd: 0.01,
-    handoff_to_model: null,
     handoff_new_generation: null,
     prompt_fingerprint: null,
     prompt_metrics: null,
@@ -36,30 +31,25 @@ function metricPoint(overrides: Partial<KeeperMetricPoint>): KeeperMetricPoint {
     inference_telemetry: null,
     fallback_applied: false,
     fallback_hops: 0,
-    fallback_from: null,
-    fallback_to: null,
     fallback_reason: null,
     ...overrides,
   }
 }
 
 describe('KpiGrid', () => {
-  it('does not render the removed last-compaction-age KPI', () => {
+  it('renders current compaction metadata instead of retired window aggregates', () => {
     const keeper = {
       name: 'sangsu',
       status: 'active',
       last_heartbeat: '2026-07-29T10:00:00Z',
-      metrics_window: {
-        compaction_saved_ratio: 0.4,
-        avg_compaction_saved_tokens: 120,
-      },
+      last_compaction_saved_tokens: 120,
     } as Keeper
 
     render(h(KpiGrid, { keeper }))
 
     expect(screen.getByText('하트비트')).toBeInTheDocument()
-    expect(screen.getByText('압축 절감률')).toBeInTheDocument()
-    expect(screen.queryByText('마지막 압축')).not.toBeInTheDocument()
+    expect(screen.getByText('마지막 압축 절약')).toBeInTheDocument()
+    expect(screen.queryByText('압축 절감률')).not.toBeInTheDocument()
   })
 
   it('surfaces latest keeper tok/sec in the detail KPI grid', () => {

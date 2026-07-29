@@ -51,18 +51,8 @@ export type OasAgentEvent =
   | OasTrustUpdatedEvent
   | OasReputationChangedEvent
 
-export interface OasKeeperSnapshot {
-  keeper_name: string
-  generation: number
-  context_ratio: number
-  message_count: number
-  timestamp: number
-}
-
 export interface OasHealthSummary {
   agentEventsCount: number
-  keeperSnapshotsCount: number
-  lastKeeperTick: number | null
   totalEvents: number
   replayLoadedEvents: number
   replayTotalMatchingEvents: number

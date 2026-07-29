@@ -287,12 +287,6 @@ let keeper_schemas : tool_schema list = [
           ("maximum", `Int Keeper_status_options_defaults.max_tail_messages);
           ("description", `String (Printf.sprintf "How many recent history messages to include (default: %d; maximum: %d)." Keeper_status_options_defaults.tail_messages Keeper_status_options_defaults.max_tail_messages));
         ]);
-        (Keeper_status_options_defaults.Argument.tail_compactions, `Assoc [
-          ("type", `String "integer");
-          ("minimum", `Int Keeper_status_options_defaults.min_tail_compactions);
-          ("maximum", `Int Keeper_status_options_defaults.max_tail_compactions);
-          ("description", `String (Printf.sprintf "How many recent compaction events to include (default: %d; maximum: %d)." Keeper_status_options_defaults.tail_compactions Keeper_status_options_defaults.max_tail_compactions));
-        ]);
         (Keeper_status_options_defaults.Argument.tail_bytes, `Assoc [
           ("type", `String "integer");
           ("minimum", `Int Keeper_status_options_defaults.min_tail_bytes);
@@ -302,7 +296,7 @@ let keeper_schemas : tool_schema list = [
         (Keeper_status_options_defaults.Argument.tail_order, `Assoc [
           ("type", `String "string");
           ("enum", `List (List.map (fun s -> `String s) tail_order_enum_strings));
-          ("description", `String "Ordering for metrics/history/compaction tails and recent memory notes. Default: oldest_first (compat).");
+          ("description", `String "Ordering for metrics/history tails and recent memory notes. Default: oldest_first.");
         ]);
         (Keeper_status_options_defaults.Argument.fast, `Assoc [
           ("type", `String "boolean");
@@ -319,10 +313,6 @@ let keeper_schemas : tool_schema list = [
         (Keeper_status_options_defaults.Argument.include_history_tail, `Assoc [
           ("type", `String "boolean");
           ("description", `String "Include recent history tail + fragment counters (default: !fast).");
-        ]);
-        (Keeper_status_options_defaults.Argument.include_compaction_history, `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Include recent compaction history tail (default: !fast).");
         ]);
     ];
   };

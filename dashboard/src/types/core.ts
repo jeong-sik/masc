@@ -367,19 +367,14 @@ export interface CtxCompositionTelemetry {
 
 export interface KeeperMetricPoint {
   ts: number
-  context_ratio: number
-  context_tokens: number
-  context_max: number
+  context_ratio: number | null
+  context_tokens: number | null
+  context_max: number | null
   latency_ms: number | null
   generation: number
   channel: string
   is_handoff: boolean
-  is_compaction: boolean
-  compaction_saved_tokens: number
-  compaction_trigger: string | null
-  model_used: string
   cost_usd: number
-  handoff_to_model: string | null
   handoff_new_generation: number | null
   prompt_fingerprint: string | null
   prompt_metrics: PromptTelemetry | null
@@ -391,13 +386,10 @@ export interface KeeperMetricPoint {
   inference_telemetry: InferenceTelemetry | null
   runtime_id?: string | null
   runtime_outcome?: string | null
-  runtime_selected_model?: string | null
   runtime_attempt_count?: number | null
   runtime_strategy?: string | null
   fallback_applied: boolean
   fallback_hops: number
-  fallback_from: string | null
-  fallback_to: string | null
   fallback_reason: string | null
 }
 
@@ -1041,48 +1033,25 @@ export interface MetricsWindow {
   window_interactions?: number
   window_turns?: number
   window_series_max_lines?: number
-  window_series_max_bytes?: number
-  primary_model?: string
 
-  // -- Handoff / Compaction counts --
+  // -- Handoff --
   handoff_count?: number
-  compaction_events?: number
-  compaction_before_tokens?: number
-  compaction_saved_tokens?: number
-  compaction_saved_ratio?: number
-  avg_compaction_saved_tokens?: number
 
-  // -- Fallback rates --
+  // -- Runtime fallback --
   fallback_count?: number
   fallback_rate?: number
-  model_fallback_count?: number
-  model_fallback_rate?: number
-  model_fallback_numerator?: number
-  model_fallback_denominator?: number
-  proactive_fallback_count?: number
-  proactive_fallback_rate?: number
-  proactive_template_fallback_count?: number
-  proactive_template_fallback_rate?: number
-  proactive_template_fallback_numerator?: number
-  proactive_template_fallback_denominator?: number
+  fallback_observed_points?: number
 
   // -- Intervention --
   intervention_share?: number
   intervention_per_turn?: number
-
-  // -- Drift --
-  drift_applied_count?: number
-  drift_applied_rate?: number
 
   // -- Tool --
   tool_call_count?: number
 
   // -- Top-N lists --
   top_work_kinds?: MetricsWindowTopItem[]
-  top_models?: MetricsWindowTopItem[]
   top_tools?: MetricsWindowTopItem[]
-  top_drift_reasons?: MetricsWindowTopItem[]
-  top_compaction_triggers?: MetricsWindowTopItem[]
   generation_equipment?: MetricsWindowTopItem[]
 
   // Catch-all for future fields
@@ -1144,24 +1113,6 @@ export type KeeperContextMetricsUnavailable =
   | {
       kind: 'not_observed'
       reason: 'context_measurement_missing'
-    }
-  | {
-      kind: 'storage_read_failed'
-      reason:
-        | 'invalid_offset'
-        | 'not_a_directory'
-        | 'invalid_layout_entry'
-        | 'non_regular_file'
-        | 'io_error'
-      path: string | null
-      detail: string
-    }
-  | {
-      kind: 'malformed_json'
-      reason: 'malformed_metrics_row'
-      path: string
-      line_number: number | null
-      detail: string
     }
   | {
       kind: 'invalid_payload'

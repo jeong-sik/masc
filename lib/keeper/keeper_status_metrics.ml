@@ -1,38 +1,32 @@
-(** Keeper_status_metrics — metrics summary type, serialization, and
-    line-based aggregation. Split from keeper_status_runtime.ml. *)
+(** Keeper status projections over the current metrics-ledger contract. *)
 
-type metrics_summary = {
-  sample_points : int;
-  turn_points : int;
-  heartbeat_points : int;
-  proactive_points : int;
-  drift_applied_count : int;
-  handoff_count : int;
-  compaction_events : int;
-  compaction_saved_tokens : int;
-  last_handoff : Yojson.Safe.t option;
-  last_compaction : Yojson.Safe.t option;
-}
+type metrics_summary =
+  { sample_points : int
+  ; turn_points : int
+  ; heartbeat_points : int
+  ; proactive_points : int
+  ; handoff_count : int
+  ; last_handoff : Yojson.Safe.t option
+  }
 
-type tool_audit_snapshot = {
-  latest_tool_names : string list;
-  latest_tool_call_count : int option;
-  latest_action_source : string option;
-  tool_audit_source : string option;
-  tool_audit_at : string option;
-}
+type tool_audit_snapshot =
+  { latest_tool_names : string list
+  ; latest_tool_call_count : int option
+  ; latest_action_source : string option
+  ; tool_audit_source : string option
+  ; tool_audit_at : string option
+  }
 
 let metrics_summary_persistence_surface = "keeper_status_metrics"
-let decision_log_tool_audit_persistence_surface =
-  "keeper_status_runtime_decision_log"
 let metrics_tool_audit_persistence_surface =
   "keeper_status_runtime_keeper_metrics"
 
 let report_persistence_read_drop ~surface ~reason ~path ~detail =
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
-      Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
-        ~labels:[("surface", surface); ("reason", reason)]
+      Otel_metric_store.inc_counter
+        Otel_metric_store.metric_persistence_read_drops
+        ~labels:[ "surface", surface; "reason", reason ]
         ())
     ~surface
     ~reason
@@ -47,327 +41,197 @@ let report_metrics_summary_read_drop ~reason ~detail =
     ~detail
 
 let empty_metrics_summary =
-  {
-    sample_points = 0;
-    turn_points = 0;
-    heartbeat_points = 0;
-    proactive_points = 0;
-    drift_applied_count = 0;
-    handoff_count = 0;
-    compaction_events = 0;
-    compaction_saved_tokens = 0;
-    last_handoff = None;
-    last_compaction = None;
+  { sample_points = 0
+  ; turn_points = 0
+  ; heartbeat_points = 0
+  ; proactive_points = 0
+  ; handoff_count = 0
+  ; last_handoff = None
   }
 
 let empty_tool_audit_snapshot =
-  {
-    latest_tool_names = [];
-    latest_tool_call_count = None;
-    latest_action_source = None;
-    tool_audit_source = None;
-    tool_audit_at = None;
+  { latest_tool_names = []
+  ; latest_tool_call_count = None
+  ; latest_action_source = None
+  ; tool_audit_source = None
+  ; tool_audit_at = None
   }
 
 let age_seconds_opt ~now_ts timestamp =
   if timestamp <= 0.0 then None else Some (now_ts -. timestamp)
 
-let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
-  let interaction_points = s.turn_points + s.proactive_points in
-  let intervention_share =
-    if interaction_points = 0 then 0.0
-    else float_of_int s.proactive_points /. float_of_int interaction_points
-  in
-  let intervention_per_turn =
-    if s.turn_points = 0 then 0.0
-    else float_of_int s.proactive_points /. float_of_int s.turn_points
-  in
-  let drift_applied_rate =
-    if interaction_points = 0 then 0.0
-    else float_of_int s.drift_applied_count /. float_of_int interaction_points
+let ratio_json numerator denominator =
+  if denominator = 0
+  then `Null
+  else `Float (float_of_int numerator /. float_of_int denominator)
+
+let metrics_summary_to_json (summary : metrics_summary) : Yojson.Safe.t =
+  let interaction_points =
+    summary.turn_points + summary.proactive_points
   in
   `Assoc
-    [
-      ("sample_points", `Int s.sample_points);
-      ("turn_points", `Int s.turn_points);
-      ("heartbeat_points", `Int s.heartbeat_points);
-      ("proactive_points", `Int s.proactive_points);
-      ("window_interactions", `Int interaction_points);
-      ("intervention_share", `Float intervention_share);
-      ("intervention_per_turn", `Float intervention_per_turn);
-      ("drift_applied_count", `Int s.drift_applied_count);
-      ("drift_applied_rate", `Float drift_applied_rate);
-      ("handoff_count", `Int s.handoff_count);
-      ("compaction_events", `Int s.compaction_events);
-      ("compaction_saved_tokens", `Int s.compaction_saved_tokens);
-      ("last_handoff", match s.last_handoff with Some j -> j | None -> `Null);
-      ("last_compaction", match s.last_compaction with Some j -> j | None -> `Null);
+    [ "sample_points", `Int summary.sample_points
+    ; "turn_points", `Int summary.turn_points
+    ; "heartbeat_points", `Int summary.heartbeat_points
+    ; "proactive_points", `Int summary.proactive_points
+    ; "window_interactions", `Int interaction_points
+    ; ( "intervention_share"
+      , ratio_json summary.proactive_points interaction_points )
+    ; ( "intervention_per_turn"
+      , ratio_json summary.proactive_points summary.turn_points )
+    ; "handoff_count", `Int summary.handoff_count
+    ; ( "last_handoff"
+      , match summary.last_handoff with
+        | Some json -> json
+        | None -> `Null )
     ]
 
-let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
-    metrics_summary =
+let nonempty_string_opt key json =
+  match Safe_ops.json_string_opt key json with
+  | Some value ->
+      let value = String.trim value in
+      if value = "" then None else Some value
+  | None -> None
+
+let summarize_metrics_lines (lines : string list) : metrics_summary =
   List.fold_left
     (fun acc line ->
-      try
-        let j =
-          match Yojson.Safe.from_string line with
-          | `Assoc _ as json -> json
-          | _ ->
-              report_metrics_summary_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-                ~detail:"keeper metrics row is not a JSON object";
-              raise Exit
-        in
-        let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key j) in
-        let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-        let trace_id = Safe_ops.json_string ~default:"" "trace_id" j in
-        let generation =
-          Safe_ops.json_int ~default:default_generation "generation" j
-        in
-        let channel = Safe_ops.json_string ~default:"turn" "channel" j in
-        let parsed_channel = Keeper_world_observation.channel_of_string channel in
-        let is_turn =
-          match parsed_channel with
-          | Some Keeper_world_observation.Reactive -> true
-          | _ -> false
-        in
-        (* "heartbeat" is a status-tick marker outside the keeper_cycle_channel
-           taxonomy, so it is matched on the raw wire string, not the typed
-           parse (which returns None for it). *)
-        let is_heartbeat = String.equal channel "heartbeat" in
-        let is_scheduled_autonomous =
-          match parsed_channel with
-          | Some c -> Keeper_world_observation.is_autonomous c
-          | None -> false
-        in
-        let is_interaction = is_turn || is_scheduled_autonomous in
-        let compacted = Safe_ops.json_bool ~default:false "compacted" j in
-        let before_tokens =
-          Safe_ops.json_int ~default:0 "compaction_before_tokens" j
-        in
-        let after_tokens =
-          Safe_ops.json_int ~default:0 "compaction_after_tokens" j
-        in
-        let saved_tokens = max 0 (before_tokens - after_tokens) in
-        let handoff = m "handoff" in
-        let handoff_performed =
-          Safe_ops.json_bool ~default:false "performed" handoff
-        in
-        let to_model = Safe_ops.json_string_opt "to_model" handoff in
-        let prev_trace_id = Safe_ops.json_string_opt "prev_trace_id" handoff in
-        let new_trace_id = Safe_ops.json_string_opt "new_trace_id" handoff in
-        let drift = m "drift" in
-        let drift_applied_now =
-          Safe_ops.json_bool ~default:false "applied" drift
-        in
-        let handoff_json =
-          if handoff_performed then
-            Some
-              (`Assoc
-                [
-                  ("ts_unix", `Float ts_unix);
-                  ("trace_id", `String trace_id);
-                  ("generation", `Int generation);
-                  ( "to_model",
-                    match to_model with Some s when s <> "" -> `String s | _ -> `Null );
-                  ( "prev_trace_id",
-                    match prev_trace_id with Some s when s <> "" -> `String s | _ -> `Null );
-                  ( "new_trace_id",
-                    match new_trace_id with Some s when s <> "" -> `String s | _ -> `Null );
-                ])
-          else acc.last_handoff
-        in
-        let compaction_json =
-          if compacted then
-            let trigger = Safe_ops.json_string_opt "compaction_trigger" j in
-            Some
-              (`Assoc
-                [
-                  ("ts_unix", `Float ts_unix);
-                  ("trace_id", `String trace_id);
-                  ("generation", `Int generation);
-                  ("before_tokens", `Int before_tokens);
-                  ("after_tokens", `Int after_tokens);
-                  ("saved_tokens", `Int saved_tokens);
-                  ( "trigger",
-                    match trigger with
-                    | Some reason when String.trim reason <> "" -> `String reason
-                    | _ -> `Null );
-                ])
-          else acc.last_compaction
-        in
-        {
-          sample_points = acc.sample_points + 1;
-          turn_points = acc.turn_points + (if is_turn then 1 else 0);
-          heartbeat_points = acc.heartbeat_points + (if is_heartbeat then 1 else 0);
-          proactive_points =
-            acc.proactive_points + (if is_scheduled_autonomous then 1 else 0);
-          drift_applied_count =
-            acc.drift_applied_count + (if is_interaction && drift_applied_now then 1 else 0);
-          handoff_count =
-            acc.handoff_count + (if is_interaction && handoff_performed then 1 else 0);
-          compaction_events =
-            acc.compaction_events + (if is_interaction && compacted then 1 else 0);
-          compaction_saved_tokens =
-            acc.compaction_saved_tokens
-            + (if is_interaction && compacted then saved_tokens else 0);
-          last_handoff = handoff_json;
-          last_compaction = compaction_json;
-        }
-      with
-      | Exit -> acc
-      | Yojson.Json_error detail ->
-          report_metrics_summary_read_drop
-            ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
-            ~detail;
-          acc
-      | Yojson.Safe.Util.Type_error (detail, _) ->
-          report_metrics_summary_read_drop
-            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-            ~detail;
-          acc)
-    empty_metrics_summary lines
-
-
-let action_source_opt_member json =
-  match Safe_ops.json_string_opt "action_source" json with
-  | Some _ as value -> value
-  | None -> (
-      match Json_util.assoc_member_opt "deliberation_execution" json with
-      | Some (`Assoc _ as nested) ->
-          Safe_ops.json_string_opt "action_source" nested
-      | _ -> None)
-
-let has_tool_audit_evidence ~tools ~raw_tool_call_count ~action_source =
-  tools <> []
-  || Option.fold ~none:false ~some:(fun count -> count > 0) raw_tool_call_count
-  || Option.is_some action_source
-
-let merge_tool_name_lists primary secondary =
-  let seen = Hashtbl.create 8 in
-  let add acc raw_name =
-    let name = String.trim raw_name in
-    if name = "" || Hashtbl.mem seen name
-    then acc
-    else (
-      Hashtbl.replace seen name ();
-      name :: acc)
-  in
-  List.rev (List.fold_left add [] (List.concat [ primary; secondary ]))
-
-let single_tool_name_members json =
-  [ "tool"; "tool_name"; "last_tool_name" ]
-  |> List.filter_map (fun key ->
-         match Safe_ops.json_string_opt key json with
-         | Some value when String.trim value <> "" -> Some value
-         | _ -> None)
-
-let tool_names_of_audit_json json =
-  merge_tool_name_lists
-    (single_tool_name_members json)
-    (Json_util.json_string_list_member "tools_used" json)
-
-let json_iso_opt json =
-  match Safe_ops.json_string_opt "ts" json with
-  | Some text ->
-      let trimmed = String.trim text in
-      if trimmed <> "" then Some trimmed
-      else
-        let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" json in
-        if ts_unix > 0.0 then Some (Masc_domain.iso8601_of_unix_seconds ts_unix) else None
-  | None ->
-      let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" json in
-      if ts_unix > 0.0 then Some (Masc_domain.iso8601_of_unix_seconds ts_unix) else None
-
-let read_recent_metrics_lines config keeper_name =
-  let store = Keeper_types_support.keeper_metrics_store config keeper_name in
-  Dated_jsonl.read_recent_lines store 8
-
-let latest_snapshot_of_lines lines ~parse_snapshot =
-  let ordered = List.rev lines in
-  List.find_map parse_snapshot ordered
-
-(* Decision-log tail projection for the latest tool-audit snapshot.  Mirrors
-   the projection in Operator_control_snapshot_tool_audit: folds only newly
-   appended lines (steady-state O(new bytes)) instead of re-reading the last
-   40 KB on every snapshot, while returning the same most-recent-12 lines so
-   the unchanged [latest_snapshot_of_lines] below yields byte-identical
-   output. *)
-let decision_audit_tail_window = 12
-let decision_audit_tail_bytes = 40000
-
-let decision_audit_lines_projection :
-    string list Jsonl_incremental_projection.t =
-  Jsonl_incremental_projection.create ()
-
-let latest_tool_audit_snapshot_from_decisions config keeper_name =
-  let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
-  if not (Fs_compat.file_exists path) then None
-  else
-    let lines =
-      Keeper_memory.recent_lines_or_record decision_audit_lines_projection
-        ~site:"keeper_status_runtime_tool_audit" ~key:path ~path
-        ~window:decision_audit_tail_window
-        ~initial_tail_bytes:decision_audit_tail_bytes
-    in
-    let report_drop ~reason ~detail =
-      report_persistence_read_drop
-        ~surface:decision_log_tool_audit_persistence_surface
-        ~reason
-        ~path
-        ~detail
-    in
-    let parse_snapshot line =
       try
         let json =
           match Yojson.Safe.from_string line with
           | `Assoc _ as json -> json
           | _ ->
-              report_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-                ~detail:"decision log row is not a JSON object";
+              report_metrics_summary_read_drop
+                ~reason:
+                  Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~detail:"keeper metrics row is not a JSON object";
               raise Exit
         in
-        let tools = tool_names_of_audit_json json in
-        let raw_tool_call_count = Json_util.get_int json "tool_call_count" in
-        let tool_call_count =
-          match raw_tool_call_count with
-          | Some _ as value -> value
-          | None -> Some (List.length tools)
-        in
-        let action_source = action_source_opt_member json in
-        if not (has_tool_audit_evidence ~tools ~raw_tool_call_count ~action_source)
-        then None
-        else
-          Some
-            {
-              latest_tool_names = tools;
-              latest_tool_call_count = tool_call_count;
-              latest_action_source = action_source;
-              tool_audit_source = Some "keeper_decision_log";
-              tool_audit_at = json_iso_opt json;
-            }
+        match Keeper_metrics_record.kind_of_json json with
+        | None -> acc
+        | Some Keeper_metrics_record.Heartbeat ->
+            (match
+               Safe_ops.json_float_opt "ts_unix" json,
+               Safe_ops.json_string_opt "channel" json
+             with
+             | Some _, Some "heartbeat" ->
+                 { acc with
+                   sample_points = acc.sample_points + 1
+                 ; heartbeat_points = acc.heartbeat_points + 1
+                 }
+             | _ -> acc)
+        | Some Keeper_metrics_record.Turn ->
+            let parsed_channel =
+              Safe_ops.json_string_opt "channel" json
+              |> Option.bind Keeper_world_observation.channel_of_string
+            in
+            (match
+               Safe_ops.json_float_opt "ts_unix" json,
+               nonempty_string_opt "trace_id" json,
+               Safe_ops.json_int_opt "generation" json,
+               Safe_ops.json_bool_opt "handoff_performed" json,
+               parsed_channel
+             with
+             | ( Some ts_unix
+               , Some trace_id
+               , Some generation
+               , Some handoff_performed
+               , Some channel ) ->
+                 let is_turn =
+                   match channel with
+                   | Keeper_world_observation.Reactive -> true
+                   | Keeper_world_observation.Scheduled_autonomous -> false
+                 in
+                 let is_scheduled_autonomous =
+                   Keeper_world_observation.is_autonomous channel
+                 in
+                 let handoff_json =
+                   if handoff_performed
+                   then
+                     let handoff =
+                       Option.value
+                         ~default:`Null
+                         (Json_util.assoc_member_opt "handoff" json)
+                     in
+                     Some
+                       (`Assoc
+                         [ "ts_unix", `Float ts_unix
+                         ; "trace_id", `String trace_id
+                         ; "generation", `Int generation
+                         ; ( "prev_trace_id"
+                           , Json_util.string_opt_to_json
+                               (nonempty_string_opt
+                                  "prev_trace_id"
+                                  handoff) )
+                         ; ( "new_trace_id"
+                           , Json_util.string_opt_to_json
+                               (nonempty_string_opt
+                                  "new_trace_id"
+                                  handoff) )
+                         ; ( "to_generation"
+                           , Json_util.int_opt_to_json
+                               (Safe_ops.json_int_opt
+                                  "to_generation"
+                                  handoff) )
+                         ])
+                   else acc.last_handoff
+                 in
+                 { sample_points = acc.sample_points + 1
+                 ; turn_points =
+                     acc.turn_points + if is_turn then 1 else 0
+                 ; heartbeat_points = acc.heartbeat_points
+                 ; proactive_points =
+                     acc.proactive_points
+                     + if is_scheduled_autonomous then 1 else 0
+                 ; handoff_count =
+                     acc.handoff_count + if handoff_performed then 1 else 0
+                 ; last_handoff = handoff_json
+                 }
+             | _ -> acc)
       with
-      | Exit -> None
+      | Exit -> acc
       | Yojson.Json_error detail ->
-          report_drop
-            ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          report_metrics_summary_read_drop
+            ~reason:
+              Safe_ops.persistence_read_drop_reason_entry_load_error
             ~detail;
-          None
-    in
-    latest_snapshot_of_lines lines ~parse_snapshot
-    |> Option.map (fun snapshot ->
-           {
-             snapshot with
-             tool_audit_source =
-               Some
-                 (Option.value ~default:"keeper_decision_log"
-                    snapshot.tool_audit_source);
-           })
+          acc
+      | Yojson.Safe.Util.Type_error (detail, _) ->
+          report_metrics_summary_read_drop
+            ~reason:
+              Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~detail;
+          acc)
+    empty_metrics_summary
+    lines
+
+let string_list_member_opt key json =
+  match Json_util.assoc_member_opt key json with
+  | Some (`List values) ->
+      let rec decode acc = function
+        | [] -> Some (List.rev acc)
+        | `String value :: rest ->
+            let value = String.trim value in
+            if value = "" then None else decode (value :: acc) rest
+        | _ -> None
+      in
+      decode [] values
+  | _ -> None
+
+let read_recent_metrics_lines config keeper_name =
+  let store =
+    Keeper_types_support.keeper_metrics_store config keeper_name
+  in
+  Dated_jsonl.read_recent_lines store 120
+
+let latest_snapshot_of_lines lines ~parse_snapshot =
+  lines |> List.rev |> List.find_map parse_snapshot
 
 let latest_tool_audit_snapshot_from_metrics config keeper_name =
   let lines = read_recent_metrics_lines config keeper_name in
-  let metrics_path = Keeper_types_support.keeper_metrics_dir config keeper_name in
+  let metrics_path =
+    Keeper_types_support.keeper_metrics_dir config keeper_name
+  in
   let report_drop ~reason ~detail =
     report_persistence_read_drop
       ~surface:metrics_tool_audit_persistence_surface
@@ -382,29 +246,29 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
         | `Assoc _ as json -> json
         | _ ->
             report_drop
-              ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+              ~reason:
+                Safe_ops.persistence_read_drop_reason_invalid_payload
               ~detail:"keeper metrics row is not a JSON object";
             raise Exit
       in
-      let tools = tool_names_of_audit_json json in
-      let raw_tool_call_count = Json_util.get_int json "tool_call_count" in
-      let tool_call_count =
-        match raw_tool_call_count with
-        | Some _ as value -> value
-        | None -> Some (List.length tools)
-      in
-      let action_source = action_source_opt_member json in
-      if not (has_tool_audit_evidence ~tools ~raw_tool_call_count ~action_source)
-      then None
-      else
-        Some
-          {
-            latest_tool_names = tools;
-            latest_tool_call_count = tool_call_count;
-            latest_action_source = action_source;
-            tool_audit_source = Some "keeper_metrics";
-            tool_audit_at = json_iso_opt json;
-          }
+      match Keeper_metrics_record.kind_of_json json with
+      | Some Keeper_metrics_record.Turn ->
+          (match
+             string_list_member_opt "tools_used" json,
+             Safe_ops.json_int_opt "tool_call_count" json,
+             nonempty_string_opt "ts" json
+           with
+           | Some tools, Some tool_call_count, Some timestamp ->
+               Some
+                 { latest_tool_names = tools
+                 ; latest_tool_call_count = Some tool_call_count
+                 ; latest_action_source =
+                     nonempty_string_opt "action_source" json
+                 ; tool_audit_source = Some "keeper_metrics"
+                 ; tool_audit_at = Some timestamp
+                 }
+           | _ -> None)
+      | Some Keeper_metrics_record.Heartbeat | None -> None
     with
     | Exit -> None
     | Yojson.Json_error detail ->
@@ -414,23 +278,15 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
         None
   in
   latest_snapshot_of_lines lines ~parse_snapshot
-  |> Option.map (fun snapshot ->
-         {
-           snapshot with
-           tool_audit_source =
-             Some
-               (Option.value ~default:"keeper_metrics"
-                  snapshot.tool_audit_source);
-         })
 
 let latest_tool_audit_snapshot_from_files config ~keeper_name =
-  match latest_tool_audit_snapshot_from_decisions config keeper_name with
-  | Some _ as snapshot -> snapshot
-  | None -> latest_tool_audit_snapshot_from_metrics config keeper_name
+  latest_tool_audit_snapshot_from_metrics config keeper_name
 
 let accountability_summary_lookup config =
   Keeper_accountability.accountability_summary_lookup config
 
 let accountability_summary_json config ~keeper_name ~agent_name =
-  Keeper_accountability.accountability_summary_json config ~keeper_name
+  Keeper_accountability.accountability_summary_json
+    config
+    ~keeper_name
     ~agent_name

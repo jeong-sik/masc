@@ -159,7 +159,6 @@ val append_metrics_snapshot :
   turn_cost:float ->
   turn_generation:int ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
-  snapshot_source:string ->
   checkpoint_bytes:int ->
   message_count:int ->
   handoff_json:Yojson.Safe.t option ->

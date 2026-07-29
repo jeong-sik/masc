@@ -172,7 +172,7 @@ check_json "model metrics exposes model list" "$BASE/api/v1/models/metrics?windo
 check_http "keeper costs 200" "$BASE/api/v1/dashboard/keeper-costs?window=60" "200"
 check_json "keeper costs exposes keepers" "$BASE/api/v1/dashboard/keeper-costs?window=60" "'keepers' in d" '^True$'
 check_http "memory subsystems 200" "$BASE/api/v1/dashboard/memory-subsystems" "200"
-check_json "memory subsystems has hebbian block" "$BASE/api/v1/dashboard/memory-subsystems" "'hebbian' in d" '^True$'
+check_json "memory subsystems exposes delegation requests" "$BASE/api/v1/dashboard/memory-subsystems" "'delegation_requests' in d" '^True$'
 check_http "transport health 200" "$BASE/api/v1/dashboard/transport-health" "200"
 check_json "transport health exposes provenance" "$BASE/api/v1/dashboard/transport-health" "'summary' in d and d.get('dashboard_surface') == '/api/v1/dashboard/transport-health' and d.get('source') == 'transport_health_read_model' and d.get('retention', {}).get('scope') == 'dashboard_transport_health' and d.get('query', {}).get('default_snapshot_request') is True and d.get('cache', {}).get('cache_state') in ('fresh', 'stale', 'initializing', 'request_swr_or_inline_compute')" '^True$'
 check_http "attribution summary 200" "$BASE/api/v1/attribution/summary" "200"

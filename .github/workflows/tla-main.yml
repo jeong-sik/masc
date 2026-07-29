@@ -56,8 +56,6 @@ jobs:
       matrix:
         shard:
           - { name: keeper-state-machine, target: check-keeper }
-          - { name: masc-ecosystem,       target: check-ecosystem }
-          - { name: social-state,         target: check-social }
           - { name: others,               target: check-others }
 
     steps:

@@ -6,7 +6,6 @@ let evidence : Keeper_compaction_evidence.t =
     ~catalog_generation_fingerprint:"catalog-generation"
     ~catalog_evidence_sha256:"catalog-evidence"
     ~plan_fingerprint:"plan-fingerprint"
-    ~receipt_plan_fingerprint:"plan-fingerprint"
     ~receipt_request_body_sha256:"request-body"
     ~before_checkpoint_bytes:4096
     ~after_checkpoint_bytes:1024
@@ -59,7 +58,6 @@ let test_projection_and_roundtrip () =
       ; "catalog_generation_fingerprint", `String "catalog-generation"
       ; "catalog_evidence_sha256", `String "catalog-evidence"
       ; "plan_fingerprint", `String "plan-fingerprint"
-      ; "receipt_plan_fingerprint", `String "plan-fingerprint"
       ; "receipt_request_body_sha256", `String "request-body"
       ; "before_checkpoint_bytes", `Int 4096
       ; "after_checkpoint_bytes", `Int 1024
@@ -123,18 +121,17 @@ let test_rejections () =
     ; ( "blank call id"
       , Invalid_field (Call_id, Blank_string)
       , replace "call_id" (`String "   ") canonical )
-    ; ( "tampered plan fingerprint"
-      , Plan_fingerprint_mismatch
-          { plan_fingerprint = "plan-fingerprint"
-          ; receipt_plan_fingerprint = "tampered-plan"
-          }
-      , replace "receipt_plan_fingerprint" (`String "tampered-plan") canonical )
     ; ( "duplicate"
       , Invalid_field (After_message_count, Duplicate)
       , duplicate )
     ; ( "unknown field"
       , Unknown_field "retired_counter"
       , `Assoc (("retired_counter", `Int 1) :: fields canonical) )
+    ; ( "retired duplicate identity field"
+      , Unknown_field "receipt_plan_fingerprint"
+      , `Assoc
+          (("receipt_plan_fingerprint", `String "plan-fingerprint")
+           :: fields canonical) )
     ; ( "missing field"
       , Invalid_field (Before_tool_use_count, Missing)
       , remove "before_tool_use_count" canonical )
@@ -193,7 +190,6 @@ let test_atomic_cycle_and_normalization_accounting () =
       ~catalog_generation_fingerprint:"catalog-generation"
       ~catalog_evidence_sha256:"catalog-evidence"
       ~plan_fingerprint:"plan-fingerprint"
-      ~receipt_plan_fingerprint:"plan-fingerprint"
       ~receipt_request_body_sha256:"request-body"
       ~before_checkpoint_bytes:4096
       ~after_checkpoint_bytes:1024

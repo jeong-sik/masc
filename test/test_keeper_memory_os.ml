@@ -3898,7 +3898,6 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
         ; "catalog_generation_fingerprint", `String "catalog-generation"
         ; "catalog_evidence_sha256", `String "catalog-evidence"
         ; "plan_fingerprint", `String "plan-fingerprint"
-        ; "receipt_plan_fingerprint", `String "plan-fingerprint"
         ; "receipt_request_body_sha256", `String "request-body"
         ; "before_checkpoint_bytes", `Int 4096
         ; "after_checkpoint_bytes", `Int 1024

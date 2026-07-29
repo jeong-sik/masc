@@ -134,11 +134,12 @@ let keeper_config_json (config : Workspace.config) (name : string)
           ~active_goals
           ()
       in
-      (* Preview the actual unified prompt the keeper turn uses.
+      (* Preview the unified prompt shape a keeper turn uses.
          We build the observation from the current workspace state so the
          effective per-turn system side (identity + "Current World State"
-         dynamic context) and the persisted user message both match what a
-         turn would see right now.
+         dynamic context) and the persisted user message match current state.
+         No turn fired, so the typed preview entrypoint omits scheduler wake
+         reasons instead of fabricating a cycle decision.
 
          Board events are collected WITHOUT advancing the keeper's board
          cursor: passing [~pending_board_events:None] would route through
@@ -158,7 +159,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
             ~pending_board_events:(Some pending_board_events) ~config ~meta:m
         in
         let parts =
-          Keeper_unified_prompt.build_prompt ~meta:m ~base_path:config.base_path
+          Keeper_unified_prompt.build_prompt_preview ~meta:m ~base_path:config.base_path
             ~profile_defaults:defaults ~observation ()
         in
         (* Match what a turn actually sends: the observation frame rides the

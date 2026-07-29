@@ -298,6 +298,17 @@ let test_threaded_stimulus_decision_renders_wake_reason () =
   check bool "bootstrap reason listed" true
     (contains ~needle:"bootstrap" threaded)
 
+let test_preview_does_not_invent_wake_reason () =
+  let { Prompt.world_state; _ } =
+    Prompt.build_prompt_preview
+      ~meta
+      ~base_path:"/tmp/unused"
+      ~observation:base_observation
+      ()
+  in
+  check bool "preview has no scheduler trigger" false
+    (contains ~needle:"### Autonomous Trigger" world_state)
+
 (* --- 3. Goal titles + self-direction parity --- *)
 
 let test_goal_summaries_render_titles () =
@@ -384,6 +395,8 @@ let () =
         [
           test_case "stimulus decision renders wake reason" `Quick
             test_threaded_stimulus_decision_renders_wake_reason;
+          test_case "preview invents no wake reason" `Quick
+            test_preview_does_not_invent_wake_reason;
         ] );
       ( "goal titles and parity directive",
         [

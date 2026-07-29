@@ -468,9 +468,9 @@ let autonomous_trigger_lines
                [ Printf.sprintf "- Reasons: %s" (String.concat ", " reasons) ]))
   | _ -> []
 
-let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)
+let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
-    ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
+    ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
     ?(current_task : Masc_domain.task option)
     ?(active_goal_summaries : (string * string) list option)
     ~(observation : Keeper_world_observation.world_observation)
@@ -641,7 +641,9 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
   in
   let connector_presence_failures = observation.connected_surface_failures in
   let autonomous_trigger =
-    autonomous_trigger_lines ~decision:turn_decision ~observation
+    match turn_decision with
+    | Some decision -> autonomous_trigger_lines ~decision ~observation
+    | None -> []
   in
   let content_of : Keeper_context_layers.layer_id -> string option = function
     (* 1. Active goals — stable turn context. Titles render when the caller
@@ -836,3 +838,44 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     ~labels:[("keeper", meta.name)]
     prompt_hash;
   { system_prompt; world_state; user_message }
+
+let build_prompt
+      ~meta
+      ~base_path
+      ?profile_defaults
+      ~turn_decision
+      ?current_task
+      ?active_goal_summaries
+      ~observation
+      ()
+  =
+  build_prompt_internal
+    ~meta
+    ~base_path
+    ?profile_defaults
+    ~turn_decision:(Some turn_decision)
+    ?current_task
+    ?active_goal_summaries
+    ~observation
+    ()
+;;
+
+let build_prompt_preview
+      ~meta
+      ~base_path
+      ?profile_defaults
+      ?current_task
+      ?active_goal_summaries
+      ~observation
+      ()
+  =
+  build_prompt_internal
+    ~meta
+    ~base_path
+    ?profile_defaults
+    ~turn_decision:None
+    ?current_task
+    ?active_goal_summaries
+    ~observation
+    ()
+;;

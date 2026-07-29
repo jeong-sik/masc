@@ -65,3 +65,15 @@ val build_prompt :
       turn must see the work that admitted it). Omitted: layer absent.
     - [?active_goal_summaries]: renders goal titles next to ids in the Active
       Goals layer. Omitted or empty: bare ids. *)
+
+val build_prompt_preview :
+  meta:Keeper_meta_contract.keeper_meta ->
+  base_path:string ->
+  ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
+  ?current_task:Masc_domain.task ->
+  ?active_goal_summaries:(string * string) list ->
+  observation:Keeper_world_observation.world_observation ->
+  unit ->
+  turn_prompt_parts
+(** Build a dashboard preview from current state without inventing a scheduler
+    decision. Scheduler wake reasons are absent because no turn fired. *)

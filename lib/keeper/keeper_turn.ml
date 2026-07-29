@@ -544,30 +544,14 @@ let run_keeper_invocation_turn_admitted
       in
       Progress.Tracker.step turn_tracker ~message:"Building turn prompt" ();
       (match
-         Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
-           ~requested_override:meta.max_context_override
+         Keeper_unified_turn_pre_dispatch.build_runtime_execution
+           ~meta
            ~runtime_id:turn_runtime_id
        with
-		         | Error error ->
-		           Progress.stop_tracking turn_task_id;
-	           tool_result_error
-	             (Keeper_context_runtime.max_context_resolution_error_to_string error)
-	         | Ok resolution ->
-	            let max_runtime_context =
-              let () =
-                match resolution.requested_override with
-                | Some requested ->
-                  Log.Keeper.debug
-                    "%s: using max_context_override=%d context_budget=%d primary_budget=%d effective_budget=%d (manual turn)"
-                    meta.name
-                    requested
-                    resolution.requested_context_window
-                    resolution.primary_budget
-                    resolution.effective_budget
-                | None -> ()
-              in
-              resolution.effective_budget
-            in
+	         | Error error ->
+	           Progress.stop_tracking turn_task_id;
+	           tool_result_error (Agent_sdk.Error.to_string error)
+	         | Ok initial_execution ->
             let base_dir =
               let root = session_base_dir ctx.config in
               match channel_session_key with
@@ -705,11 +689,10 @@ let run_keeper_invocation_turn_admitted
 		                    ~keeper_name:meta.name
 		                    ~turn_id:keeper_turn_id
 		                    (fun () ->
-		                       Keeper_turn_runtime_budget.run_direct_no_progress_retry_loop
-		                         ~keeper_name:meta.name
-	                         ~base_runtime:turn_runtime_id
-	                         ~initial_runtime:turn_runtime_id
-	                         ~initial_max_context:max_runtime_context
+	                       Keeper_turn_runtime_budget.run_direct_no_progress_retry_loop
+	                         ~keeper_name:meta.name
+	                         ~base_runtime:initial_execution.runtime_id
+	                         ~initial_execution
 	                         ~current_turn_phase_elapsed_ms
 		                         ~now_s:(fun () -> Eio.Time.now clock)
 		                         ~setup_retry_runtime:setup_direct_retry_runtime

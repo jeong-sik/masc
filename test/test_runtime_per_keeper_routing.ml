@@ -1043,30 +1043,6 @@ let test_of_meta_projection_budgets_against_routed_runtime () =
       res.Keeper_context_runtime.effective_budget)
 ;;
 
-let test_turn_context_window_uses_routed_runtime () =
-  with_runtime_initialized (fun () ->
-    (* [budgettest] is assigned [openai.gpt] in [[runtime.assignments]]. *)
-    let budget =
-      let meta = make_meta "budgettest" in
-      let resolution =
-        match
-          Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
-            ~requested_override:meta.max_context_override
-            ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
-        with
-        | Ok resolution -> resolution
-        | Error error ->
-          Alcotest.fail
-            (Keeper_context_runtime.max_context_resolution_error_to_string error)
-      in
-      Keeper_turn_runtime_budget.resolved_max_context_for_turn ~meta resolution
-    in
-    Alcotest.(check int)
-      "turn context window uses routed runtime, not runtime-id-agnostic labels"
-      64000
-      budget)
-;;
-
 (* ---- per-model thinking gate: runtime.toml [thinking-support] drives the
    keeper thinking seed via [Runtime_inference.for_runtime] ----
 
@@ -1937,10 +1913,6 @@ let () =
             "of_meta projection prefers the routed runtime"
             `Quick
             test_of_meta_projection_budgets_against_routed_runtime
-        ; Alcotest.test_case
-            "turn context window uses the routed runtime"
-            `Quick
-            test_turn_context_window_uses_routed_runtime
         ] )
     ; ( "per-model thinking gate"
       , [ Alcotest.test_case

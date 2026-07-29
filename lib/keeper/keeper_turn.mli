@@ -74,8 +74,7 @@ module For_testing : sig
   val run_direct_no_progress_retry_loop :
     keeper_name:string ->
     base_runtime:string ->
-    initial_runtime:string ->
-    initial_max_context:int ->
+    initial_execution:Keeper_turn_runtime_budget.runtime_execution ->
     current_turn_phase_elapsed_ms:(float option -> int * int option) ->
     now_s:(unit -> float) ->
     setup_retry_runtime:
@@ -112,8 +111,9 @@ module For_testing : sig
     unit ->
     ('a * int, Agent_sdk.Error.sdk_error) result
   (** Execute the direct-message no-progress retry loop with injected side
-      effects. Exposed only to verify that fallback selection reaches the next
-      keeper run attempt. *)
+      effects. The initial attempt receives its typed runtime execution record,
+      just like a retry. Exposed only to verify fallback selection without
+      duplicating the provider call inside the test. *)
 end
 
 (** Format a dashboard co-view context object ({ label, route, scene, fields })

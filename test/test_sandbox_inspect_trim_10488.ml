@@ -1,8 +1,6 @@
-(** #10488: pin the [nonempty_lines] + [parse_inspect_line] pair
-    against the docker-inspect-cleanup payload that triggered 4.6%
-    log-spam + container leak in production (legacy containers
-    without the [sandbox_ttl_sec] label, emitting trailing-empty
-    tab-separated fields). *)
+(** #10488: pin the current four-field docker-inspect cleanup payload.
+    Missing ttl labels are represented by an empty fourth field, whose
+    trailing tab must survive [nonempty_lines]. *)
 
 open Alcotest
 module R = Masc.Keeper_sandbox_runtime.For_testing
@@ -31,10 +29,8 @@ let test_nonempty_lines_drops_blank () =
   check (list string) "blank lines dropped"
     [ "abc" ] (R.nonempty_lines raw)
 
-(* The docker template is 4 fields; legacy containers without the
-   [sandbox_ttl_sec] label produce a 4-field line whose 4th is
-   empty. Once [nonempty_lines] preserves the trailing tab, the
-   parse splits into 4 fields and [float_opt ""] returns None. *)
+(* The docker template is four fields. A missing [sandbox_ttl_sec] label
+   leaves the fourth field empty, and [float_opt ""] returns [None]. *)
 let test_parse_4field_with_empty_ttl () =
   let line = "87799\t1777149306.102\ttrue\t" in
   match R.parse_inspect_line line with
@@ -57,20 +53,12 @@ let test_parse_4field_full () =
       ignore started_at
   | Error msg -> failf "expected Ok, got Error: %s" msg
 
-(* Legacy 3-field fallback: docker emit may be flat [f1\tf2\tf3]
-   when the label-template references a label key that does not
-   exist on the container. Parser must return [ttl_sec=None]
-   instead of erroring out; otherwise the cleanup loop spams the
-   same parse failure every cycle. *)
-let test_parse_3field_legacy () =
+let test_parse_3field_rejected () =
   let line = "999\t1777149999.5\ttrue" in
   match R.parse_inspect_line line with
-  | Ok (owner_pid, _, running, ttl_sec) ->
-      check (option int) "owner_pid" (Some 999) owner_pid;
-      check (option bool) "running" (Some true) running;
-      check (option (float 0.001)) "ttl_sec=None on legacy"
-        None ttl_sec
-  | Error msg -> failf "expected legacy 3-field Ok, got: %s" msg
+  | Error msg ->
+      check bool "error message mentions payload" true (String.length msg > 0)
+  | Ok _ -> fail "expected Error on retired 3-field payload"
 
 let test_parse_unexpected_arity () =
   match R.parse_inspect_line "only-one-field" with
@@ -80,11 +68,7 @@ let test_parse_unexpected_arity () =
         (String.length msg > 0)
   | Ok _ -> fail "expected Error on 1-field payload"
 
-(* Combined regression: the historical incident was
-   [String.trim → 3 fields → exact-match 4-field parser fails],
-   producing the spam line in #10488. With both fixes the same
-   raw bytes reach [Ok ttl_sec=None]. *)
-let test_end_to_end_legacy_payload () =
+let test_end_to_end_current_payload () =
   let raw = "87799\t1777149306.102\ttrue\t\n" in
   match R.nonempty_lines raw with
   | [ line ] ->
@@ -113,13 +97,13 @@ let () =
           test_parse_4field_with_empty_ttl;
         test_case "4-field full payload" `Quick
           test_parse_4field_full;
-        test_case "3-field legacy fallback (#10488)" `Quick
-          test_parse_3field_legacy;
+        test_case "retired 3-field payload is rejected" `Quick
+          test_parse_3field_rejected;
         test_case "unexpected arity errors out" `Quick
           test_parse_unexpected_arity;
       ]);
     ("regression", [
-        test_case "raw bytes → nonempty_lines → parse, end-to-end"
-          `Quick test_end_to_end_legacy_payload;
+        test_case "current raw bytes → nonempty_lines → parse"
+          `Quick test_end_to_end_current_payload;
       ]);
   ]

@@ -102,26 +102,11 @@ let strip_leading_slash text =
   else text
 ;;
 
-(* #10488: accept both 4-field (current schema, with [ttl_sec]
-   label) and 3-field (legacy containers spawned before the
-   [sandbox_ttl_sec] label was introduced) payloads.  Without this
-   fallback, a single legacy container in the fleet produces a
-   sustained 4.6%-of-events log spam loop because the 5-minute
-   cleanup pass keeps re-attempting [parse_inspect_line] and
-   keeps failing with [Error].  Treating [ttl_sec=None] is
-   equivalent to "no TTL configured" — cleanup then falls back to
-   the running-state / owner-pid heuristics, which is the correct
-   semantics for a label-less container. *)
 let parse_inspect_line line =
   (* docker inspect --format emits a trailing empty field as either
-     ["<no value>"] (template default) or omits the trailing tab when the
-     ttl_sec label is unset on the container.  Both 4-field (ttl_sec
-     present) and 3-field (ttl_sec missing) shapes are valid; treat the
-     missing case as [ttl_sec = None] instead of failing the cleanup
-     pass with a parse error.  Without this fallback the 5-minute
-     cleanup loop emits "errors=2" on every cycle for any container
-     created without a ttl_sec label, which produced the 138 consecutive
-     parse-error cycles observed on 2026-04-26. *)
+     ["<no value>"] or an empty fourth field when the ttl_sec label is
+     unset. [nonempty_lines] preserves that trailing tab, so every current
+     cleanup payload has exactly four fields. *)
   match String.split_on_char '\t' line with
   | [ owner_pid; started_at; running; ttl_sec ] ->
     Ok
@@ -129,13 +114,6 @@ let parse_inspect_line line =
       ; started_at = float_opt started_at
       ; running = bool_opt running
       ; ttl_sec = float_opt ttl_sec
-      }
-  | [ owner_pid; started_at; running ] ->
-    Ok
-      { owner_pid = int_opt owner_pid
-      ; started_at = float_opt started_at
-      ; running = bool_opt running
-      ; ttl_sec = None
       }
   | _ ->
     Error

@@ -11,8 +11,8 @@ open Keeper_memory_os_types
     into the conversation window the librarian summarized — the model restated
     its own prompt, which is not fresh evidence. The write boundary decides
     this once (the production caller joins against
-    {!Keeper_recall_injection_window.recently_injected}); tests exercising the
-    legacy semantics pass [Independent_observation]. A closed sum rather than
+    {!Keeper_recall_injection_window.recently_injected}); direct-observation
+    tests pass [Independent_observation]. A closed sum rather than
     an optional flag so no call site can skip the judgment. *)
 type reobservation_provenance =
   | Independent_observation

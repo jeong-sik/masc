@@ -2512,7 +2512,7 @@ let test_gc_uses_only_explicit_valid_until () =
   let base = fact_fixture ~now () in
   let old_external =
     { base with
-      Types.claim = "legacy external state expired"
+      Types.claim = "old external state"
     ; Types.claim_kind = Some Types.External_state
     ; Types.first_seen = now -. 1_000_000.0
     ; Types.valid_until = None
@@ -2523,7 +2523,7 @@ let test_gc_uses_only_explicit_valid_until () =
   in
   let durable =
     { old_external with
-      Types.claim = "durable legacy row"
+      Types.claim = "durable row without claim kind"
     ; Types.claim_kind = None
     }
   in
@@ -2548,7 +2548,7 @@ let test_gc_uses_only_explicit_valid_until () =
     (List.map (fun f -> f.Types.claim) gone);
   Alcotest.(check (list string))
     "live keeps unbounded external + durable"
-    [ "legacy external state expired"; "durable legacy row" ]
+    [ "old external state"; "durable row without claim kind" ]
     (List.map (fun f -> f.Types.claim) live)
 ;;
 
@@ -2944,20 +2944,20 @@ let test_category_codec_roundtrip () =
        Alcotest.(check bool)
          (Printf.sprintf "of_string %s" label)
          true
-         (Types.category_of_string label = expected);
+         (Types.category_of_string label = Some expected);
        Alcotest.(check string)
          (Printf.sprintf "to_string round-trip %s" label)
          label
-         (Types.category_to_string (Types.category_of_string label)))
+         (Types.category_to_string expected))
     known;
   Alcotest.(check bool)
-    "unknown label parses to Unknown"
+    "unknown label is rejected"
     true
-    (Types.category_of_string "checkpoint_saved" = Types.Unknown "checkpoint_saved");
-  Alcotest.(check string)
-    "unknown round-trips losslessly"
-    "checkpoint_saved"
-    (Types.category_to_string (Types.category_of_string "checkpoint_saved"))
+    (Option.is_none (Types.category_of_string "checkpoint_saved"));
+  Alcotest.(check bool)
+    "non-canonical label is rejected"
+    true
+    (Option.is_none (Types.category_of_string " Fact "))
 ;;
 
 let test_all_categories_are_validity_context () =
@@ -2969,7 +2969,7 @@ let test_all_categories_are_validity_context () =
          (Types.category_to_string category)
          true
          (Types.fact_is_current ~now fact))
-    (Types.Unknown "novel" :: Types.all_categories)
+    Types.all_categories
 ;;
 
 let test_claim_kinds_are_validity_context () =
@@ -2995,7 +2995,7 @@ let test_no_category_infers_validity () =
          (Types.category_to_string category ^ " does not infer validity")
          None
          (Types.fact_effective_valid_until fact))
-    (Types.Unknown "novel" :: Types.all_categories)
+    Types.all_categories
 ;;
 
 let with_env name value f =
@@ -3175,73 +3175,24 @@ let test_self_observation_uses_only_explicit_validity () =
     (Types.fact_is_current ~now:past durable)
 ;;
 
-let test_fact_of_json_preserves_unknown_category () =
+let test_fact_of_json_rejects_unknown_category () =
   let first_seen = 1_000_000.0 in
-  let json =
-    `Assoc
-      [ "claim", `String "connector state observation"
-      ; "category", `String "connector_state"
-      ; "source", `Assoc [ "trace_id", `String "t"; "turn", `Int 1 ]
-      ; "first_seen", `Float first_seen
-      ; "schema_version", `String Types.schema_version
-      ]
-  in
-  match Types.fact_of_json json with
-  | None -> Alcotest.fail "current unknown-category row failed to decode"
-  | Some f ->
-    Alcotest.(check string)
-      "unknown category remains exact context"
-      "connector_state"
-      (Types.category_to_string f.Types.category);
-    Alcotest.(check (option string))
-      "unknown category does not invent claim_kind"
-      None
-      (Option.map Types.claim_kind_to_string f.Types.claim_kind);
-    let json = Types.fact_to_json f in
-    let string_field key =
-      match json with
-      | `Assoc fields ->
-        (match List.assoc_opt key fields with
-         | Some (`String value) -> Some value
-         | Some _ | None -> None)
-      | _ -> None
-    in
-    Alcotest.(check (option string))
-      "rewritten row preserves category"
-      (Some "connector_state")
-      (string_field "category");
-    Alcotest.(check (option string))
-      "rewritten row does not invent claim_kind"
-      None
-      (string_field "claim_kind")
-;;
-
-let test_fact_of_json_preserves_non_exact_unknown_category () =
-  let first_seen = 1_000_000.0 in
-  let category = " Connector_State " in
-  let json =
-    `Assoc
-      [ "claim", `String "connector state observation"
-      ; "category", `String category
-      ; "source", `Assoc [ "trace_id", `String "t"; "turn", `Int 1 ]
-      ; "first_seen", `Float first_seen
-      ; "schema_version", `String Types.schema_version
-      ]
-  in
-  match Types.fact_of_json json with
-  | None -> Alcotest.fail "current row with non-exact unknown category failed"
-  | Some f ->
-    (match f.Types.category with
-     | Types.Unknown raw ->
-       Alcotest.(check string)
-         "non-exact label stays unknown"
-         category
-         raw
-     | _ -> Alcotest.fail "non-exact unknown category normalized");
-    Alcotest.(check (option string))
-      "non-exact unknown category does not set claim_kind"
-      None
-      (Option.map Types.claim_kind_to_string f.Types.claim_kind)
+  List.iter
+    (fun category ->
+       let json =
+         `Assoc
+           [ "claim", `String "connector state observation"
+           ; "category", `String category
+           ; "source", `Assoc [ "trace_id", `String "t"; "turn", `Int 1 ]
+           ; "first_seen", `Float first_seen
+           ; "schema_version", `String Types.schema_version
+           ]
+       in
+       Alcotest.(check bool)
+         ("category rejects: " ^ category)
+         true
+         (Option.is_none (Types.fact_of_json json)))
+    [ "connector_state"; " Fact " ]
 ;;
 
 let test_fact_of_json_rejects_invalid_claim_kind () =
@@ -4715,13 +4666,9 @@ let () =
             `Quick
             test_claim_kinds_remain_recall_context_in_source_order
         ; Alcotest.test_case
-            "fact_of_json preserves unknown category"
+            "fact_of_json rejects unknown category"
             `Quick
-            test_fact_of_json_preserves_unknown_category
-        ; Alcotest.test_case
-            "fact_of_json preserves non-exact unknown category"
-            `Quick
-            test_fact_of_json_preserves_non_exact_unknown_category
+            test_fact_of_json_rejects_unknown_category
         ; Alcotest.test_case
             "fact_of_json rejects invalid claim_kind"
             `Quick

@@ -120,9 +120,8 @@ type provenance_event =
   ; tool_call_id : string option
   }
 
-(* The librarian taxonomy as a closed sum. The LLM emits a category label;
-   [category_of_string] parses it once at the producer boundary, with [Unknown]
-   preserving any label outside the current vocabulary. Categories are model
+(* The librarian taxonomy as a closed sum. The LLM emits one exact category
+   token; anything outside this vocabulary is rejected. Categories are model
    context only: no variant grants retention, expiry, or promotion authority. *)
 type category =
   | Code_change
@@ -134,7 +133,6 @@ type category =
   | Ephemeral
   | Validated_approach
   | Lesson
-  | Unknown of string
 
 let category_to_string = function
   | Code_change -> "code_change"
@@ -146,7 +144,6 @@ let category_to_string = function
   | Ephemeral -> "ephemeral"
   | Validated_approach -> "validated_approach"
   | Lesson -> "lesson"
-  | Unknown s -> s
 ;;
 
 let all_categories =
@@ -163,17 +160,17 @@ let all_categories =
 ;;
 
 let category_of_string s =
-  match String.lowercase_ascii (String.trim s) with
-  | "code_change" -> Code_change
-  | "fact" -> Fact
-  | "preference" -> Preference
-  | "blocker" -> Blocker
-  | "goal" -> Goal
-  | "constraint" -> Constraint
-  | "ephemeral" -> Ephemeral
-  | "validated_approach" -> Validated_approach
-  | "lesson" -> Lesson
-  | _ -> Unknown s
+  match s with
+  | "code_change" -> Some Code_change
+  | "fact" -> Some Fact
+  | "preference" -> Some Preference
+  | "blocker" -> Some Blocker
+  | "goal" -> Some Goal
+  | "constraint" -> Some Constraint
+  | "ephemeral" -> Some Ephemeral
+  | "validated_approach" -> Some Validated_approach
+  | "lesson" -> Some Lesson
+  | _ -> None
 ;;
 
 (* Producer-emitted origin tag, orthogonal to [category]. It is parsed once at
@@ -201,7 +198,7 @@ let librarian_claim_kinds =
 ;;
 
 let claim_kind_of_string s =
-  match String.lowercase_ascii (String.trim s) with
+  match s with
   | "self_observation" -> Some Self_observation
   | "external_state" -> Some External_state
   | "durable_knowledge" -> Some Durable_knowledge
@@ -225,11 +222,11 @@ let persisted_claim_kind_of_json fields =
 ;;
 
 let category_and_claim_kind_of_persisted_row ~category_str ~claim_kind =
-  match claim_kind with
-  | Persisted_claim_kind_absent -> Some (category_of_string category_str, None)
-  | Persisted_claim_kind_valid claim_kind ->
-    Some (category_of_string category_str, Some claim_kind)
-  | Persisted_claim_kind_invalid -> None
+  match category_of_string category_str, claim_kind with
+  | Some category, Persisted_claim_kind_absent -> Some (category, None)
+  | Some category, Persisted_claim_kind_valid claim_kind ->
+    Some (category, Some claim_kind)
+  | None, _ | Some _, Persisted_claim_kind_invalid -> None
 ;;
 
 (* The fact carries only the claim, model-produced context, provenance, the
@@ -482,9 +479,7 @@ let fact_of_json (json : Yojson.Safe.t) =
            | Some (category, claim_kind) ->
              Some
                { claim
-               ; (* Parse once at the read boundary. Unknown categories remain
-                    [Unknown raw], and invalid structured tags are rejected. *)
-                 category
+               ; category
                ; claim_kind
                ; source
                ; first_seen

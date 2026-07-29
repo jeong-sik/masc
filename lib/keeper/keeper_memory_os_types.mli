@@ -55,10 +55,9 @@ type provenance_event =
   ; tool_call_id : string option
   }
 
-(** Librarian taxonomy as a closed sum. The LLM-produced label is parsed once at
-    the producer boundary; [Unknown] preserves labels outside the current
-    vocabulary. Categories are model context only and do not grant retention,
-    expiry, or promotion authority. *)
+(** Librarian taxonomy as a closed sum. Labels outside the current vocabulary
+    reject at the producer and persistence boundaries. Categories are model
+    context only and do not grant retention, expiry, or promotion authority. *)
 type category =
   | Code_change
   | Fact
@@ -69,19 +68,15 @@ type category =
   | Ephemeral
   | Validated_approach
   | Lesson
-  | Unknown of string
 
-(** Canonical lowercase token for a category (round-trips with
-    [category_of_string] for known variants; [Unknown s] yields [s]). *)
+(** Canonical lowercase token for a category. *)
 val category_to_string : category -> string
 
-(** All closed taxonomy categories that can be emitted by the librarian prompt.
-    [Unknown _] is excluded because it carries an arbitrary producer label. *)
+(** All closed taxonomy categories that can be emitted by the librarian prompt. *)
 val all_categories : category list
 
-(** Parse a free-text category label (trimmed, case-insensitive on known tokens);
-    anything outside the taxonomy becomes [Unknown] carrying the raw label. *)
-val category_of_string : string -> category
+(** Parse an exact category token. Unknown or non-canonical tokens reject. *)
+val category_of_string : string -> category option
 
 (** Producer-emitted origin tag, orthogonal to {!category}. It is parsed once at
     the librarian boundary and preserved as model context; it does not create a

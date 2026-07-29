@@ -228,7 +228,9 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
   | `Assoc fields ->
     (match
        string_field wire_field_claim fields
-       , string_field wire_field_category fields
+       , (match List.assoc_opt wire_field_category fields with
+          | Some (`String raw) -> category_of_string raw
+          | Some _ | None -> None)
        , int_field wire_field_source_turn fields
        , claim_kind_field fields
        , claim_id_field fields
@@ -236,16 +238,13 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
        , valid_for_days_field fields
      with
      | ( Some claim
-       , Some category_str
+       , Some category
        , Some turn
        , Some claim_kind
        , Some claim_id
        , Some tool_call_id
        , Some valid_for_days )
        when turn >= 0 ->
-      (* Parse the provider's category once at the producer boundary. It remains
-         context and never creates a validity horizon. *)
-      let category = category_of_string category_str in
       Some
         { claim
         ; category

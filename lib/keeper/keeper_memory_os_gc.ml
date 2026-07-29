@@ -47,8 +47,7 @@ let expired_category_counts expired =
            | Validated_approach
            | Lesson
            | Blocker
-           | Goal
-           | Unknown _ -> ephemeral, non_ephemeral + 1
+           | Goal -> ephemeral, non_ephemeral + 1
          in
          ephemeral, non_ephemeral, bump_count category_key by_category)
       (0, 0, String_map.empty)

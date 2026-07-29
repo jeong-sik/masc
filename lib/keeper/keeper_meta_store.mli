@@ -250,10 +250,9 @@ val persist_compaction_outcome :
     {!Keeper_meta_contract.compaction_retry_suspended} reads to refuse a
     failing compaction instead of retrying it without bound (RFC-0351 S0,
     #25461); [count] had no writer before this despite being serialized and
-    rendered. Heartbeat intake reads the durable streak before ordinary
-    provider dispatch; compaction prepare repeats the check only as a race
-    defense. A persistence failure must therefore stop the Keeper lane rather
-    than fail open. *)
+    rendered. Before #25969 the same ceiling was applied one layer lower, by
+    [Keeper_heartbeat_loop.settlement_of_cycle_outcome] escalating the lease
+    settlement; that function went with the claim/settle model. *)
 
 val persist_transcript_corruption_pause :
   Workspace.config ->

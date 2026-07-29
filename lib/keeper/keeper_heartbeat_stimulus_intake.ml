@@ -382,14 +382,8 @@ let consume_board_stimulus_batch ~meta_after_triage batch =
   intake_result
 ;;
 
-let stimulus_ready_for_intake
-      ~base_path
-      ~compaction_retry_suspended
-      (stimulus : Keeper_event_queue.stimulus)
-  =
+let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus) =
   match stimulus.payload with
-  | Keeper_event_queue.Manual_compaction_requested -> true
-  | _ when compaction_retry_suspended -> false
   | Keeper_event_queue.Hitl_resolved resolution ->
     (match
        Keeper_approval_queue.get_pending_entry_for_workspace
@@ -405,6 +399,7 @@ let stimulus_ready_for_intake
   | Keeper_event_queue.Bg_completed _
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Connector_attention _
+  | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Goal_assigned _
   | Keeper_event_queue.Goal_reconciliation_ready _ ->
     true
@@ -535,18 +530,11 @@ let heartbeat_event_intake
      payload-family priority hierarchy. *)
   let base_path = ctx.config.base_path in
   let keeper_name = meta_after_triage.name in
-  let compaction_retry_suspended =
-    Keeper_meta_contract.compaction_retry_suspended
-      meta_after_triage.runtime.compaction_rt
-  in
   let select_pending () =
     Keeper_registry_event_queue.peek_when_result
       ~base_path
       keeper_name
-      ~ready:
-        (stimulus_ready_for_intake
-           ~base_path
-           ~compaction_retry_suspended)
+      ~ready:(stimulus_ready_for_intake ~base_path)
   in
   let rec select_pending_after_spent_reconciliation () =
     match select_pending () with

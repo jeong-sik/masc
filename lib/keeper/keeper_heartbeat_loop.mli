@@ -80,14 +80,11 @@ val heartbeat_event_intake :
   heartbeat_event_intake
 
 (** Source-authority gate applied after world scheduling. A selected stimulus
-    whose intake failed must remain pending and cannot reach the provider.
-    A suspended compaction retry admits only the exact manual-compaction
-    stimulus selected by [event_intake]; independent booleans cannot invent
-    manual recovery authority. *)
+    whose intake failed must remain pending and cannot reach the provider. *)
 val should_run_turn_after_event_intake :
   scheduled:bool ->
-  compaction_retry_suspended:bool ->
-  event_intake:heartbeat_event_intake ->
+  event_queue_intake_error:
+    Keeper_heartbeat_stimulus_intake.event_queue_intake_error option ->
   bool
 
 type keepalive_scheduling_decision = {
@@ -148,11 +145,11 @@ type keepalive_turn_outcome = {
 val record_crashed_cycle_failure :
   base_path:string -> keeper_name:string -> exn -> unit
 
-val compaction_outcomes_of_cycle_outcome :
+val compaction_outcome_of_cycle_outcome :
   Keeper_heartbeat_loop_cycle.cycle_outcome option ->
-  [ `Committed | `Overflow_episode_committed | `Failed | `Recovered ] list
-(** Pure mapping from a settled cycle outcome to the ordered compaction-streak
-    stamps ([Keeper_meta_store.persist_compaction_outcome]). Manual-lane
+  [ `Committed | `Overflow_episode_committed | `Failed | `Recovered ] option
+(** Pure mapping from a settled cycle outcome to the compaction-streak stamp
+    ([Keeper_meta_store.persist_compaction_outcome]). Manual-lane
     applied/failed outcomes and in-lane provider-overflow dispositions join
     the same per-keeper streak. The streak counts consecutive
     provider-overflow episodes (#25538): an in-lane commit maps to
@@ -160,9 +157,7 @@ val compaction_outcomes_of_cycle_outcome :
     under an incompressible floor must still reach the ceiling), a completed
     overflow-free turn maps to [`Recovered] (resets it), and only the
     operator's manual commit maps to [`Committed] (count + reset).
-    A manual commit followed immediately by an in-lane compaction returns two
-    ordered stamps so neither count nor the follow-up overflow is lost.
-    Outcomes with no compaction involvement return [[]]. *)
+    Outcomes with no compaction involvement return [None]. *)
 
 
 (** Pure: post-turn status event derived from the registry
@@ -249,14 +244,5 @@ module For_testing : sig
     ?settle:(unit -> (unit, string) result) ->
     unit ->
     transcript_corruption_commit
-
-  type pending_selection_outcome =
-    | Selection_completed
-    | Selection_failed of string
-    | Selection_retained
-
-  val pending_selection_outcome_of_cycle_outcome :
-    Keeper_heartbeat_loop_cycle.cycle_outcome option ->
-    pending_selection_outcome
 
 end

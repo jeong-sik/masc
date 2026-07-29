@@ -74,11 +74,6 @@ let consume_single_heartbeat_stimulus = Stimulus_intake.consume_single_heartbeat
 let consume_board_stimulus_batch = Stimulus_intake.consume_board_stimulus_batch
 let heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake
 
-let manual_compaction_requested_of_stimuli = function
-  | [ { Keeper_event_queue.payload = Manual_compaction_requested; _ } ] -> true
-  | [] | [ _ ] | _ :: _ :: _ -> false
-;;
-
 (* Keepalive scheduling decision (record + decide function) extracted to
    [Keeper_heartbeat_loop_scheduling] (godfile decomp). *)
 type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_scheduling_decision = {
@@ -90,16 +85,8 @@ type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_
 
 let decide_keepalive_scheduling = Keeper_heartbeat_loop_scheduling.decide_keepalive_scheduling
 
-let should_run_turn_after_event_intake
-      ~scheduled
-      ~compaction_retry_suspended
-      ~(event_intake : heartbeat_event_intake)
-  =
-  scheduled
-  && Option.is_none event_intake.event_queue_intake_error
-  &&
-  ( (not compaction_retry_suspended)
-  || manual_compaction_requested_of_stimuli event_intake.consumed_stimuli )
+let should_run_turn_after_event_intake ~scheduled ~event_queue_intake_error =
+  scheduled && Option.is_none event_queue_intake_error
 ;;
 
 let provider_timeout_observation_reasons =
@@ -342,40 +329,32 @@ let record_crashed_cycle_failure ~base_path ~keeper_name exn =
     (if String.equal backtrace "" then "" else "\n" ^ backtrace)
 ;;
 
-let compaction_outcome_of_failed_turn failure =
-  match failure.Keeper_unified_turn.source_disposition with
-  | Keeper_unified_turn.Requeue_after_context_compaction
-      Keeper_unified_turn.Compaction_committed ->
-    (* #25538: an in-lane commit is still one provider-overflow episode.
-       Advancing (not resetting) the streak is what lets an
-       incompressible floor reach the ceiling; only an overflow-free
-       completed turn — or the operator's manual commit — resets. *)
-    Some `Overflow_episode_committed
-  | Keeper_unified_turn.Requeue_after_context_compaction
-      (Keeper_unified_turn.Compaction_attempt_failed _)
-  | Keeper_unified_turn.Follow_failure_route_after_no_compaction _ ->
-    Some `Failed
-  | Keeper_unified_turn.Escalate_after_exact_output_terminal _ -> Some `Failed
-  | Keeper_unified_turn.Follow_failure_route
-  | Keeper_unified_turn.Acknowledge_after_in_turn_handling
-  | Keeper_unified_turn.Pause_after_transcript_corruption _ -> None
+let manual_compaction_requested_of_stimuli = function
+  | [ { Keeper_event_queue.payload = Manual_compaction_requested; _ } ] -> true
+  | [] | [ _ ] | _ :: _ :: _ -> false
 ;;
 
-let rec compaction_outcomes_of_cycle_outcome = function
-  | Some (Cycle.Manual_compaction_applied { followup; _ }) ->
-    let followup_outcomes =
-      match compaction_outcomes_of_cycle_outcome (Some followup) with
-      | [ `Recovered ] | [] -> []
-      | outcomes -> outcomes
-    in
-    (* A manual commit and its immediate provider follow-up are two distinct
-       facts. Keep both stamps so a same-cycle reactive overflow cannot be
-       erased by the manual reset or disappear from compaction_count. *)
-    `Committed :: followup_outcomes
-  | Some (Cycle.Manual_compaction_failed _) -> [ `Failed ]
+let compaction_outcome_of_cycle_outcome = function
+  | Some (Cycle.Manual_compaction_applied _) -> Some `Committed
+  | Some (Cycle.Manual_compaction_failed _) -> Some `Failed
   | Some (Cycle.Failed { failure; _ }) ->
-    Option.to_list (compaction_outcome_of_failed_turn failure)
-  | Some (Cycle.Completed _) -> [ `Recovered ]
+    (match failure.Keeper_unified_turn.source_disposition with
+     | Keeper_unified_turn.Requeue_after_context_compaction
+         Keeper_unified_turn.Compaction_committed ->
+       (* #25538: an in-lane commit is still one provider-overflow episode.
+          Advancing (not resetting) the streak is what lets an
+          incompressible floor reach the ceiling; only an overflow-free
+          completed turn — or the operator's manual commit — resets. *)
+       Some `Overflow_episode_committed
+     | Keeper_unified_turn.Requeue_after_context_compaction
+         (Keeper_unified_turn.Compaction_attempt_failed _)
+     | Keeper_unified_turn.Follow_failure_route_after_no_compaction _ ->
+       Some `Failed
+     | Keeper_unified_turn.Escalate_after_exact_output_terminal _ -> Some `Failed
+     | Keeper_unified_turn.Follow_failure_route
+     | Keeper_unified_turn.Acknowledge_after_in_turn_handling
+     | Keeper_unified_turn.Pause_after_transcript_corruption _ -> None)
+  | Some (Cycle.Completed _) -> Some `Recovered
   | Some
       ( Cycle.Checkpointed _
       | Cycle.Input_required _
@@ -383,7 +362,7 @@ let rec compaction_outcomes_of_cycle_outcome = function
       | Cycle.Skipped _
       | Cycle.Busy _
       | Cycle.Manual_compaction_not_applied _ )
-  | None -> []
+  | None -> None
 ;;
 
 type transcript_corruption_commit =
@@ -414,40 +393,6 @@ let commit_transcript_corruption ~stop ~persist_pause ?settle () =
           | Error detail -> Transcript_pause_settlement_failed detail)))
 ;;
 
-type pending_selection_outcome =
-  | Selection_completed
-  | Selection_failed of string
-  | Selection_retained
-
-let pending_selection_outcome_of_cycle_outcome = function
-  | Some
-      ( Cycle.Completed _
-      | Cycle.Manual_compaction_applied _
-      | Cycle.Manual_compaction_not_applied _ ) ->
-    Selection_completed
-  | Some (Cycle.Manual_compaction_failed { failure; _ }) ->
-    Selection_failed (Keeper_manual_compaction.failure_to_string failure)
-  | Some (Cycle.Failed { failure; _ }) ->
-    (match failure.Keeper_unified_turn.source_disposition with
-     | Keeper_unified_turn.Acknowledge_after_in_turn_handling
-     | Keeper_unified_turn.Escalate_after_exact_output_terminal _ ->
-       Selection_failed
-         (Agent_sdk.Error.to_string failure.Keeper_unified_turn.error)
-     | Keeper_unified_turn.Follow_failure_route
-     | Keeper_unified_turn.Follow_failure_route_after_no_compaction _
-     | Keeper_unified_turn.Requeue_after_context_compaction _
-     | Keeper_unified_turn.Pause_after_transcript_corruption _ ->
-       Selection_retained)
-  | Some
-      ( Cycle.Checkpointed _
-      | Cycle.Input_required _
-      | Cycle.Cancelled _
-      | Cycle.Skipped _
-      | Cycle.Busy _ )
-  | None ->
-    Selection_retained
-;;
-
 module For_testing = struct
   let consume_deferred_runtime_lane_hint =
     consume_deferred_runtime_lane_hint
@@ -459,14 +404,6 @@ module For_testing = struct
     | Transcript_pause_settlement_failed of string
 
   let commit_transcript_corruption = commit_transcript_corruption
-
-  type nonrec pending_selection_outcome = pending_selection_outcome =
-    | Selection_completed
-    | Selection_failed of string
-    | Selection_retained
-
-  let pending_selection_outcome_of_cycle_outcome =
-    pending_selection_outcome_of_cycle_outcome
 
 end
 
@@ -638,10 +575,7 @@ let run_keepalive_unified_turn
       let should_run_turn =
         should_run_turn_after_event_intake
           ~scheduled:scheduling.should_run_turn
-          ~compaction_retry_suspended:
-            (Keeper_meta_contract.compaction_retry_suspended
-               meta_after_triage.runtime.compaction_rt)
-          ~event_intake
+          ~event_queue_intake_error:event_intake.event_queue_intake_error
       in
       let verdict_strs =
         match event_intake.event_queue_intake_error with
@@ -896,8 +830,11 @@ let run_keepalive_unified_turn
                  (connector_attention_event_ids_of_stimuli !consumed_stimuli)
              | Error message -> record_event_queue_failure message
            in
-           match pending_selection_outcome_of_cycle_outcome !cycle_outcome_ref with
-           | Selection_completed ->
+           match !cycle_outcome_ref with
+           | Some
+               ( Cycle.Completed _
+               | Cycle.Manual_compaction_applied _
+               | Cycle.Manual_compaction_not_applied _ ) ->
              (match
                 complete_schedule_due
                   ~ctx
@@ -906,58 +843,61 @@ let run_keepalive_unified_turn
               with
               | Ok () -> remove_completed_selection ()
               | Error message -> record_event_queue_failure message)
-           | Selection_failed error ->
-             (* One operator request authorizes one compaction attempt. Leaving
-                the exact request pending would turn a failed manual operation
-                into an automatic summarizer loop on every heartbeat. A later
-                retry therefore requires a new operator request. *)
-             (match fail_schedule_due ~ctx ~error !consumed_stimuli with
-              | Ok () -> remove_completed_selection ()
-              | Error message -> record_event_queue_failure message)
-           | Selection_retained -> ());
-      (* RFC-0351 S0 / #25461: advance the compaction streak read by heartbeat
-         intake and by the prepare defense. This update is intentionally
+           | Some (Cycle.Failed { failure; _ }) ->
+             (match failure.Keeper_unified_turn.source_disposition with
+              | Keeper_unified_turn.Acknowledge_after_in_turn_handling
+              | Keeper_unified_turn.Escalate_after_exact_output_terminal _ ->
+                (match
+                   fail_schedule_due
+                     ~ctx
+                     ~error:
+                       (Agent_sdk.Error.to_string failure.Keeper_unified_turn.error)
+                     !consumed_stimuli
+                 with
+                 | Ok () -> remove_completed_selection ()
+                 | Error message -> record_event_queue_failure message)
+              | Keeper_unified_turn.Follow_failure_route
+              | Keeper_unified_turn.Follow_failure_route_after_no_compaction _
+              | Keeper_unified_turn.Requeue_after_context_compaction _
+              | Keeper_unified_turn.Pause_after_transcript_corruption _ ->
+                ())
+           | Some
+               ( Cycle.Checkpointed _
+               | Cycle.Input_required _
+               | Cycle.Cancelled _
+               | Cycle.Skipped _
+               | Cycle.Busy _
+               | Cycle.Manual_compaction_failed _ )
+           | None ->
+             ());
+      (* RFC-0351 S0 / #25461: advance the compaction streak read by the trigger.
+         [Keeper_post_turn] refuses another compaction once the streak reaches
+         [compaction_retry_escalation_threshold]. This update is intentionally
          independent of Event Queue source selection: every failed compaction
-         must consume retry budget, including cycles with no selected source.
-         A failed write stops this Keeper lane; otherwise neither reader could
-         prove the retry ceiling and the next heartbeat would fail open into
-         another provider/compactor call. *)
-      (let compaction_outcomes =
-         compaction_outcomes_of_cycle_outcome !cycle_outcome_ref
+         must consume retry budget, including cycles with no selected source. *)
+      (let compaction_outcome =
+         compaction_outcome_of_cycle_outcome !cycle_outcome_ref
        in
-       let stop_after_persistence_failure message =
-         Atomic.set stop true;
-         event_queue_failed := true;
-         Health.record_failure
-           ~agent_name:meta_after_triage.name
-           ~reason:(Keeper_types_profile.short_preview message);
-         Log.Keeper.error
-           ~keeper_name:meta_after_triage.name
-           "compaction outcome not persisted; stopping Keeper lane before another provider dispatch: %s"
-           message
-       in
-       let rec persist = function
-         | [] -> ()
-         | `Recovered :: rest
-           when meta_after_triage.runtime.compaction_rt.consecutive_failures = 0 ->
-           (* Streak already clear: skip the read-modify-write that every
-              healthy completed turn would otherwise pay. *)
-           persist rest
-         | outcome :: rest ->
-           (match
-              Keeper_meta_store.persist_compaction_outcome
-                ctx.config
-                ~keeper_name:meta_after_triage.name
-                ~outcome
-            with
-            | Ok `Persisted -> persist rest
-            | Ok `No_durable_meta ->
-              stop_after_persistence_failure
-                "durable Keeper metadata is missing for the compaction outcome"
-            | Error message ->
-              stop_after_persistence_failure message)
-       in
-       persist compaction_outcomes);
+       match compaction_outcome with
+       | None -> ()
+       | Some `Recovered
+         when meta_after_triage.runtime.compaction_rt.consecutive_failures = 0 ->
+         (* Streak already clear: skip the read-modify-write that every healthy
+            completed turn would otherwise pay. *)
+         ()
+       | Some outcome ->
+         (match
+            Keeper_meta_store.persist_compaction_outcome
+              ctx.config
+              ~keeper_name:meta_after_triage.name
+              ~outcome
+          with
+          | Ok (`Persisted | `No_durable_meta) -> ()
+          | Error message ->
+            Log.Keeper.warn
+              "compaction outcome counter not persisted keeper=%s: %s"
+              meta_after_triage.name
+              message));
       { meta = meta_after_cycle
       ; cycle_status =
           if !event_queue_failed then Turn_cycle_crashed else Turn_cycle_completed

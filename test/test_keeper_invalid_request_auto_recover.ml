@@ -16,25 +16,6 @@ let invalid_request message =
        { message; reason = Llm_provider.Retry.Unknown_invalid_request })
 ;;
 
-let request_body_too_large () =
-  Agent_sdk.Error.Api
-    (Llm_provider.Retry.InvalidRequest
-       { message = "serialized request body exceeds the declared limit"
-       ; reason =
-           Llm_provider.Retry.Request_body_too_large
-             { actual_bytes = 526_155; limit_bytes = 524_288 }
-       })
-;;
-
-let request_body_refused () =
-  Agent_sdk.Error.Api
-    (Llm_provider.Retry.InvalidRequest
-       { message = "provider refused the serialized request body"
-       ; reason =
-           Llm_provider.Retry.Request_body_refused_by_provider { status = 413 }
-       })
-;;
-
 let test_is_invalid_request_error_only_for_api_invalid_request () =
   check
     bool
@@ -141,50 +122,6 @@ let test_counters_are_per_keeper () =
   KUF.reset_invalid_request_failures ~keeper_name:keeper_b
 ;;
 
-let test_capacity_invalid_request_has_one_retry_authority () =
-  let keeper = Printf.sprintf "test-ir-capacity-%d" (Unix.getpid ()) in
-  KUF.reset_invalid_request_failures ~keeper_name:keeper;
-  List.iter
-    (fun error ->
-       check bool "capacity reason stays a typed InvalidRequest" true
-         (EC.is_invalid_request_error error);
-       match
-         Masc.Keeper_turn_runtime_budget.capacity_transition_of_error error
-       with
-       | Masc.Keeper_turn_runtime_budget.Compact_next_cycle _ -> ()
-       | Masc.Keeper_turn_runtime_budget.Not_capacity
-       | Masc.Keeper_turn_runtime_budget.Capacity_non_compacting _ ->
-         fail "capacity reason did not enter the canonical compaction lane")
-    [ request_body_too_large (); request_body_refused () ];
-  (match
-     Masc.Keeper_turn_runtime_budget.capacity_transition_of_error
-       (invalid_request "bad body")
-   with
-   | Masc.Keeper_turn_runtime_budget.Not_capacity -> ()
-   | Masc.Keeper_turn_runtime_budget.Compact_next_cycle _
-   | Masc.Keeper_turn_runtime_budget.Capacity_non_compacting _ ->
-     fail "generic InvalidRequest entered the compaction lane");
-  for attempt = 1 to KUF.max_consecutive_invalid_request_failures + 2 do
-    check
-      bool
-      (Printf.sprintf "capacity attempt %d does not consume generic budget" attempt)
-      false
-      (KUF.account_failure_counting
-         ~keeper_name:keeper
-         ~is_auto_recoverable:true
-         (request_body_too_large ()))
-  done;
-  check
-    bool
-    "first later generic InvalidRequest still has its full budget"
-    false
-    (KUF.account_failure_counting
-       ~keeper_name:keeper
-       ~is_auto_recoverable:true
-       (invalid_request "bad body"));
-  KUF.reset_invalid_request_failures ~keeper_name:keeper
-;;
-
 let () =
   run
     "keeper_invalid_request_auto_recover"
@@ -209,10 +146,6 @@ let () =
             "consecutive counters are per-keeper"
             `Quick
             test_counters_are_per_keeper
-        ; test_case
-            "capacity InvalidRequest uses only the compaction retry authority"
-            `Quick
-            test_capacity_invalid_request_has_one_retry_authority
         ] )
     ]
 ;;

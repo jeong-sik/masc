@@ -134,10 +134,7 @@ val reconcile_spent_selection
     newly-consumed board events with the [pending_board_events] already
     accumulated by the caller, deduplicating by [post_id]. A
     [Hitl_resolved] stimulus remains queued until its exact approval id has
-    left the pending map, while later ready stimuli can still be leased. Once
-    the durable compaction retry streak is suspended, ordinary stimuli stay
-    pending and only an explicit [Manual_compaction_requested] recovery remains
-    eligible.
+    left the pending map, while later ready stimuli can still be leased.
     A transient Board read returns no consumed stimuli, keeps the exact
     [pending_selection], and sets [event_queue_intake_error]; the heartbeat
     loop must not dispatch or acknowledge that selection. *)

@@ -207,6 +207,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     | `Int value -> Some (float_of_int value)
     | _ -> None
   in
+  let paused = Json_util.assoc_bool_opt "paused" keeper in
   let last_action_at =
     String_util.trim_to_option (string_field "last_autonomous_action_at" keeper)
   in
@@ -249,6 +250,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
         | Keeper_status_runtime.Surface_listening
         | Keeper_status_runtime.Surface_idle ) ->
       false
+    | None when paused = Some true -> false
     | None ->
       invalid_arg
         (Printf.sprintf

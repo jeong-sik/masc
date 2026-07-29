@@ -5,7 +5,7 @@ let yojson = testable Yojson.Safe.pp Yojson.Safe.equal
 
 let keeper ?(status = "offline") ?(last_autonomous_action_at = "")
     ?(updated_at = "") ?(keepalive_running = false) ?(turn_count = 0)
-    ?(autonomous_turn_count = 0) () =
+    ?(autonomous_turn_count = 0) ?(paused = false) () =
   `Assoc
     [
       ("name", `String "executor");
@@ -13,6 +13,7 @@ let keeper ?(status = "offline") ?(last_autonomous_action_at = "")
       ("agent_name", `String "executor");
       ("keeper_id", `String "k-executor");
       ("status", `String status);
+      ("paused", `Bool paused);
       ("keepalive_running", `Bool keepalive_running);
       ("generation", `Int 0);
       ("turn_count", `Int turn_count);
@@ -97,6 +98,12 @@ let test_running_but_inactive_stays_critical () =
   check string "lifecycle" "offline" (lifecycle_of row);
   check string "state" "critical" (state_of row)
 
+let test_control_plane_paused_status_is_not_rejected () =
+  let row = build_one (keeper ~status:"paused" ~paused:true ()) in
+  check string "status" "paused" (status_of row);
+  check string "lifecycle" "idle" (lifecycle_of row);
+  check string "state" "warning" (state_of row)
+
 let () =
   run "dashboard_continuity_briefs"
     [
@@ -112,5 +119,7 @@ let () =
             test_reconciled_active_status_is_healthy_active;
           test_case "running + inactive -> critical" `Quick
             test_running_but_inactive_stays_critical;
+          test_case "control-plane paused status -> warning" `Quick
+            test_control_plane_paused_status_is_not_rejected;
         ] );
     ]

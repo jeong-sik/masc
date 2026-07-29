@@ -1,11 +1,12 @@
 (** Durable per-Keeper Event Layer state.
 
     Current writes use the [keeper.event_queue.state.v12] [event-queue.json]
-    envelope: revision, pending stimuli, the last projected transition, at most
-    one unprojected transition, and durable accepted-transfer target
-    projections. Only this schema and the current transition WAL schema are
-    accepted. Malformed or retired schemas fail closed. Retired sidecars are
-    not inspected or treated as queue authority. *)
+    envelope: revision, pending stimuli, the latest projected transition, an
+    operation-indexed ledger of older projected dispositions, at most one
+    unprojected transition, and durable accepted-transfer target projections.
+    Only this schema and the current transition WAL schema are accepted.
+    Malformed or retired schemas fail closed. Retired sidecars are not inspected
+    or treated as queue authority. *)
 
 type owner_identity
 type owner_identity_error

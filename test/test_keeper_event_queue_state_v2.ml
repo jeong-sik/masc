@@ -97,6 +97,93 @@ let test_changed_selected_snapshot_fails_closed () =
     (post_ids (State.pending changed))
 ;;
 
+let test_projected_disposition_ledger_replays_older_operation () =
+  let cancelled_source = stimulus "cancelled-source" 1.0 in
+  let transferred_source = stimulus "transferred-source" 2.0 in
+  let initial =
+    State.empty
+    |> State.with_pending (queue [ cancelled_source; transferred_source ])
+  in
+  let cancellation : State.accepted_cancellation =
+    { source = cancelled_source
+    ; source_revision = State.revision initial
+    ; owner_nonce = 7
+    ; operator_operation_id = "cancel-operation"
+    ; reason = "operator cancelled"
+    }
+  in
+  let staged_cancel, cancel_receipt =
+    match
+      State.cancel_pending_accepted
+        ~current_owner_nonce:7
+        ~applied_at:3.0
+        ~cancellation
+        initial
+      |> require_ok "stage cancellation"
+    with
+    | state, State.Transition_applied receipt -> state, receipt
+    | _, State.Transition_already_applied _ ->
+      Alcotest.fail "first cancellation was replayed"
+  in
+  let projected_cancel =
+    State.mark_transition_projected
+      ~transition_id:cancel_receipt.transition_id
+      staged_cancel
+    |> require_ok "project cancellation"
+  in
+  let transfer : State.accepted_transfer =
+    { source = transferred_source
+    ; source_revision = State.revision projected_cancel
+    ; owner_nonce = 7
+    ; operator_operation_id = "transfer-operation"
+    ; from_keeper = "source-keeper"
+    ; to_keeper = "target-keeper"
+    }
+  in
+  let staged_transfer, transfer_receipt =
+    match
+      State.transfer_pending_accepted
+        ~current_owner_nonce:7
+        ~applied_at:4.0
+        ~transfer
+        projected_cancel
+      |> require_ok "stage transfer"
+    with
+    | state, State.Transition_applied receipt -> state, receipt
+    | _, State.Transition_already_applied _ ->
+      Alcotest.fail "first transfer was replayed"
+  in
+  let projected_transfer =
+    State.mark_transition_projected
+      ~transition_id:transfer_receipt.transition_id
+      staged_transfer
+    |> require_ok "project transfer"
+  in
+  Alcotest.(check int)
+    "both disposition witnesses survive"
+    2
+    (List.length (State.projected_dispositions projected_transfer));
+  (match
+     State.cancel_pending_accepted
+       ~current_owner_nonce:7
+       ~applied_at:5.0
+       ~cancellation
+       projected_transfer
+     |> require_ok "replay older cancellation"
+   with
+   | replayed, State.Transition_already_applied receipt ->
+     Alcotest.(check string)
+       "older operation keeps its transition identity"
+       cancel_receipt.transition_id
+       receipt.transition_id;
+     Alcotest.(check int64)
+       "older operation replay does not revise"
+       (State.revision projected_transfer)
+       (State.revision replayed)
+   | _, State.Transition_applied _ ->
+     Alcotest.fail "older cancellation was applied twice")
+;;
+
 let test_current_schema_round_trip_and_retired_schemas_rejected () =
   let state = State.with_pending (queue [ stimulus "fresh" 1.0 ]) State.empty in
   let json = State.to_yojson state in
@@ -108,6 +195,7 @@ let test_current_schema_round_trip_and_retired_schemas_rejected () =
        [ "accepted_transfer_projections"
        ; "last_transition"
        ; "pending"
+       ; "projected_dispositions"
        ; "revision"
        ; "schema"
        ; "transition_outbox"
@@ -218,6 +306,10 @@ let () =
             "changed selected snapshot fails closed"
             `Quick
             test_changed_selected_snapshot_fails_closed
+        ; Alcotest.test_case
+            "older projected disposition replays"
+            `Quick
+            test_projected_disposition_ledger_replays_older_operation
         ; Alcotest.test_case
             "current schema only"
             `Quick

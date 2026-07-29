@@ -234,6 +234,14 @@ val empty : t
 val revision : t -> int64
 val pending : t -> Keeper_event_queue.t
 val last_transition : t -> transition_receipt option
+val projected_dispositions : t -> transition_receipt list
+(** Newest-first projected operator dispositions, including
+    [last_transition] when it is itself an operator disposition. *)
+
+val projected_transition_receipts : t -> transition_receipt list
+(** The latest projected transition plus every older operator disposition
+    witness retained for exact operation replay. *)
+
 val transition_outbox : t -> outbox_entry list
 val accepted_transfer_projections : t -> accepted_transfer list
 
@@ -322,9 +330,10 @@ val source_terminal_receipt_of_stimulus :
 
 val mark_transition_projected : transition_id:string -> t -> (t, string) result
 (** Atomically retire a durable outbox entry after an external projector has
-    materialized its stable [event_id], retaining the last receipt as the
-    durable witness for an idempotent retry. Unknown transition ids fail
-    closed. *)
+    materialized its stable [event_id]. The latest receipt remains visible and
+    every older operator disposition remains in the replay ledger; ordinary
+    non-disposition history is not retained indefinitely. Unknown transition
+    ids fail closed. *)
 
 val remove_by_post_id :
   Keeper_event_queue.post_id -> t -> Keeper_event_queue.stimulus list * t

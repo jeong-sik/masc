@@ -577,7 +577,53 @@ let test_projected_wal_recovery_allows_next_source_ack () =
     Alcotest.(check int)
       "second source-terminal ACK removes its already-pending source"
       0
-      (Queue.length (State.pending final)))
+      (Queue.length (State.pending final));
+    Alcotest.(check int)
+      "both projected ACK witnesses survive"
+      2
+      (List.length (State.projected_dispositions final));
+    let replay_first =
+      Transaction.ack_pending config ~keeper_name first_request
+      |> Result.map_error Transaction.error_to_string
+      |> require_ok "replay first source-terminal ACK after second projection"
+    in
+    (match replay_first.commit_status with
+     | Transaction.Already_committed -> ()
+     | Transaction.Committed ->
+       Alcotest.fail "older source-terminal ACK was committed twice");
+    (match replay_first.projection with
+     | Transaction.Applied
+         (Keeper_registry_event_queue.Already_acked
+            { transition_id; _ }) ->
+       Alcotest.(check string)
+         "older ACK keeps its transition identity"
+         ("pending-source-terminal-ack:"
+          ^ first_request.operator_operation_id)
+         transition_id
+     | Transaction.Applied (Keeper_registry_event_queue.Acked _) ->
+       Alcotest.fail "older source-terminal ACK was applied twice"
+     | Transaction.Applied
+         (Keeper_registry_event_queue.Ack_committed_followup_failed
+            { detail; _ }) ->
+       Alcotest.fail detail
+     | Transaction.Committed_followup_failed failure ->
+       Alcotest.fail
+         (Transaction.error_to_string
+            { cause = failure; reservation_release = None }));
+    let replayed =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "reload replayed first source-terminal ACK"
+    in
+    Alcotest.(check int64)
+      "older ACK replay does not revise"
+      (State.revision final)
+      (State.revision replayed);
+    Alcotest.(check int)
+      "older ACK replay preserves both witnesses"
+      2
+      (List.length (State.projected_dispositions replayed)))
 ;;
 
 let test_retired_v3_receipt_file_is_rejected () =
@@ -727,7 +773,7 @@ let () =
             `Quick
             test_terminal_ack_replays_after_projection_and_snapshot_reload
         ; Alcotest.test_case
-            "projected WAL recovery permits a different next ACK"
+            "old ACK replays after a different projected ACK"
             `Quick
             test_projected_wal_recovery_allows_next_source_ack
         ; Alcotest.test_case

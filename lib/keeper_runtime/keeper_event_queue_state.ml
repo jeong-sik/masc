@@ -183,6 +183,7 @@ type t =
   { revision : int64
   ; pending : Keeper_event_queue.t
   ; last_transition : transition_receipt option
+  ; projected_dispositions : transition_receipt list
   ; transition_outbox : outbox_entry list
   ; accepted_transfer_projections : accepted_transfer list
   }
@@ -201,6 +202,7 @@ let empty =
   { revision = 0L
   ; pending = Keeper_event_queue.empty
   ; last_transition = None
+  ; projected_dispositions = []
   ; transition_outbox = []
   ; accepted_transfer_projections = []
   }
@@ -209,6 +211,30 @@ let empty =
 let revision state = state.revision
 let pending state = state.pending
 let last_transition state = state.last_transition
+
+let disposition_operation_id = function
+  | Cancel_accepted cancellation -> Some cancellation.operator_operation_id
+  | Transfer_accepted transfer -> Some transfer.operator_operation_id
+  | Ack_source_terminal source_terminal ->
+    Some source_terminal.operator_operation_id
+  | Ack | Manual_compaction_committed _ | No_compaction _ | Requeue _
+  | Escalate _ ->
+    None
+;;
+
+let projected_dispositions state =
+  match state.last_transition with
+  | Some receipt
+    when Option.is_some
+           (disposition_operation_id receipt.transition) ->
+    receipt :: state.projected_dispositions
+  | Some _ | None -> state.projected_dispositions
+;;
+
+let projected_transition_receipts state =
+  Option.to_list state.last_transition @ state.projected_dispositions
+;;
+
 let transition_outbox state = state.transition_outbox
 let accepted_transfer_projections state = state.accepted_transfer_projections
 
@@ -265,15 +291,28 @@ let project_accepted_transfer (transfer : accepted_transfer) state =
 let mark_transition_projected ~transition_id state =
   match state.transition_outbox with
   | [ entry ] when String.equal entry.receipt.transition_id transition_id ->
+    let projected_dispositions =
+      match state.last_transition with
+      | Some receipt
+        when Option.is_some
+               (disposition_operation_id receipt.transition) ->
+        receipt :: state.projected_dispositions
+      | Some _ | None -> state.projected_dispositions
+    in
     Ok
       { state with
         last_transition = Some entry.receipt
+      ; projected_dispositions
       ; transition_outbox = []
       }
   | [] ->
-    (match state.last_transition with
-     | Some receipt when String.equal receipt.transition_id transition_id -> Ok state
-     | Some _ | None ->
+    (match
+       List.find_opt
+         (fun receipt -> String.equal receipt.transition_id transition_id)
+         (projected_transition_receipts state)
+     with
+     | Some _ -> Ok state
+     | None ->
        Error (Printf.sprintf "event queue transition not found: %s" transition_id))
   | [ _ ] ->
     Error (Printf.sprintf "event queue transition not found: %s" transition_id)
@@ -1003,7 +1042,6 @@ let apply_pending_transition ~applied_at ~transition ~source ~pending state =
     Ok
       ( { state with
           pending
-        ; last_transition = None
         ; transition_outbox = [ { receipt; stimuli = [ source ] } ]
         }
       , Transition_applied receipt )
@@ -1013,20 +1051,10 @@ let find_prior_receipt transition_id state =
   match state.transition_outbox with
   | [ entry ] when String.equal entry.receipt.transition_id transition_id -> Some entry.receipt
   | [] | [ _ ] ->
-    (match state.last_transition with
-     | Some receipt when String.equal receipt.transition_id transition_id -> Some receipt
-     | Some _ | None -> None)
+    List.find_opt
+      (fun receipt -> String.equal receipt.transition_id transition_id)
+      (projected_transition_receipts state)
   | _ :: _ :: _ -> None
-;;
-
-let disposition_operation_id = function
-  | Cancel_accepted cancellation -> Some cancellation.operator_operation_id
-  | Transfer_accepted transfer -> Some transfer.operator_operation_id
-  | Ack_source_terminal source_terminal ->
-    Some source_terminal.operator_operation_id
-  | Ack | Manual_compaction_committed _ | No_compaction _ | Requeue _
-  | Escalate _ ->
-    None
 ;;
 
 let prior_disposition_by_operation_id operation_id state =
@@ -1038,9 +1066,7 @@ let prior_disposition_by_operation_id operation_id state =
   match state.transition_outbox with
   | [ entry ] when is_same_operation entry.receipt -> Some entry.receipt
   | [] | [ _ ] ->
-    (match state.last_transition with
-     | Some receipt when is_same_operation receipt -> Some receipt
-     | Some _ | None -> None)
+    List.find_opt is_same_operation (projected_dispositions state)
   | _ :: _ :: _ -> None
 ;;
 
@@ -1305,9 +1331,13 @@ let replay_transition_outbox_entry entry state =
          current.receipt.transition_id)
   | _ :: _ :: _ -> Error "event queue checkpoint contains multiple outbox entries"
   | [] ->
-    (match state.last_transition with
-     | Some receipt when transition_receipt_equal receipt entry.receipt -> Ok state
-     | Some _ | None ->
+    (match
+       List.find_opt
+         (fun receipt -> transition_receipt_equal receipt entry.receipt)
+         (projected_transition_receipts state)
+     with
+     | Some _ -> Ok state
+     | None ->
        (match entry.receipt.transition, entry.stimuli with
      | Cancel_accepted cancellation, [ source ] when source = cancellation.source ->
        restore_pending_transition entry state (fun state ->
@@ -2144,6 +2174,11 @@ let to_yojson state =
       , match state.last_transition with
         | None -> `Null
         | Some receipt -> transition_receipt_to_yojson receipt )
+    ; ( "projected_dispositions"
+      , `List
+          (List.map
+             transition_receipt_to_yojson
+             state.projected_dispositions) )
     ; ( "transition_outbox"
       , `List (List.map outbox_entry_to_yojson state.transition_outbox) )
     ; ( "accepted_transfer_projections"
@@ -2191,34 +2226,80 @@ let validate_state state =
   else if List.length state.transition_outbox > 1
   then Error "event queue state must contain at most one unprojected transition"
   else if
-    match state.last_transition, state.transition_outbox with
-    | Some receipt, [ entry ] ->
-      String.equal receipt.transition_id entry.receipt.transition_id
-    | None, _ | Some _, ([] | _ :: _ :: _) -> false
-  then Error "event queue last transition duplicates the unprojected transition"
+    List.exists
+      (fun receipt ->
+         Option.is_none
+           (disposition_operation_id receipt.transition))
+      state.projected_dispositions
+  then Error "event queue disposition ledger contains a non-disposition transition"
+  else if
+    match state.transition_outbox with
+    | [ entry ] ->
+      List.exists
+        (fun receipt ->
+           String.equal receipt.transition_id entry.receipt.transition_id)
+        (projected_transition_receipts state)
+    | [] | _ :: _ :: _ -> false
+  then Error "event queue projected ledger duplicates the unprojected transition"
   else
-    match
-      duplicate_by
-        (fun entry -> entry.receipt.transition_id)
-        state.transition_outbox
-    with
-    | Some transition_id ->
-      Error (Printf.sprintf "duplicate event queue transition id: %s" transition_id)
-    | None ->
-      (match
-         duplicate_by
-           (fun (transfer : accepted_transfer) -> transfer.operator_operation_id)
-           state.accepted_transfer_projections
-       with
-       | Some operation_id ->
-         Error
-           (Printf.sprintf
-              "duplicate target transfer projection operation id: %s"
-              operation_id)
-       | None ->
-         (match duplicate_transfer_source state.accepted_transfer_projections with
-          | Some _ -> Error "duplicate target transfer projection source identity"
-          | None -> Ok state))
+    let* () =
+      match
+        duplicate_by
+          (fun entry -> entry.receipt.transition_id)
+          state.transition_outbox
+      with
+      | Some transition_id ->
+        Error (Printf.sprintf "duplicate event queue transition id: %s" transition_id)
+      | None -> Ok ()
+    in
+    let* () =
+      match
+        duplicate_by
+          (fun receipt -> receipt.transition_id)
+          (projected_transition_receipts state)
+      with
+      | Some transition_id ->
+        Error
+          (Printf.sprintf
+             "duplicate projected event queue transition id: %s"
+             transition_id)
+      | None -> Ok ()
+    in
+    let disposition_operation_ids =
+      List.filter_map
+        (fun receipt -> disposition_operation_id receipt.transition)
+        (projected_dispositions state)
+      @ List.filter_map
+          (fun entry ->
+             disposition_operation_id entry.receipt.transition)
+          state.transition_outbox
+    in
+    let* () =
+      match duplicate_by Fun.id disposition_operation_ids with
+      | Some operation_id ->
+        Error
+          (Printf.sprintf
+             "duplicate durable disposition operation id: %s"
+             operation_id)
+      | None -> Ok ()
+    in
+    let* () =
+      match
+        duplicate_by
+          (fun (transfer : accepted_transfer) ->
+             transfer.operator_operation_id)
+          state.accepted_transfer_projections
+      with
+      | Some operation_id ->
+        Error
+          (Printf.sprintf
+             "duplicate target transfer projection operation id: %s"
+             operation_id)
+      | None -> Ok ()
+    in
+    (match duplicate_transfer_source state.accepted_transfer_projections with
+     | Some _ -> Error "duplicate target transfer projection source identity"
+     | None -> Ok state)
 ;;
 
 let of_yojson json =
@@ -2240,6 +2321,7 @@ let of_yojson json =
         ; "revision"
         ; "pending"
         ; "last_transition"
+        ; "projected_dispositions"
         ; "transition_outbox"
         ; "accepted_transfer_projections"
         ]
@@ -2257,6 +2339,13 @@ let of_yojson json =
     | Some json -> transition_receipt_of_yojson json |> Result.map Option.some
     | None -> Error "keeper event queue state missing required field last_transition"
   in
+  let* projected_dispositions =
+    list_field
+      ~context
+      "projected_dispositions"
+      transition_receipt_of_yojson
+      fields
+  in
   let* accepted_transfer_projections =
     list_field
       ~context
@@ -2268,6 +2357,7 @@ let of_yojson json =
     { revision
     ; pending
     ; last_transition
+    ; projected_dispositions
     ; transition_outbox
     ; accepted_transfer_projections
     }

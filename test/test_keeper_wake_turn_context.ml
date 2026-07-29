@@ -16,6 +16,7 @@ open Alcotest
 
 module WO = Masc.Keeper_world_observation
 module Prompt = Masc.Keeper_unified_prompt
+module Turn = Masc.Keeper_turn
 
 let has_repo_prompts root =
   Sys.file_exists (Filename.concat root "config/prompts/keeper.unified.system.md")
@@ -146,6 +147,17 @@ let contains ~needle haystack =
   in
   loop 0
 
+let count_occurrences ~needle haystack =
+  let needle_length = String.length needle in
+  let haystack_length = String.length haystack in
+  let rec loop offset count =
+    if needle_length = 0 || offset + needle_length > haystack_length then count
+    else if String.sub haystack offset needle_length = needle
+    then loop (offset + needle_length) (count + 1)
+    else loop (offset + 1) count
+  in
+  loop 0 0
+
 let make_task ?(handoff_context = None) ~task_status () : Masc_domain.task =
   {
     id = "task-42";
@@ -211,6 +223,58 @@ let test_current_task_section_absent_without_task () =
   let user = user_message base_observation in
   check bool "no section without current task" false
     (contains ~needle:"### Current Task" user)
+
+let test_direct_turn_reuses_current_task_context () =
+  let task =
+    make_task
+      ~task_status:
+        (Masc_domain.InProgress
+           { assignee = "wake-context-keeper"; started_at = "2026-07-07T01:00:00Z" })
+      ~handoff_context:
+        (Some
+           {
+             summary = "parser is ready for a direct reply";
+             reason = None;
+             next_step = Some "answer with the current parser status";
+             failure_mode = None;
+             reclaim_policy = None;
+             evidence_refs = [];
+             updated_at = None;
+             updated_by = None;
+           })
+      ()
+  in
+  let context =
+    Turn.For_testing.direct_turn_dynamic_context
+      ~current_task:(Some task)
+      ~recent_direct_conversation_text:"recent owner message"
+      ~worktree_text:"worktree state"
+      ~telemetry_feedback_text:"telemetry state"
+      ~turn_instructions_text:"turn instructions"
+  in
+  check int "current task is injected exactly once" 1
+    (count_occurrences
+       ~needle:"### Current Task (held by you)"
+       context);
+  check bool "held task id and title" true
+    (contains ~needle:"task-42 — Wire the wake-turn context" context);
+  check bool "handoff is available to direct reply" true
+    (contains ~needle:"parser is ready for a direct reply" context);
+  check bool "other fresh direct context is preserved" true
+    (contains ~needle:"recent owner message" context)
+
+let test_direct_turn_has_no_synthetic_task_context () =
+  let context =
+    Turn.For_testing.direct_turn_dynamic_context
+      ~current_task:None
+      ~recent_direct_conversation_text:"recent owner message"
+      ~worktree_text:""
+      ~telemetry_feedback_text:""
+      ~turn_instructions_text:""
+  in
+  check bool "no held task means no synthetic task context" false
+    (contains ~needle:"### Current Task" context);
+  check string "non-task context remains" "recent owner message" context
 
 (* --- 2. Threaded turn decision --- *)
 
@@ -310,6 +374,10 @@ let () =
             test_current_task_section_renders;
           test_case "absent without a held task" `Quick
             test_current_task_section_absent_without_task;
+          test_case "direct reply receives the held task and handoff" `Quick
+            test_direct_turn_reuses_current_task_context;
+          test_case "direct reply invents no task when none is held" `Quick
+            test_direct_turn_has_no_synthetic_task_context;
         ] );
       ( "threaded turn decision",
         [

@@ -34,6 +34,11 @@ val autonomous_wake_marker : string
     tiny by design: the observation frame lives in
     {!turn_prompt_parts.world_state}, not in the message history. *)
 
+val format_current_task : Masc_domain.task -> string
+(** Render one held task as per-turn observation context. The direct-message
+    lane reuses this renderer so it sees the same task identity, status, and
+    handoff as an autonomous wake without persisting that context. *)
+
 (** Build the three-channel unified prompt from keeper state.
 
     @param meta Keeper metadata (identity, soul, goals, instructions)

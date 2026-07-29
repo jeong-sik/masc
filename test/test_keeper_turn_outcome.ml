@@ -132,42 +132,6 @@ let test_runtime_stop_reason_controls_durable_source_completion () =
        (cycle_of_stop_reason
           (Runtime_agent.InputRequired { turns_used = 2; request })))
 
-let test_cooperative_yield_ignores_only_active_source_identity () =
-  let stimulus post_id : Keeper_event_queue.stimulus =
-    { post_id
-    ; urgency = Keeper_event_queue.Normal
-    ; arrived_at = 1_000.0
-    ; payload = Keeper_event_queue.Bootstrap
-    }
-  in
-  let active = stimulus "active-source" in
-  let later = stimulus "later-source" in
-  let filter =
-    Masc.Keeper_unified_turn_execution.For_testing
-    .pending_without_active_sources
-      ~active_source_stimuli:[ active ]
-  in
-  let only_active =
-    Keeper_event_queue.enqueue Keeper_event_queue.empty active
-    |> filter
-  in
-  check int "active source does not yield to itself" 0
-    (Keeper_event_queue.length only_active);
-  let with_later =
-    Keeper_event_queue.empty
-    |> fun queue -> Keeper_event_queue.enqueue queue active
-    |> fun queue -> Keeper_event_queue.enqueue queue later
-    |> filter
-    |> Keeper_event_queue.to_list
-  in
-  match with_later with
-  | [ retained ] ->
-    check string "same payload with a different identity still requests yield"
-      later.post_id
-      retained.post_id
-  | retained ->
-    failf "expected one later durable source, got %d" (List.length retained)
-
 let test_of_result_surface () =
   check outcome "completed with text -> visible" TO.Visible_reply
     (TO.of_result_surface ~response_text:"done" Runtime_agent.Completed);
@@ -570,8 +534,6 @@ let () =
           test_case "of_stop_reason" `Quick test_of_stop_reason;
           test_case "runtime stop reason controls durable source completion" `Quick
             test_runtime_stop_reason_controls_durable_source_completion;
-          test_case "cooperative yield ignores only active source identity" `Quick
-            test_cooperative_yield_ignores_only_active_source_identity;
           test_case "of_result_surface" `Quick test_of_result_surface;
           test_case "external effect wait acknowledgement is visible" `Quick
             test_external_effect_wait_acknowledgement_is_visible;

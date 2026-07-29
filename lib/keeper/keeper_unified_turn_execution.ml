@@ -41,56 +41,6 @@ let run_provider_dispatch_if_authorized ~before_dispatch_authority dispatch =
   | Ok () -> dispatch ()
 ;;
 
-let pending_without_active_sources ~active_source_stimuli pending =
-  pending
-  |> Keeper_event_queue.to_list
-  |> List.filter (fun candidate ->
-    not
-      (List.exists
-         (fun active ->
-            Keeper_event_queue.stimulus_identity_equal active candidate)
-         active_source_stimuli))
-  |> List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty
-;;
-
-let autonomous_yield_request ~base_path ~keeper_name ~active_source_stimuli =
-  match Keeper_registry.get ~base_path keeper_name with
-  | None -> Error (Printf.sprintf "keeper not registered: %s" keeper_name)
-  | Some _ ->
-    if Keeper_turn_admission.chat_waiting ~base_path ~keeper_name
-    then Ok (Some Keeper_agent_run.{ reason = Chat_waiting })
-    else
-      (match Keeper_chat_queue.has_active_receipts ~keeper_name with
-       | Error error ->
-         Error
-           ("chat queue snapshot failed: "
-            ^ Keeper_chat_queue.mutation_error_to_string error)
-       | Ok true -> Ok (Some Keeper_agent_run.{ reason = Chat_waiting })
-       | Ok false ->
-         let* pending =
-           Keeper_registry_event_queue.snapshot_result ~base_path keeper_name
-         in
-         let pending =
-           pending_without_active_sources ~active_source_stimuli pending
-         in
-         if Keeper_event_queue.is_empty pending
-         then Ok None
-         else (
-           let summary =
-             Keeper_agent_run.durable_stimulus_summary
-               ~now:(Time_compat.now ())
-               pending
-           in
-           Log.Keeper.info
-             ~keeper_name
-             "autonomous turn yields to durable stimulus: %s"
-             (Keeper_agent_run.durable_stimulus_summary_to_string summary);
-           Ok
-             (Some
-                Keeper_agent_run.
-                  { reason = Durable_stimulus_waiting summary })))
-;;
-
 (** [run] operates on the immutable [Keeper_unified_turn_types.turn_state]
     accumulator instead of casual [ref] cells. *)
 
@@ -127,10 +77,11 @@ type ctx =
   ; turn_id : int
   ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
   ; on_deferred_runtime_consumed : (unit -> unit) option
-  ; active_source_stimuli : Keeper_event_queue.stimulus list
   }
 
 let run (ctx : ctx)
+      ~(autonomous_yield_requested :
+          unit -> (Keeper_agent_run.autonomous_yield_request option, string) result)
       ~(initial_execution : runtime_execution)
       ~(turn_state : turn_state)
       ~(before_dispatch_authority : unit -> (unit, string) result)
@@ -166,7 +117,6 @@ let run (ctx : ctx)
       ; attempt = _attempt
       ; deferred_runtime_lane
       ; on_deferred_runtime_consumed
-      ; active_source_stimuli
       } =
     ctx
   in
@@ -288,11 +238,7 @@ let run (ctx : ctx)
                       path. Thus the probe is lane-gated and runs only at OAS's
                       post-tool boundary. Its signals come from the exact chat
                       receipt and durable-event queues their consumers drain. *)
-                 ~autonomous_yield_requested:(fun () ->
-                   autonomous_yield_request
-                     ~base_path:config.base_path
-                     ~keeper_name:meta.name
-                     ~active_source_stimuli)
+                 ~autonomous_yield_requested
                  ()
             with
             | Eio.Cancel.Cancelled _ as exn ->
@@ -521,5 +467,4 @@ module For_testing = struct
     | Declared_runtime_lane_exhausted
 
   let declared_lane_failure_of_error = declared_lane_failure_of_error
-  let pending_without_active_sources = pending_without_active_sources
 end

@@ -33,7 +33,7 @@ let model_of_agent name = function
 
 let test_projects_active_models_to_agents_wire () =
   let keeper_name = "alice" in
-  let keeper_agent_name = Keeper_identity.keeper_agent_name keeper_name in
+  let keeper_agent_name = "keeper-" ^ keeper_name ^ "-agent" in
   let keepers =
     [ `Assoc
         [ "name", `String keeper_name

@@ -298,16 +298,68 @@ let test_threaded_stimulus_decision_renders_wake_reason () =
   check bool "bootstrap reason listed" true
     (contains ~needle:"bootstrap" threaded)
 
+let test_bootstrap_stimulus_keeps_reactive_post_action () =
+  let decision =
+    WO.keeper_cycle_decision
+      ~event_queue_triggers:[ WO.Bootstrap_stimulus ]
+      ~meta
+      base_observation
+  in
+  match
+    Masc.Keeper_unified_turn_success.For_testing.post_action_of_channel
+      decision.WO.channel
+  with
+  | Masc.Keeper_unified_turn_success.For_testing.Assign_task -> ()
+  | Masc.Keeper_unified_turn_success.For_testing.Empty_queue_sleep ->
+    Alcotest.fail
+      "bootstrap stimulus must not be reclassified from reactive to scheduled"
+
 let test_preview_does_not_invent_wake_reason () =
+  let preview_meta =
+    { meta with
+      Masc.Keeper_meta_contract.name = "preview-must-not-emit-turn-metrics"
+    }
+  in
+  let segment_metric = Keeper_metrics.(to_string PromptSegmentBytes) in
+  let segment_labels =
+    [ "keeper", preview_meta.name; "segment", "system_prompt" ]
+  in
+  let instruction_hash_metric =
+    Keeper_metrics.(to_string KeeperTurnInstructionHash)
+  in
+  check bool "fixture has no preview segment metric" true
+    (Option.is_none
+       (Otel_metric_store.get_metric_value
+          segment_metric
+          ~labels:segment_labels
+          ()));
+  check bool "fixture has no preview hash metric" true
+    (Option.is_none
+       (Otel_metric_store.get_metric_value
+          instruction_hash_metric
+          ~labels:[ "keeper", preview_meta.name ]
+          ()));
   let { Prompt.world_state; _ } =
     Prompt.build_prompt_preview
-      ~meta
+      ~meta:preview_meta
       ~base_path:"/tmp/unused"
       ~observation:base_observation
       ()
   in
   check bool "preview has no scheduler trigger" false
-    (contains ~needle:"### Autonomous Trigger" world_state)
+    (contains ~needle:"### Autonomous Trigger" world_state);
+  check bool "preview does not emit segment metric" true
+    (Option.is_none
+       (Otel_metric_store.get_metric_value
+          segment_metric
+          ~labels:segment_labels
+          ()));
+  check bool "preview does not emit instruction hash" true
+    (Option.is_none
+       (Otel_metric_store.get_metric_value
+          instruction_hash_metric
+          ~labels:[ "keeper", preview_meta.name ]
+          ()))
 
 (* --- 3. Goal titles + self-direction parity --- *)
 
@@ -395,6 +447,8 @@ let () =
         [
           test_case "stimulus decision renders wake reason" `Quick
             test_threaded_stimulus_decision_renders_wake_reason;
+          test_case "bootstrap keeps reactive post-action" `Quick
+            test_bootstrap_stimulus_keeps_reactive_post_action;
           test_case "preview invents no wake reason" `Quick
             test_preview_does_not_invent_wake_reason;
         ] );

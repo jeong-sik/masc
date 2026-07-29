@@ -1481,6 +1481,7 @@ dominant source of the observed CAS race exhaustion after
                       ~meta
                       ~turn_ctx_cell
                       ~observation
+                      ~channel
                       ~latency_ms
                       ~degraded_retry_applied
                       ~degraded_retry_runtime

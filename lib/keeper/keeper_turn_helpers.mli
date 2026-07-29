@@ -51,10 +51,10 @@ val record_execution_receipt_gap :
   unit -> unit
 (** Record a coverage gap when an execution receipt could not be appended. *)
 
-val post_assign_task : any_pending:bool -> channel:string -> unit
+val post_assign_task : channel:string -> unit
 (** FSM guard post-action for [AssignTask]. *)
 
-val post_empty_queue_sleep : any_pending:bool -> channel:string -> unit
+val post_empty_queue_sleep : channel:string -> unit
 (** FSM guard post-action for [EmptyQueueSleep]. *)
 
 val post_turn_complete_task : cycle_completed:bool -> unit

@@ -800,6 +800,13 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path
     "## Current World State\n\n" ^ Keeper_context_layers.assemble ~content_of
   in
   let user_message = autonomous_wake_marker in
+  { system_prompt; world_state; user_message }
+;;
+
+let emit_prompt_metrics
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      { system_prompt; world_state; user_message }
+  =
   (* Tool names and availability come exclusively from the typed schemas sent
      with this turn. Prompt markdown describes behaviour rather than attempting
      to mirror that catalog. World-state observations remain byte-for-byte
@@ -836,8 +843,8 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path
   Otel_metric_store.set_gauge
     (Keeper_metrics.to_string KeeperTurnInstructionHash)
     ~labels:[("keeper", meta.name)]
-    prompt_hash;
-  { system_prompt; world_state; user_message }
+    prompt_hash
+;;
 
 let build_prompt
       ~meta
@@ -849,15 +856,19 @@ let build_prompt
       ~observation
       ()
   =
-  build_prompt_internal
-    ~meta
-    ~base_path
-    ?profile_defaults
-    ~turn_decision:(Some turn_decision)
-    ?current_task
-    ?active_goal_summaries
-    ~observation
-    ()
+  let prompt =
+    build_prompt_internal
+      ~meta
+      ~base_path
+      ?profile_defaults
+      ~turn_decision:(Some turn_decision)
+      ?current_task
+      ?active_goal_summaries
+      ~observation
+      ()
+  in
+  emit_prompt_metrics ~meta prompt;
+  prompt
 ;;
 
 let build_prompt_preview

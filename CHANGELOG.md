@@ -19,6 +19,12 @@
   no compatibility reader or migration path was added.
 
 ### Removed
+- **Breaking (host FD-pressure path)**: removed the retired
+  `MASC_SYSMON_PRESSURE_STATE` environment fallback from both the sysmon
+  producer and server poller. The live pressure path now has one override,
+  `MASC_HOST_FD_PRESSURE_STATE_FILE`, plus the existing base-path default.
+  Split-brain conflict detection and the public legacy env helpers were removed;
+  no migration or compatibility path was added.
 - **Breaking (workspace root state)**: removed the pre-rename
   `.masc/state.json` fallback from the cluster-root initialization check and
   removed its public path helper. Workspace, dashboard, keeper-directive, and

@@ -11,7 +11,6 @@
 
 type state_file_source =
   | Canonical_env
-  | Legacy_env
   | Default
 
 type state_file_resolution =
@@ -21,7 +20,6 @@ type state_file_resolution =
 
 let state_file_source_to_string = function
   | Canonical_env -> Env_config_core.host_fd_pressure_state_file_env_key
-  | Legacy_env -> Env_config_core.legacy_host_fd_pressure_state_file_env_key
   | Default -> "default"
 
 let default_state_file_path ~base_path =
@@ -31,23 +29,9 @@ let default_state_file_path ~base_path =
 ;;
 
 let resolve_state_file_path ~base_path () =
-  match
-    ( Env_config_core.host_fd_pressure_state_file_path_opt ()
-    , Env_config_core.legacy_host_fd_pressure_state_file_path_opt () )
-  with
-  | Some path, _ -> { path; source = Canonical_env }
-  | None, Some path -> { path; source = Legacy_env }
-  | None, None -> { path = default_state_file_path ~base_path; source = Default }
-;;
-
-let state_file_env_conflict () =
-  match
-    ( Env_config_core.host_fd_pressure_state_file_path_opt ()
-    , Env_config_core.legacy_host_fd_pressure_state_file_path_opt () )
-  with
-  | Some canonical, Some legacy when not (String.equal canonical legacy) ->
-    Some (canonical, legacy)
-  | _ -> None
+  match Env_config_core.host_fd_pressure_state_file_path_opt () with
+  | Some path -> { path; source = Canonical_env }
+  | None -> { path = default_state_file_path ~base_path; source = Default }
 ;;
 
 let poll_interval_sec = Env_config_core.host_fd_pressure_poll_interval_sec
@@ -203,16 +187,6 @@ let start ~sw ~clock ~base_path =
     let resolution = resolve_state_file_path ~base_path () in
     let path = resolution.path in
     let interval = poll_interval_sec () in
-    (match state_file_env_conflict () with
-     | Some (canonical, legacy) ->
-       Log.Server.warn
-         "host_fd_pressure_poller: %s=%s overrides legacy %s=%s; set the sysmon \
-          producer to the canonical env to avoid split-brain state files"
-         Env_config_core.host_fd_pressure_state_file_env_key
-         canonical
-         Env_config_core.legacy_host_fd_pressure_state_file_env_key
-         legacy
-     | None -> ());
     Log.Server.info
       "host_fd_pressure_poller: started path=%s source=%s interval=%.1fs"
       path

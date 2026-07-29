@@ -5,8 +5,6 @@
     writes the configured state file (JSON one-line) on WARN/CRIT
     thresholds against [kern.maxfiles]; file absence means OK.
     [MASC_HOST_FD_PRESSURE_STATE_FILE] is the canonical path override.
-    [MASC_SYSMON_PRESSURE_STATE] remains a compatibility fallback when the
-    canonical env is absent.
 
     This module starts a single Eio fiber that reads the state file
     every 1s. On parse success + advancing [ts] it invokes
@@ -21,7 +19,6 @@
 
 type state_file_source =
   | Canonical_env
-  | Legacy_env
   | Default
 
 type state_file_resolution =
@@ -32,9 +29,6 @@ type state_file_resolution =
 val resolve_state_file_path : base_path:string -> unit -> state_file_resolution
 (** Resolve the state-file path. Explicit env overrides win; otherwise the
     default state file lives under [<base_path>/.masc]. *)
-
-val state_file_env_conflict : unit -> (string * string) option
-(** [Some (canonical, legacy)] when both env vars are set to different paths. *)
 
 val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:string -> unit
 (** [start ~sw ~clock ~base_path] forks the poller fiber under [sw]. Wired from

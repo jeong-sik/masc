@@ -1967,8 +1967,33 @@ let test_oneof_null_const_matches_non_null_branch () =
 (* Runner                                                            *)
 (* ================================================================ *)
 
+let test_rejection_attaches_schema_shape_feedback () =
+  let schema =
+    `Assoc
+      [ ("type", `String "object")
+      ; ( "properties"
+        , `Assoc [ ("task_id", `Assoc [ ("type", `String "string") ]) ] )
+      ; ("required", `List [ `String "task_id" ])
+      ]
+  in
+  let args = `Assoc [] in
+  match Tool_input_validation.validate_args ~schema ~name:"test_feedback_tool" ~args () with
+  | Error result ->
+    let data = Tool_result.data result in
+    let has_schema_shape =
+      match Yojson.Safe.Util.member "schema_shape" data with
+      | `Assoc fields -> List.mem_assoc "required" fields && List.mem_assoc "properties" fields
+      | _ -> false
+    in
+    Alcotest.(check bool) "attaches schema_shape feedback" true has_schema_shape
+  | Ok _ -> Alcotest.fail "expected rejection with schema_shape feedback"
+
 let () =
   Alcotest.run "Tool_input_validation (OAS delegation)" [
+    ("self_correction_feedback", [
+      Alcotest.test_case "rejection attaches schema_shape feedback" `Quick
+        test_rejection_attaches_schema_shape_feedback;
+    ]);
     ("required", [
       Alcotest.test_case "present" `Quick test_required_present;
       Alcotest.test_case "missing" `Quick test_required_missing;

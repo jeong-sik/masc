@@ -393,23 +393,28 @@ let validation_schema_of_json ~name json_schema : Agent_sdk.Types.tool_schema =
   }
 ;;
 
-let reject_validation ~name ~reason ~message =
+let reject_validation ?schema ~name ~reason ~message =
   emit_validation_telemetry ~tool:name ~result:"fail" ~reason;
   Log.Tool_validation.info "tool_input_validation rejected %s: %s" name message;
+  let schema_shape_data =
+    match schema with
+    | Some s -> [ "schema_shape", schema_shape_json s ]
+    | None -> []
+  in
   Tool_dispatch.Reject
     (Tool_result.Failed
        { Tool_result.class_ = Tool_result.Policy_rejection
        ; message
        ; data =
            `Assoc
-             [ "error", `String message
-             ; "validation", `String "oas_tool_middleware"
-             ; "reason", `String reason
-             ; ( "failure_class"
-               , `String
-                   (Tool_result.tool_failure_class_to_string
-                      Tool_result.Policy_rejection) )
-             ]
+             ([ "error", `String message
+              ; "validation", `String "oas_tool_middleware"
+              ; "reason", `String reason
+              ; ( "failure_class"
+                , `String
+                    (Tool_result.tool_failure_class_to_string
+                       Tool_result.Policy_rejection) )
+              ] @ schema_shape_data)
        ; tool_name = name
        ; duration_ms = 0.0
        })
@@ -462,6 +467,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
       if required <> []
       then
         reject_validation
+          ~schema
           ~name
           ~reason:"malformed_schema"
           ~message:
@@ -476,6 +482,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
         else Tool_dispatch.Proceed prepared_args)
       else
         reject_validation
+          ~schema
           ~name
           ~reason:"empty_schema_args"
           ~message:
@@ -487,6 +494,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
        | alias :: aliases ->
          let aliases = String.concat ", " (alias :: aliases) in
          reject_validation
+           ~schema
            ~name
            ~reason:"invalid_args"
            ~message:
@@ -499,6 +507,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
       (match schema_shape_error schema prepared_args with
        | Some message ->
          reject_validation
+           ~schema
            ~name
            ~reason:"invalid_args"
            ~message:(Printf.sprintf "Tool '%s' %s" name message)
@@ -525,23 +534,21 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
     | Agent_sdk.Tool_middleware.Reject { message; _ } ->
       emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"invalid_args";
       Log.Tool_validation.info "tool_input_validation rejected %s: %s" name message;
-      (* Input-schema / policy rejection — classify so the
-         dispatch-level metric label (failure_class) reflects the
-         actual category instead of bucketing as "unclassified". *)
+      let schema_shape_data = [ "schema_shape", schema_shape_json schema ] in
       Tool_dispatch.Reject
         (Tool_result.Failed
            { Tool_result.class_ = Tool_result.Policy_rejection
            ; message
            ; data =
                `Assoc
-                 [ "error", `String message
-                 ; "validation", `String "oas_tool_middleware"
-                 ; "reason", `String "invalid_args"
-                 ; ( "failure_class"
-                   , `String
-                       (Tool_result.tool_failure_class_to_string
-                          Tool_result.Policy_rejection) )
-                 ]
+                 ([ "error", `String message
+                  ; "validation", `String "oas_tool_middleware"
+                  ; "reason", `String "invalid_args"
+                  ; ( "failure_class"
+                    , `String
+                        (Tool_result.tool_failure_class_to_string
+                           Tool_result.Policy_rejection) )
+                  ] @ schema_shape_data)
            ; tool_name = name
            ; duration_ms = 0.0
            })

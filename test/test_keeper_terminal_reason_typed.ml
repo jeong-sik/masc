@@ -805,6 +805,7 @@ let () =
     let ctx_composition : Masc.Keeper_agent_prompt_metrics.ctx_composition_metrics =
       { actual_input_tokens = None
       ; attributed_bytes = 0
+      ; request_boundary_observed = false
       ; segments = []
       }
     in

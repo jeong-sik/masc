@@ -381,6 +381,22 @@ let assemble_hooks
                 let recorded_blocks_for_receipt =
                   extra_system_context_assembly.blocks
                 in
+                acc.pending_request_ctx_attribution <-
+                  Some
+                    { Keeper_agent_prompt_metrics.extra_system_context_blocks =
+                        recorded_blocks_for_receipt
+                    (* OAS Agent_input appends the original User prompt
+                       immediately after config.initial_messages. MASC passes
+                       [history_messages] as that exact seed list. *)
+                    ; current_user_message_index =
+                        Some (List.length history_messages)
+                    (* OAS prepare_messages appends the synthetic system-context
+                       User message after the hook's [messages]. MASC's later
+                       projections preserve existing indices and may append. *)
+                    ; extra_system_context_message_index =
+                        Option.map (fun _ -> List.length messages) ctx
+                    };
+                acc.last_request_ctx_composition <- None;
                 (* OAS treats [None] in AdjustParams as "keep the base
                    config", so strict choices must be explicitly relaxed.
                    Tools remain available, but the model may finish without
@@ -563,13 +579,27 @@ let assemble_hooks
     in
     let model_input_projection messages =
       let messages = hydrate_model_input messages in
-      match gate_replay_evidence with
-      | None -> Ok messages
-      | Some evidence ->
-        Keeper_gate_replay.project_model_input
-          ~base_path:ctx.config.base_path
-          evidence
-          messages
+      let projected =
+        match gate_replay_evidence with
+        | None -> Ok messages
+        | Some evidence ->
+          Keeper_gate_replay.project_model_input
+            ~base_path:ctx.config.base_path
+            evidence
+            messages
+      in
+      (match projected, acc.pending_request_ctx_attribution with
+       | Ok final_messages, Some attribution ->
+         acc.last_request_ctx_composition <-
+           Some
+             (Keeper_agent_prompt_metrics.build_ctx_composition_metrics
+                ~system_prompt:turn_system_prompt
+                ~attribution
+                ~messages:final_messages
+                ~tools
+                ~actual_input_tokens:None)
+       | (Ok _ | Error _), None | Error _, Some _ -> ());
+      projected
     in
     Ok
       { tools

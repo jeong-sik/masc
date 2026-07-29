@@ -20,10 +20,10 @@ type hook_accumulator =
   ; mutable requested_tool_names : string list
   ; mutable receipt_completion_contract_result :
       Keeper_execution_receipt.completion_contract_result
-    (* RFC-0233 PR-3: last SDK turn's context assembly, written by the
-       before_turn_params hook, read at the receipt/TurnRecord write site
-       in run_turn. Last-write-wins matches the turn-context cell
-       semantics the receipt already uses. *)
+    (* RFC-0233 PR-3: last SDK turn's context assembly, captured after
+       model_input_projection and read at the receipt/TurnRecord write site
+       in run_turn. Last-write-wins matches the turn-context cell semantics
+       the receipt already uses. *)
   ; mutable receipt_actionable_signal :
       Keeper_contract_classifier.actionable_signal option
     (* Root B (#22710): world-observation actionable signal computed from the
@@ -33,6 +33,10 @@ type hook_accumulator =
   ; mutable prompt_blocks : Turn_record.prompt_block list
   ; mutable extra_system_context_digest : string option
   ; mutable extra_system_context_size : int option
+  ; mutable pending_request_ctx_attribution :
+      Keeper_agent_prompt_metrics.request_boundary_attribution option
+  ; mutable last_request_ctx_composition :
+      Keeper_agent_prompt_metrics.ctx_composition_metrics option
   }
 
 type hook_outputs =

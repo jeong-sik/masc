@@ -30,6 +30,9 @@ let bytes_of_content_block (block : Agent_sdk.Types.content_block) : int =
   | Some result ->
     String.length result.Canonical_tool.call_id
     + String.length result.Canonical_tool.content
+    + (match result.Canonical_tool.structured_content with
+       | Some value -> String.length (Yojson.Safe.to_string value)
+       | None -> 0)
   | None -> (
     match Canonical_tool.tool_call_of_block block with
     | Some call ->

@@ -29,6 +29,10 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   ; mutable prompt_blocks : Turn_record.prompt_block list
   ; mutable extra_system_context_digest : string option
   ; mutable extra_system_context_size : int option
+  ; mutable pending_request_ctx_attribution :
+      Keeper_agent_prompt_metrics.request_boundary_attribution option
+  ; mutable last_request_ctx_composition :
+      Keeper_agent_prompt_metrics.ctx_composition_metrics option
   }
 
 type hook_outputs = Keeper_run_tools_hook_accumulator.hook_outputs =

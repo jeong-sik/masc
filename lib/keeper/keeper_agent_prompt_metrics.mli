@@ -29,7 +29,14 @@ type prompt_metrics =
 type ctx_composition_metrics =
   { actual_input_tokens : int option
   ; attributed_bytes : int
+  ; request_boundary_observed : bool
   ; segments : (string * prompt_segment_metrics) list
+  }
+
+type request_boundary_attribution =
+  { extra_system_context_blocks : (Prompt_block_id.t * string) list
+  ; current_user_message_index : int option
+  ; extra_system_context_message_index : int option
   }
 
 val empty_prompt_segment_metrics : prompt_segment_metrics
@@ -66,17 +73,31 @@ val metric_of_block :
 val history_bucket_of_block :
   role:Agent_sdk.Types.role -> Agent_sdk.Types.content_block -> string
 
-(** [actual_input_tokens] is provider-reported and only known after a response.
-    It is not attributed to byte segments. [attributed_bytes] sums only the
-    exact textual/JSON components represented by [segments]. *)
+(** Build byte attribution after OAS has applied [model_input_projection].
+    [messages] is the final message list OAS will send to its provider. The
+    original current User prompt and OAS-appended extra-system-context message
+    are identified by their pre-projection indices; MASC projections preserve
+    existing message order and may only rewrite content or append Gate evidence.
+    MASC-owned extra-context blocks are attributed individually, while the OAS
+    system-context prefix, pre-existing context, and join separators remain in
+    [extra_system_context_existing_or_joiners]. Tool schemas use the same
+    canonical schema JSON projection as wake telemetry. *)
 val build_ctx_composition_metrics :
   system_prompt:string ->
-  dynamic_context:string ->
-  memory_context:string ->
-  temporal_context:string ->
-  user_message:string ->
-  history_messages:Agent_sdk.Types.message list ->
+  attribution:request_boundary_attribution ->
+  messages:Agent_sdk.Types.message list ->
+  tools:Agent_sdk.Tool.t list ->
   actual_input_tokens:int option ->
   ctx_composition_metrics
+
+val with_actual_input_tokens :
+  ctx_composition_metrics -> int option -> ctx_composition_metrics
+(** Attach the aggregate provider-reported input token count after the response.
+    Tokens remain unallocated across byte segments. *)
+
+val unavailable_ctx_composition :
+  actual_input_tokens:int option -> ctx_composition_metrics
+(** Explicit incomplete observation used only when no request-boundary hook ran.
+    It never fabricates a partial composition from stale pre-run inputs. *)
 
 val ctx_composition_to_json : ctx_composition_metrics -> Yojson.Safe.t

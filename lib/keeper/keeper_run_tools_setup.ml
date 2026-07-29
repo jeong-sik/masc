@@ -155,6 +155,8 @@ let prepare_agent_setup
     ; prompt_blocks = []
     ; extra_system_context_digest = None
     ; extra_system_context_size = None
+    ; pending_request_ctx_attribution = None
+    ; last_request_ctx_composition = None
     }
   in
   let local_search_fn_ref

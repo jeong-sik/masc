@@ -56,6 +56,30 @@ let test_tool_result_bytes () =
     (String.length "abc" + String.length "hello world")
     (WT.bytes_of_message_content m)
 
+let test_tool_result_structured_content_bytes () =
+  let structured_content = `Assoc [ "count", `Int 3 ] in
+  let m : Types.message =
+    { role = Types.Tool
+    ; content =
+        [ Types.ToolResult
+            { tool_use_id = "abc"
+            ; content = "hello world"
+            ; outcome = Types.Tool_succeeded
+            ; json = Some structured_content
+            ; content_blocks = None
+            }
+        ]
+    ; name = None
+    ; tool_call_id = Some "abc"
+    ; metadata = []
+    }
+  in
+  check int "tool_result includes canonical structured content"
+    (String.length "abc"
+     + String.length "hello world"
+     + String.length (Yojson.Safe.to_string structured_content))
+    (WT.bytes_of_message_content m)
+
 let test_thinking_and_redacted () =
   let m : Types.message =
     {
@@ -249,6 +273,8 @@ let () =
           test_case "tool_use serialization bytes" `Quick test_tool_use_bytes;
           test_case "tool_result id + content bytes" `Quick
             test_tool_result_bytes;
+          test_case "tool_result structured content bytes" `Quick
+            test_tool_result_structured_content_bytes;
           test_case "thinking + redacted thinking" `Quick
             test_thinking_and_redacted;
         ] );

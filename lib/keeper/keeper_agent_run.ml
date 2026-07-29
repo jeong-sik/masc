@@ -876,14 +876,12 @@ let run_turn
                  in
                  let usage = Keeper_context_runtime.usage_of_response result.response in
                  let ctx_composition =
-                   build_ctx_composition_metrics
-                     ~system_prompt:turn_system_prompt
-                     ~dynamic_context
-                     ~memory_context
-                     ~temporal_context
-                     ~user_message
-                     ~history_messages
-                     ~actual_input_tokens:(Some usage.input_tokens)
+                   match acc.last_request_ctx_composition with
+                   | Some composition ->
+                     with_actual_input_tokens composition (Some usage.input_tokens)
+                   | None ->
+                     unavailable_ctx_composition
+                       ~actual_input_tokens:(Some usage.input_tokens)
                  in
                  let completion_observation ()
                      : Keeper_execution_receipt.completion_contract_result =

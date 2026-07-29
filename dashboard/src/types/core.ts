@@ -362,6 +362,7 @@ export interface PromptTelemetry {
 export interface CtxCompositionTelemetry {
   actual_input_tokens: number | null
   attributed_bytes: number
+  request_boundary_observed: boolean
   segments: Record<string, PromptSegmentTelemetry>
 }
 

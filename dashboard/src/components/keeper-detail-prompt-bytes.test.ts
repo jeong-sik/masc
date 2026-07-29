@@ -79,6 +79,7 @@ describe('keeper prompt byte telemetry', () => {
         ctx_composition: {
           actual_input_tokens: 1000,
           attributed_bytes: 1160,
+          request_boundary_observed: true,
           segments: {
             system_prompt: { bytes: 320, fingerprint: null },
             history_tool_result: { bytes: 840, fingerprint: null },
@@ -93,6 +94,30 @@ describe('keeper prompt byte telemetry', () => {
     expect(container.textContent).toContain('1,160 bytes')
     expect(container.textContent).toContain('provider input')
     expect(container.textContent).toContain('reported separately; not byte-attributed')
+    expect(container.textContent).toContain('request-boundary bytes represented')
     expect(container.textContent).not.toContain('residual')
+  })
+
+  it('marks pre-boundary composition as incomplete', () => {
+    const container = document.createElement('div')
+    const keeper = {
+      name: 'legacy-composition-keeper',
+      status: 'active',
+      metrics_series: [metricPoint({
+        ctx_composition: {
+          actual_input_tokens: 1000,
+          attributed_bytes: 320,
+          request_boundary_observed: false,
+          segments: {
+            system_prompt: { bytes: 320, fingerprint: null },
+          },
+        },
+      })],
+    } as Keeper
+
+    render(html`<${CtxCompositionPanel} keeper=${keeper} />`, container)
+
+    expect(container.textContent).toContain('partial pre-boundary bytes represented')
+    expect(container.textContent).toContain('Memory OS, 도구 스키마, thinking이 누락될 수 있습니다')
   })
 })

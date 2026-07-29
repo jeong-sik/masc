@@ -462,6 +462,7 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
           ? {
               actual_input_tokens: rawCtxComposition ? (asNumber(rawCtxComposition.actual_input_tokens) ?? null) : null,
               attributed_bytes: rawCtxComposition ? (asNumber(rawCtxComposition.attributed_bytes) ?? 0) : 0,
+              request_boundary_observed: rawCtxComposition?.request_boundary_observed === true,
               segments: ctxSegments,
             }
           : null

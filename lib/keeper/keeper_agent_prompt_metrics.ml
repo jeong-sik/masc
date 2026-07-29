@@ -33,7 +33,14 @@ type prompt_metrics =
 type ctx_composition_metrics =
   { actual_input_tokens : int option
   ; attributed_bytes : int
+  ; request_boundary_observed : bool
   ; segments : (string * prompt_segment_metrics) list
+  }
+
+type request_boundary_attribution =
+  { extra_system_context_blocks : (Prompt_block_id.t * string) list
+  ; current_user_message_index : int option
+  ; extra_system_context_message_index : int option
   }
 
 let empty_prompt_segment_metrics =
@@ -115,37 +122,9 @@ let add_segment_metric
 let metric_of_block
     ~role:(_ : Agent_sdk.Types.role)
     (block : Agent_sdk.Types.content_block) : prompt_segment_metrics =
-  let bytes =
-    match Canonical_tool.tool_result_of_block block with
-    | Some result ->
-        String.length
-          (Inference_utils.sanitize_text_utf8 result.Canonical_tool.call_id)
-        + String.length
-            (Inference_utils.sanitize_text_utf8 result.Canonical_tool.content)
-        + (match result.Canonical_tool.structured_content with
-           | Some value -> String.length (Yojson.Safe.to_string value)
-           | None -> 0)
-    | None -> (
-        match Canonical_tool.tool_call_of_block block with
-        | Some call ->
-            String.length
-              (Inference_utils.sanitize_text_utf8 call.Canonical_tool.call_id)
-            + String.length
-                (Inference_utils.sanitize_text_utf8 call.Canonical_tool.name)
-            + String.length (Yojson.Safe.to_string call.Canonical_tool.input)
-        | None -> (
-          match block with
-          | Agent_sdk.Types.Text text ->
-              String.length (Inference_utils.sanitize_text_utf8 text)
-          | Agent_sdk.Types.ToolResult _ ->
-              invalid_arg
-                "keeper_agent_prompt_metrics: OAS canonical tool-result projection unavailable"
-          | Agent_sdk.Types.ToolUse _ ->
-              invalid_arg
-                "keeper_agent_prompt_metrics: OAS canonical tool-call projection unavailable"
-          | _ -> 0))
-  in
-  { bytes; fingerprint = None }
+  { bytes = Keeper_wake_telemetry.bytes_of_content_block block
+  ; fingerprint = None
+  }
 
 let history_bucket_of_block
     ~(role : Agent_sdk.Types.role)
@@ -161,8 +140,8 @@ let history_bucket_of_block
   | Agent_sdk.Types.Text _ -> (
       match role with
       | Agent_sdk.Types.User -> "history_user"
-      | Agent_sdk.Types.Assistant | Agent_sdk.Types.System ->
-          "history_assistant_text"
+      | Agent_sdk.Types.Assistant -> "history_assistant_text"
+      | Agent_sdk.Types.System -> "history_system"
       | Agent_sdk.Types.Tool -> "history_tool_result")
   | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.ReasoningDetails _ ->
       "history_thinking"
@@ -172,32 +151,79 @@ let history_bucket_of_block
   | Agent_sdk.Types.Audio _ -> "history_audio"
 
 let build_ctx_composition_metrics
-    ~(system_prompt : string)
-    ~(dynamic_context : string)
-    ~(memory_context : string)
-    ~(temporal_context : string)
-    ~(user_message : string)
-    ~(history_messages : Agent_sdk.Types.message list)
-    ~(actual_input_tokens : int option) : ctx_composition_metrics =
+      ~(system_prompt : string)
+      ~(attribution : request_boundary_attribution)
+      ~(messages : Agent_sdk.Types.message list)
+      ~(tools : Agent_sdk.Tool.t list)
+      ~(actual_input_tokens : int option)
+  : ctx_composition_metrics
+  =
   let totals : (string, prompt_segment_metrics) Hashtbl.t = Hashtbl.create 16 in
   let add_text_segment bucket text =
     let metric = prompt_segment_metrics_of_text text in
     if metric.bytes > 0 then add_segment_metric totals ~bucket metric
   in
   add_text_segment "system_prompt" system_prompt;
-  add_text_segment "dynamic_context" dynamic_context;
-  add_text_segment "memory_context" memory_context;
-  add_text_segment "temporal_context" temporal_context;
-  add_text_segment "user_message" user_message;
-  List.iter
-    (fun (message : Agent_sdk.Types.message) ->
-      List.iter
-        (fun block ->
-          let bucket = history_bucket_of_block ~role:message.role block in
-          let metric = metric_of_block ~role:message.role block in
-          if metric.bytes > 0 then add_segment_metric totals ~bucket metric)
-        message.content)
-    history_messages;
+  let block_bytes =
+    List.fold_left
+      (fun total (_, text) -> total + String.length text)
+      0
+      attribution.extra_system_context_blocks
+  in
+  let extra_system_context_message_bytes = ref 0 in
+  List.iteri
+    (fun message_index (message : Agent_sdk.Types.message) ->
+      match attribution.extra_system_context_message_index with
+      | Some index when Int.equal index message_index ->
+        extra_system_context_message_bytes :=
+          List.fold_left
+            (fun total block ->
+               total + (metric_of_block ~role:message.role block).bytes)
+            0
+            message.content
+      | Some _ | None ->
+        List.iter
+          (fun block ->
+            let bucket =
+              match attribution.current_user_message_index, message.role with
+              | Some index, Agent_sdk.Types.User when Int.equal index message_index ->
+                "current_user"
+              | (Some _ | None), _ ->
+                history_bucket_of_block ~role:message.role block
+            in
+            let metric = metric_of_block ~role:message.role block in
+            if metric.bytes > 0 then add_segment_metric totals ~bucket metric)
+          message.content)
+    messages;
+  let extra_system_context_message_bytes =
+    !extra_system_context_message_bytes
+  in
+  if extra_system_context_message_bytes >= block_bytes
+  then (
+    List.iter
+      (fun (block, text) ->
+         add_text_segment (Prompt_block_id.to_string block) text)
+      attribution.extra_system_context_blocks;
+    let existing_or_joiner_bytes =
+      extra_system_context_message_bytes - block_bytes
+    in
+    if existing_or_joiner_bytes > 0
+    then
+      add_segment_metric totals
+        ~bucket:"extra_system_context_existing_or_joiners"
+        { bytes = existing_or_joiner_bytes; fingerprint = None })
+  else if extra_system_context_message_bytes > 0
+  then
+    add_segment_metric totals
+      ~bucket:"extra_system_context_existing_or_joiners"
+      { bytes = extra_system_context_message_bytes; fingerprint = None };
+  let tool_schema_bytes =
+    Keeper_wake_telemetry.bytes_of_tool_schema_json tools
+  in
+  if tool_schema_bytes > 0
+  then
+    add_segment_metric totals ~bucket:"tool_schemas"
+      { bytes = tool_schema_bytes; fingerprint = None };
   let segments =
     Hashtbl.to_seq totals
     |> List.of_seq
@@ -216,7 +242,23 @@ let build_ctx_composition_metrics
   {
     actual_input_tokens;
     attributed_bytes;
+    request_boundary_observed = true;
     segments;
+  }
+
+let with_actual_input_tokens metrics actual_input_tokens =
+  let actual_input_tokens =
+    match actual_input_tokens with
+    | Some n when n > 0 -> Some n
+    | Some _ | None -> None
+  in
+  { metrics with actual_input_tokens }
+
+let unavailable_ctx_composition ~actual_input_tokens =
+  { actual_input_tokens
+  ; attributed_bytes = 0
+  ; request_boundary_observed = false
+  ; segments = []
   }
 
 let ctx_composition_to_json (metrics : ctx_composition_metrics) : Yojson.Safe.t =
@@ -224,6 +266,7 @@ let ctx_composition_to_json (metrics : ctx_composition_metrics) : Yojson.Safe.t 
     [
       ("actual_input_tokens", Json_util.int_opt_to_json metrics.actual_input_tokens);
       ("attributed_bytes", `Int metrics.attributed_bytes);
+      ("request_boundary_observed", `Bool metrics.request_boundary_observed);
       ( "segments",
         `Assoc
           (List.map

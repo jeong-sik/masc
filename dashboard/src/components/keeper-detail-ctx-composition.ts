@@ -29,6 +29,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
 
   const latestTotalBytes = latestComposition.attributed_bytes
   const latestActual = latestComposition.actual_input_tokens
+  const latestBoundaryObserved = latestComposition.request_boundary_observed
   const latestEntries = Object.entries(latestComposition.segments)
     .filter(([, segment]) => (segment?.bytes ?? 0) > 0)
     .sort(([, left], [, right]) => (right.bytes ?? 0) - (left.bytes ?? 0))
@@ -77,7 +78,9 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
             })}
           </div>
           <div class="mt-2 flex flex-wrap gap-2 text-3xs text-[var(--color-fg-disabled)]">
-            <span>${latestTotalBytes.toLocaleString()} exact bytes represented</span>
+            <span>${latestBoundaryObserved
+              ? `${latestTotalBytes.toLocaleString()} request-boundary bytes represented`
+              : `${latestTotalBytes.toLocaleString()} partial pre-boundary bytes represented`}</span>
           </div>
         <//>
 
@@ -119,7 +122,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
                   width="${barWidth.toFixed(1)}"
                   height="${Math.max(height, 1).toFixed(1)}"
                   fill="${ctxSegmentColor(key)}"
-                  opacity="0.92"
+                  opacity="${comp.request_boundary_observed ? '0.92' : '0.35'}"
                 />`
               })
             })}
@@ -162,6 +165,11 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
           </div>
         <//>
       </div>
+      ${latestBoundaryObserved ? null : html`
+        <div class="mt-3 rounded-[var(--r-1)] border border-[var(--color-status-warn)] px-3 py-2 text-2xs text-[var(--color-status-warn)]">
+          이 스냅샷은 실제 OAS 요청 경계 이전 계측입니다. Memory OS, 도구 스키마, thinking이 누락될 수 있습니다.
+        </div>
+      `}
     </div>
   `
 }

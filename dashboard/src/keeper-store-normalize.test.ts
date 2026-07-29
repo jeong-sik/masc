@@ -684,6 +684,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
             ctx_composition: {
               actual_input_tokens: 1000,
               attributed_bytes: 1160,
+              request_boundary_observed: true,
               segments: {
                 system_prompt: { bytes: 320, fingerprint: null },
                 history_user: { bytes: 210, fingerprint: null },
@@ -701,6 +702,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(metric?.ctx_composition).toEqual({
       actual_input_tokens: 1000,
       attributed_bytes: 1160,
+      request_boundary_observed: true,
       segments: {
         system_prompt: { bytes: 320, fingerprint: null },
         history_user: { bytes: 210, fingerprint: null },

@@ -249,7 +249,11 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
         | Keeper_status_runtime.Surface_listening
         | Keeper_status_runtime.Surface_idle ) ->
       false
-    | None -> Dashboard_utils.is_keeper_offline status
+    | None ->
+      invalid_arg
+        (Printf.sprintf
+           "dashboard continuity: unknown current keeper surface status %S"
+           status)
   in
   let lifecycle =
     if continuity_offline then Lc_offline

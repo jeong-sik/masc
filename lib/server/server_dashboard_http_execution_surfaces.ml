@@ -769,13 +769,15 @@ let patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
        let keeper_rows =
          patch_keeper_rows ~keeper_name ~event ~keepalive_running rows
        in
-       execution_cache.json
-       <- `Assoc
-            (replace_keeper_rows_and_rebuild_briefs
-               ~now_ts:(Time_compat.now ())
-               ~keeper_rows
-               ~keepers_json:(`List keeper_rows)
-               fields)
+       if keeper_rows <> rows
+       then
+         execution_cache.json
+         <- `Assoc
+              (replace_keeper_rows_and_rebuild_briefs
+                 ~now_ts:(Time_compat.now ())
+                 ~keeper_rows
+                 ~keepers_json:(`List keeper_rows)
+                 fields)
      | Some _ -> ()
      | None -> ())
   | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ()

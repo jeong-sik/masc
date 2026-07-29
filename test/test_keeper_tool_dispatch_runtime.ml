@@ -63,6 +63,31 @@ let read_file path =
   Fun.protect ~finally:(fun () -> close_in ic) @@ fun () ->
   really_input_string ic (in_channel_length ic)
 
+let fetch_artifact_exn ~base_path artifact_ref =
+  let store = Tool_blob_store.create ~base_path in
+  match Tool_blob_store.fetch store ~sha256:artifact_ref.Tool_output.sha256 with
+  | Ok (Some payload) -> payload
+  | Ok None -> fail "durable replay artifact is missing"
+  | Error error -> fail (Tool_blob_store.fetch_error_to_string error)
+;;
+
+let project_replay_message_exn ~base_path
+    (message : Masc.Keeper_gate_replay.model_message) =
+  match message.replay_evidence with
+  | None -> fail "model message has no replay evidence"
+  | Some evidence ->
+    (match
+       Masc.Keeper_gate_replay.project_model_input
+         ~base_path
+         evidence
+         [ Agent_sdk.Types.user_msg message.text ]
+     with
+     | Ok [ projected ] ->
+       Agent_sdk.Types.text_of_content projected.content
+     | Ok _ -> fail "replay projection changed message count"
+     | Error detail -> fail detail)
+;;
+
 let make_meta ?(name = "keeper-exec-tools") () =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -2489,12 +2514,17 @@ let test_approved_web_search_replays_without_model_resubmission () =
                    { outcome =
                        Masc.Keeper_gate_replay.Applied
                          { operation = "network_read"
-                         ; output
+                         ; output_ref
                          ; journal =
                              Masc.Keeper_gate_replay.Replay_journal_recorded
                          }
                    ; _
                    } ->
+                 let output =
+                   fetch_artifact_exn
+                     ~base_path:config.base_path
+                     output_ref
+                 in
                  check bool
                    "stored WebSearch effect executed"
                    true
@@ -2549,15 +2579,20 @@ let test_approved_web_search_replays_without_model_resubmission () =
              ~user_message:"continue"
              (Some resolution)
          in
+         let projected_message =
+           project_replay_message_exn
+             ~base_path:config.base_path
+             model_message
+         in
          check bool
-           "durable replay output reaches the next model turn"
+           "durable replay output reaches the provider-only projection"
            true
-           (contains_substring model_message "Replayed result");
+           (contains_substring projected_message "Replayed result");
          check bool
            "model is forbidden to request the consumed operation again"
            true
            (contains_substring
-              model_message
+              model_message.text
               "Do not request the approved operation again")
        | Ok _ -> fail "durable WebSearch replay result was missing"
        | Error error ->
@@ -2853,9 +2888,14 @@ let test_blob_failure_repairs_journal_without_second_effect () =
        with
        | Masc.Keeper_gate_replay.Applied
            { journal = Masc.Keeper_gate_replay.Replay_journal_recorded
-           ; output
+           ; output_ref
            ; _
            } ->
+         let output =
+           fetch_artifact_exn
+             ~base_path:config.base_path
+             output_ref
+         in
          check bool
            "journal-only repair persisted the exact prior outcome"
            true
@@ -2864,99 +2904,6 @@ let test_blob_failure_repairs_journal_without_second_effect () =
          failf
            "in-memory journal-only repair failed: %s"
            (Masc.Keeper_gate_replay.outcome_to_string outcome))
-;;
-
-let test_concurrent_replay_has_one_effect_owner () =
-  with_exec_fixture "keeper_gate_replay_concurrent_owner"
-  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
-  (match
-     Masc.Keeper_gate_mode.set
-       config
-       ~actor:"test"
-       Masc.Keeper_gate_mode.Manual
-   with
-   | Ok _ -> ()
-   | Error detail -> fail detail);
-  let _, approval_id, resolution =
-    approved_web_search_resolution
-      ~config
-      ~meta
-      ~publication_recovery
-      ~ctx_work
-      ~tool_call_id:"web-search-concurrent-owner"
-  in
-  let grant () =
-    match Masc.Keeper_gate.cycle_grant_of_resolution resolution with
-    | Some grant -> grant
-    | None -> fail "concurrent replay resolution did not create a grant"
-  in
-  Eio.Switch.run
-  @@ fun sw ->
-  let owner_claimed, resolve_owner_claimed = Eio.Promise.create () in
-  let release_owner, resolve_release_owner = Eio.Promise.create () in
-  let owner_result, resolve_owner_result = Eio.Promise.create () in
-  Masc.Keeper_gate_replay.For_testing.with_replay_claim_hook
-    (fun ~approval_id:claimed_id ->
-       check string "claim belongs to approval" approval_id claimed_id;
-       Eio.Promise.resolve resolve_owner_claimed ();
-       Eio.Promise.await release_owner)
-  @@ fun () ->
-  Eio.Fiber.fork ~sw (fun () ->
-    let outcome =
-      Masc.Tool_misc.with_web_search_simulation_for_test
-        ~outcomes:
-          [ ( "duckduckgo"
-            , `Hits
-                [ ( "Single owner"
-                  , "https://example.com/single-owner"
-                  , "only one replay may execute"
-                  )
-                ] )
-          ]
-      @@ fun () ->
-      Masc.Keeper_gate_replay.replay_approved_effect
-        ~config
-        ~meta
-        ~publication_recovery
-        ~turn_sandbox_factory:None
-        ~grant:(grant ())
-        ~approval_id
-        ()
-    in
-    Eio.Promise.resolve resolve_owner_result outcome);
-  Eio.Promise.await owner_claimed;
-  (match
-     Masc.Keeper_gate_replay.replay_approved_effect
-       ~config
-       ~meta
-       ~publication_recovery
-       ~turn_sandbox_factory:None
-       ~grant:(grant ())
-       ~approval_id
-       ()
-   with
-   | Masc.Keeper_gate_replay.Repair_required
-       { stage = Masc.Keeper_gate_replay.Replay_in_flight; _ } ->
-     ()
-   | outcome ->
-     failf
-       "concurrent replay escaped its single owner: %s"
-       (Masc.Keeper_gate_replay.outcome_to_string outcome));
-  Eio.Promise.resolve resolve_release_owner ();
-  match Eio.Promise.await owner_result with
-  | Masc.Keeper_gate_replay.Applied
-      { output
-      ; journal = Masc.Keeper_gate_replay.Replay_journal_recorded
-      ; _
-      } ->
-    check bool
-      "the single owner completed the effect"
-      true
-      (contains_substring output "Single owner")
-  | outcome ->
-    failf
-      "the replay owner did not complete: %s"
-      (Masc.Keeper_gate_replay.outcome_to_string outcome)
 ;;
 
 let test_journal_failure_retries_only_persistence () =
@@ -3314,6 +3261,7 @@ let test_unsupported_approved_operation_retains_exact_model_issued_path () =
            ~hitl_resolution:(Some resolution)
            ~replay_delivery:(Some (approval_id, outcome))
        in
+       let model_message = model_message.Masc.Keeper_gate_replay.text in
        check bool
          "unsupported exact input remains in the model-issued path"
          true
@@ -4394,8 +4342,6 @@ let () =
         test_replaced_write_target_retires_stale_approval;
       test_case "blob failure repairs journal without second effect" `Quick
         test_blob_failure_repairs_journal_without_second_effect;
-      test_case "concurrent replay has one effect owner" `Quick
-        test_concurrent_replay_has_one_effect_owner;
       test_case "journal failure retries only persistence" `Quick
         test_journal_failure_retries_only_persistence;
       test_case "unknown effect is durable and not replayed" `Quick

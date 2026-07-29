@@ -23,8 +23,6 @@ type repair_stage =
   | Evidence_storage
   | Evidence_retrieval
   | Replay_journal
-  | Replay_in_flight
-  | Replay_persistence_backpressure
   | Stale_grant_retirement
   | Invalid_resolution_state
 
@@ -34,22 +32,22 @@ type outcome =
           continuation and retains its existing model-issued path. *)
   | Applied of
       { operation : string
-      ; output : string
+      ; output_ref : Tool_output.artifact_ref
       ; journal : replay_journal
       }
   | Applied_with_warning of
       { operation : string
-      ; detail : string
+      ; detail_ref : Tool_output.artifact_ref
       ; journal : replay_journal
       }
   | Failed of
       { operation : string
-      ; detail : string
+      ; detail_ref : Tool_output.artifact_ref
       ; journal : replay_journal
       }
   | Indeterminate of
       { operation : string
-      ; detail : string
+      ; detail_ref : Tool_output.artifact_ref
       ; journal : replay_journal
       }
       (** The effect may already have happened. This is a durable terminal
@@ -69,13 +67,39 @@ val outcome_to_string : outcome -> string
 (** Render operation, journal state, exact evidence byte count, and SHA-256
     only. Full replay output is never copied into operational logs. *)
 
+type model_evidence
+
+type model_message =
+  { text : string
+  ; replay_evidence : model_evidence option
+  }
+
 val append_model_evidence :
-  approval_id:string -> user_message:string -> outcome -> string
-(** Append exact host replay evidence to the current model turn, labelled as
-    untrusted data. Runtime request-body admission, not a local byte heuristic,
-    owns capacity. Replay outcomes explicitly forbid blindly requesting the
-    same approved operation again. [Not_applicable] leaves the message
-    unchanged. *)
+  approval_id:string -> user_message:string -> outcome -> model_message
+(** Append a typed artifact reference to canonical model state. The exact
+    payload is deliberately absent from [text] and is available only through
+    [replay_evidence]. *)
+
+val append_model_evidence_block :
+  model_evidence ->
+  Agent_sdk.Types.content_block list ->
+  Agent_sdk.Types.content_block list
+(** Append the same canonical replay reference to a structured user input.
+    This keeps replay evidence live when a multimodal goal uses [goal_blocks]
+    instead of the string [goal]. *)
+
+val project_model_input :
+  base_path:string ->
+  model_evidence ->
+  Agent_sdk.Types.message list ->
+  (Agent_sdk.Types.message list, string) result
+(** Replace the newest exact canonical replay reference with the full durable
+    payload in the provider-only projection. If the canonical reference was
+    removed by an upstream projection, append the same exact evidence instead
+    of blocking dispatch. A storage miss is logged and leaves the current input
+    unchanged, matching ordinary artifact hydration. OAS measures and dispatches
+    this same projection; no Keeper byte cap or preview substitutes for the
+    current result. *)
 
 val approved_resolution_message :
   approval_id:string ->
@@ -92,20 +116,21 @@ val user_message_with_hitl_resolution :
   base_path:string ->
   user_message:string ->
   Keeper_event_queue.hitl_resolution option ->
-  string
+  model_message
 (** Render a durable HITL resolution that was not freshly replayed in this
-    setup. Consumed approvals rehydrate their exact replay evidence from the
-    typed content-addressed reference. *)
+    setup. Consumed approvals keep the typed content-addressed reference in
+    canonical state and expose its exact bytes through [project_model_input]. *)
 
 val compose_model_message :
   base_path:string ->
   user_message:string ->
   hitl_resolution:Keeper_event_queue.hitl_resolution option ->
   replay_delivery:(string * outcome) option ->
-  string
+  model_message
 (** Build the model message once, after host replay. A fresh replay starts from
     the undecorated user message, so the pre-replay exact approval payload
-    cannot survive beside a consumed result. *)
+    cannot survive beside a consumed result. Canonical history/checkpoints keep
+    only the artifact reference. *)
 
 type replayable =
   | Replay_write
@@ -130,6 +155,8 @@ val replayable_of_operation : string -> replayable option
     path supplies. A re-derived input mismatch follows that producer's existing
     ordinary Gate semantics; replay adds no second authorization constraint.
 
+    The caller already holds [Keeper_turn_admission]'s per-Keeper turn mutex.
+    Replay does not add an approval claim or workspace-wide backpressure Gate.
     Consumption is the durable one-shot grant. A repeated call after a
     successful replay returns the durable outcome without invoking the effect.
     Consumed-without-outcome after restart is durably settled as
@@ -152,23 +179,10 @@ module For_testing : sig
     string ->
     (Tool_output.artifact_ref, string) result
 
-  val durable_replay_outcome :
-    base_path:string ->
-    operation:string ->
-    journal:replay_journal ->
-    Keeper_approval_queue.resolution_replay_outcome ->
-    outcome
-  (** Exposes the durable-evidence rendering boundary: at or under the
-      [Tool_bridge] externalize threshold the exact bytes are inlined; above
-      it the standard [Tool_output] blob marker is rendered. *)
-
   val with_replay_evidence_persister :
     ( base_path:string
       -> string
       -> (Tool_output.artifact_ref, string) result ) ->
     (unit -> 'a) ->
     'a
-
-  val with_replay_claim_hook :
-    (approval_id:string -> unit) -> (unit -> 'a) -> 'a
 end

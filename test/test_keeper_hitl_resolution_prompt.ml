@@ -19,6 +19,7 @@ let test_rejection_rationale_is_actionable_without_grant () =
       ~base_path:"/tmp"
       ~user_message:"continue"
       (Some resolution)
+    |> fun message -> message.Keeper_gate_replay.text
   in
   check bool
     "rationale reaches model input"
@@ -65,6 +66,7 @@ let test_edited_input_is_durable_and_not_a_grant () =
       ~base_path:"/tmp"
       ~user_message:"continue"
       (Some resolution)
+    |> fun message -> message.Keeper_gate_replay.text
   in
   check bool
     "edited JSON reaches model input"
@@ -94,6 +96,7 @@ let test_large_rejection_and_edit_remain_exact () =
       ~base_path:"/tmp"
       ~user_message:"continue"
       (Some resolution)
+    |> fun message -> message.Keeper_gate_replay.text
   in
   List.iter
     (fun (label, rendered) ->

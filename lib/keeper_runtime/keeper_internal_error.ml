@@ -231,8 +231,6 @@ type gate_replay_repair_stage =
   | Replay_evidence_storage
   | Replay_evidence_retrieval
   | Replay_journal
-  | Replay_in_flight
-  | Replay_persistence_backpressure
   | Replay_stale_grant_retirement
   | Replay_invalid_resolution_state
 
@@ -242,8 +240,6 @@ let gate_replay_repair_stage_to_string = function
   | Replay_evidence_storage -> "evidence_storage"
   | Replay_evidence_retrieval -> "evidence_retrieval"
   | Replay_journal -> "replay_journal"
-  | Replay_in_flight -> "replay_in_flight"
-  | Replay_persistence_backpressure -> "replay_persistence_backpressure"
   | Replay_stale_grant_retirement -> "stale_grant_retirement"
   | Replay_invalid_resolution_state -> "invalid_resolution_state"
 ;;
@@ -254,9 +250,6 @@ let gate_replay_repair_stage_of_string = function
   | "evidence_storage" -> Some Replay_evidence_storage
   | "evidence_retrieval" -> Some Replay_evidence_retrieval
   | "replay_journal" -> Some Replay_journal
-  | "replay_in_flight" -> Some Replay_in_flight
-  | "replay_persistence_backpressure" ->
-    Some Replay_persistence_backpressure
   | "stale_grant_retirement" -> Some Replay_stale_grant_retirement
   | "invalid_resolution_state" -> Some Replay_invalid_resolution_state
   | _ -> None

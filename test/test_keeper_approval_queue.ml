@@ -1102,22 +1102,25 @@ let test_resolution_is_durable_and_origin_scoped () =
                 ( id
                 , Masc.Keeper_gate_replay.Applied
                     { operation = "external-effect"
-                    ; output = replay_output
+                    ; output_ref = replay_output_ref
                     ; journal =
                         Masc.Keeper_gate_replay.Replay_journal_recorded
                     } ))
+       in
+       let fresh_replay_text =
+         fresh_replay_message.Masc.Keeper_gate_replay.text
        in
        Alcotest.(check bool)
          "fresh replay replaces pre-replay one-shot authorization"
          false
          (String_util.contains_substring
-            fresh_replay_message
+            fresh_replay_text
             "The one-shot authorization belongs");
        Alcotest.(check bool)
-         "fresh replay outcome is model-visible"
+         "fresh replay reference is model-visible"
          true
          (String_util.contains_substring
-            fresh_replay_message
+            fresh_replay_text
             "Host Gate replay completed");
        AQ.For_testing.reset_runtime_state ();
        ignore (install_exn ~base_path);
@@ -1139,27 +1142,43 @@ let test_resolution_is_durable_and_origin_scoped () =
            ~user_message:"continue"
            (Some resolution)
        in
+       let retry_text = retry_message.Masc.Keeper_gate_replay.text in
        Alcotest.(check bool)
          "retry reads durable replay evidence without stale authorization"
          false
          (String_util.contains_substring
-            retry_message
+            retry_text
             "The one-shot authorization belongs");
        Alcotest.(check bool)
          "retry forbids replaying consumed operation"
          true
          (String_util.contains_substring
-            retry_message
+            retry_text
             "Do not request the approved operation again");
+       let projected_text =
+         match retry_message.replay_evidence with
+         | None -> Alcotest.fail "retry lost its replay evidence projection"
+         | Some evidence ->
+           (match
+              Masc.Keeper_gate_replay.project_model_input
+                ~base_path
+                evidence
+                [ Agent_sdk.Types.user_msg retry_text ]
+            with
+            | Ok [ message ] ->
+              Agent_sdk.Types.text_of_content message.content
+            | Ok _ -> Alcotest.fail "replay projection changed message count"
+            | Error detail -> Alcotest.fail detail)
+       in
        let replay_evidence =
-         retry_message
+         projected_text
          |> String.split_on_char '\n'
          |> List.rev
          |> List.find (fun line -> not (String.equal (String.trim line) ""))
          |> Yojson.Safe.from_string
        in
        Alcotest.(check string)
-         "retry rehydrates the exact replay output"
+         "provider-only projection rehydrates the exact replay output"
          replay_output
          Yojson.Safe.Util.(
            replay_evidence |> member "untrusted_tool_output" |> to_string);

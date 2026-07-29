@@ -582,6 +582,13 @@ let run_turn
   | Error e -> Error e
   | Ok s ->
     let user_message = s.Keeper_run_tools.user_message in
+    let user_blocks =
+      match user_blocks, s.Keeper_run_tools.gate_replay_evidence with
+      | Some blocks, Some evidence ->
+        Some (Keeper_gate_replay.append_model_evidence_block evidence blocks)
+      | (Some _ as blocks), None -> blocks
+      | None, _ -> None
+    in
     let ctx_work =
       match hitl_resolution with
       | None -> ctx_work

@@ -195,8 +195,12 @@ restore_backup() {
     local backup_dir
     backup_dir="$(canonical_directory "$RESTORE_DIR")"
     local manifest="${backup_dir}/manifest.json"
+    local checksums="${backup_dir}/checksums.sha256"
 
     [[ -f "$manifest" ]] || die "backup manifest not found: $manifest"
+    [[ -f "$checksums" ]] || die "backup checksums not found: $checksums"
+    (cd "$backup_dir" && shasum -a 256 -c checksums.sha256 >/dev/null) \
+        || die "backup checksum verification failed: $backup_dir"
     local manifest_base
     manifest_base="$(jq -er '.base_path' "$manifest")"
     [[ "$manifest_base" == "$BASE_PATH" ]] \
@@ -206,6 +210,7 @@ restore_backup() {
     local backup_file
     for backup_file in "$backup_dir"/keepers/*/event-queue.json; do
         [[ -f "$backup_file" ]] || continue
+        validate_v8_snapshot "$backup_file"
         local keeper_name target
         keeper_name="$(basename "$(dirname "$backup_file")")"
         target="${runtime_root}/keepers/${keeper_name}/event-queue.json"
@@ -222,6 +227,7 @@ restore_backup() {
 run_migration() {
     require_command jq
     require_command python3
+    require_command shasum
     BASE_PATH="$(canonical_directory "$BASE_PATH")"
     local runtime_root="${BASE_PATH}/.masc"
     local keepers_dir="${runtime_root}/keepers"
@@ -290,6 +296,10 @@ run_migration() {
         rendered_file="${backup_dir}/rendered/${keeper_name}.json"
         render_v12_snapshot "$file" "$rendered_file"
     done
+    (
+        cd "$backup_dir"
+        shasum -a 256 keepers/*/event-queue.json > checksums.sha256
+    )
 
     jq -n \
         --arg base_path "$BASE_PATH" \

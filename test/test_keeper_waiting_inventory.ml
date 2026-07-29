@@ -65,9 +65,7 @@ let keeper_meta_fixture keeper_name =
   Masc_test_deps.meta_of_json_fixture
     (`Assoc
       [ "name", `String keeper_name
-      ; "agent_name", `String keeper_name
-      ; "sandbox_profile", `String "local"
-      ; "network_mode", `String "inherit"
+      ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name keeper_name)
       ])
 ;;
 

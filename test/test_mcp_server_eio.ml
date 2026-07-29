@@ -177,7 +177,10 @@ let json_string_field_exn label json field =
         (Yojson.Safe.to_string json)
 
 let log_detail_string (entry : Masc_log.Ring.entry) field =
-  Yojson.Safe.Util.(entry.details |> member field |> to_string_option)
+  match Yojson.Safe.Util.member field entry.details with
+  | `String value | `Intlit value -> Some value
+  | `Int value -> Some (string_of_int value)
+  | _ -> None
 
 let find_mcp_tool_log_exn ~phase ~tool_name ~request_id entries =
   match
@@ -744,7 +747,7 @@ let test_handle_request_initialize_operator_profile () =
               | _ -> ""
             in
             Alcotest.(check bool) "mentions operator profile" true
-              (contains_substring instructions "seven operator tools");
+              (contains_substring instructions "six operator tools");
             Alcotest.(check bool) "does not mention surface audit" false
               (contains_substring instructions "surface audit");
             Alcotest.(check bool) "mentions confirm workflow" true
@@ -880,7 +883,7 @@ let test_handle_request_initialize_managed_profile () =
             in
             Alcotest.(check bool) "mentions managed profile" true
               (contains_substring instructions "managed-agent profile");
-            Alcotest.(check bool) "mentions canonical task control" true
+            Alcotest.(check bool) "does not promise a specific tool inventory" false
               (contains_substring instructions "masc_transition")
         | _ -> Alcotest.fail "result not an object")
    | _ -> Alcotest.fail "response not an object");
@@ -1206,8 +1209,19 @@ let test_handle_request_tools_call_transition_done_requires_llm_verdict () =
     Masc.Workspace.bind_session (Mcp_server.workspace_config state) ~agent_name:"codex" ~capabilities:[] ()
   in
   ignore
-    (Masc.Workspace.add_task (Mcp_server.workspace_config state) ~title:"transition-done"
-       ~priority:2 ~description:"");
+    (Masc.Workspace.add_task
+       (Mcp_server.workspace_config state)
+       ~contract:
+         { strict = true
+         ; completion_contract = [ "requires an assigned verifier" ]
+         ; required_evidence = [ "artifact:transition-done" ]
+         ; inspect_gate_evidence = []
+         ; verify_gate_evidence = []
+         ; links = { operation_id = None; session_id = None }
+         }
+       ~title:"transition-done"
+       ~priority:2
+       ~description:"");
   let claim_result =
     Mcp_eio.execute_tool_eio ~sw ~clock
       ~workspace_scope:(Mcp_server.workspace_scope state)

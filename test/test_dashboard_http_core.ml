@@ -1505,7 +1505,7 @@ let test_offline_keeper_composite_exposes_secret_projection () =
       Masc_test_deps.meta_of_json_fixture
         (`Assoc
            [ "name", `String keeper_name
-           ; "agent_name", `String keeper_name
+           ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name keeper_name)
            ; "trace_id", `String "offline-secret-trace"
            ])
     with
@@ -1551,7 +1551,7 @@ let keeper_state_diagram_meta ?last_runtime_attempt_provider name =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
          ([ "name", `String name
-          ; "agent_name", `String (name ^ "-agent")
+          ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name name)
           ; "trace_id", `String ("trace-" ^ name)
           ]
           @ runtime_attempt_fields))

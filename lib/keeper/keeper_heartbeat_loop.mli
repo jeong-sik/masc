@@ -58,7 +58,7 @@ type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
-  pending_selection : Keeper_registry_event_queue.pending_selection option;
+  pending_selection : Keeper_event_queue.stimulus option;
   event_queue_intake_error :
     Keeper_heartbeat_stimulus_intake.event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;

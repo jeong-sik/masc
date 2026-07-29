@@ -3200,11 +3200,10 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
        | Ok None -> Alcotest.fail "HITL wake was not durably queued"
        | Error detail -> Alcotest.fail detail
        in
-       List.iter
-         (Reaction_ledger.record_event_queue_turn_started
-            ~base_path
-            ~keeper_name)
-         selection.stimuli;
+       Reaction_ledger.record_event_queue_turn_started
+         ~base_path
+         ~keeper_name
+         selection;
        (match
           Event_queue_persistence.ack_pending_result
             ~base_path

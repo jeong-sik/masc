@@ -33,8 +33,7 @@ let test_peek_keeps_pending_authoritative () =
     |> State.with_pending (queue [ stimulus "first" 1.0; stimulus "second" 2.0 ])
   in
   let selected = selection state in
-  Alcotest.(check int64) "observed revision" 7L selected.source_revision;
-  Alcotest.(check (list string)) "selected exact head" [ "first" ] (post_ids (queue selected.stimuli));
+  Alcotest.(check string) "selected exact head" "first" selected.post_id;
   Alcotest.(check (list string))
     "peek does not dequeue"
     [ "first"; "second" ]

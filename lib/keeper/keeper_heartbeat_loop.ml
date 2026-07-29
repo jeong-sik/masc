@@ -54,7 +54,7 @@ type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
-  pending_selection : Keeper_registry_event_queue.pending_selection option;
+  pending_selection : Keeper_event_queue.stimulus option;
   event_queue_intake_error : Stimulus_intake.event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
@@ -71,7 +71,6 @@ let classify_turn_intake_admission ~lifecycle =
 ;;
 
 let consume_single_heartbeat_stimulus = Stimulus_intake.consume_single_heartbeat_stimulus
-let consume_board_stimulus_batch = Stimulus_intake.consume_board_stimulus_batch
 let heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake
 
 (* Keepalive scheduling decision (record + decide function) extracted to
@@ -461,7 +460,7 @@ let run_keepalive_unified_turn
         (fun admission_token ->
     let consumed_stimuli = ref [] in
     let pending_selection
-      : Keeper_registry_event_queue.pending_selection option ref
+      : Keeper_event_queue.stimulus option ref
       =
       ref None
     in

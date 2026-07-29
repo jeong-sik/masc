@@ -5,16 +5,6 @@
     persistence supplies the atomic file boundary and publishes [pending] into
     the live registry only after a durable commit. *)
 
-type selection_kind =
-  | Single
-  | Board_batch
-
-type pending_selection =
-  { source_revision : int64
-  ; kind : selection_kind
-  ; stimuli : Keeper_event_queue.stimulus list
-  }
-
 type exact_execution_terminal_cause =
   | Exact_execution_failed
   | Exact_execution_cancelled
@@ -147,17 +137,17 @@ val with_revision : int64 -> t -> t
 val peek_when :
   ready:(Keeper_event_queue.stimulus -> bool) ->
   t ->
-  pending_selection option
+  Keeper_event_queue.stimulus option
 
 val validate_pending_selection :
-  selection:pending_selection ->
+  selection:Keeper_event_queue.stimulus ->
   t ->
   (unit, string) result
 (** Read-only exact immutable selection validation. Unrelated pending entries
     and queue revisions do not invalidate the selected source. *)
 
 val ack_pending :
-  selection:pending_selection ->
+  selection:Keeper_event_queue.stimulus ->
   t ->
   (t, string) result
 (** Compare-and-remove the exact immutable selected stimulus snapshot.

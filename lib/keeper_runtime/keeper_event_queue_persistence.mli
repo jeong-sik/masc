@@ -25,17 +25,6 @@ val owner_identity_hash : owner_identity -> int
 val owner_identity_base_path : owner_identity -> string
 val owner_identity_keeper_name : owner_identity -> string
 
-type selection_kind = Keeper_event_queue_state.selection_kind =
-  | Single
-  | Board_batch
-
-type pending_selection = Keeper_event_queue_state.pending_selection =
-  { source_revision : int64
-  ; kind : selection_kind
-  ; stimuli : Keeper_event_queue.stimulus list
-  }
-
-
 type exact_write_outcome =
   | Fsync_completed
   | Visible_sync_unconfirmed of string
@@ -109,19 +98,19 @@ val peek_when_result :
   base_path:string ->
   keeper_name:string ->
   ready:(Keeper_event_queue.stimulus -> bool) ->
-  (pending_selection option, string) result
+  (Keeper_event_queue.stimulus option, string) result
 
 val validate_pending_selection_result :
   base_path:string ->
   keeper_name:string ->
-  selection:pending_selection ->
+  selection:Keeper_event_queue.stimulus ->
   (unit, string) result
 
 val ack_pending_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  selection:pending_selection ->
+  selection:Keeper_event_queue.stimulus ->
   unit ->
   (unit, string) result
 

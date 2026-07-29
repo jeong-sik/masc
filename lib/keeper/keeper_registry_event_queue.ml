@@ -7,13 +7,6 @@
     that per-entry Atomic only after commit.  No coupling to the central
     registry Atomic state primitive. *)
 
-type pending_selection = Keeper_event_queue_persistence.pending_selection =
-  { source_revision : int64
-  ; kind : Keeper_event_queue_persistence.selection_kind
-  ; stimuli : Keeper_event_queue.stimulus list
-  }
-
-
 let publish_pending ~base_path name pending =
   match Keeper_registry.get ~base_path name with
   | None -> ()

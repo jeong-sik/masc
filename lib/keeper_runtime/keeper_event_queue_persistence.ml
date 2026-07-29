@@ -20,17 +20,6 @@ let owner_identity_keeper_name owner =
   Owner_lock.keeper_name owner |> Keeper_id.Keeper_name.to_string
 ;;
 
-type selection_kind = State.selection_kind =
-  | Single
-  | Board_batch
-
-type pending_selection = State.pending_selection =
-  { source_revision : int64
-  ; kind : selection_kind
-  ; stimuli : Keeper_event_queue.stimulus list
-  }
-
-
 type exact_write_outcome =
   | Fsync_completed
   | Visible_sync_unconfirmed of string

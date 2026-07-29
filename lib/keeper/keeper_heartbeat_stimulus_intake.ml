@@ -5,10 +5,9 @@
 
     - the [heartbeat_event_intake] record returned to the heartbeat loop;
     - per-class string labels used in Otel_metric_store and log lines;
-    - per-stimulus consumption ([consume_single_heartbeat_stimulus]) +
-      board-batch consumption ([consume_board_stimulus_batch]);
+    - per-stimulus consumption ([consume_single_heartbeat_stimulus]);
     - the top-level RFC-0020 §3 Rule 4 draining function
-      ([heartbeat_event_intake]) that leases the earliest ready stimulus
+      ([heartbeat_event_intake]) that selects the earliest ready stimulus
       without assigning priority to a payload family. *)
 
 open Keeper_types
@@ -78,17 +77,12 @@ type stimulus_intake_result =
 
 type event_queue_intake_error =
   | Pending_selection_failed of string
-  | Invalid_single_selection of { selected_count : int }
   | Transient_board_read of
       Keeper_world_observation_board_signal.board_unavailable
 
 let event_queue_intake_error_to_string = function
   | Pending_selection_failed detail ->
     "event queue pending selection failed: " ^ detail
-  | Invalid_single_selection { selected_count } ->
-    Printf.sprintf
-      "event queue Single selection contained %d stimuli instead of exactly one"
-      selected_count
   | Transient_board_read unavailable ->
     "event queue stimulus intake retry: "
     ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable
@@ -96,12 +90,11 @@ let event_queue_intake_error_to_string = function
 
 let event_queue_intake_error_reason_label = function
   | Pending_selection_failed _ -> "event_queue_selection_failed"
-  | Invalid_single_selection _ -> "event_queue_selection_invalid"
   | Transient_board_read _ -> "event_queue_transient_board_read"
 ;;
 
 let event_queue_intake_error_counts_as_cycle_failure = function
-  | Pending_selection_failed _ | Invalid_single_selection _ -> true
+  | Pending_selection_failed _ -> true
   | Transient_board_read _ -> false
 ;;
 
@@ -176,7 +169,7 @@ type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
-  pending_selection : Keeper_registry_event_queue.pending_selection option;
+  pending_selection : Keeper_event_queue.stimulus option;
   event_queue_intake_error : event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
@@ -348,40 +341,6 @@ let consume_single_heartbeat_stimulus
     intake_result
 ;;
 
-let consume_board_stimulus_batch ~meta_after_triage batch =
-  let batch_len = List.length batch in
-  if batch_len > 1 then
-    Log.Keeper.info
-      "turn digest: coalesced %d board signals into one turn (keeper=%s)"
-      batch_len
-      meta_after_triage.name;
-  let rec render_batch acc = function
-    | [] -> Stimulus_consumed (List.concat (List.rev acc))
-    | (stim : Keeper_event_queue.stimulus) :: rest ->
-      (match pending_board_events_of_stimulus_result ~meta_after_triage stim with
-       | Stimulus_retry_later _ as retry -> retry
-       | Stimulus_consumed events -> render_batch (events :: acc) rest)
-  in
-  let intake_result = render_batch [] batch in
-  (match intake_result with
-   | Stimulus_retry_later _ -> ()
-   | Stimulus_consumed _ ->
-     List.iter
-       (fun (stim : Keeper_event_queue.stimulus) ->
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string StimulusConsumed)
-         ~labels:[ "keeper", meta_after_triage.name; "class", "board_signal" ]
-         ();
-       Log.Keeper.info
-         "turn entry: consumed stimulus stimulus_id=%s urgency=%s class=board_signal \
-          (keeper=%s)"
-         stim.post_id
-         (stimulus_urgency_to_string stim.urgency)
-         meta_after_triage.name)
-       batch);
-  intake_result
-;;
-
 let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus) =
   match stimulus.payload with
   | Keeper_event_queue.Hitl_resolved resolution ->
@@ -417,12 +376,8 @@ type spent_selection_reconciliation =
   | Spent_grant_replay_acknowledged
 
 let reconcile_spent_selection ~config ~keeper_name selection =
-  match
-    selection.Keeper_registry_event_queue.kind,
-    selection.Keeper_registry_event_queue.stimuli
-  with
-  | Keeper_event_queue_persistence.Single,
-    [ { Keeper_event_queue.payload = Schedule_due wake; _ } ] ->
+  match selection.Keeper_event_queue.payload with
+  | Schedule_due wake ->
     (* The schedule lock covers both the terminal read and queue ACK. A retry
        must start under the same lock, so either it starts first and this sees
        its non-terminal execution, or this removes the old wake first and the
@@ -465,12 +420,8 @@ let reconcile_spent_selection ~config ~keeper_name selection =
             }
         | None ->
           Ok Selection_actionable))
-  | Keeper_event_queue_persistence.Single,
-    [ { Keeper_event_queue.payload =
-          Hitl_resolved { approval_id; decision = Keeper_event_queue.Hitl_approved; _ }
-      ; _
-      }
-    ] ->
+  | Hitl_resolved
+      { approval_id; decision = Keeper_event_queue.Hitl_approved; _ } ->
     (* An approved grant is one-shot, but consumption alone is not terminal:
        host replay consumes before running the effect, then durably records the
        outcome. If evidence or journal persistence fails after the effect,
@@ -513,8 +464,21 @@ let reconcile_spent_selection ~config ~keeper_name selection =
          }
      | Error _ ->
        Ok Selection_actionable)
-  | Keeper_event_queue_persistence.Single, _
-  | Keeper_event_queue_persistence.Board_batch, _ ->
+  | Hitl_resolved
+      { decision =
+          ( Keeper_event_queue.Hitl_rejected _
+          | Keeper_event_queue.Hitl_edited _ )
+      ; _
+      }
+  | Board_signal _
+  | Board_attention _
+  | Bootstrap
+  | Fusion_completed _
+  | Bg_completed _
+  | Connector_attention _
+  | Manual_compaction_requested
+  | Goal_assigned _
+  | Goal_reconciliation_ready _ ->
     Ok Selection_actionable
 ;;
 
@@ -570,28 +534,15 @@ let heartbeat_event_intake
       [], [], None, Some (Pending_selection_failed message)
     | Ok None -> [], [], None, None
     | Ok (Some selection) ->
-      let stimuli = selection.Keeper_registry_event_queue.stimuli in
-      let intake_result, selection_error =
-        match selection.kind, stimuli with
-        | Keeper_event_queue_persistence.Board_batch, batch ->
-          consume_board_stimulus_batch ~meta_after_triage batch, None
-        | Keeper_event_queue_persistence.Single, [ stimulus ] ->
-          ( consume_single_heartbeat_stimulus
-              ~ctx
-              ~meta_after_triage
-              stimulus
-          , None )
-        | Keeper_event_queue_persistence.Single, stimuli ->
-          ( Stimulus_consumed []
-          , Some
-              (Invalid_single_selection
-                 { selected_count = List.length stimuli }) )
-      in
-      (match selection_error, intake_result with
-       | Some error, _ -> [], [], Some selection, Some error
-       | None, Stimulus_consumed observations ->
-         observations, stimuli, Some selection, None
-       | None, Stimulus_retry_later unavailable ->
+      (match
+         consume_single_heartbeat_stimulus
+           ~ctx
+           ~meta_after_triage
+           selection
+       with
+       | Stimulus_consumed observations ->
+         observations, [ selection ], Some selection, None
+       | Stimulus_retry_later unavailable ->
          [], [], Some selection, Some (Transient_board_read unavailable))
   in
   let consumed_stimulus_count = List.length consumed_stimuli in

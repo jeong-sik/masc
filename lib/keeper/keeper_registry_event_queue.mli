@@ -6,13 +6,6 @@
     entry-owned [event_queue : Keeper_event_queue.t Atomic.t].  No central
     registry Atomic is touched. *)
 
-type pending_selection = Keeper_event_queue_persistence.pending_selection =
-  { source_revision : int64
-  ; kind : Keeper_event_queue_persistence.selection_kind
-  ; stimuli : Keeper_event_queue.stimulus list
-  }
-
-
 type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
@@ -74,18 +67,18 @@ val peek_when_result :
   base_path:string ->
   string ->
   ready:(Keeper_event_queue.stimulus -> bool) ->
-  (pending_selection option, string) result
+  (Keeper_event_queue.stimulus option, string) result
 
 val validate_pending_selection_result :
   base_path:string ->
   string ->
-  selection:pending_selection ->
+  selection:Keeper_event_queue.stimulus ->
   (unit, string) result
 
 val ack_pending_result :
   base_path:string ->
   string ->
-  selection:pending_selection ->
+  selection:Keeper_event_queue.stimulus ->
   (unit, string) result
 
 val cancel_pending_accepted_result :

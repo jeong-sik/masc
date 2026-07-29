@@ -1,13 +1,3 @@
-type selection_kind =
-  | Single
-  | Board_batch
-
-type pending_selection =
-  { source_revision : int64
-  ; kind : selection_kind
-  ; stimuli : Keeper_event_queue.stimulus list
-  }
-
 type exact_execution_terminal_cause =
   | Exact_execution_failed
   | Exact_execution_cancelled
@@ -245,57 +235,34 @@ let rec dequeue_first_ready ~ready skipped pending =
 let peek_when ~ready state =
   match dequeue_first_ready ~ready [] state.pending with
   | None -> None
-  | Some (stimulus, _) ->
-    Some
-      { source_revision = state.revision
-      ; kind = Single
-      ; stimuli = [ stimulus ]
-      }
+  | Some (stimulus, _) -> Some stimulus
 ;;
 
-let validate_pending_selection ~(selection : pending_selection) state =
-  match selection.stimuli with
-  | [] -> Error "event queue pending selection must not be empty"
-  | _ :: _ :: _ when selection.kind = Single ->
-    Error "single event queue pending selection must contain exactly one stimulus"
-  | stimuli ->
-    let selected candidate =
-      List.exists
-        (fun expected ->
-           Keeper_event_queue.stimulus_identity_equal expected candidate)
-        stimuli
-    in
-    let matching =
-      Keeper_event_queue.to_list state.pending |> List.filter selected
-    in
-    if List.length matching <> List.length stimuli
-    then Error "event queue pending selection is no longer present exactly once"
-    else if
-      not
-        (List.for_all
-           (fun expected ->
-              List.exists
-                (fun actual ->
-                   actual = expected
-                   && Keeper_event_queue.stimulus_identity_equal expected actual)
-                matching)
-           stimuli)
-    then Error "event queue pending selection typed snapshot changed"
-    else Ok ()
+let validate_pending_selection
+      ~(selection : Keeper_event_queue.stimulus)
+      state
+  =
+  let matching =
+    Keeper_event_queue.to_list state.pending
+    |> List.filter (Keeper_event_queue.stimulus_identity_equal selection)
+  in
+  match matching with
+  | [ actual ] when actual = selection -> Ok ()
+  | [ _ ] -> Error "event queue pending selection typed snapshot changed"
+  | [] -> Error "event queue pending selection is no longer present"
+  | _ :: _ :: _ ->
+    Error "event queue pending selection is present more than once"
 ;;
 
-let ack_pending ~(selection : pending_selection) state =
+let ack_pending ~(selection : Keeper_event_queue.stimulus) state =
   match validate_pending_selection ~selection state with
   | Error _ as error -> error
   | Ok () ->
-    let selected candidate =
-      List.exists
-        (fun expected ->
-           Keeper_event_queue.stimulus_identity_equal expected candidate)
-        selection.stimuli
-    in
     let retained =
-      Keeper_event_queue.to_list state.pending |> List.filter (Fun.negate selected)
+      Keeper_event_queue.to_list state.pending
+      |> List.filter
+           (Fun.negate
+              (Keeper_event_queue.stimulus_identity_equal selection))
     in
     let pending =
       List.fold_left

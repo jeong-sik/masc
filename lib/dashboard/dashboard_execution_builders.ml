@@ -237,8 +237,9 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   let turn_count = int_field_default "turn_count" keeper in
   let generation = int_field_default "generation" keeper in
   let goal_count = List.length (list_field "active_goal_ids" keeper) in
+  let has_runtime_signal = last_action_ts > 0.0 || last_signal_ts > 0.0 in
   let lifecycle =
-    if Dashboard_utils.is_keeper_offline status then Lc_offline
+    if Dashboard_utils.is_keeper_offline status && not has_runtime_signal then Lc_offline
     else if Option.value ~default:0.0 context_ratio >= ctx_handoff_imminent then Lc_handoff_imminent
     else if Option.value ~default:0.0 context_ratio >= ctx_preparing then Lc_preparing
     else if Option.value ~default:0.0 context_ratio >= ctx_compacting then Lc_compacting
@@ -247,7 +248,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     else Lc_idle
   in
   let (state, tone, note) =
-    if Dashboard_utils.is_keeper_offline status then
+    if Dashboard_utils.is_keeper_offline status && not has_runtime_signal then
       (Exec_critical, Tone_bad, "keeper 오프라인")
     else
       match lifecycle with

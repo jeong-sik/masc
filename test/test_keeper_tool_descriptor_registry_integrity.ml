@@ -728,7 +728,11 @@ let test_read_public_validation_rejects_line_fields () =
       ; "end_line", `Int 280
       ]
   in
-  match Resolution.validate_public_input_for_tool_call ~tool_name:"Read" ~input with
+  match
+    Resolution.validated_descriptor_and_input_for_tool_call
+      ~tool_name:"Read"
+      ~input
+  with
   | Some (Error validation_result) ->
     let data = Tool_result.data validation_result |> Yojson.Safe.to_string in
     check_contains

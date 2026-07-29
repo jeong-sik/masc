@@ -102,18 +102,6 @@ let public_descriptor_and_name_for_tool_call tool_name =
   | None -> None
 ;;
 
-let validate_public_input_for_tool_call ~tool_name ~input =
-  match public_descriptor_and_name_for_tool_call tool_name with
-  | Some (public_name, descriptor) ->
-    Some
-      (Tool_input_validation.validate_args
-         ~schema:descriptor.Keeper_tool_descriptor.input_schema
-         ~name:public_name
-         ~args:input
-         ())
-  | None -> None
-;;
-
 let validate_descriptor_input ~tool_name
       (descriptor : Keeper_tool_descriptor.t) input
   =

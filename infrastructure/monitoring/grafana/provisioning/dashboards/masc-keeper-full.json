@@ -2366,55 +2366,6 @@
       "type": "gauge"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "Memory consolidation operations by keeper.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 5,
-            "lineInterpolation": "smooth",
-            "pointSize": 0,
-            "showPoints": "never"
-          },
-          "unit": "cpm"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 128
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (keeper) (rate(masc_keeper_memory_consolidations_total{keeper=~\"$keeper\"}[$__rate_interval])) * 60",
-          "legendFormat": "{{keeper}}",
-          "refId": "A"
-        }
-      ],
-      "title": "Memory Consolidations",
-      "transparent": true,
-      "type": "timeseries"
-    },
-    {
       "collapsed": false,
       "gridPos": {
         "h": 1,

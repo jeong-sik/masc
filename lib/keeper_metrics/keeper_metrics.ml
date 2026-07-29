@@ -136,7 +136,6 @@ type t =
   | HitlSummaryOutcomes
   | OasEnvKeyRejections
   | MemoryLaneUnitFailures
-  | MemoryConsolidations
   | MemoryLaneSubmitted
   | MemoryLaneRanInline
   | MemoryLaneDropped
@@ -354,7 +353,6 @@ let to_string = function
   | HitlSummaryOutcomes -> "masc_keeper_hitl_summary_outcomes_total"
   | OasEnvKeyRejections -> "masc_keeper_oas_env_key_rejections_total"
   | MemoryLaneUnitFailures -> "masc_keeper_memory_lane_unit_failures_total"
-  | MemoryConsolidations -> "masc_keeper_memory_consolidations_total"
   | MemoryLaneSubmitted -> "masc_keeper_memory_lane_submitted_total"
   | MemoryLaneRanInline -> "masc_keeper_memory_lane_ran_inline_total"
   | MemoryLaneDropped -> "masc_keeper_memory_lane_dropped_total"

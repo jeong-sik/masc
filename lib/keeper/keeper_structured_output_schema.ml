@@ -293,7 +293,7 @@ let without_response_format (provider_cfg : Llm_provider.Provider_config.t) =
    response format constrains only the final assistant text, which this
    surface never parses — while its capability branch rejected every
    json_object-only provider (Glm/DeepSeek/Kimi) as
-   [InvalidConfig "task.anti_rationalization.output_schema"], so the gate
+   [InvalidConfig "task.anti_rationalization.response_format"], so the gate
    never ran and every task stayed nonterminal fleet-wide (live incident
    2026-07-21). Converges with the fusion-judge / consolidation /
    board-attention / librarian surfaces above: no wire

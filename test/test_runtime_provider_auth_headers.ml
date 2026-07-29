@@ -1312,7 +1312,6 @@ let test_runtime_agent_context_resume_patches_stale_response_format_to_base_cont
     let base = provider_cfg () in
     { base with
       Llm_provider.Provider_config.response_format = Agent_sdk.Types.JsonSchema resume_schema
-    ; output_schema = Some resume_schema
     }
   in
   let config =

@@ -38,7 +38,6 @@ let fact ?(category = Types.Preference) ?(trace_id = "trace-memory")
   ; category
   ; claim_kind = None
   ; source = { trace_id; turn; tool_call_id = None }
-  ; observed_by = []
   ; first_seen
   ; valid_until = None
   ; last_verified_at
@@ -86,19 +85,6 @@ let test_http_json_surfaces_delegation_requests () =
         (Filename.basename Json.(item |> member "task_seed_md_path" |> to_string)))
 ;;
 
-let shared_fact ?(observed_by = []) ?(last_verified_at = 10.0) claim : Types.fact =
-  { claim
-  ; category = Types.Fact
-  ; claim_kind = None
-  ; source = { trace_id = "shared"; turn = 1; tool_call_id = None }
-  ; observed_by
-  ; first_seen = 10.0
-  ; valid_until = None
-  ; last_verified_at = Some last_verified_at
-  ; schema_version = Types.schema_version
-  ; claim_id = None
-  }
-;;
 
 let append_recall_record
       ?failure_reason
@@ -276,88 +262,8 @@ let test_http_json_surfaces_memory_quality_decode_errors () =
        check int "top key limit applies" 0 (List.length top_echoed))
 ;;
 
-let test_http_json_hebbian_derives_from_shared_facts () =
-  let dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> rm_rf dir)
-    (fun () ->
-       let config = Workspace_utils.default_config dir in
-       let keepers_dir =
-         Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
-       in
-       Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
-         Memory_io.append_fact
-           ~keeper_id:Types.shared_store_id
-           (shared_fact
-              ~observed_by:[ "keeper-a"; "keeper-b" ]
-              ~last_verified_at:42.0
-              "Shared operational fact");
-         let json =
-          Memory_subsystems.dashboard_memory_subsystems_http_json
-            ~config
-            (request "/dashboard/memory-subsystems?limit=100")
-         in
-         let hebbian = Json.(json |> member "hebbian") in
-         check
-           (float 0.0001)
-           "last_consolidation from shared fact"
-           42.0
-           Json.(hebbian |> member "last_consolidation" |> to_number);
-         let synapses = Json.(hebbian |> member "synapses" |> to_list) in
-         check int "one synapse for one shared pair" 1 (List.length synapses);
-         let synapse = List.hd synapses in
-         let from_agent = Json.(synapse |> member "from_agent" |> to_string) in
-         let to_agent = Json.(synapse |> member "to_agent" |> to_string) in
-         let pair = List.sort String.compare [ from_agent; to_agent ] in
-         check (list string) "synapse links the two observers" [ "keeper-a"; "keeper-b" ] pair;
-         check bool "weight is positive" true (Json.(synapse |> member "weight" |> to_number) > 0.0)))
-;;
 
-let test_http_json_hebbian_empty_without_shared_facts () =
-  let dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> rm_rf dir)
-    (fun () ->
-       let config = Workspace_utils.default_config dir in
-       let json =
-        Memory_subsystems.dashboard_memory_subsystems_http_json
-          ~config
-          (request "/dashboard/memory-subsystems?limit=100")
-       in
-       let hebbian = Json.(json |> member "hebbian") in
-       check int "empty synapses" 0 Json.(hebbian |> member "synapses" |> to_list |> List.length);
-       check
-         (float 0.0001)
-         "last_consolidation zero when no shared facts"
-         0.0
-         Json.(hebbian |> member "last_consolidation" |> to_number))
-;;
 
-let test_http_json_hebbian_dedupes_duplicate_observers () =
-  let dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> rm_rf dir)
-    (fun () ->
-       let config = Workspace_utils.default_config dir in
-       let keepers_dir =
-         Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
-       in
-       Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
-         (* A duplicate observer in a single fact must not inflate the edge. *)
-         Memory_io.append_fact
-           ~keeper_id:Types.shared_store_id
-           (shared_fact
-              ~observed_by:[ "keeper-a"; "keeper-a"; "keeper-b" ]
-              ~last_verified_at:10.0
-              "Shared operational fact");
-         let json =
-          Memory_subsystems.dashboard_memory_subsystems_http_json
-            ~config
-            (request "/dashboard/memory-subsystems?limit=100")
-         in
-         let synapses = Json.(json |> member "hebbian" |> member "synapses" |> to_list) in
-         check int "one synapse after dedupe" 1 (List.length synapses)))
-;;
 
 let () =
   Eio_main.run @@ fun _env ->
@@ -365,10 +271,6 @@ let () =
     "server_dashboard_http_memory_subsystems"
     [ ( "json"
       , [ test_case
-            "hebbian derives from shared facts"
-            `Quick
-            test_http_json_hebbian_derives_from_shared_facts
-        ; test_case
             "surfaces memory quality summary"
             `Quick
             test_http_json_surfaces_memory_quality_summary
@@ -376,14 +278,6 @@ let () =
             "surfaces memory quality decode errors"
             `Quick
             test_http_json_surfaces_memory_quality_decode_errors
-        ; test_case
-            "hebbian empty without shared facts"
-            `Quick
-            test_http_json_hebbian_empty_without_shared_facts
-        ; test_case
-            "hebbian dedupes duplicate observers"
-            `Quick
-            test_http_json_hebbian_dedupes_duplicate_observers
         ; test_case
             "surfaces delegation requests"
             `Quick

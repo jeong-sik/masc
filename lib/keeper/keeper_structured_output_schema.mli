@@ -1,9 +1,8 @@
 (** Provider-native JSON schemas for MASC LLM sub-call producers.
 
-    These schemas are used as [response_format = JsonSchema _] /
-    [output_schema = Some _] at the OAS provider boundary. The existing
-    domain parsers still own semantic validation after the provider returns
-    JSON. *)
+    These schemas are used as [response_format = JsonSchema _] at the OAS
+    provider boundary. The existing domain parsers still own semantic
+    validation after the provider returns JSON. *)
 
 val librarian_episode_output_schema : Yojson.Safe.t
 (** JSON object the librarian extraction provider must return. *)
@@ -43,12 +42,12 @@ val apply_to_provider_config
   :  Yojson.Safe.t
   -> Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
-(** Set both OAS structured-output fields for [schema]. *)
+(** Set the single OAS structured-output request state for [schema]. *)
 
 val without_response_format
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
-(** Clear both OAS structured-output fields: the request states its output
+(** Clear the OAS structured-output request state: the request states its output
     contract in its prompt and validates the parse downstream, so it asks the
     provider for no wire format at all. Use for call sites whose prompt spells
     out the object shape and whose parser is total — a malformed reply must
@@ -58,8 +57,8 @@ val without_response_format
 val anti_rationalization_reviewer_provider_config
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
-(** Provider config for the task anti-rationalization reviewer: clears both
-    OAS structured-output fields. The verdict channel is the
+(** Provider config for the task anti-rationalization reviewer: clears the OAS
+    structured-output request state. The verdict channel is the
     [report_review_verdict] tool call (exactly-once, total parser in
     [Task.Anti_rationalization]); a wire response format constrained only the
     final assistant text this surface never parses, and its capability branch

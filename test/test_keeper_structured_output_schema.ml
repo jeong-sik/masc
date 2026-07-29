@@ -96,13 +96,6 @@ let test_all_schemas_apply_as_oas_native_json_schema () =
          (match configured.Llm_provider.Provider_config.response_format with
           | Agent_sdk.Types.JsonSchema actual -> Yojson.Safe.equal schema actual
           | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false);
-       check
-         bool
-         (label ^ " output_schema mirrors schema")
-         true
-         (match configured.Llm_provider.Provider_config.output_schema with
-          | Some actual -> Yojson.Safe.equal schema actual
-          | None -> false);
        match Llm_provider.Provider_config.validate_output_schema_request configured with
        | Ok () -> ()
        | Error msg ->
@@ -121,8 +114,7 @@ let has_json_schema_response_format schema provider_cfg =
 
 let has_no_response_format provider_cfg =
   match provider_cfg.Llm_provider.Provider_config.response_format with
-  | Agent_sdk.Types.Off ->
-    Option.is_none provider_cfg.Llm_provider.Provider_config.output_schema
+  | Agent_sdk.Types.Off -> true
   | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false
 ;;
 

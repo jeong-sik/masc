@@ -7,12 +7,6 @@
    are not part of the generic Memory fact type. *)
 let schema_version = "rfc0259-v1"
 
-(* RFC-0244 Tier 2: the shared semantic store reuses the per-keeper IO/codec
-   under a reserved id. A leading underscore is not produced by keeper naming, so
-   no real keeper collides with its file (keepers/_shared.facts.jsonl); the
-   consolidator additionally filters this id out of its source keeper list. *)
-let shared_store_id = "_shared"
-
 (* Canonical JSON wire keys for Memory OS persistence and librarian ingestion.
    The schema module owns these strings so the parser, retry prompt, persistence
    codec, and tests cannot drift by maintaining parallel literal sets. *)
@@ -25,7 +19,6 @@ let wire_field_source = "source"
 let wire_field_first_seen = "first_seen"
 let wire_field_valid_until = "valid_until"
 let wire_field_last_verified_at = "last_verified_at"
-let wire_field_observed_by = "observed_by"
 let wire_field_claim_id = "claim_id"
 let wire_field_claim_kind = "claim_kind"
 let wire_field_schema_version = "schema_version"
@@ -193,11 +186,6 @@ type fact =
     (* Producer-emitted origin tag, orthogonal to [category]. It is model
        context only. *)
   ; source : provenance_event
-  ; observed_by : string list
-    (* RFC-0244 Tier 2 (shared semantic store) ONLY: the sorted set of distinct
-       keeper ids that have corroborated this claim. Empty for Tier-1 per-keeper
-       facts — a single keeper's store has no distinct keeper-source to track, so
-       it is omitted from their JSON. *)
   ; first_seen : float
   ; valid_until : float option
   ; last_verified_at : float option
@@ -365,12 +353,6 @@ let fact_to_json (f : fact) =
     ]
     @ optional_float_field wire_field_valid_until f.valid_until
     @ optional_float_field wire_field_last_verified_at f.last_verified_at
-    (* Tier-1 facts carry [], which is omitted so per-keeper stores stay
-       byte-identical to pre-RFC-0244; only Tier-2 shared facts emit it. *)
-    @ (match f.observed_by with
-       | [] -> []
-       | keepers ->
-         [ wire_field_observed_by, `List (List.map (fun k -> `String k) keepers) ])
     @ (match f.claim_id with
        | Some id when claim_id_is_valid id -> [ wire_field_claim_id, `String id ]
        | Some _ -> invalid_arg "memory fact claim_id must be non-empty"
@@ -412,10 +394,6 @@ let fact_of_json (json : Yojson.Safe.t) =
         | Some source ->
           let last_verified_at = json_float_field wire_field_last_verified_at fields in
           let valid_until = json_float_field wire_field_valid_until fields in
-          (* [observed_by] is optional for private facts. *)
-          let observed_by =
-            Option.value (json_string_list_field wire_field_observed_by fields) ~default:[]
-          in
           let claim_kind = persisted_claim_kind_of_json fields in
           (match category_and_claim_kind_of_persisted_row ~category_str ~claim_kind with
            | None -> None
@@ -427,7 +405,6 @@ let fact_of_json (json : Yojson.Safe.t) =
                  category
                ; claim_kind
                ; source
-               ; observed_by
                ; first_seen
                ; valid_until
                ; last_verified_at

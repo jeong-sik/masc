@@ -184,7 +184,58 @@ let schema_shape_json schema =
 
 let schema_has_property_name schema name = List.mem name (schema_property_names schema)
 
-let prepare_args ?schema:_ ~name:_ args = strip_internal_marker_args args
+let soft_coerce_field_value prop_schema (value : Yojson.Safe.t) : Yojson.Safe.t =
+  match prop_schema with
+  | `Assoc fields ->
+    (match List.assoc_opt "type" fields with
+     | Some (`String "integer") ->
+       (match value with
+        | `String s ->
+          (match int_of_string_opt (String.trim s) with
+           | Some n -> `Int n
+           | None -> value)
+        | _ -> value)
+     | Some (`String "number") ->
+       (match value with
+        | `String s ->
+          (match float_of_string_opt (String.trim s) with
+           | Some f -> `Float f
+           | None -> value)
+        | _ -> value)
+     | Some (`String "boolean") ->
+       (match value with
+        | `String s ->
+          let trimmed = String.lowercase_ascii (String.trim s) in
+          if String.equal trimmed "true" then `Bool true
+          else if String.equal trimmed "false" then `Bool false
+          else value
+        | _ -> value)
+     | _ -> value)
+  | _ -> value
+;;
+
+let soft_coerce_scalar_args ?schema (args : Yojson.Safe.t) : Yojson.Safe.t =
+  match schema, args with
+  | Some (`Assoc schema_fields), `Assoc arg_fields ->
+    (match List.assoc_opt "properties" schema_fields with
+     | Some (`Assoc props) ->
+       let coerced_fields =
+         List.map
+           (fun (k, v) ->
+              match List.assoc_opt k props with
+              | Some prop_schema -> (k, soft_coerce_field_value prop_schema v)
+              | None -> (k, v))
+           arg_fields
+       in
+       `Assoc coerced_fields
+     | _ -> args)
+  | _ -> args
+;;
+
+let prepare_args ?schema ~name:_ args =
+  let args = strip_internal_marker_args args in
+  soft_coerce_scalar_args ?schema args
+;;
 
 let schema_has_properties = function
   | `Assoc fields ->

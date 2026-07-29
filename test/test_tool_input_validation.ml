@@ -1967,8 +1967,41 @@ let test_oneof_null_const_matches_non_null_branch () =
 (* Runner                                                            *)
 (* ================================================================ *)
 
+let test_soft_coercion_scalar_args () =
+  let schema =
+    `Assoc
+      [ ("type", `String "object")
+      ; ( "properties"
+        , `Assoc
+            [ ("count", `Assoc [ ("type", `String "integer") ])
+            ; ("ratio", `Assoc [ ("type", `String "number") ])
+            ; ("strict", `Assoc [ ("type", `String "boolean") ])
+            ; ("name", `Assoc [ ("type", `String "string") ])
+            ] )
+      ]
+  in
+  let args =
+    `Assoc
+      [ ("count", `String "10")
+      ; ("ratio", `String "3.14")
+      ; ("strict", `String "true")
+      ; ("name", `String "test")
+      ]
+  in
+  match Tool_input_validation.validate_args ~schema ~name:"test_tool" ~args () with
+  | Ok (`Assoc fields) ->
+    Alcotest.(check int) "count coerced to int" 10 (Yojson.Safe.Util.to_int (List.assoc "count" fields));
+    Alcotest.(check (float 0.001)) "ratio coerced to float" 3.14 (Yojson.Safe.Util.to_float (List.assoc "ratio" fields));
+    Alcotest.(check bool) "strict coerced to bool" true (Yojson.Safe.Util.to_bool (List.assoc "strict" fields));
+    Alcotest.(check string) "name unchanged" "test" (Yojson.Safe.Util.to_string (List.assoc "name" fields))
+  | _ -> Alcotest.fail "expected soft coercion to succeed"
+
 let () =
   Alcotest.run "Tool_input_validation (OAS delegation)" [
+    ("soft_coercion", [
+      Alcotest.test_case "scalar args soft coercion" `Quick
+        test_soft_coercion_scalar_args;
+    ]);
     ("required", [
       Alcotest.test_case "present" `Quick test_required_present;
       Alcotest.test_case "missing" `Quick test_required_missing;

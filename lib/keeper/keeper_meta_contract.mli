@@ -85,10 +85,10 @@ val compaction_retry_escalation_threshold : int
     and settles to no compaction outcome. *)
 
 val compaction_retry_suspended : compaction_runtime -> bool
-(** [true] once the persisted failure streak has reached
-    {!compaction_retry_escalation_threshold} — the settlement has stopped
-    retrying compaction for this keeper and each further stimulus escalates
-    after a single bounded attempt, pending operator inspection. *)
+(** [true] once the persisted streak has reached
+    {!compaction_retry_escalation_threshold}. Reactive preparation is then
+    refused before checkpoint load or summarizer dispatch; the refusal leaves
+    the streak unchanged. *)
 
 type proactive_runtime = {
   count_total : int;

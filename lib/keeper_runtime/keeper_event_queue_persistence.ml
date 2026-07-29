@@ -483,7 +483,7 @@ let transition_wal_entry_of_json owner = function
          then State.outbox_entry_of_yojson
          else if String.equal schema legacy_transition_wal_schema_v1
          then State.legacy_transition_outbox_entry_of_yojson
-         else State.legacy_source_terminal_ack_outbox_entry_of_yojson
+         else State.legacy_persisted_transition_outbox_entry_of_yojson
        in
        (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
         | [ ("base_path", `String base_path)
@@ -816,7 +816,7 @@ let commit_transform_unlocked
              (* [load_state_unlocked] above replayed the transition WAL, so
                 [next] already carries that transition's pending mutation and
                 its transition outbox, and the snapshot just written persists
-                both (schema v8). Retire the WAL here, paired with the revision
+                both (schema v12). Retire the WAL here, paired with the revision
                 bump that absorbed it. Leaving it behind is what latches the
                 owner: the next load replays an already-absorbed row against
                 the advanced revision, [commit_transition] rejects it on

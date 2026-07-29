@@ -216,8 +216,8 @@ val exact_execution_binding_result :
 
 val load_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue.t, string) result
-(** Strict replay projection: pending followed by active lease stimuli.
-    Durable read failures remain explicit. *)
+(** Strict pending projection after durable transition-WAL replay. Durable read
+    failures remain explicit. *)
 
 val load_pending_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue.t, string) result
@@ -365,7 +365,7 @@ val enqueue_stimulus_if_absent_result :
   Keeper_event_queue.stimulus ->
   (enqueue_stimulus_result, string) result
 (** Atomically enqueue only when the same typed stimulus is absent from the
-    full durable state: pending, active leases, and transition outbox. *)
+    full durable state: pending and transition outbox. *)
 
 val project_accepted_transfer_result :
   after_commit:(Keeper_event_queue.t -> unit) ->

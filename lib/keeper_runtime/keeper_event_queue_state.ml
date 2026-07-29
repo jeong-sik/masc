@@ -3212,7 +3212,7 @@ let legacy_transition_outbox_entry_of_yojson json =
   Ok { receipt; stimuli }
 ;;
 
-let legacy_source_terminal_ack_outbox_entry_of_yojson json =
+let legacy_persisted_transition_outbox_entry_of_yojson json =
   legacy_settlement_outbox_entry_json json |> legacy_transition_outbox_entry_of_yojson
 ;;
 
@@ -3515,7 +3515,7 @@ let of_yojson json =
       list_field
         ~context
         "transition_outbox"
-        legacy_source_terminal_ack_outbox_entry_of_yojson
+        legacy_persisted_transition_outbox_entry_of_yojson
         fields
     else if
       String.equal schema_value schema_v9 || String.equal schema_value schema_v8
@@ -3523,7 +3523,7 @@ let of_yojson json =
       list_field
         ~context
         "transition_outbox"
-        legacy_source_terminal_ack_outbox_entry_of_yojson
+        legacy_persisted_transition_outbox_entry_of_yojson
         fields
     else Ok []
   in

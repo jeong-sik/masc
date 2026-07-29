@@ -385,18 +385,18 @@ val legacy_settlement_transition_receipt_of_yojson :
     [applied_at_unix] and [transition] exclusively. *)
 val legacy_transition_receipt_of_yojson :
   Yojson.Safe.t -> (transition_receipt, string) result
-(** Recovery-only decoder for retired v10 lease receipt fields. *)
+(** Recovery-only decoder for retired lease receipt fields. *)
 val outbox_entry_to_yojson : outbox_entry -> Yojson.Safe.t
 val outbox_entry_of_yojson : Yojson.Safe.t -> (outbox_entry, string) result
 val legacy_transition_outbox_entry_of_yojson :
   Yojson.Safe.t -> (outbox_entry, string) result
-(** Recovery-only decoder for the retired v10 receipt fields. *)
-val legacy_source_terminal_ack_outbox_entry_of_yojson :
+(** Recovery-only decoder for retired transition-shaped lease receipt fields. *)
+val legacy_persisted_transition_outbox_entry_of_yojson :
   Yojson.Safe.t -> (outbox_entry, string) result
-(** Recovery-only decoder for a v8 source-terminal outbox. It canonicalizes
-    the removed source-terminal action label to [Ack_source_terminal] while
-    preserving the historical transition/event identity. New writes never use
-    this path. *)
+(** Recovery-only decoder for persisted v11 through v8 outboxes and legacy
+    settlement WAL rows. It converts retired settlement field names and the
+    removed source-terminal action label while preserving the historical
+    transition/event identity. New writes never use this path. *)
 val replay_transition_outbox_entry : outbox_entry -> t -> (t, string) result
 (** Replay a source-bearing committed transition. Historical lease-backed
     records are accepted only at this durable recovery boundary. *)

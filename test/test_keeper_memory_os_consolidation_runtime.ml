@@ -31,7 +31,6 @@ let fact ?valid_until claim =
   ; category = Types.Fact
   ; claim_kind = None
   ; source = { Types.trace_id = "t"; turn = 1; tool_call_id = None }
-  ; observed_by = []
   ; first_seen = now
   ; valid_until
   ; last_verified_at = Some now

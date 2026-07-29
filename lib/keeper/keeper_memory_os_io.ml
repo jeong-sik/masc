@@ -64,9 +64,7 @@ let list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir =
     Sys.readdir dir
     |> Array.to_list
     |> List.filter_map (fun name ->
-      match Filename.chop_suffix_opt ~suffix:".facts.jsonl" name with
-      | Some id when not (String.equal id shared_store_id) -> Some id
-      | Some _ | None -> None)
+      Filename.chop_suffix_opt ~suffix:".facts.jsonl" name)
     |> List.sort String.compare
 ;;
 
@@ -84,8 +82,8 @@ let has_episode_store_for_keepers_dir ~keepers_dir ~keeper_id =
 (* Keeper ids with an on-disk episode store ([<id>/episodes/]), for the episode
    retention sweep. A keeper whose extracted episodes all carried zero claims
    has no [*.facts.jsonl] but still accumulates episode files, so the sweep
-   cannot enumerate from fact stores alone. The reserved shared id is excluded;
-   sorted for deterministic sweep order. *)
+   cannot enumerate from fact stores alone. Sorted for deterministic sweep
+   order. *)
 let list_episode_store_keeper_ids_for_keepers_dir ~keepers_dir =
   let dir = keepers_dir in
   if not (Sys.file_exists dir && Sys.is_directory dir)
@@ -94,8 +92,7 @@ let list_episode_store_keeper_ids_for_keepers_dir ~keepers_dir =
     Sys.readdir dir
     |> Array.to_list
     |> List.filter (fun name ->
-      (not (String.equal name shared_store_id))
-      && has_episode_store_for_keepers_dir ~keepers_dir ~keeper_id:name)
+      has_episode_store_for_keepers_dir ~keepers_dir ~keeper_id:name)
     |> List.sort String.compare
 ;;
 

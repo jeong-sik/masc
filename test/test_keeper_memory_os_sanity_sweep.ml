@@ -17,7 +17,6 @@ let fact
   ; category
   ; claim_kind
   ; source = { Types.trace_id = "trace-sanity"; turn = 1; tool_call_id = None }
-  ; observed_by = []
   ; first_seen
   ; valid_until
   ; last_verified_at

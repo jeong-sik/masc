@@ -1,17 +1,27 @@
 ---
 rfc: "0244"
 title: "Memory OS recall: turn-seeded deterministic lexical retrieval, with provenance and layered consolidation roadmap"
-status: Draft
+status: Superseded
 created: 2026-06-15
 updated: 2026-06-15
 author: vincent
 supersedes: []
-superseded_by: null
+superseded_by: "0247"
 related: ["0239", "0241", "0243"]
 implementation_prs: []
 ---
 
 # RFC-0244 — Memory OS recall: turn-seeded deterministic lexical retrieval
+
+> **Superseded by RFC-0247.** The score-based Memory OS this RFC builds on was
+> purged by RFC-0247, and the Tier-2 shared semantic store described here was
+> deleted with the keeper governance refactor (PR #24332) without a replacement
+> writer. The reader-side residue — the `_shared` reserved store id, the
+> `observed_by` corroboration set, and the dashboard Hebbian synapse view — was
+> removed afterwards; each had a live-looking reader and no producer, so the
+> synapse graph was computed from an empty set on every request. Consolidation
+> today is per-keeper only (`Keeper_memory_os_consolidation`).
+
 
 ## §0 Context — what RFC-0243 did and did not fix
 

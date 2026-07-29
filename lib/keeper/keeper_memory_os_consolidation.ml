@@ -340,14 +340,10 @@ let consolidated_fact ~now:_ ~members ~claim_kind (group : merge_group) =
   let first_seen =
     List.fold_left (fun acc m -> Float.min acc m.first_seen) earliest.first_seen members
   in
-  let observed_by =
-    List.concat_map (fun m -> m.observed_by) members |> List.sort_uniq String.compare
-  in
   { claim = group.consolidated_claim
   ; category = group.category
   ; claim_kind
   ; source = earliest.source
-  ; observed_by
   ; first_seen
   ; valid_until = valid_until_for_members members
   ; last_verified_at = last_verified_for_members members

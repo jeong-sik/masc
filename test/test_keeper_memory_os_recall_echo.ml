@@ -26,7 +26,6 @@ let fact ?(claim = "keeper must do zero tool calls and emit one short line")
   ; Types.category
   ; Types.claim_kind
   ; Types.source = { Types.trace_id = "trace-echo"; Types.turn = 58; Types.tool_call_id = None }
-  ; Types.observed_by = []
   ; Types.first_seen = now -. 86_400.0
   ; Types.valid_until = None
   ; Types.last_verified_at

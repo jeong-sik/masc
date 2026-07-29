@@ -89,7 +89,6 @@ let fact claim =
   ; category = Fact
   ; claim_kind = Some Durable_knowledge
   ; source = { trace_id = "trace-1"; turn = 1; tool_call_id = None }
-  ; observed_by = []
   ; first_seen = 10.0
   ; valid_until = None
   ; last_verified_at = None
@@ -1431,8 +1430,7 @@ let test_exact_implementation_boundary ~fs () =
 let test_canonical_state_and_digest_parity () =
   let special_fact =
     { (fact "quote:\" slash:\\ control:\x7f utf8:한글") with
-      observed_by = [ "keeper-a"; "quote:\""; "control:\x01" ]
-    ; first_seen = Float.max_float
+      first_seen = Float.max_float
     ; valid_until = Some (-. Float.max_float)
     ; last_verified_at = Some 2.2250738585072014e-308
     }

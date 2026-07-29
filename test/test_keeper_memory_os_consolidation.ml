@@ -10,7 +10,6 @@ let fact
       ?(first_seen = now)
       ?valid_until
       ?last_verified_at
-      ?(observed_by = [])
       ?claim_id
       ?(claim_kind = None)
       claim
@@ -24,7 +23,6 @@ let fact
   ; category
   ; claim_kind
   ; source = { Types.trace_id = "t"; turn = 1; tool_call_id = None }
-  ; observed_by
   ; first_seen
   ; valid_until
   ; last_verified_at
@@ -47,12 +45,12 @@ let only_fact = function
 ;;
 
 (* A two-member group collapses into one consolidated claim; provenance is the
-   earliest member's, first_seen is the min, observed_by is the union, and
-   verification age is preserved from the newest member verification. *)
+   earliest member's, first_seen is the min, and verification age is preserved
+   from the newest member verification. *)
 let test_apply_merges_group () =
   let facts =
-    [ fact ~first_seen:200.0 ~observed_by:[ "alpha" ] "deploy uses blue-green"
-    ; fact ~first_seen:100.0 ~observed_by:[ "beta" ] "deployment is blue-green based"
+    [ fact ~first_seen:200.0 "deploy uses blue-green"
+    ; fact ~first_seen:100.0 "deployment is blue-green based"
     ]
   in
   let plan =
@@ -70,10 +68,6 @@ let test_apply_merges_group () =
   | [ merged ] ->
     Alcotest.(check string) "consolidated claim" "deploys via blue-green" merged.Types.claim;
     Alcotest.(check (float 1e-9)) "earliest first_seen preserved" 100.0 merged.Types.first_seen;
-    Alcotest.(check (list string))
-      "observed_by union"
-      [ "alpha"; "beta" ]
-      merged.Types.observed_by;
     Alcotest.(check (option (float 1e-9)))
       "newest verification preserved"
       (Some 200.0)

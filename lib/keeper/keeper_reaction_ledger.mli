@@ -1,9 +1,9 @@
 (** Durable keeper stimulus -> reaction ledger.
 
     This is the runtime mirror for the KeeperReactionLiveness L1/L5
-    contract: queue-visible stimuli, queue settlement reactions, and board
+    contract: queue-visible stimuli, queue transition reactions, and board
     cursor acknowledgements are written to a replayable JSONL store under
-    [.masc/keepers/<keeper>/reaction-ledger/v4/YYYY-MM/DD.jsonl].  The
+    [.masc/keepers/<keeper>/reaction-ledger/v5/YYYY-MM/DD.jsonl].  The
     generation namespace is a hard boundary: older stores are neither read nor
     written by this module. *)
 
@@ -67,14 +67,14 @@ val record_event_queue_stimulus :
 
 val record_event_queue_turn_started :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus -> unit
-(** Append the sole non-settlement event-queue reaction. The writer fixes the
-    reaction kind so callers cannot manufacture settlement evidence. *)
+(** Append the sole non-transition event-queue reaction. The writer fixes the
+    reaction kind so callers cannot manufacture transition evidence. *)
 
 val project_event_queue_transition_outbox_result :
   base_path:string -> keeper_name:string -> (unit, string) result
 (** Read the sole durable event-queue transition outbox, append every source in
     exact order, then retire that same transition. Callers supply no receipt,
-    stimulus, source index, or outbox record, so settlement evidence can only
+    stimulus, source index, or outbox record, so transition evidence can only
     originate from the event-queue SSOT. Persistence failures remain explicit
     [Error]. Retries are logically idempotent through deterministic per-source
     event ids. *)

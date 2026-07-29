@@ -4,7 +4,6 @@ type request =
   ; owner_nonce : int
   ; source_receipt : Keeper_event_queue_state.source_terminal_receipt
   ; operator_operation_id : string
-  ; settled_at : float
   }
 
 type failure =
@@ -25,7 +24,7 @@ type failure =
       }
   | Durable_owner_identity_changed
   | Source_queue_validation_failed of string
-  | Committed_settlement_failed of string
+  | Committed_ack_failed of string
 
 type error =
   { cause : failure
@@ -37,7 +36,7 @@ type commit_status =
   | Already_committed
 
 type projection =
-  | Applied of Keeper_registry_event_queue.settle_result
+  | Applied of Keeper_registry_event_queue.source_ack_result
   | Committed_followup_failed of failure
 
 type success =
@@ -51,45 +50,45 @@ let ( let* ) = Result.bind
 
 let failure_to_string = function
   | Invalid_request detail ->
-    "invalid Settle_from_source_terminal request: " ^ detail
+    "invalid Ack_source_terminal request: " ^ detail
   | Admission_busy block ->
     Printf.sprintf
-      "keeper_turn_admission_busy: operation=settle_from_source_terminal %s"
+      "keeper_turn_admission_busy: operation=ack_source_terminal %s"
       (Keeper_turn_admission.autonomous_block_to_string block)
   | Reservation_conflict owner ->
-    "Settle_from_source_terminal lifecycle reservation conflict: "
+    "Ack_source_terminal lifecycle reservation conflict: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner
   | Receipt_lock_failed detail ->
-    "Settle_from_source_terminal receipt lock failed: " ^ detail
+    "Ack_source_terminal receipt lock failed: " ^ detail
   | Receipt_read_failed detail ->
-    "Settle_from_source_terminal receipt read failed: " ^ detail
+    "Ack_source_terminal receipt read failed: " ^ detail
   | Receipt_conflict receipt ->
     Printf.sprintf
-      "Settle_from_source_terminal operation ID conflicts with keeper=%s generation=%d requested_at=%.17g"
+      "Ack_source_terminal operation ID conflicts with keeper=%s generation=%d requested_at=%.17g"
       receipt.keeper_name
       receipt.expected_generation
       receipt.requested_at
   | Receipt_write_failed detail ->
-    "Settle_from_source_terminal receipt write failed: " ^ detail
+    "Ack_source_terminal receipt write failed: " ^ detail
   | Durable_meta_read_failed detail ->
-    "Settle_from_source_terminal durable metadata read failed: " ^ detail
+    "Ack_source_terminal durable metadata read failed: " ^ detail
   | Durable_meta_missing ->
-    "Settle_from_source_terminal durable Keeper metadata is missing"
+    "Ack_source_terminal durable Keeper metadata is missing"
   | Durable_owner_not_paused ->
-    "Settle_from_source_terminal requires a paused Keeper"
+    "Ack_source_terminal requires a paused Keeper"
   | Durable_owner_dead_tombstone ->
-    "Settle_from_source_terminal cannot use a Dead tombstone"
+    "Ack_source_terminal cannot use a Dead tombstone"
   | Durable_owner_nonce_changed { expected; actual } ->
     Printf.sprintf
-      "Settle_from_source_terminal generation changed: expected %d, actual %d"
+      "Ack_source_terminal generation changed: expected %d, actual %d"
       expected
       actual
   | Durable_owner_identity_changed ->
-    "Settle_from_source_terminal trace identity changed"
+    "Ack_source_terminal trace identity changed"
   | Source_queue_validation_failed detail ->
-    "Settle_from_source_terminal source queue validation failed: " ^ detail
-  | Committed_settlement_failed detail ->
-    "Settle_from_source_terminal committed receipt but settlement failed: " ^ detail
+    "Ack_source_terminal source queue validation failed: " ^ detail
+  | Committed_ack_failed detail ->
+    "Ack_source_terminal committed receipt but source ACK failed: " ^ detail
 ;;
 
 let error_to_string error =
@@ -115,8 +114,6 @@ let validate_request request =
   then Error "source post id must not be empty"
   else if String.equal (String.trim request.operator_operation_id) ""
   then Error "operator operation ID must not be empty"
-  else if not (Float.is_finite request.settled_at)
-  then Error "settlement time must be finite"
   else
     let* exact =
       Keeper_event_queue_state.source_terminal_receipt_of_stimulus request.source
@@ -160,9 +157,6 @@ let validate_source_queue config ~keeper_name request =
   in
   if not (Int64.equal (Keeper_event_queue_state.revision state) request.source_revision)
   then Error (Source_queue_validation_failed "source revision changed")
-  (* An "active lease" guard sat here. No caller can claim a lease since #25969
-     moved production to peek/ack, and [State.of_yojson] restores none, so the
-     condition could never hold. The outbox guard below still can. *)
   else if Keeper_event_queue_state.transition_outbox state <> []
   then Error (Source_queue_validation_failed "source lane has a pending transition outbox")
   else
@@ -181,7 +175,7 @@ let validate_source_queue config ~keeper_name request =
 
 let operation_of_receipt receipt =
   match receipt.Keeper_paused_work_disposition_receipt.operation with
-  | Keeper_paused_work_disposition_receipt.Settle_from_source_terminal operation ->
+  | Keeper_paused_work_disposition_receipt.Ack_source_terminal operation ->
     Ok operation
   | Keeper_paused_work_disposition_receipt.Resume_owner
   | Keeper_paused_work_disposition_receipt.Transfer_owner _ ->
@@ -197,7 +191,6 @@ let receipt_matches_request ~keeper_name request receipt =
     && String.equal receipt.operator_operation_id request.operator_operation_id
     && operation.source = request.source
     && Int64.equal operation.source_revision request.source_revision
-    && Float.equal operation.settled_at request.settled_at
     && operation.source_receipt = request.source_receipt
 ;;
 
@@ -208,7 +201,6 @@ let create_receipt config ~keeper_name request =
   let operation : Keeper_paused_work_disposition_receipt.source_terminal_operation =
     { source = request.source
     ; source_revision = request.source_revision
-    ; settled_at = request.settled_at
     ; source_receipt = request.source_receipt
     }
   in
@@ -219,7 +211,7 @@ let create_receipt config ~keeper_name request =
      ; operator_operation_id = request.operator_operation_id
      ; requested_at = Time_compat.now ()
      ; operation =
-         Keeper_paused_work_disposition_receipt.Settle_from_source_terminal
+         Keeper_paused_work_disposition_receipt.Ack_source_terminal
            operation
      }
      : Keeper_paused_work_disposition_receipt.t)
@@ -240,16 +232,16 @@ let project_receipt config receipt =
     Keeper_event_queue_persistence.load_state_result
       ~base_path
       ~keeper_name:receipt.keeper_name
-    |> Result.map_error (fun detail -> Committed_settlement_failed detail)
+    |> Result.map_error (fun detail -> Committed_ack_failed detail)
   in
   let* prior =
-    Keeper_event_queue_state.accepted_pending_source_terminal_replay
+    Keeper_event_queue_state.accepted_pending_source_terminal_ack_replay
       source_terminal
       state
-    |> Result.map_error (fun detail -> Committed_settlement_failed detail)
+    |> Result.map_error (fun detail -> Committed_ack_failed detail)
   in
   match prior with
-  | Some prior -> Ok (Keeper_registry_event_queue.Already_settled prior)
+  | Some prior -> Ok (Keeper_registry_event_queue.Already_acked prior)
   | None ->
     let* current = read_meta config receipt.keeper_name in
     let* () =
@@ -264,13 +256,13 @@ let project_receipt config receipt =
       then Error Durable_owner_identity_changed
       else Ok ()
     in
-    Keeper_registry_event_queue.settle_pending_from_source_terminal_result
+    Keeper_registry_event_queue.ack_pending_source_terminal_result
       ~base_path
       receipt.keeper_name
       ~current_owner_nonce:current.runtime.nonce
-      ~settled_at:operation.settled_at
+      ~acked_at:receipt.requested_at
       ~source_terminal
-    |> Result.map_error (fun detail -> Committed_settlement_failed detail)
+    |> Result.map_error (fun detail -> Committed_ack_failed detail)
 ;;
 
 let run_owned receipt_lock config ~keeper_name request =
@@ -305,13 +297,13 @@ let run_owned receipt_lock config ~keeper_name request =
   in
   let projection =
     match project_receipt config receipt with
-    | Ok settlement -> Applied settlement
+    | Ok result -> Applied result
     | Error failure -> Committed_followup_failed failure
   in
   Ok (receipt, commit_status, projection)
 ;;
 
-let settle_pending_under_admission config ~keeper_name request =
+let ack_pending_under_admission config ~keeper_name request =
   match validate_request request with
   | Error detail ->
     Error { cause = Invalid_request detail; reservation_release = None }
@@ -352,12 +344,12 @@ let settle_pending_under_admission config ~keeper_name request =
           raise exn))
 ;;
 
-let settle_pending config ~keeper_name request =
+let ack_pending config ~keeper_name request =
   match
     Keeper_turn_admission.run_admin_if_free
       ~base_path:config.Workspace.base_path
       ~keeper_name
-      (fun () -> settle_pending_under_admission config ~keeper_name request)
+      (fun () -> ack_pending_under_admission config ~keeper_name request)
   with
   | `Ran outcome -> outcome
   | `Busy block ->

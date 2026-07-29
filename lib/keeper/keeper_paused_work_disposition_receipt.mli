@@ -11,21 +11,19 @@ type transfer_owner =
   ; target_generation : int
   ; source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; settled_at : float
   ; continuation_binding : continuation_binding
   }
 
 type source_terminal_operation =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; settled_at : float
   ; source_receipt : Keeper_event_queue_state.source_terminal_receipt
   }
 
 type operation =
   | Resume_owner
   | Transfer_owner of transfer_owner
-  | Settle_from_source_terminal of source_terminal_operation
+  | Ack_source_terminal of source_terminal_operation
 
 type t =
   { keeper_name : string
@@ -55,16 +53,19 @@ val continuation_binding_of_yojson : Yojson.Safe.t -> (continuation_binding, str
 val source_terminal_receipt_kind :
   Keeper_event_queue_state.source_terminal_receipt -> string
 
+val schema : string
+(** The only accepted durable receipt schema. *)
+
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
-(** Strict public codec used by authenticated operator surfaces and harnesses.
-    It is the same codec used for the durable receipt file. *)
+(** Strict current codec used by both public surfaces and durable loads. *)
 
 val load :
   Workspace.config ->
   keeper_name:string ->
   operator_operation_id:string ->
   (t option, string) result
+(** Load a receipt in the current schema. Retired schemas are rejected. *)
 
 val with_keeper_lock :
   Workspace.config ->

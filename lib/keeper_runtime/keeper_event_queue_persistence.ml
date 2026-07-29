@@ -20,13 +20,13 @@ let owner_identity_keeper_name owner =
   Owner_lock.keeper_name owner |> Keeper_id.Keeper_name.to_string
 ;;
 
-type lease_kind = State.lease_kind =
+type selection_kind = State.selection_kind =
   | Single
   | Board_batch
 
 type pending_selection = State.pending_selection =
   { source_revision : int64
-  ; kind : lease_kind
+  ; kind : selection_kind
   ; stimuli : Keeper_event_queue.stimulus list
   }
 
@@ -61,43 +61,6 @@ type exact_execution_terminal = State.exact_execution_terminal =
   ; call_id : string
   ; plan_fingerprint : string
   ; request_body_sha256 : string
-  }
-
-type exact_source_action = State.exact_source_action = Consume_source
-
-type exact_settlement_semantic = State.exact_settlement_semantic =
-  | Exact_no_compaction
-  | Exact_escalate
-
-type exact_source_outcome = State.exact_source_outcome =
-  | Terminal of exact_execution_terminal_cause
-
-type exact_source_disposition = State.exact_source_disposition =
-  { disposition_id : string
-  ; source : Keeper_checkpoint_ref.t
-  ; slot_id : string
-  ; call_id : string
-  ; plan_fingerprint : string
-  ; request_body_sha256 : string
-  ; outcome : exact_source_outcome
-  ; action : exact_source_action
-  ; semantic : exact_settlement_semantic
-  ; prepared_at : float
-  }
-
-type exact_execution_lease_status = State.exact_execution_lease_status =
-  | Dispatch_uncertain
-  | Terminal_quarantined of exact_execution_terminal_cause
-  | Disposition_prepared of exact_source_disposition
-
-type exact_execution_binding = State.exact_execution_binding =
-  { lease_id : string
-  ; lease_sequence : int64
-  ; slot_id : string
-  ; call_id : string
-  ; plan_fingerprint : string
-  ; request_body_sha256 : string
-  ; status : exact_execution_lease_status
   }
 
 type exact_write_outcome =
@@ -163,7 +126,7 @@ type accepted_source_terminal = State.accepted_source_terminal =
   ; source_receipt : source_terminal_receipt
   }
 
-type settlement = State.settlement =
+type transition = State.transition =
   | Ack
   | Manual_compaction_committed of
       { commit : State.manual_compaction_commit
@@ -172,8 +135,7 @@ type settlement = State.settlement =
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
-  | Settle_from_source_terminal of accepted_source_terminal
-  | Settle_exact of exact_source_disposition
+  | Ack_source_terminal of accepted_source_terminal
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -183,10 +145,10 @@ type settlement = State.settlement =
 type transition_receipt = State.transition_receipt
 type outbox_entry = State.outbox_entry
 
-type settle_result =
-  | Settled of transition_receipt
-  | Already_settled of transition_receipt
-  | Committed_followup_failed of
+type transition_result =
+  | Transition_applied of transition_receipt
+  | Transition_already_applied of transition_receipt
+  | Transition_committed_followup_failed of
       { receipt : transition_receipt
       ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
       ; detail : string
@@ -197,9 +159,8 @@ type transfer_projection_result = State.transfer_projection_result =
   | Transfer_already_projected
 
 
-let snapshot_filename = "event-queue.json"
-let settlement_wal_filename = "event-queue-settlements.jsonl"
-let unsupported_inflight_filename = "event-queue-inflight.json"
+let snapshot_filename = "event-queue-v12.json"
+let transition_wal_filename = "event-queue-transitions-v2.jsonl"
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
 
@@ -223,12 +184,11 @@ let snapshot_path_of_owner owner =
   Filename.concat (keeper_runtime_dir_of_owner owner) snapshot_filename
 ;;
 
-let settlement_wal_path_of_owner owner =
-  Filename.concat (keeper_runtime_dir_of_owner owner) settlement_wal_filename
+let transition_wal_path_of_owner owner =
+  Filename.concat (keeper_runtime_dir_of_owner owner) transition_wal_filename
 ;;
 
-let compact_settlement_wal_unlocked owner =
-  let path = settlement_wal_path_of_owner owner in
+let compact_wal_unlocked ~surface ~path owner =
   match
     Fs_compat.rewrite_private_file_durable_locked_result path (fun existing ->
       (if String.equal existing "" then None else Some ""), ())
@@ -237,14 +197,18 @@ let compact_settlement_wal_unlocked owner =
   | Error detail ->
     Error
       (Printf.sprintf
-         "failed to compact checkpointed settlement WAL keeper=%s path=%s: %s"
+         "failed to compact checkpointed %s keeper=%s path=%s: %s"
+         surface
          (keeper_name_of_owner owner)
          path
          detail)
 ;;
 
-let unsupported_inflight_path_of_owner owner =
-  Filename.concat (keeper_runtime_dir_of_owner owner) unsupported_inflight_filename
+let compact_transition_wals_unlocked owner =
+  compact_wal_unlocked
+    ~surface:"transition WAL"
+    ~path:(transition_wal_path_of_owner owner)
+    owner
 ;;
 
 let save_json_atomic_with ~strict_parent_sync path json =
@@ -412,31 +376,17 @@ let read_primary_unlocked owner =
                message)))
 ;;
 
-let reject_unsupported_inflight owner =
-  let path = unsupported_inflight_path_of_owner owner in
-  try
-    if Sys.file_exists path
-    then
-      Error
-        (Printf.sprintf
-           "unsupported event queue sidecar remains at %s; remove it before starting the keeper"
-           path)
-    else Ok ()
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Error (Printf.sprintf "failed to inspect unsupported sidecar %s: %s" path (Printexc.to_string exn))
-;;
-
 let bump_revision state =
   if Int64.equal (State.revision state) Int64.max_int
   then Error "event queue revision exhausted"
   else Ok (State.with_revision (Int64.succ (State.revision state)) state)
 ;;
 
-let settlement_wal_entry_to_line owner entry =
+let transition_wal_schema = "masc.keeper_event_queue.transition.v2"
+
+let transition_wal_entry_to_line owner entry =
   `Assoc
-    [ "schema", `String "masc.keeper_event_queue.settlement.v2"
+    [ "schema", `String transition_wal_schema
     ; "base_path", `String (Owner_lock.base_path owner)
     ; "keeper_name", `String (keeper_name_of_owner owner)
     ; "outbox_entry", State.outbox_entry_to_yojson entry
@@ -445,84 +395,108 @@ let settlement_wal_entry_to_line owner entry =
   |> fun row -> row ^ "\n"
 ;;
 
-let settlement_wal_entry_of_json owner = function
+let transition_wal_entry_of_json owner = function
   | `Assoc fields ->
     (match List.assoc_opt "schema" fields with
-     | Some (`String schema)
-       when not (String.equal schema "masc.keeper_event_queue.settlement.v2") ->
-       Error (Printf.sprintf "unsupported settlement WAL schema: %s" schema)
-     | _ ->
+     | Some (`String schema) when String.equal schema transition_wal_schema ->
        (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
         | [ ("base_path", `String base_path)
           ; ("keeper_name", `String keeper_name)
           ; ("outbox_entry", entry)
-          ; ("schema", `String "masc.keeper_event_queue.settlement.v2")
+          ; ("schema", `String row_schema)
           ] ->
-          if
+          if not (String.equal row_schema schema)
+          then Error "transition WAL schema field changed during decode"
+          else if
             not
               (String.equal base_path (Owner_lock.base_path owner)
                && String.equal keeper_name (keeper_name_of_owner owner))
-          then Error "settlement WAL row owner does not match its Keeper lane"
+          then Error "transition WAL row owner does not match its Keeper lane"
           else State.outbox_entry_of_yojson entry
-        | _ -> Error "settlement WAL row fields are not exact"))
-  | _ -> Error "settlement WAL row must be a JSON object"
+        | _ -> Error "transition WAL row fields are not exact")
+     | Some (`String schema) ->
+       Error (Printf.sprintf "unsupported transition WAL schema: %s" schema)
+     | Some _ | None -> Error "transition WAL schema must be a string")
+  | _ -> Error "transition WAL row must be a JSON object"
 ;;
 
-let replay_settlement_wal_bytes owner state bytes =
-  let rec replay state = function
-    | [] | [ "" ] -> Ok state
-    | "" :: _ -> Error "settlement WAL contains an empty row"
+let replay_transition_wal_bytes owner state bytes =
+  let row_is_already_projected (entry : State.outbox_entry) state =
+    State.transition_outbox state = []
+    && List.exists
+         (fun receipt ->
+            State.transition_receipt_equal receipt entry.receipt)
+         (State.projected_transition_receipts state)
+  in
+  let rec replay ~saw_row ~all_rows_already_projected state = function
+    | [] | [ "" ] -> Ok (state, saw_row && all_rows_already_projected)
+    | "" :: _ -> Error "transition WAL contains an empty row"
     | line :: rest ->
       (match
          try Ok (Yojson.Safe.from_string line) with
          | Yojson.Json_error detail -> Error detail
        with
-       | Error detail -> Error ("invalid settlement WAL JSON: " ^ detail)
+       | Error detail -> Error ("invalid transition WAL JSON: " ^ detail)
        | Ok json ->
-         (match settlement_wal_entry_of_json owner json with
+         (match transition_wal_entry_of_json owner json with
           | Error _ as error -> error
           | Ok entry ->
+            let already_projected = row_is_already_projected entry state in
             (match State.replay_transition_outbox_entry entry state with
              | Error _ as error -> error
-             | Ok state -> replay state rest)))
+             | Ok state ->
+               replay
+                 ~saw_row:true
+                 ~all_rows_already_projected:(all_rows_already_projected && already_projected)
+                 state
+                 rest)))
   in
-  replay state (String.split_on_char '\n' bytes)
+  replay
+    ~saw_row:false
+    ~all_rows_already_projected:true
+    state
+    (String.split_on_char '\n' bytes)
 ;;
 
-let replay_settlement_wal_unlocked owner state =
-  let path = settlement_wal_path_of_owner owner in
+let replay_wal_unlocked ~path ~surface owner state =
   let replay_slice slice =
     match slice.Fs_compat.Private_jsonl_slice.bytes with
     | "" -> Ok state
     | bytes ->
-       (match replay_settlement_wal_bytes owner state bytes with
+       (match replay_transition_wal_bytes owner state bytes with
         | Error detail ->
           Error
             (reset_required_message
                ~path
-               ~surface:"settlement WAL"
+               ~surface
                detail)
-        | Ok replayed ->
-          (* [State.to_yojson] intentionally persists only the pending queue.
-             Leases and transition outboxes are no longer snapshot fields, so
-             checkpointing [replayed] and compacting this WAL here would erase
-             the only durable copy of the settlement before its reaction-ledger
-             projector can observe it. Keep the source-bearing WAL authoritative
-             until [project_transition_outbox_result] appends and retires it. *)
-          Ok replayed)
+        | Ok (replayed, all_rows_already_projected) ->
+          if all_rows_already_projected
+          then
+            (* A projection checkpoint was durable before its WAL retirement.
+               The exact row now proves only the same already-projected
+               transition, so leaving it in place would block the next append
+               (which rightly requires an empty WAL). This is the sole safe
+               read-time compaction: any replay that reconstructs an outbox is
+               still authoritative until [project_transition_outbox_result]
+               records the reaction and retires it. *)
+            compact_wal_unlocked ~surface ~path owner |> Result.map (fun () -> replayed)
+          else Ok replayed)
   in
   match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
   | Private_file_failed error ->
     Error
       (Printf.sprintf
-         "failed to read settlement WAL keeper=%s path=%s: %s"
+         "failed to read %s keeper=%s path=%s: %s"
+         surface
          (keeper_name_of_owner owner)
          path
          (Fs_compat.Private_jsonl_slice.error_to_string error))
   | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
     Error
       (Printf.sprintf
-         "failed to read settlement WAL keeper=%s path=%s: %s; descriptor settlement failed: %s"
+         "failed to read %s keeper=%s path=%s: %s; descriptor cleanup failed: %s"
+         surface
          (keeper_name_of_owner owner)
          path
          (Fs_compat.Private_jsonl_slice.error_to_string error)
@@ -531,21 +505,28 @@ let replay_settlement_wal_unlocked owner state =
   | Private_file_succeeded_with_cleanup_failure
       { value = slice; cleanup_failure } ->
     Log.Keeper.error
-      "settlement WAL read succeeded with descriptor settlement failure keeper=%s path=%s: %s"
+      "%s read succeeded with descriptor cleanup failure keeper=%s path=%s: %s"
+      surface
       (keeper_name_of_owner owner)
       path
       (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
     replay_slice slice
 ;;
 
+let replay_transition_wal_unlocked owner state =
+  replay_wal_unlocked
+    ~path:(transition_wal_path_of_owner owner)
+    ~surface:"transition WAL"
+    owner
+    state
+;;
+
 let load_state_unlocked owner =
-  match reject_unsupported_inflight owner with
+  match read_primary_unlocked owner with
   | Error _ as error -> error
-  | Ok () ->
-    (match read_primary_unlocked owner with
-     | Error _ as error -> error
-     | Ok (Primary_current state) -> replay_settlement_wal_unlocked owner state
-     | Ok Primary_missing -> replay_settlement_wal_unlocked owner State.empty)
+  | Ok (Primary_current state) ->
+    replay_transition_wal_unlocked owner state
+  | Ok Primary_missing -> replay_transition_wal_unlocked owner State.empty
 ;;
 
 let load_state_result ~base_path ~keeper_name =
@@ -564,19 +545,13 @@ let load_state_result ~base_path ~keeper_name =
 ;;
 
 
-let exact_execution_binding_result ~base_path ~keeper_name =
-  load_state_result ~base_path ~keeper_name |> Result.map State.exact_execution_binding
-;;
-
 let queue_of_stimuli stimuli =
   List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty stimuli
 ;;
 
-(* In-flight work was the stimuli held by an active lease. Nothing outside
-   [Keeper_event_queue_state] can claim a lease any more and [State.of_yojson]
-   restores none, so a loaded state never carries in-flight stimuli. The
-   projection stays so replay, snapshot, and outbox reporting keep their
-   shape. *)
+(* The current pending-selection protocol has no separate in-flight queue.
+   Keep the empty projection so snapshot/reporting consumers retain their
+   current shape. *)
 let inflight_queue (_ : State.t) = Keeper_event_queue.empty
 
 let replay_queue state =
@@ -609,7 +584,6 @@ let diagnose_snapshot_read_error ~base_path ~keeper_name message =
   | Error invalid -> [ { kind = Invalid_path; path = None; message = invalid } ]
   | Ok owner ->
     let primary = snapshot_path_of_owner owner in
-    let unsupported = unsupported_inflight_path_of_owner owner in
     let inspect path =
       try
         if not (Sys.file_exists path)
@@ -628,12 +602,9 @@ let diagnose_snapshot_read_error ~base_path ~keeper_name message =
           ; message = Printexc.to_string exn
           }
     in
-    match inspect unsupported with
-    | Some _ -> [ { kind = Parse_failed; path = Some unsupported; message } ]
-    | None ->
-      (match inspect primary with
-       | Some error -> [ error ]
-       | None -> [ { kind = Parse_failed; path = None; message } ])
+    (match inspect primary with
+     | Some error -> [ error ]
+     | None -> [ { kind = Parse_failed; path = None; message } ])
 ;;
 
 let load_snapshot_pair_with_errors ~base_path ~keeper_name =
@@ -732,16 +703,16 @@ let commit_transform_unlocked
           (match save_state owner next with
            | Error _ as error -> error
            | Ok () ->
-             (* [load_state_unlocked] above replayed the settlement WAL, so
-                [next] already carries that settlement's pending mutation and
+             (* [load_state_unlocked] above replayed the transition WAL, so
+                [next] already carries that transition's pending mutation and
                 its transition outbox, and the snapshot just written persists
-                both (schema v8). Retire the WAL here, paired with the revision
+                both (schema v12). Retire the WAL here, paired with the revision
                 bump that absorbed it. Leaving it behind is what latches the
                 owner: the next load replays an already-absorbed row against
-                the advanced revision, [settle_committed] rejects it on
+                the advanced revision, [commit_transition] rejects it on
                 [source_revision], and no runtime path can clear it because the
                 projector itself starts with [load_state_unlocked] (#26074). *)
-             (match compact_settlement_wal_unlocked owner with
+             (match compact_transition_wals_unlocked owner with
               | Error _ as error -> error
               | Ok () ->
                 after_commit (State.pending next);
@@ -844,10 +815,6 @@ let state_accounts_for_stimulus state stimulus =
   let same candidate =
     Keeper_event_queue.stimulus_identity_equal candidate stimulus
   in
-  (* A lease term sat between these two: a stimulus held by an active lease also
-     counted as accounted for. No caller can claim a lease since #25969 moved
-     production to peek/ack, and [State.of_yojson] restores none, so that term
-     was always false. *)
   List.exists same (Keeper_event_queue.to_list (State.pending state))
   || List.exists
        (fun (entry : outbox_entry) -> List.exists same entry.stimuli)
@@ -929,13 +896,7 @@ let ack_pending_result
     | Ok state -> Ok (state, ()))
 ;;
 
-(* The lease-taking exact-execution fence lived here: bind, release before
-   dispatch, quarantine, prepare/finalize source disposition, and
-   settle_bound_exact_nonterminal, plus a For_testing pair that drove the same
-   calls. All of them required a lease, which no caller can obtain since #25969
-   moved production to peek/ack. *)
-
-let commit_settlement_transition_unlocked_with
+let commit_transition_unlocked_with
       ~save_checkpoint
       ~compact_wal
       owner
@@ -945,29 +906,29 @@ let commit_settlement_transition_unlocked_with
   =
   match transition current with
   | Error _ as error -> error
-  | Ok (state, State.Already_settled receipt) ->
-    Ok (Already_settled receipt, State.pending state)
-  | Ok (state, State.Settled receipt) ->
+  | Ok (state, State.Transition_already_applied receipt) ->
+    Ok (Transition_already_applied receipt, State.pending state)
+  | Ok (state, State.Transition_applied receipt) ->
     (match State.transition_outbox state with
      | [ entry ] when State.transition_receipt_equal receipt entry.receipt ->
        (match bump_revision state with
      | Error _ as error -> error
      | Ok checkpoint ->
-       let suffix = settlement_wal_entry_to_line owner entry in
-       let path = settlement_wal_path_of_owner owner in
+       let suffix = transition_wal_entry_to_line owner entry in
+       let path = transition_wal_path_of_owner owner in
        let continue_after_commit () =
          let pending = State.pending checkpoint in
          match save_checkpoint owner checkpoint with
          | Error detail ->
            Ok
-             ( Committed_followup_failed
+             ( Transition_committed_followup_failed
                  { receipt; stage = `Checkpoint; detail }
              , pending )
          | Ok () ->
            (match compact_wal owner with
             | Error detail ->
               Ok
-                ( Committed_followup_failed
+                ( Transition_committed_followup_failed
                     { receipt; stage = `Wal_compaction; detail }
                 , pending )
             | Ok () ->
@@ -978,14 +939,14 @@ let commit_settlement_transition_unlocked_with
                  with
                  | Eio.Cancel.Cancelled _ as exn ->
                    Error
-                     ("pending projection cancelled after settlement commit: "
+                     ("pending projection cancelled after transition commit: "
                       ^ Printexc.to_string exn)
                  | exn -> Error (Printexc.to_string exn)
                with
-               | Ok () -> Ok (Settled receipt, pending)
+               | Ok () -> Ok (Transition_applied receipt, pending)
                | Error detail ->
                  Ok
-                   ( Committed_followup_failed
+                   ( Transition_committed_followup_failed
                        { receipt; stage = `Projection; detail }
                    , pending )))
        in
@@ -998,7 +959,7 @@ let commit_settlement_transition_unlocked_with
         | Private_file_failed error ->
           Error
             (Printf.sprintf
-               "settlement WAL commit failed keeper=%s path=%s: %s"
+               "transition WAL commit failed keeper=%s path=%s: %s"
                (keeper_name_of_owner owner)
                path
                (Fs_compat.private_jsonl_append_error_to_string error))
@@ -1006,7 +967,7 @@ let commit_settlement_transition_unlocked_with
             { error; cleanup_failure } ->
           Error
             (Printf.sprintf
-               "settlement WAL commit failed keeper=%s path=%s: %s; descriptor settlement failed: %s"
+               "transition WAL commit failed keeper=%s path=%s: %s; descriptor cleanup failed: %s"
                (keeper_name_of_owner owner)
                path
                (Fs_compat.private_jsonl_append_error_to_string error)
@@ -1016,38 +977,30 @@ let commit_settlement_transition_unlocked_with
         | Private_file_succeeded_with_cleanup_failure
             { value = _committed_end_offset; cleanup_failure } ->
           Log.Keeper.error
-            "settlement WAL commit succeeded with descriptor settlement failure keeper=%s path=%s: %s"
+            "transition WAL commit succeeded with descriptor cleanup failure keeper=%s path=%s: %s"
             (keeper_name_of_owner owner)
             path
             (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
           continue_after_commit ()))
      | [] | [ _ ] | _ :: _ :: _ ->
-       Error "settlement transition did not produce its canonical outbox entry")
+       Error "transition commit did not produce its canonical outbox entry")
 ;;
 
-let commit_settlement_transition_unlocked =
-  commit_settlement_transition_unlocked_with
-    (* The settlement WAL is the commit record.  The current pending-only
-       snapshot cannot retain its lease or transition outbox, so replacing the
-       pre-commit snapshot here would make this WAL impossible to replay (and
-       would erase its only durable outbox if it were then compacted).  The
-       projector checkpoints the post-transition pending state only after its
-       reaction-ledger append succeeds. *)
+let commit_transition_unlocked =
+  commit_transition_unlocked_with
+    (* The transition WAL is the commit record. The projector checkpoints the
+       post-transition pending state only after its reaction-ledger append
+       succeeds. *)
     ~save_checkpoint:(fun _owner _state -> Ok ())
     ~compact_wal:(fun _owner -> Ok ())
 ;;
-
-(* cancel_accepted_result took an operator-supplied lease and handed it to
-   State.cancel_accepted, which reached settle_committed and looked the lease up
-   in durable state. No lease has been there since #25969, so the call could
-   only answer "event queue lease not found". *)
 
 let cancel_pending_accepted_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
       ~current_owner_nonce
-      ~settled_at
+      ~applied_at
       ~cancellation
       ()
   =
@@ -1059,12 +1012,12 @@ let cancel_pending_accepted_result
          match load_state_unlocked owner with
          | Error _ as error -> error
          | Ok state ->
-           commit_settlement_transition_unlocked
+           commit_transition_unlocked
              owner
              ~after_commit
              (State.cancel_pending_accepted
                 ~current_owner_nonce
-                ~settled_at
+                ~applied_at
                 ~cancellation)
              state
            |> Result.map fst)
@@ -1083,7 +1036,7 @@ let transfer_pending_accepted_result
       ~base_path
       ~keeper_name
       ~current_owner_nonce
-      ~settled_at
+      ~applied_at
       ~transfer
       ()
   =
@@ -1095,12 +1048,12 @@ let transfer_pending_accepted_result
          match load_state_unlocked owner with
          | Error _ as error -> error
          | Ok state ->
-           commit_settlement_transition_unlocked
+           commit_transition_unlocked
              owner
              ~after_commit
              (State.transfer_pending_accepted
                 ~current_owner_nonce
-                ~settled_at
+                ~applied_at
                 ~transfer)
              state
            |> Result.map fst)
@@ -1114,12 +1067,12 @@ let transfer_pending_accepted_result
             (Printexc.to_string exn)))
 ;;
 
-let settle_pending_from_source_terminal_result
+let ack_pending_source_terminal_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
       ~current_owner_nonce
-      ~settled_at
+      ~acked_at
       ~source_terminal
       ()
   =
@@ -1131,12 +1084,12 @@ let settle_pending_from_source_terminal_result
          match load_state_unlocked owner with
          | Error _ as error -> error
          | Ok state ->
-           commit_settlement_transition_unlocked
+           commit_transition_unlocked
              owner
              ~after_commit
-             (State.settle_pending_from_source_terminal
+             (State.ack_pending_source_terminal
                 ~current_owner_nonce
-                ~settled_at
+                ~applied_at:acked_at
                 ~source_terminal)
              state
            |> Result.map fst)
@@ -1145,60 +1098,9 @@ let settle_pending_from_source_terminal_result
      | exn ->
        Error
          (Printf.sprintf
-            "event queue pending source-terminal settlement raised keeper=%s: %s"
+            "event queue pending source-terminal ACK raised keeper=%s: %s"
             (keeper_name_of_owner owner)
             (Printexc.to_string exn)))
-;;
-
-let prepare_registration_after_exact_recovery_result
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~settled_at
-      ()
-  =
-  match resolve_owner ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok owner ->
-    (try
-       Owner_lock.with_durable_lock owner (fun () ->
-         match load_state_unlocked owner with
-         | Error _ as error -> error
-         | Ok state ->
-           (* Registration recovery used to resume an active lease here:
-              generic leases were requeued as [Registration_recovery] and a
-              prepared exact disposition was finalized. Both needed
-              [State.active_lease], which cannot return anything now that no
-              caller can claim a lease and [State.of_yojson] restores none.
-              An exact-execution binding without a lease was already an error
-              on this path, so it stays one. *)
-           (match State.exact_execution_binding state with
-            | None -> Ok (State.pending state)
-            | Some _ ->
-              Error "exact execution binding has no matching active lease"))
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Error
-         (Printf.sprintf
-            "event queue registration settlement raised keeper=%s: %s"
-            (keeper_name_of_owner owner)
-            (Printexc.to_string exn)))
-;;
-
-let prepare_registration_result
-      ?after_commit
-      ~base_path
-      ~keeper_name
-      ~settled_at
-      ()
-  =
-  prepare_registration_after_exact_recovery_result
-    ?after_commit
-    ~base_path
-    ~keeper_name
-    ~settled_at
-    ()
 ;;
 
 let mark_transition_projected_result state ~transition_id =
@@ -1226,7 +1128,7 @@ let project_transition_outbox_result
         in
         let* projected = bump_revision projected in
         let* () = save_state_unlocked owner projected in
-        compact_settlement_wal_unlocked owner
+        compact_transition_wals_unlocked owner
       | entries ->
         Error
           (Printf.sprintf

@@ -379,7 +379,7 @@ let test_fleet_summary_serializes_with_owner_commit () =
               0; the pending assertion above still carries the serialization
               property this case exists for. *)
            Alcotest.(check int)
-             "summary reports no leased work"
+             "summary reports no in-flight work"
              0
              (int_field "inflight_count" keeper)));
     require_some "split writer join" !writer_result

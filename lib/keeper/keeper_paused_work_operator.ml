@@ -14,13 +14,13 @@ type request = Request.t =
       { to_keeper : string
       ; request : Transfer.request
       }
-  | Settle_from_source_terminal of Source_terminal.request
+  | Ack_source_terminal of Source_terminal.request
 
 type outcome =
   | Resumed of Resume.success
   | Cancelled of Cancellation.success
   | Transferred of Transfer.success
-  | Source_terminal_settled of Source_terminal.success
+  | Source_terminal_acked of Source_terminal.success
 
 type error =
   | Invalid_request of string
@@ -57,9 +57,9 @@ let execute config ~keeper_name = function
     Transfer.transfer_pending config ~from_keeper:keeper_name ~to_keeper request
     |> Result.map (fun success -> Transferred success)
     |> Result.map_error (fun error -> Transfer_rejected error)
-  | Settle_from_source_terminal request ->
-    Source_terminal.settle_pending config ~keeper_name request
-    |> Result.map (fun success -> Source_terminal_settled success)
+  | Ack_source_terminal request ->
+    Source_terminal.ack_pending config ~keeper_name request
+    |> Result.map (fun success -> Source_terminal_acked success)
     |> Result.map_error (fun error -> Source_terminal_rejected error)
 ;;
 
@@ -70,12 +70,12 @@ let commit_status = function
 
 let cancellation_result_json (success : Cancellation.success) =
   let commit_status, ok, projection, receipt, error =
-    match success.settlement with
-    | Keeper_registry_event_queue.Settled receipt ->
+    match success.transition with
+    | Keeper_registry_event_queue.Transition_applied receipt ->
       "committed", true, "applied", receipt, None
-    | Keeper_registry_event_queue.Already_settled receipt ->
+    | Keeper_registry_event_queue.Transition_already_applied receipt ->
       "already_committed", true, "applied", receipt, None
-    | Keeper_registry_event_queue.Committed_followup_failed
+    | Keeper_registry_event_queue.Transition_committed_followup_failed
         { receipt; stage; detail } ->
       let stage =
         match stage with
@@ -136,7 +136,7 @@ let outcome_to_yojson = function
     in
     let ok, projection, error =
       match success.projection with
-      | Transfer.Applied { source_settlement = _; target_projection } ->
+      | Transfer.Applied target_projection ->
         let projection =
           match target_projection with
           | Transfer.Enqueued -> "enqueued"
@@ -159,7 +159,7 @@ let outcome_to_yojson = function
        ; "receipt", Disposition.to_yojson success.receipt
        ]
        @ match error with None -> [] | Some detail -> [ "error", `String detail ])
-  | Source_terminal_settled (success : Source_terminal.success) ->
+  | Source_terminal_acked (success : Source_terminal.success) ->
     let commit_status =
       match success.commit_status with
       | Source_terminal.Committed -> commit_status `Committed
@@ -178,7 +178,7 @@ let outcome_to_yojson = function
     `Assoc
       ([ "ok", `Bool ok
        ; "committed", `Bool true
-       ; "operation", `String "settle_from_source_terminal"
+       ; "operation", `String "ack_source_terminal"
        ; "commit_status", `String commit_status
        ; "projection", `String projection
        ; "receipt", Disposition.to_yojson success.receipt
@@ -189,19 +189,19 @@ let outcome_to_yojson = function
 let outcome_projection_complete = function
   | Resumed { projection = Resume.Applied _; _ }
   | Cancelled
-      { settlement =
-          ( Keeper_registry_event_queue.Settled _
-          | Keeper_registry_event_queue.Already_settled _ )
+      { transition =
+          ( Keeper_registry_event_queue.Transition_applied _
+          | Keeper_registry_event_queue.Transition_already_applied _ )
       ; _
       }
   | Transferred { projection = Transfer.Applied _; _ }
-  | Source_terminal_settled { projection = Source_terminal.Applied _; _ } ->
+  | Source_terminal_acked { projection = Source_terminal.Applied _; _ } ->
     true
   | Resumed { projection = Resume.Committed_followup_failed _; _ }
   | Cancelled
-      { settlement = Keeper_registry_event_queue.Committed_followup_failed _; _ }
+      { transition = Keeper_registry_event_queue.Transition_committed_followup_failed _; _ }
   | Transferred { projection = Transfer.Committed_followup_failed _; _ }
-  | Source_terminal_settled
+  | Source_terminal_acked
       { projection = Source_terminal.Committed_followup_failed _; _ } ->
     false
 ;;
@@ -276,8 +276,7 @@ let error_class = function
             | Cancellation.Durable_owner_dead_tombstone
             | Cancellation.Durable_owner_nonce_changed _
             | Cancellation.Registry_owner_not_paused _
-            | Cancellation.Registry_owner_nonce_changed _
-            | Cancellation.Lease_source_invalid )
+            | Cancellation.Registry_owner_nonce_changed _ )
         ; _
         })
   | Transfer_rejected
@@ -342,7 +341,7 @@ let error_class = function
           | Source_terminal.Receipt_read_failed _
           | Source_terminal.Receipt_write_failed _
           | Source_terminal.Durable_meta_read_failed _
-          | Source_terminal.Committed_settlement_failed _ )
+          | Source_terminal.Committed_ack_failed _ )
       ; _
       } ->
     `Unavailable
@@ -400,14 +399,11 @@ let inventory_json config ~keeper_name =
             [ "revision", `Intlit (Int64.to_string (Queue_state.revision state))
             ; "pending_count", `Int (List.length pending)
             ; "pending", `List (List.map pending_item_to_yojson pending)
-              (* "active_lease" was reported here. It read
-                 [Queue_state.active_lease], which has answered [None] -- and so
-                 rendered `Null -- since #25969 moved production to peek/ack and
-                 left [State.of_yojson] restoring no leases. The field is
-                 dropped rather than pinned to null so the wire stops describing
-                 a concept the queue no longer has. *)
             ; ( "transition_outbox_count"
               , `Int (List.length (Queue_state.transition_outbox state)) )
+            ; ( "accepted_transfer_projection_count"
+              , `Int
+                  (List.length (Queue_state.accepted_transfer_projections state)) )
             ] )
       ])
 ;;

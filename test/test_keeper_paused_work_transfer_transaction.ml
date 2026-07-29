@@ -25,6 +25,34 @@ let rec remove_tree path =
     else Sys.remove path
 ;;
 
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/"
+  then ()
+  else if Sys.file_exists path
+  then ()
+  else (
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755)
+;;
+
+let write_json path json =
+  mkdir_p (Filename.dirname path);
+  Out_channel.with_open_bin path (fun channel ->
+    output_string channel (Yojson.Safe.to_string json))
+;;
+
+let sha256 value = Digestif.SHA256.(digest_string value |> to_hex)
+
+let receipt_path config ~keeper_name ~operator_operation_id =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat
+          (Workspace.masc_root_dir config)
+          "paused-work-dispositions-v5")
+       ("keeper-" ^ sha256 keeper_name))
+    ("operation-" ^ sha256 operator_operation_id ^ ".json")
+;;
+
 let write_meta config ~keeper_name ~trace_id ~generation ~paused =
   let meta =
     Masc_test_deps.meta_of_json_fixture
@@ -118,19 +146,13 @@ let with_transfer_lane f =
          ; target_generation = target_meta.runtime.nonce
          ; continuation_binding = Receipt.Routed channel
          ; operator_operation_id = "operator-transfer-1"
-         ; settled_at = 3.0
          }
        in
        f config from_keeper to_keeper source_meta target_meta request)
 ;;
 
 let check_applied ~expected_target = function
-  | Transaction.Applied { source_settlement; target_projection } ->
-    (match source_settlement with
-     | Keeper_registry_event_queue.Settled _
-     | Keeper_registry_event_queue.Already_settled _ -> ()
-     | Keeper_registry_event_queue.Committed_followup_failed { detail; _ } ->
-       Alcotest.fail detail);
+  | Transaction.Applied target_projection ->
     Alcotest.(check bool)
       "target projection status"
       true
@@ -175,7 +197,133 @@ let test_transfer_commits_exact_pending_move () =
      | Transaction.Committed -> ()
      | Transaction.Already_committed -> Alcotest.fail "first transfer was a replay");
     check_applied ~expected_target:Transaction.Enqueued first.projection;
+    let open Yojson.Safe.Util in
+    Alcotest.(check bool)
+      "transfer receipt omits removed settled_at"
+      true
+      (match Receipt.to_yojson first.receipt |> member "transfer" |> member "settled_at" with
+       | `Null -> true
+       | _ -> false);
+    let obsolete_v2_receipt =
+      match Receipt.to_yojson first.receipt with
+      | `Assoc fields ->
+        `Assoc
+          (List.map
+             (function
+               | "schema", _ -> "schema", `String "masc.keeper.paused-work-disposition.v2"
+               | field -> field)
+             fields)
+      | _ -> Alcotest.fail "transfer receipt must be a JSON object"
+    in
+    (match Receipt.of_yojson obsolete_v2_receipt with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "transfer receipt accepted obsolete v2 schema");
     assert_converged config ~from_keeper ~to_keeper request.source)
+;;
+
+let test_retired_v2_receipt_file_is_rejected () =
+  with_transfer_lane
+  @@ fun config from_keeper to_keeper source_meta target_meta request ->
+  let transfer : Receipt.transfer_owner =
+    { from_keeper
+    ; to_keeper
+    ; target_trace_id = target_meta.runtime.trace_id
+    ; target_generation = request.target_generation
+    ; source = request.source
+    ; source_revision = request.source_revision
+    ; continuation_binding = request.continuation_binding
+    }
+  in
+  let current : Receipt.t =
+    { keeper_name = from_keeper
+    ; expected_trace_id = source_meta.runtime.trace_id
+    ; expected_generation = request.owner_nonce
+    ; operator_operation_id = request.operator_operation_id
+    ; requested_at = 2.0
+    ; operation = Receipt.Transfer_owner transfer
+    }
+  in
+  let legacy =
+    match Receipt.to_yojson current with
+    | `Assoc fields ->
+      let transfer =
+        match List.assoc_opt "transfer" fields with
+        | Some (`Assoc transfer_fields) ->
+          `Assoc (("settled_at", `Float 2.0) :: transfer_fields)
+        | Some _ | None -> Alcotest.fail "transfer receipt must contain an object"
+      in
+      `Assoc
+        (List.map
+           (function
+             | "schema", _ ->
+               "schema", `String "masc.keeper.paused-work-disposition.v2"
+             | "transfer", _ -> "transfer", transfer
+             | field -> field)
+           fields)
+    | _ -> Alcotest.fail "transfer receipt must be a JSON object"
+  in
+  (match Receipt.of_yojson legacy with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "public receipt codec accepted recovery-only v2");
+  write_json
+    (receipt_path
+       config
+       ~keeper_name:from_keeper
+       ~operator_operation_id:request.operator_operation_id)
+    legacy;
+  match
+    Receipt.load
+      config
+      ~keeper_name:from_keeper
+      ~operator_operation_id:request.operator_operation_id
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "durable load accepted retired v2 transfer receipt"
+;;
+
+let test_retired_receipt_directory_is_not_read () =
+  with_transfer_lane
+  @@ fun config from_keeper to_keeper _source_meta _target_meta request ->
+  let retired_path =
+    Filename.concat
+      (Filename.concat
+         (Filename.concat
+            (Workspace.masc_root_dir config)
+            "paused-work-dispositions")
+         ("keeper-" ^ sha256 from_keeper))
+      ("operation-" ^ sha256 request.operator_operation_id ^ ".json")
+  in
+  let retired_bytes =
+    "retired paused-work receipt must remain opaque: not-json\000settlement_id"
+  in
+  mkdir_p (Filename.dirname retired_path);
+  Out_channel.with_open_bin retired_path (fun channel ->
+    output_string channel retired_bytes);
+  (match
+     Receipt.load
+       config
+       ~keeper_name:from_keeper
+       ~operator_operation_id:request.operator_operation_id
+   with
+   | Ok None -> ()
+   | Ok (Some _) -> Alcotest.fail "retired receipt directory was read"
+   | Error detail -> Alcotest.fail detail);
+  Transaction.transfer_pending config ~from_keeper ~to_keeper request
+  |> Result.map_error Transaction.error_to_string
+  |> require_ok "commit beside retired receipt directory"
+  |> fun result -> check_applied ~expected_target:Transaction.Enqueued result.projection;
+  Alcotest.(check bool)
+    "current receipt uses a disjoint path"
+    true
+    (Sys.file_exists
+       (receipt_path
+          config
+          ~keeper_name:from_keeper
+          ~operator_operation_id:request.operator_operation_id));
+  Alcotest.(check string)
+    "retired receipt is not consumed or rewritten"
+    retired_bytes
+    (In_channel.with_open_bin retired_path In_channel.input_all)
 ;;
 
 let test_transfer_busy_has_zero_mutation () =
@@ -213,10 +361,9 @@ let test_replay_after_target_consumption_has_no_second_effect () =
       |> require_ok "commit Transfer_owner before target consumption"
     in
     check_applied ~expected_target:Transaction.Enqueued first.projection;
-    (* Consume the transferred source the way production does. This used to
-       claim a lease and settle it with Ack; #25969 replaced that with
-       peek/ack. The property under test is unchanged: once the target has
-       consumed the source, replaying the transfer must not enqueue it again. *)
+    (* Consume the transferred source the way production does. Once the target
+       has consumed the source, replaying the transfer must not enqueue it
+       again. *)
     let selection =
       Persistence.peek_when_result
         ~base_path
@@ -257,7 +404,7 @@ let test_replay_after_target_consumption_has_no_second_effect () =
       (List.length (State.accepted_transfer_projections target)))
 ;;
 
-let test_replay_after_source_settlement_projects_target () =
+let test_replay_after_source_ack_projects_target () =
   with_transfer_lane (fun config from_keeper to_keeper source_meta target_meta request ->
     let transfer : Receipt.transfer_owner =
       { from_keeper
@@ -266,7 +413,6 @@ let test_replay_after_source_settlement_projects_target () =
       ; target_generation = request.target_generation
       ; source = request.source
       ; source_revision = request.source_revision
-      ; settled_at = request.settled_at
       ; continuation_binding = request.continuation_binding
       }
     in
@@ -295,19 +441,19 @@ let test_replay_after_source_settlement_projects_target () =
       ; to_keeper
       }
     in
-    (* fire-and-forget: the settlement value is only a fixture precondition here. *)
+    (* The source ACK is only a fixture precondition here. *)
     ignore
       (Keeper_registry_event_queue.transfer_pending_accepted_result
          ~base_path:config.Workspace.base_path
          from_keeper
          ~current_owner_nonce:request.owner_nonce
-         ~settled_at:request.settled_at
+         ~applied_at:receipt.requested_at
          ~transfer:causal
-       |> require_ok "simulate committed source settlement");
+       |> require_ok "simulate committed source ACK");
     let replay =
       Transaction.transfer_pending config ~from_keeper ~to_keeper request
       |> Result.map_error Transaction.error_to_string
-      |> require_ok "resume after source settlement"
+      |> require_ok "resume after source ACK"
     in
     (match replay.commit_status with
      | Transaction.Already_committed -> ()
@@ -361,6 +507,14 @@ let () =
             `Quick
             test_transfer_commits_exact_pending_move
         ; Alcotest.test_case
+            "retired v2 receipt is rejected"
+            `Quick
+            test_retired_v2_receipt_file_is_rejected
+        ; Alcotest.test_case
+            "retired receipt directory is not read"
+            `Quick
+            test_retired_receipt_directory_is_not_read
+        ; Alcotest.test_case
             "admission busy has zero mutation"
             `Quick
             test_transfer_busy_has_zero_mutation
@@ -368,6 +522,10 @@ let () =
             "stale source revision has no effect"
             `Quick
             test_stale_source_revision_has_no_receipt_or_target_effect
+        ; Alcotest.test_case
+            "replay after source ACK projects target"
+            `Quick
+            test_replay_after_source_ack_projects_target
         ] )
     ]
 ;;

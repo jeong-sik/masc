@@ -8,7 +8,7 @@
 
 type pending_selection = Keeper_event_queue_persistence.pending_selection =
   { source_revision : int64
-  ; kind : Keeper_event_queue_persistence.lease_kind
+  ; kind : Keeper_event_queue_persistence.selection_kind
   ; stimuli : Keeper_event_queue.stimulus list
   }
 
@@ -44,37 +44,6 @@ type exact_execution_terminal = Keeper_event_queue_persistence.exact_execution_t
   ; plan_fingerprint : string
   ; request_body_sha256 : string
   }
-
-type exact_source_action = Keeper_event_queue_persistence.exact_source_action =
-  | Consume_source
-
-type exact_settlement_semantic = Keeper_event_queue_persistence.exact_settlement_semantic =
-  | Exact_no_compaction
-  | Exact_escalate
-
-type exact_source_outcome = Keeper_event_queue_persistence.exact_source_outcome =
-  | Terminal of exact_execution_terminal_cause
-
-type exact_source_disposition = Keeper_event_queue_persistence.exact_source_disposition
-
-type exact_execution_lease_status = Keeper_event_queue_persistence.exact_execution_lease_status =
-  | Dispatch_uncertain
-  | Terminal_quarantined of exact_execution_terminal_cause
-  | Disposition_prepared of exact_source_disposition
-
-type exact_execution_binding = Keeper_event_queue_persistence.exact_execution_binding =
-  { lease_id : string
-  ; lease_sequence : int64
-  ; slot_id : string
-  ; call_id : string
-  ; plan_fingerprint : string
-  ; request_body_sha256 : string
-  ; status : exact_execution_lease_status
-  }
-
-type exact_write_outcome = Keeper_event_queue_persistence.exact_write_outcome =
-  | Fsync_completed
-  | Visible_sync_unconfirmed of string
 
 type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
   | Compaction_exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
@@ -135,7 +104,7 @@ type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_t
   ; source_receipt : source_terminal_receipt
   }
 
-type settlement = Keeper_event_queue_persistence.settlement =
+type transition = Keeper_event_queue_persistence.transition =
   | Ack
   | Manual_compaction_committed of
       { commit : Keeper_event_queue_state.manual_compaction_commit
@@ -144,8 +113,7 @@ type settlement = Keeper_event_queue_persistence.settlement =
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
-  | Settle_from_source_terminal of accepted_source_terminal
-  | Settle_exact of exact_source_disposition
+  | Ack_source_terminal of accepted_source_terminal
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -155,10 +123,19 @@ type settlement = Keeper_event_queue_persistence.settlement =
 type transition_receipt = Keeper_event_queue_persistence.transition_receipt
 type outbox_entry = Keeper_event_queue_persistence.outbox_entry
 
-type settle_result = Keeper_event_queue_persistence.settle_result =
-  | Settled of transition_receipt
-  | Already_settled of transition_receipt
-  | Committed_followup_failed of
+type transition_result = Keeper_event_queue_persistence.transition_result =
+  | Transition_applied of transition_receipt
+  | Transition_already_applied of transition_receipt
+  | Transition_committed_followup_failed of
+      { receipt : transition_receipt
+      ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
+      ; detail : string
+      }
+
+type source_ack_result =
+  | Acked of transition_receipt
+  | Already_acked of transition_receipt
+  | Ack_committed_followup_failed of
       { receipt : transition_receipt
       ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
       ; detail : string
@@ -183,21 +160,13 @@ val ack_pending_result :
   selection:pending_selection ->
   (unit, string) result
 
-val exact_execution_binding_result :
-  base_path:string -> string -> (exact_execution_binding option, string) result
-
-(* claim_when_result / claim_board_result / settle_result and the lease-taking
-   exact-execution fence lived here, together with cancel_accepted_result.
-   #25969 moved production to peek/ack and nothing outside tests could obtain a
-   lease afterwards. The pending-side commits below need none. *)
-
 val cancel_pending_accepted_result :
   base_path:string ->
   string ->
   current_owner_nonce:int ->
-  settled_at:float ->
+  applied_at:float ->
   cancellation:accepted_cancellation ->
-  (settle_result, string) result
+  (transition_result, string) result
 (** Commit an exact pending accepted cancellation and publish the post-commit
     pending projection when the owner currently has a live registry lane. *)
 
@@ -205,19 +174,21 @@ val transfer_pending_accepted_result :
   base_path:string ->
   string ->
   current_owner_nonce:int ->
-  settled_at:float ->
+  applied_at:float ->
   transfer:accepted_transfer ->
-  (settle_result, string) result
-(** Commit an exact pending accepted transfer settlement and publish the
+  (transition_result, string) result
+(** Commit an exact pending accepted transfer transition and publish the
     post-commit source pending projection when the owner is registered. *)
 
-val settle_pending_from_source_terminal_result :
+val ack_pending_source_terminal_result :
   base_path:string ->
   string ->
   current_owner_nonce:int ->
-  settled_at:float ->
+  acked_at:float ->
   source_terminal:accepted_source_terminal ->
-  (settle_result, string) result
+  (source_ack_result, string) result
+(** Commit one exact terminal source ACK and publish the post-commit pending
+    projection when the owner is registered. *)
 
 (** Enqueue a stimulus on the keeper's event queue. When the keeper is not
     registered yet, persist the stimulus to the durable snapshot so later
@@ -266,7 +237,7 @@ val enqueue_stimulus_durable_result :
   -> enqueue_stimulus_durable_result
 (** Durably enqueue an already-typed deterministic stimulus only when its
     {!Keeper_event_queue.stimulus_identity_equal} identity is absent from
-    pending, active leases, and the transition outbox. This explicit-result
+    pending and the transition outbox. This explicit-result
     path is for structurally addressed signals whose delivery must commit
     before a wake hint. Board-attention judgments use the stricter
     opaque-event-id API above. *)

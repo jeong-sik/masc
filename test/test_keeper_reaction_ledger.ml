@@ -79,30 +79,8 @@ let manual_compaction_stimulus () : Keeper_event_queue.stimulus =
   }
 ;;
 
-let no_compaction_settlement ~turn_count reason :
-  Keeper_event_queue_state.settlement
-  =
-  let trace_id =
-    Keeper_id.Trace_id.of_string "trace-ledger-no-compaction"
-    |> require_ok "parse no-compaction trace"
-  in
-  let source =
-    Keeper_checkpoint_ref.of_persisted
-      ~trace_id
-      ~generation:3
-      ~turn_count
-      ~sha256:(String.make 64 'a')
-    |> Result.get_ok
-  in
-  Keeper_event_queue_state.No_compaction { source; reason }
-;;
-
-(* [persist_transition_outbox] staged an outbox entry by claiming a lease and
-   settling it. It served four cases asserting Ack and No_compaction
-   projections. Neither settlement can be produced any more: settle was the
-   only producer and it required a lease, which #25969 made unobtainable when
-   it moved production to peek/ack. The cancellation case below still covers
-   the live outbox projection through its pending-side commit. *)
+(* The retired lease path once produced generic ACK/no-compaction records.
+   Live projection now covers only the three typed pending operations. *)
 
 let check_member_string label expected key json =
   check string label expected (json |> member key |> to_string)
@@ -132,7 +110,7 @@ let write_file path content =
 let event_queue_snapshot_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-    "event-queue.json"
+    "event-queue-v12.json"
 ;;
 
 let reaction_ledger_dir ~base_path ~keeper_name =
@@ -142,13 +120,23 @@ let reaction_ledger_dir ~base_path ~keeper_name =
           (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
           keeper_name)
        "reaction-ledger")
-    "v4"
+    "v5"
 ;;
 
 let reaction_ledger_store ~base_path ~keeper_name =
   Dated_jsonl.create
     ~base_dir:(reaction_ledger_dir ~base_path ~keeper_name)
     ()
+;;
+
+let retired_reaction_ledger_dir ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat
+          (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
+          keeper_name)
+       "reaction-ledger")
+    "v4"
 ;;
 
 let read_recent_rows ~base_path ~keeper_name ~limit =
@@ -193,6 +181,42 @@ let latest_row rows =
   | [] -> fail "expected at least one reaction ledger row"
 ;;
 
+let test_retired_generation_is_not_read () =
+  with_temp_base
+  @@ fun base_path ->
+  let keeper_name = "retired-generation-keeper" in
+  let retired_month =
+    Filename.concat
+      (retired_reaction_ledger_dir ~base_path ~keeper_name)
+      "2026-07"
+  in
+  mkdir_p retired_month;
+  let retired_path = Filename.concat retired_month "29.jsonl" in
+  let retired_bytes =
+    "retired reaction ledger must remain opaque: not-json\000keeper_event_queue_settlement\n"
+  in
+  write_file retired_path retired_bytes;
+  check
+    int
+    "retired generation contributes no current rows"
+    0
+    (List.length (read_recent_rows ~base_path ~keeper_name ~limit:10));
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    (board_stimulus ());
+  check
+    int
+    "current generation receives new rows"
+    1
+    (List.length (read_recent_rows ~base_path ~keeper_name ~limit:10));
+  check
+    string
+    "retired generation is not consumed or rewritten"
+    retired_bytes
+    (In_channel.with_open_bin retired_path In_channel.input_all)
+;;
+
 let test_event_queue_stimulus_and_turn_reaction () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "ledger-keeper" in
@@ -210,7 +234,7 @@ let test_event_queue_stimulus_and_turn_reaction () =
   in
   check int "two rows persisted" 2 (List.length rows);
   let stimulus_row = List.nth rows 0 in
-  check_member_string "stimulus schema" "keeper.reaction_ledger.v4" "schema" stimulus_row;
+  check_member_string "stimulus schema" "keeper.reaction_ledger.v5" "schema" stimulus_row;
   check_member_string "stimulus record kind" "stimulus" "record_kind" stimulus_row;
   check_member_string "board stimulus id" "board:post-42" "stimulus_id" stimulus_row;
   check_member_string
@@ -555,7 +579,7 @@ let test_fleet_summary_surfaces_durable_event_queue_discovery_error () =
   in
   mkdir_p invalid_keeper_dir;
   write_file
-    (Filename.concat invalid_keeper_dir "event-queue.json")
+    (Filename.concat invalid_keeper_dir "event-queue-v12.json")
     (Yojson.Safe.to_string (Keeper_event_queue.queue_to_yojson Keeper_event_queue.empty));
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
@@ -734,7 +758,7 @@ let test_unknown_reaction_is_quarantined_without_clearing_pending () =
   Dated_jsonl.append
     (reaction_ledger_store ~base_path ~keeper_name)
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v4"
+        [ "schema", `String "keeper.reaction_ledger.v5"
         ; "record_kind", `String "reaction"
         ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
         ; "keeper_name", `String keeper_name
@@ -869,20 +893,6 @@ let test_reaction_kind_string_roundtrip () =
     check string "unknown reaction decoder preserves evidence" "unknown_custom" value
   | Ok _ -> fail "unknown reaction string must not decode"
 ;;
-
-(* [test_cancelled_transition_is_projected_as_typed_history] asserted that a
-   committed Cancel_accepted reaches the reaction ledger as typed history. It
-   staged the state in memory and handed it to the projector by writing a
-   snapshot file, which worked only while the snapshot carried the transition
-   outbox. #25978 reduced Keeper_event_queue_state.to_yojson to schema,
-   revision and pending, so a commit checkpoints without the outbox and then
-   compacts the settlement WAL; reloading afterwards -- whether directly or
-   through Keeper_event_queue_recovery.project_owner_result -- sees an empty
-   outbox and projects nothing. Verified with a probe against the durable
-   path: commit returns Settled, the reloaded state reports outbox=0, and the
-   projection finds no rows. The case cannot hold from a separate call and is
-   removed rather than weakened; restating it needs a commit and projection
-   that share one state. Recorded in #26014. *)
 
 let test_unexpected_schema_rows_are_quarantined_without_double_counting () =
   with_temp_base
@@ -1082,7 +1092,7 @@ let test_missing_identity_does_not_claim_an_occurrence_identity () =
   Dated_jsonl.append
     (reaction_ledger_store ~base_path ~keeper_name)
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v4"
+        [ "schema", `String "keeper.reaction_ledger.v5"
         ; "record_kind", `String "stimulus"
         ; "event_id", `String "unattributed-event"
         ; "keeper_name", `String keeper_name
@@ -1119,6 +1129,10 @@ let () =
             "event queue stimulus and turn reaction are durable"
             `Quick
             test_event_queue_stimulus_and_turn_reaction
+        ; test_case
+            "retired generation is not read"
+            `Quick
+            test_retired_generation_is_not_read
         ; test_case
             "unexpected schema rows cannot double-count current occurrences"
             `Quick

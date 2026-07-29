@@ -33,7 +33,7 @@ module Event_id_set = Set.Make (String)
 (* The storage namespace and row schema advance together.  A generation hard
    cut never scans or writes an older namespace, so retired data cannot remain
    on the exact-evidence hot path or become a second authority. *)
-let storage_generation = "v4"
+let storage_generation = "v5"
 let schema = "keeper.reaction_ledger." ^ storage_generation
 
 let stimulus_kind_to_string = function
@@ -294,7 +294,7 @@ let record_event_queue_turn_started ~base_path ~keeper_name stimulus =
     (event_queue_turn_started_json ~keeper_name stimulus)
 ;;
 
-let reaction_kind_of_settlement = function
+let reaction_kind_of_transition = function
   | Keeper_event_queue_state.Ack -> Event_queue_ack
   | Keeper_event_queue_state.Manual_compaction_committed
       { followup = Keeper_event_queue_state.Compaction_commit_ack; _ } ->
@@ -302,12 +302,7 @@ let reaction_kind_of_settlement = function
   | Keeper_event_queue_state.No_compaction _ -> Event_queue_no_compaction
   | Keeper_event_queue_state.Cancel_accepted _ -> Event_queue_cancelled
   | Keeper_event_queue_state.Transfer_accepted _ -> Event_queue_ack
-  | Keeper_event_queue_state.Settle_from_source_terminal _ -> Event_queue_ack
-  | Keeper_event_queue_state.Settle_exact
-      { semantic = Exact_no_compaction; _ } ->
-    Event_queue_no_compaction
-  | Keeper_event_queue_state.Settle_exact { semantic = Exact_escalate; _ } ->
-    Event_queue_escalated
+  | Keeper_event_queue_state.Ack_source_terminal _ -> Event_queue_ack
   | Keeper_event_queue_state.Requeue _ -> Event_queue_requeued
   | Keeper_event_queue_state.Escalate _ -> Event_queue_escalated
 ;;
@@ -348,7 +343,7 @@ let event_queue_transition_reaction_json
       (receipt : Keeper_event_queue_state.transition_receipt)
       stimulus
   =
-  let reaction_kind = reaction_kind_of_settlement receipt.settlement in
+  let reaction_kind = reaction_kind_of_transition receipt.transition in
   let stimulus_id = stimulus_id_of_event_queue stimulus in
   let event_id = event_queue_transition_event_id receipt source_index in
   `Assoc
@@ -356,12 +351,12 @@ let event_queue_transition_reaction_json
        ~record_kind:"reaction"
        ~event_id
        ~keeper_name
-       ~recorded_at:receipt.settled_at
+       ~recorded_at:receipt.applied_at
      @ [ "stimulus_id", `String stimulus_id
        ; ( "reaction"
          , `Assoc
              [ "kind", `String (reaction_kind_to_string reaction_kind)
-             ; "source", `String "keeper_event_queue_settlement"
+            ; "source", `String "keeper_event_queue_transition"
              ; "post_id", `String stimulus.post_id
              ; ( "stimulus_kind"
                , `String
@@ -394,7 +389,7 @@ let project_event_queue_transition_outbox_result ~base_path ~keeper_name =
       | [] ->
         Error
           (Printf.sprintf
-             "event queue settlement outbox has no sources keeper=%s transition_id=%s"
+             "event queue transition outbox has no sources keeper=%s transition_id=%s"
              keeper_name
              entry.receipt.transition_id)
       | stimuli ->
@@ -422,7 +417,7 @@ let project_event_queue_transition_outbox_result ~base_path ~keeper_name =
              | exn ->
                Error
                  (Printf.sprintf
-                    "event queue settlement ledger append failed keeper=%s event_id=%s: %s"
+                    "event queue transition ledger append failed keeper=%s event_id=%s: %s"
                     keeper_name
                     event_id
                     (Printexc.to_string exn)))
@@ -577,7 +572,7 @@ type row_quarantine_reason =
   | Transition_source_index_out_of_bounds
   | Transition_source_identity_mismatch
   | Event_identity_mismatch
-  | Transition_settlement_mismatch
+  | Transition_kind_mismatch
   | Missing_cursor
   | Missing_cursor_ts
   | Non_finite_cursor_ts
@@ -628,7 +623,7 @@ let row_quarantine_reason_to_string = function
   | Transition_source_index_out_of_bounds -> "transition_source_index_out_of_bounds"
   | Transition_source_identity_mismatch -> "transition_source_identity_mismatch"
   | Event_identity_mismatch -> "event_identity_mismatch"
-  | Transition_settlement_mismatch -> "transition_settlement_mismatch"
+  | Transition_kind_mismatch -> "transition_kind_mismatch"
   | Missing_cursor -> "missing_cursor"
   | Missing_cursor_ts -> "missing_cursor_ts"
   | Non_finite_cursor_ts -> "non_finite_cursor_ts"
@@ -678,32 +673,24 @@ let require_finite_float ~missing ~non_finite field json =
   | Some _ -> Error non_finite
 ;;
 
-let reaction_kind_matches_settlement reaction_kind settlement =
-  match reaction_kind, settlement with
+let reaction_kind_matches_transition reaction_kind transition =
+  match reaction_kind, transition with
   | Event_queue_ack, Keeper_event_queue_state.Ack -> true
   | Event_queue_ack,
     Keeper_event_queue_state.Manual_compaction_committed
       { followup = Keeper_event_queue_state.Compaction_commit_ack; _ } ->
     true
   | Event_queue_ack, Keeper_event_queue_state.Transfer_accepted _ -> true
-  | Event_queue_ack, Keeper_event_queue_state.Settle_from_source_terminal _ -> true
+  | Event_queue_ack, Keeper_event_queue_state.Ack_source_terminal _ -> true
   | Event_queue_no_compaction, Keeper_event_queue_state.No_compaction _ -> true
-  | Event_queue_no_compaction,
-    Keeper_event_queue_state.Settle_exact
-      { semantic = Exact_no_compaction; _ } ->
-    true
   | Event_queue_cancelled, Keeper_event_queue_state.Cancel_accepted _ -> true
   | Event_queue_requeued, Keeper_event_queue_state.Requeue _ -> true
   | Event_queue_escalated, Keeper_event_queue_state.Escalate _ -> true
-  | Event_queue_escalated,
-    Keeper_event_queue_state.Settle_exact { semantic = Exact_escalate; _ } ->
-    true
   | Turn_started, _
   | Cursor_ack, _
   | Event_queue_ack,
     ( Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Cancel_accepted _
-    | Keeper_event_queue_state.Settle_exact _
     | Keeper_event_queue_state.Requeue _
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_no_compaction,
@@ -711,8 +698,7 @@ let reaction_kind_matches_settlement reaction_kind settlement =
     | Keeper_event_queue_state.Manual_compaction_committed _
     | Keeper_event_queue_state.Cancel_accepted _
     | Keeper_event_queue_state.Transfer_accepted _
-    | Keeper_event_queue_state.Settle_from_source_terminal _
-    | Keeper_event_queue_state.Settle_exact _
+    | Keeper_event_queue_state.Ack_source_terminal _
     | Keeper_event_queue_state.Requeue _
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_cancelled,
@@ -720,8 +706,7 @@ let reaction_kind_matches_settlement reaction_kind settlement =
     | Keeper_event_queue_state.Manual_compaction_committed _
     | Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Transfer_accepted _
-    | Keeper_event_queue_state.Settle_from_source_terminal _
-    | Keeper_event_queue_state.Settle_exact _
+    | Keeper_event_queue_state.Ack_source_terminal _
     | Keeper_event_queue_state.Requeue _
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_requeued,
@@ -730,8 +715,7 @@ let reaction_kind_matches_settlement reaction_kind settlement =
     | Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Cancel_accepted _
     | Keeper_event_queue_state.Transfer_accepted _
-    | Keeper_event_queue_state.Settle_from_source_terminal _
-    | Keeper_event_queue_state.Settle_exact _
+    | Keeper_event_queue_state.Ack_source_terminal _
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_escalated,
     ( Keeper_event_queue_state.Ack
@@ -739,8 +723,7 @@ let reaction_kind_matches_settlement reaction_kind settlement =
     | Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Cancel_accepted _
     | Keeper_event_queue_state.Transfer_accepted _
-    | Keeper_event_queue_state.Settle_from_source_terminal _
-    | Keeper_event_queue_state.Settle_exact _
+    | Keeper_event_queue_state.Ack_source_terminal _
     | Keeper_event_queue_state.Requeue _ ) -> false
 ;;
 
@@ -836,9 +819,9 @@ let decode_transition_reaction
   in
   if not (String.equal event_id expected_event_id && transition_id_matches)
   then Error Event_identity_mismatch
-  else if reaction_kind_matches_settlement reaction_kind receipt.settlement
+  else if reaction_kind_matches_transition reaction_kind receipt.transition
   then Ok receipt
-  else Error Transition_settlement_mismatch
+  else Error Transition_kind_mismatch
 ;;
 
 let decode_reaction_row ~event_id metadata reaction =
@@ -861,7 +844,7 @@ let decode_reaction_row ~event_id metadata reaction =
     else Error Event_identity_mismatch
   | ( Event_queue_ack | Event_queue_no_compaction | Event_queue_cancelled
     | Event_queue_requeued | Event_queue_escalated ),
-    "keeper_event_queue_settlement" ->
+    "keeper_event_queue_transition" ->
     let* transition_receipt =
       decode_transition_reaction
         ~event_id
@@ -876,11 +859,12 @@ let decode_reaction_row ~event_id metadata reaction =
          { metadata; reaction_kind; transition_receipt = Some transition_receipt })
   | Cursor_ack, "keeper_world_observation.board_cursor" ->
     Error Reaction_source_mismatch
-  | Turn_started, "keeper_event_queue_settlement"
+  | Turn_started, "keeper_event_queue_transition"
   | ( Event_queue_ack | Event_queue_no_compaction | Event_queue_cancelled
     | Event_queue_requeued | Event_queue_escalated ),
     "keeper_event_queue"
-  | Cursor_ack, ("keeper_event_queue" | "keeper_event_queue_settlement") ->
+  | Cursor_ack,
+    ("keeper_event_queue" | "keeper_event_queue_transition") ->
     Error Reaction_source_mismatch
   | ( Turn_started | Event_queue_ack | Event_queue_no_compaction
     | Event_queue_cancelled | Event_queue_requeued | Event_queue_escalated

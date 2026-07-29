@@ -153,10 +153,10 @@ type in_lane_compaction =
   | Compaction_attempt_failed of { reason : string }
 (** Typed outcome of the in-lane provider-overflow compaction behind a
     [Requeue_after_context_compaction] disposition. [Compaction_committed]
-    proves the checkpoint durably shrank before the requeue, so the settlement
+    proves the checkpoint durably shrank before the requeue, so the transition
     resets the keeper's compaction-failure streak and the retry reloads real
     progress. [Compaction_attempt_failed] means the recovery made no durable
-    progress; the settlement advances the streak and escalates once it reaches
+    progress; the transition advances the streak and escalates once it reaches
     [Keeper_meta_contract.compaction_retry_escalation_threshold] (RFC-0351 S0,
     #25461 — without the ceiling this lane requeued forever: 284 of 285
     rejections in the 2026-07-21 storm carried trigger=provider_overflow and
@@ -171,7 +171,7 @@ type exact_output_terminal_reason = private
 (** Closed exact-output reasons that forbid another provider-overflow
     compaction attempt for the same source. *)
 
-type source_lease_disposition =
+type source_disposition =
   | Follow_failure_route
   | Follow_failure_route_after_no_compaction of
       { reason : Keeper_event_queue_state.no_compaction_reason }
@@ -182,11 +182,11 @@ type source_lease_disposition =
 (** A failed turn normally follows its typed retry/rotate/escalate route.
     [Follow_failure_route_after_no_compaction] follows the same route but
     records that the in-lane provider-overflow compaction terminally declined
-    to act ([no_compaction_reason]); the settlement advances the
+    to act ([no_compaction_reason]); the terminal transition advances the
     compaction-failure streak and replaces the route with
     [Escalate Compaction_retry_exhausted] at the threshold, because a turn
     whose context cannot shrink re-overflows deterministically on every retry.
-    [Escalate_after_exact_output_terminal] consumes the source lease into a
+    [Escalate_after_exact_output_terminal] consumes the selected source into a
     typed escalation with no successor, so neither the ordinary retry route nor
     another compaction dispatch can run when the exact lane is unconfigured,
     after the receipt crossed dispatch, or after a dispatched response failed
@@ -196,15 +196,15 @@ type source_lease_disposition =
     cycle reloads the durably compacted checkpoint.
     [Pause_after_transcript_corruption] is terminal for automatic execution:
     typed transcript admission rejected before provider dispatch, so the
-    heartbeat durably pauses the Keeper and consumes any owning lease into an
+    heartbeat durably pauses the Keeper and consumes the selected source into an
     operator-reset-required escalation with no retry successor.
     [Acknowledge_after_in_turn_handling] consumes only the source stimulus when
     the configured in-turn policy already handled the terminal failure; the
     cycle remains failed for receipts, counters, and heartbeat freshness. *)
 
-val source_lease_disposition_after_no_compaction
+val source_disposition_after_no_compaction
   :  Keeper_event_queue_state.no_compaction
-  -> source_lease_disposition
+  -> source_disposition
 (** Compiler-checked partition of no-compaction outcomes. Missing-lane,
     effect-boundary, and domain-invalid outcomes return
     [Escalate_after_exact_output_terminal]; all other deterministic no-progress
@@ -215,11 +215,11 @@ type turn_failure =
   { error : Agent_sdk.Error.sdk_error
   ; runtime_id : string
   ; route : Keeper_runtime_failure_route.route
-  ; source_lease_disposition : source_lease_disposition
+  ; source_disposition : source_disposition
   ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
   }
 (** Exact execution identity and typed disposition route for a failed turn.
-    The heartbeat queue settles from this value; it must not reconstruct a
+    The heartbeat queue transitions from this value; it must not reconstruct a
     possibly rotated runtime from Keeper meta. *)
 
 type turn_success =

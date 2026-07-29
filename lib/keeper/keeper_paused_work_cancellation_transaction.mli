@@ -1,22 +1,16 @@
-(** Owner-fenced terminal cancellation for one leased accepted event on a paused
+(** Owner-fenced terminal cancellation for one pending accepted event on a paused
     Keeper lane.
 
     The transaction reserves the Keeper lifecycle generation, verifies both
     durable and live pause ownership, then commits the exact cancellation
     receipt through the event-queue WAL boundary. *)
 
-(* [request] carried a [Keeper_registry_event_queue.lease] and drove [cancel],
-   the active-lease arm of this transaction. #25969 moved production to
-   peek/ack, after which no caller could obtain a lease and
-   [Keeper_event_queue_state.of_yojson] restored none, so that arm could not
-   run. The pending arm below needs no lease. *)
 type pending_request =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
-  ; settled_at : float
   }
 
 type failure =
@@ -33,12 +27,11 @@ type failure =
       { expected : int
       ; actual : int
       }
-  | Lease_source_invalid
   | Queue_replay_failed of string
   | Queue_commit_failed of string
 
 type success =
-  { settlement : Keeper_registry_event_queue.settle_result
+  { transition : Keeper_registry_event_queue.transition_result
   ; reservation_release : Keeper_lifecycle_reservation.release_outcome option
   }
 

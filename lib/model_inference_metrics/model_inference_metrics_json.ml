@@ -39,6 +39,20 @@ let bucket_metric_to_json (b : bucket_metric) : Yojson.Safe.t =
     ]
 ;;
 
+let cost_read_to_json = function
+  | Ok diagnostics ->
+    `Assoc
+      [ "status", `String "ok"
+      ; "malformed_rows", `Int diagnostics.malformed_rows
+      ; "schema_violation_rows", `Int diagnostics.schema_violation_rows
+      ]
+  | Error error ->
+    `Assoc
+      [ "status", `String "error"
+      ; "detail", `String (Dated_jsonl.read_error_to_string error)
+      ]
+;;
+
 let model_stats_to_json ?(model_label = public_runtime_label) (s : model_stats)
   : Yojson.Safe.t
   =
@@ -144,6 +158,7 @@ let to_json (agg : aggregate) : Yojson.Safe.t =
     ; "bucket_minutes", `Int agg.bucket_minutes
     ; "total_entries", `Int agg.total_entries
     ; "total_error_entries", `Int agg.total_error_entries
+    ; "cost_ledger_read", cost_read_to_json agg.cost_read
     ; "latency_buckets", `List (List.map latency_bucket_to_json agg.latency_buckets)
     ; ( "models"
       , `List
@@ -245,7 +260,7 @@ let provider_stats_to_json (s : provider_stats) : Yojson.Safe.t =
 
 let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
   let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
-  let entries = read_all_entries ~base_path ~since_unix in
+  let entries, cost_read = read_all_entries ~base_path ~since_unix in
   let model_stats_list = aggregate_by_model entries in
   (* per-agent rows - sorted by cost descending, skip zero-signal rows *)
   let per_agent =
@@ -330,6 +345,7 @@ let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
     ; "p95", Json_util.float_opt_to_json global_p95
     ; "total_cost_usd", `Float total_cost_usd
     ; "window_minutes", `Int window_minutes
+    ; "cost_ledger_read", cost_read_to_json cost_read
     ; "generated_at", `Float (Time_compat.now ())
     ]
 ;;

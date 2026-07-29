@@ -55,54 +55,50 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
       files)
 ;;
 
-let read_cost_entries_dated ~base_path ~since_unix : raw_entry list =
+let read_cost_entries_dated ~base_path ~since_unix
+  : (raw_entry list * cost_read_diagnostics, Dated_jsonl.read_error) result
+  =
   let dir = Filename.concat (Common.masc_dir_from_base_path ~base_path) "costs" in
   if not (Sys.file_exists dir)
-  then []
+  then Ok ([], { malformed_rows = 0; schema_violation_rows = 0 })
   else (
     let store = Dated_jsonl.create ~base_dir:dir () in
     let entries = ref [] in
-    try
-      match
-        Dated_jsonl.iter_all_entries_result store (function
-          | Dated_jsonl.Parsed json ->
-            (match parse_cost_entry json ~since_unix with
-             | Ok entry -> entries := entry :: !entries
-             | Error err ->
-               if parse_error_is_schema_violation err
-               then
-                 Log.Model_inference_metrics.warn
-                   "costs/dated parse drop: reason=%s"
-                   (parse_error_label err))
-          | Dated_jsonl.Malformed_json { path; line_number; detail } ->
-            let location =
-              match line_number with
-              | Some line_number -> Printf.sprintf "%s:%d" path line_number
-              | None -> path
-            in
-            Log.Model_inference_metrics.warn
-              "costs/dated malformed row: %s detail=%s"
-              location
-              detail)
-      with
-      | Ok () -> List.rev !entries
-      | Error error ->
-        Log.Model_inference_metrics.error
-          "costs/dated read failed: %s"
-          (Dated_jsonl.read_error_to_string error);
-        []
+    let malformed_rows = ref 0 in
+    let schema_violation_rows = ref 0 in
+    match
+      Dated_jsonl.iter_all_entries_result store (function
+        | Dated_jsonl.Parsed json ->
+          (match parse_cost_entry json ~since_unix with
+           | Ok entry -> entries := entry :: !entries
+           | Error Out_of_window -> ()
+           | Error err ->
+             incr schema_violation_rows;
+             Log.Model_inference_metrics.warn
+               "costs/dated schema drop: reason=%s"
+               (parse_error_label err))
+        | Dated_jsonl.Malformed_json { path; line_number; detail } ->
+          incr malformed_rows;
+          let location =
+            match line_number with
+            | Some line_number -> Printf.sprintf "%s:%d" path line_number
+            | None -> path
+          in
+          Log.Model_inference_metrics.warn
+            "costs/dated malformed row: %s detail=%s"
+            location
+            detail)
     with
-    | Eio.Cancel.Cancelled _ as exn ->
-      let bt = Printexc.get_raw_backtrace () in
-      Printexc.raise_with_backtrace exn bt
-    | exn ->
-      Log.Model_inference_metrics.error
-        "costs/dated read failed: %s"
-        (Printexc.to_string exn);
-      [])
+    | Ok () ->
+      Ok
+        ( List.rev !entries
+        , { malformed_rows = !malformed_rows
+          ; schema_violation_rows = !schema_violation_rows
+          } )
+    | Error error -> Error error)
 ;;
 
-let read_cost_entries ~base_path ~since_unix : raw_entry list =
+let read_cost_entries ~base_path ~since_unix =
   read_cost_entries_dated ~base_path ~since_unix
 ;;
 
@@ -135,8 +131,14 @@ let merge_decision_and_cost_entries decisions costs =
 
 let read_all_entries ~base_path ~since_unix =
   let decisions = read_all_decisions ~base_path ~since_unix in
-  let costs = read_cost_entries ~base_path ~since_unix in
-  merge_decision_and_cost_entries decisions costs
+  match read_cost_entries ~base_path ~since_unix with
+  | Ok (costs, diagnostics) ->
+    merge_decision_and_cost_entries decisions costs, Ok diagnostics
+  | Error error ->
+    Log.Model_inference_metrics.error
+      "costs/dated read failed: %s"
+      (Dated_jsonl.read_error_to_string error);
+    decisions, Error error
 ;;
 
 (* ── Coverage helpers (used by aggregate stage) ───────────── *)

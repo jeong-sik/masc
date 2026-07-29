@@ -124,6 +124,14 @@ type latency_bucket =
   ; count : int
   }
 
+type cost_read_diagnostics =
+  { malformed_rows : int
+  ; schema_violation_rows : int
+  }
+
+type cost_read_result =
+  (cost_read_diagnostics, Dated_jsonl.read_error) result
+
 type aggregate =
   { window_minutes : int
   ; bucket_minutes : int
@@ -131,6 +139,7 @@ type aggregate =
   ; total_entries : int
   ; total_error_entries : int
   ; latency_buckets : latency_bucket list
+  ; cost_read : cost_read_result
   }
 
 (** Per-provider rollup of {!model_stats} aggregated across every model id

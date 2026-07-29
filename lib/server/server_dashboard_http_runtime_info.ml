@@ -1544,7 +1544,11 @@ let runtime_request_config_json (rt : Runtime.t) =
     ; "tool_choice", tool_choice_json cfg.tool_choice
     ; "disable_parallel_tool_use", `Bool cfg.disable_parallel_tool_use
     ; "response_format", response_format_json cfg.response_format
-    ; "has_output_schema", `Bool (Option.is_some cfg.output_schema)
+    ; ( "has_output_schema"
+      , `Bool
+          (match cfg.response_format with
+           | Llm_provider.Types.JsonSchema _ -> true
+           | Llm_provider.Types.Off | Llm_provider.Types.JsonMode -> false) )
     ; "cache_system_prompt", `Bool cfg.cache_system_prompt
     ; "supports_tool_choice_override", Json_util.bool_opt_to_json cfg.supports_tool_choice_override
     ; ( "supports_structured_output_override"

@@ -260,10 +260,7 @@ let fusion_judge_output_schema =
 ;;
 
 let apply_to_provider_config schema (provider_cfg : Llm_provider.Provider_config.t) =
-  { provider_cfg with
-    response_format = Agent_sdk.Types.JsonSchema schema
-  ; output_schema = Some schema
-  }
+  { provider_cfg with response_format = Agent_sdk.Types.JsonSchema schema }
 ;;
 
 (* Ask the provider for no wire response format. The call sites that use this
@@ -286,10 +283,7 @@ let apply_to_provider_config schema (provider_cfg : Llm_provider.Provider_config
    response's visible text, so native and prompt tiers converge on the same
    parser byte for byte. *)
 let without_response_format (provider_cfg : Llm_provider.Provider_config.t) =
-  { provider_cfg with
-    response_format = Agent_sdk.Types.Off
-  ; output_schema = None
-  }
+  { provider_cfg with response_format = Agent_sdk.Types.Off }
 ;;
 
 (* The anti-rationalization reviewer's verdict channel is the

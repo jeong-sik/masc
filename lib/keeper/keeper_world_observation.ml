@@ -634,23 +634,43 @@ let pending_board_event_of_stimulus
   (stimulus : Keeper_event_queue.stimulus)
   : (pending_board_event option, Board_signal.board_unavailable) result
   =
+  (* Self-attribution at the observation SSOT. A Board_post_created authored by
+     this keeper is its own action echo, not foreign board activity. Returning
+     None excludes it from the observation's pending_board_events so the keeper
+     does not re-react to its own post. Without this gate the live heartbeat
+     path injects stimulus-derived events verbatim via the [Some] branch of
+     [observe] and re-observes the keeper's freshly-created post as "1 new
+     board activity" every turn, re-triggering a reactive post — a self-trigger
+     loop. This complements the cursor-pull self filter in
+     [collect_board_events_with_cursor_policy], which only runs on the [None]
+     path of [observe]. Comment/reaction signals stay visible: a foreign reply
+     to the keeper's own post is still relevant observation. *)
+  let is_self_post_created_echo (signal : Board_dispatch.board_signal) =
+    match signal.kind with
+    | Board_dispatch.Board_post_created ->
+      is_self_author ~self_ids:(self_ids meta) signal.author
+    | _ -> false
+  in
+  let board_event_of_signal signal =
+    if is_self_post_created_echo signal
+    then Ok None
+    else
+      Result.map
+        (fun ev -> Some ev)
+        (pending_board_event_of_board_signal
+           ~meta
+           ~arrived_at:stimulus.arrived_at
+           signal)
+  in
   match stimulus.payload with
   | Keeper_event_queue.Board_signal bs ->
-    Result.map
-      (fun ev -> Some ev)
-      (pending_board_event_of_board_signal
-         ~meta
-         ~arrived_at:stimulus.arrived_at
-         (Board_signal.board_signal_of_board_stimulus ~post_id:stimulus.post_id bs))
+    board_event_of_signal
+      (Board_signal.board_signal_of_board_stimulus ~post_id:stimulus.post_id bs)
   | Keeper_event_queue.Board_attention attention ->
-    Result.map
-      (fun ev -> Some ev)
-      (pending_board_event_of_board_signal
-         ~meta
-         ~arrived_at:stimulus.arrived_at
-         (Board_signal.board_signal_of_board_stimulus
-            ~post_id:stimulus.post_id
-            attention.signal))
+    board_event_of_signal
+      (Board_signal.board_signal_of_board_stimulus
+         ~post_id:stimulus.post_id
+         attention.signal)
   | Keeper_event_queue.Fusion_completed fc ->
     Ok (Some (pending_board_event_of_fusion_completion ~meta ~arrived_at:stimulus.arrived_at fc))
   | Keeper_event_queue.Bg_completed c ->

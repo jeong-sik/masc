@@ -408,6 +408,9 @@ let inventory_json config ~keeper_name =
                  a concept the queue no longer has. *)
             ; ( "transition_outbox_count"
               , `Int (List.length (Queue_state.transition_outbox state)) )
+            ; ( "accepted_transfer_projection_count"
+              , `Int
+                  (List.length (Queue_state.accepted_transfer_projections state)) )
             ] )
       ])
 ;;

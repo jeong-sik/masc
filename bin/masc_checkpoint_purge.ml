@@ -68,6 +68,8 @@ let purge_error_text = function
 
 let load_error_text = function
   | Store.Not_found -> "canonical checkpoint file not found"
+  | Store.Schema_version_mismatch { expected; got } ->
+    Printf.sprintf "schema v%d is not this build's v%d" got expected
   | Store.Store_error detail -> "store error: " ^ detail
   | Store.Parse_error detail -> "parse error: " ^ detail
   | Store.Io_error detail -> "io error: " ^ detail

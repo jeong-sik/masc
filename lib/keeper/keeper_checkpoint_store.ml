@@ -192,6 +192,16 @@ let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string lis
 
 type checkpoint_load_error =
   | Not_found
+  | Schema_version_mismatch of
+      { expected : int
+      ; got : int
+      }
+      (** The artifact parsed, but its schema generation is not this build's.
+          [Agent_sdk.Error.Serialization] reports both numbers; keeping them
+          typed here is what lets a caller tell a superseded generation
+          ([got < expected], written by an older build) apart from a downgrade
+          ([got > expected], written by a newer one). Flattening this into
+          [Parse_error] would put that decision behind a string. *)
   | Store_error of string
   | Parse_error of string
   | Io_error of string
@@ -231,7 +241,7 @@ let classify_sdk_error (e : Agent_sdk.Error.sdk_error) : checkpoint_load_error =
   | Io (ValidationFailed r) -> Store_error r.detail
   | Serialization (JsonParseError r) -> Parse_error r.detail
   | Serialization (VersionMismatch r) ->
-      Parse_error (sprintf "version mismatch: expected %d, got %d" r.expected r.got)
+      Schema_version_mismatch { expected = r.expected; got = r.got }
   | Serialization (UnknownVariant r) ->
       Parse_error (sprintf "unknown variant %s: %s" r.type_name r.value)
   | Api _ | Provider _ | Agent _ | Mcp _ | Config _
@@ -326,6 +336,8 @@ type save_oas_error =
 
 let checkpoint_load_error_to_string = function
   | Not_found -> "checkpoint not found"
+  | Schema_version_mismatch { expected; got } ->
+    Printf.sprintf "version mismatch: expected %d, got %d" expected got
   | Store_error detail
   | Parse_error detail
   | Io_error detail
@@ -924,6 +936,28 @@ module For_testing = struct
   ;;
 end
 
+(* The durable write both admission paths share. [known] is the watermark this
+   write advances from: [None] when there is nothing readable on disk, whether
+   because no file exists or because its schema generation is superseded. *)
+let write_canonical ~session_dir ~canonical_path ~known (ckpt : Agent_sdk.Checkpoint.t) =
+  let ownership_root = Filename.dirname session_dir in
+  match
+    Keeper_fs.save_json_durable_atomic_from
+      ~ownership_root
+      ~pretty:false
+      canonical_path
+      (fun () -> Agent_sdk.Checkpoint.to_json ckpt)
+  with
+  | Error error -> Error (Canonical_write_failed error)
+  | Ok () ->
+    archive_oas_history_best_effort ~session_dir ckpt;
+    Ok
+      (Saved
+         { relation = save_relation ~known ~incoming:ckpt.turn_count
+         ; turn_count = ckpt.turn_count
+         })
+;;
+
 let save_oas_classified_typed
     ~(session_dir : string)
     (ckpt : Agent_sdk.Checkpoint.t)
@@ -935,6 +969,37 @@ let save_oas_classified_typed
       let session_id = Keeper_id.Trace_id.to_string trace_id in
       let canonical_path = oas_checkpoint_path ~session_dir ~session_id in
       match known_watermark ~canonical_path with
+      (* A checkpoint from a superseded schema generation carries no watermark
+         this build can read, which is the same position as having no
+         checkpoint at all: neither guard below has an input. Identity is
+         already fixed by [canonical_path], which is keyed by [session_id], and
+         the monotonicity guard exists to avoid regressing to an older turn —
+         an artifact this build cannot parse cannot be resumed from at any
+         turn, so there is no state to regress to.
+
+         Direction is the whole decision, which is why [Schema_version_mismatch]
+         keeps both numbers instead of a message. [got < expected] is an older
+         build's artifact and is safe to replace. [got > expected] means a
+         NEWER build wrote it: that state is live for the build that owns it,
+         so overwriting it would destroy readable work and stays an error.
+
+         The hard cut this handles is contractual, not exceptional — the OAS
+         pin records it ("checkpoint artifacts below v9 are rejected and must
+         be reset", scripts/oas-agent-sdk-pin.sh). Before this, the unreadable
+         artifact failed [persist_for_state] on every turn, and the keeper hit
+         consecutive turn failures until an operator deleted the file by hand.
+         Logged at warn with both generations so the replacement is visible. *)
+      | Error (Schema_version_mismatch { expected; got }) when got < expected ->
+        Log.Keeper.warn
+          "replacing superseded OAS checkpoint for %s: on-disk schema v%d, this build reads v%d"
+          session_id
+          got
+          expected;
+        Otel_metric_store.inc_counter
+          "masc_keeper_checkpoint_superseded_schema_replaced_total"
+          ~labels:[ ("site", "store_watermark") ]
+          ();
+        write_canonical ~session_dir ~canonical_path ~known:None ckpt
       | Error error -> Error (Existing_checkpoint_unreadable error)
       | Ok (Some existing) when not (String.equal existing.session_id session_id) ->
         Error
@@ -958,22 +1023,7 @@ let save_oas_classified_typed
              })
       | Ok existing ->
         let known = Option.map (fun (w : watermark) -> w.turn_count) existing in
-        let ownership_root = Filename.dirname session_dir in
-        (match
-           Keeper_fs.save_json_durable_atomic_from
-             ~ownership_root
-             ~pretty:false
-             canonical_path
-             (fun () -> Agent_sdk.Checkpoint.to_json ckpt)
-         with
-         | Error error -> Error (Canonical_write_failed error)
-         | Ok () ->
-           archive_oas_history_best_effort ~session_dir ckpt;
-           Ok
-             (Saved
-                { relation = save_relation ~known ~incoming:ckpt.turn_count
-                ; turn_count = ckpt.turn_count
-                })))
+        write_canonical ~session_dir ~canonical_path ~known ckpt)
 
 let save_oas_classified ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
   : (save_oas_outcome, string) result =

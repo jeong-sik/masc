@@ -235,13 +235,23 @@ let load_context_from_checkpoint ~trace_id ~base_dir =
          ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_sdk))]
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint SDK error: %s" trace_id detail
+   (* Not a load failure and deliberately not counted under
+      [CheckpointFailures]: the artifact belongs to a different schema
+      generation, so there was never anything this build could resume. Same
+      outcome as [Not_found] — cold start — but logged with both generations,
+      because unlike an absent file this one still occupies disk and an
+      operator may want it reset. *)
+   | Error (Schema_version_mismatch { expected; got }) ->
+       Log.Keeper.warn
+         "keeper:%s OAS checkpoint schema v%d is not this build's v%d; starting cold"
+         trace_id got expected
    | Error Not_found ->
        Log.Keeper.debug "keeper:%s OAS checkpoint not found" trace_id
    | Ok _ -> ());
   let oas_checkpoint =
     (match oas_result with
      | Ok v -> Some v
-     | Error Not_found -> None
+     | Error Not_found | Error (Schema_version_mismatch _) -> None
      | Error _ ->
        Log.Keeper.warn
          "keeper:%s OAS checkpoint unavailable after explicit load diagnostics"

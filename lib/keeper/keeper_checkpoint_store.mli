@@ -95,6 +95,19 @@ val with_session_lock :
     cold-start absence from real I/O / parse / SDK errors. *)
 type checkpoint_load_error =
   | Not_found
+  | Schema_version_mismatch of
+      { expected : int
+      ; got : int
+      }
+      (** The artifact parsed but belongs to another schema generation.
+          [expected] is what this build reads; [got] is what is on disk. Both
+          are kept because the direction decides the outcome: [got < expected]
+          is a superseded artifact an older build wrote, which
+          {!save_oas_classified_typed} replaces; [got > expected] is a
+          downgrade against state a newer build still reads, which stays an
+          error. Same reason [Not_found] is not string-matched — the SDK
+          reports this typed, and flattening it puts the decision behind a
+          message. *)
   | Store_error of string
   | Parse_error of string
   | Io_error of string

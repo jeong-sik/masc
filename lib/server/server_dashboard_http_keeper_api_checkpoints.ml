@@ -45,6 +45,13 @@ let checkpoint_load_error_json
   let status, kind, detail =
     match error with
     | Not_found -> "missing", "not_found", `Null
+    (* Not "missing": the file is on disk, this build just reads another schema
+       generation. An operator seeing "missing" would look for a write failure
+       that never happened. *)
+    | Schema_version_mismatch { expected; got } ->
+      ( "unavailable"
+      , "schema_version_mismatch"
+      , `String (Printf.sprintf "schema v%d is not this build's v%d" got expected) )
     | Store_error detail -> "unavailable", "store_error", `String detail
     | Parse_error detail -> "unavailable", "parse_error", `String detail
     | Io_error detail -> "unavailable", "io_error", `String detail
@@ -63,6 +70,12 @@ let current_checkpoint_error_json
   =
   match error with
   | Not_found -> `Null
+  | Schema_version_mismatch { expected; got } ->
+    `Assoc
+      [ "kind", `String "schema_version_mismatch"
+      ; ( "detail"
+        , `String (Printf.sprintf "schema v%d is not this build's v%d" got expected) )
+      ]
   | Store_error detail ->
     `Assoc [ "kind", `String "store_error"; "detail", `String detail ]
   | Parse_error detail ->
@@ -125,6 +138,7 @@ let inventory_json (config : Workspace.config) (name : string)
         let status =
           match error with
           | Keeper_checkpoint_store.Not_found -> "missing"
+          | Schema_version_mismatch _
           | Store_error _ | Parse_error _ | Io_error _ | Sdk_other_error _ ->
             "unavailable"
         in

@@ -116,6 +116,8 @@ let compaction_recovery_error_to_tag = function
 
 let checkpoint_load_error_detail = function
   | Keeper_checkpoint_store.Not_found -> "checkpoint not found"
+  | Schema_version_mismatch { expected; got } ->
+    Printf.sprintf "checkpoint schema v%d is not this build's v%d" got expected
   | Store_error detail
   | Parse_error detail
   | Io_error detail

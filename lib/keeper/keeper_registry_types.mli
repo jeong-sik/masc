@@ -335,11 +335,10 @@ type turn_attempt_state = {
   first_started_at : float;
 }
 
-(** #16 (38-bug campaign PR-5): what caused a turn to run — an explicit
-    reactive stimulus batch or the proactive cadence tick (no stimulus).
-    Closed sum over {!Keeper_event_queue.stimulus_payload} so a new wake
-    source cannot silently collapse into a generic "running" label on the
-    operator dashboard. *)
+(** What entered a turn: its exact consumed event batch, an empty external
+    wake, or the proactive cadence tick. Closed over
+    {!Keeper_event_queue.stimulus_payload} so a new source cannot silently
+    collapse into a generic "running" label on the operator dashboard. *)
 type wake_reason =
   | Proactive_tick
   | Woken of Keeper_event_queue.stimulus_payload list

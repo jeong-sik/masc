@@ -112,7 +112,6 @@ let run_keeper_cycle_admitted
       ?event_bus
       ?hitl_resolution
       ?continuation_delivery_channel
-      ?active_source_stimuli
       ~ctx
       ~meta_after_triage
       ~stop
@@ -138,7 +137,6 @@ let run_keeper_cycle_admitted
         ~channel:turn_decision.channel
         ?hitl_resolution
         ?continuation_delivery_channel
-        ?active_source_stimuli
         (* RFC-0315: pass the whole decision, not just its channel — the
            prompt renders the verdict reasons so the turn knows why it woke. *)
         ~turn_decision
@@ -218,7 +216,6 @@ let run_keeper_cycle_with
       ?event_bus
       ?hitl_resolution
       ?continuation_delivery_channel
-      ?active_source_stimuli
       ~ctx
       ~meta_after_triage
       ~stop
@@ -280,7 +277,6 @@ let run_keeper_cycle_with
       ?event_bus
       ?hitl_resolution
       ?continuation_delivery_channel
-      ?active_source_stimuli
       ()
   in
   match manual_compaction_requested with
@@ -331,7 +327,6 @@ let run_keeper_cycle
       ?event_bus
       ?hitl_resolution
       ?continuation_delivery_channel
-      ?active_source_stimuli
       ~ctx
       ~meta_after_triage
       ~stop
@@ -366,7 +361,6 @@ run_keeper_cycle_with
     ?event_bus
     ?hitl_resolution
     ?continuation_delivery_channel
-    ?active_source_stimuli
     ~ctx
     ~meta_after_triage
     ~stop

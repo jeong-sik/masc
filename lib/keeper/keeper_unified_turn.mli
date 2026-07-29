@@ -259,7 +259,6 @@ val run_keeper_cycle
   -> ?event_bus:Agent_sdk.Event_bus.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> ?continuation_delivery_channel:Keeper_continuation_channel.t
-  -> ?active_source_stimuli:Keeper_event_queue.stimulus list
   -> unit
   -> (turn_success, turn_failure) result
 

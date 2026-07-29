@@ -120,6 +120,57 @@ let turn_success_of_stop_reason ~meta = function
   | Runtime_agent.InputRequired _ -> Turn_input_required meta
 ;;
 
+let chat_yield_request ~base_path ~keeper_name =
+  match Keeper_registry.get ~base_path keeper_name with
+  | None -> Error (Printf.sprintf "keeper not registered: %s" keeper_name)
+  | Some _ ->
+    if Keeper_turn_admission.chat_waiting ~base_path ~keeper_name
+    then Ok (Some Keeper_agent_run.{ reason = Chat_waiting })
+    else
+      match Keeper_chat_queue.has_active_receipts ~keeper_name with
+      | Error error ->
+        Error
+          ("chat queue snapshot failed: "
+           ^ Keeper_chat_queue.mutation_error_to_string error)
+      | Ok true -> Ok (Some Keeper_agent_run.{ reason = Chat_waiting })
+      | Ok false -> Ok None
+;;
+
+let autonomous_yield_request ~base_path ~keeper_name =
+  match chat_yield_request ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok (Some _) as request -> request
+  | Ok None ->
+    (match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+     | Error _ as error -> error
+     | Ok pending ->
+       if Keeper_event_queue.is_empty pending
+       then Ok None
+       else (
+         let summary =
+           Keeper_agent_run.durable_stimulus_summary ~now:(Time_compat.now ()) pending
+         in
+         Log.Keeper.info
+           ~keeper_name
+           "autonomous turn yields to durable stimulus: %s"
+           (Keeper_agent_run.durable_stimulus_summary_to_string summary);
+         Ok
+           (Some
+              Keeper_agent_run.
+                { reason = Durable_stimulus_waiting summary })))
+;;
+
+let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
+  match wake with
+  (* A nonempty [Woken] is the event queue input already selected for this
+     turn. It may yield for chat delivery, but a queued successor waits until
+     that source reaches its terminal settlement. *)
+  | Keeper_registry.Woken (_ :: _) ->
+    fun () -> chat_yield_request ~base_path ~keeper_name
+  | Keeper_registry.Proactive_tick | Keeper_registry.Woken [] ->
+    fun () -> autonomous_yield_request ~base_path ~keeper_name
+;;
+
 (* RFC-0356: for the operations [Keeper_gate_replay] dispatches to, the runtime
    spends the grant itself during tool-bundle setup (#25947, #26089). That
    happens after this message is composed — [keeper_agent_run.ml:560] runs
@@ -666,7 +717,6 @@ let run_keeper_cycle
       ?event_bus
       ?hitl_resolution
       ?continuation_delivery_channel
-      ?(active_source_stimuli = [])
       ()
   : (turn_success, turn_failure) result
   =
@@ -1164,8 +1214,12 @@ let run_keeper_cycle
                            ; turn_id = keeper_turn_id
                            ; deferred_runtime_lane
                            ; on_deferred_runtime_consumed
-                           ; active_source_stimuli
                            }
+                           ~autonomous_yield_requested:
+                             (autonomous_yield_request_for_wake
+                                ~wake
+                                ~base_path:config.base_path
+                                ~keeper_name:meta.name)
                            ~initial_execution
                            ~turn_state
                            ~before_dispatch_authority

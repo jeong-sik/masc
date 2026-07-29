@@ -769,23 +769,20 @@ let run_keepalive_unified_turn
               Some completion.channel
             | [] | [ _ ] | _ :: _ :: _ -> None
           in
-          (* #16 (38-bug campaign PR-5): [reactive_wake] tells us this cycle
-             was triggered by an external signal rather than the proactive
-             cadence tick, but by itself does not say *which* stimulus (or
-             whether the event queue drained anything at all). Pairing it
-             with [!consumed_stimuli] — already drained above, unchanged
-             until the post-turn ack/requeue below — gives
-             [mark_turn_started] a total, typed answer instead of the
-             boolean the registry previously discarded. *)
+          (* The event intake is the exact turn input. Keep its attribution in
+             the existing wake record even when the cadence, rather than a
+             direct wake signal, discovered it. An empty [Woken] still means a
+             reactive wake with no selected event. *)
           let wake : Keeper_registry.wake_reason =
-            if reactive_wake
-            then
+            match !consumed_stimuli, reactive_wake with
+            | _ :: _, _ ->
               Keeper_registry.Woken
                 (List.map
                    (fun (stim : Keeper_event_queue.stimulus) ->
                       stim.Keeper_event_queue.payload)
                    !consumed_stimuli)
-            else Keeper_registry.Proactive_tick
+            | [], true -> Keeper_registry.Woken []
+            | [], false -> Keeper_registry.Proactive_tick
           in
           let run_cycle () =
             run_keeper_cycle
@@ -795,7 +792,6 @@ let run_keepalive_unified_turn
               ?event_bus
               ?hitl_resolution
               ?continuation_delivery_channel
-              ~active_source_stimuli:!consumed_stimuli
               ~ctx
               ~meta_after_triage
               ~stop

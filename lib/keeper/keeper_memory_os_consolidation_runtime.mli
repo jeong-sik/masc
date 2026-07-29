@@ -23,6 +23,13 @@ type outcome =
       { before : int
       ; current : int
       }
+  | Eligibility_changed of
+      { before : int
+      ; newly_expired : int
+      }
+      (** At least one fact shown to the provider expired before the plan could
+          be applied or written. The plan indices are stale, so the store is
+          left untouched and a later maintenance tick must re-judge it. *)
   | Consolidated of
       { before : int
       ; after : int
@@ -62,11 +69,13 @@ val resolve_provider_for_consolidation
     so model-level temperature declarations survive request tuning.
     [provider_cfg] must already be tier-resolved via
     {!resolve_provider_for_consolidation}; the contract is not re-applied per
-    keeper. *)
+    keeper. [fresh_now] is an injectable wall-clock read used to revalidate the
+    model input immediately before apply and again under the rewrite lock. *)
 val consolidate_keeper
   :  ?complete:complete_fn
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?dry_run:bool
+  -> ?fresh_now:(unit -> float)
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> runtime_id:string

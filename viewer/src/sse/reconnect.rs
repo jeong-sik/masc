@@ -79,10 +79,9 @@ impl ReconnectState {
     }
 }
 
-/// Bevy resource holding reconnect state for TRPG and MASC connections.
+/// Bevy resource holding reconnect state for MASC connections.
 #[derive(Resource, Default)]
 pub struct SseReconnectManager {
-    pub trpg: ReconnectState,
     pub masc: ReconnectState,
 }
 

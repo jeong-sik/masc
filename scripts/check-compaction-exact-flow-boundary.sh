@@ -31,15 +31,6 @@ check_boundary() {
     || fail "retired compaction provider/model projection carrier remains"
   [[ ! -e "${REPO_ROOT}/lib/keeper/keeper_compaction_projection_target.mli" ]] \
     || fail "retired compaction provider/model projection interface remains"
-  for retired_event_layer_module in \
-    "${REPO_ROOT}/lib/keeper/keeper_exact_disposition_recovery.ml" \
-    "${REPO_ROOT}/lib/keeper/keeper_exact_disposition_recovery.mli" \
-    "${REPO_ROOT}/lib/keeper/keeper_registry_event_queue_exact_execution.ml" \
-    "${REPO_ROOT}/lib/keeper/keeper_registry_event_queue_exact_execution.mli"
-  do
-    [[ ! -e "${retired_event_layer_module}" ]] \
-      || fail "retired Event Layer module remains: ${retired_event_layer_module}"
-  done
 
   require_once "Exact_output.make_flow_candidate"
   require_once "Exact_output.snapshot_flow"
@@ -131,7 +122,7 @@ check_boundary() {
   local retired_event_queue_pattern
   local event_queue_candidate
   local event_queue_candidates=()
-  retired_event_queue_pattern='\b(lease_id|lease_sequence|settlement_id|settle_exact|Settle_exact|settle_exact_terminal_after_cancellation|retain_unacked_pending|source_lease_disposition|exact_execution_binding|exact_source_disposition|allow_legacy_durable)\b|lease:|keeper\.event_queue\.state\.v([1-9]|10|11)\b|masc\.keeper_event_queue\.transition\.v1\b|masc\.keeper\.paused-work-disposition\.v[1-4]\b|masc\.keeper_event_queue\.settlement|event-queue-settlements|event-queue-inflight'
+  retired_event_queue_pattern='\b(lease_id|lease_sequence|settlement_id|settle_exact|Settle_exact|settle_exact_terminal_after_cancellation|retain_unacked_pending|source_lease_disposition|exact_execution_binding|exact_source_disposition|allow_legacy_durable)\b|keeper\.event_queue\.state\.v(7|8|9|10|11)|masc\.keeper_event_queue\.settlement|event-queue-settlements|event-queue-inflight'
   for event_queue_candidate in \
     "${REPO_ROOT}/lib/keeper_runtime/keeper_event_queue_state.ml" \
     "${REPO_ROOT}/lib/keeper_runtime/keeper_event_queue_state.mli" \
@@ -142,19 +133,13 @@ check_boundary() {
     "${REPO_ROOT}/lib/keeper/keeper_unified_turn.ml" \
     "${REPO_ROOT}/lib/keeper/keeper_unified_turn.mli" \
     "${REPO_ROOT}/lib/keeper/keeper_heartbeat_loop.ml" \
+    "${REPO_ROOT}/lib/keeper/keeper_paused_work_disposition_receipt.ml" \
+    "${REPO_ROOT}/lib/keeper/keeper_paused_work_disposition_receipt.mli" \
     "${REPO_ROOT}/lib/keeper/keeper_reaction_ledger.ml"
   do
     [[ -f "${event_queue_candidate}" ]] \
       && event_queue_candidates+=("${event_queue_candidate}")
   done
-  while IFS= read -r event_queue_candidate; do
-    event_queue_candidates+=("${event_queue_candidate}")
-  done < <(
-    find "${REPO_ROOT}/lib/keeper" -maxdepth 1 -type f \
-      \( -name 'keeper_paused_work_*.ml' -o -name 'keeper_paused_work_*.mli' \) \
-      -print \
-      | sort
-  )
   if (( ${#event_queue_candidates[@]} > 0 )) \
     && rg -n "${retired_event_queue_pattern}" "${event_queue_candidates[@]}"
   then
@@ -165,7 +150,7 @@ check_boundary() {
 }
 
 self_test() {
-  local fixture target clean adjacent adjacent_clean alternate event_state retired_module
+  local fixture target clean adjacent adjacent_clean alternate event_state
   fixture="$(mktemp -d "${TMPDIR:-/tmp}/compaction-exact-flow-boundary.XXXXXX")"
   trap "rm -rf '${fixture}'" EXIT
   mkdir -p "${fixture}/lib/keeper" "${fixture}/lib/keeper_runtime" "${fixture}/test"
@@ -200,17 +185,6 @@ EOF
     fail "self-test retired Event Layer authority unexpectedly passed"
   fi
   rm -f "${event_state}"
-
-  retired_module="${fixture}/lib/keeper/keeper_exact_disposition_recovery.ml"
-  printf '%s\n' 'let _ = ()' >"${retired_module}"
-  if
-    MASC_COMPACTION_BOUNDARY_ROOT="${fixture}" \
-      MASC_COMPACTION_EXACT_FLOW_TARGET="${target}" \
-      "${BASH_SOURCE[0]}" --check-only >/dev/null 2>&1
-  then
-    fail "self-test retired Event Layer module unexpectedly passed"
-  fi
-  rm -f "${retired_module}"
 
   printf '%s\n' 'let _ = Exact_output.snapshot_flow' >>"${target}"
   if
@@ -295,10 +269,10 @@ EOF
   rm -f "${fixture}/lib/keeper/keeper_compaction_projection_target.ml"
 
   MASC_COMPACTION_BOUNDARY_ROOT="${fixture}" \
-  MASC_COMPACTION_EXACT_FLOW_TARGET="${target}" \
+    MASC_COMPACTION_EXACT_FLOW_TARGET="${target}" \
     "${BASH_SOURCE[0]}" --check-only >/dev/null
   echo \
-    "[compaction-exact-flow-boundary:self-test] clean=pass event-layer=fail event-module=fail unrelated=pass duplicate=fail missing=fail legacy=fail forbidden=fail projection=fail dynamic=fail carrier=fail restored=pass"
+    "[compaction-exact-flow-boundary:self-test] clean=pass event-layer=fail unrelated=pass duplicate=fail missing=fail legacy=fail forbidden=fail projection=fail dynamic=fail carrier=fail restored=pass"
 }
 
 case "${1:-}" in

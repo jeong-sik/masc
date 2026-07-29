@@ -37,7 +37,7 @@ let workflow_rejection_error_json
     | Some outcome -> [ "typed_outcome", Keeper_tool_outcome.to_json outcome ]
     | None -> []
   in
-  Workflow_rejection_payload.payload
+  Masc_task_handlers.Workflow_rejection_payload.payload
     ~rule_id
     ~extra_fields
     message

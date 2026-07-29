@@ -469,9 +469,12 @@ let test_parse_valid_broadcast_json () =
           check string "message" "Status update" message
       | _ -> fail "expected Broadcast action"
 
-let test_structured_result_schema_metadata () =
-  check string "schema name" "keeper_deliberation_decision"
-    D.structured_result_schema.name;
+(* agent_sdk 0.231.1 dropped [name] and [description] from
+   [Structured.schema]: the SDK now emits a bare object JSON schema
+   ([schema_to_json_schema]) instead of a named tool, so no schema name reaches
+   the provider. The prompt still names the schema in prose for the model, and
+   [test_prompt_contains_tool_input_instruction] pins that string. *)
+let test_structured_result_schema_requires_action () =
   check bool "schema requires action" true
     (List.exists
        (fun (param : Agent_sdk.Types.tool_param) ->
@@ -1145,8 +1148,8 @@ let () =
         ] );
       ( "structured_result_schema",
         [
-          test_case "schema metadata" `Quick
-            test_structured_result_schema_metadata;
+          test_case "schema requires action" `Quick
+            test_structured_result_schema_requires_action;
           test_case "schema parse valid json" `Quick
             test_structured_result_schema_parse_valid_json;
         ] );

@@ -155,7 +155,8 @@ let test_lifecycle_fifo_terminal_pk_and_restart () =
   check "first FIFO receipt claims alone"
     (String.equal (receipt_wire first_claim.receipt_id) first_id);
   let first_outcome =
-    Mark_delivered { completed_at = 2.0; outcome_ref = Some "turn-1" }
+    Keeper_chat_queue.Mark_delivered
+      { completed_at = 2.0; outcome_ref = Some "turn-1" }
   in
   (match
      Keeper_chat_queue.complete_claim
@@ -187,7 +188,7 @@ let test_lifecycle_fifo_terminal_pk_and_restart () =
        ~keeper_name
        ~receipt_id:first_claim.receipt_id
        ~outcome:
-         (Mark_failed
+         (Keeper_chat_queue.Mark_failed
             { completed_at = 2.0
             ; kind = Delivery_failed
             ; detail = "conflicting terminal decision"
@@ -254,7 +255,7 @@ let test_preallocated_receipt_convergence () =
        ~keeper_name
        ~receipt_id:claim.receipt_id
        ~outcome:
-         (Mark_failed
+         (Keeper_chat_queue.Mark_failed
             { completed_at = 3.0
             ; kind = Delivery_failed
             ; detail = "transport failed"
@@ -335,7 +336,7 @@ let test_pending_cancellation_is_state_guarded () =
        ~keeper_name
        ~receipt_id:claim.receipt_id
        ~outcome:
-         (Mark_failed
+         (Keeper_chat_queue.Mark_failed
             { completed_at = 6.0
             ; kind = Delivery_failed
             ; detail = "test cleanup"
@@ -589,7 +590,8 @@ let test_uncertain_claim_and_completion_reconcile () =
          ~keeper_name
          ~receipt_id:claim.receipt_id
          ~outcome:
-           (Mark_delivered { completed_at = 4.0; outcome_ref = Some "turn" })
+           (Keeper_chat_queue.Mark_delivered
+              { completed_at = 4.0; outcome_ref = Some "turn" })
      with
      | `Error
          (Keeper_chat_queue.Persist_failed

@@ -41,6 +41,25 @@ type input_schema_source =
 
 type readonly_of_input = Yojson.Safe.t -> bool option
 
+type identity_validation =
+  | Validate_once_before_translation
+  | Validate_once_after_translation
+
+type shape_changing_validation =
+  | Validate_before_and_after_translation
+  | Validate_before_then_runtime_handler
+
+type input_translation =
+  | Identity of identity_validation
+  | Schema_preserving of
+      { translate : Yojson.Safe.t -> Yojson.Safe.t
+      ; validation : identity_validation
+      }
+  | Shape_changing of
+      { translate : Yojson.Safe.t -> Yojson.Safe.t
+      ; validation : shape_changing_validation
+      }
+
 type runtime_handler =
   | Tool_execute
   | Tool_search_files
@@ -105,8 +124,7 @@ type t =
   ; backend : backend
   ; sandbox : sandbox
   ; runtime_handler : runtime_handler
-  ; translate : Yojson.Safe.t -> Yojson.Safe.t
-  ; validate_translated_input : bool
+  ; input_translation : input_translation
   ; receipt_labels : (string * string) list
   ; eval_tags : string list
   ; examples : Yojson.Safe.t list
@@ -448,8 +466,6 @@ let fetch_web_schema =
     ]
 ;;
 
-let translate_identity input = input
-
 (* [offset]/[limit] pass through as LINE coordinates — the runtime owns the
    line-window contract (keeper_tool_filesystem_runtime.slice_read_window).
    [limit] used to be renamed to [max_bytes] here, which silently turned "200
@@ -537,11 +553,36 @@ let translate_search_files input =
 (* search_files is now rg (pattern search) only — always read-only. *)
 let search_files_readonly_of_input _input = Some true
 
+let translate_input_for_descriptor descriptor input =
+  match descriptor.input_translation with
+  | Identity _ -> input
+  | Schema_preserving { translate; _ }
+  | Shape_changing { translate; _ } -> translate input
+;;
+
+let requires_pre_translation_validation descriptor =
+  match descriptor.input_translation with
+  | Identity Validate_once_before_translation
+  | Schema_preserving { validation = Validate_once_before_translation; _ }
+  | Shape_changing _ -> true
+  | Identity Validate_once_after_translation
+  | Schema_preserving { validation = Validate_once_after_translation; _ } -> false
+;;
+
+let requires_post_translation_validation descriptor =
+  match descriptor.input_translation with
+  | Identity Validate_once_after_translation
+  | Schema_preserving { validation = Validate_once_after_translation; _ }
+  | Shape_changing { validation = Validate_before_and_after_translation; _ } -> true
+  | Identity Validate_once_before_translation
+  | Schema_preserving { validation = Validate_once_before_translation; _ }
+  | Shape_changing { validation = Validate_before_then_runtime_handler; _ } -> false
+;;
+
 let descriptor_with_public_aliases
       ?(examples = [])
       ~keeper_model_projection
       ~input_schema_source
-      ~validate_translated_input
       ~public_aliases
       ~id
       ~public_name
@@ -553,7 +594,7 @@ let descriptor_with_public_aliases
       ~backend
       ~sandbox
       ~runtime_handler
-      ~translate
+      ~input_translation
       ()
   =
   let receipt_labels =
@@ -590,8 +631,7 @@ let descriptor_with_public_aliases
   ; backend
   ; sandbox
   ; runtime_handler
-  ; translate
-  ; validate_translated_input
+  ; input_translation
   ; receipt_labels
   ; eval_tags = []
   ; examples
@@ -602,7 +642,6 @@ let descriptor
       ?(examples = [])
       ~keeper_model_projection
       ~input_schema_source
-      ~validate_translated_input
       ~id
       ~public_name
       ~internal_name
@@ -613,14 +652,13 @@ let descriptor
       ~backend
       ~sandbox
       ~runtime_handler
-      ~translate
+      ~input_translation
       ()
   =
   descriptor_with_public_aliases
     ~examples
     ~keeper_model_projection
     ~input_schema_source
-    ~validate_translated_input
     ~public_aliases:[]
     ~id
     ~public_name
@@ -632,7 +670,7 @@ let descriptor
     ~backend
     ~sandbox
     ~runtime_handler
-    ~translate
+    ~input_translation
     ()
 ;;
 
@@ -672,8 +710,7 @@ let public_descriptors =
             ~argv:[ "program"; "--version" ]
             ()
         ]
-      ~validate_translated_input:false
-      ~translate:translate_identity
+      ~input_translation:(Identity Validate_once_before_translation)
       ()
   ; descriptor_with_public_aliases
       ~keeper_model_projection:Preferred_public_name
@@ -701,8 +738,11 @@ let public_descriptors =
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
       ~runtime_handler:Tool_search_files
-      ~validate_translated_input:true
-      ~translate:translate_search_files
+      ~input_translation:
+        (Shape_changing
+           { translate = translate_search_files
+           ; validation = Validate_before_and_after_translation
+           })
       ()
   ; descriptor
       ~keeper_model_projection:Preferred_public_name
@@ -726,8 +766,11 @@ let public_descriptors =
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
       ~runtime_handler:Tool_read_file
-      ~validate_translated_input:false
-      ~translate:translate_read_file
+      ~input_translation:
+        (Shape_changing
+           { translate = translate_read_file
+           ; validation = Validate_before_then_runtime_handler
+           })
       ()
   ; descriptor
       ~keeper_model_projection:Preferred_public_name
@@ -751,8 +794,11 @@ let public_descriptors =
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
       ~runtime_handler:Tool_edit_file
-      ~validate_translated_input:false
-      ~translate:translate_edit_file
+      ~input_translation:
+        (Shape_changing
+           { translate = translate_edit_file
+           ; validation = Validate_before_then_runtime_handler
+           })
       ()
   ; descriptor
       ~keeper_model_projection:Preferred_public_name
@@ -774,8 +820,11 @@ let public_descriptors =
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
       ~runtime_handler:Tool_write_file
-      ~validate_translated_input:false
-      ~translate:translate_write_file
+      ~input_translation:
+        (Shape_changing
+           { translate = translate_write_file
+           ; validation = Validate_before_then_runtime_handler
+           })
       ()
   ; descriptor
       ~keeper_model_projection:Preferred_public_name
@@ -799,8 +848,7 @@ let public_descriptors =
       ~backend:Ocaml_runtime
       ~sandbox:No_sandbox
       ~runtime_handler:Tool_web_search
-      ~validate_translated_input:false
-      ~translate:translate_identity
+      ~input_translation:(Identity Validate_once_before_translation)
       ()
   ; descriptor
       ~keeper_model_projection:Preferred_public_name
@@ -824,8 +872,7 @@ let public_descriptors =
       ~backend:Ocaml_runtime
       ~sandbox:No_sandbox
       ~runtime_handler:Tool_web_fetch
-      ~validate_translated_input:false
-      ~translate:translate_identity
+      ~input_translation:(Identity Validate_once_before_translation)
       ()
   ]
 ;;
@@ -1148,8 +1195,7 @@ let in_process_descriptor_with_schema_source ~keeper_model_projection
     ~backend:Ocaml_runtime
     ~sandbox:No_sandbox
     ~runtime_handler:handler
-    ~validate_translated_input:true
-    ~translate:translate_identity
+    ~input_translation:(Identity Validate_once_after_translation)
     ()
 ;;
 
@@ -2053,7 +2099,7 @@ let public_input_schema public =
 
 let translate_input ~public input =
   match find_public public with
-  | Some d -> d.translate input
+  | Some descriptor -> translate_input_for_descriptor descriptor input
   | None -> input
 ;;
 

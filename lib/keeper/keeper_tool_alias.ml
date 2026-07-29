@@ -35,7 +35,7 @@ let routing_table : (string, route) Hashtbl.t =
               t
               public_name
               { internal_name = d.internal_name
-              ; translate = d.translate
+              ; translate = Keeper_tool_descriptor.translate_input_for_descriptor d
               ; public_schema = Some d.input_schema
               ; descriptor = d
               })

@@ -678,20 +678,44 @@ let test_read_public_descriptor_schema_is_closed () =
     (schema_forbids_additional_properties descriptor.input_schema)
 ;;
 
-let test_identity_translators_do_not_repeat_public_validation () =
+let test_translation_validation_policy_is_typed_for_all_descriptors () =
+  let probe = `Assoc [ "probe", `String "byte-identical" ] in
   List.iter
-    (fun name ->
-       let descriptor = required_public_descriptor name in
-       Alcotest.(check bool)
-         (name ^ " skips duplicate post-identity validation")
-         false
-         descriptor.validate_translated_input)
-    [ "Execute"; "WebSearch"; "WebFetch" ];
-  let grep = required_public_descriptor "Grep" in
-  Alcotest.(check bool)
-    "Grep retains post-translation validation"
-    true
-    grep.validate_translated_input
+    (fun (descriptor : Descriptor.t) ->
+       let pre =
+         Descriptor.requires_pre_translation_validation descriptor
+       in
+       let post =
+         Descriptor.requires_post_translation_validation descriptor
+       in
+       match descriptor.input_translation with
+       | Descriptor.Identity _ ->
+         Alcotest.(check int)
+           (descriptor.id ^ " validates an identity payload exactly once")
+           1
+           ((if pre then 1 else 0) + if post then 1 else 0);
+         Alcotest.(check Yojson.Safe.equal)
+           (descriptor.id ^ " identity translation is byte-identical")
+           probe
+           (Descriptor.translate_input_for_descriptor descriptor probe)
+       | Descriptor.Schema_preserving _ ->
+         Alcotest.(check int)
+           (descriptor.id ^ " validates a schema-preserving payload exactly once")
+           1
+           ((if pre then 1 else 0) + if post then 1 else 0)
+       | Descriptor.Shape_changing
+           { validation = Descriptor.Validate_before_and_after_translation; _ } ->
+         Alcotest.(check bool)
+           (descriptor.id ^ " validates both shape boundaries")
+           true
+           (pre && post)
+       | Descriptor.Shape_changing
+           { validation = Descriptor.Validate_before_then_runtime_handler; _ } ->
+         Alcotest.(check bool)
+           (descriptor.id ^ " validates public input before runtime-owned validation")
+           true
+           (pre && not post))
+    (Descriptor.all_descriptors ())
 ;;
 
 let test_read_public_validation_rejects_line_fields () =
@@ -1507,9 +1531,9 @@ let () =
             `Quick
             test_read_public_validation_rejects_line_fields
         ; test_case
-            "identity translators validate the public payload once"
+            "translation validation policy is typed for all descriptors"
             `Quick
-            test_identity_translators_do_not_repeat_public_validation
+            test_translation_validation_policy_is_typed_for_all_descriptors
         ; test_case
             "Read validates then translates supported public fields"
             `Quick

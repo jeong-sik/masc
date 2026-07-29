@@ -77,7 +77,10 @@ let capability_has kind tool_name =
 let descriptor_and_input_for_tool_call ~tool_name ~input =
   let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
   match Keeper_tool_descriptor.find_public stripped with
-  | Some descriptor -> Some (descriptor, descriptor.Keeper_tool_descriptor.translate input)
+  | Some descriptor ->
+    Some
+      ( descriptor
+      , Keeper_tool_descriptor.translate_input_for_descriptor descriptor input )
   | None ->
     (match Keeper_tool_descriptor.descriptors_for_internal stripped with
      | descriptor :: _ -> Some (descriptor, input)
@@ -125,7 +128,9 @@ let validated_descriptor_and_input_for_tool_call ~tool_name ~input =
        Some
          (Ok
             ( descriptor
-            , descriptor.Keeper_tool_descriptor.translate validated_input ))
+            , Keeper_tool_descriptor.translate_input_for_descriptor
+                descriptor
+                validated_input ))
      | Error validation_result -> Some (Error validation_result))
   | None ->
     Option.map

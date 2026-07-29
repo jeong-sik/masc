@@ -9,8 +9,9 @@
   or repair path was added.
 - **Keeper tool admission**: identity-translated `Execute`, `WebSearch`, and
   `WebFetch` payloads now use the public descriptor validation as their single
-  schema Gate. Shape-changing translators such as `Grep` retain post-translation
-  validation.
+  schema Gate. Translation shape and validation ownership now share one typed
+  descriptor field, so shape-changing translators such as `Grep` retain
+  post-translation validation without an independent boolean.
 - **Breaking (recall injection ledger)**: schema v3 adds a required typed
   `reset` marker. The first row for each keeper process now resets replay state
   before applying its exact current baseline, so keys deleted across a process

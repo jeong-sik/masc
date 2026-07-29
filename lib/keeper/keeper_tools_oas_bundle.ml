@@ -198,7 +198,7 @@ let make_tool_bundle
   (* The handler dispatches with
      [~name:descriptor.internal_name] so all telemetry SSOT remains internal;
      exactly one projected Tool.schema.name is model-visible.
-     [descriptor.translate] reshapes the LLM's payload before dispatch;
+     the descriptor-owned typed translation reshapes the LLM's payload before dispatch;
      [descriptor.input_schema] provides the LLM-facing schema. *)
   let descriptor_tools =
     List.concat_map
@@ -232,15 +232,21 @@ let make_tool_bundle
                  ~on_external_effect_deferred:mark_external_effect_deferred
                  ?on_failed
                  ~pre_validate_input:(fun input ->
-                   match
-                     Keeper_tool_descriptor_resolution.validate_public_input_for_tool_call
-                       ~tool_name:model_name
-                       ~input
-                   with
-                 | Some result -> result
-                 | None -> Ok input)
-                 ~translate_input:descriptor.translate
-                 ~validate_translated_input:descriptor.validate_translated_input
+                   if
+                     Keeper_tool_descriptor.requires_pre_translation_validation
+                       descriptor
+                   then
+                     Tool_input_validation.validate_args
+                       ~schema:descriptor.input_schema
+                       ~name:model_name
+                       ~args:input
+                       ()
+                   else Ok input)
+                 ~translate_input:
+                   (Keeper_tool_descriptor.translate_input_for_descriptor descriptor)
+                 ~validate_translated_input:
+                   (Keeper_tool_descriptor.requires_post_translation_validation
+                      descriptor)
                  ()
              in
              Tool_bridge.oas_tool_of_masc_with_execution_env

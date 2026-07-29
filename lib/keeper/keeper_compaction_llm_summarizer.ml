@@ -1178,9 +1178,12 @@ let execute_prepared_lane_current
     authorized_observation := Some observation;
     Ok ()
   in
-  let before_advance ~failed:_ ~next:_ =
-    authorized_observation := None;
-    Ok ()
+  let before_advance ~failed ~next:_ =
+    match failed with
+    | Exact_output.Flow_candidate_rejected _ -> Ok ()
+    | Exact_output.Flow_candidate_execution_failed _ ->
+      authorized_observation := None;
+      Ok ()
   in
   let validate flow_success =
     let success = Exact_output.flow_success_output flow_success in
@@ -1237,8 +1240,9 @@ let execute_prepared_lane_current
     | Eio.Cancel.Cancelled _ as cancellation ->
       let raw_bt = Printexc.get_raw_backtrace () in
       (* OAS owns execution state. MASC records only whether its source
-         authority callback passed for the current candidate. OAS clears that
-         observation through [before_advance] before selecting a successor. *)
+         authority callback passed for a dispatched candidate. An admission
+         rejection cannot erase the last dispatched observation; an execution
+         failure clears it before OAS selects a successor. *)
       (match !authorized_observation with
        | None -> Printexc.raise_with_backtrace cancellation raw_bt
        | Some observation ->

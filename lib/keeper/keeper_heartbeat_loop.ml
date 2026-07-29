@@ -357,9 +357,8 @@ let compaction_outcome_of_cycle_outcome = function
           Counting it advanced the streak the gate itself reads: live keeper
           kidsnote reached 907 against a threshold of 3. *)
        None
-     | Keeper_unified_turn.Escalate_after_exact_output_terminal _ -> Some `Failed
+     | Keeper_unified_turn.Acknowledge_after_in_turn_handling -> Some `Failed
      | Keeper_unified_turn.Follow_failure_route
-     | Keeper_unified_turn.Acknowledge_after_in_turn_handling
      | Keeper_unified_turn.Pause_after_transcript_corruption _ -> None)
   | Some (Cycle.Completed _) -> Some `Recovered
   | Some
@@ -800,7 +799,6 @@ let run_keepalive_unified_turn
            | Keeper_unified_turn.Follow_failure_route
            | Keeper_unified_turn.Follow_failure_route_after_no_compaction _
            | Keeper_unified_turn.Requeue_after_context_compaction _
-           | Keeper_unified_turn.Escalate_after_exact_output_terminal _
            | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
              None)
         | Some
@@ -852,8 +850,7 @@ let run_keepalive_unified_turn
               | Error message -> record_event_queue_failure message)
            | Some (Cycle.Failed { failure; _ }) ->
              (match failure.Keeper_unified_turn.source_disposition with
-              | Keeper_unified_turn.Acknowledge_after_in_turn_handling
-              | Keeper_unified_turn.Escalate_after_exact_output_terminal _ ->
+              | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
                 (match
                    fail_schedule_due
                      ~ctx

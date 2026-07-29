@@ -15,16 +15,6 @@ type pending_selection =
   ; stimuli : Keeper_event_queue.stimulus list
   }
 
-type requeue_reason =
-  | Cycle_busy
-  | Turn_not_scheduled
-  | Rotate_now
-  | Cancelled
-  | Cycle_crashed
-  | Registration_recovery
-  | Retry_after_observed
-  | Context_compaction_retry
-
 type exact_execution_terminal_cause =
   | Exact_execution_failed
   | Exact_execution_cancelled
@@ -46,45 +36,8 @@ type exact_execution_terminal =
   ; request_body_sha256 : string
   }
 (** One OAS-owned affine call that crossed, or can no longer safely be assumed
-    not to have crossed, the dispatch boundary. The complete producer proof is
-    mandatory and survives the queue receipt/WAL codec. *)
-
-type escalation_reason =
-  | Compaction_exact_lane_unconfigured of
-      { source : Keeper_checkpoint_ref.t
-      }
-      (** The exact-output compaction lane is absent. The durable checkpoint
-          source is retained and the event escalates without a retry successor. *)
-  | Compaction_exact_output_terminal of
-      { source : Keeper_checkpoint_ref.t
-      ; terminal : exact_execution_terminal
-      }
-      (** A source-bound exact-output call is terminal. The checkpoint source,
-          slot, call ID, and categorical cause are durably retained; no retry
-          successor is legal. *)
-  | Compaction_retry_exhausted of
-      { attempts : int
-      ; detail : string
-      }
-      (** RFC-0351 S0 / #25461: settled instead of
-          [Requeue Context_compaction_retry] once consecutive manual-compaction
-          failures reach the escalation threshold.  A requeue is not an ack, so
-          without this ceiling the same stimulus re-enters every heartbeat
-          cycle. *)
-  | Compaction_floor_exceeded of
-      { attempts : int
-      ; detail : string
-      }
-      (** RFC-0351 S0 / #25538: consecutive provider-overflow episodes reached
-          the threshold even though compactions were committing — the
-          committed savings cannot bring the context under the provider
-          window (an incompressible floor).  Distinct from
-          [Compaction_retry_exhausted] so "compaction keeps failing" and
-          "compaction succeeds but cannot help" stay operator-distinguishable. *)
-  | Transcript_corruption_requires_reset of { detail : string }
-      (** Structural transcript corruption is terminal for automatic
-          execution. The first failure pauses the Keeper and consumes the
-          source event without a successor until explicit operator reset. *)
+    not to have crossed, the dispatch boundary. This is in-process compaction
+    evidence; the event queue does not claim to persist it. *)
 
 type no_compaction_reason =
   | No_eligible_history
@@ -141,69 +94,15 @@ type accepted_source_terminal =
   ; source_receipt : source_terminal_receipt
   }
 
-type manual_compaction_auxiliary =
-  | Compaction_commit_durability_unknown of { detail : string }
-  | Compaction_commit_observer_failed of
-      { detail : string
-      ; backtrace_present : bool
-      }
-  | Compaction_release_process_lock_failed of { detail : string }
-  | Compaction_post_commit_unwind_interrupted of
-      { detail : string
-      ; backtrace_present : bool
-      }
-  | Compaction_history_write_failed of
-      { detail : string
-      ; backtrace_present : bool
-      }
-
-type manual_compaction_lifecycle =
-  | Compaction_completion_applied
-  | Compaction_completion_rejected_failure_dispatched of
-      { completion_error : string }
-  | Compaction_completion_rejected_failure_dispatch_failed of
-      { completion_error : string
-      ; failure_dispatch_error : string
-      }
-
-type manual_compaction_commit =
-  { installed_ref : Keeper_checkpoint_ref.t
-  ; auxiliary : manual_compaction_auxiliary list
-  ; lifecycle : manual_compaction_lifecycle
-  ; manifest_error : string option
-  }
-
-type manual_compaction_followup =
-  | Compaction_commit_ack
-
-val manual_compaction_commit_requires_operator_action
-  :  manual_compaction_commit
-  -> bool
-
 val no_compaction_reason_label : no_compaction_reason -> string
-val no_compaction_reason_of_label : string -> (no_compaction_reason, string) result
 val no_compaction_reason_to_string : no_compaction_reason -> string
 val exact_execution_terminal_cause_label : exact_execution_terminal_cause -> string
-val exact_execution_terminal_cause_of_label
-  :  string
-  -> (exact_execution_terminal_cause, string) result
 val exact_execution_terminal_to_string : exact_execution_terminal -> string
 
 type transition =
-  | Ack
-  | Manual_compaction_committed of
-      { commit : manual_compaction_commit
-      ; followup : manual_compaction_followup
-      }
-  | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
   | Ack_source_terminal of accepted_source_terminal
-  | Requeue of requeue_reason
-  | Escalate of
-      { reason : escalation_reason
-      ; successor : Keeper_event_queue.stimulus option
-      }
 
 type transition_receipt =
   { transition_id : string

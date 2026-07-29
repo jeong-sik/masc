@@ -882,10 +882,7 @@ let test_reaction_kind_string_roundtrip () =
       check bool "reaction_kind round-trips through string" true (roundtrips k))
     [ Keeper_reaction_ledger.Turn_started
     ; Keeper_reaction_ledger.Event_queue_ack
-    ; Keeper_reaction_ledger.Event_queue_no_compaction
     ; Keeper_reaction_ledger.Event_queue_cancelled
-    ; Keeper_reaction_ledger.Event_queue_requeued
-    ; Keeper_reaction_ledger.Event_queue_escalated
     ; Keeper_reaction_ledger.Cursor_ack
     ];
   match Keeper_reaction_ledger.reaction_kind_of_string "unknown_custom" with

@@ -158,6 +158,26 @@ let test_final_admission_busy_requeues_only_pre_dispatch_no_compaction () =
           (exact_terminal Keeper_event_queue_state.Exact_execution_failed)))
 ;;
 
+let test_exact_no_compaction_acknowledges_without_persistence_facade () =
+  let disposition =
+    Masc.Keeper_unified_turn.source_disposition_after_no_compaction_reason
+  in
+  List.iter
+    (fun reason ->
+       match disposition reason with
+       | Masc.Keeper_unified_turn.Acknowledge_after_in_turn_handling -> ()
+       | _ -> fail "exact terminal no-compaction did not acknowledge its source")
+    [ Keeper_event_queue_state.Exact_lane_unconfigured
+    ; Keeper_event_queue_state.Exact_execution_terminal
+        (exact_terminal Keeper_event_queue_state.Exact_execution_failed)
+    ];
+  match disposition Keeper_event_queue_state.No_eligible_history with
+  | Masc.Keeper_unified_turn.Follow_failure_route_after_no_compaction
+      { reason = Keeper_event_queue_state.No_eligible_history } ->
+    ()
+  | _ -> fail "pre-dispatch no-compaction lost its ordinary failure route"
+;;
+
 let make_meta
       ?(name = "post-turn-no-auto-compact")
       ?(trace_id = "trace-post-turn-no-auto-compact")
@@ -1356,6 +1376,10 @@ let () =
       test_case
         "final-admission Busy distinguishes pre-dispatch from exact terminal"
         `Quick test_final_admission_busy_requeues_only_pre_dispatch_no_compaction;
+      test_case
+        "exact no-compaction acknowledges without persistence facade"
+        `Quick
+        test_exact_no_compaction_acknowledges_without_persistence_facade;
       test_case "regular post-turn does not auto-compact"
         `Quick test_regular_post_turn_does_not_auto_compact;
       test_case

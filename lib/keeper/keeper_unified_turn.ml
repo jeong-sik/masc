@@ -24,31 +24,18 @@ type in_lane_compaction =
   | Compaction_attempt_failed of { reason : string }
   | Compaction_refused_without_attempt of { consecutive_failures : int }
 
-type exact_output_terminal_reason =
-  | Exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
-  | Exact_execution_terminal of
-      { source : Keeper_checkpoint_ref.t
-      ; terminal : Keeper_event_queue_state.exact_execution_terminal
-      }
-
 type source_disposition =
   | Follow_failure_route
   | Follow_failure_route_after_no_compaction of
       { reason : Keeper_event_queue_state.no_compaction_reason }
-  | Escalate_after_exact_output_terminal of exact_output_terminal_reason
   | Requeue_after_context_compaction of in_lane_compaction
   | Pause_after_transcript_corruption of { detail : string }
   | Acknowledge_after_in_turn_handling
 
-let source_disposition_after_no_compaction
-      ({ source; reason } : Keeper_event_queue_state.no_compaction)
-  =
-  match reason with
-  | Keeper_event_queue_state.Exact_lane_unconfigured ->
-    Escalate_after_exact_output_terminal (Exact_lane_unconfigured { source })
-  | Keeper_event_queue_state.Exact_execution_terminal terminal ->
-    Escalate_after_exact_output_terminal
-      (Exact_execution_terminal { source; terminal })
+let source_disposition_after_no_compaction_reason = function
+  | Keeper_event_queue_state.Exact_lane_unconfigured
+  | Keeper_event_queue_state.Exact_execution_terminal _ ->
+    Acknowledge_after_in_turn_handling
   | ( Keeper_event_queue_state.No_eligible_history
     | Keeper_event_queue_state.Invalid_structural_source ) as reason ->
     Follow_failure_route_after_no_compaction { reason }
@@ -356,7 +343,8 @@ let recover_provider_context_overflow_in_lane
                   reason
                   cleanup_error
             ; source_disposition =
-                source_disposition_after_no_compaction no_compaction
+                source_disposition_after_no_compaction_reason
+                  no_compaction.reason
             ; recovery = None
             })
     in
@@ -568,7 +556,7 @@ let append_provider_overflow_manifest
        failure route. Effect-boundary and domain-invalid reasons instead become
        an immediate typed escalation: replaying the source could issue a second
        exact-output request after dispatch. *)
-    source_disposition_after_no_compaction no_compaction,
+    source_disposition_after_no_compaction_reason no_compaction.reason,
     turn_state
   | Provider_overflow_applied recovery ->
     let turn_state =

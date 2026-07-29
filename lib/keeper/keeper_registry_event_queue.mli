@@ -13,64 +13,6 @@ type pending_selection = Keeper_event_queue_persistence.pending_selection =
   }
 
 
-type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
-  | Cycle_busy
-  | Turn_not_scheduled
-  | Rotate_now
-  | Cancelled
-  | Cycle_crashed
-  | Registration_recovery
-  | Retry_after_observed
-  | Context_compaction_retry
-
-type exact_execution_terminal_cause = Keeper_event_queue_persistence.exact_execution_terminal_cause =
-  | Exact_execution_failed
-  | Exact_execution_cancelled
-  | Domain_invalid_output
-  | Compaction_produced_no_reduction
-  | Compaction_increased_checkpoint
-  | Invalid_structural_evidence
-  | Invalid_structural_source_after_dispatch
-  | Commit_admission_unavailable
-  | Lifecycle_transition_failed_after_dispatch
-  | Checkpoint_source_changed
-  | Checkpoint_persistence_failed
-
-type exact_execution_terminal = Keeper_event_queue_persistence.exact_execution_terminal =
-  { cause : exact_execution_terminal_cause
-  ; slot_id : string
-  ; call_id : string
-  ; plan_fingerprint : string
-  ; request_body_sha256 : string
-  }
-
-type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
-  | Compaction_exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
-  | Compaction_exact_output_terminal of
-      { source : Keeper_checkpoint_ref.t
-      ; terminal : exact_execution_terminal
-      }
-  | Compaction_retry_exhausted of
-      { attempts : int
-      ; detail : string
-      }
-  | Compaction_floor_exceeded of
-      { attempts : int
-      ; detail : string
-      }
-  | Transcript_corruption_requires_reset of { detail : string }
-
-type no_compaction_reason = Keeper_event_queue_persistence.no_compaction_reason =
-  | No_eligible_history
-  | Invalid_structural_source
-  | Exact_lane_unconfigured
-  | Exact_execution_terminal of exact_execution_terminal
-
-type no_compaction = Keeper_event_queue_persistence.no_compaction =
-  { source : Keeper_checkpoint_ref.t
-  ; reason : no_compaction_reason
-  }
-
 type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
@@ -102,20 +44,9 @@ type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_t
   }
 
 type transition = Keeper_event_queue_persistence.transition =
-  | Ack
-  | Manual_compaction_committed of
-      { commit : Keeper_event_queue_state.manual_compaction_commit
-      ; followup : Keeper_event_queue_state.manual_compaction_followup
-      }
-  | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
   | Ack_source_terminal of accepted_source_terminal
-  | Requeue of requeue_reason
-  | Escalate of
-      { reason : escalation_reason
-      ; successor : Keeper_event_queue.stimulus option
-      }
 
 type transition_receipt = Keeper_event_queue_persistence.transition_receipt
 type outbox_entry = Keeper_event_queue_persistence.outbox_entry

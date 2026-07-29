@@ -808,6 +808,79 @@ let test_cancellation_preserves_lifecycle_authorized_identity () =
   Alcotest.(check int) "cancellation never dispatches successor" 0 (F.post_count successor)
 ;;
 
+let test_admission_rejection_preserves_prior_authorized_identity () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  let first_slot = "semantic-rejection-before-admission-rejection" in
+  let rejected_slot = "admission-rejected-without-dispatch" in
+  let cancelled_slot = "cancelled-before-dispatch" in
+  let first = F.start_server ~sw ~net ~clock (F.Reply domain_invalid_response) in
+  let rejected = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let cancelled = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let snapshot =
+    F.resolver_snapshot
+      ~api_key_envs:
+        [ rejected_slot, "MASC_TEST_MISSING_COMPACTION_EXACT_KEY" ]
+      ~source:"masc admission rejection retains prior authorized source"
+      [ { id = first_slot; base_url = first.base_url }
+      ; { id = rejected_slot; base_url = rejected.base_url }
+      ; { id = cancelled_slot; base_url = cancelled.base_url }
+      ]
+  in
+  let registry =
+    publish_exn
+      ~slot_ids:[ first_slot; rejected_slot; cancelled_slot ]
+      snapshot
+  in
+  let prepared =
+    prepare_exn
+      ~keeper_name:"keeper-admission-rejection-cancelled"
+      ~registry
+      ()
+  in
+  let authorized = ref [] in
+  let result =
+    Eio.Cancel.sub (fun context ->
+      execute_prepared_lane
+        ~keeper_name:"keeper-admission-rejection-cancelled"
+        ~net
+        ~clock
+        ~before_dispatch_authority:
+          (fun observation ->
+             authorized := observation.slot_id :: !authorized;
+             if String.equal observation.slot_id cancelled_slot
+             then (
+               Eio.Cancel.cancel context Cancel_after_request_arrived;
+               Eio.Cancel.check context);
+             Ok ())
+        prepared)
+  in
+  let terminal =
+    match result with
+    | Error (C.Exact_execution_terminal terminal) -> terminal
+    | Error _ -> Alcotest.fail "cancellation returned the wrong terminal"
+    | Ok _ -> Alcotest.fail "cancelled flow unexpectedly succeeded"
+  in
+  Alcotest.(check string)
+    "admission rejection retains the prior dispatched source"
+    first_slot
+    terminal.slot_id;
+  Alcotest.(check bool)
+    "cancellation remains typed"
+    true
+    (terminal.cause = Keeper_event_queue_state.Exact_execution_cancelled);
+  Alcotest.(check (list string))
+    "only admitted candidates reach source authority"
+    [ first_slot; cancelled_slot ]
+    (List.rev !authorized);
+  Alcotest.(check int) "semantic rejection dispatched once" 1 (F.post_count first);
+  Alcotest.(check int) "admission rejection did not dispatch" 0 (F.post_count rejected);
+  Alcotest.(check int)
+    "cancelled authority did not dispatch"
+    0
+    (F.post_count cancelled)
+;;
+
 
 let test_post_success_commit_claim_blocks_reject () =
   run_eio
@@ -938,6 +1011,10 @@ let () =
             "cancellation preserves lifecycle-authorized identity"
             `Quick
             test_cancellation_preserves_lifecycle_authorized_identity
+        ; Alcotest.test_case
+            "admission rejection preserves prior authorized identity"
+            `Quick
+            test_admission_rejection_preserves_prior_authorized_identity
         ; Alcotest.test_case
             "commit claim blocks reject after install"
             `Quick

@@ -951,7 +951,6 @@ let parse_keeper_assignments (toml : Otoml.t)
 type runtime_section =
   { default_runtime_id : string option
   ; memory_os_consolidation_runtime_id : string option
-  ; structured_judge_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   }
@@ -959,7 +958,6 @@ type runtime_section =
 let empty_runtime_section =
   { default_runtime_id = None
   ; memory_os_consolidation_runtime_id = None
-  ; structured_judge_runtime_id = None
   ; cross_verifier_runtime_id = None
   ; media_failover = []
   }
@@ -1016,16 +1014,6 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
                   }
                 , errs )
               | Error e -> section, errs @ e)
-           | "structured_judge" ->
-             (match
-                parse_runtime_string_leaf ~path:"runtime.structured_judge" ~key value
-              with
-              | Ok structured_judge_runtime_id ->
-                ( { section with
-                    structured_judge_runtime_id = Some structured_judge_runtime_id
-                  }
-                , errs )
-              | Error e -> section, errs @ e)
            | "cross_verifier" ->
              (match
                 parse_runtime_string_leaf ~path:"runtime.cross_verifier" ~key value
@@ -1061,7 +1049,7 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
                    (Printf.sprintf
                       "unknown [runtime] key %S; expected default, \
                        memory_os_consolidation, \
-                       structured_judge, cross_verifier, \
+                       cross_verifier, \
                        media_failover, [runtime.lanes], \
                        [runtime.exact_output_lanes], [runtime.assignments], or a \
                        table-valued [runtime.<profile>]"
@@ -1267,7 +1255,6 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
       ; default_runtime_id = runtime_section.default_runtime_id
       ; memory_os_consolidation_runtime_id =
           runtime_section.memory_os_consolidation_runtime_id
-      ; structured_judge_runtime_id = runtime_section.structured_judge_runtime_id
       ; cross_verifier_runtime_id = runtime_section.cross_verifier_runtime_id
       ; keeper_assignments
       ; media_failover = runtime_section.media_failover

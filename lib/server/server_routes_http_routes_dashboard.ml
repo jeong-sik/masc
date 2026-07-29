@@ -9,8 +9,6 @@ open Server_dashboard_http
 open Server_routes_http_common
 open Server_routes_http_keeper_stream
 
-module Runtime_config_file = Runtime
-
 include Server_routes_http_routes_dashboard_setup
 
 let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
@@ -195,19 +193,16 @@ let parse_runtime_config_raw_body body_str =
 
 type runtime_route_lane =
   | Runtime_default
-  | Runtime_structured_judge
   | Runtime_cross_verifier
   | Runtime_media_failover
 
 let runtime_route_lane_to_string = function
   | Runtime_default -> "default"
-  | Runtime_structured_judge -> "structured_judge"
   | Runtime_cross_verifier -> "cross_verifier"
   | Runtime_media_failover -> "media_failover"
 
 let parse_runtime_route_lane = function
   | "default" -> Ok Runtime_default
-  | "structured_judge" -> Ok Runtime_structured_judge
   | "cross_verifier" -> Ok Runtime_cross_verifier
   | "media_failover" -> Ok Runtime_media_failover
   | lane -> Error (Printf.sprintf "unknown runtime routing lane: %s" lane)
@@ -361,7 +356,7 @@ let audit_runtime_config_write state agent_name ?path ~operation ~text ~outcome 
       (Printexc.to_string exn)
 
 let respond_runtime_config_reload state agent_name ~operation request reqd =
-  match Runtime_config_file.load_config_text () with
+  match Runtime.load_config_text () with
   | Ok (path, saved_text) ->
     audit_runtime_config_write state agent_name ~path ~operation ~text:saved_text
       ~outcome:Audit_log.Success ();
@@ -735,7 +730,7 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/runtime/config/raw" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun _state _agent_name req reqd ->
-           match Runtime_config_file.load_config_text () with
+           match Runtime.load_config_text () with
            | Ok (path, source_text) ->
              Http.Response.json_value ~compress:true ~request:req
                (runtime_config_raw_json ~path ~source_text ~reloaded:false)
@@ -777,7 +772,7 @@ let add_routes ~sw ~clock router =
                   audit trail (actor + path + size) on top of the CanAdmin gate.
                   The config body is deliberately excluded: runtime.toml can carry
                   provider secrets (RFC-0132 redaction). *)
-               (match Runtime_config_file.save_config_text source_text with
+               (match Runtime.save_config_text source_text with
                 | Error msg ->
                   audit_runtime_config_write state agent_name
                     ~operation:Runtime_config_raw_save ~text:source_text
@@ -796,7 +791,7 @@ let add_routes ~sw ~clock router =
              | Error msg ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
              | Ok (Runtime_route_runtime_id (Runtime_default, Some runtime_id)) ->
-               (match Runtime_config_file.set_runtime_default ~runtime_id () with
+               (match Runtime.set_runtime_default ~runtime_id () with
                 | Error msg ->
                   audit_runtime_config_write state agent_name
                     ~operation:(Runtime_config_routing (Runtime_default, Some runtime_id))
@@ -810,22 +805,8 @@ let add_routes ~sw ~clock router =
              | Ok (Runtime_route_runtime_id (Runtime_default, None)) ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd
                  "default runtime_id required"
-             | Ok (Runtime_route_runtime_id (Runtime_structured_judge, runtime_id)) ->
-               (match Runtime_config_file.set_runtime_structured_judge ~runtime_id () with
-                | Error msg ->
-                  audit_runtime_config_write state agent_name
-                    ~operation:
-                      (Runtime_config_routing (Runtime_structured_judge, runtime_id))
-                    ~text:body_str
-                    ~outcome:(Audit_log.Failure msg) ();
-                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok () ->
-                  respond_runtime_config_reload state agent_name
-                    ~operation:
-                      (Runtime_config_routing (Runtime_structured_judge, runtime_id))
-                    req reqd)
              | Ok (Runtime_route_runtime_id (Runtime_cross_verifier, runtime_id)) ->
-               (match Runtime_config_file.set_runtime_cross_verifier ~runtime_id () with
+               (match Runtime.set_runtime_cross_verifier ~runtime_id () with
                 | Error msg ->
                   audit_runtime_config_write state agent_name
                     ~operation:
@@ -842,7 +823,7 @@ let add_routes ~sw ~clock router =
                respond_dashboard_error ~status:`Bad_request ~request:req reqd
                  "media_failover runtime_ids required"
              | Ok (Runtime_route_runtime_ids (Runtime_media_failover, runtime_ids)) ->
-               (match Runtime_config_file.set_runtime_media_failover ~runtime_ids () with
+               (match Runtime.set_runtime_media_failover ~runtime_ids () with
                 | Error msg ->
                   audit_runtime_config_write state agent_name
                     ~operation:
@@ -871,7 +852,7 @@ let add_routes ~sw ~clock router =
                respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
              | Ok (keeper_name, Some runtime_id) ->
                (match
-                  Runtime_config_file.set_runtime_id_for_keeper
+                  Runtime.set_runtime_id_for_keeper
                     ~keeper_name
                     ~runtime_id
                     ()
@@ -887,7 +868,7 @@ let add_routes ~sw ~clock router =
                     ~operation:(Runtime_config_assignment (keeper_name, Some runtime_id))
                     req reqd)
              | Ok (keeper_name, None) ->
-               (match Runtime_config_file.clear_runtime_id_for_keeper ~keeper_name () with
+               (match Runtime.clear_runtime_id_for_keeper ~keeper_name () with
                 | Error msg ->
                   audit_runtime_config_write state agent_name
                     ~operation:(Runtime_config_assignment (keeper_name, None))

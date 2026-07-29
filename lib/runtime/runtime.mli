@@ -105,20 +105,18 @@ val load_list :
        * (string * string) list
        * string option
        * string option
-       * string option
        * string list
        * Runtime_lane.t list
      , string )
      result
 (** [load_list ~config_path] parses runtime.toml into [(runtimes, default,
     keeper_assignments, memory_os_consolidation_runtime_id,
-    structured_judge_runtime_id, cross_verifier_runtime_id, media_failover,
-    lanes)].
+    cross_verifier_runtime_id, media_failover, lanes)].
     Fails ([Error]) if
     [\[runtime\].default] is missing / unresolved, if any
     [\[runtime.assignments\]] target does not resolve to a configured runtime, if
     [\[runtime\].memory_os_consolidation] /
-    [\[runtime\].structured_judge] / [\[runtime\].cross_verifier] is set to an
+    [\[runtime\].cross_verifier] is set to an
     unresolved id, if any
     [\[runtime\].media_failover] entry does not resolve, or if any
     [\[runtime.lanes.<id>\]] candidate does not resolve (mirrors default
@@ -194,16 +192,14 @@ module For_testing : sig
     default_runtime_id:string ->
     assignments:(string * string) list ->
     memory_os_consolidation_runtime_id:string option ->
-    structured_judge_runtime_id:string option ->
     cross_verifier_runtime_id:string option ->
     media_failover:string list ->
     lanes:Runtime_lane.t list ->
     string list
   (** Ordered, deduplicated runtime ids reachable by Keeper default/assignment
       roots (including a same-named lane's candidates), the explicit
-      Memory OS consolidation, structured-judge, and cross-verifier runtimes,
-      and explicit runtime-only media failover routing. Dormant declared lanes
-      are excluded. *)
+      Memory OS consolidation and cross-verifier runtimes, and explicit
+      runtime-only media failover routing. Dormant declared lanes are excluded. *)
 
   val save_config_text_with_sync_parent :
     ?runtime_config_path:string ->
@@ -267,7 +263,6 @@ type dashboard_runtime_defaults_snapshot =
   ; runtimes : t list
   ; memory_os_consolidation_runtime_id : string option
   ; memory_os_consolidation : (effective_memory_os_consolidation, string) result
-  ; structured_judge_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; config_path : string option
@@ -282,18 +277,6 @@ val cross_verifier_runtime_id : unit -> string option
 (** [\[runtime\].cross_verifier] runtime id for the anti-rationalization
     evaluator, or [None] when unset (the evaluator uses [\[runtime\].default]).
     Validated at load so a [Some] always resolves to a configured runtime. *)
-
-val structured_judge_runtime_id : unit -> string option
-(** [\[runtime\].structured_judge] runtime id for provider-native
-    structured-output judge calls, or [None] when unset. Validated at load so a
-    [Some] resolves to a configured runtime whose model declares
-    [supports-structured-output]. *)
-
-val runtime_id_for_structured_judge : unit -> string
-(** Resolved runtime id for configured structured-output judgment calls.
-    Uses [\[runtime\].structured_judge] first, then [\[runtime\].default]. The
-    default path still fails loudly at each caller's schema validation if the
-    runtime cannot satisfy provider-native structured output. *)
 
 val media_failover : unit -> string list
 (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted when a
@@ -475,12 +458,6 @@ val set_runtime_default :
 (** Persist [\[runtime\]].default through the runtime.toml SSOT writer,
     validate the resulting config, atomically write it, and refresh the
     in-process runtime cache. *)
-
-val set_runtime_structured_judge :
-  ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result
-(** Persist or clear [\[runtime\]].structured_judge through the runtime.toml
-    SSOT writer, validate the resulting config, atomically write it, and refresh
-    the in-process runtime cache. *)
 
 val set_runtime_cross_verifier :
   ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result

@@ -619,7 +619,6 @@ let test_repo_runtime_bindings_resolve_through_oas_provider_config () =
       , _default
       , _assignments
       , _memory_os_consolidation
-      , _structured_judge
       , _cross_verifier
       , _media_failover , _lanes ) ->
     check bool "at least one runtime binding" true (List.length runtimes > 0);
@@ -743,7 +742,6 @@ let test_repo_runtime_toml_loads () =
       , default
       , assignments
       , memory_os_consolidation
-      , structured_judge
       , cross_verifier
       , media_failover
       , lanes ) ->
@@ -755,11 +753,6 @@ let test_repo_runtime_toml_loads () =
       "Memory OS consolidation runtime"
       (Some "ollama_cloud_native.minimax-m3-native-structured")
       memory_os_consolidation;
-    check
-      (option string)
-      "structured judge runtime"
-      (Some "ollama_cloud_native.minimax-m3-native-structured")
-      structured_judge;
     (match Runtime_toml.parse_file path with
      | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
      | Ok config ->
@@ -808,7 +801,6 @@ List.iter
         ~default_runtime_id:default.id
         ~assignments
         ~memory_os_consolidation_runtime_id:memory_os_consolidation
-        ~structured_judge_runtime_id:structured_judge
         ~cross_verifier_runtime_id:cross_verifier
         ~media_failover
         ~lanes
@@ -1571,10 +1563,6 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
         ~strategy:Runtime_lane.Ordered
         [ "lane-c"; "lane-b" ]
     ; Runtime_lane.make
-        ~id:"structured-d"
-        ~strategy:Runtime_lane.Ordered
-        [ "structured-a"; "lane-b" ]
-    ; Runtime_lane.make
         ~id:"cross-e"
         ~strategy:Runtime_lane.Ordered
         [ "cross-a"; "lane-b" ]
@@ -1585,7 +1573,6 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
       ~default_runtime_id:"default-a"
       ~assignments:[ "keeper-a", "assigned-b" ]
       ~memory_os_consolidation_runtime_id:(Some "memory-os-d")
-      ~structured_judge_runtime_id:(Some "structured-d")
       ~cross_verifier_runtime_id:(Some "cross-e")
       ~media_failover:[ "media-c"; "lane-a" ]
       ~lanes
@@ -1599,7 +1586,6 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
     ; "assigned-b"
     ; "media-c"
     ; "memory-os-d"
-    ; "structured-a"
     ; "cross-a"
     ]
     actual
@@ -1744,7 +1730,7 @@ let test_runtime_config_validation_rejects_uncapped_special_runtime () =
                 (String_util.contains_substring detail "max-request-body-bytes");
               check bool "typed config diagnostic names the special runtime" true
                 (String_util.contains_substring detail "local.special")))
-    [ "structured_judge"; "cross_verifier" ]
+    [ "cross_verifier" ]
 ;;
 
 let test_runtime_config_validation_allows_uncapped_dormant_lane_candidate () =
@@ -2147,10 +2133,10 @@ let test_every_routing_field_names_itself_in_its_diagnostic () =
   let route =
     load_error_of_runtime_toml
       ~what:"a route naming an unknown runtime"
-      (routing_reference_base ^ "structured_judge = \"local.typo\"\n")
+      (routing_reference_base ^ "cross_verifier = \"local.typo\"\n")
   in
   check bool "route diagnostic names the route field" true
-    (String_util.contains_substring route "[runtime].structured_judge = \"local.typo\"");
+    (String_util.contains_substring route "[runtime].cross_verifier = \"local.typo\"");
   let media =
     load_error_of_runtime_toml
       ~what:"a media_failover entry naming an unknown runtime"
@@ -2166,12 +2152,12 @@ let test_routing_reference_domains_stay_distinct () =
   (* A route resolves lane-first, mirroring [resolve_assignment], so naming a lane
      is valid config. *)
   with_temp_runtime_toml
-    (routing_reference_base ^ "structured_judge = \"safe\"\n" ^ lane)
+    (routing_reference_base ^ "cross_verifier = \"safe\"\n" ^ lane)
     (fun path ->
       match Runtime.load_list ~config_path:path with
       | Error msg -> failf "a route may name a lane: %s" msg
-      | Ok (_, _, _, _, structured_judge, _, _, _) ->
-        check (option string) "route keeps the lane id" (Some "safe") structured_judge);
+      | Ok (_, _, _, _, cross_verifier, _, _) ->
+        check (option string) "route keeps the lane id" (Some "safe") cross_verifier);
   (* An assignment resolves among runtimes only. runtime.mli documents the
      assignment snapshot as ids that resolve to a configured runtime, so admitting
      a lane here would load a config the assignment consumer cannot look up. *)
@@ -2521,7 +2507,6 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
         , _default
         , _assignments
         , _memory_os_consolidation
-        , _structured_judge
         , _cross_verifier
         , _media_failover
         , _lanes ) ->
@@ -2590,7 +2575,6 @@ let test_cross_verifier_runtime_routing () =
         , _default
         , _assignments
         , _memory_os_consolidation
-        , _structured_judge
         , cross_verifier
         , _media_failover , _lanes ) ->
       check (option string) "cross_verifier runtime id" (Some "local.libr")
@@ -2603,7 +2587,6 @@ let test_cross_verifier_runtime_routing () =
         , _
         , _
         , _
-        , _structured_judge
         , cross_verifier
         , _media_failover
         , _lanes ) ->
@@ -2653,7 +2636,7 @@ let test_memory_os_consolidation_runtime_routing () =
     (fun path ->
        match Runtime.load_list ~config_path:path with
        | Error msg -> failf "Memory OS consolidation routing should load: %s" msg
-       | Ok (_, _, _, consolidation, _, _, _, _) ->
+       | Ok (_, _, _, consolidation, _, _, _) ->
          check
            (option string)
            "Memory OS consolidation runtime id"
@@ -2662,7 +2645,7 @@ let test_memory_os_consolidation_runtime_routing () =
   with_temp_runtime_toml base (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "absent Memory OS consolidation route should load: %s" msg
-    | Ok (_, _, _, consolidation, _, _, _, _) ->
+    | Ok (_, _, _, consolidation, _, _, _) ->
       check (option string) "Memory OS consolidation route unset" None consolidation);
   with_temp_runtime_toml
     (base ^ "memory_os_consolidation = \"local.nope\"\n")
@@ -2674,121 +2657,23 @@ let test_memory_os_consolidation_runtime_routing () =
          check bool "error names Memory OS consolidation route" true
            (String_util.contains_substring msg "memory_os_consolidation"))
 
-let test_structured_judge_runtime_routing () =
-  with_fake_runtime_model_catalog @@ fun () ->
-  let base =
-    "[providers.local]\n\
-     display-name = \"Local\"\n\
-     protocol = \"ollama-http\"\n\
-     endpoint = \"http://localhost:11434\"\n\
-     \n\
-     [models.chat]\n\
-     api-name = \"chat\"\n\
-     max-context = 1024\n\
-     \n\
-     [models.judge]\n\
-     api-name = \"judge\"\n\
-     max-context = 1024\n\
-     \n\
-     [models.judge.capabilities]\n\
-     supports-response-format-json = true\n\
-     supports-structured-output = true\n\
-     \n\
-     [local.chat]\n\
-     max-request-body-bytes = 65536\n\
-     \n\
-     [local.judge]\n\
-     max-request-body-bytes = 65536\n\
-     \n\
-     [runtime]\n\
-     default = \"local.chat\"\n"
-  in
-  with_temp_runtime_toml (base ^ "structured_judge = \"local.judge\"\n") (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg -> failf "structured_judge routing should load: %s" msg
-    | Ok (_, _, _, _, structured_judge, _, _, _) ->
-      check
-        (option string)
-        "structured_judge runtime id"
-        (Some "local.judge")
-        structured_judge);
-  with_temp_runtime_toml base (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg -> failf "absent structured_judge should load: %s" msg
-    | Ok (_, _, _, _, structured_judge, _, _, _) ->
-      check (option string) "structured_judge unset is None" None structured_judge);
-  with_temp_runtime_toml (base ^ "structured_judge = \"local.nope\"\n") (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Ok _ -> failf "unknown [runtime].structured_judge id must be rejected"
-    | Error _ -> ());
-  (* The shared structured-judge runtime identity is not itself a wire-format
-     capability declaration. Individual domain consumers own that request. *)
-  with_temp_runtime_toml (base ^ "structured_judge = \"local.chat\"\n") (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg ->
-      failf "[runtime].structured_judge must accept a capability-free model: %s" msg
-    | Ok _ -> ());
-  with_temp_runtime_toml base (fun path ->
-    match Runtime.save_config_text ~runtime_config_path:path base with
-    | Error msg -> failf "save_config_text should load default fallback: %s" msg
-    | Ok () ->
-      check string "structured judge falls back to default" "local.chat"
-        (Runtime.runtime_id_for_structured_judge ()));
-  let explicit_structured_judge = base ^ "structured_judge = \"local.judge\"\n" in
-  with_temp_runtime_toml explicit_structured_judge (fun path ->
-    match
-      Runtime.save_config_text ~runtime_config_path:path explicit_structured_judge
-    with
-    | Error msg -> failf "save_config_text should load structured_judge: %s" msg
-    | Ok () ->
-      check
-        (option string)
-        "saved structured_judge runtime id"
-        (Some "local.judge")
-        (Runtime.structured_judge_runtime_id ());
-      check string "resolved structured judge runtime" "local.judge"
-        (Runtime.runtime_id_for_structured_judge ()))
-  ;
-  with_temp_runtime_toml base (fun path ->
-    match
-      Runtime.set_runtime_structured_judge
-        ~runtime_config_path:path
-        ~runtime_id:(Some "local.judge")
-        ()
-    with
-    | Error msg -> failf "set_runtime_structured_judge should validate: %s" msg
-    | Ok () ->
-      check
-        (option string)
-        "writer saved structured_judge runtime id"
-        (Some "local.judge")
-        (Runtime.structured_judge_runtime_id ());
-      check bool "runtime.toml structured_judge persisted" true
-        (String_util.contains_substring
-           (Fs_compat.load_file path)
-           "structured_judge = \"local.judge\""));
-  with_temp_runtime_toml (base ^ "structured_judge = \"local.judge\"\n") (fun path ->
-    match
-      Runtime.set_runtime_structured_judge
-        ~runtime_config_path:path
-        ~runtime_id:None
-        ()
-    with
-    | Error msg -> failf "clear structured_judge should validate: %s" msg
-    | Ok () ->
-      check (option string) "writer cleared structured_judge" None
-        (Runtime.structured_judge_runtime_id ());
-      check bool "runtime.toml structured_judge removed" false
-        (String_util.contains_substring
-           (Fs_compat.load_file path)
-           "structured_judge"))
+let test_structured_judge_runtime_key_is_rejected () =
+  match
+    Runtime_toml.parse_string
+      "[runtime]\ndefault = \"local.chat\"\nstructured_judge = \"local.judge\"\n"
+  with
+  | Ok _ -> fail "[runtime].structured_judge must be rejected as an unknown key"
+  | Error errors ->
+    check bool "retired key is named in the parse error" true
+      (List.exists
+         (fun (error : Runtime_toml.parse_error) ->
+            String.equal error.path "runtime.structured_judge"
+            && String_util.contains_substring error.message "unknown [runtime] key")
+         errors)
 
-(* #25394 slice 1: [runtime].structured_judge / .cross_verifier accept a
+(* The live cross_verifier and memory_os_consolidation routes accept a
    [runtime.lanes] id, following [resolve_assignment]'s lane-over-runtime
-   precedence. There is no longer a per-candidate capability contract: #25719
-   dropped the wire-format requirement after finding neither consumer requests
-   one, and the lane-candidate capability check that enforced it was removed with
-   the per-route validators it belonged to. *)
+   precedence. *)
 let judge_lane_base =
   "[providers.local]\n\
    display-name = \"Local\"\n\
@@ -2834,96 +2719,12 @@ let judge_lane_base =
    [runtime]\n\
    default = \"local.chat\"\n"
 
-let test_structured_judge_lane_target () =
-  with_fake_runtime_model_catalog @@ fun () ->
-  let capable_lane =
-    judge_lane_base
-    ^ "structured_judge = \"judges\"\n\
-       \n\
-       [runtime.lanes.judges]\n\
-       strategy = \"ordered\"\n\
-       candidates = [\"local.judge\", \"local.judge2\"]\n"
-  in
-  with_temp_runtime_toml capable_lane (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg -> failf "lane-targeted structured_judge should load: %s" msg
-    | Ok (_, _, _, _, structured_judge, _, _, lanes) ->
-      check
-        (option string)
-        "structured_judge keeps the lane id"
-        (Some "judges")
-        structured_judge;
-      check bool "judges lane is materialized" true
-        (List.exists
-           (fun lane -> String.equal (Runtime_lane.id lane) "judges")
-           lanes));
-  let incapable_candidate_lane =
-    judge_lane_base
-    ^ "structured_judge = \"judges\"\n\
-       \n\
-       [runtime.lanes.judges]\n\
-       strategy = \"ordered\"\n\
-       candidates = [\"local.judge\", \"local.jsononly\"]\n"
-  in
-  (* Formerly rejected: every candidate had to declare structured output even
-     though this runtime identity is selected before a domain consumer declares
-     its own wire-format requirement. The lane therefore resolves here. *)
-  with_temp_runtime_toml incapable_candidate_lane (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg ->
-      failf
-        "structured_judge lane should resolve without a wire-format requirement: %s"
-        msg
-    | Ok (_, _, _, _, structured_judge, _, _, lanes) ->
-      check (option string) "structured_judge keeps the lane id" (Some "judges")
-        structured_judge;
-      check bool "judges lane is materialized" true
-        (List.exists
-           (fun lane -> String.equal (Runtime_lane.id lane) "judges")
-           lanes))
-
-(* A lane that shadows a capable runtime id must be validated as the lane:
-   [resolve_assignment] hands consumers the lane, so validating the shadowed
-   runtime would approve a target the consumer never uses. *)
-let test_structured_judge_lane_shadow_precedence () =
-  with_fake_runtime_model_catalog @@ fun () ->
-  let shadowing_lane =
-    judge_lane_base
-    ^ "structured_judge = \"local.judge\"\n\
-       \n\
-       [runtime.lanes.\"local.judge\"]\n\
-       strategy = \"ordered\"\n\
-       candidates = [\"local.jsononly\"]\n"
-  in
-  (* This used to prove lane-over-runtime precedence through a capability
-     rejection: the lane's only candidate lacked structured output, so an error
-     naming it showed the lane had been judged rather than the shadowed runtime.
-     The route requires no wire format now, so both branches return Ok and that
-     witness no longer exists at admission.
-
-     The precedence itself is covered where the consumers read it —
-     test_keeper_turn_driver_failover.ml:319
-     test_resolve_assignment_prefers_lane_over_runtime — so nothing is left
-     unasserted. What admission still guarantees is asserted here: a lane id that
-     shadows a runtime id is accepted and materialised, and the route keeps that
-     id rather than silently resolving to the shadowed runtime. *)
-  with_temp_runtime_toml shadowing_lane (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg -> failf "shadowing lane should resolve: %s" msg
-    | Ok (_, _, _, _, structured_judge, _, _, lanes) ->
-      check (option string) "structured_judge keeps the shadowing id"
-        (Some "local.judge") structured_judge;
-      check bool "the shadowing lane is materialized" true
-        (List.exists
-           (fun lane -> String.equal (Runtime_lane.id lane) "local.judge")
-           lanes))
-
 (* memory_os_consolidation was validated before lanes_of_decls ran, so it was the
-   one route that could not name a lane while structured_judge and cross_verifier
-   could. It is now validated after lanes are materialised, with the same
+   one route that could not name a lane while cross_verifier could. It is now
+   validated after lanes are materialised, with the same
    lane-over-runtime precedence [resolve_assignment] applies. Its requirement is
    Resolves_only, so a candidate without declared capabilities is admissible —
-   that is the difference from the judge and verifier lanes. *)
+   that is the difference from the verifier route. *)
 let test_memory_os_consolidation_lane_target () =
   with_fake_runtime_model_catalog @@ fun () ->
   let lane_target =
@@ -2938,7 +2739,7 @@ let test_memory_os_consolidation_lane_target () =
     match Runtime.load_list ~config_path:path with
     | Error msg ->
       failf "lane-targeted memory_os_consolidation should load: %s" msg
-    | Ok (_, _, _, _, _, _, _, lanes) ->
+    | Ok (_, _, _, _, _, _, lanes) ->
       check bool "consolidators lane is materialized" true
         (List.exists
            (fun lane -> String.equal (Runtime_lane.id lane) "consolidators")
@@ -2967,7 +2768,7 @@ let test_cross_verifier_lane_target () =
   with_temp_runtime_toml json_capable_lane (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "lane-targeted cross_verifier should load: %s" msg
-    | Ok (_, _, _, _, _, cross_verifier, _, _) ->
+    | Ok (_, _, _, _, cross_verifier, _, _) ->
       check
         (option string)
         "cross_verifier keeps the lane id"
@@ -2987,7 +2788,7 @@ let test_cross_verifier_lane_target () =
   with_temp_runtime_toml json_incapable_lane (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "cross_verifier lane should resolve: %s" msg
-    | Ok (_, _, _, _, _, cross_verifier, _, lanes) ->
+    | Ok (_, _, _, _, cross_verifier, _, lanes) ->
       check (option string) "cross_verifier keeps the lane id" (Some "verifiers")
         cross_verifier;
       check bool "verifiers lane is materialized" true
@@ -3479,14 +3280,8 @@ let () =
             "[runtime].memory_os_consolidation resolves and rejects unknown"
             `Quick test_memory_os_consolidation_runtime_routing;
           test_case
-            "[runtime].structured_judge resolves and rejects unsupported models"
-            `Quick test_structured_judge_runtime_routing;
-          test_case
-            "[runtime].structured_judge accepts capability-complete lanes"
-            `Quick test_structured_judge_lane_target;
-          test_case
-            "[runtime].structured_judge validates shadowing lanes as lanes"
-            `Quick test_structured_judge_lane_shadow_precedence;
+            "retired [runtime].structured_judge key is rejected"
+            `Quick test_structured_judge_runtime_key_is_rejected;
           test_case
             "[runtime].cross_verifier accepts JSON-capable lanes"
             `Quick test_cross_verifier_lane_target;
@@ -3569,7 +3364,7 @@ let () =
             `Quick
             test_runtime_config_validation_rejects_uncapped_memory_os_runtime;
           test_case
-            "runtime config rejects uncapped structured-judge and cross-verifier runtimes"
+            "runtime config rejects an uncapped cross-verifier runtime"
             `Quick
             test_runtime_config_validation_rejects_uncapped_special_runtime;
           test_case

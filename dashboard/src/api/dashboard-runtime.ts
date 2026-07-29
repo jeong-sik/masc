@@ -1117,7 +1117,6 @@ export async function saveRuntimeTomlConfig(sourceText: string): Promise<Runtime
 
 export type RuntimeRoutingLane =
   | 'default'
-  | 'structured_judge'
   | 'cross_verifier'
 
 export async function patchRuntimeRouting(

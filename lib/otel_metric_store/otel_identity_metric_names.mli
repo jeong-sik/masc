@@ -1,4 +1,4 @@
-(** Auth, identity, config, and structured-judge metric-name constants.
+(** Auth, identity, and config metric-name constants.
 
     Included by {!Otel_metric_store} so existing callers keep using
     [Otel_metric_store.metric_*] bindings unchanged. *)

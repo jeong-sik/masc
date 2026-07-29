@@ -189,20 +189,10 @@ type config =
     (** [\[runtime\].memory_os_consolidation] — runtime id for the periodic
         Memory OS fact-survival consolidation pass. [None] inherits
         [\[runtime\].default]. Unknown ids are rejected at load. *)
-  ; structured_judge_runtime_id : string option
-    (** [\[runtime\].structured_judge] — runtime id for provider-native
-        structured-output judge calls. When set, the model must declare
-        [supports-structured-output]. [None] lets callers use their documented
-        migration fallback; schema requests still fail loudly if the resolved
-        runtime cannot satisfy them. *)
   ; cross_verifier_runtime_id : string option
     (** [\[runtime\].cross_verifier] — runtime id for the anti-rationalization
-        evaluator (cross-model task verification). The evaluator requests JSON
-        mode (a structured verdict tool call), so it must run on a model
-        declaring [supports-response-format-json]; otherwise it returns empty
-        output and the gate approves by liveness. [None] = inherit
-        [\[runtime\].default]. Unknown id rejected at load like
-        [\[runtime\].default]. *)
+        evaluator (cross-model task verification). [None] inherits
+        [\[runtime\].default]. Unknown ids are rejected at load. *)
   ; keeper_assignments : (string * string) list
     (** [\[runtime.assignments\]] — keeper name → runtime id ["provider.model"].
         Sole SSOT for keeper→runtime assignment (persona⊥{model,runtime}). A

@@ -11,7 +11,6 @@ function validModelRouting(overrides: Record<string, unknown> = {}): Record<stri
     memory_os_consolidation_effective_runtime_id: 'anthropic.sonnet',
     memory_os_consolidation_status: 'resolved',
     memory_os_consolidation_error: null,
-    structured_judge_runtime_id: 'openai.gpt-4o',
     cross_verifier_runtime_id: null,
     media_failover: ['openai.gpt-4o'],
     ...overrides,
@@ -46,7 +45,6 @@ describe('parseRuntimeDefaultsResponse', () => {
     expect(out.model_routing.memory_os_consolidation_status).toBe('resolved')
     expect(out.model_routing.memory_os_consolidation_runtime_id).toBe('anthropic.sonnet')
     expect(out.model_routing.memory_os_consolidation_effective_runtime_id).toBe('anthropic.sonnet')
-    expect(out.model_routing.structured_judge_runtime_id).toBe('openai.gpt-4o')
     expect(out.model_routing.cross_verifier_runtime_id).toBeNull()
   })
 
@@ -63,7 +61,6 @@ describe('parseRuntimeDefaultsResponse', () => {
           memory_os_consolidation_effective_runtime_id: null,
           memory_os_consolidation_status: 'error',
           memory_os_consolidation_error: 'runtime state is not initialized',
-          structured_judge_runtime_id: null,
           cross_verifier_runtime_id: null,
           media_failover: [],
         },
@@ -85,7 +82,6 @@ describe('parseRuntimeDefaultsResponse', () => {
           memory_os_consolidation_effective_runtime_id: 'openai.gpt-4o',
           memory_os_consolidation_status: 'inherited',
           memory_os_consolidation_error: null,
-          structured_judge_runtime_id: 'openai.gpt-4o',
           cross_verifier_runtime_id: null,
           media_failover: ['openai.gpt-4o'],
         },

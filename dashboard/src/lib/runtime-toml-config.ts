@@ -47,7 +47,6 @@ export interface RuntimeTomlBinding {
 
 export interface RuntimeTomlEnvironment {
   defaultRuntimeId: string
-  structuredJudgeRuntimeId: string
   crossVerifierRuntimeId: string
   assignments: Record<string, string>
   providers: RuntimeTomlProvider[]
@@ -372,7 +371,6 @@ export function parseRuntimeTomlEnvironment(sourceText: string): RuntimeTomlEnvi
   }
   return {
     defaultRuntimeId: asString(runtimeValues.default),
-    structuredJudgeRuntimeId: asString(runtimeValues.structured_judge),
     crossVerifierRuntimeId: asString(runtimeValues.cross_verifier),
     assignments,
     providers,
@@ -618,9 +616,6 @@ export function cascadeDeleteProvider(sourceText: string, providerId: string): s
     next = fallback
       ? setRuntimeTomlKey(next, 'runtime', 'default', fallback)
       : deleteRuntimeTomlKey(next, 'runtime', 'default')
-  }
-  if (typeof runtimeValues.structured_judge === 'string' && toDeleteBindings.has(runtimeValues.structured_judge)) {
-    next = deleteRuntimeTomlKey(next, 'runtime', 'structured_judge')
   }
   if (typeof runtimeValues.cross_verifier === 'string' && toDeleteBindings.has(runtimeValues.cross_verifier)) {
     next = deleteRuntimeTomlKey(next, 'runtime', 'cross_verifier')

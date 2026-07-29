@@ -34,10 +34,9 @@ conditions that would reopen it, so the axis is not re-litigated ad hoc.
 A second, higher-capability model already participates in keeper workflows — but
 *after* the producing turn, as a verifier/judge, never *inside* it:
 
-- **Structured judgment lanes**: Keeper failure judgment and board attention
-  resolve the configured second runtime via
-  `Runtime.runtime_id_for_structured_judge ()`. Runtime validation lives in
-  `lib/runtime/runtime.ml`.
+- **Exact-output judgment lanes**: Keeper board attention and HITL judgment
+  resolve immutable OAS target slots through `Runtime_exact_output_registry`
+  (`board_attention_exact` and `hitl_auto_judge`).
 - **Fusion judge**: `lib/fusion/fusion_judge.ml:188` `run_composed
   ~judge_model …` (and `run` / `run_refine` wrappers) — a distinct judge model
   scores/refines fusion panel output.
@@ -131,7 +130,7 @@ value. Avoid Option B until C (or a T1 benchmark) justifies the blast radius.
 
 ## 6. Non-goals
 
-- Replacing the structured-judge / fusion-judge post-hoc path.
+- Replacing the exact-output / fusion-judge post-hoc path.
 - Removing broadcast consult.
 - Any change to `Keeper_turn_driver` in this RFC (deferred to a follow-up gated
   on T1/T2).

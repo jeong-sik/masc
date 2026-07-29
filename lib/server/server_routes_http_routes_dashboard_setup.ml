@@ -7,7 +7,6 @@ open Server_routes_http_keeper_stream
 module Http = Http_server_eio
 module Mcp_eio = Mcp_server_eio
 module Pages = Server_routes_http_pages
-module Runtime = Server_routes_http_runtime
 module Keeper_api = Server_dashboard_http_keeper_api
 
 (* Dashboard /logs JSON builder extracted to

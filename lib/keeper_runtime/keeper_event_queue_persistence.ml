@@ -507,8 +507,13 @@ let transition_wal_entry_of_json owner = function
 ;;
 
 let replay_transition_wal_bytes owner state bytes =
-  let rec replay state = function
-    | [] | [ "" ] -> Ok state
+  let row_is_already_projected entry state =
+    match State.transition_outbox state, State.last_transition state with
+    | [], Some receipt -> State.transition_receipt_equal receipt entry.receipt
+    | [ _ ] | _ :: _ :: _ | [], None -> false
+  in
+  let rec replay ~saw_row ~all_rows_already_projected state = function
+    | [] | [ "" ] -> Ok (state, saw_row && all_rows_already_projected)
     | "" :: _ -> Error "transition WAL contains an empty row"
     | line :: rest ->
       (match
@@ -520,11 +525,21 @@ let replay_transition_wal_bytes owner state bytes =
          (match transition_wal_entry_of_json owner json with
           | Error _ as error -> error
           | Ok entry ->
+            let already_projected = row_is_already_projected entry state in
             (match State.replay_transition_outbox_entry entry state with
              | Error _ as error -> error
-             | Ok state -> replay state rest)))
+             | Ok state ->
+               replay
+                 ~saw_row:true
+                 ~all_rows_already_projected:(all_rows_already_projected && already_projected)
+                 state
+                 rest)))
   in
-  replay state (String.split_on_char '\n' bytes)
+  replay
+    ~saw_row:false
+    ~all_rows_already_projected:true
+    state
+    (String.split_on_char '\n' bytes)
 ;;
 
 let replay_wal_unlocked ~path ~surface owner state =
@@ -539,11 +554,8 @@ let replay_wal_unlocked ~path ~surface owner state =
                ~path
                ~surface
                detail)
-        | Ok replayed ->
-          if
-            replayed == state
-            && State.transition_outbox state = []
-            && Option.is_some (State.last_transition state)
+        | Ok (replayed, all_rows_already_projected) ->
+          if all_rows_already_projected
           then
             (* A projection checkpoint was durable before its WAL retirement.
                The exact row now proves only the same already-projected

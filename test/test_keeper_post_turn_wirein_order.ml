@@ -356,6 +356,23 @@ let only_compaction_manifest config (meta : Masc.Keeper_meta_contract.keeper_met
   | rows -> failf "expected one manual compaction manifest, got %d" (List.length rows)
 ;;
 
+(* [test_manual_compaction_serializes_owner_lane] used to live here. It ran a
+   manual compaction against a busy owner lane and proved three things off the
+   lease settlement: a Busy preflight stayed safely requeueable
+   ([Requeue Cycle_busy]) with no exact dispatch, an applied compaction settled
+   the claimed lease and projected its transition outbox before the stale-source
+   CAS section ran on that settled state, and a commit-admission race settled as
+   [No_compaction { reason = Exact_execution_terminal
+   { cause = Commit_admission_unavailable; _ }; _ }].
+
+   #25969 replaced claim/settle with peek/ack and removed both
+   settlement_of_cycle_outcome and For_testing.settle_claimed_lease_exact. The
+   two settle calls in this test were not extra assertions: they produced the
+   durable state that the sections after them read, so dropping only the
+   settlement assertions would have left those sections silently verifying a
+   different state. The whole case is removed instead. Restating it against the
+   peek/ack intake path is tracked in #25980. *)
+
 let test_missing_exact_lane_is_source_bound_no_compaction () =
   Eio_main.run @@ fun env ->
   Masc_test_deps.init_eio_clock env;

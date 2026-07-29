@@ -20,13 +20,13 @@ let owner_identity_keeper_name owner =
   Owner_lock.keeper_name owner |> Keeper_id.Keeper_name.to_string
 ;;
 
-type selection_kind = State.selection_kind =
+type lease_kind = State.lease_kind =
   | Single
   | Board_batch
 
 type pending_selection = State.pending_selection =
   { source_revision : int64
-  ; kind : selection_kind
+  ; kind : lease_kind
   ; stimuli : Keeper_event_queue.stimulus list
   }
 
@@ -61,6 +61,43 @@ type exact_execution_terminal = State.exact_execution_terminal =
   ; call_id : string
   ; plan_fingerprint : string
   ; request_body_sha256 : string
+  }
+
+type exact_source_action = State.exact_source_action = Consume_source
+
+type exact_settlement_semantic = State.exact_settlement_semantic =
+  | Exact_no_compaction
+  | Exact_escalate
+
+type exact_source_outcome = State.exact_source_outcome =
+  | Terminal of exact_execution_terminal_cause
+
+type exact_source_disposition = State.exact_source_disposition =
+  { disposition_id : string
+  ; source : Keeper_checkpoint_ref.t
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; outcome : exact_source_outcome
+  ; action : exact_source_action
+  ; semantic : exact_settlement_semantic
+  ; prepared_at : float
+  }
+
+type exact_execution_lease_status = State.exact_execution_lease_status =
+  | Dispatch_uncertain
+  | Terminal_quarantined of exact_execution_terminal_cause
+  | Disposition_prepared of exact_source_disposition
+
+type exact_execution_binding = State.exact_execution_binding =
+  { lease_id : string
+  ; lease_sequence : int64
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; status : exact_execution_lease_status
   }
 
 type exact_write_outcome =
@@ -136,6 +173,7 @@ type transition = State.transition =
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
   | Ack_source_terminal of accepted_source_terminal
+  | Settle_exact of exact_source_disposition
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -161,6 +199,8 @@ type transfer_projection_result = State.transfer_projection_result =
 
 let snapshot_filename = "event-queue.json"
 let transition_wal_filename = "event-queue-transitions.jsonl"
+let legacy_settlement_wal_filename = "event-queue-settlements.jsonl"
+let unsupported_inflight_filename = "event-queue-inflight.json"
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
 
@@ -188,6 +228,10 @@ let transition_wal_path_of_owner owner =
   Filename.concat (keeper_runtime_dir_of_owner owner) transition_wal_filename
 ;;
 
+let legacy_settlement_wal_path_of_owner owner =
+  Filename.concat (keeper_runtime_dir_of_owner owner) legacy_settlement_wal_filename
+;;
+
 let compact_wal_unlocked ~surface ~path owner =
   match
     Fs_compat.rewrite_private_file_durable_locked_result path (fun existing ->
@@ -205,10 +249,22 @@ let compact_wal_unlocked ~surface ~path owner =
 ;;
 
 let compact_transition_wals_unlocked owner =
-  compact_wal_unlocked
-    ~surface:"transition WAL"
-    ~path:(transition_wal_path_of_owner owner)
-    owner
+  match
+    compact_wal_unlocked
+      ~surface:"transition WAL"
+      ~path:(transition_wal_path_of_owner owner)
+      owner
+  with
+  | Error _ as error -> error
+  | Ok () ->
+    compact_wal_unlocked
+      ~surface:"legacy settlement WAL"
+      ~path:(legacy_settlement_wal_path_of_owner owner)
+      owner
+;;
+
+let unsupported_inflight_path_of_owner owner =
+  Filename.concat (keeper_runtime_dir_of_owner owner) unsupported_inflight_filename
 ;;
 
 let save_json_atomic_with ~strict_parent_sync path json =
@@ -376,6 +432,22 @@ let read_primary_unlocked owner =
                message)))
 ;;
 
+let reject_unsupported_inflight owner =
+  let path = unsupported_inflight_path_of_owner owner in
+  try
+    if Sys.file_exists path
+    then
+      Error
+        (Printf.sprintf
+           "unsupported event queue sidecar remains at %s; remove it before starting the keeper"
+           path)
+    else Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error (Printf.sprintf "failed to inspect unsupported sidecar %s: %s" path (Printexc.to_string exn))
+;;
+
 let bump_revision state =
   if Int64.equal (State.revision state) Int64.max_int
   then Error "event queue revision exhausted"
@@ -383,6 +455,9 @@ let bump_revision state =
 ;;
 
 let transition_wal_schema = "masc.keeper_event_queue.transition.v2"
+let legacy_transition_wal_schema_v1 = "masc.keeper_event_queue.transition.v1"
+let legacy_settlement_wal_schema_v3 = "masc.keeper_event_queue.settlement.v3"
+let legacy_settlement_wal_schema_v2 = "masc.keeper_event_queue.settlement.v2"
 
 let transition_wal_entry_to_line owner entry =
   `Assoc
@@ -398,7 +473,18 @@ let transition_wal_entry_to_line owner entry =
 let transition_wal_entry_of_json owner = function
   | `Assoc fields ->
     (match List.assoc_opt "schema" fields with
-     | Some (`String schema) when String.equal schema transition_wal_schema ->
+     | Some (`String schema)
+       when String.equal schema transition_wal_schema
+            || String.equal schema legacy_transition_wal_schema_v1
+            || String.equal schema legacy_settlement_wal_schema_v3
+            || String.equal schema legacy_settlement_wal_schema_v2 ->
+       let outbox_entry_of_yojson =
+         if String.equal schema transition_wal_schema
+         then State.outbox_entry_of_yojson
+         else if String.equal schema legacy_transition_wal_schema_v1
+         then State.legacy_transition_outbox_entry_of_yojson
+         else State.legacy_persisted_transition_outbox_entry_of_yojson
+       in
        (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
         | [ ("base_path", `String base_path)
           ; ("keeper_name", `String keeper_name)
@@ -412,7 +498,7 @@ let transition_wal_entry_of_json owner = function
               (String.equal base_path (Owner_lock.base_path owner)
                && String.equal keeper_name (keeper_name_of_owner owner))
           then Error "transition WAL row owner does not match its Keeper lane"
-          else State.outbox_entry_of_yojson entry
+          else outbox_entry_of_yojson entry
         | _ -> Error "transition WAL row fields are not exact")
      | Some (`String schema) ->
        Error (Printf.sprintf "unsupported transition WAL schema: %s" schema)
@@ -495,7 +581,7 @@ let replay_wal_unlocked ~path ~surface owner state =
   | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
     Error
       (Printf.sprintf
-         "failed to read %s keeper=%s path=%s: %s; descriptor cleanup failed: %s"
+         "failed to read %s keeper=%s path=%s: %s; descriptor settlement failed: %s"
          surface
          (keeper_name_of_owner owner)
          path
@@ -505,12 +591,20 @@ let replay_wal_unlocked ~path ~surface owner state =
   | Private_file_succeeded_with_cleanup_failure
       { value = slice; cleanup_failure } ->
     Log.Keeper.error
-      "%s read succeeded with descriptor cleanup failure keeper=%s path=%s: %s"
+      "%s read succeeded with descriptor settlement failure keeper=%s path=%s: %s"
       surface
       (keeper_name_of_owner owner)
       path
       (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
     replay_slice slice
+;;
+
+let replay_legacy_settlement_wal_unlocked owner state =
+  replay_wal_unlocked
+    ~path:(legacy_settlement_wal_path_of_owner owner)
+    ~surface:"legacy settlement WAL"
+    owner
+    state
 ;;
 
 let replay_transition_wal_unlocked owner state =
@@ -522,11 +616,19 @@ let replay_transition_wal_unlocked owner state =
 ;;
 
 let load_state_unlocked owner =
-  match read_primary_unlocked owner with
+  match reject_unsupported_inflight owner with
   | Error _ as error -> error
-  | Ok (Primary_current state) ->
-    replay_transition_wal_unlocked owner state
-  | Ok Primary_missing -> replay_transition_wal_unlocked owner State.empty
+  | Ok () ->
+    (match read_primary_unlocked owner with
+     | Error _ as error -> error
+     | Ok (Primary_current state) ->
+       (match replay_legacy_settlement_wal_unlocked owner state with
+        | Error _ as error -> error
+        | Ok state -> replay_transition_wal_unlocked owner state)
+     | Ok Primary_missing ->
+       (match replay_legacy_settlement_wal_unlocked owner State.empty with
+        | Error _ as error -> error
+        | Ok state -> replay_transition_wal_unlocked owner state))
 ;;
 
 let load_state_result ~base_path ~keeper_name =
@@ -544,14 +646,15 @@ let load_state_result ~base_path ~keeper_name =
             (Printexc.to_string exn)))
 ;;
 
-
 let queue_of_stimuli stimuli =
   List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty stimuli
 ;;
 
-(* The current pending-selection protocol has no separate in-flight queue.
-   Keep the empty projection so snapshot/reporting consumers retain their
-   current shape. *)
+(* In-flight work was the stimuli held by an active lease. Nothing outside
+   [Keeper_event_queue_state] can claim a lease any more and [State.of_yojson]
+   restores none, so a loaded state never carries in-flight stimuli. The
+   projection stays so replay, snapshot, and outbox reporting keep their
+   shape. *)
 let inflight_queue (_ : State.t) = Keeper_event_queue.empty
 
 let replay_queue state =
@@ -584,6 +687,7 @@ let diagnose_snapshot_read_error ~base_path ~keeper_name message =
   | Error invalid -> [ { kind = Invalid_path; path = None; message = invalid } ]
   | Ok owner ->
     let primary = snapshot_path_of_owner owner in
+    let unsupported = unsupported_inflight_path_of_owner owner in
     let inspect path =
       try
         if not (Sys.file_exists path)
@@ -602,9 +706,12 @@ let diagnose_snapshot_read_error ~base_path ~keeper_name message =
           ; message = Printexc.to_string exn
           }
     in
-    (match inspect primary with
-     | Some error -> [ error ]
-     | None -> [ { kind = Parse_failed; path = None; message } ])
+    match inspect unsupported with
+    | Some _ -> [ { kind = Parse_failed; path = Some unsupported; message } ]
+    | None ->
+      (match inspect primary with
+       | Some error -> [ error ]
+       | None -> [ { kind = Parse_failed; path = None; message } ])
 ;;
 
 let load_snapshot_pair_with_errors ~base_path ~keeper_name =
@@ -815,6 +922,10 @@ let state_accounts_for_stimulus state stimulus =
   let same candidate =
     Keeper_event_queue.stimulus_identity_equal candidate stimulus
   in
+  (* A lease term sat between these two: a stimulus held by an active lease also
+     counted as accounted for. No caller can claim a lease since #25969 moved
+     production to peek/ack, and [State.of_yojson] restores none, so that term
+     was always false. *)
   List.exists same (Keeper_event_queue.to_list (State.pending state))
   || List.exists
        (fun (entry : outbox_entry) -> List.exists same entry.stimuli)
@@ -896,6 +1007,12 @@ let ack_pending_result
     | Ok state -> Ok (state, ()))
 ;;
 
+(* The lease-taking exact-execution fence lived here: bind, release before
+   dispatch, quarantine, prepare/finalize source disposition, and
+   settle_bound_exact_nonterminal, plus a For_testing pair that drove the same
+   calls. All of them required a lease, which no caller can obtain since #25969
+   moved production to peek/ack. *)
+
 let commit_transition_unlocked_with
       ~save_checkpoint
       ~compact_wal
@@ -967,7 +1084,7 @@ let commit_transition_unlocked_with
             { error; cleanup_failure } ->
           Error
             (Printf.sprintf
-               "transition WAL commit failed keeper=%s path=%s: %s; descriptor cleanup failed: %s"
+               "transition WAL commit failed keeper=%s path=%s: %s; descriptor settlement failed: %s"
                (keeper_name_of_owner owner)
                path
                (Fs_compat.private_jsonl_append_error_to_string error)
@@ -977,7 +1094,7 @@ let commit_transition_unlocked_with
         | Private_file_succeeded_with_cleanup_failure
             { value = _committed_end_offset; cleanup_failure } ->
           Log.Keeper.error
-            "transition WAL commit succeeded with descriptor cleanup failure keeper=%s path=%s: %s"
+            "transition WAL commit succeeded with descriptor settlement failure keeper=%s path=%s: %s"
             (keeper_name_of_owner owner)
             path
             (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);

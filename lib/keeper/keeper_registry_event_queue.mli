@@ -8,7 +8,7 @@
 
 type pending_selection = Keeper_event_queue_persistence.pending_selection =
   { source_revision : int64
-  ; kind : Keeper_event_queue_persistence.selection_kind
+  ; kind : Keeper_event_queue_persistence.lease_kind
   ; stimuli : Keeper_event_queue.stimulus list
   }
 
@@ -44,6 +44,18 @@ type exact_execution_terminal = Keeper_event_queue_persistence.exact_execution_t
   ; plan_fingerprint : string
   ; request_body_sha256 : string
   }
+
+type exact_source_action = Keeper_event_queue_persistence.exact_source_action =
+  | Consume_source
+
+type exact_settlement_semantic = Keeper_event_queue_persistence.exact_settlement_semantic =
+  | Exact_no_compaction
+  | Exact_escalate
+
+type exact_source_outcome = Keeper_event_queue_persistence.exact_source_outcome =
+  | Terminal of exact_execution_terminal_cause
+
+type exact_source_disposition = Keeper_event_queue_persistence.exact_source_disposition
 
 type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
   | Compaction_exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
@@ -114,6 +126,7 @@ type transition = Keeper_event_queue_persistence.transition =
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
   | Ack_source_terminal of accepted_source_terminal
+  | Settle_exact of exact_source_disposition
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -159,6 +172,11 @@ val ack_pending_result :
   string ->
   selection:pending_selection ->
   (unit, string) result
+
+(* claim_when_result / claim_board_result / transition_result and the lease-taking
+   exact-execution fence lived here, together with cancel_accepted_result.
+   #25969 moved production to peek/ack and nothing outside tests could obtain a
+   lease afterwards. The pending-side commits below need none. *)
 
 val cancel_pending_accepted_result :
   base_path:string ->
@@ -237,7 +255,7 @@ val enqueue_stimulus_durable_result :
   -> enqueue_stimulus_durable_result
 (** Durably enqueue an already-typed deterministic stimulus only when its
     {!Keeper_event_queue.stimulus_identity_equal} identity is absent from
-    pending and the transition outbox. This explicit-result
+    pending, active leases, and the transition outbox. This explicit-result
     path is for structurally addressed signals whose delivery must commit
     before a wake hint. Board-attention judgments use the stricter
     opaque-event-id API above. *)

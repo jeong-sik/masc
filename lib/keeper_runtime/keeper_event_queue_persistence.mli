@@ -4,9 +4,13 @@
     envelope: revision, pending stimuli, the latest projected transition, an
     operation-indexed ledger of older projected dispositions, at most one
     unprojected transition, and durable accepted-transfer target projections.
-    Only this schema and the current transition WAL schema are accepted.
-    Malformed or retired schemas fail closed. Retired sidecars are not inspected
-    or treated as queue authority. *)
+    Leases and exact-execution bindings are neither written nor restored.
+
+    State schemas v11 through v7 and transition WAL v1 / settlement WAL v3 and
+    v2 are decode-only recovery inputs; every new snapshot/WAL write uses v12
+    state and v2 transition rows. Malformed or unknown schemas fail closed and
+    require reset. [event-queue-inflight.json] is rejected explicitly rather
+    than migrated or treated as a second authority. *)
 
 type owner_identity
 type owner_identity_error
@@ -25,13 +29,13 @@ val owner_identity_hash : owner_identity -> int
 val owner_identity_base_path : owner_identity -> string
 val owner_identity_keeper_name : owner_identity -> string
 
-type selection_kind = Keeper_event_queue_state.selection_kind =
+type lease_kind = Keeper_event_queue_state.lease_kind =
   | Single
   | Board_batch
 
 type pending_selection = Keeper_event_queue_state.pending_selection =
   { source_revision : int64
-  ; kind : selection_kind
+  ; kind : lease_kind
   ; stimuli : Keeper_event_queue.stimulus list
   }
 
@@ -66,6 +70,44 @@ type exact_execution_terminal = Keeper_event_queue_state.exact_execution_termina
   ; call_id : string
   ; plan_fingerprint : string
   ; request_body_sha256 : string
+  }
+
+type exact_source_action = Keeper_event_queue_state.exact_source_action =
+  | Consume_source
+
+type exact_settlement_semantic = Keeper_event_queue_state.exact_settlement_semantic =
+  | Exact_no_compaction
+  | Exact_escalate
+
+type exact_source_outcome = Keeper_event_queue_state.exact_source_outcome =
+  | Terminal of exact_execution_terminal_cause
+
+type exact_source_disposition = Keeper_event_queue_state.exact_source_disposition =
+  { disposition_id : string
+  ; source : Keeper_checkpoint_ref.t
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; outcome : exact_source_outcome
+  ; action : exact_source_action
+  ; semantic : exact_settlement_semantic
+  ; prepared_at : float
+  }
+
+type exact_execution_lease_status = Keeper_event_queue_state.exact_execution_lease_status =
+  | Dispatch_uncertain
+  | Terminal_quarantined of exact_execution_terminal_cause
+  | Disposition_prepared of exact_source_disposition
+
+type exact_execution_binding = Keeper_event_queue_state.exact_execution_binding =
+  { lease_id : string
+  ; lease_sequence : int64
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; status : exact_execution_lease_status
   }
 
 type exact_write_outcome =
@@ -146,6 +188,7 @@ type transition = Keeper_event_queue_state.transition =
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
   | Ack_source_terminal of accepted_source_terminal
+  | Settle_exact of exact_source_disposition
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -233,6 +276,14 @@ val load_state_result :
     unprojected source-bearing row remains authoritative until the reaction
     projector records and retires it. *)
 
+(* The claim/settle lease surface lived here: claim_when_result,
+   claim_board_result, transition_result, the lease-taking exact-execution
+   fence (bind / release_before_dispatch / quarantine / prepare / finalize /
+   settle_bound_exact_nonterminal), and cancel_accepted_result. #25969 moved
+   production to peek/ack; nothing outside tests obtained a lease afterwards,
+   and Keeper_event_queue_state.of_yojson never restored one, so no live lane
+   could reach any of them. The pending-side operations below carry no lease
+   and stay. *)
 val cancel_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->

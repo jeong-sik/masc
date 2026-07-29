@@ -1,7 +1,3 @@
-(* [request] and [cancel] -- the active-lease arm -- lived here. They needed a
-   Keeper_registry_event_queue.lease, which no caller can obtain since #25969
-   moved production to peek/ack and which State.of_yojson never restores. *)
-
 type pending_request =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
@@ -24,7 +20,6 @@ type failure =
       { expected : int
       ; actual : int
       }
-  | Lease_source_invalid
   | Queue_replay_failed of string
   | Queue_commit_failed of string
 
@@ -60,8 +55,6 @@ let failure_to_string = function
       "live Keeper owner generation changed: expected %d, actual %d"
       expected
       actual
-  | Lease_source_invalid ->
-    "accepted cancellation lease must carry exactly one source stimulus"
   | Queue_replay_failed detail -> "accepted cancellation replay failed: " ^ detail
   | Queue_commit_failed detail -> "accepted cancellation commit failed: " ^ detail
 ;;

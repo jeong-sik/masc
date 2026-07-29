@@ -30,7 +30,7 @@ type exact_output_terminal_reason =
       ; terminal : Keeper_event_queue_state.exact_execution_terminal
       }
 
-type source_lease_disposition =
+type source_disposition =
   | Follow_failure_route
   | Follow_failure_route_after_no_compaction of
       { reason : Keeper_event_queue_state.no_compaction_reason }
@@ -39,7 +39,7 @@ type source_lease_disposition =
   | Pause_after_transcript_corruption of { detail : string }
   | Acknowledge_after_in_turn_handling
 
-let source_lease_disposition_after_no_compaction
+let source_disposition_after_no_compaction
       ({ source; reason } : Keeper_event_queue_state.no_compaction)
   =
   match reason with
@@ -59,7 +59,7 @@ type turn_failure =
   { error : Agent_sdk.Error.sdk_error
   ; runtime_id : string
   ; route : Keeper_runtime_failure_route.route
-  ; source_lease_disposition : source_lease_disposition
+  ; source_disposition : source_disposition
   ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
   }
 
@@ -71,8 +71,8 @@ let turn_failure_of_error
       error
   =
   match exact_failure_execution with
-  | Some (runtime_id, route, source_lease_disposition) ->
-    { error; runtime_id; route; source_lease_disposition; deferred_runtime_lane }
+  | Some (runtime_id, route, source_disposition) ->
+    { error; runtime_id; route; source_disposition; deferred_runtime_lane }
   | None ->
     { error
     ; runtime_id
@@ -80,7 +80,7 @@ let turn_failure_of_error
         Keeper_runtime_failure_route.route_of_error
           ~boundary:fallback_boundary
           error
-    ; source_lease_disposition = Follow_failure_route
+    ; source_disposition = Follow_failure_route
     ; deferred_runtime_lane
     }
 ;;
@@ -248,7 +248,7 @@ type provider_overflow_recovery =
   | Provider_overflow_lifecycle_cleanup_failed of
       { trigger : Compaction_trigger.t
       ; reason : string
-      ; source_lease_disposition : source_lease_disposition
+      ; source_disposition : source_disposition
       ; recovery : Keeper_post_turn.compaction_recovery option
       }
 
@@ -324,7 +324,7 @@ let recover_provider_context_overflow_in_lane
         let reason =
           Printf.sprintf "%s; lifecycle_cleanup=%s" reason cleanup_error
         in
-        let source_lease_disposition =
+        let source_disposition =
           match recovery with
           | None ->
             Requeue_after_context_compaction
@@ -333,7 +333,7 @@ let recover_provider_context_overflow_in_lane
             Requeue_after_context_compaction Compaction_committed
         in
         Provider_overflow_lifecycle_cleanup_failed
-          { trigger; reason; source_lease_disposition; recovery }
+          { trigger; reason; source_disposition; recovery }
       | Ok () ->
         (match recovery with
          | None -> Provider_overflow_retry_without_checkpoint { trigger; reason }
@@ -359,8 +359,8 @@ let recover_provider_context_overflow_in_lane
                   "%s; lifecycle_cleanup=%s"
                   reason
                   cleanup_error
-            ; source_lease_disposition =
-                source_lease_disposition_after_no_compaction no_compaction
+            ; source_disposition =
+                source_disposition_after_no_compaction no_compaction
             ; recovery = None
             })
     in
@@ -566,7 +566,7 @@ let append_provider_overflow_manifest
        failure route. Effect-boundary and domain-invalid reasons instead become
        an immediate typed escalation: replaying the source could issue a second
        exact-output request after dispatch. *)
-    source_lease_disposition_after_no_compaction no_compaction,
+    source_disposition_after_no_compaction no_compaction,
     turn_state
   | Provider_overflow_applied recovery ->
     let turn_state =
@@ -615,7 +615,7 @@ let append_provider_overflow_manifest
     Requeue_after_context_compaction (Compaction_attempt_failed { reason }),
     turn_state
   | Provider_overflow_lifecycle_cleanup_failed
-      { trigger; reason; source_lease_disposition; recovery } ->
+      { trigger; reason; source_disposition; recovery } ->
     let turn_state =
       match recovery with
       | Some recovery ->
@@ -645,7 +645,7 @@ let append_provider_overflow_manifest
                     ])))
           Keeper_runtime_manifest.Context_compacted
     in
-    source_lease_disposition, turn_state
+    source_disposition, turn_state
 ;;
 
 let run_keeper_cycle
@@ -692,7 +692,7 @@ let run_keeper_cycle
           Keeper_runtime_failure_route.route_of_error
             ~boundary:Keeper_runtime_failure_route.Masc_execution
             error
-      ; source_lease_disposition = Follow_failure_route
+      ; source_disposition = Follow_failure_route
       ; deferred_runtime_lane = None
       }
   | Ok { entry; publication_recovery } ->
@@ -1437,15 +1437,16 @@ dominant source of the observed CAS race exhaustion after
                          else Keeper_runtime_failure_route.Oas_execution)
                       err
                   in
-                  let source_lease_disposition, turn_state =
+                  let source_disposition, turn_state =
                     match transcript_corruption with
                     | Some detail ->
                       Pause_after_transcript_corruption { detail }, turn_state
                     | None ->
                       (* The checkpoint helper reports [Ok] only after the
                          compacted checkpoint is durably saved. The heartbeat
-                         settles the owning lease after this cycle returns, so
-                         no source stimulus is acknowledged ahead of it. *)
+                         applies the selected source transition after this cycle
+                         returns, so no source stimulus is acknowledged ahead of
+                         it. *)
                       let overflow_recovery =
                         recover_provider_context_overflow_in_lane
                           ?exact_execution_guard
@@ -1467,7 +1468,7 @@ dominant source of the observed CAS race exhaustion after
                     Some
                       ( final_execution.runtime_id
                       , failure_route
-                      , source_lease_disposition );
+                      , source_disposition );
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string FailureRoute)
                     ~labels:

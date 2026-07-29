@@ -53,20 +53,19 @@ val continuation_binding_of_yojson : Yojson.Safe.t -> (continuation_binding, str
 val source_terminal_receipt_kind :
   Keeper_event_queue_state.source_terminal_receipt -> string
 
+val schema : string
+(** The only accepted durable receipt schema. *)
+
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
-(** Strict current public codec used by authenticated operator surfaces and
-    harnesses. Recovery-only durable compatibility is private to [load]. *)
+(** Strict current codec used by both public surfaces and durable loads. *)
 
 val load :
   Workspace.config ->
   keeper_name:string ->
   operator_operation_id:string ->
   (t option, string) result
-(** Load a current receipt, or recover an exact v2 transfer / v3
-    source-terminal receipt so a receipt-first crash can finish its typed
-    projection. Recovery does not make either retired schema valid at the
-    public codec boundary. *)
+(** Load a receipt in the current schema. Retired schemas are rejected. *)
 
 val with_keeper_lock :
   Workspace.config ->

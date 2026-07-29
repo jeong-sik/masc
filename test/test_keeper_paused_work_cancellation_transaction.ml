@@ -89,13 +89,6 @@ let with_seeded_owner ?(registered = true) ?latched_reason ~paused ~generation f
                (Keeper_state_machine.transition_error_to_string error));
        f config keeper_name source)
 ;;
-(* [with_lane] built a Transaction.request around a claimed lease and fed the
-   five Cancel_active_lease cases (paused commit-once, running rejected,
-   unregistered durable lane, dead tombstone, stale generation). #25969 moved
-   production to peek/ack, after which no caller could claim a lease and
-   Transaction.cancel could only answer "event queue lease not found"; the
-   arm and its cases are gone. The pending twin below is unaffected. *)
-
 
 let with_pending_lane ?registered ?latched_reason ~paused ~generation f =
   with_seeded_owner

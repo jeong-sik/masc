@@ -73,14 +73,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
                | None -> None)
           m.active_goal_ids
       in
-      let default_prompt_string default live =
-        match default with
-        | Some value when String.trim live = "" -> value
-        | _ -> live
-      in
-      let prompt_instructions =
-        default_prompt_string defaults.instructions m.instructions
-      in
       let active_goal_ids_json =
         `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids)
       in

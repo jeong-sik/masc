@@ -1307,11 +1307,12 @@ let receipt_for_lease ~applied_at ~transition (lease : lease) =
 let receipt_for_pending_transition ~applied_at ~transition =
   match pending_transition_id transition with
   | Some transition_id ->
-    { transition_id
-    ; event_id = event_id_of_transition transition_id
-    ; applied_at
-    ; transition
-    }
+    Ok
+      { transition_id
+      ; event_id = event_id_of_transition transition_id
+      ; applied_at
+      ; transition
+      }
   | None -> Error "current pending transition must carry an operator operation ID"
 ;;
 
@@ -1801,11 +1802,21 @@ let finalize_exact_source_disposition
   | Some { status = Terminal_quarantined _; _ } ->
     Error "source-less terminal quarantine has no source disposition"
   | None ->
-    (match
-       find_prior_receipt
-         (transition_id ~lease_id:lease.lease_id (Settle_exact disposition))
-         state
-     with
+    let prior_receipts =
+      List.map
+        (fun (entry : outbox_entry) -> entry.receipt)
+        state.transition_outbox
+      @ Option.to_list state.last_transition
+    in
+    let prior =
+      List.find_opt
+        (fun receipt ->
+           String.equal
+             receipt.transition_id
+             (transition_id ~lease_id:lease.lease_id receipt.transition))
+        prior_receipts
+    in
+    (match prior with
      | Some ({ transition = Settle_exact disposition; _ } as receipt)
        when String.equal disposition.disposition_id disposition_id ->
        Ok (state, Transition_already_applied receipt)
@@ -1906,6 +1917,7 @@ let cancel_pending_accepted
        let pending =
          List.fold_left
            Keeper_event_queue.enqueue
+           Keeper_event_queue.empty
            retained
        in
        apply_pending_transition
@@ -3505,7 +3517,7 @@ let of_yojson json =
       list_field
         ~context
         "transition_outbox"
-        legacy_transition_outbox_entry_of_yojson
+        legacy_source_terminal_ack_outbox_entry_of_yojson
         fields
     else if
       String.equal schema_value schema_v9 || String.equal schema_value schema_v8

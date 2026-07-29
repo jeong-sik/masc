@@ -507,10 +507,10 @@ let transition_wal_entry_of_json owner = function
 ;;
 
 let replay_transition_wal_bytes owner state bytes =
-  let row_is_already_projected entry state =
+  let row_is_already_projected (entry : State.outbox_entry) state =
     match State.transition_outbox state, State.last_transition state with
     | [], Some receipt -> State.transition_receipt_equal receipt entry.receipt
-    | [ _ ] | _ :: _ :: _ | [], None -> false
+    | _ -> false
   in
   let rec replay ~saw_row ~all_rows_already_projected state = function
     | [] | [ "" ] -> Ok (state, saw_row && all_rows_already_projected)

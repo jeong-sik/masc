@@ -1,11 +1,16 @@
 (** Durable per-Keeper Event Layer state.
 
-    [event-queue.json] keeps the v5 envelope containing pending stimuli, active
-    typed leases, exact-execution dispatch fences, the monotonic lease
-    sequence, transition outbox, and durable accepted-transfer target
-    accounting. Only the current schema is accepted; stale or unknown state
-    fails closed and requires reset. [event-queue-inflight.json] is rejected
-    explicitly rather than migrated or treated as a second authority. *)
+    Current writes use the [keeper.event_queue.state.v12] [event-queue.json]
+    envelope: revision, pending stimuli, the last projected transition, at most
+    one unprojected transition, and durable accepted-transfer target
+    projections. Leases and exact-execution bindings are neither written nor
+    restored.
+
+    State schemas v11 through v7 and transition WAL v1 / settlement WAL v3 and
+    v2 are decode-only recovery inputs; every new snapshot/WAL write uses v12
+    state and v2 transition rows. Malformed or unknown schemas fail closed and
+    require reset. [event-queue-inflight.json] is rejected explicitly rather
+    than migrated or treated as a second authority. *)
 
 type owner_identity
 type owner_identity_error

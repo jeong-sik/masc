@@ -306,7 +306,7 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
     in
     (match State.transition_outbox recovered_v10_unprojected with
      | [ { receipt = { transition = State.Ack_source_terminal _; _ }; _ } ] -> ()
-     | [] | _ :: _ :: _ -> Alcotest.fail "v10 source ACK outbox did not recover");
+     | _ -> Alcotest.fail "v10 source ACK outbox did not recover");
     let v10_projected_state =
       state_fields
       |> remove_field "last_transition"

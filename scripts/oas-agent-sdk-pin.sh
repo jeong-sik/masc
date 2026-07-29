@@ -29,11 +29,12 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.2"
 # The reachability guards in check-oas-pin.sh and oas-drift-check.sh track
 # main; oas-drift-check.sh also reports the public-surface delta at pin-bump
 # time.
-# v0.231.2 is a patch on the hard-cut wave: adds GLM-5-Turbo
-# reasoning_streaming_format (#2880) — recovers streaming reasoning that was
-# falling back to batch (No_streaming_reasoning, ~60s/turn). Also carries the
-# #2875 agent-card current-interface contract hard-cut. MASC consumes the same
-# public Agent SDK contract; no compatibility or migration code retained.
+# v0.231.2 is a patch on the hard-cut wave: the base catalog declares
+# GLM-5-Turbo reasoning_streaming_format (#2880). Deployment exact overlays
+# must declare the same capability explicitly, and parser wiring/runtime proof
+# remain separate concerns. It also carries the #2875 agent-card
+# current-interface contract hard-cut. MASC consumes the same public Agent SDK
+# contract; no compatibility or migration code retained.
 # Pinned to the 0.231.2 release commit (1ea60e7a1).
 readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.2"
 # TRACK_REF consumed by check-oas-pin.sh / oas-drift-check.sh /

@@ -47,7 +47,7 @@ val build_prompt :
   meta:Keeper_meta_contract.keeper_meta ->
   base_path:string ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
-  ?turn_decision:Keeper_world_observation.keeper_cycle_decision ->
+  turn_decision:Keeper_world_observation.keeper_cycle_decision ->
   ?current_task:Masc_domain.task ->
   ?active_goal_summaries:(string * string) list ->
   observation:Keeper_world_observation.world_observation ->
@@ -58,10 +58,8 @@ val build_prompt :
     tests can keep the bare call.
 
     RFC-0315 wake-turn self-description:
-    - [?turn_decision]: the scheduler's actual cycle decision. When present it
-      replaces the internal recompute, so the rendered wake reason matches the
-      decision that fired the turn (the recompute cannot see [reactive_wake]
-      or drained event-queue triggers). Omitted: legacy recompute.
+    - [turn_decision]: the scheduler's actual cycle decision, required so the
+      rendered wake reason matches the decision that fired the turn.
     - [?current_task]: renders a "Current Task" layer for the task the keeper
       holds ([meta.current_task_id] admits scheduled-autonomous turns, so the
       turn must see the work that admitted it). Omitted: layer absent.

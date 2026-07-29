@@ -60,6 +60,16 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   | Ok m -> m
   | Error e -> failwith ("meta_of_json failed: " ^ e)
 
+let build_prompt meta =
+  let turn_decision = WO.keeper_cycle_decision ~meta base_observation in
+  Masc.Keeper_unified_prompt.build_prompt
+    ~meta
+    ~base_path:"/tmp"
+    ~turn_decision
+    ~observation:base_observation
+    ()
+;;
+
 let contains ~affix s =
   let n = String.length affix and m = String.length s in
   let rec go i = i + n <= m && (String.sub s i n = affix || go (i + 1)) in
@@ -117,8 +127,7 @@ let test_persona_reaches_unified_system_prompt () =
     (Filename.concat persona_dir "AGENT.md")
     "집요하고 직설적. 근본 원인을 잡을 때까지 <blame>을 판다.";
   let { Masc.Keeper_unified_prompt.system_prompt; _ } =
-    Masc.Keeper_unified_prompt.build_prompt ~meta:(make_meta "test-keeper")
-      ~base_path:"/tmp" ~observation:base_observation ()
+    build_prompt (make_meta "test-keeper")
   in
   check bool "persona block present" true
     (contains ~affix:"<persona>" system_prompt);
@@ -132,8 +141,7 @@ let test_persona_reaches_unified_system_prompt () =
 let test_no_persona_file_means_no_block () =
   with_config_dir @@ fun ~config_dir:_ ->
   let { Masc.Keeper_unified_prompt.system_prompt; _ } =
-    Masc.Keeper_unified_prompt.build_prompt ~meta:(make_meta "test-keeper")
-      ~base_path:"/tmp" ~observation:base_observation ()
+    build_prompt (make_meta "test-keeper")
   in
   check bool "no persona block without persona text" false
     (contains ~affix:"<persona>" system_prompt)
@@ -146,8 +154,7 @@ let test_persona_sits_between_identity_and_shared_body () =
   mkdir_p persona_dir;
   write_file (Filename.concat persona_dir "AGENT.md") "차분하고 꼼꼼함.";
   let { Masc.Keeper_unified_prompt.system_prompt; _ } =
-    Masc.Keeper_unified_prompt.build_prompt ~meta:(make_meta "test-keeper")
-      ~base_path:"/tmp" ~observation:base_observation ()
+    build_prompt (make_meta "test-keeper")
   in
   let index_of ~affix =
     let n = String.length affix and m = String.length system_prompt in

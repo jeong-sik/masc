@@ -712,7 +712,7 @@ let run_keeper_cycle
       ~(generation : int)
       ~(wake : Keeper_registry.wake_reason)
       ?(channel : Keeper_world_observation.keeper_cycle_channel = Scheduled_autonomous)
-      ?(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
+      ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
       ?shared_context
       ?event_bus
       ?hitl_resolution
@@ -1007,7 +1007,7 @@ let run_keeper_cycle
                    ~meta
                    ~base_path:config.base_path
                    ~profile_defaults
-                   ?turn_decision
+                   ~turn_decision
                    ?current_task
                    ~active_goal_summaries
                    ~observation

@@ -712,7 +712,7 @@ describe('computeOverviewStats', () => {
       run: 0,
       att: 0,
       hot: 0,
-      avgCtx: 0,
+      avgCtx: null,
       tasks: 0,
       traces: 0,
       total: 0,
@@ -747,6 +747,14 @@ describe('computeOverviewStats', () => {
       makeKeeper({ name: 'b', status: 'active', context_ratio: 0.6 }),
     ]
     expect(computeOverviewStats(keepers, []).avgCtx).toBe(70)
+  })
+
+  it('does not report zero average when running context is unobserved', () => {
+    const keepers = [
+      makeKeeper({ name: 'rondo', status: 'active', context_ratio: null }),
+    ]
+
+    expect(computeOverviewStats(keepers, []).avgCtx).toBeNull()
   })
 })
 

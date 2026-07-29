@@ -547,6 +547,40 @@ describe('Ops surface', () => {
     expect(diagnostics[0]?.source).toBe('persistent_agent')
   }, 60000)
 
+  it('keeps not-observed context typed while ignoring absent diagnostics', async () => {
+    const { contextMetricsDiagnostics } = await loadOps()
+    const snapshot = {
+      root: { paused: false },
+      sessions: [],
+      keepers: [
+        {
+          name: 'rondo',
+          context_metrics_unavailable: {
+            kind: 'not_observed',
+            reason: 'context_measurement_missing',
+          },
+        },
+        {
+          name: 'kidsnote',
+          context_metrics_unavailable: null,
+        },
+      ],
+      persistent_agents: [],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+
+    const diagnostics = contextMetricsDiagnostics(snapshot)
+
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]?.keeper.name).toBe('rondo')
+    expect(diagnostics[0]?.error).toEqual({
+      kind: 'not_observed',
+      reason: 'context_measurement_missing',
+    })
+  }, 60000)
+
   it('filters out entries older than 3 days so stale reviews stop showing', async () => {
     const {
       Ops,

@@ -18,7 +18,14 @@ import { MutedSpan, DetailCard, DetailRow } from './keeper-detail-kpi'
 export function ContextChart({ keeper }: { keeper: Keeper }) {
   const series = keeper.metrics_series ?? []
   if (series.length < 2) {
-    const pct = ((keeper.context_ratio ?? keeper.context?.context_ratio ?? 0) * 100)
+    const ratio = keeper.context_ratio ?? keeper.context?.context_ratio ?? null
+    if (ratio == null) {
+      return html`
+        <${DetailCard} class="flex items-center gap-3 mb-5">
+          <${MutedSpan}>컨텍스트 미관측</${MutedSpan}>
+        <//>`
+    }
+    const pct = ratio * 100
     const color = ctxColor(pct)
     return html`
       <${DetailCard} class="flex items-center gap-3 mb-5">

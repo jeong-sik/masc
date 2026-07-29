@@ -128,7 +128,11 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                     ; "updated_at", `String meta.updated_at
                     ; "created_at", `String meta.created_at
                     ]
-                    @ keeper_context_snapshot_fields context_snapshot)))
+                    @ keeper_context_snapshot_fields context_snapshot
+                    @ [ ( "last_turn_usage"
+                        , keeper_last_turn_usage_of_meta meta
+                          |> keeper_last_turn_usage_to_json )
+                      ])))
         names
   in
   `Assoc [ "count", `Int (List.length rows); "items", `List rows ]

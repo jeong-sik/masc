@@ -1,7 +1,9 @@
 import type {
   CtxCompositionTelemetry,
   Keeper,
+  KeeperContextMetricsUnavailable,
   KeeperLifecycleState,
+  KeeperLastTurnUsage,
   KeeperMetricPoint,
   KeeperPhase,
   KeeperProfileConfigErrorKind,
@@ -23,6 +25,10 @@ import { normalizeStopCause } from './lib/stop-cause'
 import { contextThresholds } from './config/context-thresholds'
 import { normalizeKeeperDiagnostic } from './keeper-state'
 import type { RuntimeRef } from './types'
+import {
+  OPERATOR_CONTEXT_METRICS_STORAGE_READ_FAILURE_REASONS,
+  type OperatorContextMetricsStorageReadFailureReason,
+} from './types/dashboard-mission'
 
 /** Normalize a raw runtime_ref JSON object into a typed RuntimeRef. */
 function normalizeRuntimeRef(raw: unknown): RuntimeRef | null {
@@ -31,6 +37,82 @@ function normalizeRuntimeRef(raw: unknown): RuntimeRef | null {
   if (!group) return null
   const item = asString(raw.item) ?? null
   return { group, item }
+}
+
+const contextMetricsStorageReadFailureReasons = new Set<OperatorContextMetricsStorageReadFailureReason>([
+  ...OPERATOR_CONTEXT_METRICS_STORAGE_READ_FAILURE_REASONS,
+])
+
+export function normalizeKeeperContextMetricsUnavailable(
+  raw: unknown,
+): KeeperContextMetricsUnavailable | null {
+  if (raw === null || raw === undefined) return null
+  if (!isRecord(raw)) {
+    return { kind: 'invalid_payload', reported_kind: null, reported_reason: null }
+  }
+
+  const kind = asString(raw.kind) ?? null
+  const reason = asString(raw.reason) ?? null
+  if (kind === 'not_observed' && reason === 'context_measurement_missing') {
+    return { kind, reason }
+  }
+
+  const path = raw.path === null ? null : asString(raw.path)
+  const detail = typeof raw.detail === 'string' ? raw.detail : undefined
+  if (
+    kind === 'storage_read_failed'
+    && reason !== null
+    && contextMetricsStorageReadFailureReasons.has(reason as OperatorContextMetricsStorageReadFailureReason)
+    && path !== undefined
+    && detail !== undefined
+  ) {
+    return {
+      kind,
+      reason: reason as OperatorContextMetricsStorageReadFailureReason,
+      path,
+      detail,
+    }
+  }
+
+  const lineNumber = raw.line_number === null ? null : asNumber(raw.line_number)
+  if (
+    kind === 'malformed_json'
+    && reason === 'malformed_metrics_row'
+    && typeof path === 'string'
+    && (lineNumber === null || (lineNumber !== undefined && Number.isSafeInteger(lineNumber)))
+    && detail !== undefined
+  ) {
+    return { kind, reason, path, line_number: lineNumber, detail }
+  }
+
+  return { kind: 'invalid_payload', reported_kind: kind, reported_reason: reason }
+}
+
+export function normalizeKeeperLastTurnUsage(raw: unknown): KeeperLastTurnUsage | null {
+  if (!isRecord(raw) || raw.source !== 'keeper_runtime_usage') return null
+  const inputTokens = asNumber(raw.input_tokens)
+  const outputTokens = asNumber(raw.output_tokens)
+  const totalTokens = asNumber(raw.total_tokens)
+  if (
+    inputTokens === undefined
+    || outputTokens === undefined
+    || totalTokens === undefined
+    || !Number.isSafeInteger(inputTokens)
+    || !Number.isSafeInteger(outputTokens)
+    || !Number.isSafeInteger(totalTokens)
+    || inputTokens < 0
+    || outputTokens < 0
+    || totalTokens < 0
+  ) {
+    return null
+  }
+  return {
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    total_tokens: totalTokens,
+    observed_at: asString(raw.observed_at) ?? null,
+    source: 'keeper_runtime_usage',
+  }
 }
 
 function normalizeKeeperLiveActivitySource(raw: unknown): Keeper['last_activity_source'] {
@@ -598,7 +680,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
       const name = asString(row.name)
       if (!name) return null
 
-      const contextRatio = asNumber(row.context_ratio) ?? asNumber(contextRaw?.context_ratio)
+      const contextRatio = asNumber(row.context_ratio) ?? asNumber(contextRaw?.context_ratio) ?? null
       const statusRaw = asString(row.status) ?? asString(agentRaw?.status) ?? 'offline'
       const model = undefined
       const metricsSeries = normalizeMetricsSeries(row.metrics_series)
@@ -606,10 +688,10 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
       const normalizedContext =
         contextRaw
           ? {
-              source: asString(contextRaw.source),
-              context_ratio: asNumber(contextRaw.context_ratio),
-              context_tokens: asNumber(contextRaw.context_tokens),
-              context_max: asNumber(contextRaw.context_max),
+              source: asString(contextRaw.source) ?? null,
+              context_ratio: asNumber(contextRaw.context_ratio) ?? null,
+              context_tokens: asNumber(contextRaw.context_tokens) ?? null,
+              context_max: asNumber(contextRaw.context_max) ?? null,
               message_count: asNumber(contextRaw.message_count),
               has_checkpoint: typeof contextRaw.has_checkpoint === 'boolean' ? contextRaw.has_checkpoint : undefined,
             }
@@ -744,9 +826,11 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_blocker: asString(row.last_blocker) ?? null,
         runtime_warning_ctx_ratio: asNumber(row.runtime_warning_ctx_ratio) ?? null,
         context_ratio: contextRatio,
-        context_tokens: asNumber(row.context_tokens) ?? asNumber(contextRaw?.context_tokens),
-        context_max: asNumber(row.context_max) ?? asNumber(contextRaw?.context_max),
-        context_source: asString(row.context_source) ?? asString(contextRaw?.source),
+        context_tokens: asNumber(row.context_tokens) ?? asNumber(contextRaw?.context_tokens) ?? null,
+        context_max: asNumber(row.context_max) ?? asNumber(contextRaw?.context_max) ?? null,
+        context_source: asString(row.context_source) ?? asString(contextRaw?.source) ?? null,
+        context_metrics_unavailable: normalizeKeeperContextMetricsUnavailable(row.context_metrics_unavailable),
+        last_turn_usage: normalizeKeeperLastTurnUsage(row.last_turn_usage),
         context: normalizedContext,
         traits: asStringArray(row.traits),
         interests: asStringArray(row.interests),

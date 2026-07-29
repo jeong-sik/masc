@@ -366,7 +366,7 @@ let keepers_json
                     in
                     let context_snapshot =
                       if lightweight
-                      then fallback_keeper_context_snapshot meta
+                      then missing_keeper_context_snapshot ()
                       else keeper_context_snapshot_of_meta config meta
                     in
                     let runtime_trust =
@@ -487,6 +487,10 @@ let keepers_json
                                result )
                            ]
                          @ keeper_context_snapshot_fields context_snapshot
+                         @ [ ( "last_turn_usage"
+                             , keeper_last_turn_usage_of_meta meta
+                               |> keeper_last_turn_usage_to_json )
+                           ]
                          @ Keeper_status_bridge.runtime_blocker_fields_json config meta
                          @ Keeper_status_bridge.attention_fields_json config meta
                          @ [ "runtime_trust", runtime_trust ])

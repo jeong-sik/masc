@@ -163,16 +163,24 @@ stateDiagram-v2
 
 ### 2.2 Context Management
 
-Context 사용량은 OAS `Context.t`에서 계산된다.
+Provider context-window 관리와 overflow retry는 OAS가 소유한다. OAS 내부의
+`Context.t`는 메시지와 system prompt로부터 context 크기를 계산할 수 있지만,
+그 내부 계산값이 MASC operator snapshot에 자동으로 관측되었다는 뜻은 아니다.
 
-**계산 공식**:
-```
-context_ratio = token_count / max_tokens
-token_count = sum(message별 토큰) + system_prompt 토큰
-message 토큰 = (문자열 길이 / 4) + 4
-```
+MASC operator/execution surface는 다음 계약을 따른다.
 
-Provider context-window 관리와 overflow retry는 OAS가 소유한다. MASC는
+- `context_ratio`, `context_tokens`, `context_max`는 완전한
+  `keeper_context_status` 측정 행이 있을 때만 숫자다.
+- 현재 heartbeat producer는 이 완전한 측정 행을 만들지 않으므로, 일반적인
+  현재 상태는 세 필드가 `null`이고
+  `context_metrics_unavailable={kind:"not_observed",
+  reason:"context_measurement_missing"}`이다.
+- `last_turn_usage`는 최근 완료된 provider 호출의 input/output/total token
+  usage다. 현재 context 점유율이나 남은 window를 뜻하지 않는다.
+- 미관측 context는 `0%`도 `100%`도 아니며, attention/compaction 임계값에
+  사용할 수 없다.
+
+MASC는
 checkpoint를 임의 길이로 자르거나 tool result를 Stub으로 바꾸지 않는다.
 post-turn 요약이 요청되더라도 configured LLM이 유효한 plan을 반환할 때만
 그 plan을 적용하고, runtime/plan 오류 또는 구형 deterministic mode에서는
@@ -392,8 +400,9 @@ live observer는 shell gate counter와 semantic marker 계열만 남는다.
 | `status` | MASC | agent_status + health_state 결합 (surface_status) | keepalive 미실행 |
 | `generation` | OAS+MASC | handoff 마다 +1, 초기값 0 | 아직 handoff 없음 |
 | `turn_count` (`total_turns`) | MASC | JSONL 메트릭에서 `channel="turn"` 카운트 | 아직 대화 없음 |
-| `context_ratio` | OAS | `token_count / max_tokens` | context 미로드 또는 checkpoint 없음 |
-| `context_tokens` | OAS | `sum(msg_tokens)` 근사 합산 | context 미로드 |
+| `context_ratio` | MASC operator projection | 완전한 `keeper_context_status` 측정 행의 관측값만 전달 | `null`은 미관측. `0%`가 아님 |
+| `context_tokens` / `context_max` | MASC operator projection | 같은 측정 행의 현재 token 수와 측정된 max를 함께 전달 | 둘 중 하나라도 없으면 context 세 필드 전체가 `null` |
+| `last_turn_usage` | MASC keeper runtime usage | 최근 완료 turn의 input/output/total token counter | `null`은 완료 usage 없음. context 점유율로 해석 금지 |
 | `last_heartbeat` | MASC | 마지막 heartbeat 타임스탬프 | keepalive 미실행 |
 | `trace_id` | MASC | `trace-{timestamp}-{random}` 형식 | (항상 존재) |
 | `agent_name` | MASC | `keeper-{name}-agent` 형식 | (항상 존재) |
@@ -571,23 +580,25 @@ Keeper의 모든 활동은 날짜별 JSONL에 기록된다:
 | `heartbeat` | keepalive fiber의 주기적 스냅샷 | snapshot_interval_sec마다 |
 | `proactive` | keeper 자발적 메시지 | proactive 발신 후 |
 
-각 항목에 포함되는 주요 필드:
+각 항목은 producer별로 필드가 다르다. 예를 들어 현재 heartbeat 행은
+context 숫자를 기록하지 않는다.
 
 ```json
 {
   "ts_unix": 1710000000.0,
   "trace_id": "trace-xxx",
   "generation": 1,
-  "channel": "turn",
-  "context_ratio": 0.32,
-  "context_tokens": 4500,
+  "channel": "heartbeat",
+  "snapshot_source": "keeper_context_status",
   "compacted": false,
-  "context_actions": {
-    "compact": false,
-    "handoff": false
-  }
+  "message_count": 12
 }
 ```
+
+operator projection이 context 숫자를 신뢰하려면 한 행에
+`snapshot_source="keeper_context_status"`, `context_ratio`,
+`context_tokens`, `context_max`가 모두 유효하게 있어야 한다. 부분 행과
+turn usage 행은 context snapshot으로 승격하지 않는다.
 
 ### 6.2 Hybrid Autonomy
 
@@ -684,10 +695,14 @@ flowchart TD
 
 ### 7.3 context_ratio 높음
 
-| 상태 | 조건 | 자동 동작 |
+먼저 `context_source="keeper_context_status"`이고
+`context_metrics_unavailable=null`인 완전한 측정인지 확인한다.
+
+| 상태 | 의미 | 자동 동작 |
 |------|------|----------|
-| 정상 | < 50% | 없음 |
-| Compaction 요청 | 명시적 Manual 요청 또는 typed provider overflow | MASC-owned compaction 경계로 진입 |
+| 숫자 관측됨 | 완전한 context 측정 행에서 읽음 | 관측만으로 compaction하지 않음 |
+| `null` + `not_observed` | 현재 context 점유율을 모름 | attention/compaction 임계 판단 금지 |
+| typed provider overflow | provider가 overflow를 명시적으로 보고 | MASC-owned compaction 경계로 진입 |
 
 `context_ratio`는 관측값일 뿐 compaction 실행 권한이 아니다. 필요하면
 명시적인 compaction을 요청하며, provider overflow는 typed failure에서만

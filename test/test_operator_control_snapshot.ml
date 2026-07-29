@@ -157,12 +157,8 @@ let test_align_keeper_runtime_status_tolerates_null_status_json () =
   Alcotest.(check string) "null runtime status keeps surface status" "inactive"
     status
 
-let test_compute_context_ratio_resolves_budget_and_clamps_at_ceiling () =
-  (* The runtime_id ("primary") resolves to an effective context budget via
-     [Keeper_context_runtime]; [last_input_tokens] here is deliberately above
-     that budget, so the ratio is clamped to the [0,1] ceiling (1.0). The
-     pre-#22080 stub returned [None] (no budget was ever inferred); this test
-     now pins the resolved+clamped behaviour, not the absence of inference. *)
+let test_usage_does_not_create_context_snapshot () =
+  let model_budget = 256_000 in
   let base =
     match
       Masc_test_deps.meta_of_json_fixture
@@ -186,15 +182,98 @@ let test_compute_context_ratio_resolves_budget_and_clamps_at_ceiling () =
           usage =
             {
               base.runtime.usage with
-              (* over-budget on purpose: ratio clamps to 1.0 *)
-              last_input_tokens = 2_106_223;
+              last_input_tokens = 790_360;
+              last_output_tokens = 17;
+              last_total_tokens = 790_377;
             };
         };
     }
   in
+  let snapshot =
+    Operator_control_context_snapshot.missing_keeper_context_snapshot ()
+  in
+  Alcotest.(check bool)
+    "fixture is deliberately above the assigned model budget"
+    true
+    (meta.runtime.usage.last_input_tokens > model_budget);
   Alcotest.(check (option (float 0.0001)))
-    "resolved budget clamps an over-budget ratio to 1.0" (Some 1.0)
-    (Operator_control_snapshot.compute_context_ratio meta)
+    "usage is not context ratio" None snapshot.context_ratio;
+  Alcotest.(check (option int))
+    "usage is not context tokens" None snapshot.context_tokens;
+  Alcotest.(check (option int))
+    "model budget is not an observed context max" None snapshot.context_max;
+  Alcotest.(check (option string))
+    "fallback source is not fabricated" None snapshot.context_source;
+  let json =
+    `Assoc
+      (Operator_control_context_snapshot.keeper_context_snapshot_fields snapshot)
+  in
+  Alcotest.(check string)
+    "missing measurement kind" "not_observed"
+    Yojson.Safe.Util.(
+      json
+      |> member "context_metrics_unavailable"
+      |> member "kind"
+      |> to_string);
+  Alcotest.(check string)
+    "missing measurement reason" "context_measurement_missing"
+    Yojson.Safe.Util.(
+      json
+      |> member "context_metrics_unavailable"
+      |> member "reason"
+      |> to_string)
+  ;
+  let usage =
+    match
+      Operator_control_context_snapshot.keeper_last_turn_usage_of_meta meta
+    with
+    | Some usage -> usage
+    | None -> Alcotest.fail "last-turn usage was lost"
+  in
+  Alcotest.(check int) "usage input retained" 790_360 usage.input_tokens;
+  Alcotest.(check int) "usage output retained" 17 usage.output_tokens;
+  Alcotest.(check int) "usage total retained" 790_377 usage.total_tokens;
+  let usage_json =
+    Operator_control_context_snapshot.keeper_last_turn_usage_to_json
+      (Some usage)
+  in
+  Alcotest.(check int) "usage JSON input retained" 790_360
+    Yojson.Safe.Util.(usage_json |> member "input_tokens" |> to_int);
+  Alcotest.(check string) "usage JSON source is explicit"
+    "keeper_runtime_usage"
+    Yojson.Safe.Util.(usage_json |> member "source" |> to_string)
+
+let test_complete_context_measurement_is_trusted () =
+  let snapshot =
+    Operator_control_context_snapshot.keeper_context_snapshot_from_metrics_json
+      (`Assoc
+        [ "snapshot_source", `String "keeper_context_status"
+        ; "context_ratio", `Float 0.42
+        ; "context_tokens", `Int 42_000
+        ; "context_max", `Int 100_000
+        ])
+  in
+  match snapshot with
+  | None -> Alcotest.fail "complete context measurement was rejected"
+  | Some snapshot ->
+    Alcotest.(check (option (float 0.0001)))
+      "trusted ratio" (Some 0.42) snapshot.context_ratio;
+    Alcotest.(check (option int))
+      "trusted tokens" (Some 42_000) snapshot.context_tokens;
+    Alcotest.(check (option int))
+      "trusted max" (Some 100_000) snapshot.context_max
+
+let test_partial_context_measurement_is_not_trusted () =
+  let snapshot =
+    Operator_control_context_snapshot.keeper_context_snapshot_from_metrics_json
+      (`Assoc
+        [ "snapshot_source", `String "keeper_context_status"
+        ; "context_ratio", `Float 0.42
+        ; "context_tokens", `Int 42_000
+        ])
+  in
+  Alcotest.(check bool) "partial measurement rejected" true
+    (Option.is_none snapshot)
 
 let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
   Eio_main.run @@ fun env ->
@@ -308,9 +387,6 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
         | Some snapshot -> snapshot
         | None -> Alcotest.fail "expected keeper_context_status metrics snapshot"
       in
-      let usage_ratio =
-        Operator_control_snapshot.compute_context_ratio updated_meta
-      in
       let snapshot_ratio =
         Yojson.Safe.Util.(keeper |> member "context_ratio" |> to_float)
       in
@@ -328,8 +404,6 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
         metrics_max snapshot_max;
       Alcotest.(check string) "metrics source retained" "keeper_context_status"
         Yojson.Safe.Util.(keeper |> member "context_source" |> to_string);
-      Alcotest.(check (option (float 0.000001)))
-        "usage fallback does not infer provider context" None usage_ratio;
       Alcotest.(check bool) "metrics tokens differ from usage fallback" true
         (snapshot_tokens <> updated_meta.runtime.usage.last_input_tokens);
       Alcotest.(check bool) "nested context payload omitted" true
@@ -379,7 +453,7 @@ let write_raw_metrics_row config keeper_name row =
   path
 ;;
 
-let test_context_snapshot_missing_metrics_uses_observed_metadata () =
+let test_context_snapshot_missing_metrics_is_typed_unavailable () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   let base_dir = temp_dir () in
@@ -388,7 +462,9 @@ let test_context_snapshot_missing_metrics_uses_observed_metadata () =
     (fun () ->
        init_context_test_runtime ();
        let config = Workspace.default_config base_dir in
-       let meta = context_test_meta ~name:"metrics-missing" ~last_input_tokens:731 in
+       let meta =
+         context_test_meta ~name:"metrics-missing" ~last_input_tokens:790_360
+       in
        (match
           Operator_control_context_snapshot.latest_keeper_context_snapshot_from_files
             config
@@ -400,12 +476,26 @@ let test_context_snapshot_missing_metrics_uses_observed_metadata () =
        let snapshot =
          Operator_control_context_snapshot.keeper_context_snapshot_of_meta config meta
        in
-       Alcotest.(check (option int)) "metadata token observation" (Some 731)
+       Alcotest.(check (option (float 0.0001))) "no context ratio" None
+         snapshot.context_ratio;
+       Alcotest.(check (option int)) "no context token fallback" None
          snapshot.context_tokens;
-       Alcotest.(check (option string)) "explicit metadata source"
-         (Some "fallback_metadata") snapshot.context_source;
-       Alcotest.(check bool) "no metrics failure" true
-         (snapshot.context_metrics_unavailable = None))
+       Alcotest.(check (option int)) "no context max fallback" None
+         snapshot.context_max;
+       Alcotest.(check (option string)) "no fabricated source" None
+         snapshot.context_source;
+       let json =
+         `Assoc
+           (Operator_control_context_snapshot.keeper_context_snapshot_fields snapshot)
+       in
+       let unavailable =
+         Yojson.Safe.Util.member "context_metrics_unavailable" json
+       in
+       Alcotest.(check string) "typed missing observation" "not_observed"
+         Yojson.Safe.Util.(unavailable |> member "kind" |> to_string);
+       Alcotest.(check string)
+         "exact missing reason" "context_measurement_missing"
+         Yojson.Safe.Util.(unavailable |> member "reason" |> to_string))
 ;;
 
 let test_context_snapshot_malformed_metrics_is_unavailable () =
@@ -1397,9 +1487,21 @@ let () =
         ] );
       ( "context metrics ledger"
       , [ Alcotest.test_case
-            "missing ledger uses observed metadata"
+            "last-turn usage does not create context"
             `Quick
-            test_context_snapshot_missing_metrics_uses_observed_metadata
+            test_usage_does_not_create_context_snapshot
+        ; Alcotest.test_case
+            "missing ledger is typed unavailable"
+            `Quick
+            test_context_snapshot_missing_metrics_is_typed_unavailable
+        ; Alcotest.test_case
+            "complete measurement is trusted"
+            `Quick
+            test_complete_context_measurement_is_trusted
+        ; Alcotest.test_case
+            "partial measurement is not trusted"
+            `Quick
+            test_partial_context_measurement_is_not_trusted
         ; Alcotest.test_case
             "malformed row is typed unavailable"
             `Quick

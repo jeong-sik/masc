@@ -1,6 +1,6 @@
 # System Event and Snapshot Inventory
 
-Validated against the current code on 2026-04-16.
+Validated against the current code on 2026-07-30.
 
 This document is the operator-facing SSOT for:
 
@@ -23,19 +23,63 @@ This document is the operator-facing SSOT for:
 - `keeper_composite_changed` is signal-only. Consumers re-fetch `/api/v1/keepers/:name/composite`.
 - `operator_snapshot` and `operator_digest` are cached server-push surfaces. Default HTTP reads usually return the cache.
 - OAS bridge events are replayable because `oas_event_bridge` persists them under `.masc/oas-events/`.
+- Keeper context occupancy and last-turn provider usage are separate observations.
+  Operator/execution snapshots expose context numbers only from a complete
+  `keeper_context_status` metrics row. Missing measurement is typed
+  `not_observed`; it is never synthesized from `last_input_tokens`.
 
 ## Timing and Trigger Semantics
 
 | Surface / event | When it happens | Payload model | Notes |
 | --- | --- | --- | --- |
 | `keeper_composite_changed` | After every successful `Keeper_registry.dispatch_event*` application, including no-phase-change updates | Signal-only: `{name, ts_unix}` | Consumers must re-fetch the full composite payload. |
-| `keeper_heartbeat` | When a heartbeat snapshot is actually written | Lightweight SSE envelope | Not emitted on every keepalive cycle. |
-| `oas:masc:keeper:snapshot` | Same moment as `keeper_heartbeat` | OAS Event_bus custom event relayed to SSE | Durable via `.masc/oas-events/`. |
+| `keeper_heartbeat` | When a heartbeat snapshot is actually written | Lightweight SSE envelope without context numbers | Not emitted on every keepalive cycle. |
+| `oas:masc:keeper:snapshot` | Only if `publish_keeper_snapshot` is called | OAS Event_bus custom event relayed to SSE | The publisher API exists, but the current heartbeat write path does not call it. |
 | `operator_snapshot` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Default root/summary HTTP path returns cache. |
 | `operator_digest` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Default root HTTP path returns cache; non-default requests recompute. |
 | `execution_snapshot` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Used by execution dashboard surfaces. |
 | `transport_health_snapshot` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Used for transport diagnostics. |
 | `namespace_truth_snapshot` | After namespace-truth recomposition from cached surfaces | Cached payload wrapped as `{type, payload, ts_unix}` | Namespace truth dashboard snapshot. |
+
+## Keeper Context Observation Contract
+
+The operator and execution projections use this precedence:
+
+1. newest complete metrics row with
+   `snapshot_source="keeper_context_status"` plus valid
+   `context_ratio`, `context_tokens`, and `context_max`
+2. otherwise no numeric context observation
+
+When step 2 applies, the row carries:
+
+```json
+{
+  "context_ratio": null,
+  "context_tokens": null,
+  "context_max": null,
+  "context_source": null,
+  "context_metrics_unavailable": {
+    "kind": "not_observed",
+    "reason": "context_measurement_missing"
+  },
+  "last_turn_usage": {
+    "input_tokens": 790360,
+    "output_tokens": 17,
+    "total_tokens": 790377,
+    "observed_at": "2026-07-30T00:00:00Z",
+    "source": "keeper_runtime_usage"
+  }
+}
+```
+
+`last_turn_usage` may be present while context is unobserved. Its input token
+count is not a context-window numerator. The current heartbeat producer writes
+`snapshot_source="keeper_context_status"` and message metadata but does not
+write the complete context-number tuple, so it does not satisfy step 1.
+
+Direct `keeper_heartbeat` and `oas:masc:keeper:snapshot` messages are transport
+events with their own payload contracts. They do not override the operator
+projection's source and completeness gate.
 
 ## `keeper_composite_changed`
 
@@ -97,10 +141,11 @@ By contrast, the nearby `dispatch_keeper_phase_event` calls in the overflow-retr
 - Snapshot write is gated by `now_ts - last_snapshot_ts >= snapshot_interval_sec`.
 - Busy/idle/activity/observer state never skips a cycle. Snapshot distance can
   still exceed the interval while the preceding cycle itself is running.
-- When a snapshot is written, three things happen together:
+- When a snapshot is written, two things happen together:
   - JSONL metrics append
   - `keeper_heartbeat` SSE broadcast
-  - `masc:keeper:snapshot` OAS custom event publish, later relayed as `oas:masc:keeper:snapshot`
+- `publish_keeper_snapshot` still defines an OAS custom-event producer, but no
+  current live call site connects it to heartbeat persistence.
 
 ### Practical consequence
 
@@ -190,7 +235,7 @@ These originate in `lib/oas_events.ml` and are later relayed by `oas_event_bridg
 | `masc:board_post` | board post created |
 | `masc:task_transition` | task state transition |
 | `masc:heartbeat_recovered` | agent recovered from timeout |
-| `masc:keeper:snapshot` | keeper heartbeat snapshot |
+| `masc:keeper:snapshot` | dormant keeper snapshot publisher API; no current heartbeat call site |
 | `masc:keeper:lifecycle` | keeper lifecycle update |
 | `masc:institution_episode` | institution episode recorded |
 | `masc:harness:verdict_recorded` | harness verdict persisted |
@@ -230,7 +275,6 @@ Meaning:
   "type": "keeper_heartbeat",
   "name": "keeper-a",
   "generation": 3,
-  "context_ratio": 0.42,
   "ts_unix": 1710000000.123
 }
 ```
@@ -242,7 +286,8 @@ Meaning:
 
 ### 3. OAS custom event publish: `masc:keeper:snapshot`
 
-This is the payload published to the shared Event_bus before the SSE bridge wraps it.
+This is the payload schema of the dormant `publish_keeper_snapshot` API. It is
+not evidence that the current heartbeat path emits the event.
 
 ```json
 {
@@ -255,6 +300,9 @@ This is the payload published to the shared Event_bus before the SSE bridge wrap
 ```
 
 ### 4. OAS-relayed SSE: `oas:masc:keeper:snapshot`
+
+This is the bridge shape if the dormant publisher is invoked. It is not a
+currently wired heartbeat surface.
 
 ```json
 {

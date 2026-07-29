@@ -1,25 +1,7 @@
 (** Keeper context snapshot helpers for operator control snapshots. *)
 
-(* Context budget resolution is intentionally unimplemented: the provider-side
-   max-context number is not threaded through the keeper meta yet. Both
-   [compute_context_ratio] and [context_max] therefore return [None] for all
-   keepers — observed-and-tested behavior (see
-   [test_compute_context_ratio_does_not_infer_provider_budget]). If a future
-   RFC threads the budget through, these call sites become real computations
-   again. *)
-
-let compute_context_ratio (meta : Keeper_meta_contract.keeper_meta) : float option =
-  let resolution = Keeper_context_runtime.resolve_max_context_resolution_of_meta meta in
-  let max_tokens = resolution.effective_budget in
-  let last_tokens = meta.runtime.usage.last_input_tokens in
-  if max_tokens > 0 && last_tokens > 0 then
-    let ratio = float_of_int last_tokens /. float_of_int max_tokens in
-    Some (Float.max 0.0 (Float.min 1.0 ratio))
-  else
-    None
-;;
-
-type context_metrics_read_error =
+type context_metrics_unavailable_reason =
+  | Context_measurement_missing
   | Storage_read_failed of Dated_jsonl.read_error
   | Malformed_metrics_row of
       { path : string
@@ -32,7 +14,7 @@ type keeper_context_snapshot =
   ; context_tokens : int option
   ; context_max : int option
   ; context_source : string option
-  ; context_metrics_unavailable : context_metrics_read_error option
+  ; context_metrics_unavailable : context_metrics_unavailable_reason option
   }
 
 let keeper_context_snapshot_is_empty (snapshot : keeper_context_snapshot) =
@@ -44,22 +26,26 @@ let keeper_context_snapshot_is_empty (snapshot : keeper_context_snapshot) =
 ;;
 
 let keeper_context_snapshot_from_metrics_json (json : Yojson.Safe.t) =
-  let snapshot =
-    { context_ratio = Safe_ops.json_float_opt "context_ratio" json
-    ; context_tokens = Safe_ops.json_int_opt "context_tokens" json
-    ; context_max = Safe_ops.json_int_opt "context_max" json
-    ; context_source =
-        (match Safe_ops.json_string_opt "snapshot_source" json with
-         | Some source when String.trim source <> "" -> Some source
-         | _ ->
-           (match Safe_ops.json_string_opt "channel" json with
-            | Some channel when String.trim channel <> "" ->
-              Some ("metrics_" ^ String.trim channel)
-            | Some _ | None -> Some "metrics_log"))
-    ; context_metrics_unavailable = None
-    }
-  in
-  if keeper_context_snapshot_is_empty snapshot then None else Some snapshot
+  match
+    ( Safe_ops.json_string_opt "snapshot_source" json
+    , Safe_ops.json_float_opt "context_ratio" json
+    , Safe_ops.json_int_opt "context_tokens" json
+    , Safe_ops.json_int_opt "context_max" json )
+  with
+  | Some "keeper_context_status", Some ratio, Some tokens, Some max_tokens
+    when Float.is_finite ratio
+         && ratio >= 0.0
+         && ratio <= 1.0
+         && tokens >= 0
+         && max_tokens > 0 ->
+    Some
+      { context_ratio = Some ratio
+      ; context_tokens = Some tokens
+      ; context_max = Some max_tokens
+      ; context_source = Some "keeper_context_status"
+      ; context_metrics_unavailable = None
+      }
+  | _ -> None
 ;;
 
 let latest_keeper_context_snapshot_from_files config keeper_name =
@@ -82,36 +68,24 @@ let latest_keeper_context_snapshot_from_files config keeper_name =
       Error (Malformed_metrics_row { path; line_number; detail })
   in
   let* snapshots = snapshots_newest_first [] entries in
-  match
-    List.find_opt
-      (fun snapshot -> snapshot.context_source = Some "keeper_context_status")
-      snapshots
-  with
-  | Some snapshot -> Ok (Some snapshot)
-  | None ->
-    (match snapshots with
-     | snapshot :: _ -> Ok (Some snapshot)
-     | [] -> Ok None)
+  match snapshots with
+  | snapshot :: _ -> Ok (Some snapshot)
+  | [] -> Ok None
 ;;
 
-let fallback_keeper_context_snapshot (meta : Keeper_meta_contract.keeper_meta) =
-  let resolution = Keeper_context_runtime.resolve_max_context_resolution_of_meta meta in
-  let max_tokens = resolution.effective_budget in
-  { context_ratio = compute_context_ratio meta
-  ; context_tokens =
-      (match meta.runtime.usage.last_input_tokens with
-       | n when n > 0 -> Some n
-       | _ -> None)
-  ; context_max = if max_tokens > 0 then Some max_tokens else None
-  ; context_source = Some "fallback_metadata"
-  ; context_metrics_unavailable = None
+let missing_keeper_context_snapshot () =
+  { context_ratio = None
+  ; context_tokens = None
+  ; context_max = None
+  ; context_source = None
+  ; context_metrics_unavailable = Some Context_measurement_missing
   }
 ;;
 
 let keeper_context_snapshot_of_meta config (meta : Keeper_meta_contract.keeper_meta) =
   match latest_keeper_context_snapshot_from_files config meta.name with
   | Ok (Some snapshot) -> snapshot
-  | Ok None -> fallback_keeper_context_snapshot meta
+  | Ok None -> missing_keeper_context_snapshot ()
   | Error error ->
     { context_ratio = None
     ; context_tokens = None
@@ -142,6 +116,11 @@ let dated_jsonl_read_error_path = function
 
 let context_metrics_unavailable_json = function
   | None -> `Null
+  | Some Context_measurement_missing ->
+    `Assoc
+      [ "kind", `String "not_observed"
+      ; "reason", `String "context_measurement_missing"
+      ]
   | Some (Storage_read_failed error) ->
     `Assoc
       [ "kind", `String "storage_read_failed"
@@ -197,4 +176,42 @@ let keeper_context_snapshot_fields (snapshot : keeper_context_snapshot) =
     , context_metrics_unavailable_json snapshot.context_metrics_unavailable )
   ; ( "context", `Assoc assoc_fields )
   ]
+;;
+
+type keeper_last_turn_usage =
+  { input_tokens : int
+  ; output_tokens : int
+  ; total_tokens : int
+  ; observed_at : string option
+  }
+
+let keeper_last_turn_usage_of_meta (meta : Keeper_meta_contract.keeper_meta) =
+  let usage = meta.runtime.usage in
+  if usage.last_input_tokens <= 0
+     && usage.last_output_tokens <= 0
+     && usage.last_total_tokens <= 0
+  then
+    None
+  else
+    Some
+      { input_tokens = usage.last_input_tokens
+      ; output_tokens = usage.last_output_tokens
+      ; total_tokens = usage.last_total_tokens
+      ; observed_at =
+          (if usage.last_turn_ts > 0.0
+           then Some (Masc_domain.iso8601_of_unix_seconds usage.last_turn_ts)
+           else None)
+      }
+;;
+
+let keeper_last_turn_usage_to_json = function
+  | None -> `Null
+  | Some usage ->
+    `Assoc
+      [ "input_tokens", `Int usage.input_tokens
+      ; "output_tokens", `Int usage.output_tokens
+      ; "total_tokens", `Int usage.total_tokens
+      ; "observed_at", Json_util.string_opt_to_json usage.observed_at
+      ; "source", `String "keeper_runtime_usage"
+      ]
 ;;

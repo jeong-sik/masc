@@ -1,4 +1,12 @@
-import type { KeeperDiagnostic, KeeperTrustSummary, Message, MissionSignalTruth, MissionEvidenceSource } from './core'
+import type {
+  KeeperContextMetricsUnavailable,
+  KeeperDiagnostic,
+  KeeperLastTurnUsage,
+  KeeperTrustSummary,
+  Message,
+  MissionSignalTruth,
+  MissionEvidenceSource,
+} from './core'
 import type { PendingConfirmEnvelope, PendingConfirmation, PendingConfirmSummary, OperatorActionDescriptor } from './gate'
 
 export interface DashboardMissionSummary {
@@ -362,25 +370,7 @@ export const OPERATOR_CONTEXT_METRICS_STORAGE_READ_FAILURE_REASONS = [
 export type OperatorContextMetricsStorageReadFailureReason =
   typeof OPERATOR_CONTEXT_METRICS_STORAGE_READ_FAILURE_REASONS[number]
 
-export type OperatorContextMetricsUnavailable =
-  | {
-      kind: 'storage_read_failed'
-      reason: OperatorContextMetricsStorageReadFailureReason
-      path: string | null
-      detail: string
-    }
-  | {
-      kind: 'malformed_json'
-      reason: 'malformed_metrics_row'
-      path: string
-      line_number: number | null
-      detail: string
-    }
-  | {
-      kind: 'invalid_payload'
-      reported_kind: string | null
-      reported_reason: string | null
-    }
+export type OperatorContextMetricsUnavailable = KeeperContextMetricsUnavailable
 
 export interface OperatorKeeperSnapshot {
   name: string
@@ -391,17 +381,18 @@ export interface OperatorKeeperSnapshot {
   registered?: boolean
   agent_name?: string
   status?: string
-  context_ratio?: number
+  context_ratio?: number | null
   generation?: number
   active_goal_ids?: string[]
   last_autonomous_action_at?: string | null
   last_turn_ago_s?: number
   model?: string
   turn_count?: number
-  context_tokens?: number
-  context_max?: number
-  context_source?: string
-  context_metrics_unavailable?: OperatorContextMetricsUnavailable
+  context_tokens?: number | null
+  context_max?: number | null
+  context_source?: string | null
+  context_metrics_unavailable?: OperatorContextMetricsUnavailable | null
+  last_turn_usage?: KeeperLastTurnUsage | null
   keepalive_running?: boolean
   autonomous_action_count?: number
   autonomous_turn_count?: number

@@ -148,7 +148,7 @@ export interface OverviewStats {
   run: number
   att: number
   hot: number
-  avgCtx: number
+  avgCtx: number | null
   tasks: number
   traces: number
   total: number
@@ -175,7 +175,7 @@ export function computeOverviewStats(keeperList: readonly Keeper[], taskList: re
   const liveCtx = keeperList.filter(k => keeperRowLooksRunning(k) && typeof k.context_ratio === 'number')
   const avgCtx = liveCtx.length
     ? Math.round(liveCtx.reduce((sum, k) => sum + (k.context_ratio ?? 0), 0) / liveCtx.length * 100)
-    : 0
+    : null
 
   return { run, att, hot, avgCtx, tasks, traces, total }
 }

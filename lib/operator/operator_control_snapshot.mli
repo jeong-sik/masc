@@ -29,14 +29,15 @@
     the operator snapshot cache implementation in
     {!Operator_control_snapshot_cache}, the keeper-context
     snapshot helpers,
-    [compute_context_ratio],
     [keeper_context_snapshot] type +
     [keeper_context_snapshot_is_empty] /
     [keeper_context_snapshot_from_metrics_json] /
     [latest_keeper_context_snapshot_from_files] /
-    [fallback_keeper_context_snapshot] /
+    [missing_keeper_context_snapshot] /
     [keeper_context_snapshot_of_meta] /
-    [keeper_context_snapshot_fields],
+    [keeper_context_snapshot_fields] /
+    [keeper_last_turn_usage_of_meta] /
+    [keeper_last_turn_usage_to_json],
     [action_result_status] / [confirmation_state] /
     [action_log_entry] types and their stringifiers,
     [action_log_path],
@@ -130,16 +131,6 @@ val align_keeper_runtime_status :
     unchanged when keepalive is off or the live signal
     does not promote.  Specifically lifts [inactive] /
     [offline] surface labels to the live runtime status. *)
-
-(** {1 Context ratio} *)
-
-val compute_context_ratio :
-  Keeper_meta_contract.keeper_meta -> float option
-(** Returns [used_tokens / context_budget] when the
-    keeper meta has a resolved context budget, [None]
-    otherwise.  Pinned because
-    [test/test_operator_control_snapshot.ml] exercises
-    the ratio calculation across budget edge cases. *)
 
 (** {1 Runtime-include consumer re-exports} *)
 

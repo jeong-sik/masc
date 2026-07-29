@@ -145,7 +145,7 @@ export const focusAgents: ReadonlySignal<FocusAgent[]> = computed(() => {
 
 export interface KeeperPressure {
   name: string
-  ratio: number
+  ratio: number | null
   stage: PipelineStage
 }
 
@@ -168,14 +168,18 @@ export const keeperHealthSummary: ReadonlySignal<KeeperHealthSummary> = computed
 
   const thresholds = contextThresholds.value
   const pressures: KeeperPressure[] = active.map(k => {
-    const ratio = k.context_ratio ?? 0
-    if (ratio > thresholds.critical) criticalCount++
-    else if (ratio > thresholds.warn || stale.has(k.name)) warningCount++
+    const ratio = k.context_ratio ?? null
+    if (ratio != null && ratio > thresholds.critical) criticalCount++
+    else if ((ratio != null && ratio > thresholds.warn) || stale.has(k.name)) warningCount++
     // No `as PipelineStage` cast: `k.pipeline_stage` is `PipelineStage | undefined`
     // post-normalize (toPipelineStage at keeper-store-normalize.ts), so the
     // `?? 'unknown'` (PipelineStage member) is already correctly typed.
     return { name: k.name, ratio, stage: k.pipeline_stage ?? 'unknown' }
-  }).sort((a, b) => b.ratio - a.ratio)
+  }).sort((a, b) => {
+    if (a.ratio == null) return b.ratio == null ? 0 : 1
+    if (b.ratio == null) return -1
+    return b.ratio - a.ratio
+  })
 
   return {
     activeCount: active.length,

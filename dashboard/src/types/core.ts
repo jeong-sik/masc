@@ -1132,6 +1132,43 @@ export interface KeeperProfileConfigError {
   next_action: 'fix_keeper_toml_config'
 }
 
+export interface KeeperLastTurnUsage {
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  observed_at: string | null
+  source: 'keeper_runtime_usage'
+}
+
+export type KeeperContextMetricsUnavailable =
+  | {
+      kind: 'not_observed'
+      reason: 'context_measurement_missing'
+    }
+  | {
+      kind: 'storage_read_failed'
+      reason:
+        | 'invalid_offset'
+        | 'not_a_directory'
+        | 'invalid_layout_entry'
+        | 'non_regular_file'
+        | 'io_error'
+      path: string | null
+      detail: string
+    }
+  | {
+      kind: 'malformed_json'
+      reason: 'malformed_metrics_row'
+      path: string
+      line_number: number | null
+      detail: string
+    }
+  | {
+      kind: 'invalid_payload'
+      reported_kind: string | null
+      reported_reason: string | null
+    }
+
 export interface Keeper {
   name: string
   keeper_id?: string | null
@@ -1221,15 +1258,17 @@ export interface Keeper {
   last_activity_source?: KeeperLiveActivitySource | null
   live_activity?: KeeperLiveActivity | null
   current_gate?: KeeperCurrentGate | null
-  context_ratio?: number
-  context_tokens?: number
-  context_max?: number
-  context_source?: string
+  context_ratio?: number | null
+  context_tokens?: number | null
+  context_max?: number | null
+  context_source?: string | null
+  context_metrics_unavailable?: KeeperContextMetricsUnavailable | null
+  last_turn_usage?: KeeperLastTurnUsage | null
   context?: {
-    source?: string
-    context_ratio?: number
-    context_tokens?: number
-    context_max?: number
+    source?: string | null
+    context_ratio?: number | null
+    context_tokens?: number | null
+    context_max?: number | null
     message_count?: number
     has_checkpoint?: boolean
   }

@@ -288,6 +288,48 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.keepers[0]!.context_source).toBe('keeper_context_status')
   })
 
+  it('preserves unknown context and separately typed last-turn usage', () => {
+    const result = normalizeOperatorSnapshot({
+      keepers: [
+        {
+          name: 'rondo',
+          context_ratio: null,
+          context_tokens: null,
+          context_max: null,
+          context_source: null,
+          context_metrics_unavailable: {
+            kind: 'not_observed',
+            reason: 'context_measurement_missing',
+          },
+          last_turn_usage: {
+            input_tokens: 790360,
+            output_tokens: 17,
+            total_tokens: 790377,
+            observed_at: '2026-07-29T14:15:00Z',
+            source: 'keeper_runtime_usage',
+          },
+        },
+      ],
+    })
+
+    expect(result.keepers[0]).toMatchObject({
+      context_ratio: null,
+      context_tokens: null,
+      context_max: null,
+      context_source: null,
+      context_metrics_unavailable: {
+        kind: 'not_observed',
+        reason: 'context_measurement_missing',
+      },
+      last_turn_usage: {
+        input_tokens: 790360,
+        output_tokens: 17,
+        total_tokens: 790377,
+        source: 'keeper_runtime_usage',
+      },
+    })
+  })
+
   it('preserves typed keeper context metrics storage failures', () => {
     const result = normalizeOperatorSnapshot({
       keepers: [

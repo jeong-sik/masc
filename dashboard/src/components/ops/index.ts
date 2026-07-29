@@ -60,11 +60,11 @@ export function contextMetricsDiagnostics(snapshot: OperatorSnapshot | null): Co
   if (!snapshot) return []
   const keepers = snapshot.keepers
     .filter((keeper): keeper is OperatorKeeperSnapshot & { context_metrics_unavailable: OperatorContextMetricsUnavailable } =>
-      keeper.context_metrics_unavailable !== undefined)
+      keeper.context_metrics_unavailable != null)
     .map(keeper => ({ keeper, source: 'keeper' as const, error: keeper.context_metrics_unavailable }))
   const persistentAgents = (snapshot.persistent_agents ?? [])
     .filter((keeper): keeper is OperatorKeeperSnapshot & { context_metrics_unavailable: OperatorContextMetricsUnavailable } =>
-      keeper.context_metrics_unavailable !== undefined)
+      keeper.context_metrics_unavailable != null)
     .map(keeper => ({ keeper, source: 'persistent_agent' as const, error: keeper.context_metrics_unavailable }))
   const byName = new Map<string, ContextMetricsDiagnostic>()
   for (const diagnostic of [...keepers, ...persistentAgents]) {
@@ -79,6 +79,18 @@ export function contextMetricsDiagnostics(snapshot: OperatorSnapshot | null): Co
 function renderContextMetricsDiagnostic(diagnostic: ContextMetricsDiagnostic) {
   const { keeper, source, error } = diagnostic
   const sourceLabel = source === 'keeper' ? 'Keeper' : 'Persistent agent'
+  if (error.kind === 'not_observed') {
+    return html`
+      <li
+        class="grid gap-1 text-sm text-[var(--color-fg-primary)]"
+        data-testid="ops-context-metrics-diagnostic"
+        data-error-kind=${error.kind}
+      >
+        <strong>${sourceLabel} ${keeper.name}</strong>
+        <span>context measurement not observed</span>
+      </li>
+    `
+  }
   if (error.kind === 'invalid_payload') {
     return html`
       <li

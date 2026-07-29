@@ -181,6 +181,34 @@ describe('CopilotDock', () => {
     ])
   })
 
+  it('labels missing context as unobserved instead of fabricating zero percent', () => {
+    keepers.value = [
+      {
+        name: 'rondo',
+        keeper_id: 'rondo',
+        status: 'running',
+        phase: 'Running',
+        runtime_id: 'fleet',
+        context_ratio: null,
+      },
+    ] as unknown as typeof keepers.value
+    route.value = { tab: 'keepers', params: {}, postId: null }
+
+    const selected = getSurfaceContext('rondo')
+    const fleet = getSurfaceContext()
+
+    expect(selected.fields.find(field => field.k === 'ctx')).toEqual({
+      k: 'ctx',
+      v: '미관측',
+      tone: undefined,
+    })
+    expect(fleet.fields.find(field => field.k === 'ctx')).toEqual({
+      k: 'ctx',
+      v: '미관측',
+      tone: undefined,
+    })
+  })
+
   it('keeps backed fleet context as the Keepers fallback when no keeper is selected', () => {
     keepers.value = [
       { name: 'masc-improver', keeper_id: 'masc-improver', koreanName: 'MASC Improver', status: 'running', phase: 'Running', runtime_id: 'fleet', needs_attention: true, total_turns: 12, context_ratio: 0.8 },

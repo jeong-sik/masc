@@ -39,6 +39,21 @@
   gRPC root gates now recognize only the current `.masc/root-state.json`
   marker already written by init/bootstrap. No migration or repair path was
   added.
+- **Breaking (Memory OS retention)**: removed the periodic full-store LLM
+  consolidation fiber, its runtime route, env toggle, prompt/schema, dashboard
+  projection, and tests. The bounded Librarian still upserts producer-declared
+  facts; GC deletes only rows past an explicit `valid_until`. There is currently
+  no semantic supersession/tombstone path, so an unexpired row is retained and
+  no score, clock, or model sweep may silently retire it.
+  - Migration order is strict: before deploying this build, remove
+    `memory_os_consolidation = ...` from the live
+    `<base-path>/.masc/config/runtime.toml`. Confirm the key is absent with
+    `rg -n '^[[:space:]]*memory_os_consolidation[[:space:]]*=' <runtime.toml>`;
+    any match blocks deployment.
+  - After deploying, restart normally and require
+  `curl -fsS 'http://127.0.0.1:8935/health?full=1'` to succeed. The new parser
+  rejects the retired key as unknown; no compatibility parser or automatic
+  migration is retained.
 - **Breaking (keeper chat wire)**: removed read-time message-id synthesis for
   rows without a persisted `id` and removed the duplicate persisted `source`
   lane label. Current chat rows require a nonblank producer-assigned `id` and

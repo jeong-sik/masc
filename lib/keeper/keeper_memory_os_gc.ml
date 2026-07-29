@@ -58,8 +58,8 @@ let expired_category_counts expired =
 ;;
 
 (* GC performs one authorized deletion only: an explicit [valid_until] in the
-   past. It does not deduplicate or rank rows; semantic forgetting belongs to the
-   configured Memory/LLM consolidation plan. *)
+   past. It does not deduplicate, rank, supersede, or otherwise decide semantic
+   forgetting. A row without producer-declared expiry is retained. *)
 let run_gc_with_store
       ~facts_path
       ~read_facts_all_strict

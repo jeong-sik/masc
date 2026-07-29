@@ -2589,6 +2589,23 @@ let test_structured_judge_runtime_key_is_rejected () =
             && String_util.contains_substring error.message "unknown [runtime] key")
          errors)
 
+let test_memory_os_consolidation_runtime_key_is_rejected () =
+  match
+    Runtime_toml.parse_string
+      "[runtime]\n\
+       default = \"local.chat\"\n\
+       memory_os_consolidation = \"local.memory\"\n"
+  with
+  | Ok _ ->
+    fail "[runtime].memory_os_consolidation must be rejected as an unknown key"
+  | Error errors ->
+    check bool "retired memory route is named in the parse error" true
+      (List.exists
+         (fun (error : Runtime_toml.parse_error) ->
+            String.equal error.path "runtime.memory_os_consolidation"
+            && String_util.contains_substring error.message "unknown [runtime] key")
+         errors)
+
 (* The live cross_verifier route accepts a [runtime.lanes] id, following
    [resolve_assignment]'s lane-over-runtime precedence. *)
 let judge_lane_base =
@@ -3164,6 +3181,10 @@ let () =
           test_case
             "retired [runtime].structured_judge key is rejected"
             `Quick test_structured_judge_runtime_key_is_rejected;
+          test_case
+            "retired [runtime].memory_os_consolidation key is rejected"
+            `Quick
+            test_memory_os_consolidation_runtime_key_is_rejected;
           test_case
             "[runtime].cross_verifier accepts JSON-capable lanes"
             `Quick test_cross_verifier_lane_target;

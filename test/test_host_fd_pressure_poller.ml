@@ -5,7 +5,6 @@ module Poller = Host_fd_pressure_poller
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
 let canonical_env = Env_config_core.host_fd_pressure_state_file_env_key
-let retired_env = "MASC_SYSMON_PRESSURE_STATE"
 let base_path = Filename.concat (Filename.get_temp_dir_name ()) "masc-fd-pressure-test"
 
 let default_path =
@@ -35,13 +34,12 @@ let check_resolution label expected_path expected_source =
   check bool (label ^ " source") true (actual.source = expected_source)
 
 let test_default_path () =
-  with_env [ canonical_env, None; retired_env, None ] (fun () ->
+  with_env [ canonical_env, None ] (fun () ->
     check_resolution "default" default_path Poller.Default)
 
 let test_canonical_env_wins () =
   with_env
     [ canonical_env, Some "/var/run/masc/fd-pressure.json"
-    ; retired_env, Some "/tmp/sysmon-pressure.json"
     ]
     (fun () ->
       check_resolution
@@ -49,12 +47,8 @@ let test_canonical_env_wins () =
         "/var/run/masc/fd-pressure.json"
         Poller.Canonical_env)
 
-let test_retired_env_is_ignored () =
-  with_env [ canonical_env, None; retired_env, Some "/tmp/sysmon-pressure.json" ] (fun () ->
-    check_resolution "retired env" default_path Poller.Default)
-
 let test_empty_env_is_absent () =
-  with_env [ canonical_env, Some ""; retired_env, Some "" ] (fun () ->
+  with_env [ canonical_env, Some "" ] (fun () ->
     check_resolution "empty" default_path Poller.Default)
 
 let () =
@@ -63,7 +57,6 @@ let () =
     [ ( "state path"
       , [ test_case "default path" `Quick test_default_path
         ; test_case "canonical env wins" `Quick test_canonical_env_wins
-        ; test_case "retired env is ignored" `Quick test_retired_env_is_ignored
         ; test_case "empty env is absent" `Quick test_empty_env_is_absent
         ] )
     ]

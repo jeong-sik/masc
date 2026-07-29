@@ -36,6 +36,10 @@ type outcome =
       { before : int
       ; current : int
       }
+  | Eligibility_changed of
+      { before : int
+      ; newly_expired : int
+      }
   | Consolidated of
       { before : int
       ; after : int
@@ -102,7 +106,17 @@ let messages_for_consolidation facts =
     else Ok [ user_message user ]
 ;;
 
-let rewrite_if_snapshot_current ?clock ~keeper_id ~facts ~survivors ~before ~after () =
+let rewrite_if_snapshot_current
+      ?clock
+      ~fresh_now
+      ~keeper_id
+      ~facts
+      ~plan_facts
+      ~survivors
+      ~before
+      ~after
+      ()
+  =
   with_facts_lock ?clock ~keeper_id (fun () ->
     match Io.read_facts_all_strict ~keeper_id with
     | Error msg ->
@@ -110,7 +124,13 @@ let rewrite_if_snapshot_current ?clock ~keeper_id ~facts ~survivors ~before ~aft
     | Ok current ->
       if not (Io.same_fact_snapshot facts current)
       then Snapshot_changed { before; current = List.length current }
-      else (
+      else
+        let _, newly_expired =
+          Keeper_memory_os_types.partition_expired ~now:(fresh_now ()) plan_facts
+        in
+        if newly_expired <> []
+        then Eligibility_changed { before; newly_expired = List.length newly_expired }
+        else (
         Io.rewrite_facts_atomically ~keeper_id survivors;
         Consolidated { before; after }))
 ;;
@@ -138,6 +158,7 @@ let consolidate_keeper
       ?complete
       ?clock
       ?(dry_run = false)
+      ?(fresh_now = Time_compat.now)
       ~sw
       ~net
       ~runtime_id
@@ -153,10 +174,21 @@ let consolidate_keeper
     | Error msg -> Unparseable ("consolidation fact store read failed: " ^ msg)
     | Ok facts ->
       let before = List.length facts in
-      if before = 0
+      (* Expiry GC runs on a coarser cadence than this pass, so rows past their
+         producer-declared horizon are routinely still on disk. They are held out
+         of the plan entirely rather than filtered inside the merge: a dead row
+         must neither drag a live member's horizon into the past (the merged row
+         would be born expired, and the next GC tick would delete knowledge GC
+         would otherwise have kept) nor have its own volatility erased by merging
+         into a durable row. Both failures come from mixing the two populations,
+         so they are not mixed. Expiry stays GC's decision — the untouched rows
+         are written back unchanged, and the snapshot CAS still compares the
+         whole store. *)
+      let live, expired = Keeper_memory_os_types.partition_expired ~now facts in
+      if live = []
       then Skipped_too_few before
       else
-        match messages_for_consolidation facts with
+        match messages_for_consolidation live with
         | Error msg -> Unparseable msg
         | Ok messages ->
           (match
@@ -180,62 +212,87 @@ let consolidate_keeper
               | Error detail -> invalid_structured_response_detail detail
               | Ok (`Assoc _ as json) ->
                 let plan = Consolidation.plan_of_json json in
-                let survivors, stats = Consolidation.apply_plan ~now ~facts plan in
-                (* Only the gate mismatches mean the judge and the apply gate
-                   disagreed — with the gate fields rendered into the prompt
-                   that should be rare, so it is loud. The sum deliberately
-                   excludes [rejected_too_few_members]; see
-                   [Consolidation.gate_rejection_count]. *)
-                let gate_rejected_groups =
-                  Consolidation.gate_rejection_count stats
+                (* The maintenance caller captures [now] once before processing
+                   keepers serially. A provider call can therefore outlive a
+                   member's declared horizon. Recheck the exact model input
+                   before interpreting its indices: repartitioning and applying
+                   old indices to a shorter list would target different facts,
+                   while merging an expired member can create an already-expired
+                   row that the next GC removes together with durable knowledge.
+                   A stale temporal plan is retried on the next tick instead of
+                   being remapped. *)
+                let plan_now = fresh_now () in
+                let _, newly_expired =
+                  Keeper_memory_os_types.partition_expired ~now:plan_now live
                 in
-                if gate_rejected_groups > 0
-                then (
-                  Log.Keeper.warn
-                    "memory_os_keeper_consolidation rejected %d group(s) at the merge gate keeper=%s: kind_mismatch=%d valid_until_mismatch=%d (merged=%d dropped=%d too_few_members=%d)"
-                    gate_rejected_groups
-                    keeper_id
-                    stats.rejected_kind_mismatch
-                    stats.rejected_valid_until_mismatch
-                    stats.merged_groups
-                    stats.dropped
-                    stats.rejected_too_few_members;
-                  Otel_metric_store.inc_counter
-                    Keeper_metrics.(to_string MemoryOsConsolidationGroupRejected)
-                    ~labels:[ "keeper", keeper_id ]
-                    ())
-                else if stats.rejected_too_few_members > 0
+                if newly_expired <> []
                 then
-                  Log.Keeper.info
-                    "memory_os_keeper_consolidation skipped %d group(s) below two free members keeper=%s (merged=%d dropped=%d)"
-                    stats.rejected_too_few_members
-                    keeper_id
-                    stats.merged_groups
-                    stats.dropped;
-                let after = List.length survivors in
-                (* [before > 0] is guaranteed by the [Skipped_too_few] guard above,
-                   so [after = 0] here means the plan asked to erase the store. A
-                   plan that keeps nothing is treated as a malformed response, not
-                   as judgement: the store is the keeper's only durable memory and
-                   [rewrite_facts_atomically] renames over the sole copy, so the
-                   rows are unrecoverable. A truncated response that loses its
-                   [groups] array while retaining [drop_indices] produces exactly
-                   this shape. Only total erasure is refused — a large deletion
-                   over a mostly redundant store is a legitimate outcome, so no
-                   ratio or floor is imposed on [after > 0]. *)
-                if after = 0
-                then Plan_rejected_total_deletion { before }
-                else if dry_run
-                then Consolidated { before; after }
-                else
-                  rewrite_if_snapshot_current
-                    ?clock
-                    ~keeper_id
-                    ~facts
-                    ~survivors
-                    ~before
-                    ~after
-                    ()
+                  Eligibility_changed
+                    { before; newly_expired = List.length newly_expired }
+                else (
+                  (* Indices in the plan address [live], the list the judge was
+                     shown. [expired] rejoins afterwards, untouched. *)
+                  let live_survivors, stats =
+                    Consolidation.apply_plan ~now:plan_now ~facts:live plan
+                  in
+                  let survivors = live_survivors @ expired in
+                  (* A kind mismatch means the judge and the apply gate disagreed
+                     on a field the prompt renders, so it is loud. The
+                     valid_until arm is gone: that gate compared write instants
+                     the judge could not control, so it fired on ordinary plans
+                     and buried this signal. Below-two-free-members is expected
+                     on contested-duplicate plans and stays at info. *)
+                  if stats.rejected_kind_mismatch > 0
+                  then (
+                    Log.Keeper.warn
+                      "memory_os_keeper_consolidation rejected %d group(s) at the claim_kind gate keeper=%s (merged=%d dropped=%d too_few_members=%d)"
+                      stats.rejected_kind_mismatch
+                      keeper_id
+                      stats.merged_groups
+                      stats.dropped
+                      stats.rejected_too_few_members;
+                    Otel_metric_store.inc_counter
+                      Keeper_metrics.(to_string MemoryOsConsolidationGroupRejected)
+                      ~labels:[ "keeper", keeper_id ]
+                      ())
+                  else if stats.rejected_too_few_members > 0
+                  then
+                    Log.Keeper.info
+                      "memory_os_keeper_consolidation skipped %d group(s) below two free members keeper=%s (merged=%d dropped=%d)"
+                      stats.rejected_too_few_members
+                      keeper_id
+                      stats.merged_groups
+                      stats.dropped;
+                  let after = List.length survivors in
+                  (* [live] is non-empty by the [Skipped_too_few] guard above. A
+                     plan that retains no live survivor has erased every fact the
+                     judge was allowed to act on. Expired rows rejoined above must
+                     not mask that loss: they are ineligible for recall and the
+                     next GC tick can remove them, leaving no usable memory. A
+                     plan that keeps no live fact is treated as a malformed
+                     response, not as judgement: the store is the keeper's only
+                     durable memory and [rewrite_facts_atomically] renames over
+                     the sole copy, so the rows are unrecoverable. A truncated
+                     response that loses its [groups] array while retaining
+                     [drop_indices] produces exactly this shape. Only total live
+                     erasure is refused — a large deletion over a mostly
+                     redundant store remains legitimate when at least one live
+                     fact survives, so no ratio or numeric floor is imposed. *)
+                  if live_survivors = []
+                  then Plan_rejected_total_deletion { before }
+                  else if dry_run
+                  then Consolidated { before; after }
+                  else
+                    rewrite_if_snapshot_current
+                      ?clock
+                      ~fresh_now
+                      ~keeper_id
+                      ~facts
+                      ~plan_facts:live
+                      ~survivors
+                      ~before
+                      ~after
+                      ())
               | Ok _ -> invalid_structured_response Consolidation.Non_object_json)
           )
 ;;

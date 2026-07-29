@@ -360,6 +360,7 @@ let run_memory_os_consolidation_tick_with_candidates
        | Empty_response, _
        | Invalid_structured_response _, _
        | Snapshot_changed _, _
+       | Eligibility_changed _, _
        | Plan_rejected_total_deletion _, _
        | Consolidated _, _ ->
          Some outcome)
@@ -426,6 +427,12 @@ let run_memory_os_consolidation_tick_with_candidates
           keeper_id
           before
           current
+      | Some (Eligibility_changed { before; newly_expired }) ->
+        Log.Server.info
+          "memory_os_keeper_consolidation: keeper=%s eligibility_changed before=%d newly_expired=%d"
+          keeper_id
+          before
+          newly_expired
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->

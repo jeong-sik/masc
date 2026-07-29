@@ -26,14 +26,14 @@ let contains substring s =
   if sub_len = 0 then true else aux 0
 ;;
 
-let fact claim =
+let fact ?valid_until claim =
   { Types.claim
   ; category = Types.Fact
   ; claim_kind = None
   ; source = { Types.trace_id = "t"; turn = 1; tool_call_id = None }
   ; observed_by = []
   ; first_seen = now
-  ; valid_until = None
+  ; valid_until
   ; last_verified_at = Some now
   ; schema_version = Types.schema_version
   ; claim_id = None
@@ -189,6 +189,101 @@ let test_consolidate_rejects_total_deletion () =
           "store untouched"
           [ "build runs on dune 3.x"; "deploy uses blue-green"; "tests live under test/" ]
           claims))))
+;;
+
+(* Expired rows are excluded from the model input and cannot make deletion of
+   every live row safe. Otherwise the rewrite would leave only recall-ineligible
+   rows, and the next GC tick would empty the store. *)
+let test_consolidate_rejects_total_live_deletion_with_expired_rows () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      with_prompts (fun () ->
+      with_temp_keepers (fun () ->
+        let keeper_id = "keeper-live-delete" in
+        List.iter
+          (Io.append_fact ~keeper_id)
+          [ fact "live deployment fact"
+          ; fact "live build fact"
+          ; fact ~valid_until:(now -. 1.0) "expired fact"
+          ];
+        let plan = {|{"groups":[],"drop_indices":[0,1]}|} in
+        let outcome =
+          Runtime.consolidate_keeper
+            ~complete:(fake_complete plan)
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~runtime_id:unconfigured_runtime_id
+            ~provider_cfg:(provider_cfg ())
+            ~now
+            ~keeper_id
+            ()
+        in
+        (match outcome with
+         | Runtime.Plan_rejected_total_deletion { before } ->
+           Alcotest.(check int) "whole snapshot count" 3 before
+         | _ ->
+           Alcotest.fail
+             "expired rows must not mask deletion of every live fact");
+        Alcotest.(check (list string))
+          "store remains untouched"
+          [ "expired fact"; "live build fact"; "live deployment fact" ]
+          (Io.read_facts_all ~keeper_id
+           |> List.map (fun f -> f.Types.claim)
+           |> List.sort String.compare)))))
+;;
+
+(* A fact can cross its producer-declared horizon while the provider is
+   judging. The plan indices still address the old live list, so the runtime
+   must discard that temporal snapshot instead of merging the expired member
+   with durable knowledge and writing an already-expired result. *)
+let test_consolidate_rejects_fact_expired_during_provider_call () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      with_prompts (fun () ->
+      with_temp_keepers (fun () ->
+        let keeper_id = "keeper-expired-during-call" in
+        List.iter
+          (Io.append_fact ~keeper_id)
+          [ fact ~valid_until:(now +. 1.0) "temporary deployment observation"
+          ; fact "durable deployment knowledge"
+          ];
+        let current_now = ref now in
+        let plan =
+          {|{"groups":[{"member_indices":[0,1],"consolidated_claim":"deployment knowledge","category":"fact"}],"drop_indices":[]}|}
+        in
+        let complete : Runtime.complete_fn =
+          fun ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () ->
+            current_now := now +. 2.0;
+            Ok (fake_response plan)
+        in
+        let outcome =
+          Runtime.consolidate_keeper
+            ~complete
+            ~fresh_now:(fun () -> !current_now)
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~runtime_id:unconfigured_runtime_id
+            ~provider_cfg:(provider_cfg ())
+            ~now
+            ~keeper_id
+            ()
+        in
+        (match outcome with
+         | Runtime.Eligibility_changed { before; newly_expired } ->
+           Alcotest.(check int) "whole snapshot count" 2 before;
+           Alcotest.(check int) "one member expired during provider call" 1
+             newly_expired
+         | _ ->
+           Alcotest.fail
+             "plan must be rejected when a member expires during provider call");
+        Alcotest.(check (list string))
+          "store remains untouched"
+          [ "durable deployment knowledge"; "temporary deployment observation" ]
+          (Io.read_facts_all ~keeper_id
+           |> List.map (fun f -> f.Types.claim)
+           |> List.sort String.compare)))))
 ;;
 
 (* Counterpart to the guard: dropping all but one row is a legitimate outcome for
@@ -689,6 +784,14 @@ let () =
             "rejects a plan that deletes every fact"
             `Quick
             test_consolidate_rejects_total_deletion
+        ; Alcotest.test_case
+            "expired rows do not mask total live deletion"
+            `Quick
+            test_consolidate_rejects_total_live_deletion_with_expired_rows
+        ; Alcotest.test_case
+            "rejects a plan whose member expires during provider call"
+            `Quick
+            test_consolidate_rejects_fact_expired_during_provider_call
         ; Alcotest.test_case
             "applies a large but partial deletion"
             `Quick

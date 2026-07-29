@@ -377,25 +377,75 @@ let test_large_replay_result_reaches_model_exactly () =
         | Ok None -> Alcotest.fail "replay artifact is missing"
         | Error error ->
           Alcotest.fail (Tool_blob_store.fetch_error_to_string error));
+       let outcome =
+         Masc.Keeper_gate_replay.For_testing.durable_replay_outcome
+           ~base_path
+           ~operation:"network_read"
+           ~journal:Masc.Keeper_gate_replay.Replay_journal_recorded
+           (Masc.Keeper_approval_queue.Replay_applied artifact)
+       in
        let message =
          Masc.Keeper_gate_replay.append_model_evidence
            ~approval_id:"approval-large"
            ~user_message:"continue"
-           (Masc.Keeper_gate_replay.Applied
-              { operation = "network_read"
-              ; output = raw_output
-              ; journal =
-                  Masc.Keeper_gate_replay.Replay_journal_recorded
-              })
+           outcome
        in
+       (* Above the ordinary-tool externalize threshold the rendered turn
+          carries the standard blob marker, never the raw half-megabyte body:
+          an unbounded injection re-enters the 07-29 request-cap x compaction
+          incident class. The exact bytes stay durable (asserted above). *)
        Alcotest.check
          Alcotest.bool
-         "model receives the exact replay tail"
+         "rendered evidence is the standard blob marker"
          true
+         (String_util.contains_substring message Tool_output.marker_prefix);
+       Alcotest.check
+         Alcotest.bool
+         "raw oversized body does not enter the model turn"
+         false
          (String_util.contains_substring message "LARGE-REPLAY-END");
        Alcotest.check
          Alcotest.bool
-         "model output is not replaced with a blob marker"
+         "rendered turn stays bounded"
+         true
+         (String.length message < 16 * 1024))
+;;
+
+(* At or under the threshold the exact bytes are inlined — the small-output
+   path is unchanged by the marker boundary. *)
+let test_small_replay_result_is_inlined_exactly () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let raw_output = {|{"results":[{"title":"small-exact"}]}|} in
+       let artifact =
+         match
+           Masc.Keeper_gate_replay.For_testing.persist_replay_artifact
+             ~base_path
+             raw_output
+         with
+         | Ok artifact -> artifact
+         | Error detail -> Alcotest.fail detail
+       in
+       let message =
+         Masc.Keeper_gate_replay.append_model_evidence
+           ~approval_id:"approval-small"
+           ~user_message:"continue"
+           (Masc.Keeper_gate_replay.For_testing.durable_replay_outcome
+              ~base_path
+              ~operation:"network_read"
+              ~journal:Masc.Keeper_gate_replay.Replay_journal_recorded
+              (Masc.Keeper_approval_queue.Replay_applied artifact))
+       in
+       Alcotest.check
+         Alcotest.bool
+         "small evidence is inlined byte-exact"
+         true
+         (String_util.contains_substring message "small-exact");
+       Alcotest.check
+         Alcotest.bool
+         "no marker below the threshold"
          false
          (String_util.contains_substring message Tool_output.marker_prefix))
 ;;
@@ -571,9 +621,13 @@ let () =
             `Quick
             test_applied_replay_result_is_model_visible
         ; Alcotest.test_case
-            "large result reaches model exactly"
+            "large result renders the standard blob marker"
             `Quick
             test_large_replay_result_reaches_model_exactly
+        ; Alcotest.test_case
+            "small result is inlined byte-exact"
+            `Quick
+            test_small_replay_result_is_inlined_exactly
         ] )
     ; ( "dispatch"
       , [ Alcotest.test_case

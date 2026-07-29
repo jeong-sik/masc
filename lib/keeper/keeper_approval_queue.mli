@@ -97,7 +97,13 @@ type resolution_replay_outcome =
   | Replay_failed of Tool_output.artifact_ref
 (** Derived replay evidence points to exact bytes in {!Tool_blob_store}. The
     Gate sidecar owns only this typed content address; provider input is
-    rehydrated from it and is never replaced with a size-based preview. *)
+    rehydrated from it through the same inline/marker boundary as ordinary
+    tool outputs ([Tool_bridge] externalize threshold): at or under the
+    threshold the exact bytes are inlined; above it the standard
+    [Tool_output] blob marker is delivered and the exact bytes remain
+    durable in the store. The rendered request therefore stays bounded by
+    the assigned Runtime's request-body cap while the evidence itself is
+    never truncated. *)
 
 type approved_resolution_delivery =
   { request : approved_resolution_request

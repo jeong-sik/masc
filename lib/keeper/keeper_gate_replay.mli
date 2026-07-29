@@ -137,6 +137,16 @@ module For_testing : sig
     string ->
     (Tool_output.artifact_ref, string) result
 
+  val durable_replay_outcome :
+    base_path:string ->
+    operation:string ->
+    journal:replay_journal ->
+    Keeper_approval_queue.resolution_replay_outcome ->
+    outcome
+  (** Exposes the durable-evidence rendering boundary: at or under the
+      [Tool_bridge] externalize threshold the exact bytes are inlined; above
+      it the standard [Tool_output] blob marker is rendered. *)
+
   val with_replay_evidence_persister :
     ( base_path:string
       -> string

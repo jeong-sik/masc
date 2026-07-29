@@ -596,14 +596,11 @@ let run ~sw ~clock ~base_path ~handle_turn =
       let admission =
         Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
       in
-      (match
-         admission.snapshot_in_flight,
-         admission.snapshot_shutdown_operation_id
-       with
-       | Some _, _ | _, Some _ ->
+      (match admission.snapshot_shutdown_operation_id with
+       | Some _ ->
          nack_or_warn dispatch_state ~keeper_name ~lease_id;
          release keeper_name
-       | None, None ->
+       | None ->
          (match delivery_key with
           | Error detail ->
             finalize_or_warn dispatch_state ~keeper_name ~lease_id
@@ -661,12 +658,9 @@ let run ~sw ~clock ~base_path ~handle_turn =
         let admission =
           Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
         in
-        (match
-           admission.snapshot_in_flight,
-           admission.snapshot_shutdown_operation_id
-         with
-         | Some _, _ | _, Some _ -> release keeper_name
-         | None, None ->
+        (match admission.snapshot_shutdown_operation_id with
+         | Some _ -> release keeper_name
+         | None ->
            (match Keeper_chat_queue.lease_next ~keeper_name with
             | `Empty -> release keeper_name
             | `Already_leased _ -> release keeper_name

@@ -84,6 +84,21 @@ let await_promise ~clock ~seconds promise =
       Eio.Time.sleep clock seconds;
       false)
 
+let await_until ~clock ~seconds predicate =
+  Eio.Fiber.first
+    (fun () ->
+      let rec loop () =
+        if predicate ()
+        then true
+        else (
+          Eio.Time.sleep clock 0.02;
+          loop ())
+      in
+      loop ())
+    (fun () ->
+      Eio.Time.sleep clock seconds;
+      false)
+
 let await_receipt ~clock ~seconds ~keeper_name ~receipt_id ~accept =
   Eio.Fiber.first
     (fun () ->
@@ -464,9 +479,17 @@ let test_busy_turn_release_wakes_pending_receipt () =
     let release_holder, resolve_release_holder = Eio.Promise.create () in
     let calls = ref 0 in
     let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
-      incr calls;
-      Keeper_chat_consumer.Delivered
-        { outcome_ref = "trace-busy-release#1" }
+      match
+        Keeper_turn_admission.run_serialized
+          ~base_path:base
+          ~keeper_name
+          (fun () ->
+            incr calls;
+            Keeper_chat_consumer.Delivered
+              { outcome_ref = "trace-busy-release#1" })
+      with
+      | `Ran outcome -> outcome
+      | `Rejected rejection -> Keeper_chat_consumer.Deferred { rejection }
     in
     with_consumer_switch (fun sw ->
       Eio.Fiber.fork ~sw (fun () ->
@@ -489,7 +512,9 @@ let test_busy_turn_release_wakes_pending_receipt () =
       with
       | None -> Eio.Promise.resolve resolve_release_holder ()
       | Some accepted ->
-        Eio.Fiber.yield ();
+        check "consumer parks on the held turn slot"
+          (await_until ~clock ~seconds:5.0 (fun () ->
+             Keeper_turn_admission.chat_waiting ~base_path:base ~keeper_name));
         check "consumer never crosses the held turn slot" (!calls = 0);
         Eio.Promise.resolve resolve_release_holder ();
         check "turn release dispatches without fleet polling"

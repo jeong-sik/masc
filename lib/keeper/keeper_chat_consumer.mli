@@ -58,15 +58,15 @@ type turn_outcome =
     release, and explicit operator reconciliation; it performs no fleet-wide
     timer polling.
 
-    Per Keeper wake: when a turn is in flight
-    ([Keeper_turn_admission.in_flight]), queued messages are left to
-    accumulate; once the slot is free, the exact FIFO head receipt is leased
-    ([Keeper_chat_queue.lease_next]) into one typed turn. User-message identity,
-    multimodal blocks, transcript provenance, and receipt correlation are never
-    flattened into a delimiter string. The turn then runs in a Keeper-scoped child fiber, so a slow queued turn for one
-    keeper does not block wake processing or delivery for other keepers.  A
-    keeper-local dispatch gate preserves the single follow-up turn contract
-    for messages sent during an existing queued turn.
+    Per Keeper wake, the exact FIFO head receipt is leased
+    ([Keeper_chat_queue.lease_next]) and its handler parks on the authoritative
+    Keeper turn mutex even when another turn is in flight. User-message
+    identity, multimodal blocks, transcript provenance, and receipt correlation
+    are never flattened into a delimiter string. The turn then runs in a
+    Keeper-scoped child fiber, so a slow queued turn for one keeper does not
+    block wake processing or delivery for other keepers. A keeper-local
+    dispatch gate preserves the single follow-up turn contract for messages
+    sent during an existing queued turn.
 
     [handle_turn]'s typed terminal outcome is durably finalized as [Delivered]
     or [Failed]. [Deferred] and structured cancellation nack the unchanged

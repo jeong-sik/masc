@@ -198,6 +198,67 @@ let () =
     String.equal
       (payload_kind_label (board_attention_payload "candidate-1"))
       "board_attention");
+  let self_meta = event_queue_test_meta "a" "trace-self-board-author" in
+  let self_post_stimulus payload =
+    { post_id = "self-post"
+    ; urgency = Normal
+    ; arrived_at = 3.0
+    ; payload
+    }
+  in
+  let expect_no_self_post_echo label payload =
+    match
+      Masc.Keeper_world_observation.pending_board_event_of_stimulus
+        ~meta:self_meta
+        (self_post_stimulus payload)
+    with
+    | Ok None -> ()
+    | Ok (Some _) -> Alcotest.fail (label ^ " re-observed a self-authored post")
+    | Error unavailable ->
+      Alcotest.fail
+        (label
+         ^ " unexpectedly read Board: "
+         ^ Masc.Keeper_world_observation_board_signal.unavailable_to_string
+             unavailable)
+  in
+  expect_no_self_post_echo "direct board signal" (board_payload ());
+  expect_no_self_post_echo
+    "attention-admitted board signal"
+    (board_attention_payload "self-post-candidate");
+  let self_comment =
+    Board_signal
+      { kind = Comment_added
+      ; author = "a"
+      ; title = "reply"
+      ; content = "a comment is not a post echo"
+      ; hearth = None
+      ; updated_at = None
+      }
+  in
+  (match
+     Masc.Keeper_world_observation.pending_board_event_of_stimulus
+       ~meta:self_meta
+       (self_post_stimulus self_comment)
+   with
+   | Ok (Some _) -> ()
+   | Ok None -> Alcotest.fail "self-authored comment was incorrectly suppressed"
+   | Error unavailable ->
+     Alcotest.fail
+       ("self comment unexpectedly read Board: "
+        ^ Masc.Keeper_world_observation_board_signal.unavailable_to_string
+            unavailable));
+  (match
+     Masc.Keeper_world_observation.pending_board_event_of_stimulus
+       ~meta:(event_queue_test_meta "different-keeper" "trace-foreign-board-author")
+       (self_post_stimulus (board_payload ()))
+   with
+   | Ok (Some _) -> ()
+   | Ok None -> Alcotest.fail "foreign post was incorrectly suppressed"
+   | Error unavailable ->
+     Alcotest.fail
+       ("foreign post unexpectedly read Board: "
+        ^ Masc.Keeper_world_observation_board_signal.unavailable_to_string
+            unavailable));
   (match
      stimulus_of_yojson
        (stimulus_to_yojson

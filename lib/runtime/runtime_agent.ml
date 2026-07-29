@@ -1003,6 +1003,8 @@ let resume_from_checkpoint
            ~tools:config.tools ?context:config.context
            ~context_fit_admission:prepared_resume.context_fit_admission
            ?model_input_projection:config.model_input_projection
+           ?pre_dispatch_serialization_observer:
+             config.pre_dispatch_serialization_observer
            ~options ~config:prepared_resume.agent_config
            ?checkpoint_sink:config.checkpoint_sink
            ()))

@@ -1685,6 +1685,57 @@ let test_runtime_agent_fresh_projection_precedes_measurement () =
 let test_runtime_agent_resume_projection_precedes_measurement () =
   run_projection_case ~resume:true
 
+let run_pre_dispatch_serialization_observer_case ~resume =
+  let observed_body_bytes = ref [] in
+  let (), requests =
+    with_native_projection_server
+    @@ fun ~sw ~net ~base_url ->
+    let config =
+      { (context_fit_runtime_config base_url) with
+        pre_dispatch_serialization_observer =
+          Some
+            (fun observation ->
+               observed_body_bytes :=
+                 observation.Llm_provider.Request_wire_observer.body_bytes
+                 :: !observed_body_bytes;
+               Ok ())
+      }
+    in
+    let agent =
+      if resume
+      then
+        Runtime_agent.resume_from_checkpoint
+          ~sw
+          ~net
+          ~config
+          ~checkpoint:(context_fit_checkpoint ())
+      else Runtime_agent.build ~sw ~net ~config
+    in
+    let agent =
+      match agent with
+      | Ok agent -> agent
+      | Error error -> fail (Agent_sdk.Error.to_string error)
+    in
+    Fun.protect
+      ~finally:(fun () -> Agent_sdk.Agent.close agent)
+      (fun () ->
+         match Agent_sdk.Agent.run ~sw agent "observe exact request bytes" with
+         | Ok _ -> ()
+         | Error error -> fail (Agent_sdk.Error.to_string error))
+  in
+  let completion_body = List.assoc "/v1/messages" requests in
+  check
+    (list int)
+    "observer receives the exact dispatched body size once"
+    [ String.length completion_body ]
+    (List.rev !observed_body_bytes)
+
+let test_runtime_agent_fresh_observes_pre_dispatch_serialization () =
+  run_pre_dispatch_serialization_observer_case ~resume:false
+
+let test_runtime_agent_resume_observes_pre_dispatch_serialization () =
+  run_pre_dispatch_serialization_observer_case ~resume:true
+
 (* RFC-OAS-026 §4.6: a configured stream-idle deadline with no resolvable clock
    must fail loudly rather than silently disarm the only I2-legitimate
    streaming timeout. *)
@@ -1921,6 +1972,14 @@ let () =
             "resumed projection precedes measurement and dispatch"
             `Quick
             test_runtime_agent_resume_projection_precedes_measurement
+        ; test_case
+            "fresh agent observes exact pre-dispatch serialization"
+            `Quick
+            test_runtime_agent_fresh_observes_pre_dispatch_serialization
+        ; test_case
+            "resumed agent observes exact pre-dispatch serialization"
+            `Quick
+            test_runtime_agent_resume_observes_pre_dispatch_serialization
         ; test_case
             "dashboard runtime provider reachability contracts"
             `Quick

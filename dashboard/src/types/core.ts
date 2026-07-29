@@ -1198,7 +1198,6 @@ export interface Keeper {
   keeper_age_s?: number
   last_turn_ago_s?: number
   last_handoff_ago_s?: number
-  last_compaction_ago_s?: number
   last_proactive_ago_s?: number
   last_proactive_reason?: string | null
   last_proactive_preview?: string | null

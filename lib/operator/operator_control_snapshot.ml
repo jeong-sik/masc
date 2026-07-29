@@ -268,10 +268,6 @@ let keepers_json
                       Keeper_status_metrics.age_seconds_opt
                         ~now_ts meta.runtime.last_handoff_ts
                     in
-                    let last_compaction_ago_s =
-                      Keeper_status_metrics.age_seconds_opt
-                        ~now_ts meta.runtime.compaction_rt.last_ts
-                    in
                     let last_proactive_ago_s =
                       Keeper_status_metrics.age_seconds_opt
                         ~now_ts meta.runtime.proactive_rt.last_ts
@@ -401,7 +397,6 @@ let keepers_json
                          ; "turn_count", `Int meta.runtime.usage.total_turns
                          ; "last_turn_ago_s", Json_util.float_opt_to_json last_turn_ago_s
                          ; "last_handoff_ago_s", Json_util.float_opt_to_json last_handoff_ago_s
-                         ; "last_compaction_ago_s", Json_util.float_opt_to_json last_compaction_ago_s
                          ; "last_proactive_ago_s", Json_util.float_opt_to_json last_proactive_ago_s
                          ; "last_activity_ago_s", Json_util.float_opt_to_json last_activity_ago_s
                          ; "last_model_used", `String (Keeper_status_runtime.active_model_of_meta meta)

@@ -1353,6 +1353,25 @@ let test_operator_digest_severity_rank_supports_critical () =
 (* test_snapshot_and_digest_expose_role_runtime_census removed:
    depended on team session start/update which is no longer available. *)
 
+let test_last_compaction_ago_s_removed_from_backend_serializers () =
+  let root = Masc_test_deps.find_project_root () in
+  let files =
+    [ "lib/operator/operator_control_snapshot.ml"
+    ; "lib/dashboard/dashboard_http_keeper.ml"
+    ; "lib/keeper/keeper_status_detail.ml" ]
+  in
+  List.iter
+    (fun rel ->
+       let path = Filename.concat root rel in
+       match Safe_ops.read_file_safe path with
+       | Error err -> Alcotest.failf "read %s failed: %s" rel err
+       | Ok text ->
+           Alcotest.(check bool)
+             (Printf.sprintf "%s does not contain last_compaction_ago_s" rel)
+             true
+             (Option.is_none (last_substring_index text "last_compaction_ago_s")))
+    files
+
 let () =
   Alcotest.run
     "operator_control_snapshot"
@@ -1389,6 +1408,12 @@ let () =
             "storage failure is typed unavailable"
             `Quick
             test_context_snapshot_storage_failure_is_unavailable
+        ] );
+      ( "last_compaction_ago_s removal"
+      , [ Alcotest.test_case
+            "backend serializers do not emit last_compaction_ago_s"
+            `Quick
+            test_last_compaction_ago_s_removed_from_backend_serializers
         ] );
     ]
 ;;

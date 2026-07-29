@@ -62,13 +62,12 @@ export function OperationalHealth({ keeper }: { keeper: Keeper }) {
   const hb = keeper.last_heartbeat
   const compSavedRatio = mw?.compaction_saved_ratio
   const avgSaved = mw?.avg_compaction_saved_tokens
-  const lastCompAgo = keeper.last_compaction_ago_s
 
   const hbTone: KpiTone = !hb ? 'default' : 'ok'
   const compTone: KpiTone = compSavedRatio == null ? 'default'
     : compSavedRatio >= 0.4 ? 'ok' : compSavedRatio >= 0.2 ? 'warn' : 'bad'
 
-  const hasAny = hb || compSavedRatio != null || lastCompAgo != null
+  const hasAny = hb || compSavedRatio != null
   if (!hasAny) return null
 
   return html`

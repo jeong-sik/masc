@@ -306,7 +306,6 @@ export function keeperFreshnessTs(keeper: Keeper, heartbeats: Map<string, number
     keeper.last_turn_ago_s,
     keeper.last_proactive_ago_s,
     keeper.last_handoff_ago_s,
-    keeper.last_compaction_ago_s,
   ].find(value => typeof value === 'number' && Number.isFinite(value) && value >= 0)
 
   return typeof ageSeconds === 'number'
@@ -734,7 +733,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         keeper_age_s: asNumber(row.keeper_age_s),
         last_turn_ago_s: asNumber(row.last_turn_ago_s),
         last_handoff_ago_s: asNumber(row.last_handoff_ago_s),
-        last_compaction_ago_s: asNumber(row.last_compaction_ago_s),
         last_proactive_ago_s: asNumber(row.last_proactive_ago_s),
         last_proactive_reason: asString(row.last_proactive_reason) ?? null,
         last_activity_ago_s: asNumber(row.last_activity_ago_s),

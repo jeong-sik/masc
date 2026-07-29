@@ -599,10 +599,7 @@ let structured_result_of_json (json : Yojson.Safe.t)
 
 let structured_result_schema : structured_result Agent_sdk.Structured.schema =
   {
-    Agent_sdk.Structured.name = "keeper_deliberation_decision";
-    description =
-      "Choose exactly one typed keeper deliberation action and return only the tool input object.";
-    params =
+    Agent_sdk.Structured.params =
       [
         {
           Agent_sdk.Types.name = "action";

@@ -126,14 +126,12 @@ type in_lane_compaction =
   | Compaction_attempt_failed of { reason : string }
 (** Typed outcome of the in-lane provider-overflow compaction behind a
     [Requeue_after_context_compaction] disposition. [Compaction_committed]
-    proves the checkpoint durably shrank before the requeue, so the transition
-    resets the keeper's compaction-failure streak and the retry reloads real
-    progress. [Compaction_attempt_failed] means the recovery made no durable
-    progress; the transition advances the streak and escalates once it reaches
+    proves the checkpoint durably shrank before the requeue, but still advances
+    the provider-overflow episode streak: repeated small commits may remain
+    above the request limit. [Compaction_attempt_failed] also advances the
+    streak. Ordinary heartbeat intake stops provider dispatch once it reaches
     [Keeper_meta_contract.compaction_retry_escalation_threshold] (RFC-0351 S0,
-    #25461 — without the ceiling this lane requeued forever: 284 of 285
-    rejections in the 2026-07-21 storm carried trigger=provider_overflow and
-    only the operator's keeper_down ended it). *)
+    #25461); explicit manual compaction remains the recovery path. *)
 
 type exact_output_terminal_reason = private
   | Exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }

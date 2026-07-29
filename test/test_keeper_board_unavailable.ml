@@ -303,7 +303,8 @@ let test_transient_intake_retains_pending_source_and_blocks_dispatch () =
     false
     (Keeper_heartbeat_loop.should_run_turn_after_event_intake
        ~scheduled:true
-       ~event_queue_intake_error:intake.event_queue_intake_error);
+       ~compaction_retry_suspended:false
+       ~event_intake:intake);
   let queued =
     match Keeper_registry_event_queue.snapshot_result ~base_path meta.name with
     | Ok queue -> queue
@@ -343,6 +344,226 @@ let test_transient_intake_retains_pending_source_and_blocks_dispatch () =
     (Keeper_event_queue.length settled)
 ;;
 
+let test_compaction_suspension_preserves_work_and_admits_manual_recovery () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run
+  @@ fun sw ->
+  let base_path = fresh_test_base_path () in
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  Keeper_registry.For_testing.clear ();
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.clear ())
+  @@ fun () ->
+  let meta = test_meta "compaction-suspension" in
+  let suspended_meta =
+    { meta with
+      runtime =
+        { meta.runtime with
+          compaction_rt =
+            { meta.runtime.compaction_rt with
+              consecutive_failures =
+                Keeper_meta_contract.compaction_retry_escalation_threshold
+            }
+        }
+    }
+  in
+  let config = Workspace.default_config base_path in
+  let ctx : _ Keeper_types_profile.context =
+    { config
+    ; agent_name = "compaction-suspension-test"
+    ; sw
+    ; clock = Eio.Stdenv.clock env
+    ; proc_mgr = None
+    ; net = None
+    ; publication_recovery_provider =
+        Masc_test_deps.non_runtime_publication_recovery_provider
+    }
+  in
+  ignore
+    (Keeper_registry.For_testing.register
+       ~base_path
+       suspended_meta.name
+       suspended_meta);
+  let enqueue post_id payload =
+    let stimulus : Keeper_event_queue.stimulus =
+      { post_id
+      ; urgency = Keeper_event_queue.Normal
+      ; arrived_at = Time_compat.now ()
+      ; payload
+      }
+    in
+    match
+      Keeper_registry_event_queue.enqueue_durable_result
+        ~base_path
+        suspended_meta.name
+        stimulus
+    with
+    | Ok () -> ()
+    | Error message -> failf "failed to seed %s: %s" post_id message
+  in
+  enqueue "ordinary-before-manual" Keeper_event_queue.Bootstrap;
+  enqueue
+    "manual-recovery"
+    Keeper_event_queue.Manual_compaction_requested;
+  let manual_intake =
+    Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx
+      ~meta_after_triage:suspended_meta
+      ~pending_board_events:[]
+  in
+  (match manual_intake.consumed_stimuli with
+   | [ { Keeper_event_queue.payload = Manual_compaction_requested; _ } ] -> ()
+   | _ -> fail "suspended intake did not select the explicit manual recovery");
+  check
+    bool
+    "typed manual recovery is admitted"
+    true
+    (Keeper_heartbeat_loop.should_run_turn_after_event_intake
+       ~scheduled:true
+       ~compaction_retry_suspended:true
+       ~event_intake:manual_intake);
+  (match manual_intake.pending_selection with
+   | None -> fail "manual recovery lost its exact pending selection"
+   | Some selection ->
+     (match
+        Keeper_registry_event_queue.ack_pending_result
+          ~base_path
+          suspended_meta.name
+          ~selection
+      with
+      | Ok () -> ()
+      | Error message -> failf "failed to acknowledge manual recovery: %s" message));
+  let suspended_intake =
+    Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx
+      ~meta_after_triage:suspended_meta
+      ~pending_board_events:[]
+  in
+  check bool "ordinary source is not selected while suspended" true
+    (Option.is_none suspended_intake.pending_selection);
+  check
+    bool
+    "suspended ordinary turn is blocked before provider dispatch"
+    false
+    (Keeper_heartbeat_loop.should_run_turn_after_event_intake
+       ~scheduled:true
+       ~compaction_retry_suspended:true
+       ~event_intake:suspended_intake);
+  let pending =
+    match
+      Keeper_registry_event_queue.snapshot_result
+        ~base_path
+        suspended_meta.name
+    with
+    | Ok queue -> queue
+    | Error message -> failf "failed to reload suspended queue: %s" message
+  in
+  check int "ordinary work remains durable for post-recovery retry" 1
+    (Keeper_event_queue.length pending);
+  let recovered_meta =
+    { suspended_meta with
+      runtime =
+        { suspended_meta.runtime with
+          compaction_rt =
+            { suspended_meta.runtime.compaction_rt with consecutive_failures = 0 }
+        }
+    }
+  in
+  let recovered_intake =
+    Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx
+      ~meta_after_triage:recovered_meta
+      ~pending_board_events:[]
+  in
+  match recovered_intake.consumed_stimuli with
+  | [ { Keeper_event_queue.payload = Bootstrap; _ } ] -> ()
+  | _ -> fail "ordinary work did not become selectable after recovery"
+;;
+
+let test_failed_manual_compaction_is_terminal_for_its_request () =
+  let meta = test_meta "manual-compaction-terminal" in
+  let failure =
+    Keeper_manual_compaction.Recovery
+      ( Keeper_post_turn.Retry_suspended
+          { consecutive_failures =
+              Keeper_meta_contract.compaction_retry_escalation_threshold
+          }
+      , Ok () )
+  in
+  match
+    Keeper_heartbeat_loop.For_testing.pending_selection_outcome_of_cycle_outcome
+      (Some
+         (Keeper_heartbeat_loop_cycle.Manual_compaction_failed
+            { meta; failure }))
+  with
+  | Keeper_heartbeat_loop.For_testing.Selection_failed detail ->
+    check bool "terminal failure keeps an operator-facing detail" true
+      (not (String.equal (String.trim detail) ""))
+  | Keeper_heartbeat_loop.For_testing.Selection_completed ->
+    fail "failed manual compaction was treated as successful"
+  | Keeper_heartbeat_loop.For_testing.Selection_retained ->
+    fail "failed manual compaction would be replayed without a new operator request"
+;;
+
+let test_manual_compaction_followup_preserves_both_outcomes () =
+  let meta = test_meta "manual-compaction-followup" in
+  let trace_id =
+    match Keeper_id.Trace_id.of_string "manual-compaction-followup-trace" with
+    | Ok trace_id -> trace_id
+    | Error detail -> failf "trace id construction failed: %s" detail
+  in
+  let installed_ref =
+    match
+      Keeper_checkpoint_ref.create
+        ~trace_id
+        ~generation:1
+        ~turn_count:1
+        ~canonical_checkpoint_bytes:"{}"
+    with
+    | Ok checkpoint_ref -> checkpoint_ref
+    | Error _ -> fail "checkpoint ref construction failed"
+  in
+  let receipt : Keeper_manual_compaction.applied_receipt =
+    { installation = { installed_ref; auxiliary = [] }
+    ; lifecycle = Keeper_manual_compaction.Completion_applied
+    ; manifest = Ok ()
+    }
+  in
+  let error =
+    Agent_sdk.Error.Api
+      (Agent_sdk.Retry.ContextOverflow
+         { message = "manual follow-up still exceeds capacity"; limit = None })
+  in
+  let failure : Keeper_unified_turn.turn_failure =
+    { error
+    ; runtime_id = "test-runtime"
+    ; route =
+        Keeper_runtime_failure_route.route_of_error
+          ~boundary:Keeper_runtime_failure_route.Oas_execution
+          error
+    ; source_disposition =
+        Keeper_unified_turn.Requeue_after_context_compaction
+          Keeper_unified_turn.Compaction_committed
+    ; deferred_runtime_lane = None
+    }
+  in
+  let followup = Keeper_heartbeat_loop_cycle.Failed { meta; failure } in
+  match
+    Keeper_heartbeat_loop.compaction_outcomes_of_cycle_outcome
+      (Some
+         (Keeper_heartbeat_loop_cycle.Manual_compaction_applied
+            { receipt; followup }))
+  with
+  | [ `Committed; `Overflow_episode_committed ] -> ()
+  | _ ->
+    fail
+      "manual reset erased the same-cycle reactive overflow or its compaction count"
+;;
+
 let () =
   run
     "keeper_board_unavailable"
@@ -371,6 +592,20 @@ let () =
             "pending source is retained and provider dispatch is blocked"
             `Quick
             test_transient_intake_retains_pending_source_and_blocks_dispatch
+        ] )
+    ; ( "compaction retry suspension"
+      , [ test_case
+            "ordinary work stays pending while manual recovery remains selectable"
+            `Quick
+            test_compaction_suspension_preserves_work_and_admits_manual_recovery
+        ; test_case
+            "failed manual compaction requires a new operator request"
+            `Quick
+            test_failed_manual_compaction_is_terminal_for_its_request
+        ; test_case
+            "manual compaction keeps immediate reactive overflow evidence"
+            `Quick
+            test_manual_compaction_followup_preserves_both_outcomes
         ] )
     ]
 ;;

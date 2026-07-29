@@ -721,14 +721,12 @@ let prepare_compaction_admitted
                (Keeper_compact_policy.compaction_decision_to_string decision))))
 ;;
 
-(* RFC-0351 S0 / #25461: reactive admission gate in front of the prepare
-   phase. Once the persisted failure streak reaches the escalation threshold
-   the settlement already refuses to retry, but each *new* stimulus still paid
-   one full prepare — checkpoint load plus a summarizer LLM call — before its
-   escalation settled. Refusing the reactive trigger here, before any I/O,
-   drops that residual burn to zero. The manual trigger passes through on
-   purpose: an operator-committed compaction is the recovery lever — its
-   commit resets the streak and lifts the suspension. *)
+(* RFC-0351 S0 / #25461: defense-in-depth for a race after heartbeat intake.
+   The heartbeat gate normally blocks a suspended ordinary turn before its
+   provider call. If another cycle reaches the threshold after that admission,
+   this trigger-owned check still refuses reactive compaction before checkpoint
+   I/O or a summarizer call. [Manual] stays exempt because it is the explicit
+   operator recovery path. *)
 let prepare_compaction_with
       ~compact_for_request
       ~base_dir

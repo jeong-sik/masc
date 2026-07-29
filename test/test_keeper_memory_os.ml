@@ -2245,7 +2245,8 @@ let test_render_if_enabled_preserves_empty_claim_episode () =
             (contains episode.episode_summary block))))
 ;;
 
-(* Recall reads the complete persisted store in source order. *)
+(* Recall scans the complete persisted candidate store before applying its
+   bounded projection; it must not degrade into a tail-file scan. *)
 let test_recall_reads_complete_store () =
   with_recall_env "true" (fun () ->
     with_prompt_registry (fun () ->
@@ -3046,11 +3047,91 @@ let with_env name value f =
   Fun.protect ~finally:(fun () -> restore_env name old) f
 ;;
 
-(* masc#25052 P1: selection budget. Below budget, recall's behavior is
-   unchanged (asserted throughout the rest of this file, all of which use far
-   fewer than the 500-fact/500-episode default). This proves the truncation
-   case: over budget, only the most-recent-[last_verified_at] facts survive,
-   the drop is counted, and the dropped items are gone from the block. *)
+let without_env name f =
+  let old = Sys.getenv_opt name in
+  unsetenv name;
+  Fun.protect ~finally:(fun () -> restore_env name old) f
+;;
+
+(* Default recall is a compact prompt projection, not a rendering of the whole
+   store. The projection keeps exact text, selects only through typed recency,
+   and leaves all persisted rows intact. *)
+let test_recall_default_selection_window_is_bounded () =
+  without_env "MASC_KEEPER_MEMORY_OS_RECALL_MAX_FACTS" (fun () ->
+    without_env "MASC_KEEPER_MEMORY_OS_RECALL_MAX_EPISODES" (fun () ->
+      without_env "MASC_KEEPER_MEMORY_OS_RECALL_MAX_BYTES" (fun () ->
+        with_prompt_registry (fun () ->
+          with_temp_keepers_dir (fun _keepers_dir ->
+            let keeper_id = "default-selection-window-keeper" in
+            let now = 1_000_000.0 in
+            for i = 1 to 9 do
+              let fact =
+                { (fact_fixture ~now ()) with
+                  Types.claim = Printf.sprintf "default window fact %d" i
+                ; Types.claim_id = Some (Printf.sprintf "default-window-fact-%d" i)
+                ; Types.last_verified_at = Some (now -. float_of_int (9 - i))
+                }
+              in
+              Memory_io.append_fact ~keeper_id fact
+            done;
+            for i = 1 to 3 do
+              let episode =
+                episode_fixture
+                  ~now:(now -. float_of_int (3 - i))
+                  ~trace_id:(Printf.sprintf "default-window-episode-%d" i)
+                  ~generation:i
+                  ~summary:(Printf.sprintf "default window episode %d" i)
+              in
+              Memory_io.append_episode ~keeper_id episode
+            done;
+            let ctx = Recall.render_context ~keeper_id ~now () in
+            Alcotest.(check int)
+              "default fact window"
+              8
+              (Masc.Keeper_config.keeper_memory_os_recall_max_facts ());
+            Alcotest.(check int)
+              "default episode window"
+              2
+              (Masc.Keeper_config.keeper_memory_os_recall_max_episodes ());
+            Alcotest.(check bool)
+              "oldest fact is outside the prompt projection"
+              false
+              (contains "default window fact 1" ctx);
+            List.iter
+              (fun i ->
+                 Alcotest.(check bool)
+                   (Printf.sprintf "recent fact %d is injected" i)
+                   true
+                   (contains (Printf.sprintf "default window fact %d" i) ctx))
+              [ 2; 3; 4; 5; 6; 7; 8; 9 ];
+            Alcotest.(check bool)
+              "oldest episode is outside the prompt projection"
+              false
+              (contains "default window episode 1" ctx);
+            List.iter
+              (fun i ->
+                 Alcotest.(check bool)
+                   (Printf.sprintf "recent episode %d is injected" i)
+                   true
+                   (contains (Printf.sprintf "default window episode %d" i) ctx))
+              [ 2; 3 ];
+            Alcotest.(check bool)
+              "prompt gauge exposes selected versus stored rows"
+              true
+              (contains "facts 8/9 injected, episodes 2/3 injected" ctx);
+            Alcotest.(check int)
+              "fact store remains complete"
+              9
+              (List.length (Memory_io.read_facts_all ~keeper_id));
+            Alcotest.(check int)
+              "episode store remains complete"
+              3
+              (List.length (Memory_io.read_episodes_all ~keeper_id)))))))
+;;
+
+(* Over an explicit budget, only the most-recent-[last_verified_at] facts
+   survive, the drop is counted, and the dropped items are gone from the
+   prompt projection. *)
 let test_recall_selection_budget_truncates_facts_by_recency () =
   with_env "MASC_KEEPER_MEMORY_OS_RECALL_MAX_FACTS" "3" (fun () ->
     with_prompt_registry (fun () ->
@@ -3483,8 +3564,8 @@ let test_merge_keeps_distinct_conclusions () =
 (* RFC-0351 L3: the rendered byte budget drops the oldest episodes until the
    block fits and keeps survivors in their original order. Before this the
    budget only logged "not truncated" and let the block go out whole — one
-   keeper rendered 222,499B of recall while both count budgets (500/500) sat
-   unfired at 62 facts / 432 episodes. *)
+   keeper rendered 222,499B of recall before the default count window became
+   a compact working set. *)
 let test_byte_budget_keeps_newest_in_original_order () =
   (* Pairs arrive oldest-first, the order recall renders them in. Each line is
      4 bytes plus one newline joiner, so a 12-byte budget fits exactly two. *)
@@ -4670,6 +4751,10 @@ let () =
             "preserves repeated claim rows"
             `Quick
             test_recall_preserves_repeated_claims
+        ; Alcotest.test_case
+            "default selection window is bounded"
+            `Quick
+            test_recall_default_selection_window_is_bounded
         ; Alcotest.test_case
             "selection budget truncates by recency"
             `Quick

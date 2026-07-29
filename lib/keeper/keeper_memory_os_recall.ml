@@ -144,17 +144,14 @@ type render_result =
   ; failure_reason : unavailable_reason option
   }
 
-(* masc#25052 P1: selection budget. Before this, every current fact/episode
-   in the store was injected every turn -- no selection contract existed.
-   [select_most_recent ~budget ~key ~recency items] keeps the [budget] most
-   recent items (by [recency], descending) and returns them in their
+(* Per-turn working-set selection. [select_most_recent ~budget ~key ~recency
+   items] keeps the [budget] most recent items (by [recency], descending)
+   without mutating the persisted store, and returns them in their
    ORIGINAL relative order (a stable filter over [items], not a reordering)
-   alongside the drop count, so turns that fit within budget see byte-for-
-   byte the same order they always did -- only the truncation CASE picks
-   which items survive, never how the survivors are arranged. [key] must be
-   a stable per-item identity (claim_identity for facts, "trace_id:gN" for
-   episodes) so membership after sorting can be checked without relying on
-   structural/physical equality. *)
+   alongside the drop count. Selection uses typed time fields only; it never
+   inspects claim/summary prose. [key] must be a stable per-item identity
+   (claim_identity for facts, "trace_id:gN" for episodes) so membership after
+   sorting can be checked without relying on structural/physical equality. *)
 let select_most_recent ~budget ~key ~recency items =
   let n = List.length items in
   if n <= budget
@@ -175,11 +172,8 @@ let select_most_recent ~budget ~key ~recency items =
 (* RFC-0351 L3: byte budget on the rendered block.
 
    The count budgets above bound how many items are injected, not how large
-   they render. One keeper sat at 62 facts / 432 episodes -- both under the 500
-   count budgets, so neither truncated -- and still rendered 222,499 bytes,
-   98.5% of that turn's entire extra_system_context. The byte budget existed but
-   was observability-only: it logged "not truncated" and let the block go out in
-   full.
+   unusually long exact rows render. The byte budget remains a backstop after
+   count selection.
 
    Same selection shape as [select_most_recent]: keep the most recent items that
    fit and return them in their ORIGINAL relative order, so a block within

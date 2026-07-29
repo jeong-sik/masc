@@ -4,14 +4,13 @@
     and episodes and returns their exact text in an advisory block suitable for
     OAS [extra_system_context].
 
-    masc#25052 P1: recall used to inject every current fact/episode in the
-    store, unbounded. It now applies a selection budget
+    Recall applies a bounded per-turn working-set projection
     ([Keeper_config.keeper_memory_os_recall_max_facts] /
-    [_max_episodes], live-tunable, default sized above all observed real
-    volumes): within budget, nothing changes (same items, same order); over
-    budget, the most-recent-[reference_time]/[created_at] items survive,
-    still rendered in their original relative order, and the drop is logged
-    plus counted (never silent).
+    [_max_episodes], live-tunable, default 8 facts / 2 episodes). The
+    most-recent-[reference_time]/[created_at] items survive, still rendered in
+    their original relative order, and every drop is visible in the prompt
+    gauge, logs, metrics, and recall-injection ledger. Persisted stores are not
+    mutated, and selection never inspects claim or summary prose.
 
     RFC-0351 L3: the count budgets bound how many items are injected, not how
     large they render. A rendered byte budget
@@ -49,11 +48,9 @@ val render_context
   -> now:float
   -> unit
   -> string
-(** Render every current fact and episode in persisted source order, up to
-    the configured selection budget (see the module doc). Below budget this
-    is byte-for-byte the old "no truncation, ranking, deduplication, or
-    fixed-size slices" behavior; over budget, the most recent items are kept
-    and a truncation is logged and counted. *)
+(** Render the configured working set of current facts and episodes in
+    persisted source order (see the module doc). The most recent items are
+    selected by typed time fields; exact text is preserved. *)
 
 val enabled : unit -> bool
 (** Kill-switch flag [MASC_KEEPER_MEMORY_OS_RECALL] (default [true]).

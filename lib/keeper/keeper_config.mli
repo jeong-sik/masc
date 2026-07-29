@@ -104,12 +104,13 @@ val normalize_prompt_text : max_bytes:int -> string -> string
     Each parameter is registered with [Runtime_params] and can be
     adjusted via the dashboard at runtime. *)
 
-(** Memory OS recall selection budget (masc#25052 P1). See the .ml for the
-    growth problem this bounds and the default-sizing rationale. *)
+(** Memory OS per-turn working-set projection. Defaults to the most recent
+    8 exact facts and 2 exact episodes; persisted stores are not mutated.
+    Selection uses typed time fields only and never inspects claim prose. *)
 val keeper_memory_os_recall_max_facts : unit -> int
 val keeper_memory_os_recall_max_episodes : unit -> int
 val keeper_memory_os_recall_max_bytes : unit -> int
-(** Observability-only threshold (see .ml); not itself an enforced drop. *)
+(** Enforced rendered-byte backstop for selected episodes (see .ml). *)
 
 val keeper_bootstrap_proactive_warmup_sec : unit -> int
 val keeper_bootstrap_stagger_step_sec : unit -> int

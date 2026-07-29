@@ -11,7 +11,7 @@
    These tests run the production Keeper_chat_consumer control loop against an
    autonomous driver on the same slot. The provider call is the only thing
    replaced: handle_turn calls Keeper_turn_admission.run_serialized, which is
-   what the production handler reaches (keeper_chat_consumer.ml run_leased_turn
+   what the production handler reaches (keeper_chat_consumer.ml run_claimed_turn
    -> server_bootstrap_loops.ml handle_turn -> ... -> keeper_turn.ml
    handle_keeper_invocation -> run_serialized).
 

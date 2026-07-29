@@ -103,7 +103,6 @@ describe('applyKeeperStreamEvent', () => {
         queue_revision: '12',
         pending_count: 3,
         inflight_count: 1,
-        recovery_required_count: 1,
         shutdown_operation_id: ' shutdown-op-7 ',
         in_flight_lane: 'autonomous',
         in_flight_started_at: 42,
@@ -119,13 +118,9 @@ describe('applyKeeperStreamEvent', () => {
       queueRevision: '12',
       queuePendingCount: 3,
       queueInflightCount: 1,
-      queueRecoveryRequiredCount: 1,
       queueInFlightLane: 'autonomous',
       queueInFlightStartedAt: 42,
     })
-    expect(entry?.text).toBe(
-      'sangsu의 이전 메시지 상태를 확인해야 해요. 새 메시지는 안전하게 대기 중입니다.',
-    )
     expect(entry?.streamContract).toMatchObject({
       source: 'queue_event',
       eventName: 'KEEPER_CHAT_QUEUED',
@@ -142,7 +137,6 @@ describe('applyKeeperStreamEvent', () => {
         status: 'queued',
         pending_count: 1,
         inflight_count: 0,
-        recovery_required_count: 0,
         shutdown_operation_id: null,
       },
     })).toBe('Keeper queue acceptance is missing its durable receipt metadata.')
@@ -158,7 +152,6 @@ describe('applyKeeperStreamEvent', () => {
         queue_revision: '1',
         pending_count: 1,
         inflight_count: 0,
-        recovery_required_count: 0,
         shutdown_operation_id: null,
       },
     })).toBe('Keeper queue acceptance is missing its durable receipt metadata.')
@@ -168,22 +161,6 @@ describe('applyKeeperStreamEvent', () => {
       name: 'KEEPER_CHAT_QUEUED',
       value: {
         receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
-        pending_count: 1,
-        inflight_count: 0,
-        recovery_required_count: 0,
-        shutdown_operation_id: null,
-      },
-    })).toBe('Keeper queue acceptance is missing its durable receipt metadata.')
-  })
-
-  it('rejects queue acceptance that omits recovery-required depth', () => {
-    assistantEntry()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_CHAT_QUEUED',
-      value: {
-        receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
-        queue_revision: '1',
         pending_count: 1,
         inflight_count: 0,
         shutdown_operation_id: null,
@@ -198,7 +175,6 @@ describe('applyKeeperStreamEvent', () => {
       queue_revision: '1',
       pending_count: 1,
       inflight_count: 0,
-      recovery_required_count: 0,
     }
 
     for (const shutdownOperationId of [undefined, '   ', 7]) {

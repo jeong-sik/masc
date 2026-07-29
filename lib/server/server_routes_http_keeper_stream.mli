@@ -221,7 +221,7 @@ val process_single_turn :
     only ([persist_user_message_only]), matching its existing "the keeper will
     answer on the next turn" semantics; a queued turn instead persists a typed
     failure row via [persist_failure_reply]. A queued message was already
-    leased from [Keeper_chat_queue] — there is no "next turn" for it to ride
+    claimed from [Keeper_chat_queue] — there is no "next turn" for it to ride
     along with, so true silence here is terminal, not merely deferred. *)
 
 (** {1 Testing helpers} *)

@@ -438,19 +438,16 @@ let duplicate_assoc_keys fields =
   in
   loop [] [] fields
 
-let keeper_chat_recovery_error_status = function
+let keeper_chat_pending_cancel_error_status = function
   | Keeper_chat_queue.Invalid_input _ -> `Bad_request
   | Keeper_chat_queue.Receipt_already_terminal _
-  | Keeper_chat_queue.Receipt_not_recovery_required _
-  | Keeper_chat_queue.Receipt_not_pending _
-  | Keeper_chat_queue.Recovery_revision_mismatch _
-  | Keeper_chat_queue.Recovery_lease_mismatch _ ->
-      `Conflict
+  | Keeper_chat_queue.Receipt_not_pending _ ->
+    `Conflict
   | Keeper_chat_queue.Persistence_not_configured
   | Keeper_chat_queue.Snapshot_unavailable _
   | Keeper_chat_queue.Revision_exhausted
   | Keeper_chat_queue.Persist_failed _ ->
-      `Service_unavailable
+    `Service_unavailable
 
 let keeper_chat_pending_cancel_request_schema =
   "keeper_chat_queue.pending_cancel.request.v1"
@@ -480,9 +477,7 @@ let parse_keeper_chat_pending_cancel_request body_str =
   let* () =
     if observed_keys = expected_keys
     then Ok ()
-    else
-      Error
-        "request must contain exactly schema"
+    else Error "request must contain exactly schema"
   in
   let* schema =
     match List.assoc "schema" fields with
@@ -579,77 +574,13 @@ let handle_keeper_chat_pending_cancel_post state agent_name req reqd ~keeper_nam
                ])
          | Error error ->
            respond
-             ~status:(keeper_chat_recovery_error_status error)
+             ~status:(keeper_chat_pending_cancel_error_status error)
              (`Assoc
                [ "schema", `String keeper_chat_pending_cancel_result_schema
                ; "ok", `Bool false
                ; "error", Keeper_chat_queue.mutation_error_to_json error
                ; "audit", audit
                ]))
-
-let handle_keeper_chat_recovery_post state agent_name req reqd ~keeper_name
-    ~raw_receipt_id body_str =
-  let respond ?(status = `OK) json =
-    Http.Response.json_value ~status ~request:req json reqd
-  in
-  let parsed =
-    try
-      Yojson.Safe.from_string body_str
-      |> Keeper_chat_recovery_command.parse_request
-    with
-    | Yojson.Json_error detail ->
-      Error
-        (Keeper_chat_recovery_command.Invalid_field
-           { field = "request body"; expectation = "is invalid JSON: " ^ detail })
-  in
-  match parsed with
-  | Error error ->
-    respond
-      ~status:`Bad_request
-      (`Assoc
-        [ "schema", `String Keeper_chat_recovery_command.result_schema
-        ; "ok", `Bool false
-        ; "error", Keeper_chat_recovery_command.input_error_to_json error
-        ])
-  | Ok recovery_request ->
-    (match
-       Keeper_chat_recovery_command.make
-         ~keeper_name
-         ~raw_receipt_id
-         recovery_request
-     with
-     | Error error ->
-       respond
-         ~status:`Bad_request
-         (`Assoc
-           [ "schema", `String Keeper_chat_recovery_command.result_schema
-           ; "ok", `Bool false
-           ; "error", Keeper_chat_recovery_command.input_error_to_json error
-           ])
-     | Ok command ->
-       let result =
-         Keeper_chat_recovery_command.execute ~now:(Time_compat.now ()) command
-       in
-       let audit =
-         Keeper_chat_recovery_command.audit
-           (Mcp_server.workspace_config state)
-           ~actor:agent_name
-           command
-           ~outcome:
-             (match result with
-              | Ok _ -> Audit_log.Success
-              | Error error ->
-                Audit_log.Failure
-                  (Keeper_chat_queue.mutation_error_to_string error))
-         |> Keeper_chat_recovery_command.audit_json
-       in
-       (match result with
-        | Ok report ->
-          respond (Keeper_chat_recovery_command.success_json ~audit command report)
-        | Error error ->
-          respond
-            ~status:(keeper_chat_recovery_error_status error)
-            (Keeper_chat_recovery_command.mutation_error_json ~audit error)))
 
 let keeper_board_attention_quarantine_error_status = function
   | Keeper_board_attention_quarantine_command.Candidate_state_conflict _

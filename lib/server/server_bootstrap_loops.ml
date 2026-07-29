@@ -200,7 +200,7 @@ let queued_chat_projection (queued_message : Keeper_chat_queue.queued_message) =
 
 (* Queue-consumer turns need the same synthetic
    [Server_routes_http_keeper_stream.keeper_chat_stream_request] built from
-   a dequeued/leased [Keeper_chat_queue.queued_message], and a duplicated
+   a dequeued/claimed [Keeper_chat_queue.queued_message], and a duplicated
    copy would silently drift out of sync with [queued_chat_projection] the
    next time either changes. *)
 let payload_of_queued_message ~keeper_name
@@ -541,13 +541,13 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
     queue_recovery.load_errors;
   if
     queue_recovery.restored_keeper_count > 0
-    || queue_recovery.recovery_required_receipt_count > 0
+    || queue_recovery.interrupted_receipt_count > 0
     || queue_recovery.load_errors <> []
   then
     Log.Keeper.warn
-      "keeper_chat_queue: recovery restored_keepers=%d recovery_required_receipts=%d failures=%d"
+      "keeper_chat_queue: startup restored_keepers=%d interrupted_receipts=%d failures=%d"
       queue_recovery.restored_keeper_count
-      queue_recovery.recovery_required_receipt_count
+      queue_recovery.interrupted_receipt_count
       (List.length queue_recovery.load_errors);
   (* Request status is recovered only after queue receipts converge: a poller
      must never observe a final Lost status while its durable terminal row is
@@ -1641,7 +1641,7 @@ let start_keeper_loops_owned
       try
         (* A durable queue mutation both refreshes the dashboard (SSE) and must
            wake this consumer: [notify_transition] is a non-blocking Wake_inbox
-           post, so a message enqueued after boot is actually leased and
+           post, so a message enqueued after boot is actually claimed and
            delivered instead of sitting queued until the next unrelated wake. *)
         Keeper_chat_queue.set_transition_observer
           (Some

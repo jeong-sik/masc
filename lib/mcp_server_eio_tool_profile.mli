@@ -56,11 +56,10 @@ val managed_agent_instructions : string
     surface and the managed-agent surface diverge in inventory. *)
 
 val operator_remote_instructions : string
-(** [Operator_remote] profile instructions.  Names the 7 operator
+(** [Operator_remote] profile instructions.  Names the 6 operator
     tools ([masc_operator_snapshot], [masc_operator_digest],
     [masc_operator_action],
     [masc_operator_board_attention_quarantine_requeue],
-    [masc_operator_chat_recovery_resolve],
     [masc_operator_task_recovery_resolve], [masc_operator_confirm])
     and the confirm_token contract for [confirm_required = true]. *)
 

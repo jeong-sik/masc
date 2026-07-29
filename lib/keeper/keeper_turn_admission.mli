@@ -45,7 +45,7 @@ type autonomous_block =
       ; inflight_count : int
       }
     (** The slot mutex itself is free and pending [Keeper_chat_queue] receipts
-        exist without a currently leased receipt; the standard autonomous lane
+        exist without a currently claimed receipt; the standard autonomous lane
         yields so the chat consumer can drain them. Inflight receipts are not
         a second turn lock: an executing chat is fenced by the actual slot,
         while a stranded/finalizing receipt must not halt unrelated progress.

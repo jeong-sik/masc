@@ -106,19 +106,19 @@ let await_receipt ~clock ~seconds ~keeper_name ~receipt_id ~accept =
 
 let is_delivered = function
   | Keeper_chat_queue.Delivered _ -> true
-  | Pending | Inflight _ | Recovery_required _ | Failed _ -> false
+  | Pending | Inflight _ | Failed _ -> false
 
 let is_failed = function
   | Keeper_chat_queue.Failed _ -> true
-  | Pending | Inflight _ | Recovery_required _ | Delivered _ -> false
+  | Pending | Inflight _ | Delivered _ -> false
 
 let is_inflight = function
   | Keeper_chat_queue.Inflight _ -> true
-  | Pending | Recovery_required _ | Delivered _ | Failed _ -> false
+  | Pending | Delivered _ | Failed _ -> false
 
 let is_pending = function
   | Keeper_chat_queue.Pending -> true
-  | Inflight _ | Recovery_required _ | Delivered _ | Failed _ -> false
+  | Inflight _ | Delivered _ | Failed _ -> false
 
 let receipt_id_in_active receipt_id receipts =
   List.exists
@@ -143,7 +143,7 @@ let receipt_id_is_terminal ~keeper_name receipt_id =
       { receipt =
           None
           | Some
-              { state = Pending | Inflight _ | Recovery_required _; _ }
+              { state = Pending | Inflight _; _ }
       ; _
       }
   | Error _ ->
@@ -213,7 +213,7 @@ let test_delivery_finalizes_terminal_receipt () =
            | Keeper_chat_queue.Delivered completion ->
              check "delivery stores the typed outcome reference"
                (completion.outcome_ref = Some "trace-delivered#1")
-           | Pending | Inflight _ | Recovery_required _ | Failed _ ->
+           | Pending | Inflight _ | Failed _ ->
              check "delivery state is Delivered" false));
       (match !captured with
        | Some (dispatched_keeper, queued_message) ->
@@ -266,13 +266,13 @@ let test_explicit_failure_finalizes_failed_receipt () =
                   "connector rejected outbound delivery");
              check "failure outcome reference is preserved"
                (failure.outcome_ref = Some "trace-delivery-failed#1")
-           | Pending | Inflight _ | Recovery_required _ | Delivered _ ->
+           | Pending | Inflight _ | Delivered _ ->
              check "explicit failure state is Failed" false));
       check_terminal_snapshot ~label:"explicit failure" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
-let test_structured_cancellation_nacks_and_preserves_receipt () =
-  Printf.printf "Test: structured cancellation nacks the unchanged receipt\n%!";
+let test_structured_cancellation_terminalizes_claim () =
+  Printf.printf "Test: structured cancellation terminalizes an unproven claim\n%!";
   with_env (fun ~base ~clock ->
     match
       enqueue_checked ~label:"cancellation enqueue" ~keeper_name
@@ -303,7 +303,11 @@ let test_structured_cancellation_nacks_and_preserves_receipt () =
            ~receipt_id:accepted.receipt_id
        with
        | Ok
-           { receipt = Some { state = Keeper_chat_queue.Pending; receipt_id }
+           { receipt =
+               Some
+                 { state = Keeper_chat_queue.Failed { kind = Interrupted; _ }
+                 ; receipt_id
+                 }
            ; _
            } ->
          check "cancellation preserves the accepted receipt id"
@@ -312,21 +316,21 @@ let test_structured_cancellation_nacks_and_preserves_receipt () =
            { receipt =
                Some
                  { state =
-                     Inflight _ | Recovery_required _ | Delivered _ | Failed _
+                     Pending | Inflight _ | Delivered _ | Failed _
                  ; _
                  }
              | None
            ; _
            }
        | Error _ ->
-         check "cancellation returns the receipt to Pending" false);
+         check "cancellation terminalizes the receipt" false);
       let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
-      check "cancelled receipt remains pending"
-        (receipt_id_in_active accepted.receipt_id snapshot.pending);
-      check "cancelled receipt is not left inflight"
+      check "cancelled receipt is not pending"
+        (not (receipt_id_in_active accepted.receipt_id snapshot.pending));
+      check "cancelled receipt is not inflight"
         (not (receipt_id_in_active accepted.receipt_id snapshot.inflight));
-      check "cancelled receipt is not terminal"
-        (not (receipt_id_is_terminal ~keeper_name accepted.receipt_id)))
+      check "cancelled receipt is terminal"
+        (receipt_id_is_terminal ~keeper_name accepted.receipt_id))
 
 let test_dispatch_is_concurrent_per_keeper () =
   Printf.printf "Test: queued turns dispatch concurrently across keepers\n%!";
@@ -428,7 +432,7 @@ let test_finalization_persistence_retry_does_not_redeliver () =
       in
       with_consumer_switch (fun sw ->
         start_consumer ~sw ~clock ~base_path:base ~handle_turn;
-        check "failed terminal persist leaves the exact lease observable"
+        check "failed terminal persist leaves the exact claim observable"
           (match
              await_receipt ~clock ~seconds:5.0 ~keeper_name
                ~receipt_id:accepted.receipt_id ~accept:is_inflight
@@ -450,7 +454,7 @@ let test_finalization_persistence_retry_does_not_redeliver () =
            | Keeper_chat_queue.Delivered completion ->
              check "retried finalization preserves the outcome reference"
                (completion.outcome_ref = Some "trace-finalized-after-retry#3")
-           | Pending | Inflight _ | Recovery_required _ | Failed _ ->
+           | Pending | Inflight _ | Failed _ ->
              check "retried finalization reaches Delivered" false));
       check "finalization retry does not re-run handle_turn" (!calls = 1);
       check_terminal_snapshot ~label:"retried finalization" ~keeper_name
@@ -530,7 +534,7 @@ let test_invalid_delivered_turn_ref_fails_closed () =
           check "invalid Delivered ref has diagnostic detail"
             (String.trim failure.detail <> "")
         | Some
-            { state = Pending | Inflight _ | Recovery_required _ | Delivered _
+            { state = Pending | Inflight _ | Delivered _
             ; _
             }
         | None ->
@@ -591,7 +595,7 @@ let test_invalid_delivery_diagnostic_does_not_block_lane () =
                (failure.outcome_ref = None)
            | Some
                { state =
-                   Pending | Inflight _ | Recovery_required _ | Delivered _
+                   Pending | Inflight _ | Delivered _
                ; _
                }
            | None ->
@@ -633,7 +637,7 @@ let test_shutdown_fence_keeps_receipt_pending_until_rollback () =
       with_consumer_switch (fun sw ->
         start_consumer ~sw ~clock ~base_path:base ~handle_turn;
         Eio.Time.sleep clock 1.2;
-        check "consumer does not lease through the shutdown fence" (!calls = 0);
+        check "consumer does not claim through the shutdown fence" (!calls = 0);
         check "fenced receipt remains Pending"
           (match
              Keeper_chat_queue.lookup_receipt ~keeper_name
@@ -645,7 +649,6 @@ let test_shutdown_fence_keeps_receipt_pending_until_rollback () =
                    Some
                      { state =
                          Inflight _
-                         | Recovery_required _
                          | Delivered _
                          | Failed _
                      ; _
@@ -674,9 +677,9 @@ let test_shutdown_fence_keeps_receipt_pending_until_rollback () =
       check_terminal_snapshot ~label:"shutdown rollback" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
-let test_typed_admission_race_nacks_then_retries () =
+let test_typed_admission_race_requeues_then_retries () =
   Printf.printf
-    "Test: typed admission race nacks the lease and retries without Failed\n%!";
+    "Test: typed admission race requeues the claim and retries without Failed\n%!";
   with_env (fun ~base ~clock ->
     match
       enqueue_checked ~label:"typed deferral enqueue" ~keeper_name
@@ -711,7 +714,7 @@ let test_typed_admission_race_nacks_then_retries () =
       in
       with_consumer_switch (fun sw ->
         start_consumer ~sw ~clock ~base_path:base ~handle_turn;
-        check "first leased attempt returns typed Deferred"
+        check "first claimed attempt returns typed Deferred"
           (await_promise ~clock ~seconds:5.0 first_deferred);
         check "typed Deferred returns the same receipt to Pending"
           (match
@@ -739,14 +742,14 @@ let test_typed_admission_race_nacks_then_retries () =
 let () =
   test_delivery_finalizes_terminal_receipt ();
   test_explicit_failure_finalizes_failed_receipt ();
-  test_structured_cancellation_nacks_and_preserves_receipt ();
+  test_structured_cancellation_terminalizes_claim ();
   test_dispatch_is_concurrent_per_keeper ();
   test_finalization_persistence_retry_does_not_redeliver ();
   test_busy_turn_release_wakes_pending_receipt ();
   test_invalid_delivered_turn_ref_fails_closed ();
   test_invalid_delivery_diagnostic_does_not_block_lane ();
   test_shutdown_fence_keeps_receipt_pending_until_rollback ();
-  test_typed_admission_race_nacks_then_retries ();
+  test_typed_admission_race_requeues_then_retries ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

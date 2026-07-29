@@ -24,8 +24,6 @@ import {
   probeKeeperRuntime,
   reconcileKeeperChatReceipts,
   cancelKeeperChatPendingEntry,
-  requeueKeeperChatRecoveryEntry,
-  cancelKeeperChatRecoveryEntry,
   recoverKeeperRuntime,
   resumePendingKeeperChatRequests,
   sendKeeperThreadMessage,
@@ -537,7 +535,6 @@ function ServerQueueStatus({
   busy,
   pendingCount,
   inflightCount,
-  recoveryRequiredCount,
   persistenceBlockedCount,
   readErrorCount,
   projectionError,
@@ -548,7 +545,6 @@ function ServerQueueStatus({
   busy: boolean
   pendingCount: number
   inflightCount: number
-  recoveryRequiredCount: number
   persistenceBlockedCount: number
   readErrorCount: number
   projectionError?: string | null
@@ -562,7 +558,6 @@ function ServerQueueStatus({
     && !busy
     && pendingCount === 0
     && inflightCount === 0
-    && recoveryRequiredCount === 0
     && persistenceBlockedCount === 0
     && readErrorCount === 0
   ) return null
@@ -572,7 +567,6 @@ function ServerQueueStatus({
       data-server-chat-queue
       data-server-chat-queue-pending=${pendingCount}
       data-server-chat-queue-inflight=${inflightCount}
-      data-server-chat-queue-recovery-required=${recoveryRequiredCount}
       data-server-chat-queue-persistence-blocked=${persistenceBlockedCount}
       data-server-chat-queue-read-errors=${readErrorCount}
       data-server-chat-queue-projection=${projectionError
@@ -590,9 +584,6 @@ function ServerQueueStatus({
           : null}
         ${pendingCount > 0
           ? html`<span class="rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5" data-server-chat-queue-state="pending">서버 대기 ${pendingCount}</span>`
-          : null}
-        ${recoveryRequiredCount > 0
-          ? html`<span class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-[var(--color-status-err)]" data-server-chat-queue-state="recovery-required">배송 복구 확인 필요 ${recoveryRequiredCount}</span>`
           : null}
         ${persistenceBlockedCount > 0
           ? html`<span class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-[var(--color-status-err)]" data-server-chat-queue-state="persistence-blocked">영속화 조정 필요 ${persistenceBlockedCount}</span>`
@@ -710,10 +701,6 @@ export function KeeperConversationPanel({
   const isKeeperBusy = Boolean(serverBusy && !sending)
   const serverPendingCount = Math.max(0, inventoryEntry?.sources?.chat_queue_pending ?? 0)
   const serverInflightCount = Math.max(0, inventoryEntry?.sources?.chat_queue_inflight ?? 0)
-  const serverRecoveryRequiredCount = Math.max(
-    0,
-    inventoryEntry?.sources?.chat_queue_recovery_required ?? 0,
-  )
   const serverPersistenceBlockedCount = Math.max(
     0,
     inventoryEntry?.sources?.chat_queue_persistence_blocked ?? 0,
@@ -799,10 +786,6 @@ export function KeeperConversationPanel({
         setQueueVersion(value => value + 1)
         showToast('서버 대기를 취소하고 편집 화면으로 옮겼습니다.', 'success')
       },
-      onRecoveryRequeue: (entry: KeeperConversationEntry) =>
-        requeueKeeperChatRecoveryEntry(keeperName, entry),
-      onRecoveryCancel: (entry: KeeperConversationEntry, detail: string) =>
-        cancelKeeperChatRecoveryEntry(keeperName, entry, detail),
     }),
     [keeperName, onInspectTurn],
   )
@@ -986,7 +969,6 @@ export function KeeperConversationPanel({
       busy=${serverBusy}
       pendingCount=${serverPendingCount}
       inflightCount=${serverInflightCount}
-      recoveryRequiredCount=${serverRecoveryRequiredCount}
       persistenceBlockedCount=${serverPersistenceBlockedCount}
       readErrorCount=${serverQueueReadErrorCount}
       projectionError=${toolsProjectionError}

@@ -786,7 +786,6 @@ let test_handle_request_tools_list_operator_profile () =
                    [
                      "masc_operator_action";
                      "masc_operator_board_attention_quarantine_requeue";
-                     "masc_operator_chat_recovery_resolve";
                      "masc_operator_confirm";
                      "masc_operator_digest";
                      "masc_operator_snapshot";

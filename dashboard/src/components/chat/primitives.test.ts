@@ -749,55 +749,6 @@ describe('ChatTranscript', () => {
     expect(onClick.mock.calls[0]?.[0].id).toBe('a1')
   })
 
-  it('renders only exact single-receipt recovery decisions', async () => {
-    const onRecoveryRequeue = vi.fn().mockResolvedValue(undefined)
-    const onRecoveryCancel = vi.fn().mockResolvedValue(undefined)
-    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('operator verified no delivery')
-    const target = entry({
-      id: 'recovery-receipt',
-      role: 'assistant',
-      source: 'direct_assistant',
-      label: 'sangsu',
-      text: 'queued',
-      delivery: 'queued',
-      details: {
-        queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-        queueRevision: '8',
-        queueState: 'recovery_required',
-      },
-    })
-
-    render(
-      html`<${ChatTranscript}
-        entries=${[target]}
-        emptyText="empty"
-        variant="messenger"
-        action=${{ onRecoveryRequeue, onRecoveryCancel }}
-      />`,
-      container,
-    )
-
-    const requeue = container.querySelector(
-      '[data-chat-queue-recovery-action="requeue_unconfirmed"]',
-    ) as HTMLButtonElement
-    const cancel = container.querySelector(
-      '[data-chat-queue-recovery-action="cancel_unconfirmed"]',
-    ) as HTMLButtonElement
-    expect(requeue).not.toBeNull()
-    expect(cancel).not.toBeNull()
-
-    fireEvent.click(requeue)
-    await waitFor(() => expect(onRecoveryRequeue).toHaveBeenCalledWith(target))
-    fireEvent.click(cancel)
-    await waitFor(() => {
-      expect(onRecoveryCancel).toHaveBeenCalledWith(
-        target,
-        'operator verified no delivery',
-      )
-    })
-    expect(prompt).toHaveBeenCalledTimes(1)
-  })
-
   it('offers edit and cancel only while a durable receipt is pending', async () => {
     const onPendingEdit = vi.fn().mockResolvedValue(undefined)
     const onPendingCancel = vi.fn().mockResolvedValue(undefined)

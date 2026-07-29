@@ -11,10 +11,9 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Operator_remote
 
 let operator_remote_instructions =
-  "MASC remote operator profile exposes seven operator tools: \
-masc_operator_snapshot, masc_operator_digest, masc_operator_action, masc_operator_board_attention_quarantine_requeue, masc_operator_chat_recovery_resolve, masc_operator_task_recovery_resolve, and masc_operator_confirm. \
+  "MASC remote operator profile exposes six operator tools: \
+masc_operator_snapshot, masc_operator_digest, masc_operator_action, masc_operator_board_attention_quarantine_requeue, masc_operator_task_recovery_resolve, and masc_operator_confirm. \
 masc_operator_board_attention_quarantine_requeue accepts only with the exact Keeper, partition, candidate, and quarantine id observed from durable state; it never auto-retries. \
-masc_operator_chat_recovery_resolve accepts only the exact receipt_id, revision, and lease_id observed from queue state; it never auto-redelivers. \
 masc_operator_task_recovery_resolve accepts only the exact task owner and backlog version observed from Task state; it performs no liveness inference. \
 When confirm_required=true, you must call masc_operator_confirm with the returned confirm_token before the action executes. \
 Do not assume access to any other MASC tool from this endpoint."
@@ -207,7 +206,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_operator_digest", "Operator Digest");
   ("masc_operator_action", "Operator Action");
   ("masc_operator_board_attention_quarantine_requeue", "Requeue Board Quarantine");
-  ("masc_operator_chat_recovery_resolve", "Resolve Chat Recovery");
   ("masc_operator_task_recovery_resolve", "Resolve Task Recovery");
   ("masc_operator_confirm", "Operator Confirm");
   (* SDK projections *)

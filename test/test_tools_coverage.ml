@@ -431,7 +431,6 @@ let test_retired_front_door_tools_absent_from_schema_inventory () =
       "masc_operator_digest";
       "masc_operator_action";
       "masc_operator_board_attention_quarantine_requeue";
-      "masc_operator_chat_recovery_resolve";
       "masc_operator_task_recovery_resolve";
       "masc_operator_confirm";
       "masc_operator_judgment_write";

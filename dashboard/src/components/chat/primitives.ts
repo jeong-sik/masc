@@ -383,8 +383,6 @@ type ChatTranscriptAction = {
   onClick?: (entry: KeeperConversationEntry) => void
   onPendingCancel?: (entry: KeeperConversationEntry) => Promise<void>
   onPendingEdit?: (entry: KeeperConversationEntry) => Promise<void>
-  onRecoveryRequeue?: (entry: KeeperConversationEntry) => Promise<void>
-  onRecoveryCancel?: (entry: KeeperConversationEntry, detail: string) => Promise<void>
 }
 
 export const THINKING_TRACE_PREVIEW_CHARS = 2400
@@ -452,7 +450,6 @@ function QueueReceiptBadge({ entry, action }: {
   entry: KeeperConversationEntry
   action?: ChatTranscriptAction
 }) {
-  const [recoveryPending, setRecoveryPending] = useState<'requeue' | 'cancel' | null>(null)
   const [pendingAction, setPendingAction] = useState<'edit' | 'cancel' | null>(null)
   const receiptId = entry.details?.queueReceiptId?.trim()
   const shutdownOperationId = entry.details?.queueShutdownOperationId?.trim()
@@ -462,7 +459,6 @@ function QueueReceiptBadge({ entry, action }: {
     switch (queueState) {
       case 'pending': return '대기 중'
       case 'inflight': return '처리 중'
-      case 'recovery_required': return '복구 확인 필요'
       case 'delivered': return '처리 완료'
       case 'failed': return '처리 실패'
       default: return '상태 확인 필요'
@@ -487,29 +483,6 @@ function QueueReceiptBadge({ entry, action }: {
     label,
     shutdownOperationId ? `shutdown operation ${shutdownOperationId}` : null,
   ].filter((value): value is string => value !== null).join(' · ')
-  const runRecovery = async (
-    kind: 'requeue' | 'cancel',
-    operation: () => Promise<void>,
-  ) => {
-    setRecoveryPending(kind)
-    try {
-      await operation()
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error')
-    } finally {
-      setRecoveryPending(null)
-    }
-  }
-  const cancelRecovery = () => {
-    if (!action?.onRecoveryCancel) return
-    const detail = window.prompt('미확인 배송을 취소하는 이유를 입력하세요.')
-    if (detail === null) return
-    if (!detail || detail !== detail.trim()) {
-      showToast('취소 이유는 공백 없이 정확히 입력해야 합니다.', 'error')
-      return
-    }
-    void runRecovery('cancel', () => action.onRecoveryCancel!(entry, detail))
-  }
   const runPendingAction = async (
     kind: 'edit' | 'cancel',
     operation: () => Promise<void>,
@@ -561,30 +534,6 @@ function QueueReceiptBadge({ entry, action }: {
                 void runPendingAction('cancel', () => action.onPendingCancel!(entry))
               }}
             >${pendingAction === 'cancel' ? '취소 중...' : '취소'}</button>
-          `
-        : null}
-      ${queueState === 'recovery_required' && action?.onRecoveryRequeue
-        ? html`
-            <button
-              type="button"
-              disabled=${recoveryPending !== null}
-              class="rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5 text-2xs font-semibold text-[var(--warn-bright)] disabled:opacity-50"
-              data-chat-queue-recovery-action="requeue_unconfirmed"
-              onClick=${() => {
-                void runRecovery('requeue', () => action.onRecoveryRequeue!(entry))
-              }}
-            >${recoveryPending === 'requeue' ? '반영 중...' : '미확인 배송 재큐잉'}</button>
-          `
-        : null}
-      ${queueState === 'recovery_required' && action?.onRecoveryCancel
-        ? html`
-            <button
-              type="button"
-              disabled=${recoveryPending !== null}
-              class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-status-err)] disabled:opacity-50"
-              data-chat-queue-recovery-action="cancel_unconfirmed"
-              onClick=${cancelRecovery}
-            >${recoveryPending === 'cancel' ? '반영 중...' : '미확인 배송 취소'}</button>
           `
         : null}
     </span>
@@ -738,9 +687,6 @@ function overviewRows(details: KeeperConversationDetails): Array<{ label: string
     typeof details.queueRevision === 'string' ? { label: '큐 revision', value: details.queueRevision } : null,
     typeof details.queuePendingCount === 'number' ? { label: '접수 시 pending', value: `${details.queuePendingCount}` } : null,
     typeof details.queueInflightCount === 'number' ? { label: '접수 시 inflight', value: `${details.queueInflightCount}` } : null,
-    typeof details.queueRecoveryRequiredCount === 'number'
-      ? { label: '접수 시 recovery required', value: `${details.queueRecoveryRequiredCount}` }
-      : null,
     typeof details.generation === 'number' ? { label: '세대', value: `${details.generation}` } : null,
   ].filter((row): row is { label: string; value: string } => Boolean(row))
 }
@@ -2692,7 +2638,6 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-queue-revision=${entry.details?.queueRevision ?? undefined}
       data-chat-queue-pending-count=${entry.details?.queuePendingCount ?? undefined}
       data-chat-queue-inflight-count=${entry.details?.queueInflightCount ?? undefined}
-      data-chat-queue-recovery-required-count=${entry.details?.queueRecoveryRequiredCount ?? undefined}
       data-chat-attachment-count=${attachments.length}
       data-chat-server-attach-block-count=${attachBlocks.length}
       data-chat-multimodal-sources=${multimodalSources.length > 0 ? multimodalSources.join(',') : undefined}

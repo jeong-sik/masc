@@ -284,11 +284,11 @@ let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
      check "pending receipt blocks direct admission" true
    | `Busy _ | `Ran () -> check "pending receipt blocks direct admission" false);
   check "pending receipt is not overtaken" (not !direct_ran);
-  let lease =
-    match Keeper_chat_queue.lease_next ~keeper_name with
-    | `Leased lease -> lease
-    | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
-      failwith "expected the committed receipt to lease"
+  let claim =
+    match Keeper_chat_queue.claim_next ~keeper_name with
+    | `Claimed claim -> claim
+    | `Empty | `Already_claimed _ | `Error _ ->
+      failwith "expected the committed receipt to claim"
   in
   (match
      Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () ->
@@ -298,13 +298,13 @@ let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
    | `Ran () -> check "inflight receipt blocks direct admission" false);
   check "inflight receipt is not overtaken" (not !direct_ran);
   (match
-     Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
+     Keeper_chat_queue.complete_claim ~keeper_name ~attempt_id:claim.attempt_id
        ~outcome:
          (Keeper_chat_queue.Mark_delivered
             { completed_at = Time_compat.now (); outcome_ref = Some "turn#1" })
    with
-   | `Finalized _ -> ()
-   | `Unknown_lease | `Error _ -> failwith "expected the lease to finalize");
+   | `Completed _ -> ()
+   | `Unknown_claim | `Error _ -> failwith "expected the claim to complete");
   (match
      Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () ->
        direct_ran := true)
@@ -642,15 +642,15 @@ let test_autonomous_yields_to_queued_connector_message () =
      check "run_if_free yields (Busy) while a connector message is queued" true
    | `Ran () ->
      check "run_if_free must not admit while a connector message is queued" false);
-  (* Leasing changes the receipt to Inflight but does not make it disappear.
+  (* Claiming changes the receipt to Inflight but does not make it disappear.
      The actual turn mutex, not that durable receipt, is the execution fence.
      A free mutex plus an inflight receipt must stay progress-capable even when
      a second message is pending — this is the live timeout/orphan shape. *)
-  let lease =
-    match Keeper_chat_queue.lease_next ~keeper_name with
-    | `Leased lease -> Some lease
-    | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
-      check "lease_next leases the queued connector message" false;
+  let claim =
+    match Keeper_chat_queue.claim_next ~keeper_name with
+    | `Claimed claim -> Some claim
+    | `Empty | `Already_claimed _ | `Error _ ->
+      check "claim_next claims the queued connector message" false;
       None
   in
   (match Keeper_chat_queue.enqueue ~keeper_name { queued_message with content = "next" } with
@@ -661,25 +661,25 @@ let test_autonomous_yields_to_queued_connector_message () =
         ^ Keeper_chat_queue.mutation_error_to_string error)
        false);
   let inflight = Keeper_chat_queue.snapshot ~keeper_name in
-  check "leased receipt remains visible" (List.length inflight.inflight = 1);
+  check "claimed receipt remains visible" (List.length inflight.inflight = 1);
   check "second receipt remains pending" (List.length inflight.pending = 1);
   (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
    | `Ran () ->
      check "stranded/finalizing inflight receipt does not become a second lock" true
    | `Busy _ ->
      check "inflight receipt with a free turn mutex must not halt progress" false);
-  (match lease with
+  (match claim with
    | None -> ()
-   | Some lease ->
+   | Some claim ->
      (match
-        Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
+        Keeper_chat_queue.complete_claim ~keeper_name ~attempt_id:claim.attempt_id
           ~outcome:
             (Keeper_chat_queue.Mark_delivered
                { completed_at = 2.0; outcome_ref = None })
       with
-      | `Finalized _ -> ()
-      | `Unknown_lease | `Error _ ->
-        check "finalize commits the terminal receipt" false));
+      | `Completed _ -> ()
+      | `Unknown_claim | `Error _ ->
+        check "completion commits the terminal receipt" false));
   (* With the inflight receipt gone, the still-pending chat is again the
      authoritative backlog and the autonomous lane yields to its consumer. *)
   (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
@@ -688,21 +688,21 @@ let test_autonomous_yields_to_queued_connector_message () =
      check "pending-only backlog still has chat priority" true
    | `Busy _ | `Ran () ->
      check "pending-only backlog must retain chat priority" false);
-  (match Keeper_chat_queue.lease_next ~keeper_name with
-   | `Leased lease ->
+  (match Keeper_chat_queue.claim_next ~keeper_name with
+   | `Claimed claim ->
      (match
-        Keeper_chat_queue.finalize
+        Keeper_chat_queue.complete_claim
           ~keeper_name
-          ~lease_id:lease.lease_id
+          ~attempt_id:claim.attempt_id
           ~outcome:
             (Keeper_chat_queue.Mark_delivered
                { completed_at = 3.0; outcome_ref = None })
       with
-      | `Finalized _ -> ()
-      | `Unknown_lease | `Error _ ->
-        check "second finalize commits the terminal receipt" false)
-   | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
-     check "second receipt leases for cleanup" false);
+      | `Completed _ -> ()
+      | `Unknown_claim | `Error _ ->
+        check "second completion commits the terminal receipt" false)
+   | `Empty | `Already_claimed _ | `Error _ ->
+     check "second receipt claims for cleanup" false);
   let settled = Keeper_chat_queue.snapshot ~keeper_name in
   check
     "queue has no active receipts after finalization"
@@ -845,13 +845,13 @@ let test_compaction_lane_bypasses_chat_backlog () =
    with
    | `Ran 7 -> check "compaction lane admits despite a pending receipt" true
    | `Ran _ | `Busy _ -> check "compaction lane admits despite a pending receipt" false);
-  (* Leasing moves the receipt to inflight. Both autonomous entry points use
+  (* Claiming moves the receipt to inflight. Both autonomous entry points use
      the actual turn mutex as the execution fence; the durable receipt is not
      a second global lock. *)
-  (match Keeper_chat_queue.lease_next ~keeper_name with
-   | `Leased _ -> ()
-   | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
-     check "lease_next leases the queued message" false);
+  (match Keeper_chat_queue.claim_next ~keeper_name with
+   | `Claimed _ -> ()
+   | `Empty | `Already_claimed _ | `Error _ ->
+     check "claim_next claims the queued message" false);
   (match
      Keeper_turn_admission.run_compaction_if_free ~base_path ~keeper_name (fun () -> 8)
    with

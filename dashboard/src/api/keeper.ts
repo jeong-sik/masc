@@ -708,13 +708,7 @@ export type KeeperChatReceiptFailureKind = KeeperQueueReceiptFailureKind
 
 export type KeeperChatReceiptState =
   | { kind: 'pending' }
-  | { kind: 'inflight'; leaseId: string; startedAt: number }
-  | {
-      kind: 'recovery_required'
-      leaseId: string
-      startedAt: number
-      dispatchable: false
-    }
+  | { kind: 'inflight'; attemptId: string; startedAt: number }
   | { kind: 'delivered'; completedAt: number; outcomeRef: string | null }
   | {
       kind: 'failed'
@@ -731,20 +725,6 @@ export interface KeeperChatReceipt {
   state: KeeperChatReceiptState
 }
 
-export type KeeperChatRecoveryDecision =
-  | { kind: 'requeue_unconfirmed' }
-  | {
-      kind: 'cancel_unconfirmed'
-      detail: string
-      outcomeRef: string | null
-    }
-
-export interface KeeperChatRecoveryResult {
-  decision: KeeperChatRecoveryDecision['kind']
-  receipt: KeeperChatReceipt
-  audit: { recorded: true } | { recorded: false; error: string }
-}
-
 export interface KeeperChatPendingCancelResult {
   receipt: KeeperChatReceipt
   audit: { recorded: true } | { recorded: false; error: string }
@@ -758,7 +738,7 @@ const KEEPER_CHAT_RECEIPT_FAILURE_KINDS = new Set<KeeperChatReceiptFailureKind>(
   'delivery_failed',
   'cancelled',
   'internal_error',
-  'recovery_interrupted',
+  'interrupted',
 ])
 
 export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
@@ -795,21 +775,12 @@ export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
       state = { kind }
       break
     case 'inflight': {
-      const leaseId = asString(rawState.lease_id, '').trim()
+      const attemptId = asString(rawState.attempt_id, '').trim()
       const startedAt = asNumber(rawState.started_at)
-      if (!leaseId || typeof startedAt !== 'number') {
-        throw new Error('Keeper chat inflight receipt is missing lease metadata')
+      if (!attemptId || typeof startedAt !== 'number') {
+        throw new Error('Keeper chat inflight receipt is missing attempt metadata')
       }
-      state = { kind, leaseId, startedAt }
-      break
-    }
-    case 'recovery_required': {
-      const leaseId = asString(rawState.lease_id, '').trim()
-      const startedAt = asNumber(rawState.started_at)
-      if (!leaseId || typeof startedAt !== 'number' || rawState.dispatchable !== false) {
-        throw new Error('Keeper chat recovery-required receipt has invalid recovery evidence')
-      }
-      state = { kind, leaseId, startedAt, dispatchable: false }
+      state = { kind, attemptId, startedAt }
       break
     }
     case 'delivered': {
@@ -894,52 +865,6 @@ export async function cancelKeeperChatPendingReceipt(
         error: asString(raw.audit.error, '').trim() || 'pending cancellation audit persistence failed',
       }
   return { receipt, audit }
-}
-
-export async function resolveKeeperChatRecovery(
-  keeperName: string,
-  receiptId: string,
-  expectedRevision: string,
-  leaseId: string,
-  decision: KeeperChatRecoveryDecision,
-): Promise<KeeperChatRecoveryResult> {
-  const decisionPayload = decision.kind === 'requeue_unconfirmed'
-    ? { kind: decision.kind }
-    : {
-        kind: decision.kind,
-        detail: decision.detail,
-        outcome_ref: decision.outcomeRef,
-      }
-  const raw = await post<unknown>(
-    `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/receipts/${encodeURIComponent(receiptId)}/recovery`,
-    {
-      schema: 'keeper_chat_queue.recovery.request.v1',
-      expected_revision: expectedRevision,
-      lease_id: leaseId,
-      decision: decisionPayload,
-    },
-  )
-  if (
-    !isRecord(raw)
-    || raw.schema !== 'keeper_chat_queue.recovery.result.v1'
-    || raw.ok !== true
-    || raw.decision !== decision.kind
-    || !isRecord(raw.audit)
-    || typeof raw.audit.recorded !== 'boolean'
-  ) {
-    throw new Error('resolveKeeperChatRecovery: invalid response envelope')
-  }
-  const receipt = parseKeeperChatReceipt(raw.receipt)
-  if (receipt.keeperName !== keeperName || receipt.receiptId !== receiptId) {
-    throw new Error('resolveKeeperChatRecovery: response identity mismatch')
-  }
-  const audit = raw.audit.recorded
-    ? { recorded: true as const }
-    : {
-        recorded: false as const,
-        error: asString(raw.audit.error, '').trim() || 'recovery audit persistence failed',
-      }
-  return { decision: decision.kind, receipt, audit }
 }
 
 export async function fetchKeeperChatHistory(

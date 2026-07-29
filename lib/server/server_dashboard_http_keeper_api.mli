@@ -63,19 +63,6 @@ val handle_keeper_catchup_judge_post :
 (** Handle [POST /catchup-judge] by recomputing the keeper catch-up digest
     and starting an out-of-band Fusion judge run. *)
 
-val handle_keeper_chat_recovery_post :
-  Mcp_server.server_state ->
-  string ->
-  Httpun.Request.t ->
-  Httpun.Reqd.t ->
-  keeper_name:string ->
-  raw_receipt_id:string ->
-  string ->
-  unit
-(** Resolve exactly one recovery-required chat receipt using the caller's
-    revision and lease evidence. The route is wired only behind token-bound
-    [CanAdmin] authorization. *)
-
 val handle_keeper_chat_pending_cancel_post :
   Mcp_server.server_state ->
   string ->
@@ -85,8 +72,6 @@ val handle_keeper_chat_pending_cancel_post :
   raw_receipt_id:string ->
   string ->
   unit
-(** Cancel exactly one still-pending chat receipt. The route is token-bound
-    [CanAdmin]. *)
 
 val handle_keeper_board_attention_quarantine_recovery_post :
   Mcp_server.server_state ->

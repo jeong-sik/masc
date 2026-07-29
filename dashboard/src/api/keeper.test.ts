@@ -30,7 +30,6 @@ import {
   pauseKeeper,
   parseKeeperRuntimeTrace,
   parseKeeperChatReceipt,
-  resolveKeeperChatRecovery,
   queuedKeeperMessageError,
   queuedKeeperMessageToReply,
   resumeKeeper,
@@ -98,44 +97,27 @@ describe('keeper API module split compatibility', () => {
 })
 
 describe('Keeper chat durable receipt API', () => {
-  it('parses exact non-dispatchable recovery evidence', () => {
+  it('parses an inflight receipt with its stale-completion attempt id', () => {
     expect(parseKeeperChatReceipt({
       schema: 'keeper_chat_queue.receipt.v2',
       keeper_name: 'echo',
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: '8',
+      revision: '7',
       state: {
-        kind: 'recovery_required',
-        lease_id: 'lease_00000000-0000-4000-8000-000000000002',
+        kind: 'inflight',
+        attempt_id: 'attempt_00000000-0000-4000-8000-000000000002',
         started_at: 42,
-        dispatchable: false,
       },
     })).toEqual({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: '8',
+      revision: '7',
       state: {
-        kind: 'recovery_required',
-        leaseId: 'lease_00000000-0000-4000-8000-000000000002',
+        kind: 'inflight',
+        attemptId: 'attempt_00000000-0000-4000-8000-000000000002',
         startedAt: 42,
-        dispatchable: false,
       },
     })
-  })
-
-  it('rejects recovery evidence that claims automatic dispatchability', () => {
-    expect(() => parseKeeperChatReceipt({
-      schema: 'keeper_chat_queue.receipt.v2',
-      keeper_name: 'echo',
-      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: '8',
-      state: {
-        kind: 'recovery_required',
-        lease_id: 'lease_00000000-0000-4000-8000-000000000002',
-        started_at: 42,
-        dispatchable: true,
-      },
-    })).toThrow('invalid recovery evidence')
   })
 
   it('parses the closed terminal failure state', () => {
@@ -165,7 +147,7 @@ describe('Keeper chat durable receipt API', () => {
     })
   })
 
-  it.each(['recovery_interrupted'] as const)(
+  it.each(['interrupted'] as const)(
     'parses the canonical %s terminal failure kind',
     (failureKind) => {
       expect(parseKeeperChatReceipt({
@@ -253,50 +235,7 @@ describe('Keeper chat durable receipt API', () => {
     )
   })
 
-  it('resolves one exact recovery receipt with string revision and lease evidence', async () => {
-    const receiptId = 'chatq_00000000-0000-4000-8000-000000000001'
-    const leaseId = 'lease_00000000-0000-4000-8000-000000000002'
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        schema: 'keeper_chat_queue.recovery.result.v1',
-        ok: true,
-        decision: 'requeue_unconfirmed',
-        receipt: {
-          schema: 'keeper_chat_queue.receipt.v2',
-          keeper_name: 'keeper sangsu',
-          receipt_id: receiptId,
-          revision: '9223372036854775806',
-          state: { kind: 'pending' },
-        },
-        audit: { recorded: true },
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await resolveKeeperChatRecovery(
-      'keeper sangsu',
-      receiptId,
-      '9223372036854775805',
-      leaseId,
-      { kind: 'requeue_unconfirmed' },
-    )
-
-    expect(result.receipt.revision).toBe('9223372036854775806')
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/v1/keepers/keeper%20sangsu/chat/receipts/${receiptId}/recovery`,
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({
-          schema: 'keeper_chat_queue.recovery.request.v1',
-          expected_revision: '9223372036854775805',
-          lease_id: leaseId,
-          decision: { kind: 'requeue_unconfirmed' },
-        }),
-      }),
-    )
-  })
-
-  it('cancels one exact pending receipt with its observed revision', async () => {
+  it('cancels one exact pending receipt', async () => {
     const receiptId = 'chatq_00000000-0000-4000-8000-000000000003'
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

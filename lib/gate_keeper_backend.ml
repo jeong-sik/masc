@@ -162,7 +162,7 @@ let busy_ack_reply_text ?in_flight (request : Gate_protocol.message_request) =
    outbound adapter. *)
 let busy_ack_reply_text_queued
     ~(admission_rejection : Keeper_turn_admission.rejection)
-    ~keeper_name ~receipt_id ~recovery_required_count =
+    ~keeper_name ~receipt_id =
   let in_flight_text =
     match admission_rejection.in_flight with
     | None -> ""
@@ -171,29 +171,19 @@ let busy_ack_reply_text_queued
           " Current turn: %s."
           (Keeper_turn_admission.lane_to_string lane)
   in
-  match admission_rejection.shutdown_operation_id, recovery_required_count with
-  | Some operation_id, 0 ->
+  match admission_rejection.shutdown_operation_id with
+  | Some operation_id ->
       Printf.sprintf
         "%s is stopping under shutdown operation %s; your message is durably \
          queued and will wait for the next active lane (receipt_id=%s).%s"
         keeper_name
         (Keeper_shutdown_types.Operation_id.to_string operation_id)
         receipt_id in_flight_text
-  | Some operation_id, recovery_required_count ->
-      Printf.sprintf
-        "%s is stopping under shutdown operation %s; your message is durably queued, but this Keeper lane also has %d receipt(s) awaiting explicit delivery recovery and cannot dispatch automatically (receipt_id=%s).%s"
-        keeper_name
-        (Keeper_shutdown_types.Operation_id.to_string operation_id)
-        recovery_required_count receipt_id in_flight_text
-  | None, 0 ->
+  | None ->
       Printf.sprintf
         "%s is busy; your message is queued and will be answered once the current \
         turn finishes (receipt_id=%s).%s"
         keeper_name receipt_id in_flight_text
-  | None, recovery_required_count ->
-      Printf.sprintf
-        "%s accepted your message durably, but this Keeper lane has %d receipt(s) awaiting explicit delivery recovery and cannot dispatch automatically (receipt_id=%s).%s"
-        keeper_name recovery_required_count receipt_id in_flight_text
 
 let chat_queue_message_request ~channel ~channel_user_id ~keeper_name
     ~(admission_rejection : Keeper_turn_admission.rejection) ~metadata
@@ -222,8 +212,6 @@ let chat_queue_message_request ~channel ~channel_user_id ~keeper_name
       ; "queue_revision", Int64.to_string receipt.revision
       ; "pending_count", string_of_int receipt.pending_count
       ; "inflight_count", string_of_int receipt.inflight_count
-      ; ( "recovery_required_count"
-        , string_of_int receipt.recovery_required_count )
       ]
       @ shutdown_metadata
       @ metadata
@@ -443,8 +431,6 @@ let terminal_request_status = function
   | Keeper_chat_queue.Failed _ -> Gate_protocol.Failed
   | Keeper_chat_queue.Pending -> Gate_protocol.Queued
   | Keeper_chat_queue.Inflight _ -> Gate_protocol.Running
-  | Keeper_chat_queue.Recovery_required _ ->
-    Gate_protocol.Acceptance_uncertain
 
 let extra_mentions_for_metadata ~keeper_name metadata =
   match metadata_value "mentions_bound_keeper" metadata with
@@ -590,8 +576,6 @@ let accept_connector ~delivery ~clock ~config ~channel ~channel_user_id
                       redact_text
                         (busy_ack_reply_text_queued ~admission_rejection
                            ~keeper_name ~receipt_id:message_request.request_id
-                           ~recovery_required_count:
-                             receipt.recovery_required_count)
                   ; structured = None
                   ; stats = None
                   ; message_request = Some message_request

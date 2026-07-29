@@ -40,7 +40,6 @@ export function stateTone(state: string | null | undefined): StatusChipTone {
 export function sourceTone(source: string | null | undefined): StatusChipTone {
   switch (source) {
     case 'read_error':
-    case 'chat_queue_recovery_required':
     case 'chat_queue_persistence_blocked':
       return 'bad'
     case 'hitl_pending':
@@ -105,7 +104,7 @@ function WaitingRowReceiptDetail({ row }: { row: DashboardKeeperWaitingRow }) {
   if (!receiptId) return null
   const queueIndex = typeof detail?.queue_index === 'number' ? detail.queue_index : null
   const state = typeof lifecycle?.state === 'string' ? lifecycle.state : null
-  const leaseId = typeof lifecycle?.lease_id === 'string' ? lifecycle.lease_id : null
+  const attemptId = typeof lifecycle?.attempt_id === 'string' ? lifecycle.attempt_id : null
   const startedAt = typeof lifecycle?.started_at_iso === 'string'
     ? lifecycle.started_at_iso
     : null
@@ -117,7 +116,7 @@ function WaitingRowReceiptDetail({ row }: { row: DashboardKeeperWaitingRow }) {
       <span class="min-w-0 break-all font-mono">receipt ${receiptId}</span>
       ${queueIndex === null ? null : html`<span class="font-mono">queue index ${queueIndex}</span>`}
       ${state ? html`<span class="font-mono">state ${enumLabel(state)}</span>` : null}
-      ${leaseId ? html`<span class="min-w-0 break-all font-mono">lease ${leaseId}</span>` : null}
+      ${attemptId ? html`<span class="min-w-0 break-all font-mono">attempt ${attemptId}</span>` : null}
       ${startedAt ? html`<span>started ${timeLabel(startedAt)}</span>` : null}
     </div>
   `

@@ -28,16 +28,6 @@ val respond_error :
 val handle_keeper_catchup_judge_post :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 
-val handle_keeper_chat_recovery_post :
-  Mcp_server.server_state ->
-  string ->
-  Httpun.Request.t ->
-  Httpun.Reqd.t ->
-  keeper_name:string ->
-  raw_receipt_id:string ->
-  string ->
-  unit
-
 val handle_keeper_chat_pending_cancel_post :
   Mcp_server.server_state ->
   string ->

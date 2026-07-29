@@ -170,7 +170,6 @@ type dashboard_deferred_chat =
   ; chat_waiting : bool
   ; pending_count : int
   ; inflight_count : int
-  ; recovery_required_count : int
   ; receipt_id : string
   ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
   ; queue_revision : int64
@@ -191,7 +190,6 @@ let dashboard_busy_queue_state ~base_path ~keeper_name =
       | Ok
           { health =
               ( Keeper_chat_queue.Persistence_reconciliation_required
-              | Keeper_chat_queue.Delivery_recovery_required _
               | Keeper_chat_queue.Unavailable _ )
           ; _
           } ->
@@ -202,30 +200,33 @@ let dashboard_busy_queue_state ~base_path ~keeper_name =
   | _ -> Some (in_flight, chat_waiting, shutdown_operation_id)
 
 let dashboard_deferred_ack_text ~keeper_name deferred =
-  if deferred.recovery_required_count < 0
-  then invalid_arg "dashboard deferred recovery count must be non-negative"
-  else if deferred.recovery_required_count > 0
-  then
-    Printf.sprintf
-      "%s의 이전 메시지 상태를 확인해야 해요. 새 메시지는 안전하게 대기 중입니다."
-      keeper_name
-  else
-    match deferred.shutdown_operation_id with
-    | Some _ ->
+  match deferred.shutdown_operation_id with
+    | Some operation_id ->
       Printf.sprintf
-        "%s가 종료 중이에요. 다시 활동을 시작하면 이 메시지를 처리합니다."
+        "%s is stopping under operation %s; your message was durably accepted \
+         (receipt_id=%s, pending_count=%d, inflight_count=%d) for the next active \
+         lane. The Dashboard will track it through Pending, Inflight, and a \
+         terminal Delivered or Failed state."
         keeper_name
+        (Keeper_shutdown_types.Operation_id.to_string operation_id)
+        deferred.receipt_id
+        deferred.pending_count
+        deferred.inflight_count
     | None ->
       Printf.sprintf
-        "%s가 다른 작업을 처리 중이에요. 메시지는 대기열에 추가했습니다."
+        "%s is busy; your message was durably accepted (receipt_id=%s, \
+         pending_count=%d, inflight_count=%d). The Dashboard will track it through \
+         Pending, Inflight, and a terminal Delivered or Failed state."
         keeper_name
+        deferred.receipt_id
+        deferred.pending_count
+        deferred.inflight_count
 
 let dashboard_deferred_chat_to_json ~keeper_name
     ({ in_flight
      ; chat_waiting
      ; pending_count
      ; inflight_count
-     ; recovery_required_count
      ; receipt_id
      ; shutdown_operation_id
      ; queue_revision
@@ -246,7 +247,6 @@ let dashboard_deferred_chat_to_json ~keeper_name
      ; ("queue", `String "keeper_chat_queue")
      ; ("pending_count", `Int pending_count)
      ; ("inflight_count", `Int inflight_count)
-     ; ("recovery_required_count", `Int recovery_required_count)
      ; ("chat_waiting", `Bool chat_waiting)
      ; ("receipt_id", `String receipt_id)
      ; ("queue_revision", `String (Int64.to_string queue_revision))
@@ -284,7 +284,6 @@ let enqueue_dashboard_payload
         ; chat_waiting
         ; pending_count = receipt.pending_count
         ; inflight_count = receipt.inflight_count
-        ; recovery_required_count = receipt.recovery_required_count
         ; receipt_id = Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id
         ; queue_revision = receipt.revision
         ; shutdown_operation_id

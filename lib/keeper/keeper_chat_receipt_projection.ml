@@ -1,17 +1,10 @@
 let state_json = function
   | Keeper_chat_queue.Pending -> `Assoc [ "kind", `String "pending" ]
-  | Keeper_chat_queue.Inflight { lease_id; started_at } ->
+  | Keeper_chat_queue.Inflight { attempt_id; started_at } ->
     `Assoc
       [ "kind", `String "inflight"
-      ; "lease_id", `String lease_id
+      ; "attempt_id", `String attempt_id
       ; "started_at", `Float started_at
-      ]
-  | Keeper_chat_queue.Recovery_required { lease_id; started_at } ->
-    `Assoc
-      [ "kind", `String "recovery_required"
-      ; "lease_id", `String lease_id
-      ; "started_at", `Float started_at
-      ; "dispatchable", `Bool false
       ]
   | Keeper_chat_queue.Delivered completion ->
     `Assoc

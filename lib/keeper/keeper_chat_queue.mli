@@ -3,13 +3,13 @@
     Every accepted message receives a stable receipt before the first durable
     write.  The receipt then follows exactly one closed lifecycle:
     [Pending -> Inflight -> Delivered | Failed]. On restart, [Inflight] becomes
-    [Recovery_required] in the same SQLite store. From there only an explicit
-    operator decision can produce [Pending] or [Failed]. No external journal
-    participates in this lifecycle.
+    terminal [Failed { kind = Interrupted }]. The external effect is unknown,
+    so the receipt is never automatically re-dispatched. No external journal or
+    operator recovery gate participates in this lifecycle.
 
-    Each lease contains exactly one receipt, so message, multimodal block,
+    Each claim contains exactly one receipt, so message, multimodal block,
     attachment, timestamp, provenance, and connector identity boundaries are
-    preserved without delimiter-based coalescing. A crashed lease is never
+    preserved without delimiter-based coalescing. A crashed claim is never
     automatically redispatched because its external effect is unproven.
 
     @since 2.145.0 *)
@@ -48,6 +48,7 @@ type failure_kind =
   | Connector_unavailable
   | Delivery_failed
   | Cancelled
+  | Interrupted
   | Internal_error
 
 val failure_kind_to_string : failure_kind -> string
@@ -61,25 +62,14 @@ type failure = {
 
 type receipt_state =
   | Pending
-  | Inflight of { lease_id : string; started_at : float }
-  | Recovery_required of { lease_id : string; started_at : float }
+  | Inflight of { attempt_id : string; started_at : float }
   | Delivered of completion
   | Failed of failure
 
-type leased_message = {
+type claim = {
   receipt_id : Receipt_id.t;
+  attempt_id : string;
   message : queued_message;
-}
-
-type lease = {
-  lease_id : string;
-  item : leased_message;
-}
-
-type recovery_evidence = {
-  receipt_id : Receipt_id.t;
-  lease_id : string;
-  started_at : float;
 }
 
 type finalization =
@@ -90,7 +80,7 @@ type snapshot_load_error_kind =
   | Invalid_path
   | Read_failed
   | Parse_failed
-  | Recovery_failed
+  | Startup_transition_failed
   | Durability_uncertain
   | Reconciliation_failed
   | Configuration_conflict
@@ -107,39 +97,29 @@ type persistence_publication =
       { revision : int64
       ; receipt_id : Receipt_id.t
       }
-  | Lease_indeterminate of
-      { revision : int64
-      ; receipt_id : Receipt_id.t
-      ; lease_id : string
-      }
-  | Finalize_indeterminate of
-      { revision : int64
-      ; receipt_id : Receipt_id.t
-      ; lease_id : string
-      }
-  | Nack_indeterminate of
-      { revision : int64
-      ; receipt_id : Receipt_id.t
-      ; lease_id : string
-      }
-  | Startup_recovery_indeterminate of
-      { revision : int64
-      ; receipt_id : Receipt_id.t
-      ; lease_id : string
-      }
-  | Recovery_requeue_indeterminate of
-      { revision : int64
-      ; receipt_id : Receipt_id.t
-      ; lease_id : string
-      }
-  | Recovery_cancel_indeterminate of
-      { revision : int64
-      ; receipt_id : Receipt_id.t
-      ; lease_id : string
-      }
   | Pending_cancel_indeterminate of
       { revision : int64
       ; receipt_id : Receipt_id.t
+      }
+  | Claim_indeterminate of
+      { revision : int64
+      ; receipt_id : Receipt_id.t
+      ; attempt_id : string
+      }
+  | Complete_indeterminate of
+      { revision : int64
+      ; receipt_id : Receipt_id.t
+      ; attempt_id : string
+      }
+  | Requeue_indeterminate of
+      { revision : int64
+      ; receipt_id : Receipt_id.t
+      ; attempt_id : string
+      }
+  | Startup_interrupted_indeterminate of
+      { revision : int64
+      ; receipt_id : Receipt_id.t
+      ; attempt_id : string
       }
 
 type persistence_failure =
@@ -155,23 +135,9 @@ type mutation_error =
       { receipt_id : Receipt_id.t
       ; state : receipt_state
       }
-  | Receipt_not_recovery_required of
-      { receipt_id : Receipt_id.t
-      ; observed_state : receipt_state option
-      }
   | Receipt_not_pending of
       { receipt_id : Receipt_id.t
       ; observed_state : receipt_state option
-      }
-  | Recovery_revision_mismatch of
-      { receipt_id : Receipt_id.t
-      ; expected_revision : int64
-      ; observed_revision : int64
-      }
-  | Recovery_lease_mismatch of
-      { receipt_id : Receipt_id.t
-      ; expected_lease_id : string
-      ; observed_lease_id : string
       }
   | Revision_exhausted
   | Persist_failed of persistence_failure
@@ -200,7 +166,6 @@ type diagnostic_snapshot = {
   revision : int64;
   pending : active_receipt list;
   inflight : active_receipt list;
-  recovery_required : active_receipt list;
   terminal_count : int64;
   load_errors : snapshot_load_error list;
 }
@@ -210,12 +175,11 @@ type enqueue_receipt = {
   revision : int64;
   pending_count : int;
   inflight_count : int;
-  recovery_required_count : int;
 }
 
 type configure_report = {
   restored_keeper_count : int;
-  recovery_required_receipt_count : int;
+  interrupted_receipt_count : int;
   load_errors : (string option * snapshot_load_error) list;
 }
 
@@ -253,33 +217,32 @@ val enqueue_with_receipt :
     An existing terminal receipt returns [Receipt_already_terminal]; terminal
     rows never retain message bodies and are never overwritten or redispatched. *)
 
-val lease_next :
+val claim_next :
   keeper_name:string ->
-  [ `Leased of lease
+  [ `Claimed of claim
   | `Empty
-  | `Already_leased of string
-  | `Recovery_required of recovery_evidence
+  | `Already_claimed of string
   | `Error of mutation_error
   ]
 
-(** Atomically finalize the receipt in the matching lease. Terminal records
+(** Atomically complete the receipt in the matching claim. Terminal records
     retain correlation metadata but discard message bodies and attachments. *)
-val finalize :
+val complete_claim :
   keeper_name:string ->
-  lease_id:string ->
+  attempt_id:string ->
   outcome:finalization ->
-  [ `Finalized of Receipt_id.t
-  | `Unknown_lease
+  [ `Completed of Receipt_id.t
+  | `Unknown_claim
   | `Error of mutation_error
   ]
 
-(** Return the receipt in the matching lease to [Pending], preserving its id
+(** Return the receipt in the matching claim to [Pending], preserving its id
     and FIFO position. *)
-val nack :
+val requeue_claim :
   keeper_name:string ->
-  lease_id:string ->
+  attempt_id:string ->
   [ `Requeued of Receipt_id.t
-  | `Unknown_lease
+  | `Unknown_claim
   | `Error of mutation_error
   ]
 
@@ -288,11 +251,6 @@ val has_active_receipts : keeper_name:string -> (bool, mutation_error) result
 type lane_health =
   | Ready
   | Persistence_reconciliation_required
-  | Delivery_recovery_required of
-      { receipt_id : Receipt_id.t
-      ; lease_id : string
-      ; started_at : float
-      }
   | Unavailable of snapshot_load_error
 
 type lane_status = {
@@ -302,7 +260,7 @@ type lane_status = {
 }
 
 (** O(1), memory-only hot-path projection. Consumers should use this instead
-    of materializing [snapshot] before [lease_next]. *)
+    of materializing [snapshot] before [claim_next]. *)
 val lane_status : keeper_name:string -> (lane_status, mutation_error) result
 
 val snapshot : keeper_name:string -> diagnostic_snapshot
@@ -348,37 +306,9 @@ val reconcile_persistence :
 (** Reconcile one quarantined Keeper lane without resetting the process-wide
     registry. The SQLite observation must exactly match either side of the
     retained transaction plan. A pre-publication projection is replayed; a
-    published projection is verified; an uncertain lease is compensated to
+    published projection is verified; a pre-dispatch claim is returned to
     [Pending]. Any third state remains a typed [Reconciliation_failed] conflict
-    for explicit operator action. *)
-
-type recovery_cancellation =
-  { cancelled_at : float
-  ; detail : string
-  ; outcome_ref : string option
-  }
-
-type recovery_resolution =
-  | Requeue_unconfirmed
-  | Cancel_unconfirmed of recovery_cancellation
-
-type recovery_resolution_report =
-  { receipt_id : Receipt_id.t
-  ; revision : int64
-  ; state : receipt_state
-  }
-
-(** Resolve exactly one durable [Recovery_required] receipt. The caller must
-    present the revision and lease evidence it observed. A stale or mismatched
-    decision is rejected without mutation. [Requeue_unconfirmed] is the only
-    path back to dispatch; [Cancel_unconfirmed] makes the receipt terminal. *)
-val resolve_recovery_required :
-  keeper_name:string ->
-  receipt_id:Receipt_id.t ->
-  expected_revision:int64 ->
-  lease_id:string ->
-  resolution:recovery_resolution ->
-  (recovery_resolution_report, mutation_error) result
+    that the consumer never replays. *)
 
 val all_keeper_names : unit -> string list
 

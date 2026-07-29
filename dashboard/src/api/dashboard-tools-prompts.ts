@@ -295,7 +295,6 @@ export type DashboardKeeperWaitingSource =
   | 'event_queue_inflight'
   | 'chat_queue_pending'
   | 'chat_queue_inflight'
-  | 'chat_queue_recovery_required'
   | 'chat_queue_persistence_blocked'
   | 'hitl_pending'
   | 'external_attention'
@@ -312,7 +311,6 @@ export const DASHBOARD_KEEPER_WAITING_SOURCE_VALUES = [
   'event_queue_inflight',
   'chat_queue_pending',
   'chat_queue_inflight',
-  'chat_queue_recovery_required',
   'chat_queue_persistence_blocked',
   'hitl_pending',
   'external_attention',

@@ -5,7 +5,6 @@ import {
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
   fetchKeeperChatReceipt,
-  resolveKeeperChatRecovery,
   fetchQueuedKeeperMessageResult,
   interruptKeeperTurn as apiInterruptKeeperTurn,
   isTerminalQueuedKeeperMessage,
@@ -901,7 +900,6 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
       switch (receipt.state.kind) {
         case 'pending':
         case 'inflight':
-        case 'recovery_required':
           finalizeAssistantEntry(keeperName, entry.id, {
             delivery: 'queued',
             streamState: null,
@@ -1011,78 +1009,6 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
   }
 }
 
-async function resolveKeeperChatRecoveryEntry(
-  keeperName: string,
-  entry: KeeperConversationEntry,
-  decision:
-    | { kind: 'requeue_unconfirmed' }
-    | { kind: 'cancel_unconfirmed'; detail: string; outcomeRef: string | null },
-): Promise<void> {
-  const receiptId = entry.details?.queueReceiptId?.trim() ?? ''
-  if (!receiptId) {
-    throw new Error('복구할 durable queue receipt가 없습니다.')
-  }
-  setRecordValue(keeperActionErrors, keeperName, null)
-  try {
-    const observed = await fetchKeeperChatReceipt(keeperName, receiptId)
-    if (observed.state.kind !== 'recovery_required') {
-      throw new Error(`receipt ${receiptId} is ${observed.state.kind}, not recovery_required`)
-    }
-    const result = await resolveKeeperChatRecovery(
-      keeperName,
-      receiptId,
-      observed.revision,
-      observed.state.leaseId,
-      decision,
-    )
-    const state = result.receipt.state
-    const details = {
-      ...(entry.details ?? {}),
-      queueRevision: result.receipt.revision,
-      queueState: state.kind,
-      queueFailureKind: state.kind === 'failed' ? state.failureKind : null,
-    }
-    finalizeAssistantEntry(keeperName, entry.id, {
-      delivery: state.kind === 'failed' ? 'error' : state.kind === 'delivered' ? 'delivered' : 'queued',
-      streamState: null,
-      details,
-      error: state.kind === 'failed' ? state.detail : undefined,
-    })
-    if (!result.audit.recorded) {
-      setRecordValue(
-        keeperActionErrors,
-        keeperName,
-        `복구 결정은 반영됐지만 audit 기록에 실패했습니다: ${result.audit.error}`,
-      )
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    setRecordValue(keeperActionErrors, keeperName, `큐 복구 결정 실패: ${message}`)
-    throw error
-  }
-}
-
-export async function requeueKeeperChatRecoveryEntry(
-  keeperName: string,
-  entry: KeeperConversationEntry,
-): Promise<void> {
-  await resolveKeeperChatRecoveryEntry(keeperName, entry, {
-    kind: 'requeue_unconfirmed',
-  })
-}
-
-export async function cancelKeeperChatRecoveryEntry(
-  keeperName: string,
-  entry: KeeperConversationEntry,
-  detail: string,
-): Promise<void> {
-  await resolveKeeperChatRecoveryEntry(keeperName, entry, {
-    kind: 'cancel_unconfirmed',
-    detail,
-    outcomeRef: null,
-  })
-}
-
 export async function cancelKeeperChatPendingEntry(
   keeperName: string,
   entry: KeeperConversationEntry,
@@ -1102,10 +1028,7 @@ export async function cancelKeeperChatPendingEntry(
     if (options.requireUserInput && !userEntry) {
       throw new Error('수정할 원문을 찾지 못해 서버 대기를 취소하지 않았습니다.')
     }
-    const result = await cancelKeeperChatPendingReceipt(
-      keeperName,
-      receiptId,
-    )
+    const result = await cancelKeeperChatPendingReceipt(keeperName, receiptId)
     const matchingEntryIds = thread
       .filter(candidate => candidate.details?.queueReceiptId === receiptId)
       .map(candidate => candidate.id)

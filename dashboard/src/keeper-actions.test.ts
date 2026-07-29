@@ -11,7 +11,6 @@ const {
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
   fetchKeeperChatReceipt,
-  resolveKeeperChatRecovery,
   fetchQueuedKeeperMessageResult,
   isTerminalQueuedKeeperMessage,
   queuedKeeperMessageError,
@@ -30,7 +29,6 @@ const {
   ),
   fetchKeeperChatHistory: vi.fn(),
   fetchKeeperChatReceipt: vi.fn(),
-  resolveKeeperChatRecovery: vi.fn(),
   fetchQueuedKeeperMessageResult: vi.fn(),
   isTerminalQueuedKeeperMessage: vi.fn((result: { status: string }) => (
     result.status === 'done'
@@ -57,7 +55,6 @@ vi.mock('./api/keeper', () => ({
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
   fetchKeeperChatReceipt,
-  resolveKeeperChatRecovery,
   fetchQueuedKeeperMessageResult,
   isTerminalQueuedKeeperMessage,
   queuedKeeperMessageError,
@@ -96,8 +93,6 @@ import {
   noteKeeperChatAppended,
   probeKeeperRuntime,
   reconcileKeeperChatReceipts,
-  requeueKeeperChatRecoveryEntry,
-  cancelKeeperChatRecoveryEntry,
   recoverKeeperRuntime,
   refreshActiveKeeperChatHistory,
   resumePendingKeeperChatRequests,
@@ -244,19 +239,19 @@ describe('reconcileKeeperChatReceipts', () => {
     fetchKeeperChatHistory.mockResolvedValue([])
     fetchKeeperChatReceipt.mockReset()
     cancelKeeperChatPendingReceipt.mockReset()
-    resolveKeeperChatRecovery.mockReset()
   })
 
-  it('retains the queued message while exact delivery recovery is required', async () => {
+  it('surfaces an interrupted claim as a terminal queue failure', async () => {
     fetchKeeperChatReceipt.mockResolvedValue({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
       revision: '3',
       state: {
-        kind: 'recovery_required',
-        leaseId: 'lease_00000000-0000-4000-8000-000000000002',
-        startedAt: 42,
-        dispatchable: false,
+        kind: 'failed',
+        failureKind: 'interrupted',
+        detail: 'Keeper stopped before this claim completed.',
+        completedAt: 42,
+        outcomeRef: null,
       },
     })
 
@@ -265,9 +260,10 @@ describe('reconcileKeeperChatReceipts', () => {
     const entry = keeperThreads.value.echo?.find(candidate => (
       candidate.details?.queueReceiptId === 'chatq_00000000-0000-4000-8000-000000000001'
     ))
-    expect(entry?.delivery).toBe('queued')
-    expect(entry?.details?.queueState).toBe('recovery_required')
-    expect(entry?.error).toBeFalsy()
+    expect(entry?.delivery).toBe('error')
+    expect(entry?.details?.queueState).toBe('failed')
+    expect(entry?.details?.queueFailureKind).toBe('interrupted')
+    expect(entry?.error).toContain('Keeper stopped')
   })
 
   it('cancels a pending receipt and returns its optimistic user input for editing', async () => {
@@ -308,89 +304,9 @@ describe('reconcileKeeperChatReceipts', () => {
       keeperThreads.value.echo![1]!,
     )
 
-    expect(cancelKeeperChatPendingReceipt).toHaveBeenCalledWith(
-      'echo',
-      receiptId,
-    )
+    expect(cancelKeeperChatPendingReceipt).toHaveBeenCalledWith('echo', receiptId)
     expect(original?.text).toBe('원문')
     expect(keeperThreads.value.echo).toEqual([])
-  })
-
-  it('requeues only with the freshly observed revision and lease', async () => {
-    const entry = keeperThreads.value.echo![0]!
-    fetchKeeperChatReceipt.mockResolvedValue({
-      keeperName: 'echo',
-      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: '9223372036854775805',
-      state: {
-        kind: 'recovery_required',
-        leaseId: 'lease_00000000-0000-4000-8000-000000000002',
-        startedAt: 42,
-        dispatchable: false,
-      },
-    })
-    resolveKeeperChatRecovery.mockResolvedValue({
-      decision: 'requeue_unconfirmed',
-      receipt: {
-        keeperName: 'echo',
-        receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-        revision: '9223372036854775806',
-        state: { kind: 'pending' },
-      },
-      audit: { recorded: true },
-    })
-
-    await requeueKeeperChatRecoveryEntry('echo', entry)
-
-    expect(resolveKeeperChatRecovery).toHaveBeenCalledWith(
-      'echo',
-      'chatq_00000000-0000-4000-8000-000000000001',
-      '9223372036854775805',
-      'lease_00000000-0000-4000-8000-000000000002',
-      { kind: 'requeue_unconfirmed' },
-    )
-    expect(keeperThreads.value.echo?.[0]?.details?.queueRevision)
-      .toBe('9223372036854775806')
-  })
-
-  it('surfaces audit failure after an exact cancellation was committed', async () => {
-    const entry = keeperThreads.value.echo![0]!
-    fetchKeeperChatReceipt.mockResolvedValue({
-      keeperName: 'echo',
-      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: '3',
-      state: {
-        kind: 'recovery_required',
-        leaseId: 'lease_00000000-0000-4000-8000-000000000002',
-        startedAt: 42,
-        dispatchable: false,
-      },
-    })
-    resolveKeeperChatRecovery.mockResolvedValue({
-      decision: 'cancel_unconfirmed',
-      receipt: {
-        keeperName: 'echo',
-        receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-        revision: '4',
-        state: {
-          kind: 'failed',
-          failureKind: 'cancelled',
-          detail: 'operator verified no delivery',
-          completedAt: 43,
-          outcomeRef: null,
-        },
-      },
-      audit: { recorded: false, error: 'audit disk unavailable' },
-    })
-
-    await cancelKeeperChatRecoveryEntry(
-      'echo',
-      entry,
-      'operator verified no delivery',
-    )
-
-    expect(keeperThreads.value.echo?.[0]?.details?.queueState).toBe('failed')
-    expect(keeperActionErrors.value.echo).toContain('audit disk unavailable')
   })
 
   it('moves a busy ACK to delivered only after the durable terminal receipt', async () => {
@@ -1713,7 +1629,6 @@ describe('sendKeeperThreadMessage stream outcome', () => {
           queue_revision: '4',
           pending_count: 1,
           inflight_count: 0,
-          recovery_required_count: 0,
           shutdown_operation_id: null,
         },
       },
@@ -1730,13 +1645,12 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       'chatq_00000000-0000-4000-8000-000000000001',
     )
     expect(reply?.delivery).toBe('queued')
-    expect(reply?.text).toContain('메시지는 대기열에 추가했습니다')
+    expect(reply?.text).toContain('message is queued')
     expect(reply?.details).toMatchObject({
       queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000001',
       queueRevision: '4',
       queuePendingCount: 1,
       queueInflightCount: 0,
-      queueRecoveryRequiredCount: 0,
     })
     expect(fetchKeeperChatReceipt).toHaveBeenCalledWith(
       'echo',
@@ -1771,7 +1685,6 @@ describe('sendKeeperThreadMessage stream outcome', () => {
           queue_revision: '4',
           pending_count: 1,
           inflight_count: 0,
-          recovery_required_count: 0,
           shutdown_operation_id: null,
         },
       },

@@ -10,19 +10,19 @@
     @since 2.145.0 *)
 
 (** Wake one Keeper lane after a durable queue mutation, admission release, or
-    explicit operator reconciliation. Repeated pending wakes for the same
+    persistence reconciliation. Repeated pending wakes for the same
     Keeper are coalesced without a capacity limit; a wake observed while that
     Keeper is running schedules exactly one follow-up inspection. *)
 val notify_transition : keeper_name:string -> unit
 
 type persistence_blocked_operation =
-  | Lease_next_blocked
-  | Finalize_blocked
-  | Nack_blocked
+  | Claim_next_blocked
+  | Complete_blocked
+  | Requeue_blocked
 
 type persistence_blocked_status =
   { operation : persistence_blocked_operation
-  ; lease_id : string option
+  ; attempt_id : string option
   ; error : Keeper_chat_queue.mutation_error
   }
 
@@ -55,34 +55,34 @@ type turn_outcome =
 
     Startup performs one inventory of restored queue lanes. Thereafter the
     consumer is driven only by durable queue transitions, Keeper admission
-    release, and explicit operator reconciliation; it performs no fleet-wide
+    release, and persistence reconciliation; it performs no fleet-wide
     timer polling.
 
     Per Keeper wake: when a turn is in flight
     ([Keeper_turn_admission.in_flight]), queued messages are left to
-    accumulate; once the slot is free, the exact FIFO head receipt is leased
-    ([Keeper_chat_queue.lease_next]) into one typed turn. User-message identity,
+    accumulate; once the slot is free, the exact FIFO head receipt is claimed
+    ([Keeper_chat_queue.claim_next]) into one typed turn. User-message identity,
     multimodal blocks, transcript provenance, and receipt correlation are never
     flattened into a delimiter string. The turn then runs in a Keeper-scoped child fiber, so a slow queued turn for one
     keeper does not block wake processing or delivery for other keepers.  A
     keeper-local dispatch gate preserves the single follow-up turn contract
     for messages sent during an existing queued turn.
 
-    [handle_turn]'s typed terminal outcome is durably finalized as [Delivered]
-    or [Failed]. [Deferred] and structured cancellation nack the unchanged
-    receipt back to [Pending]; [Deferred] is reserved for a typed admission
-    rejection such as an active shutdown fence, so the same accepted receipt is
-    retried after the lane reopens. A lease found after process restart is
-    [Recovery_required] and is never automatically dispatched: an operator must
-    explicitly requeue or cancel its exact receipt/revision/lease evidence. An
+    [handle_turn]'s typed terminal outcome is durably completed as [Delivered]
+    or [Failed]. [Deferred] returns the unchanged receipt to [Pending] and is
+    reserved for a typed admission rejection such as an active shutdown fence,
+    so the same accepted receipt is retried after the lane reopens. A claim
+    cancelled while its external effect is unproven, including process restart,
+    is terminal [Failed { kind = Interrupted }], never automatically dispatched,
+    and cannot block a later receipt. An
     unexpected handler exception becomes a durable [Internal_error] failure
     instead of a poison-message retry loop. There is deliberately no second
     wall-clock watchdog: the turn runtime owns timeout/cancellation and must
     return the typed outcome.
 
-    If finalization persistence fails before publication, the exact decision is
+    If completion persistence fails before publication, the exact decision is
     retained and retried before another turn starts after the next durable
-    transition or explicit operator reconciliation. External diagnostic text is
+    transition or persistence reconciliation. External diagnostic text is
     normalized at this terminal boundary. If queue validation still rejects the
     decision, the consumer replaces it with a typed [Internal_error] terminal
     outcome instead of retrying a permanently invalid action forever.

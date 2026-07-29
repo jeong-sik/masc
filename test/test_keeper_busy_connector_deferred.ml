@@ -118,21 +118,21 @@ let test_exact_source_identity_converges () =
        let pending = (Keeper_chat_queue.snapshot ~keeper_name).pending in
        check "active replay keeps one FIFO receipt" (List.length pending = 1);
        check "accepted user transcript row is idempotent" (count_user_lines ~base = 1);
-       (match Keeper_chat_queue.lease_next ~keeper_name with
-        | `Leased lease ->
+       (match Keeper_chat_queue.claim_next ~keeper_name with
+        | `Claimed claim ->
           ignore
-            (Keeper_chat_queue.finalize
+            (Keeper_chat_queue.complete_claim
                ~keeper_name
-               ~lease_id:lease.lease_id
+               ~attempt_id:claim.attempt_id
                ~outcome:
                  (Keeper_chat_queue.Mark_delivered
                     { completed_at = Time_compat.now (); outcome_ref = None })
-             : [ `Finalized of Keeper_chat_queue.Receipt_id.t
-               | `Unknown_lease
+             : [ `Completed of Keeper_chat_queue.Receipt_id.t
+               | `Unknown_claim
                | `Error of Keeper_chat_queue.mutation_error
                ])
-        | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
-          check "source receipt leases before terminal replay" false);
+        | `Empty | `Already_claimed _ | `Error _ ->
+          check "source receipt claims before terminal replay" false);
        let terminal = request_of_reply (accept metadata) in
        check
          "terminal replay reports done without redispatch"

@@ -54,7 +54,6 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
       ; "agent_name", `String (name ^ "-agent")
       ; "trace_id", `String (name ^ "-trace")
       ; "allowed_paths", `List [ `String "*" ]
-      ; "sandbox_profile", `String "none"
       ]
   in
 match Masc_test_deps.meta_of_json_fixture json with

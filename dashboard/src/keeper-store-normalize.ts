@@ -537,7 +537,7 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
 
 // Top-N list keys that contain arrays of { tool/kind/model/..., count } objects
 const TOP_LIST_KEYS = new Set([
-  'top_tools', 'top_work_kinds', 'top_models', 'top_memory_kinds',
+  'top_tools', 'top_work_kinds', 'top_models',
   'top_drift_reasons', 'top_compaction_triggers', 'generation_equipment',
 ])
 

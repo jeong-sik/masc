@@ -583,10 +583,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                    try
                      let j = Yojson.Safe.from_string line in
                      let compacted = Safe_ops.json_bool ~default:false "compacted" j in
-                     let memory_compaction_performed =
-                       Safe_ops.json_bool ~default:false "memory_compaction_performed" j
-                     in
-                     if (not compacted) && (not memory_compaction_performed) then acc
+                     if not compacted then acc
                      else
                        let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
                        let age_s =
@@ -595,26 +592,9 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                        let before_tokens = Safe_ops.json_int ~default:0 "compaction_before_tokens" j in
                        let after_tokens = Safe_ops.json_int ~default:0 "compaction_after_tokens" j in
                        let saved_tokens = max 0 (before_tokens - after_tokens) in
-                       let memory_before_notes =
-                         Safe_ops.json_int ~default:0 "memory_compaction_before_notes" j
-                       in
-                       let memory_after_notes =
-                         Safe_ops.json_int ~default:0 "memory_compaction_after_notes" j
-                       in
-                       let memory_dropped_notes =
-                         Safe_ops.json_int ~default:0 "memory_compaction_dropped_notes" j
-                       in
-                       let memory_invalid_dropped =
-                         Safe_ops.json_int ~default:0 "memory_compaction_invalid_dropped" j
-                       in
-                       let event_kind =
-                         if compacted && memory_compaction_performed then "context+memory"
-                         else if compacted then "context"
-                         else "memory"
-                       in
                        let item =
                          `Assoc [
-                           ("kind", `String event_kind);
+                           ("kind", `String "context");
                            ("channel", `String (Safe_ops.json_string ~default:"turn" "channel" j));
                            ("ts_unix", `Float ts_unix);
                            ("age_s", Json_util.float_opt_to_json age_s);
@@ -625,15 +605,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                            ("context_saved_tokens", `Int saved_tokens);
                            ( "context_trigger",
                              match Safe_ops.json_string_opt "compaction_trigger" j with
-                             | Some reason when String.trim reason <> "" -> `String reason
-                             | _ -> `Null );
-                           ("memory_compaction_performed", `Bool memory_compaction_performed);
-                           ("memory_before_notes", `Int memory_before_notes);
-                           ("memory_after_notes", `Int memory_after_notes);
-                           ("memory_dropped_notes", `Int memory_dropped_notes);
-                           ("memory_invalid_dropped", `Int memory_invalid_dropped);
-                           ( "memory_reason",
-                             match Safe_ops.json_string_opt "memory_compaction_reason" j with
                              | Some reason when String.trim reason <> "" -> `String reason
                              | _ -> `Null );
                          ]

@@ -10,10 +10,6 @@ type metrics_summary = {
   handoff_count : int;
   compaction_events : int;
   compaction_saved_tokens : int;
-  memory_compaction_events : int;
-  memory_compaction_before_notes : int;
-  memory_compaction_dropped_notes : int;
-  memory_compaction_invalid_dropped : int;
   last_handoff : Yojson.Safe.t option;
   last_compaction : Yojson.Safe.t option;
 }
@@ -60,10 +56,6 @@ let empty_metrics_summary =
     handoff_count = 0;
     compaction_events = 0;
     compaction_saved_tokens = 0;
-    memory_compaction_events = 0;
-    memory_compaction_before_notes = 0;
-    memory_compaction_dropped_notes = 0;
-    memory_compaction_invalid_dropped = 0;
     last_handoff = None;
     last_compaction = None;
   }
@@ -94,18 +86,6 @@ let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
     if interaction_points = 0 then 0.0
     else float_of_int s.drift_applied_count /. float_of_int interaction_points
   in
-  let memory_compaction_drop_ratio =
-    if s.memory_compaction_before_notes = 0 then 0.0
-    else
-      float_of_int s.memory_compaction_dropped_notes
-      /. float_of_int s.memory_compaction_before_notes
-  in
-  let memory_compaction_drop_avg =
-    if s.memory_compaction_events = 0 then 0.0
-    else
-      float_of_int s.memory_compaction_dropped_notes
-      /. float_of_int s.memory_compaction_events
-  in
   `Assoc
     [
       ("sample_points", `Int s.sample_points);
@@ -120,12 +100,6 @@ let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
       ("handoff_count", `Int s.handoff_count);
       ("compaction_events", `Int s.compaction_events);
       ("compaction_saved_tokens", `Int s.compaction_saved_tokens);
-      ("memory_compaction_events", `Int s.memory_compaction_events);
-      ("memory_compaction_before_notes", `Int s.memory_compaction_before_notes);
-      ("memory_compaction_dropped_notes", `Int s.memory_compaction_dropped_notes);
-      ("memory_compaction_invalid_dropped", `Int s.memory_compaction_invalid_dropped);
-      ("memory_compaction_drop_ratio", `Float memory_compaction_drop_ratio);
-      ("memory_compaction_drop_avg", `Float memory_compaction_drop_avg);
       ("last_handoff", match s.last_handoff with Some j -> j | None -> `Null);
       ("last_compaction", match s.last_compaction with Some j -> j | None -> `Null);
     ]
@@ -182,18 +156,6 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
         let to_model = Safe_ops.json_string_opt "to_model" handoff in
         let prev_trace_id = Safe_ops.json_string_opt "prev_trace_id" handoff in
         let new_trace_id = Safe_ops.json_string_opt "new_trace_id" handoff in
-        let memory_compaction_performed =
-          Safe_ops.json_bool ~default:false "memory_compaction_performed" j
-        in
-        let memory_compaction_before_now =
-          Safe_ops.json_int ~default:0 "memory_compaction_before_notes" j
-        in
-        let memory_compaction_dropped_now =
-          Safe_ops.json_int ~default:0 "memory_compaction_dropped_notes" j
-        in
-        let memory_compaction_invalid_now =
-          Safe_ops.json_int ~default:0 "memory_compaction_invalid_dropped" j
-        in
         let drift = m "drift" in
         let drift_applied_now =
           Safe_ops.json_bool ~default:false "applied" drift
@@ -249,18 +211,6 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
           compaction_saved_tokens =
             acc.compaction_saved_tokens
             + (if is_interaction && compacted then saved_tokens else 0);
-          memory_compaction_events =
-            acc.memory_compaction_events
-            + (if is_interaction && memory_compaction_performed then 1 else 0);
-          memory_compaction_before_notes =
-            acc.memory_compaction_before_notes
-            + (if is_interaction && memory_compaction_performed then memory_compaction_before_now else 0);
-          memory_compaction_dropped_notes =
-            acc.memory_compaction_dropped_notes
-            + (if is_interaction && memory_compaction_performed then memory_compaction_dropped_now else 0);
-          memory_compaction_invalid_dropped =
-            acc.memory_compaction_invalid_dropped
-            + (if is_interaction && memory_compaction_performed then memory_compaction_invalid_now else 0);
           last_handoff = handoff_json;
           last_compaction = compaction_json;
         }

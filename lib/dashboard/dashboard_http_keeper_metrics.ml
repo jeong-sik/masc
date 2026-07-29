@@ -28,9 +28,6 @@ type keeper_gen_window_stats = {
   mutable total_tokens: int;
   mutable handoffs: int;
   mutable compactions: int;
-  mutable memory_compactions: int;
-  mutable memory_trimmed: int;
-  mutable memory_notes: int;
   mutable first_ts: float;
   mutable last_ts: float;
   models: (string, int) Hashtbl.t;
@@ -45,9 +42,6 @@ let create_keeper_gen_window_stats () : keeper_gen_window_stats =
     total_tokens = 0;
     handoffs = 0;
     compactions = 0;
-    memory_compactions = 0;
-    memory_trimmed = 0;
-    memory_notes = 0;
     first_ts = 0.0;
     last_ts = 0.0;
     models = Hashtbl.create 8;

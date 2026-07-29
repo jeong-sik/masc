@@ -350,7 +350,7 @@ let test_preview_does_not_invent_wake_reason () =
     (contains ~needle:"### Autonomous Trigger" world_state);
   check bool "preview does not emit segment metric" true
     (Option.is_none
-       (Otel_metric_store.get_metric_value
+       (Otel_metric_store_core.get_metric_value
           segment_metric
           ~labels:segment_labels
           ()));

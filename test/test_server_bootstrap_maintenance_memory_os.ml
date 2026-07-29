@@ -9,6 +9,7 @@
 module Types = Masc.Keeper_memory_os_types
 module Io = Masc.Keeper_memory_os_io
 module Recall = Masc.Keeper_memory_os_recall
+module Recall_projection = Masc.Keeper_memory_os_recall_projection
 module Atypes = Agent_sdk.Types
 
 let now = 1_000_000.0
@@ -133,6 +134,7 @@ let test_accumulate_consolidate_recall () =
           (* 3. Recall: the consolidated memory is visible. *)
           let block =
             Recall.render_context
+              ~projection:Recall_projection.Facts_and_episodes
               ~keeper_id
               ~now
               ()

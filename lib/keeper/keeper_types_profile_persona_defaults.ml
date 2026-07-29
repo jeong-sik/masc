@@ -78,6 +78,7 @@ let load_from_path ~name path : (keeper_profile_defaults, load_error) result =
               telemetry_feedback_window_hours =
                 Safe_ops.json_int_opt "telemetry_feedback_window_hours" keeper_json;
               always_allow = Safe_ops.json_bool_opt "always_allow" keeper_json;
+              memory_os_recall_projection = None;
               oas_env = [];
               unknown_toml_keys = [];
               }

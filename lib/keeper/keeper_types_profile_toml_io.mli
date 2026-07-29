@@ -81,6 +81,7 @@ type keeper_profile_defaults =
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   always_allow : bool option;
+  memory_os_recall_projection : Keeper_memory_os_recall_projection.t option;
   oas_env : (string * string) list;
   unknown_toml_keys : string list;
 }

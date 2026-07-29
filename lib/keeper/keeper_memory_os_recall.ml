@@ -85,6 +85,7 @@ let render_nonempty_section key variable lines =
    config/prompts/keeper.memory_os_recall.context.md. Counts and byte totals
    only — no advice, no threshold, no verdict. *)
 let render_gauge_line
+      ~projection
       ~facts_injected
       ~facts_stored
       ~episodes_injected
@@ -98,7 +99,8 @@ let render_gauge_line
     else Printf.sprintf "%dB/%dB rendered" rendered_bytes byte_budget
   in
   Printf.sprintf
-    "facts %d/%d injected, episodes %d/%d injected, %s"
+    "projection=%s, facts %d/%d injected, episodes %d/%d injected, %s"
+    (Keeper_memory_os_recall_projection.to_string projection)
     facts_injected
     facts_stored
     episodes_injected
@@ -218,7 +220,7 @@ let log_truncation ~keeper_id ~kind ~metric ~store_count ~injected_count ~droppe
     budget
 ;;
 
-let render_context_exn ~keeper_id ~now () =
+let render_context_exn ~projection ~keeper_id ~now () =
   let all_facts =
     File_lock_eio.with_lock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
       Keeper_memory_os_io.read_facts_all ~keeper_id
@@ -238,11 +240,14 @@ let render_context_exn ~keeper_id ~now () =
     select_most_recent ~budget:max_facts ~key:claim_identity ~recency:reference_time all_facts
   in
   let episodes, episodes_dropped =
-    select_most_recent
-      ~budget:max_episodes
-      ~key:episode_key
-      ~recency:(fun (e : episode) -> e.created_at)
-      all_episodes
+    match projection with
+    | Keeper_memory_os_recall_projection.Facts_and_episodes ->
+      select_most_recent
+        ~budget:max_episodes
+        ~key:episode_key
+        ~recency:(fun (e : episode) -> e.created_at)
+        all_episodes
+    | Keeper_memory_os_recall_projection.Facts_only -> [], 0
   in
   if facts_dropped > 0
   then
@@ -308,6 +313,7 @@ let render_context_exn ~keeper_id ~now () =
   in
   let gauge_line =
     render_gauge_line
+      ~projection
       ~facts_injected:(List.length facts)
       ~facts_stored:n_facts_in_store
       ~episodes_injected:(List.length episodes)
@@ -334,8 +340,8 @@ let render_context_exn ~keeper_id ~now () =
   { block; injected_fact_keys; injected_episode_keys; n_facts_in_store; failure_reason }
 ;;
 
-let render_context ~keeper_id ~now () =
-  try (render_context_exn ~keeper_id ~now ()).block with
+let render_context ~projection ~keeper_id ~now () =
+  try (render_context_exn ~projection ~keeper_id ~now ()).block with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Keeper.warn
@@ -351,7 +357,7 @@ let enabled () =
   Env_config.KeeperMemoryOs.recall_enabled ()
 ;;
 
-let render_if_enabled ~keeper_id ~now ~trace_id ~turn ~masc_root () =
+let render_if_enabled ~projection ~keeper_id ~now ~trace_id ~turn ~masc_root () =
   if not (enabled ())
   then None
   else (
@@ -361,7 +367,7 @@ let render_if_enabled ~keeper_id ~now ~trace_id ~turn ~masc_root () =
        and never affects the returned block. *)
     let result =
       try
-        render_context_exn ~keeper_id ~now ()
+        render_context_exn ~projection ~keeper_id ~now ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->

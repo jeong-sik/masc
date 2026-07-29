@@ -13,6 +13,7 @@ module Consolidation_runtime = Masc.Keeper_memory_os_consolidation_runtime
 module Domain_pool_ref = Domain_pool_ref
 module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
+module Recall_projection = Masc.Keeper_memory_os_recall_projection
 module Metrics = Masc.Otel_metric_store
 module Runtime_manifest = Masc.Keeper_runtime_manifest
 
@@ -109,8 +110,15 @@ let write_text_file path contents =
     (fun () -> output_string oc contents)
 ;;
 
-let render_if_enabled_for_test ~keeper_id ~now ~masc_root () =
+let render_if_enabled_for_test
+      ?(projection = Recall_projection.Facts_and_episodes)
+      ~keeper_id
+      ~now
+      ~masc_root
+      ()
+  =
   Recall.render_if_enabled
+    ~projection
     ~keeper_id
     ~now
     ~trace_id:"trace-recall-render-test"
@@ -1981,6 +1989,7 @@ let test_recall_context_empty_store_renders_gauge () =
   with_temp_keepers_dir (fun _keepers_dir ->
     let ctx =
       Recall.render_context
+        ~projection:Recall_projection.Facts_and_episodes
         ~keeper_id:"virtual-memory-keeper"
         ~now:1_000_000.0
         ()
@@ -2129,6 +2138,70 @@ let test_render_if_enabled_renders_persisted_memory () =
             true
             (contains "Gated recall should surface saved facts" block))))
   ;;
+
+let test_facts_only_projection_excludes_episodes_without_deleting_them () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let keeper_id = "facts-only-memory-keeper" in
+      let now = 1_000_000.0 in
+      let fact =
+        { (fact_fixture ~now ()) with
+          Types.claim = "Librarian fact remains prompt context"
+        }
+      in
+      let episode =
+        { Types.trace_id = "trace-facts-only"
+        ; Types.generation = 7
+        ; Types.episode_summary = "Repeated turn residue stays out of the prompt"
+        ; Types.claims = [ fact ]
+        ; Types.open_items = []
+        ; Types.constraints = []
+        ; Types.preserved_tool_refs = []
+        ; Types.source_turn_range = Some (1, 2)
+        ; Types.created_at = now
+        ; Types.valid_until = None
+        ; Types.terminal_marker = None
+        ; Types.schema_version = Types.schema_version
+        }
+      in
+      Memory_io.append_episode_bundle ~keeper_id episode;
+      let facts_only =
+        Recall.render_context
+          ~projection:Recall_projection.Facts_only
+          ~keeper_id
+          ~now
+          ()
+      in
+      Alcotest.(check bool)
+        "typed Librarian fact is injected"
+        true
+        (contains fact.claim facts_only);
+      Alcotest.(check bool)
+        "episode summary is excluded without prose inspection"
+        false
+        (contains episode.episode_summary facts_only);
+      Alcotest.(check bool)
+        "gauge exposes the selected projection and retained episode count"
+        true
+        (contains
+           "projection=facts_only, facts 1/1 injected, episodes 0/1 injected"
+           facts_only);
+      Alcotest.(check int)
+        "episode remains persisted"
+        1
+        (List.length (Memory_io.read_episodes_all ~keeper_id));
+      let complete =
+        Recall.render_context
+          ~projection:Recall_projection.Facts_and_episodes
+          ~keeper_id
+          ~now
+          ()
+      in
+      Alcotest.(check bool)
+        "the same persisted episode remains available to the complete projection"
+        true
+        (contains episode.episode_summary complete)))
+;;
 
 (* The keeper turn wraps [render_if_enabled] in
    [Domain_pool_ref.submit_io_or_inline] so its synchronous memory file I/O runs
@@ -2417,7 +2490,13 @@ let test_recall_filters_expired_episodes () =
       in
       Memory_io.append_episode_bundle ~keeper_id expired;
       Memory_io.append_episode_bundle ~keeper_id active;
-      let ctx = Recall.render_context ~keeper_id ~now () in
+      let ctx =
+        Recall.render_context
+          ~projection:Recall_projection.Facts_and_episodes
+          ~keeper_id
+          ~now
+          ()
+      in
       Alcotest.(check bool)
         "expired episode row is omitted"
         false
@@ -2448,7 +2527,13 @@ let test_recall_renders_terminal_episode_marker () =
         }
       in
       Memory_io.append_episode_bundle ~keeper_id episode;
-      let ctx = Recall.render_context ~keeper_id ~now () in
+      let ctx =
+        Recall.render_context
+          ~projection:Recall_projection.Facts_and_episodes
+          ~keeper_id
+          ~now
+          ()
+      in
       Alcotest.(check bool)
         "terminal marker is visible in episode line"
         true
@@ -2500,7 +2585,13 @@ let test_recall_preserves_repeated_claims () =
         }
       in
       Memory_io.append_episode_bundle ~keeper_id episode;
-      let ctx = Recall.render_context ~keeper_id ~now () in
+      let ctx =
+        Recall.render_context
+          ~projection:Recall_projection.Facts_and_episodes
+          ~keeper_id
+          ~now
+          ()
+      in
       Alcotest.(check int)
         "all repeated rows remain visible"
         3
@@ -2778,7 +2869,13 @@ let test_recall_context_preserves_semantic_memory_content () =
         }
       in
       Memory_io.append_episode_bundle ~keeper_id episode;
-      let ctx = Recall.render_context ~keeper_id ~now () in
+      let ctx =
+        Recall.render_context
+          ~projection:Recall_projection.Facts_and_episodes
+          ~keeper_id
+          ~now
+          ()
+      in
       Alcotest.(check bool)
         "contains recall header"
         true
@@ -2856,7 +2953,13 @@ let test_recall_context_preserves_admission_memory () =
       in
       Memory_io.append_episode_bundle ~keeper_id transient_episode;
       Memory_io.append_episode_bundle ~keeper_id useful_episode;
-      let ctx = Recall.render_context ~keeper_id ~now () in
+      let ctx =
+        Recall.render_context
+          ~projection:Recall_projection.Facts_and_episodes
+          ~keeper_id
+          ~now
+          ()
+      in
       Alcotest.(check bool)
         "keeps stale diagnostic fact"
         true
@@ -3070,7 +3173,13 @@ let test_recall_selection_budget_truncates_facts_by_recency () =
             in
             Memory_io.append_fact ~keeper_id f)
           [ 1; 2; 3; 4; 5 ];
-        let ctx = Recall.render_context ~keeper_id ~now () in
+        let ctx =
+          Recall.render_context
+            ~projection:Recall_projection.Facts_and_episodes
+            ~keeper_id
+            ~now
+            ()
+        in
         List.iter
           (fun i ->
             Alcotest.(check bool)
@@ -3112,7 +3221,13 @@ let test_recall_selection_budget_no_truncation_below_budget () =
             in
             Memory_io.append_fact ~keeper_id f)
           [ 1; 2; 3 ];
-        let ctx = Recall.render_context ~keeper_id ~now () in
+        let ctx =
+          Recall.render_context
+            ~projection:Recall_projection.Facts_and_episodes
+            ~keeper_id
+            ~now
+            ()
+        in
         List.iter
           (fun i ->
             Alcotest.(check bool)
@@ -3514,8 +3629,10 @@ let test_byte_budget_keeps_newest_in_original_order () =
 let test_gauge_reports_injected_against_stored () =
   Alcotest.(check string)
     "gauge reports injected against stored plus the byte budget"
-    "facts 62/62 injected, episodes 130/432 injected, 64512B/65536B rendered"
+    "projection=facts_and_episodes, facts 62/62 injected, episodes 130/432 \
+     injected, 64512B/65536B rendered"
     (Masc.Keeper_memory_os_recall.render_gauge_line
+       ~projection:Recall_projection.Facts_and_episodes
        ~facts_injected:62
        ~facts_stored:62
        ~episodes_injected:130
@@ -3524,11 +3641,13 @@ let test_gauge_reports_injected_against_stored () =
        ~byte_budget:65536);
   Alcotest.(check string)
     "a disabled budget reads as unbounded rather than as a literal zero"
-    "facts 1/1 injected, episodes 2/2 injected, 40B rendered (no byte budget)"
+    "projection=facts_only, facts 1/1 injected, episodes 0/2 injected, 40B \
+     rendered (no byte budget)"
     (Masc.Keeper_memory_os_recall.render_gauge_line
+       ~projection:Recall_projection.Facts_only
        ~facts_injected:1
        ~facts_stored:1
-       ~episodes_injected:2
+       ~episodes_injected:0
        ~episodes_stored:2
        ~rendered_bytes:40
        ~byte_budget:0)
@@ -4343,7 +4462,13 @@ let test_claim_kinds_remain_recall_context_in_source_order () =
       List.iter
         (Memory_io.append_fact ~keeper_id)
         [ self_observation; external_state ];
-      let context = Recall.render_context ~keeper_id ~now () in
+      let context =
+        Recall.render_context
+          ~projection:Recall_projection.Facts_and_episodes
+          ~keeper_id
+          ~now
+          ()
+      in
       Alcotest.(check bool)
         "both typed facts remain recall context"
         true
@@ -4630,6 +4755,10 @@ let () =
             "render_if_enabled renders persisted memory"
             `Quick
             test_render_if_enabled_renders_persisted_memory
+        ; Alcotest.test_case
+            "facts-only projection excludes episodes without deleting them"
+            `Quick
+            test_facts_only_projection_excludes_episodes_without_deleting_them
         ; Alcotest.test_case
             "render_if_enabled keeps diagnostic context"
             `Quick

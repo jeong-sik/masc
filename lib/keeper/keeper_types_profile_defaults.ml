@@ -17,6 +17,7 @@ type keeper_profile_defaults = {
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   always_allow : bool option;
+  memory_os_recall_projection : Keeper_memory_os_recall_projection.t option;
   (* Per-keeper OAS CLI transport env vars (OAS 0.159+).
      Parsed from [[keeper.oas_env]] table.  Keys MUST match
      ^OAS_[A-Z]+_.+ — any other entries are dropped with
@@ -52,6 +53,7 @@ let empty_keeper_profile_defaults =
     telemetry_feedback_enabled = None;
     telemetry_feedback_window_hours = None;
     always_allow = None;
+    memory_os_recall_projection = None;
     unknown_toml_keys = [];
     oas_env = [];
   }

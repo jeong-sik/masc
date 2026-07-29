@@ -18,6 +18,7 @@ type keeper_profile_defaults = {
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   always_allow : bool option;
+  memory_os_recall_projection : Keeper_memory_os_recall_projection.t option;
   (* No per-keeper [model]/[runtime_id] field: keeper→runtime assignment lives
      solely in runtime.toml [[runtime.assignments]] (persona⊥{model,runtime}). *)
   oas_env : (string * string) list;

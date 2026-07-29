@@ -104,6 +104,21 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     | false, false -> Ok ()
   in
   let result = Result.bind result (fun () -> runtime_assignment_result) in
+  let memory_os_recall_projection_result =
+    match str "memory_os_recall_projection" with
+    | None -> Ok None
+    | Some raw ->
+      (match Keeper_memory_os_recall_projection.of_string raw with
+       | Some projection -> Ok (Some projection)
+       | None ->
+         Error
+           (Printf.sprintf
+              "invalid memory_os_recall_projection '%s' (allowed: %s)"
+              raw
+              (String.concat
+                 ", "
+                 Keeper_memory_os_recall_projection.valid_strings)))
+  in
   let max_context_override_result =
     match int_ "max_context_override" with
     | None -> Ok None
@@ -112,7 +127,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
       |> Result.map Option.some
   in
   Result.bind result (fun () ->
-    Result.map
+    Result.bind memory_os_recall_projection_result (fun memory_os_recall_projection ->
+      Result.map
       (fun max_context_override ->
       {
         id = None;
@@ -140,10 +156,11 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
         always_allow = bool_ "always_allow";
+        memory_os_recall_projection;
         oas_env;
         unknown_toml_keys = [];
       })
-      max_context_override_result)
+      max_context_override_result))
 
 (** Fields actually read by [profile_defaults_of_toml] from the [[keeper]]
     TOML table.  Keep this in sync with the record construction above — the
@@ -165,6 +182,7 @@ let parsed_field_key_names =
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
   ; "always_allow"
+  ; "memory_os_recall_projection"
   ]
 
 (** Canonical TOML key names used by [detect_unknown_keeper_toml_keys].
@@ -195,6 +213,7 @@ let canonical_keeper_toml_key_names =
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
   ; "always_allow"
+  ; "memory_os_recall_projection"
   ]
 
 let () =
@@ -312,6 +331,10 @@ let merge_keeper_profile_defaults
       prefer overlay.telemetry_feedback_window_hours
         base.telemetry_feedback_window_hours;
     always_allow = prefer overlay.always_allow base.always_allow;
+    memory_os_recall_projection =
+      prefer
+        overlay.memory_os_recall_projection
+        base.memory_os_recall_projection;
     oas_env =
       (let overlay_keys = List.map fst overlay.oas_env in
        let surviving_base =

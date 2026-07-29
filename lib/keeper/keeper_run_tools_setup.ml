@@ -95,6 +95,7 @@ let prepare_agent_setup
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(publication_recovery :
           Keeper_publication_recovery_availability.turn_context)
+      ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
       ~(ctx_work : working_context)
       ~(session : Keeper_types.session_context)
@@ -125,6 +126,11 @@ let prepare_agent_setup
     match runtime_manifest_context with
     | Some ctx -> ctx.Keeper_runtime_manifest.manifest_keeper_turn_id
     | None -> None
+  in
+  let memory_os_recall_projection =
+    match profile_defaults.memory_os_recall_projection with
+    | Some projection -> projection
+    | None -> Keeper_memory_os_recall_projection.Facts_and_episodes
   in
   let ctx_snapshot = ctx_work in
   let gate_history, gate_history_omitted = gate_history_slice history_messages in
@@ -420,6 +426,7 @@ let prepare_agent_setup
     ; terminal_effect_state
     ; manifest_keeper_turn_id
     ; meta
+    ; memory_os_recall_projection
     ; turn_ctx_cell
     ; receipt_turn_count_ref
     ; receipt_model_used_ref

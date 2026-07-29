@@ -31,7 +31,8 @@ val select_pairs_within_byte_budget
     score and no inspection of line content. *)
 
 val render_gauge_line
-  :  facts_injected:int
+  :  projection:Keeper_memory_os_recall_projection.t
+  -> facts_injected:int
   -> facts_stored:int
   -> episodes_injected:int
   -> episodes_stored:int
@@ -45,15 +46,15 @@ val render_gauge_line
     renders as unbounded rather than as a literal zero. *)
 
 val render_context
-  :  keeper_id:string
+  :  projection:Keeper_memory_os_recall_projection.t
+  -> keeper_id:string
   -> now:float
   -> unit
   -> string
-(** Render every current fact and episode in persisted source order, up to
-    the configured selection budget (see the module doc). Below budget this
-    is byte-for-byte the old "no truncation, ranking, deduplication, or
-    fixed-size slices" behavior; over budget, the most recent items are kept
-    and a truncation is logged and counted. *)
+(** Render the stores selected by [projection] in persisted source order, up
+    to the configured selection budget (see the module doc).
+    [Facts_only] keeps persisted episodes available to operators and future
+    turns but excludes them from this prompt without inspecting their prose. *)
 
 val enabled : unit -> bool
 (** Kill-switch flag [MASC_KEEPER_MEMORY_OS_RECALL] (default [true]).
@@ -61,14 +62,16 @@ val enabled : unit -> bool
     separately by [MASC_KEEPER_MEMORY_OS_LIBRARIAN]. *)
 
 val render_if_enabled
-  :  keeper_id:string
+  :  projection:Keeper_memory_os_recall_projection.t
+  -> keeper_id:string
   -> now:float
   -> trace_id:string
   -> turn:int
   -> masc_root:string
   -> unit
   -> string option
-(** [render_if_enabled ~keeper_id ~now ~trace_id ~turn ~masc_root ()] is
+(** [render_if_enabled ~projection ~keeper_id ~now ~trace_id ~turn ~masc_root
+    ()] is
     [Some block] when the flag is on and the store yields advisory content,
     [Some block] with an explicit unavailable advisory when recall fails after
     the flag is on, and [None] when disabled or when no memory exists. Intended

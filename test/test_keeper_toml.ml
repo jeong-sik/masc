@@ -3,6 +3,7 @@ open Alcotest
 module TL = Keeper_toml_loader
 module KTP = Masc.Keeper_types_profile
 module KEP = Masc.Keeper_tool_persona_runtime
+module Recall_projection = Masc.Keeper_memory_os_recall_projection
 module Runtime = Server_routes_http_runtime
 
 let request_trust_policy =
@@ -542,6 +543,64 @@ max_context_override = 0
      | Error message ->
        check bool "names max_context_override" true
          (contains_substring message "max_context_override"))
+
+let test_profile_parses_memory_os_recall_projection () =
+  let input =
+    {|
+[keeper]
+memory_os_recall_projection = "facts_only"
+|}
+  in
+  match TL.parse_toml input with
+  | Error error -> fail error
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Error error -> fail error
+     | Ok defaults ->
+       check bool "typed projection" true
+         (defaults.memory_os_recall_projection
+          = Some Recall_projection.Facts_only);
+       check (list string) "canonical key" []
+         (KTP.detect_unknown_keeper_toml_keys doc))
+
+let test_profile_rejects_invalid_memory_os_recall_projection () =
+  let input =
+    {|
+[keeper]
+memory_os_recall_projection = "latest_useful"
+|}
+  in
+  match TL.parse_toml input with
+  | Error error -> fail error
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "expected invalid memory_os_recall_projection error"
+     | Error message ->
+       check bool "names field" true
+         (contains_substring message "memory_os_recall_projection");
+       check bool "names exact allowed values" true
+         (contains_substring message "facts_and_episodes, facts_only"))
+
+let test_profile_merge_overrides_memory_os_recall_projection () =
+  let base =
+    { KTP.empty_keeper_profile_defaults with
+      memory_os_recall_projection =
+        Some Recall_projection.Facts_and_episodes
+    }
+  in
+  let overlay =
+    { KTP.empty_keeper_profile_defaults with
+      memory_os_recall_projection = Some Recall_projection.Facts_only
+    }
+  in
+  let merged =
+    KTP.merge_keeper_profile_defaults
+      ~agent_name:"projection-test"
+      ~base
+      ~overlay
+  in
+  check bool "overlay projection" true
+    (merged.memory_os_recall_projection = Some Recall_projection.Facts_only)
 
 let test_profile_parses_multimodal_policy () =
   let input = {|
@@ -1431,6 +1490,7 @@ let test_detect_unknown_keys_empty_when_all_canonical () =
 mention_targets = ["a", "b"]
 autoboot_enabled = false
 active_goal_ids = ["goal-runtime"]
+memory_os_recall_projection = "facts_only"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1890,6 +1950,12 @@ let () =
           test_case "full" `Quick test_profile_full;
           test_case "rejects invalid max_context_override" `Quick
             test_profile_rejects_invalid_max_context_override;
+          test_case "parses memory os recall projection" `Quick
+            test_profile_parses_memory_os_recall_projection;
+          test_case "rejects invalid memory os recall projection" `Quick
+            test_profile_rejects_invalid_memory_os_recall_projection;
+          test_case "profile overlay owns memory os recall projection" `Quick
+            test_profile_merge_overrides_memory_os_recall_projection;
           test_case "parses multimodal_policy" `Quick
             test_profile_parses_multimodal_policy;
           test_case "rejects invalid multimodal_policy" `Quick

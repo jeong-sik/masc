@@ -134,6 +134,7 @@ These are still accepted by the loader, but for consistency they should be used 
 | `active_goal_ids` | string array | Declarative goal scope for task claim eligibility |
 | `telemetry_feedback_enabled` | bool | Surface recent telemetry in the keeper prompt |
 | `telemetry_feedback_window_hours` | int | Window size for telemetry summarization |
+| `memory_os_recall_projection` | string enum | Select persisted Memory OS stores for prompt recall. `facts_only` retains episodes on disk but injects only Librarian facts. |
 
 The retired `shards` field is rejected in both persona `keeper` objects and
 Keeper TOML. Tool-family membership is not a Keeper configuration axis; the
@@ -151,6 +152,7 @@ Enumerated fields only accept the values below. The loader rejects invalid input
 | --- | --- |
 | `sandbox_profile` | `local`, `docker` |
 | `network_mode` | `none`, `inherit` |
+| `memory_os_recall_projection` | `facts_and_episodes`, `facts_only` |
 
 Deprecated personality-state axes are not allowed public keeper TOML values.
 The retired non-public keeper input list is currently empty in code.

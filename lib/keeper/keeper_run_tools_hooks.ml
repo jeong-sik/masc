@@ -41,6 +41,7 @@ type ctx =
   ; terminal_effect_state : unit -> Keeper_tools_oas.terminal_effect_state
   ; manifest_keeper_turn_id : int option
   ; meta : Keeper_meta_contract.keeper_meta
+  ; memory_os_recall_projection : Keeper_memory_os_recall_projection.t
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
     (* RFC-0225 §3.3: per-run carrier; written by the pre-request hook
        below, read by the post-tool hooks in Keeper_hooks_oas. *)
@@ -352,16 +353,18 @@ let assemble_hooks
                     ()
                 in
                 (match
-                   (* Memory OS recall — advisory block rendered from every
-                      persisted facts/episodes (read side; the write side is
-                      the librarian wired in #20897), in persisted source order.
-                      Opt-in via MASC_KEEPER_MEMORY_OS_RECALL. *)
+                   (* Memory OS recall — advisory block rendered from the
+                      keeper profile's typed store projection (read side; the
+                      write side is the librarian wired in #20897), in
+                      persisted source order. Kill-switch:
+                      MASC_KEEPER_MEMORY_OS_RECALL. *)
                    (* Off-main: recall reads persisted facts/episodes via synchronous
                       file I/O, which would starve the main Eio domain and HOL
                       sibling keepers. Read-side only, no module-level mutable
                       state, so it is domain-safe on the shared pool. *)
                    Domain_pool_ref.submit_io_or_inline (fun () ->
                      Keeper_memory_os_recall.render_if_enabled
+                       ~projection:ctx.memory_os_recall_projection
                        ~keeper_id:meta.name
                        ~now:(Time_compat.now ())
                        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)

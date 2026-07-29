@@ -157,10 +157,6 @@ function makeModelRouting(
   } = {},
 ): RuntimeDefaultsResponse['model_routing'] {
   return {
-    memory_os_consolidation_runtime_id: 'rt-a',
-    memory_os_consolidation_effective_runtime_id: 'rt-a',
-    memory_os_consolidation_status: 'resolved',
-    memory_os_consolidation_error: null,
     cross_verifier_runtime_id: null,
     media_failover: [],
     ...overrides,

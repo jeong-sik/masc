@@ -6,7 +6,6 @@
 val librarian_episode_output_schema : Yojson.Safe.t
 (** JSON object the librarian extraction provider must return. *)
 
-val consolidation_plan_output_schema : Yojson.Safe.t
 (** JSON object the per-keeper consolidation provider must return. *)
 
 (** Wire field names for {!compaction_plan_output_schema}; shared with the

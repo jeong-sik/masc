@@ -557,8 +557,7 @@ let validate_request_body_cap ~runtime_id
 ;;
 
 (* Keeper provider attempts originate at the configured default, an explicit
-   keeper assignment, an explicit media-failover runtime, the periodic Memory
-   OS consolidation runtime, or cross verifier. A lane is
+   keeper assignment, an explicit media-failover runtime, or cross verifier. A lane is
    reachable only when its id shadows one of the configured routes; a merely
    declared lane is dormant until a routed root names it.
    Expand each lane-capable route with the same lane-over-runtime precedence as
@@ -570,7 +569,6 @@ let validate_request_body_cap ~runtime_id
 let keeper_dispatch_runtime_ids
     ~(default_runtime_id : string)
     ~(assignments : (string * string) list)
-    ~(memory_os_consolidation_runtime_id : string option)
     ~(cross_verifier_runtime_id : string option)
     ~(media_failover : string list)
     ~(lanes : Runtime_lane.t list)
@@ -597,9 +595,6 @@ let keeper_dispatch_runtime_ids
     []
     ( routed_roots
       @ media_failover
-      @ (memory_os_consolidation_runtime_id
-         |> Option.to_list
-         |> List.concat_map expand)
       @ (cross_verifier_runtime_id |> Option.to_list |> List.concat_map expand) )
 ;;
 
@@ -609,7 +604,6 @@ let validate_keeper_dispatch_request_caps
     ( runtimes
     , (default_runtime : t)
     , assignments
-    , memory_os_consolidation_runtime_id
     , cross_verifier_runtime_id
     , media_failover
     , lanes )
@@ -618,7 +612,6 @@ let validate_keeper_dispatch_request_caps
     keeper_dispatch_runtime_ids
       ~default_runtime_id:default_runtime.id
       ~assignments
-      ~memory_os_consolidation_runtime_id
       ~cross_verifier_runtime_id
       ~media_failover
       ~lanes
@@ -775,12 +768,11 @@ let missing_reference_error
 ;;
 
 let degrade_loaded_for_missing_catalog
-    ( (runtimes, configured_default, assignments, memory_os_consolidation_id,
+    ( (runtimes, configured_default, assignments,
        cross_verifier_id, media_failover, lanes) :
       t list
       * t
       * (string * string) list
-      * string option
       * string option
       * string list
       * Runtime_lane.t list )
@@ -788,7 +780,6 @@ let degrade_loaded_for_missing_catalog
   : ( ( t list
         * t
         * (string * string) list
-        * string option
         * string option
         * string list
         * Runtime_lane.t list )
@@ -875,17 +866,11 @@ let degrade_loaded_for_missing_catalog
       None, Some { route_name; runtime_id }
     | Some _ as value -> value, None
   in
-  let memory_os_consolidation_id, memory_os_consolidation_drop =
-    drop_route
-      "[runtime].memory_os_consolidation"
-      memory_os_consolidation_id
-  in
   let cross_verifier_id, cross_verifier_drop =
     drop_route "[runtime].cross_verifier" cross_verifier_id
   in
   let dropped_routes =
     [ default_drop
-    ; memory_os_consolidation_drop
     ; cross_verifier_drop
     ]
     |> List.filter_map Fun.id
@@ -941,7 +926,6 @@ let degrade_loaded_for_missing_catalog
       ( ( active_runtimes
         , configured_default
         , kept_assignments
-        , memory_os_consolidation_id
         , cross_verifier_id
         , kept_media_failover
         , kept_lanes )
@@ -955,7 +939,6 @@ let materialize_config
   : ( (t list
        * t
        * (string * string) list
-       * string option
        * string option
        * string list
        * Runtime_lane.t list)
@@ -997,19 +980,15 @@ let materialize_config
   in
   (* Lanes are materialized before every route validation so any route id can
      name a lane (#25394); candidate resolution is enforced by [validate_lanes]
-     inside [lanes_of_decls]. memory_os_consolidation used to be validated above
-     this point, which is the only reason it could not name a lane. *)
+     inside [lanes_of_decls]. *)
   let* lanes =
     lanes_of_decls ~config_path ~dropped_bindings runtimes cfg.lane_decls
   in
-  (* One list in the order the errors surface: the two routes, then the
-     media_failover entries. *)
+  (* One list in the order the errors surface: the route, then media_failover. *)
   let* () =
     validate_runtime_references ~config_path ~dropped_bindings runtimes lanes
       (route_references
-         [ "memory_os_consolidation", cfg.memory_os_consolidation_runtime_id
-         ; "cross_verifier", cfg.cross_verifier_runtime_id
-         ]
+         [ "cross_verifier", cfg.cross_verifier_runtime_id ]
       @ media_failover_references cfg.media_failover)
   in
   let* () =
@@ -1025,7 +1004,6 @@ let materialize_config
     ( runtimes
     , rt
     , assignments
-    , cfg.memory_os_consolidation_runtime_id
     , cfg.cross_verifier_runtime_id
     , cfg.media_failover
     , lanes )
@@ -1037,7 +1015,6 @@ let load_list_internal ~(config_path : string) ~validate_max_context
   : ( (t list
        * t
        * (string * string) list
-       * string option
        * string option
        * string list
        * Runtime_lane.t list)
@@ -1078,7 +1055,6 @@ type loaded_state =
   { default_runtime : t option
   ; runtimes : t list
   ; keeper_assignments : (string * string) list
-  ; memory_os_consolidation_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; lanes : Runtime_lane.t list
@@ -1090,7 +1066,6 @@ let empty_loaded_state =
   { default_runtime = None
   ; runtimes = []
   ; keeper_assignments = []
-  ; memory_os_consolidation_runtime_id = None
   ; cross_verifier_runtime_id = None
   ; media_failover = []
   ; lanes = []
@@ -1108,7 +1083,6 @@ let set_loaded
     ( runtimes
     , rt
     , assignments
-    , memory_os_consolidation_id
     , cross_verifier_id
     , media_failover
     , lanes ) =
@@ -1116,7 +1090,6 @@ let set_loaded
     { default_runtime = Some rt
     ; runtimes
     ; keeper_assignments = assignments
-    ; memory_os_consolidation_runtime_id = memory_os_consolidation_id
     ; cross_verifier_runtime_id = cross_verifier_id
     ; media_failover
     ; lanes
@@ -1230,93 +1203,18 @@ let runtime_id_for_keeper (keeper_name : string) : string option =
 
 let keeper_assignments () = (runtime_state ()).keeper_assignments
 
-type memory_os_consolidation_source =
-  | Consolidation_configured
-  | Consolidation_inherited_default
-
-type effective_memory_os_consolidation =
-  { effective_runtime : t
-  ; resolution_source : memory_os_consolidation_source
-  }
-
 type dashboard_runtime_defaults_snapshot =
   { default_runtime : t option
   ; runtimes : t list
-  ; memory_os_consolidation_runtime_id : string option
-  ; memory_os_consolidation : (effective_memory_os_consolidation, string) result
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; config_path : string option
   }
 
-(* Resolve the effective Memory OS consolidation runtime from the supplied
-   immutable loaded-state snapshot. Only an absent task route inherits the
-   default. A configured id missing from the same snapshot is an invariant
-   violation, never permission to execute on a different runtime. *)
-let resolve_memory_os_consolidation_runtime_candidates_from_state
-    (state : loaded_state)
-  =
-  match state.default_runtime, state.memory_os_consolidation_runtime_id with
-  | None, _ ->
-    Error
-      "Memory OS consolidation runtime cannot resolve before runtime initialization"
-  | Some default_runtime, None ->
-    Ok [ default_runtime ]
-  | Some _, Some route_id ->
-    let candidate_ids =
-      match find_declared_lane state.lanes route_id with
-      | Some lane -> Runtime_lane.ordered_candidates lane
-      | None -> [ route_id ]
-    in
-    let rec resolve acc = function
-      | [] -> Ok (List.rev acc)
-      | runtime_id :: rest ->
-        (match
-           List.find_opt
-             (fun (runtime : t) -> String.equal runtime.id runtime_id)
-             state.runtimes
-         with
-         | Some runtime -> resolve (runtime :: acc) rest
-         | None ->
-           Error
-             (Printf.sprintf
-                "configured [runtime].memory_os_consolidation candidate %S is \
-                 absent from the loaded runtime snapshot"
-                runtime_id))
-    in
-    resolve [] candidate_ids
-;;
-
-let resolve_memory_os_consolidation_from_state (state : loaded_state) =
-  let source =
-    match state.memory_os_consolidation_runtime_id with
-    | None -> Consolidation_inherited_default
-    | Some _ -> Consolidation_configured
-  in
-  match resolve_memory_os_consolidation_runtime_candidates_from_state state with
-  | Error _ as error -> error
-  | Ok [] ->
-    Error "Memory OS consolidation route resolved to an empty runtime candidate list"
-  | Ok (effective_runtime :: _) -> Ok { effective_runtime; resolution_source = source }
-;;
-
-let resolve_memory_os_consolidation_runtime () =
-  resolve_memory_os_consolidation_from_state (runtime_state ())
-  |> Result.map (fun resolution -> resolution.effective_runtime)
-;;
-
-let resolve_memory_os_consolidation_runtime_candidates () =
-  resolve_memory_os_consolidation_runtime_candidates_from_state (runtime_state ())
-;;
-
 let dashboard_runtime_defaults_snapshot () =
   let state = runtime_state () in
   { default_runtime = state.default_runtime
   ; runtimes = state.runtimes
-  ; memory_os_consolidation_runtime_id =
-      state.memory_os_consolidation_runtime_id
-  ; memory_os_consolidation =
-      resolve_memory_os_consolidation_from_state state
   ; cross_verifier_runtime_id = state.cross_verifier_runtime_id
   ; media_failover = state.media_failover
   ; config_path = state.config_path

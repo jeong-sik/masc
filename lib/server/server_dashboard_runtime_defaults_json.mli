@@ -12,18 +12,11 @@ type runtime_entry =
   ; is_default : bool
   }
 
-type memory_os_consolidation_resolution =
-  | Consolidation_resolved of string
-  | Consolidation_inherited of string
-  | Consolidation_error of string
-
 type resolved =
   { default_runtime_id : string option
   ; default_model : string option
   ; default_max_context : int option
   ; runtimes : runtime_entry list
-  ; memory_os_consolidation_runtime_id : string option
-  ; memory_os_consolidation : memory_os_consolidation_resolution
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; config_path : string option

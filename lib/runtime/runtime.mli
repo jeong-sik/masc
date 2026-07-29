@@ -104,18 +104,15 @@ val load_list :
        * t
        * (string * string) list
        * string option
-       * string option
        * string list
        * Runtime_lane.t list
      , string )
      result
 (** [load_list ~config_path] parses runtime.toml into [(runtimes, default,
-    keeper_assignments, memory_os_consolidation_runtime_id,
-    cross_verifier_runtime_id, media_failover, lanes)].
+    keeper_assignments, cross_verifier_runtime_id, media_failover, lanes)].
     Fails ([Error]) if
     [\[runtime\].default] is missing / unresolved, if any
     [\[runtime.assignments\]] target does not resolve to a configured runtime, if
-    [\[runtime\].memory_os_consolidation] /
     [\[runtime\].cross_verifier] is set to an
     unresolved id, if any
     [\[runtime\].media_failover] entry does not resolve, or if any
@@ -192,14 +189,13 @@ module For_testing : sig
   val keeper_dispatch_runtime_ids :
     default_runtime_id:string ->
     assignments:(string * string) list ->
-    memory_os_consolidation_runtime_id:string option ->
     cross_verifier_runtime_id:string option ->
     media_failover:string list ->
     lanes:Runtime_lane.t list ->
     string list
   (** Ordered, deduplicated runtime ids reachable by Keeper default/assignment
       roots (including a same-named lane's candidates), the explicit
-      Memory OS consolidation and cross-verifier runtimes, and explicit
+      cross-verifier runtime, and explicit
       runtime-only media failover routing. Dormant declared lanes are excluded. *)
 
   val save_config_text_with_sync_parent :
@@ -237,33 +233,9 @@ val keeper_assignments : unit -> (string * string) list
     Dashboard/operator surfaces use this to expose assignment blast radius
     without parsing TOML independently. *)
 
-val resolve_memory_os_consolidation_runtime : unit -> (t, string) result
-(** Resolve the effective runtime for the periodic Memory OS fact-survival
-    consolidation pass from one immutable loaded-state snapshot. An absent
-    [\[runtime\].memory_os_consolidation] inherits [\[runtime\].default].
-    An uninitialized state or an explicit id missing from the same snapshot is
-    [Error], never a fallback to another runtime. *)
-
-val resolve_memory_os_consolidation_runtime_candidates : unit -> (t list, string) result
-(** Ordered candidates for the periodic Memory OS fact-survival consolidation
-    pass. An absent route inherits the default as a singleton; a configured
-    lane expands to its declared ordered candidates. The maintenance caller
-    retries only provider transport failures across this list. *)
-
-type memory_os_consolidation_source =
-  | Consolidation_configured
-  | Consolidation_inherited_default
-
-type effective_memory_os_consolidation =
-  { effective_runtime : t
-  ; resolution_source : memory_os_consolidation_source
-  }
-
 type dashboard_runtime_defaults_snapshot =
   { default_runtime : t option
   ; runtimes : t list
-  ; memory_os_consolidation_runtime_id : string option
-  ; memory_os_consolidation : (effective_memory_os_consolidation, string) result
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; config_path : string option
@@ -271,8 +243,7 @@ type dashboard_runtime_defaults_snapshot =
 
 val dashboard_runtime_defaults_snapshot : unit -> dashboard_runtime_defaults_snapshot
 (** Capture every value consumed by the dashboard runtime-defaults endpoint from
-    one immutable loaded-state snapshot. The consolidation resolution retains
-    configured-vs-inherited provenance and any invariant error. *)
+    one immutable loaded-state snapshot. *)
 
 val cross_verifier_runtime_id : unit -> string option
 (** [\[runtime\].cross_verifier] runtime id for the anti-rationalization

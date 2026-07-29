@@ -950,14 +950,12 @@ let parse_keeper_assignments (toml : Otoml.t)
 
 type runtime_section =
   { default_runtime_id : string option
-  ; memory_os_consolidation_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   }
 
 let empty_runtime_section =
   { default_runtime_id = None
-  ; memory_os_consolidation_runtime_id = None
   ; cross_verifier_runtime_id = None
   ; media_failover = []
   }
@@ -1000,20 +998,6 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
               | Ok default_runtime_id ->
                 { section with default_runtime_id = Some default_runtime_id }, errs
               | Error e -> section, errs @ e)
-           | "memory_os_consolidation" ->
-             (match
-                parse_runtime_string_leaf
-                  ~path:"runtime.memory_os_consolidation"
-                  ~key
-                  value
-              with
-              | Ok memory_os_consolidation_runtime_id ->
-                ( { section with
-                    memory_os_consolidation_runtime_id =
-                      Some memory_os_consolidation_runtime_id
-                  }
-                , errs )
-              | Error e -> section, errs @ e)
            | "cross_verifier" ->
              (match
                 parse_runtime_string_leaf ~path:"runtime.cross_verifier" ~key value
@@ -1048,7 +1032,6 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
                    ("runtime." ^ key)
                    (Printf.sprintf
                       "unknown [runtime] key %S; expected default, \
-                       memory_os_consolidation, \
                        cross_verifier, \
                        media_failover, [runtime.lanes], \
                        [runtime.exact_output_lanes], [runtime.assignments], or a \
@@ -1253,8 +1236,6 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
       ; models
       ; bindings
       ; default_runtime_id = runtime_section.default_runtime_id
-      ; memory_os_consolidation_runtime_id =
-          runtime_section.memory_os_consolidation_runtime_id
       ; cross_verifier_runtime_id = runtime_section.cross_verifier_runtime_id
       ; keeper_assignments
       ; media_failover = runtime_section.media_failover

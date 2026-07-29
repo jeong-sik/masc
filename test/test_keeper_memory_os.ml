@@ -7,7 +7,6 @@ module GC = Masc.Keeper_memory_os_gc
 module Librarian = Masc.Keeper_librarian
 module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Keeper_registry = Masc.Keeper_registry
-module Consolidation_runtime = Masc.Keeper_memory_os_consolidation_runtime
 (* Domain_pool_ref lives in the unwrapped masc_core sublibrary (re_export'd by
    masc_test_deps), so it is referenced bare — there is no Masc.Domain_pool_ref. *)
 module Domain_pool_ref = Domain_pool_ref
@@ -878,54 +877,6 @@ let test_librarian_defaults_missing_optional_lists () =
   | None -> Alcotest.fail "expected missing optional list fields to parse"
 ;;
 
-let memory_runtime_resolution_toml =
-  {|
-[runtime]
-default = "p0.default"
-
-[providers.p0]
-protocol = "openai-compatible-http"
-endpoint = "https://p0.example/v1"
-
-[models.default]
-api-name = "default"
-max-context = 4096
-temperature = 1.0
-
-[p0.default]
-|}
-;;
-
-let with_runtime_config_toml content f =
-  let snapshot = Runtime.For_testing.snapshot () in
-  let path = Filename.temp_file "keeper-memory-runtime-" ".toml" in
-  write_text_file path content;
-  Fun.protect
-    ~finally:(fun () ->
-      Runtime.For_testing.restore snapshot;
-      try Sys.remove path with
-      | _ -> ())
-    (fun () ->
-       match Runtime.init_default ~config_path:path with
-       | Error msg -> Alcotest.failf "Runtime.init_default failed: %s" msg
-       | Ok () -> f ())
-;;
-
-let test_memory_provider_configs_use_runtime_temperature () =
-  with_runtime_config_toml memory_runtime_resolution_toml (fun () ->
-    match Runtime.get_default_runtime () with
-    | None -> Alcotest.fail "default memory runtime should resolve"
-    | Some runtime ->
-      let consolidation =
-        Consolidation_runtime.For_testing.provider_for_consolidation
-          runtime.Runtime.provider_config
-      in
-      Alcotest.(check (option (float 0.0001)))
-        "memory consolidation keeps runtime.toml temperature"
-        (Some 1.0)
-        consolidation.temperature)
-;;
-
 let with_memory_os_env name value f =
   let old = Sys.getenv_opt name in
   Unix.putenv name value;
@@ -964,12 +915,7 @@ let test_memory_os_bool_env_accepts_enabled_disabled () =
     Alcotest.(check bool)
       "enabled enables GC"
       true
-      (Env_config.KeeperMemoryOs.gc_enabled ()));
-  with_memory_os_env Env_config.KeeperMemoryOs.consolidation_env_key "enabled" (fun () ->
-    Alcotest.(check bool)
-      "enabled enables consolidation"
-      true
-      (Env_config.KeeperMemoryOs.consolidation_enabled ()))
+      (Env_config.KeeperMemoryOs.gc_enabled ()))
 ;;
 
 let test_memory_os_env_invalid_values_fail_closed_or_default () =
@@ -1002,14 +948,6 @@ let test_memory_os_env_invalid_values_fail_closed_or_default () =
         false
         (Env_config.KeeperMemoryOs.gc_enabled ()));
     check_log_contains lines Env_config.KeeperMemoryOs.gc_env_key;
-    check_log_contains lines "fail-closed false");
-  with_captured_console_lines (fun lines ->
-    with_memory_os_env Env_config.KeeperMemoryOs.consolidation_env_key "maybe" (fun () ->
-      Alcotest.(check bool)
-        "invalid consolidation flag fail-closes"
-        false
-        (Env_config.KeeperMemoryOs.consolidation_enabled ()));
-    check_log_contains lines Env_config.KeeperMemoryOs.consolidation_env_key;
     check_log_contains lines "fail-closed false");
   with_captured_console_lines (fun lines ->
     with_memory_os_env Env_config.KeeperMemoryOs.librarian_max_messages_env_key "bogus" (fun () ->
@@ -1079,8 +1017,6 @@ let memory_os_knob_readers : (string * (unit -> unit)) list =
     , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_global_slot () : int) )
   ; ( Env_config.KeeperMemoryOs.gc_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.gc_enabled () : bool) )
-  ; ( Env_config.KeeperMemoryOs.consolidation_env_key
-    , fun () -> ignore (Env_config.KeeperMemoryOs.consolidation_enabled () : bool) )
   ]
 ;;
 
@@ -4456,10 +4392,6 @@ let () =
             "librarian defaults missing optional lists"
             `Quick
             test_librarian_defaults_missing_optional_lists
-        ; Alcotest.test_case
-            "memory provider configs use runtime temperature"
-            `Quick
-            test_memory_provider_configs_use_runtime_temperature
         ; Alcotest.test_case
             "memory os bool env accepts enabled disabled"
             `Quick

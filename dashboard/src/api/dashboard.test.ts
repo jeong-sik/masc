@@ -3671,10 +3671,6 @@ describe('fetchRuntimeDefaults', () => {
         { id: 'openai.gpt-4o', provider: 'OpenAI', model: 'gpt-4o', max_context: 128000, is_default: true },
       ],
       model_routing: {
-        memory_os_consolidation_runtime_id: null,
-        memory_os_consolidation_effective_runtime_id: 'openai.gpt-4o',
-        memory_os_consolidation_status: 'inherited',
-        memory_os_consolidation_error: null,
         cross_verifier_runtime_id: null,
         media_failover: [],
       },
@@ -3693,7 +3689,6 @@ describe('fetchRuntimeDefaults', () => {
     expect(result.default_runtime_id).toBe('openai.gpt-4o')
     expect(result.default_model).toBe('gpt-4o')
     expect(result.runtimes[0]?.is_default).toBe(true)
-    expect(result.model_routing.memory_os_consolidation_status).toBe('inherited')
-    expect(result.model_routing.memory_os_consolidation_effective_runtime_id).toBe('openai.gpt-4o')
+    expect(result.model_routing.cross_verifier_runtime_id).toBeNull()
   })
 })

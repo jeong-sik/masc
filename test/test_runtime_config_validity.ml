@@ -643,7 +643,6 @@ let test_repo_runtime_bindings_resolve_through_oas_provider_config () =
       ( runtimes
       , _default
       , _assignments
-      , _memory_os_consolidation
       , _cross_verifier
       , _media_failover , _lanes ) ->
     check bool "at least one runtime binding" true (List.length runtimes > 0);
@@ -766,18 +765,12 @@ let test_repo_runtime_toml_loads () =
       ( runtimes
       , default
       , assignments
-      , memory_os_consolidation
       , cross_verifier
       , media_failover
       , lanes ) ->
     check bool "at least one runtime" true (List.length runtimes > 0);
     check string "default runtime" "ollama_cloud.deepseek-v4-flash"
       default.Runtime.id;
-    check
-      (option string)
-      "Memory OS consolidation runtime"
-      (Some "ollama_cloud_native.minimax-m3-native-structured")
-      memory_os_consolidation;
     (match Runtime_toml.parse_file path with
      | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
      | Ok config ->
@@ -825,7 +818,6 @@ List.iter
       Runtime.For_testing.keeper_dispatch_runtime_ids
         ~default_runtime_id:default.id
         ~assignments
-        ~memory_os_consolidation_runtime_id:memory_os_consolidation
         ~cross_verifier_runtime_id:cross_verifier
         ~media_failover
         ~lanes
@@ -1597,7 +1589,6 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
     Runtime.For_testing.keeper_dispatch_runtime_ids
       ~default_runtime_id:"default-a"
       ~assignments:[ "keeper-a", "assigned-b" ]
-      ~memory_os_consolidation_runtime_id:(Some "memory-os-d")
       ~cross_verifier_runtime_id:(Some "cross-e")
       ~media_failover:[ "media-c"; "lane-a" ]
       ~lanes
@@ -1610,7 +1601,6 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
     ; "lane-b"
     ; "assigned-b"
     ; "media-c"
-    ; "memory-os-d"
     ; "cross-a"
     ]
     actual
@@ -1661,51 +1651,6 @@ let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
            (String_util.contains_substring detail "max-request-body-bytes");
          check bool "typed config diagnostic names the candidate" true
            (String_util.contains_substring detail "local.lane"))
-;;
-
-let test_runtime_config_validation_rejects_uncapped_memory_os_runtime () =
-  let content =
-    "[providers.local]\n\
-     protocol = \"openai-compatible-http\"\n\
-     endpoint = \"http://127.0.0.1:1/v1\"\n\
-     \n\
-     [models.default]\n\
-     api-name = \"default\"\n\
-     max-context = 1024\n\
-     \n\
-     [models.consolidation]\n\
-     api-name = \"consolidation\"\n\
-     max-context = 1024\n\
-     \n\
-     [local.default]\n\
-     max-request-body-bytes = 65536\n\
-     \n\
-     [local.consolidation]\n\
-     \n\
-     [runtime]\n\
-     default = \"local.default\"\n\
-     memory_os_consolidation = \"local.consolidation\"\n"
-  in
-  let snapshot = Runtime.For_testing.snapshot () in
-  let path = Filename.temp_file "uncapped_memory_os_runtime_" ".toml" in
-  let oc = open_out path in
-  output_string oc content;
-  close_out oc;
-  Fun.protect
-    ~finally:(fun () ->
-      Runtime.For_testing.restore snapshot;
-      try Sys.remove path with
-      | Sys_error _ -> ())
-    (fun () ->
-       match Runtime.save_config_text ~runtime_config_path:path content with
-       | Ok () ->
-         fail
-           "uncapped Memory OS consolidation runtime must fail runtime config validation"
-       | Error detail ->
-         check bool "typed config diagnostic names the cap" true
-           (String_util.contains_substring detail "max-request-body-bytes");
-         check bool "typed config diagnostic names the direct runtime" true
-           (String_util.contains_substring detail "local.consolidation"))
 ;;
 
 let test_runtime_config_validation_rejects_uncapped_special_runtime () =
@@ -2531,7 +2476,6 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
         ( runtimes
         , _default
         , _assignments
-        , _memory_os_consolidation
         , _cross_verifier
         , _media_failover
         , _lanes ) ->
@@ -2599,7 +2543,6 @@ let test_cross_verifier_runtime_routing () =
         ( _runtimes
         , _default
         , _assignments
-        , _memory_os_consolidation
         , cross_verifier
         , _media_failover , _lanes ) ->
       check (option string) "cross_verifier runtime id" (Some "local.libr")
@@ -2609,7 +2552,6 @@ let test_cross_verifier_runtime_routing () =
     | Error msg -> failf "absent cross_verifier should load: %s" msg
     | Ok
         ( _
-        , _
         , _
         , _
         , cross_verifier
@@ -2633,55 +2575,6 @@ let test_cross_verifier_runtime_routing () =
       failf "[runtime].cross_verifier must accept a capability-free model: %s" msg
     | Ok _ -> ())
 
-let test_memory_os_consolidation_runtime_routing () =
-  with_fake_runtime_model_catalog @@ fun () ->
-  let base =
-    "[providers.local]\n\
-     display-name = \"Local\"\n\
-     protocol = \"ollama-http\"\n\
-     endpoint = \"http://localhost:11434\"\n\
-     \n\
-     [models.chat]\n\
-     api-name = \"chat\"\n\
-     max-context = 1024\n\
-     \n\
-     [models.consolidation]\n\
-     api-name = \"consolidation\"\n\
-     max-context = 1024\n\
-     \n\
-     [local.chat]\n\
-     \n\
-     [local.consolidation]\n\
-     \n\
-     [runtime]\n\
-     default = \"local.chat\"\n"
-  in
-  with_temp_runtime_toml
-    (base ^ "memory_os_consolidation = \"local.consolidation\"\n")
-    (fun path ->
-       match Runtime.load_list ~config_path:path with
-       | Error msg -> failf "Memory OS consolidation routing should load: %s" msg
-       | Ok (_, _, _, consolidation, _, _, _) ->
-         check
-           (option string)
-           "Memory OS consolidation runtime id"
-           (Some "local.consolidation")
-           consolidation);
-  with_temp_runtime_toml base (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg -> failf "absent Memory OS consolidation route should load: %s" msg
-    | Ok (_, _, _, consolidation, _, _, _) ->
-      check (option string) "Memory OS consolidation route unset" None consolidation);
-  with_temp_runtime_toml
-    (base ^ "memory_os_consolidation = \"local.nope\"\n")
-    (fun path ->
-       match Runtime.load_list ~config_path:path with
-       | Ok _ ->
-         failf "unknown [runtime].memory_os_consolidation id must be rejected"
-       | Error msg ->
-         check bool "error names Memory OS consolidation route" true
-           (String_util.contains_substring msg "memory_os_consolidation"))
-
 let test_structured_judge_runtime_key_is_rejected () =
   match
     Runtime_toml.parse_string
@@ -2696,9 +2589,8 @@ let test_structured_judge_runtime_key_is_rejected () =
             && String_util.contains_substring error.message "unknown [runtime] key")
          errors)
 
-(* The live cross_verifier and memory_os_consolidation routes accept a
-   [runtime.lanes] id, following [resolve_assignment]'s lane-over-runtime
-   precedence. *)
+(* The live cross_verifier route accepts a [runtime.lanes] id, following
+   [resolve_assignment]'s lane-over-runtime precedence. *)
 let judge_lane_base =
   "[providers.local]\n\
    display-name = \"Local\"\n\
@@ -2743,42 +2635,6 @@ let judge_lane_base =
    \n\
    [runtime]\n\
    default = \"local.chat\"\n"
-
-(* memory_os_consolidation was validated before lanes_of_decls ran, so it was the
-   one route that could not name a lane while cross_verifier could. It is now
-   validated after lanes are materialised, with the same
-   lane-over-runtime precedence [resolve_assignment] applies. Its requirement is
-   Resolves_only, so a candidate without declared capabilities is admissible —
-   that is the difference from the verifier route. *)
-let test_memory_os_consolidation_lane_target () =
-  with_fake_runtime_model_catalog @@ fun () ->
-  let lane_target =
-    judge_lane_base
-    ^ "memory_os_consolidation = \"consolidators\"\n\
-       \n\
-       [runtime.lanes.consolidators]\n\
-       strategy = \"ordered\"\n\
-       candidates = [\"local.chat\", \"local.judge\"]\n"
-  in
-  with_temp_runtime_toml lane_target (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg ->
-      failf "lane-targeted memory_os_consolidation should load: %s" msg
-    | Ok (_, _, _, _, _, _, lanes) ->
-      check bool "consolidators lane is materialized" true
-        (List.exists
-           (fun lane -> String.equal (Runtime_lane.id lane) "consolidators")
-           lanes));
-  (* An unknown id stays an operator typo whether or not lanes exist. *)
-  with_temp_runtime_toml
-    (judge_lane_base ^ "memory_os_consolidation = \"local.absent\"\n")
-    (fun path ->
-      match Runtime.load_list ~config_path:path with
-      | Ok _ ->
-        failf "unknown [runtime].memory_os_consolidation id must still be rejected"
-      | Error msg ->
-        check bool "error names the route" true
-          (String_util.contains_substring msg "memory_os_consolidation"))
 
 let test_cross_verifier_lane_target () =
   with_fake_runtime_model_catalog @@ fun () ->
@@ -3306,17 +3162,11 @@ let () =
             "[runtime].cross_verifier resolves, defaults to None, rejects unknown"
             `Quick test_cross_verifier_runtime_routing;
           test_case
-            "[runtime].memory_os_consolidation resolves and rejects unknown"
-            `Quick test_memory_os_consolidation_runtime_routing;
-          test_case
             "retired [runtime].structured_judge key is rejected"
             `Quick test_structured_judge_runtime_key_is_rejected;
           test_case
             "[runtime].cross_verifier accepts JSON-capable lanes"
             `Quick test_cross_verifier_lane_target;
-          test_case
-            "[runtime].memory_os_consolidation accepts a lane id"
-            `Quick test_memory_os_consolidation_lane_target;
           test_case
             "save_config_text validates and refreshes cross_verifier runtime"
             `Quick test_save_config_text_refreshes_cross_verifier_runtime;
@@ -3388,10 +3238,6 @@ let () =
           test_case
             "runtime config rejects uncapped keeper candidate"
             `Quick test_runtime_config_validation_rejects_uncapped_keeper_candidate;
-          test_case
-            "runtime config rejects uncapped Memory OS consolidation runtime"
-            `Quick
-            test_runtime_config_validation_rejects_uncapped_memory_os_runtime;
           test_case
             "runtime config rejects an uncapped cross-verifier runtime"
             `Quick

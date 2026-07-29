@@ -11,10 +11,6 @@
 
 [runtime]
 default = "ollama_cloud.deepseek-v4-flash"
-# Periodic Memory OS fact-survival consolidation is a separate task route from
-# post-turn Librarian extraction. Model/provider selection belongs only here.
-memory_os_consolidation = "ollama_cloud_native.minimax-m3-native-structured"
-# Structured domain judgment does not inherit the fleet chat default.
 # Anti-rationalization/cross-verifier work uses a typed verdict tool call.
 # Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
 # this explicit smart lane.
@@ -300,8 +296,6 @@ supports-multimodal-inputs = true
 
 [ollama_cloud_native.minimax-m3-native-structured]
 wizard-default = true
-# This is the explicit Memory OS consolidation route. It bypasses the normal
-# turn driver, so it must carry its own exact serialized-request ceiling.
 max-request-body-bytes = 524288
 
 # Kimi K2.7 Code (Ollama Cloud) — vision-capable Cloud runtime. The model name

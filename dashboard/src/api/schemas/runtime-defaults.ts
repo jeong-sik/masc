@@ -11,14 +11,11 @@
 import {
   array,
   boolean,
-  literal,
   nullable,
-  null_,
   number,
   object,
   optional,
   string,
-  variant,
   type BaseIssue,
   type InferOutput,
 } from 'valibot'
@@ -32,32 +29,10 @@ const RuntimeEntrySchema = object({
   is_default: boolean(),
 })
 
-const ModelRoutingSchema = variant('memory_os_consolidation_status', [
-  object({
-    memory_os_consolidation_runtime_id: string(),
-    memory_os_consolidation_effective_runtime_id: string(),
-    memory_os_consolidation_status: literal('resolved'),
-    memory_os_consolidation_error: null_(),
-    cross_verifier_runtime_id: nullable(string()),
-    media_failover: array(string()),
-  }),
-  object({
-    memory_os_consolidation_runtime_id: null_(),
-    memory_os_consolidation_effective_runtime_id: string(),
-    memory_os_consolidation_status: literal('inherited'),
-    memory_os_consolidation_error: null_(),
-    cross_verifier_runtime_id: nullable(string()),
-    media_failover: array(string()),
-  }),
-  object({
-    memory_os_consolidation_runtime_id: nullable(string()),
-    memory_os_consolidation_effective_runtime_id: null_(),
-    memory_os_consolidation_status: literal('error'),
-    memory_os_consolidation_error: string(),
-    cross_verifier_runtime_id: nullable(string()),
-    media_failover: array(string()),
-  }),
-])
+const ModelRoutingSchema = object({
+  cross_verifier_runtime_id: nullable(string()),
+  media_failover: array(string()),
+})
 
 const RuntimeDefaultsResponseSchema = object({
   generated_at_iso: optional(string()),

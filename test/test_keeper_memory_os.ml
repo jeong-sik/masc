@@ -391,6 +391,29 @@ let test_fact_decoder_rejects_wrong_schema_version () =
     (Option.is_none (Types.fact_of_json wrong_version))
 ;;
 
+let test_persisted_memory_decoders_reject_unknown_fields () =
+  let fact = fact_fixture ~now:1_000_000.0 () in
+  let fact_with_unknown =
+    match Types.fact_to_json fact with
+    | `Assoc fields -> `Assoc (("retired_field", `String "value") :: fields)
+    | _ -> Alcotest.fail "fact_to_json must produce an object"
+  in
+  Alcotest.(check bool)
+    "fact wire is closed"
+    true
+    (Option.is_none (Types.fact_of_json fact_with_unknown));
+  let episode = episode_fixture ~summary:"closed wire" ~now:1_000_000.0 [ fact ] in
+  let episode_with_unknown =
+    match Types.episode_to_json episode with
+    | `Assoc fields -> `Assoc (("retired_field", `String "value") :: fields)
+    | _ -> Alcotest.fail "episode_to_json must produce an object"
+  in
+  Alcotest.(check bool)
+    "episode wire is closed"
+    true
+    (Option.is_none (Types.episode_of_json episode_with_unknown))
+;;
+
 let test_librarian_prompt_renders () =
   let inp : Librarian.input =
     { Librarian.trace_id = "trace-abc"
@@ -4346,6 +4369,10 @@ let () =
             "fact decoder rejects unsupported schema version"
             `Quick
             test_fact_decoder_rejects_wrong_schema_version
+        ; Alcotest.test_case
+            "persisted memory decoders reject unknown fields"
+            `Quick
+            test_persisted_memory_decoders_reject_unknown_fields
         ; Alcotest.test_case "librarian prompt renders" `Quick test_librarian_prompt_renders
         ; Alcotest.test_case
             "librarian prompt omits private blocks"

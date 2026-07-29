@@ -118,6 +118,7 @@ let base_tools : Masc_domain.tool_schema list =
                       ] )
                 ] )
           ; "required", `List [ `String "content" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ; (* Tool self-introspection — lets the keeper enumerate its own capabilities *)

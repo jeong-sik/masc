@@ -50,12 +50,10 @@ let facts_path ~keeper_id =
   facts_path_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
 ;;
 
-(* RFC-0244 Tier 2: the keeper ids that currently have a Tier-1 fact store, for
-   the cross-keeper consolidation sweep. Derived from the [*.facts.jsonl] files
-   in the keepers dir (the same path keeper writes use), so it tracks exactly the
-   keepers with persisted facts. The reserved shared id is excluded so a prior
-   sweep's output is never folded back in as a source keeper. Sorted for
-   deterministic sweep order. *)
+(* Keeper ids that currently have a Tier-1 fact store. Derived from the
+   [*.facts.jsonl] files in the keepers dir (the same path Keeper writes use),
+   so it tracks exactly the keepers with persisted facts. The reserved shared
+   id is excluded; results are sorted for deterministic enumeration. *)
 let list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir =
   let dir = keepers_dir in
   if not (Sys.file_exists dir && Sys.is_directory dir)
@@ -350,30 +348,6 @@ let rewrite_facts_atomically_for_base_path ~base_path ~keeper_id facts =
 
 let rewrite_facts_atomically ~keeper_id facts =
   rewrite_facts_atomically_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id facts
-;;
-
-(* ---------- Facts snapshot CAS (optimistic concurrency) ---------- *)
-
-(* Byte-level snapshot identity for the read-outside-lock, rewrite-under-lock
-   pattern. [fact_to_json] has a stable key order (see Keeper_memory_os_types — the
-   optional claim metadata keys are appended last and omitted when None,
-   specifically to keep this fingerprint byte-identical for legacy rows), so a
-   fact's canonical JSON is a sound content key. [same_fact_snapshot snapshot
-   current] is true iff the two lists are positionally byte-identical: any
-   concurrent append (longer), cap/GC (shorter), or re-observation (a row's bytes
-   change) makes them differ, so a caller that classified [snapshot] outside the
-   lock can re-read under the lock and abandon a stale rewrite. Line count and file
-   size are NOT sound CAS keys — [merge_facts] can hold either
-   steady while rows differ. SSOT for the reconcile and consolidation rewrite
-   paths. *)
-let fact_fingerprint fact = fact_to_json fact |> Yojson.Safe.to_string
-
-let rec same_fact_snapshot left right =
-  match left, right with
-  | [], [] -> true
-  | l :: ls, r :: rs ->
-    String.equal (fact_fingerprint l) (fact_fingerprint r) && same_fact_snapshot ls rs
-  | [], _ :: _ | _ :: _, [] -> false
 ;;
 
 (* Run [f] holding the per-keeper facts lock. On lock-acquisition timeout (another

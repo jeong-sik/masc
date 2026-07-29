@@ -35,8 +35,8 @@ val keeper_context_status_json
 
 (** RFC-0035 P4 surface: explicit memory write.
 
-    Writes a durable claim into the Memory OS fact store (the only store
-    an explicit write reaches — RFC keeper-memory-consolidation Stage 4).
+    Writes a durable claim into the Memory OS fact store, the only store
+    an explicit write reaches.
     Body is stored as [**title** content] when [title] is non-empty.
 
     Args (JSON object):
@@ -44,8 +44,6 @@ val keeper_context_status_json
       stands alone.
     - [content] — body. Required; must be non-empty.
     - [valid_for_days] — optional producer-declared lifetime.
-    - [kind] — retired with the memory bank's horizon vocabulary; sending
-      it gets a typed [kind_argument_removed] rejection.
 
     Returns a JSON string with [{ok, error_kind, ...}]:
     - On success: [ok=true], [rows_written], [outcome], [store].
@@ -73,7 +71,6 @@ val keeper_memory_write_max_body_chars : int
     so tests can pin the error_kind taxonomy without constructing a
     [Workspace.config]. *)
 type memory_write_error_kind =
-  | Kind_argument_removed
   | Title_too_long
   | Content_empty
   | Content_too_long

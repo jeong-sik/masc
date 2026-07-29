@@ -22,11 +22,8 @@ let wire_field_source_tool_call_id = Keeper_memory_os_types.wire_field_source_to
 let wire_field_claim_id = Keeper_memory_os_types.wire_field_claim_id
 let wire_field_claim_kind = Keeper_memory_os_types.wire_field_claim_kind
 let wire_field_valid_for_days = Keeper_memory_os_types.wire_field_valid_for_days
-let wire_field_schema_version = Keeper_memory_os_types.wire_field_schema_version
 let wire_episode_fields = Keeper_memory_os_types.wire_librarian_episode_fields
 let wire_claim_fields = Keeper_memory_os_types.wire_librarian_claim_fields
-
-let accepted_episode_fields = wire_field_schema_version :: wire_episode_fields
 
 let trim_nonempty s =
   let s = String.trim s in
@@ -302,7 +299,7 @@ let episode_of_json_result ?now ~generation (inp : input) (json : Yojson.Safe.t)
   in
   match json with
   | `Assoc fields ->
-    (match first_unexpected_field ~allowed:accepted_episode_fields fields with
+    (match first_unexpected_field ~allowed:wire_episode_fields fields with
      | Some field -> Error (Unexpected_field field)
      | None ->
        (match

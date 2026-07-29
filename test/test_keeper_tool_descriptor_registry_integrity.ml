@@ -720,6 +720,14 @@ let test_shape_changing_post_validation_is_executed () =
   | Ok _ -> Alcotest.fail "translated payload skipped descriptor validation"
 ;;
 
+let test_memory_write_descriptor_schema_is_closed () =
+  let descriptor = required_public_descriptor "keeper_memory_write" in
+  Alcotest.(check bool)
+    "keeper_memory_write schema forbids additional properties"
+    true
+    (schema_forbids_additional_properties descriptor.input_schema)
+;;
+
 let test_read_public_validation_rejects_line_fields () =
   let input =
     `Assoc
@@ -1529,6 +1537,10 @@ let () =
         ] )
     ; ( "agent-contract"
       , [ test_case
+            "keeper_memory_write descriptor schema is closed"
+            `Quick
+            test_memory_write_descriptor_schema_is_closed
+        ; test_case
             "Read public descriptor schema is closed"
             `Quick
             test_read_public_descriptor_schema_is_closed

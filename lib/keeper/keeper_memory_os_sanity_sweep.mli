@@ -3,10 +3,9 @@
     This is an operator review packet, not an automatic belief invalidator. The
     code only projects typed Memory OS state: current-vs-expired facts from the
     stored [valid_until] boundary, duplicate claim identities from the Memory OS
-    SSOT. It does not
-    string-match claim prose or infer external truth. Obsolete/superseded
-    decisions remain HITL/model-judgement work through the existing
-    consolidation-plan index contract. *)
+    SSOT. It does not string-match claim prose, infer external truth, or mutate
+    stored facts. Obsolete/superseded decisions remain outside this read-only
+    projection. *)
 
 type keeper_error =
   | Missing_fact_store of { facts_path : string }

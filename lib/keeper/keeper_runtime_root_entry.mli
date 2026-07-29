@@ -1,11 +1,10 @@
 (** Typed filename authority for regular files directly under
-    [.masc/keepers].  High-cardinality lane artifacts belong below the Keeper
-    directory; these constructors are the closed set of legacy/current root
-    artifacts that runtime producers still own. *)
+    [.masc/keepers]. High-cardinality lane artifacts belong below the Keeper
+    directory; these constructors are the closed set of root artifacts that
+    current runtime producers own. *)
 
 type keeper_artifact =
   | Metadata
-  | Memory_log
   | Generation_index_log
   | Decision_log
   | Feedback_log

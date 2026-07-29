@@ -10,8 +10,8 @@ open Keeper_memory_os_types
 val facts_path : keeper_id:string -> string
 val facts_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
-(** RFC-0244 Tier 2: keeper ids that currently have a [*.facts.jsonl] store, for
-    the cross-keeper consolidation sweep. Excludes the reserved shared id; sorted. *)
+(** Keeper ids that currently have a [*.facts.jsonl] store. Excludes the
+    reserved shared id; sorted. *)
 val list_fact_store_keeper_ids : unit -> string list
 val list_fact_store_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
 
@@ -83,19 +83,6 @@ val rewrite_facts_atomically_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> fact list -> unit
 val rewrite_facts_atomically_for_base_path :
   base_path:string -> keeper_id:string -> fact list -> unit
-
-(** {1 Facts snapshot CAS} *)
-
-(** Canonical-JSON fingerprint of a fact (stable key order — see
-    {!Keeper_memory_os_types}). *)
-val fact_fingerprint : fact -> string
-
-(** [same_fact_snapshot snapshot current] is true iff the two fact lists are
-    positionally byte-identical. Used for read-outside-lock / rewrite-under-lock
-    optimistic concurrency: a snapshot classified without the lock is revalidated
-    under the lock and a stale rewrite abandoned if any concurrent writer changed
-    the store. Line count / file size are NOT sound CAS keys. *)
-val same_fact_snapshot : fact list -> fact list -> bool
 
 (** [with_facts_lock ?clock ~keeper_id ~on_timeout f] runs [f] holding the
     per-keeper facts lock. On flock-acquisition timeout, [on_timeout msg] produces

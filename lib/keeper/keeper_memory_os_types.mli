@@ -1,8 +1,8 @@
 (** Keeper_memory_os_types — typed schema for the tiered Memory OS.
 
     This module defines the canonical fact and episode records used by
-    the librarian, the I/O layer, and Memory projections. All records
-    carry a [schema_version] to support future migrations. *)
+    the librarian, the I/O layer, and Memory projections. Every persisted
+    record carries the exact current [schema_version]; other versions reject. *)
 
 (** Current schema version written to disk. *)
 val schema_version : string
@@ -41,8 +41,7 @@ val wire_field_created_at : string
 val wire_field_terminal_marker : string
 
 (** Episode-object fields accepted from the librarian and rendered in retry
-    prompts. [wire_field_schema_version] is accepted separately for compatibility
-    but is not requested from the provider. *)
+    prompts. *)
 val wire_librarian_episode_fields : string list
 
 (** Claim-object fields accepted from the librarian and rendered in retry

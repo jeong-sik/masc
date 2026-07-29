@@ -367,6 +367,7 @@ let test_json_syntax_request_is_prompt_only_and_carries_canonical_domain_schema 
        publish_lane
          [ "hitl-json-syntax-contract" ]
          (F.resolver_snapshot
+            ~supports_response_format_json:false
             ~supports_structured_output:false
             ~source:"hitl-json-syntax-contract"
             [ { id = "hitl-json-syntax-contract"; base_url = server.base_url } ]);

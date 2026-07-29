@@ -7,10 +7,12 @@
       outcome, not a silent inline fallback.
     - Content-addressed: same bytes -> same sha -> idempotent put.
     - Sharding: blobs land under [<sha[0..1]>/<sha>].
-    - GC: blobs not in keep_set are deleted; kept ones survive.
+    - Maintenance: union-scanned live refs survive and stable dead refs are
+      deleted only on the second explicit retention pass.
     - Concurrent put: simultaneous writes of same content do not corrupt. *)
 
 module B = Tool_blob_store
+module M = Tool_blob_maintenance
 module O = Tool_output
 
 (* --- Helpers --- *)
@@ -25,6 +27,10 @@ let fetch_ok store ~sha256 =
   | Ok value -> value
   | Error error ->
       Alcotest.failf "fetch failed: %s" (B.fetch_error_to_string error)
+
+let stored_ref_exn = function
+  | O.Stored reference -> reference
+  | O.Inline _ -> Alcotest.fail "expected Stored"
 
 let with_temp_dir f =
   let dir = Filename.temp_file "masc_blob_test" "" in
@@ -82,6 +88,25 @@ let test_stored_roundtrip () =
   | O.Not_marker -> Alcotest.fail "expected Decoded"
   | O.Invalid_marker { detail } ->
       Alcotest.failf "expected Decoded, got Invalid_marker: %s" detail
+
+let test_normalized_artifact_ref_roundtrip () =
+  let reference =
+    ref_exn
+      ~sha256:(String.make 64 'b')
+      ~bytes:4096
+      ~mime:"application/json"
+      ~preview:"{\"ok\":true}"
+  in
+  match O.normalized_artifact_ref_of_json (O.normalized_artifact_ref_to_json reference) with
+  | O.Decoded_normalized_artifact_ref decoded ->
+    Alcotest.(check string) "sha256" reference.sha256 decoded.sha256;
+    Alcotest.(check int) "bytes" reference.bytes decoded.bytes;
+    Alcotest.(check string) "mime" reference.mime decoded.mime;
+    Alcotest.(check string) "preview" reference.preview decoded.preview
+  | O.Not_normalized_artifact_ref ->
+    Alcotest.fail "expected normalized artifact reference"
+  | O.Invalid_normalized_artifact_ref { detail } ->
+    Alcotest.failf "normalized artifact reference rejected: %s" detail
 
 let test_encoded_marker_stays_under_externalization_threshold () =
   with_temp_dir (fun dir ->
@@ -208,37 +233,516 @@ let test_sharding_layout () =
             (Sys.file_exists expected)
       | O.Inline _ -> Alcotest.fail "put returned Inline")
 
-(* --- GC --- *)
+let maintenance_ok ~base_path ~mode =
+  match M.run ~base_path ~mode with
+  | Ok report -> report
+  | Error error ->
+    Alcotest.failf "maintenance failed: %s" (M.error_to_string error)
 
-let test_gc_deletes_unkept () =
-  with_temp_dir (fun dir ->
-      let store = B.create ~base_path:dir in
-      let stored payload =
-        match B.put store ~bytes:payload ~mime:"text/plain" with
-        | O.Stored { sha256; _ } -> sha256
-        | O.Inline _ -> Alcotest.fail "expected Stored"
+let test_maintenance_keeps_live_and_deletes_stable_dead_after_restart () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let live =
+        B.put store ~bytes:"live shared bridge output" ~mime:"text/plain"
+        |> stored_ref_exn
       in
-      let keep = stored "keep me" in
-      let _drop = stored "drop me" in
-      let _drop2 = stored "drop me too" in
-      Alcotest.(check int) "before gc" 3 (List.length (B.list_all store));
-      let deleted = B.gc store ~keep_set:[ keep ] in
-      Alcotest.(check int) "deleted count" 2 deleted;
-      Alcotest.(check int) "after gc" 1 (List.length (B.list_all store));
+      let dead =
+        B.put store ~bytes:"dead replay sidecar output" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let replay_live =
+        B.put store ~bytes:"live gate replay output" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let durable_consumer =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "keepers/keeper-a/sessions/history.jsonl"
+      in
+      Fs_compat.mkdir_p (Filename.dirname durable_consumer);
+      Fs_compat.save_file
+        durable_consumer
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ "consumer", `String "Tool_bridge"
+             ; "output_ref", `String (O.encode_for_oas (O.Stored live))
+             ])
+         ^ "\n");
+      let replay_sidecar =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "gate/replay-results.json"
+      in
+      Fs_compat.mkdir_p (Filename.dirname replay_sidecar);
+      Fs_compat.save_file
+        replay_sidecar
+        (Yojson.Safe.pretty_to_string
+           (`Assoc
+             [ "approval_id", `String "approval-maintenance"
+             ; ( "outcome"
+               , `String (O.encode_for_oas (O.Stored replay_live)) )
+             ]));
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int) "union includes both consumers" 2 observed.live_references;
+      Alcotest.(check int) "three blobs observed" 3 observed.blobs_observed;
+      Alcotest.(check int) "one candidate" 1 observed.candidates_recorded;
+      Alcotest.(check int) "observe deletes none" 0 observed.deleted;
+      Alcotest.(check bool)
+        "dead remains after observation"
+        true
+        (Option.is_some (fetch_ok store ~sha256:dead.sha256));
+      (* The second call deliberately uses only the durable candidate snapshot:
+         this is the restart boundary of the two-state retention policy. *)
+      let swept =
+        maintenance_ok
+          ~base_path
+          ~mode:M.Delete_previous_candidates
+      in
+      Alcotest.(check int) "stable dead blob deleted" 1 swept.deleted;
       Alcotest.(check (option string))
-        "kept blob still fetchable"
-        (Some "keep me")
-        (fetch_ok store ~sha256:keep))
+        "shared consumer reference remains live"
+        (Some "live shared bridge output")
+        (fetch_ok store ~sha256:live.sha256);
+      Alcotest.(check (option string))
+        "dead blob no longer exists"
+        None
+        (fetch_ok store ~sha256:dead.sha256);
+      Alcotest.(check (option string))
+        "Gate replay sidecar reference remains live"
+        (Some "live gate replay output")
+        (fetch_ok store ~sha256:replay_live.sha256))
 
-let test_gc_empty_keep_clears_all () =
-  with_temp_dir (fun dir ->
-      let store = B.create ~base_path:dir in
-      let _ = B.put store ~bytes:"a" ~mime:"text/plain" in
-      let _ = B.put store ~bytes:"b" ~mime:"text/plain" in
-      let _ = B.put store ~bytes:"c" ~mime:"text/plain" in
-      let deleted = B.gc store ~keep_set:[] in
-      Alcotest.(check int) "deleted all" 3 deleted;
-      Alcotest.(check int) "store empty" 0 (List.length (B.list_all store)))
+let test_maintenance_keeps_wire_capture_reference_within_retention () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let captured =
+        B.put store ~bytes:"captured provider response" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let dead =
+        B.put store ~bytes:"unreferenced provider response" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let wire_capture =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "wire-capture/2026-07/28.jsonl"
+      in
+      Fs_compat.mkdir_p (Filename.dirname wire_capture);
+      Fs_compat.save_file
+        wire_capture
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ "kind", `String "response"
+             ; ( "response_text"
+               , `String (O.encode_for_oas (O.Stored captured)) )
+             ])
+         ^ "\n");
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "wire capture reference is live"
+        1
+        observed.live_references;
+      Alcotest.(check int)
+        "only the unreferenced blob is a candidate"
+        1
+        observed.candidates_recorded;
+      let swept =
+        maintenance_ok
+          ~base_path
+          ~mode:M.Delete_previous_candidates
+      in
+      Alcotest.(check int) "stable unreferenced blob is deleted" 1 swept.deleted;
+      Alcotest.(check (option string))
+        "wire capture blob remains readable"
+        (Some "captured provider response")
+        (fetch_ok store ~sha256:captured.sha256);
+      Alcotest.(check (option string))
+        "unreferenced blob no longer exists"
+        None
+        (fetch_ok store ~sha256:dead.sha256))
+
+let test_maintenance_rejects_uncoordinated_cluster_roots () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let blob =
+        B.put store ~bytes:"cluster-owned output" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let cluster_capture =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "clusters/secondary/wire-capture/2026-07/28.jsonl"
+      in
+      Fs_compat.mkdir_p (Filename.dirname cluster_capture);
+      Fs_compat.save_file
+        cluster_capture
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ "response_text", `String (O.encode_for_oas (O.Stored blob)) ])
+         ^ "\n");
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
+       | Error
+           (M.Clustered_durable_roots_uncoordinated
+             { path; entries }) ->
+         Alcotest.(check string)
+           "exact cluster root"
+           (Filename.concat
+              (Common.masc_dir_from_base_path ~base_path)
+              "clusters")
+           path;
+         Alcotest.(check int) "one cluster entry" 1 entries
+       | Error error ->
+         Alcotest.failf
+           "unexpected clustered maintenance error: %s"
+           (M.error_to_string error)
+       | Ok _ ->
+         Alcotest.fail
+           "shared blob maintenance ran without cross-cluster coordination");
+      Alcotest.(check (option string))
+        "cluster-owned blob remains readable"
+        (Some "cluster-owned output")
+        (fetch_ok store ~sha256:blob.sha256);
+      Alcotest.(check bool)
+        "cluster refusal does not publish a candidate snapshot"
+        false
+        (Sys.file_exists (M.candidate_snapshot_path ~base_path)))
+
+let test_maintenance_malformed_reference_fails_closed () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let blob =
+        B.put store ~bytes:"must survive malformed source" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let source =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "gate/malformed.jsonl"
+      in
+      Fs_compat.mkdir_p (Filename.dirname source);
+      Fs_compat.save_file source "{\"output\":\"[masc:blob garbage]\"}\n";
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
+       | Error (M.Malformed_artifact_reference { path; line; _ }) ->
+         Alcotest.(check string) "exact malformed source" source path;
+         Alcotest.(check int) "exact malformed line" 1 line
+       | Error error ->
+         Alcotest.failf
+           "unexpected maintenance error: %s"
+           (M.error_to_string error)
+       | Ok _ -> Alcotest.fail "malformed reference reached deletion");
+      Alcotest.(check (option string))
+        "blob retained on malformed reference"
+        (Some "must survive malformed source")
+        (fetch_ok store ~sha256:blob.sha256))
+
+let test_maintenance_does_not_scan_repository_mirrors () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let blob =
+        B.put store ~bytes:"not owned by a repository mirror" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let repository_source =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "repos/masc/docs/blob-marker.md"
+      in
+      Fs_compat.mkdir_p (Filename.dirname repository_source);
+      Fs_compat.save_file
+        repository_source
+        "documentation example: [masc:blob not-a-reference]";
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "repository source does not claim blob ownership"
+        1
+        observed.candidates_recorded;
+      let swept =
+        maintenance_ok
+          ~base_path
+          ~mode:M.Delete_previous_candidates
+      in
+      Alcotest.(check int) "stable unowned blob is deleted" 1 swept.deleted;
+      Alcotest.(check (option string))
+        "repository text did not retain the blob"
+        None
+        (fetch_ok store ~sha256:blob.sha256))
+
+let test_maintenance_rechecks_candidate_referenced_before_startup () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let candidate =
+        B.put store ~bytes:"referenced before startup sweep" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int) "one candidate observed" 1 observed.candidates_recorded;
+      let durable_consumer =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "keepers/keeper-a/history.jsonl"
+      in
+      Fs_compat.mkdir_p (Filename.dirname durable_consumer);
+      Fs_compat.save_file
+        durable_consumer
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ "output_ref", `String (O.encode_for_oas (O.Stored candidate)) ])
+         ^ "\n");
+      let swept =
+        maintenance_ok
+          ~base_path
+          ~mode:M.Delete_previous_candidates
+      in
+      Alcotest.(check int) "new live reference prevents deletion" 0 swept.deleted;
+      Alcotest.(check (option string))
+        "newly referenced candidate remains readable"
+        (Some "referenced before startup sweep")
+        (fetch_ok store ~sha256:candidate.sha256))
+
+let test_maintenance_keeps_normalized_tool_call_blob_reference () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let reference =
+        B.put
+          store
+          ~bytes:"normalized tool-call output"
+          ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let tool_call_log =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "tool_calls/2026-07/29.jsonl"
+      in
+      Fs_compat.mkdir_p (Filename.dirname tool_call_log);
+      Fs_compat.save_file
+        tool_call_log
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ "keeper", `String "keeper-tool-log"
+             ; "tool", `String "large_output"
+             ; ( "output"
+               , `Assoc
+                   [ ( "_blob"
+                     , `Assoc
+                         [ "sha256", `String reference.sha256
+                         ; "bytes", `Int reference.bytes
+                         ; "mime", `String reference.mime
+                         ; "preview", `String reference.preview
+                         ] )
+                   ] )
+             ])
+         ^ "\n");
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "normalized tool-call reference is live"
+        1
+        observed.live_references;
+      Alcotest.(check int)
+        "normalized live blob is not a candidate"
+        0
+        observed.candidates_recorded;
+      let swept =
+        maintenance_ok
+          ~base_path
+          ~mode:M.Delete_previous_candidates
+      in
+      Alcotest.(check int) "normalized live blob is not deleted" 0 swept.deleted;
+      Alcotest.(check (option string))
+        "normalized tool-call blob remains readable"
+        (Some "normalized tool-call output")
+        (fetch_ok store ~sha256:reference.sha256))
+
+let test_maintenance_malformed_normalized_blob_fails_closed () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let reference =
+        B.put store ~bytes:"survive malformed normalized ref" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let tool_call_log =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "tool_calls/2026-07/29.jsonl"
+      in
+      Fs_compat.mkdir_p (Filename.dirname tool_call_log);
+      Fs_compat.save_file
+        tool_call_log
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ ( "output"
+               , `Assoc
+                   [ ( "_blob"
+                     , `Assoc [ "sha256", `String reference.sha256 ] )
+                   ] )
+             ])
+         ^ "\n");
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
+       | Error
+           (M.Malformed_structured_artifact_reference
+             { path; line; _ }) ->
+         Alcotest.(check string) "exact malformed tool-call log" tool_call_log path;
+         Alcotest.(check int) "exact malformed tool-call line" 1 line
+       | Error error ->
+         Alcotest.failf
+           "unexpected normalized-reference error: %s"
+           (M.error_to_string error)
+       | Ok _ -> Alcotest.fail "malformed normalized reference reached deletion");
+      Alcotest.(check (option string))
+        "malformed normalized reference retains every blob"
+        (Some "survive malformed normalized ref")
+        (fetch_ok store ~sha256:reference.sha256))
+
+let test_maintenance_truncated_normalized_blob_fails_closed () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let reference =
+        B.put store ~bytes:"survive truncated normalized ref" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "unreferenced blob is first recorded"
+        1
+        observed.candidates_recorded;
+      let tool_call_log =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "tool_calls/2026-07/29.jsonl"
+      in
+      Fs_compat.mkdir_p (Filename.dirname tool_call_log);
+      let complete_reference =
+        O.normalized_artifact_ref_to_json reference
+        |> Yojson.Safe.to_string
+      in
+      Fs_compat.save_file
+        tool_call_log
+        ("{\"output\":" ^ complete_reference);
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
+       | Error
+           (M.Malformed_structured_artifact_reference
+             { path; line; _ }) ->
+         Alcotest.(check string) "exact truncated tool-call log" tool_call_log path;
+         Alcotest.(check int) "exact truncated tool-call line" 1 line
+       | Error error ->
+         Alcotest.failf
+           "unexpected truncated-reference error: %s"
+           (M.error_to_string error)
+       | Ok _ ->
+         Alcotest.fail "truncated normalized reference reached deletion");
+      Alcotest.(check (option string))
+        "truncated normalized reference retains every blob"
+        (Some "survive truncated normalized ref")
+        (fetch_ok store ~sha256:reference.sha256))
+
+let test_maintenance_unlink_failure_is_typed () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let sha256 = String.make 64 'a' in
+      let shard_dir =
+        Filename.concat (B.root_dir store) (String.sub sha256 0 2)
+      in
+      Fs_compat.mkdir_p shard_dir;
+      Unix.mkdir (Filename.concat shard_dir sha256) 0o755;
+      ignore (maintenance_ok ~base_path ~mode:M.Observe_only);
+      match M.run ~base_path ~mode:M.Delete_previous_candidates with
+      | Error
+          (M.Blob_delete_failed
+            { Tool_blob_store.sha256 = actual; _ }) ->
+        Alcotest.(check string) "exact failed blob" sha256 actual
+      | Error error ->
+        Alcotest.failf
+          "unexpected unlink error: %s"
+          (M.error_to_string error)
+      | Ok _ -> Alcotest.fail "unlink failure was silently skipped")
+
+let test_maintenance_rejects_symbolic_link_shard () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      Fs_compat.mkdir_p (B.root_dir store);
+      let outside = Filename.concat base_path "outside-blobs" in
+      Unix.mkdir outside 0o755;
+      Fs_compat.save_file
+        (Filename.concat outside (String.make 64 'a'))
+        "outside";
+      Unix.symlink outside (Filename.concat (B.root_dir store) "aa");
+      match M.run ~base_path ~mode:M.Observe_only with
+      | Error (M.Blob_listing_failed { Tool_blob_store.path; _ }) ->
+        Alcotest.(check string)
+          "exact symbolic-link shard"
+          (Filename.concat (B.root_dir store) "aa")
+          path
+      | Error error ->
+        Alcotest.failf
+          "unexpected symbolic-link error: %s"
+          (M.error_to_string error)
+      | Ok _ -> Alcotest.fail "symbolic-link shard crossed blob ownership")
+
+let test_maintenance_rejects_symbolic_link_durable_source () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let blob =
+        B.put store ~bytes:"must survive linked source" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let outside = Filename.concat base_path "outside-consumer.json" in
+      Fs_compat.save_file
+        outside
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ "output_ref", `String (O.encode_for_oas (O.Stored blob)) ]));
+      let linked_source =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "messages/linked-consumer.json"
+      in
+      Fs_compat.mkdir_p (Filename.dirname linked_source);
+      Unix.symlink outside linked_source;
+      (match M.run ~base_path ~mode:M.Observe_only with
+       | Error (M.Durable_source_stat_failed { path; _ }) ->
+         Alcotest.(check string) "exact linked source" linked_source path
+       | Error error ->
+         Alcotest.failf
+           "unexpected linked-source error: %s"
+           (M.error_to_string error)
+       | Ok _ -> Alcotest.fail "symbolic-link source was silently skipped");
+      Alcotest.(check (option string))
+        "blob retained when source ownership is ambiguous"
+        (Some "must survive linked source")
+        (fetch_ok store ~sha256:blob.sha256))
+
+let test_maintenance_rejects_symbolic_link_candidate_snapshot () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let blob =
+        B.put store ~bytes:"must survive linked snapshot" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      ignore (maintenance_ok ~base_path ~mode:M.Observe_only);
+      let candidate_path = M.candidate_snapshot_path ~base_path in
+      let outside = Filename.concat base_path "outside-candidates.json" in
+      Fs_compat.save_file
+        outside
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ "schema_version", `Int 1
+             ; "unreferenced_candidates", `List [ `String blob.sha256 ]
+             ]));
+      Sys.remove candidate_path;
+      Unix.symlink outside candidate_path;
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
+       | Error (M.Candidate_snapshot_read_failed { path; _ }) ->
+         Alcotest.(check string) "exact linked snapshot" candidate_path path
+       | Error error ->
+         Alcotest.failf
+           "unexpected linked-snapshot error: %s"
+           (M.error_to_string error)
+       | Ok _ -> Alcotest.fail "symbolic-link candidate snapshot reached deletion");
+      Alcotest.(check (option string))
+        "blob retained when candidate snapshot ownership is ambiguous"
+        (Some "must survive linked snapshot")
+        (fetch_ok store ~sha256:blob.sha256))
 
 (* --- Repeated put: documents the atomicity contract --- *)
 
@@ -389,6 +893,10 @@ let () =
           Alcotest.test_case "inline" `Quick test_inline_roundtrip;
           Alcotest.test_case "stored" `Quick test_stored_roundtrip;
           Alcotest.test_case
+            "normalized artifact reference"
+            `Quick
+            test_normalized_artifact_ref_roundtrip;
+          Alcotest.test_case
             "encoded marker stays under externalization threshold"
             `Quick
             test_encoded_marker_stays_under_externalization_threshold;
@@ -408,9 +916,58 @@ let () =
         ] );
       ( "gc",
         [
-          Alcotest.test_case "deletes unkept" `Quick test_gc_deletes_unkept;
-          Alcotest.test_case "empty keep clears all" `Quick
-            test_gc_empty_keep_clears_all;
+          Alcotest.test_case
+            "maintenance keeps live and deletes stable dead after restart"
+            `Quick
+            test_maintenance_keeps_live_and_deletes_stable_dead_after_restart;
+          Alcotest.test_case
+            "maintenance malformed reference fails closed"
+            `Quick
+            test_maintenance_malformed_reference_fails_closed;
+          Alcotest.test_case
+            "maintenance keeps wire-capture reference within retention"
+            `Quick
+            test_maintenance_keeps_wire_capture_reference_within_retention;
+          Alcotest.test_case
+            "maintenance rejects uncoordinated cluster roots"
+            `Quick
+            test_maintenance_rejects_uncoordinated_cluster_roots;
+          Alcotest.test_case
+            "maintenance ignores repository mirrors"
+            `Quick
+            test_maintenance_does_not_scan_repository_mirrors;
+          Alcotest.test_case
+            "maintenance rechecks candidate referenced before startup"
+            `Quick
+            test_maintenance_rechecks_candidate_referenced_before_startup;
+          Alcotest.test_case
+            "maintenance keeps normalized tool-call blob reference"
+            `Quick
+            test_maintenance_keeps_normalized_tool_call_blob_reference;
+          Alcotest.test_case
+            "maintenance malformed normalized blob fails closed"
+            `Quick
+            test_maintenance_malformed_normalized_blob_fails_closed;
+          Alcotest.test_case
+            "maintenance truncated normalized blob fails closed"
+            `Quick
+            test_maintenance_truncated_normalized_blob_fails_closed;
+          Alcotest.test_case
+            "maintenance unlink failure is typed"
+            `Quick
+            test_maintenance_unlink_failure_is_typed;
+          Alcotest.test_case
+            "maintenance rejects symbolic-link shard"
+            `Quick
+            test_maintenance_rejects_symbolic_link_shard;
+          Alcotest.test_case
+            "maintenance rejects symbolic-link durable source"
+            `Quick
+            test_maintenance_rejects_symbolic_link_durable_source;
+          Alcotest.test_case
+            "maintenance rejects symbolic-link candidate snapshot"
+            `Quick
+            test_maintenance_rejects_symbolic_link_candidate_snapshot;
         ] );
       ( "atomicity",
         [

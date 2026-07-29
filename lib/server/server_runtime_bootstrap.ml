@@ -906,6 +906,46 @@ let initialize_owner_state_blocking
         (Owner_initialization_failed
            (Keeper_persistence_preparation_failed error))
   in
+  (* Preparation above has converged recovery writes, while Keeper
+     persistence owners have not started yet, so startup is the sole
+     quiescent scan/deletion boundary. A blob must remain unreferenced across
+     two complete startup scans before deletion. A failed scan retains every
+     blob and does not make unrelated server startup unavailable. *)
+  (match
+     Eio_unix.run_in_systhread (fun () ->
+       Keeper_wire_capture.prune_expired
+         ~masc_root:(Workspace.masc_root_dir (Mcp_server.workspace_config state)))
+   with
+   | Error error ->
+     Log.Server.warn
+       "startup tool blob maintenance stopped; wire-capture retention prune failed: %s"
+       (Keeper_wire_capture.prune_error_to_string error)
+   | Ok wire_capture_pruned ->
+     if wire_capture_pruned > 0
+     then
+       Log.Server.info
+         "startup wire-capture retention: pruned %d expired day-file(s)"
+         wire_capture_pruned;
+     (match
+        Eio_unix.run_in_systhread (fun () ->
+          Tool_blob_maintenance.run
+            ~base_path
+            ~mode:Tool_blob_maintenance.Delete_previous_candidates)
+      with
+      | Ok report ->
+        if report.candidates_recorded > 0 || report.deleted > 0
+        then
+          Log.Server.info
+            "startup tool blob maintenance: live=%d blobs=%d candidates=%d \
+             deleted=%d"
+            report.live_references
+            report.blobs_observed
+            report.candidates_recorded
+            report.deleted
+      | Error error ->
+        Log.Server.warn
+          "startup tool blob maintenance stopped; no further blobs were deleted: %s"
+          (Tool_blob_maintenance.error_to_string error)));
   Runtime_settings.ensure_init ();
   Runtime_params.restore ~base_path;
   Log.Server.info "Runtime_params restored from %s" base_path;

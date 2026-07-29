@@ -46,6 +46,27 @@ let store_for ~masc_root =
       entry)
 ;;
 
+type prune_error =
+  | Retention_prune_failed of
+      { path : string
+      ; detail : string
+      }
+
+let prune_error_to_string = function
+  | Retention_prune_failed { path; detail } ->
+    Printf.sprintf "wire-capture retention prune failed path=%s: %s" path detail
+;;
+
+let prune_expired ~masc_root =
+  let path = wire_capture_dir masc_root in
+  try
+    let { store; retention_days; _ } = store_for ~masc_root in
+    Ok (Dated_jsonl.prune store ~days:retention_days)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Retention_prune_failed { path; detail = Printexc.to_string exn })
+;;
+
 type record_skip_reason = Current_file_byte_cap
 
 let record_skip_reason_label = function

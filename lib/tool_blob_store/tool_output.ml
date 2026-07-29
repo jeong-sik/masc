@@ -56,6 +56,58 @@ let make_artifact_ref ~sha256 ~bytes ~preview ~mime =
 
 let with_preview artifact_ref preview = { artifact_ref with preview }
 
+let normalized_artifact_ref_key = "_blob"
+
+let normalized_artifact_ref_to_json { sha256; bytes; preview; mime } =
+  `Assoc
+    [ ( normalized_artifact_ref_key
+      , `Assoc
+          [ "sha256", `String sha256
+          ; "bytes", `Int bytes
+          ; "mime", `String mime
+          ; "preview", `String preview
+          ] )
+    ]
+;;
+
+type normalized_artifact_ref_decode =
+  | Not_normalized_artifact_ref
+  | Invalid_normalized_artifact_ref of { detail : string }
+  | Decoded_normalized_artifact_ref of artifact_ref
+
+let normalized_artifact_ref_of_json = function
+  | `Assoc [ (key, `Assoc fields) ]
+    when String.equal key normalized_artifact_ref_key ->
+    let fields =
+      List.sort
+        (fun (left, _) (right, _) -> String.compare left right)
+        fields
+    in
+    (match fields with
+     | [ "bytes", `Int bytes
+       ; "mime", `String mime
+       ; "preview", `String preview
+       ; "sha256", `String sha256
+       ] ->
+       (match make_artifact_ref ~sha256 ~bytes ~preview ~mime with
+        | Ok reference -> Decoded_normalized_artifact_ref reference
+        | Error error ->
+          Invalid_normalized_artifact_ref
+            { detail = make_error_to_string error })
+     | _ ->
+       Invalid_normalized_artifact_ref
+         { detail =
+             "expected exact _blob fields bytes, mime, preview, and sha256"
+         })
+  | `Assoc [ (key, _) ] when String.equal key normalized_artifact_ref_key ->
+    Invalid_normalized_artifact_ref
+      { detail = "_blob value must be an object" }
+  | `Assoc fields when List.mem_assoc normalized_artifact_ref_key fields ->
+    Invalid_normalized_artifact_ref
+      { detail = "_blob wrapper must contain no sibling fields" }
+  | _ -> Not_normalized_artifact_ref
+;;
+
 type t =
   | Inline of string
   | Stored of artifact_ref
@@ -92,3 +144,57 @@ let decode_from_oas s =
       match make_artifact_ref ~sha256 ~bytes ~preview ~mime with
       | Ok artifact_ref -> Decoded artifact_ref
       | Error err -> Invalid_marker { detail = make_error_to_string err })
+
+type embedded_reference_error =
+  { offset : int
+  ; detail : string
+  }
+
+let artifact_refs_in_text text =
+  let text_length = String.length text in
+  let prefix_length = String.length marker_prefix in
+  let rec find_prefix offset =
+    if offset + prefix_length > text_length
+    then None
+    else if String.sub text offset prefix_length = marker_prefix
+    then Some offset
+    else find_prefix (offset + 1)
+  in
+  let rec marker_end index in_quotes escaped =
+    if index >= text_length
+    then None
+    else
+      let character = String.unsafe_get text index in
+      if escaped
+      then marker_end (index + 1) in_quotes false
+      else if in_quotes && character = '\\'
+      then marker_end (index + 1) in_quotes true
+      else if character = '"'
+      then marker_end (index + 1) (not in_quotes) false
+      else if character = ']' && not in_quotes
+      then Some index
+      else marker_end (index + 1) in_quotes false
+  in
+  let rec collect offset references =
+    match find_prefix offset with
+    | None -> Ok (List.rev references)
+    | Some start ->
+      (match marker_end (start + prefix_length) false false with
+       | None ->
+         Error
+           { offset = start
+           ; detail = "artifact marker has no closing bracket"
+           }
+       | Some stop ->
+         let marker = String.sub text start (stop - start + 1) in
+         (match decode_from_oas marker with
+          | Decoded reference ->
+            collect (stop + 1) (reference :: references)
+          | Invalid_marker { detail } -> Error { offset = start; detail }
+          | Not_marker ->
+            Error
+              { offset = start
+              ; detail = "artifact marker prefix was not recognized"
+              }))
+  in
+  collect 0 []

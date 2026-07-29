@@ -74,6 +74,13 @@ let replace_key json key value =
   | other -> other
 ;;
 
+let remove_key json key =
+  match json with
+  | `Assoc fields ->
+    `Assoc (List.filter (fun (name, _) -> not (String.equal name key)) fields)
+  | other -> other
+;;
+
 let test_codec_round_trip () =
   let store = Board_core.create_store () in
   let tr = Ids.Turn_ref.make ~trace_id:"trace-abc" ~absolute_turn:42 in
@@ -105,6 +112,20 @@ let test_codec_absent_origin () =
     | None -> Alcotest.fail "round trip dropped origin-less post"
   in
   Alcotest.(check bool) "absent origin decodes to None" true (Option.is_none decoded.origin)
+;;
+
+let test_current_persisted_fields_are_required () =
+  let store = Board_core.create_store () in
+  let post = create_no_origin store ~content:"current fields" in
+  let json = Board_core.post_to_yojson post in
+  Alcotest.(check bool)
+    "missing updated_at is rejected"
+    true
+    (Option.is_none (decode (remove_key json "updated_at")));
+  Alcotest.(check bool)
+    "missing pinned is rejected"
+    true
+    (Option.is_none (decode (remove_key json "pinned")))
 ;;
 
 let test_malformed_origin_preserves_post () =
@@ -234,6 +255,10 @@ let () =
     [ ( "codec"
       , [ Alcotest.test_case "origin round trip" `Quick (with_eio test_codec_round_trip)
         ; Alcotest.test_case "absent origin -> None" `Quick (with_eio test_codec_absent_origin)
+        ; Alcotest.test_case
+            "current persisted fields are required"
+            `Quick
+            (with_eio test_current_persisted_fields_are_required)
         ; Alcotest.test_case
             "malformed origin -> None, post preserved"
             `Quick

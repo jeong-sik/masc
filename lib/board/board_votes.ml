@@ -340,36 +340,36 @@ let load_persisted_votes store =
   if not (Fs_compat.file_exists path) then Ok 0
   else begin
     try
-      let loaded = ref 0 in
       let lines = Fs_compat.load_jsonl path in
-      List.iter (fun json ->
-        match Safe_ops.json_string_opt "target" json,
-              Safe_ops.json_string_opt "direction" json with
-        | Some target, Some dir_str ->
-          (match vote_direction_of_string_opt dir_str with
-           | None -> ()
-           | Some direction ->
-             (* #10086: legacy rows persisted before this fix may have
-                [ts] overwritten by a prior flush cycle.  Use the
-                recorded value when present; fall back to 0.0 rather
-                than [Time_compat.now ()] — loading a ledger at server
-                start time must NOT advance the ts of every pre-fix
-                vote to "now".  Downstream readers treat ts=0.0 as
-                "unknown cast time". *)
-             let ts =
-               match Safe_ops.json_float_opt "ts" json with
-               | Some t -> t
-               | None -> 0.0
-             in
-             Hashtbl.replace store.vote_log target (direction, ts);
-             Stdlib.incr loaded)
-        | _ -> ()
-      ) lines;
-      if !loaded > 0 then
-        Log.BoardLog.info "loaded %d vote entries from %s" !loaded path
+      let loaded, invalid =
+        List.fold_left
+          (fun (loaded, invalid) json ->
+             match
+               ( Safe_ops.json_string_opt "target" json
+               , Safe_ops.json_string_opt "direction" json
+               , Safe_ops.json_float_opt "ts" json )
+             with
+             | Some target, Some dir_str, Some ts ->
+               (match vote_direction_of_string_opt dir_str with
+                | None -> loaded, invalid + 1
+                | Some direction ->
+                  Hashtbl.replace store.vote_log target (direction, ts);
+                  loaded + 1, invalid)
+             | _ -> loaded, invalid + 1)
+          (0, 0)
+          lines
+      in
+      if invalid > 0
+      then
+        Log.BoardLog.warn
+          "dropped %d vote rows that do not satisfy the current persisted schema: %s"
+          invalid
+          path;
+      if loaded > 0 then
+        Log.BoardLog.info "loaded %d vote entries from %s" loaded path
       else
         Log.BoardLog.debug "loaded 0 vote entries from %s" path;
-      Ok !loaded
+      Ok loaded
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e -> Error (path, e)

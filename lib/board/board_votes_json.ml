@@ -39,27 +39,25 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
     , Safe_ops.json_string_opt "content" json
     , Safe_ops.json_string_opt "visibility" json
     , Safe_ops.json_float_opt "created_at" json
-    , Safe_ops.json_float_opt "expires_at" json )
+    , Safe_ops.json_float_opt "updated_at" json
+    , Safe_ops.json_float_opt "expires_at" json
+    , Safe_ops.json_bool_opt "pinned" json )
   with
   | ( Some id_str
     , Some author_str
     , Some content
     , Some vis_str
     , Some created_at
-    , Some expires_at ) ->
+    , Some updated_at
+    , Some expires_at
+    , Some pinned ) ->
     let title_opt = Safe_ops.json_string_opt "title" json in
     let body_opt = Safe_ops.json_string_opt "body" json in
-    (* Backward compat: default updated_at to created_at if missing *)
-    let updated_at =
-      Safe_ops.json_float_opt "updated_at" json |> Option.value ~default:created_at
-    in
     let votes_up = Safe_ops.json_int ~default:0 "votes_up" json in
     let votes_down = Safe_ops.json_int ~default:0 "votes_down" json in
     let reply_count = Safe_ops.json_int ~default:0 "reply_count" json in
     let hearth = Safe_ops.json_string_opt "hearth" json in
     let thread_id = Safe_ops.json_string_opt "thread_id" json in
-    (* Missing on legacy rows persisted before the pin field existed -> default false. *)
-    let pinned = Safe_ops.json_bool ~default:false "pinned" json in
     let post_kind_opt =
       match Safe_ops.json_string_opt "post_kind" json with
       | Some raw -> post_kind_of_string raw
@@ -191,10 +189,10 @@ let load_persisted_posts store =
     try
       let t0 = Time_compat.now () in
       let now = Time_compat.now () in
-      let loaded = ref 0 in
       let lines = Fs_compat.load_jsonl path in
-      List.iter
-        (fun json ->
+      let loaded, invalid =
+        List.fold_left
+          (fun (loaded, invalid) json ->
            match post_of_yojson json with
            | Some p
              when Float.compare p.expires_at 0.0 = 0
@@ -205,15 +203,24 @@ let load_persisted_posts store =
                 find_post_by_run_id survive a restart without a second persisted
                 SSOT that could drift from the post rows. *)
              index_post_origin store p;
-             incr loaded
-           | _ -> ())
-        lines;
+             loaded + 1, invalid
+           | Some _ -> loaded, invalid
+           | None -> loaded, invalid + 1)
+          (0, 0)
+          lines
+      in
+      if invalid > 0
+      then
+        Log.BoardLog.warn
+          "dropped %d board post rows that do not satisfy the current persisted schema: %s"
+          invalid
+          path;
       store.post_count := Hashtbl.length store.posts;
       let elapsed = Time_compat.now () -. t0 in
-      if !loaded > 0
-      then Log.BoardLog.info "loaded %d posts from %s in %.3fs" !loaded path elapsed
+      if loaded > 0
+      then Log.BoardLog.info "loaded %d posts from %s in %.3fs" loaded path elapsed
       else Log.BoardLog.debug "loaded 0 posts from %s in %.3fs" path elapsed;
-      Ok !loaded
+      Ok loaded
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e -> Error (path, e)

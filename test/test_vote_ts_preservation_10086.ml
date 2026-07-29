@@ -44,6 +44,14 @@ let with_eio f () =
   Board_dispatch.init_jsonl ();
   f ()
 
+let with_uninitialized_eio f () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = fresh_test_base_path () in
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  f base_path
+
 let read_ts_rows path =
   (* Read each jsonl row as (target, voter, ts). *)
   let ic = open_in path in
@@ -74,6 +82,38 @@ let read_ts_rows path =
 
 let find_row ~target ~voter rows =
   List.find_opt (fun (t, v, _) -> t = target && v = voter) rows
+
+let test_loader_requires_current_vote_timestamp () =
+  with_uninitialized_eio
+    (fun base_path ->
+      Unix.mkdir base_path 0o700;
+      let masc_dir = Common.masc_dir_from_base_path ~base_path in
+      Unix.mkdir masc_dir 0o700;
+      let path = Board_votes.vote_log_path () in
+      Out_channel.with_open_text path (fun output ->
+        output_string output
+          {|{"target":"post:old:old-voter","voter":"old-voter","direction":"up"}|};
+        output_char output '\n';
+        output_string output
+          {|{"target":"post:current:current-voter","voter":"current-voter","direction":"up","ts":42.0}|};
+        output_char output '\n');
+      Board_dispatch.init_jsonl ();
+      match Board_dispatch.backend () with
+      | Board_dispatch.Jsonl store ->
+        Alcotest.(check int)
+          "only the current vote row loads"
+          1
+          (Hashtbl.length store.vote_log);
+        Alcotest.(check bool)
+          "missing-ts row is absent"
+          false
+          (Hashtbl.mem store.vote_log "post:old:old-voter");
+        (match Hashtbl.find_opt store.vote_log "post:current:current-voter" with
+         | Some (Board.Up, ts) ->
+           Alcotest.(check (float 1e-9)) "current timestamp preserved" 42.0 ts
+         | Some (Board.Down, _) -> Alcotest.fail "current vote direction changed"
+         | None -> Alcotest.fail "current vote row was dropped"))
+    ()
 
 let create_post_exn ~author ~content =
   match
@@ -190,5 +230,7 @@ let () =
             (with_eio test_flush_preserves_cast_ts);
           Alcotest.test_case "flip inherits flip-time" `Quick
             (with_eio test_flip_inherits_flip_time);
+          Alcotest.test_case "loader requires current vote timestamp" `Quick
+            test_loader_requires_current_vote_timestamp;
         ] );
     ]

@@ -20,6 +20,12 @@
   gRPC root gates now recognize only the current `.masc/root-state.json`
   marker already written by init/bootstrap. No migration or repair path was
   added.
+- **Breaking (board persistence)**: board post rows now require the current
+  `updated_at` and `pinned` fields, and vote rows require their persisted cast
+  `ts`. Missing or malformed current fields are dropped with an explicit
+  warning instead of being repaired as `created_at`, `false`, or `0.0`. The
+  current post and vote writers already emit all three fields; no migration or
+  repair path was added.
 - **Breaking (keeper chat wire)**: removed read-time message-id synthesis for
   rows without a persisted `id` and removed the duplicate persisted `source`
   lane label. Current chat rows require a nonblank producer-assigned `id` and

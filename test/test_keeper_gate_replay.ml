@@ -390,15 +390,35 @@ let test_large_replay_result_reaches_model_exactly () =
            ~user_message:"continue"
            outcome
        in
+       let rendered_output =
+         message
+         |> String.split_on_char '\n'
+         |> List.rev
+         |> List.hd
+         |> Yojson.Safe.from_string
+         |> Yojson.Safe.Util.member "untrusted_tool_output"
+         |> Yojson.Safe.Util.to_string
+       in
        (* Above the ordinary-tool externalize threshold the rendered turn
           carries the standard blob marker, never the raw half-megabyte body:
           an unbounded injection re-enters the 07-29 request-cap x compaction
           incident class. The exact bytes stay durable (asserted above). *)
-       Alcotest.check
-         Alcotest.bool
-         "rendered evidence is the standard blob marker"
-         true
-         (String_util.contains_substring message Tool_output.marker_prefix);
+       (match Tool_output.decode_from_oas rendered_output with
+        | Tool_output.Decoded rendered ->
+          Alcotest.check
+            Alcotest.string
+            "rendered marker preserves artifact identity"
+            artifact.sha256
+            rendered.sha256;
+          Alcotest.check
+            Alcotest.int
+            "rendered marker preserves byte count"
+            artifact.bytes
+            rendered.bytes
+        | Tool_output.Not_marker ->
+          Alcotest.fail "untrusted_tool_output is not a blob marker"
+        | Tool_output.Invalid_marker { detail } ->
+          Alcotest.failf "untrusted_tool_output has an invalid blob marker: %s" detail);
        Alcotest.check
          Alcotest.bool
          "raw oversized body does not enter the model turn"

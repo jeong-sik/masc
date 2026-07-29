@@ -163,7 +163,7 @@ let source_ack_wire_fields json =
   | _ -> Alcotest.fail "source ACK state must be a JSON object"
 ;;
 
-let source_ack_transition_state request state =
+let source_ack_transition_state (request : Transaction.request) state =
   let source_terminal : State.accepted_source_terminal =
     { source = request.source
     ; source_revision = request.source_revision

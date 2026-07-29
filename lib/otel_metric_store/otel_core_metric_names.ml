@@ -35,9 +35,6 @@ let metric_provider_prefix_cache_creation_tokens =
   Otel_metric_store_core.declare_counter "masc_provider_prefix_cache_creation_tokens_total"
 ;;
 
-let metric_provider_prefix_cache_read_tokens =
-  Otel_metric_store_core.declare_counter "masc_provider_prefix_cache_read_tokens_total"
-;;
 let metric_tool_input_validation = Otel_metric_store_core.declare_counter "masc_tool_input_validation_total"
 let metric_llm_provider_http_status = Otel_metric_store_core.declare_counter "masc_llm_provider_http_status_total"
 let metric_llm_provider_request_latency = "masc_llm_provider_request_latency_seconds"

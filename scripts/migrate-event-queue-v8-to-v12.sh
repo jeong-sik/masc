@@ -206,6 +206,23 @@ restore_backup() {
     [[ "$manifest_base" == "$BASE_PATH" ]] \
         || die "backup base path mismatch: manifest=$manifest_base requested=$BASE_PATH"
 
+    local current_file current_keeper current_backup
+    for current_file in "$runtime_root"/keepers/*/event-queue.json; do
+        [[ -f "$current_file" ]] || continue
+        current_keeper="$(basename "$(dirname "$current_file")")"
+        current_backup="${backup_dir}/keepers/${current_keeper}/event-queue.json"
+        if [[ ! -f "$current_backup" ]]; then
+            local current_schema
+            current_schema="$(jq -er '.schema | select(type == "string")' "$current_file")" \
+                || die "unbacked snapshot has no string schema: $current_file"
+            if [[ "$current_schema" == "$SOURCE_SCHEMA" ]]; then
+                validate_v8_snapshot "$current_file"
+            else
+                die "unbacked non-v8 snapshot blocks rollback: $current_file"
+            fi
+        fi
+    done
+
     local restored=0
     local backup_file
     for backup_file in "$backup_dir"/keepers/*/event-queue.json; do
@@ -393,6 +410,16 @@ self_test() {
 
     MASC_EVENT_QUEUE_MIGRATION_SELF_TEST=1 \
         "$0" --base-path "$fixture" --apply --confirm-stopped >/dev/null
+    mkdir -p "$fixture/.masc/keepers/beta"
+    printf '%s\n' \
+        '{"schema":"keeper.event_queue.state.v12","revision":1,"pending":{"schema":"keeper.event_queue.v2","length":0,"items":[]},"last_transition":null,"projected_dispositions":[],"transition_outbox":[],"accepted_transfer_projections":[]}' \
+        > "$fixture/.masc/keepers/beta/event-queue.json"
+    if MASC_EVENT_QUEUE_MIGRATION_SELF_TEST=1 \
+        "$0" --base-path "$fixture" --restore "$backup_dir" --confirm-stopped >/dev/null 2>&1
+    then
+        die "self-test: rollback accepted an unbacked v12 snapshot"
+    fi
+    rm -rf "$fixture/.masc/keepers/beta"
     MASC_EVENT_QUEUE_MIGRATION_SELF_TEST=1 \
         "$0" --base-path "$fixture" --restore "$backup_dir" --confirm-stopped >/dev/null
     validate_v8_snapshot "$snapshot"

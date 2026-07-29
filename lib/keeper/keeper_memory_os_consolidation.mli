@@ -10,10 +10,11 @@
     needs >= 2 in-range members to merge; out-of-range/duplicate indices skip.
 
     [valid_until] is no longer a precondition: it is derived from write-time
-    policy, so exact timestamp equality is not a semantic grouping contract.
-    It is combined by a meet at apply time instead. [claim_kind] remains gated
-    because a merged row has no lossless way to record that its members
-    disagreed. *)
+    policy, so exact timestamp equality is not a semantic grouping contract. It
+    is combined by a meet at apply time instead. [claim_kind] is no longer a
+    precondition either — the judge states the merged row's tag, and the group is
+    refused only when it states nothing while the members disagree. Every
+    remaining refusal is one the judge can clear by restating its plan. *)
 
 open Keeper_memory_os_types
 
@@ -22,11 +23,19 @@ val wire_field_consolidated_claim : string
 val wire_field_category : string
 val wire_field_groups : string
 val wire_field_drop_indices : string
+val wire_field_claim_kind : string
 
+(** [claim_kind] is the origin tag the judge assigns to the row it authors, like
+    [category] — a merged row is a new claim, not a union needing lossless
+    representation. [None] is "not stated": {!apply_plan} then inherits the
+    members' one distinct tag, or refuses the group when they disagree rather
+    than writing [None], which would mean "producer emitted no tag" and is
+    omitted entirely at the read boundary. *)
 type merge_group =
   { member_indices : int list
   ; consolidated_claim : string
   ; category : category
+  ; claim_kind : claim_kind option
   }
 
 type consolidation_plan =
@@ -43,7 +52,10 @@ type output_rejection_reason =
 val output_rejection_reason_to_string : output_rejection_reason -> string
 
 (** The numbered fact list the consolidation prompt sees: one 0-based line per
-    fact, ["i: [category] claim"]. The index is the LLM's only handle on an
+    fact, ["i: [category] (kind=k until=t) claim"], where [kind=untagged] renders
+    an absent tag and [until=] is omitted when there is no expiry. The
+    annotations are not decoration: [kind=] is the judge's only input for
+    choosing a group's own [claim_kind]. The index is the LLM's only handle on an
     existing fact, matching [apply_plan]'s reading. *)
 val render_numbered_facts : fact list -> string
 
@@ -80,16 +92,25 @@ type apply_stats =
 (** Apply a plan to a keeper's facts, returning the new fact list and the typed
     apply statistics. Each group of >= 2 in-range, not-yet-consumed members
     collapses into one consolidated fact (claim/category from the plan;
-    provenance — earliest source/first_seen, union of [observed_by],
-    [last_verified_at] = [now] — reconstructed from the members).
+    provenance — earliest source/first_seen, union of [observed_by], and
+    [last_verified_at] = the members' latest — reconstructed from the members).
+    Merging is not a verification, so [now] does not advance that anchor.
 
     The merged row's [valid_until] is the meet of its members': [None] is "no
     expiry", the lattice top and identity, and two expiries take the earlier, so
     a consolidated claim never outlives the shortest-lived claim it absorbed.
-    A merge whose members disagree on [claim_kind] is still rejected and
-    counted, and [render_numbered_facts] shows the judge that field so such
-    groups are not proposed blind. Explicitly dropped indices are removed; every
-    other fact survives unchanged. *)
+    That invariant holds unconditionally because expired rows never reach here —
+    {!Keeper_memory_os_consolidation_runtime} partitions them out before the
+    judge sees the store, so no group can mix a dead row with a live one.
+    The merged row's [claim_kind] is the judge's stated tag, taken as given like
+    [category]; parsing has already bounded it to the closed variants, and no
+    code branches on it, so no admissibility rule narrows it further. When the
+    judge states nothing, one distinct member tag is inherited and disagreement
+    is rejected and counted — the code will not invent a tag, and [None] is not
+    available as a stand-in because it means "producer emitted no tag".
+    [render_numbered_facts] shows the judge each member's tag so that refusal is
+    never hit blind. Explicitly dropped indices are removed; every other fact
+    survives unchanged. *)
 val apply_plan
   :  now:float
   -> facts:fact list

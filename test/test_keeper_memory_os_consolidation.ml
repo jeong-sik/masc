@@ -60,6 +60,7 @@ let test_apply_merges_group () =
         [ { Consolidation.member_indices = [ 0; 1 ]
           ; consolidated_claim = "deploys via blue-green"
           ; category = Types.Fact
+          ; claim_kind = None
           }
         ]
     ; drop_indices = []
@@ -88,6 +89,7 @@ let test_apply_keeps_unreferenced () =
         [ { Consolidation.member_indices = [ 0; 1 ]
           ; consolidated_claim = "A and B merged"
           ; category = Types.Fact
+          ; claim_kind = None
           }
         ]
     ; drop_indices = []
@@ -107,6 +109,7 @@ let test_apply_single_member_group_is_noop () =
         [ { Consolidation.member_indices = [ 0 ]
           ; consolidated_claim = "reworded"
           ; category = Types.Fact
+          ; claim_kind = None
           }
         ]
     ; drop_indices = []
@@ -127,6 +130,7 @@ let test_apply_skips_bad_indices () =
         [ { Consolidation.member_indices = [ 0; 0; 5; -1 ]
           ; consolidated_claim = "should not form"
           ; category = Types.Fact
+          ; claim_kind = None
           }
         ]
     ; drop_indices = [ 9 ]
@@ -154,8 +158,8 @@ let test_apply_first_group_wins_contested () =
   let facts = [ fact "x"; fact "y"; fact "z" ] in
   let plan =
     { Consolidation.groups =
-        [ { Consolidation.member_indices = [ 0; 1 ]; consolidated_claim = "xy"; category = Types.Fact }
-        ; { Consolidation.member_indices = [ 1; 2 ]; consolidated_claim = "yz"; category = Types.Fact }
+        [ { Consolidation.member_indices = [ 0; 1 ]; consolidated_claim = "xy"; category = Types.Fact; claim_kind = None }
+        ; { Consolidation.member_indices = [ 1; 2 ]; consolidated_claim = "yz"; category = Types.Fact; claim_kind = None }
         ]
     ; drop_indices = [ 0 ]
     }
@@ -179,6 +183,7 @@ let test_apply_accepts_model_category_change () =
         [ { Consolidation.member_indices = [ 0; 1 ]
           ; consolidated_claim = "Retry loops can time out under load"
           ; category = Types.Fact
+          ; claim_kind = None
           }
         ]
     ; drop_indices = []
@@ -201,6 +206,7 @@ let test_apply_accepts_model_category_selection () =
         [ { Consolidation.member_indices = [ 0; 1 ]
           ; consolidated_claim = "Retry timeout failures imply a durable lesson"
           ; category = Types.Lesson
+          ; claim_kind = None
           }
         ]
     ; drop_indices = []
@@ -212,16 +218,14 @@ let test_apply_accepts_model_category_selection () =
     (claims (apply_plan_facts ~now ~facts plan))
 ;;
 
-(* RFC-0285 §3.1: [group_preserves_category] is orthogonal to [claim_kind], so the
-   LLM can group a Self_observation with a durable claim of the SAME category. The
-   merge must be refused (both kept) — otherwise [earliest.claim_kind] would, by
-   first_seen order, either immortalize the self-observation or expire the durable
-   claim. Earliest here is the durable claim; merging would carry [Durable_knowledge]
-   and re-immortalize the self-observation echo this RFC exists to stop. Writing
-   [None] instead is not an escape: [None] means "producer emitted no tag" and the
-   read boundary omits the field for it, so the merge would be indistinguishable
-   from a never-tagged row. *)
-let test_apply_rejects_mixed_claim_kind () =
+(* RFC-0285 §3.1: category is orthogonal to [claim_kind], so the LLM can group a
+   Self_observation with a durable claim of the SAME category. With no stated
+   [claim_kind] the plan does not determine the merged row's tag, and the code
+   must not pick one: inheriting by first_seen order would either immortalize the
+   self-observation or expire the durable claim, and writing [None] would mean
+   "producer emitted no tag" — a row the read boundary renders identically to a
+   never-tagged one. Refuse instead; the judge can clear this by stating a tag. *)
+let test_apply_rejects_undetermined_claim_kind () =
   let facts =
     [ fact
         ~first_seen:100.0
@@ -240,17 +244,90 @@ let test_apply_rejects_mixed_claim_kind () =
         [ { Consolidation.member_indices = [ 0; 1 ]
           ; consolidated_claim = "retry loops need bounds"
           ; category = Types.Lesson
+          ; claim_kind = None
           }
         ]
     ; drop_indices = []
     }
   in
   Alcotest.(check (list string))
-    "mixed-claim_kind group is skipped; both facts survive unchanged"
+    "undetermined-claim_kind group is skipped; both facts survive unchanged"
     [ "Bounded retries prevent loop starvation"
     ; "the agent is stuck in a retry loop this turn"
     ]
     (claims (apply_plan_facts ~now ~facts plan))
+;;
+
+(* The same mixed-kind group merges once the judge states which tag the row it is
+   authoring should carry. This is what makes the refusal above satisfiable
+   rather than a gate on metadata the judge cannot express. *)
+let test_apply_merges_mixed_kind_when_judge_states_tag () =
+  let facts =
+    [ fact
+        ~first_seen:100.0
+        ~category:Types.Lesson
+        ~claim_kind:(Some Types.Durable_knowledge)
+        "Bounded retries prevent loop starvation"
+    ; fact
+        ~first_seen:200.0
+        ~category:Types.Lesson
+        ~claim_kind:(Some Types.Self_observation)
+        "the agent is stuck in a retry loop this turn"
+    ]
+  in
+  let plan =
+    { Consolidation.groups =
+        [ { Consolidation.member_indices = [ 0; 1 ]
+          ; consolidated_claim = "retry loops need bounds"
+          ; category = Types.Lesson
+          ; claim_kind = Some Types.Self_observation
+          }
+        ]
+    ; drop_indices = []
+    }
+  in
+  let merged = only_fact (apply_plan_facts ~now ~facts plan) in
+  Alcotest.(check string) "the group merges" "retry loops need bounds" merged.Types.claim;
+  Alcotest.(check bool)
+    "the merged row carries the stated tag, not the earliest member's"
+    true
+    (merged.Types.claim_kind = Some Types.Self_observation)
+;;
+
+(* A stated tag no member carries is accepted, like a model-selected [category]
+   (see [test_apply_accepts_model_category_change]). RFC-0285's anti-promotion
+   rule is a Tier-2 promotion-call-site concern (§3.5), not a Tier-1 merge one,
+   and nothing branches on [claim_kind], so narrowing the judge here would be a
+   gate without a harm to prevent. This test pins that the narrowing is absent:
+   if someone re-adds it, this fails. *)
+let test_apply_accepts_claim_kind_no_member_carries () =
+  let facts =
+    [ fact ~first_seen:100.0 ~claim_kind:(Some Types.Self_observation) "the agent is idle"
+    ; fact ~first_seen:200.0 ~claim_kind:(Some Types.Self_observation) "the agent remains idle"
+    ]
+  in
+  let plan =
+    { Consolidation.groups =
+        [ { Consolidation.member_indices = [ 0; 1 ]
+          ; consolidated_claim = "idleness is a durable property of this keeper"
+          ; category = Types.Lesson
+          ; claim_kind = Some Types.Durable_knowledge
+          }
+        ]
+    ; drop_indices = []
+    }
+  in
+  let _survivors, stats = Consolidation.apply_plan ~now ~facts plan in
+  Alcotest.(check int) "the group merges" 1 stats.Consolidation.merged_groups;
+  Alcotest.(check int)
+    "no kind rejection: a stated tag is not narrowed to the members'"
+    0
+    stats.Consolidation.rejected_kind_mismatch;
+  let merged = only_fact (apply_plan_facts ~now ~facts plan) in
+  Alcotest.(check bool)
+    "the merged row carries the stated tag"
+    true
+    (merged.Types.claim_kind = Some Types.Durable_knowledge)
 ;;
 
 let test_apply_merges_different_explicit_validity () =
@@ -274,6 +351,7 @@ let test_apply_merges_different_explicit_validity () =
         [ { Consolidation.member_indices = [ 0; 1 ]
           ; consolidated_claim = "the agent is stuck looping"
           ; category = Types.Lesson
+          ; claim_kind = None
           }
         ]
     ; drop_indices = []
@@ -314,6 +392,7 @@ let test_apply_merges_absent_vs_explicit_validity () =
         [ { Consolidation.member_indices = [ 0; 1 ]
           ; consolidated_claim = "task-1578 is blocked by missing mapping"
           ; category = Types.Blocker
+          ; claim_kind = None
           }
         ]
     ; drop_indices = []
@@ -345,6 +424,7 @@ let test_apply_merges_rows_with_different_validity () =
         [ { Consolidation.member_indices = [ 0; 1 ]
           ; consolidated_claim = "checkpoint saved"
           ; category = Types.Ephemeral
+          ; claim_kind = None
           }
         ]
     ; drop_indices = []
@@ -359,6 +439,38 @@ let test_apply_merges_rows_with_different_validity () =
     "untagged members produce an untagged merge"
     true
     (merged.Types.claim_kind = None)
+;;
+
+(* The meet is order-independent and takes the true minimum, not the first
+   member's. Written with the minimum LAST so that replacing Float.min with
+   "keep the accumulator" fails here — every other two-Some fixture happens to
+   put its minimum at index 0. *)
+let test_apply_merge_meet_takes_the_minimum_not_the_first () =
+  let facts =
+    [ fact ~valid_until:(now +. 9_000.0) "the deploy is blocked"
+    ; fact ~valid_until:(now +. 100.0) "the deploy remains blocked"
+    ]
+  in
+  let plan =
+    { Consolidation.groups =
+        [ { Consolidation.member_indices = [ 0; 1 ]
+          ; consolidated_claim = "the deploy is blocked"
+          ; category = Types.Blocker
+          ; claim_kind = None
+          }
+        ]
+    ; drop_indices = []
+    }
+  in
+  let merged = only_fact (apply_plan_facts ~now ~facts plan) in
+  Alcotest.(check (option (float 0.001)))
+    "the later member's earlier horizon wins"
+    (Some (now +. 100.0))
+    merged.Types.valid_until;
+  Alcotest.(check bool)
+    "and the merged row is current"
+    true
+    (Types.fact_is_current ~now merged)
 ;;
 
 (* Regression for the live defect: sangsu carried 20 self_observation rows all
@@ -381,6 +493,7 @@ let test_apply_merges_distinct_write_instants () =
         [ { Consolidation.member_indices = List.init 20 Fun.id
           ; consolidated_claim = "keeper has been idle-looping with no new signals"
           ; category = Types.Ephemeral
+          ; claim_kind = None
           }
         ]
     ; drop_indices = []
@@ -407,6 +520,7 @@ let test_apply_preserves_shared_claim_id () =
         [ { Consolidation.member_indices = [ 0; 1 ]
           ; consolidated_claim = "PR #123 remains open"
           ; category = Types.Fact
+          ; claim_kind = None
           }
         ]
     ; drop_indices = []
@@ -436,6 +550,7 @@ let test_apply_drops_conflicting_claim_ids () =
         [ { Consolidation.member_indices = [ 0; 1 ]
           ; consolidated_claim = "PR #123 changed status"
           ; category = Types.Fact
+          ; claim_kind = None
           }
         ]
     ; drop_indices = []
@@ -507,14 +622,17 @@ let test_apply_stats_count_rejections () =
         [ { Consolidation.member_indices = [ 0; 1 ]
           ; consolidated_claim = "mixed kinds"
           ; category = Types.Fact
+          ; claim_kind = None
           }
         ; { Consolidation.member_indices = [ 2; 3 ]
           ; consolidated_claim = "dup A"
           ; category = Types.Fact
+          ; claim_kind = None
           }
         ; { Consolidation.member_indices = [ 2 ]
           ; consolidated_claim = "already consumed"
           ; category = Types.Fact
+          ; claim_kind = None
           }
         ]
     ; drop_indices = []
@@ -544,10 +662,12 @@ let test_first_group_wins_lands_in_too_few_bucket () =
         [ { Consolidation.member_indices = [ 0; 1 ]
           ; consolidated_claim = "xy"
           ; category = Types.Fact
+          ; claim_kind = None
           }
         ; { Consolidation.member_indices = [ 1; 2 ]
           ; consolidated_claim = "yz"
           ; category = Types.Fact
+          ; claim_kind = None
           }
         ]
     ; drop_indices = []
@@ -562,6 +682,45 @@ let test_first_group_wins_lands_in_too_few_bucket () =
     "an ordinary contested plan raises no kind-gate rejection"
     0
     stats.Consolidation.rejected_kind_mismatch
+;;
+
+(* The wire path for the judge-stated tag. Without this, a key or token rename
+   silently reverts the feature to "never stated" and every other test passes. *)
+let test_parse_plan_claim_kind_wire () =
+  let parse raw =
+    match Consolidation.plan_of_string raw with
+    | Some { Consolidation.groups = [ g ]; _ } -> g.Consolidation.claim_kind
+    | _ -> Alcotest.failf "expected exactly one group from %s" raw
+  in
+  let group extra =
+    Printf.sprintf
+      {|{"groups":[{"member_indices":[0,1],"consolidated_claim":"c","category":"fact"%s}],"drop_indices":[]}|}
+      extra
+  in
+  Alcotest.(check bool)
+    "a stated token round-trips to its variant"
+    true
+    (parse (group {|,"claim_kind":"self_observation"|}) = Some Types.Self_observation);
+  Alcotest.(check bool)
+    "an absent field is not stated"
+    true
+    (parse (group "") = None);
+  Alcotest.(check bool)
+    "an explicit null is not stated"
+    true
+    (parse (group {|,"claim_kind":null|}) = None);
+  Alcotest.(check bool)
+    "a misspelled token degrades to not stated rather than dropping the group"
+    true
+    (parse (group {|,"claim_kind":"durable"|}) = None);
+  Alcotest.(check bool)
+    "the display word 'untagged' is not a wire token"
+    true
+    (parse (group {|,"claim_kind":"untagged"|}) = None);
+  Alcotest.(check bool)
+    "diagnostic is withheld from provider surfaces"
+    true
+    (parse (group {|,"claim_kind":"diagnostic"|}) = None)
 ;;
 
 let test_parse_plan_json () =
@@ -655,7 +814,18 @@ let () =
 	        ; Alcotest.test_case "first group wins contested fact" `Quick test_apply_first_group_wins_contested
 	        ; Alcotest.test_case "accepts model category change" `Quick test_apply_accepts_model_category_change
 	        ; Alcotest.test_case "accepts model category selection" `Quick test_apply_accepts_model_category_selection
-        ; Alcotest.test_case "rejects mixed claim_kind" `Quick test_apply_rejects_mixed_claim_kind
+        ; Alcotest.test_case
+            "rejects undetermined claim_kind"
+            `Quick
+            test_apply_rejects_undetermined_claim_kind
+        ; Alcotest.test_case
+            "merges mixed kinds when the judge states the tag"
+            `Quick
+            test_apply_merges_mixed_kind_when_judge_states_tag
+        ; Alcotest.test_case
+            "accepts a claim_kind no member carries"
+            `Quick
+            test_apply_accepts_claim_kind_no_member_carries
         ; Alcotest.test_case
             "different explicit validity merges at the earliest horizon"
             `Quick
@@ -673,6 +843,10 @@ let () =
             `Quick
             test_apply_merges_distinct_write_instants
         ; Alcotest.test_case
+            "the meet takes the minimum, not the first member"
+            `Quick
+            test_apply_merge_meet_takes_the_minimum_not_the_first
+        ; Alcotest.test_case
             "preserves a shared claim_id"
             `Quick
             test_apply_preserves_shared_claim_id
@@ -683,6 +857,10 @@ let () =
 	        ] )
 	    ; ( "parse"
 	      , [ Alcotest.test_case "parses a plan" `Quick test_parse_plan_json
+        ; Alcotest.test_case
+            "parses the judge-stated claim_kind"
+            `Quick
+            test_parse_plan_claim_kind_wire
 	        ; Alcotest.test_case "rejects fractional indices" `Quick test_parse_rejects_fractional_indices
         ; Alcotest.test_case "rejects wrapped JSON" `Quick test_parse_rejects_wrapped_json
         ; Alcotest.test_case "degrades a garbled group" `Quick test_parse_degrades_garbled_group

@@ -9,7 +9,7 @@ You are consolidating the long-term memory of an AI agent. Below is the agent's 
 Rules:
 1. Reference existing facts ONLY by their index. Do not invent new facts. A consolidated claim must be supported by the facts it merges.
 2. Merge a group only when two or more facts genuinely overlap (duplicates, rewordings, or one superseding another). Write one consolidated_claim that preserves every durable detail from its members. Keep the most specific category among the members.
-3. Every member of a group must carry the SAME kind= tag (shown on each line). A group that mixes kinds is structurally rejected and nothing in it merges — split such candidates into per-kind groups instead. until= is NOT a grouping constraint: members may carry different expiry values, or none at all, and the merged row inherits the earliest until= among them. Use until= to judge whether two claims mean the same thing — a claim that expires next week and one with no expiry are often not the same claim — but do not split a genuine duplicate group merely because the expiry values differ.
+3. Neither kind= nor until= constrains grouping; both are context for judging whether two claims mean the same thing. A claim that expires next week and one with no expiry are often not the same claim, and a self-observation is rarely the same claim as durable knowledge — but do not split a genuine duplicate group merely because the values differ. The merged row inherits the earliest until= among its members. For kind=, set "claim_kind" on the group to the tag the merged row should carry. It must be one of `self_observation`, `external_state`, `durable_knowledge` — `untagged` is how a line with no tag is DISPLAYED, not a value you may send; to leave the merged row untagged, omit the field. If every member shares one kind= you may omit "claim_kind" and it is inherited. A group whose members carry different kind= values and states no "claim_kind" is rejected and nothing in it merges, so state one whenever you group across kinds.
 4. Leave distinct, still-true facts alone — do NOT put them in any group. A fact you do not mention survives unchanged. Conservatism is correct: when in doubt, do not merge.
 5. drop_indices is ONLY for claims that are now FALSE or have been explicitly superseded and carry no remaining value. Do not drop a fact merely because it is old. If unsure, do not drop.
 6. Preserve the meaning of validated_approach and lesson claims especially — a success worth remembering and a failure recorded as a reusable lesson must not be flattened into a generic fact.
@@ -22,7 +22,7 @@ Return exactly one JSON object. Do not wrap the object in markdown fences, prose
 
 {
   "groups": [
-    { "member_indices": [0, 3], "consolidated_claim": "One sentence merging those facts.", "category": "fact" }
+    { "member_indices": [0, 3], "consolidated_claim": "One sentence merging those facts.", "category": "fact", "claim_kind": "durable_knowledge" }
   ],
   "drop_indices": [5]
 }

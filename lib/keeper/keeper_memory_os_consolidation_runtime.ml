@@ -153,10 +153,21 @@ let consolidate_keeper
     | Error msg -> Unparseable ("consolidation fact store read failed: " ^ msg)
     | Ok facts ->
       let before = List.length facts in
-      if before = 0
+      (* Expiry GC runs on a coarser cadence than this pass, so rows past their
+         producer-declared horizon are routinely still on disk. They are held out
+         of the plan entirely rather than filtered inside the merge: a dead row
+         must neither drag a live member's horizon into the past (the merged row
+         would be born expired, and the next GC tick would delete knowledge GC
+         would otherwise have kept) nor have its own volatility erased by merging
+         into a durable row. Both failures come from mixing the two populations,
+         so they are not mixed. Expiry stays GC's decision — the untouched rows
+         are written back unchanged, and the snapshot CAS still compares the
+         whole store. *)
+      let live, expired = Keeper_memory_os_types.partition_expired ~now facts in
+      if live = []
       then Skipped_too_few before
       else
-        match messages_for_consolidation facts with
+        match messages_for_consolidation live with
         | Error msg -> Unparseable msg
         | Ok messages ->
           (match
@@ -180,7 +191,10 @@ let consolidate_keeper
               | Error detail -> invalid_structured_response_detail detail
               | Ok (`Assoc _ as json) ->
                 let plan = Consolidation.plan_of_json json in
-                let survivors, stats = Consolidation.apply_plan ~now ~facts plan in
+                (* Indices in the plan address [live], the list the judge was
+                   shown. [expired] rejoins afterwards, untouched. *)
+                let live_survivors, stats = Consolidation.apply_plan ~now ~facts:live plan in
+                let survivors = live_survivors @ expired in
                 (* A kind mismatch means the judge and the apply gate disagreed
                    on a field the prompt renders, so it is loud. The
                    valid_until arm is gone: that gate compared write instants
@@ -209,8 +223,9 @@ let consolidate_keeper
                     stats.merged_groups
                     stats.dropped;
                 let after = List.length survivors in
-                (* [before > 0] is guaranteed by the [Skipped_too_few] guard above,
-                   so [after = 0] here means the plan asked to erase the store. A
+                (* [live] is non-empty by the [Skipped_too_few] guard above, so
+                   [after = 0] here means the plan asked to erase every live row
+                   (and there were no expired rows to rejoin). A
                    plan that keeps nothing is treated as a malformed response, not
                    as judgement: the store is the keeper's only durable memory and
                    [rewrite_facts_atomically] renames over the sole copy, so the

@@ -51,9 +51,9 @@ type compaction_recovery_error =
       (** RFC-0351 S0 / #25461: the keeper's compaction failure streak reached
           [Keeper_meta_contract.compaction_retry_escalation_threshold], so a
           reactive ([Provider_overflow]) prepare is refused before the
-          checkpoint load and the summarizer LLM call — the settlement's
-          per-stimulus escalation already stops the retries, and this gate
-          stops the one bounded LLM attempt each new stimulus still paid.
+          checkpoint load and the summarizer LLM call. The pending source
+          remains on the ordinary failure route without a fabricated durable
+          escalation.
           [Manual] prepares bypass the gate: an operator-committed compaction
           resets the streak and lifts the suspension. *)
 

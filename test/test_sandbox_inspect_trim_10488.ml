@@ -68,6 +68,21 @@ let test_parse_unexpected_arity () =
         (String.length msg > 0)
   | Ok _ -> fail "expected Error on 1-field payload"
 
+let test_parse_rejects_malformed_current_fields () =
+  List.iter
+    (fun line ->
+       match R.parse_inspect_line line with
+       | Error _ -> ()
+       | Ok _ -> failf "malformed current payload accepted: %S" line)
+    [ "\t1777149000.0\ttrue\t"
+    ; "owner\t1777149000.0\ttrue\t"
+    ; "12345\t0\ttrue\t"
+    ; "12345\tnan\ttrue\t"
+    ; "12345\t1777149000.0\trunning\t"
+    ; "12345\t1777149000.0\ttrue\t0"
+    ; "12345\t1777149000.0\ttrue\tnan"
+    ]
+
 let test_end_to_end_current_payload () =
   let raw = "87799\t1777149306.102\ttrue\t\n" in
   match R.nonempty_lines raw with
@@ -101,6 +116,8 @@ let () =
           test_parse_3field_rejected;
         test_case "unexpected arity errors out" `Quick
           test_parse_unexpected_arity;
+        test_case "malformed current fields are rejected" `Quick
+          test_parse_rejects_malformed_current_fields;
       ]);
     ("regression", [
         test_case "current raw bytes → nonempty_lines → parse"

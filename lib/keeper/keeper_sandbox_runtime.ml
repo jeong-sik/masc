@@ -95,6 +95,38 @@ let string_opt text =
   | value -> Some value
 ;;
 
+let invalid_cleanup_field ~field ~value =
+  Error
+    (Printf.sprintf
+       "invalid docker inspect cleanup field %s=%S"
+       field
+       (Exec_policy.truncate_for_log value))
+;;
+
+let required_positive_int ~field text =
+  match int_opt text with
+  | Some value when value > 0 -> Ok (Some value)
+  | None | Some _ -> invalid_cleanup_field ~field ~value:text
+;;
+
+let required_positive_float ~field text =
+  match float_opt text with
+  | Some value when Float.is_finite value && value > 0.0 -> Ok (Some value)
+  | None | Some _ -> invalid_cleanup_field ~field ~value:text
+;;
+
+let required_bool ~field text =
+  match bool_opt text with
+  | Some value -> Ok (Some value)
+  | None -> invalid_cleanup_field ~field ~value:text
+;;
+
+let optional_positive_float ~field text =
+  match string_opt text with
+  | None -> Ok None
+  | Some value -> required_positive_float ~field value
+;;
+
 let strip_leading_slash text =
   let text = String.trim text in
   if String.length text > 0 && text.[0] = '/'
@@ -109,11 +141,16 @@ let parse_inspect_line line =
      cleanup payload has exactly four fields. *)
   match String.split_on_char '\t' line with
   | [ owner_pid; started_at; running; ttl_sec ] ->
+    let ( let* ) = Result.bind in
+    let* owner_pid = required_positive_int ~field:"owner_pid" owner_pid in
+    let* started_at = required_positive_float ~field:"started_at" started_at in
+    let* running = required_bool ~field:"running" running in
+    let* ttl_sec = optional_positive_float ~field:"ttl_sec" ttl_sec in
     Ok
-      { owner_pid = int_opt owner_pid
-      ; started_at = float_opt started_at
-      ; running = bool_opt running
-      ; ttl_sec = float_opt ttl_sec
+      { owner_pid
+      ; started_at
+      ; running
+      ; ttl_sec
       }
   | _ ->
     Error

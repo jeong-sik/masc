@@ -470,7 +470,7 @@ let autonomous_trigger_lines
 
 let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
-    ?(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
+    ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
     ?(current_task : Masc_domain.task option)
     ?(active_goal_summaries : (string * string) list option)
     ~(observation : Keeper_world_observation.world_observation)
@@ -640,16 +640,6 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
       observation.connected_surfaces
   in
   let connector_presence_failures = observation.connected_surface_failures in
-  let turn_decision =
-    (* RFC-0315: prefer the scheduler's actual decision (threaded through the
-       turn runner) over a local recompute. The recompute cannot see
-       [reactive_wake] or the drained event-queue triggers, so stimulus-driven
-       wakes would render no wake reason. The recompute remains the fallback
-       for callers that predate the threading. *)
-    match turn_decision with
-    | Some decision -> decision
-    | None -> Keeper_world_observation.keeper_cycle_decision ~meta observation
-  in
   let autonomous_trigger =
     autonomous_trigger_lines ~decision:turn_decision ~observation
   in

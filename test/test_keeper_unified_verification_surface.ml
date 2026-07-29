@@ -80,6 +80,18 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
 
 let minimal_meta : Masc.Keeper_meta_contract.keeper_meta = make_meta "test-keeper"
 
+let build_prompt ~meta observation =
+  let turn_decision =
+    Masc.Keeper_world_observation.keeper_cycle_decision ~meta observation
+  in
+  Masc.Keeper_unified_prompt.build_prompt
+    ~meta
+    ~base_path:"/tmp"
+    ~turn_decision
+    ~observation
+    ()
+;;
+
 let runtime_toml =
   {|
 [runtime]
@@ -174,12 +186,10 @@ let test_board_authors_share_one_neutral_observation_boundary () =
   let obs_peer = { base_observation with pending_board_events = [ peer_event ] } in
   let obs_human = { base_observation with pending_board_events = [ human_event ] } in
   let { Masc.Keeper_unified_prompt.world_state = peer_msg; _ } =
-    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
-      ~observation:obs_peer ()
+    build_prompt ~meta:minimal_meta obs_peer
   in
   let { Masc.Keeper_unified_prompt.world_state = human_msg; _ } =
-    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
-      ~observation:obs_human ()
+    build_prompt ~meta:minimal_meta obs_human
   in
   let neutral_boundary = "Rows below are Board context." in
   check bool "automation event uses neutral boundary" true
@@ -223,8 +233,7 @@ let test_board_reaction_event_renders_reaction_context () =
   in
   let obs = { base_observation with pending_board_events = [ reaction_event ] } in
   let { Masc.Keeper_unified_prompt.world_state = user_msg; _ } =
-    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
-      ~observation:obs ()
+    build_prompt ~meta:minimal_meta obs
   in
   check bool "prompt labels reaction board event" true
     (contains_sub "event=reaction_changed" user_msg);
@@ -250,8 +259,7 @@ let test_observation_tool_names_are_preserved () =
   in
   let obs = { base_observation with pending_board_events = [ event ] } in
   let { Masc.Keeper_unified_prompt.world_state = user_msg; _ } =
-    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
-      ~observation:obs ()
+    build_prompt ~meta:minimal_meta obs
   in
   check bool "keeper diagnostic token remains in observation" true
     (contains_sub "keeper_turn_id=turn-1" user_msg);
@@ -329,8 +337,7 @@ let test_scheduled_automation_prompt_section () =
     { base_observation with scheduled_automation = scheduled_automation_observation }
   in
   let { Masc.Keeper_unified_prompt.world_state = user_msg; _ } =
-    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
-      ~observation:obs ()
+    build_prompt ~meta:minimal_meta obs
   in
   check bool "prompt includes schedule section" true
     (contains_sub "### Scheduled Automation" user_msg);
@@ -346,11 +353,7 @@ let test_scheduled_wake_is_not_rendered_as_board_activity () =
     }
   in
   let { Masc.Keeper_unified_prompt.world_state; _ } =
-    Masc.Keeper_unified_prompt.build_prompt
-      ~meta:minimal_meta
-      ~base_path:"/tmp"
-      ~observation:obs
-      ()
+    build_prompt ~meta:minimal_meta obs
   in
   check bool "scheduled wake has dedicated section" true
     (contains_sub "### Scheduled Wake (1 due)" world_state);
@@ -416,8 +419,7 @@ let test_scheduled_wake_preserves_complete_message () =
 let test_world_state_never_in_persisted_user_message () =
   let obs = { base_observation with pending_board_events = [ sample_board_event ] } in
   let { Masc.Keeper_unified_prompt.world_state; user_message; _ } =
-    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
-      ~observation:obs ()
+    build_prompt ~meta:minimal_meta obs
   in
   check bool "world_state carries the frame header" true
     (contains_sub "## Current World State" world_state);

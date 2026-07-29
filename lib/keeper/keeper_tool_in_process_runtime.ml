@@ -184,6 +184,55 @@ let with_external_gate_execution
       blocked.payload
 ;;
 
+let network_read_gate_operation = "network_read"
+
+type network_read_replay =
+  | Replay_web_search of Yojson.Safe.t
+  | Replay_web_fetch of Yojson.Safe.t
+
+let unique_field key fields =
+  match List.filter_map (fun (name, value) -> if String.equal name key then Some value else None) fields with
+  | [ value ] -> Ok value
+  | [] -> Error (Printf.sprintf "approved network_read input is missing %S" key)
+  | _ -> Error (Printf.sprintf "approved network_read input repeats %S" key)
+;;
+
+let reject_unknown_network_read_fields fields =
+  let unknown =
+    fields
+    |> List.filter_map (fun (name, _) ->
+      if String.equal name "capability" || String.equal name "input"
+      then None
+      else Some name)
+    |> List.sort_uniq String.compare
+  in
+  match unknown with
+  | [] -> Ok ()
+  | names ->
+    Error
+      (Printf.sprintf
+         "approved network_read input has unknown field(s): %s"
+         (String.concat ", " names))
+;;
+
+let network_read_replay_of_gate_input = function
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let* () = reject_unknown_network_read_fields fields in
+    let* capability = unique_field "capability" fields in
+    let* input = unique_field "input" fields in
+    (match capability with
+     | `String "web_search" -> Ok (Replay_web_search input)
+     | `String "web_fetch" -> Ok (Replay_web_fetch input)
+     | `String capability ->
+       Error
+         (Printf.sprintf
+            "approved network_read capability %S is not replayable"
+            capability)
+     | _ -> Error "approved network_read capability must be a string")
+  | _ -> Error "approved network_read input must be an object"
+;;
+
 let handle_web_search_with_outcome
       ~config
       ~(meta : keeper_meta)
@@ -200,7 +249,7 @@ let handle_web_search_with_outcome
     ?continuation_channel
     ?gate_context
     ?gate_grant
-    ~operation:"network_read"
+    ~operation:network_read_gate_operation
     ~input
   @@ fun () ->
   let tool_name = "masc_web_search" in
@@ -229,7 +278,7 @@ let handle_web_fetch_with_outcome
     ?continuation_channel
     ?gate_context
     ?gate_grant
-    ~operation:"network_read"
+    ~operation:network_read_gate_operation
     ~input
   @@ fun () ->
   Tool_misc_web_fetch.handle
@@ -359,6 +408,98 @@ let connector_post_gate_input ~connector ~channel_id ~content ?blocks () =
      @ block_fields)
 ;;
 
+let connector_post_gate_operation = "connector_post"
+
+type connector_post_replay =
+  | Replay_discord_post of
+      { input : Yojson.Safe.t
+      ; channel_id : string
+      ; content : string
+      }
+  | Replay_slack_post of
+      { input : Yojson.Safe.t
+      ; channel_id : string
+      ; content : string
+      ; blocks : Yojson.Safe.t list
+      }
+
+let connector_post_replay_of_gate_input input =
+  let required_string key fields =
+    match
+      List.filter_map
+        (fun (name, value) ->
+           if String.equal name key then Some value else None)
+        fields
+    with
+    | [ `String value ] when not (String.equal (String.trim value) "") ->
+      Ok value
+    | [ `String _ ] ->
+      Error (Printf.sprintf "approved connector_post %s is blank" key)
+    | [ _ ] ->
+      Error
+        (Printf.sprintf "approved connector_post %s must be a string" key)
+    | [] ->
+      Error (Printf.sprintf "approved connector_post is missing %s" key)
+    | _ ->
+      Error (Printf.sprintf "approved connector_post repeats %s" key)
+  in
+  let reject_unknown ~allowed fields =
+    match
+      fields
+      |> List.filter_map (fun (name, _) ->
+        if List.mem name allowed then None else Some name)
+      |> List.sort_uniq String.compare
+    with
+    | [] -> Ok ()
+    | names ->
+      Error
+        (Printf.sprintf
+           "approved connector_post has unknown field(s): %s"
+           (String.concat ", " names))
+  in
+  match input with
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let* connector = required_string "connector" fields in
+    let* channel_id = required_string "channel_id" fields in
+    let* content = required_string "content" fields in
+    if String.equal connector Keeper_surface_post.discord_label
+    then (
+      let* () =
+        reject_unknown
+          ~allowed:[ "connector"; "channel_id"; "content" ]
+          fields
+      in
+      Ok (Replay_discord_post { input; channel_id; content }))
+    else if String.equal connector Keeper_surface_post.slack_label
+    then (
+      let* () =
+        reject_unknown
+          ~allowed:[ "connector"; "channel_id"; "content"; "blocks" ]
+          fields
+      in
+      match
+        List.filter_map
+          (fun (name, value) ->
+             if String.equal name "blocks" then Some value else None)
+          fields
+      with
+      | [ `List blocks ] ->
+        Ok (Replay_slack_post { input; channel_id; content; blocks })
+      | [ _ ] ->
+        Error "approved connector_post blocks must be an array"
+      | [] ->
+        Error "approved Slack connector_post is missing blocks"
+      | _ ->
+        Error "approved connector_post repeats blocks")
+    else
+      Error
+        (Printf.sprintf
+           "approved connector_post connector %S is unsupported"
+           connector)
+  | _ -> Error "approved connector_post input must be an object"
+;;
+
 let with_connector_post_gate_execution
       ~config
       ~(meta : keeper_meta)
@@ -374,9 +515,109 @@ let with_connector_post_gate_execution
     ?continuation_channel
     ?gate_context
     ?gate_grant
-    ~operation:"connector_post"
+    ~operation:connector_post_gate_operation
     ~input
     continue
+;;
+
+let replay_connector_post_with_outcome
+      ~config
+      ~(meta : keeper_meta)
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+  =
+  let succeed connector ?message_id () =
+    Keeper_tool_execution.success
+      (Keeper_surface_post.ok_json ~surface:connector ?message_id ())
+  in
+  let fail connector detail =
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
+      ~effect_disposition:Tool_result.Effect_outcome_unknown
+      (Keeper_surface_post.error_json
+         (Printf.sprintf "%s send failed: %s" connector detail))
+  in
+  function
+  | Replay_discord_post { input; channel_id; content } ->
+    with_connector_post_gate_execution
+      ~config
+      ~meta
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~input
+    @@ fun () ->
+    (match Channel_gate_discord_state.send_message ~channel_id ~content () with
+     | Error send_error ->
+       fail
+         Keeper_surface_post.discord_label
+         (Format.asprintf
+            "%a"
+            Channel_gate_discord_state.pp_send_error
+            send_error)
+     | Ok message_id ->
+       Keeper_chat_store.append_assistant_message
+         ~base_dir:config.Workspace.base_path
+         ~keeper_name:meta.name
+         ~content
+         ~surface:
+           (Surface_ref.Discord
+              { guild_id = None
+              ; channel_id
+              ; parent_channel_id = None
+              ; thread_id = None
+              })
+         ();
+       Keeper_chat_broadcast.chat_appended
+         ~keeper_name:meta.name
+         ~source:Keeper_surface_post.discord_label
+         ~content
+         ();
+       succeed Keeper_surface_post.discord_label ~message_id ())
+  | Replay_slack_post { input; channel_id; content; blocks } ->
+    with_connector_post_gate_execution
+      ~config
+      ~meta
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~input
+    @@ fun () ->
+    (match slack_token_opt () with
+     | None ->
+       Keeper_tool_execution.failure
+         ~class_:Tool_result.Runtime_failure
+         ~effect_disposition:Tool_result.Proven_pre_effect
+         (Keeper_surface_post.error_json "SLACK_BOT_TOKEN is unset or empty")
+     | Some token ->
+       (match
+          Keeper_chat_slack.send_message_with_blocks
+            ~token
+            ~channel:channel_id
+            ~content
+            ~blocks
+            ()
+        with
+        | Error send_error ->
+          fail
+            Keeper_surface_post.slack_label
+            (Format.asprintf "%a" Keeper_chat_slack.pp_error send_error)
+        | Ok () ->
+          Keeper_chat_store.append_assistant_message
+            ~base_dir:config.Workspace.base_path
+            ~keeper_name:meta.name
+            ~content
+            ~surface:
+              (Surface_ref.Slack
+                 { team_id = None; channel_id; thread_ts = None })
+            ();
+          Keeper_chat_broadcast.chat_appended
+            ~keeper_name:meta.name
+            ~source:Keeper_surface_post.slack_label
+            ~content
+            ();
+          succeed Keeper_surface_post.slack_label ()))
 ;;
 
 let handle_surface_post_with_outcome
@@ -473,107 +714,37 @@ let handle_surface_post_with_outcome
           ~content:safe_content
           ()
       in
-      with_connector_post_gate_execution
+      replay_connector_post_with_outcome
         ~config
         ~meta
         ?continuation_channel
         ?gate_context
         ?gate_grant
-        ~input
-      @@ fun () ->
-      (match Channel_gate_discord_state.send_message ~channel_id ~content:safe_content () with
-       | Error send_error ->
-         fail
-           ~class_:Tool_result.Runtime_failure
-           ~effect_disposition:Tool_result.Effect_outcome_unknown
-           (Keeper_surface_post.error_json
-              (Format.asprintf
-                 "discord send failed: %a"
-                 Channel_gate_discord_state.pp_send_error
-                 send_error))
-       | Ok message_id ->
-         Keeper_chat_store.append_assistant_message
-           ~base_dir:config.Workspace.base_path
-           ~keeper_name:meta.name
-           ~content:safe_content
-           ~surface:
-             (Surface_ref.Discord
-                { guild_id = None
-                ; channel_id
-                ; parent_channel_id = None
-                ; thread_id = None
-                })
-           ();
-         Keeper_chat_broadcast.chat_appended
-           ~keeper_name:meta.name
-           ~source:"discord"
-           ~content:safe_content
-           ();
-         succeed (Keeper_surface_post.ok_json ~surface ~message_id ()))
+        (Replay_discord_post { input; channel_id; content = safe_content })
     | Ok (Keeper_surface_post.To_slack { channel_id; blocks = _ }) ->
-        let slack_blocks =
-          Keeper_chat_slack.content_blocks_of_text safe_content
-        in
-        let (_ : Keeper_surface_post.post_target) =
-          Keeper_surface_post.set_blocks
-            (Keeper_surface_post.To_slack { channel_id; blocks = None })
-            (Some slack_blocks)
-        in
-        let input =
-          connector_post_gate_input
-            ~connector:surface
-            ~channel_id
-            ~content:safe_content
-            ~blocks:slack_blocks
-            ()
-        in
-        with_connector_post_gate_execution
-          ~config
-          ~meta
-          ?continuation_channel
-          ?gate_context
-          ?gate_grant
-          ~input
-        @@ fun () ->
-        (match slack_token_opt () with
-         | None ->
-           fail
-             ~class_:Tool_result.Runtime_failure
-             ~effect_disposition:Tool_result.Proven_pre_effect
-             (Keeper_surface_post.error_json "SLACK_BOT_TOKEN is unset or empty")
-         | Some token ->
-           (match
-              Keeper_chat_slack.send_message_with_blocks
-                ~token
-                ~channel:channel_id
-                ~content:safe_content
-                ~blocks:slack_blocks
-                ()
-            with
-            | Error err ->
-              fail
-                ~class_:Tool_result.Runtime_failure
-                ~effect_disposition:Tool_result.Effect_outcome_unknown
-                (Keeper_surface_post.error_json
-                   (Format.asprintf
-                      "slack send failed: %a"
-                      Keeper_chat_slack.pp_error
-                      err))
-            | Ok () ->
-              Keeper_chat_store.append_assistant_message
-                ~base_dir:config.Workspace.base_path
-                ~keeper_name:meta.name
-                ~content:safe_content
-                ~surface:
-                  (Surface_ref.Slack
-                     { team_id = None; channel_id; thread_ts = None })
-                ();
-              Keeper_chat_broadcast.chat_appended
-                ~keeper_name:meta.name
-                ~source:"slack"
-                ~content:safe_content
-                ();
-              succeed (Keeper_surface_post.ok_json ~surface ()))))
+      let slack_blocks =
+        Keeper_chat_slack.content_blocks_of_text safe_content
+      in
+      let input =
+        connector_post_gate_input
+          ~connector:surface
+          ~channel_id
+          ~content:safe_content
+          ~blocks:slack_blocks
+          ()
+      in
+      replay_connector_post_with_outcome
+        ~config
+        ~meta
+        ?continuation_channel
+        ?gate_context
+        ?gate_grant
+        (Replay_slack_post
+           { input
+           ; channel_id
+           ; content = safe_content
+           ; blocks = slack_blocks
+           }))
 ;;
 
 let handle_ide_annotate ~config ~(meta : keeper_meta) ~args =

@@ -19,33 +19,6 @@ val decide_degraded_retry
   -> Agent_sdk.Error.sdk_error
   -> degraded_retry_decision
 
-val approved_resolution_message :
-  approval_id:string ->
-  tool_name:string ->
-  input:Yojson.Safe.t ->
-  user_message:string ->
-  string
-(** Render the approved-resolution block appended to the turn input.
-
-    Whether the Keeper must emit the approved call depends on the same
-    dispatch the replay uses ({!Keeper_gate_replay.replayable_of_operation}).
-    For a replayed operation the runtime spends the grant during tool-bundle
-    setup, which happens after this message is composed, so the approval store
-    still reads unconsumed here — an instruction to re-emit would send the
-    Keeper after an authorization the runtime is about to spend for it.
-
-    Exposed separately from the store read so the rendering is testable
-    without a durable approval journal. *)
-
-val user_message_with_hitl_resolution :
-  base_path:string ->
-  user_message:string ->
-  Keeper_event_queue.hitl_resolution option ->
-  string
-(** Add the durable HITL resolution output to the model-facing turn input.
-    Reject rationale and edited JSON are always explicit and never imply a
-    one-shot grant; only an approved journal can render exact authorization. *)
-
 (** Summary of event-bus signals observed during a single keeper turn.
     Exposed for regression tests. *)
 type turn_event_bus_summary =

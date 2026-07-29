@@ -63,6 +63,7 @@ type approved_resolution_request =
 
 type grant_error =
   | Grant_store_unavailable of storage_error
+  | Grant_replay_projection_unavailable of storage_error
   | Grant_workspace_mismatch of
       { approval_id : string
       ; requested_base_path : string
@@ -71,15 +72,31 @@ type grant_error =
   | Grant_still_pending of string
   | Grant_resolution_not_approved of string
   | Grant_resolution_missing of string
+  | Grant_replay_not_consumed of string
+  | Grant_replay_outcome_conflict of string
 
 type approved_resolution_state =
   | Resolution_unconsumed
   | Resolution_consumed
 
+type resolution_replay_outcome =
+  | Replay_applied of Tool_output.artifact_ref
+  | Replay_failed of Tool_output.artifact_ref
+
+type approved_resolution_delivery =
+  { request : approved_resolution_request
+  ; state : approved_resolution_state
+  ; replay_outcome : resolution_replay_outcome option
+  }
+
 type grant_consumption =
   | Consumption_committed
   | Consumption_already_committed
   | Consumption_not_matching
+
+type replay_recording =
+  | Replay_recorded
+  | Replay_already_recorded
 
 type delivery_replay_failure =
   { approval_id : string
@@ -90,6 +107,7 @@ type install_report =
   { loaded_pending : int
   ; replayed_deliveries : int
   ; delivery_replay_failures : delivery_replay_failure list
+  ; replay_projection_error : storage_error option
   }
 
 type install_error = Install_storage_failed of storage_error
@@ -102,6 +120,7 @@ type persisted_delivery =
   ; rule_expires_at : float option
   ; created_by : string option
   ; grant_consumed : bool
+  ; replay_outcome : resolution_replay_outcome option
   }
 
 let storage_error_to_string error =
@@ -233,6 +252,10 @@ let exact_attempt_error_to_string = function
 
 let grant_error_to_string = function
   | Grant_store_unavailable error -> storage_error_to_string error
+  | Grant_replay_projection_unavailable error ->
+    Printf.sprintf
+      "derived replay projection unavailable: %s"
+      (storage_error_to_string error)
   | Grant_workspace_mismatch
       { approval_id; requested_base_path; stored_base_path } ->
     Printf.sprintf
@@ -246,6 +269,14 @@ let grant_error_to_string = function
     Printf.sprintf "approval %s was not approved" approval_id
   | Grant_resolution_missing approval_id ->
     Printf.sprintf "approval %s has no durable resolution journal" approval_id
+  | Grant_replay_not_consumed approval_id ->
+    Printf.sprintf
+      "approval %s cannot record a replay outcome before its grant is consumed"
+      approval_id
+  | Grant_replay_outcome_conflict approval_id ->
+    Printf.sprintf
+      "approval %s already has a different durable replay outcome"
+      approval_id
 ;;
 
 let install_error_to_string = function
@@ -254,9 +285,15 @@ let install_error_to_string = function
 
 let pending_store_version = 8
 let pending_store_surface = "keeper_gate_pending"
+let replay_results_store_version = 1
+let replay_results_store_surface = "keeper_gate_replay_results"
 let pending_store_mutex = Cross_context_mutex.create ()
 let deliveries : persisted_delivery SMap.t Atomic.t = Atomic.make SMap.empty
 let unavailable_stores : storage_error SMap.t Atomic.t = Atomic.make SMap.empty
+let replay_projection_errors : storage_error SMap.t Atomic.t =
+  Atomic.make SMap.empty
+;;
+
 let store_revisions : int SMap.t Atomic.t = Atomic.make SMap.empty
 (** Process projection of the next value persisted in each workspace snapshot. *)
 let next_sequences : int SMap.t Atomic.t = Atomic.make SMap.empty
@@ -309,6 +346,10 @@ let pending_store_path ~base_path =
   Keeper_gate_path.pending ~base_path
 ;;
 
+let replay_results_store_path ~base_path =
+  Keeper_gate_path.replay_results ~base_path
+;;
+
 let report_pending_read_drop ~reason ~path ~detail =
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
@@ -317,6 +358,22 @@ let report_pending_read_drop ~reason ~path ~detail =
         ~labels:[ "surface", pending_store_surface; "reason", reason ]
         ())
     ~surface:pending_store_surface
+    ~reason
+    ~path
+    ~detail
+;;
+
+let report_replay_results_read_drop ~reason ~path ~detail =
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () ->
+      Otel_metric_store.inc_counter
+        Otel_metric_store.metric_persistence_read_drops
+        ~labels:
+          [ "surface", replay_results_store_surface
+          ; "reason", reason
+          ]
+        ())
+    ~surface:replay_results_store_surface
     ~reason
     ~path
     ~detail
@@ -368,6 +425,19 @@ let approval_decision_to_yojson = function
     `Assoc [ "kind", `String "edit"; "input", input ]
 ;;
 
+let resolution_replay_outcome_to_yojson = function
+  | Replay_applied output_ref ->
+    `Assoc
+      [ "kind", `String "applied"
+      ; "output_ref", Tool_output.normalized_artifact_ref_to_json output_ref
+      ]
+  | Replay_failed detail_ref ->
+    `Assoc
+      [ "kind", `String "failed"
+      ; "detail_ref", Tool_output.normalized_artifact_ref_to_json detail_ref
+      ]
+;;
+
 (* [request_context] is the Auto Judge / HITL summary input: request-local
    causal evidence (bounded history lead-up, the triggering user message,
    current dynamic context, and completed tool calls) captured at request time.
@@ -417,6 +487,27 @@ let snapshot_to_yojson ~base_path ~next_sequence ~pending_map ~delivery_map =
     ]
 ;;
 
+let replay_results_to_yojson ~base_path ~delivery_map =
+  let outcomes =
+    map_values_for_base
+      ~base_path
+      delivery_map
+      (fun delivery -> delivery.entry)
+    |> List.filter_map (fun delivery ->
+      Option.map
+        (fun outcome ->
+           `Assoc
+             [ "approval_id", `String delivery.entry.id
+             ; "outcome", resolution_replay_outcome_to_yojson outcome
+             ])
+        delivery.replay_outcome)
+  in
+  `Assoc
+    [ "version", `Int replay_results_store_version
+    ; "outcomes", `List outcomes
+    ]
+;;
+
 let save_snapshot_file_unlocked
       ~base_path
       ~next_sequence
@@ -453,6 +544,32 @@ let save_snapshot_file_strict_staged_unlocked
       |> Yojson.Safe.pretty_to_string
     in
     match save_file_atomic_strict_staged path body with
+    | Ok () -> Ok Fsync_completed
+    | Error (failure : Fs_compat.atomic_replace_failure) ->
+      let reason = Fs_compat.atomic_replace_failure_to_string failure in
+      (match failure.stage with
+       | Fs_compat.Before_rename ->
+         (match failure.exception_ with
+          | Eio.Cancel.Cancelled _ ->
+            Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+          | _ -> Error { path; reason })
+       | Fs_compat.After_rename -> Ok (Visible_sync_unconfirmed reason))
+  with
+  | Eio.Cancel.Cancelled _ as exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Printexc.raise_with_backtrace exn backtrace
+  | exn -> Error { path; reason = Printexc.to_string exn }
+;;
+
+let save_replay_results_file_unlocked ~base_path ~delivery_map =
+  let path = replay_results_store_path ~base_path in
+  try
+    Fs_compat.mkdir_p (Filename.dirname path);
+    let body =
+      replay_results_to_yojson ~base_path ~delivery_map
+      |> Yojson.Safe.pretty_to_string
+    in
+    match Fs_compat.save_file_atomic_strict_staged path body with
     | Ok () -> Ok Fsync_completed
     | Error (failure : Fs_compat.atomic_replace_failure) ->
       let reason = Fs_compat.atomic_replace_failure_to_string failure in
@@ -888,6 +1005,59 @@ let approval_decision_of_yojson json =
   | _ -> Error "gate_pending.decision must be a JSON object"
 ;;
 
+let replay_artifact_ref_of_yojson ~surface field fields =
+  match List.assoc_opt field fields with
+  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+  | Some json ->
+    (match Tool_output.normalized_artifact_ref_of_json json with
+     | Tool_output.Decoded_normalized_artifact_ref artifact_ref ->
+       Ok artifact_ref
+     | Tool_output.Not_normalized_artifact_ref ->
+       Error
+         (Printf.sprintf
+            "%s.%s must be a normalized artifact reference"
+            surface
+            field)
+     | Tool_output.Invalid_normalized_artifact_ref { detail } ->
+       Error (Printf.sprintf "%s.%s: %s" surface field detail))
+;;
+
+let resolution_replay_outcome_of_yojson ~surface = function
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let* kind = required_string ~surface "kind" fields in
+    (match kind with
+     | "applied" ->
+       let* () =
+         reject_unknown_fields
+           ~surface
+           ~allowed:[ "kind"; "output_ref" ]
+           fields
+       in
+       let* output_ref =
+         replay_artifact_ref_of_yojson ~surface "output_ref" fields
+       in
+       Ok (Replay_applied output_ref)
+     | "failed" ->
+       let* () =
+         reject_unknown_fields
+           ~surface
+           ~allowed:[ "kind"; "detail_ref" ]
+           fields
+       in
+       let* detail_ref =
+         replay_artifact_ref_of_yojson ~surface "detail_ref" fields
+       in
+       Ok (Replay_failed detail_ref)
+     | other ->
+       Error
+         (Printf.sprintf
+            "%s.kind %S is unknown"
+            surface
+            other))
+  | _ -> Error (surface ^ " must be a JSON object")
+;;
+
 let persisted_delivery_of_yojson ~base_path json =
   match json with
   | `Assoc fields ->
@@ -933,7 +1103,7 @@ let persisted_delivery_of_yojson ~base_path json =
     in
     let* () =
       match decision, grant_consumed with
-      | Decision.Approve, _ -> Ok ()
+      | Decision.Approve, (true | false) -> Ok ()
       | (Decision.Reject _ | Decision.Edit _), false -> Ok ()
       | (Decision.Reject _ | Decision.Edit _), true ->
         Error (surface ^ ".grant_consumed is valid only for approve")
@@ -946,6 +1116,7 @@ let persisted_delivery_of_yojson ~base_path json =
       ; rule_expires_at
       ; created_by
       ; grant_consumed
+      ; replay_outcome = None
       }
   | _ -> Error "gate_pending.delivery must be a JSON object"
 ;;
@@ -983,6 +1154,68 @@ let parse_list ~surface parse = function
     in
     loop 0 [] values
   | _ -> Error (surface ^ " must be an array")
+;;
+
+let replay_result_row_of_yojson json =
+  match json with
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let surface = "gate_replay_results.outcomes[]" in
+    let* () =
+      reject_unknown_fields
+        ~surface
+        ~allowed:[ "approval_id"; "outcome" ]
+        fields
+    in
+    let* approval_id = required_string ~surface "approval_id" fields in
+    let* outcome_json = required_member ~surface "outcome" fields in
+    let* outcome =
+      resolution_replay_outcome_of_yojson
+        ~surface:(surface ^ ".outcome")
+        outcome_json
+    in
+    Ok (approval_id, outcome)
+  | _ -> Error "gate_replay_results.outcomes[] must be a JSON object"
+;;
+
+let replay_results_of_yojson json =
+  match json with
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let surface = "gate_replay_results" in
+    let* () =
+      reject_unknown_fields
+        ~surface
+        ~allowed:[ "version"; "outcomes" ]
+        fields
+    in
+    let* () =
+      match List.assoc_opt "version" fields with
+      | Some (`Int version) when version = replay_results_store_version ->
+        Ok ()
+      | Some (`Int version) ->
+        Error
+          (Printf.sprintf
+             "%s.version %d is unsupported (current %d)"
+             surface
+             version
+             replay_results_store_version)
+      | Some _ -> Error (surface ^ ".version must be an integer")
+      | None -> Error (surface ^ ".version is required")
+    in
+    let* outcomes_json = required_member ~surface "outcomes" fields in
+    let* outcomes =
+      parse_list
+        ~surface:"gate_replay_results.outcomes"
+        replay_result_row_of_yojson
+        outcomes_json
+    in
+    map_of_unique_entries
+      ~surface:"gate_replay_results.outcomes"
+      ~id_of:fst
+      outcomes
+    |> Result.map (SMap.map snd)
+  | _ -> Error "gate_replay_results must be a JSON object"
 ;;
 
 let validate_snapshot_sequences ~next_sequence pending_entries delivery_entries =
@@ -1192,6 +1425,90 @@ let load_snapshot_unlocked ~base_path =
       ~path
       ~detail:reason;
     Error { path; reason }
+;;
+
+let attach_replay_results ~delivery_map replay_results =
+  SMap.fold
+    (fun approval_id outcome result ->
+       match result with
+       | Error _ as error -> error
+       | Ok deliveries ->
+         (match SMap.find_opt approval_id deliveries with
+          | None ->
+            Error
+              (Printf.sprintf
+                 "gate_replay_results outcome %s has no matching delivery"
+                 approval_id)
+          | Some
+              ( { decision = Decision.Approve
+                ; grant_consumed = true
+                ; replay_outcome = None
+                ; _
+                } as delivery ) ->
+            Ok
+              (SMap.add
+                 approval_id
+                 { delivery with replay_outcome = Some outcome }
+                 deliveries)
+          | Some { decision = Decision.Approve; grant_consumed = false; _ } ->
+            Error
+              (Printf.sprintf
+                 "gate_replay_results outcome %s requires a consumed approve grant"
+                 approval_id)
+          | Some
+              { decision = (Decision.Reject _ | Decision.Edit _); _ } ->
+            Error
+              (Printf.sprintf
+                 "gate_replay_results outcome %s belongs to a non-approved delivery"
+                 approval_id)
+          | Some { replay_outcome = Some _; _ } ->
+            Error
+              (Printf.sprintf
+                 "gate_replay_results outcome %s is duplicated in memory"
+                 approval_id)))
+    replay_results
+    (Ok delivery_map)
+;;
+
+let load_replay_results_unlocked ~base_path ~delivery_map =
+  let path = replay_results_store_path ~base_path in
+  try
+    if not (Sys.file_exists path)
+    then delivery_map, None
+    else (
+      match Safe_ops.read_json_file_safe path with
+      | Error reason ->
+        report_replay_results_read_drop
+          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~path
+          ~detail:reason;
+        delivery_map, Some { path; reason }
+      | Ok json ->
+        (match replay_results_of_yojson json with
+         | Error reason ->
+           report_replay_results_read_drop
+             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+             ~path
+             ~detail:reason;
+           delivery_map, Some { path; reason }
+         | Ok replay_results ->
+           (match attach_replay_results ~delivery_map replay_results with
+            | Ok delivery_map -> delivery_map, None
+            | Error reason ->
+              report_replay_results_read_drop
+                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~path
+                ~detail:reason;
+              delivery_map, Some { path; reason })))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    let reason = Printexc.to_string exn in
+    report_replay_results_read_drop
+      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+      ~path
+      ~detail:reason;
+    delivery_map, Some { path; reason }
 ;;
 
 let remove_base_entries ~base_path map project =
@@ -1707,7 +2024,7 @@ let normalized_input_hash = request_fingerprint
 
 type approved_delivery_lookup =
   | Approved_delivery_unconsumed of persisted_delivery
-  | Approved_delivery_consumed
+  | Approved_delivery_consumed of persisted_delivery
 
 type grant_consumption_commit =
   | Consumption_without_audit of grant_consumption
@@ -1734,7 +2051,7 @@ let approved_delivery_unlocked ~base_path ~id =
          (match delivery.decision with
           | Decision.Approve ->
             if delivery.grant_consumed
-            then Ok Approved_delivery_consumed
+            then Ok (Approved_delivery_consumed delivery)
             else Ok (Approved_delivery_unconsumed delivery)
           | Decision.Reject _ | Decision.Edit _ ->
             Error (Grant_resolution_not_approved id))
@@ -1756,7 +2073,7 @@ let approved_resolution_request ~base_path ~id =
   with_pending_store_lock (fun () ->
     match approved_delivery_unlocked ~base_path ~id with
     | Error _ as error -> error
-    | Ok Approved_delivery_consumed -> Ok None
+    | Ok (Approved_delivery_consumed _) -> Ok None
     | Ok (Approved_delivery_unconsumed delivery) ->
       Ok
         (Some
@@ -1770,8 +2087,84 @@ let approved_resolution_state ~base_path ~id =
   with_pending_store_lock (fun () ->
     match approved_delivery_unlocked ~base_path ~id with
     | Error _ as error -> error
-    | Ok Approved_delivery_consumed -> Ok Resolution_consumed
+    | Ok (Approved_delivery_consumed _) -> Ok Resolution_consumed
     | Ok (Approved_delivery_unconsumed _) -> Ok Resolution_unconsumed)
+;;
+
+let approved_resolution_delivery ~base_path ~id =
+  with_pending_store_lock (fun () ->
+    match approved_delivery_unlocked ~base_path ~id with
+    | Error _ as error -> error
+    | Ok (Approved_delivery_unconsumed delivery) ->
+      Ok
+        { request =
+            { keeper_name = delivery.entry.keeper_name
+            ; tool_name = delivery.entry.tool_name
+            ; input = delivery.entry.input
+            }
+        ; state = Resolution_unconsumed
+        ; replay_outcome = delivery.replay_outcome
+        }
+    | Ok (Approved_delivery_consumed delivery) ->
+      Ok
+        { request =
+            { keeper_name = delivery.entry.keeper_name
+            ; tool_name = delivery.entry.tool_name
+            ; input = delivery.entry.input
+            }
+        ; state = Resolution_consumed
+        ; replay_outcome = delivery.replay_outcome
+        })
+;;
+
+let resolution_replay_outcome_equal left right =
+  match left, right with
+  | Replay_applied left, Replay_applied right
+  | Replay_failed left, Replay_failed right ->
+    left = right
+  | Replay_applied _, Replay_failed _
+  | Replay_failed _, Replay_applied _ ->
+    false
+;;
+
+let record_consumed_resolution_replay ~base_path ~id ~outcome =
+  with_pending_store_lock (fun () ->
+    match SMap.find_opt base_path (Atomic.get replay_projection_errors) with
+    | Some error -> Error (Grant_replay_projection_unavailable error)
+    | None ->
+      (match approved_delivery_unlocked ~base_path ~id with
+       | Error _ as error -> error
+       | Ok (Approved_delivery_unconsumed _) ->
+         Error (Grant_replay_not_consumed id)
+       | Ok (Approved_delivery_consumed delivery) ->
+         (match delivery.replay_outcome with
+          | Some existing when resolution_replay_outcome_equal existing outcome ->
+            Ok Replay_already_recorded
+          | Some _ -> Error (Grant_replay_outcome_conflict id)
+          | None ->
+            let updated_delivery =
+              { delivery with replay_outcome = Some outcome }
+            in
+            let updated_deliveries =
+              SMap.add id updated_delivery (Atomic.get deliveries)
+            in
+            (match
+               save_replay_results_file_unlocked
+                 ~base_path
+                 ~delivery_map:updated_deliveries
+             with
+             | Error error ->
+               Error (Grant_replay_projection_unavailable error)
+             | Ok Fsync_completed ->
+               Atomic.set deliveries updated_deliveries;
+               Ok Replay_recorded
+             | Ok (Visible_sync_unconfirmed reason) ->
+               let error =
+                 { path = replay_results_store_path ~base_path
+                 ; reason
+                 }
+               in
+               Error (Grant_replay_projection_unavailable error)))))
 ;;
 
 let consume_approved_resolution
@@ -1785,7 +2178,7 @@ let consume_approved_resolution
     with_pending_store_lock (fun () ->
       match approved_delivery_unlocked ~base_path ~id with
       | Error error -> Error error
-      | Ok Approved_delivery_consumed ->
+      | Ok (Approved_delivery_consumed _) ->
         Ok (Consumption_without_audit Consumption_already_committed)
       | Ok (Approved_delivery_unconsumed delivery) ->
         let entry = delivery.entry in
@@ -3216,6 +3609,7 @@ let journal_resolution ~id ~decision ~source ~remember_rule ~rule_expires_at ~cr
         ; rule_expires_at
         ; created_by
         ; grant_consumed = false
+        ; replay_outcome = None
         }
       in
       let updated_pending = SMap.remove id pending_map in
@@ -3404,13 +3798,31 @@ let install_persistence_internal ~after_load ~base_path =
      being published between the read and the replacement below. *)
   let installed =
     with_pending_store_lock (fun () ->
-      let loaded_snapshot = load_snapshot_unlocked ~base_path in
+      let loaded_snapshot =
+        match load_snapshot_unlocked ~base_path with
+        | Error _ as error -> error
+        | Ok (loaded_pending, loaded_deliveries, loaded_next_sequence) ->
+          let loaded_deliveries, replay_projection_error =
+            load_replay_results_unlocked
+              ~base_path
+              ~delivery_map:loaded_deliveries
+          in
+          Ok
+            ( loaded_pending
+            , loaded_deliveries
+            , loaded_next_sequence
+            , replay_projection_error )
+      in
       after_load ();
       match loaded_snapshot with
       | Error storage_error ->
         mark_store_unavailable_unlocked ~base_path storage_error;
         Error storage_error
-      | Ok (loaded_pending, loaded_deliveries, loaded_next_sequence) ->
+      | Ok
+          ( loaded_pending
+          , loaded_deliveries
+          , loaded_next_sequence
+          , replay_projection_error ) ->
         let current_pending =
           remove_base_entries ~base_path (Atomic.get pending) Fun.id
         in
@@ -3457,6 +3869,18 @@ let install_persistence_internal ~after_load ~base_path =
               Error error
             | None ->
               clear_store_unavailable_unlocked ~base_path;
+              Atomic.set
+                replay_projection_errors
+                (match replay_projection_error with
+                 | None ->
+                   SMap.remove
+                     base_path
+                     (Atomic.get replay_projection_errors)
+                 | Some error ->
+                   SMap.add
+                     base_path
+                     error
+                     (Atomic.get replay_projection_errors));
               Atomic.set pending pending_map;
               Atomic.set deliveries delivery_map;
               Atomic.set
@@ -3470,17 +3894,19 @@ let install_persistence_internal ~after_load ~base_path =
                 , SMap.bindings loaded_deliveries
                   |> List.map snd
                   |> List.sort (fun left right ->
-                    compare_pending_order left.entry right.entry) ))))
+                    compare_pending_order left.entry right.entry)
+                , replay_projection_error ))))
   in
   match installed with
   | Error storage_error -> Error (Install_storage_failed storage_error)
-  | Ok (loaded_pending, loaded_deliveries) ->
+  | Ok (loaded_pending, loaded_deliveries, replay_projection_error) ->
     let rec replay count failures = function
       | [] ->
         Ok
           { loaded_pending
           ; replayed_deliveries = count
           ; delivery_replay_failures = List.rev failures
+          ; replay_projection_error
           }
       | delivery :: rest ->
         if delivery.grant_consumed
@@ -3523,6 +3949,7 @@ module For_testing = struct
       Atomic.set pending SMap.empty;
       Atomic.set deliveries SMap.empty;
       Atomic.set unavailable_stores SMap.empty;
+      Atomic.set replay_projection_errors SMap.empty;
       Atomic.set store_revisions SMap.empty;
       Atomic.set next_sequences SMap.empty)
   ;;
@@ -3532,6 +3959,7 @@ module For_testing = struct
   ;;
 
   let pending_store_path = pending_store_path
+  let replay_results_store_path = replay_results_store_path
   let always_allowed_store_path ~base_path = rules_path ~base_path ()
 
   let bind_summary_exact_attempt_with_writer = bind_summary_exact_attempt_with

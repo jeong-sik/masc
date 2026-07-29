@@ -98,9 +98,38 @@ let transcript_corruption error =
       | Keeper_internal_error.Internal_bridge_exception _
       | Keeper_internal_error.Internal_contract_rejected _
       | Keeper_internal_error.Terminal_effect_failed _
-      | Keeper_internal_error.Receipt_persistence_failed _ )
+      | Keeper_internal_error.Receipt_persistence_failed _
+      | Keeper_internal_error.Gate_replay_repair_required _ )
   | None ->
     None
+;;
+
+let execution_boundary_of_turn_failure ~transcript_corruption error =
+  match
+    transcript_corruption,
+    Keeper_internal_error.classify_masc_internal_error error
+  with
+  | Some _, (Some _ | None) ->
+    Keeper_runtime_failure_route.Masc_execution
+  | None, Some (Keeper_internal_error.Gate_replay_repair_required _) ->
+    (* This failure is produced by MASC after host replay and before provider
+       dispatch. The shared [Agent_sdk.Error.Internal] carrier must not
+       misattribute that local replay boundary to OAS. *)
+    Keeper_runtime_failure_route.Masc_execution
+  | None,
+    Some
+      ( Keeper_internal_error.Runtime_exhausted _
+      | Keeper_internal_error.Capacity_backpressure _
+      | Keeper_internal_error.Resumable_cli_session _
+      | Keeper_internal_error.Accept_rejected _
+      | Keeper_internal_error.Internal_unhandled_exception _
+      | Keeper_internal_error.Internal_bridge_exception _
+      | Keeper_internal_error.Internal_contract_rejected _
+      | Keeper_internal_error.Incomplete_tool_transcript _
+      | Keeper_internal_error.Terminal_effect_failed _
+      | Keeper_internal_error.Receipt_persistence_failed _ )
+  | None, None ->
+    Keeper_runtime_failure_route.Oas_execution
 ;;
 
 type turn_success =
@@ -169,119 +198,6 @@ let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
     fun () -> chat_yield_request ~base_path ~keeper_name
   | Keeper_registry.Proactive_tick | Keeper_registry.Woken [] ->
     fun () -> autonomous_yield_request ~base_path ~keeper_name
-;;
-
-(* RFC-0356: for the operations [Keeper_gate_replay] dispatches to, the runtime
-   spends the grant itself during tool-bundle setup (#25947, #26089). That
-   happens after this message is composed — [keeper_agent_run.ml:560] runs
-   [prepare_agent_setup] well past [build_turn_context] — so the approval store
-   still reads unconsumed here and the Keeper would be told to emit a call the
-   runtime is about to emit for it. Branching on the same dispatch the replay
-   uses keeps the instruction true for both halves. *)
-let approved_resolution_message ~approval_id ~tool_name ~input ~user_message =
-  let closing =
-    match Keeper_gate_replay.replayable_of_operation tool_name with
-    | Some _ ->
-      "The runtime spends this one-shot authorization itself this turn: the \
-       operation above runs from that exact input without you re-emitting it. \
-       A repeat call finds the authorization gone and opens a new Gate request \
-       instead. Other external effects follow the ordinary Gate independently."
-    | None ->
-      "The one-shot authorization belongs to this exact operation and input. \
-       Other external effects follow the ordinary Gate independently."
-  in
-  String.concat
-    "\n"
-    [ user_message
-    ; ""
-    ; "Gate resolution delivered:"
-    ; Printf.sprintf "- approval_id: %s" approval_id
-    ; Printf.sprintf "- operation: %s" tool_name
-    ; "- exact input:"
-    ; "```json"
-    ; Yojson.Safe.pretty_to_string input
-    ; "```"
-    ; closing
-    ]
-;;
-
-let user_message_with_hitl_resolution ~base_path ~user_message = function
-  | Some
-      { Keeper_event_queue.approval_id
-      ; decision = Hitl_approved
-      ; _
-      } ->
-    (match
-       Keeper_approval_queue.approved_resolution_request
-         ~base_path
-         ~id:approval_id
-     with
-     | Ok (Some request) ->
-       approved_resolution_message
-         ~approval_id
-         ~tool_name:request.tool_name
-         ~input:request.input
-         ~user_message
-     | Ok None ->
-       Log.Keeper.info
-         "approved Gate request already consumed approval=%s"
-         approval_id;
-       String.concat
-         "\n"
-         [ user_message
-         ; ""
-         ; "Gate resolution delivered:"
-         ; Printf.sprintf "- approval_id: %s" approval_id
-         ; "- state: authorization already consumed"
-         ; "This replay grants no authorization; any new external effect follows the ordinary Gate."
-         ]
-     | Error error ->
-       Log.Keeper.error
-         "approved Gate request unavailable approval=%s: %s"
-         approval_id
-         (Keeper_approval_queue.grant_error_to_string error);
-       String.concat
-         "\n"
-         [ user_message
-         ; ""
-         ; Printf.sprintf
-             "Gate resolution %s could not be read from its durable journal; this event will be retried."
-             approval_id
-         ])
-  | Some
-      { Keeper_event_queue.approval_id
-      ; decision = Hitl_rejected rationale
-      ; _
-      } ->
-    String.concat
-      "\n"
-      [ user_message
-      ; ""
-      ; "Gate resolution delivered:"
-      ; Printf.sprintf "- approval_id: %s" approval_id
-      ; "- decision: rejected"
-      ; Printf.sprintf "- rationale: %s" rationale
-      ; "This resolution grants no authorization."
-      ]
-  | Some
-      { Keeper_event_queue.approval_id
-      ; decision = Hitl_edited edited_input
-      ; _
-      } ->
-    String.concat
-      "\n"
-      [ user_message
-      ; ""
-      ; "Gate resolution delivered:"
-      ; Printf.sprintf "- approval_id: %s" approval_id
-      ; "- decision: edited"
-      ; "- edited input:"
-      ; "```json"
-      ; Yojson.Safe.pretty_to_string edited_input
-      ; "```"
-      ; "This edit grants no authorization; any external effect follows the ordinary Gate independently."
-      ]
-  | None -> user_message
 ;;
 
 type provider_overflow_recovery =
@@ -1013,12 +929,6 @@ let run_keeper_cycle
                    ~observation
                    ()
                in
-               let user_message =
-                 user_message_with_hitl_resolution
-                   ~base_path:config.base_path
-                   ~user_message
-                   hitl_resolution
-               in
                Eio.Fiber.yield ();
                let base_dir = session_base_dir config in
                (* Ensure session dir tree for trace artifacts. *)
@@ -1486,9 +1396,9 @@ dominant source of the observed CAS race exhaustion after
                   let failure_route =
                     Keeper_runtime_failure_route.route_of_error
                       ~boundary:
-                        (if Option.is_some transcript_corruption
-                         then Keeper_runtime_failure_route.Masc_execution
-                         else Keeper_runtime_failure_route.Oas_execution)
+                        (execution_boundary_of_turn_failure
+                           ~transcript_corruption
+                           err)
                       err
                   in
                   let source_disposition, turn_state =

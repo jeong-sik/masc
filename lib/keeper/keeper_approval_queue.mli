@@ -76,6 +76,7 @@ type approved_resolution_request =
 
 type grant_error =
   | Grant_store_unavailable of storage_error
+  | Grant_replay_projection_unavailable of storage_error
   | Grant_workspace_mismatch of
       { approval_id : string
       ; requested_base_path : string
@@ -84,15 +85,40 @@ type grant_error =
   | Grant_still_pending of string
   | Grant_resolution_not_approved of string
   | Grant_resolution_missing of string
+  | Grant_replay_not_consumed of string
+  | Grant_replay_outcome_conflict of string
 
 type approved_resolution_state =
   | Resolution_unconsumed
   | Resolution_consumed
 
+type resolution_replay_outcome =
+  | Replay_applied of Tool_output.artifact_ref
+  | Replay_failed of Tool_output.artifact_ref
+(** Derived replay evidence points to exact bytes in {!Tool_blob_store}. The
+    Gate sidecar owns only this typed content address; provider input is
+    rehydrated from it through the same inline/marker boundary as ordinary
+    tool outputs ([Tool_bridge] externalize threshold): at or under the
+    threshold the exact bytes are inlined; above it the standard
+    [Tool_output] blob marker is delivered and the exact bytes remain
+    durable in the store. The rendered request therefore stays bounded by
+    the assigned Runtime's request-body cap while the evidence itself is
+    never truncated. *)
+
+type approved_resolution_delivery =
+  { request : approved_resolution_request
+  ; state : approved_resolution_state
+  ; replay_outcome : resolution_replay_outcome option
+  }
+
 type grant_consumption =
   | Consumption_committed
   | Consumption_already_committed
   | Consumption_not_matching
+
+type replay_recording =
+  | Replay_recorded
+  | Replay_already_recorded
 
 type delivery_replay_failure =
   { approval_id : string
@@ -103,6 +129,7 @@ type install_report =
   { loaded_pending : int
   ; replayed_deliveries : int
   ; delivery_replay_failures : delivery_replay_failure list
+  ; replay_projection_error : storage_error option
   }
 
 type install_error = Install_storage_failed of storage_error
@@ -126,6 +153,10 @@ val install_error_to_string : install_error -> string
     Snapshot read and in-memory installation are one serialized transition, so
     a concurrent mutation for the same workspace cannot be overwritten by the
     loaded snapshot.
+    A malformed or unreadable derived replay projection is reported in
+    [replay_projection_error] without making the authorization store
+    unavailable. The projection stays untouched and replay-result writes remain
+    scoped unavailable until operator repair.
     In-flight summaries retain their durable state. Independent delivery replay
     failures are returned in [delivery_replay_failures] and never prevent later
     journals or Gate recovery from being attempted. *)
@@ -143,6 +174,15 @@ val approved_resolution_request :
 val approved_resolution_state :
   base_path:string -> id:string -> (approved_resolution_state, grant_error) result
 
+(** Read the approved request together with its consumption state and any
+    durable host replay result. Unlike [approved_resolution_request], this
+    remains available after one-shot consumption so a retried or restarted
+    Keeper turn cannot forget an already-applied external effect. *)
+val approved_resolution_delivery :
+  base_path:string ->
+  id:string ->
+  (approved_resolution_delivery, grant_error) result
+
 (** Atomically consume an approved resolution only when the Keeper, opaque
     operation identity, and canonical complete input match its durable request.
     Turn, Task, Goal, and channel fields remain provenance and never become
@@ -154,6 +194,17 @@ val consume_approved_resolution :
   tool_name:string ->
   input:Yojson.Safe.t ->
   (grant_consumption, grant_error) result
+
+(** Durably attach a typed content address for exact host replay evidence to a
+    consumed approval. The derived replay projection is separate from
+    authorization state, so a write failure affects this approval's replay
+    delivery only. Identical writes are idempotent; conflicting or
+    not-fully-synced writes fail visibly. *)
+val record_consumed_resolution_replay :
+  base_path:string ->
+  id:string ->
+  outcome:resolution_replay_outcome ->
+  (replay_recording, grant_error) result
 
 (** {1 Exact Always Allowed rules} *)
 
@@ -291,6 +342,7 @@ module For_testing : sig
     after_load:(unit -> unit) ->
     (install_report, install_error) result
   val pending_store_path : base_path:string -> string
+  val replay_results_store_path : base_path:string -> string
   val always_allowed_store_path : base_path:string -> string
 
   val bind_summary_exact_attempt_with_writer :

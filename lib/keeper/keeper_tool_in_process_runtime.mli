@@ -13,6 +13,51 @@ val handle_time_now : args:Yojson.Safe.t -> string
 
 val handle_tools_list : meta:keeper_meta -> args:Yojson.Safe.t -> string
 
+val network_read_gate_operation : string
+
+type network_read_replay =
+  | Replay_web_search of Yojson.Safe.t
+  | Replay_web_fetch of Yojson.Safe.t
+
+val network_read_replay_of_gate_input :
+  Yojson.Safe.t -> (network_read_replay, string) result
+(** Decode the exact producer-owned Gate envelope for WebSearch/WebFetch.
+    Replay never reconstructs arguments or guesses a capability. *)
+
+val connector_post_gate_operation : string
+
+type connector_post_replay =
+  | Replay_discord_post of
+      { input : Yojson.Safe.t
+      ; channel_id : string
+      ; content : string
+      }
+  | Replay_slack_post of
+      { input : Yojson.Safe.t
+      ; channel_id : string
+      ; content : string
+      ; blocks : Yojson.Safe.t list
+      }
+
+val connector_post_replay_of_gate_input :
+  Yojson.Safe.t -> (connector_post_replay, string) result
+(** Decode the exact durable connector request emitted by
+    [handle_surface_post_with_outcome]. The original JSON value is retained
+    and used for one-shot Gate consumption; content and blocks are never
+    truncated or reconstructed for replay. *)
+
+val replay_connector_post_with_outcome :
+  config:Workspace.config ->
+  meta:keeper_meta ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
+  ?gate_context:(unit -> Keeper_gate.causal_context) ->
+  ?gate_grant:Keeper_gate.cycle_grant ->
+  connector_post_replay ->
+  Keeper_tool_execution.t
+(** Spend the approved connector grant and send its exact durable request.
+    This is the producer-owned continuation for connector posts; it does not
+    ask the model to copy a potentially large approved payload. *)
+
 val handle_web_search_with_outcome
   :  config:Workspace.config
   -> meta:keeper_meta

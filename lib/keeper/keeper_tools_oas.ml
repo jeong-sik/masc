@@ -22,10 +22,16 @@ type terminal_effect_state =
   | Terminal_effect_completed
   | Terminal_effect_failed of terminal_effect_failure
 
+type gate_replay_delivery =
+  { approval_id : string
+  ; outcome : Keeper_gate_replay.outcome
+  }
+
 type tool_bundle =
   { tools : Agent_sdk.Tool.t list
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> terminal_effect_state
+  ; gate_replay_delivery : gate_replay_delivery option
   }
 
 (** Tool usage now lives in Keeper_registry (per-entry tool_usage Hashtbl).

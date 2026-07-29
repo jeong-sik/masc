@@ -1209,6 +1209,13 @@ let install_keeper_gate_persistence state =
       report.loaded_pending
       report.replayed_deliveries
       (List.length report.delivery_replay_failures);
+    (match report.replay_projection_error with
+     | None -> ()
+     | Some error ->
+       Log.Server.error
+         "keeper_gate: derived replay projection unavailable; authorization queue remains ready base_path=%s error=%s"
+         base_path
+         (Keeper_approval_queue.storage_error_to_string error));
     List.iter
       (fun (failure : Keeper_approval_queue.delivery_replay_failure) ->
          Log.Server.error

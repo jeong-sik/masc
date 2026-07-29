@@ -514,6 +514,11 @@ let run_turn
     Keeper_runtime_manifest.Checkpoint_loaded;
   (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
      and user message append — Keeper_run_prompt. *)
+  let prompt_user_turn_record =
+    match hitl_resolution with
+    | Some _ -> Keeper_run_prompt.Skip_uninformative_wake
+    | None -> user_turn_record
+  in
   let prompt_ctx =
     Keeper_run_prompt.build_turn_context
       ~ctx
@@ -522,7 +527,7 @@ let run_turn
       ~config
       ~meta
       ~history_user_source
-      ~user_turn_record
+      ~user_turn_record:prompt_user_turn_record
       ~is_retry
       ~start_turn_count
   in
@@ -530,7 +535,6 @@ let run_turn
   let dynamic_context = prompt_ctx.Keeper_run_prompt.dynamic_context in
   let memory_context = prompt_ctx.Keeper_run_prompt.memory_context in
   let temporal_context = prompt_ctx.Keeper_run_prompt.temporal_context in
-  let prompt_metrics = prompt_ctx.Keeper_run_prompt.prompt_metrics in
   let history_messages = prompt_ctx.Keeper_run_prompt.history_messages in
   let resume_oas_checkpoint =
     Option.map
@@ -539,32 +543,6 @@ let run_turn
       resume_oas_checkpoint
   in
   let ctx_work = prompt_ctx.Keeper_run_prompt.ctx_work in
-  let history_messages_digest = digest_message_texts_as_joined history_messages in
-  let context_digest =
-    digest_text
-      (base_system_prompt ^ turn_system_prompt ^ dynamic_context ^ memory_context
-       ^ temporal_context ^ user_message ^ history_messages_digest)
-  in
-  append_manifest ~site:"context_injected"
-    ~keeper_turn_id:manifest_keeper_turn_id
-    ?checkpoint_path:
-      (if ctx.loaded_checkpoint_present then Some checkpoint_path else None)
-    ~decision:
-      (Keeper_runtime_manifest.with_payload_role ~payload_role:Model_input
-        (`Assoc
-          [
-            ("base_system_prompt_digest", `String (digest_text base_system_prompt));
-            ("turn_system_prompt_digest", `String (digest_text turn_system_prompt));
-            ("dynamic_context_digest", `String (digest_text dynamic_context));
-            ("memory_context_digest", `String (digest_text memory_context));
-            ("temporal_context_digest", `String (digest_text temporal_context));
-            ("user_message_digest", `String (digest_text user_message));
-            ("history_message_count", `Int (List.length history_messages));
-            ("history_messages_digest", `String history_messages_digest);
-            ("context_window", `Int max_context);
-            ("context_digest", `String context_digest);
-          ]))
-    Keeper_runtime_manifest.Context_injected;
   (* 7. Set up agent — delegated to Keeper_run_tools *)
   let setup =
     Keeper_run_tools.prepare_agent_setup
@@ -581,7 +559,6 @@ let run_turn
       ~user_message
       ~dynamic_context
       ~history_messages
-      ~prompt_metrics
       ~shared_context
       ~context_injector
       ~start_turn_count
@@ -604,6 +581,54 @@ let run_turn
   match setup with
   | Error e -> Error e
   | Ok s ->
+    let user_message = s.Keeper_run_tools.user_message in
+    let ctx_work =
+      match hitl_resolution with
+      | None -> ctx_work
+      | Some _ ->
+        let user_message = Agent_sdk.Types.user_msg user_message in
+        Keeper_context_runtime.append ctx_work user_message
+    in
+    let prompt_metrics =
+      Keeper_agent_prompt_metrics.build_prompt_metrics
+        ~system_prompt:turn_system_prompt
+        ~dynamic_context
+        ~user_message
+    in
+    let history_messages_digest =
+      digest_message_texts_as_joined history_messages
+    in
+    let context_digest =
+      digest_text
+        (base_system_prompt ^ turn_system_prompt ^ dynamic_context
+         ^ memory_context ^ temporal_context ^ user_message
+         ^ history_messages_digest)
+    in
+    append_manifest
+      ~site:"context_injected"
+      ~keeper_turn_id:manifest_keeper_turn_id
+      ?checkpoint_path:
+        (if ctx.loaded_checkpoint_present then Some checkpoint_path else None)
+      ~decision:
+        (Keeper_runtime_manifest.with_payload_role
+           ~payload_role:Model_input
+           (`Assoc
+              [ ( "base_system_prompt_digest"
+                , `String (digest_text base_system_prompt) )
+              ; ( "turn_system_prompt_digest"
+                , `String (digest_text turn_system_prompt) )
+              ; ( "dynamic_context_digest"
+                , `String (digest_text dynamic_context) )
+              ; "memory_context_digest", `String (digest_text memory_context)
+              ; ( "temporal_context_digest"
+                , `String (digest_text temporal_context) )
+              ; "user_message_digest", `String (digest_text user_message)
+              ; "history_message_count", `Int (List.length history_messages)
+              ; "history_messages_digest", `String history_messages_digest
+              ; "context_window", `Int max_context
+              ; "context_digest", `String context_digest
+              ]))
+      Keeper_runtime_manifest.Context_injected;
     let cleanup_agent_setup () =
       Turn_helpers.cleanup_agent_setup ~keeper_name:meta.name s
     in

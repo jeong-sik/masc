@@ -54,6 +54,7 @@ type agent_setup =
   { tools : Agent_sdk.Tool.t list
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_oas.terminal_effect_state
+  ; user_message : string
   ; hooks : Agent_sdk.Hooks.hooks
   ; model_input_projection : Agent_sdk.Agent.model_input_projection
   ; acc : hook_accumulator
@@ -78,7 +79,6 @@ val prepare_agent_setup
   -> user_message:string
   -> dynamic_context:string
   -> history_messages:Agent_sdk.Types.message list
-  -> prompt_metrics:Keeper_agent_prompt_metrics.prompt_metrics
   -> shared_context:Agent_sdk.Context.t
   -> context_injector:Agent_sdk.Hooks.context_injector
   -> start_turn_count:int

@@ -14,6 +14,7 @@ type agent_setup =
   { tools : Agent_sdk.Tool.t list
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_oas.terminal_effect_state
+  ; user_message : string
   ; hooks : Agent_sdk.Hooks.hooks
   ; model_input_projection : Agent_sdk.Agent.model_input_projection
   ; acc : hook_accumulator
@@ -563,6 +564,7 @@ let assemble_hooks
       { tools
       ; cleanup = keeper_tools_cleanup
       ; terminal_effect_state
+      ; user_message
       ; hooks
       ; model_input_projection
       ; acc

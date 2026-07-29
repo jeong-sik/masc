@@ -1,8 +1,7 @@
-(** Provider-native JSON schemas for MASC LLM sub-call producers.
+(** Domain JSON schemas for MASC LLM sub-call parsers and exact-output flows.
 
-    These schemas are used as [response_format = JsonSchema _] at the OAS
-    provider boundary. The existing domain parsers still own semantic
-    validation after the provider returns JSON. *)
+    They describe the expected value for prompt instructions and local parsing;
+    MASC does not send them through provider-native response formats. *)
 
 val librarian_episode_output_schema : Yojson.Safe.t
 (** JSON object the librarian extraction provider must return. *)
@@ -24,9 +23,6 @@ val compaction_plan_output_schema : Yojson.Safe.t
 (** JSON object the LLM compaction summarizer must return: exactly one typed
     decision for every eligible source unit. *)
 
-val vision_analyze_output_schema : Yojson.Safe.t
-(** JSON object the one-shot vision analyzer provider must return. *)
-
 val fusion_judge_output_schema : Yojson.Safe.t
 (** JSON object the Fusion judge/refine/meta-judge provider must return. *)
 
@@ -38,16 +34,10 @@ val board_attention_judgment_batch_output_schema : Yojson.Safe.t
 val hitl_context_summary_schema : Yojson.Safe.t
 (** JSON object the HITL context-summary worker provider must return. *)
 
-val apply_to_provider_config
-  :  Yojson.Safe.t
-  -> Llm_provider.Provider_config.t
-  -> Llm_provider.Provider_config.t
-(** Set the single OAS structured-output request state for [schema]. *)
-
 val without_response_format
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
-(** Clear the OAS structured-output request state: the request states its output
+(** Clear the OAS structured-output response format: the request states its output
     contract in its prompt and validates the parse downstream, so it asks the
     provider for no wire format at all. Use for call sites whose prompt spells
     out the object shape and whose parser is total — a malformed reply must
@@ -58,24 +48,12 @@ val anti_rationalization_reviewer_provider_config
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
 (** Provider config for the task anti-rationalization reviewer: clears the OAS
-    structured-output request state. The verdict channel is the
+    structured-output response format. The verdict channel is the
     [report_review_verdict] tool call (exactly-once, total parser in
     [Task.Anti_rationalization]); a wire response format constrained only the
     final assistant text this surface never parses, and its capability branch
     rejected json_object-only providers, leaving every task nonterminal
     (2026-07-21 live incident). *)
-
-val validate_provider_config
-  :  Yojson.Safe.t
-  -> Llm_provider.Provider_config.t
-  -> (unit, string) result
-(** Validate that [provider_cfg] can accept [schema] at the OAS boundary. *)
-
-val provider_config_accepts_schema
-  :  Yojson.Safe.t
-  -> Llm_provider.Provider_config.t
-  -> bool
-(** True when [validate_provider_config] accepts [provider_cfg]. *)
 
 val for_deterministic_subcall
   :  max_tokens:int option
@@ -100,5 +78,5 @@ val for_deterministic_subcall
     site-specific (a consolidation plan over hundreds of rows needs more
     room than a per-turn summary); everything else is not.
 
-    This does NOT apply the response-format/schema tier — sites differ there
-    and compose {!without_response_format} themselves. *)
+    This does NOT clear [response_format] — callers compose
+    {!without_response_format} themselves. *)

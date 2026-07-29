@@ -14,7 +14,6 @@
 module Vt = Masc.Keeper_vision_tool
 module Vi = Masc.Keeper_vision_ingest
 module Va = Multimodal.Vision_analyze
-module Structured_schema = Masc.Keeper_structured_output_schema
 module Store = Multimodal.Vision_artifact_store
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
@@ -243,12 +242,10 @@ let test_provider_for_vision_preserves_configured_max_tokens () =
     Vt.provider_for_vision { base with max_tokens = None }
   in
   assert (fallback.max_tokens = Some Vt.vision_default_max_tokens);
-  let expected_schema = Structured_schema.vision_analyze_output_schema in
   (match configured.response_format with
-   | Agent_sdk.Types.JsonSchema schema ->
-     assert (Yojson.Safe.equal schema expected_schema)
+   | Agent_sdk.Types.Off -> ()
    | Agent_sdk.Types.JsonMode
-   | Agent_sdk.Types.Off -> failwith "vision provider must request JsonSchema")
+   | Agent_sdk.Types.JsonSchema _ -> failwith "vision provider must not request a wire format")
 
 let test_max_image_bytes_reads_env_config () =
   with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "128" (fun () ->
@@ -469,59 +466,6 @@ let with_temp_runtime_toml content f =
       init_runtime_or_fail path;
       f ())
 
-(* The structured-output capability gate (SDK [validate_output_schema_request])
-   resolves a model's [supports_structured_output] from the global
-   [Model_catalog], not from the runtime.toml [capabilities] block. OAS owns
-   production catalog loading from its packaged models.toml or an explicit
-   operator override. These pure tests use synthetic model ids that are absent
-   from the packaged catalog, so they resolve to [default_capabilities]
-   (supports_structured_output = false); [vision_runtime_candidates] then
-   filters them out and the tool short-circuits to no_capable_runtime before
-   ever reaching the provider sub-call. Install a minimal catalog so the
-   provider-reaching tests below exercise their intended paths.
-   Ref #22767 (consume provider capability contract). *)
-let vision_model_catalog_toml =
-  {|
-[[models]]
-id_prefix = "ollama/vision-a"
-base = "ollama"
-supports_image_input = true
-supports_multimodal_inputs = true
-supports_structured_output = true
-
-[[models]]
-id_prefix = "ollama/vision-b"
-base = "ollama"
-supports_image_input = true
-supports_multimodal_inputs = true
-supports_structured_output = true
-
-[[models]]
-id_prefix = "ollama/vision-c"
-base = "ollama"
-supports_image_input = true
-supports_multimodal_inputs = true
-supports_structured_output = true
-|}
-
-let with_vision_model_catalog f =
-  let path = Filename.temp_file "masc-vision-catalog-" ".toml" in
-  write_file path vision_model_catalog_toml;
-  let previous = Llm_provider.Model_catalog.global () in
-  Fun.protect
-    ~finally:(fun () ->
-      (match previous with
-       | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-       | None -> Llm_provider.Model_catalog.clear_global ());
-      try Sys.remove path with
-      | _ -> ())
-    (fun () ->
-      match Llm_provider.Model_catalog.load_file path with
-      | Error msg -> failwith ("vision test model catalog should load: " ^ msg)
-      | Ok catalog ->
-        Llm_provider.Model_catalog.set_global catalog;
-        f ())
-
 let vision_failover_runtime_toml =
   {|
 [runtime]
@@ -543,7 +487,6 @@ max-context = 4096
 [models.vision-a.capabilities]
 supports-image-input = true
 supports-multimodal-inputs = true
-supports-structured-output = true
 
 [models.vision-b]
 api-name = "vision-b"
@@ -552,7 +495,6 @@ max-context = 4096
 [models.vision-b.capabilities]
 supports-image-input = true
 supports-multimodal-inputs = true
-supports-structured-output = true
 
 [p1.vision-a]
 max-request-body-bytes = 65536
@@ -579,13 +521,12 @@ temperature = 1.0
 [models.vision-c.capabilities]
 supports-image-input = true
 supports-multimodal-inputs = true
-supports-structured-output = true
 
 [p3.vision-c]
 max-request-body-bytes = 65536
 |}
 
-(* Vision falls back to every schema-capable image runtime after explicit
+(* Vision falls back to every image-capable runtime after explicit
    media_failover ordering. The uncapped fallback is therefore genuinely
    reachable even though neither [runtime].default nor media_failover names it. *)
 let uncapped_vision_fallback_runtime_toml =
@@ -617,7 +558,6 @@ max-context = 4096
 [models.vision-a.capabilities]
 supports-image-input = true
 supports-multimodal-inputs = true
-supports-structured-output = true
 
 [p0.text]
 max-request-body-bytes = 65536
@@ -663,7 +603,7 @@ let test_uncapped_vision_fallback_rejects_before_provider_call () =
     | Vt.Vo_provider { failure_class = Tool_result.Runtime_failure; _ } -> ()
     | _ -> failwith "uncapped vision fallback must fail before provider dispatch")
 
-let schema_unsupported_vision_runtime_toml =
+let image_capable_vision_runtime_toml =
   {|
 [runtime]
 default = "local.vision"
@@ -692,32 +632,13 @@ let test_temp_runtime_toml_restores_runtime_cache () =
     assert (Runtime.get_runtime_ids () = before));
   assert (Vt.vision_runtime_ids () = [])
 
-let test_schema_unsupported_vision_runtime_is_skipped_before_provider_call () =
-  with_temp_runtime_toml schema_unsupported_vision_runtime_toml (fun () ->
-    assert (Vt.vision_runtime_ids () = []);
+let test_image_capable_vision_runtime_is_admitted_without_schema_capability () =
+  with_temp_runtime_toml image_capable_vision_runtime_toml (fun () ->
+    assert (Vt.vision_runtime_ids () = [ "local.vision" ]);
     (match Vt.first_vision_runtime_id () with
-     | Ok runtime_id ->
-       failwith ("schema-unsupported vision runtime was admitted: " ^ runtime_id)
-     | Error msg ->
-       assert (contains_substring msg "schema-capable image runtime"));
-    with_temp_base (fun _ ->
-      let meta = make_meta "vision-schema-admission" in
-      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
-      let raw =
-        Eio_main.run (fun env ->
-          Eio.Switch.run (fun sw ->
-            Vt.handle
-              ~complete:complete_should_not_run
-              ~sw
-              ~clock:(Eio.Stdenv.clock env)
-              ~net:(Eio.Stdenv.net env)
-              ~meta
-              ~args:(artifact_args handle)
-              ()))
-      in
-      let json = json_of_output raw in
-      assert (String.equal (assoc_string "error" json) "no_capable_runtime");
-      assert (String.equal (assoc_string "failure_class" json) "runtime_failure")))
+     | Ok "local.vision" -> ()
+     | Ok runtime_id -> failwith ("unexpected vision runtime admitted: " ^ runtime_id)
+     | Error msg -> failwith ("image-capable runtime was rejected: " ^ msg)))
 
 let test_invalid_structured_vision_response_is_runtime_failure () =
   with_temp_runtime_toml single_vision_runtime_toml (fun () ->
@@ -1164,21 +1085,16 @@ let () =
   test_unknown_magic_bytes_are_policy_rejection ();
   test_oversize_image_is_runtime_failure_before_provider_call ();
   test_temp_runtime_toml_restores_runtime_cache ();
-  test_schema_unsupported_vision_runtime_is_skipped_before_provider_call ();
-  (* These tests drive the synthetic ollama vision runtimes past the
-     schema-capability gate to the provider sub-call, so they need an installed
-  model catalog that advertises supports_structured_output (see
-     [with_vision_model_catalog]). *)
-  with_vision_model_catalog (fun () ->
-    test_provider_for_vision_uses_runtime_temperature ();
-    test_uncapped_vision_fallback_rejects_before_provider_call ();
-    test_invalid_structured_vision_response_is_runtime_failure ();
-    test_run_vision_invalid_structured_response_is_typed ();
-    test_retryable_provider_error_tries_next_runtime ();
+  test_image_capable_vision_runtime_is_admitted_without_schema_capability ();
+  test_provider_for_vision_uses_runtime_temperature ();
+  test_uncapped_vision_fallback_rejects_before_provider_call ();
+  test_invalid_structured_vision_response_is_runtime_failure ();
+  test_run_vision_invalid_structured_response_is_typed ();
+  test_retryable_provider_error_tries_next_runtime ();
   test_candidate_failover_is_not_cut_off_by_local_deadline ();
-    test_non_retryable_provider_error_stops_without_trying_next_runtime ();
-    test_accept_rejected_is_policy_rejection_without_failover ();
-    test_eager_eviction_reason_preserves_typed_outcome ());
+  test_non_retryable_provider_error_stops_without_trying_next_runtime ();
+  test_accept_rejected_is_policy_rejection_without_failover ();
+  test_eager_eviction_reason_preserves_typed_outcome ();
   test_delegate_eager_eviction_stores_image_and_removes_inline_block ();
   test_delegate_eviction_rejects_invalid_media_type_before_store ();
   test_delegate_eviction_rejects_oversize_before_store ();

@@ -47,8 +47,6 @@ type structured_result = {
   confidence: float;
 }
 
-val structured_result_schema : structured_result Agent_sdk.Structured.schema
-
 (** {1 World observation} *)
 
 type world_observation = {

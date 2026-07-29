@@ -68,8 +68,9 @@ let with_facts_lock ?clock ~keeper_id f =
    schema on top of that added no guarantee the parser did not already provide,
    only a capability branch: [validate_output_schema_request] rejects
    json_schema on every json_object-only endpoint, and the parse path never
-   read a provider-side field anyway — [structured_json_of_response] extracts
-   JSON from the response's visible text. *)
+   read a provider-side field anyway —
+   [Agent_sdk.Structured.response_json_extractor] extracts JSON from the
+   response's visible text. *)
 let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
   let max_tokens =
     match provider_cfg.max_tokens with
@@ -205,7 +206,7 @@ let consolidate_keeper
            then Empty_response
            else
              (match
-                Agent_sdk_response.structured_json_of_response response
+                (Agent_sdk.Structured.response_json_extractor ()) response
               with
               | Error detail -> invalid_structured_response_detail detail
               | Ok (`Assoc _ as json) ->

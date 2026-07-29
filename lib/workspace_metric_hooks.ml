@@ -379,7 +379,7 @@ let install () =
              ~start_time
              (Printf.sprintf "Invalid verdict format: %s" msg))
     in
-    let apply_review_verdict_output_schema provider_cfg =
+    let apply_review_verdict_output_contract provider_cfg =
       Ok
         (Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config
            provider_cfg)
@@ -393,7 +393,7 @@ let install () =
           ~goal:prompt
           ~masc_tools:[ report_tool_schema ]
           ~dispatch
-          ~provider_config_transform:apply_review_verdict_output_schema
+          ~provider_config_transform:apply_review_verdict_output_contract
           ?sw
           ())
     with

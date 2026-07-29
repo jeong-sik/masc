@@ -49,125 +49,11 @@ let allows_additional_properties schema =
   | _ -> false
 ;;
 
-let all_provider_native_schema_cases =
-  [ "librarian_episode", Keeper_structured_output_schema.librarian_episode_output_schema
-  ; "consolidation_plan", Keeper_structured_output_schema.consolidation_plan_output_schema
-  ; "compaction_plan", Keeper_structured_output_schema.compaction_plan_output_schema
-  ; "vision_analyze", Keeper_structured_output_schema.vision_analyze_output_schema
-  ; "fusion_judge", Keeper_structured_output_schema.fusion_judge_output_schema
-  ; ( "board_attention_judgment_batch"
-    , Keeper_structured_output_schema.board_attention_judgment_batch_output_schema )
-  ]
-;;
-
-let schema_capable_oas_provider_config () =
-  Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.OpenAI_compat
-    ~model_id:"structured-output-ratchet"
-    ~base_url:"https://structured-output.invalid/v1"
-    ~model_capabilities_override:
-      Llm_provider.Capabilities.openai_compat_chat_extended_capabilities
-    ()
-;;
-
-let prompt_tier_oas_provider_config () =
-  Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.OpenAI_compat
-    ~model_id:"prompt-tier-ratchet"
-    ~base_url:"https://prompt-tier.invalid/v1"
-    ~model_capabilities_override:
-      { Llm_provider.Capabilities.openai_compat_chat_extended_capabilities with
-        supports_structured_output = false
-      }
-    ()
-;;
-
-let test_all_schemas_apply_as_oas_native_json_schema () =
-  let base = schema_capable_oas_provider_config () in
-  List.iter
-    (fun (label, schema) ->
-       let configured =
-         Keeper_structured_output_schema.apply_to_provider_config schema base
-       in
-       check
-         bool
-         (label ^ " response_format mirrors schema")
-         true
-         (match configured.Llm_provider.Provider_config.response_format with
-          | Agent_sdk.Types.JsonSchema actual -> Yojson.Safe.equal schema actual
-          | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false);
-       match Llm_provider.Provider_config.validate_output_schema_request configured with
-       | Ok () -> ()
-       | Error msg ->
-         failf
-           "%s should satisfy the OAS native structured-output contract: %s"
-           label
-           msg)
-    all_provider_native_schema_cases
-;;
-
-let has_json_schema_response_format schema provider_cfg =
-  match provider_cfg.Llm_provider.Provider_config.response_format with
-  | Agent_sdk.Types.JsonSchema actual -> Yojson.Safe.equal schema actual
-  | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false
-;;
-
 let has_no_response_format provider_cfg =
   match provider_cfg.Llm_provider.Provider_config.response_format with
   | Agent_sdk.Types.Off -> true
   | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false
 ;;
-
-(* A schema-capable provider gets no response format either: capability is not
-   consulted. Without this the helper could silently regrow a native tier for
-   the one provider class that accepts it, which is the split these call sites
-   were changed to remove. *)
-let test_without_response_format_clears_schema_capable_provider () =
-  let base =
-    Keeper_structured_output_schema.apply_to_provider_config
-      Keeper_structured_output_schema.librarian_episode_output_schema
-      (schema_capable_oas_provider_config ())
-  in
-  check bool "schema-capable provider starts with a native schema attached" true
-    (has_json_schema_response_format
-       Keeper_structured_output_schema.librarian_episode_output_schema
-       base);
-  check bool "helper clears it anyway" true
-    (has_no_response_format (Keeper_structured_output_schema.without_response_format base))
-;;
-
-(* The point of the helper is that the request is byte-identical regardless of
-   what the provider advertises, so a capability fact that turns out to be a lie
-   (ollama.com cloud declared json_schema and ignored it — 2026-07-02 probe)
-   cannot change the request that was sent. *)
-let test_without_response_format_is_capability_independent () =
-  let schema_capable =
-    Keeper_structured_output_schema.without_response_format
-      (schema_capable_oas_provider_config ())
-  in
-  let json_object_only =
-    Keeper_structured_output_schema.without_response_format
-      (prompt_tier_oas_provider_config ())
-  in
-  check bool "schema-capable provider asks for no format" true
-    (has_no_response_format schema_capable);
-  check bool "json_object-only provider asks for no format" true
-    (has_no_response_format json_object_only);
-  check bool "both configs pass output-schema validation" true
-    (List.for_all
-       (fun cfg ->
-          match Llm_provider.Provider_config.validate_output_schema_request cfg with
-          | Ok () -> true
-          | Error _ -> false)
-       [ schema_capable; json_object_only ])
-;;
-
-(* #25266: a json_object-only provider (structured_output=false,
-   response_format_json=true — GLM/DeepSeek/Kimi's OpenAI-compat endpoints)
-   must get JsonMode from the three-tier selector, not be dropped to the
-   prompt tier. [prompt_tier_oas_provider_config] is exactly this shape:
-   openai_compat_chat_extended has response_format_json=true, and it disables
-   only structured_output. *)
 let test_operator_remote_tool_name_ssot_matches_remote_schemas () =
   let schema_names =
     Operator_tool.remote_schemas
@@ -318,44 +204,26 @@ let glm_provider_config () =
 ;;
 
 let test_anti_rationalization_reviewer_config_reaches_glm () =
-  let native =
-    Keeper_structured_output_schema.apply_to_provider_config
-      (`Assoc [ "type", `String "object" ])
-      (glm_provider_config ())
-  in
-  (match Llm_provider.Provider_config.validate_output_schema_request native with
-   | Error _ -> ()
-   | Ok () ->
-     fail
-       "counterfactual: a native json_schema request on a Glm config must be \
-        rejected — if this starts passing, revisit whether the reviewer \
-        surface still needs to avoid wire response formats");
   let reviewer =
     Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config
       (glm_provider_config ())
   in
-  check
-    bool
-    "reviewer config carries no wire response format"
-    true
-    (has_no_response_format reviewer);
-  match Llm_provider.Provider_config.validate_output_schema_request reviewer with
-  | Ok () -> ()
-  | Error msg -> failf "reviewer config must validate on a Glm provider: %s" msg
+  check bool "reviewer config carries no wire response format" true
+    (has_no_response_format reviewer)
 ;;
 
-let test_anti_rationalization_reviewer_config_strips_preset_schema () =
+let test_anti_rationalization_reviewer_config_clears_preset_response_format () =
   let preset =
-    Keeper_structured_output_schema.apply_to_provider_config
-      (`Assoc [ "type", `String "object" ])
-      (glm_provider_config ())
+    { (glm_provider_config ()) with
+      response_format = Agent_sdk.Types.JsonMode
+    }
   in
   let reviewer =
     Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config preset
   in
   check
     bool
-    "a pre-set schema on the incoming config is cleared, not inherited"
+    "a pre-set response format on the incoming config is cleared, not inherited"
     true
     (has_no_response_format reviewer)
 ;;
@@ -467,21 +335,7 @@ let test_deterministic_subcall_passes_max_tokens_through () =
 let () =
   run
     "keeper-structured-output-schema"
-    [ ( "oas provider config"
-      , [ test_case
-            "all schemas apply as OAS native JSON schema requests"
-            `Quick
-            test_all_schemas_apply_as_oas_native_json_schema
-        ; test_case
-            "without_response_format clears a schema-capable provider too"
-            `Quick
-            test_without_response_format_clears_schema_capable_provider
-        ; test_case
-            "without_response_format is capability-independent"
-            `Quick
-            test_without_response_format_is_capability_independent
-        ] )
-    ; ( "dashboard schemas"
+    [ ( "dashboard schemas"
       , [ test_case
             "operator remote tool-name SSOT matches remote schemas"
             `Quick
@@ -509,9 +363,9 @@ let () =
             `Quick
             test_anti_rationalization_reviewer_config_reaches_glm
         ; test_case
-            "anti-rationalization reviewer config strips a pre-set schema"
+            "anti-rationalization reviewer config clears a pre-set response format"
             `Quick
-            test_anti_rationalization_reviewer_config_strips_preset_schema
+            test_anti_rationalization_reviewer_config_clears_preset_response_format
         ; test_case
             "Board attention batch schema uses contract SSOT"
             `Quick

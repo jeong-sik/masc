@@ -53,15 +53,16 @@ val message_of_request
 val provider_for_vision
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
-(** A one-shot, non-thinking, structured-output vision config: thinking off (avoids the
+(** A one-shot, non-thinking vision config: thinking off (avoids the
     2026-06-25 gemma4 thinking-budget exhaustion that produced empty replies),
-    [response_format = JsonSchema _], [tool_choice = None], the selected
-    provider config's exact temperature
+    [response_format = Off]; its prompt specifies the JSON object and the
+    response parser validates it, [tool_choice = None], the selected provider
+    config's exact temperature
     (including omission), and a fallback [max_tokens] only when the selected
     runtime has not configured one. *)
 
 val vision_runtime_ids : unit -> string list
-(** Ordered schema-capable image runtime ids: [\[runtime\].media_failover] order
+(** Ordered image-capable runtime ids: [\[runtime\].media_failover] order
     first, then declaration order. The handler tries these candidates in order
     for timeout/provider failures within one cumulative tool deadline. *)
 

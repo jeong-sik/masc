@@ -260,10 +260,7 @@ let fusion_judge_output_schema =
 ;;
 
 let apply_to_provider_config schema (provider_cfg : Llm_provider.Provider_config.t) =
-  { provider_cfg with
-    response_format = Agent_sdk.Types.JsonSchema schema
-  ; output_schema = Some schema
-  }
+  { provider_cfg with response_format = Agent_sdk.Types.JsonSchema schema }
 ;;
 
 (* Ask the provider for no wire response format. The call sites that use this
@@ -286,10 +283,7 @@ let apply_to_provider_config schema (provider_cfg : Llm_provider.Provider_config
    response's visible text, so native and prompt tiers converge on the same
    parser byte for byte. *)
 let without_response_format (provider_cfg : Llm_provider.Provider_config.t) =
-  { provider_cfg with
-    response_format = Agent_sdk.Types.Off
-  ; output_schema = None
-  }
+  { provider_cfg with response_format = Agent_sdk.Types.Off }
 ;;
 
 (* The anti-rationalization reviewer's verdict channel is the
@@ -299,7 +293,7 @@ let without_response_format (provider_cfg : Llm_provider.Provider_config.t) =
    response format constrains only the final assistant text, which this
    surface never parses — while its capability branch rejected every
    json_object-only provider (Glm/DeepSeek/Kimi) as
-   [InvalidConfig "task.anti_rationalization.output_schema"], so the gate
+   [InvalidConfig "task.anti_rationalization.response_format"], so the gate
    never ran and every task stayed nonterminal fleet-wide (live incident
    2026-07-21). Converges with the fusion-judge / consolidation /
    board-attention / librarian surfaces above: no wire

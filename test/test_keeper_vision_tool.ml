@@ -248,10 +248,7 @@ let test_provider_for_vision_preserves_configured_max_tokens () =
    | Agent_sdk.Types.JsonSchema schema ->
      assert (Yojson.Safe.equal schema expected_schema)
    | Agent_sdk.Types.JsonMode
-   | Agent_sdk.Types.Off -> failwith "vision provider must request JsonSchema");
-  (match configured.output_schema with
-   | Some schema -> assert (Yojson.Safe.equal schema expected_schema)
-   | None -> failwith "vision provider must mirror output_schema")
+   | Agent_sdk.Types.Off -> failwith "vision provider must request JsonSchema")
 
 let test_max_image_bytes_reads_env_config () =
   with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "128" (fun () ->

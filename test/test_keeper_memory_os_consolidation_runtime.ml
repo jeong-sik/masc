@@ -640,7 +640,6 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
           {|{"groups":[{"member_indices":[0,1],"consolidated_claim":"ab","category":"fact"}],"drop_indices":[]}|}
         in
         let seen_response_format = ref None in
-        let seen_output_schema = ref None in
         let seen_prompt_matches_template = ref false in
         let expected_prompt =
           match
@@ -656,7 +655,6 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
             (fun config messages ->
                seen_max_tokens := config.Llm_provider.Provider_config.max_tokens;
                seen_response_format := Some config.Llm_provider.Provider_config.response_format;
-               seen_output_schema := config.Llm_provider.Provider_config.output_schema;
                let rendered_prompt =
                  messages
                  |> List.map text_of_message
@@ -704,10 +702,6 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
                | Atypes.JsonMode | Atypes.JsonSchema _ -> false)
              !seen_response_format);
         Alcotest.(check bool)
-          "no output schema is attached"
-          true
-          (Option.is_none !seen_output_schema);
-        Alcotest.(check bool)
           "prompt registry output is passed through verbatim"
           true
           !seen_prompt_matches_template))))
@@ -738,10 +732,6 @@ let test_resolver_is_capability_independent () =
     (match resolved.Llm_provider.Provider_config.response_format with
      | Atypes.Off -> true
      | Atypes.JsonMode | Atypes.JsonSchema _ -> false);
-  Alcotest.(check bool)
-    "no output_schema is attached"
-    true
-    (Option.is_none resolved.Llm_provider.Provider_config.output_schema);
   Alcotest.(check (option bool))
     "thinking is disabled for the consolidation request"
     (Some false)

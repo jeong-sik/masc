@@ -745,6 +745,11 @@ export interface KeeperChatRecoveryResult {
   audit: { recorded: true } | { recorded: false; error: string }
 }
 
+export interface KeeperChatPendingCancelResult {
+  receipt: KeeperChatReceipt
+  audit: { recorded: true } | { recorded: false; error: string }
+}
+
 const KEEPER_CHAT_RECEIPT_FAILURE_KINDS = new Set<KeeperChatReceiptFailureKind>([
   'turn_failed',
   'no_visible_reply',
@@ -854,6 +859,41 @@ export async function fetchKeeperChatReceipt(
     throw new Error(`fetchKeeperChatReceipt: HTTP ${resp.status} ${resp.statusText}`)
   }
   return parseKeeperChatReceipt(data)
+}
+
+export async function cancelKeeperChatPendingReceipt(
+  keeperName: string,
+  receiptId: string,
+): Promise<KeeperChatPendingCancelResult> {
+  const raw = await post<unknown>(
+    `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/receipts/${encodeURIComponent(receiptId)}/cancel`,
+    {
+      schema: 'keeper_chat_queue.pending_cancel.request.v1',
+    },
+  )
+  if (
+    !isRecord(raw)
+    || raw.schema !== 'keeper_chat_queue.pending_cancel.result.v1'
+    || raw.ok !== true
+    || !isRecord(raw.audit)
+    || typeof raw.audit.recorded !== 'boolean'
+  ) {
+    throw new Error('cancelKeeperChatPendingReceipt: invalid response envelope')
+  }
+  const receipt = parseKeeperChatReceipt(raw.receipt)
+  if (receipt.keeperName !== keeperName || receipt.receiptId !== receiptId) {
+    throw new Error('cancelKeeperChatPendingReceipt: response identity mismatch')
+  }
+  if (receipt.state.kind !== 'failed' || receipt.state.failureKind !== 'cancelled') {
+    throw new Error('cancelKeeperChatPendingReceipt: response is not cancelled')
+  }
+  const audit = raw.audit.recorded
+    ? { recorded: true as const }
+    : {
+        recorded: false as const,
+        error: asString(raw.audit.error, '').trim() || 'pending cancellation audit persistence failed',
+      }
+  return { receipt, audit }
 }
 
 export async function resolveKeeperChatRecovery(

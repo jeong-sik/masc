@@ -137,6 +137,10 @@ type persistence_publication =
       ; receipt_id : Receipt_id.t
       ; lease_id : string
       }
+  | Pending_cancel_indeterminate of
+      { revision : int64
+      ; receipt_id : Receipt_id.t
+      }
 
 type persistence_failure =
   { publication : persistence_publication
@@ -152,6 +156,10 @@ type mutation_error =
       ; state : receipt_state
       }
   | Receipt_not_recovery_required of
+      { receipt_id : Receipt_id.t
+      ; observed_state : receipt_state option
+      }
+  | Receipt_not_pending of
       { receipt_id : Receipt_id.t
       ; observed_state : receipt_state option
       }
@@ -306,6 +314,25 @@ val lookup_receipt :
 (** Atomically return the receipt observation with the queue revision that
     produced it. A [Durability_uncertain] lane remains observable by receipt id
     even though further mutations are rejected until reconciliation. *)
+
+type pending_cancellation =
+  { cancelled_at : float
+  ; detail : string
+  }
+
+type pending_cancellation_report =
+  { receipt_id : Receipt_id.t
+  ; revision : int64
+  ; state : receipt_state
+  }
+
+(** Cancel exactly one durable [Pending] receipt. A receipt that has already
+    started delivery is rejected without mutation. *)
+val cancel_pending :
+  keeper_name:string ->
+  receipt_id:Receipt_id.t ->
+  cancellation:pending_cancellation ->
+  (pending_cancellation_report, mutation_error) result
 
 type reconciliation_outcome =
   | Already_consistent

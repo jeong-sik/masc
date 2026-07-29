@@ -391,6 +391,7 @@ let recovery_mutation_failure_class = function
   | Keeper_chat_queue.Invalid_input _
   | Keeper_chat_queue.Receipt_already_terminal _
   | Keeper_chat_queue.Receipt_not_recovery_required _
+  | Keeper_chat_queue.Receipt_not_pending _
   | Keeper_chat_queue.Recovery_revision_mismatch _
   | Keeper_chat_queue.Recovery_lease_mismatch _ ->
     Tool_result.Workflow_rejection

@@ -17,6 +17,7 @@ vi.mock('./core', async (importOriginal) => {
 import {
   bootKeeper,
   bulkKeeperDirective,
+  cancelKeeperChatPendingReceipt,
   cancelQueuedKeeperMessage,
   clearKeeper,
   deleteKeeperHistorySnapshots,
@@ -290,6 +291,44 @@ describe('Keeper chat durable receipt API', () => {
           expected_revision: '9223372036854775805',
           lease_id: leaseId,
           decision: { kind: 'requeue_unconfirmed' },
+        }),
+      }),
+    )
+  })
+
+  it('cancels one exact pending receipt with its observed revision', async () => {
+    const receiptId = 'chatq_00000000-0000-4000-8000-000000000003'
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        schema: 'keeper_chat_queue.pending_cancel.result.v1',
+        ok: true,
+        receipt: {
+          schema: 'keeper_chat_queue.receipt.v2',
+          keeper_name: 'sangsu',
+          receipt_id: receiptId,
+          revision: '10',
+          state: {
+            kind: 'failed',
+            failure_kind: 'cancelled',
+            detail: 'cancelled by dashboard user before delivery',
+            completed_at: 42,
+            outcome_ref: null,
+          },
+        },
+        audit: { recorded: true },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await cancelKeeperChatPendingReceipt('sangsu', receiptId)
+
+    expect(result.receipt.state.kind).toBe('failed')
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v1/keepers/sangsu/chat/receipts/${receiptId}/cancel`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          schema: 'keeper_chat_queue.pending_cancel.request.v1',
         }),
       }),
     )

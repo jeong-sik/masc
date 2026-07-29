@@ -798,6 +798,50 @@ describe('ChatTranscript', () => {
     expect(prompt).toHaveBeenCalledTimes(1)
   })
 
+  it('offers edit and cancel only while a durable receipt is pending', async () => {
+    const onPendingEdit = vi.fn().mockResolvedValue(undefined)
+    const onPendingCancel = vi.fn().mockResolvedValue(undefined)
+    const target = entry({
+      id: 'pending-receipt',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: '메시지는 대기 중입니다.',
+      delivery: 'queued',
+      details: {
+        queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000002',
+        queueRevision: '9',
+        queueState: 'pending',
+        queueInFlightLane: 'autonomous',
+        queueInFlightStartedAt: 42,
+      },
+    })
+
+    render(
+      html`<${ChatTranscript}
+        entries=${[target]}
+        emptyText="empty"
+        variant="messenger"
+        action=${{ onPendingEdit, onPendingCancel }}
+      />`,
+      container,
+    )
+
+    expect(container.textContent).toContain('자율 작업 처리 중')
+    const edit = container.querySelector(
+      '[data-chat-queue-pending-action="edit"]',
+    ) as HTMLButtonElement
+    const cancel = container.querySelector(
+      '[data-chat-queue-pending-action="cancel"]',
+    ) as HTMLButtonElement
+    expect(edit).not.toBeNull()
+    expect(cancel).not.toBeNull()
+    fireEvent.click(edit)
+    await waitFor(() => expect(onPendingEdit).toHaveBeenCalledWith(target))
+    fireEvent.click(cancel)
+    await waitFor(() => expect(onPendingCancel).toHaveBeenCalledWith(target))
+  })
+
   it('copies the message text from an assistant message copy button', () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.assign(globalThis.navigator, { clipboard: { writeText } })

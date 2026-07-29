@@ -105,6 +105,8 @@ describe('applyKeeperStreamEvent', () => {
         inflight_count: 1,
         recovery_required_count: 1,
         shutdown_operation_id: ' shutdown-op-7 ',
+        in_flight_lane: 'autonomous',
+        in_flight_started_at: 42,
       },
     })).toBeNull()
 
@@ -118,7 +120,12 @@ describe('applyKeeperStreamEvent', () => {
       queuePendingCount: 3,
       queueInflightCount: 1,
       queueRecoveryRequiredCount: 1,
+      queueInFlightLane: 'autonomous',
+      queueInFlightStartedAt: 42,
     })
+    expect(entry?.text).toBe(
+      'sangsu의 이전 메시지 상태를 확인해야 해요. 새 메시지는 안전하게 대기 중입니다.',
+    )
     expect(entry?.streamContract).toMatchObject({
       source: 'queue_event',
       eventName: 'KEEPER_CHAT_QUEUED',

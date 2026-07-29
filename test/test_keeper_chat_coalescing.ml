@@ -247,8 +247,77 @@ let test_preallocated_receipt_convergence () =
           { receipt_id = observed; state = Failed _ }) ->
      check "terminal preallocated receipt converges without payload equality claim"
        (Keeper_chat_queue.Receipt_id.equal receipt_id observed)
-   | Ok _ | Error _ ->
+  | Ok _ | Error _ ->
      check "terminal preallocated receipt converges without payload equality claim" false)
+
+let test_pending_cancellation_is_state_guarded () =
+  Printf.printf "Test: pending cancellation is exact and state-guarded\n%!";
+  with_base "keeper-chat-pending-cancel" @@ fun base_path ->
+  let keeper_name = "pending-cancel" in
+  ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
+  let first = enqueue_exn ~keeper_name (message "first") in
+  let second = enqueue_exn ~keeper_name (message "second") in
+  (match
+     Keeper_chat_queue.cancel_pending
+       ~keeper_name
+       ~receipt_id:first.receipt_id
+       ~cancellation:
+         { cancelled_at = 3.0
+         ; detail = "cancelled by dashboard user before delivery"
+         }
+   with
+   | Ok { revision = 3L; state = Failed { kind = Cancelled; _ }; _ } ->
+     check "exact pending receipt becomes terminal once" true
+   | Ok _ | Error _ ->
+     check "exact pending receipt becomes terminal once" false);
+  let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+  check "cancellation removes only the selected pending receipt"
+    (active_ids snapshot.pending = [ receipt_wire second.receipt_id ]);
+  check "cancellation increments terminal count"
+    (Int64.equal snapshot.terminal_count 1L);
+  ignore
+    (enqueue_exn ~keeper_name (message "unrelated") :
+      Keeper_chat_queue.enqueue_receipt);
+  (match
+     Keeper_chat_queue.cancel_pending
+       ~keeper_name
+       ~receipt_id:second.receipt_id
+       ~cancellation:{ cancelled_at = 4.0; detail = "cancel after unrelated enqueue" }
+   with
+   | Ok { revision = 5L; state = Failed { kind = Cancelled; _ }; _ } ->
+     check "unrelated queue revision does not gate exact cancellation" true
+   | Ok _ | Error _ ->
+     check "unrelated queue revision does not gate exact cancellation" false);
+  let lease = lease_exn ~keeper_name in
+  (match
+     Keeper_chat_queue.cancel_pending
+       ~keeper_name
+       ~receipt_id:lease.item.receipt_id
+       ~cancellation:{ cancelled_at = 5.0; detail = "too late" }
+   with
+   | Error
+       (Keeper_chat_queue.Receipt_not_pending
+          { observed_state = Some (Inflight _); _ }) ->
+     check "delivery start closes the pending cancellation window" true
+   | Ok _ | Error _ ->
+     check "delivery start closes the pending cancellation window" false);
+  check "rejected inflight cancellation does not mutate the queue"
+    (Int64.equal (Keeper_chat_queue.snapshot ~keeper_name).revision 6L);
+  ignore
+    (Keeper_chat_queue.finalize
+       ~keeper_name
+       ~lease_id:lease.lease_id
+       ~outcome:
+         (Mark_failed
+            { completed_at = 6.0
+            ; kind = Delivery_failed
+            ; detail = "test cleanup"
+            ; outcome_ref = None
+            }) :
+      [ `Finalized of Keeper_chat_queue.Receipt_id.t
+      | `Unknown_lease
+      | `Error of Keeper_chat_queue.mutation_error
+      ])
 
 let expect_enqueue_indeterminate label expected_receipt_id = function
   | Error
@@ -925,6 +994,7 @@ let () =
   test_first_enqueue_with_runtime_eio_guard ();
   test_lifecycle_fifo_terminal_pk_and_restart ();
   test_preallocated_receipt_convergence ();
+  test_pending_cancellation_is_state_guarded ();
   test_transaction_publication_boundaries ();
   test_commit_observer_exception_and_cancellation ();
   test_transition_observer_outside_lock_exactly_once ();

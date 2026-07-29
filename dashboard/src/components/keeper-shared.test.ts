@@ -1026,8 +1026,8 @@ describe('KeeperConversationPanel', () => {
     )
 
     await waitFor(() => {
-      expect(container.querySelector('[data-chat-queue-state-badge="pending"]')?.textContent).toContain('서버 대기')
-      expect(container.querySelector('[data-chat-queue-state-badge="inflight"]')?.textContent).toContain('Keeper 처리 중')
+      expect(container.querySelector('[data-chat-queue-state-badge="pending"]')?.textContent).toContain('대기 중')
+      expect(container.querySelector('[data-chat-queue-state-badge="inflight"]')?.textContent).toContain('처리 중')
       expect(container.querySelector('[data-chat-queue-state-badge="recovery_required"]')?.textContent).toContain('복구 확인 필요')
       expect(container.querySelector('[data-chat-queue-state-badge="delivered"]')?.textContent).toContain('처리 완료')
       expect(container.querySelector('[data-chat-queue-state-badge="failed"]')?.textContent).toContain('처리 실패')

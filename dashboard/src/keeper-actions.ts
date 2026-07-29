@@ -1,6 +1,7 @@
 import { callMcpTool } from './api/mcp'
 import { runOperatorAction } from './api/core'
 import {
+  cancelKeeperChatPendingReceipt,
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
   fetchKeeperChatReceipt,
@@ -1080,6 +1081,49 @@ export async function cancelKeeperChatRecoveryEntry(
     detail,
     outcomeRef: null,
   })
+}
+
+export async function cancelKeeperChatPendingEntry(
+  keeperName: string,
+  entry: KeeperConversationEntry,
+  options: { requireUserInput?: boolean } = {},
+): Promise<KeeperConversationEntry | null> {
+  const receiptId = entry.details?.queueReceiptId?.trim() ?? ''
+  if (!receiptId || entry.details?.queueState !== 'pending') {
+    throw new Error('취소할 대기 메시지의 최신 상태가 없습니다.')
+  }
+  setRecordValue(keeperActionErrors, keeperName, null)
+  try {
+    const thread = keeperThreads.value[keeperName] ?? []
+    const userEntry = thread.find(candidate => (
+      candidate.role === 'user'
+      && candidate.details?.queueReceiptId === receiptId
+    )) ?? null
+    if (options.requireUserInput && !userEntry) {
+      throw new Error('수정할 원문을 찾지 못해 서버 대기를 취소하지 않았습니다.')
+    }
+    const result = await cancelKeeperChatPendingReceipt(
+      keeperName,
+      receiptId,
+    )
+    const matchingEntryIds = thread
+      .filter(candidate => candidate.details?.queueReceiptId === receiptId)
+      .map(candidate => candidate.id)
+    removeThreadEntries(keeperName, matchingEntryIds)
+    if (!result.audit.recorded) {
+      setRecordValue(
+        keeperActionErrors,
+        keeperName,
+        `메시지는 취소됐지만 audit 기록에 실패했습니다: ${result.audit.error}`,
+      )
+    }
+    return userEntry
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    setRecordValue(keeperActionErrors, keeperName, `대기 메시지 취소 실패: ${message}`)
+    void reconcileKeeperChatReceipts(keeperName)
+    throw error
+  }
 }
 
 /** React to a server `keeper_chat_appended` push: re-merge the

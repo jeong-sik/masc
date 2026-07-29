@@ -729,6 +729,8 @@ export interface KeeperConversationDetails {
   queuePendingCount?: number | null
   queueInflightCount?: number | null
   queueRecoveryRequiredCount?: number | null
+  queueInFlightLane?: string | null
+  queueInFlightStartedAt?: number | null
   queueState?: KeeperQueueReceiptLifecycle | null
   queueFailureKind?: KeeperQueueReceiptFailureKind | null
   queueCorrelationError?: 'missing_outcome_ref' | null

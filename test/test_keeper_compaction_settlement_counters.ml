@@ -14,10 +14,10 @@ module Meta_store = Masc.Keeper_meta_store
 
 let metric_name = Keeper_metrics.(to_string CompactionSettlements)
 
-let counted ~keeper_name ~outcome =
+let counted ~outcome =
   Otel_metric_store_core.metric_value_or_zero
     metric_name
-    ~labels:[ "keeper", keeper_name; "outcome", outcome ]
+    ~labels:[ "outcome", outcome ]
     ()
 ;;
 
@@ -64,13 +64,13 @@ let test_each_outcome_is_labelled () =
     ignore (register config ~name);
     List.iter
       (fun (outcome, label) ->
-         let before = counted ~keeper_name:name ~outcome:label in
+         let before = counted ~outcome:label in
          settle config ~name ~outcome;
          check
            (float 0.5)
            (Printf.sprintf "%s is counted under its own label" label)
            (before +. 1.)
-           (counted ~keeper_name:name ~outcome:label))
+           (counted ~outcome:label))
       [ `Committed, "committed"
       ; `Overflow_episode_committed, "overflow_episode_committed"
       ; `Failed, "failed"
@@ -86,7 +86,7 @@ let test_count_tracks_the_durable_streak () =
   with_workspace (fun config ->
     let name = "settlement-streak" in
     ignore (register config ~name);
-    let before = counted ~keeper_name:name ~outcome:"failed" in
+    let before = counted ~outcome:"failed" in
     for _ = 1 to 4 do
       settle config ~name ~outcome:`Failed
     done;
@@ -94,7 +94,7 @@ let test_count_tracks_the_durable_streak () =
       (float 0.5)
       "four failed settlements are counted four times"
       (before +. 4.)
-      (counted ~keeper_name:name ~outcome:"failed");
+      (counted ~outcome:"failed");
     match Meta_store.read_meta config name with
     | Ok (Some meta) ->
       check
@@ -106,19 +106,30 @@ let test_count_tracks_the_durable_streak () =
     | Error msg -> failf "meta read failed: %s" msg)
 ;;
 
-let test_attributes_the_settlement_to_its_keeper () =
+let test_keeper_names_share_one_bounded_series () =
   with_workspace (fun config ->
     let alpha = "settlement-alpha" in
     let beta = "settlement-beta" in
     ignore (register config ~name:alpha);
     ignore (register config ~name:beta);
-    let beta_before = counted ~keeper_name:beta ~outcome:"failed" in
+    let before = counted ~outcome:"failed" in
     settle config ~name:alpha ~outcome:`Failed;
+    settle config ~name:beta ~outcome:`Failed;
     check
       (float 0.5)
-      "another keeper's series is untouched"
-      beta_before
-      (counted ~keeper_name:beta ~outcome:"failed"))
+      "both keepers increment the same outcome series"
+      (before +. 2.)
+      (counted ~outcome:"failed");
+    let settlement_metrics =
+      Otel_metric_store_core.snapshot ()
+      |> List.filter (fun (metric : Otel_metric_store_core.metric) ->
+        String.equal metric.name metric_name)
+    in
+    check bool "settlement series never carry Keeper identity" true
+      (List.for_all
+         (fun (metric : Otel_metric_store_core.metric) ->
+            not (List.mem_assoc "keeper" metric.labels))
+         settlement_metrics))
 ;;
 
 (* No durable meta means no settlement was persisted and no streak moved, so
@@ -126,7 +137,7 @@ let test_attributes_the_settlement_to_its_keeper () =
 let test_unregistered_keeper_is_not_counted () =
   with_workspace (fun config ->
     let name = "settlement-unregistered" in
-    let before = counted ~keeper_name:name ~outcome:"failed" in
+    let before = counted ~outcome:"failed" in
     (match
        Meta_store.persist_compaction_outcome config ~keeper_name:name ~outcome:`Failed
      with
@@ -137,7 +148,7 @@ let test_unregistered_keeper_is_not_counted () =
       (float 0.5)
       "an unpersisted settlement is not counted"
       before
-      (counted ~keeper_name:name ~outcome:"failed"))
+      (counted ~outcome:"failed"))
 ;;
 
 let test_metric_name_is_stable () =
@@ -158,9 +169,9 @@ let () =
             `Quick
             test_count_tracks_the_durable_streak
         ; test_case
-            "attributes the settlement to its keeper"
+            "keeper names share one bounded series"
             `Quick
-            test_attributes_the_settlement_to_its_keeper
+            test_keeper_names_share_one_bounded_series
         ; test_case
             "an unregistered keeper is not counted"
             `Quick

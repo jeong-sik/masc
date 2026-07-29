@@ -250,7 +250,10 @@ val persist_compaction_outcome :
     {!Keeper_meta_contract.compaction_retry_suspended} reads to refuse a
     failing compaction instead of retrying it without bound (RFC-0351 S0,
     #25461); [count] had no writer before this despite being serialized and
-    rendered. Before #25969 the same ceiling was applied one layer lower, by
+    rendered. The metric is fleet-level and bounded by the closed outcome
+    variant; the per-Keeper outcome is emitted on the successful persistence
+    log and the current per-Keeper counters remain in durable [compaction_rt].
+    Before #25969 the same ceiling was applied one layer lower, by
     [Keeper_heartbeat_loop.settlement_of_cycle_outcome] escalating the lease
     settlement; that function went with the claim/settle model. *)
 

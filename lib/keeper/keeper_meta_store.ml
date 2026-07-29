@@ -553,9 +553,12 @@ let persist_compaction_outcome config ~keeper_name ~outcome
          series answers — which outcome advanced it, and which reset it. *)
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CompactionSettlements)
-        ~labels:
-          [ "keeper", keeper_name; "outcome", compaction_outcome_label outcome ]
+        ~labels:[ "outcome", compaction_outcome_label outcome ]
         ();
+      Log.Keeper.info
+        ~keeper_name
+        "compaction settlement persisted outcome=%s"
+        (compaction_outcome_label outcome);
       `Persisted)
 ;;
 

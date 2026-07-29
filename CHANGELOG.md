@@ -55,6 +55,11 @@
   - `merge_keeper_profile_defaults` and `merge_string_list` are retained: they still implement the persona `profile.json` → keeper TOML overlay (`keeper_types_profile.ml:244`), which is a separate mechanism. Note `merge_string_list` is replace-if-non-empty, not union.
 
 ### Changed
+- Provider materialization and registry/model-string resolution now share
+  `Runtime_provider_binding.default_headers_for_kind` as the sole owner of
+  non-credential provider header defaults. The duplicate Runtime adapter
+  table and unused `headers_with_auth` public surface were removed; auth
+  tokens remain carried only through OAS `api_key`.
 - Workspace broadcast delivery now returns the canonical content, mention, and
   message type produced by its single terminal-task invariant check. MCP
   session/SSE/notification/audit consumers reuse that exact result instead of

@@ -62,10 +62,5 @@ val display_provider_name : string -> string
 val default_headers_for_kind :
   Llm_provider.Provider_config.provider_kind -> (string * string) list
 
-val headers_with_auth :
-  kind:Llm_provider.Provider_config.provider_kind ->
-  api_key:string ->
-  (string * string) list
-
 val normalize_openai_compat_request_path :
   base_url:string -> request_path:string -> string

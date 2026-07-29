@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
-readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.1"
+readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.2"
 # v0.231.0 is a hard-cut wave: checkpoint schema is v9 only (v1-v8
 # rejected; #2867), provider_config.output_schema is removed in favor of
 # response_format = JsonSchema as the single structured-output request state
@@ -23,16 +23,21 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.1"
 # The #2877 follow-up derives the effective turn provider config once, threads
 # that exact value through dispatch and pricing, and removes duplicate Provider
 # auth/pricing facades. MASC consumes the canonical public modules directly.
-# Previous pin: v0.231.0 (2cb7d922); before that v0.230.0 (7a3f2af7).
+# Previous pin: v0.231.1 (c3bb4daa7); before that v0.231.0 (2cb7d922).
 # MASC consumes only the public Agent SDK contract; Keeper, Gate, Board, and
 # product operation ownership remain MASC concepts.
 # The reachability guards in check-oas-pin.sh and oas-drift-check.sh track
 # main; oas-drift-check.sh also reports the public-surface delta at pin-bump
 # time.
-# Pinned to the merged #2877 commit.
-readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.1"
+# v0.231.2 is a patch on the hard-cut wave: adds GLM-5-Turbo
+# reasoning_streaming_format (#2880) — recovers streaming reasoning that was
+# falling back to batch (No_streaming_reasoning, ~60s/turn). Also carries the
+# #2875 agent-card current-interface contract hard-cut. MASC consumes the same
+# public Agent SDK contract; no compatibility or migration code retained.
+# Pinned to the 0.231.2 release commit (1ea60e7a1).
+readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.2"
 # TRACK_REF consumed by check-oas-pin.sh / oas-drift-check.sh /
 # sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584).
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="c3bb4daa7b6e2e5f7c54b0e1a4ade887f876d835"
-readonly OAS_AGENT_SDK_MIN_VERSION="0.231.1"
+readonly OAS_AGENT_SDK_SHA="1ea60e7a1d379d0229eb1c83cfd5005b429eca81"
+readonly OAS_AGENT_SDK_MIN_VERSION="0.231.2"

@@ -166,6 +166,7 @@ type parse_error =
   | Missing_success_model
   | Missing_error_model_attribution
   | Missing_cost_model
+  | Missing_cost_usage_missing
 
 val parse_error_label : parse_error -> string
 val parse_error_is_schema_violation : parse_error -> bool

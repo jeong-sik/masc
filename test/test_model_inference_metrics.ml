@@ -50,6 +50,11 @@ let iso_of_unix ts =
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
 let write_costs base entries =
+  let costs_dir = Filename.concat base ".masc/costs" in
+  let store = Dated_jsonl.create ~base_dir:costs_dir () in
+  List.iter (Dated_jsonl.append store) entries
+
+let write_retired_costs base entries =
   let masc_dir = Filename.concat base ".masc" in
   let rec mkdir_p dir =
     if not (Sys.file_exists dir) then begin
@@ -326,6 +331,23 @@ let test_cost_parser_uses_current_hw_decode_field_only () =
     (row "hw_decode_tokens_per_second")
     (Some 42.0);
   parse "retired cost alias ignored" (row "provider_tokens_per_second") None
+;;
+
+let test_cost_parser_requires_usage_missing () =
+  let ts = now_unix () in
+  let row =
+    match cost_entry ~model:"model" ~ts () with
+    | `Assoc fields ->
+      `Assoc (List.filter (fun (key, _) -> not (String.equal key "usage_missing")) fields)
+    | _ -> fail "cost entry must be an object"
+  in
+  match Model_inference_metrics_parser.parse_cost_entry row ~since_unix:0.0 with
+  | Error Model_inference_metrics_entry.Missing_cost_usage_missing -> ()
+  | Error error ->
+    fail
+      ("wrong parse error: "
+       ^ Model_inference_metrics_entry.parse_error_label error)
+  | Ok _ -> fail "cost row without usage_missing must be rejected"
 ;;
 
 (* ── Tests ───────────────────────────────────────── *)
@@ -894,6 +916,26 @@ let test_costs_jsonl_dedupes_matching_decision_sample () =
     check int "matching cost sample deduped" 1 s.entry_count;
     check (option (float 0.001)) "decision tok/sec preserved"
       (Some 100.0) s.avg_tok_per_sec)
+
+let test_retired_single_file_cost_store_is_ignored () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let ts = now_unix () in
+    write_retired_costs
+      base
+      [ cost_entry ~model:"retired-single-file" ~ts () ];
+    write_costs
+      base
+      [ cost_entry ~model:"current-dated-store" ~ts () ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    check int "only current store row is loaded" 1 agg.total_entries;
+    let stats = List.hd agg.models in
+    check
+      string
+      "retired single-file row ignored"
+      "ollama:current-dated-store"
+      stats.model_id)
+;;
 
 let test_cost_latency_json_composes_axes_and_percentiles () =
   let base = test_dir () in
@@ -1521,11 +1563,15 @@ let () =
         test_hw_decode_parser_uses_current_field_only;
       test_case "cost parser uses current hw-decode field only" `Quick
         test_cost_parser_uses_current_hw_decode_field_only;
+      test_case "cost parser requires usage_missing" `Quick
+        test_cost_parser_requires_usage_missing;
       test_case "costs.jsonl backfills wall tok/sec" `Quick test_costs_jsonl_backfills_wall_tok_per_sec;
       test_case "costs.jsonl disambiguates matching model names by provider" `Quick
         test_costs_jsonl_disambiguates_matching_model_names_by_provider;
       test_case "costs.jsonl zero latency stays missing" `Quick test_costs_jsonl_zero_latency_is_missing;
       test_case "costs.jsonl dedupes matching decision sample" `Quick test_costs_jsonl_dedupes_matching_decision_sample;
+      test_case "retired single-file cost store is ignored" `Quick
+        test_retired_single_file_cost_store_is_ignored;
       test_case "cost latency json composes axes and percentiles" `Quick test_cost_latency_json_composes_axes_and_percentiles;
       test_case "public runtime lane label is stable across windows" `Quick
         test_public_runtime_lane_label_is_stable_across_windows;

@@ -1,6 +1,6 @@
 (** Model_inference_metrics — per-model aggregate inference statistics.
 
-    Reads keeper decisions.jsonl files plus inference-level costs.jsonl
+    Reads keeper decisions.jsonl files plus inference-level date-split costs
     samples and computes per-model aggregates within a configurable time
     window.
 

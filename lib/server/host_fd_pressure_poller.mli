@@ -14,8 +14,8 @@
     duplicate [(level, ts)] reads, so an unchanged state file contributes one
     observation rather than one observation per poll tick.
 
-    Failure modes: malformed JSON, partial writes, missing file,
-    stat(2) errors — all no-ops. Single throttled WARN log per hour. *)
+    Failure modes: a missing file is normal absence. Malformed JSON, partial
+    writes, and non-ENOENT read errors emit a throttled WARN log. *)
 
 type state_file_source =
   | Canonical_env

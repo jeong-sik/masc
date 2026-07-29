@@ -137,17 +137,27 @@ let parse_state_line line =
   | exception Yojson.Json_error _ -> None
 ;;
 
-let read_state_file_opt path =
+let read_state_file path =
   try
-    let ic = open_in path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-        match input_line ic with
-        | line -> Some line
-        | exception End_of_file -> None)
+    let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+    let ic = Unix.in_channel_of_descr fd in
+    Ok
+      (Fun.protect
+         ~finally:(fun () -> close_in_noerr ic)
+         (fun () ->
+            match input_line ic with
+            | line -> Some line
+            | exception End_of_file -> None))
   with
-  | Sys_error _ -> None
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | Unix.Unix_error (error, operation, argument) ->
+    Error
+      (Printf.sprintf
+         "%s(%s): %s"
+         operation
+         argument
+         (Unix.error_message error))
+  | Sys_error detail -> Error detail
 ;;
 
 let last_warn_log_at = Atomic.make 0.0
@@ -162,9 +172,15 @@ let log_throttled_warn (mk_msg : unit -> string) =
 ;;
 
 let one_tick path =
-  match read_state_file_opt path with
-  | None -> ()
-  | Some line ->
+  match read_state_file path with
+  | Ok None -> ()
+  | Error detail ->
+    log_throttled_warn (fun () ->
+      Printf.sprintf
+        "host_fd_pressure_poller: state read failed path=%s detail=%s"
+        path
+        detail)
+  | Ok (Some line) ->
     (match parse_state_line line with
      | Some p ->
        Keeper_fd_pressure.engage_external

@@ -202,7 +202,7 @@ let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
    single decision, not two decisions: an acked selection whose occurrence is
    still [dispatched] leaks that row forever, because the stimulus that would
    have carried it back to a turn is gone. Deriving both from one value keeps
-   them from drifting — a new cycle outcome or lease disposition forces one
+   them from drifting — a new cycle outcome or source disposition forces one
    edit here instead of two that no compiler can cross-check. *)
 type scheduled_work_terminal =
   | Scheduled_work_succeeded
@@ -222,7 +222,7 @@ let turn_source_ack_of_cycle_outcome = function
   | Some Cycle.Input_required _ ->
     Keep_source_pending
   | Some (Cycle.Failed { failure; _ }) ->
-    (match failure.Keeper_unified_turn.source_lease_disposition with
+    (match failure.Keeper_unified_turn.source_disposition with
      | Keeper_unified_turn.Acknowledge_after_in_turn_handling
      | Keeper_unified_turn.Escalate_after_exact_output_terminal _ ->
        Ack_source
@@ -368,7 +368,7 @@ let compaction_outcome_of_cycle_outcome = function
   | Some (Cycle.Manual_compaction_applied _) -> Some `Committed
   | Some (Cycle.Manual_compaction_failed _) -> Some `Failed
   | Some (Cycle.Failed { failure; _ }) ->
-    (match failure.Keeper_unified_turn.source_lease_disposition with
+    (match failure.Keeper_unified_turn.source_disposition with
      | Keeper_unified_turn.Requeue_after_context_compaction
          Keeper_unified_turn.Compaction_committed ->
        (* #25538: an in-lane commit is still one provider-overflow episode.
@@ -496,13 +496,12 @@ let run_keepalive_unified_turn
     let cycle_outcome_ref = ref None in
     let selection_acked = ref false in
     let event_queue_failed = ref false in
-    let transcript_corruption_detected = ref false in
     let record_event_queue_failure message =
       event_queue_failed := true;
       match !cycle_outcome_ref with
       | Some (Cycle.Failed _) ->
-        (* The failed turn already recorded its failure counter.  The queue
-           error remains explicit in the log and active durable lease. *)
+        (* The failed turn already recorded its failure counter. The queue
+           error remains explicit in the log and durable pending state. *)
         ()
       | Some
           ( Cycle.Completed _
@@ -520,8 +519,6 @@ let run_keepalive_unified_turn
           ~keeper_name:meta_after_triage.name
           (Event_queue_cycle_failed message)
     in
-    let retain_unacked_pending _reason = () in
-    let settle_exact_terminal_after_cancellation () = false in
     try
       (match
          Keeper_board_attention_worker.settle_one_completed
@@ -820,9 +817,8 @@ let run_keepalive_unified_turn
       let transcript_corruption_commit =
         match !cycle_outcome_ref with
         | Some (Cycle.Failed { failure; _ }) ->
-          (match failure.Keeper_unified_turn.source_lease_disposition with
+          (match failure.Keeper_unified_turn.source_disposition with
            | Keeper_unified_turn.Pause_after_transcript_corruption { detail } ->
-             transcript_corruption_detected := true;
              Log.Keeper.error
                ~keeper_name:meta_after_triage.name
                "transcript corruption retained its exact pending source without \
@@ -888,26 +884,11 @@ let run_keepalive_unified_turn
                ~keeper_name:meta_after_triage.name
                (connector_attention_event_ids_of_stimuli !consumed_stimuli)
            | Error message -> record_event_queue_failure message);
-      (* RFC-0351 S0 / #25461: advance the compaction streak the ceiling reads.
-         The ceiling now lives at the trigger, not at lease settlement:
-         [Keeper_post_turn] asks [Keeper_meta_contract.compaction_retry_suspended]
-         and refuses to prepare a compaction once the streak reaches
-         [compaction_retry_escalation_threshold]. Stamping after that read keeps
-         the decision on the count before this failure. (#25969 removed
-         [settlement_of_cycle_outcome], which applied the same ceiling by
-         escalating the lease settlement instead.)
-
-         Hoisted out of the [Some lease] branch. A failure has to consume retry
-         budget whether or not the cycle happened to own an event-queue lease.
-         While this ran inside that branch, a keeper that claimed no lease could
-         neither compact — [dispatch_guard] is [None] without a lease, so the
-         summarizer rejects with an absent exact-execution guard — nor accumulate
-         the streak that would eventually suspend it. Measured 2026-07-25: two
-         keepers at 306 and 368 failed context_compacted attempts with
-         consecutive_failures = 0, retrying without bound, while keepers that did
-         hold a lease reached the ceiling at 21 and 3 and settled. Compaction
-         failures already map to [`Failed] (keeper_unified_turn.ml:448 ->
-         compaction_outcome_of_cycle_outcome), so nothing else was suppressing it. *)
+      (* RFC-0351 S0 / #25461: advance the compaction streak read by the trigger.
+         [Keeper_post_turn] refuses another compaction once the streak reaches
+         [compaction_retry_escalation_threshold]. This update is intentionally
+         independent of Event Queue source selection: every failed compaction
+         must consume retry budget, including cycles with no selected source. *)
       (let compaction_outcome =
          compaction_outcome_of_cycle_outcome !cycle_outcome_ref
        in
@@ -938,19 +919,11 @@ let run_keepalive_unified_turn
     with
     | Eio.Cancel.Cancelled _ as e ->
       let backtrace = Printexc.get_raw_backtrace () in
-      if
-        (not !transcript_corruption_detected)
-        && not (settle_exact_terminal_after_cancellation ())
-      then retain_unacked_pending Keeper_registry_event_queue.Cancelled;
       Printexc.raise_with_backtrace e backtrace
     | Keeper_registry.Keeper_fiber_crash as e ->
       let backtrace = Printexc.get_raw_backtrace () in
-      if not !transcript_corruption_detected
-      then retain_unacked_pending Keeper_registry_event_queue.Cycle_crashed;
       Printexc.raise_with_backtrace e backtrace
     | exn ->
-      if not !transcript_corruption_detected
-      then retain_unacked_pending Keeper_registry_event_queue.Cycle_crashed;
       (* T6 audit: keep the fiber alive, but surface the crash as a
          turn failure so the caller does not dispatch
          [Turn_succeeded] for a cycle that never completed. *)

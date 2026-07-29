@@ -5,13 +5,13 @@
     persistence supplies the atomic file boundary and publishes [pending] into
     the live registry only after a durable commit. *)
 
-type lease_kind =
+type selection_kind =
   | Single
   | Board_batch
 
 type pending_selection =
   { source_revision : int64
-  ; kind : lease_kind
+  ; kind : selection_kind
   ; stimuli : Keeper_event_queue.stimulus list
   }
 
@@ -50,50 +50,6 @@ type exact_execution_terminal =
     not to have crossed, the dispatch boundary. The complete producer proof is
     mandatory and survives the queue receipt/WAL codec. *)
 
-type exact_source_action = Consume_source
-
-type exact_settlement_semantic =
-  | Exact_no_compaction
-  | Exact_escalate
-
-type exact_source_outcome = Terminal of exact_execution_terminal_cause
-
-type exact_source_disposition =
-  { disposition_id : string
-  ; source : Keeper_checkpoint_ref.t
-  ; slot_id : string
-  ; call_id : string
-  ; plan_fingerprint : string
-  ; request_body_sha256 : string
-  ; outcome : exact_source_outcome
-  ; action : exact_source_action
-  ; semantic : exact_settlement_semantic
-  ; prepared_at : float
-  }
-(** Immutable terminal source disposition for one exact call. The ID is the
-    SHA-256 of its stable proof, outcome, semantic, and action fields.
-    [prepared_at] is observational and excluded from identity. *)
-
-type exact_execution_lease_status =
-  | Dispatch_uncertain
-  | Terminal_quarantined of exact_execution_terminal_cause
-      (** Current-schema terminal quarantine before a source disposition is
-          prepared. It has no source authority and can never be finalized or
-          registration-requeued. *)
-  | Disposition_prepared of exact_source_disposition
-
-type exact_execution_binding =
-  { lease_id : string
-  ; lease_sequence : int64
-  ; slot_id : string
-  ; call_id : string
-  ; plan_fingerprint : string
-  ; request_body_sha256 : string
-  ; status : exact_execution_lease_status
-  }
-(** Durable pre-dispatch fence for one OAS exact-output attempt. A bound lease
-    cannot pass through a generic transition or registration recovery. *)
-
 type escalation_reason =
   | Compaction_exact_lane_unconfigured of
       { source : Keeper_checkpoint_ref.t
@@ -129,7 +85,7 @@ type escalation_reason =
   | Transcript_corruption_requires_reset of { detail : string }
       (** Structural transcript corruption is terminal for automatic
           execution. The first failure pauses the Keeper and consumes the
-          source lease without a successor until explicit operator reset. *)
+          source event without a successor until explicit operator reset. *)
 
 type no_compaction_reason =
   | No_eligible_history
@@ -246,7 +202,6 @@ type transition =
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
   | Ack_source_terminal of accepted_source_terminal
-  | Settle_exact of exact_source_disposition
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -312,8 +267,6 @@ val ack_pending :
 (** Compare-and-remove the exact immutable selected stimulus snapshot.
     Unrelated queue revisions and enqueues are allowed; a missing, duplicated,
     or changed selected identity fails closed. *)
-
-val exact_execution_binding : t -> exact_execution_binding option
 
 val cancel_pending_accepted :
   current_owner_nonce:int ->
@@ -388,31 +341,12 @@ val remove_by_post_id :
 val transition_receipt_equal : transition_receipt -> transition_receipt -> bool
 val transition_receipt_to_yojson : transition_receipt -> Yojson.Safe.t
 val transition_receipt_of_yojson : Yojson.Safe.t -> (transition_receipt, string) result
-val legacy_settlement_transition_receipt_of_yojson :
-  Yojson.Safe.t -> (transition_receipt, string) result
-(** Recovery-only decoder for historical receipt field names. New writes use
-    [applied_at_unix] and [transition] exclusively. *)
-val legacy_transition_receipt_of_yojson :
-  Yojson.Safe.t -> (transition_receipt, string) result
-(** Recovery-only decoder for retired lease receipt fields. *)
 val outbox_entry_to_yojson : outbox_entry -> Yojson.Safe.t
 val outbox_entry_of_yojson : Yojson.Safe.t -> (outbox_entry, string) result
-val legacy_transition_outbox_entry_of_yojson :
-  Yojson.Safe.t -> (outbox_entry, string) result
-(** Recovery-only decoder for retired transition-shaped lease receipt fields. *)
-val legacy_persisted_transition_outbox_entry_of_yojson :
-  Yojson.Safe.t -> (outbox_entry, string) result
-(** Recovery-only decoder for persisted v11 through v8 outboxes and legacy
-    settlement WAL rows. It converts retired settlement field names and the
-    removed source-terminal action label while preserving the historical
-    transition/event identity. New writes never use this path. *)
 val replay_transition_outbox_entry : outbox_entry -> t -> (t, string) result
-(** Replay a source-bearing committed transition. Historical lease-backed
-    records are accepted only at this durable recovery boundary. *)
+(** Replay one current source-bearing committed transition. *)
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v12"] is the current write schema. Historical
-    v7/v8/v9/v10/v11 snapshots are accepted only at the durable recovery
-    boundary; unknown schemas fail closed and require a runtime reset. *)
+(** ["keeper.event_queue.state.v12"] is the only accepted schema. *)

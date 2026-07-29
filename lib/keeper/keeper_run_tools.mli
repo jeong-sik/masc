@@ -79,7 +79,6 @@ val prepare_agent_setup
   -> user_message:string
   -> dynamic_context:string
   -> history_messages:Agent_sdk.Types.message list
-  -> prompt_metrics:Keeper_agent_prompt_metrics.prompt_metrics
   -> shared_context:Agent_sdk.Context.t
   -> context_injector:Agent_sdk.Hooks.context_injector
   -> start_turn_count:int

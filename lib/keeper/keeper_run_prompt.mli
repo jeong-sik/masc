@@ -33,14 +33,6 @@ val user_turn_record_of_hitl_resolution : _ option -> user_turn_record
 (** Map the unified lane's HITL resolution slot to a transcript decision.
     Absent resolution means the user turn is the bare wake marker. *)
 
-val user_turn_record_for_prompt_build :
-  hitl_resolution_present:bool ->
-  user_turn_record:user_turn_record ->
-  user_turn_record
-(** Defer a HITL user turn during pre-replay prompt construction. The agent
-    runner appends the final post-replay message after setup has consumed the
-    approval. Non-HITL turns preserve their original decision. *)
-
 type turn_effect_record =
   | Meaningful_turn
   | Inert_autonomous_turn

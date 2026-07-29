@@ -927,7 +927,9 @@ let test_resolution_is_durable_and_origin_scoped () =
   let keeper_name = "queue-origin" in
   let unrelated_keeper = "queue-unrelated" in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
     (fun () ->
        ignore (install_exn ~base_path);
        let input = `Assoc [ "target", `String "document"; "body", `String "hello" ] in
@@ -1149,10 +1151,18 @@ let test_resolution_is_durable_and_origin_scoped () =
          (String_util.contains_substring
             retry_message
             "Do not request the approved operation again");
-       Alcotest.(check bool)
+       let replay_evidence =
+         retry_message
+         |> String.split_on_char '\n'
+         |> List.rev
+         |> List.find (fun line -> not (String.equal (String.trim line) ""))
+         |> Yojson.Safe.from_string
+       in
+       Alcotest.(check string)
          "retry rehydrates the exact replay output"
-         true
-         (String_util.contains_substring retry_message replay_output);
+         replay_output
+         Yojson.Safe.Util.(
+           replay_evidence |> member "untrusted_tool_output" |> to_string);
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
@@ -2955,6 +2965,7 @@ let test_replay_sidecar_rejects_raw_output_wire () =
        let sidecar_path =
          AQ.For_testing.replay_results_store_path ~base_path
        in
+       ensure_dir (Filename.dirname sidecar_path);
        Yojson.Safe.to_file
          sidecar_path
          (`Assoc
@@ -3023,7 +3034,7 @@ let test_replay_sidecar_rejects_raw_output_wire () =
             ~id:approval_id
             ~outcome:(AQ.Replay_applied output_ref)
         with
-        | Error (AQ.Grant_store_unavailable { path; _ }) ->
+        | Error (AQ.Grant_replay_projection_unavailable { path; _ }) ->
           Alcotest.(check string)
             "only replay-result publication remains unavailable"
             sidecar_path

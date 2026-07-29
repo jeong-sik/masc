@@ -63,6 +63,7 @@ type approved_resolution_request =
 
 type grant_error =
   | Grant_store_unavailable of storage_error
+  | Grant_replay_projection_unavailable of storage_error
   | Grant_workspace_mismatch of
       { approval_id : string
       ; requested_base_path : string
@@ -251,6 +252,10 @@ let exact_attempt_error_to_string = function
 
 let grant_error_to_string = function
   | Grant_store_unavailable error -> storage_error_to_string error
+  | Grant_replay_projection_unavailable error ->
+    Printf.sprintf
+      "derived replay projection unavailable: %s"
+      (storage_error_to_string error)
   | Grant_workspace_mismatch
       { approval_id; requested_base_path; stored_base_path } ->
     Printf.sprintf
@@ -2125,7 +2130,7 @@ let resolution_replay_outcome_equal left right =
 let record_consumed_resolution_replay ~base_path ~id ~outcome =
   with_pending_store_lock (fun () ->
     match SMap.find_opt base_path (Atomic.get replay_projection_errors) with
-    | Some error -> Error (Grant_store_unavailable error)
+    | Some error -> Error (Grant_replay_projection_unavailable error)
     | None ->
       (match approved_delivery_unlocked ~base_path ~id with
        | Error _ as error -> error
@@ -2148,7 +2153,8 @@ let record_consumed_resolution_replay ~base_path ~id ~outcome =
                  ~base_path
                  ~delivery_map:updated_deliveries
              with
-             | Error error -> Error (Grant_store_unavailable error)
+             | Error error ->
+               Error (Grant_replay_projection_unavailable error)
              | Ok Fsync_completed ->
                Atomic.set deliveries updated_deliveries;
                Ok Replay_recorded
@@ -2158,7 +2164,7 @@ let record_consumed_resolution_replay ~base_path ~id ~outcome =
                  ; reason
                  }
                in
-               Error (Grant_store_unavailable error))))
+               Error (Grant_replay_projection_unavailable error)))))
 ;;
 
 let consume_approved_resolution

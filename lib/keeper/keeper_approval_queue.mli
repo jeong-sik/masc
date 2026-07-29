@@ -76,6 +76,7 @@ type approved_resolution_request =
 
 type grant_error =
   | Grant_store_unavailable of storage_error
+  | Grant_replay_projection_unavailable of storage_error
   | Grant_workspace_mismatch of
       { approval_id : string
       ; requested_base_path : string

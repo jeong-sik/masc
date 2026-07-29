@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
-readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.2"
+readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.3"
 # v0.231.0 is a hard-cut wave: checkpoint schema is v9 only (v1-v8
 # rejected; #2867), provider_config.output_schema is removed in favor of
 # response_format = JsonSchema as the single structured-output request state
@@ -35,10 +35,15 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.2"
 # remain separate concerns. It also carries the #2875 agent-card
 # current-interface contract hard-cut. MASC consumes the same public Agent SDK
 # contract; no compatibility or migration code retained.
-# Pinned to the 0.231.2 release commit (1ea60e7a1).
-readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.2"
+# v0.231.3 resolves the catalog-declared streaming reasoning dialect once and
+# passes that typed value to the GLM stream parser (#2883). This removes the
+# backend's hardcoded reasoning_content field without adding model-name or
+# provider heuristics. MASC's exact overlay declares the corresponding
+# delta:reasoning_content capability.
+# Previous pin: v0.231.2 (1ea60e7a1).
+readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.3"
 # TRACK_REF consumed by check-oas-pin.sh / oas-drift-check.sh /
 # sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584).
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="1ea60e7a1d379d0229eb1c83cfd5005b429eca81"
-readonly OAS_AGENT_SDK_MIN_VERSION="0.231.2"
+readonly OAS_AGENT_SDK_SHA="e01940b14d501900b8cbfa2fbb1e0484ada5a42d"
+readonly OAS_AGENT_SDK_MIN_VERSION="0.231.3"

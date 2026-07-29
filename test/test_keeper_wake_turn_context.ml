@@ -279,6 +279,38 @@ let test_direct_turn_has_no_synthetic_task_context () =
     (contains ~needle:"### Current Task" context);
   check string "non-task context remains" "recent owner message" context
 
+let test_direct_and_autonomous_share_system_prompt () =
+  with_repo_prompt_config @@ fun () ->
+  let decision = WO.keeper_cycle_decision ~meta base_observation in
+  let { Prompt.system_prompt = autonomous_system_prompt; _ } =
+    Prompt.build_prompt
+      ~meta
+      ~base_path:"/tmp/unused"
+      ~turn_decision:decision
+      ~observation:base_observation
+      ()
+  in
+  let base_system_prompt =
+    Masc.Keeper_run_context.build_base_system_prompt
+      ~config:(Masc.Workspace.default_config "/tmp/unused")
+      ~profile_defaults:
+        Masc.Keeper_types_profile_defaults.empty_keeper_profile_defaults
+      ~meta
+  in
+  let direct_system_prompt =
+    Turn.For_testing.direct_turn_system_prompt
+      ~base_system_prompt
+      ~direct_reply:false
+  in
+  check string
+    "stable contract is byte-identical across turn entrypoints"
+    autonomous_system_prompt
+    direct_system_prompt;
+  check bool "shared contract carries repository discovery policy" true
+    (contains
+       ~needle:"A repository you have not worked on yet has no checkout there"
+       direct_system_prompt)
+
 (* --- 2. Threaded turn decision --- *)
 
 let test_threaded_stimulus_decision_renders_wake_reason () =
@@ -442,6 +474,9 @@ let () =
             test_direct_turn_reuses_current_task_context;
           test_case "direct reply invents no task when none is held" `Quick
             test_direct_turn_has_no_synthetic_task_context;
+          test_case "direct and autonomous turns share the stable contract"
+            `Quick
+            test_direct_and_autonomous_share_system_prompt;
         ] );
       ( "threaded turn decision",
         [

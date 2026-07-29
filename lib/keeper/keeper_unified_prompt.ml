@@ -468,15 +468,11 @@ let autonomous_trigger_lines
                [ Printf.sprintf "- Reasons: %s" (String.concat ", " reasons) ]))
   | _ -> []
 
-let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)
+let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
-    ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
-    ?(current_task : Masc_domain.task option)
     ?(active_goal_summaries : (string * string) list option)
-    ~(observation : Keeper_world_observation.world_observation)
-    () : turn_prompt_parts
-    =
-  ignore base_path;
+    ()
+  =
   (* Total deterministic resolution between two known instruction sources
      (profile default else meta), not a permissive unknown-input default;
      pre-existing pattern, was the 4th tuple element before RFC-0282. *)
@@ -490,15 +486,12 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path
     if instructions = "" then ""
     else Printf.sprintf "\nInstructions:\n%s\n" instructions
   in
-  (* D-11 (2026-07-14 prompt-assembly audit): the unified lane shipped
-     without any persona injection — identity was the one-line header —
-     while the chat lane injected the persona via
-     [Keeper_prompt.build_keeper_system_prompt]. A keeper therefore only
-     had a personality when spoken to. Mirror the chat lane exactly: same
-     loader (persona file re-read each turn), same XML-escaped <persona>
-     block, so both lanes present one personality. With no
-     [profile_defaults], resolution degrades to the keeper name — the same
-     total fallback [resolved_persona_name] applies. *)
+  (* D-11 (2026-07-14 prompt-assembly audit): autonomous turns once omitted
+     persona while direct turns used a separate prompt builder. This stable
+     builder now owns both entrypoints and the initial checkpoint, so the same
+     loader and XML-escaped <persona> block reach every turn. With no
+     [profile_defaults], resolution degrades to the keeper name through the
+     same total [resolved_persona_name] fallback. *)
   let persona_block =
     let persona_name =
       match profile_defaults with
@@ -616,6 +609,25 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path
   let turn_intent_block = resolve_turn_intent_block () in
   let system_prompt =
     Printf.sprintf "%s\n\n## Turn Intent\n%s" base_system_prompt turn_intent_block
+  in
+  system_prompt
+;;
+
+let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)
+    ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
+    ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
+    ?(current_task : Masc_domain.task option)
+    ?(active_goal_summaries : (string * string) list option)
+    ~(observation : Keeper_world_observation.world_observation)
+    () : turn_prompt_parts
+  =
+  let system_prompt =
+    build_system_prompt
+      ~meta
+      ~base_path
+      ?profile_defaults
+      ?active_goal_summaries
+      ()
   in
   (* User message: structured world observation — reactive triggers + resource state only.
      Runtime telemetry remains on decision_audit and independent observation paths.

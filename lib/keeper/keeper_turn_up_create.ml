@@ -167,27 +167,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           |> Keeper_types_profile.load_persona_extended
           |> Option.value ~default:""
         in
-        let active_goals =
-          List.filter_map
-            (fun goal_id ->
-               match Goal_store.get_goal ctx.config ~goal_id with
-               (* RFC-0294: active_goals tuple dropped its horizon element. *)
-               | Some { Goal_store.id; title; _ } ->
-                   Some (id, title)
-               | None -> None)
-            active_goal_ids
-        in
-        let system_prompt =
-          build_keeper_system_prompt
-            ~instructions
-            ~persona_extended
-            ~keeper_name:p.name
-            ~active_goals
-            ()
-      in
-      let ctx0 =
-        Keeper_context_runtime.create ~eio:true ~system_prompt
-      in
       let nonce = 1 in
       let meta = {
         id = None;
@@ -268,6 +247,15 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       oas_env = p.profile_defaults.oas_env;
       meta_version = 0;
       } in
+      let system_prompt =
+        Keeper_run_context.build_base_system_prompt
+          ~config:ctx.config
+          ~profile_defaults:p.profile_defaults
+          ~meta
+      in
+      let ctx0 =
+        Keeper_context_runtime.create ~eio:true ~system_prompt
+      in
       Progress.Tracker.step tracker ~message:"Saving initial checkpoint" ();
       let init_save_result =
         try

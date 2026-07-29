@@ -52,6 +52,13 @@ module For_testing : sig
   (** Production composition boundary for fresh direct-turn context. The
       result is prompt-only and must never enter durable conversation history. *)
 
+  val direct_turn_system_prompt :
+    base_system_prompt:string ->
+    direct_reply:bool ->
+    string
+  (** Stable model-facing contract shared with autonomous turns. Only
+      [direct_reply=true] appends a channel-specific hard constraint. *)
+
   val surface_context_to_instructions : Yojson.Safe.t -> string option
   (** Format a dashboard co-view context object ({ label, route, scene, fields })
       into turn instructions when no explicit [turn_instructions] is supplied. *)

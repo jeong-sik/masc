@@ -63,11 +63,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
                  ~keeper_name:m.name
                  error) )
       in
-      let persona_extended =
-        Keeper_types_profile.resolved_persona_name ~keeper_name:m.name defaults
-        |> Keeper_types_profile.load_persona_extended
-        |> Option.value ~default:""
-      in
       let active_goals =
         List.filter_map
           (fun goal_id ->
@@ -128,11 +123,10 @@ let keeper_config_json (config : Workspace.config) (name : string)
         Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta:m
       in
       let effective_system_prompt =
-        Keeper_prompt.build_keeper_system_prompt
-          ~instructions:prompt_instructions
-          ~persona_extended ~keeper_name:m.name
-          ~active_goals
-          ()
+        Keeper_run_context.build_base_system_prompt
+          ~config
+          ~profile_defaults:defaults
+          ~meta:m
       in
       (* Preview the unified prompt shape a keeper turn uses.
          We build the observation from the current workspace state so the

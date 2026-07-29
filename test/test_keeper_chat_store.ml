@@ -150,7 +150,7 @@ let test_append_turn_roundtrip () =
         ~user_attachments:[]
         ~tool_calls:
           [
-            { K.call_id = "toolu_1"; call_name = "Read"; args = {|{"path":"x"}|} };
+            { K.call_id = " toolu_1 "; call_name = "Read"; args = {|{"path":"x"}|} };
             (* Empty args normalise to "{}", empty id to a positional one. *)
             { K.call_id = ""; call_name = "masc_status"; args = "  " };
           ]
@@ -165,7 +165,7 @@ let test_append_turn_roundtrip () =
       let tool2 = List.nth messages 2 in
       let asst = List.nth messages 3 in
       Alcotest.(check (option string)) "tool id persisted"
-        (Some "toolu_1") tool1.tool_call_id;
+        (Some " toolu_1 ") tool1.tool_call_id;
       Alcotest.(check (option string)) "tool name persisted"
         (Some "Read") tool1.tool_call_name;
       Alcotest.(check string) "tool args persisted" {|{"path":"x"}|} tool1.content;
@@ -176,6 +176,52 @@ let test_append_turn_roundtrip () =
         (Some "dashboard") asst.source;
       Alcotest.(check (option string)) "assistant has no tool id"
         None asst.tool_call_id)
+
+let test_tool_only_continuations_do_not_fabricate_assistant_rows () =
+  let base_dir = temp_base_path "keeper-chat-tool-only" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-tool-only" in
+      let tool_calls =
+        [ { K.call_id = "call-1"; call_name = "Read"; args = {|{"path":"x"}|} } ]
+      in
+      (match
+         K.append_user_and_tool_calls_result ~base_dir ~keeper_name
+           ~user_content:"inspect x" ~user_attachments:[] ~tool_calls ()
+       with
+       | Ok () -> ()
+       | Error error -> Alcotest.fail error);
+      (match K.append_tool_calls_result ~base_dir ~keeper_name ~tool_calls () with
+       | Ok () -> ()
+       | Error error -> Alcotest.fail error);
+      let history = K.load ~base_dir ~keeper_name in
+      Alcotest.(check (list string)) "only durable user/tool rows"
+        [ "user"; "tool"; "tool" ]
+        (roles history);
+      Alcotest.(check bool) "no fabricated assistant row" false
+        (List.exists
+           (fun (message : K.chat_message) ->
+              K.Role.equal message.role K.Role.Assistant)
+           history))
+
+let test_structured_only_assistant_row_survives_reload () =
+  let base_dir = temp_base_path "keeper-chat-structured-only" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-structured-only" in
+      K.append_assistant_message ~base_dir ~keeper_name ~content:""
+        ~blocks:[ B.Image { src = "https://example.com/generated.png"; cap = None } ]
+        ();
+      match K.load ~base_dir ~keeper_name with
+      | [ assistant ] ->
+        Alcotest.(check string) "empty text is retained" "" assistant.content;
+        Alcotest.(check bool) "structured payload is retained" true
+          (Option.exists (fun blocks -> blocks <> []) assistant.blocks)
+      | messages ->
+        Alcotest.failf "expected one structured-only row, got %d"
+          (List.length messages))
 
 let test_legacy_lines_parse_without_new_fields () =
   let base_dir = temp_base_path "keeper-chat-store-legacy" in
@@ -741,6 +787,77 @@ let test_orphan_leading_tool_lines_trimmed () =
       let messages = K.load ~base_dir ~keeper_name in
       Alcotest.(check (list string)) "leading orphan tool trimmed"
         [ "user"; "assistant" ] (roles messages))
+
+let test_leading_failure_tool_batch_is_retained () =
+  let base_dir = temp_base_path "keeper-chat-store-leading-failure-tools" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-leading-failure-tools" in
+      (match
+         K.append_assistant_message_result ~base_dir ~keeper_name
+           ~content:"Keeper request failed: projection rejected"
+           ~tool_calls:
+             [ { K.call_id = "failure-call"
+               ; call_name = "Read"
+               ; args = {|{"path":"lib/a.ml"}|}
+               }
+             ]
+           ~assistant_kind:K.Row_kind.Transport_failure
+           ()
+       with
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail);
+      match K.load ~base_dir ~keeper_name with
+      | [ tool; failure ] ->
+        Alcotest.(check string) "tool row remains first" "tool"
+          (K.Role.to_label tool.role);
+        Alcotest.(check (option string)) "tool identity retained"
+          (Some "failure-call") tool.tool_call_id;
+        Alcotest.(check bool) "terminal row proves failure batch" true
+          (K.Row_kind.equal failure.kind K.Row_kind.Transport_failure)
+      | messages ->
+        Alcotest.failf "expected failure tool batch, got roles [%s]"
+          (String.concat "; " (roles messages)))
+
+let test_identified_tool_only_history_is_not_trimmed () =
+  let base_dir = temp_base_path "keeper-chat-store-identified-tool-only" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-identified-tool-only" in
+      let request_id =
+        match
+          Keeper_chat_delivery_identity.Request_id.of_string
+            "identified-tool-only"
+        with
+        | Ok request_id -> request_id
+        | Error detail -> Alcotest.fail detail
+      in
+      let delivery_key =
+        Keeper_chat_delivery_identity.Direct_request request_id
+      in
+      (match
+         K.append_tool_calls_once ~base_dir ~keeper_name ~delivery_key
+           ~tool_calls:
+             [ { K.call_id = "call-only"
+               ; call_name = "Read"
+               ; args = {|{"path":"lib/a.ml"}|}
+               }
+             ]
+           ()
+       with
+       | Ok _ -> ()
+       | Error detail -> Alcotest.fail detail);
+      match K.load ~base_dir ~keeper_name with
+      | [ tool ] ->
+        Alcotest.(check string) "identified tool-only row survives" "tool"
+          (K.Role.to_label tool.role);
+        Alcotest.(check bool) "durable identity remains available" true
+          (Option.is_some tool.delivery_key)
+      | messages ->
+        Alcotest.failf "expected one identified tool row, got %d"
+          (List.length messages))
 
 (* RFC-0226 P2: a lane larger than the tail-read bound must still
    yield exactly the window a full scan would — the bound only caps
@@ -2051,6 +2168,10 @@ let () =
         [
           Alcotest.test_case "append_turn roundtrip" `Quick
             test_append_turn_roundtrip;
+          Alcotest.test_case "tool-only continuations omit assistant rows" `Quick
+            test_tool_only_continuations_do_not_fabricate_assistant_rows;
+          Alcotest.test_case "structured-only assistant rows survive reload"
+            `Quick test_structured_only_assistant_row_survives_reload;
           Alcotest.test_case "legacy lines parse" `Quick
             test_legacy_lines_parse_without_new_fields;
           Alcotest.test_case "message id minted unique and stable (R3)" `Quick
@@ -2077,6 +2198,10 @@ let () =
             test_window_keeps_tool_lines_of_retained_turns;
           Alcotest.test_case "orphan leading tool lines trimmed" `Quick
             test_orphan_leading_tool_lines_trimmed;
+          Alcotest.test_case "leading failure tool batch is retained" `Quick
+            test_leading_failure_tool_batch_is_retained;
+          Alcotest.test_case "identified tool-only history is retained" `Quick
+            test_identified_tool_only_history_is_not_trimmed;
           Alcotest.test_case "tail-bounded load matches full-scan window (RFC-0226 P2)"
             `Quick test_tail_bounded_load_matches_full_scan_window;
           Alcotest.test_case "turn_ref stamped on turn rows + json (RFC-0233 §7)"

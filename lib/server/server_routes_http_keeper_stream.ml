@@ -548,105 +548,6 @@ let keeper_stream_success = function
   | Tool_result.Completed () | Tool_result.Deferred () -> true
   | Tool_result.Failed _ -> false
 
-let execute_keeper_stream_tool
-      ~sw
-      ~clock
-      ?auth_token:_
-      state
-      ~agent_name
-      ~arguments
-      ~continuation_channel
-  =
-  let workspace_scope = Mcp_server.workspace_scope state in
-  let config = workspace_scope.config in
-  let start_time = Eio.Time.now clock in
-  let body, disposition =
-    try
-      let keeper_ctx : _ Keeper_tool_surface.context =
-        {
-          config;
-          agent_name;
-          sw;
-          clock;
-          proc_mgr = state.Mcp_server.proc_mgr;
-          net = state.Mcp_server.net;
-          publication_recovery_provider =
-            Mcp_server.publication_recovery_availability_provider state;
-        }
-      in
-      match
-        Keeper_tool_surface.dispatch_keeper_msg
-          ~submitted_by:agent_name
-          ~continuation_channel
-          keeper_ctx
-          ~args:arguments
-      with
-      | result ->
-          let body = Tool_result.message result in
-          body, keeper_stream_disposition_of_result result
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | Workspace.Not_initialized ->
-        ( Masc_domain.masc_error_to_string
-            (Masc_domain.System Masc_domain.System_error.NotInitialized)
-        , Tool_result.Failed Tool_result.Runtime_failure )
-    | exn ->
-        let err = Printexc.to_string exn in
-        Log.Mcp.error "tools/call crashed: %s" err;
-        ( Printf.sprintf "Internal error: %s" err
-        , Tool_result.Failed Tool_result.Runtime_failure )
-  in
-  let success = keeper_stream_success disposition in
-  let end_time = Eio.Time.now clock in
-  let duration_ms = Keeper_timing.elapsed_duration_ms ~start_time ~end_time in
-  let error_detail =
-    if success then None
-    else Some (keeper_tool_failure_error_detail ~duration_ms ~error_body:body)
-  in
-  Audit_log.log_tool_call config
-    ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success ~error_msg:error_detail ();
-  (match disposition with
-   | Tool_result.Failed failure_class ->
-     Log.Keeper.emit Log.Error
-       ~details:
-         (keeper_tool_failure_log_details ~tool_name:"masc_keeper_msg"
-            ~agent_name ~duration_ms ~streaming:false ~error_body:body
-            ~failure_class)
-       "keeper tool call failed: masc_keeper_msg"
-   | Tool_result.Completed () | Tool_result.Deferred () -> ());
-  let telemetry_enabled = Env_config_core.telemetry_enabled () in
-  if telemetry_enabled then (
-    match state.Mcp_server.fs with
-    | Some fs ->
-        (try
-           let telemetry_error_kind =
-             if success then None
-             else Some (Telemetry_eio.error_kind_of_string "tool_failure")
-           in
-           let telemetry_failure_class =
-             match disposition with
-             | Tool_result.Failed failure_class -> Some failure_class
-             | Tool_result.Completed () | Tool_result.Deferred () -> None
-           in
-           Telemetry_eio.track_tool_called ~fs config
-             ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success ~duration_ms
-             ~source:(Tool_registry.string_of_source Agent_internal)
-             ?failure_class:telemetry_failure_class
-             ?error_kind:telemetry_error_kind ?error_message:error_detail ()
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-           Log.Misc.error "telemetry tracking failed: %s"
-             (Printexc.to_string exn))
-    | None -> ()
-  );
-  Tool_registry.record_call_if_known ~source:Agent_internal
-    ~tool_name:"masc_keeper_msg"
-    ~disposition
-    ~duration_ms
-    ();
-  (success, body)
-
 let parse_keeper_chat_stream_request body_str =
   try
     let json = Yojson.Safe.from_string body_str in
@@ -1440,6 +1341,28 @@ let committed_delivery_outcome ~queued_turn ~turn_ref = function
          then Some (queued_delivery_outcome_of_turn_ref turn_ref)
          else None)
 
+let empty_reply_delivery_plan ~queued_turn ~has_visible_blocks ~has_tool_calls =
+  if has_visible_blocks
+  then `Visible_blocks
+  else if has_tool_calls
+  then `Tool_calls_only
+  else if queued_turn
+  then `Failure
+  else `User_only
+
+let continuation_delivery_plan
+      ~has_direct_checkpoint
+      ~has_visible_blocks
+      ~has_tool_calls
+  =
+  if has_visible_blocks
+  then `Assistant_reply
+  else if has_tool_calls
+  then `Tool_calls_only
+  else if has_direct_checkpoint
+  then `No_assistant_reply
+  else `User_only
+
 type keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.state
 
 type translated_keeper_stream_event =
@@ -1709,7 +1632,7 @@ let process_single_turn ~user_row_origin ~queued_turn
     | Keeper_chat_store.Already_persisted_upstream ->
       Ok ()
   in
-  let append_queued_assistant_once ~content ?blocks ?turn_ref () =
+  let append_queued_assistant_once ~content ?(tool_calls = []) ?blocks ?turn_ref () =
     let ( let* ) = Result.bind in
     let* delivery_key = queue_delivery_key () in
     Keeper_chat_store.append_assistant_message_once
@@ -1717,6 +1640,7 @@ let process_single_turn ~user_row_origin ~queued_turn
       ~keeper_name:payload.name
       ~delivery_key
       ~content
+      ~tool_calls
       ~surface:chat_surface
       ?blocks
       ?turn_ref
@@ -1724,7 +1648,7 @@ let process_single_turn ~user_row_origin ~queued_turn
       ()
     |> Result.map (fun _ -> ())
   in
-  let append_queued_transport_failure_once content =
+  let append_queued_transport_failure_once ?(tool_calls = []) ?blocks ?turn_ref content =
     let ( let* ) = Result.bind in
     let* delivery_key = queue_delivery_key () in
     Keeper_chat_store.append_assistant_message_once
@@ -1732,9 +1656,25 @@ let process_single_turn ~user_row_origin ~queued_turn
       ~keeper_name:payload.name
       ~delivery_key
       ~content
+      ~tool_calls
       ~surface:chat_surface
       ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+      ?blocks
+      ?turn_ref
       ~stream_lifecycle:errored_stream_lifecycle
+      ()
+    |> Result.map (fun _ -> ())
+  in
+  let append_queued_tool_calls_once ?turn_ref tool_calls =
+    let ( let* ) = Result.bind in
+    let* delivery_key = queue_delivery_key () in
+    Keeper_chat_store.append_tool_calls_once
+      ~base_dir:base_path
+      ~keeper_name:payload.name
+      ~delivery_key
+      ~tool_calls
+      ~surface:chat_surface
+      ?turn_ref
       ()
     |> Result.map (fun _ -> ())
   in
@@ -1832,9 +1772,23 @@ let process_single_turn ~user_row_origin ~queued_turn
      media live over SSE; the persist site records it durably (see the persist arm
      below). Content-addressed, so the two persists reuse one file. *)
   let worker_media_accum = Keeper_stream_media_accum.create () in
+  (* The same stream carries this turn's tool calls. Without collecting them the
+     persist site below has nothing to pass as [?tool_calls], so history rows
+     hold no tool rows and a reload loses the tool timeline the live stream
+     showed. *)
+  let worker_tool_accum = Keeper_stream_tool_accum.create () in
   let on_event evt =
     Keeper_stream_media_accum.on_event worker_media_accum evt;
+    Keeper_stream_tool_accum.on_event worker_tool_accum evt;
     push_worker_event (Stream_event evt)
+  in
+  let accumulated_media_blocks () =
+    match
+      Keeper_stream_media_accum.to_chat_blocks ~base_dir:base_path
+        worker_media_accum
+    with
+    | [] -> None
+    | media_blocks -> Some media_blocks
   in
   let persist_user_message_only () =
     if Option.is_some !direct_delivery_checkpoint || queued_turn
@@ -1854,16 +1808,24 @@ let process_single_turn ~user_row_origin ~queued_turn
       | Keeper_chat_store.Already_persisted_upstream ->
         ()
   in
-  let persist_failure_reply err =
+  let persist_failure_reply ?blocks ?turn_ref err =
     (* The failure marker is typed, not an utterance: it renders for the
        operator but does not advance the lane watermark, so the user
        message it failed to answer stays pending for the keeper's next
-       turn — and the keeper never reads the error as its own words. *)
+       turn — and the keeper never reads the error as its own words. Any
+       completed media block was already delivered live, so a failure must
+       retain it for reload just as a successful terminal does. *)
+    let blocks =
+      match blocks with
+      | Some _ -> blocks
+      | None -> accumulated_media_blocks ()
+    in
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ChatTransportFailures)
       ~labels:[ ("keeper", payload.name); ("source", chat_source) ]
       ();
     let content = persisted_error_reply err in
+    let tool_calls = Keeper_stream_tool_accum.to_tool_calls worker_tool_accum in
     let persisted =
       if Option.is_some !direct_delivery_checkpoint
       then
@@ -1871,9 +1833,10 @@ let process_single_turn ~user_row_origin ~queued_turn
           ~ok:false
           ~body:err
           ~data:None
-          (Keeper_chat_direct_delivery.Transport_failure { content })
+          (Keeper_chat_direct_delivery.Transport_failure
+             { content; blocks; turn_ref; tool_calls })
       else if queued_turn
-      then append_queued_transport_failure_once content
+      then append_queued_transport_failure_once ~tool_calls ?blocks ?turn_ref content
       else
         match user_row_origin with
         | Keeper_chat_store.Needs_append ->
@@ -1885,7 +1848,10 @@ let process_single_turn ~user_row_origin ~queued_turn
             ~surface:chat_surface
             ~speaker:chat_speaker
             ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+            ~tool_calls
             ~assistant_content:content
+            ?blocks
+            ?turn_ref
             ~stream_lifecycle:errored_stream_lifecycle
             ()
         | Keeper_chat_store.Already_persisted _
@@ -1894,7 +1860,11 @@ let process_single_turn ~user_row_origin ~queued_turn
             ~base_dir:base_path
             ~keeper_name:payload.name
             ~content
+            ~tool_calls
             ~surface:chat_surface
+            ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+            ?blocks
+            ?turn_ref
             ~stream_lifecycle:errored_stream_lifecycle
             ()
     in
@@ -2037,19 +2007,14 @@ let process_single_turn ~user_row_origin ~queued_turn
               Log.Keeper.warn
                 "keeper_stream: streaming dispatch raised: %s"
                 (Printexc.to_string exn);
-              if dashboard_direct_stream || queued_turn
-              then Error (Printexc.to_string exn)
-              else
-                (try
-                   Ok
-                     (`Ran
-	                        (execute_keeper_stream_tool ~sw:request_sw ~clock
-	                           ?auth_token
-	                           state ~agent_name ~arguments:args
-                            ~continuation_channel))
-                 with
-                 | Eio.Cancel.Cancelled _ as e -> raise e
-                 | exn2 -> Error (Printexc.to_string exn2))
+              (* A second non-streaming dispatch is a distinct asynchronous
+                 turn whose submission acknowledgement returns before its
+                 events. Retrying here can duplicate provider/tool effects,
+                 while the outer transcript has already consumed its
+                 accumulator. Terminalize the original streaming attempt;
+                 [persist_failure_reply] retains the calls and media it
+                 actually emitted. *)
+              Error (Printexc.to_string exn)
         in
         match dispatch_result with
         | Ok (`Deferred rejection) ->
@@ -2120,14 +2085,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                this turn's stream) as reload-visible chat blocks so a dashboard
                reload shows media-only replies too, not just text-bearing
                replies. *)
-            let blocks =
-              match
-                Keeper_stream_media_accum.to_chat_blocks ~base_dir:base_path
-                  worker_media_accum
-              with
-              | [] -> None
-              | media_blocks -> Some media_blocks
-            in
+            let blocks = accumulated_media_blocks () in
             let has_visible_blocks = Option.is_some blocks in
             (match
                direct_reply_terminal_error ~has_visible_blocks payload_json_opt
@@ -2137,7 +2095,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                  let queued_outcome =
                    if not queued_turn then None
                    else
-                     match persist_failure_reply err with
+                     match persist_failure_reply ?turn_ref err with
                      | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
                      | Error persist_error ->
                          Some
@@ -2148,7 +2106,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                  in
                  if not queued_turn
                  then
-                   (match persist_failure_reply err with
+                   (match persist_failure_reply ?turn_ref err with
                     | Ok () -> ()
                     | Error persist_error ->
                       Log.Keeper.error
@@ -2163,6 +2121,9 @@ let process_single_turn ~user_row_origin ~queued_turn
                       });
                  Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
              | None ->
+                 let tool_calls =
+                   Keeper_stream_tool_accum.to_tool_calls worker_tool_accum
+                 in
                  let persist_assistant_reply ~assistant_content =
                    if Option.is_some !direct_delivery_checkpoint
                    then
@@ -2171,11 +2132,12 @@ let process_single_turn ~user_row_origin ~queued_turn
                        ~body
                        ~data:payload_json_opt
                        (Keeper_chat_direct_delivery.Assistant_reply
-                          { content = assistant_content; blocks; turn_ref })
+                          { content = assistant_content; blocks; turn_ref; tool_calls })
                    else if queued_turn
                    then
                      append_queued_assistant_once
                        ~content:assistant_content
+                       ~tool_calls
                        ?blocks
                        ?turn_ref
                        ()
@@ -2187,6 +2149,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                          ~keeper_name:payload.name
                          ~user_content:payload.message
                          ~user_attachments:payload.attachments
+                         ~tool_calls
                          ~surface:chat_surface
                          ~speaker:chat_speaker
                          ~assistant_content
@@ -2200,10 +2163,46 @@ let process_single_turn ~user_row_origin ~queued_turn
                          ~base_dir:base_path
                          ~keeper_name:payload.name
                          ~content:assistant_content
+                         ~tool_calls
                          ~surface:chat_surface
                          ?blocks
                          ?turn_ref
                          ~stream_lifecycle:completed_stream_lifecycle
+                         ()
+                 in
+                 let persist_tool_calls_only () =
+                   if tool_calls = []
+                   then Ok ()
+                   else if Option.is_some !direct_delivery_checkpoint
+                   then
+                     commit_direct_terminal
+                       ~ok:true
+                       ~body
+                       ~data:payload_json_opt
+                       (Keeper_chat_direct_delivery.Tool_calls_only { tool_calls; turn_ref })
+                   else if queued_turn
+                   then append_queued_tool_calls_once ?turn_ref tool_calls
+                   else
+                     match user_row_origin with
+                     | Keeper_chat_store.Needs_append ->
+                       Keeper_chat_store.append_user_and_tool_calls_result
+                         ~base_dir:base_path
+                         ~keeper_name:payload.name
+                         ~user_content:payload.message
+                         ~user_attachments:payload.attachments
+                         ~tool_calls
+                         ~surface:chat_surface
+                         ~speaker:chat_speaker
+                         ?turn_ref
+                         ()
+                     | Keeper_chat_store.Already_persisted _
+                     | Keeper_chat_store.Already_persisted_upstream ->
+                       Keeper_chat_store.append_tool_calls_result
+                         ~base_dir:base_path
+                         ~keeper_name:payload.name
+                         ~tool_calls
+                         ~surface:chat_surface
+                         ?turn_ref
                          ()
                  in
                  let delivered_after_persist ?content persisted =
@@ -2216,6 +2215,11 @@ let process_single_turn ~user_row_origin ~queued_turn
                        Ok queued_outcome
                    | Error _ as error -> error
                  in
+                 let broadcast_after_tool_only_persist () =
+                   Keeper_chat_broadcast.chat_appended
+                     ~keeper_name:payload.name ~source:chat_source ();
+                   Ok None
+                 in
                  let turn_outcome = canonical_reply.turn_outcome in
                  let delivery_result =
                    match turn_outcome, String_util.trim_to_option visible_reply with
@@ -2223,7 +2227,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                        let detail =
                          "queued turn ended with a continuation checkpoint and no delivered reply"
                        in
-                       (match persist_failure_reply detail with
+                       (match persist_failure_reply ?blocks ?turn_ref detail with
                         | Ok () ->
                             Ok
                               (Some
@@ -2233,35 +2237,65 @@ let process_single_turn ~user_row_origin ~queued_turn
                                     }))
                         | Error persist_error -> Error persist_error)
                    | Keeper_turn_outcome.Continuation_checkpoint, _ ->
-                       (match !direct_delivery_checkpoint with
-                        | Some _ ->
+                       (match
+                          continuation_delivery_plan
+                            ~has_direct_checkpoint:
+                              (Option.is_some !direct_delivery_checkpoint)
+                            ~has_visible_blocks
+                            ~has_tool_calls:(tool_calls <> [])
+                        with
+                        | `Assistant_reply ->
+                          persist_assistant_reply ~assistant_content:""
+                          |> delivered_after_persist
+                        | `Tool_calls_only ->
+                          Result.bind
+                            (persist_tool_calls_only ())
+                            (fun () -> broadcast_after_tool_only_persist ())
+                        | `No_assistant_reply ->
                           commit_direct_terminal
                             ~ok:true
                             ~body
                             ~data:payload_json_opt
                             Keeper_chat_direct_delivery.No_assistant_reply
                           |> Result.map (fun () -> None)
-                        | None ->
+                        | `User_only ->
                           persist_user_message_only ();
                           Ok None)
                    | Keeper_turn_outcome.No_visible_reply, _
                    | Keeper_turn_outcome.Visible_reply, None ->
-                       if has_visible_blocks
-                       then
-                         persist_assistant_reply ~assistant_content:""
-                         |> delivered_after_persist
-                       else if queued_turn
-                       then
-                         let detail =
-                           "no visible reply was produced for this queued message"
-                         in
-                         (match persist_failure_reply detail with
-                          | Ok () ->
-                            Ok (Some (Failed { kind = No_visible_reply; detail }))
-                          | Error persist_error -> Error persist_error)
-                       else (
-                         persist_user_message_only ();
-                         Ok None)
+                       let detail =
+                         "no visible reply was produced for this queued message"
+                       in
+                       (match
+                          empty_reply_delivery_plan ~queued_turn
+                            ~has_visible_blocks
+                            ~has_tool_calls:(tool_calls <> [])
+                        with
+                        | `Visible_blocks ->
+                          persist_assistant_reply ~assistant_content:""
+                          |> delivered_after_persist
+                        | `Tool_calls_only ->
+                          Result.bind
+                            (persist_tool_calls_only ())
+                            (fun () ->
+                               Keeper_chat_broadcast.chat_appended
+                                 ~keeper_name:payload.name
+                                 ~source:chat_source
+                                 ();
+                               if queued_turn
+                               then
+                                 Ok
+                                   (Some
+                                      (Failed
+                                         { kind = No_visible_reply; detail }))
+                               else Ok None)
+                        | `Failure ->
+                          persist_failure_reply ?turn_ref detail
+                          |> Result.map (fun () ->
+                                 Some (Failed { kind = No_visible_reply; detail }))
+                        | `User_only ->
+                          persist_user_message_only ();
+                          Ok None)
                    | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
                        persist_assistant_reply ~assistant_content:visible_reply
                        |> delivered_after_persist ~content:visible_reply
@@ -3118,6 +3152,8 @@ module For_testing = struct
   let queued_delivery_outcome_of_turn_ref =
     queued_delivery_outcome_of_turn_ref
   let committed_delivery_outcome = committed_delivery_outcome
+  let empty_reply_delivery_plan = empty_reply_delivery_plan
+  let continuation_delivery_plan = continuation_delivery_plan
   let format_surface_context = format_surface_context
   let surface_context_to_instructions = surface_context_to_instructions
   let keeper_tool_failure_log_details = keeper_tool_failure_log_details

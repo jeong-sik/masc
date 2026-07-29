@@ -271,6 +271,34 @@ val append_turn :
   unit ->
   unit
 
+(** Persist a user row followed by one or more tool rows, with no invented
+    assistant terminal. Used when a turn reached a tool-only continuation. *)
+val append_user_and_tool_calls_result :
+  base_dir:string ->
+  keeper_name:string ->
+  user_content:string ->
+  user_attachments:attachment list ->
+  tool_calls:tool_call list ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?external_message_id:string ->
+  ?speaker:speaker ->
+  ?extra_mentions:Keeper_identity.Keeper_id.t list ->
+  ?turn_ref:Ids.Turn_ref.t ->
+  unit ->
+  (unit, string) result
+
+(** Persist one or more tool rows with no assistant terminal. *)
+val append_tool_calls_result :
+  base_dir:string ->
+  keeper_name:string ->
+  tool_calls:tool_call list ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?turn_ref:Ids.Turn_ref.t ->
+  unit ->
+  (unit, string) result
+
 (** [append_assistant_message_result] is {!append_assistant_message} that
     returns [Error msg] on a write failure instead of swallowing it (the failure
     is still counted + warn-logged). For callers whose own contract requires
@@ -279,9 +307,11 @@ val append_assistant_message_result :
   base_dir:string ->
   keeper_name:string ->
   content:string ->
+  ?tool_calls:tool_call list ->
   ?surface:Surface_ref.t ->
   ?conversation_id:string ->
   ?audio:audio_clip ->
+  ?assistant_kind:Row_kind.t ->
   ?blocks:chat_block list ->
   ?turn_ref:Ids.Turn_ref.t ->
   ?stream_lifecycle:stream_lifecycle_event list ->
@@ -300,9 +330,24 @@ val append_assistant_message_once :
   ?surface:Surface_ref.t ->
   ?conversation_id:string ->
   ?assistant_kind:Row_kind.t ->
+  ?tool_calls:tool_call list ->
   ?blocks:chat_block list ->
   ?turn_ref:Ids.Turn_ref.t ->
   ?stream_lifecycle:stream_lifecycle_event list ->
+  unit ->
+  (append_once_result, string) result
+
+(** Idempotently append the ordered tool-call rows for a durable request that
+    has no assistant message. This is the only valid representation of a
+    tool-only continuation; callers must not write an empty assistant row. *)
+val append_tool_calls_once :
+  base_dir:string ->
+  keeper_name:string ->
+  delivery_key:Keeper_chat_delivery_identity.delivery_key ->
+  tool_calls:tool_call list ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?turn_ref:Ids.Turn_ref.t ->
   unit ->
   (append_once_result, string) result
 
@@ -315,6 +360,7 @@ val append_assistant_message :
   base_dir:string ->
   keeper_name:string ->
   content:string ->
+  ?tool_calls:tool_call list ->
   ?surface:Surface_ref.t ->
   ?conversation_id:string ->
   ?audio:audio_clip ->

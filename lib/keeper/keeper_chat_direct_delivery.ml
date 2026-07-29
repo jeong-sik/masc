@@ -22,8 +22,18 @@ type transcript_effect =
       { content : string
       ; blocks : Keeper_chat_store.chat_block list option
       ; turn_ref : Ids.Turn_ref.t option
+      ; tool_calls : Keeper_chat_store.tool_call list
       }
-  | Transport_failure of { content : string }
+  | Transport_failure of
+      { content : string
+      ; blocks : Keeper_chat_store.chat_block list option
+      ; turn_ref : Ids.Turn_ref.t option
+      ; tool_calls : Keeper_chat_store.tool_call list
+      }
+  | Tool_calls_only of
+      { tool_calls : Keeper_chat_store.tool_call list
+      ; turn_ref : Ids.Turn_ref.t option
+      }
   | No_assistant_reply
 
 type staged_effect =
@@ -271,6 +281,13 @@ let validate_nonblank field value =
   else Ok ()
 ;;
 
+let validate_nonempty_after_trim field value =
+  let* () = validate_utf8 field value in
+  if String.equal (String.trim value) ""
+  then Error (Invalid_payload (field ^ " must not be blank"))
+  else Ok ()
+;;
+
 let rec validate_json_text field = function
   | `Null | `Bool _ | `Int _ | `Intlit _ -> Ok ()
   | `String text -> validate_utf8 field text
@@ -339,6 +356,22 @@ let validate_payload (payload : accepted_payload) =
 
 let validate_row_id field row_id = validate_nonblank field row_id
 
+let validate_tool_call index (tool_call : Keeper_chat_store.tool_call) =
+  let prefix = Printf.sprintf "tool_calls[%d]." index in
+  let* () = validate_nonempty_after_trim (prefix ^ "call_id") tool_call.call_id in
+  let* () = validate_nonempty_after_trim (prefix ^ "call_name") tool_call.call_name in
+  validate_utf8 (prefix ^ "args") tool_call.args
+;;
+
+let validate_tool_calls tool_calls =
+  List.mapi validate_tool_call tool_calls
+  |> List.fold_left
+       (fun result validation ->
+          let* () = result in
+          validation)
+       (Ok ())
+;;
+
 let validate_effect (staged : staged_effect) =
   let* () = validate_utf8 "request_result.body" staged.request_result.body in
   let* () =
@@ -347,22 +380,34 @@ let validate_effect (staged : staged_effect) =
     | Some data -> validate_json_text "request_result.data" data
   in
   match staged.request_result.ok, staged.transcript_effect with
-  | true, Assistant_reply { content; blocks; _ } ->
+  | true, Assistant_reply { content; blocks; tool_calls; _ } ->
     let* () = validate_utf8 "assistant_reply.content" content in
+    let* () = validate_tool_calls tool_calls in
     (match blocks with
      | None -> Ok ()
      | Some blocks ->
        validate_json_text
          "assistant_reply.blocks"
          (Keeper_chat_blocks.blocks_to_yojson blocks))
-  | false, Transport_failure { content } ->
-    validate_utf8 "transport_failure.content" content
+  | false, Transport_failure { content; blocks; tool_calls; _ } ->
+    let* () = validate_utf8 "transport_failure.content" content in
+    let* () = validate_tool_calls tool_calls in
+    (match blocks with
+     | None -> Ok ()
+     | Some blocks ->
+       validate_json_text
+         "transport_failure.blocks"
+         (Keeper_chat_blocks.blocks_to_yojson blocks))
+  | true, Tool_calls_only { tool_calls = _ :: _ as tool_calls; _ } ->
+    validate_tool_calls tool_calls
+  | true, Tool_calls_only { tool_calls = []; _ } ->
+    Error (Invalid_effect "a tool-only reply requires at least one tool call")
   | true, No_assistant_reply -> Ok ()
   | true, Transport_failure _ ->
     Error
       (Invalid_effect
          "a successful request result cannot carry a transport failure")
-  | false, (Assistant_reply _ | No_assistant_reply) ->
+  | false, (Assistant_reply _ | Tool_calls_only _ | No_assistant_reply) ->
     Error
       (Invalid_effect
          "a failed request result must carry a transport failure")
@@ -504,8 +549,16 @@ let request_result_to_yojson (result : request_result) =
     ]
 ;;
 
+let tool_call_to_yojson (tool_call : Keeper_chat_store.tool_call) =
+  `Assoc
+    [ "call_id", `String tool_call.call_id
+    ; "call_name", `String tool_call.call_name
+    ; "args", `String tool_call.args
+    ]
+;;
+
 let transcript_effect_to_yojson = function
-  | Assistant_reply { content; blocks; turn_ref } ->
+  | Assistant_reply { content; blocks; turn_ref; tool_calls } ->
     `Assoc
       [ "kind", `String "assistant_reply"
       ; "content", `String content
@@ -515,9 +568,27 @@ let transcript_effect_to_yojson = function
           | Some blocks -> Keeper_chat_blocks.blocks_to_yojson blocks )
       ; ( "turn_ref"
         , string_option_to_yojson (Option.map Ids.Turn_ref.to_string turn_ref) )
+      ; "tool_calls", `List (List.map tool_call_to_yojson tool_calls)
       ]
-  | Transport_failure { content } ->
-    `Assoc [ "kind", `String "transport_failure"; "content", `String content ]
+  | Transport_failure { content; blocks; turn_ref; tool_calls } ->
+    `Assoc
+      [ "kind", `String "transport_failure"
+      ; "content", `String content
+      ; ( "blocks"
+        , match blocks with
+          | None -> `Null
+          | Some blocks -> Keeper_chat_blocks.blocks_to_yojson blocks )
+      ; ( "turn_ref"
+        , string_option_to_yojson (Option.map Ids.Turn_ref.to_string turn_ref) )
+      ; "tool_calls", `List (List.map tool_call_to_yojson tool_calls)
+      ]
+  | Tool_calls_only { tool_calls; turn_ref } ->
+    `Assoc
+      [ "kind", `String "tool_calls_only"
+      ; ( "turn_ref"
+        , string_option_to_yojson (Option.map Ids.Turn_ref.to_string turn_ref) )
+      ; "tool_calls", `List (List.map tool_call_to_yojson tool_calls)
+      ]
   | No_assistant_reply -> `Assoc [ "kind", `String "no_assistant_reply" ]
 ;;
 
@@ -760,15 +831,51 @@ let request_result_of_yojson = function
   | _ -> Error (Decode_failed "request_result must be an object")
 ;;
 
+let tool_calls_of_yojson = function
+  | `List raw_calls ->
+    let parse index = function
+      | `Assoc fields ->
+        let* () =
+          validate_fields
+            ~context:(Printf.sprintf "tool_calls[%d]" index)
+            ~expected:[ "call_id"; "call_name"; "args" ]
+            fields
+        in
+        let* call_id = json_string "call_id" fields in
+        let* call_name = json_string "call_name" fields in
+        let* args = json_string "args" fields in
+        let tool_call : Keeper_chat_store.tool_call = { call_id; call_name; args } in
+        let* () = validate_tool_call index tool_call in
+        Ok tool_call
+      | _ ->
+        Error
+          (Decode_failed
+             (Printf.sprintf "tool_calls[%d] must be an object" index))
+    in
+    List.mapi parse raw_calls
+    |> List.fold_left
+         (fun result item ->
+            let* calls = result in
+            let* call = item in
+            Ok (call :: calls))
+         (Ok [])
+    |> Result.map List.rev
+  | _ -> Error (Decode_failed "tool_calls must be a list")
+;;
+
 let transcript_effect_of_yojson = function
   | `Assoc fields ->
     let* kind = json_string "kind" fields in
     (match kind with
      | "assistant_reply" ->
+       let tool_calls_json = List.assoc_opt "tool_calls" fields in
        let* () =
          validate_fields
            ~context:"assistant reply effect"
-           ~expected:[ "kind"; "content"; "blocks"; "turn_ref" ]
+           ~expected:
+             (match tool_calls_json with
+              | None -> [ "kind"; "content"; "blocks"; "turn_ref" ]
+              | Some _ -> [ "kind"; "content"; "blocks"; "turn_ref"; "tool_calls" ])
            fields
        in
        let* content = json_string "content" fields in
@@ -795,16 +902,85 @@ let transcript_effect_of_yojson = function
             | Some turn_ref -> Ok (Some turn_ref)
             | None -> Error (Decode_failed "assistant reply turn_ref is invalid"))
        in
-       Ok (Assistant_reply { content; blocks; turn_ref })
+       let* tool_calls =
+         match tool_calls_json with
+         | None -> Ok []
+         | Some json -> tool_calls_of_yojson json
+       in
+       Ok (Assistant_reply { content; blocks; turn_ref; tool_calls })
      | "transport_failure" ->
+       let tool_calls_json = List.assoc_opt "tool_calls" fields in
+       let turn_ref_json = List.assoc_opt "turn_ref" fields in
+       let blocks_json = List.assoc_opt "blocks" fields in
        let* () =
          validate_fields
            ~context:"transport failure effect"
-           ~expected:[ "kind"; "content" ]
+           ~expected:
+             ([ "kind"; "content" ]
+              @ (if Option.is_some blocks_json then [ "blocks" ] else [])
+              @ (if Option.is_some turn_ref_json then [ "turn_ref" ] else [])
+              @ (if Option.is_some tool_calls_json then [ "tool_calls" ] else []))
            fields
        in
        let* content = json_string "content" fields in
-       Ok (Transport_failure { content })
+       let* blocks =
+         match blocks_json with
+         | None | Some `Null -> Ok None
+         | Some (`List raw_blocks as json) ->
+           (match Keeper_chat_blocks.blocks_of_yojson json with
+            | Some blocks
+              when List.length blocks = List.length raw_blocks
+                   && Keeper_chat_blocks.blocks_to_yojson blocks = json ->
+              Ok (Some blocks)
+            | Some _ | None ->
+              Error (Decode_failed "transport failure blocks are invalid"))
+         | Some _ ->
+           Error (Decode_failed "transport failure blocks must be a list or null")
+       in
+       let* turn_ref =
+         match turn_ref_json with
+         | None -> Ok None
+         | Some _ ->
+           let* wire = json_string_option "turn_ref" fields in
+           (match wire with
+            | None -> Ok None
+            | Some wire ->
+              (match Ids.Turn_ref.of_string wire with
+               | Some turn_ref -> Ok (Some turn_ref)
+               | None ->
+                 Error (Decode_failed "transport failure turn_ref is invalid")))
+       in
+       let* tool_calls =
+         match tool_calls_json with
+         | None -> Ok []
+         | Some json -> tool_calls_of_yojson json
+       in
+       Ok (Transport_failure { content; blocks; turn_ref; tool_calls })
+     | "tool_calls_only" ->
+       let turn_ref_json = List.assoc_opt "turn_ref" fields in
+       let* () =
+         validate_fields
+           ~context:"tool-only effect"
+           ~expected:
+             (match turn_ref_json with
+              | None -> [ "kind"; "tool_calls" ]
+              | Some _ -> [ "kind"; "turn_ref"; "tool_calls" ])
+           fields
+       in
+       let* tool_calls = tool_calls_of_yojson (List.assoc "tool_calls" fields) in
+       let* turn_ref =
+         match turn_ref_json with
+         | None -> Ok None
+         | Some _ ->
+           let* wire = json_string_option "turn_ref" fields in
+           (match wire with
+            | None -> Ok None
+            | Some wire ->
+              (match Ids.Turn_ref.of_string wire with
+               | Some turn_ref -> Ok (Some turn_ref)
+               | None -> Error (Decode_failed "tool-only turn_ref is invalid")))
+       in
+       Ok (Tool_calls_only { tool_calls; turn_ref })
      | "no_assistant_reply" ->
        let* () =
          validate_fields
@@ -1205,6 +1381,11 @@ let redact_payload ~base_path (payload : accepted_payload) =
 ;;
 
 let redact_effect redaction (staged : staged_effect) =
+  let redact_tool_call (tool_call : Keeper_chat_store.tool_call) =
+    { tool_call with
+      args = Keeper_secret_redaction.redact_text redaction tool_call.args
+    }
+  in
   let request_result =
     { staged.request_result with
       body =
@@ -1220,7 +1401,7 @@ let redact_effect redaction (staged : staged_effect) =
   in
   let* transcript_effect =
     match staged.transcript_effect with
-    | Assistant_reply { content; blocks; turn_ref } ->
+    | Assistant_reply { content; blocks; turn_ref; tool_calls } ->
       let content = Keeper_secret_redaction.redact_text redaction content in
       let* blocks =
         match blocks with
@@ -1236,11 +1417,36 @@ let redact_effect redaction (staged : staged_effect) =
                (Invalid_effect
                   "secret redaction could not preserve assistant block structure"))
       in
-      Ok (Assistant_reply { content; blocks; turn_ref })
-    | Transport_failure { content } ->
+      let tool_calls = List.map redact_tool_call tool_calls in
+      Ok (Assistant_reply { content; blocks; turn_ref; tool_calls })
+    | Transport_failure { content; blocks; turn_ref; tool_calls } ->
+      let* blocks =
+        match blocks with
+        | None -> Ok None
+        | Some blocks ->
+          let json = Keeper_chat_blocks.blocks_to_yojson blocks in
+          let redacted = Keeper_secret_redaction.redact_json redaction json in
+          (match Keeper_chat_blocks.blocks_of_yojson redacted with
+           | Some redacted_blocks when List.length redacted_blocks = List.length blocks ->
+             Ok (Some redacted_blocks)
+           | Some _ | None ->
+             Error
+               (Invalid_effect
+                  "secret redaction could not preserve transport failure block structure"))
+      in
       Ok
         (Transport_failure
-           { content = Keeper_secret_redaction.redact_text redaction content })
+           { content = Keeper_secret_redaction.redact_text redaction content
+           ; blocks
+           ; turn_ref
+           ; tool_calls = List.map redact_tool_call tool_calls
+           })
+    | Tool_calls_only { tool_calls; turn_ref } ->
+      Ok
+        (Tool_calls_only
+           { turn_ref
+           ; tool_calls = List.map redact_tool_call tool_calls
+           })
     | No_assistant_reply -> Ok No_assistant_reply
   in
   Ok { request_result; transcript_effect }
@@ -1458,12 +1664,13 @@ let stage_effect = stage_effect_with_io production_io
 
 let append_staged_transcript ~base_path existing ~user_row_id staged =
   match staged.transcript_effect with
-  | Assistant_reply { content; blocks; turn_ref } ->
+  | Assistant_reply { content; blocks; turn_ref; tool_calls } ->
     Keeper_chat_store.append_assistant_message_once
       ~base_dir:base_path
       ~keeper_name:existing.payload.keeper_name
       ~delivery_key:(direct_delivery_key existing.request_id)
       ~content
+      ~tool_calls
       ~surface:existing.payload.surface
       ?conversation_id:existing.payload.conversation_id
       ?blocks
@@ -1478,21 +1685,37 @@ let append_staged_transcript ~base_path existing ~user_row_id staged =
     |> Result.map row_id_of_append_once
     |> Result.map_error (fun detail ->
       Transcript_failed { slot = Assistant_transcript; detail })
-  | Transport_failure { content } ->
+  | Transport_failure { content; blocks; turn_ref; tool_calls } ->
     Keeper_chat_store.append_assistant_message_once
       ~base_dir:base_path
       ~keeper_name:existing.payload.keeper_name
       ~delivery_key:(direct_delivery_key existing.request_id)
       ~content
+      ~tool_calls
       ~surface:existing.payload.surface
       ?conversation_id:existing.payload.conversation_id
       ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+      ?blocks
+      ?turn_ref
       ~stream_lifecycle:
         [ Keeper_chat_store.Run_started
         ; Keeper_chat_store.Text_message_start
         ; Keeper_chat_store.Text_message_end
         ; Keeper_chat_store.Run_error
         ]
+      ()
+    |> Result.map row_id_of_append_once
+    |> Result.map_error (fun detail ->
+      Transcript_failed { slot = Assistant_transcript; detail })
+  | Tool_calls_only { tool_calls; turn_ref } ->
+    Keeper_chat_store.append_tool_calls_once
+      ~base_dir:base_path
+      ~keeper_name:existing.payload.keeper_name
+      ~delivery_key:(direct_delivery_key existing.request_id)
+      ~tool_calls
+      ~surface:existing.payload.surface
+      ?conversation_id:existing.payload.conversation_id
+      ?turn_ref
       ()
     |> Result.map row_id_of_append_once
     |> Result.map_error (fun detail ->

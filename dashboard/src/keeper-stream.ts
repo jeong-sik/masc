@@ -32,7 +32,10 @@ import {
   setRecordValue,
 } from './keeper-state'
 import { isRecord, asNumber, asString } from './components/common/normalize'
-import { toolEntryIdFromCallId } from './tool-call-output-store'
+import {
+  nonBlankToolCallId,
+  toolEntryIdFromCallId,
+} from './tool-call-output-store'
 import { STREAMING_THINKING_PREVIEW_CHARS } from './config/constants'
 import { updatePendingKeeperChatAssistantDraft } from './keeper-chat-pending'
 import { isKeeperChatReceiptId, parseKeeperQueueRevision } from './lib/keeper-chat-receipt'
@@ -214,7 +217,7 @@ function recordStreamProtocolError(
       error: message,
     }
   })
-  const id = toolCallId?.trim()
+  const id = nonBlankToolCallId(toolCallId)
   if (id) {
     markAssistantToolTraceErrored(keeperName, assistantEntryId, id)
     updateThreadEntry(keeperName, toolEntryIdFromCallId(id), entry => ({
@@ -236,7 +239,7 @@ function rememberOasToolBlockIndex(
   toolCallId: string,
   index: number | undefined,
 ): void {
-  const id = toolCallId.trim()
+  const id = nonBlankToolCallId(toolCallId)
   if (!id || index === undefined) return
   pendingOasToolBlockIndexes.set(oasToolBlockKey(keeperName, assistantEntryId, id), index)
 }
@@ -419,7 +422,7 @@ export function applyKeeperStreamEvent(
       return null
     case 'TOOL_CALL_START': {
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
-      const toolCallId = event.toolCallId?.trim()
+      const toolCallId = nonBlankToolCallId(event.toolCallId)
       const toolName = (event.toolCallName ?? event.name)?.trim()
       if (!toolCallId || !toolName) {
         recordStreamProtocolError(
@@ -456,7 +459,7 @@ export function applyKeeperStreamEvent(
     }
     case 'TOOL_CALL_ARGS': {
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
-      const toolCallId = event.toolCallId?.trim()
+      const toolCallId = nonBlankToolCallId(event.toolCallId)
       if (!toolCallId) {
         recordStreamProtocolError(
           keeperName,
@@ -485,7 +488,7 @@ export function applyKeeperStreamEvent(
     }
     case 'TOOL_CALL_END': {
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
-      const toolCallId = event.toolCallId?.trim()
+      const toolCallId = nonBlankToolCallId(event.toolCallId)
       if (!toolCallId) {
         recordStreamProtocolError(
           keeperName,

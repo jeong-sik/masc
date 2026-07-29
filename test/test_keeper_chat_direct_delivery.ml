@@ -2,6 +2,7 @@ open Alcotest
 
 module Direct = Masc.Keeper_chat_direct_delivery
 module Keeper_chat_store = Masc.Keeper_chat_store
+module Keeper_chat_blocks = Masc.Keeper_chat_blocks
 module Keeper_fs = Masc.Keeper_fs
 module Keeper_msg_async = Masc.Keeper_msg_async
 module Keeper_types_profile = Masc.Keeper_types_profile
@@ -68,7 +69,7 @@ let payload ?(keeper_name = "sangsu") ?(submitted_by = "owner") () :
   }
 ;;
 
-let assistant_effect ?(body = "completed") () : Direct.staged_effect =
+let assistant_effect ?(body = "completed") ?(tool_calls = []) () : Direct.staged_effect =
   { request_result =
       { ok = true
       ; body
@@ -79,6 +80,7 @@ let assistant_effect ?(body = "completed") () : Direct.staged_effect =
         { content = "소스코드를 확인했다"
         ; blocks = None
         ; turn_ref = None
+        ; tool_calls
         }
   }
 ;;
@@ -141,6 +143,146 @@ let test_direct_flow_is_active_only _env =
          (Direct.phase_kind_to_string (Direct.phase_kind phase)));
     let history = Keeper_chat_store.load ~base_dir:base_path ~keeper_name:"sangsu" in
     check int "one user and one assistant row" 2 (List.length history))
+;;
+
+let test_direct_transcript_persists_tool_calls _env =
+  with_temp_dir (fun base_path ->
+    let request_id = request_id "direct-tool-calls" in
+    let prepared =
+      Direct.prepare ~base_path ~request_id ~payload:(payload ()) ~now:1.0
+      |> expect_ok
+    in
+    let user_committed =
+      Direct.commit_user_row ~base_path ~identity:prepared ~now:2.0 |> expect_ok
+    in
+    let running =
+      Direct.mark_running ~base_path ~identity:user_committed ~now:3.0 |> expect_ok
+    in
+    let staged =
+      Direct.stage_effect
+        ~base_path
+        ~identity:running
+        ~staged:
+          (assistant_effect
+             ~tool_calls:
+               [ { Keeper_chat_store.call_id = "call-1"
+                 ; call_name = "Read"
+                 ; args = "{\"path\":\"lib/a.ml\"}"
+                 } ]
+             ())
+        ~now:4.0
+      |> expect_ok
+    in
+    ignore
+      (Direct.commit_transcript ~base_path ~identity:staged ~now:5.0 |> expect_ok
+       : Direct.t);
+    let history = Keeper_chat_store.load ~base_dir:base_path ~keeper_name:"sangsu" in
+    check int "user, tool, assistant rows survive reload" 3 (List.length history);
+    match history with
+    | [ _user; tool; _assistant ] ->
+      check string "tool call id" "call-1"
+        (Option.value ~default:"" tool.tool_call_id)
+    | _ -> fail "expected user, tool, assistant rows")
+;;
+
+let test_direct_tool_only_transcript_has_no_empty_assistant _env =
+  with_temp_dir (fun base_path ->
+    let request_id = request_id "direct-tool-only" in
+    let prepared =
+      Direct.prepare ~base_path ~request_id ~payload:(payload ()) ~now:1.0
+      |> expect_ok
+    in
+    let user_committed =
+      Direct.commit_user_row ~base_path ~identity:prepared ~now:2.0 |> expect_ok
+    in
+    let running =
+      Direct.mark_running ~base_path ~identity:user_committed ~now:3.0 |> expect_ok
+    in
+    let staged =
+      Direct.stage_effect
+        ~base_path
+        ~identity:running
+        ~staged:
+          { request_result = { ok = true; body = "continued"; data = None }
+          ; transcript_effect =
+              Direct.Tool_calls_only
+                { tool_calls =
+                    [ { Keeper_chat_store.call_id = "call-2"
+                      ; call_name = "Read"
+                      ; args = "{\"path\":\"lib/b.ml\"}"
+                      } ]
+                ; turn_ref = Some (Ids.Turn_ref.make ~trace_id:"direct-tool-only" ~absolute_turn:1)
+                }
+          }
+        ~now:4.0
+      |> expect_ok
+    in
+    ignore
+      (Direct.commit_transcript ~base_path ~identity:staged ~now:5.0 |> expect_ok
+       : Direct.t);
+    let history = Keeper_chat_store.load ~base_dir:base_path ~keeper_name:"sangsu" in
+    check int "tool-only continuation stores no empty assistant" 2 (List.length history);
+    match history with
+    | [ _user; tool ] ->
+      check string "tool call id" "call-2"
+        (Option.value ~default:"" tool.tool_call_id);
+      check (option string) "tool-only row keeps turn provenance"
+        (Some "direct-tool-only#1")
+        (Option.map Ids.Turn_ref.to_string tool.turn_ref)
+    | _ -> fail "expected user and tool rows")
+;;
+
+let test_direct_transport_failure_keeps_turn_ref _env =
+  with_temp_dir (fun base_path ->
+    let request_id = request_id "direct-failure-turn-ref" in
+    let prepared =
+      Direct.prepare ~base_path ~request_id ~payload:(payload ()) ~now:1.0
+      |> expect_ok
+    in
+    let user_committed =
+      Direct.commit_user_row ~base_path ~identity:prepared ~now:2.0 |> expect_ok
+    in
+    let running =
+      Direct.mark_running ~base_path ~identity:user_committed ~now:3.0
+      |> expect_ok
+    in
+    let turn_ref =
+      Ids.Turn_ref.make ~trace_id:"direct-failure" ~absolute_turn:4
+    in
+    let staged =
+      Direct.stage_effect
+        ~base_path
+        ~identity:running
+        ~staged:
+          { request_result = { ok = false; body = "failed"; data = None }
+          ; transcript_effect =
+              Direct.Transport_failure
+                { content = "Keeper request failed"
+                ; blocks = Some [ Keeper_chat_blocks.Image { src = "/media/generated.png"; cap = None } ]
+                ; turn_ref = Some turn_ref
+                ; tool_calls = []
+                }
+          }
+        ~now:4.0
+      |> expect_ok
+    in
+    ignore
+      (Direct.commit_transcript ~base_path ~identity:staged ~now:5.0
+       |> expect_ok
+        : Direct.t);
+    match
+      Keeper_chat_store.load ~base_dir:base_path ~keeper_name:"sangsu"
+    with
+    | [ _user; failure ] ->
+      check (option string) "failure row keeps canonical turn provenance"
+        (Some "direct-failure#4")
+        (Option.map Ids.Turn_ref.to_string failure.turn_ref);
+      check bool "failure row keeps generated media"
+        true
+        (Option.is_some failure.blocks)
+    | history ->
+      failf "expected user and transport failure rows, got %d"
+        (List.length history))
 ;;
 
 let fail_after_rename_io () =
@@ -625,6 +767,18 @@ let () =
     "keeper_chat_direct_delivery"
     [ ( "direct checkpoint"
       , [ eio_test_case "direct flow remains active-only" `Quick test_direct_flow_is_active_only
+        ; eio_test_case
+            "direct transcript persists tool calls"
+            `Quick
+            test_direct_transcript_persists_tool_calls
+        ; eio_test_case
+            "direct tool-only transcript has no empty assistant"
+            `Quick
+            test_direct_tool_only_transcript_has_no_empty_assistant
+        ; eio_test_case
+            "direct transport failure keeps turn_ref"
+            `Quick
+            test_direct_transport_failure_keeps_turn_ref
         ; eio_test_case
             "post-rename ambiguity is explicit and reconcilable"
             `Quick

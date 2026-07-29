@@ -3,7 +3,10 @@ import { formatKeeperVisibleReply } from './keeper-message'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
 import { isInFlightDelivery } from './lib/keeper-delivery'
 import { isRecord, asString, asNumber, asBoolean, toIsoTimestamp } from './components/common/normalize'
-import { toolEntryIdFromCallId } from './tool-call-output-store'
+import {
+  nonBlankToolCallId,
+  toolEntryIdFromCallId,
+} from './tool-call-output-store'
 import type {
   KeeperConversationAttachment,
   KeeperConversationAudioClip,
@@ -1183,7 +1186,7 @@ export function appendAssistantToolTraceStep(
   entryId: string,
   step: { toolCallId: string; name: string; ts?: string; oasBlockIndex?: number },
 ): void {
-  const toolCallId = step.toolCallId.trim()
+  const toolCallId = nonBlankToolCallId(step.toolCallId)
   const toolName = step.name.trim()
   if (!toolCallId || !toolName) {
     console.warn('[keeper-trace] invalid tool trace step', { op: 'start', keeperName: name, entryId })
@@ -1232,7 +1235,7 @@ export function appendAssistantToolTraceArgsDelta(
   toolCallId: string,
   delta: string,
 ): void {
-  const id = toolCallId.trim()
+  const id = nonBlankToolCallId(toolCallId)
   if (!id || !delta) return
   let found = false
   updateThreadEntry(name, entryId, entry => {
@@ -1259,7 +1262,7 @@ export function setAssistantToolTraceArgsSnapshot(
   toolCallId: string,
   snapshot: string,
 ): void {
-  const id = toolCallId.trim()
+  const id = nonBlankToolCallId(toolCallId)
   if (!id) return
   let found = false
   updateThreadEntry(name, entryId, entry => {
@@ -1285,7 +1288,7 @@ export function markAssistantToolTraceEnded(
   entryId: string,
   toolCallId: string,
 ): void {
-  const id = toolCallId.trim()
+  const id = nonBlankToolCallId(toolCallId)
   if (!id) return
   let found = false
   updateThreadEntry(name, entryId, entry => {
@@ -1311,7 +1314,7 @@ export function markAssistantToolTraceErrored(
   entryId: string,
   toolCallId: string,
 ): void {
-  const id = toolCallId.trim()
+  const id = nonBlankToolCallId(toolCallId)
   if (!id) return
   let found = false
   updateThreadEntry(name, entryId, entry => {
@@ -1603,12 +1606,14 @@ interface RestChatHistoryMessage {
  *  raw content is used as-is — formatKeeperVisibleReply is for keeper
  *  reply text and would mangle argument JSON. */
 function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEntry | null {
-  if (!message.tool_call_id || !message.tool_call_name) return null
+  const toolCallId = nonBlankToolCallId(message.tool_call_id)
+  const toolCallName = message.tool_call_name?.trim()
+  if (!toolCallId || !toolCallName) return null
   return {
-    id: toolEntryIdFromCallId(message.tool_call_id),
+    id: toolEntryIdFromCallId(toolCallId),
     role: 'tool',
     source: 'tool_result',
-    label: message.tool_call_name,
+    label: toolCallName,
     text: message.content,
     rawText: message.content,
     timestamp: toIsoTimestamp(message.ts),

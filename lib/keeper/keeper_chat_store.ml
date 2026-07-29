@@ -662,40 +662,63 @@ let provenance_of_line ~line_number line =
   | Yojson.Json_error detail -> fail detail
 ;;
 
-let find_provenance existing ~delivery_key ~transcript_slot =
+module Provenance_key = struct
+  type t =
+    Keeper_chat_delivery_identity.delivery_key
+    * Keeper_chat_delivery_identity.transcript_slot
+
+  let equal (left_key, left_slot) (right_key, right_slot) =
+    Keeper_chat_delivery_identity.delivery_key_equal left_key right_key
+    && Keeper_chat_delivery_identity.transcript_slot_equal left_slot right_slot
+  ;;
+
+  let hash = Hashtbl.hash
+end
+
+module Provenance_index = Hashtbl.Make (Provenance_key)
+
+type indexed_provenance =
+  | Unique_provenance of string
+  | Duplicate_provenance
+
+let provenance_index_of_existing existing =
+  let index = Provenance_index.create 16 in
+  let add_provenance (delivery_key, transcript_slot, row_id) =
+    let key = delivery_key, transcript_slot in
+    match Provenance_index.find_opt index key with
+    | None -> Provenance_index.add index key (Unique_provenance row_id)
+    | Some (Unique_provenance _ | Duplicate_provenance) ->
+      Provenance_index.replace index key Duplicate_provenance
+  in
   existing
   |> String.split_on_char '\n'
-  |> List.mapi (fun index line -> index + 1, line)
+  |> List.mapi (fun offset line -> offset + 1, line)
   |> List.fold_left
        (fun result (line_number, line) ->
           let ( let* ) = Result.bind in
-          let* found = result in
+          let* () = result in
           if String.equal line ""
-          then Ok found
+          then Ok ()
           else
             let* provenance = provenance_of_line ~line_number line in
-            match provenance, found with
-            | None, _ -> Ok found
-            | Some (candidate_key, candidate_slot, row_id), None
-              when
-                Keeper_chat_delivery_identity.delivery_key_equal
-                  delivery_key
-                  candidate_key
-                && Keeper_chat_delivery_identity.transcript_slot_equal
-                     transcript_slot
-                     candidate_slot ->
-              Ok (Some row_id)
-            | Some (candidate_key, candidate_slot, _), Some _
-              when
-                Keeper_chat_delivery_identity.delivery_key_equal
-                  delivery_key
-                  candidate_key
-                && Keeper_chat_delivery_identity.transcript_slot_equal
-                     transcript_slot
-                     candidate_slot ->
-              Error "duplicate Keeper chat delivery provenance rows"
-            | Some _, _ -> Ok found)
-       (Ok None)
+            Option.iter add_provenance provenance;
+            Ok ())
+       (Ok ())
+  |> Result.map (fun () -> index)
+;;
+
+let find_indexed_provenance index ~delivery_key ~transcript_slot =
+  match Provenance_index.find_opt index (delivery_key, transcript_slot) with
+  | None -> Ok None
+  | Some (Unique_provenance row_id) -> Ok (Some row_id)
+  | Some Duplicate_provenance ->
+    Error "duplicate Keeper chat delivery provenance rows"
+;;
+
+let find_provenance existing ~delivery_key ~transcript_slot =
+  let ( let* ) = Result.bind in
+  let* index = provenance_index_of_existing existing in
+  find_indexed_provenance index ~delivery_key ~transcript_slot
 ;;
 
 let append_line_once path ~delivery_key ~transcript_slot ~row_id line =
@@ -850,6 +873,88 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
        ~assistant_content ()
       : (unit, string) result)
 
+(* A turn that executed tools but reached no assistant terminal still has a
+   durable user/tool timeline.  Do not fabricate an assistant utterance (or a
+   transport failure) merely to reuse [append_turn_result]. *)
+let append_user_and_tool_calls_result ~base_dir ~keeper_name ~(user_content : string)
+    ~(user_attachments : attachment list) ~(tool_calls : tool_call list) ?surface
+    ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
+    ?turn_ref () : (unit, string) result =
+  if tool_calls = [] then Error "tool-only continuation requires at least one tool call"
+  else try
+    ensure_dir_once ~base_dir;
+    let redaction = redaction_for ~base_dir ~keeper_name in
+    let user_content = Keeper_secret_redaction.redact_text redaction user_content in
+    let user_attachments = List.map (redact_attachment redaction) user_attachments in
+    let persisted_user_attachments = List.map persisted_attachment user_attachments in
+    let tool_calls = List.map (redact_tool_call redaction) tool_calls in
+    let path = chat_path ~base_dir ~keeper_name in
+    let ts = Time_compat.now () in
+    let user_line =
+      encode_line ~role:Role.User ~content:user_content ~ts
+        ~attachments:persisted_user_attachments ?surface ?conversation_id
+        ?external_message_id ?speaker ?turn_ref
+        ~mentions:(user_line_mentions ~extra_mentions user_content) ()
+    in
+    let tool_lines =
+      List.mapi
+        (fun position tc ->
+           encode_line ~role:Role.Tool
+             ~content:(normalize_tool_args tc.args)
+             ~ts
+             ~tool_call_id:(normalize_tool_call_id ~position tc.call_id)
+             ~tool_call_name:tc.call_name
+             ?surface ?conversation_id ?turn_ref ())
+        tool_calls
+    in
+    append_chat_payload_durable path (String.concat "\n" (user_line :: tool_lines) ^ "\n");
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ChatStoreFailures)
+      ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
+      ();
+    let message = Printexc.to_string exn in
+    Log.Keeper.warn "keeper_chat_store: user/tool append failed for %s: %s"
+      (sanitize_name keeper_name) message;
+    Error message
+
+let append_tool_calls_result ~base_dir ~keeper_name ~(tool_calls : tool_call list)
+    ?surface ?conversation_id ?turn_ref () : (unit, string) result =
+  if tool_calls = [] then Error "tool-only continuation requires at least one tool call"
+  else try
+    ensure_dir_once ~base_dir;
+    let redaction = redaction_for ~base_dir ~keeper_name in
+    let tool_calls = List.map (redact_tool_call redaction) tool_calls in
+    let path = chat_path ~base_dir ~keeper_name in
+    let ts = Time_compat.now () in
+    let tool_lines =
+      List.mapi
+        (fun position tc ->
+           encode_line ~role:Role.Tool
+             ~content:(normalize_tool_args tc.args)
+             ~ts
+             ~tool_call_id:(normalize_tool_call_id ~position tc.call_id)
+             ~tool_call_name:tc.call_name
+             ?surface ?conversation_id ?turn_ref ())
+        tool_calls
+    in
+    append_chat_payload_durable path (String.concat "\n" tool_lines ^ "\n");
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ChatStoreFailures)
+      ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
+      ();
+    let message = Printexc.to_string exn in
+    Log.Keeper.warn "keeper_chat_store: tool-only append failed for %s: %s"
+      (sanitize_name keeper_name) message;
+    Error message
+
 (* RFC-0223 P4: keeper-initiated message on one lane. A single
    assistant line — there is no user turn to pair it with.
 
@@ -858,21 +963,37 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
    propagate it. The failure is still counted + warn-logged here so callers that
    use the unit wrapper below keep the existing swallow-and-count telemetry. *)
 let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
-    ?surface ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle () :
-    (unit, string) result =
+    ?(tool_calls = []) ?surface ?conversation_id ?audio
+    ?(assistant_kind = Row_kind.Utterance) ?blocks ?turn_ref ?stream_lifecycle
+    () : (unit, string) result =
   try
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
     let content = Keeper_secret_redaction.redact_text redaction content in
+    let tool_calls = List.map (redact_tool_call redaction) tool_calls in
     let blocks = redact_blocks redaction blocks in
     let audio = Option.map (redact_audio redaction) audio in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
+    let tool_lines =
+      List.mapi
+        (fun position tc ->
+          encode_line ~role:Role.Tool
+            ~content:(normalize_tool_args tc.args)
+            ~ts
+            ~tool_call_id:(normalize_tool_call_id ~position tc.call_id)
+            ~tool_call_name:tc.call_name
+            ?surface ?conversation_id ?turn_ref ())
+        tool_calls
+    in
     let line =
       encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id
-        ?audio ?blocks ?turn_ref ?stream_lifecycle ()
+        ?audio ~kind:assistant_kind ?blocks ?turn_ref ?stream_lifecycle ()
     in
-    append_chat_payload_durable path (line ^ "\n");
+    let payload =
+      String.concat "\n" (tool_lines @ [ line ]) ^ "\n"
+    in
+    append_chat_payload_durable path payload;
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -885,6 +1006,169 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
       (sanitize_name keeper_name) (Printexc.to_string exn);
     Error (Printexc.to_string exn)
 
+type append_once_line =
+  { transcript_slot : Keeper_chat_delivery_identity.transcript_slot
+  ; row_id : string
+  ; line : string
+  }
+
+let append_lines_once ?(reject_partial_after_result = false) path ~delivery_key
+      ~result_slot lines =
+  match
+    Fs_compat.update_private_file_durable_locked_result path (fun existing ->
+      let inspect index =
+        let rec loop found additions = function
+          | [] -> Ok (found, List.rev additions)
+          | ({ transcript_slot; row_id; line = _ } as candidate) :: rest ->
+            (match
+               find_indexed_provenance index ~delivery_key ~transcript_slot
+             with
+             | Error detail -> Error detail
+             | Ok (Some existing_row_id) ->
+               loop
+                 ((transcript_slot, existing_row_id, true) :: found)
+                 additions
+                 rest
+             | Ok None ->
+               loop
+                 ((transcript_slot, row_id, false) :: found)
+                 (candidate :: additions)
+                 rest)
+        in
+        loop [] [] lines
+      in
+      let inspected =
+        Result.bind (provenance_index_of_existing existing) inspect
+      in
+      match inspected with
+      | Error detail -> None, Error detail
+      | Ok (rows, additions) ->
+        let result_row =
+          List.find_map
+            (fun (slot, row_id, was_present) ->
+               if Keeper_chat_delivery_identity.transcript_slot_equal slot result_slot
+               then Some (row_id, was_present)
+               else None)
+            rows
+        in
+        (match result_row with
+         | None -> None, Error "idempotent chat append is missing its result slot"
+         | Some (row_id, result_was_present)
+           when reject_partial_after_result && result_was_present && additions <> [] ->
+           None,
+           Error
+             "assistant transcript already exists without its tool-call payload"
+         | Some (row_id, _) ->
+           let result =
+             if additions = []
+             then Already_present { row_id }
+             else Appended { row_id }
+           in
+           let payload =
+             additions
+             |> List.map (fun candidate -> candidate.line ^ "\n")
+             |> String.concat ""
+           in
+           (if additions = [] then None else Some payload), Ok result))
+  with
+  | Private_file_succeeded result -> result
+  | Private_file_succeeded_with_cleanup_failure
+      { value = result; cleanup_failure } ->
+    Log.Keeper.error
+      "keeper_chat_store: provenance batch update succeeded with descriptor settlement failure path=%s: %s"
+      path
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+    result
+  | Private_file_failed error ->
+    Error (Fs_compat.durable_append_error_to_string error)
+  | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+    Error
+      (Printf.sprintf
+         "%s; descriptor settlement failed: %s"
+         (Fs_compat.durable_append_error_to_string error)
+         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+;;
+
+let tool_call_append_lines ~ts ~surface ~conversation_id ~turn_ref ~delivery_key
+      tool_calls =
+  List.mapi
+    (fun ordinal tc ->
+       let call_id = normalize_tool_call_id ~position:ordinal tc.call_id in
+       let transcript_slot =
+         Keeper_chat_delivery_identity.Tool_call
+           { execution_id = Ids.Execution_id.of_string call_id; ordinal }
+       in
+       let row_id = mint_message_id ~ts in
+       { transcript_slot
+       ; row_id
+       ; line =
+           encode_line
+             ~role:Role.Tool
+             ~content:(normalize_tool_args tc.args)
+             ~ts
+             ~message_id:row_id
+             ~tool_call_id:call_id
+             ~tool_call_name:tc.call_name
+             ?surface
+             ?conversation_id
+             ?turn_ref
+             ~delivery_key
+             ~transcript_slot
+             ()
+       })
+    tool_calls
+;;
+
+let append_tool_calls_once
+      ~base_dir
+      ~keeper_name
+      ~delivery_key
+      ~(tool_calls : tool_call list)
+      ?surface
+      ?conversation_id
+      ?turn_ref
+      ()
+  =
+  match tool_calls with
+  | [] -> Error "idempotent tool-call append requires at least one tool call"
+  | _ ->
+    try
+      ensure_dir_once ~base_dir;
+      let redaction = redaction_for ~base_dir ~keeper_name in
+      let tool_calls = List.map (redact_tool_call redaction) tool_calls in
+      let path = chat_path ~base_dir ~keeper_name in
+      let ts = Time_compat.now () in
+      let lines =
+        tool_call_append_lines ~ts ~surface ~conversation_id ~turn_ref ~delivery_key
+          tool_calls
+      in
+      let ordinal = List.length tool_calls - 1 in
+      let result_slot =
+        Keeper_chat_delivery_identity.Tool_call
+          { execution_id =
+              Ids.Execution_id.of_string
+                (normalize_tool_call_id
+                   ~position:ordinal
+                   (List.nth tool_calls ordinal).call_id)
+          ; ordinal
+          }
+      in
+      append_lines_once path ~delivery_key ~result_slot lines
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string ChatStoreFailures)
+        ~labels:[ "operation", Keeper_chat_store_operation.(to_label Append) ]
+        ();
+      let detail = Printexc.to_string exn in
+      Log.Keeper.warn
+        "keeper_chat_store: tool-call append-once failed for %s: %s"
+        (sanitize_name keeper_name)
+        detail;
+      Error detail
+;;
+
 let append_assistant_message_once
       ~base_dir
       ~keeper_name
@@ -893,6 +1177,7 @@ let append_assistant_message_once
       ?surface
       ?conversation_id
       ?(assistant_kind = Row_kind.Utterance)
+      ?(tool_calls = [])
       ?blocks
       ?turn_ref
       ?stream_lifecycle
@@ -902,6 +1187,7 @@ let append_assistant_message_once
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
     let content = Keeper_secret_redaction.redact_text redaction content in
+    let tool_calls = List.map (redact_tool_call redaction) tool_calls in
     let blocks = redact_blocks redaction blocks in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
@@ -925,7 +1211,17 @@ let append_assistant_message_once
         ~transcript_slot
         ()
     in
-    append_line_once path ~delivery_key ~transcript_slot ~row_id line
+    let tool_lines =
+      tool_call_append_lines ~ts ~surface ~conversation_id ~turn_ref ~delivery_key
+        tool_calls
+    in
+    let assistant_line = { transcript_slot; row_id; line } in
+    append_lines_once
+      ~reject_partial_after_result:(tool_lines <> [])
+      path
+      ~delivery_key
+      ~result_slot:transcript_slot
+      (tool_lines @ [ assistant_line ])
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -945,10 +1241,11 @@ let append_assistant_message_once
    failure is already counted + logged inside the [_result] variant). New callers
    that must surface the failure call [append_assistant_message_result] directly. *)
 let append_assistant_message ~base_dir ~keeper_name ~(content : string)
-    ?surface ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle () =
+    ?tool_calls ?surface ?conversation_id ?audio ?blocks ?turn_ref
+    ?stream_lifecycle () =
   ignore
-    (append_assistant_message_result ~base_dir ~keeper_name ~content ?surface
-       ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle ()
+    (append_assistant_message_result ~base_dir ~keeper_name ~content ?tool_calls
+       ?surface ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle ()
       : (unit, string) result)
 
 (* RFC-0226: inbound user line recorded at delivery time, before (and
@@ -1267,11 +1564,16 @@ let parse_line ~file_path (line : string) : chat_message option =
                 ~detail:(Printf.sprintf "invalid delivery_key: %s" detail);
               None)
     in
-    if role_label = "" || content = "" then (
+    let has_structured_payload =
+      Option.is_some audio
+      || Option.exists (fun values -> values <> []) attachments
+      || Option.exists (fun values -> values <> []) blocks
+    in
+    if role_label = "" || (content = "" && not has_structured_payload) then (
       report_persistence_read_drop
         ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
         ~path:file_path
-        ~detail:"chat row missing non-empty role/content";
+        ~detail:"chat row missing role and readable text/structured payload";
       None)
     else
       match Role.of_label role_label with
@@ -1318,12 +1620,27 @@ let max_total_lines = 400
 
 let is_tool_message (msg : chat_message) = Role.equal msg.role Role.Tool
 
-(* A turn is persisted as user, tool*, assistant. Evicting the front of
-   the window can leave tool lines whose owning user line is gone;
-   render-wise they are orphans, so trim them. *)
-let rec drop_leading_tool_messages = function
-  | msg :: rest when is_tool_message msg -> drop_leading_tool_messages rest
-  | messages -> messages
+(* Old rows without either causal identity can become unrenderable when a
+   window evicts their owning user row. Current tool-only continuations carry
+   [turn_ref] or an idempotent [delivery_key] and remain valid even when they
+   are the first retained row. *)
+let drop_leading_orphan_tool_messages messages =
+  let rec split anonymous_tools = function
+    | ({ turn_ref = None; delivery_key = None; _ } as msg) :: rest
+      when is_tool_message msg ->
+      split (msg :: anonymous_tools) rest
+    | rest -> List.rev anonymous_tools, rest
+  in
+  match split [] messages with
+  | [], _ -> messages
+  | anonymous_tools,
+    ({ role = Role.Assistant; kind = Row_kind.Transport_failure; _ } :: _ as rest) ->
+    (* Failure persistence is one ordered batch: tool rows followed by its
+       typed terminal assistant row. The user row may already have been
+       persisted upstream or may fall just outside this page, so the terminal
+       marker—not a guessed missing parent—proves these leading rows belong. *)
+    anonymous_tools @ rest
+  | _, rest -> rest
 
 (* RFC-0226 P2: [load] serves a fixed window ([max_total_lines]) but
    used to read and JSON-parse the whole file to build it, so its cost
@@ -1443,7 +1760,7 @@ let load_page ~base_dir ~keeper_name ?before () : page =
       let redaction = redaction_for ~base_dir ~keeper_name in
       Queue.fold (fun acc msg -> msg :: acc) [] q
       |> List.rev
-      |> drop_leading_tool_messages
+      |> drop_leading_orphan_tool_messages
       |> List.map (redact_message redaction)
     in
     { messages; has_more = from > 0 || !evicted }

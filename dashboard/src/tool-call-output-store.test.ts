@@ -56,6 +56,15 @@ describe('tool-call-output-store', () => {
     expect(lookupToolCallOutput('toolu_abc')?.output).toBe('hello')
   })
 
+  it('preserves provider tool_use_id whitespace as opaque transcript identity', () => {
+    recordToolCallOutputs([
+      toolCall({ tool_use_id: '  toolu_abc \t', output: 'hello' }),
+    ])
+    expect(lookupToolCallOutput('tool-  toolu_abc \t')?.output).toBe('hello')
+    expect(lookupToolCallOutput('tool-toolu_abc')).toBeNull()
+    expect(toolCallOutputsById.value.has('  toolu_abc \t')).toBe(true)
+  })
+
   it('returns null for an unknown id', () => {
     recordToolCallOutputs([toolCall({ tool_use_id: 'toolu_abc' })])
     expect(lookupToolCallOutput('tool-missing')).toBeNull()
@@ -63,6 +72,11 @@ describe('tool-call-output-store', () => {
 
   it('skips entries without a tool_use_id (no stable join key)', () => {
     recordToolCallOutputs([toolCall({ tool_use_id: undefined })])
+    expect(toolCallOutputsById.value.size).toBe(0)
+  })
+
+  it('skips entries with a whitespace-only tool_use_id', () => {
+    recordToolCallOutputs([toolCall({ tool_use_id: ' \t ' })])
     expect(toolCallOutputsById.value.size).toBe(0)
   })
 

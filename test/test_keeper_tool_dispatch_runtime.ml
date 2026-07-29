@@ -2646,131 +2646,6 @@ let approved_web_search_resolution
   input, approval_id, resolution
 ;;
 
-let test_replaced_write_target_retires_stale_approval () =
-  with_exec_fixture "keeper_gate_replay_replaced_write_target"
-  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
-  (match
-     Masc.Keeper_gate_mode.set
-       config
-       ~actor:"test"
-       Masc.Keeper_gate_mode.Manual
-   with
-   | Ok _ -> ()
-   | Error detail -> fail detail);
-  let path = Filename.concat config.base_path "replace-before-replay.txt" in
-  write_file path "approved target";
-  let deferred =
-    KET.execute_keeper_tool_call_with_outcome
-      ~config
-      ~meta
-      ~publication_recovery
-      ~ctx_work
-      ~name:"Write"
-      ~input:
-        (`Assoc
-           [ "file_path", `String path
-           ; "content", `String "must not reach replaced target"
-           ])
-      ()
-  in
-  (match deferred.disposition with
-   | Tool_result.Deferred () -> ()
-   | Tool_result.Completed () | Tool_result.Failed _ ->
-     fail "write replacement fixture did not defer");
-  let approval_id =
-    match
-      Masc.Keeper_approval_queue.list_pending_entries_for_workspace
-        ~base_path:config.base_path
-    with
-    | Ok [ entry ] -> entry.id
-    | Ok entries ->
-      failf "expected one write approval, got %d" (List.length entries)
-    | Error error ->
-      fail (Masc.Keeper_approval_queue.storage_error_to_string error)
-  in
-  (match
-     Masc.Keeper_approval_queue.resolve_with_policy
-       ~base_path:config.base_path
-       ~id:approval_id
-       ~decision:Masc.Keeper_approval_queue.Decision.Approve
-       ~source:Masc.Keeper_approval_queue.Auto_judge
-       ()
-   with
-   | Ok _ -> ()
-   | Error error ->
-     fail (Masc.Keeper_approval_queue.resolve_error_to_string error));
-  let replacement = path ^ ".replacement" in
-  write_file replacement "replacement survives";
-  Unix.rename replacement path;
-  let resolution : Keeper_event_queue.hitl_resolution =
-    { approval_id
-    ; decision = Keeper_event_queue.Hitl_approved
-    ; channel =
-        Keeper_continuation_channel.unrouted "replaced write target test"
-    }
-  in
-  let grant () =
-    match Masc.Keeper_gate.cycle_grant_of_resolution resolution with
-    | Some grant -> grant
-    | None -> fail "approved write resolution did not create a grant"
-  in
-  let first =
-    Masc.Keeper_gate_replay.replay_approved_effect
-      ~config
-      ~meta
-      ~publication_recovery
-      ~turn_sandbox_factory:None
-      ~grant:(grant ())
-      ~approval_id
-      ()
-  in
-  (match first with
-   | Masc.Keeper_gate_replay.Failed
-       { journal = Masc.Keeper_gate_replay.Replay_journal_recorded; _ } ->
-     ()
-   | outcome ->
-     failf
-       "replaced target did not terminally retire its stale approval: %s"
-       (Masc.Keeper_gate_replay.outcome_to_string outcome));
-  check string
-    "replacement target was not overwritten"
-    "replacement survives"
-    (read_file path);
-  (match
-     Masc.Keeper_approval_queue.approved_resolution_delivery
-       ~base_path:config.base_path
-       ~id:approval_id
-   with
-   | Ok
-       { state = Masc.Keeper_approval_queue.Resolution_consumed
-       ; replay_outcome = Some (Masc.Keeper_approval_queue.Replay_failed _)
-       ; _
-       } ->
-     ()
-   | Ok _ -> fail "stale write approval remained actionable"
-   | Error error ->
-     fail (Masc.Keeper_approval_queue.grant_error_to_string error));
-  match
-    Masc.Keeper_gate_replay.replay_approved_effect
-      ~config
-      ~meta
-      ~publication_recovery
-      ~turn_sandbox_factory:None
-      ~grant:(grant ())
-      ~approval_id
-      ()
-  with
-  | Masc.Keeper_gate_replay.Failed
-      { journal = Masc.Keeper_gate_replay.Replay_journal_already_recorded
-      ; _
-      } ->
-    ()
-  | outcome ->
-    failf
-      "retired stale approval became actionable again: %s"
-      (Masc.Keeper_gate_replay.outcome_to_string outcome)
-;;
-
 let test_blob_failure_repairs_journal_without_second_effect () =
   with_exec_fixture "keeper_gate_replay_blob_repair"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -2864,99 +2739,6 @@ let test_blob_failure_repairs_journal_without_second_effect () =
          failf
            "in-memory journal-only repair failed: %s"
            (Masc.Keeper_gate_replay.outcome_to_string outcome))
-;;
-
-let test_concurrent_replay_has_one_effect_owner () =
-  with_exec_fixture "keeper_gate_replay_concurrent_owner"
-  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
-  (match
-     Masc.Keeper_gate_mode.set
-       config
-       ~actor:"test"
-       Masc.Keeper_gate_mode.Manual
-   with
-   | Ok _ -> ()
-   | Error detail -> fail detail);
-  let _, approval_id, resolution =
-    approved_web_search_resolution
-      ~config
-      ~meta
-      ~publication_recovery
-      ~ctx_work
-      ~tool_call_id:"web-search-concurrent-owner"
-  in
-  let grant () =
-    match Masc.Keeper_gate.cycle_grant_of_resolution resolution with
-    | Some grant -> grant
-    | None -> fail "concurrent replay resolution did not create a grant"
-  in
-  Eio.Switch.run
-  @@ fun sw ->
-  let owner_claimed, resolve_owner_claimed = Eio.Promise.create () in
-  let release_owner, resolve_release_owner = Eio.Promise.create () in
-  let owner_result, resolve_owner_result = Eio.Promise.create () in
-  Masc.Keeper_gate_replay.For_testing.with_replay_claim_hook
-    (fun ~approval_id:claimed_id ->
-       check string "claim belongs to approval" approval_id claimed_id;
-       Eio.Promise.resolve resolve_owner_claimed ();
-       Eio.Promise.await release_owner)
-  @@ fun () ->
-  Eio.Fiber.fork ~sw (fun () ->
-    let outcome =
-      Masc.Tool_misc.with_web_search_simulation_for_test
-        ~outcomes:
-          [ ( "duckduckgo"
-            , `Hits
-                [ ( "Single owner"
-                  , "https://example.com/single-owner"
-                  , "only one replay may execute"
-                  )
-                ] )
-          ]
-      @@ fun () ->
-      Masc.Keeper_gate_replay.replay_approved_effect
-        ~config
-        ~meta
-        ~publication_recovery
-        ~turn_sandbox_factory:None
-        ~grant:(grant ())
-        ~approval_id
-        ()
-    in
-    Eio.Promise.resolve resolve_owner_result outcome);
-  Eio.Promise.await owner_claimed;
-  (match
-     Masc.Keeper_gate_replay.replay_approved_effect
-       ~config
-       ~meta
-       ~publication_recovery
-       ~turn_sandbox_factory:None
-       ~grant:(grant ())
-       ~approval_id
-       ()
-   with
-   | Masc.Keeper_gate_replay.Repair_required
-       { stage = Masc.Keeper_gate_replay.Replay_in_flight; _ } ->
-     ()
-   | outcome ->
-     failf
-       "concurrent replay escaped its single owner: %s"
-       (Masc.Keeper_gate_replay.outcome_to_string outcome));
-  Eio.Promise.resolve resolve_release_owner ();
-  match Eio.Promise.await owner_result with
-  | Masc.Keeper_gate_replay.Applied
-      { output
-      ; journal = Masc.Keeper_gate_replay.Replay_journal_recorded
-      ; _
-      } ->
-    check bool
-      "the single owner completed the effect"
-      true
-      (contains_substring output "Single owner")
-  | outcome ->
-    failf
-      "the replay owner did not complete: %s"
-      (Masc.Keeper_gate_replay.outcome_to_string outcome)
 ;;
 
 let test_journal_failure_retries_only_persistence () =
@@ -3056,8 +2838,8 @@ let test_journal_failure_retries_only_persistence () =
            (Masc.Keeper_gate_replay.outcome_to_string outcome))
 ;;
 
-let test_unknown_effect_is_durable_and_not_replayed () =
-  with_exec_fixture "keeper_gate_replay_unknown_effect"
+let test_failed_effect_is_durable_and_not_replayed () =
+  with_exec_fixture "keeper_gate_replay_failed_effect"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        (match
           Masc.Keeper_gate_mode.set
@@ -3095,12 +2877,12 @@ let test_unknown_effect_is_durable_and_not_replayed () =
            ()
        in
        (match first with
-        | Masc.Keeper_gate_replay.Indeterminate
+        | Masc.Keeper_gate_replay.Failed
             { journal = Masc.Keeper_gate_replay.Replay_journal_recorded; _ } ->
           ()
         | outcome ->
           failf
-            "unknown effect was not durably recorded: %s"
+            "failed effect was not durably recorded: %s"
             (Masc.Keeper_gate_replay.outcome_to_string outcome));
        match
          Masc.Keeper_gate_replay.replay_approved_effect
@@ -3112,7 +2894,7 @@ let test_unknown_effect_is_durable_and_not_replayed () =
            ~approval_id
            ()
        with
-       | Masc.Keeper_gate_replay.Indeterminate
+       | Masc.Keeper_gate_replay.Failed
            { journal =
                Masc.Keeper_gate_replay.Replay_journal_already_recorded
            ; _
@@ -3120,11 +2902,11 @@ let test_unknown_effect_is_durable_and_not_replayed () =
          ()
        | outcome ->
          failf
-           "durable indeterminate effect was executed again: %s"
+           "durable failure was executed again: %s"
            (Masc.Keeper_gate_replay.outcome_to_string outcome))
 ;;
 
-let test_consumed_without_outcome_is_terminal_indeterminate () =
+let test_consumed_without_outcome_requires_operator_repair () =
   with_exec_fixture "keeper_gate_replay_unknown_restart"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        (match
@@ -3179,7 +2961,7 @@ let test_consumed_without_outcome_is_terminal_indeterminate () =
          | None ->
            fail "approved restart resolution did not create a grant"
        in
-       let first =
+       match
          Masc.Keeper_gate_replay.replay_approved_effect
            ~config
            ~meta
@@ -3188,32 +2970,17 @@ let test_consumed_without_outcome_is_terminal_indeterminate () =
            ~grant:restarted_grant
            ~approval_id
            ()
-       in
-       (match first with
-        | Masc.Keeper_gate_replay.Indeterminate
-            { journal = Masc.Keeper_gate_replay.Replay_journal_recorded
-            ; _
-            } ->
-          ()
-        | outcome ->
-          failf
-            "consumed outcome gap did not settle fail-closed: %s"
-            (Masc.Keeper_gate_replay.outcome_to_string outcome));
-       match
-         Masc.Keeper_approval_queue.approved_resolution_delivery
-           ~base_path:config.base_path
-           ~id:approval_id
        with
-       | Ok
-           { state = Masc.Keeper_approval_queue.Resolution_consumed
-           ; replay_outcome =
-               Some (Masc.Keeper_approval_queue.Replay_indeterminate _)
+       | Masc.Keeper_gate_replay.Repair_required
+           { stage =
+               Masc.Keeper_gate_replay.Replay_effect_indeterminate_after_restart
            ; _
            } ->
          ()
-       | Ok _ -> fail "restart gap did not persist its terminal uncertainty"
-       | Error error ->
-         fail (Masc.Keeper_approval_queue.grant_error_to_string error))
+       | outcome ->
+         failf
+           "consumed unknown outcome entered replay: %s"
+           (Masc.Keeper_gate_replay.outcome_to_string outcome))
 ;;
 
 let test_unsupported_approved_operation_retains_exact_model_issued_path () =
@@ -4390,18 +4157,14 @@ let () =
         test_approved_web_search_grant_executes_exact_request;
       test_case "approved WebSearch replays without model resubmission" `Quick
         test_approved_web_search_replays_without_model_resubmission;
-      test_case "replaced write target retires stale approval" `Quick
-        test_replaced_write_target_retires_stale_approval;
       test_case "blob failure repairs journal without second effect" `Quick
         test_blob_failure_repairs_journal_without_second_effect;
-      test_case "concurrent replay has one effect owner" `Quick
-        test_concurrent_replay_has_one_effect_owner;
       test_case "journal failure retries only persistence" `Quick
         test_journal_failure_retries_only_persistence;
-      test_case "unknown effect is durable and not replayed" `Quick
-        test_unknown_effect_is_durable_and_not_replayed;
-      test_case "consumed outcome gap settles indeterminate" `Quick
-        test_consumed_without_outcome_is_terminal_indeterminate;
+      test_case "failed effect is durable and not replayed" `Quick
+        test_failed_effect_is_durable_and_not_replayed;
+      test_case "consumed outcome gap requires operator repair" `Quick
+        test_consumed_without_outcome_requires_operator_repair;
       test_case "unsupported approval retains exact model-issued path" `Quick
         test_unsupported_approved_operation_retains_exact_model_issued_path;
       test_case "task FSM errors require explicit failure_class" `Quick

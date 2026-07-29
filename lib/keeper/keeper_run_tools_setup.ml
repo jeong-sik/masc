@@ -218,12 +218,8 @@ let prepare_agent_setup
                      Keeper_internal_error.Replay_evidence_retrieval
                    | Keeper_gate_replay.Replay_journal ->
                      Keeper_internal_error.Replay_journal
-                   | Keeper_gate_replay.Replay_in_flight ->
-                     Keeper_internal_error.Replay_in_flight
-                   | Keeper_gate_replay.Replay_persistence_backpressure ->
-                     Keeper_internal_error.Replay_persistence_backpressure
-                   | Keeper_gate_replay.Stale_grant_retirement ->
-                     Keeper_internal_error.Replay_stale_grant_retirement
+                   | Keeper_gate_replay.Replay_effect_indeterminate_after_restart ->
+                     Keeper_internal_error.Replay_effect_indeterminate_after_restart
                    | Keeper_gate_replay.Invalid_resolution_state ->
                      Keeper_internal_error.Replay_invalid_resolution_state)
               ; detail
@@ -232,9 +228,7 @@ let prepare_agent_setup
         ( _
         , ( Keeper_gate_replay.Not_applicable
           | Keeper_gate_replay.Applied _
-          | Keeper_gate_replay.Applied_with_warning _
-          | Keeper_gate_replay.Failed _
-          | Keeper_gate_replay.Indeterminate _ ) )
+          | Keeper_gate_replay.Failed _ ) )
     | None ->
       Ok ()
   in

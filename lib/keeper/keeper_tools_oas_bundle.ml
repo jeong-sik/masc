@@ -86,17 +86,7 @@ let make_tool_bundle
            "gate replay approval=%s %s"
            approval_id
            (Keeper_gate_replay.outcome_to_string outcome)
-       | Keeper_gate_replay.Applied_with_warning _ as outcome ->
-         Log.Keeper.error
-           "gate replay approval=%s %s"
-           approval_id
-           (Keeper_gate_replay.outcome_to_string outcome)
        | Keeper_gate_replay.Failed _ as outcome ->
-         Log.Keeper.error
-           "gate replay approval=%s %s"
-           approval_id
-           (Keeper_gate_replay.outcome_to_string outcome)
-       | Keeper_gate_replay.Indeterminate _ as outcome ->
          Log.Keeper.error
            "gate replay approval=%s %s"
            approval_id

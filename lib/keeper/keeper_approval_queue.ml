@@ -81,9 +81,7 @@ type approved_resolution_state =
 
 type resolution_replay_outcome =
   | Replay_applied of Tool_output.artifact_ref
-  | Replay_applied_with_warning of Tool_output.artifact_ref
   | Replay_failed of Tool_output.artifact_ref
-  | Replay_indeterminate of Tool_output.artifact_ref
 
 type approved_resolution_delivery =
   { request : approved_resolution_request
@@ -433,19 +431,9 @@ let resolution_replay_outcome_to_yojson = function
       [ "kind", `String "applied"
       ; "output_ref", Tool_output.normalized_artifact_ref_to_json output_ref
       ]
-  | Replay_applied_with_warning detail_ref ->
-    `Assoc
-      [ "kind", `String "applied_with_warning"
-      ; "detail_ref", Tool_output.normalized_artifact_ref_to_json detail_ref
-      ]
   | Replay_failed detail_ref ->
     `Assoc
       [ "kind", `String "failed"
-      ; "detail_ref", Tool_output.normalized_artifact_ref_to_json detail_ref
-      ]
-  | Replay_indeterminate detail_ref ->
-    `Assoc
-      [ "kind", `String "indeterminate"
       ; "detail_ref", Tool_output.normalized_artifact_ref_to_json detail_ref
       ]
 ;;
@@ -1050,17 +1038,6 @@ let resolution_replay_outcome_of_yojson ~surface = function
          replay_artifact_ref_of_yojson ~surface "output_ref" fields
        in
        Ok (Replay_applied output_ref)
-     | "applied_with_warning" ->
-       let* () =
-         reject_unknown_fields
-           ~surface
-           ~allowed:[ "kind"; "detail_ref" ]
-           fields
-       in
-       let* detail_ref =
-         replay_artifact_ref_of_yojson ~surface "detail_ref" fields
-       in
-       Ok (Replay_applied_with_warning detail_ref)
      | "failed" ->
        let* () =
          reject_unknown_fields
@@ -1072,17 +1049,6 @@ let resolution_replay_outcome_of_yojson ~surface = function
          replay_artifact_ref_of_yojson ~surface "detail_ref" fields
        in
        Ok (Replay_failed detail_ref)
-     | "indeterminate" ->
-       let* () =
-         reject_unknown_fields
-           ~surface
-           ~allowed:[ "kind"; "detail_ref" ]
-           fields
-       in
-       let* detail_ref =
-         replay_artifact_ref_of_yojson ~surface "detail_ref" fields
-       in
-       Ok (Replay_indeterminate detail_ref)
      | other ->
        Error
          (Printf.sprintf
@@ -2154,22 +2120,10 @@ let approved_resolution_delivery ~base_path ~id =
 let resolution_replay_outcome_equal left right =
   match left, right with
   | Replay_applied left, Replay_applied right
-  | Replay_applied_with_warning left, Replay_applied_with_warning right
-  | Replay_failed left, Replay_failed right
-  | Replay_indeterminate left, Replay_indeterminate right ->
+  | Replay_failed left, Replay_failed right ->
     left = right
   | Replay_applied _, Replay_failed _
-  | Replay_applied _, Replay_applied_with_warning _
-  | Replay_applied _, Replay_indeterminate _
-  | Replay_applied_with_warning _, Replay_applied _
-  | Replay_applied_with_warning _, Replay_failed _
-  | Replay_applied_with_warning _, Replay_indeterminate _
-  | Replay_failed _, Replay_applied _
-  | Replay_failed _, Replay_applied_with_warning _
-  | Replay_failed _, Replay_indeterminate _
-  | Replay_indeterminate _, Replay_applied _
-  | Replay_indeterminate _, Replay_applied_with_warning _
-  | Replay_indeterminate _, Replay_failed _ ->
+  | Replay_failed _, Replay_applied _ ->
     false
 ;;
 

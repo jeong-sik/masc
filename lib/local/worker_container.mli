@@ -105,10 +105,11 @@ val make_worker_meta :
 val load_worker_checkpoint :
   base_path:string ->
   worker_name:string ->
-  Agent_sdk.Checkpoint.t option
+  (Agent_sdk.Checkpoint.t option, string) result
 (** Reads [checkpoint.json] via {!Agent_sdk.Checkpoint.of_string}.
-    Returns [None] on missing file, parse failure, or
-    [Sys_error]. *)
+    Returns [Ok None] only when the file is absent. Decode and I/O failures are
+    returned explicitly so an incompatible checkpoint cannot become a silent
+    cold start. *)
 
 val save_worker_checkpoint :
   base_path:string ->

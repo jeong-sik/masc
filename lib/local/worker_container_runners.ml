@@ -53,7 +53,7 @@ let run_worker_oas ~sw ?net
     let mcp_session_id =
       resolved_mcp_session_id ~base_path ~worker_name
     in
-    let checkpoint = load_worker_checkpoint ~base_path ~worker_name in
+    let* checkpoint = load_worker_checkpoint ~base_path ~worker_name in
     let* provider_config, model_id =
       resolve_oas_provider_of_label spec.model_label
     in

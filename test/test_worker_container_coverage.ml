@@ -11,6 +11,21 @@ let with_env name value f =
       | None -> Unix.putenv name "")
     f
 
+let rec remove_tree path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+  | stat when stat.Unix.st_kind = Unix.S_DIR ->
+    Sys.readdir path
+    |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+    Unix.rmdir path
+  | _ -> Unix.unlink path
+;;
+
+let with_temp_dir prefix f =
+  let dir = Filename.temp_dir prefix "" in
+  Fun.protect ~finally:(fun () -> remove_tree dir) (fun () -> f dir)
+;;
+
 let worker_usage ?cost_usd ~input_tokens ~output_tokens () :
     Agent_sdk.Types.api_usage =
   {
@@ -207,6 +222,62 @@ let worker_meta ?mcp_client_session_started_at () =
     last_run_at = None;
   }
 
+let test_worker_checkpoint_missing_is_explicitly_empty () =
+  with_temp_dir "worker-checkpoint-missing" @@ fun base_path ->
+  match
+    Worker_container.load_worker_checkpoint
+      ~base_path
+      ~worker_name:"coverage-worker"
+  with
+  | Ok None -> ()
+  | Ok (Some _) | Error _ -> fail "missing checkpoint must be Ok None"
+;;
+
+let test_worker_checkpoint_decode_failure_is_not_cold_start () =
+  with_temp_dir "worker-checkpoint-invalid" @@ fun base_path ->
+  let worker_name = "coverage-worker" in
+  Worker_container.ensure_worker_container_dirs ~base_path ~worker_name;
+  let path =
+    Filename.concat
+      (Worker_container.worker_container_dir ~base_path ~worker_name)
+      "checkpoint.json"
+  in
+  Out_channel.with_open_text path (fun channel -> output_string channel {|{"version":8}|});
+  match Worker_container.load_worker_checkpoint ~base_path ~worker_name with
+  | Error _ -> ()
+  | Ok _ -> fail "incompatible checkpoint must fail explicitly"
+;;
+
+let test_worker_checkpoint_open_failure_is_not_cold_start () =
+  with_temp_dir "worker-checkpoint-open-failure" @@ fun base_path ->
+  let worker_name = "coverage-worker" in
+  Worker_container.ensure_worker_container_dirs ~base_path ~worker_name;
+  let path =
+    Filename.concat
+      (Worker_container.worker_container_dir ~base_path ~worker_name)
+      "checkpoint.json"
+  in
+  Unix.symlink "checkpoint.json" path;
+  match Worker_container.load_worker_checkpoint ~base_path ~worker_name with
+  | Error _ -> ()
+  | Ok _ -> fail "unopenable checkpoint must fail explicitly"
+;;
+
+let test_worker_checkpoint_dangling_link_is_not_cold_start () =
+  with_temp_dir "worker-checkpoint-dangling-link" @@ fun base_path ->
+  let worker_name = "coverage-worker" in
+  Worker_container.ensure_worker_container_dirs ~base_path ~worker_name;
+  let path =
+    Filename.concat
+      (Worker_container.worker_container_dir ~base_path ~worker_name)
+      "checkpoint.json"
+  in
+  Unix.symlink "missing-checkpoint.json" path;
+  match Worker_container.load_worker_checkpoint ~base_path ~worker_name with
+  | Error _ -> ()
+  | Ok _ -> fail "dangling checkpoint link must fail explicitly"
+;;
+
 let test_worker_mcp_client_session_preserves_persisted_start () =
   let started_at = 42.0 in
   let begun =
@@ -263,5 +334,13 @@ let () =
           test_case "worker MCP client session finish clears active start"
             `Quick
             test_worker_mcp_client_session_finish_clears_started_at;
+          test_case "missing checkpoint is explicit empty" `Quick
+            test_worker_checkpoint_missing_is_explicitly_empty;
+          test_case "checkpoint decode failure is not cold start" `Quick
+            test_worker_checkpoint_decode_failure_is_not_cold_start;
+          test_case "checkpoint open failure is not cold start" `Quick
+            test_worker_checkpoint_open_failure_is_not_cold_start;
+          test_case "checkpoint dangling link is not cold start" `Quick
+            test_worker_checkpoint_dangling_link_is_not_cold_start;
         ] );
     ]

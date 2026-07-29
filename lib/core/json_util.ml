@@ -203,11 +203,14 @@ let bool_opt_to_json : bool option -> Yojson.Safe.t = function
 let string_opt_field name (opt : string option) : string * Yojson.Safe.t =
   (name, string_opt_to_json opt)
 
-let error_assoc fields : Yojson.Safe.t =
+let assoc_with_status status fields : Yojson.Safe.t =
   let fields =
     List.filter (fun (key, _) -> not (String.equal key "status")) fields
   in
-  `Assoc (("status", `String "error") :: fields)
+  `Assoc (("status", `String status) :: fields)
+
+let ok_assoc fields = assoc_with_status "ok" fields
+let error_assoc fields = assoc_with_status "error" fields
 
 (** {1 Assoc field extraction}
 

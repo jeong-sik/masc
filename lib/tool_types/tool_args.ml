@@ -129,8 +129,7 @@ let error_response_typed ~code message =
     sub-payloads, or [(Yojson.Safe.t, string) result] pipelines that
     serialize at a later stage.  Same field-order guarantee as
     [ok_response]: status is prepended to the head of the [`Assoc]. *)
-let ok_assoc fields : Yojson.Safe.t =
-  `Assoc (("status", `String "ok") :: without_status_field fields)
+let ok_assoc = Json_util.ok_assoc
 
 (** Build a JSON OK response string with additional fields. *)
 let ok_response fields =

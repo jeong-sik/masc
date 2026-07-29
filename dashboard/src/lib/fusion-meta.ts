@@ -1,10 +1,10 @@
-// Fusion sink compatibility helpers shared by Board evidence, the standalone
-// Fusion surface, and keeper chat cards. All consumers parse the same
-// `meta.source === 'fusion'` payload emitted by `fusion_sink.ml`; this module
-// is the single source of truth for that normalization.
+// Fusion sink helpers shared by Board evidence, the standalone Fusion surface,
+// and keeper chat cards. Run identity comes only from the typed Board origin;
+// meta carries deliberation evidence, not a second identity.
 
 import { isRecord } from './type-guards'
 import { asRecord, asString, asBoolean } from './json-coerce'
+import type { BoardPostOrigin } from '../types'
 
 function decodeOcamlStringLiteral(value: string): string {
   return value
@@ -113,7 +113,7 @@ export type FusionUsage = {
 
 export type FusionEvidence = {
   source: 'fusion'
-  runId?: string | null
+  runId: string
   question?: string | null
   panel: FusionPanelEntry[]
   judge: FusionJudgeView | null
@@ -278,31 +278,25 @@ export function normalizeFusionUsage(
   }
 }
 
-export function extractFusionEvidence(meta: unknown): FusionEvidence | null {
+export function extractFusionEvidence(
+  meta: unknown,
+  origin: BoardPostOrigin | null | undefined,
+): FusionEvidence | null {
   if (!isRecord(meta)) return null
+  if (origin?.source !== 'fusion') return null
+  const runId = asString(origin.fusion_run_id)
+  if (!runId) return null
 
-  const nested = asRecord(meta.fusion_deliberation)
-  const effective: Record<string, unknown> = nested ? { ...nested, source: 'fusion' } : meta
-
-  const panel = normalizeFusionPanel(effective.panel)
-  const judge = normalizeFusionJudge(effective.judge)
-  const runId = firstString(effective, ['run_id', 'runId', 'id'])
-
-  // Explicit source tag is canonical. As a defensive fallback, treat any meta
-  // carrying panel + (judge | run_id) as fusion evidence so older payloads or
-  // schema drift still render.
-  const isFusion =
-    asString(effective.source) === 'fusion'
-    || (panel.length > 0 && (judge !== null || Boolean(runId)))
-  if (!isFusion) return null
+  const panel = normalizeFusionPanel(meta.panel)
+  const judge = normalizeFusionJudge(meta.judge)
 
   return {
     source: 'fusion',
     runId,
-    question: firstString(effective, ['question', 'prompt']),
+    question: firstString(meta, ['question', 'prompt']),
     panel,
     judge,
-    judges: normalizeFusionJudgeNodes(effective.judges),
-    usage: normalizeFusionUsage(effective, panel),
+    judges: normalizeFusionJudgeNodes(meta.judges),
+    usage: normalizeFusionUsage(meta, panel),
   }
 }

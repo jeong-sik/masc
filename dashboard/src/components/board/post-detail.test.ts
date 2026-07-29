@@ -683,9 +683,8 @@ describe('PostDetail', () => {
       comment_count: 0,
       post_kind: 'system',
       comments: [],
+      origin: { source: 'fusion', fusion_run_id: 'fus-1234567890' },
       meta: {
-        source: 'fusion',
-        run_id: 'fus-1234567890',
         question: 'Should we ship the fusion board renderer?',
         panel: [
           {

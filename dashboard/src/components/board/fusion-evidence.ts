@@ -138,10 +138,10 @@ export function FusionBoardEvidence({
   post,
   class: className,
 }: {
-  post: Pick<BoardPost, 'meta'>
+  post: Pick<BoardPost, 'meta' | 'origin'>
   class?: string
 }) {
-  const evidence = extractFusionEvidence(post.meta)
+  const evidence = extractFusionEvidence(post.meta, post.origin)
   if (!evidence) return null
 
   const answeredCount = evidence.panel.filter((panel) => panel.status === 'answered').length

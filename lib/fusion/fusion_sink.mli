@@ -43,8 +43,9 @@ val judge_node_meta : Fusion_types.judge_outcome -> Yojson.Safe.t
     stimulus는 Running 키퍼에게만 배달되는 일회성 채널이라, chat lane이 비어 있으면
     비-Running 키퍼는 실패 사유에 도달할 tool-reachable 표면이 없다(2026-07-01 사고 —
     bare "judge failed"만 보고 keeper들이 원인을 추측·폴링). board headline도 같은
-    실패 요약을 나른다. board: [Board_dispatch.create_post]로 meta_json(source/run_id/question/panel
-    답변 전체/judge 종합/observed_usage = panel N + judge 1 합산) 증거를 남긴다. [judge_usage]는
+    실패 요약을 나른다. board: [Board_dispatch.create_post]로 typed
+    [origin.source]/[origin.fusion_run_id]와 meta_json(question/panel 답변
+    전체/judge 종합/observed_usage = panel N + judge 1 합산) 증거를 남긴다. [judge_usage]는
     심판이 소비한 토큰(orchestrator가 [Fusion_judge.run]에서 분리해 주입). [judges]는 실제로
     실행된 심판 노드 관측 배열(RFC-0284)로 board meta_json [judges] 키에 panel과 동형으로
     직렬화된다 — canonical 단일 [judge] 키는 ADDITIVE 유지. [base_dir]는 호출자 주입.

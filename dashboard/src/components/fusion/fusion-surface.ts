@@ -122,8 +122,6 @@ interface FusionRunParams {
 interface FusionRunView {
   runId: string
   boardPostId: string
-  boardOriginSource: string | null
-  boardOriginRunId: string | null
   keeperName: string
   title: string
   question: string
@@ -333,27 +331,27 @@ function keeperNameFor(post: BoardPost): string {
     || 'system'
 }
 
-function fusionMeta(post: BoardPost): Record<string, unknown> | null {
+function fusionEvidence(post: BoardPost): {
+  meta: Record<string, unknown>
+  runId: string
+} | null {
   const meta = asRecord(post.meta)
   if (!meta) return null
-  if (asString(meta.source) === FUSION_BOARD_SOURCE) return meta
-
-  const nested = asRecord(meta.fusion_deliberation)
-  if (nested) return { ...nested, source: FUSION_BOARD_SOURCE }
-
-  return null
+  if (post.origin?.source !== FUSION_BOARD_SOURCE) return null
+  const runId = asString(post.origin.fusion_run_id)
+  return runId ? { meta, runId } : null
 }
 
 function fusionRunFromPost(post: BoardPost): FusionRunView | null {
-  const meta = fusionMeta(post)
-  if (!meta) return null
+  const evidence = fusionEvidence(post)
+  if (!evidence) return null
+  const { meta, runId } = evidence
 
   const panel = normalizeFusionPanel(meta.panel)
   const judge = normalizeJudge(meta.judge)
   const judges = normalizeFusionJudgeNodes(meta.judges)
   const usage = normalizeUsage(meta, panel)
   const params = normalizeParams(meta)
-  const runId = firstString(meta, ['run_id', 'runId', 'id']) ?? post.id
   const question = firstString(meta, ['question', 'prompt']) ?? post.body ?? post.content ?? post.title
   const status = statusFor(judge, panel)
   const tone = toneFor(status, judge.decision)
@@ -361,8 +359,6 @@ function fusionRunFromPost(post: BoardPost): FusionRunView | null {
   return {
     runId,
     boardPostId: post.id,
-    boardOriginSource: post.origin?.source ?? null,
-    boardOriginRunId: post.origin?.fusion_run_id ?? null,
     keeperName: keeperNameFor(post),
     title: post.title || `Fusion run ${runId}`,
     question,
@@ -997,50 +993,6 @@ function hasParams(params: FusionRunParams): boolean {
     || params.maxTokens !== null
 }
 
-type FusionSinkLinkageStatus = 'verified' | 'missing' | 'mismatch'
-
-interface FusionSinkLinkage {
-  status: FusionSinkLinkageStatus
-  label: string
-  detail: string
-}
-
-function sinkLinkageFor(run: FusionRunView): FusionSinkLinkage {
-  if (run.boardOriginSource !== FUSION_BOARD_SOURCE || !run.boardOriginRunId) {
-    return {
-      status: 'missing',
-      label: 'origin unverified',
-      detail: 'typed board origin is absent; using meta.run_id only',
-    }
-  }
-  if (run.boardOriginRunId !== run.runId) {
-    return {
-      status: 'mismatch',
-      label: 'origin mismatch',
-      detail: `origin.fusion_run_id=${run.boardOriginRunId}`,
-    }
-  }
-  return {
-    status: 'verified',
-    label: 'origin verified',
-    detail: 'origin.source=fusion and origin.fusion_run_id match meta.run_id',
-  }
-}
-
-function FusionSinkLinkageBadge({ linkage }: { linkage: FusionSinkLinkage }) {
-  return html`
-    <span
-      class=${`fus-sink-linkage ${linkage.status}`}
-      data-testid="fusion-sink-linkage"
-      data-linkage-status=${linkage.status}
-      title=${linkage.detail}
-    >
-      <span class="fus-sink-linkage-k">${linkage.label}</span>
-      <span class="fus-sink-linkage-v">${linkage.detail}</span>
-    </span>
-  `
-}
-
 // Presentation-only thresholds for clamping a long resolved_answer. These are a
 // display heuristic, not a semantic model of the rendered markdown — RichContent
 // owns markdown parsing, so this deliberately avoids counting markdown blocks and
@@ -1085,8 +1037,6 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
   const tokenLabel = combinedTokenLabel(run.usage)
   const preset = run.preset ?? findPreset(run.runId)
   const shape = fusionShapeInfo(run.judges)
-  const sinkLinkage = sinkLinkageFor(run)
-
   return html`
     <div class="fus-run-scroll" data-testid="fusion-detail">
       <div class="fus-run-head">
@@ -1243,8 +1193,16 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
                         class=${`fus-sink-to ${ringFocusClasses()}`}
                         onClick=${() => navigate('board', { post: run.boardPostId })}
                       >보드 포스트 #${run.boardPostId} →</button>
-                      <span class="fus-sink-d">패널 N + 심판 종합을 meta_json 증거로 발행 · typed origin으로 run linkage 검증</span>
-                      <${FusionSinkLinkageBadge} linkage=${sinkLinkage} />
+                      <span class="fus-sink-d">패널 N + 심판 종합을 meta_json 증거로 발행 · typed origin이 run identity를 소유</span>
+                      <span
+                        class="fus-sink-linkage verified"
+                        data-testid="fusion-sink-linkage"
+                        data-linkage-status="verified"
+                        title="origin.source=fusion and origin.fusion_run_id are the run identity"
+                      >
+                        <span class="fus-sink-linkage-k">typed origin</span>
+                        <span class="fus-sink-linkage-v">origin.fusion_run_id=${run.runId}</span>
+                      </span>
                     </div>
                   </div>
                   <div class="fus-sink-track">
@@ -1258,13 +1216,10 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
                 <div
                   class="fus-corr"
                   data-testid="fusion-sink-correlation"
-                  data-meta-run-id=${run.runId}
-                  data-origin-source=${run.boardOriginSource ?? ''}
-                  data-origin-run-id=${run.boardOriginRunId ?? ''}
+                  data-origin-source=${FUSION_BOARD_SOURCE}
+                  data-origin-run-id=${run.runId}
                 >
-                  correlation · meta <span class="mono">${run.runId}</span>
-                  <span class="fus-corr-sep">/</span>
-                  origin <span class="mono">${run.boardOriginRunId ?? 'unverified'}</span>
+                  correlation · origin <span class="mono">${run.runId}</span>
                 </div>
               </div>
             </div>
@@ -1304,7 +1259,7 @@ function FusionRegistryDetail({ record }: { record: FusionRunRecord }) {
         </div>
         <div class="fus-judge-wait">
           ${record.status === 'running'
-            ? html`<span class="fus-rdot run"></span>심의 진행 중 — 패널·심판 상세는 fusion sink가 <code>meta.source = "fusion"</code> 보드 포스트를 기록한 뒤 이 자리에 나타납니다.`
+            ? html`<span class="fus-rdot run"></span>심의 진행 중 — 패널·심판 상세는 fusion sink가 typed Fusion origin을 가진 보드 포스트를 기록한 뒤 이 자리에 나타납니다.`
             : record.status === 'failed'
               ? html`실패로 종료됨.${record.failureCode ? html` <span class="mono">${record.failureCode}</span>` : null}${record.error ? html` · ${record.error}` : null}`
               : '완료됨 — 보드 sink 기록을 기다리는 중입니다.'}
@@ -1436,7 +1391,7 @@ export function FusionSurface() {
                     ${boardError
                       ? html`보드 sink read path(<code>${'/api/v1/dashboard/board?sort_by=recent&limit=500'}</code>)가 실패했습니다. registry 관측(<code>/api/v1/dashboard/fusion-runs</code>)은 독립 소스이며, 캐시된 보드 sink 행만 상세 리뷰에 표시됩니다.`
                       : html`레지스트리 관측(<code>/api/v1/dashboard/fusion-runs</code>)은 상단 KPI에 집계되고, 진행 중 런은 왼쪽 목록에 표시됩니다.
-                        상세한 패널·심판 리뷰는 fusion sink가 <code>meta.source = "fusion"</code> 보드 포스트를 기록한 뒤 나타납니다.`}
+                        상세한 패널·심판 리뷰는 fusion sink가 typed Fusion origin을 가진 보드 포스트를 기록한 뒤 나타납니다.`}
                   </p>
                 </div>
               </div>

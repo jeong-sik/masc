@@ -63,11 +63,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
                  ~keeper_name:m.name
                  error) )
       in
-      let persona_extended =
-        Keeper_types_profile.resolved_persona_name ~keeper_name:m.name defaults
-        |> Keeper_types_profile.load_persona_extended
-        |> Option.value ~default:""
-      in
       let active_goals =
         List.filter_map
           (fun goal_id ->
@@ -77,14 +72,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
                  Some (id, title)
                | None -> None)
           m.active_goal_ids
-      in
-      let default_prompt_string default live =
-        match default with
-        | Some value when String.trim live = "" -> value
-        | _ -> live
-      in
-      let prompt_instructions =
-        default_prompt_string defaults.instructions m.instructions
       in
       let active_goal_ids_json =
         `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids)
@@ -128,11 +115,10 @@ let keeper_config_json (config : Workspace.config) (name : string)
         Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta:m
       in
       let effective_system_prompt =
-        Keeper_prompt.build_keeper_system_prompt
-          ~instructions:prompt_instructions
-          ~persona_extended ~keeper_name:m.name
-          ~active_goals
-          ()
+        Keeper_run_context.build_base_system_prompt
+          ~config
+          ~profile_defaults:defaults
+          ~meta:m
       in
       (* Preview the unified prompt shape a keeper turn uses.
          We build the observation from the current workspace state so the
@@ -159,8 +145,11 @@ let keeper_config_json (config : Workspace.config) (name : string)
             ~pending_board_events:(Some pending_board_events) ~config ~meta:m
         in
         let parts =
+          let active_goal_summaries =
+            Keeper_unified_prompt.active_goal_summaries ~config ~meta:m
+          in
           Keeper_unified_prompt.build_prompt_preview ~meta:m ~base_path:config.base_path
-            ~profile_defaults:defaults ~observation ()
+            ~profile_defaults:defaults ~active_goal_summaries ~observation ()
         in
         (* Match what a turn actually sends: the observation frame rides the
            per-turn dynamic context (system side), and the persisted user
@@ -172,7 +161,12 @@ let keeper_config_json (config : Workspace.config) (name : string)
       in
       let prompt =
         `Assoc [
-          ("instructions", `String prompt_instructions);
+          ( "instructions",
+            `String
+              (Keeper_unified_prompt.effective_instructions
+                 ~meta:m
+                 ~profile_defaults:defaults
+                 ()) );
           ( "system_prompt_blocks",
             `Assoc
               [

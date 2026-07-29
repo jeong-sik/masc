@@ -176,9 +176,12 @@ let build_keeper_system_prompt
             (fun (id, title) ->
                (* RFC-0294: available-goals line was "- <id> [<horizon>] <title>";
                   horizon removed, so it is now "- <id> <title>". *)
-               Printf.sprintf "- %s %s"
-                 (String_util.escape_xml id)
-                 (String_util.escape_xml title))
+               match String.trim title with
+               | "" -> Printf.sprintf "- %s" (String_util.escape_xml id)
+               | title ->
+                 Printf.sprintf "- %s %s"
+                   (String_util.escape_xml id)
+                   (String_util.escape_xml title))
             goals
         in
         Printf.sprintf "\n<available_goals>\n%s\n</available_goals>\n"

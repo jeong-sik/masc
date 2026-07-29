@@ -39,6 +39,33 @@ val format_current_task : Masc_domain.task -> string
     lane reuses this renderer so it sees the same task identity, status, and
     handoff as an autonomous wake without persisting that context. *)
 
+val effective_instructions :
+  meta:Keeper_meta_contract.keeper_meta ->
+  ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
+  unit ->
+  string
+(** Resolve the single instructions value used by every system-prompt
+    entrypoint and its dashboard projection. *)
+
+val active_goal_summaries :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  (string * string) list
+(** Resolve every active goal id for the stable prompt contract. Unknown ids
+    remain present with an empty title so every entrypoint renders the same
+    bare-id fallback. *)
+
+val build_system_prompt :
+  meta:Keeper_meta_contract.keeper_meta ->
+  base_path:string ->
+  ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
+  ?active_goal_summaries:(string * string) list ->
+  unit ->
+  string
+(** Build the model-facing stable Keeper contract shared by direct and
+    autonomous turns. Channel-specific input belongs in dynamic context or the
+    persisted user message, not in a second system-prompt implementation. *)
+
 (** Build the three-channel unified prompt from keeper state.
 
     @param meta Keeper metadata (identity, soul, goals, instructions)

@@ -107,6 +107,16 @@ let direct_turn_dynamic_context
   |> List.filter (fun text -> String.trim text <> "")
   |> String.concat "\n\n"
 
+let direct_turn_system_prompt
+      ~(base_system_prompt : string)
+      ~(direct_reply : bool)
+  =
+  if direct_reply
+  then
+    Keeper_prompt.append_direct_reply_mode_prompt
+      ~base_prompt:base_system_prompt
+  else base_system_prompt
+
 let direct_owner_conversation_context
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -215,6 +225,7 @@ let surface_context_to_instructions (ctx : Yojson.Safe.t) : string option =
 module For_testing = struct
   let direct_owner_conversation_context = direct_owner_conversation_context
   let direct_turn_dynamic_context = direct_turn_dynamic_context
+  let direct_turn_system_prompt = direct_turn_system_prompt
   let surface_context_to_instructions = surface_context_to_instructions
   let direct_no_progress_retry_reason =
     Keeper_turn_runtime_budget.direct_no_progress_retry_reason
@@ -635,13 +646,16 @@ let run_keeper_invocation_turn_admitted
                   ~turn_instructions_text
               in
               (* === HARD CONSTRAINTS (stay in system_prompt) === *)
-              (* 1. Direct reply mode *)
+              (* The model-facing stable contract is shared with autonomous
+                 turns. [base_system_prompt] is the checkpoint bootstrap
+                 prompt assembled by [Keeper_run_context]; using it here was
+                 the last production split between direct and autonomous
+                 Keeper behavior. Channel-specific input remains below in
+                 [dynamic_context] and the persisted user message. *)
               let prompt =
-                if direct_reply then
-                  Keeper_prompt.append_direct_reply_mode_prompt
-                    ~base_prompt:base_system_prompt
-                else
-                  base_system_prompt
+                direct_turn_system_prompt
+                  ~base_system_prompt
+                  ~direct_reply
               in
               { system_prompt = prompt; dynamic_context }
             in

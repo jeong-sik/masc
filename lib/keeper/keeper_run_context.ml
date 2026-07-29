@@ -25,43 +25,19 @@ type run_context =
   ; runtime_config_path : string option
   }
 
-let prompt_profile_default default current =
-  (* DET-OK: keeper TOML/persona profile defaults are the declarative
-     prompt-config boundary; persisted meta is the legacy fallback. *)
-  match default with
-  | Some value -> value
-  | None -> current
-
 let build_base_system_prompt
       ~(config : Workspace.config)
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ~(meta : keeper_meta)
   =
-  let persona_extended =
-    Keeper_types_profile.resolved_persona_name ~keeper_name:meta.name
-      profile_defaults
-    |> Keeper_types_profile.load_persona_extended
-    |> Option.value ~default:""
+  let active_goal_summaries =
+    Keeper_unified_prompt.active_goal_summaries ~config ~meta
   in
-  let active_goals =
-    List.filter_map
-      (fun goal_id ->
-         match Goal_store.get_goal config ~goal_id with
-         (* RFC-0294: active_goals tuple dropped its horizon element. *)
-         | Some { Goal_store.id; title; _ } -> Some (id, title)
-         | None -> None)
-      meta.active_goal_ids
-  in
-  (* RFC-0324 B-1: no catalog-fed repository list is injected into the
-     prompt any more — the filesystem is the repo truth and the prompt's
-     constant <repositories> block instructs self-discovery. *)
-  Keeper_prompt.build_keeper_system_prompt
-    ~instructions:
-      (prompt_profile_default profile_defaults.instructions meta.instructions)
-    ~persona_extended
-    ~keeper_name:meta.name
-    ~active_goals
-    ~home_ground:(Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
+  Keeper_unified_prompt.build_system_prompt
+    ~meta
+    ~base_path:config.base_path
+    ~profile_defaults
+    ~active_goal_summaries
     ()
 
 let prepare_run_context

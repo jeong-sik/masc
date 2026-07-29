@@ -17,6 +17,7 @@ let base_observation : WO.world_observation =
   ; running_keeper_fiber_count = 1
   ; connected_surfaces = []
   ; connected_surface_failures = []
+  ; own_recent_board_posts = []
   }
 ;;
 

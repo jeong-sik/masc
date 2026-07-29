@@ -101,6 +101,7 @@ type world_observation =
   ; running_keeper_fiber_count : int
   ; connected_surfaces : Gate_surface.surface_presence list
   ; connected_surface_failures : Gate_surface.presence_failure list
+  ; own_recent_board_posts : Board.post list
   }
 
 type keeper_cycle_channel =
@@ -183,6 +184,44 @@ let check_self_comment_status = Board_signal.check_self_comment_status
 let compare_board_cursor_token = Board_signal.compare_cursor_token
 let board_cursor_token_of_post = Board_signal.cursor_token_of_post
 let list_board_posts_after_cursor = Board_signal.list_posts_after_cursor
+
+(** The keeper's own latest board posts, newest first. Cursor-independent:
+    the board-event collector above filters out self-authored posts and only
+    looks past the cursor, so without this a keeper never observes its own
+    published posts in-prompt (production: one keeper posted 23 near-duplicate
+    posts in a single hour). Raw observation only — bounded by
+    [Keeper_config.keeper_board_own_recent_max], scanned within
+    [Keeper_config.keeper_board_own_recent_scan_limit]; no dedup gate. *)
+let collect_own_recent_board_posts ~(meta : keeper_meta) : Board.post list =
+  let max_posts = Keeper_config.keeper_board_own_recent_max () in
+  if max_posts <= 0
+  then []
+  else (
+    let self_ids = self_ids meta in
+    try
+      Board_dispatch.list_posts
+        ~sort_by:Board_dispatch.Recent
+        ~limit:(Keeper_config.keeper_board_own_recent_scan_limit ())
+        ()
+      |> List.filter (fun (p : Board.post) ->
+           is_self_author ~self_ids (Board.Agent_id.to_string p.author))
+      (* [List.filteri] over [List.take]: a fresh keeper has fewer than
+         [max_posts] posts, and [List.take] raises past the list length. *)
+      |> List.filteri (fun i _ -> i < max_posts)
+    with
+    | exn ->
+      (* Same fail-loud contract as board event collection: counted, warned,
+         re-raised — never an empty list on a storage failure. *)
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string ObservationQueryFailures)
+        ~labels:[ ("operation", Runtime_observation_query_operation.(to_label Board_events)) ]
+        ();
+      Log.Keeper.warn
+        "own recent board posts collection failed keeper=%s: %s"
+        meta.name
+        (Printexc.to_string exn);
+      raise exn)
+;;
 
 let scheduled_automation_item_limit = 5
 
@@ -1077,6 +1116,7 @@ let observe
   ; running_keeper_fiber_count
   ; connected_surfaces = surface_presence.surfaces
   ; connected_surface_failures = surface_presence.failures
+  ; own_recent_board_posts = collect_own_recent_board_posts ~meta
   }
 ;;
 
@@ -1113,6 +1153,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; running_keeper_fiber_count = count_running_keeper_fibers ~config
   ; connected_surfaces = surface_presence.surfaces
   ; connected_surface_failures = surface_presence.failures
+  ; own_recent_board_posts = collect_own_recent_board_posts ~meta
   }
 ;;
 

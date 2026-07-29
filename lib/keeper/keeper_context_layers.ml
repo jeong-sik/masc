@@ -9,13 +9,16 @@ type layer_id =
   | Scheduled_automation
   | Pending_mentions
   | Scope_messages
+  | Own_board_posts
   | Board_activity
 
 (* Prefix-cache ordering: emit larger, more stable sections first so providers
    can reuse a longer shared prefix across cycles; highly volatile reactive
    signals stay later in the same user message. [Current_task] sits directly
    after [Active_goals]: the claimed task is standing context that changes on
-   claim/release, not per cycle. *)
+   claim/release, not per cycle. [Own_board_posts] changes only when the
+   keeper itself publishes, so it sits just ahead of the per-cycle reactive
+   [Board_activity]. *)
 let ordered =
   [ Active_goals
   ; Current_task
@@ -25,6 +28,7 @@ let ordered =
   ; Scheduled_automation
   ; Pending_mentions
   ; Scope_messages
+  ; Own_board_posts
   ; Board_activity
   ]
 ;;
@@ -41,7 +45,8 @@ let order_index = function
   | Scheduled_automation -> 5
   | Pending_mentions -> 6
   | Scope_messages -> 7
-  | Board_activity -> 8
+  | Own_board_posts -> 8
+  | Board_activity -> 9
 ;;
 
 let assemble ~content_of =

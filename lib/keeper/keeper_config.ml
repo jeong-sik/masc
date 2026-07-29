@@ -94,6 +94,36 @@ let keeper_memory_os_recall_max_bytes_rp =
     ~description:"Rendered recall block byte budget; oldest episodes are dropped to fit (0 = unbounded)" ()
 let keeper_memory_os_recall_max_bytes () : int =
   Runtime_params.get keeper_memory_os_recall_max_bytes_rp
+
+(* Own-recent-board-posts self-awareness layer. The board-event collector is
+   cursor-based and filters out self-authored posts, so without this layer a
+   keeper never observes its own published posts in-prompt and can repeat the
+   same content every cycle (observed in production: 23 of 26 posts in one
+   hour were near-duplicates). The layer restores raw observation data only —
+   relevance and novelty remain model decisions; there is no dedup gate.
+
+   [max] bounds how many of the keeper's own newest posts the world
+   observation carries per turn. [scan_limit] bounds how many recent board
+   posts (across all authors) the collector scans to find them, so a busy
+   board cannot push the keeper's own posts out of the window. Both default
+   small: this is standing context, not a history dump. *)
+let keeper_board_own_recent_max_rp =
+  _rp_int ~key:"keeper.board.own_recent.max"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOARD_OWN_RECENT_MAX"
+                          ~default:5 ~min_v:0 ~max_v:1000)
+    ~min_v:0 ~max_v:1000
+    ~description:"Own recent board posts injected into the world observation per turn (0 = disable)" ()
+let keeper_board_own_recent_max () : int =
+  Runtime_params.get keeper_board_own_recent_max_rp
+
+let keeper_board_own_recent_scan_limit_rp =
+  _rp_int ~key:"keeper.board.own_recent.scan_limit"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOARD_OWN_RECENT_SCAN_LIMIT"
+                          ~default:200 ~min_v:1 ~max_v:100_000)
+    ~min_v:1 ~max_v:100_000
+    ~description:"Recent board posts scanned to collect the keeper's own posts" ()
+let keeper_board_own_recent_scan_limit () : int =
+  Runtime_params.get keeper_board_own_recent_scan_limit_rp
 let keeper_bootstrap_proactive_warmup_sec_rp =
   _rp_int ~key:"keeper.proactive.warmup_sec"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_PROACTIVE_WARMUP_SEC"

@@ -111,6 +111,12 @@ val keeper_memory_os_recall_max_episodes : unit -> int
 val keeper_memory_os_recall_max_bytes : unit -> int
 (** Observability-only threshold (see .ml); not itself an enforced drop. *)
 
+(** Own-recent-board-posts self-awareness layer (see .ml): how many of the
+    keeper's own latest posts the world observation carries per turn, and how
+    far back the scan window reaches to find them. *)
+val keeper_board_own_recent_max : unit -> int
+val keeper_board_own_recent_scan_limit : unit -> int
+
 val keeper_bootstrap_proactive_warmup_sec : unit -> int
 val keeper_bootstrap_stagger_step_sec : unit -> int
 val keeper_bootstrap_retry_interval_sec : unit -> int

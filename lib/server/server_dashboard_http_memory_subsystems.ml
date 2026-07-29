@@ -2,7 +2,7 @@
 
 open Server_utils
 
-   existing fixtures in test_server_dashboard_http_memory_subsystems.ml). *)
+(* Memory subsystem fixtures (see existing fixtures in test_server_dashboard_http_memory_subsystems.ml). *)
 
 let dashboard_memory_subsystems_http_json
       ~(config : Workspace_utils.config)

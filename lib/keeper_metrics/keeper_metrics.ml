@@ -39,6 +39,7 @@ type t =
   | Compactions
   | CompactionRatioChange
   | CompactionSavedTokens
+  | CompactionSettlements
   | EmergencyCompactRatioThreshold
   | OperatorCompact
   | OperatorClear
@@ -250,6 +251,7 @@ let to_string = function
   | Compactions -> "masc_keeper_compactions_total"
   | CompactionRatioChange -> "masc_keeper_compaction_ratio_change"
   | CompactionSavedTokens -> "masc_keeper_compaction_saved_tokens_total"
+  | CompactionSettlements -> "masc_keeper_compaction_settlements_total"
   | EmergencyCompactRatioThreshold ->
     "masc_keeper_emergency_compact_ratio_threshold"
   | OperatorCompact -> "masc_keeper_operator_compact_total"

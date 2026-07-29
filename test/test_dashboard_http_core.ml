@@ -235,17 +235,25 @@ let test_keeper_chat_recovery_route_is_exact () =
     "/api/v1/keepers/idealist/chat/receipts/" ^ receipt_id ^ "/cancel"
   in
   (match
-     Server_dashboard_http_keeper_api.classify_keeper_post_route cancel_path
+     Server_dashboard_http_keeper_chat_pending.pending_cancel_route cancel_path
    with
-   | Server_dashboard_http_keeper_api.Keeper_post_chat_pending_cancel route ->
-     check string "pending cancel route keeper" "idealist" route.keeper_name;
-     check string "pending cancel route receipt" receipt_id route.receipt_id
+   | Some (keeper_name, observed_receipt_id) ->
+     check string "pending cancel route keeper" "idealist" keeper_name;
+     check string "pending cancel route receipt" receipt_id observed_receipt_id
    | _ -> fail "exact pending cancel route was not classified");
-  check bool "pending cancel route rejects extra segments" true
-    (Server_dashboard_http_keeper_api.classify_keeper_post_route
-       (cancel_path ^ "/bulk")
-     = Server_dashboard_http_keeper_api.Keeper_post_unknown)
-  ;
+  check (option (pair string string)) "pending cancel route rejects extra segments" None
+    (Server_dashboard_http_keeper_chat_pending.pending_cancel_route
+       (cancel_path ^ "/bulk"));
+  let pending_path = "/api/v1/keepers/idealist/chat/pending" in
+  check (option string) "pending inventory route is exact" (Some "idealist")
+    (Server_dashboard_http_keeper_chat_pending.pending_get_route pending_path);
+  check (option string) "pending inventory route rejects extra segments" None
+    (Server_dashboard_http_keeper_chat_pending.pending_get_route
+       (pending_path ^ "/extra"));
+  check bool "Worker can cancel a directly submitted pending message" true
+    (Masc_domain.has_permission
+       Masc_domain.Worker
+       Server_dashboard_http_keeper_chat_pending.cancel_permission);
   let quarantine_path =
     "/api/v1/keepers/idealist/board-attention/quarantines/ba-root-123/recovery"
   in

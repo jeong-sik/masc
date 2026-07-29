@@ -22,6 +22,7 @@ import {
   clearKeeper,
   deleteKeeperHistorySnapshots,
   fetchKeeperChatHistory,
+  fetchKeeperChatPending,
   fetchKeeperChatReceipt,
   fetchKeeperCheckpoints,
   fetchQueuedKeeperMessageResult,
@@ -29,6 +30,7 @@ import {
   isTerminalQueuedKeeperMessage,
   pauseKeeper,
   parseKeeperRuntimeTrace,
+  parseKeeperChatPendingSnapshot,
   parseKeeperChatReceipt,
   resolveKeeperChatRecovery,
   queuedKeeperMessageError,
@@ -332,6 +334,100 @@ describe('Keeper chat durable receipt API', () => {
         }),
       }),
     )
+  })
+
+  it('fetches the exact durable pending payload and live work projection', async () => {
+    const receiptId = 'chatq_00000000-0000-4000-8000-000000000004'
+    const payload = {
+      schema: 'keeper_chat_queue.pending.v1',
+      ok: true,
+      keeper_name: 'keeper sangsu',
+      revision: '11',
+      current_work: { lane: 'autonomous', started_at: 42 },
+      pending: [{
+        receipt: {
+          schema: 'keeper_chat_queue.receipt.v2',
+          keeper_name: 'keeper sangsu',
+          receipt_id: receiptId,
+          revision: '11',
+          state: { kind: 'pending' },
+        },
+        content: '[image attached: photo.png]',
+        user_blocks: [{
+          type: 'image',
+          attachment_id: 'att-1',
+          name: 'photo.png',
+          mime_type: 'image/png',
+          size: 3,
+        }],
+        attachments: [{
+          id: 'att-1',
+          type: 'image',
+          name: 'photo.png',
+          size: 3,
+          mime_type: 'image/png',
+          data: 'data:image/png;base64,abc',
+        }],
+        submitted_at: 40,
+      }],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperChatPending('keeper sangsu')
+
+    expect(result).toEqual(parseKeeperChatPendingSnapshot(payload))
+    expect(result.currentWork).toEqual({ lane: 'autonomous', startedAt: 42 })
+    expect(result.pending[0]?.userBlocks).toEqual([{
+      type: 'image',
+      attachmentId: 'att-1',
+      name: 'photo.png',
+      mimeType: 'image/png',
+      size: 3,
+    }])
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/keepers/keeper%20sangsu/chat/pending',
+      expect.objectContaining({ headers: expect.any(Object) }),
+    )
+  })
+
+  it('recovers a committed cancellation when the POST response is lost', async () => {
+    const receiptId = 'chatq_00000000-0000-4000-8000-000000000005'
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('connection reset after commit'))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          schema: 'keeper_chat_queue.receipt.v2',
+          keeper_name: 'sangsu',
+          receipt_id: receiptId,
+          revision: '12',
+          state: {
+            kind: 'failed',
+            failure_kind: 'cancelled',
+            detail: 'cancelled by dashboard user before delivery',
+            completed_at: 42,
+            outcome_ref: null,
+          },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await cancelKeeperChatPendingReceipt('sangsu', receiptId)
+
+    expect(result.receipt.state).toMatchObject({
+      kind: 'failed',
+      failureKind: 'cancelled',
+    })
+    expect(result.audit).toEqual({
+      recorded: false,
+      error: '취소 응답이 유실되어 audit 기록 여부를 확인할 수 없습니다.',
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('bounds chat history response-body consumption after headers arrive', async () => {

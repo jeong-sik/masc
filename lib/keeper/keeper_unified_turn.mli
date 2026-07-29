@@ -127,14 +127,16 @@ type in_lane_compaction =
   | Compaction_refused_without_attempt of { consecutive_failures : int }
 (** Typed outcome of the in-lane provider-overflow compaction behind a
     [Requeue_after_context_compaction] disposition. [Compaction_committed]
-    proves the checkpoint durably shrank before the requeue, so the transition
-    resets the keeper's compaction-failure streak and the retry reloads real
-    progress. [Compaction_attempt_failed] means the recovery made no durable
-    progress; the transition advances the streak and escalates once it reaches
-    [Keeper_meta_contract.compaction_retry_escalation_threshold] (RFC-0351 S0,
-    #25461 — without the ceiling this lane requeued forever: 284 of 285
-    rejections in the 2026-07-21 storm carried trigger=provider_overflow and
-    only the operator's keeper_down ended it).
+    proves the checkpoint durably shrank before the requeue. It still advances
+    the provider-overflow episode streak; only an overflow-free completed turn
+    or an operator-committed manual compaction resets it. The retry reloads the
+    durable progress. [Compaction_attempt_failed] means the recovery made no
+    durable progress and also advances the streak. Once the streak reaches
+    [Keeper_meta_contract.compaction_retry_escalation_threshold], subsequent
+    reactive admission is refused (RFC-0351 S0, #25461 — without the ceiling
+    this lane requeued forever: 284 of 285 rejections in the 2026-07-21 storm
+    carried trigger=provider_overflow and only the operator's keeper_down ended
+    it).
 
     [Compaction_refused_without_attempt] is the admission gate declining the
     trigger at that same threshold ([Keeper_post_turn.Retry_suspended]): no
@@ -159,15 +161,10 @@ type source_disposition =
     to act ([no_compaction_reason]); the terminal transition advances the
     compaction-failure streak, because a turn whose context cannot shrink
     re-overflows deterministically on every retry. It does not replace the
-    route: [Keeper_event_queue_state.Compaction_retry_exhausted] is constructed
-    nowhere outside that module's [of_json], so nothing ever serializes one to
-    decode. What the threshold actually does is make
-    [Keeper_post_turn.prepare_compaction] refuse reactive triggers
+    route. The threshold makes [Keeper_post_turn.prepare_compaction] refuse
+    reactive triggers
     ([Compaction_refused_without_attempt]); only an operator-committed manual
     compaction or an overflow-free completed turn lifts it.
-    [Acknowledge_after_in_turn_handling] consumes the selected source after an
-    exact terminal outcome was handled in this turn, so the ordinary retry
-    route cannot dispatch the same exact attempt again.
     [Requeue_after_context_compaction] preserves the exact source stimulus
     after MASC handled a typed provider overflow in this Keeper lane; the next
     cycle reloads the durably compacted checkpoint.

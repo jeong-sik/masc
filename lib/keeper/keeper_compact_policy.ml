@@ -504,8 +504,6 @@ let compact_for_request_typed_with
               (Keeper_compaction_llm_summarizer.exact_execution_evidence_catalog_evidence_sha256 exact)
             ~plan_fingerprint:
               (Keeper_compaction_llm_summarizer.exact_execution_evidence_plan_fingerprint exact)
-            ~receipt_plan_fingerprint:
-              (Keeper_compaction_llm_summarizer.exact_execution_evidence_receipt_plan_fingerprint exact)
             ~receipt_request_body_sha256:
               (Keeper_compaction_llm_summarizer.exact_execution_evidence_receipt_request_body_sha256 exact)
             ~before_checkpoint_bytes:before_bytes

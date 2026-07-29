@@ -129,7 +129,6 @@ let canonical_compaction_evidence () =
       ~catalog_generation_fingerprint:"catalog-generation"
       ~catalog_evidence_sha256:"catalog-evidence"
       ~plan_fingerprint:"plan-fingerprint"
-      ~receipt_plan_fingerprint:"plan-fingerprint"
       ~receipt_request_body_sha256:"request-body"
       ~before_checkpoint_bytes:4096
       ~after_checkpoint_bytes:1024

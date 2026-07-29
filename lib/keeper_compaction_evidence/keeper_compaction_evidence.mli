@@ -7,7 +7,6 @@ type t =
   ; catalog_generation_fingerprint : string
   ; catalog_evidence_sha256 : string
   ; plan_fingerprint : string
-  ; receipt_plan_fingerprint : string
   ; receipt_request_body_sha256 : string
   ; before_checkpoint_bytes : int
   ; after_checkpoint_bytes : int
@@ -28,7 +27,6 @@ type field =
   | Catalog_generation_fingerprint
   | Catalog_evidence_sha256
   | Plan_fingerprint
-  | Receipt_plan_fingerprint
   | Receipt_request_body_sha256
   | Before_checkpoint_bytes
   | After_checkpoint_bytes
@@ -59,10 +57,6 @@ type decode_error =
   | Expected_object
   | Unknown_field of string
   | Invalid_field of field * field_error
-  | Plan_fingerprint_mismatch of
-      { plan_fingerprint : string
-      ; receipt_plan_fingerprint : string
-      }
   | Invalid_transition of measure * int * int
   | Invalid_message_accounting of
       { before_message_count : int
@@ -94,7 +88,6 @@ val create
   -> catalog_generation_fingerprint:string
   -> catalog_evidence_sha256:string
   -> plan_fingerprint:string
-  -> receipt_plan_fingerprint:string
   -> receipt_request_body_sha256:string
   -> before_checkpoint_bytes:int
   -> after_checkpoint_bytes:int
@@ -120,7 +113,7 @@ val to_json : t -> Yojson.Safe.t
 
 val of_json : Yojson.Safe.t -> (t, decode_error) result
 (** Restore persisted structural and exact-execution evidence from one closed
-    object. Unknown, duplicate, missing, malformed, blank, mismatched, or
+    object. Unknown, duplicate, missing, malformed, blank, or
     objectively impossible evidence is rejected explicitly; no external
     provenance labels or historical shape are inferred or migrated.
     [Checkpoint_bytes] must strictly reduce, message accounting must remain

@@ -50,7 +50,6 @@ type exact_execution_evidence =
   ; catalog_generation_fingerprint : string
   ; catalog_evidence_sha256 : string
   ; plan_fingerprint : string
-  ; receipt_plan_fingerprint : string
   ; receipt_request_body_sha256 : string
   }
 
@@ -1011,7 +1010,6 @@ let exact_execution_evidence (flow_success : Exact_output.flow_success) =
       |> Exact_output.plan_provenance_catalog_evidence
       |> Exact_output.catalog_evidence_sha256
   ; plan_fingerprint = observation.receipt_plan_fingerprint
-  ; receipt_plan_fingerprint = observation.receipt_plan_fingerprint
   ; receipt_request_body_sha256 =
       observation.receipt_request_body_sha256
   }
@@ -1568,11 +1566,6 @@ let exact_execution_evidence_catalog_evidence_sha256
 
 let exact_execution_evidence_plan_fingerprint (evidence : exact_execution_evidence) =
   evidence.plan_fingerprint
-;;
-
-let exact_execution_evidence_receipt_plan_fingerprint
-      (evidence : exact_execution_evidence) =
-  evidence.receipt_plan_fingerprint
 ;;
 
 let exact_execution_evidence_receipt_request_body_sha256

@@ -5,7 +5,6 @@ type t =
   ; catalog_generation_fingerprint : string
   ; catalog_evidence_sha256 : string
   ; plan_fingerprint : string
-  ; receipt_plan_fingerprint : string
   ; receipt_request_body_sha256 : string
   ; before_checkpoint_bytes : int
   ; after_checkpoint_bytes : int
@@ -26,7 +25,6 @@ type field =
   | Catalog_generation_fingerprint
   | Catalog_evidence_sha256
   | Plan_fingerprint
-  | Receipt_plan_fingerprint
   | Receipt_request_body_sha256
   | Before_checkpoint_bytes
   | After_checkpoint_bytes
@@ -57,10 +55,6 @@ type decode_error =
   | Expected_object
   | Unknown_field of string
   | Invalid_field of field * field_error
-  | Plan_fingerprint_mismatch of
-      { plan_fingerprint : string
-      ; receipt_plan_fingerprint : string
-      }
   | Invalid_transition of measure * int * int
   | Invalid_message_accounting of
       { before_message_count : int
@@ -83,7 +77,6 @@ let field_name = function
   | Catalog_generation_fingerprint -> "catalog_generation_fingerprint"
   | Catalog_evidence_sha256 -> "catalog_evidence_sha256"
   | Plan_fingerprint -> "plan_fingerprint"
-  | Receipt_plan_fingerprint -> "receipt_plan_fingerprint"
   | Receipt_request_body_sha256 -> "receipt_request_body_sha256"
   | Before_checkpoint_bytes -> "before_checkpoint_bytes"
   | After_checkpoint_bytes -> "after_checkpoint_bytes"
@@ -104,7 +97,6 @@ let exact_fields =
   ; Catalog_generation_fingerprint
   ; Catalog_evidence_sha256
   ; Plan_fingerprint
-  ; Receipt_plan_fingerprint
   ; Receipt_request_body_sha256
   ]
 ;;
@@ -153,12 +145,6 @@ let decode_error_to_string = function
       "invalid_field:%s:%s"
       (field_name field)
       (field_error_to_string error)
-  | Plan_fingerprint_mismatch
-      { plan_fingerprint; receipt_plan_fingerprint } ->
-    Printf.sprintf
-      "plan_fingerprint_mismatch:plan=%s:receipt=%s"
-      plan_fingerprint
-      receipt_plan_fingerprint
   | Invalid_transition (measure, before, after) ->
     Printf.sprintf
       "invalid_transition:%s:%d:%d"
@@ -241,7 +227,6 @@ let create
       ~catalog_generation_fingerprint
       ~catalog_evidence_sha256
       ~plan_fingerprint
-      ~receipt_plan_fingerprint
       ~receipt_request_body_sha256
       ~before_checkpoint_bytes
       ~after_checkpoint_bytes
@@ -279,18 +264,12 @@ let create
          ; Catalog_generation_fingerprint, catalog_generation_fingerprint
          ; Catalog_evidence_sha256, catalog_evidence_sha256
          ; Plan_fingerprint, plan_fingerprint
-         ; Receipt_plan_fingerprint, receipt_plan_fingerprint
          ; Receipt_request_body_sha256, receipt_request_body_sha256
          ]
      with
      | Some (field, _) -> Error (Invalid_field (field, Blank_string))
      | None ->
-       if not (String.equal plan_fingerprint receipt_plan_fingerprint)
-       then
-         Error
-           (Plan_fingerprint_mismatch
-              { plan_fingerprint; receipt_plan_fingerprint })
-       else if after_checkpoint_bytes >= before_checkpoint_bytes
+       if after_checkpoint_bytes >= before_checkpoint_bytes
        then
          Error
            (Invalid_transition
@@ -344,7 +323,6 @@ let create
            ; catalog_generation_fingerprint
            ; catalog_evidence_sha256
            ; plan_fingerprint
-           ; receipt_plan_fingerprint
            ; receipt_request_body_sha256
            ; before_checkpoint_bytes
            ; after_checkpoint_bytes
@@ -378,7 +356,6 @@ let of_json = function
     let* catalog_generation_fingerprint = string Catalog_generation_fingerprint in
     let* catalog_evidence_sha256 = string Catalog_evidence_sha256 in
     let* plan_fingerprint = string Plan_fingerprint in
-    let* receipt_plan_fingerprint = string Receipt_plan_fingerprint in
     let* receipt_request_body_sha256 = string Receipt_request_body_sha256 in
     let* before_checkpoint_bytes = integer Before_checkpoint_bytes in
     let* after_checkpoint_bytes = integer After_checkpoint_bytes in
@@ -397,7 +374,6 @@ let of_json = function
       ~catalog_generation_fingerprint
       ~catalog_evidence_sha256
       ~plan_fingerprint
-      ~receipt_plan_fingerprint
       ~receipt_request_body_sha256
       ~before_checkpoint_bytes
       ~after_checkpoint_bytes
@@ -420,7 +396,6 @@ let to_json evidence =
     ; "catalog_generation_fingerprint", `String evidence.catalog_generation_fingerprint
     ; "catalog_evidence_sha256", `String evidence.catalog_evidence_sha256
     ; "plan_fingerprint", `String evidence.plan_fingerprint
-    ; "receipt_plan_fingerprint", `String evidence.receipt_plan_fingerprint
     ; "receipt_request_body_sha256", `String evidence.receipt_request_body_sha256
     ; "before_checkpoint_bytes", `Int evidence.before_checkpoint_bytes
     ; "after_checkpoint_bytes", `Int evidence.after_checkpoint_bytes

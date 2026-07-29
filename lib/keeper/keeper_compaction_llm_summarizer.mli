@@ -211,7 +211,6 @@ val exact_execution_evidence_target_identity_fingerprint : exact_execution_evide
 val exact_execution_evidence_catalog_generation_fingerprint : exact_execution_evidence -> string
 val exact_execution_evidence_catalog_evidence_sha256 : exact_execution_evidence -> string
 val exact_execution_evidence_plan_fingerprint : exact_execution_evidence -> string
-val exact_execution_evidence_receipt_plan_fingerprint : exact_execution_evidence -> string
 val exact_execution_evidence_receipt_request_body_sha256 : exact_execution_evidence -> string
 val apply : compaction_plan -> Agent_sdk.Types.message list
 val summarized_indices : compaction_plan -> int list

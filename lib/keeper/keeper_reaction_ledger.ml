@@ -294,7 +294,7 @@ let record_event_queue_turn_started ~base_path ~keeper_name stimulus =
     (event_queue_turn_started_json ~keeper_name stimulus)
 ;;
 
-let reaction_kind_of_settlement = function
+let reaction_kind_of_transition = function
   | Keeper_event_queue_state.Ack -> Event_queue_ack
   | Keeper_event_queue_state.Manual_compaction_committed
       { followup = Keeper_event_queue_state.Compaction_commit_ack; _ } ->
@@ -348,7 +348,7 @@ let event_queue_transition_reaction_json
       (receipt : Keeper_event_queue_state.transition_receipt)
       stimulus
   =
-  let reaction_kind = reaction_kind_of_settlement receipt.settlement in
+  let reaction_kind = reaction_kind_of_transition receipt.transition in
   let stimulus_id = stimulus_id_of_event_queue stimulus in
   let event_id = event_queue_transition_event_id receipt source_index in
   `Assoc
@@ -356,12 +356,12 @@ let event_queue_transition_reaction_json
        ~record_kind:"reaction"
        ~event_id
        ~keeper_name
-       ~recorded_at:receipt.settled_at
+       ~recorded_at:receipt.applied_at
      @ [ "stimulus_id", `String stimulus_id
        ; ( "reaction"
          , `Assoc
              [ "kind", `String (reaction_kind_to_string reaction_kind)
-             ; "source", `String "keeper_event_queue_settlement"
+            ; "source", `String "keeper_event_queue_transition"
              ; "post_id", `String stimulus.post_id
              ; ( "stimulus_kind"
                , `String
@@ -394,7 +394,7 @@ let project_event_queue_transition_outbox_result ~base_path ~keeper_name =
       | [] ->
         Error
           (Printf.sprintf
-             "event queue settlement outbox has no sources keeper=%s transition_id=%s"
+             "event queue transition outbox has no sources keeper=%s transition_id=%s"
              keeper_name
              entry.receipt.transition_id)
       | stimuli ->
@@ -422,7 +422,7 @@ let project_event_queue_transition_outbox_result ~base_path ~keeper_name =
              | exn ->
                Error
                  (Printf.sprintf
-                    "event queue settlement ledger append failed keeper=%s event_id=%s: %s"
+                    "event queue transition ledger append failed keeper=%s event_id=%s: %s"
                     keeper_name
                     event_id
                     (Printexc.to_string exn)))
@@ -577,7 +577,7 @@ type row_quarantine_reason =
   | Transition_source_index_out_of_bounds
   | Transition_source_identity_mismatch
   | Event_identity_mismatch
-  | Transition_settlement_mismatch
+  | Transition_kind_mismatch
   | Missing_cursor
   | Missing_cursor_ts
   | Non_finite_cursor_ts
@@ -628,7 +628,7 @@ let row_quarantine_reason_to_string = function
   | Transition_source_index_out_of_bounds -> "transition_source_index_out_of_bounds"
   | Transition_source_identity_mismatch -> "transition_source_identity_mismatch"
   | Event_identity_mismatch -> "event_identity_mismatch"
-  | Transition_settlement_mismatch -> "transition_settlement_mismatch"
+  | Transition_kind_mismatch -> "transition_kind_mismatch"
   | Missing_cursor -> "missing_cursor"
   | Missing_cursor_ts -> "missing_cursor_ts"
   | Non_finite_cursor_ts -> "non_finite_cursor_ts"
@@ -678,8 +678,8 @@ let require_finite_float ~missing ~non_finite field json =
   | Some _ -> Error non_finite
 ;;
 
-let reaction_kind_matches_settlement reaction_kind settlement =
-  match reaction_kind, settlement with
+let reaction_kind_matches_transition reaction_kind transition =
+  match reaction_kind, transition with
   | Event_queue_ack, Keeper_event_queue_state.Ack -> true
   | Event_queue_ack,
     Keeper_event_queue_state.Manual_compaction_committed
@@ -782,6 +782,7 @@ let decode_transition_source = function
 ;;
 
 let decode_transition_reaction
+      ~legacy_receipt
       ~event_id
       ~metadata
       ~reaction_kind
@@ -824,9 +825,18 @@ let decode_transition_reaction
     | Some value -> Ok value
     | None -> Error Missing_transition_receipt
   in
-  let* receipt =
-    Keeper_event_queue_state.transition_receipt_of_yojson receipt_json
-    |> Result.map_error (fun _ -> Invalid_transition_receipt)
+  let decode_receipt =
+    if legacy_receipt
+    then Keeper_event_queue_state.legacy_settlement_transition_receipt_of_yojson
+    else
+      match receipt_json with
+      | `Assoc fields
+        when List.mem_assoc "lease_id" fields || List.mem_assoc "lease_sequence" fields ->
+        Keeper_event_queue_state.legacy_transition_receipt_of_yojson
+      | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+        Keeper_event_queue_state.transition_receipt_of_yojson
+  in
+  let* receipt = decode_receipt receipt_json |> Result.map_error (fun _ -> Invalid_transition_receipt)
   in
   let expected_event_id = event_queue_transition_event_id receipt source_index in
   let transition_id_matches =
@@ -836,9 +846,9 @@ let decode_transition_reaction
   in
   if not (String.equal event_id expected_event_id && transition_id_matches)
   then Error Event_identity_mismatch
-  else if reaction_kind_matches_settlement reaction_kind receipt.settlement
+  else if reaction_kind_matches_transition reaction_kind receipt.transition
   then Ok receipt
-  else Error Transition_settlement_mismatch
+  else Error Transition_kind_mismatch
 ;;
 
 let decode_reaction_row ~event_id metadata reaction =
@@ -861,9 +871,10 @@ let decode_reaction_row ~event_id metadata reaction =
     else Error Event_identity_mismatch
   | ( Event_queue_ack | Event_queue_no_compaction | Event_queue_cancelled
     | Event_queue_requeued | Event_queue_escalated ),
-    "keeper_event_queue_settlement" ->
+    ("keeper_event_queue_transition" | "keeper_event_queue_settlement" as source) ->
     let* transition_receipt =
       decode_transition_reaction
+        ~legacy_receipt:(String.equal source "keeper_event_queue_settlement")
         ~event_id
         ~metadata
         ~reaction_kind
@@ -876,11 +887,12 @@ let decode_reaction_row ~event_id metadata reaction =
          { metadata; reaction_kind; transition_receipt = Some transition_receipt })
   | Cursor_ack, "keeper_world_observation.board_cursor" ->
     Error Reaction_source_mismatch
-  | Turn_started, "keeper_event_queue_settlement"
+  | Turn_started, ("keeper_event_queue_transition" | "keeper_event_queue_settlement")
   | ( Event_queue_ack | Event_queue_no_compaction | Event_queue_cancelled
     | Event_queue_requeued | Event_queue_escalated ),
     "keeper_event_queue"
-  | Cursor_ack, ("keeper_event_queue" | "keeper_event_queue_settlement") ->
+  | Cursor_ack,
+    ("keeper_event_queue" | "keeper_event_queue_transition" | "keeper_event_queue_settlement") ->
     Error Reaction_source_mismatch
   | ( Turn_started | Event_queue_ack | Event_queue_no_compaction
     | Event_queue_cancelled | Event_queue_requeued | Event_queue_escalated

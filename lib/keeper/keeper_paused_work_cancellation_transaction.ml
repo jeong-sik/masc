@@ -8,7 +8,6 @@ type pending_request =
   ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
-  ; settled_at : float
   }
 
 type failure =
@@ -30,7 +29,7 @@ type failure =
   | Queue_commit_failed of string
 
 type success =
-  { settlement : Keeper_registry_event_queue.settle_result
+  { transition : Keeper_registry_event_queue.transition_result
   ; reservation_release : Keeper_lifecycle_reservation.release_outcome option
   }
 
@@ -181,7 +180,7 @@ let cancel_with_lifecycle
   let finish token outcome =
     let reservation_release = Keeper_lifecycle_reservation.release token in
     match outcome with
-    | Ok settlement -> Ok { settlement; reservation_release = Some reservation_release }
+    | Ok transition -> Ok { transition; reservation_release = Some reservation_release }
     | Error cause ->
       Error (Failed { cause; reservation_release = Some reservation_release })
   in
@@ -200,7 +199,7 @@ let cancel_with_lifecycle
          match replay_committed ~base_path ~keeper_name replay with
          | Error cause -> finish token (Error cause)
          | Ok (Some receipt) ->
-           finish token (Ok (Keeper_registry_event_queue.Already_settled receipt))
+           finish token (Ok (Keeper_registry_event_queue.Transition_already_applied receipt))
          | Ok None ->
            finish
              token
@@ -222,7 +221,7 @@ let cancel_with_lifecycle
   | Error cause -> Error (Failed { cause; reservation_release = None })
   | Ok (Some receipt) ->
     Ok
-      { settlement = Keeper_registry_event_queue.Already_settled receipt
+      { transition = Keeper_registry_event_queue.Transition_already_applied receipt
       ; reservation_release = None
       }
   | Ok None ->
@@ -249,6 +248,6 @@ let cancel_pending config ~keeper_name request =
         ~base_path:config.Workspace.base_path
         keeper_name
         ~current_owner_nonce
-        ~settled_at:request.settled_at
+        ~applied_at:(Time_compat.now ())
         ~cancellation)
 ;;

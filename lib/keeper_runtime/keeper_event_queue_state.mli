@@ -1,9 +1,9 @@
 (** Pure durable state machine for one Keeper event queue owner.
 
-    [event-queue.json] is the sole authority for pending stimuli, active
-    leases, monotonic lease identity, and settlement projection work.  This
-    module performs no I/O; persistence supplies the atomic file boundary and
-    publishes [pending] into the live registry only after a durable commit. *)
+    [event-queue.json] is the sole authority for pending stimuli and
+    source-bearing transition projection work. This module performs no I/O;
+    persistence supplies the atomic file boundary and publishes [pending] into
+    the live registry only after a durable commit. *)
 
 type lease_kind =
   | Single
@@ -92,7 +92,7 @@ type exact_execution_binding =
   ; status : exact_execution_lease_status
   }
 (** Durable pre-dispatch fence for one OAS exact-output attempt. A bound lease
-    cannot pass through generic settlement or registration recovery. *)
+    cannot pass through a generic transition or registration recovery. *)
 
 type escalation_reason =
   | Compaction_exact_lane_unconfigured of
@@ -236,7 +236,7 @@ val exact_execution_terminal_cause_of_label
   -> (exact_execution_terminal_cause, string) result
 val exact_execution_terminal_to_string : exact_execution_terminal -> string
 
-type settlement =
+type transition =
   | Ack
   | Manual_compaction_committed of
       { commit : manual_compaction_commit
@@ -256,10 +256,8 @@ type settlement =
 type transition_receipt =
   { transition_id : string
   ; event_id : string
-  ; lease_id : string
-  ; lease_sequence : int64
-  ; settled_at : float
-  ; settlement : settlement
+  ; applied_at : float
+  ; transition : transition
   }
 
 type outbox_entry =
@@ -269,9 +267,9 @@ type outbox_entry =
 
 type t
 
-type settle_result =
-  | Settled of transition_receipt
-  | Already_settled of transition_receipt
+type transition_result =
+  | Transition_applied of transition_receipt
+  | Transition_already_applied of transition_receipt
 
 type transfer_projection_result =
   | Transfer_projected
@@ -280,7 +278,7 @@ type transfer_projection_result =
 val empty : t
 val revision : t -> int64
 val pending : t -> Keeper_event_queue.t
-val last_settlement : t -> transition_receipt option
+val last_transition : t -> transition_receipt option
 val transition_outbox : t -> outbox_entry list
 val accepted_transfer_projections : t -> accepted_transfer list
 
@@ -311,32 +309,30 @@ val exact_execution_binding : t -> exact_execution_binding option
 
 val cancel_pending_accepted :
   current_owner_nonce:int ->
-  settled_at:float ->
+  applied_at:float ->
   cancellation:accepted_cancellation ->
   t ->
-  (t * settle_result, string) result
-(** Atomically create and terminally settle a synthetic single-event lease for
-    the exact pending [cancellation.source]. The source revision and owner
-    generation are checked before removal. This pure transition is committed
+  (t * transition_result, string) result
+(** Atomically apply the exact pending cancellation. The source revision and
+    owner generation are checked before removal. The transition is committed
     through a source-bearing WAL outbox entry by persistence. *)
 
 val transfer_pending_accepted :
   current_owner_nonce:int ->
-  settled_at:float ->
+  applied_at:float ->
   transfer:accepted_transfer ->
   t ->
-  (t * settle_result, string) result
-(** Atomically create and terminally settle a synthetic single-event lease for
-    the exact pending transfer source. The source revision and owner generation
-    are checked before removal, and the source-bearing WAL remains the replay
-    authority until the target projection completes. *)
+  (t * transition_result, string) result
+(** Atomically apply the exact pending transfer. The source revision and owner
+    generation are checked before removal, and the source-bearing WAL remains
+    the replay authority until the target projection completes. *)
 
 val ack_pending_source_terminal :
   current_owner_nonce:int ->
-  settled_at:float ->
+  applied_at:float ->
   source_terminal:accepted_source_terminal ->
   t ->
-  (t * settle_result, string) result
+  (t * transition_result, string) result
 (** ACK one exact pending event only when its closed payload
     exactly matches [source_terminal.source_receipt]. *)
 
@@ -345,14 +341,14 @@ val accepted_pending_cancellation_replay :
   t ->
   (transition_receipt option, string) result
 (** Look up an already committed pending cancellation by its stable operator
-    operation ID and exact source-bearing settlement. *)
+    operation ID and exact source-bearing transition. *)
 
 val accepted_pending_transfer_replay :
   accepted_transfer ->
   t ->
   (transition_receipt option, string) result
 (** Look up an already committed pending transfer by its stable operator
-    operation ID and exact source-bearing settlement. *)
+    operation ID and exact source-bearing transition. *)
 
 val project_accepted_transfer :
   accepted_transfer -> t -> (t * transfer_projection_result, string) result
@@ -371,11 +367,6 @@ val source_terminal_receipt_of_stimulus :
 (** Accept only [Fusion_completed], [Bg_completed], or [Hitl_resolved] and
     retain their exact typed terminal payload. *)
 
-val replay_transition_receipt : transition_receipt -> t -> (t, string) result
-(** Apply one canonical durable receipt to its exact active lease. Replaying
-    the same retained receipt is idempotent; a different receipt or a missing
-    lease is an explicit conflict. *)
-
 val mark_transition_projected : transition_id:string -> t -> (t, string) result
 (** Atomically retire a durable outbox entry after an external projector has
     materialized its stable [event_id], retaining the last receipt as the
@@ -388,8 +379,18 @@ val remove_by_post_id :
 val transition_receipt_equal : transition_receipt -> transition_receipt -> bool
 val transition_receipt_to_yojson : transition_receipt -> Yojson.Safe.t
 val transition_receipt_of_yojson : Yojson.Safe.t -> (transition_receipt, string) result
+val legacy_settlement_transition_receipt_of_yojson :
+  Yojson.Safe.t -> (transition_receipt, string) result
+(** Recovery-only decoder for historical receipt field names. New writes use
+    [applied_at_unix] and [transition] exclusively. *)
+val legacy_transition_receipt_of_yojson :
+  Yojson.Safe.t -> (transition_receipt, string) result
+(** Recovery-only decoder for retired v10 lease receipt fields. *)
 val outbox_entry_to_yojson : outbox_entry -> Yojson.Safe.t
 val outbox_entry_of_yojson : Yojson.Safe.t -> (outbox_entry, string) result
+val legacy_transition_outbox_entry_of_yojson :
+  Yojson.Safe.t -> (outbox_entry, string) result
+(** Recovery-only decoder for the retired v10 receipt fields. *)
 val legacy_source_terminal_ack_outbox_entry_of_yojson :
   Yojson.Safe.t -> (outbox_entry, string) result
 (** Recovery-only decoder for a v8 source-terminal outbox. It canonicalizes
@@ -397,13 +398,12 @@ val legacy_source_terminal_ack_outbox_entry_of_yojson :
     preserving the historical transition/event identity. New writes never use
     this path. *)
 val replay_transition_outbox_entry : outbox_entry -> t -> (t, string) result
-(** Replay a source-bearing committed transition. Active-lease settlements use
-    their exact lease; pending accepted cancellations reconstruct the same
-    synthetic lease from the receipt sequence and exact source. *)
+(** Replay a source-bearing committed transition. Historical lease-backed
+    records are accepted only at this durable recovery boundary. *)
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v10"] is the current write schema. Historical
-    v7/v8/v9 snapshots are accepted only at the durable recovery boundary;
-    unknown schemas fail closed and require a runtime reset. *)
+(** ["keeper.event_queue.state.v12"] is the current write schema. Historical
+    v7/v8/v9/v10/v11 snapshots are accepted only at the durable recovery
+    boundary; unknown schemas fail closed and require a runtime reset. *)

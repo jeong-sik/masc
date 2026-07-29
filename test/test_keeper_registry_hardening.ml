@@ -913,15 +913,15 @@ let test_goal_reconciliation_outbox_identity_rewakes_without_duplicate () =
             ~base_path:config.base_path
             ~keeper_name:meta.name
             ~current_owner_nonce:17
-            ~settled_at:101.0
+            ~applied_at:101.0
             ~cancellation
             ()
         with
         | Ok
-            (Keeper_event_queue_persistence.Settled _
-            | Keeper_event_queue_persistence.Already_settled _) -> ()
+            (Keeper_event_queue_persistence.Transition_applied _
+            | Keeper_event_queue_persistence.Transition_already_applied _) -> ()
         | Error detail -> fail detail
-        | Ok (Keeper_event_queue_persistence.Committed_followup_failed { detail; _ }) ->
+        | Ok (Keeper_event_queue_persistence.Transition_committed_followup_failed { detail; _ }) ->
           fail detail);
        let staged =
          match

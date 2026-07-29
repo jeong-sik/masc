@@ -31,16 +31,6 @@ let int64_of_yojson field = function
   | _ -> Error (field ^ " must be an int64")
 ;;
 
-let finite_float_of_yojson field = function
-  | `Float value when Float.is_finite value -> Ok value
-  | `Int value -> Ok (Float.of_int value)
-  | `Intlit value ->
-    (match Float.of_string_opt value with
-     | Some value when Float.is_finite value -> Ok value
-     | Some _ | None -> Error (field ^ " must be a finite number"))
-  | _ -> Error (field ^ " must be a finite number")
-;;
-
 let nonblank field value =
   if String.equal (String.trim value) ""
   then Error (field ^ " must not be blank")
@@ -78,7 +68,6 @@ let parse_cancel_pending = function
     ; ("owner_nonce", `Int owner_nonce)
     ; ("reason", `String reason)
     ; ("schema", `String request_schema)
-    ; ("settled_at", settled_at_json)
     ; ("source", source_json)
     ; ("source_revision", source_revision_json)
     ; ("source_state", `String "pending")
@@ -87,7 +76,6 @@ let parse_cancel_pending = function
     let* source = Queue.stimulus_of_yojson source_json in
     let* source_revision = int64_of_yojson "source_revision" source_revision_json in
     let* source_revision = nonnegative_int64 "source_revision" source_revision in
-    let* settled_at = finite_float_of_yojson "settled_at" settled_at_json in
     let* operator_operation_id =
       nonblank "operator_operation_id" operator_operation_id
     in
@@ -101,7 +89,6 @@ let parse_cancel_pending = function
            ; owner_nonce
            ; operator_operation_id
            ; reason
-           ; settled_at
            })
   | _ -> Error "pending cancel_accepted request fields are not exact"
 ;;
@@ -193,7 +180,7 @@ let of_yojson = function
        parse_cancel_pending fields
      | Some (`String "cancel_accepted"), Some (`String "active_lease") ->
        (* The active-lease arm required an operator-supplied lease that
-          [settle_committed] then had to find in durable state; none has been
+          [commit_transition] then had to find in durable state; none has been
           there since #25969 moved production to peek/ack. *)
        Error "active-lease cancel_accepted is no longer supported"
      | Some (`String "transfer_owner"), _ -> parse_transfer fields

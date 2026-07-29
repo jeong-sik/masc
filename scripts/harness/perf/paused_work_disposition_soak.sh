@@ -412,7 +412,6 @@ while (( $(date +%s) - START_EPOCH < DURATION_SEC )); do
   binding="$(jq -c --arg post_id "$post_id" '.queue.pending[] | select(.source.post_id == $post_id) | .continuation_binding' <<<"$INVENTORY")"
   source_revision="$(jq -r '.queue.revision | tostring' <<<"$INVENTORY")"
   operation_id="$RUN_ID/$ITERATIONS/$action"
-  settled_at="$(date +%s)"
 
   case "$action" in
     resume)
@@ -434,10 +433,10 @@ while (( $(date +%s) - START_EPOCH < DURATION_SEC )); do
     cancel)
       request="$(jq -cn --arg schema "$REQUEST_SCHEMA" --arg op "$operation_id" \
         --argjson source "$source" --arg revision "$source_revision" \
-        --argjson generation "$source_generation" --argjson settled_at "$settled_at" \
+        --argjson generation "$source_generation" \
         '{schema:$schema,operation:"cancel_accepted",source_state:"pending",source:$source,
           source_revision:$revision,owner_nonce:$generation,operator_operation_id:$op,
-          reason:"paused-work soak accepted cancellation",settled_at:$settled_at}')"
+          reason:"paused-work soak accepted cancellation"}')"
       CANCEL_CASES=$((CANCEL_CASES + 1))
       ;;
   esac
@@ -487,8 +486,6 @@ while (( $(date +%s) - START_EPOCH < DURATION_SEC )); do
     resume)
       wait_clean_lane "$source_keeper" false ||
         die "resume replay left source lane non-clean" "duplicate"
-      verify_receipt_file "$source_keeper" "$operation_id" ||
-        die "resume operation does not have exactly one durable disposition receipt"
       ;;
     transfer)
       wait_clean_lane "$source_keeper" true ||
@@ -499,16 +496,14 @@ while (( $(date +%s) - START_EPOCH < DURATION_SEC )); do
         die "target inventory unavailable after replay for $target_keeper"
       [[ "$(jq '.queue.accepted_transfer_projection_count' <<<"$INVENTORY")" == "$target_projection_expected" ]] ||
         die "transfer replay changed the durable target projection count" "duplicate"
-      verify_receipt_file "$source_keeper" "$operation_id" ||
-        die "transfer operation does not have exactly one durable disposition receipt"
       ;;
     cancel)
       wait_clean_lane "$source_keeper" true ||
         die "cancel replay left source lane non-clean" "duplicate"
-      verify_receipt_file "$source_keeper" "$operation_id" ||
-        die "cancel operation does not have exactly one durable disposition receipt"
       ;;
   esac
+  verify_receipt_file "$source_keeper" "$operation_id" ||
+    die "$action operation does not have exactly one durable disposition receipt"
 
   jq -n --arg schema "masc.keeper.paused-work.soak-case.v1" --arg run_id "$RUN_ID" \
     --argjson iteration "$ITERATIONS" --arg action "$action" --arg source_keeper "$source_keeper" \

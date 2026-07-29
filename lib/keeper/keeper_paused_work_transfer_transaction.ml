@@ -331,15 +331,15 @@ let ack_source config receipt transfer =
         ~base_path
         transfer.from_keeper
         ~current_owner_nonce:current.runtime.nonce
-        ~settled_at:receipt.requested_at
+        ~applied_at:receipt.requested_at
         ~transfer:causal
       |> Result.map_error (fun detail ->
         Committed_projection_failed { stage = Source_ack; detail })
     in
     (match outcome with
-     | Keeper_registry_event_queue.Settled _
-     | Keeper_registry_event_queue.Already_settled _ -> Ok ()
-     | Keeper_registry_event_queue.Committed_followup_failed
+     | Keeper_registry_event_queue.Transition_applied _
+     | Keeper_registry_event_queue.Transition_already_applied _ -> Ok ()
+     | Keeper_registry_event_queue.Transition_committed_followup_failed
          { stage; detail; _ } ->
        let stage =
          match stage with

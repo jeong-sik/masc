@@ -117,7 +117,6 @@ let with_pending_lane ?registered ?latched_reason ~paused ~generation f =
          ; owner_nonce = generation
          ; operator_operation_id = "operator-pending-cancel-1"
          ; reason = "operator rejected exact pending paused work"
-         ; settled_at = 3.0
          }
        in
        f config keeper_name request)
@@ -168,9 +167,10 @@ let test_pending_cancellation_commits_exact_remove () =
          |> require_ok "cancel pending paused work"
        in
        check_released first.reservation_release;
-       (match first.settlement with
-        | Registry_queue.Settled _ | Registry_queue.Committed_followup_failed _ -> ()
-        | Registry_queue.Already_settled _ ->
+       (match first.transition with
+        | Registry_queue.Transition_applied _
+        | Registry_queue.Transition_committed_followup_failed _ -> ()
+        | Registry_queue.Transition_already_applied _ ->
           Alcotest.fail "first pending transaction was already settled");
        let state =
          Persistence.load_state_result

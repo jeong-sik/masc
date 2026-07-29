@@ -461,23 +461,7 @@ let reconcile_spent_selection ~config ~keeper_name selection =
            with
            | Error message ->
              Error ("schedule terminal reconciliation ack failed: " ^ message)
-           | Ok Keeper_registry_event_queue.Ack_applied ->
-             Ok Spent_schedule_acknowledged
-           | Ok
-               (Keeper_registry_event_queue.Ack_applied_followup_failed detail)
-             ->
-             (match
-                Keeper_registry_event_queue.retry_pending_ack_followup_result
-                  ~base_path:config.Workspace_utils.base_path
-                  keeper_name
-              with
-              | Ok () -> Ok Spent_schedule_acknowledged
-              | Error retry_detail ->
-                Error
-                  (Printf.sprintf
-                     "schedule terminal reconciliation ACK committed but cleanup failed (%s); cleanup retry failed: %s"
-                     detail
-                     retry_detail)))
+           | Ok () -> Ok Spent_schedule_acknowledged)
         | Some
             { Schedule_domain.status =
                 ( Schedule_domain.Execution_running
@@ -519,22 +503,7 @@ let reconcile_spent_selection ~config ~keeper_name selection =
         with
         | Error message ->
            Error ("spent grant replay ack failed: " ^ message)
-        | Ok Keeper_registry_event_queue.Ack_applied ->
-          Ok Spent_grant_replay_acknowledged
-        | Ok
-            (Keeper_registry_event_queue.Ack_applied_followup_failed detail) ->
-          (match
-             Keeper_registry_event_queue.retry_pending_ack_followup_result
-               ~base_path:config.Workspace_utils.base_path
-               keeper_name
-           with
-           | Ok () -> Ok Spent_grant_replay_acknowledged
-           | Error retry_detail ->
-             Error
-               (Printf.sprintf
-                  "spent grant replay ACK committed but cleanup failed (%s); cleanup retry failed: %s"
-                  detail
-                  retry_detail)))
+        | Ok () -> Ok Spent_grant_replay_acknowledged)
      | Ok
          { state =
              ( Keeper_approval_queue.Resolution_unconsumed

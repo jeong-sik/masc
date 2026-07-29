@@ -154,10 +154,9 @@ type source_disposition =
     [Follow_failure_route_after_no_compaction] follows the same route but
     records that the in-lane provider-overflow compaction terminally declined
     to act ([no_compaction_reason]); the terminal transition advances the
-    compaction-failure streak. At the threshold, heartbeat intake retains the
-    source but makes ordinary work ineligible, because a context that cannot
-    shrink re-overflows deterministically on every retry; manual compaction
-    remains eligible.
+    compaction-failure streak and replaces the route with
+    [Escalate Compaction_retry_exhausted] at the threshold, because a turn
+    whose context cannot shrink re-overflows deterministically on every retry.
     [Escalate_after_exact_output_terminal] consumes the selected source into a
     typed escalation with no successor, so neither the ordinary retry route nor
     another compaction dispatch can run when the exact lane is unconfigured,

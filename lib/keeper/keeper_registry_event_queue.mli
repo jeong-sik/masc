@@ -141,10 +141,6 @@ type source_ack_result =
       ; detail : string
       }
 
-type pending_ack_result = Keeper_event_queue_persistence.pending_ack_result =
-  | Ack_applied
-  | Ack_applied_followup_failed of string
-
 
 val peek_when_result :
   base_path:string ->
@@ -162,11 +158,7 @@ val ack_pending_result :
   base_path:string ->
   string ->
   selection:pending_selection ->
-  (pending_ack_result, string) result
-
-val retry_pending_ack_followup_result :
-  base_path:string -> string -> (unit, string) result
-(** Retry only cleanup/publication after a durably applied pending ACK. *)
+  (unit, string) result
 
 val cancel_pending_accepted_result :
   base_path:string ->

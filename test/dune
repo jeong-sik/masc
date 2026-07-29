@@ -768,7 +768,7 @@
 (test
  (name test_keeper_board_unavailable)
  (modules test_keeper_board_unavailable)
- (libraries masc_test_deps masc.keeper_checkpoint_ref))
+ (libraries masc_test_deps))
 
 ; Fusion OAS failure-detail tests need Fusion_types constructors from
 ; masc.fusion_core, which is intentionally not re-exported via masc.

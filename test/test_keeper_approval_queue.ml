@@ -3212,9 +3212,7 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
             ~selection
             ()
         with
-        | Ok Event_queue_persistence.Ack_applied -> ()
-        | Ok (Event_queue_persistence.Ack_applied_followup_failed detail) ->
-          Alcotest.failf "HITL wake ACK cleanup failed: %s" detail
+        | Ok () -> ()
         | Error detail -> Alcotest.fail detail);
        let post_id =
          Keeper_event_queue.hitl_resolution_post_id resolution

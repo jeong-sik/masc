@@ -3,11 +3,11 @@
 val should_collect_board_events :
   proactive_warmup_elapsed:bool ->
   paused:bool ->
-  compaction_retry_suspended:bool ->
   bool
 (** Pure gate deciding whether this cycle may collect board events (which
-    advances the per-keeper cursor as a side effect). Warmup, explicit lifecycle
-    pause, and compaction suspension are the pre-collection admission facts. *)
+    advances the per-keeper cursor as a side effect). Runtime/provider state is
+    deliberately absent: only warmup and explicit lifecycle pause can withhold
+    collection. *)
 
 val collect_keepalive_board_events :
   ctx:'a Keeper_types_profile.context ->

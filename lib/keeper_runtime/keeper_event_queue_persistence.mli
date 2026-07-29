@@ -189,30 +189,13 @@ val validate_pending_selection_result :
   selection:pending_selection ->
   (unit, string) result
 
-type pending_ack_result =
-  | Ack_applied
-  | Ack_applied_followup_failed of string
-
 val ack_pending_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
   selection:pending_selection ->
   unit ->
-  (pending_ack_result, string) result
-(** Remove the exact pending selection. [Ack_applied_followup_failed] means the
-    snapshot already committed the removal but transition-WAL cleanup or
-    post-commit projection failed; callers must not apply the ACK or execute
-    the source again. *)
-
-val retry_pending_ack_followup_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  unit ->
   (unit, string) result
-(** Retry only post-commit WAL cleanup and publish the already-committed
-    pending projection. Never applies an ACK transition. *)
 
 type snapshot_read_error_kind =
   | Invalid_path
@@ -342,12 +325,6 @@ val project_accepted_transfer_result :
 
 val persist_snapshot :
   base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit
-
-module For_testing : sig
-  val force_transition_wal_compaction_failures : int -> unit
-  (** Force the next N transition-WAL compactions to fail after the snapshot
-      commit, for ACK post-commit recovery tests. *)
-end
 
 val ack_consumed :
   base_path:string ->

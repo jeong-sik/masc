@@ -150,10 +150,6 @@ type source_ack_result =
       ; detail : string
       }
 
-type pending_ack_result = Keeper_event_queue_persistence.pending_ack_result =
-  | Ack_applied
-  | Ack_applied_followup_failed of string
-
 
 let rec queue_contains queue stimulus =
   match Keeper_event_queue.dequeue queue with
@@ -426,14 +422,6 @@ let ack_pending_result ~base_path name ~selection =
     ~base_path
     ~keeper_name:name
     ~selection
-    ~after_commit:(publish_pending ~base_path name)
-    ()
-;;
-
-let retry_pending_ack_followup_result ~base_path name =
-  Keeper_event_queue_persistence.retry_pending_ack_followup_result
-    ~base_path
-    ~keeper_name:name
     ~after_commit:(publish_pending ~base_path name)
     ()
 ;;

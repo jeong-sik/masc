@@ -54,8 +54,7 @@ val with_in_turn_liveness_pulse :
   stop:bool Atomic.t ->
   (unit -> 'b) -> 'b
 
-type heartbeat_event_intake =
-  Keeper_heartbeat_stimulus_intake.heartbeat_event_intake = {
+type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
@@ -153,7 +152,7 @@ val compaction_outcomes_of_cycle_outcome :
   Keeper_heartbeat_loop_cycle.cycle_outcome option ->
   [ `Committed | `Overflow_episode_committed | `Failed | `Recovered ] list
 (** Pure mapping from a settled cycle outcome to the ordered compaction-streak
-    stamps ([Keeper_meta_store.persist_compaction_outcomes]). Manual-lane
+    stamps ([Keeper_meta_store.persist_compaction_outcome]). Manual-lane
     applied/failed outcomes and in-lane provider-overflow dispositions join
     the same per-keeper streak. The streak counts consecutive
     provider-overflow episodes (#25538): an in-lane commit maps to

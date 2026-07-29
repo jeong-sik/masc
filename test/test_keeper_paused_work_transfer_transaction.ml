@@ -379,9 +379,7 @@ let test_replay_after_target_consumption_has_no_second_effect () =
          ~selection
          ()
      with
-     | Ok Persistence.Ack_applied -> ()
-     | Ok (Persistence.Ack_applied_followup_failed detail) ->
-       Alcotest.failf "target ACK cleanup failed: %s" detail
+     | Ok () -> ()
      | Error detail -> Alcotest.fail detail);
     let replay =
       Transaction.transfer_pending config ~from_keeper ~to_keeper request

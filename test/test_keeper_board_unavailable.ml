@@ -333,9 +333,7 @@ let test_transient_intake_retains_pending_source_and_blocks_dispatch () =
           meta.name
           ~selection
       with
-      | Ok Keeper_registry_event_queue.Ack_applied -> ()
-      | Ok (Keeper_registry_event_queue.Ack_applied_followup_failed detail) ->
-        failf "successful retry ACK cleanup failed: %s" detail
+      | Ok () -> ()
       | Error message -> failf "failed to acknowledge successful retry: %s" message));
   let settled =
     match Keeper_registry_event_queue.snapshot_result ~base_path meta.name with
@@ -437,9 +435,7 @@ let test_compaction_suspension_preserves_work_and_admits_manual_recovery () =
           suspended_meta.name
           ~selection
       with
-      | Ok Keeper_registry_event_queue.Ack_applied -> ()
-      | Ok (Keeper_registry_event_queue.Ack_applied_followup_failed detail) ->
-        failf "manual recovery ACK cleanup failed: %s" detail
+      | Ok () -> ()
       | Error message -> failf "failed to acknowledge manual recovery: %s" message));
   let suspended_intake =
     Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
@@ -568,40 +564,6 @@ let test_manual_compaction_followup_preserves_both_outcomes () =
       "manual reset erased the same-cycle reactive overflow or its compaction count"
 ;;
 
-let test_ordered_compaction_outcomes_persist_as_one_final_state () =
-  let base_path = fresh_test_base_path () in
-  let config = Workspace.default_config base_path in
-  let meta = test_meta "ordered-compaction-persistence" in
-  (match Keeper_meta_store.write_meta config meta with
-   | Ok () -> ()
-   | Error message -> failf "failed to seed durable Keeper meta: %s" message);
-  (match
-     Keeper_meta_store.persist_compaction_outcomes
-       config
-       ~keeper_name:meta.name
-       ~outcomes:[ `Committed; `Overflow_episode_committed ]
-   with
-   | Ok `Persisted -> ()
-   | Ok `No_durable_meta -> fail "seeded Keeper meta disappeared"
-   | Error message -> failf "ordered compaction outcome write failed: %s" message);
-  let persisted =
-    match Keeper_meta_store.read_meta config meta.name with
-    | Ok (Some persisted) -> persisted
-    | Ok None -> fail "ordered compaction outcome left no durable Keeper meta"
-    | Error message -> failf "ordered compaction outcome read failed: %s" message
-  in
-  check
-    int
-    "manual and reactive commits both increment compaction count"
-    (meta.runtime.compaction_rt.count + 2)
-    persisted.runtime.compaction_rt.count;
-  check
-    int
-    "reactive overflow remains after the manual reset"
-    1
-    persisted.runtime.compaction_rt.consecutive_failures
-;;
-
 let () =
   run
     "keeper_board_unavailable"
@@ -644,10 +606,6 @@ let () =
             "manual compaction keeps immediate reactive overflow evidence"
             `Quick
             test_manual_compaction_followup_preserves_both_outcomes
-        ; test_case
-            "ordered compaction facts persist as one final state"
-            `Quick
-            test_ordered_compaction_outcomes_persist_as_one_final_state
         ] )
     ]
 ;;

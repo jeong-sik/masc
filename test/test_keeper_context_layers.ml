@@ -19,6 +19,7 @@ let all_layers =
     L.Scheduled_automation;
     L.Pending_mentions;
     L.Scope_messages;
+    L.Own_board_posts;
     L.Board_activity;
   ]
 
@@ -67,7 +68,6 @@ let test_assemble_all_present_follows_ordered () =
   let content_of id = Some (string_of_int (L.order_index id)) in
   check string "every layer present -> indices in order" "0123456789"
     (L.assemble ~content_of)
-
 let () =
   run "keeper_context_layers"
     [

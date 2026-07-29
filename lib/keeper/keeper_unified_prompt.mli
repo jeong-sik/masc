@@ -47,6 +47,14 @@ val effective_instructions :
 (** Resolve the single instructions value used by every system-prompt
     entrypoint and its dashboard projection. *)
 
+val active_goal_summaries :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  (string * string) list
+(** Resolve every active goal id for the stable prompt contract. Unknown ids
+    remain present with an empty title so every entrypoint renders the same
+    bare-id fallback. *)
+
 val build_system_prompt :
   meta:Keeper_meta_contract.keeper_meta ->
   base_path:string ->

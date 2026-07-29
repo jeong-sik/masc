@@ -311,6 +311,51 @@ let test_direct_and_autonomous_share_system_prompt () =
        ~needle:"A repository you have not worked on yet has no checkout there"
        direct_system_prompt)
 
+let test_unresolved_goal_keeps_one_stable_safety_contract () =
+  with_repo_prompt_config @@ fun () ->
+  let meta_with_goal =
+    meta_of_json
+      (`Assoc
+        [
+          ("name", `String "wake-context-keeper");
+          ("trace_id", `String "test-trace-wake-context");
+          ("active_goal_ids", `List [ `String "missing-goal" ]);
+        ])
+  in
+  let config = Masc.Workspace.default_config "/tmp/unused" in
+  let active_goal_summaries =
+    Prompt.active_goal_summaries ~config ~meta:meta_with_goal
+  in
+  let decision = WO.keeper_cycle_decision ~meta:meta_with_goal base_observation in
+  let { Prompt.system_prompt = autonomous_system_prompt; _ } =
+    Prompt.build_prompt
+      ~meta:meta_with_goal
+      ~base_path:"/tmp/unused"
+      ~active_goal_summaries
+      ~turn_decision:decision
+      ~observation:base_observation
+      ()
+  in
+  let direct_system_prompt =
+    Masc.Keeper_run_context.build_base_system_prompt
+      ~config
+      ~profile_defaults:
+        Masc.Keeper_types_profile_defaults.empty_keeper_profile_defaults
+      ~meta:meta_with_goal
+  in
+  check string
+    "unresolved goal does not split direct and autonomous prompts"
+    direct_system_prompt
+    autonomous_system_prompt;
+  check bool "unresolved goal remains as a bare id" true
+    (contains ~needle:"- missing-goal\n" direct_system_prompt);
+  check bool "identity anchor is preserved" true
+    (contains ~needle:"<identity_anchor>" direct_system_prompt);
+  check bool "world contract is preserved" true
+    (contains ~needle:"<world>" direct_system_prompt);
+  check bool "capability contract is preserved" true
+    (contains ~needle:"<capabilities>" direct_system_prompt)
+
 (* --- 2. Threaded turn decision --- *)
 
 let test_threaded_stimulus_decision_renders_wake_reason () =
@@ -477,6 +522,8 @@ let () =
           test_case "direct and autonomous turns share the stable contract"
             `Quick
             test_direct_and_autonomous_share_system_prompt;
+          test_case "unresolved goal keeps one stable safety contract" `Quick
+            test_unresolved_goal_keeps_one_stable_safety_contract;
         ] );
       ( "threaded turn decision",
         [

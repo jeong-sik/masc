@@ -145,8 +145,11 @@ let keeper_config_json (config : Workspace.config) (name : string)
             ~pending_board_events:(Some pending_board_events) ~config ~meta:m
         in
         let parts =
+          let active_goal_summaries =
+            Keeper_unified_prompt.active_goal_summaries ~config ~meta:m
+          in
           Keeper_unified_prompt.build_prompt_preview ~meta:m ~base_path:config.base_path
-            ~profile_defaults:defaults ~observation ()
+            ~profile_defaults:defaults ~active_goal_summaries ~observation ()
         in
         (* Match what a turn actually sends: the observation frame rides the
            per-turn dynamic context (system side), and the persisted user

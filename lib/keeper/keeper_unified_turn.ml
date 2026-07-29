@@ -911,12 +911,7 @@ let run_keeper_cycle
                  Keeper_world_observation_inputs.read_current_task ~config ~meta
                in
                let active_goal_summaries =
-                 List.map
-                   (fun goal_id ->
-                     match Goal_store.get_goal config ~goal_id with
-                     | Some { Goal_store.title; _ } -> (goal_id, title)
-                     | None -> (goal_id, ""))
-                   meta.active_goal_ids
+                 Keeper_unified_prompt.active_goal_summaries ~config ~meta
                in
                let { Keeper_unified_prompt.system_prompt; world_state; user_message } =
                  Keeper_unified_prompt.build_prompt

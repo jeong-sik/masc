@@ -480,23 +480,25 @@ let effective_instructions ~(meta : Keeper_meta_contract.keeper_meta)
   | None -> meta.instructions
 ;;
 
+let active_goal_summaries
+      ~(config : Workspace.config)
+      ~(meta : Keeper_meta_contract.keeper_meta)
+  =
+  List.map
+    (fun goal_id ->
+       match Goal_store.get_goal config ~goal_id with
+       | Some { Goal_store.title; _ } -> (goal_id, title)
+       | None -> (goal_id, ""))
+    meta.active_goal_ids
+;;
+
 let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ?(active_goal_summaries : (string * string) list option)
     ()
   =
   let instructions = effective_instructions ~meta ?profile_defaults () in
-  let instructions_block =
-    if instructions = "" then ""
-    else Printf.sprintf "\nInstructions:\n%s\n" instructions
-  in
-  (* D-11 (2026-07-14 prompt-assembly audit): autonomous turns once omitted
-     persona while direct turns used a separate prompt builder. This stable
-     builder now owns both entrypoints and the initial checkpoint, so the same
-     loader and XML-escaped <persona> block reach every turn. With no
-     [profile_defaults], resolution degrades to the keeper name through the
-     same total [resolved_persona_name] fallback. *)
-  let persona_block =
+  let persona_extended =
     let persona_name =
       match profile_defaults with
       | Some defaults ->
@@ -504,111 +506,26 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path :
             defaults
       | None -> meta.name
     in
-    let persona_extended =
-      (* DET-OK: an absent persona file is a valid state — the block is
-         omitted below. Read failures already WARN and count
-         ProfileLoadFailures inside [load_persona_extended]; this is a
-         total default between two known outcomes, not an unknown-input
-         guess. *)
-      match Keeper_types_profile.load_persona_extended persona_name with
-      | Some text -> text
-      | None -> ""
-    in
-    (* Inner bytes are the shared SSOT ([Keeper_persona_block.render]); the
-       surrounding newlines are unified-lane layout. *)
-    match Keeper_persona_block.render ~persona_extended with
-    | None -> ""
-    | Some block -> "\n" ^ block ^ "\n"
+    (* An absent persona is a valid empty block. Read failures are already
+       operator-visible in [load_persona_extended]. *)
+    Option.value
+      ~default:""
+      (Keeper_types_profile.load_persona_extended persona_name)
   in
-  let goal_lines =
-    let primary_goal =
-      match Keeper_runtime_contract.primary_goal_id_opt meta with
-      | None -> None
-      | Some goal_id ->
-        let title =
-          match active_goal_summaries with
-          | Some summaries -> List.assoc_opt goal_id summaries
-          | None -> None
-        in
-        Some
-          (match title with
-           | Some title -> goal_id ^ " — " ^ title
-           | None -> goal_id)
-    in
-    line_block "Primary goal"
-      (Option.value
-         ~default:"(no valid active goal — awaiting assignment)"
-         primary_goal)
+  let active_goals =
+    Option.value
+      ~default:(List.map (fun goal_id -> (goal_id, "")) meta.active_goal_ids)
+      active_goal_summaries
   in
-  (* The section this fills used to say "use the paths returned by the current
-     context capability" and named no path at all. Measured across twelve live
-     checkpoints, the rendered system prompt carried zero path strings, so the
-     only concrete paths a keeper saw arrived inside Gate approval echoes and
-     execution_location payloads — both host-side, and therefore absent inside
-     a Docker keeper's container. That is the shape of #10650.
-
-     Rendered from Keeper_sandbox so this agrees with what the Execute cwd
-     resolver actually accepts, rather than restating it. *)
-  let sandbox_paths =
-    let config = Workspace.default_config base_path in
-    let sandbox = Keeper_sandbox.of_meta ~config ~meta in
-    (* The root line depends on the backend because the two backends make
-       different promises about the absolute spelling:
-
-       - Local ([container_root = None]): every command executes on the
-         host, so the host-absolute root is stable and may appear in a cwd
-         or argv operand.
-       - Docker ([container_root = Some _]): the mount spelling is real
-         only while the command actually runs inside the container.
-         Execute dispatch transparently runs the same sandbox on the host
-         when the image preflight fails
-         ([Keeper_sandbox_shell_ir_target.docker_local_fallback_target]),
-         and the typed cwd resolver confines raw cwds against host roots
-         either way ([Keeper_tool_shared_runtime
-         .resolve_keeper_execute_cwd_typed]) — so the mount path is
-         orientation vocabulary, never an execution operand. The fallback
-         is decided per call at dispatch time, so this statically rendered
-         prompt cannot name the effective target; it can only refuse to
-         promise one. *)
-    let root_line =
-      match sandbox.Keeper_sandbox.container_root with
-      | None ->
-        Printf.sprintf "- Sandbox root: %s" sandbox.Keeper_sandbox.host_root_abs
-      | Some container_root ->
-        Printf.sprintf
-          "- Sandbox root: mounted at %s inside your container. The same \
-           sandbox may execute on the host under a different absolute \
-           spelling when the container backend is unavailable, so never \
-           place this absolute path in a typed cwd or an argv operand."
-          container_root
-    in
-    String.concat
-      "\n"
-      [ root_line
-      ; Printf.sprintf
-          "- Repository clones: %s, relative to that root."
-          sandbox.Keeper_sandbox.repos_arg
-      ; Printf.sprintf
-          "- Pass a relative typed cwd (`%s` for the root, `%s/<repository>` for \
-           a clone). Relative argv path operands resolve from that cwd and are \
-           the only path spelling valid on every execution backend."
-          sandbox.Keeper_sandbox.root_arg
-          sandbox.Keeper_sandbox.repos_arg
-      ]
-  in
+  let config = Workspace.default_config base_path in
   let base_system_prompt =
-    match
-      Prompt_registry.render_prompt_template Keeper_prompt_names.unified_system
-        [
-          ("identity_header", Printf.sprintf "You are %s, a keeper agent." meta.name);
-          ("persona_block", persona_block);
-          ("instructions_block", instructions_block);
-          ("goal_lines", goal_lines);
-          ("sandbox_paths", sandbox_paths);
-        ]
-    with
-    | Ok value -> value
-    | Error _ -> Prompt_registry.get_prompt Keeper_prompt_names.unified_system
+    Keeper_prompt.build_keeper_system_prompt
+      ~instructions
+      ~persona_extended
+      ~keeper_name:meta.name
+      ~active_goals
+      ~home_ground:(Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
+      ()
   in
   let turn_intent_block = resolve_turn_intent_block () in
   let system_prompt =

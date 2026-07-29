@@ -31,12 +31,7 @@ let build_base_system_prompt
       ~(meta : keeper_meta)
   =
   let active_goal_summaries =
-    List.filter_map
-      (fun goal_id ->
-         match Goal_store.get_goal config ~goal_id with
-         | Some { Goal_store.title; _ } -> Some (goal_id, title)
-         | None -> None)
-      meta.active_goal_ids
+    Keeper_unified_prompt.active_goal_summaries ~config ~meta
   in
   Keeper_unified_prompt.build_system_prompt
     ~meta

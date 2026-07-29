@@ -619,15 +619,11 @@ let accept_connector ~delivery ~clock ~config ~channel ~channel_user_id
                   (redact_text
                      (Keeper_chat_queue.mutation_error_to_string error))))))
 
-let persist_connector_assistant_reply ~base_dir ~keeper_name ~source ?surface
+let persist_connector_assistant_reply ~base_dir ~keeper_name ~surface
     ?conversation_id ?turn_ref ~reply () =
   let content = String.trim reply in
   if content <> "" then begin
-    let surface =
-      match surface with
-      | Some surface -> surface
-      | None -> Surface_ref.Gate { label = source; address = [] }
-    in
+    let source = Surface_ref.lane_label surface in
     (* RFC-0233 §7: [turn_ref] is the join key the keeper minted into the
        reply payload, carried onto this connector turn's assistant row. *)
     Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name
@@ -851,8 +847,8 @@ let dispatch_core ?on_text_snapshot ~submitted_by ~sw ~clock ~proc_mgr ~net
            with Yojson.Json_error _ -> None)
       in
       persist_connector_assistant_reply
-        ~base_dir:config.Workspace.base_path ~keeper_name ~source:lane
-        ~surface ?conversation_id ?turn_ref ~reply ();
+        ~base_dir:config.Workspace.base_path ~keeper_name ~surface
+        ?conversation_id ?turn_ref ~reply ();
       Gate_protocol.Reply { content = reply; structured; stats; message_request = None }
   | `Async_ack (_, Some result) | `Streaming (Some result) ->
       Gate_protocol.Keeper_error_result (redact_text (Tool_result.message result))

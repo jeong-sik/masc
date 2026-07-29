@@ -439,12 +439,10 @@ val load_page :
     [ts] field; [tool_call_id] / [tool_call_name] /
     [conversation_id] / [external_message_id] / [workspace_id] /
     [speaker_id] / [speaker_name] / [speaker_authority] appear only
-    when present. [source] is a response-only label derived from the typed
-    [surface], never a second persisted identity. [delivery_key] appears only
-    on rows persisted by the
-    idempotent append-once paths, verbatim as the typed delivery
-    identity object. When [base_dir] is supplied, the history endpoint
-    marks audio clips as [expired] when the underlying MP3 file is
+    when present. [surface] is the sole lane identity. [delivery_key] appears
+    only on rows persisted by the idempotent append-once paths, verbatim as the
+    typed delivery identity object. When [base_dir] is supplied, the history
+    endpoint marks audio clips as [expired] when the underlying MP3 file is
     gone. *)
 val to_json_array :
   ?base_dir:string ->

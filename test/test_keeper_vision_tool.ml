@@ -51,7 +51,6 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   let json =
     `Assoc
       [ "name", `String name
-      ; "agent_name", `String (name ^ "-agent")
       ; "trace_id", `String (name ^ "-trace")
       ; "allowed_paths", `List [ `String "*" ]
       ]

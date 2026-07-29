@@ -246,6 +246,28 @@ let run_try_provider
           ; event_bus = ctx.event_bus
           ; initial_messages = ctx.initial_messages
           ; model_input_projection = ctx.model_input_projection
+            (* The serialized request body is the quantity the provider admits
+               against [max_request_body_bytes], and today only a refused
+               request reports it: a request that fits is never sized, so the
+               admitted population is unmeasured.
+               [Keeper_context_core_accessors.serialize_context] cannot stand in
+               for it — that covers [{system_prompt, messages}] and excludes
+               tool schemas and every provider-specific stream field. OAS runs
+               this observer after those are injected and after its own
+               admission check, so the value is the exact byte count.
+               Diagnostic only: OAS reports a rejection or a raised callback as
+               typed failure evidence and does not rewrite the provider
+               result. *)
+          ; pre_dispatch_serialization_observer =
+              Some
+                (fun observation ->
+                  Otel_metric_store.observe_histogram
+                    Keeper_metrics.(to_string RuntimeRequestWireBytes)
+                    ~labels:[ "keeper", ctx.keeper_name ]
+                    (Float.of_int
+                       observation
+                         .Llm_provider.Request_wire_observer.body_bytes);
+                  Ok ())
           ; raw_trace = ctx.raw_trace
           ; trace_link = ctx.trace_link
           ; yield_on_tool = ctx.yield_on_tool

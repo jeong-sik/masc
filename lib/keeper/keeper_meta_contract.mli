@@ -64,20 +64,19 @@ type compaction_runtime = {
   last_check_ts : float;
   last_decision : compaction_runtime_decision;
   consecutive_failures : int;
-      (** RFC-0351 S0 / #25461: consecutive compaction failures across the
-          manual lane and the in-lane provider-overflow recovery.  An in-lane
-          reactive commit advances the streak; only an overflow-free completed
-          turn or an operator-committed manual compaction resets it. Once it
-          reaches {!compaction_retry_escalation_threshold}, reactive
-          preparation is refused without counting that refusal as another
-          failure. *)
+      (** RFC-0351 S0 / #25461: consecutive manual-compaction failures and
+          reactive provider-overflow episodes. A reactive commit advances the
+          streak; an overflow-free completed turn or operator-committed manual
+          compaction resets it. Once it reaches
+          {!compaction_retry_escalation_threshold}, reactive preparation is
+          refused without counting that refusal as another failure. *)
 }
 
 val compaction_retry_escalation_threshold : int
-(** RFC-0351 S0 / #25461: consecutive compaction failures tolerated before
+(** RFC-0351 S0 / #25461: streak entries tolerated before
     [Keeper_post_turn.prepare_compaction] stops admitting reactive triggers.
-    Single definition shared by the heartbeat settlement and the
-    status/dashboard projections.
+    Single definition shared by reactive admission and status/dashboard
+    projections.
 
     The refusal is not itself a compaction failure — it reads this counter
     without attempting anything, so settling it as one made the threshold

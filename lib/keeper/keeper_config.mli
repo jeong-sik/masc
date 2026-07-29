@@ -109,7 +109,7 @@ val normalize_prompt_text : max_bytes:int -> string -> string
 val keeper_memory_os_recall_max_facts : unit -> int
 val keeper_memory_os_recall_max_episodes : unit -> int
 val keeper_memory_os_recall_max_bytes : unit -> int
-(** Observability-only threshold (see .ml); not itself an enforced drop. *)
+(** Enforced rendered-byte budget. A zero value disables enforcement. *)
 
 val keeper_bootstrap_proactive_warmup_sec : unit -> int
 val keeper_bootstrap_stagger_step_sec : unit -> int

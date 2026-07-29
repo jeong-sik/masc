@@ -80,6 +80,30 @@ let () =
     Alcotest.(check int) "unchanged after rejection" 5 v
   in
 
+  let test_keeper_memory_os_recall_max_bytes_default () =
+    let env_key = "MASC_KEEPER_MEMORY_OS_RECALL_MAX_BYTES" in
+    let previous = Sys.getenv_opt env_key in
+    Fun.protect
+      ~finally:(fun () ->
+        Unix.putenv env_key (Option.value previous ~default:"");
+        ignore
+          (Runtime_params.clear_by_key
+             "keeper.memory_os.recall.max_bytes"))
+      (fun () ->
+        Unix.putenv env_key "";
+        ignore (Keeper_config.keeper_memory_os_recall_max_bytes ());
+        (match
+           Runtime_params.clear_by_key
+             "keeper.memory_os.recall.max_bytes"
+         with
+         | Ok () -> ()
+         | Error msg -> Alcotest.fail msg);
+        Alcotest.(check int)
+          "request-body-sized fallback"
+          16_384
+          (Keeper_config.keeper_memory_os_recall_max_bytes ()))
+  in
+
   let test_set_by_key () =
     let _p =
       Runtime_params.register
@@ -508,6 +532,10 @@ let () =
           Alcotest.test_case "register_and_get" `Quick test_register_and_get;
           Alcotest.test_case "set_and_get" `Quick test_set_and_get;
           Alcotest.test_case "validation_rejects" `Quick test_validation_rejects;
+          Alcotest.test_case
+            "keeper recall byte budget default"
+            `Quick
+            test_keeper_memory_os_recall_max_bytes_default;
           Alcotest.test_case "set_by_key" `Quick test_set_by_key;
           Alcotest.test_case "set_by_key_unknown" `Quick test_set_by_key_unknown;
           Alcotest.test_case "clear" `Quick test_clear;

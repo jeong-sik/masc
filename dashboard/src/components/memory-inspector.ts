@@ -31,32 +31,15 @@ import {
   type MemoryOsFactCategory,
   type TurnBlock,
   type TurnInputComponent,
+  type TurnInputComponentId,
+  type TurnPromptBlockId,
   type TurnRecordRow,
 } from '../api/dashboard'
 
-// Minimal keeper shape the inspector reads. Only `id` (the keeper name used as
-// the API key) and `status` (the header dot) are consumed now; `ctx`/`tasks`/
-// `traces` remain for call-site back-compat (they drove the removed fabricated
-// composition and are no longer read).
 export interface MemoryKeeper {
   readonly id: string
-  readonly ctx: number
-  readonly status: string
-  readonly tasks?: number
-  readonly traces?: number
+  readonly status: 'run' | 'pause' | 'off' | 'unknown'
 }
-
-// Keeper roster fallback for the agent-profile mount (agent-detail-memory.ts)
-// when an agent id is outside the live keepers signal. Identity-only — carries
-// no memory content (that is fetched per keeper).
-export const DEFAULT_MEMORY_KEEPERS: readonly MemoryKeeper[] = [
-  { id: 'masc-improver', ctx: 0, status: 'run' },
-  { id: 'nick0cave', ctx: 0, status: 'run' },
-  { id: 'sangsu', ctx: 0, status: 'run' },
-  { id: 'qa-king', ctx: 0, status: 'pause' },
-  { id: 'analyst', ctx: 0, status: 'run' },
-  { id: 'drifter', ctx: 0, status: 'off' },
-]
 
 // ── byte / token formatters ──
 export function memFmtTok(n: number): string {
@@ -73,9 +56,8 @@ export function memFmtBytes(n: number): string {
 
 // ── prompt-block composition (real, from turn_record blocks) ──
 // PROMPT_BLOCK_META mirrors the OCaml Prompt_block_id closed sum
-// (lib/types/prompt_block_id.ml — to_string is the wire SSOT). A token outside
-// the closed set is an `Other name` block; it keeps its raw label so a new
-// block id surfaces verbatim rather than as a silent miscolour.
+// (lib/types/prompt_block_id.ml — to_string is the wire SSOT). Unknown tokens
+// are protocol drift and are rejected at the API decoder.
 interface BlockMeta {
   readonly lbl: string
   readonly color: string
@@ -84,18 +66,14 @@ interface BlockMeta {
   // carries recalled memory; the rest are persona/context/surface.
   readonly mem: boolean
 }
-const PROMPT_BLOCK_META: Readonly<Record<string, BlockMeta>> = {
+const PROMPT_BLOCK_META: Readonly<Record<TurnPromptBlockId, BlockMeta>> = {
   persona: { lbl: '페르소나', color: 'var(--text-dim)', mem: false },
-  continuity: { lbl: '연속성', color: 'var(--info)', mem: false },
   dynamic_context: { lbl: '동적 컨텍스트', color: 'var(--volt)', mem: false },
   temporal_summary: { lbl: '시간 요약', color: 'var(--status-warn)', mem: false },
-  claimed_task_nudge: { lbl: '태스크 넛지', color: 'var(--status-ok)', mem: false },
-  retry_nudge: { lbl: '재시도 넛지', color: 'var(--status-bad)', mem: false },
   memory_os_recall: { lbl: '메모리 회상', color: 'var(--volt-strong)', mem: true },
-  connected_surface: { lbl: '연결 표면', color: 'var(--status-warn)', mem: false },
 }
-export function promptBlockMeta(token: string): BlockMeta {
-  return PROMPT_BLOCK_META[token] ?? { lbl: token, color: 'var(--text-dim)', mem: false }
+export function promptBlockMeta(token: TurnPromptBlockId): BlockMeta {
+  return PROMPT_BLOCK_META[token]
 }
 
 export interface CompositionPart {
@@ -124,7 +102,11 @@ export function memCompositionFromBlocks(blocks: readonly TurnBlock[]): Composit
   return { totalBytes, parts }
 }
 
-const INPUT_COMPONENT_META: Readonly<Record<string, BlockMeta>> = {
+const INPUT_COMPONENT_META: Readonly<Record<TurnInputComponentId, BlockMeta>> = {
+  'prompt.persona': PROMPT_BLOCK_META.persona,
+  'prompt.dynamic_context': PROMPT_BLOCK_META.dynamic_context,
+  'prompt.temporal_summary': PROMPT_BLOCK_META.temporal_summary,
+  'prompt.memory_os_recall': PROMPT_BLOCK_META.memory_os_recall,
   tool_schemas: { lbl: '도구 스키마', color: 'var(--status-warn)', mem: false },
   message_user: { lbl: '사용자 메시지', color: 'var(--info)', mem: false },
   message_system: { lbl: '시스템 메시지', color: 'var(--text-dim)', mem: false },
@@ -138,9 +120,8 @@ const INPUT_COMPONENT_META: Readonly<Record<string, BlockMeta>> = {
   message_audio: { lbl: '오디오', color: 'var(--status-ok)', mem: false },
 }
 
-export function inputComponentMeta(token: string): BlockMeta {
-  if (token.startsWith('prompt.')) return promptBlockMeta(token.slice('prompt.'.length))
-  return INPUT_COMPONENT_META[token] ?? { lbl: token, color: 'var(--text-dim)', mem: false }
+export function inputComponentMeta(token: TurnInputComponentId): BlockMeta {
+  return INPUT_COMPONENT_META[token]
 }
 
 export function memCompositionFromInputComponents(
@@ -549,8 +530,8 @@ function ReadErrors({ snapshot }: { snapshot: MemoryOsTurnRecordSnapshot }) {
   return html`<div class="mem-read-error" role="alert">${'⚠'} 읽기 오류 — ${text}</div>`
 }
 
-function memDotState(status: string): 'ok' | 'idle' | 'bad' {
-  return status === 'run' ? 'ok' : status === 'pause' ? 'idle' : 'bad'
+function memDotState(status: MemoryKeeper['status']): 'ok' | 'idle' | 'bad' {
+  return status === 'run' ? 'ok' : status === 'off' ? 'bad' : 'idle'
 }
 
 function CategoryFilters({
@@ -947,8 +928,9 @@ export interface MemoryInspectorProps {
 export function MemoryInspector({
   keeper,
   onClose,
-  keepers = DEFAULT_MEMORY_KEEPERS,
+  keepers: providedKeepers,
 }: MemoryInspectorProps) {
+  const keepers = providedKeepers ?? [keeper]
   const scope = useSignal<'one' | 'all'>('one')
   // The keeper the one-scope view is bound to. Starts at the opened keeper and can
   // be re-pointed by clicking an aggregate row (전체 → 개별), mirroring the prototype.

@@ -33,11 +33,11 @@ type ctx_composition_metrics =
   }
 
 (** Return concrete provider content messages only when their provenance is
-    unambiguous. OAS currently gives its generated [extra_system_context]
-    carrier no typed identity, so any turn with prompt context returns [None]
-    instead of removing a message by position. Without prompt context,
-    projection-only messages remain included when the projection preserves the
-    exact input prefix; a rewrite or reorder also returns [None]. *)
+    unambiguous. The OAS-generated [extra_system_context] carrier is removed by
+    its typed metadata identity, never by position or content. Its presence must
+    exactly agree with [prompt_context_present]. Projection-only messages remain
+    included when the projection preserves the exact input prefix; a rewrite,
+    reorder, missing carrier, or duplicate/invalid carrier returns [None]. *)
 val provider_content_messages :
   prompt_context_present:bool ->
   projection_input:Agent_sdk.Types.message list ->

@@ -368,7 +368,7 @@ export function AgentDetailOverlay() {
         <div class="flex flex-col gap-5">
           <${AgentJournalStream} agentName=${agentName} />
           <${AgentTimelineSection} />
-          <${AgentDetailMemory} agentName=${agentName} />
+          <${AgentDetailMemory} agentName=${agentName} keeper=${keeper} />
           <${AgentWorkerBrief} agentName=${agentName} />
           ${agentFitness.value ? html`
             <${CollapsibleSection} title="적합도 (7일)" mountWhenOpen=${true}>

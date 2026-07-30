@@ -18,13 +18,9 @@ export function autonomyHint(count: number | undefined, proactiveEnabled: boolea
 
 export const CTX_SEGMENT_LABELS: Record<string, string> = {
   'prompt.persona': '페르소나',
-  'prompt.continuity': '연속성',
   'prompt.dynamic_context': '턴 컨텍스트',
   'prompt.temporal_summary': '시간 요약',
-  'prompt.claimed_task_nudge': '태스크 넛지',
-  'prompt.retry_nudge': '재시도 넛지',
   'prompt.memory_os_recall': '메모리 회상',
-  'prompt.connected_surface': '연결 표면',
   tool_schemas: '도구 스키마',
   message_user: '메시지 · user',
   message_system: '메시지 · system',
@@ -40,13 +36,9 @@ export const CTX_SEGMENT_LABELS: Record<string, string> = {
 
 export const CTX_SEGMENT_COLORS: Record<string, string> = {
   'prompt.persona': 'var(--amber-bright)',
-  'prompt.continuity': 'var(--cyan)',
   'prompt.dynamic_context': 'var(--purple)',
   'prompt.temporal_summary': 'var(--cyan)',
-  'prompt.claimed_task_nudge': 'var(--color-status-ok)',
-  'prompt.retry_nudge': 'var(--color-status-err)',
   'prompt.memory_os_recall': 'var(--rose-light)',
-  'prompt.connected_surface': 'var(--amber-bright)',
   tool_schemas: 'var(--amber-bright)',
   message_user: 'var(--sky-400)',
   message_system: 'var(--color-fg-muted)',

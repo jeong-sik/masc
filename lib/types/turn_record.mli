@@ -55,7 +55,7 @@ type usage =
        matters against [context_window] below: the fill percentage it denominates is
        read as pressure on the compaction ceiling, and cache-heavy turns and
        genuinely large prompts are different situations with the same numerator.
-       [None] when the provider reported no usage. *)
+       [None] when the provider reported no cache usage. *)
   }
 
 type request_wire_observation =
@@ -69,8 +69,9 @@ type t =
   ; trace_id : string
   ; absolute_turn : int
   ; turn_ref : Ids.Turn_ref.t
-    (* RFC-0233 §7 — "<trace_id>#<absolute_turn>" join key for chat/board.
-       The decoder requires it to match [trace_id] and [absolute_turn]. *)
+    (* RFC-0233 §7 — required "<trace_id>#<absolute_turn>" join key for
+       chat/board. The decoder rejects a key that does not exactly match the
+       row's [trace_id] and [absolute_turn]. *)
   ; blocks : prompt_block list (* assembly order *)
   ; input_components : input_component list
     (* Exact UTF-8/JSON payload bytes attributed to the concrete prompt blocks,
@@ -91,8 +92,8 @@ type t =
   ; context_window : int option
     (* RFC-0233 §8 — keeper-resolved effective context budget (tokens) for
        this turn, the denominator the dashboard ctx-fill% uses. [None] on
-       the error path; the inspector renders absence rather than the
-       fabricated 200K. This is the keeper compaction ceiling
+       the error path; the inspector renders absence rather
+       than the fabricated 200K. This is the keeper compaction ceiling
        ([max_context]), NOT the provider's per-request num-ctx cap (an
        Ollama-only transport detail). *)
   ; price_input_per_million : float option
@@ -151,9 +152,11 @@ val input_component_to_json : input_component -> Yojson.Safe.t
 val to_json : t -> Yojson.Safe.t
 
 val of_json : Yojson.Safe.t -> (t, string) result
-(** Fails loudly on malformed rows (missing fields, unparseable
-    execution ids, unknown block names, or mismatched turn refs) instead
-    of repairing them — RFC-0233 §4. *)
+(** Fails loudly on malformed rows instead of repairing them — RFC-0233 §4.
+    [turn_ref] and provider-input observation fields are required. Unknown or
+    duplicate fields, prompt blocks, or input-component ids, negative byte
+    counts, partial request-runtime/request-bytes pairs, and a [turn_ref]
+    inconsistent with the row identity are rejected. *)
 
 (** Result of diffing two consecutive records by [(block, digest)]. *)
 type block_diff =

@@ -407,9 +407,15 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
 
 let message text : Agent_sdk.Types.message = Agent_sdk.Types.user_msg text
 
-let test_provider_content_messages_requires_typed_prompt_carrier_provenance () =
+let prompt_carrier text =
+  { (message text) with
+    metadata = Agent_sdk.Types.Extra_system_context_provenance.metadata
+  }
+;;
+
+let test_provider_content_messages_removes_typed_prompt_carrier () =
   let history = [ message "history"; message "current user" ] in
-  let prompt_carrier = message "[system context] dynamic and memory blocks" in
+  let prompt_context = prompt_carrier "[system context] dynamic and memory blocks" in
   let gate_evidence = message "typed gate replay payload" in
   let message_texts =
     Option.map
@@ -418,12 +424,24 @@ let test_provider_content_messages_requires_typed_prompt_carrier_provenance () =
   in
   check
     (option (list string))
-    "untyped prompt carrier leaves attribution unavailable"
-    None
+    "typed prompt carrier is removed and projection suffix is retained"
+    (Some [ "history"; "current user"; "typed gate replay payload" ])
     (KAPM.provider_content_messages
        ~prompt_context_present:true
-       ~projection_input:(history @ [ prompt_carrier ])
-       ~projected_messages:(history @ [ prompt_carrier; gate_evidence ])
+       ~projection_input:(history @ [ prompt_context ])
+       ~projected_messages:(history @ [ prompt_context; gate_evidence ])
+     |> message_texts);
+  let middle_input =
+    [ message "history"; prompt_context; message "current user" ]
+  in
+  check
+    (option (list string))
+    "typed identity works independently of carrier position"
+    (Some [ "history"; "current user" ])
+    (KAPM.provider_content_messages
+       ~prompt_context_present:true
+       ~projection_input:middle_input
+       ~projected_messages:middle_input
      |> message_texts);
   check
     (option (list string))
@@ -434,6 +452,40 @@ let test_provider_content_messages_requires_typed_prompt_carrier_provenance () =
        ~projection_input:history
        ~projected_messages:(history @ [ gate_evidence ])
      |> message_texts)
+;;
+
+let test_provider_content_messages_rejects_prompt_carrier_mismatch () =
+  let plain = message "[system context] same text without typed identity" in
+  let marked = prompt_carrier "typed prompt context" in
+  let invalid =
+    match Agent_sdk.Types.Extra_system_context_provenance.metadata with
+    | [ key, _ ] -> { marked with metadata = [ key, `Bool false ] }
+    | _ -> fail "OAS prompt carrier metadata must contain exactly one field"
+  in
+  let duplicate =
+    { marked with
+      metadata =
+        Agent_sdk.Types.Extra_system_context_provenance.metadata
+        @ Agent_sdk.Types.Extra_system_context_provenance.metadata
+    }
+  in
+  let unavailable ~prompt_context_present messages =
+    KAPM.provider_content_messages
+      ~prompt_context_present
+      ~projection_input:messages
+      ~projected_messages:messages
+    |> Option.map List.length
+  in
+  check (option int) "missing typed carrier is rejected" None
+    (unavailable ~prompt_context_present:true [ plain ]);
+  check (option int) "unexpected typed carrier is rejected" None
+    (unavailable ~prompt_context_present:false [ marked ]);
+  check (option int) "multiple typed carriers are rejected" None
+    (unavailable ~prompt_context_present:true [ marked; marked ]);
+  check (option int) "invalid typed carrier is rejected" None
+    (unavailable ~prompt_context_present:true [ invalid ]);
+  check (option int) "duplicate metadata key is rejected" None
+    (unavailable ~prompt_context_present:true [ duplicate ])
 ;;
 
 let test_provider_content_messages_rejects_projection_rewrite () =
@@ -496,10 +548,10 @@ let () =
         [
           test_case "attributes final provider input content" `Quick
             test_ctx_composition_splits_final_provider_input_bytes;
-          test_case
-            "requires typed prompt carrier provenance"
-            `Quick
-            test_provider_content_messages_requires_typed_prompt_carrier_provenance;
+          test_case "removes typed prompt carrier" `Quick
+            test_provider_content_messages_removes_typed_prompt_carrier;
+          test_case "rejects prompt carrier mismatch" `Quick
+            test_provider_content_messages_rejects_prompt_carrier_mismatch;
           test_case
             "rejects projection rewrites"
             `Quick

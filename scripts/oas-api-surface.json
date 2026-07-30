@@ -1,6 +1,6 @@
 {
-  "pinned_sha": "2add6bf4a0c7a70dab3b60f82c62643a5bd8a9d6",
-  "pinned_version": "v0.231.4",
+  "pinned_sha": "ae4cc55363b12ae47b9090e715c15dabba9f9f16",
+  "pinned_version": "v0.231.6",
   "surfaces": {
     "event_bus_payload_variants": [
       "AgentCompleted",
@@ -116,8 +116,7 @@
       "type:effect_phase:type effect_phase = | Not_started | Before_dispatch | Dispatch_started | Response_received | Terminal",
       "type:provider_trace:type provider_trace",
       "type:raw_response:type raw_response = { body : string ; body_sha256 : string }",
-      "type:input_capacity_refusal:type input_capacity_refusal = | Context_window_refused of { limit_tokens : int option } | Serialized_request_refused of { http_status : int }",
-      "type:execution_error_cause:type execution_error_cause = | Attempt_already_started | Clock_required_for_timeout | Frozen_request_mismatch | Completion_failed | Input_capacity_refused of input_capacity_refusal | Incomplete_output | Missing_output | Ambiguous_output of int | Unexpected_output_content | Invalid_json_output | Internal_non_json_output",
+      "type:execution_error_cause:type execution_error_cause = | Attempt_already_started | Clock_required_for_timeout | Frozen_request_mismatch | Completion_failed | Serialized_request_refused of { http_status : int } | Incomplete_output | Missing_output | Ambiguous_output of int | Unexpected_output_content | Invalid_json_output | Internal_non_json_output",
       "type:execution_error:type execution_error = { call_id : call_id ; receipt : receipt ; cause : execution_error_cause ; raw_response : raw_response option }",
       "type:success:type success = { call_id : call_id ; receipt : receipt ; output : Yojson.Safe.t ; provenance : plan_provenance ; raw_response : raw_response }",
       "type:flow_candidate_identity:type flow_candidate_identity = { candidate_id : string ; catalog_generation : catalog_generation ; catalog_evidence : catalog_evidence ; target_identity : target_identity }",
@@ -196,6 +195,8 @@
       "val:generation_receipt_snapshot_target_identity:val generation_receipt_snapshot_target_identity : generation_receipt_snapshot -> target_identity",
       "type:flow_attempt_receipt:type flow_attempt_receipt = private { visit : flow_candidate_visit ; receipt : receipt }",
       "type:flow_attempt_snapshot:type flow_attempt_snapshot = private { visit : flow_candidate_visit ; receipt : generation_receipt_snapshot }",
+      "type:flow_advance_failure_snapshot:type flow_advance_failure_snapshot = | Flow_advance_candidate_rejected of candidate_rejection_receipt | Flow_advance_execution_failed of { candidate : flow_attempt_snapshot ; cause : execution_error_cause ; raw_response_sha256 : string option }",
+      "type:flow_advance_receipt:type flow_advance_receipt = private { failed : flow_advance_failure_snapshot ; next : flow_candidate_visit }",
       "val:candidate_visit_count_to_int:val candidate_visit_count_to_int : candidate_visit_count -> int",
       "val:measurement_operation_id_to_string:val measurement_operation_id_to_string : measurement_operation_id -> string",
       "val:flow_measurement_receipt_snapshot:val flow_measurement_receipt_snapshot : flow_measurement_receipt -> measurement_receipt_snapshot",
@@ -221,7 +222,7 @@
       "val:candidate_rejection_measurement_dispatch_fact:val candidate_rejection_measurement_dispatch_fact : candidate_rejection_receipt -> measurement_dispatch_fact",
       "val:candidate_rejection_measurement_outcome:val candidate_rejection_measurement_outcome : candidate_rejection_receipt -> measurement_outcome",
       "val:candidate_rejection_disposition:val candidate_rejection_disposition : candidate_rejection_receipt -> candidate_rejection_disposition",
-      "type:flow_evidence:type flow_evidence = private { flow_id : flow_id ; declared_candidate_snapshot : flow_candidate_identity list ; candidate_visit_count : candidate_visit_count ; measurements : measurement_receipt_snapshot list ; admissions : candidate_admission list ; attempts : flow_attempt_snapshot list }",
+      "type:flow_evidence:type flow_evidence = private { flow_id : flow_id ; declared_candidate_snapshot : flow_candidate_identity list ; candidate_visit_count : candidate_visit_count ; measurements : measurement_receipt_snapshot list ; admissions : candidate_admission list ; attempts : flow_attempt_snapshot list ; advances : flow_advance_receipt list }",
       "val:flow_success_candidate:val flow_success_candidate : flow_success -> flow_attempt_receipt",
       "val:flow_success_output:val flow_success_output : flow_success -> success",
       "val:flow_success_evidence:val flow_success_evidence : flow_success -> flow_evidence",

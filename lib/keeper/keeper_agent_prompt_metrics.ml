@@ -50,20 +50,33 @@ let provider_content_messages
       ~(projection_input : Agent_sdk.Types.message list)
       ~(projected_messages : Agent_sdk.Types.message list)
   =
-  if prompt_context_present
-  then
-    (* OAS currently exposes only generic messages here, not typed provenance
-       for its generated prompt-context carrier. Its position is therefore not
-       a contract. Leave attribution unavailable instead of dropping a message
-       by position. *)
-    None
-  else
-    let projection_input_count = List.length projection_input in
-    match split_at projection_input_count [] projected_messages with
-    | Some (projected_prefix, _)
-      when List.equal ( = ) projected_prefix projection_input ->
-      Some projected_messages
-    | Some _ | None -> None
+  let projection_input_count = List.length projection_input in
+  match split_at projection_input_count [] projected_messages with
+  | Some (projected_prefix, projection_suffix)
+    when List.equal ( = ) projected_prefix projection_input ->
+    let rec remove_prompt_context seen rev_retained = function
+      | [] ->
+        if Bool.equal seen prompt_context_present
+        then Some (List.rev rev_retained)
+        else None
+      | (message : Agent_sdk.Types.message) :: rest ->
+        (match
+         Agent_sdk.Types.Extra_system_context_provenance.classify
+             message.metadata
+         with
+         | Agent_sdk.Types.Extra_system_context_provenance.Absent ->
+           remove_prompt_context seen (message :: rev_retained) rest
+         | Agent_sdk.Types.Extra_system_context_provenance.Present
+           when prompt_context_present && not seen ->
+           remove_prompt_context true rev_retained rest
+         | Agent_sdk.Types.Extra_system_context_provenance.Present
+         | Agent_sdk.Types.Extra_system_context_provenance.Invalid
+         | Agent_sdk.Types.Extra_system_context_provenance.Duplicate -> None)
+    in
+    Option.map
+       (fun retained_input -> retained_input @ projection_suffix)
+       (remove_prompt_context false [] projection_input)
+  | Some _ | None -> None
 ;;
 
 let empty_prompt_segment_metrics =

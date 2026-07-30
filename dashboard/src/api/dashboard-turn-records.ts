@@ -6,14 +6,34 @@ import { get, type AbortableRequestOptions } from './core'
 import { isRecord, asBoolean, asNumber, asNullableString, asString, asRecordArray } from '../components/common/normalize'
 import { type TelemetryFreshnessMetadata } from './dashboard-shared'
 
+export type TurnPromptBlockId =
+  | 'persona'
+  | 'dynamic_context'
+  | 'temporal_summary'
+  | 'memory_os_recall'
+
+export type TurnInputComponentId =
+  | `prompt.${TurnPromptBlockId}`
+  | 'tool_schemas'
+  | 'message_user'
+  | 'message_system'
+  | 'message_assistant_text'
+  | 'message_thinking'
+  | 'message_redacted_thinking'
+  | 'message_tool_use'
+  | 'message_tool_result'
+  | 'message_image'
+  | 'message_document'
+  | 'message_audio'
+
 export type TurnBlock = {
-  block: string
+  block: TurnPromptBlockId
   bytes: number
   digest: string
 }
 
 export type TurnInputComponent = {
-  component: string
+  component: TurnInputComponentId
   bytes: number
 }
 
@@ -52,9 +72,9 @@ export type TurnRecordEntry = {
   output_tokens?: number
   // #25779 made the provider cache counts durable on the turn record
   // (lib/types/turn_record.ml:79-82 writes them as optional fields). Same
-  // absent-means-absent contract as the neighbours: a legacy row that predates
-  // #25779, or a provider that reports no cache usage, leaves these undefined
-  // and the inspector renders absence rather than a fabricated zero.
+  // absent-means-absent contract as the neighbours: a provider that reports no
+  // cache usage leaves these undefined and the inspector renders absence rather
+  // than a fabricated zero.
   cache_creation_input_tokens?: number
   cache_read_input_tokens?: number
   // RFC-0233 §8 — runtime model metadata. context_window is the keeper-resolved
@@ -341,9 +361,21 @@ function wholeSecondIsoOfUnixSeconds(raw: number): string | null {
   return date.toISOString().replace('.000Z', 'Z')
 }
 
+function decodeTurnPromptBlockId(raw: unknown): TurnPromptBlockId | null {
+  switch (raw) {
+    case 'persona':
+    case 'dynamic_context':
+    case 'temporal_summary':
+    case 'memory_os_recall':
+      return raw
+    default:
+      return null
+  }
+}
+
 function decodeTurnBlock(raw: unknown): TurnBlock | null {
   if (!isRecord(raw) || !hasExactKeys(raw, ['block', 'bytes', 'digest'])) return null
-  const block = decodeExactNonEmptyString(raw.block)
+  const block = decodeTurnPromptBlockId(raw.block)
   const digest = decodeExactNonEmptyString(raw.digest)
   const bytes = asNumber(raw.bytes)
   if (
@@ -360,36 +392,37 @@ function decodeTurnBlockList(raw: unknown): TurnBlock[] | null {
   return decodeArray(raw, decodeTurnBlock)
 }
 
-const TURN_INPUT_COMPONENTS = new Set([
-  'prompt.persona',
-  'prompt.continuity',
-  'prompt.dynamic_context',
-  'prompt.temporal_summary',
-  'prompt.claimed_task_nudge',
-  'prompt.retry_nudge',
-  'prompt.memory_os_recall',
-  'prompt.connected_surface',
-  'tool_schemas',
-  'message_user',
-  'message_system',
-  'message_assistant_text',
-  'message_thinking',
-  'message_redacted_thinking',
-  'message_tool_use',
-  'message_tool_result',
-  'message_image',
-  'message_document',
-  'message_audio',
-])
+function decodeTurnInputComponentId(raw: unknown): TurnInputComponentId | null {
+  switch (raw) {
+    case 'prompt.persona':
+    case 'prompt.dynamic_context':
+    case 'prompt.temporal_summary':
+    case 'prompt.memory_os_recall':
+    case 'tool_schemas':
+    case 'message_user':
+    case 'message_system':
+    case 'message_assistant_text':
+    case 'message_thinking':
+    case 'message_redacted_thinking':
+    case 'message_tool_use':
+    case 'message_tool_result':
+    case 'message_image':
+    case 'message_document':
+    case 'message_audio':
+      return raw
+    default:
+      return null
+  }
+}
 
 function decodeTurnInputComponents(raw: unknown): TurnInputComponent[] | null {
   if (!Array.isArray(raw)) return null
   const components: TurnInputComponent[] = []
   for (const item of raw) {
     if (!isRecord(item) || !hasExactKeys(item, ['component', 'bytes'])) return null
-    const component = decodeExactNonEmptyString(item.component)
+    const component = decodeTurnInputComponentId(item.component)
     const bytes = decodeNonNegativeSafeInteger(item.bytes)
-    if (component === null || !TURN_INPUT_COMPONENTS.has(component) || bytes === null) {
+    if (component === null || bytes === null) {
       return null
     }
     components.push({ component, bytes })

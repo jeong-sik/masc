@@ -367,7 +367,6 @@ let log_call
       ?network_mode
       ?runtime_profile
       ?result_bytes
-      ?truncated_to
       ()
   =
   match !store_ref with
@@ -391,11 +390,6 @@ let log_call
       let result_bytes_field =
         match result_bytes with
         | Some n -> [ "result_bytes", `Int n ]
-        | None -> []
-      in
-      let truncated_to_field =
-        match truncated_to with
-        | Some n -> [ "truncated_to", `Int n ]
         | None -> []
       in
       let lane_field =
@@ -561,8 +555,7 @@ let log_call
            @ goal_ids_field
            @ sandbox_profile_field
            @ network_mode_field
-           @ result_bytes_field
-           @ truncated_to_field)
+           @ result_bytes_field)
       in
       (* Sanitize UTF-8 before persisting.  Tool output may contain invalid
          byte sequences (truncated UTF-8, binary output from subprocess

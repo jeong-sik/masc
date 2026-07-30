@@ -563,12 +563,22 @@ let make_hooks
                ()
            in
            let now = Time_compat.now () in
+           (* Round must come from the mutex-guarded [next_round] counter,
+              not a [calls_in_current_turn] read of [acc.entries]: with
+              parallel tool execution two fibers could otherwise observe the
+              same count and record duplicate round numbers. *)
+           let traj_turn = acc.Trajectory.turn in
            let entry : Trajectory.tool_call_entry =
              {
                ts = now;
                ts_iso = Masc_domain.iso8601_of_unix_seconds now;
-               turn = acc.Trajectory.turn;
-               round = Trajectory.calls_in_current_turn acc + 1;
+               turn = traj_turn;
+               round =
+                 Trajectory.next_round
+                   ~masc_root:acc.Trajectory.masc_root
+                   ~keeper_name
+                   ~trace_id
+                   ~turn:traj_turn;
                tool_name;
                args_json = Yojson.Safe.to_string safe_input;
                gate_decision = Trajectory.Pass;

@@ -138,7 +138,6 @@ val log_call :
   ?network_mode:string ->
   ?runtime_profile:string ->
   ?result_bytes:int ->
-  ?truncated_to:int ->
   unit ->
   unit
 (** [log_call ...] persists a single tool call record with full I/O.
@@ -154,9 +153,7 @@ val log_call :
     is persisted separately as the operator-facing runtime selector. Turn-policy fields ([lane], [tool_choice],
     [thinking_enabled], [thinking_budget]) capture the effective tool
     selection context. [result_bytes] is the original output size before
-    any observation-only log preview truncation. [truncated_to] records the
-    retained preview size when one exists; it never describes mutation of the
-    Tool result delivered to the Keeper. Best-effort (failures logged). *)
+    any observation-only log preview truncation. Best-effort (failures logged). *)
 
 val read_recent :
   ?keeper_name:string ->

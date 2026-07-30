@@ -21,6 +21,7 @@ import {
   cancelQueuedKeeperMessage,
   clearKeeper,
   deleteKeeperHistorySnapshots,
+  editKeeperChatPendingReceipt,
   fetchKeeperChatHistory,
   fetchKeeperChatPending,
   fetchKeeperChatReceipt,
@@ -28,6 +29,8 @@ import {
   fetchQueuedKeeperMessageResult,
   fetchKeeperRuntimeTrace,
   isTerminalQueuedKeeperMessage,
+  moveKeeperChatPendingReceiptToEnd,
+  operateKeeperEventQueue,
   pauseKeeper,
   parseKeeperRuntimeTrace,
   parseKeeperChatPendingSnapshot,
@@ -344,6 +347,8 @@ describe('Keeper chat durable receipt API', () => {
       keeper_name: 'keeper sangsu',
       revision: '11',
       current_work: { lane: 'autonomous', started_at: 42 },
+      total_pending: 1,
+      next_after: null,
       pending: [{
         receipt: {
           schema: 'keeper_chat_queue.receipt.v2',
@@ -391,8 +396,147 @@ describe('Keeper chat durable receipt API', () => {
       size: 3,
     }])
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/keepers/keeper%20sangsu/chat/pending',
+      '/api/v1/keepers/keeper%20sangsu/chat/pending?limit=100',
       expect.objectContaining({ headers: expect.any(Object) }),
+    )
+  })
+
+  it('combines bounded pending pages only when their queue revision is stable', async () => {
+    const entry = (suffix: string, content: string) => ({
+      receipt: {
+        schema: 'keeper_chat_queue.receipt.v2',
+        keeper_name: 'sangsu',
+        receipt_id: `chatq_00000000-0000-4000-8000-0000000000${suffix}`,
+        revision: '22',
+        state: { kind: 'pending' },
+      },
+      content,
+      user_blocks: [],
+      attachments: [],
+      submitted_at: 42,
+    })
+    const envelope = (
+      pending: ReturnType<typeof entry>[],
+      nextAfter: string | null,
+    ) => ({
+      schema: 'keeper_chat_queue.pending.v1',
+      ok: true,
+      keeper_name: 'sangsu',
+      revision: '22',
+      current_work: null,
+      total_pending: 2,
+      next_after: nextAfter,
+      pending,
+    })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(
+        [entry('21', 'first')],
+        '41',
+      )), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(
+        [entry('22', 'second')],
+        null,
+      )), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperChatPending('sangsu')
+
+    expect(result.pending.map(item => item.content)).toEqual(['first', 'second'])
+    expect(result.totalPending).toBe(2)
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/keepers/sangsu/chat/pending?limit=100&after=41',
+      expect.objectContaining({ headers: expect.any(Object) }),
+    )
+  })
+
+  it('sends revision-fenced pending edit and move requests', async () => {
+    const receiptId = 'chatq_00000000-0000-4000-8000-000000000014'
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        schema: 'keeper_chat_queue.pending_mutation.result.v1',
+        ok: true,
+        keeper_name: 'sangsu',
+        receipt_id: receiptId,
+        revision: '12',
+        pending_index: 1,
+        audit: { recorded: true },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        schema: 'keeper_chat_queue.pending_mutation.result.v1',
+        ok: true,
+        keeper_name: 'sangsu',
+        receipt_id: receiptId,
+        revision: '13',
+        pending_index: 3,
+        audit: { recorded: true },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await editKeeperChatPendingReceipt('sangsu', receiptId, '11', 'edited')
+    await moveKeeperChatPendingReceiptToEnd('sangsu', receiptId, '12')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      `/api/v1/keepers/sangsu/chat/receipts/${receiptId}/edit`,
+      expect.objectContaining({
+        body: JSON.stringify({
+          content: 'edited',
+          expected_revision: '11',
+          schema: 'keeper_chat_queue.pending_edit.request.v1',
+        }),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `/api/v1/keepers/sangsu/chat/receipts/${receiptId}/move-to-end`,
+      expect.objectContaining({
+        body: JSON.stringify({
+          expected_revision: '12',
+          schema: 'keeper_chat_queue.pending_move_to_end.request.v1',
+        }),
+      }),
+    )
+  })
+
+  it('sends an exact typed event source with its durable revision', async () => {
+    const source = {
+      post_id: 'post-1',
+      urgency: 'normal',
+      arrived_at_unix: 42,
+      payload: { kind: 'bootstrap' },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        schema: 'keeper_event_queue.operator.result.v1',
+        ok: true,
+        keeper_name: 'sangsu',
+        result: { status: 'applied', revision: '8' },
+        audit: { recorded: true },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await operateKeeperEventQueue('sangsu', {
+      action: 'reprioritize',
+      expectedRevision: '7',
+      operationId: 'operation-7',
+      source,
+      urgency: 'immediate',
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/keepers/sangsu/events/operator',
+      expect.objectContaining({
+        body: JSON.stringify({
+          schema: 'keeper_event_queue.operator.request.v1',
+          action: 'reprioritize',
+          expected_revision: '7',
+          operator_operation_id: 'operation-7',
+          source,
+          urgency: 'immediate',
+        }),
+      }),
     )
   })
 

@@ -443,6 +443,7 @@ let keeper_chat_recovery_error_status = function
   | Keeper_chat_queue.Receipt_already_terminal _
   | Keeper_chat_queue.Receipt_not_recovery_required _
   | Keeper_chat_queue.Receipt_not_pending _
+  | Keeper_chat_queue.Pending_revision_mismatch _
   | Keeper_chat_queue.Recovery_revision_mismatch _
   | Keeper_chat_queue.Recovery_lease_mismatch _ ->
       `Conflict

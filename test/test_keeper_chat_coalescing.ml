@@ -459,6 +459,121 @@ let test_uncertain_pending_cancellation_converges () =
    | Ok _ | Error _ ->
      check "uncertain pending cancellation reconciles to cancelled" false)
 
+let test_pending_edit_and_move_are_revision_fenced () =
+  Printf.printf "Test: pending edit and move-to-end are revision-fenced\n%!";
+  with_base "keeper-chat-pending-operator" @@ fun base_path ->
+  let keeper_name = "pending-operator" in
+  ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
+  let first = enqueue_exn ~keeper_name (message "first") in
+  let second = enqueue_exn ~keeper_name (message "second") in
+  let third = enqueue_exn ~keeper_name (message "third") in
+  let next_after =
+    match
+      Keeper_chat_queue.pending_receipts_page
+        ~keeper_name
+        ~after:None
+        ~limit:2
+    with
+    | Ok
+        { revision = 3L
+        ; receipts = [ first_page; second_page ]
+        ; total_pending = 3
+        ; next_after = Some cursor
+        }
+      when Keeper_chat_queue.Receipt_id.equal
+             first.receipt_id
+             first_page.receipt_id
+           && Keeper_chat_queue.Receipt_id.equal
+                second.receipt_id
+                second_page.receipt_id ->
+      check "pending projection page is bounded and FIFO" true;
+      Some cursor
+    | Ok _ | Error _ ->
+      check "pending projection page is bounded and FIFO" false;
+      None
+  in
+  (match next_after with
+   | None -> check "pending projection cursor resumes exactly" false
+   | Some after ->
+     (match
+        Keeper_chat_queue.pending_receipts_page
+          ~keeper_name
+          ~after:(Some after)
+          ~limit:2
+      with
+      | Ok
+          { revision = 3L
+          ; receipts = [ third_page ]
+          ; total_pending = 3
+          ; next_after = None
+          }
+        when Keeper_chat_queue.Receipt_id.equal
+               third.receipt_id
+               third_page.receipt_id ->
+        check "pending projection cursor resumes exactly" true
+      | Ok _ | Error _ ->
+        check "pending projection cursor resumes exactly" false));
+  (match
+     Keeper_chat_queue.edit_pending
+       ~keeper_name
+       ~receipt_id:second.receipt_id
+       ~expected_revision:3L
+       ~message:(message "second edited")
+   with
+   | Ok { revision = 4L; pending_index = 1; _ } ->
+     check "pending edit preserves the FIFO position" true
+   | Ok _ | Error _ ->
+     check "pending edit preserves the FIFO position" false);
+  (match
+     Keeper_chat_queue.move_pending_to_end
+       ~keeper_name
+       ~receipt_id:first.receipt_id
+       ~expected_revision:3L
+   with
+   | Error
+       (Keeper_chat_queue.Pending_revision_mismatch
+          { observed_revision = 4L; _ }) ->
+     check "stale move revision is rejected without mutation" true
+   | Ok _ | Error _ ->
+     check "stale move revision is rejected without mutation" false);
+  (match
+     Keeper_chat_queue.move_pending_to_end
+       ~keeper_name
+       ~receipt_id:first.receipt_id
+       ~expected_revision:4L
+   with
+   | Ok { revision = 5L; pending_index = 2; _ } ->
+     check "exact pending receipt moves behind every pending peer" true
+   | Ok _ | Error _ ->
+     check "exact pending receipt moves behind every pending peer" false);
+  (match Keeper_chat_queue.pending_receipts ~keeper_name with
+   | Ok { revision = 5L; receipts = [ second_pending; third_pending; first_pending ] } ->
+     check "edit keeps receipt identity and payload atomic"
+       (Keeper_chat_queue.Receipt_id.equal
+          second.receipt_id
+          second_pending.receipt_id
+        && String.equal second_pending.message.content "second edited");
+     check "move-to-end preserves the other FIFO order"
+       (Keeper_chat_queue.Receipt_id.equal third.receipt_id third_pending.receipt_id
+        && Keeper_chat_queue.Receipt_id.equal first.receipt_id first_pending.receipt_id)
+   | Ok _ | Error _ ->
+     check "edit keeps receipt identity and payload atomic" false;
+     check "move-to-end preserves the other FIFO order" false);
+  let lease = lease_exn ~keeper_name in
+  (match
+     Keeper_chat_queue.edit_pending
+       ~keeper_name
+       ~receipt_id:lease.item.receipt_id
+       ~expected_revision:6L
+       ~message:(message "too late")
+   with
+   | Error
+       (Keeper_chat_queue.Receipt_not_pending
+          { observed_state = Some (Inflight _); _ }) ->
+     check "inflight receipt cannot be edited" true
+   | Ok _ | Error _ ->
+     check "inflight receipt cannot be edited" false)
+
 let expect_enqueue_indeterminate label expected_receipt_id = function
   | Error
       (Keeper_chat_queue.Persist_failed
@@ -1111,6 +1226,7 @@ let () =
   test_pending_cancellation_is_state_guarded ();
   test_observed_pending_claim_is_exact ();
   test_uncertain_pending_cancellation_converges ();
+  test_pending_edit_and_move_are_revision_fenced ();
   test_transaction_publication_boundaries ();
   test_commit_observer_exception_and_cancellation ();
   test_transition_observer_outside_lock_exactly_once ();

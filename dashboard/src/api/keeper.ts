@@ -763,7 +763,17 @@ export interface KeeperChatPendingSnapshot {
   keeperName: string
   revision: string
   currentWork: { lane: string; startedAt: number } | null
+  totalPending: number
+  nextAfter: string | null
   pending: KeeperChatPendingInput[]
+}
+
+export interface KeeperChatPendingMutationResult {
+  keeperName: string
+  receiptId: string
+  revision: string
+  pendingIndex: number
+  audit: { recorded: true } | { recorded: false; error: string }
 }
 
 const KEEPER_CHAT_RECEIPT_FAILURE_KINDS = new Set<KeeperChatReceiptFailureKind>([
@@ -938,7 +948,19 @@ export function parseKeeperChatPendingSnapshot(
   }
   const keeperName = asString(value.keeper_name, '').trim()
   const revision = parseKeeperQueueRevision(value.revision)
-  if (!keeperName || revision === undefined || !Array.isArray(value.pending)) {
+  const totalPending = asNumber(value.total_pending)
+  const nextAfter = value.next_after === null
+    ? null
+    : parseKeeperQueueRevision(value.next_after)
+  if (
+    !keeperName
+    || revision === undefined
+    || typeof totalPending !== 'number'
+    || !Number.isSafeInteger(totalPending)
+    || totalPending < 0
+    || nextAfter === undefined
+    || !Array.isArray(value.pending)
+  ) {
     throw new Error('Keeper pending response is missing identity or entries')
   }
   const currentWork = (() => {
@@ -984,21 +1006,34 @@ export function parseKeeperChatPendingSnapshot(
     }
     return { receipt, content, attachments, userBlocks, submittedAt }
   })
-  return { keeperName, revision, currentWork, pending }
+  if (pending.length > totalPending) {
+    throw new Error('Keeper pending page exceeds its total count')
+  }
+  return {
+    keeperName,
+    revision,
+    currentWork,
+    totalPending,
+    nextAfter,
+    pending,
+  }
 }
 
-export async function fetchKeeperChatPending(
+async function fetchKeeperChatPendingPage(
   keeperName: string,
+  after: string | null,
 ): Promise<KeeperChatPendingSnapshot> {
+  const baseUrl = `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/pending`
+  const url = `${baseUrl}?limit=100${after === null ? '' : `&after=${encodeURIComponent(after)}`}`
   const { response, data } = await fetchJsonWithTimeout(
-    `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/pending`,
+    url,
     { headers: jsonHeaders() },
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!response.ok) {
     throw await apiRequestErrorFromResponse(
       'GET',
-      `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/pending`,
+      url,
       response,
     )
   }
@@ -1007,6 +1042,53 @@ export async function fetchKeeperChatPending(
     throw new Error('fetchKeeperChatPending: response identity mismatch')
   }
   return snapshot
+}
+
+export async function fetchKeeperChatPending(
+  keeperName: string,
+): Promise<KeeperChatPendingSnapshot> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const pending: KeeperChatPendingInput[] = []
+    const seenCursors = new Set<string>()
+    let expectedRevision: string | null = null
+    let currentWork: KeeperChatPendingSnapshot['currentWork'] = null
+    let totalPending = 0
+    let after: string | null = null
+    let revisionChanged = false
+    do {
+      const page = await fetchKeeperChatPendingPage(keeperName, after)
+      if (expectedRevision === null) {
+        expectedRevision = page.revision
+        currentWork = page.currentWork
+        totalPending = page.totalPending
+      } else if (
+        page.revision !== expectedRevision
+        || page.totalPending !== totalPending
+      ) {
+        revisionChanged = true
+        break
+      }
+      pending.push(...page.pending)
+      after = page.nextAfter
+      if (after !== null) {
+        if (seenCursors.has(after)) {
+          throw new Error('fetchKeeperChatPending: repeated page cursor')
+        }
+        seenCursors.add(after)
+      }
+    } while (after !== null)
+    if (!revisionChanged && pending.length === totalPending) {
+      return {
+        keeperName,
+        revision: expectedRevision ?? '0',
+        currentWork,
+        totalPending,
+        nextAfter: null,
+        pending,
+      }
+    }
+  }
+  throw new Error('fetchKeeperChatPending: queue changed during pagination')
 }
 
 export async function cancelKeeperChatPendingReceipt(
@@ -1061,6 +1143,113 @@ export async function cancelKeeperChatPendingReceipt(
         error: asString(raw.audit.error, '').trim() || 'pending cancellation audit persistence failed',
       }
   return { receipt, audit }
+}
+
+async function mutateKeeperChatPendingReceipt(
+  keeperName: string,
+  receiptId: string,
+  action: 'edit' | 'move-to-end',
+  request: Record<string, unknown>,
+): Promise<KeeperChatPendingMutationResult> {
+  const raw = await post<unknown>(
+    `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/receipts/${encodeURIComponent(receiptId)}/${action}`,
+    request,
+  )
+  if (
+    !isRecord(raw)
+    || raw.schema !== 'keeper_chat_queue.pending_mutation.result.v1'
+    || raw.ok !== true
+    || !isRecord(raw.audit)
+    || typeof raw.audit.recorded !== 'boolean'
+  ) {
+    throw new Error(`mutateKeeperChatPendingReceipt(${action}): invalid response envelope`)
+  }
+  const responseKeeper = asString(raw.keeper_name, '').trim()
+  const responseReceipt = asString(raw.receipt_id, '').trim()
+  const revision = parseKeeperQueueRevision(raw.revision)
+  const pendingIndex = asNumber(raw.pending_index)
+  if (
+    responseKeeper !== keeperName
+    || responseReceipt !== receiptId
+    || revision === undefined
+    || typeof pendingIndex !== 'number'
+    || !Number.isSafeInteger(pendingIndex)
+    || pendingIndex < 0
+  ) {
+    throw new Error(`mutateKeeperChatPendingReceipt(${action}): response identity mismatch`)
+  }
+  const audit = raw.audit.recorded
+    ? { recorded: true as const }
+    : {
+        recorded: false as const,
+        error: asString(raw.audit.error, '').trim() || 'pending mutation audit persistence failed',
+      }
+  return {
+    keeperName: responseKeeper,
+    receiptId: responseReceipt,
+    revision,
+    pendingIndex,
+    audit,
+  }
+}
+
+export async function editKeeperChatPendingReceipt(
+  keeperName: string,
+  receiptId: string,
+  expectedRevision: string,
+  content: string,
+): Promise<KeeperChatPendingMutationResult> {
+  return mutateKeeperChatPendingReceipt(keeperName, receiptId, 'edit', {
+    content,
+    expected_revision: expectedRevision,
+    schema: 'keeper_chat_queue.pending_edit.request.v1',
+  })
+}
+
+export async function moveKeeperChatPendingReceiptToEnd(
+  keeperName: string,
+  receiptId: string,
+  expectedRevision: string,
+): Promise<KeeperChatPendingMutationResult> {
+  return mutateKeeperChatPendingReceipt(keeperName, receiptId, 'move-to-end', {
+    expected_revision: expectedRevision,
+    schema: 'keeper_chat_queue.pending_move_to_end.request.v1',
+  })
+}
+
+export type KeeperEventQueueOperatorAction =
+  | { action: 'cancel'; expectedRevision: string; source: Record<string, unknown>; reason: string; operationId?: string }
+  | { action: 'transfer'; expectedRevision: string; source: Record<string, unknown>; targetKeeper: string; operationId?: string }
+  | { action: 'reprioritize'; expectedRevision: string; source: Record<string, unknown>; urgency: 'immediate' | 'normal' | 'low'; operationId?: string }
+
+export async function operateKeeperEventQueue(
+  keeperName: string,
+  operation: KeeperEventQueueOperatorAction,
+): Promise<void> {
+  const common = {
+    schema: 'keeper_event_queue.operator.request.v1',
+    action: operation.action,
+    expected_revision: operation.expectedRevision,
+    operator_operation_id: operation.operationId ?? crypto.randomUUID(),
+    source: operation.source,
+  }
+  const request = operation.action === 'cancel'
+    ? { ...common, reason: operation.reason }
+    : operation.action === 'transfer'
+      ? { ...common, target_keeper: operation.targetKeeper }
+      : { ...common, urgency: operation.urgency }
+  const raw = await post<unknown>(
+    `/api/v1/keepers/${encodeURIComponent(keeperName)}/events/operator`,
+    request,
+  )
+  if (
+    !isRecord(raw)
+    || raw.schema !== 'keeper_event_queue.operator.result.v1'
+    || raw.ok !== true
+    || asString(raw.keeper_name, '').trim() !== keeperName
+  ) {
+    throw new Error('operateKeeperEventQueue: invalid response envelope')
+  }
 }
 
 export async function resolveKeeperChatRecovery(

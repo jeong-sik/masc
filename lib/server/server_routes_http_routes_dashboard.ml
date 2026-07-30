@@ -12,6 +12,8 @@ open Server_routes_http_keeper_stream
 include Server_routes_http_routes_dashboard_setup
 
 module Keeper_chat_pending = Server_dashboard_http_keeper_chat_pending
+module Keeper_event_queue_operator =
+  Server_dashboard_http_keeper_event_queue_operator
 
 let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
 let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
@@ -1635,8 +1637,9 @@ let add_routes ~sw ~clock router =
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
        match Keeper_chat_pending.pending_get_route (Http.Request.path request) with
        | Some keeper_name ->
-         with_public_read
-           (fun state _req reqd ->
+         with_token_permission_auth
+           ~permission:Keeper_chat_pending.operator_permission
+           (fun state _agent_name _req reqd ->
              Keeper_chat_pending.handle_get state request reqd ~keeper_name)
            request reqd
        | None ->
@@ -1659,19 +1662,35 @@ let add_routes ~sw ~clock router =
 
   (* Keeper POST sub-routes. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
-       match Keeper_chat_pending.pending_cancel_route (Http.Request.path request) with
-       | Some (keeper_name, receipt_id) ->
+       match Keeper_event_queue_operator.route (Http.Request.path request) with
+       | Some keeper_name ->
          with_token_permission_auth
-           ~permission:Keeper_chat_pending.cancel_permission
+           ~permission:Masc_domain.CanAdmin
            (fun state agent_name req reqd ->
              Http.Request.read_body_async reqd (fun body_str ->
-               Keeper_chat_pending.handle_cancel_post
+               Keeper_event_queue_operator.handle_post
+                 state
+                 ~actor:agent_name
+                 req
+                 reqd
+                 ~keeper_name
+                 body_str))
+           request reqd
+       | None ->
+       match Keeper_chat_pending.pending_mutation_route (Http.Request.path request) with
+       | Some (keeper_name, receipt_id, mutation) ->
+         with_token_permission_auth
+           ~permission:Keeper_chat_pending.operator_permission
+           (fun state agent_name req reqd ->
+             Http.Request.read_body_async reqd (fun body_str ->
+               Keeper_chat_pending.handle_mutation_post
                  state
                  ~actor:agent_name
                  req
                  reqd
                  ~keeper_name
                  ~raw_receipt_id:receipt_id
+                 ~mutation
                  body_str))
            request reqd
        | None ->

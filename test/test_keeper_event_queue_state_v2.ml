@@ -247,6 +247,55 @@ let test_durable_peek_ack_restart () =
     Alcotest.(check (list string)) "restart sees only unacked source" [ "two" ] (post_ids restarted))
 ;;
 
+let test_durable_reprioritize_is_revision_fenced () =
+  with_temp_dir "keeper-event-reprioritize" (fun base_path ->
+    let keeper_name = "priority-keeper" in
+    let first = stimulus "first" 1.0 in
+    let second = stimulus "second" 2.0 in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      let pending = Queue.enqueue pending first in
+      Queue.enqueue pending second)
+    |> require_ok "seed durable priority queue";
+    let state =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load priority state"
+    in
+    let revision = State.revision state in
+    let applied_revision =
+      Persistence.reprioritize_pending_result
+        ~base_path
+        ~keeper_name
+        ~expected_revision:revision
+        ~source:second
+        ~urgency:Queue.Immediate
+        ()
+      |> require_ok "reprioritize exact source"
+    in
+    Alcotest.(check int64)
+      "priority change advances revision once"
+      (Int64.succ revision)
+      applied_revision;
+    let restarted =
+      Persistence.load_pending_result ~base_path ~keeper_name
+      |> require_ok "restart priority load"
+    in
+    Alcotest.(check (list string))
+      "priority change survives restart"
+      [ "second"; "first" ]
+      (post_ids restarted);
+    match
+      Persistence.reprioritize_pending_result
+        ~base_path
+        ~keeper_name
+        ~expected_revision:revision
+        ~source:second
+        ~urgency:Queue.Low
+        ()
+    with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "stale priority revision was accepted")
+;;
+
 let () =
   Alcotest.run
     "keeper pending queue current schema"
@@ -272,6 +321,11 @@ let () =
             test_current_schema_round_trip
         ] )
     ; ( "persistence"
-      , [ Alcotest.test_case "durable peek ack restart" `Quick test_durable_peek_ack_restart ] )
+      , [ Alcotest.test_case "durable peek ack restart" `Quick test_durable_peek_ack_restart
+        ; Alcotest.test_case
+            "durable reprioritize is revision fenced"
+            `Quick
+            test_durable_reprioritize_is_revision_fenced
+        ] )
     ]
 ;;

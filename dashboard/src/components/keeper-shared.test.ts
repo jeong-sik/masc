@@ -3,9 +3,22 @@ import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { bootKeeper, shutdownKeeper } = vi.hoisted(() => ({
+const {
+  bootKeeper,
+  shutdownKeeper,
+  fetchKeeperChatPending,
+  cancelKeeperChatPendingReceipt,
+  editKeeperChatPendingReceipt,
+  moveKeeperChatPendingReceiptToEnd,
+  operateKeeperEventQueue,
+} = vi.hoisted(() => ({
   bootKeeper: vi.fn(),
   shutdownKeeper: vi.fn(),
+  fetchKeeperChatPending: vi.fn(),
+  cancelKeeperChatPendingReceipt: vi.fn(),
+  editKeeperChatPendingReceipt: vi.fn(),
+  moveKeeperChatPendingReceiptToEnd: vi.fn(),
+  operateKeeperEventQueue: vi.fn(),
 }))
 
 const { invalidateDashboardCache, refreshDashboard } = vi.hoisted(() => ({
@@ -80,6 +93,11 @@ vi.mock('../keeper-state', async () => {
 vi.mock('../api/keeper', () => ({
   bootKeeper,
   shutdownKeeper,
+  fetchKeeperChatPending,
+  cancelKeeperChatPendingReceipt,
+  editKeeperChatPendingReceipt,
+  moveKeeperChatPendingReceiptToEnd,
+  operateKeeperEventQueue,
 }))
 
 vi.mock('../store', async (importOriginal) => {
@@ -214,6 +232,11 @@ describe('KeeperConversationPanel', () => {
     vi.mocked(cancelActiveKeeperThreadMessage).mockResolvedValue(true)
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReset()
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReturnValue(false)
+    fetchKeeperChatPending.mockReset()
+    cancelKeeperChatPendingReceipt.mockReset()
+    editKeeperChatPendingReceipt.mockReset()
+    moveKeeperChatPendingReceiptToEnd.mockReset()
+    operateKeeperEventQueue.mockReset()
   })
 
   afterEach(() => {
@@ -928,6 +951,77 @@ describe('KeeperConversationPanel', () => {
       expect(status?.textContent).toContain('배송 복구 확인 필요 1')
       expect(status?.textContent).toContain('영속화 조정 필요 1')
       expect(container.textContent).not.toContain('브라우저 초안 · 서버 미접수')
+    })
+  })
+
+  it('opens an operator drawer with exact durable chat and event queue evidence', async () => {
+    const receiptId = 'chatq_00000000-0000-4000-8000-000000000022'
+    fetchKeeperChatPending.mockResolvedValue({
+      keeperName: 'sangsu',
+      revision: '22',
+      currentWork: null,
+      totalPending: 1,
+      nextAfter: null,
+      pending: [{
+        receipt: {
+          keeperName: 'sangsu',
+          receiptId,
+          revision: '22',
+          state: { kind: 'pending' },
+        },
+        content: 'durable queued operator request',
+        userBlocks: [],
+        attachments: [],
+        submittedAt: 42,
+      }],
+    })
+    mockedToolsData.value = {
+      keeper_waiting_inventory: {
+        keepers: [{
+          keeper_name: 'sangsu',
+          state: 'busy',
+          waiting_count: 2,
+          sources: {
+            chat_queue_pending: 1,
+            event_queue_pending: 1,
+          },
+          waiting_on: [{
+            source: 'event_queue_pending',
+            waiting_on: 'board_signal',
+            next_action: 'keeper_drain_event_queue',
+            detail: {
+              queue_index: 0,
+              queue_revision: '9',
+              post_id: 'board-post-9',
+              urgency: 'normal',
+              arrived_at: 41,
+              payload: { kind: 'board_signal', post_id: 'board-post-9' },
+            },
+          }],
+        }],
+      },
+    }
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
+      container,
+    )
+    fireEvent.click(await waitFor(() => {
+      const button = container.querySelector('[data-open-keeper-queue-control]')
+      expect(button).not.toBeNull()
+      return button as HTMLElement
+    }))
+
+    await waitFor(() => {
+      const panel = container.querySelector('[data-keeper-queue-control-panel]')
+      expect(panel?.getAttribute('role')).toBe('dialog')
+      expect(panel?.textContent).toContain('durable queued operator request')
+      expect(panel?.textContent).toContain(receiptId)
+      expect(panel?.textContent).toContain('board-post-9')
+      expect(panel?.textContent).toContain('수정')
+      expect(panel?.textContent).toContain('맨 뒤로')
+      expect(panel?.textContent).toContain('이관')
+      expect(panel?.textContent).toContain('취소')
     })
   })
 

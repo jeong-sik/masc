@@ -148,6 +148,14 @@ type persistence_publication =
       { revision : int64
       ; receipt_id : Receipt_id.t
       }
+  | Pending_edit_indeterminate of
+      { revision : int64
+      ; receipt_id : Receipt_id.t
+      }
+  | Pending_move_to_end_indeterminate of
+      { revision : int64
+      ; receipt_id : Receipt_id.t
+      }
 
 type persistence_failure =
   { publication : persistence_publication
@@ -169,6 +177,11 @@ type mutation_error =
   | Receipt_not_pending of
       { receipt_id : Receipt_id.t
       ; observed_state : receipt_state option
+      }
+  | Pending_revision_mismatch of
+      { receipt_id : Receipt_id.t
+      ; expected_revision : int64
+      ; observed_revision : int64
       }
   | Recovery_revision_mismatch of
       { receipt_id : Receipt_id.t
@@ -207,6 +220,15 @@ type pending_snapshot = {
   revision : int64;
   receipts : active_receipt list;
 }
+
+type pending_page = {
+  revision : int64;
+  receipts : active_receipt list;
+  total_pending : int;
+  next_after : int64 option;
+}
+
+val pending_page_limit : int
 
 type diagnostic_snapshot = {
   revision : int64;
@@ -334,6 +356,16 @@ val pending_receipts :
     read-only projection over the queue authority; callers must not persist it as
     a second queue state. *)
 
+val pending_receipts_page :
+  keeper_name:string ->
+  after:int64 option ->
+  limit:int ->
+  (pending_page, mutation_error) result
+(** Return one bounded FIFO page of exact durable [Pending] payloads. [after]
+    is the opaque sequence cursor returned as [next_after] by the previous page.
+    [limit] must not exceed [pending_page_limit]. A caller combining pages must
+    require one unchanged [revision]. *)
+
 type pending_cancellation =
   { cancelled_at : float
   ; detail : string
@@ -352,6 +384,30 @@ val cancel_pending :
   receipt_id:Receipt_id.t ->
   cancellation:pending_cancellation ->
   (pending_cancellation_report, mutation_error) result
+
+type pending_mutation_report =
+  { receipt_id : Receipt_id.t
+  ; revision : int64
+  ; pending_index : int
+  }
+
+val edit_pending :
+  keeper_name:string ->
+  receipt_id:Receipt_id.t ->
+  expected_revision:int64 ->
+  message:queued_message ->
+  (pending_mutation_report, mutation_error) result
+(** Atomically replace the payload of exactly one durable [Pending] receipt.
+    The receipt identity and FIFO position remain unchanged. *)
+
+val move_pending_to_end :
+  keeper_name:string ->
+  receipt_id:Receipt_id.t ->
+  expected_revision:int64 ->
+  (pending_mutation_report, mutation_error) result
+(** Atomically move exactly one durable [Pending] receipt behind all other
+    pending receipts. The current queue revision is a mandatory CAS fence.
+    Inflight and recovery-required receipts are never reordered. *)
 
 type reconciliation_outcome =
   | Already_consistent

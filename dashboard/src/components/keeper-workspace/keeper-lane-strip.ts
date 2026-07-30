@@ -152,9 +152,11 @@ export function KeeperLaneStrip({
             <div class="grid gap-1.5">
               <div class="flex flex-wrap items-center gap-1.5">
                 <${StatusChip} tone=${stateTone(entry.state)} uppercase=${false}>${enumLabel(entry.state)}<//>
-                ${entry.next_action
-                  ? html`<span class="font-mono text-2xs text-[var(--color-fg-muted)]">${enumLabel(entry.next_action)}</span>`
-                  : null}
+                ${Object.keys(entry.source_next_actions ?? {}).length > 0
+                  ? html`<span class="font-mono text-2xs text-[var(--color-fg-muted)]">source별 next action</span>`
+                  : entry.next_action
+                    ? html`<span class="font-mono text-2xs text-[var(--color-fg-muted)]">${enumLabel(entry.next_action)}</span>`
+                    : null}
               </div>
               ${rows.length > 0
                 ? html`

@@ -383,6 +383,7 @@ type ChatTranscriptAction = {
   onClick?: (entry: KeeperConversationEntry) => void
   onPendingCancel?: (entry: KeeperConversationEntry) => Promise<void>
   onPendingEdit?: (entry: KeeperConversationEntry) => Promise<void>
+  onPendingMoveToEnd?: (entry: KeeperConversationEntry) => Promise<void>
   onRecoveryRequeue?: (entry: KeeperConversationEntry) => Promise<void>
   onRecoveryCancel?: (entry: KeeperConversationEntry, detail: string) => Promise<void>
 }
@@ -453,7 +454,7 @@ function QueueReceiptBadge({ entry, action }: {
   action?: ChatTranscriptAction
 }) {
   const [recoveryPending, setRecoveryPending] = useState<'requeue' | 'cancel' | null>(null)
-  const [pendingAction, setPendingAction] = useState<'edit' | 'cancel' | null>(null)
+  const [pendingAction, setPendingAction] = useState<'edit' | 'move' | 'cancel' | null>(null)
   const receiptId = entry.details?.queueReceiptId?.trim()
   const shutdownOperationId = entry.details?.queueShutdownOperationId?.trim()
   const queueState = entry.details?.queueState
@@ -511,7 +512,7 @@ function QueueReceiptBadge({ entry, action }: {
     void runRecovery('cancel', () => action.onRecoveryCancel!(entry, detail))
   }
   const runPendingAction = async (
-    kind: 'edit' | 'cancel',
+    kind: 'edit' | 'move' | 'cancel',
     operation: () => Promise<void>,
   ) => {
     setPendingAction(kind)
@@ -561,6 +562,19 @@ function QueueReceiptBadge({ entry, action }: {
                 void runPendingAction('cancel', () => action.onPendingCancel!(entry))
               }}
             >${pendingAction === 'cancel' ? '취소 중...' : '취소'}</button>
+          `
+        : null}
+      ${queueState === 'pending' && action?.onPendingMoveToEnd
+        ? html`
+            <button
+              type="button"
+              disabled=${pendingAction !== null}
+              class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)] disabled:opacity-50"
+              data-chat-queue-pending-action="move-to-end"
+              onClick=${() => {
+                void runPendingAction('move', () => action.onPendingMoveToEnd!(entry))
+              }}
+            >${pendingAction === 'move' ? '변경 중...' : '맨 뒤로'}</button>
           `
         : null}
       ${queueState === 'recovery_required' && action?.onRecoveryRequeue

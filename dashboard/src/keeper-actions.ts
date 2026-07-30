@@ -2,10 +2,12 @@ import { callMcpTool } from './api/mcp'
 import { runOperatorAction } from './api/core'
 import {
   cancelKeeperChatPendingReceipt,
+  editKeeperChatPendingReceipt,
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
   fetchKeeperChatPending,
   fetchKeeperChatReceipt,
+  moveKeeperChatPendingReceiptToEnd,
   resolveKeeperChatRecovery,
   fetchQueuedKeeperMessageResult,
   interruptKeeperTurn as apiInterruptKeeperTurn,
@@ -1173,8 +1175,11 @@ async function resolveKeeperChatRecoveryEntry(
       queueState: state.kind,
       queueFailureKind: state.kind === 'failed' ? state.failureKind : null,
     }
+    let delivery: KeeperConversationDelivery = 'queued'
+    if (state.kind === 'failed') delivery = 'error'
+    if (state.kind === 'delivered') delivery = 'delivered'
     finalizeAssistantEntry(keeperName, entry.id, {
-      delivery: state.kind === 'failed' ? 'error' : state.kind === 'delivered' ? 'delivered' : 'queued',
+      delivery,
       streamState: null,
       details,
       error: state.kind === 'failed' ? state.detail : undefined,
@@ -1252,6 +1257,75 @@ export async function cancelKeeperChatPendingEntry(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     setRecordValue(keeperActionErrors, keeperName, `대기 메시지 취소 실패: ${message}`)
+    void reconcileKeeperChatReceipts(keeperName)
+    throw error
+  }
+}
+
+export async function editKeeperChatPendingEntry(
+  keeperName: string,
+  entry: KeeperConversationEntry,
+  content: string,
+): Promise<void> {
+  const receiptId = entry.details?.queueReceiptId?.trim() ?? ''
+  const expectedRevision = entry.details?.queueRevision?.trim() ?? ''
+  if (!receiptId || !expectedRevision || entry.details?.queueState !== 'pending') {
+    throw new Error('수정할 대기 메시지의 최신 receipt/revision이 없습니다.')
+  }
+  if (!content.trim()) {
+    throw new Error('대기 메시지 본문은 비워둘 수 없습니다.')
+  }
+  setRecordValue(keeperActionErrors, keeperName, null)
+  try {
+    const result = await editKeeperChatPendingReceipt(
+      keeperName,
+      receiptId,
+      expectedRevision,
+      content,
+    )
+    if (!result.audit.recorded) {
+      setRecordValue(
+        keeperActionErrors,
+        keeperName,
+        `메시지는 수정됐지만 audit 기록에 실패했습니다: ${result.audit.error}`,
+      )
+    }
+    await reconcileKeeperChatReceipts(keeperName)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    setRecordValue(keeperActionErrors, keeperName, `대기 메시지 수정 실패: ${message}`)
+    void reconcileKeeperChatReceipts(keeperName)
+    throw error
+  }
+}
+
+export async function moveKeeperChatPendingEntryToEnd(
+  keeperName: string,
+  entry: KeeperConversationEntry,
+): Promise<void> {
+  const receiptId = entry.details?.queueReceiptId?.trim() ?? ''
+  const expectedRevision = entry.details?.queueRevision?.trim() ?? ''
+  if (!receiptId || !expectedRevision || entry.details?.queueState !== 'pending') {
+    throw new Error('순서를 바꿀 대기 메시지의 최신 receipt/revision이 없습니다.')
+  }
+  setRecordValue(keeperActionErrors, keeperName, null)
+  try {
+    const result = await moveKeeperChatPendingReceiptToEnd(
+      keeperName,
+      receiptId,
+      expectedRevision,
+    )
+    if (!result.audit.recorded) {
+      setRecordValue(
+        keeperActionErrors,
+        keeperName,
+        `순서는 변경됐지만 audit 기록에 실패했습니다: ${result.audit.error}`,
+      )
+    }
+    await reconcileKeeperChatReceipts(keeperName)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    setRecordValue(keeperActionErrors, keeperName, `대기 메시지 순서 변경 실패: ${message}`)
     void reconcileKeeperChatReceipts(keeperName)
     throw error
   }

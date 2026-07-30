@@ -254,7 +254,11 @@ export function KeeperWaitingInventoryPanel({
 }
 
 function laneSummary(keeper: DashboardKeeperWaitingKeeper): string {
-  const nextAction = evidenceLabel(keeper.next_action, 'next action unavailable')
+  const sourceActions = Object.entries(keeper.source_next_actions ?? {})
+    .flatMap(([source, actions]) => actions.map(action => `${enumLabel(source)}: ${enumLabel(action)}`))
+  const actionSummary = sourceActions.length > 0
+    ? sourceActions.join(', ')
+    : evidenceLabel(keeper.next_action, 'source actions unavailable')
   const dueAt = timeLabel(keeper.due_at_iso)
   const since = timeLabel(keeper.since_iso)
   return [
@@ -262,7 +266,7 @@ function laneSummary(keeper: DashboardKeeperWaitingKeeper): string {
     `waiting ${keeper.waiting_count.toLocaleString()}`,
     `since ${since}`,
     `due ${dueAt}`,
-    nextAction,
+    actionSummary,
   ].join(' · ')
 }
 
@@ -293,9 +297,11 @@ function LaneEvidenceCard({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) 
         </div>
         <div class="text-right text-2xs text-[var(--color-fg-muted)]">
           <div><span class="font-mono text-[var(--color-fg-primary)]">${keeper.waiting_count.toLocaleString()}</span> lane rows</div>
-          ${keeper.next_action
-            ? html`<div class="font-mono">${enumLabel(keeper.next_action)}</div>`
-            : html`<div class="font-mono text-[var(--color-status-warn)]">next action unavailable</div>`}
+          ${Object.keys(keeper.source_next_actions ?? {}).length > 0
+            ? html`<div class="font-mono">source별 next action</div>`
+            : keeper.next_action
+              ? html`<div class="font-mono">${enumLabel(keeper.next_action)}</div>`
+              : html`<div class="font-mono text-[var(--color-status-warn)]">source actions unavailable</div>`}
         </div>
       </div>
       <div class="mt-2">

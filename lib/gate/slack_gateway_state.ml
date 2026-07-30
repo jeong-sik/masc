@@ -304,6 +304,21 @@ let text_mentions_bot ~bot_user_id text =
     loop 0
 ;;
 
+let user_name_from_payload payload =
+  match string_field_opt "username" payload with
+  | Some u when not (String.equal (String.trim u) "") -> Some u
+  | _ -> (
+    match object_field "user_profile" payload with
+    | Error _ -> None
+    | Ok profile -> (
+      match string_field_opt "display_name" profile with
+      | Some d when not (String.equal (String.trim d) "") -> Some d
+      | _ -> (
+        match string_field_opt "real_name" profile with
+        | Some r when not (String.equal (String.trim r) "") -> Some r
+        | _ -> string_field_opt "name" profile)))
+;;
+
 let decode_event ~bot_user_id ~event_type ~payload =
   match event_type with
   | "message" ->
@@ -313,7 +328,7 @@ let decode_event ~bot_user_id ~event_type ~payload =
     let ts = string_field "ts" payload in
     let thread_ts = string_field_opt "thread_ts" payload in
     let bot_id = string_field_opt "bot_id" payload in
-    let user_name = string_field_opt "username" payload in
+    let user_name = user_name_from_payload payload in
     let mentions_bot = text_mentions_bot ~bot_user_id text in
     if String.equal channel_id "" || String.equal ts "" then
       Error "message event missing channel/ts"
@@ -335,6 +350,7 @@ let decode_event ~bot_user_id ~event_type ~payload =
     let text = string_field "text" payload in
     let ts = string_field "ts" payload in
     let thread_ts = string_field_opt "thread_ts" payload in
+    let user_name = user_name_from_payload payload in
     if String.equal channel_id "" || String.equal ts "" then
       Error "app_mention event missing channel/ts"
     else Ok (App_mention { channel_id; thread_ts; user_id; text; ts })

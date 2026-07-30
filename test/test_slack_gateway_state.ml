@@ -422,6 +422,27 @@ let test_decode_event_unknown_is_ignored_event () =
   | Ok _ -> fail "unknown event must be Ignored_event, not silent"
   | Error e -> failf "unknown event became Error (should be Ignored): %s" e
 
+let test_decode_event_message_user_profile_display_name () =
+  let payload =
+    `Assoc
+      [ ("type", `String "message")
+      ; ("channel", `String "C1")
+      ; ("user", `String "U1")
+      ; ("text", `String "hello")
+      ; ("ts", `String "1700000000.000100")
+      ; ( "user_profile"
+        , `Assoc
+            [ ("display_name", `String "dancer_nick")
+            ; ("real_name", `String "Yoon Jeong-sik")
+            ] )
+      ]
+  in
+  match S.decode_event ~bot_user_id:None ~event_type:"message" ~payload with
+  | Ok (S.Message_create { user_name = Some name; _ }) ->
+    check string "display_name extracted" "dancer_nick" name
+  | Ok _ -> fail "expected Message_create with user_name = Some dancer_nick"
+  | Error e -> failf "decode_event error: %s" e
+
 (* ---------------------------------------------------------------- *)
 
 let () =
@@ -487,5 +508,7 @@ let () =
             test_decode_event_reaction_missing_item_rejected
         ; test_case "decode unknown -> Ignored_event" `Quick
             test_decode_event_unknown_is_ignored_event
+        ; test_case "decode user_profile display_name" `Quick
+            test_decode_event_message_user_profile_display_name
         ]
     ]

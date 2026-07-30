@@ -257,10 +257,12 @@ let accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id ~
       [ ("conversation_id", slack_conversation_id ~channel_id)
       ; ("external_message_id", ts)
       ; ("slack.channel_id", channel_id)
+      ; ("slack.user_id", user_id)
       ; ("slack.message_ts", ts)
       ; ("slack.bound_channel_id", resolution.State.bound_channel_id)
       ; ("slack.binding_via_parent", string_of_bool resolution.State.via_parent)
       ]
+      @ metadata_opt "slack.user_name" user_name
       @ metadata_opt "slack.team_id" team_id
       @ metadata_opt "slack.thread_ts" thread_ts
       @ metadata_bool "slack.mentions_bot" mentions_bot
@@ -413,12 +415,12 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id
       accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id
         ~channel_id ~thread_ts ~user_id ~user_name ~text ~ts ~mentions_bot
         ~is_app_mention:false)
-  | Gw.App_mention { channel_id; thread_ts; user_id; text; ts } ->
+  | Gw.App_mention { channel_id; thread_ts; user_id; user_name; text; ts } ->
     Slack_observability.record_gateway_event ~route:Slack_observability.Triggered
       Slack_observability.App_mention;
     accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id
       ~channel_id ~thread_ts ~user_id
-      ~user_name:None ~text ~ts ~mentions_bot:true ~is_app_mention:true
+      ~user_name ~text ~ts ~mentions_bot:true ~is_app_mention:true
   | Gw.Reaction_added _ ->
     (* Unreachable from the FSM's triggered lane: reactions are emitted on the
        ambient lane only (see {!Slack_gateway_state.step}). Kept explicit for

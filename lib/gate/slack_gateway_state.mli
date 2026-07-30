@@ -44,6 +44,7 @@ type slack_event =
       { channel_id : string
       ; thread_ts : string option
       ; user_id : string
+      ; user_name : string option
       ; text : string
       ; ts : string
       }

@@ -768,7 +768,7 @@ function KeeperQueueControlPanel({
       <div class="flex items-center justify-between gap-2">
         <div>
           <div class="text-sm font-semibold text-[var(--color-fg-primary)]">운영자 대기열 제어</div>
-          <div class="text-2xs text-[var(--color-fg-muted)]">durable SSOT · pending만 변경 · revision 충돌 시 거부</div>
+          <div class="text-2xs text-[var(--color-fg-muted)]">서버에 저장된 대기 항목만 안전하게 변경합니다.</div>
         </div>
         <${GhostButton} onClick=${onClose}>닫기<//>
       </div>
@@ -852,7 +852,7 @@ function KeeperQueueControlPanel({
           `
         })}
         ${eventRows.map(item => {
-          const key = `event:${eventSnapshot!.revision}:${item.queueIndex}`
+          const key = `event:${item.sourceRef}`
           const busy = pendingAction === key
           return html`
             <div class="grid gap-1 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] p-2" data-operator-event-row>
@@ -867,8 +867,8 @@ function KeeperQueueControlPanel({
                     onClick=${() => {
                       void mutateEvent(key, {
                         action: 'reprioritize',
-                        expectedRevision: eventSnapshot!.revision,
-                        queueIndex: item.queueIndex,
+                        sourceIncarnation: item.sourceIncarnation,
+                        sourceRef: item.sourceRef,
                         urgency,
                       })
                     }}
@@ -883,8 +883,8 @@ function KeeperQueueControlPanel({
                     if (targetKeeper === null) return
                     void mutateEvent(key, {
                       action: 'transfer',
-                      expectedRevision: eventSnapshot!.revision,
-                      queueIndex: item.queueIndex,
+                      sourceIncarnation: item.sourceIncarnation,
+                      sourceRef: item.sourceRef,
                       targetKeeper,
                     })
                   }}
@@ -898,8 +898,8 @@ function KeeperQueueControlPanel({
                     if (reason === null) return
                     void mutateEvent(key, {
                       action: 'cancel',
-                      expectedRevision: eventSnapshot!.revision,
-                      queueIndex: item.queueIndex,
+                      sourceIncarnation: item.sourceIncarnation,
+                      sourceRef: item.sourceRef,
                       reason,
                     })
                   }}

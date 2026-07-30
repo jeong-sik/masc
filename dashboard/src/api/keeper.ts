@@ -787,6 +787,8 @@ export interface KeeperChatPendingMutationResult {
 export interface KeeperEventQueuePendingItem {
   queueIndex: number
   postId: string
+  sourceRef: string
+  sourceIncarnation: string
   urgency: 'immediate' | 'normal' | 'low'
   arrivedAt: number
   payloadKind: string
@@ -1114,7 +1116,7 @@ export function parseKeeperEventQueuePendingSnapshot(
 ): KeeperEventQueuePendingSnapshot {
   if (
     !isRecord(value)
-    || value.schema !== 'keeper_event_queue.pending.v1'
+    || value.schema !== 'keeper_event_queue.pending.v2'
     || value.ok !== true
   ) {
     throw new Error('Keeper event pending response has an unsupported schema')
@@ -1142,6 +1144,8 @@ export function parseKeeperEventQueuePendingSnapshot(
     }
     const queueIndex = asNumber(raw.queue_index)
     const postId = asString(raw.post_id, '').trim()
+    const sourceRef = asString(raw.source_ref, '').trim()
+    const sourceIncarnation = parseKeeperQueueRevision(raw.source_incarnation)
     const urgency = asString(raw.urgency, '').trim()
     const arrivedAt = asNumber(raw.arrived_at_unix)
     const payloadKind = asString(raw.payload_kind, '').trim()
@@ -1150,6 +1154,8 @@ export function parseKeeperEventQueuePendingSnapshot(
       || !Number.isSafeInteger(queueIndex)
       || queueIndex < 0
       || !postId
+      || !/^[0-9a-f]{64}$/.test(sourceRef)
+      || sourceIncarnation === undefined
       || !['immediate', 'normal', 'low'].includes(urgency)
       || typeof arrivedAt !== 'number'
       || !Number.isFinite(arrivedAt)
@@ -1161,6 +1167,8 @@ export function parseKeeperEventQueuePendingSnapshot(
     return {
       queueIndex,
       postId,
+      sourceRef,
+      sourceIncarnation,
       urgency: urgency as KeeperEventQueuePendingItem['urgency'],
       arrivedAt,
       payloadKind,
@@ -1366,13 +1374,13 @@ export async function moveKeeperChatPendingReceiptToEnd(
 }
 
 export type KeeperEventQueueOperatorAction =
-  | { action: 'cancel'; expectedRevision: string; queueIndex: number; reason: string; operationId?: string }
-  | { action: 'transfer'; expectedRevision: string; queueIndex: number; targetKeeper: string; operationId?: string }
-  | { action: 'reprioritize'; expectedRevision: string; queueIndex: number; urgency: 'immediate' | 'normal' | 'low' }
+  | { action: 'cancel'; sourceRef: string; sourceIncarnation: string; reason: string; operationId?: string }
+  | { action: 'transfer'; sourceRef: string; sourceIncarnation: string; targetKeeper: string; operationId?: string }
+  | { action: 'reprioritize'; sourceRef: string; sourceIncarnation: string; urgency: 'immediate' | 'normal' | 'low' }
 
 export type KeeperEventQueueReplayableAction =
-  | { action: 'cancel'; expectedRevision: string; queueIndex: number; reason: string; operationId: string }
-  | { action: 'transfer'; expectedRevision: string; queueIndex: number; targetKeeper: string; operationId: string }
+  | { action: 'cancel'; sourceRef: string; sourceIncarnation: string; reason: string; operationId: string }
+  | { action: 'transfer'; sourceRef: string; sourceIncarnation: string; targetKeeper: string; operationId: string }
 
 type PreparedKeeperEventQueueOperatorAction =
   | KeeperEventQueueReplayableAction
@@ -1425,10 +1433,10 @@ export async function operateKeeperEventQueue(
 ): Promise<void> {
   const prepared = prepareKeeperEventQueueOperatorAction(operation)
   const common = {
-    schema: 'keeper_event_queue.operator.request.v1',
+    schema: 'keeper_event_queue.operator.request.v2',
     action: prepared.action,
-    expected_revision: prepared.expectedRevision,
-    queue_index: prepared.queueIndex,
+    source_incarnation: prepared.sourceIncarnation,
+    source_ref: prepared.sourceRef,
   }
   const request = prepared.action === 'cancel'
     ? {

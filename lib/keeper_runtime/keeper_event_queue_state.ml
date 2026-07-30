@@ -83,6 +83,35 @@ let empty =
 let revision state = state.revision
 let pending_selections state = state.pending_entries
 
+let source_snapshot_ref source =
+  Keeper_event_queue.stimulus_to_yojson source
+  |> Yojson.Safe.to_string
+  |> Digestif.SHA256.digest_string
+  |> Digestif.SHA256.to_hex
+;;
+
+let resolve_pending_selection
+      ~source_ref
+      ~source_incarnation
+      state
+  =
+  let matching =
+    List.filter
+      (fun selection ->
+         String.equal
+           (source_snapshot_ref selection.source)
+           source_ref)
+      state.pending_entries
+  in
+  match matching with
+  | [ selection ]
+    when Int64.equal selection.admitted_revision source_incarnation ->
+    Ok selection
+  | [ _ ] -> Error "event queue source incarnation changed"
+  | [] -> Error "event queue source is no longer pending"
+  | _ -> Error "event queue source reference is ambiguous"
+;;
+
 let pending state =
   List.fold_left
     (fun queue entry ->
@@ -272,6 +301,37 @@ let ack_pending ~(selection : pending_selection) state =
       List.filter (Fun.negate (( = ) selection)) state.pending_entries
     in
     Ok { state with pending_entries }
+;;
+
+let reprioritize_pending
+      ~(selection : pending_selection)
+      ~urgency
+      state
+  =
+  match validate_pending_selection ~selection state with
+  | Error _ as error -> error
+  | Ok () ->
+    if selection.source.urgency = urgency
+    then Ok (state, state.revision)
+    else if Int64.equal state.revision Int64.max_int
+    then Error "event queue revision exhausted"
+    else
+      let next_revision = Int64.succ state.revision in
+      let updated =
+        { source = { selection.source with urgency }
+        ; admitted_revision = next_revision
+        }
+      in
+      let pending_entries =
+        List.map
+          (fun entry -> if entry = selection then updated else entry)
+          state.pending_entries
+      in
+      let state = { state with pending_entries } in
+      let sorted_pending =
+        pending state |> Keeper_event_queue.sort_by_urgency
+      in
+      Ok (with_pending sorted_pending state, next_revision)
 ;;
 
 let ( let* ) = Result.bind

@@ -96,10 +96,26 @@ let test_reinserted_source_invalidates_old_selection () =
     |> State.with_pending (queue [ source ])
     |> State.with_revision 2L
   in
+  let source_ref = State.source_snapshot_ref source in
+  (match
+     State.resolve_pending_selection
+       ~source_ref
+       ~source_incarnation:old_selection.admitted_revision
+       reinserted
+   with
+   | Error _ -> ()
+   | Ok _ ->
+     Alcotest.fail "source ref bypassed the reinserted source incarnation");
   (match State.ack_pending ~selection:old_selection reinserted with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "old selection consumed a reinserted source");
   let current_selection = select reinserted in
+  ignore
+    (State.resolve_pending_selection
+       ~source_ref
+       ~source_incarnation:current_selection.admitted_revision
+       reinserted
+     |> require_ok "current source ref and incarnation");
   let acked =
     State.ack_pending ~selection:current_selection reinserted
     |> require_ok "current source incarnation ACK"
@@ -408,7 +424,7 @@ let test_durable_peek_ack_restart () =
     Alcotest.(check (list string)) "restart sees only unacked source" [ "two" ] (post_ids restarted))
 ;;
 
-let test_durable_reprioritize_is_revision_fenced () =
+let test_durable_reprioritize_is_source_incarnation_fenced () =
   with_temp_dir "keeper-event-reprioritize" (fun base_path ->
     let keeper_name = "priority-keeper" in
     let first = stimulus "shared-post" 1.0 in
@@ -423,45 +439,69 @@ let test_durable_reprioritize_is_revision_fenced () =
       Persistence.load_state_result ~base_path ~keeper_name
       |> require_ok "load priority state"
     in
-    let revision = State.revision state in
+    let selection =
+      State.select_when
+        ~ready:(Queue.stimulus_identity_equal second)
+        state
+      |> require_some "select exact priority source"
+    in
+    let source_ref = State.source_snapshot_ref selection.source in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending (stimulus "unrelated" 3.0))
+    |> require_ok "enqueue unrelated source";
+    let state_after_unrelated =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load state after unrelated enqueue"
+    in
+    let resolved =
+      State.resolve_pending_selection
+        ~source_ref
+        ~source_incarnation:selection.admitted_revision
+        state_after_unrelated
+      |> require_ok "resolve selection after unrelated enqueue"
+    in
+    Alcotest.(check bool)
+      "opaque source ref resolves the exact same-post source"
+      true
+      (resolved = selection);
+    let revision_before_priority = State.revision state_after_unrelated in
     let applied_revision =
       Persistence.reprioritize_pending_result
         ~base_path
         ~keeper_name
-        ~expected_revision:revision
-        ~source:second
+        ~selection
         ~urgency:Queue.Immediate
         ()
       |> require_ok "reprioritize exact source"
     in
     Alcotest.(check int64)
       "priority change advances revision once"
-      (Int64.succ revision)
+      (Int64.succ revision_before_priority)
       applied_revision;
-    let restarted =
-      Persistence.load_pending_result ~base_path ~keeper_name
+    let restarted_state =
+      Persistence.load_state_result ~base_path ~keeper_name
       |> require_ok "restart priority load"
     in
     Alcotest.(check (list string))
       "same post id remains independently addressable"
-      [ "shared-post"; "shared-post" ]
-      (post_ids restarted);
+      [ "shared-post"; "shared-post"; "unrelated" ]
+      (post_ids (State.pending restarted_state));
     Alcotest.(check (list (float 0.0)))
       "priority change preserves the distinct same-post source"
-      [ 2.0; 1.0 ]
-      (Queue.to_list restarted
+      [ 2.0; 1.0; 3.0 ]
+      (State.pending restarted_state
+       |> Queue.to_list
        |> List.map (fun (item : Queue.stimulus) -> item.arrived_at));
     match
       Persistence.reprioritize_pending_result
         ~base_path
         ~keeper_name
-        ~expected_revision:revision
-        ~source:second
+        ~selection
         ~urgency:Queue.Low
         ()
     with
     | Error _ -> ()
-    | Ok _ -> Alcotest.fail "stale priority revision was accepted")
+    | Ok _ -> Alcotest.fail "stale priority source incarnation was accepted")
 ;;
 
 let test_durable_turn_attempt_terminal_restart () =
@@ -678,9 +718,9 @@ let () =
     ; ( "persistence"
       , [ Alcotest.test_case "durable peek ack restart" `Quick test_durable_peek_ack_restart
         ; Alcotest.test_case
-            "durable reprioritize is revision fenced"
+            "durable reprioritize is source incarnation fenced"
             `Quick
-            test_durable_reprioritize_is_revision_fenced
+            test_durable_reprioritize_is_source_incarnation_fenced
         ; Alcotest.test_case
             "durable failed turn receipt restart"
             `Quick

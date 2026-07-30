@@ -323,15 +323,13 @@ let snapshot_result ~base_path name =
 let reprioritize_pending_result
       ~base_path
       name
-      ~expected_revision
-      ~source
+      ~selection
       ~urgency
   =
   Keeper_event_queue_persistence.reprioritize_pending_result
     ~base_path
     ~keeper_name:name
-    ~expected_revision
-    ~source
+    ~selection
     ~urgency
     ~after_commit:(publish_pending ~base_path name)
     ()

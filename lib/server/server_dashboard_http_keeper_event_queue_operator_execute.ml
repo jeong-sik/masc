@@ -2,26 +2,22 @@ let ( let* ) = Result.bind
 
 type request =
   | Cancel of
-      { expected_revision : int64
-      ; queue_index : int
+      { source_ref : string
+      ; source_incarnation : int64
       ; operator_operation_id : string
       ; reason : string
       }
   | Transfer of
-      { expected_revision : int64
-      ; queue_index : int
+      { source_ref : string
+      ; source_incarnation : int64
       ; operator_operation_id : string
       ; target_keeper : string
       }
   | Reprioritize of
-      { expected_revision : int64
-      ; queue_index : int
+      { source_ref : string
+      ; source_incarnation : int64
       ; urgency : Keeper_event_queue.urgency
       }
-
-let pending_source_at ~queue_index pending =
-  List.nth_opt (Keeper_event_queue.to_list pending) queue_index
-;;
 
 let transition_result_json = function
   | Keeper_registry_event_queue.Transition_applied receipt ->
@@ -69,30 +65,19 @@ type prepared_transfer =
 
 let resolve_pending_source
       ~queue_state
-      ~expected_revision
-      ~queue_index
+      ~source_ref
+      ~source_incarnation
   =
-  let observed_revision = Keeper_event_queue_state.revision queue_state in
-  if not (Int64.equal expected_revision observed_revision)
-  then
-    Error
-      (Printf.sprintf
-         "event queue revision mismatch (expected=%Ld observed=%Ld)"
-         expected_revision
-         observed_revision)
-  else
-    match
-      pending_source_at
-        ~queue_index
-        (Keeper_event_queue_state.pending queue_state)
-    with
-    | Some source -> Ok source
-    | None -> Error "event queue selection is no longer pending"
+  Keeper_event_queue_state.resolve_pending_selection
+    ~source_ref
+    ~source_incarnation
+    queue_state
 ;;
 
 let prior_cancellation_for_request
       ~queue_state
-      ~expected_revision
+      ~source_ref
+      ~source_incarnation
       ~operator_operation_id
       ~reason
   =
@@ -105,7 +90,11 @@ let prior_cancellation_for_request
   | Some receipt ->
     (match receipt.transition with
      | Keeper_event_queue_state.Cancel_accepted cancellation
-       when Int64.equal cancellation.source_revision expected_revision
+       when Int64.equal cancellation.source_incarnation source_incarnation
+            && String.equal
+                 (Keeper_event_queue_state.source_snapshot_ref
+                    cancellation.source)
+                 source_ref
             && String.equal cancellation.reason reason ->
        Ok (Some { cancellation; applied_at = receipt.applied_at })
      | Keeper_event_queue_state.Cancel_accepted _
@@ -119,20 +108,20 @@ let prior_cancellation_for_request
 let fresh_cancellation_for_request
       ~queue_state
       ~owner_nonce
-      ~expected_revision
-      ~queue_index
+      ~source_ref
+      ~source_incarnation
       ~operator_operation_id
       ~reason
   =
-  let* source =
+  let* selection =
     resolve_pending_source
       ~queue_state
-      ~expected_revision
-      ~queue_index
+      ~source_ref
+      ~source_incarnation
   in
   let cancellation : Keeper_registry_event_queue.accepted_cancellation =
-    { source
-    ; source_revision = expected_revision
+    { source = selection.source
+    ; source_incarnation
     ; owner_nonce
     ; operator_operation_id
     ; reason
@@ -144,7 +133,8 @@ let fresh_cancellation_for_request
 let prior_transfer_for_request
       ~queue_state
       ~keeper_name
-      ~expected_revision
+      ~source_ref
+      ~source_incarnation
       ~operator_operation_id
       ~target_keeper
   =
@@ -157,7 +147,11 @@ let prior_transfer_for_request
   | Some receipt ->
     (match receipt.transition with
      | Keeper_event_queue_state.Transfer_accepted transfer
-       when Int64.equal transfer.source_revision expected_revision
+       when Int64.equal transfer.source_incarnation source_incarnation
+            && String.equal
+                 (Keeper_event_queue_state.source_snapshot_ref
+                    transfer.source)
+                 source_ref
             && String.equal transfer.from_keeper keeper_name
             && String.equal transfer.to_keeper target_keeper ->
        Ok (Some { transfer; applied_at = receipt.applied_at })
@@ -173,20 +167,20 @@ let fresh_transfer_for_request
       ~queue_state
       ~keeper_name
       ~owner_nonce
-      ~expected_revision
-      ~queue_index
+      ~source_ref
+      ~source_incarnation
       ~operator_operation_id
       ~target_keeper
   =
-  let* source =
+  let* selection =
     resolve_pending_source
       ~queue_state
-      ~expected_revision
-      ~queue_index
+      ~source_ref
+      ~source_incarnation
   in
   let transfer : Keeper_registry_event_queue.accepted_transfer =
-    { source
-    ; source_revision = expected_revision
+    { source = selection.source
+    ; source_incarnation
     ; owner_nonce
     ; operator_operation_id
     ; from_keeper = keeper_name
@@ -258,22 +252,21 @@ let execute_reprioritization
       ~base_path
       ~keeper_name
       ~queue_state
-      ~expected_revision
-      ~queue_index
+      ~source_ref
+      ~source_incarnation
       ~urgency
   =
-  let* source =
+  let* selection =
     resolve_pending_source
       ~queue_state
-      ~expected_revision
-      ~queue_index
+      ~source_ref
+      ~source_incarnation
   in
   let* revision =
     Keeper_registry_event_queue.reprioritize_pending_result
       ~base_path
       keeper_name
-      ~expected_revision
-      ~source
+      ~selection
       ~urgency
   in
   ignore
@@ -283,7 +276,7 @@ let execute_reprioritization
        keeper_name :
        Keeper_registry.wakeup_outcome);
   Ok
-    ( source
+    ( selection.source
     , `Assoc
         [ "status", `String "applied"
         ; "revision", `String (Int64.to_string revision)
@@ -309,8 +302,8 @@ let replay_committed_request ~base_path ~keeper_name request =
   match request with
   | Reprioritize _ -> Ok None
   | Cancel
-      { expected_revision
-      ; queue_index = _
+      { source_ref
+      ; source_incarnation
       ; operator_operation_id
       ; reason
       } ->
@@ -322,7 +315,8 @@ let replay_committed_request ~base_path ~keeper_name request =
     let* prepared =
       prior_cancellation_for_request
         ~queue_state
-        ~expected_revision
+        ~source_ref
+        ~source_incarnation
         ~operator_operation_id
         ~reason
     in
@@ -332,8 +326,8 @@ let replay_committed_request ~base_path ~keeper_name request =
        execute_cancellation ~base_path ~keeper_name prepared
        |> Result.map Option.some)
   | Transfer
-      { expected_revision
-      ; queue_index = _
+      { source_ref
+      ; source_incarnation
       ; operator_operation_id
       ; target_keeper
       } ->
@@ -346,7 +340,8 @@ let replay_committed_request ~base_path ~keeper_name request =
       prior_transfer_for_request
         ~queue_state
         ~keeper_name
-        ~expected_revision
+        ~source_ref
+        ~source_incarnation
         ~operator_operation_id
         ~target_keeper
     in
@@ -371,15 +366,16 @@ let run_admitted_request
   in
   match request with
   | Cancel
-      { expected_revision
-      ; queue_index
+      { source_ref
+      ; source_incarnation
       ; operator_operation_id
       ; reason
       } ->
     let* prior =
       prior_cancellation_for_request
         ~queue_state
-        ~expected_revision
+        ~source_ref
+        ~source_incarnation
         ~operator_operation_id
         ~reason
     in
@@ -390,15 +386,15 @@ let run_admitted_request
         fresh_cancellation_for_request
           ~queue_state
           ~owner_nonce
-          ~expected_revision
-          ~queue_index
+          ~source_ref
+          ~source_incarnation
           ~operator_operation_id
           ~reason
     in
     execute_cancellation ~base_path ~keeper_name prepared
   | Transfer
-      { expected_revision
-      ; queue_index
+      { source_ref
+      ; source_incarnation
       ; operator_operation_id
       ; target_keeper
       } ->
@@ -409,7 +405,8 @@ let run_admitted_request
         prior_transfer_for_request
           ~queue_state
           ~keeper_name
-          ~expected_revision
+          ~source_ref
+          ~source_incarnation
           ~operator_operation_id
           ~target_keeper
       in
@@ -422,19 +419,19 @@ let run_admitted_request
             ~queue_state
             ~keeper_name
             ~owner_nonce
-            ~expected_revision
-            ~queue_index
+            ~source_ref
+            ~source_incarnation
             ~operator_operation_id
             ~target_keeper
       in
       execute_transfer ~base_path ~keeper_name prepared
-  | Reprioritize { expected_revision; queue_index; urgency } ->
+  | Reprioritize { source_ref; source_incarnation; urgency } ->
     execute_reprioritization
       ~base_path
       ~keeper_name
       ~queue_state
-      ~expected_revision
-      ~queue_index
+      ~source_ref
+      ~source_incarnation
       ~urgency
 ;;
 

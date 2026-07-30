@@ -316,7 +316,9 @@ let test_keeper_chat_recovery_route_is_exact () =
       Server_dashboard_http_keeper_event_queue_operator.For_testing.pending_page
         ~after:0
         ~limit:100
-        [ source ]
+        [ Keeper_event_queue_state.
+            { source; admitted_revision = 23L }
+        ]
     with
     | [ json ] -> json
     | _ -> fail "event pending projection must return one metadata row"
@@ -325,6 +327,12 @@ let test_keeper_chat_recovery_route_is_exact () =
   check string "event pending projection retains post identity"
     source.post_id
     (pending_json |> member "post_id" |> to_string);
+  check string "event pending projection retains source incarnation"
+    "23"
+    (pending_json |> member "source_incarnation" |> to_string);
+  check int "event pending projection emits an opaque SHA-256 source ref"
+    64
+    (pending_json |> member "source_ref" |> to_string |> String.length);
   check string "event pending projection retains typed payload kind"
     "board_signal"
     (pending_json |> member "payload_kind" |> to_string);
@@ -340,20 +348,22 @@ let test_keeper_chat_recovery_route_is_exact () =
     |> fun queue -> Keeper_event_queue.enqueue queue source
     |> fun queue -> Keeper_event_queue.enqueue queue same_post_id_source
   in
-  (match
-     Server_dashboard_http_keeper_event_queue_operator.For_testing.pending_source_at
-       ~queue_index:1
-       duplicate_post_id_queue
-   with
-   | Some selected ->
-     check bool
-       "event selection uses revision-fenced queue position, not ambiguous post id"
-       true
-       (Keeper_event_queue.stimulus_identity_equal
-          same_post_id_source
-          selected)
-   | None ->
-     fail "event selection must address duplicate post ids independently");
+  let duplicate_state =
+    Keeper_event_queue_state.empty
+    |> Keeper_event_queue_state.with_revision 23L
+    |> Keeper_event_queue_state.with_pending duplicate_post_id_queue
+  in
+  let selections =
+    Keeper_event_queue_state.pending_selections duplicate_state
+  in
+  let refs =
+    List.map
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue_state.source_snapshot_ref selection.source)
+      selections
+  in
+  check int "duplicate post ids retain two exact source refs" 2
+    (List.sort_uniq String.compare refs |> List.length);
   let quarantine_path =
     "/api/v1/keepers/idealist/board-attention/quarantines/ba-root-123/recovery"
   in

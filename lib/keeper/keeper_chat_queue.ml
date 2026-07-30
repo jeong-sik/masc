@@ -2645,6 +2645,7 @@ let observe_pending ~keeper_name =
                            "pending FIFO index contains a non-pending receipt"))))))
 
 let pending_observation_item observation = observation.item
+let pending_observation_revision observation = observation.revision
 
 let stale_pending_claim observation observed_revision =
   `Stale

@@ -9,10 +9,10 @@
 
     @since 2.145.0 *)
 
-(** Wake one Keeper lane after a durable queue mutation, admission release, or
-    explicit operator reconciliation. Repeated pending wakes for the same
-    Keeper are coalesced without a capacity limit; a wake observed while that
-    Keeper is running schedules exactly one follow-up inspection. *)
+(** Wake one Keeper lane after a durable queue mutation, shutdown rollback, or
+    explicit operator action. Repeated pending wakes for the same Keeper are
+    coalesced without a capacity limit; a wake observed while that Keeper is
+    running schedules exactly one follow-up inspection. *)
 val notify_transition : keeper_name:string -> unit
 
 type persistence_blocked_operation =
@@ -86,6 +86,11 @@ type turn_outcome =
     [Internal_error] failure instead of a poison-message retry loop. There is
     deliberately no second wall-clock watchdog: the turn runtime owns
     timeout/cancellation and must return the typed outcome.
+
+    If a Pending claim cannot be published, the consumer reconciles at most
+    once and parks that lane at the resulting durable queue revision. Internal
+    invalidations for the same revision are absorbed; a later durable queue
+    revision re-arms the still-Pending receipt.
 
     If finalization persistence fails before publication, the exact decision is
     retained and retried before another turn starts after the next durable

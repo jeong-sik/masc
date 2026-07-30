@@ -267,6 +267,7 @@ val observe_pending :
     while an inflight or recovery-required receipt owns delivery. *)
 
 val pending_observation_item : pending_observation -> leased_message
+val pending_observation_revision : pending_observation -> int64
 
 val lease_observed :
   pending_observation ->

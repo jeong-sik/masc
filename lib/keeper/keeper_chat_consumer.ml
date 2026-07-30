@@ -70,7 +70,7 @@ type persistence_blocked_status =
   }
 
 type blocked_retry =
-  | Retry_pending_claim
+  | Retry_pending_claim of { blocked_revision : int64 }
   | Retry_finalization of
       { lease_id : string
       ; outcome : Keeper_chat_queue.finalization
@@ -101,7 +101,7 @@ module Persistence_blocked = struct
       let key = key ~base_path ~keeper_name in
       match Hashtbl.find_opt entries key with
       | Some { retry = Retry_finalization _; _ } -> ()
-      | Some { retry = Retry_pending_claim; _ } | None ->
+      | Some { retry = Retry_pending_claim _; _ } | None ->
         Hashtbl.replace entries key entry)
 
   let find ~base_path ~keeper_name =
@@ -133,8 +133,12 @@ type dispatch_state = {
 }
 
 type lane_activity =
-  | Dispatchable of bool
+  | Dispatchable of
+      { has_active : bool
+      ; revision : int64
+      }
   | Awaiting_delivery_recovery of Keeper_chat_queue.recovery_evidence
+  | Pending_claim_retry_blocked of int64
 
 let create_dispatch_state ~base_path =
   { base_path = Keeper_registry_types.canonical_base_path_exn base_path
@@ -183,7 +187,7 @@ let pending_finalization state keeper_name =
   with
   | Some { retry = Retry_finalization { lease_id; outcome }; _ } ->
     Some (lease_id, outcome)
-  | Some { retry = Retry_pending_claim; _ } | None -> None
+  | Some { retry = Retry_pending_claim _; _ } | None -> None
 
 let clear_pending_finalization state ~keeper_name ~lease_id =
   Persistence_blocked.clear_finalization
@@ -203,14 +207,27 @@ let remember_pending_finalization state ~keeper_name ~lease_id ~outcome ~error =
     ; retry = Retry_finalization { lease_id; outcome }
     }
 
-let remember_blocked_pending_claim state ~keeper_name ~error =
+let remember_blocked_pending_claim state ~keeper_name ~blocked_revision ~error =
   Persistence_blocked.remember_pending_claim
     ~base_path:state.base_path
     ~keeper_name
     { status =
         { operation = Pending_claim_blocked; lease_id = None; error }
-    ; retry = Retry_pending_claim
+    ; retry = Retry_pending_claim { blocked_revision }
     }
+
+let pending_claim_retry_blocked state ~keeper_name ~revision =
+  match
+    Persistence_blocked.find
+      ~base_path:state.base_path
+      ~keeper_name
+  with
+  | Some
+      { retry = Retry_pending_claim { blocked_revision }
+      ; _
+      } ->
+    Int64.equal blocked_revision revision
+  | Some { retry = Retry_finalization _; _ } | None -> false
 
 let clear_blocked_pending_claim state ~keeper_name =
   match
@@ -218,7 +235,7 @@ let clear_blocked_pending_claim state ~keeper_name =
       ~base_path:state.base_path
       ~keeper_name
   with
-  | Some { retry = Retry_pending_claim; _ } ->
+  | Some { retry = Retry_pending_claim _; _ } ->
     Persistence_blocked.clear
       ~base_path:state.base_path
       ~keeper_name
@@ -274,13 +291,17 @@ let reconcile_published_transition ~keeper_name error =
     Log.Keeper.info
       "keeper_chat_consumer: reconciled published queue transition keeper=%s revision=%Ld"
       keeper_name
-      report.revision
+      report.revision;
+    Some report.revision
   | Error reconciliation_error ->
     Log.Keeper.error
       "keeper_chat_consumer: published queue transition requires operator reconciliation keeper=%s publication_error=%s reconciliation_error=%s"
       keeper_name
       (Keeper_chat_queue.mutation_error_to_string error)
-      (Keeper_chat_queue.mutation_error_to_string reconciliation_error)
+      (Keeper_chat_queue.mutation_error_to_string reconciliation_error);
+    (match Keeper_chat_queue.lane_status ~keeper_name with
+     | Ok { revision; _ } -> Some revision
+     | Error _ -> None)
 
 let settle_lease state ~keeper_name ~lease_id outcome =
   let rec finalize ~allow_invalid_fallback outcome =
@@ -318,7 +339,8 @@ let settle_lease state ~keeper_name ~lease_id outcome =
         (Keeper_chat_queue.Persist_failed
            { publication = Finalize_indeterminate _; _ } as error) ->
       clear_pending_finalization state ~keeper_name ~lease_id;
-      reconcile_published_transition ~keeper_name error;
+      (match reconcile_published_transition ~keeper_name error with
+       | Some _ | None -> ());
       `Settled
     | `Error error ->
       remember_pending_finalization state ~keeper_name ~lease_id
@@ -460,21 +482,33 @@ let finalize_claimed_outcome state ~clock ~keeper_name ~lease_id = function
     finalize_or_warn state ~keeper_name ~lease_id
       (finalization_of_failed ~clock ~kind ~detail ~outcome_ref)
 
-let handle_claim_failure state ~keeper_name = function
+let handle_claim_failure state ~keeper_name ~observed_revision error =
+  let block_at blocked_revision =
+    remember_blocked_pending_claim state ~keeper_name ~blocked_revision ~error;
+    Log.Keeper.warn
+      "keeper_chat_consumer: admitted receipt claim failed for keeper=%s: %s; lane is persistence_blocked at revision=%Ld until a later durable queue revision"
+      keeper_name
+      (Keeper_chat_queue.mutation_error_to_string error)
+      blocked_revision
+  in
+  match error with
   | (Keeper_chat_queue.Persist_failed
        { publication = Lease_indeterminate _; _ }
     | Keeper_chat_queue.Snapshot_unavailable
-        { kind = Durability_uncertain; _ }) as error ->
-    reconcile_published_transition ~keeper_name error
-  | error ->
-    remember_blocked_pending_claim state ~keeper_name ~error;
-    Log.Keeper.warn
-      "keeper_chat_consumer: admitted receipt claim failed for keeper=%s: %s; lane is persistence_blocked until explicit operator reconciliation or another durable transition"
-      keeper_name
-      (Keeper_chat_queue.mutation_error_to_string error)
+        { kind = Durability_uncertain; _ }) ->
+    let blocked_revision =
+      Option.value
+        (reconcile_published_transition ~keeper_name error)
+        ~default:observed_revision
+    in
+    block_at blocked_revision
+  | _ -> block_at observed_revision
 
 let run_observed_turn state ~sw ~clock ~handle_turn ~keeper_name observation =
   let item = Keeper_chat_queue.pending_observation_item observation in
+  let observed_revision =
+    Keeper_chat_queue.pending_observation_revision observation
+  in
   let receipt_ids =
     Keeper_chat_delivery_identity.Receipt_ids.singleton item.receipt_id
   in
@@ -543,7 +577,8 @@ let run_observed_turn state ~sw ~clock ~handle_turn ~keeper_name observation =
       keeper_name
       (Keeper_chat_queue.Receipt_id.to_string item.receipt_id);
     notify_transition ~keeper_name
-  | Claim_failed error, _ -> handle_claim_failure state ~keeper_name error
+  | Claim_failed error, _ ->
+    handle_claim_failure state ~keeper_name ~observed_revision error
 
 let run ~sw ~clock ~base_path ~handle_turn =
   let dispatch_state = create_dispatch_state ~base_path in
@@ -556,8 +591,12 @@ let run ~sw ~clock ~base_path ~handle_turn =
   let ready_lane_activity keeper_name =
     match Keeper_chat_queue.lane_status ~keeper_name with
     | Error _ as error -> error
-    | Ok { health = Keeper_chat_queue.Ready; has_active; _ } ->
-      Ok (Dispatchable has_active)
+    | Ok { revision; _ }
+      when pending_claim_retry_blocked
+             dispatch_state ~keeper_name ~revision ->
+      Ok (Pending_claim_retry_blocked revision)
+    | Ok { health = Keeper_chat_queue.Ready; has_active; revision } ->
+      Ok (Dispatchable { has_active; revision })
     | Ok
         { health =
             Keeper_chat_queue.Delivery_recovery_required
@@ -585,8 +624,12 @@ let run ~sw ~clock ~base_path ~handle_turn =
            report.revision;
          (match Keeper_chat_queue.lane_status ~keeper_name with
           | Error _ as error -> error
-          | Ok { health = Keeper_chat_queue.Ready; has_active; _ } ->
-            Ok (Dispatchable has_active)
+          | Ok { revision; _ }
+            when pending_claim_retry_blocked
+                   dispatch_state ~keeper_name ~revision ->
+            Ok (Pending_claim_retry_blocked revision)
+          | Ok { health = Keeper_chat_queue.Ready; has_active; revision } ->
+            Ok (Dispatchable { has_active; revision })
           | Ok
               { health =
                   Keeper_chat_queue.Delivery_recovery_required
@@ -617,11 +660,12 @@ let run ~sw ~clock ~base_path ~handle_turn =
     try
       match ready_lane_activity keeper_name with
       | Error error ->
-        remember_blocked_pending_claim dispatch_state ~keeper_name ~error;
         Log.Keeper.error
-          "keeper_chat_consumer: lane state unavailable keeper=%s error=%s; lane is persistence_blocked until explicit operator reconciliation or another durable transition"
+          "keeper_chat_consumer: lane state unavailable keeper=%s error=%s; inspection is deferred until a later transition"
           keeper_name
           (Keeper_chat_queue.mutation_error_to_string error);
+        release keeper_name
+      | Ok (Pending_claim_retry_blocked _) ->
         release keeper_name
       | Ok _ when retry_pending_finalization dispatch_state ~keeper_name ->
         release keeper_name
@@ -634,18 +678,20 @@ let run ~sw ~clock ~base_path ~handle_turn =
           evidence.lease_id
           evidence.started_at;
         release keeper_name
-      | Ok (Dispatchable false) ->
+      | Ok (Dispatchable { has_active = false; _ }) ->
         clear_blocked_pending_claim dispatch_state ~keeper_name;
         release keeper_name
-      | Ok (Dispatchable true) ->
+      | Ok (Dispatchable { has_active = true; revision }) ->
         clear_blocked_pending_claim dispatch_state ~keeper_name;
         (match Keeper_chat_queue.observe_pending ~keeper_name with
          | Error error ->
-           remember_blocked_pending_claim dispatch_state ~keeper_name ~error;
+           remember_blocked_pending_claim dispatch_state ~keeper_name
+             ~blocked_revision:revision ~error;
            Log.Keeper.warn
-             "keeper_chat_consumer: pending head observation failed for keeper=%s: %s; lane is persistence_blocked until explicit operator reconciliation or another durable transition"
+             "keeper_chat_consumer: pending head observation failed for keeper=%s: %s; lane is persistence_blocked at revision=%Ld until a later durable queue revision"
              keeper_name
-             (Keeper_chat_queue.mutation_error_to_string error);
+             (Keeper_chat_queue.mutation_error_to_string error)
+             revision;
            release keeper_name
          | Ok None -> release keeper_name
          | Ok (Some observation) ->

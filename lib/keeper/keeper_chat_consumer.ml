@@ -59,18 +59,12 @@ type turn_outcome =
       }
   | Deferred of { rejection : Keeper_turn_admission.rejection }
 
-type persistence_blocked_operation =
-  | Pending_claim_blocked
-  | Finalize_blocked
-
 type persistence_blocked_status =
-  { operation : persistence_blocked_operation
-  ; lease_id : string option
+  { lease_id : string
   ; error : Keeper_chat_queue.mutation_error
   }
 
 type blocked_retry =
-  | Retry_pending_claim of { blocked_revision : int64 }
   | Retry_finalization of
       { lease_id : string
       ; outcome : Keeper_chat_queue.finalization
@@ -96,21 +90,9 @@ module Persistence_blocked = struct
     with_lock (fun () ->
       Hashtbl.replace entries (key ~base_path ~keeper_name) entry)
 
-  let remember_pending_claim ~base_path ~keeper_name entry =
-    with_lock (fun () ->
-      let key = key ~base_path ~keeper_name in
-      match Hashtbl.find_opt entries key with
-      | Some { retry = Retry_finalization _; _ } -> ()
-      | Some { retry = Retry_pending_claim _; _ } | None ->
-        Hashtbl.replace entries key entry)
-
   let find ~base_path ~keeper_name =
     with_lock (fun () ->
       Hashtbl.find_opt entries (key ~base_path ~keeper_name))
-
-  let clear ~base_path ~keeper_name =
-    with_lock (fun () ->
-      Hashtbl.remove entries (key ~base_path ~keeper_name))
 
   let clear_finalization ~base_path ~keeper_name ~lease_id =
     with_lock (fun () ->
@@ -133,12 +115,8 @@ type dispatch_state = {
 }
 
 type lane_activity =
-  | Dispatchable of
-      { has_active : bool
-      ; revision : int64
-      }
+  | Dispatchable of { has_active : bool }
   | Awaiting_delivery_recovery of Keeper_chat_queue.recovery_evidence
-  | Pending_claim_retry_blocked of int64
 
 let create_dispatch_state ~base_path =
   { base_path = Keeper_registry_types.canonical_base_path_exn base_path
@@ -187,7 +165,7 @@ let pending_finalization state keeper_name =
   with
   | Some { retry = Retry_finalization { lease_id; outcome }; _ } ->
     Some (lease_id, outcome)
-  | Some { retry = Retry_pending_claim _; _ } | None -> None
+  | None -> None
 
 let clear_pending_finalization state ~keeper_name ~lease_id =
   Persistence_blocked.clear_finalization
@@ -199,47 +177,9 @@ let remember_pending_finalization state ~keeper_name ~lease_id ~outcome ~error =
   Persistence_blocked.remember
     ~base_path:state.base_path
     ~keeper_name
-    { status =
-        { operation = Finalize_blocked
-        ; lease_id = Some lease_id
-        ; error
-        }
+    { status = { lease_id; error }
     ; retry = Retry_finalization { lease_id; outcome }
     }
-
-let remember_blocked_pending_claim state ~keeper_name ~blocked_revision ~error =
-  Persistence_blocked.remember_pending_claim
-    ~base_path:state.base_path
-    ~keeper_name
-    { status =
-        { operation = Pending_claim_blocked; lease_id = None; error }
-    ; retry = Retry_pending_claim { blocked_revision }
-    }
-
-let pending_claim_retry_blocked state ~keeper_name ~revision =
-  match
-    Persistence_blocked.find
-      ~base_path:state.base_path
-      ~keeper_name
-  with
-  | Some
-      { retry = Retry_pending_claim { blocked_revision }
-      ; _
-      } ->
-    Int64.equal blocked_revision revision
-  | Some { retry = Retry_finalization _; _ } | None -> false
-
-let clear_blocked_pending_claim state ~keeper_name =
-  match
-    Persistence_blocked.find
-      ~base_path:state.base_path
-      ~keeper_name
-  with
-  | Some { retry = Retry_pending_claim _; _ } ->
-    Persistence_blocked.clear
-      ~base_path:state.base_path
-      ~keeper_name
-  | Some { retry = Retry_finalization _; _ } | None -> ()
 
 let persistence_blocked_status ~base_path ~keeper_name =
   match Config_dir_resolver.canonical_base_path base_path with
@@ -452,6 +392,7 @@ type observed_claim =
   | Claim_not_attempted
   | Claim_leased of Keeper_chat_queue.lease
   | Claim_stale of Keeper_chat_queue.pending_claim_stale
+  | Claim_no_longer_pending
   | Claim_failed of Keeper_chat_queue.mutation_error
 
 let claim_error_to_string = function
@@ -463,6 +404,8 @@ let claim_error_to_string = function
       (Keeper_chat_queue.Receipt_id.to_string receipt_id)
       expected_revision
       observed_revision
+  | Claim_no_longer_pending ->
+    "pending receipt changed while its persistence claim was reconciled"
   | Claim_failed error -> Keeper_chat_queue.mutation_error_to_string error
 
 let finalize_claimed_outcome state ~clock ~keeper_name ~lease_id = function
@@ -482,51 +425,86 @@ let finalize_claimed_outcome state ~clock ~keeper_name ~lease_id = function
     finalize_or_warn state ~keeper_name ~lease_id
       (finalization_of_failed ~clock ~kind ~detail ~outcome_ref)
 
-let handle_claim_failure state ~keeper_name ~observed_revision error =
-  let block_at blocked_revision =
-    remember_blocked_pending_claim state ~keeper_name ~blocked_revision ~error;
-    Log.Keeper.warn
-      "keeper_chat_consumer: admitted receipt claim failed for keeper=%s: %s; lane is persistence_blocked at revision=%Ld until a later durable queue revision"
-      keeper_name
-      (Keeper_chat_queue.mutation_error_to_string error)
-      blocked_revision
-  in
+let reconcile_claim_failure ~keeper_name error =
   match error with
   | (Keeper_chat_queue.Persist_failed
-       { publication = Lease_indeterminate _; _ }
+       { publication =
+           ( Keeper_chat_queue.Not_published
+           | Keeper_chat_queue.Lease_indeterminate _ )
+       ; _
+       }
     | Keeper_chat_queue.Snapshot_unavailable
         { kind = Durability_uncertain; _ }) ->
-    let blocked_revision =
-      Option.value
-        (reconcile_published_transition ~keeper_name error)
-        ~default:observed_revision
-    in
-    block_at blocked_revision
-  | _ -> block_at observed_revision
+    (match Keeper_chat_queue.reconcile_persistence ~keeper_name with
+     | Ok report ->
+       Log.Keeper.info
+         "keeper_chat_consumer: reconciled failed receipt claim keeper=%s revision=%Ld"
+         keeper_name
+         report.revision;
+       Ok ()
+     | Error reconciliation_error ->
+       Log.Keeper.error
+         "keeper_chat_consumer: receipt claim reconciliation failed keeper=%s claim_error=%s reconciliation_error=%s"
+         keeper_name
+         (Keeper_chat_queue.mutation_error_to_string error)
+         (Keeper_chat_queue.mutation_error_to_string reconciliation_error);
+       Error reconciliation_error)
+  | _ ->
+    Log.Keeper.error
+      "keeper_chat_consumer: receipt claim failed without a retryable persistence transition keeper=%s error=%s"
+      keeper_name
+      (Keeper_chat_queue.mutation_error_to_string error);
+    Error error
 
 let run_observed_turn state ~sw ~clock ~handle_turn ~keeper_name observation =
   let item = Keeper_chat_queue.pending_observation_item observation in
-  let observed_revision =
-    Keeper_chat_queue.pending_observation_revision observation
-  in
   let receipt_ids =
     Keeper_chat_delivery_identity.Receipt_ids.singleton item.receipt_id
   in
   let claim = ref Claim_not_attempted in
+  let rec claim_observation ~may_retry observation =
+    match Keeper_chat_queue.lease_observed observation with
+    | `Leased lease -> Ok lease
+    | `Stale stale -> Error (`Stale stale)
+    | `Error error when may_retry ->
+      (match reconcile_claim_failure ~keeper_name error with
+       | Error _ -> Error (`Failed error)
+       | Ok () ->
+         (match Keeper_chat_queue.observe_pending ~keeper_name with
+          | Error retry_error -> Error (`Failed retry_error)
+          | Ok None -> Error `No_longer_pending
+          | Ok (Some retry_observation) ->
+            let retry_item =
+              Keeper_chat_queue.pending_observation_item retry_observation
+            in
+            if
+              Keeper_chat_queue.Receipt_id.equal
+                retry_item.receipt_id
+                item.receipt_id
+            then claim_observation ~may_retry:false retry_observation
+            else Error `No_longer_pending))
+    | `Error error -> Error (`Failed error)
+  in
   let on_admitted () =
     match !claim with
     | Claim_not_attempted ->
-      (match Keeper_chat_queue.lease_observed observation with
-       | `Leased lease ->
+      (match claim_observation ~may_retry:true observation with
+       | Ok lease ->
          claim := Claim_leased lease;
          Ok ()
-       | `Stale stale ->
+       | Error (`Stale stale) ->
          claim := Claim_stale stale;
          Error (claim_error_to_string !claim)
-       | `Error error ->
+       | Error `No_longer_pending ->
+         claim := Claim_no_longer_pending;
+         Error (claim_error_to_string !claim)
+       | Error (`Failed error) ->
          claim := Claim_failed error;
          Error (claim_error_to_string !claim))
-    | Claim_leased _ | Claim_stale _ | Claim_failed _ ->
+    | Claim_leased _
+    | Claim_stale _
+    | Claim_no_longer_pending
+    | Claim_failed _ ->
       Error (claim_error_to_string !claim)
   in
   let outcome =
@@ -544,7 +522,11 @@ let run_observed_turn state ~sw ~clock ~handle_turn ~keeper_name observation =
        | Claim_leased { lease_id; _ } ->
          Eio.Cancel.protect (fun () ->
              cancel_claimed_or_warn state ~clock ~keeper_name ~lease_id)
-       | Claim_not_attempted | Claim_stale _ | Claim_failed _ -> ());
+       | Claim_not_attempted
+       | Claim_stale _
+       | Claim_no_longer_pending
+       | Claim_failed _ ->
+         ());
       raise exn
     | exception exn -> `Raised exn
   in
@@ -571,14 +553,18 @@ let run_observed_turn state ~sw ~clock ~handle_turn ~keeper_name observation =
       "keeper_chat_consumer: queued handler completed without invoking its admission claim keeper=%s receipt_id=%s; receipt remains Pending"
       keeper_name
       (Keeper_chat_queue.Receipt_id.to_string item.receipt_id)
-  | Claim_stale _, _ ->
+  | (Claim_stale _ | Claim_no_longer_pending), _ ->
     Log.Keeper.info
       "keeper_chat_consumer: pending observation changed before admission keeper=%s receipt_id=%s; re-observing lane"
       keeper_name
       (Keeper_chat_queue.Receipt_id.to_string item.receipt_id);
     notify_transition ~keeper_name
   | Claim_failed error, _ ->
-    handle_claim_failure state ~keeper_name ~observed_revision error
+    Log.Keeper.error
+      "keeper_chat_consumer: exact receipt claim failed after one reconciled retry keeper=%s receipt_id=%s error=%s; receipt remains Pending until the next explicit lane transition"
+      keeper_name
+      (Keeper_chat_queue.Receipt_id.to_string item.receipt_id)
+      (Keeper_chat_queue.mutation_error_to_string error)
 
 let run ~sw ~clock ~base_path ~handle_turn =
   let dispatch_state = create_dispatch_state ~base_path in
@@ -591,12 +577,8 @@ let run ~sw ~clock ~base_path ~handle_turn =
   let ready_lane_activity keeper_name =
     match Keeper_chat_queue.lane_status ~keeper_name with
     | Error _ as error -> error
-    | Ok { revision; _ }
-      when pending_claim_retry_blocked
-             dispatch_state ~keeper_name ~revision ->
-      Ok (Pending_claim_retry_blocked revision)
-    | Ok { health = Keeper_chat_queue.Ready; has_active; revision } ->
-      Ok (Dispatchable { has_active; revision })
+    | Ok { health = Keeper_chat_queue.Ready; has_active; _ } ->
+      Ok (Dispatchable { has_active })
     | Ok
         { health =
             Keeper_chat_queue.Delivery_recovery_required
@@ -624,12 +606,8 @@ let run ~sw ~clock ~base_path ~handle_turn =
            report.revision;
          (match Keeper_chat_queue.lane_status ~keeper_name with
           | Error _ as error -> error
-          | Ok { revision; _ }
-            when pending_claim_retry_blocked
-                   dispatch_state ~keeper_name ~revision ->
-            Ok (Pending_claim_retry_blocked revision)
-          | Ok { health = Keeper_chat_queue.Ready; has_active; revision } ->
-            Ok (Dispatchable { has_active; revision })
+          | Ok { health = Keeper_chat_queue.Ready; has_active; _ } ->
+            Ok (Dispatchable { has_active })
           | Ok
               { health =
                   Keeper_chat_queue.Delivery_recovery_required
@@ -665,12 +643,9 @@ let run ~sw ~clock ~base_path ~handle_turn =
           keeper_name
           (Keeper_chat_queue.mutation_error_to_string error);
         release keeper_name
-      | Ok (Pending_claim_retry_blocked _) ->
-        release keeper_name
       | Ok _ when retry_pending_finalization dispatch_state ~keeper_name ->
         release keeper_name
       | Ok (Awaiting_delivery_recovery evidence) ->
-        clear_blocked_pending_claim dispatch_state ~keeper_name;
         Log.Keeper.warn
           "keeper_chat_consumer: lane awaits explicit delivery recovery keeper=%s receipt_id=%s lease_id=%s started_at=%.06f"
           keeper_name
@@ -679,19 +654,14 @@ let run ~sw ~clock ~base_path ~handle_turn =
           evidence.started_at;
         release keeper_name
       | Ok (Dispatchable { has_active = false; _ }) ->
-        clear_blocked_pending_claim dispatch_state ~keeper_name;
         release keeper_name
-      | Ok (Dispatchable { has_active = true; revision }) ->
-        clear_blocked_pending_claim dispatch_state ~keeper_name;
+      | Ok (Dispatchable { has_active = true }) ->
         (match Keeper_chat_queue.observe_pending ~keeper_name with
          | Error error ->
-           remember_blocked_pending_claim dispatch_state ~keeper_name
-             ~blocked_revision:revision ~error;
            Log.Keeper.warn
-             "keeper_chat_consumer: pending head observation failed for keeper=%s: %s; lane is persistence_blocked at revision=%Ld until a later durable queue revision"
+             "keeper_chat_consumer: pending head observation failed for keeper=%s: %s; inspection waits for the next explicit lane transition"
              keeper_name
-             (Keeper_chat_queue.mutation_error_to_string error)
-             revision;
+             (Keeper_chat_queue.mutation_error_to_string error);
            release keeper_name
          | Ok None -> release keeper_name
          | Ok (Some observation) ->

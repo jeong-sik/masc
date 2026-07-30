@@ -267,7 +267,6 @@ val observe_pending :
     while an inflight or recovery-required receipt owns delivery. *)
 
 val pending_observation_item : pending_observation -> leased_message
-val pending_observation_revision : pending_observation -> int64
 
 val lease_observed :
   pending_observation ->
@@ -359,7 +358,9 @@ val reconcile_persistence :
     retained transaction plan. A pre-publication projection is replayed; a
     published projection is verified; an uncertain lease is compensated to
     [Pending]. Any third state remains a typed [Reconciliation_failed] conflict
-    for explicit operator action. *)
+    for explicit operator action. Reconciliation itself emits no queue wake:
+    its owning consumer continues from the returned state, so an internal
+    projection repair cannot create a retry loop. *)
 
 type recovery_cancellation =
   { cancelled_at : float

@@ -2645,8 +2645,6 @@ let observe_pending ~keeper_name =
                            "pending FIFO index contains a non-pending receipt"))))))
 
 let pending_observation_item observation = observation.item
-let pending_observation_revision (observation : pending_observation) =
-  observation.revision
 
 let stale_pending_claim observation observed_revision =
   `Stale
@@ -2691,9 +2689,7 @@ let lease_observed observation =
        notify_transition ~keeper_name ~revision;
        `Leased lease
      | `Stale _ as stale -> stale
-     | `Error error ->
-       notify_indeterminate ~keeper_name (Error error);
-       `Error error)
+     | `Error error -> `Error error)
 
 let canonical_optional_ref = function
   | None -> Ok None
@@ -3339,14 +3335,7 @@ let reconcile_persistence ~keeper_name =
                        mark_reconciliation_conflict entry ~path
                          "chat queue database matches neither side of the quarantined transaction"))))
       in
-      (match result with
-       | Ok ({ outcome = Reconciled; revision } as report) ->
-         notify_transition ~keeper_name ~revision;
-         Ok report
-       | Ok { outcome = Already_consistent; _ } as result -> result
-       | Error _ as error ->
-         notify_indeterminate ~keeper_name error;
-         error)
+      result
 
 type recovery_cancellation =
   { cancelled_at : float

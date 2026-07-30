@@ -15,20 +15,14 @@
     running schedules exactly one follow-up inspection. *)
 val notify_transition : keeper_name:string -> unit
 
-type persistence_blocked_operation =
-  | Pending_claim_blocked
-  | Finalize_blocked
-
 type persistence_blocked_status =
-  { operation : persistence_blocked_operation
-  ; lease_id : string option
+  { lease_id : string
   ; error : Keeper_chat_queue.mutation_error
   }
 
-(** Observe the exact Keeper-local queue mutation that is blocked. A
-    pending-claim block is retried only after the durable queue revision
-    advances; this is operational state, not a retry timer or admission
-    constraint. *)
+(** Observe an exact terminal decision whose durable finalization is blocked.
+    Receipt claims are reconciled and retried inside their already-admitted
+    turn; they do not create process-wide blocked state. *)
 val persistence_blocked_status :
   base_path:string ->
   keeper_name:string ->
@@ -88,10 +82,10 @@ type turn_outcome =
     deliberately no second wall-clock watchdog: the turn runtime owns
     timeout/cancellation and must return the typed outcome.
 
-    If a Pending claim cannot be published, the consumer reconciles at most
-    once and parks that lane at the resulting durable queue revision. Internal
-    invalidations for the same revision are absorbed; a later durable queue
-    revision re-arms the still-Pending receipt.
+    If a Pending claim cannot be published, the consumer reconciles once and
+    retries the exact FIFO head once while it still owns the Keeper turn. A
+    second persistence failure leaves the receipt [Pending] for the next
+    explicit lane transition; no durable-revision gate survives the turn.
 
     If finalization persistence fails before publication, the exact decision is
     retained and retried before another turn starts after the next durable

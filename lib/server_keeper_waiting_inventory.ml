@@ -328,11 +328,6 @@ let chat_queue_persistence_blocked_rows ~base_path keeper_name =
         (`Assoc [ "message", `String message ])
     ]
   | Ok (Some status) ->
-    let operation =
-      match status.Keeper_chat_consumer.operation with
-      | Keeper_chat_consumer.Pending_claim_blocked -> "pending_claim"
-      | Keeper_chat_consumer.Finalize_blocked -> "finalize"
-    in
     [ { keeper_name = Some keeper_name
       ; source = Chat_queue_persistence_blocked
       ; waiting_on = "operator_reconciliation"
@@ -342,8 +337,8 @@ let chat_queue_persistence_blocked_rows ~base_path keeper_name =
       ; next_action = "reconcile_keeper_chat_queue"
       ; detail =
           `Assoc
-            [ "operation", `String operation
-            ; "lease_id", Json_util.string_opt_to_json status.lease_id
+            [ "operation", `String "finalize"
+            ; "lease_id", `String status.lease_id
             ; "error", Keeper_chat_queue.mutation_error_to_json status.error
             ]
       }

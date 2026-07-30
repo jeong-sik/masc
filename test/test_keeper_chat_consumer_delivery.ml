@@ -519,9 +519,9 @@ let test_finalization_persistence_retry_does_not_redeliver () =
       check_terminal_snapshot ~label:"retried finalization" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
-let test_claim_commit_uncertainty_waits_for_later_revision () =
+let test_claim_commit_uncertainty_retries_lone_receipt () =
   Printf.printf
-    "Test: claim commit uncertainty waits for a later durable revision\n%!";
+    "Test: claim commit uncertainty retries the lone reconciled receipt\n%!";
   with_env (fun ~base ~clock ->
     match
       enqueue_checked ~label:"claim uncertainty enqueue" ~keeper_name
@@ -562,58 +562,86 @@ let test_claim_commit_uncertainty_waits_for_later_revision () =
                    ()));
           with_consumer_switch (fun sw ->
             start_consumer ~sw ~clock ~base_path:base ~handle_turn;
-            check "uncertain claim reaches COMMIT"
+            check "uncertain claim retries after exact reconciliation"
               (await_condition ~clock ~seconds:5.0 (fun () ->
-                 !commit_attempts >= 1));
+                 !commit_attempts >= 2));
+            check "the original receipt delivers without another queue mutation"
+              (match
+                 await_receipt ~clock ~seconds:5.0 ~keeper_name
+                   ~receipt_id:first.receipt_id ~accept:is_delivered
+               with
+               | Some _ -> true
+               | None -> false));
+          check "the committed receipt runs exactly once" (!turns = 1)))
+
+let test_repeated_claim_failure_waits_for_explicit_wake () =
+  Printf.printf
+    "Test: repeated claim failure stops locally and a same-revision wake retries\n%!";
+  with_env (fun ~base ~clock ->
+    match
+      enqueue_checked ~label:"repeated claim failure enqueue" ~keeper_name
+        (discord_msg ~content:"retry on explicit wake"
+           ~channel_id:"channel-claim-explicit-wake"
+           ~user_id:"user-claim-explicit-wake" ~timestamp:6.2)
+    with
+    | None -> ()
+    | Some accepted ->
+      let commit_attempts = ref 0 in
+      let turns = ref 0 in
+      let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
+        incr turns;
+        Keeper_chat_consumer.Delivered
+          { outcome_ref =
+              Printf.sprintf "trace-claim-explicit-wake#%d" !turns
+          }
+      in
+      Fun.protect
+        ~finally:(fun () ->
+          Keeper_chat_queue.For_testing.set_transaction_stage_observer None)
+        (fun () ->
+          Keeper_chat_queue.For_testing.set_transaction_stage_observer
+            (Some
+               (function
+                 | Keeper_chat_queue.For_testing.Commit_invoked ->
+                   incr commit_attempts;
+                   if !commit_attempts <= 2
+                   then
+                     Keeper_chat_queue.For_testing.fail_next_commit_with
+                       Commit_busy
+                 | Transaction_begun
+                 | Mutation_applied
+                 | Before_commit
+                 | Commit_returned
+                 | Before_rollback
+                 | Before_close ->
+                   ()));
+          with_consumer_switch (fun sw ->
+            start_consumer ~sw ~clock ~base_path:base ~handle_turn;
+            check "one admitted turn performs only the reconciled retry"
+              (await_condition ~clock ~seconds:5.0 (fun () ->
+                 !commit_attempts >= 2));
             Eio.Time.sleep clock 0.2;
-            check "same-revision invalidations do not retry the claim"
-              (!commit_attempts = 1);
-            check "turn body does not run before a committed claim" (!turns = 0);
-            check "uncertain claim reconciles back to Pending"
+            check "internal reconciliation creates no retry loop"
+              (!commit_attempts = 2);
+            check "no turn body runs without a committed claim" (!turns = 0);
+            check "the exact receipt remains Pending"
               (match
                  Keeper_chat_queue.lookup_receipt
                    ~keeper_name
-                   ~receipt_id:first.receipt_id
+                   ~receipt_id:accepted.receipt_id
                with
                | Ok { receipt = Some { state = Pending; _ }; _ } -> true
-               | Ok
-                   { receipt =
-                       None
-                       | Some
-                           { state =
-                               Inflight _
-                               | Recovery_required _
-                               | Delivered _
-                               | Failed _
-                           ; _
-                           }
-                   ; _
-                   }
-               | Error _ -> false);
+               | Ok { receipt = None | Some _; _ } | Error _ -> false);
             Keeper_chat_queue.For_testing.set_transaction_stage_observer None;
-            (match
-               enqueue_checked ~label:"claim retry revision enqueue" ~keeper_name
-                 (discord_msg ~content:"advance the durable revision"
-                    ~channel_id:"channel-claim-retry"
-                    ~user_id:"user-claim-retry" ~timestamp:6.2)
-             with
-             | None -> ()
-             | Some second ->
-               check "later revision re-arms the original Pending receipt"
-                 (match
-                    await_receipt ~clock ~seconds:5.0 ~keeper_name
-                      ~receipt_id:first.receipt_id ~accept:is_delivered
-                  with
-                  | Some _ -> true
-                  | None -> false);
-               check "the later receipt remains FIFO behind the retried head"
-                 (match
-                    await_receipt ~clock ~seconds:5.0 ~keeper_name
-                      ~receipt_id:second.receipt_id ~accept:is_delivered
-                  with
-                  | Some _ -> true
-                  | None -> false)));
-          check "both committed receipts run exactly once" (!turns = 2)))
+            Keeper_chat_consumer.notify_transition ~keeper_name;
+            check "a same-revision explicit wake retries the receipt"
+              (match
+                 await_receipt ~clock ~seconds:5.0 ~keeper_name
+                   ~receipt_id:accepted.receipt_id ~accept:is_delivered
+               with
+               | Some _ -> true
+               | None -> false));
+          check "the explicitly woken receipt runs exactly once" (!turns = 1)))
 
 let test_busy_turn_hands_mutex_to_pending_receipt () =
   Printf.printf
@@ -1017,7 +1045,8 @@ let () =
   test_structured_cancellation_terminalizes_claimed_receipt ();
   test_dispatch_is_concurrent_per_keeper ();
   test_finalization_persistence_retry_does_not_redeliver ();
-  test_claim_commit_uncertainty_waits_for_later_revision ();
+  test_claim_commit_uncertainty_retries_lone_receipt ();
+  test_repeated_claim_failure_waits_for_explicit_wake ();
   test_busy_turn_hands_mutex_to_pending_receipt ();
   test_consumer_cancellation_while_parked_keeps_pending ();
   test_stale_parked_observation_rearms_next_pending_receipt ();

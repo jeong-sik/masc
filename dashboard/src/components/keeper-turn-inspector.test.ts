@@ -83,7 +83,15 @@ function toolCallsForTurn(): ToolCallsResponse {
 function turnRecordsWithMemoryOs(): TurnRecordsResponse {
   return {
     source: 'turn_record',
+    producer: 'keeper_agent_run.run_turn|keeper_turn_record_writer',
+    durable_store: '.masc/keepers/albini/turn-records',
+    dashboard_surface: '/api/v1/keepers/:name/turn-records',
+    freshness_slo_s: 300,
+    latest_ts_unix: 1_781_587_560,
+    latest_ts_iso: '2026-06-16T05:26:00Z',
+    latest_age_s: 40,
     health: 'ok',
+    stale_reason: null,
     keeper: 'albini',
     count: 2,
     skipped_rows: 0,

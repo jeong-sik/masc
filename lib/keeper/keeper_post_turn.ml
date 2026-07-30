@@ -5,10 +5,9 @@
     only through an explicit typed request from its owner lane.
 
     This module owns only the checkpoint/lineage tail of a keeper turn.
-    Memory bank append, episode flush, and Hebbian learning are recorded
-    elsewhere:
-    - memory bank / episodes: [Keeper_agent_run] tail after [Agent.run]
-    - hebbian: task lifecycle in [Workspace_task]
+    Current-memory selection runs in
+    [Keeper_agent_run_post_turn_memory]; task learning remains in
+    [Workspace_task].
 
     Extracted from Keeper_context_runtime as part of #4955 god-file split.
 

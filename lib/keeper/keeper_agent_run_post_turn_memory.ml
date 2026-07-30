@@ -68,18 +68,47 @@ let run
   in
   (* Memory OS librarian extraction: opt-in, provider-backed, best-effort. Its
      own lane unit, separate from [det_write_series] above. *)
-  let librarian_series () =
-    let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-    let librarian_input : Keeper_librarian.input =
-      { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
-      ; messages = librarian_messages
-      }
-    in
-    Keeper_librarian_runtime.run_best_effort
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
       ~base_path:config.Workspace.base_path
-      ~generation_floor:generation
-      ~keeper_id:meta.name
-      librarian_input
+  in
+  let librarian_series () =
+    match
+      Keeper_memory_os_current.read_for_keepers_dir
+        ~keepers_dir
+        ~keeper_id:meta.name
+    with
+    | Error detail ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string MemoryOsLibrarianFailures)
+        ~labels:[ "keeper", meta.name; "site", "memory_os_current_read" ]
+        ();
+      Log.Keeper.warn
+        ~keeper_name:meta.name
+        "memory os librarian skipped: current snapshot unavailable: %s"
+        detail
+    | Ok current ->
+      let current_facts, expected_revision =
+        match current with
+        | None -> [], None
+        | Some snapshot ->
+          snapshot.Keeper_memory_os_current.facts, Some snapshot.revision
+      in
+      let trace_id =
+        Keeper_id.Trace_id.to_string meta.runtime.trace_id
+      in
+      let librarian_input : Keeper_librarian.input =
+        { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+        ; generation
+        ; current_facts
+        ; messages = librarian_messages
+        }
+      in
+      Keeper_librarian_runtime.run_best_effort
+        ~keepers_dir
+        ~keeper_id:meta.name
+        ~expected_revision
+        librarian_input
   in
   (* RFC-0257: detach onto the per-keeper memory lane. When the executor
      switch is not initialized (tests, early startup) the lane runs units

@@ -26,16 +26,14 @@ fi
 # as the "merged but not linked" risk grows.
 REQUIRED_MODULES=(
   keeper_memory_os_types
-  keeper_memory_os_policy
-  keeper_memory_os_io
-  keeper_memory_os_consolidator
+  keeper_memory_os_current
   keeper_memory_os_recall
 )
 
 MISSING=()
 
-# OCaml emits symbols such as camlKeeper_memory_os_policy__entry or
-# camlKeeper_memory_os_policy__foo. A case-insensitive grep for the module
+# OCaml emits symbols such as camlKeeper_memory_os_current__entry or
+# camlKeeper_memory_os_current__foo. A case-insensitive grep for the module
 # basename is sufficient to prove linkage.
 #
 # Note: macOS grep -q on a large symbol table can return 1 even when matches

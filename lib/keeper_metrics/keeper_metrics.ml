@@ -119,7 +119,7 @@ type t =
   | WorkspaceHeartbeatFailures
   | TurnMetricsSnapshotFailures
   | OasExecutionErrors
-  | EpisodeCreateFailures
+  | MemoryOsLibrarianFailures
   | MemoryActivityEmitFailures
   | SupervisorSweepFailures
   | TomlReconcileSweepFailures
@@ -143,6 +143,7 @@ type t =
   | MemoryLanePending
   | MemoryLaneInFlight
   | MemoryLaneLatestPending
+  | MemoryLaneExecutionSlotBusy
   | WriteMetaCycleFailures
   | MetricsSseFailures
   | ChatStoreFailures
@@ -185,12 +186,8 @@ type t =
   | MemoryRecallHistorySwallowedExceptions
   | MemoryRecallReadErrors
   | MemoryOsRecallUnavailable
-  | MemoryOsReobserveEchoSuppressed
   | MemoryOsExplicitFactWrite
   | MemoryOsInertTurnExtractionSkipped
-  | MemoryOsRecallFactsTruncated
-  | MemoryOsRecallEpisodesTruncated
-  | MemoryOsRecallBytesOverBudget
   | RuntimeRequestWireBytes
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze
@@ -334,7 +331,7 @@ let to_string = function
   | WorkspaceHeartbeatFailures -> "masc_keeper_workspace_heartbeat_failures_total"
   | TurnMetricsSnapshotFailures -> "masc_keeper_turn_metrics_snapshot_failures_total"
   | OasExecutionErrors -> "masc_keeper_oas_execution_errors_total"
-  | EpisodeCreateFailures -> "masc_keeper_episode_create_failures_total"
+  | MemoryOsLibrarianFailures -> "masc_keeper_memory_os_librarian_failures_total"
   | MemoryActivityEmitFailures -> "masc_keeper_memory_activity_emit_failures_total"
   | SupervisorSweepFailures -> "masc_keeper_supervisor_sweep_failures_total"
   | TomlReconcileSweepFailures -> "masc_keeper_toml_reconcile_sweep_failures_total"
@@ -358,6 +355,7 @@ let to_string = function
   | MemoryLanePending -> "masc_keeper_memory_lane_pending"
   | MemoryLaneInFlight -> "masc_keeper_memory_lane_in_flight"
   | MemoryLaneLatestPending -> "masc_keeper_memory_lane_latest_pending"
+  | MemoryLaneExecutionSlotBusy -> "masc_keeper_memory_lane_execution_slot_busy_total"
   | WriteMetaCycleFailures -> "masc_keeper_write_meta_cycle_failures_total"
   | MetricsSseFailures -> "masc_keeper_metrics_sse_failures_total"
   | ChatStoreFailures -> "masc_keeper_chat_store_failures_total"
@@ -404,18 +402,10 @@ let to_string = function
       "masc_keeper_memory_recall_read_errors_total"
   | MemoryOsRecallUnavailable ->
       "masc_keeper_memory_os_recall_unavailable_total"
-  | MemoryOsReobserveEchoSuppressed ->
-      "masc_keeper_memory_os_reobserve_echo_suppressed_total"
   | MemoryOsExplicitFactWrite ->
       "masc_keeper_memory_os_explicit_fact_write_total"
   | MemoryOsInertTurnExtractionSkipped ->
       "masc_keeper_memory_os_inert_turn_extraction_skipped_total"
-  | MemoryOsRecallFactsTruncated ->
-      "masc_keeper_memory_os_recall_facts_truncated_total"
-  | MemoryOsRecallEpisodesTruncated ->
-      "masc_keeper_memory_os_recall_episodes_truncated_total"
-  | MemoryOsRecallBytesOverBudget ->
-      "masc_keeper_memory_os_recall_bytes_over_budget_total"
   | RuntimeRequestWireBytes -> "masc_keeper_runtime_request_wire_bytes"
   | RuntimeHttpProbeJsonParseFailures ->
       "masc_runtime_http_probe_json_parse_failures_total"

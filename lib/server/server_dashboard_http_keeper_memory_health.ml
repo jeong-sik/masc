@@ -1,281 +1,188 @@
-(** Keeper Memory Health dashboard HTTP JSON helper.
-
-    Produces a read-only snapshot of per-keeper fact-store sizes and the
-    fleet-wide librarian cadence counter for the
-    /api/v1/dashboard/keeper-memory-health endpoint.
-
-    Data sources:
-    - [Config_dir_resolver.keepers_dir_for_base_path] for request-scoped paths.
-    - [Keeper_memory_os_io.list_fact_store_keeper_ids_for_keepers_dir] for the
-      keeper list.
-    - [Keeper_memory_os_io.read_facts_all_for_keepers_dir] and file stat for
-      facts count/bytes.
-    - [Keeper_memory_os_io.events_path_for_keepers_dir] + file stat for events
-      bytes.
-    - [Keeper_librarian_runtime.cadence_counter_entries] for the cadence table
-      size (one fleet-wide value). *)
+(** Read-only fleet health for the current Memory OS snapshot. *)
 
 type keeper_health =
   { keeper_id : string
+  ; revision : int
   ; facts : int
-  ; facts_bytes : int
-  ; events : int
-  ; events_bytes : int
-  ; events_bytes_to_facts_bytes_ratio : float
-  ; duplicate_claim_identity_rows : int
+  ; snapshot_bytes : int
+  ; added : int
+  ; removed : int
+  ; librarian_lane_busy : int
+  ; read_error : string option
   }
 
-type alert_code =
-  | Duplicate_claim_identity_rows
-
-type alert_severity = Warn
-
-type alert_target =
-  | Duplicate_claim_identity_rows_target
-
-type keeper_alert =
-  { code : alert_code
-  ; severity : alert_severity
-  ; target : alert_target
-  ; label : string
-  ; message : string
-  ; value : float
-  ; threshold : float
-  }
-
-let duplicate_claim_identity_rows_threshold = 0.0
-
-let alert_code_to_string = function
-  | Duplicate_claim_identity_rows -> "duplicate_claim_identity_rows"
+let librarian_lane_busy_metric =
+  Keeper_metrics.(to_string MemoryLaneExecutionSlotBusy)
 ;;
 
-let alert_severity_to_string = function
-  | Warn -> "warn"
-;;
-
-let alert_target_to_string = function
-  | Duplicate_claim_identity_rows_target -> "duplicate_claim_identity_rows"
-;;
-
-(* Alert labels are endpoint-owned wire copy for this backend-defined diagnostic
-   taxonomy. The dashboard renders the label as data from this endpoint instead
-   of maintaining a second code -> label classifier. *)
-let alert_label = function
-  | Duplicate_claim_identity_rows -> "동일 claim identity 행"
-;;
-
-let alert ~code ~target ~message ~value ~threshold =
-  { code; severity = Warn; target; label = alert_label code; message; value; threshold }
-;;
-
-let keeper_alerts h =
-  []
-  |> (fun alerts ->
-    if h.duplicate_claim_identity_rows > 0
-    then
-      alert
-        ~code:Duplicate_claim_identity_rows
-        ~target:Duplicate_claim_identity_rows_target
-        ~message:
-          "Memory OS fact rows with an already-present claim identity remain on disk; \
-           operator review is required."
-        ~value:(float_of_int h.duplicate_claim_identity_rows)
-        ~threshold:duplicate_claim_identity_rows_threshold
-      :: alerts
-    else alerts)
-  |> List.rev
-;;
-
-let keeper_alert_to_json alert =
-  `Assoc
-    [ "code", `String (alert_code_to_string alert.code)
-    ; "severity", `String (alert_severity_to_string alert.severity)
-    ; "target", `String (alert_target_to_string alert.target)
-    ; "label", `String alert.label
-    ; "message", `String alert.message
-    ; "value", `Float alert.value
-    ; "threshold", `Float alert.threshold
-    ]
-;;
-
-let count_lines_in_file path =
-  (* NDT-OK: file line count is a read-only diagnostic metric, not a control
-     value. Streams the file so a large append-only events log is not loaded
-     into memory just to be counted. *)
-  if not (Sys.file_exists path)
-  then 0
-  else (
-    let ic = open_in path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-         let rec count_lines count =
-           match input_line ic with
-           | _ -> count_lines (count + 1)
-           | exception End_of_file -> count
-         in
-         count_lines 0))
-;;
+let librarian_lane_busy_site = "memory_os_librarian_execution_slot"
 
 let file_size_bytes path =
-  (* NDT-OK: file size is a diagnostic metric. *)
-  if not (Sys.file_exists path) then 0 else (Unix.stat path).Unix.st_size
+  if Sys.file_exists path then (Unix.stat path).Unix.st_size else 0
 ;;
 
-module Claim_identity_map = Map.Make (String)
-
-let duplicate_claim_identity_rows facts =
-  let counts =
-    List.fold_left
-      (fun counts fact ->
-       let key = Keeper_memory_os_types.claim_identity fact in
-       let count =
-         match Claim_identity_map.find_opt key counts with
-         | Some count -> count
-         | None -> 0
-       in
-       Claim_identity_map.add key (count + 1) counts)
-      Claim_identity_map.empty
-      facts
-  in
-  Claim_identity_map.fold
-    (fun _ count total -> total + max 0 (count - 1))
-    counts
-    0
-;;
-
-let keeper_health_unlocked ~keepers_dir keeper_id =
-  let facts =
-    (* [read_facts_all] raises on malformed JSONL — treated as a read failure
-       for this keeper; the caller catches and skips it. *)
-    Keeper_memory_os_io.read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id
-  in
-  let facts_count = List.length facts in
-  let facts_bytes =
-    file_size_bytes
-      (Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
-  in
-  let events_p =
-    Keeper_memory_os_io.events_path_for_keepers_dir ~keepers_dir ~keeper_id
-  in
-  let events_bytes = file_size_bytes events_p in
-  { keeper_id
-  ; facts = facts_count
-  ; facts_bytes
-  ; events = count_lines_in_file events_p
-  ; events_bytes
-  ; events_bytes_to_facts_bytes_ratio =
-      float_of_int events_bytes /. float_of_int (max 1 facts_bytes)
-  ; duplicate_claim_identity_rows = duplicate_claim_identity_rows facts
-  }
+let librarian_lane_busy_for_keeper keeper_id =
+  Otel_metric_store.metric_value_or_zero
+    librarian_lane_busy_metric
+    ~labels:[ "keeper", keeper_id; "site", librarian_lane_busy_site ]
+    ()
+  |> int_of_float
 ;;
 
 let keeper_health ~keepers_dir keeper_id =
-  Keeper_memory_os_io.with_episode_bundle_lock_for_keepers_dir
-    ~keepers_dir
-    ~keeper_id
-    (fun () ->
-       File_lock_eio.with_lock
-         (Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
-         (fun () ->
-            keeper_health_unlocked ~keepers_dir keeper_id))
+  let snapshot_path =
+    Keeper_memory_os_current.path_for_keepers_dir ~keepers_dir ~keeper_id
+  in
+  match
+    Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
+  with
+  | Ok None ->
+    { keeper_id
+    ; revision = 0
+    ; facts = 0
+    ; snapshot_bytes = 0
+    ; added = 0
+    ; removed = 0
+    ; librarian_lane_busy = librarian_lane_busy_for_keeper keeper_id
+    ; read_error = None
+    }
+  | Ok (Some snapshot) ->
+    { keeper_id
+    ; revision = snapshot.revision
+    ; facts = List.length snapshot.facts
+    ; snapshot_bytes = file_size_bytes snapshot_path
+    ; added = List.length snapshot.change.added
+    ; removed = List.length snapshot.change.removed
+    ; librarian_lane_busy = librarian_lane_busy_for_keeper keeper_id
+    ; read_error = None
+    }
+  | Error message ->
+    { keeper_id
+    ; revision = 0
+    ; facts = 0
+    ; snapshot_bytes = file_size_bytes snapshot_path
+    ; added = 0
+    ; removed = 0
+    ; librarian_lane_busy = librarian_lane_busy_for_keeper keeper_id
+    ; read_error = Some message
+    }
 ;;
 
-let keeper_health_entry_to_json (h, alerts) : Yojson.Safe.t =
+let alert_json ~code ~target ~label ~message ~value =
   `Assoc
-    [ "keeper_id", `String h.keeper_id
-    ; "facts", `Int h.facts
-    ; "facts_bytes", `Int h.facts_bytes
-    ; "events", `Int h.events
-    ; "events_bytes", `Int h.events_bytes
-    ; ( "events_bytes_to_facts_bytes_ratio"
-      , `Float h.events_bytes_to_facts_bytes_ratio )
-    ; "duplicate_claim_identity_rows", `Int h.duplicate_claim_identity_rows
-    ; "alerts", `List (List.map keeper_alert_to_json alerts)
+    [ "code", `String code
+    ; "severity", `String "warn"
+    ; "target", `String target
+    ; "label", `String label
+    ; "message", `String message
+    ; "value", `Float value
+    ; "threshold", `Float 0.0
     ]
 ;;
 
-let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
-  (* NDT-OK: diagnostic snapshot timestamp only. *)
-  let now = Unix.gettimeofday () in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let cadence_counter_entries = Keeper_librarian_runtime.cadence_counter_entries () in
-  let health_results =
-    Keeper_memory_os_io.list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir
-    |> List.map (fun keeper_id ->
-      match keeper_health ~keepers_dir keeper_id with
-      | h -> Ok h
-      | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-      | exception exn ->
-        let error = Printexc.to_string exn in
-        Log.Dashboard.warn
-          "[keeper_memory_health] keeper read failed %s: %s"
-          keeper_id
-          error;
-        Error (keeper_id, error))
+let alerts h =
+  let read_error_alert =
+    match h.read_error with
+    | None -> []
+    | Some message ->
+      [ alert_json
+          ~code:"snapshot_read_error"
+          ~target:"snapshot_read_error"
+          ~label:"읽기"
+          ~message
+          ~value:1.0
+      ]
   in
-  let entries, read_errors =
-    List.fold_left
-      (fun (entries, errors) -> function
-         | Ok entry -> entry :: entries, errors
-         | Error error -> entries, error :: errors)
-      ([], [])
-      health_results
+  if h.librarian_lane_busy <= 0
+  then read_error_alert
+  else
+    read_error_alert
+    @ [ alert_json
+          ~code:"librarian_lane_busy"
+          ~target:"librarian_lane_busy"
+          ~label:"Librarian"
+          ~message:
+            "The Librarian memory lane was busy; current-memory selection was deferred."
+          ~value:(float_of_int h.librarian_lane_busy)
+      ]
+;;
+
+let keeper_health_entry_to_json h =
+  `Assoc
+    [ "keeper_id", `String h.keeper_id
+    ; "revision", `Int h.revision
+    ; "facts", `Int h.facts
+    ; "snapshot_bytes", `Int h.snapshot_bytes
+    ; "added", `Int h.added
+    ; "removed", `Int h.removed
+    ; "librarian_lane_busy", `Int h.librarian_lane_busy
+    ; ( "read_error"
+      , match h.read_error with
+        | Some message -> `String message
+        | None -> `Null )
+    ; "alerts", `List (alerts h)
+    ]
+;;
+
+let keeper_memory_health_http_json ~base_path =
+  let generated_at = Time_compat.now () in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path
   in
   let entries =
-    List.rev entries
-    |> List.map (fun h -> h, keeper_alerts h)
-    (* Largest stores first so the worst offenders surface at the top. *)
-    |> List.sort (fun (a, _) (b, _) -> compare b.facts_bytes a.facts_bytes)
+    Keeper_memory_os_current.list_keeper_ids_for_keepers_dir ~keepers_dir
+    |> List.map (keeper_health ~keepers_dir)
+    |> List.sort (fun left right ->
+      compare right.snapshot_bytes left.snapshot_bytes)
   in
-  let read_errors = List.rev read_errors in
-  let sum f = List.fold_left (fun acc (h, _) -> acc + f h) 0 entries in
-  let all_alerts = List.concat_map snd entries in
-  let alert_count_by_code code =
+  let sum field =
+    List.fold_left (fun total entry -> total + field entry) 0 entries
+  in
+  let total_alerts =
     List.fold_left
-      (fun acc alert -> if alert.code = code then acc + 1 else acc)
+      (fun total entry -> total + List.length (alerts entry))
       0
-      all_alerts
+      entries
   in
   `Assoc
-    [ "generated_at", `Float now
-    ; "cadence_counter_entries", `Int cadence_counter_entries
-    ; "read_error_count", `Int (List.length read_errors)
-    ; ( "read_errors"
-      , `List
-          (List.map
-             (fun (keeper_id, error) ->
-                `Assoc [ "keeper_id", `String keeper_id; "error", `String error ])
-             read_errors) )
+    [ "schema", `String "keeper.memory_os.current_health.v1"
+    ; "generated_at", `Float generated_at
+    ; ( "cadence_counter_entries"
+      , `Int (Keeper_librarian_runtime.cadence_counter_entries ()) )
     ; "keepers", `List (List.map keeper_health_entry_to_json entries)
     ; ( "totals"
       , `Assoc
-          [ "facts", `Int (sum (fun h -> h.facts))
-          ; "facts_bytes", `Int (sum (fun h -> h.facts_bytes))
-          ; "events_bytes", `Int (sum (fun h -> h.events_bytes))
-          ; ( "duplicate_claim_identity_rows"
-            , `Int (sum (fun h -> h.duplicate_claim_identity_rows)) )
+          [ "facts", `Int (sum (fun entry -> entry.facts))
+          ; "snapshot_bytes", `Int (sum (fun entry -> entry.snapshot_bytes))
+          ; "added", `Int (sum (fun entry -> entry.added))
+          ; "removed", `Int (sum (fun entry -> entry.removed))
+          ; ( "librarian_lane_busy"
+            , `Int (sum (fun entry -> entry.librarian_lane_busy)) )
+          ; ( "read_errors"
+            , `Int
+                (sum (fun entry ->
+                   match entry.read_error with
+                   | Some _ -> 1
+                   | None -> 0)) )
           ] )
     ; ( "alert_summary"
       , `Assoc
-          [ "total_alerts", `Int (List.length all_alerts)
-          ; ( "warn_alerts"
-            , `Int
-                (List.length
-                   (List.filter (fun alert -> alert.severity = Warn) all_alerts)) )
+          [ "total_alerts", `Int total_alerts
+          ; "warn_alerts", `Int total_alerts
           ; ( "keepers_with_alerts"
             , `Int
-                (List.fold_left
-                   (fun acc (_, alerts) -> if alerts = [] then acc else acc + 1)
-                   0
-                   entries) )
-          ; ( "duplicate_claim_identity_rows_keepers"
-            , `Int (alert_count_by_code Duplicate_claim_identity_rows) )
-          ; ( "thresholds"
-            , `Assoc
-                [ ( "duplicate_claim_identity_rows"
-                  , `Float duplicate_claim_identity_rows_threshold )
-                ] )
+                (sum (fun entry ->
+                   if alerts entry = [] then 0 else 1)) )
+          ; ( "snapshot_read_error_keepers"
+            , `Int
+                (sum (fun entry ->
+                   match entry.read_error with
+                   | Some _ -> 1
+                   | None -> 0)) )
+          ; ( "librarian_lane_busy_keepers"
+            , `Int
+                (sum (fun entry ->
+                   if entry.librarian_lane_busy > 0 then 1 else 0)) )
           ] )
     ]
 ;;

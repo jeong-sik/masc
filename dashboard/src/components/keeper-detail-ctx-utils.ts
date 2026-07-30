@@ -17,31 +17,47 @@ export function autonomyHint(count: number | undefined, proactiveEnabled: boolea
 }
 
 export const CTX_SEGMENT_LABELS: Record<string, string> = {
-  system_prompt: '시스템 프롬프트',
-  dynamic_context: '턴 컨텍스트',
-  memory_context: '메모리',
-  temporal_context: '시간',
-  user_message: '현재 입력',
-  history_user: '히스토리 · user',
-  history_assistant_text: '히스토리 · assistant',
-  history_tool_use: '히스토리 · tool use',
-  history_tool_result: '히스토리 · tool result',
-  history_other: '히스토리 · 기타',
-  unattributed: '미할당',
+  'prompt.persona': '페르소나',
+  'prompt.continuity': '연속성',
+  'prompt.dynamic_context': '턴 컨텍스트',
+  'prompt.temporal_summary': '시간 요약',
+  'prompt.claimed_task_nudge': '태스크 넛지',
+  'prompt.retry_nudge': '재시도 넛지',
+  'prompt.memory_os_recall': '메모리 회상',
+  'prompt.connected_surface': '연결 표면',
+  tool_schemas: '도구 스키마',
+  message_user: '메시지 · user',
+  message_system: '메시지 · system',
+  message_assistant_text: '메시지 · assistant',
+  message_thinking: '메시지 · thinking',
+  message_redacted_thinking: '메시지 · redacted thinking',
+  message_tool_use: '메시지 · tool use',
+  message_tool_result: '메시지 · tool result',
+  message_image: '메시지 · image',
+  message_document: '메시지 · document',
+  message_audio: '메시지 · audio',
 }
 
 export const CTX_SEGMENT_COLORS: Record<string, string> = {
-  system_prompt: 'var(--amber-bright)',
-  dynamic_context: 'var(--purple)',
-  memory_context: 'var(--rose-light)',
-  temporal_context: 'var(--cyan)',
-  user_message: 'var(--sky-400)',
-  history_user: 'var(--purple)',
-  history_assistant_text: 'var(--blue-400)',
-  history_tool_use: 'var(--color-status-ok)',
-  history_tool_result: 'var(--bad-light)',
-  history_other: 'var(--color-fg-muted)',
-  unattributed: 'var(--color-border-default)',
+  'prompt.persona': 'var(--amber-bright)',
+  'prompt.continuity': 'var(--cyan)',
+  'prompt.dynamic_context': 'var(--purple)',
+  'prompt.temporal_summary': 'var(--cyan)',
+  'prompt.claimed_task_nudge': 'var(--color-status-ok)',
+  'prompt.retry_nudge': 'var(--color-status-err)',
+  'prompt.memory_os_recall': 'var(--rose-light)',
+  'prompt.connected_surface': 'var(--amber-bright)',
+  tool_schemas: 'var(--amber-bright)',
+  message_user: 'var(--sky-400)',
+  message_system: 'var(--color-fg-muted)',
+  message_assistant_text: 'var(--blue-400)',
+  message_thinking: 'var(--purple)',
+  message_redacted_thinking: 'var(--purple)',
+  message_tool_use: 'var(--color-status-ok)',
+  message_tool_result: 'var(--bad-light)',
+  message_image: 'var(--sky-400)',
+  message_document: 'var(--amber-bright)',
+  message_audio: 'var(--color-status-ok)',
 }
 
 export function ctxSegmentLabel(key: string): string {
@@ -56,7 +72,7 @@ export function ctxSegmentColor(key: string): string {
  * Pure filter for CTX composition "latest breakdown" entries.
  *
  * Case-insensitive substring match against either the raw segment key
- * (e.g. `history_tool_result`) or its human label (e.g. `History · tool result`).
+ * (e.g. `message_tool_result`) or its human label (e.g. `메시지 · tool result`).
  * This lets operators search by either form — raw key is what shows up in
  * backend logs, label is what the dashboard renders.
  *

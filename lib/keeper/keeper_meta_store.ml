@@ -496,27 +496,21 @@ let persist_compaction_decision config ~keeper_name ~decision
    [persist_compaction_decision] so a concurrent CAS re-applies the stamp
    instead of dropping it.
 
-   Reset semantics (#25538): the streak counts consecutive provider-overflow
-   episodes, and only a turn that completes without overflow — or an
-   operator-committed manual compaction — resets it.  An in-lane (reactive)
-   commit advances the streak instead of resetting it: a committed plan that
-   saves 920B of a checkpoint (0.07%, live measurement) used to reset the
-   counter on every loop iteration, so an incompressible floor never reached
-   the ceiling.
+   [consecutive_failures] is diagnostic state only: an attempted compaction
+   failure advances it, while any committed compaction or overflow-free turn
+   resets it.  It is never an admission authority.
 
-   [`Committed]/[`Overflow_episode_committed] also advance [count].  That
-   field had no writer: it was serialized to meta and rendered by the
-   dashboard while nothing incremented it, so a keeper whose compaction
-   pipeline was committing normally still reported compaction_count=0 — one
-   keeper carried 88 committed [context_compacted] runtime-manifest records
-   against a meta reading 0. *)
+   [`Committed] also advances [count].  That field had no writer: it was
+   serialized to meta and rendered by the dashboard while nothing incremented
+   it, so a keeper whose compaction pipeline was committing normally still
+   reported compaction_count=0 — one keeper carried 88 committed
+   [context_compacted] runtime-manifest records against a meta reading 0. *)
 (* Rendering, not classification: the outcome variant is the state machine's
    own outcome, so the label comes from an exhaustive match instead of being
    recovered from a message string.  A new variant fails this match at compile
    time rather than falling into an unlabelled bucket. *)
 let compaction_outcome_label = function
   | `Committed -> "committed"
-  | `Overflow_episode_committed -> "overflow_episode_committed"
   | `Failed -> "failed"
   | `Recovered -> "recovered"
 ;;
@@ -529,11 +523,6 @@ let persist_compaction_outcome config ~keeper_name ~outcome
       (fun rt ->
         match outcome with
         | `Committed -> { rt with count = rt.count + 1; consecutive_failures = 0 }
-        | `Overflow_episode_committed ->
-          { rt with
-            count = rt.count + 1
-          ; consecutive_failures = rt.consecutive_failures + 1
-          }
         | `Failed -> { rt with consecutive_failures = rt.consecutive_failures + 1 }
         | `Recovered -> { rt with consecutive_failures = 0 })
       m

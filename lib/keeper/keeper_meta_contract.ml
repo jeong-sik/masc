@@ -47,23 +47,10 @@ type compaction_runtime =
   ; last_check_ts : float
   ; last_decision : compaction_runtime_decision
   ; consecutive_failures : int
-    (* RFC-0351 S0 / #25461: consecutive manual-compaction failures and
-       reactive provider-overflow episodes for this keeper. In-lane recovery
-       advances the streak even when it durably compacts, because the retried
-       turn can still overflow at an incompressible floor. An overflow-free
-       completed turn or an operator-committed manual compaction resets it. At
-       the threshold, reactive preparation is refused without advancing the
-       streak again. *)
+    (* Consecutive compaction attempts that failed to commit durable progress.
+       This is observability only: it never grants or refuses admission.
+       Any committed compaction or overflow-free completed turn resets it. *)
   }
-
-(* RFC-0351 S0 / #25461: streak entries tolerated before reactive compaction
-   preparation is refused. Defined next to [consecutive_failures] so admission
-   and the status/dashboard projections that surface the suspended state read
-   one constant. *)
-let compaction_retry_escalation_threshold = 3
-
-let compaction_retry_suspended rt =
-  rt.consecutive_failures >= compaction_retry_escalation_threshold
 
 type proactive_runtime =
   { count_total : int

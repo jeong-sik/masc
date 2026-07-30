@@ -77,7 +77,6 @@ let test_each_outcome_is_labelled () =
            (before +. 1.)
            (counted ~keeper_name:name ~outcome:label))
       [ `Committed, "committed"
-      ; `Overflow_episode_committed, "overflow_episode_committed"
       ; `Failed, "failed"
       ; `Recovered, "recovered"
       ])
@@ -108,6 +107,29 @@ let test_count_tracks_the_durable_streak () =
         4
         meta.Masc.Keeper_meta_contract.runtime.compaction_rt.consecutive_failures
     | Ok None -> fail "keeper meta disappeared mid-test"
+    | Error msg -> failf "meta read failed: %s" msg)
+;;
+
+let test_committed_compaction_resets_failure_streak () =
+  with_workspace (fun config ->
+    let name = "outcome-commit-reset" in
+    ignore (register config ~name);
+    persist_outcome config ~name ~outcome:`Failed;
+    persist_outcome config ~name ~outcome:`Failed;
+    persist_outcome config ~name ~outcome:`Committed;
+    match Meta_store.read_meta config name with
+    | Ok (Some meta) ->
+      check
+        int
+        "a successful reactive or manual commit resets diagnostic failures"
+        0
+        meta.Masc.Keeper_meta_contract.runtime.compaction_rt.consecutive_failures;
+      check
+        int
+        "the successful commit advances the durable compaction count"
+        1
+        meta.Masc.Keeper_meta_contract.runtime.compaction_rt.count
+    | Ok None -> fail "keeper meta disappeared after committed compaction"
     | Error msg -> failf "meta read failed: %s" msg)
 ;;
 
@@ -179,6 +201,10 @@ let () =
             "count tracks the durable streak"
             `Quick
             test_count_tracks_the_durable_streak
+        ; test_case
+            "committed compaction resets failure streak"
+            `Quick
+            test_committed_compaction_resets_failure_streak
         ; test_case
             "attributes the outcome to its keeper"
             `Quick

@@ -147,17 +147,15 @@ val record_crashed_cycle_failure :
 
 val compaction_outcome_of_cycle_outcome :
   Keeper_heartbeat_loop_cycle.cycle_outcome option ->
-  [ `Committed | `Overflow_episode_committed | `Failed | `Recovered ] option
-(** Pure mapping from a cycle outcome to the compaction-streak stamp
+  [ `Committed | `Failed | `Recovered ] option
+(** Pure mapping from a cycle outcome to compaction telemetry
     ([Keeper_meta_store.persist_compaction_outcome]). Manual-lane
     applied/failed outcomes and in-lane provider-overflow dispositions join
-    the same per-keeper streak. The streak counts consecutive
-    provider-overflow episodes (#25538): an in-lane commit maps to
-    [`Overflow_episode_committed] (advances the streak — committed savings
-    under an incompressible floor must still reach the ceiling), a completed
-    overflow-free turn maps to [`Recovered] (resets it), and only the
-    operator's manual commit maps to [`Committed] (count + reset).
-    Outcomes with no compaction involvement return [None]. *)
+    the same per-keeper observation. Any committed compaction maps to
+    [`Committed] (count + failure-streak reset), a completed overflow-free turn
+    maps to [`Recovered] (failure-streak reset), and an attempted compaction
+    without durable progress maps to [`Failed]. Outcomes with no compaction
+    involvement return [None]. *)
 
 
 (** Pure: post-turn status event derived from the registry

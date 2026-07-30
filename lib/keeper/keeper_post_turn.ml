@@ -72,7 +72,6 @@ type compaction_recovery_error =
   | Checkpoint_candidate_failed of string
   | Compaction_rejected of Keeper_compact_policy.compaction_rejection
   | No_compaction of no_compaction
-  | Retry_suspended of { consecutive_failures : int }
 
 type prepared_commit_failure =
   { error : compaction_recovery_error
@@ -112,7 +111,6 @@ let compaction_recovery_error_to_tag = function
     Keeper_compact_policy.compaction_rejection_to_tag reason
   | No_compaction { reason; _ } ->
     "no_compaction:" ^ Keeper_compaction_outcome.no_compaction_reason_label reason
-  | Retry_suspended _ -> "retry_suspended"
 
 let checkpoint_load_error_detail = function
   | Keeper_checkpoint_store.Not_found -> "checkpoint not found"
@@ -194,12 +192,6 @@ let compaction_recovery_error_to_string = function
       source.turn_count
       source.sha256
       (Keeper_compaction_outcome.no_compaction_reason_to_string reason)
-  | Retry_suspended { consecutive_failures } ->
-    Printf.sprintf
-      "compaction retry suspended after %d consecutive failures; reactive \
-       prepare refused before the summarizer call — an operator-committed \
-       manual compaction resets the streak and lifts the suspension"
-      consecutive_failures
 
 (* ── Tier A6: resilience post-turn wire-in (Cycle 23) ──────────────
    Feature-flag-gated layer that runs before tool emission and
@@ -717,41 +709,13 @@ let prepare_compaction_admitted
                (Keeper_compact_policy.compaction_decision_to_string decision))))
 ;;
 
-(* RFC-0351 S0 / #25461: reactive admission gate in front of the prepare
-   phase. Once the persisted failure streak reaches the escalation threshold
-   reactive preparation is refused before checkpoint load or a summarizer LLM
-   call. The manual trigger passes through on purpose: an operator-committed
-   compaction is the recovery lever — its commit resets the streak and lifts
-   the suspension. *)
 let prepare_compaction_with
       ~compact_for_request
       ~base_dir
       ~(meta : keeper_meta)
       ~(trigger : Compaction_trigger.t)
   : (prepared_compaction, compaction_recovery_error) result =
-  let suspended =
-    Keeper_meta_contract.compaction_retry_suspended meta.runtime.compaction_rt
-  in
   match trigger with
-  (* The suspension guard follows the trigger's origin, not its axis. The
-     provider token window, serialized byte limit, and serving-admission token
-     evidence are all raised by the turn path itself, so a suspended retry must
-     refuse them or a keeper whose compactions keep failing would keep
-     re-entering compaction on every turn. [Manual] stays exempt: an operator
-     asked for this one, and refusing it would leave no way to intervene. *)
-  | Compaction_trigger.Provider_overflow _
-  | Compaction_trigger.Request_body_over_capacity _
-  | Compaction_trigger.Request_body_refused_by_provider _
-  | Compaction_trigger.Serving_input_capacity
-      (Compaction_trigger.Boundary_unknown _)
-  | Compaction_trigger.Serving_input_capacity
-      (Compaction_trigger.Input_rejected _)
-    when suspended ->
-    Error
-      (Retry_suspended
-         { consecutive_failures =
-             meta.runtime.compaction_rt.consecutive_failures
-         })
   | Compaction_trigger.Provider_overflow _
   | Compaction_trigger.Request_body_over_capacity _
   | Compaction_trigger.Request_body_refused_by_provider _

@@ -340,22 +340,11 @@ let compaction_outcome_of_cycle_outcome = function
     (match failure.Keeper_unified_turn.source_disposition with
      | Keeper_unified_turn.Requeue_after_context_compaction
          Keeper_unified_turn.Compaction_committed ->
-       (* #25538: an in-lane commit is still one provider-overflow episode.
-          Advancing (not resetting) the streak is what lets an
-          incompressible floor reach the ceiling; only an overflow-free
-          completed turn — or the operator's manual commit — resets. *)
-       Some `Overflow_episode_committed
+       Some `Committed
      | Keeper_unified_turn.Requeue_after_context_compaction
          (Keeper_unified_turn.Compaction_attempt_failed _)
      | Keeper_unified_turn.Follow_failure_route_after_no_compaction _ ->
        Some `Failed
-     | Keeper_unified_turn.Requeue_after_context_compaction
-         (Keeper_unified_turn.Compaction_refused_without_attempt _) ->
-       (* The admission gate declined the trigger before reading a checkpoint or
-          calling the summarizer, so there is no compaction outcome to record.
-          Counting it advanced the streak the gate itself reads: live keeper
-          kidsnote reached 907 against a threshold of 3. *)
-       None
      | Keeper_unified_turn.Acknowledge_after_in_turn_handling -> Some `Failed
      | Keeper_unified_turn.Follow_failure_route
      | Keeper_unified_turn.Pause_after_transcript_corruption _ -> None)
@@ -873,11 +862,9 @@ let run_keepalive_unified_turn
                | Cycle.Manual_compaction_failed _ )
            | None ->
              ());
-      (* RFC-0351 S0 / #25461: advance the compaction streak read by the trigger.
-         [Keeper_post_turn] refuses another compaction once the streak reaches
-         [compaction_retry_escalation_threshold]. This update is intentionally
-         independent of Event Queue source selection: every failed compaction
-         must consume retry budget, including cycles with no selected source. *)
+      (* Persist compaction outcome telemetry independently of Event Queue
+         source selection. The observed failure streak never controls
+         admission; a committed compaction or overflow-free turn clears it. *)
       (let compaction_outcome =
          compaction_outcome_of_cycle_outcome !cycle_outcome_ref
        in

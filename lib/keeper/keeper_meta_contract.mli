@@ -64,31 +64,10 @@ type compaction_runtime = {
   last_check_ts : float;
   last_decision : compaction_runtime_decision;
   consecutive_failures : int;
-      (** RFC-0351 S0 / #25461: consecutive manual-compaction failures and
-          reactive provider-overflow episodes. A reactive commit advances the
-          streak; an overflow-free completed turn or operator-committed manual
-          compaction resets it. Once it reaches
-          {!compaction_retry_escalation_threshold}, reactive preparation is
-          refused without counting that refusal as another failure. *)
+      (** Consecutive compaction attempts that failed to commit durable
+          progress. Observability only: it never grants or refuses admission.
+          Any committed compaction or overflow-free completed turn resets it. *)
 }
-
-val compaction_retry_escalation_threshold : int
-(** RFC-0351 S0 / #25461: streak entries tolerated before
-    [Keeper_post_turn.prepare_compaction] stops admitting reactive triggers.
-    Single definition shared by reactive admission and status/dashboard
-    projections.
-
-    The refusal is not itself a compaction failure — it reads this counter
-    without attempting anything, so settling it as one made the threshold
-    self-fulfilling (live keeper [kidsnote] reached 907 against a threshold of
-    3). It is reported as [Keeper_unified_turn.Compaction_refused_without_attempt]
-    and produces no persisted compaction outcome. *)
-
-val compaction_retry_suspended : compaction_runtime -> bool
-(** [true] once the persisted streak has reached
-    {!compaction_retry_escalation_threshold}. Reactive preparation is then
-    refused before checkpoint load or summarizer dispatch; the refusal leaves
-    the streak unchanged. *)
 
 type proactive_runtime = {
   count_total : int;

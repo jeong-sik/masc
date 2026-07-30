@@ -1101,272 +1101,71 @@ let test_post_dispatch_non_reducing_output_is_terminal () =
         (summarize_response (String.make 20_000 'x')))
 ;;
 
-(* RFC-0351 S0 / #25461: once the persisted failure streak suspends
-   compaction retries, a reactive prepare must be refused before any
-   checkpoint I/O — each new stimulus used to pay one full prepare
-   (checkpoint load + summarizer LLM call) before its escalation settled.
-   The fixture base_dir holds no checkpoint, so any prepare that passes the
-   gate deterministically fails with [Checkpoint_ref_load_failed Ref_not_found];
-   returning [Retry_suspended] instead proves the refusal fired first. *)
-let test_suspended_streak_refuses_reactive_prepare () =
+(* A persisted failure streak is observability, not an admission authority.
+   With no checkpoint installed, every trigger must reach the checkpoint store
+   even when the diagnostic streak is arbitrarily high. *)
+let test_failure_streak_never_refuses_compaction_prepare () =
   Eio_main.run @@ fun _env ->
-  let meta_with_streak streak =
+  let meta =
     match
       Masc_test_deps.meta_of_json_fixture
         (`Assoc
-          [ "name", `String "prepare-admission"
-          ; "trace_id", `String "trace-prepare-admission"
-          ; "compaction_consecutive_failures", `Int streak
+          [ "name", `String "prepare-observability"
+          ; "trace_id", `String "trace-prepare-observability"
+          ; "compaction_consecutive_failures", `Int 907
           ])
     with
     | Ok meta -> meta
-    | Error detail -> failf "prepare-admission meta fixture: %s" detail
+    | Error detail -> failf "prepare-observability meta fixture: %s" detail
   in
   let base_dir =
     Filename.concat
       (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc-prepare-admission-%d" (Unix.getpid ()))
+      (Printf.sprintf "masc-prepare-observability-%d" (Unix.getpid ()))
   in
-  let prepare ~streak ~trigger =
+  let prepare trigger =
     Post_turn.prepare_compaction
       ~base_path:base_dir
       ~base_dir
-      ~meta:(meta_with_streak streak)
+      ~meta
       ~trigger
       ()
   in
-  let suspended = meta_with_streak 3 in
-  check bool
-    "fixture streak reaches the suspension threshold"
-    true
-    (Masc.Keeper_meta_contract.compaction_retry_suspended
-       suspended.runtime.compaction_rt);
-  (match
-     prepare
-       ~streak:3
-       ~trigger:(Compaction_trigger.Provider_overflow { limit_tokens = None })
-   with
-   | Error (Post_turn.Retry_suspended { consecutive_failures }) ->
-     check int "refusal reports the persisted streak" 3 consecutive_failures
-   | Error error ->
-     failf
-       "suspended reactive prepare reached I/O instead of the admission gate: \
-        %s"
-       (Post_turn.compaction_recovery_error_to_string error)
-   | Ok _ -> fail "suspended reactive prepare produced a prepared compaction");
-  (match prepare ~streak:3 ~trigger:Compaction_trigger.Manual with
-   | Error
-       (Post_turn.Checkpoint_ref_load_failed Masc.Keeper_checkpoint_store.Ref_not_found)
-     ->
-     (* Reached the checkpoint load: the operator lever bypasses the gate. *)
-     ()
-   | Error error ->
-     failf
-       "suspended manual prepare did not reach the checkpoint load: %s"
-       (Post_turn.compaction_recovery_error_to_string error)
-   | Ok _ -> fail "manual prepare on an empty store produced a compaction");
-  (match
-     prepare
-       ~streak:2
-       ~trigger:(Compaction_trigger.Provider_overflow { limit_tokens = None })
-   with
-   | Error
-       (Post_turn.Checkpoint_ref_load_failed Masc.Keeper_checkpoint_store.Ref_not_found)
-     ->
-     (* Below the threshold the reactive path is admitted unchanged. *)
-     ()
-   | Error error ->
-     failf
-       "below-threshold reactive prepare did not reach the checkpoint load: %s"
-       (Post_turn.compaction_recovery_error_to_string error)
-   | Ok _ -> fail "reactive prepare on an empty store produced a compaction");
-  (* The byte axis follows the same gate as the token axis, not the operator lever.
-     Both are raised by the turn path itself, so a suspended keeper must refuse both —
-     the compiler forced that decision when the variant was added (masc#25739) but
-     nothing pinned the answer, and the two plausible wrong answers are opposites:
-     treating it like Manual would let a failing keeper re-enter compaction every turn,
-     while refusing it below the threshold would deny a reduction the token axis is
-     granted. *)
-  let byte_over_capacity =
-    Compaction_trigger.Request_body_over_capacity
-      { actual_bytes = 2_000_000; limit_bytes = 1_048_576 }
-  in
-  (match prepare ~streak:3 ~trigger:byte_over_capacity with
-   | Error (Post_turn.Retry_suspended { consecutive_failures }) ->
-     check int "suspended byte-axis refusal reports the streak" 3 consecutive_failures
-   | Error error ->
-     failf
-       "suspended byte-axis prepare reached I/O instead of the admission gate: %s"
-       (Post_turn.compaction_recovery_error_to_string error)
-   | Ok _ -> fail "suspended byte-axis prepare produced a prepared compaction");
-  (match prepare ~streak:2 ~trigger:byte_over_capacity with
-   | Error
-       (Post_turn.Checkpoint_ref_load_failed Masc.Keeper_checkpoint_store.Ref_not_found)
-     ->
-     (* Below the threshold the byte axis is admitted exactly as the token axis is. *)
-     ()
-   | Error error ->
-     failf
-       "below-threshold byte-axis prepare did not reach the checkpoint load: %s"
-       (Post_turn.compaction_recovery_error_to_string error)
-   | Ok _ -> fail "byte-axis prepare on an empty store produced a compaction");
   List.iter
-    (fun (reason, trigger) ->
-       (match prepare ~streak:3 ~trigger with
-        | Error (Post_turn.Retry_suspended { consecutive_failures }) ->
-          check
-            int
-            ("suspended serving-axis " ^ reason ^ " reports the streak")
-            3
-            consecutive_failures
-        | Error error ->
-          failf
-            "suspended serving-axis %s reached I/O instead of the admission gate: %s"
-            reason
-            (Post_turn.compaction_recovery_error_to_string error)
-        | Ok _ ->
-          failf "suspended serving-axis %s produced a prepared compaction" reason);
-       match prepare ~streak:2 ~trigger with
+    (fun (name, trigger) ->
+       match prepare trigger with
        | Error
            (Post_turn.Checkpoint_ref_load_failed
               Masc.Keeper_checkpoint_store.Ref_not_found) ->
          ()
        | Error error ->
          failf
-           "below-threshold serving-axis %s did not reach the checkpoint load: %s"
-           reason
+           "%s was refused before checkpoint loading: %s"
+           name
            (Post_turn.compaction_recovery_error_to_string error)
        | Ok _ ->
-         failf
-           "serving-axis %s prepare on an empty store produced a compaction"
-           reason)
-    [ ( "boundary_unknown"
+         failf "%s unexpectedly prepared from an empty checkpoint store" name)
+    [ ( "provider overflow"
+      , Compaction_trigger.Provider_overflow { limit_tokens = None } )
+    ; ( "request body over capacity"
+      , Compaction_trigger.Request_body_over_capacity
+          { actual_bytes = 2_000_000; limit_bytes = 1_048_576 } )
+    ; ( "serving boundary unknown"
       , Compaction_trigger.Serving_input_capacity
           (Compaction_trigger.Boundary_unknown
              { input_tokens = 524_299
              ; accepted_through = 524_298
              ; rejected_from = Some 524_300
              }) )
-    ; ( "input_rejected"
+    ; ( "serving input rejected"
       , Compaction_trigger.Serving_input_capacity
           (Compaction_trigger.Input_rejected
              { input_tokens = 524_300
              ; accepted_through = 524_298
              ; rejected_from = 524_299
              }) )
+    ; "manual", Compaction_trigger.Manual
     ]
-;;
-
-(* Step 0 characterization — the compaction suspension gate is self-feeding.
-
-   [test_suspended_streak_refuses_reactive_prepare] above pins the first hop: at
-   [Keeper_meta_contract.compaction_retry_escalation_threshold] the reactive
-   prepare is refused before any I/O. This test pins the two hops that close the
-   loop — the refusal was recorded as a compaction failure, and that outcome
-   advanced the very counter the gate reads.
-
-   Live evidence for the loop: keeper [kidsnote] reached
-   compaction_consecutive_failures=907 against a threshold of 3
-   (.masc/logs/system_log_2026-07-29.jsonl), so roughly 99.7% of that counter's
-   value came from refusals that never attempted a compaction. While the counter
-   is inflated this way, no statistic can say what actually drove the keeper to
-   the threshold.
-
-   The gate, the threshold, and the LLM-call bound it exists for are unchanged;
-   only the self-feeding edge is cut. The second half of this test pins that a
-   real compaction failure still advances the streak, so the ceiling that
-   #25461 added keeps working. *)
-let test_refusal_records_no_compaction_failure () =
-  Eio_main.run @@ fun _env ->
-  let meta =
-    match
-      Masc_test_deps.meta_of_json_fixture
-        (`Assoc
-          [ "name", `String "suspension-outcome"
-          ; "trace_id", `String "trace-suspension-outcome"
-          ; "compaction_consecutive_failures", `Int 3
-          ])
-    with
-    | Ok meta -> meta
-    | Error detail -> failf "suspension-outcome meta fixture: %s" detail
-  in
-  check
-    bool
-    "fixture sits at the suspension threshold"
-    true
-    (Masc.Keeper_meta_contract.compaction_retry_suspended
-       meta.runtime.compaction_rt);
-  (* A refused prepare attempted no compaction, so it records no outcome. *)
-  let turn_failure_with source_disposition : Masc.Keeper_unified_turn.turn_failure =
-    { error = Agent_sdk.Error.Internal "suspended reactive prepare"
-    ; runtime_id = "suspension-characterization"
-    ; route =
-        Keeper_runtime_failure_route.Retry_after_observed
-          { retry_class = Keeper_runtime_failure_route.Rate_limited
-          ; retry_after = None
-          }
-    ; source_disposition
-    ; deferred_runtime_lane = None
-    }
-  in
-  let outcome_of source_disposition =
-    Masc.Keeper_heartbeat_loop.compaction_outcome_of_cycle_outcome
-      (Some (Cycle.Failed { meta; failure = turn_failure_with source_disposition }))
-  in
-  check
-    bool
-    "a refusal that attempted no compaction records no outcome"
-    true
-    (outcome_of
-       (Masc.Keeper_unified_turn.Requeue_after_context_compaction
-          (Masc.Keeper_unified_turn.Compaction_refused_without_attempt
-             { consecutive_failures = 3 }))
-     = None);
-  (* The ceiling #25461 added still works: a compaction that ran and made no
-     durable progress still advances the streak. *)
-  check
-    bool
-    "an attempted compaction that made no progress records a failure"
-    true
-    (outcome_of
-       (Masc.Keeper_unified_turn.Requeue_after_context_compaction
-          (Masc.Keeper_unified_turn.Compaction_attempt_failed
-             { reason = "checkpoint candidate rejected" }))
-     = Some `Failed);
-  (* Persisting that outcome advances the counter the gate reads. *)
-  let base =
-    Filename.concat
-      (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc-suspension-outcome-%d" (Unix.getpid ()))
-  in
-  let config = Masc.Workspace.default_config base in
-  (match Masc.Keeper_meta_store.write_meta config meta with
-   | Ok () -> ()
-   | Error detail -> failf "durable meta write: %s" detail);
-  (match
-     Masc.Keeper_meta_store.persist_compaction_outcome
-       config
-       ~keeper_name:meta.name
-       ~outcome:`Failed
-   with
-   | Ok `Persisted -> ()
-   | Ok `No_durable_meta -> fail "outcome found no durable meta to update"
-   | Error detail -> failf "outcome persistence: %s" detail);
-  match Masc.Keeper_meta_store.read_meta config meta.name with
-  | Error detail -> failf "durable meta read-back: %s" detail
-  | Ok None -> fail "durable meta vanished after outcome persistence"
-  | Ok (Some updated_meta) ->
-    check
-      int
-      "an attempted-and-failed compaction advances the streak"
-      4
-      updated_meta.runtime.compaction_rt.consecutive_failures;
-    check
-      bool
-      "and that is what keeps the keeper suspended"
-      true
-      (Masc.Keeper_meta_contract.compaction_retry_suspended
-         updated_meta.runtime.compaction_rt)
 ;;
 
 let () =
@@ -1403,10 +1202,8 @@ let () =
         `Quick test_invalid_structural_evidence_after_dispatch_is_terminal;
       test_case "non-reducing output is terminal"
         `Quick test_post_dispatch_non_reducing_output_is_terminal;
-      test_case "suspended streak refuses reactive prepare"
-        `Quick test_suspended_streak_refuses_reactive_prepare;
-      test_case "refusal records no compaction failure"
-        `Quick test_refusal_records_no_compaction_failure;
+      test_case "failure streak never refuses compaction prepare"
+        `Quick test_failure_streak_never_refuses_compaction_prepare;
       test_case "missing exact lane is source-bound no-compaction"
         `Quick test_missing_exact_lane_is_source_bound_no_compaction;
     ];

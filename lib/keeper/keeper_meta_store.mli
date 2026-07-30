@@ -233,28 +233,20 @@ val persist_compaction_decision :
 val persist_compaction_outcome :
   Workspace.config ->
   keeper_name:string ->
-  outcome:
-    [ `Committed | `Overflow_episode_committed | `Failed | `Recovered ] ->
+  outcome:[ `Committed | `Failed | `Recovered ] ->
   ([ `Persisted | `No_durable_meta ], string) result
 (** Advance the compaction outcome counters on [compaction_rt] using the same
     read/stamp/merge shape as {!persist_compaction_decision}.
 
-    [`Overflow_episode_committed] (an in-lane reactive commit) increments
-    [count] AND the streak — committed savings under an incompressible floor
-    must still count toward the ceiling (#25538). [`Recovered] (a turn
-    completed without provider overflow) resets the streak; callers skip the
-    write when the streak is already 0.
-
     [`Committed] increments [count] and resets [consecutive_failures] to 0;
-    [`Failed] increments [consecutive_failures]. The streak is what
-    {!Keeper_meta_contract.compaction_retry_suspended} reads to refuse a
-    failing compaction instead of retrying it without bound (RFC-0351 S0,
-    #25461); [count] had no writer before this despite being serialized and
-    rendered. The metric carries [keeper] and [outcome]: outcome is the closed
-    outcome variant, and keeper names come from the registry and survive
-    replacement, so the series count is bounded by fleet size. The successful
-    persistence log carries the same typed outcome, which is where a single
-    outcome is resolvable by timestamp; the durable per-Keeper counters stay in
+    [`Failed] increments [consecutive_failures]; [`Recovered] resets it. The
+    streak is diagnostic observability only and never controls admission.
+    [count] had no writer before this despite being serialized and rendered.
+    The metric carries [keeper] and [outcome]: outcome is the closed outcome
+    variant, and keeper names come from the registry and survive replacement,
+    so the series count is bounded by fleet size. The successful persistence
+    log carries the same typed outcome, which is where a single outcome is
+    resolvable by timestamp; the durable per-Keeper counters stay in
     [compaction_rt]. *)
 
 val persist_transcript_corruption_pause :

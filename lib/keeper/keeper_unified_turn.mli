@@ -124,29 +124,13 @@ val record_streaming_cancelled_observation
 type in_lane_compaction =
   | Compaction_committed
   | Compaction_attempt_failed of { reason : string }
-  | Compaction_refused_without_attempt of { consecutive_failures : int }
 (** Typed outcome of the in-lane provider-overflow compaction behind a
     [Requeue_after_context_compaction] disposition. [Compaction_committed]
-    proves the checkpoint durably shrank before the requeue. It still advances
-    the provider-overflow episode streak; only an overflow-free completed turn
-    or an operator-committed manual compaction resets it. The retry reloads the
-    durable progress. [Compaction_attempt_failed] means the recovery made no
-    durable progress and also advances the streak. Once the streak reaches
-    [Keeper_meta_contract.compaction_retry_escalation_threshold], subsequent
-    reactive admission is refused (RFC-0351 S0, #25461 — without the ceiling
-    this lane requeued forever: 284 of 285 rejections in the 2026-07-21 storm
-    carried trigger=provider_overflow and only the operator's keeper_down ended
-    it).
-
-    [Compaction_refused_without_attempt] is the admission gate declining the
-    trigger at that same threshold ([Keeper_post_turn.Retry_suspended]): no
-    checkpoint was read, no summarizer ran, and no compaction was attempted, so
-    the transition leaves the streak alone. Settling it as a failure made the
-    gate's own output advance the counter the gate reads — live keeper
-    [kidsnote] reached 907 against a threshold of 3, roughly 99.7% of it from
-    refusals, which left no statistic able to say what drove it there. The
-    ceiling, the threshold, and the LLM-call bound the gate exists for are all
-    unchanged; only this self-feeding edge is cut. *)
+    proves the checkpoint durably shrank before the requeue and resets the
+    observed failure streak. The retry reloads that durable progress.
+    [Compaction_attempt_failed] means the recovery made no durable progress
+    and advances the streak for observability without refusing a later
+    recovery attempt. *)
 
 type source_disposition =
   | Follow_failure_route
@@ -161,10 +145,7 @@ type source_disposition =
     to act ([no_compaction_reason]); the terminal transition advances the
     compaction-failure streak, because a turn whose context cannot shrink
     re-overflows deterministically on every retry. It does not replace the
-    route. The threshold makes [Keeper_post_turn.prepare_compaction] refuse
-    reactive triggers
-    ([Compaction_refused_without_attempt]); only an operator-committed manual
-    compaction or an overflow-free completed turn lifts it.
+    route or refuse later recovery attempts.
     [Requeue_after_context_compaction] preserves the exact source stimulus
     after MASC handled a typed provider overflow in this Keeper lane; the next
     cycle reloads the durably compacted checkpoint.

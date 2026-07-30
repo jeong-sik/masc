@@ -501,7 +501,7 @@ let test_connector_projection_keeps_external_wait_typed () =
   match
     Masc.Keeper_chat_blocks.connector_projection
       ~turn_outcome:TO.External_effect_pending
-      ~reply:"assistant preface that must not survive"
+      ~reply:(Some "assistant preface that must not survive")
   with
   | Connector_status { kind = External_effect_pending } -> ()
   | Connector_text _ | Connector_no_visible_reply ->

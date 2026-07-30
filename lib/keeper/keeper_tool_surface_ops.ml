@@ -549,7 +549,7 @@ let direct_reply_projection json =
   | Ok turn_outcome ->
     Keeper_chat_blocks.connector_projection
       ~turn_outcome
-      ~reply:(Option.value ~default:"" (Json_util.get_string json "reply"))
+      ~reply:(Json_util.get_string json "reply")
   | Error error ->
     invalid_arg (Keeper_turn_outcome.decode_error_to_string error)
 ;;

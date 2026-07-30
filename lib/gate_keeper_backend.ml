@@ -851,7 +851,8 @@ let dispatch_core ?on_text_snapshot ~submitted_by ~sw ~clock ~proc_mgr ~net
        | Ok turn_outcome ->
          let connector_reply, blocks =
            match
-             Keeper_chat_blocks.connector_projection ~turn_outcome ~reply
+             Keeper_chat_blocks.connector_projection ~turn_outcome
+               ~reply:(Some reply)
            with
            | Connector_text text -> text, None
            | Connector_status { kind } ->

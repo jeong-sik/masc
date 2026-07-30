@@ -115,7 +115,7 @@ type connector_projection =
 
 val connector_projection :
   turn_outcome:Keeper_turn_outcome.t ->
-  reply:string ->
+  reply:string option ->
   connector_projection
 (** Project the producer-typed turn outcome onto connector UI. Status remains a
     typed block for transcript persistence; only the connector boundary renders

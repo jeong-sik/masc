@@ -1057,7 +1057,23 @@ let reload_meta_from_disk ~base_path name =
 (* Runtime-attempt cluster (runtime_attempt_merge / meta_for_runtime_attempt / record_runtime_attempt / runtime_attempt_suffix / last_runtime_attempt / runtime_attempt_freshness_threshold_sec / enrich... *)
 
 let sync_meta_if_registered ~base_path name meta =
-  update_meta_from_persisted ~base_path name meta
+  let base_path = canonical_base_path_exn base_path in
+  match validate_registry_meta ~base_path name meta with
+  | Error reason ->
+    record_invalid_registry_entry ~operation:"sync_meta_if_registered" ~name reason
+  | Ok () ->
+    let key = registry_key ~base_path name in
+    let rec loop () =
+      let current = Atomic.get registry in
+      match StringMap.find_opt key current with
+      | None -> ()
+      | Some entry ->
+        let updated =
+          StringMap.add key { entry with base_path; name; meta } current
+        in
+        if not (Atomic.compare_and_set registry current updated) then loop ()
+    in
+    loop ()
 ;;
 
 let () =

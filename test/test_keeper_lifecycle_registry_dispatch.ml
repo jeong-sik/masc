@@ -240,12 +240,10 @@ let test_registry_reload_meta_from_disk_repairs_stale_meta () =
       Masc.Keeper_meta_store.runtime_meta_write_sync_hook config persisted_meta;
       (match KR.get ~base_path:config.base_path name with
        | Some entry ->
-         check
-           (option (float 0.0))
-           "runtime write sync preserves live observation timestamp"
-           (Some 1_700_000_000.0)
-           entry.meta.runtime.usage.last_usage_reported_at
+         check bool "runtime write sync applies an explicit unobserved value" true
+           (Option.is_none entry.meta.runtime.usage.last_usage_reported_at)
        | None -> fail "expected registered keeper after runtime write sync");
+      KR.update_meta ~base_path:config.base_path name observed_meta;
       write_keeper_meta_json_for_name config name persisted_meta;
       match KR.For_testing.reload_meta_from_disk ~base_path:config.base_path name with
       | Ok (Some entry) ->

@@ -70,6 +70,7 @@ checkpoints under strict validation and need the #25443 fix, not a purge.
 | 2026-07-21 | executor, idealist, garnet, rondo, albini | **refused** — `Overlapping_tool_cycle` (recorded in #25443) | untouched |
 | 2026-07-21 | mad-improver (−48% available), issue_king, hitl-switch-verifier | skipped — keeper active at rollout time | — |
 | 2026-07-29 | verifier | 510→341 msgs, 178133→154158 B (−13.5%); unstick from `request_body_too_large(262507>262144)` wedge | `backups-checkpoint-purge-trace-1785189111950-00007-20260729T161155Z` |
+| 2026-07-30 | keeper-executor-agent | 585→581 msgs, 1112843→522174 B (−53.1%, tool results 904건 정리); unstick from `request_body_too_large(1049460>1048576)` + compaction suspension wedge | `backups-checkpoint-purge-trace-1785369403346-00000-20260730T074336Z` |
 
 ### Live resume after a purge (observed 2026-07-29)
 

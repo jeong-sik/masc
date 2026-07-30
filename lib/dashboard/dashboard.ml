@@ -112,6 +112,13 @@ let format_section (s : section) : string =
 let parse_iso_timestamp = Dashboard_labels.parse_iso_timestamp
 let format_elapsed = Dashboard_labels.format_elapsed
 
+let format_librarian_status ~enabled ~failures_total =
+  Printf.sprintf
+    "%s | LIBRARIAN-FAILURES-TOTAL: %d"
+    (if enabled then "ON" else "OFF")
+    failures_total
+;;
+
 let truncate_path (path : string) : string =
   let limit = max_path_length () in
   if String.length path > limit then
@@ -530,9 +537,9 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         Otel_metric_store.metric_total Keeper_metrics.(to_string MemoryOsLibrarianFailures) |> int_of_float
       in
       let librarian_status =
-        if not librarian_enabled then "OFF"
-        else if librarian_failures > 0 then Printf.sprintf "ON (ERR: %d)" librarian_failures
-        else "ON"
+        format_librarian_status
+          ~enabled:librarian_enabled
+          ~failures_total:librarian_failures
       in
       Printf.sprintf
         "KEEPERS: %d running / %d dead / %d other | LIBRARIAN: %s | GUARD: %d | \

@@ -68,6 +68,20 @@ let test_format_section_empty () =
   let output = Dashboard.format_section section in
   Alcotest.(check bool) "has empty message" true (contains output "(nothing here)")
 
+let test_format_librarian_status_keeps_facts_separate () =
+  Alcotest.(check string)
+    "disabled"
+    "OFF | LIBRARIAN-FAILURES-TOTAL: 0"
+    (Dashboard.format_librarian_status ~enabled:false ~failures_total:0);
+  Alcotest.(check string)
+    "enabled without failures"
+    "ON | LIBRARIAN-FAILURES-TOTAL: 0"
+    (Dashboard.format_librarian_status ~enabled:true ~failures_total:0);
+  Alcotest.(check string)
+    "cumulative failures do not become current health"
+    "ON | LIBRARIAN-FAILURES-TOTAL: 3"
+    (Dashboard.format_librarian_status ~enabled:true ~failures_total:3)
+
 (* ===== parse_iso_timestamp Tests ===== *)
 
 let test_parse_timestamp_valid () =
@@ -252,6 +266,9 @@ let test_keepers_section_with_error_truncated () =
 let format_tests = [
   "format_section with content", `Quick, test_format_section;
   "format_section empty", `Quick, test_format_section_empty;
+  ( "format librarian status keeps facts separate"
+  , `Quick
+  , test_format_librarian_status_keeps_facts_separate );
 ]
 
 let timestamp_tests = [

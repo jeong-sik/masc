@@ -232,19 +232,12 @@ let merge_decision_and_cost_entries decisions costs =
        match decisions, costs with
        | [ decision ], [ cost ] ->
          merge_exact_inference decision cost :: entries, identity_conflict_rows
+       | [ decision ], [] -> decision :: entries, identity_conflict_rows
+       | [], [ cost ] -> cost :: entries, identity_conflict_rows
+       | [], [] -> entries, identity_conflict_rows
        | _ ->
-         let duplicate_identity =
-           List.length decisions > 1 || List.length costs > 1
-         in
-         let identity_conflict_rows =
-           if duplicate_identity
-           then identity_conflict_rows + List.length decisions + List.length costs
-           else identity_conflict_rows
-         in
-         List.rev_append
-           decisions
-           (List.rev_append costs entries),
-         identity_conflict_rows)
+         ( entries
+         , identity_conflict_rows + List.length decisions + List.length costs ))
     buckets
     (unkeyed, 0)
 ;;
@@ -259,7 +252,7 @@ let read_all_entries ~base_path ~since_unix =
     if identity_conflict_rows > 0
     then
       Log.Model_inference_metrics.warn
-        "cost ledger exact identity conflict: rows=%d action=preserved"
+        "cost ledger exact identity conflict: rows=%d action=excluded"
         identity_conflict_rows;
     entries, Ok { diagnostics with identity_conflict_rows }
   | Error error ->

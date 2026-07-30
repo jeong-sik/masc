@@ -9,8 +9,10 @@
   observations merge only on exact identity; nearby timestamps and equal token
   counts no longer act as a deduplication rule. Windowed readers open only the
   requested day range, and malformed rows, schema violations, or duplicate
-  identities remain explicit diagnostics. No alternate store, field-name
-  decoder, migration, or repair path is present.
+  identities remain explicit diagnostics. The `masc-cost --json` envelope now
+  uses `state` instead of `status`, and `by_agent[]` no longer emits one
+  misleading `model` value for aggregates that can span multiple models. No
+  alternate store, field-name decoder, migration, or repair path is present.
 - **Breaking (approval snapshot wire)**: `summary_status.failed.retryable`
   is no longer accepted and discarded while loading pending approvals. Current
   snapshots contain only `status` and `reason`; snapshots carrying the retired

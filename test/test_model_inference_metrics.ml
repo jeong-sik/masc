@@ -992,7 +992,7 @@ let test_nearby_equal_usage_without_identity_match_stays_distinct () =
     check int "both exact identities remain" 2 stats.entry_count)
 ;;
 
-let test_duplicate_exact_identity_is_preserved_and_diagnosed () =
+let test_duplicate_exact_identity_is_excluded_and_diagnosed () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
     let path = make_keeper_dir base "identity-conflict" in
@@ -1018,7 +1018,9 @@ let test_duplicate_exact_identity_is_preserved_and_diagnosed () =
           ()
       ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
-    check int "conflicting rows are not dropped" 3 agg.total_entries;
+    check int "conflicting identity is excluded" 0 agg.total_entries;
+    check int "conflicting identity creates no aggregate" 0
+      (List.length agg.models);
     match agg.cost_read with
     | Error error ->
       failf "cost store read failed: %s" (Dated_jsonl.read_error_to_string error)
@@ -1769,8 +1771,8 @@ let () =
         test_exact_identity_merges_decision_and_cost;
       test_case "nearby equal usage stays distinct" `Quick
         test_nearby_equal_usage_without_identity_match_stays_distinct;
-      test_case "duplicate exact identity is preserved" `Quick
-        test_duplicate_exact_identity_is_preserved_and_diagnosed;
+      test_case "duplicate exact identity is excluded" `Quick
+        test_duplicate_exact_identity_is_excluded_and_diagnosed;
       test_case "cost read diagnostics reach API" `Quick
         test_cost_read_diagnostics_reach_api;
       test_case "cost read failure is not empty success" `Quick

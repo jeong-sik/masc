@@ -378,15 +378,30 @@ type gate_mode_recovery =
   | Recovery_not_requested
 
 let gate_mode_change_json change recovery =
-  let recovery_status, recovery_error, started, queued =
+  let recovery_status, recovery_error, started, queued, recovery_failures =
     match recovery with
     | Recovery_completed report ->
-      ( "completed"
+      ( (if report.failures = [] then "completed" else "partial")
       , `Null
       , List.length report.started_ids
-      , report.queued )
-    | Recovery_failed detail -> "failed", `String detail, 0, 0
-    | Recovery_not_requested -> "not_requested", `Null, 0, 0
+      , report.queued
+      , report.failures )
+    | Recovery_failed detail -> "failed", `String detail, 0, 0, []
+    | Recovery_not_requested -> "not_requested", `Null, 0, 0, []
+  in
+  let recovery_failures_json =
+    `List
+      (List.map
+         (fun (failure : Keeper_gate.auto_judge_owner_failure) ->
+            `Assoc
+              [ "keeper_name", `String failure.keeper_name
+              ; ( "approval_id"
+                , match failure.approval_id with
+                  | Some approval_id -> `String approval_id
+                  | None -> `Null )
+              ; "operator_detail", `String failure.operator_detail
+              ])
+         recovery_failures)
   in
   let `Assoc fields = Keeper_gate_mode.change_json change in
   `Assoc
@@ -394,6 +409,8 @@ let gate_mode_change_json change recovery =
      :: ("recovery_error", recovery_error)
      :: ("started", `Int started)
      :: ("queued", `Int queued)
+     :: ("recovery_failure_count", `Int (List.length recovery_failures))
+     :: ("recovery_failures", recovery_failures_json)
      :: fields)
 ;;
 

@@ -145,9 +145,21 @@ val retry_blocked_auto_judge :
     mode, authenticated workspace, non-blank operator identity, and exact
     approval row identity must all match. No cadence or restart hook calls it. *)
 
+type auto_judge_owner_failure =
+  { keeper_name : string
+  ; approval_id : string option
+  ; operator_detail : string
+  }
+
+type auto_judge_workspace_drain_report =
+  { started_ids : string list
+  ; failures : auto_judge_owner_failure list
+  }
+
 type operator_recovery_report =
   { started_ids : string list
   ; queued : int
+  ; failures : auto_judge_owner_failure list
   }
 
 (** After an explicit operator selection of Auto Judge, activate one FIFO drain
@@ -187,6 +199,21 @@ module For_testing : sig
 
   val claim_auto_judge : Keeper_approval_queue.pending_approval -> bool
   val release_auto_judge : Keeper_approval_queue.pending_approval -> unit
+
+  type owner_drain_outcome =
+    { started_id : string option
+    ; failures : (string * string) list
+    }
+
+  val drain_auto_judge_owners_with
+    :  drain_owner:
+         (base_path:string ->
+          keeper_name:string ->
+          (owner_drain_outcome, string) result)
+    -> (string * string) list
+    -> auto_judge_workspace_drain_report
+  (** Drain every supplied workspace/Keeper owner even when an earlier owner
+      fails, preserving both successful starts and typed owner-local failures. *)
 
   type hitl_worker_spawner =
     sw:Eio.Switch.t ->

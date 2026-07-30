@@ -1052,6 +1052,7 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
       (Server_routes_http_routes_dashboard.For_testing.Recovery_completed
          { Masc.Keeper_gate.started_ids = [ "approval-1" ]
          ; queued = 1
+         ; failures = []
          })
   in
   check string "completed status" "completed"
@@ -1060,6 +1061,32 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
     (completed |> member "recovery_error" = `Null);
   check int "completed started" 1 (completed |> member "started" |> to_int);
   check int "completed queued" 1 (completed |> member "queued" |> to_int);
+  check int "completed failures" 0
+    (completed |> member "recovery_failure_count" |> to_int);
+  let partial =
+    json
+      (Server_routes_http_routes_dashboard.For_testing.Recovery_completed
+         { Masc.Keeper_gate.started_ids = [ "approval-2" ]
+         ; queued = 1
+         ; failures =
+             [ { keeper_name = "keeper-a"
+               ; approval_id = Some "approval-1"
+               ; operator_detail = "worker unavailable"
+               }
+             ]
+         })
+  in
+  check string "partial status" "partial"
+    (partial |> member "recovery_status" |> to_string);
+  check int "partial started" 1 (partial |> member "started" |> to_int);
+  check int "partial failures" 1
+    (partial |> member "recovery_failure_count" |> to_int);
+  check string "partial failure owner" "keeper-a"
+    (partial
+     |> member "recovery_failures"
+     |> index 0
+     |> member "keeper_name"
+     |> to_string);
   let failed =
     json
       (Server_routes_http_routes_dashboard.For_testing.Recovery_failed

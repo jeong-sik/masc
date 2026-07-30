@@ -339,11 +339,19 @@ export interface SetGateModeResponse {
   previous_mode: GateMode | null
   actor: string
   changed_at: string
-  recovery_status: 'completed' | 'failed' | 'not_requested'
+  recovery_status: 'completed' | 'partial' | 'failed' | 'not_requested'
   recovery_error: string | null
   started: number
   queued: number
+  recovery_failure_count: number
+  recovery_failures: GateModeRecoveryFailure[]
   replaced_read_error?: string
+}
+
+export interface GateModeRecoveryFailure {
+  keeper_name: string
+  approval_id: string | null
+  operator_detail: string
 }
 
 const SET_GATE_MODE_RESPONSE_FIELDS = new Set([
@@ -356,6 +364,8 @@ const SET_GATE_MODE_RESPONSE_FIELDS = new Set([
   'recovery_error',
   'started',
   'queued',
+  'recovery_failure_count',
+  'recovery_failures',
   'replaced_read_error',
 ])
 
@@ -400,7 +410,12 @@ function decodeSetGateModeResponse(raw: unknown, requestedMode: GateMode): SetGa
   if (!changedAt) return gateModeProtocolDrift('changed_at must be a non-empty string')
 
   const status = raw.recovery_status
-  if (status !== 'completed' && status !== 'failed' && status !== 'not_requested') {
+  if (
+    status !== 'completed'
+    && status !== 'partial'
+    && status !== 'failed'
+    && status !== 'not_requested'
+  ) {
     return gateModeProtocolDrift('recovery_status is invalid')
   }
   const recoveryError = raw.recovery_error === null
@@ -410,19 +425,86 @@ function decodeSetGateModeResponse(raw: unknown, requestedMode: GateMode): SetGa
       : gateModeProtocolDrift('recovery_error must be null or a non-empty string')
   const started = nonNegativeSafeInteger(raw.started, 'started')
   const queued = nonNegativeSafeInteger(raw.queued, 'queued')
+  const recoveryFailureCount =
+    nonNegativeSafeInteger(raw.recovery_failure_count, 'recovery_failure_count')
+  if (!Array.isArray(raw.recovery_failures)) {
+    return gateModeProtocolDrift('recovery_failures must be an array')
+  }
+  const recoveryFailures = raw.recovery_failures.map((failure, index) => {
+    if (!isRecord(failure)) {
+      return gateModeProtocolDrift(`recovery_failures[${index}] must be an object`)
+    }
+    const fields = Object.keys(failure)
+    if (
+      fields.length !== 3
+      || !fields.includes('keeper_name')
+      || !fields.includes('approval_id')
+      || !fields.includes('operator_detail')
+    ) {
+      return gateModeProtocolDrift(
+        `recovery_failures[${index}] fields must be exact`,
+      )
+    }
+    const keeperName =
+      typeof failure.keeper_name === 'string' ? failure.keeper_name.trim() : ''
+    const approvalId =
+      failure.approval_id === null
+        ? null
+        : typeof failure.approval_id === 'string' && failure.approval_id.trim() !== ''
+          ? failure.approval_id
+          : gateModeProtocolDrift(
+              `recovery_failures[${index}].approval_id must be null or non-empty`,
+            )
+    const operatorDetail =
+      typeof failure.operator_detail === 'string'
+        ? failure.operator_detail.trim()
+        : ''
+    if (!keeperName || !operatorDetail) {
+      return gateModeProtocolDrift(
+        `recovery_failures[${index}] strings must be non-empty`,
+      )
+    }
+    return {
+      keeper_name: keeperName,
+      approval_id: approvalId,
+      operator_detail: operatorDetail,
+    }
+  })
+  if (recoveryFailures.length !== recoveryFailureCount) {
+    return gateModeProtocolDrift(
+      'recovery_failure_count must equal recovery_failures length',
+    )
+  }
 
-  if (status === 'completed' && (mode !== 'auto_judge' || recoveryError !== null)) {
-    return gateModeProtocolDrift('completed recovery requires auto_judge mode and no error')
+  if (
+    status === 'completed'
+    && (mode !== 'auto_judge' || recoveryError !== null || recoveryFailureCount !== 0)
+  ) {
+    return gateModeProtocolDrift(
+      'completed recovery requires auto_judge mode and no owner failures',
+    )
+  }
+  if (
+    status === 'partial'
+    && (mode !== 'auto_judge' || recoveryError !== null || recoveryFailureCount === 0)
+  ) {
+    return gateModeProtocolDrift(
+      'partial recovery requires auto_judge mode and owner failures',
+    )
   }
   if (status === 'failed'
       && (mode !== 'auto_judge' || recoveryError === null
-        || started !== 0 || queued !== 0)) {
-    return gateModeProtocolDrift('failed recovery requires auto_judge mode, an error, and zero counts')
+        || started !== 0 || queued !== 0 || recoveryFailureCount !== 0)) {
+    return gateModeProtocolDrift(
+      'failed recovery requires auto_judge mode, an error, and zero outcomes',
+    )
   }
   if (status === 'not_requested'
       && (mode === 'auto_judge' || recoveryError !== null
-        || started !== 0 || queued !== 0)) {
-    return gateModeProtocolDrift('not_requested recovery requires a non-auto mode and zero outcome')
+        || started !== 0 || queued !== 0 || recoveryFailureCount !== 0)) {
+    return gateModeProtocolDrift(
+      'not_requested recovery requires a non-auto mode and zero outcomes',
+    )
   }
 
   const replacedReadError = raw.replaced_read_error
@@ -441,6 +523,8 @@ function decodeSetGateModeResponse(raw: unknown, requestedMode: GateMode): SetGa
     recovery_error: recoveryError,
     started,
     queued,
+    recovery_failure_count: recoveryFailureCount,
+    recovery_failures: recoveryFailures,
     ...(typeof replacedReadError === 'string'
       ? { replaced_read_error: replacedReadError }
       : {}),

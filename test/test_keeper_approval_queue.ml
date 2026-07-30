@@ -804,6 +804,65 @@ let test_terminal_head_does_not_stall_owner_queue () =
          [ blocked_head; follower ])
 ;;
 
+let test_workspace_drain_isolates_owner_failures () =
+  let calls = ref [] in
+  let drain_owner ~base_path ~keeper_name =
+    calls := (base_path, keeper_name) :: !calls;
+    match keeper_name with
+    | "owner-a" -> Error "owner-a queue unavailable"
+    | "owner-b" ->
+      Ok
+        ({ started_id = Some "approval-b"
+         ; failures = []
+         }
+          : Gate.For_testing.owner_drain_outcome)
+    | "owner-c" ->
+      Ok
+        ({ started_id = None
+         ; failures = [ "approval-c", "owner-c worker unavailable" ]
+         }
+          : Gate.For_testing.owner_drain_outcome)
+    | unexpected -> Alcotest.failf "unexpected owner %s" unexpected
+  in
+  let owners =
+    [ "/workspace", "owner-a"
+    ; "/workspace", "owner-b"
+    ; "/workspace", "owner-c"
+    ]
+  in
+  let report =
+    Gate.For_testing.drain_auto_judge_owners_with ~drain_owner owners
+  in
+  Alcotest.(check (list (pair string string)))
+    "every owner is attempted after an earlier failure"
+    owners
+    (List.rev !calls);
+  Alcotest.(check (list string))
+    "healthy owner still starts"
+    [ "approval-b" ]
+    report.started_ids;
+  (match report.failures with
+   | [ workspace_failure; worker_failure ] ->
+     Alcotest.(check string)
+       "workspace failure owner"
+       "owner-a"
+       workspace_failure.keeper_name;
+     Alcotest.(check (option string))
+       "workspace failure has no approval identity"
+       None
+       workspace_failure.approval_id;
+     Alcotest.(check string)
+       "worker failure owner"
+       "owner-c"
+       worker_failure.keeper_name;
+     Alcotest.(check (option string))
+       "worker failure keeps approval identity"
+       (Some "approval-c")
+       worker_failure.approval_id
+   | failures ->
+     Alcotest.failf "expected two owner-local failures, got %d" (List.length failures))
+;;
+
 let test_different_owners_claim_in_parallel () =
   (* Real concurrent proof: fibers race the per-owner claim, so the
      one-winner-per-owner invariant is exercised under actual Atomic
@@ -3639,6 +3698,10 @@ let () =
             "terminal head does not stall the owner queue"
             `Quick
             test_terminal_head_does_not_stall_owner_queue
+        ; Alcotest.test_case
+            "workspace drain isolates owner failures"
+            `Quick
+            test_workspace_drain_isolates_owner_failures
         ; Alcotest.test_case
             "different owners activate in parallel"
             `Quick

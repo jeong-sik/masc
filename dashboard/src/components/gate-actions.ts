@@ -90,6 +90,21 @@ function showGateModeSaved(result: SetGateModeResponse): void {
         'success',
       )
       return
+    case 'partial': {
+      const firstFailure = result.recovery_failures[0]
+      const firstFailureDetail = firstFailure
+        ? ` · ${firstFailure.keeper_name}: ${firstFailure.operator_detail}`
+        : ''
+      showToast(
+        `${saved} · Auto Judge backlog recovery 부분 완료`
+        + ` (started ${result.started.toLocaleString()},`
+        + ` queued ${result.queued.toLocaleString()},`
+        + ` failed ${result.recovery_failure_count.toLocaleString()})`
+        + firstFailureDetail,
+        'warning',
+      )
+      return
+    }
     case 'failed':
       showToast(
         `${saved} · Auto Judge backlog recovery 실패:`

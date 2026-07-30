@@ -587,6 +587,51 @@ type auto_judge_drain_outcome =
   ; blocker : auto_judge_drain_blocker option
   }
 
+type auto_judge_owner_failure =
+  { keeper_name : string
+  ; approval_id : string option
+  ; operator_detail : string
+  }
+
+type auto_judge_workspace_drain_report =
+  { started_ids : string list
+  ; failures : auto_judge_owner_failure list
+  }
+
+let drain_auto_judge_owners_with ~drain_owner owners =
+  let started_ids, failures =
+    List.fold_left
+      (fun (started_ids, failures) (base_path, keeper_name) ->
+         match drain_owner ~base_path ~keeper_name with
+         | Error operator_detail ->
+           ( started_ids
+           , { keeper_name; approval_id = None; operator_detail } :: failures )
+         | Ok (started_id, owner_failures) ->
+           let started_ids =
+             match started_id with
+             | Some approval_id -> approval_id :: started_ids
+             | None -> started_ids
+           in
+           let failures =
+             List.fold_left
+               (fun failures (approval_id, operator_detail) ->
+                  { keeper_name
+                  ; approval_id = Some approval_id
+                  ; operator_detail
+                  }
+                  :: failures)
+               failures
+               owner_failures
+           in
+           started_ids, failures)
+      ([], [])
+      owners
+  in
+  { started_ids = List.rev started_ids
+  ; failures = List.rev failures
+  }
+;;
+
 type hitl_worker_spawner =
   sw:Eio.Switch.t ->
   entry:Keeper_approval_queue.pending_approval ->
@@ -972,7 +1017,8 @@ and drain_auto_judges ~base_path =
       base_path
       detail;
     Error detail
-  | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) -> Ok []
+  | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
+    Ok { started_ids = []; failures = [] }
   | Ok Keeper_gate_mode.Auto_judge ->
     (match Keeper_approval_queue.list_pending_entries_for_workspace ~base_path with
      | Error error ->
@@ -987,23 +1033,15 @@ and drain_auto_judges ~base_path =
            Auto_judge_owner_set.empty
            entries
        in
-       let rec drain started_ids = function
-         | [] -> Ok (List.rev started_ids)
-         | (_, keeper_name) :: rest ->
-           (match
+       Ok
+         (drain_auto_judge_owners_with
+            ~drain_owner:(fun ~base_path ~keeper_name ->
               drain_auto_judge_owner_queue ~base_path ~keeper_name ()
-            with
-            | Error error ->
-              Error (Keeper_approval_queue.storage_error_to_string error)
-            | Ok outcome ->
-              let started_ids =
-                match outcome.started_id with
-                | Some id -> id :: started_ids
-                | None -> started_ids
-              in
-              drain started_ids rest)
-       in
-       drain [] (Auto_judge_owner_set.elements owners))
+              |> Result.map
+                   (fun outcome -> outcome.started_id, outcome.failures)
+              |> Result.map_error
+                   Keeper_approval_queue.storage_error_to_string)
+            (Auto_judge_owner_set.elements owners)))
 ;;
 
 type recovered_work =
@@ -1308,6 +1346,7 @@ let resume_persisted_auto_judges =
 type operator_recovery_report =
   { started_ids : string list
   ; queued : int
+  ; failures : auto_judge_owner_failure list
   }
 
 let request_operator_auto_judge_recovery ~base_path =
@@ -1320,8 +1359,8 @@ let request_operator_auto_judge_recovery ~base_path =
      | Error detail -> Error detail
      | Ok () ->
        (match drain_auto_judges ~base_path with
-        | Error detail -> Error detail
-        | Ok started_ids ->
+       | Error detail -> Error detail
+       | Ok drain_report ->
           (match
              Keeper_approval_queue.list_pending_entries_for_workspace ~base_path
            with
@@ -1335,7 +1374,11 @@ let request_operator_auto_judge_recovery ~base_path =
                  0
                  entries
              in
-             Ok { started_ids; queued })))
+             Ok
+               { started_ids = drain_report.started_ids
+               ; queued
+               ; failures = drain_report.failures
+               })))
 ;;
 
 let defer request reason =
@@ -1583,6 +1626,20 @@ module For_testing = struct
 
   let claim_auto_judge = claim_auto_judge
   let release_auto_judge = release_auto_judge
+
+  type owner_drain_outcome =
+    { started_id : string option
+    ; failures : (string * string) list
+    }
+
+  let drain_auto_judge_owners_with ~drain_owner owners =
+    drain_auto_judge_owners_with
+      ~drain_owner:(fun ~base_path ~keeper_name ->
+        drain_owner ~base_path ~keeper_name
+        |> Result.map (fun outcome ->
+          outcome.started_id, outcome.failures))
+      owners
+  ;;
 
   type nonrec hitl_worker_spawner = hitl_worker_spawner
 

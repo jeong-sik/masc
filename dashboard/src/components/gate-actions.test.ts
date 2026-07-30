@@ -34,6 +34,8 @@ const baseResponse = {
   recovery_error: null,
   started: 0,
   queued: 0,
+  recovery_failure_count: 0,
+  recovery_failures: [],
 } as const
 
 beforeEach(() => {
@@ -97,6 +99,30 @@ describe('setKeeperGateMode recovery result', () => {
       'Gate 모드를 Auto Judge(으)로 저장했습니다 · Auto Judge backlog recovery 요청 처리 완료'
       + ' (started 1, queued 1)',
       'success',
+    )
+    expect(mocks.refreshGate).toHaveBeenCalledWith({ force: true })
+  })
+
+  it('reports partial recovery without hiding a healthy owner start', async () => {
+    mocks.setGateMode.mockResolvedValue({
+      ...baseResponse,
+      recovery_status: 'partial',
+      started: 1,
+      queued: 2,
+      recovery_failure_count: 1,
+      recovery_failures: [{
+        keeper_name: 'keeper-a',
+        approval_id: null,
+        operator_detail: 'queue unavailable',
+      }],
+    })
+
+    await setKeeperGateMode('auto_judge')
+
+    expect(mocks.showToast).toHaveBeenCalledWith(
+      'Gate 모드를 Auto Judge(으)로 저장했습니다 · Auto Judge backlog recovery 부분 완료'
+      + ' (started 1, queued 2, failed 1) · keeper-a: queue unavailable',
+      'warning',
     )
     expect(mocks.refreshGate).toHaveBeenCalledWith({ force: true })
   })

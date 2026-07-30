@@ -274,12 +274,13 @@ let claim_next_r
                else compare a.created_at b.created_at)
             working_tasks
         in
-        (* RFC-0220 §3.5: eligibility and the claim outcome are one decision
-           ([Workspace_task_lifecycle.resolve_claim]). A submitter's own
-           [AwaitingVerification] resolves to [Self_owned] and is excluded here,
-           so a worker never auto-claims (self-verifies) its own obligation; a
-           cross-agent obligation resolves to [Verifier_claim] and stays
-           eligible so the satisfier is always reachable.
+        (* Eligibility and the claim outcome are one decision
+           ([Workspace_task_lifecycle.resolve_claim]). Every
+           [AwaitingVerification] obligation resolves to [Held_pending_verdict]
+           and is excluded here: it awaits a completion authority's verdict,
+           which is not an agent's work. Previously a cross-agent obligation
+           resolved to [Verifier_claim] and stayed eligible, which is exactly how
+           a keeper became its verifier by winning the claim.
            [task_claim_next_action_is_claimable] still owns the Todo reclaim
            gate. *)
         let same_actor a = Workspace_task_classify.same_task_actor config a agent_name in

@@ -382,16 +382,9 @@ and handle_transition ~tool_name ~start_time ctx args =
     | Masc_domain.Release ->
       None
   in
-  (* Capture verification_id from AwaitingVerification state BEFORE transition.
-     approve/reject transitions change state, destroying the verification_id.
-     Issue #7543. *)
-  let verification_id_before =
-    match task_opt with
-    | Some t -> (match t.task_status with
-        | Masc_domain.AwaitingVerification { verification_id; _ } -> Some verification_id
-        | _ -> None)
-    | None -> None
-  in
+  (* The pre-transition verification_id capture (issue #7543) is gone with the
+     approve/reject actions: no agent transition consumes an AwaitingVerification
+     state any more, so there is nothing to snapshot before it changes. *)
   let result =
     Workspace.transition_task_r
       ctx.config
@@ -478,7 +471,7 @@ and handle_transition ~tool_name ~start_time ctx args =
           ~reason:(Some "task_cancelled");
         ()
   | Ok _, (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Submit_for_verification
-            | Masc_domain.Reject_verification | Masc_domain.Release)
+            | Masc_domain.Release)
   | Error _, _ -> ());
   let transition_result_to_response = function
     | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState message)) ->

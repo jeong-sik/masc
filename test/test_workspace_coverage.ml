@@ -212,14 +212,15 @@ let transition_done_r config ~agent_name ~task_id ~notes =
      with
      | Error _ as error -> error
      | Ok _ ->
-       let verifier = "admin-board-keeper" in
-       (match Workspace.claim_task_r config ~agent_name:verifier ~task_id () with
-        | Error _ as error -> error
-        | Ok _ ->
-          Workspace.transition_task_r config ~agent_name:verifier ~task_id
-            ~action:Masc_domain.Approve_verification
-            ~notes:("verified: " ^ evidence_notes)
-            ()))
+       (* No peer-keeper claim: the verdict comes from a completion authority. *)
+       Workspace.commit_verdict_r
+         config
+         ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+         ~verdict:Masc_domain.Verdict_approved
+         ~task_id
+         ~notes:("verified: " ^ evidence_notes)
+         ()
+       |> Result.map (fun (o : Workspace.transition_outcome) -> o.Workspace.message))
 ;;
 
 let transition_done config ~agent_name ~task_id ~notes =

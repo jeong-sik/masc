@@ -76,10 +76,9 @@ let synthesize_summary_from_siblings args =
    entirely (the 2026-05-17 nick0cave production case).
 
    Exit-class actions:
-     Cancel / Release / Submit_for_verification /
-     Approve_verification / Reject_verification
-   Actions whose content is judged directly by the assigned verifier or has no
-   handoff meaning do not require a local summary: Done_action / Claim / Start.
+     Cancel / Release / Submit_for_verification
+   Actions with no handoff meaning do not require a local summary:
+     Done_action / Claim / Start.
 
    This split is exhaustive over [Masc_domain.task_action]; adding a
    new variant forces a compile-time decision here, not a runtime

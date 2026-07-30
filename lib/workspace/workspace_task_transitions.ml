@@ -517,3 +517,189 @@ let transition_task_r
     ()
   |> Result.map (fun outcome -> outcome.message)
 ;;
+
+(** Commit a completion verdict issued by a [Masc_domain.completion_authority].
+
+    A separate entry from {!transition_task_outcome_r} because a verdict is not an
+    agent action. The [authority] argument is a value no agent can construct, so
+    the keeper tool surface cannot reach this function at all — that is the
+    compile-time replacement for the removed [same_agent verifier] check.
+
+    This path is what keeps an [AwaitingVerification] obligation resolvable.
+    Removing the verifier-as-keeper route without it would leave every pending
+    obligation with no resolver, which is a fleet stop rather than a fix. *)
+let commit_verdict_r
+      config
+      ~(authority : Masc_domain.completion_authority)
+      ~(verdict : Masc_domain.completion_verdict)
+      ~task_id
+      ?(notes = "")
+      ()
+  : transition_outcome Masc_domain.masc_result
+  =
+  let open Result.Syntax in
+  let* () =
+    if not (is_initialized config)
+    then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)
+    else Ok ()
+  in
+  let* () =
+    match validate_task_id_r task_id with
+    | Error e -> Error e
+    | Ok _ -> Ok ()
+  in
+  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  with_file_lock_r config backlog_path (fun () ->
+    try
+      match read_backlog_r config with
+      | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
+      | Ok backlog ->
+        (match
+           List.find_opt (fun (t : task) -> String.equal t.id task_id) backlog.tasks
+         with
+         | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
+         | Some task ->
+           let now = now_iso () in
+           let* decided =
+             match
+               Workspace_task_lifecycle.decide_verdict
+                 ~authority
+                 ~verdict
+                 ~task_id
+                 ~task_status:task.task_status
+                 ~now
+                 ~notes
+             with
+             | Ok decided -> Ok decided
+             | Error Workspace_task_lifecycle.Verdict_rejection_reason_required ->
+               Error
+                 (Masc_domain.Task
+                    (Masc_domain.Task_error.InvalidState
+                       "a rejection verdict requires a non-empty reason explaining \
+                        what must be fixed"))
+             | Error Workspace_task_lifecycle.Verification_pending_verdict
+             | Error Workspace_task_lifecycle.Verification_submission_required
+             | Error Workspace_task_lifecycle.Invalid_transition ->
+               Error
+                 (Masc_domain.Task
+                    (Masc_domain.Task_error.InvalidState
+                       (Printf.sprintf
+                          "Task %s is %s; a completion verdict applies only to an \
+                           obligation awaiting one"
+                          task_id
+                          (task_status_to_string task.task_status))))
+           in
+           let new_status = decided.Workspace_task_lifecycle.decision.new_status in
+           let producer =
+             match task.task_status with
+             | Masc_domain.AwaitingVerification { assignee; _ } -> assignee
+             | Masc_domain.Todo
+             | Masc_domain.Claimed _
+             | Masc_domain.InProgress _
+             | Masc_domain.Done _
+             | Masc_domain.Cancelled _ ->
+               (* Unreachable: [decide_verdict] admits only AwaitingVerification.
+                  Kept exhaustive so a new status constructor forces a decision
+                  here instead of falling into a default. *)
+               ""
+           in
+           let new_backlog =
+             { tasks =
+                 List.map
+                   (fun (t : task) ->
+                      if String.equal t.id task_id
+                      then { t with task_status = new_status }
+                      else t)
+                   backlog.tasks
+             ; last_updated = now
+             ; version = backlog.version + 1
+             }
+           in
+           write_backlog
+             ~after_commit:(fun () ->
+               Task_cache_invariant.clear_stale_agent_task
+                 config
+                 ~agent_name:producer
+                 ~task_id
+                 ~status:new_status
+                 ~module_name:"commit_verdict_r")
+             config
+             new_backlog;
+           (* Completion hooks key off the RESULT, and the completer is the
+              producer — never the authority, which is not an agent and owns no
+              task. *)
+           (match new_status with
+            | Masc_domain.Done { assignee; _ } ->
+              Workspace_task_cleanup.run_done_hooks config ~agent_name:assignee;
+              (* Completion metrics must fire on this path too. They used to be
+                 emitted from the agent transition surface, which a verdict no
+                 longer passes through — without this a verdict-completed task
+                 would record no completion at all. [collaborators] is empty by
+                 construction: the authority is not an agent and does not
+                 collaborate on the task. *)
+              (Atomic.get Workspace_hooks.record_task_metric_fn)
+                config
+                ~agent_id:assignee
+                ~task_id
+                ~started_at:(task_started_at_unix task.task_status)
+                ~completed_at:(Some (Time_compat.now ()))
+                ~success:true
+                ~error_message:None
+                ~collaborators:[]
+                ~handoff_from:None
+                ~handoff_to:None;
+              (Atomic.get Workspace_hooks.record_thompson_result_fn)
+                ~agent_name:assignee
+                ~success:true
+                ~reason:None
+            | Masc_domain.Todo
+            | Masc_domain.Claimed _
+            | Masc_domain.InProgress _
+            | Masc_domain.AwaitingVerification _
+            | Masc_domain.Cancelled _ -> ());
+           let event_kind =
+             match verdict with
+             | Masc_domain.Verdict_approved -> Event_kind.Task.Approved
+             | Masc_domain.Verdict_rejected _ -> Event_kind.Task.Rejected
+           in
+           let authority_fields =
+             [ "task_id", `String task_id
+             ; "authority_kind", `String decided.Workspace_task_lifecycle.authority_kind
+             ; "authority_actor", `String decided.Workspace_task_lifecycle.authority_actor
+             ; "producer", `String producer
+             ]
+           in
+           emit_task_activity
+             config
+             ~agent_name:decided.Workspace_task_lifecycle.authority_actor
+             ~task_id
+             ~kind:(Event_kind.Task.to_string event_kind)
+             ~payload:(`Assoc authority_fields);
+           (* Authority provenance is recorded here as structured fields. It is
+              deliberately NOT written into [Done.notes]: the previous code put
+              "Verified by <keeper> (vrf:<id>)" in that human-readable string,
+              making it the only record of who approved, and nothing parsed it. *)
+           log_event
+             config
+             (`Assoc
+               (("type", `String "task_completion_verdict")
+                :: ("from_status", `String (task_status_to_string task.task_status))
+                :: ("to_status", `String (task_status_to_string new_status))
+                :: ("ts", `String now)
+                :: authority_fields));
+           Ok
+             { message =
+                 Printf.sprintf
+                   "%s %s → %s (verdict by %s)"
+                   task_id
+                   (task_status_to_string task.task_status)
+                   (task_status_to_string new_status)
+                   decided.Workspace_task_lifecycle.authority_kind
+             ; noop = false
+             })
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
+      Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e))))
+  |> Workspace_task_verification.flatten_lock_result
+;;

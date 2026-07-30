@@ -90,14 +90,15 @@ let transition_done_r config ~agent_name ~task_id ~notes =
      with
      | Error _ as error -> error
      | Ok _ ->
-       let verifier = "admin-board-keeper" in
-       (match Workspace.claim_task_r config ~agent_name:verifier ~task_id () with
-        | Error _ as error -> error
-        | Ok _ ->
-          Workspace.transition_task_r config ~agent_name:verifier ~task_id
-            ~action:Masc_domain.Approve_verification
-            ~notes:("verified: " ^ evidence_notes)
-            ()))
+       (* No peer-keeper claim: the verdict comes from a completion authority. *)
+       Workspace.commit_verdict_r
+         config
+         ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+         ~verdict:Masc_domain.Verdict_approved
+         ~task_id
+         ~notes:("verified: " ^ evidence_notes)
+         ()
+       |> Result.map (fun (o : Workspace.transition_outcome) -> o.Workspace.message))
 
 let backlog_recovery_path config =
   Workspace.backlog_path config ^ ".last-good"
@@ -1114,23 +1115,27 @@ let test_approve_completion_credits_assignee () =
       Alcotest.(check bool) "submit ok" true
         (match submitted with Ok _ -> true | Error _ -> false);
       Alcotest.(check (list string)) "no done hook before approve" [] !recorded;
-      let _ =
-        Workspace.claim_task_r config ~agent_name:admin_keeper_agent
-          ~task_id:"task-001" ()
-      in
       let approved =
-        Workspace.transition_task_r config ~agent_name:admin_keeper_agent
-          ~task_id:"task-001" ~action:Masc_domain.Approve_verification
-          ~notes:"verified submitted evidence" ()
+        Workspace.commit_verdict_r
+          config
+          ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+          ~verdict:Masc_domain.Verdict_approved
+          ~task_id:"task-001"
+          ~notes:"verified submitted evidence"
+          ()
       in
       Alcotest.(check bool) "approve ok" true
         (match approved with Ok _ -> true | Error _ -> false);
-      (* The acting agent is the verifier; the done hook must fire for the
-         assignee. *)
+      (* The verdict actor is an authority, not an agent, so the done hook must
+         still credit the producer. *)
       Alcotest.(check (list string))
         "approve completion credits assignee" [ test_agent_a ] !recorded))
 
-let test_submit_and_approve_rejects_empty_justification () =
+(* Replaces the approve-notes guard. An approval no longer needs a justification
+   string — the [completion_authority] value is itself the authorisation, whereas
+   the old requirement existed because any keeper could approve. A *rejection*
+   still needs a reason: the producer has to know what to fix. *)
+let test_verdict_rejects_blank_rejection_reason () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Justification Task" ~priority:1 ~description:"" in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
@@ -1139,26 +1144,22 @@ let test_submit_and_approve_rejects_empty_justification () =
       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
         ~action:Masc_domain.Submit_for_verification ~notes:"evidence" ()
     in
-    let _ =
-      Workspace.claim_task_r config ~agent_name:admin_keeper_agent
-        ~task_id:"task-001" ()
+    let rejected =
+      Workspace.commit_verdict_r
+        config
+        ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+        ~verdict:(Masc_domain.Verdict_rejected { reason = "   " })
+        ~task_id:"task-001"
+        ()
     in
-    let approved =
-      Workspace.transition_task_r config ~agent_name:admin_keeper_agent
-        ~task_id:"task-001" ~action:Masc_domain.Approve_verification
-        ~notes:"   " ()
-    in
-    Alcotest.(check bool) "empty approval rejected before transition" false
-      (match approved with Ok _ -> true | Error _ -> false);
+    Alcotest.(check bool) "blank rejection reason refused before commit" false
+      (match rejected with Ok _ -> true | Error _ -> false);
+    (* A refused verdict leaves the obligation untouched, and the obligation
+       carries no verifier binding to mutate in the first place. *)
     match find_task config "task-001" with
-    | Some
-        { task_status =
-            Masc_domain.AwaitingVerification
-              { phase = Masc_domain.Verifier_assigned { verifier }; _ }
-        ; _
-        }
-      when String.equal verifier admin_keeper_agent -> ()
-    | _ -> Alcotest.fail "empty approval mutated the verification state")
+    | Some { task_status = Masc_domain.AwaitingVerification { assignee; _ }; _ }
+      when String.equal assignee test_agent_a -> ()
+    | _ -> Alcotest.fail "refused verdict mutated the verification state")
 
 (* === RFC-0323 G-1 (implements RFC-0308): verification-required done guard === *)
 
@@ -1365,7 +1366,7 @@ let test_read_backlog_counts_excludes_self_owned_orphan () =
     (* Remove the agent file to simulate a keeper with no active registry record. *)
     let _ = Workspace.end_session config ~agent_name:keeper in
     let meta = keeper_meta_for_self_filter keeper in
-    let _, _, failed, _, _ =
+    let _, _, failed, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int) "keeper's own orphan excluded from failed count" 0 failed
@@ -1379,7 +1380,7 @@ let test_read_backlog_counts_falls_back_to_unscoped_claimable_task () =
         ~priority:1 ~description:""
     in
     let meta = keeper_meta_for_goal_filter keeper [ "goal-a" ] in
-    let _, claimable, _, _, _ =
+    let _, claimable, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -1400,7 +1401,7 @@ let test_self_authored_scoped_task_does_not_hide_peer_work () =
       Workspace.add_task config ~goal_id:"goal-b" ~created_by:"peer-keeper"
         ~title:"Peer work outside active goal" ~priority:1 ~description:""
     in
-    let _, claimable, _, _, _ =
+    let _, claimable, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -1416,14 +1417,14 @@ let test_self_authored_scoped_task_does_not_hide_peer_work () =
 let test_read_backlog_counts_excludes_self_authored_task () =
   with_test_env (fun config ->
     let meta = keeper_meta_for_self_filter "keeper-self-filter-agent" in
-    let _, claimable_before, _, _, _ =
+    let _, claimable_before, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     let _ =
       Workspace.add_task config ~created_by:meta.name
         ~title:"self-authored routing task" ~priority:3 ~description:""
     in
-    let unclaimed_after_self, claimable_after_self, _, _, _ =
+    let unclaimed_after_self, claimable_after_self, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -1433,7 +1434,7 @@ let test_read_backlog_counts_excludes_self_authored_task () =
       Workspace.add_task config ~created_by:"peer-keeper"
         ~title:"peer authored task" ~priority:3 ~description:""
     in
-    let unclaimed_after_peer, claimable_after_peer, _, _, _ =
+    let unclaimed_after_peer, claimable_after_peer, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -1827,7 +1828,7 @@ let () =
       Alcotest.test_case "approve completion credits assignee" `Quick
         test_approve_completion_credits_assignee;
       Alcotest.test_case "submit and approve rejects empty justification" `Quick
-        test_submit_and_approve_rejects_empty_justification;
+        test_verdict_rejects_blank_rejection_reason;
     ];
 
     (* === RFC-0323 G-1: verification-required done guard === *)

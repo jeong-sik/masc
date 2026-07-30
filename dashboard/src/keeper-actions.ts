@@ -1736,7 +1736,7 @@ export async function sendKeeperThreadMessage(
       return
     }
     let emptyTerminalText = ''
-    if (toolCallEnded) {
+    if (toolCallEnded && !hasContinuationStatus) {
       emptyTerminalText = TOOL_ONLY_EMPTY_REPLY_TEXT
     }
 

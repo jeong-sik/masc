@@ -612,12 +612,16 @@ let patched_keeper_status row ~keepalive_running =
        SSOT. busy/active/listening/idle pass through; inactive/offline collapse
        to "offline"; a control-plane pause survives the patch, because a running
        keepalive fiber does not un-pause a keeper — collapsing it here made
-       [rebuild_continuity_briefs] read the row as live. Values outside the
-       published vocabulary still default to "idle". *)
-    match
-      Option.bind (keeper_agent_status_opt row)
-        Keeper_status_runtime.control_plane_status_of_string_opt
-    with
+       [rebuild_continuity_briefs] read the row as live. Missing or unknown
+       values fail loudly instead of manufacturing an idle keeper. *)
+    let status =
+      match keeper_agent_status_opt row with
+      | Some status -> status
+      | None ->
+        invalid_arg
+          "dashboard execution cache: keeper row has no current status"
+    in
+    match Keeper_status_runtime.control_plane_status_of_string_opt status with
     | Some
         (Cp_surface
            ((Surface_busy | Surface_active | Surface_listening | Surface_idle) as s)) ->
@@ -627,7 +631,11 @@ let patched_keeper_status row ~keepalive_running =
       `String
         (Keeper_status_runtime.control_plane_status_to_string
            Keeper_status_runtime.Cp_paused)
-    | None -> `String "idle")
+    | None ->
+      invalid_arg
+        (Printf.sprintf
+           "dashboard execution cache: unknown current keeper status %S"
+           status))
 ;;
 
 let patch_keeper_row ~keeper_name ~event ~keepalive_running = function

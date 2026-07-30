@@ -2033,6 +2033,32 @@ let test_paused_lifecycle_event_keeps_paused_status () =
   check bool "paused flag is set" true
     Yojson.Safe.Util.(patched |> member "paused" |> to_bool)
 
+let test_lifecycle_cache_patch_rejects_missing_or_unknown_status () =
+  let patch row =
+    Server_dashboard_http_execution_surfaces.patch_keeper_row
+      ~keeper_name:"drift-target"
+      ~event:"reconciled"
+      ~keepalive_running:true
+      row
+    |> ignore
+  in
+  check_raises
+    "missing status stays fail-loud"
+    (Invalid_argument
+       "dashboard execution cache: keeper row has no current status")
+    (fun () ->
+      patch (`Assoc [ "name", `String "drift-target" ]));
+  check_raises
+    "unknown status stays fail-loud"
+    (Invalid_argument
+       "dashboard execution cache: unknown current keeper status \"suspended\"")
+    (fun () ->
+      patch
+        (`Assoc
+          [ "name", `String "drift-target"
+          ; "status", `String "suspended"
+          ]))
+
 let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
   let dir = test_dir () in
   let config = Workspace.default_config dir in
@@ -2510,6 +2536,8 @@ let () =
             test_lifecycle_event_display_values;
           test_case "paused lifecycle event keeps the paused status" `Quick
             test_paused_lifecycle_event_keeps_paused_status;
+          test_case "cache patch rejects missing or unknown status" `Quick
+            test_lifecycle_cache_patch_rejects_missing_or_unknown_status;
           test_case "running keeper reconciliation rebuilds continuity brief" `Quick
             test_running_keeper_reconciliation_rebuilds_continuity_brief;
         ] );

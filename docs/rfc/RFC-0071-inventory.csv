@@ -404,8 +404,6 @@ lib/keeper/keeper_keepalive_signal.ml,654,None,unclassified
 lib/keeper/keeper_lifecycle_hooks.ml,56,(),unclassified
 lib/keeper/keeper_llm_bridge.ml,119,false,unclassified
 lib/keeper/keeper_memory_bank.ml,130,None,unclassified
-lib/keeper/keeper_memory_os_consolidation.ml,143,None,unclassified
-lib/keeper/keeper_memory_os_consolidation.ml,159,None,unclassified
 lib/keeper/keeper_memory_os_gc_dry_run_report.ml,59,None,unclassified
 lib/keeper/keeper_memory_os_sanity_sweep.ml,96,None,unclassified
 lib/keeper/keeper_memory_os_types.ml,177,None,unclassified

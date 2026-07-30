@@ -19,8 +19,9 @@ implementation_prs: []
 > writer. The reader-side residue — the `_shared` reserved store id, the
 > `observed_by` corroboration set, and the dashboard Hebbian synapse view — was
 > removed afterwards; each had a live-looking reader and no producer, so the
-> synapse graph was computed from an empty set on every request. Consolidation
-> today is per-keeper only (`Keeper_memory_os_consolidation`).
+> synapse graph was computed from an empty set on every request. Periodic
+> full-store consolidation was later removed by PR #26324; current retention is
+> bounded Librarian upsert plus producer-declared exact-expiry GC.
 
 
 ## §0 Context — what RFC-0243 did and did not fix

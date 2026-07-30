@@ -78,8 +78,6 @@ type compaction_preparation =
   { context : working_context
   ; decision : compaction_decision
   ; evidence : Keeper_compaction_evidence.t option
-  ; post_success_terminalizer :
-      Keeper_compaction_llm_summarizer.post_success_terminalizer option
   }
 
 let compaction_decision_to_string = function
@@ -160,8 +158,6 @@ type requested_compaction =
   { messages : Agent_sdk.Types.message list
   ; exact_execution_evidence :
       Keeper_compaction_llm_summarizer.exact_execution_evidence
-  ; post_success_terminalizer :
-      Keeper_compaction_llm_summarizer.post_success_terminalizer
   ; summarized_message_count : int
   ; dropped_message_count : int
   ; plan_accounting : plan_accounting
@@ -217,19 +213,11 @@ let tool_block_counts messages =
     messages
 ;;
 
-let terminal_rejection terminalizer cause =
-  match
-    Keeper_compaction_llm_summarizer.terminalize_post_success
-      terminalizer
-      cause
-  with
-  | Keeper_compaction_llm_summarizer.Terminalized terminal ->
-    Exact_execution_terminal terminal
-  | Keeper_compaction_llm_summarizer.Terminalization_commit_in_progress _
-  | Keeper_compaction_llm_summarizer.Terminalization_already_committed
-  | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed _ ->
-    summarization_rejection
-      Keeper_compaction_llm_summarizer.Exact_flow_already_started
+let terminal_rejection exact_execution_evidence cause =
+  Exact_execution_terminal
+    (Keeper_compaction_llm_summarizer.exact_execution_terminal
+       ~cause
+       exact_execution_evidence)
 ;;
 
 let requested_messages_with_plan
@@ -258,20 +246,11 @@ let requested_messages_with_plan
        fails too, so rejecting here refuses no compaction that could have
        persisted.
 
-       The observable outcome is deliberately NOT identical to the late
-       failure, and the difference is the point:
-
-       - Late: [commit_prepared_compaction] returns a typed [Commit_failed],
-         which [Keeper_manual_compaction.run_commit] folds into
-         [Manual_compaction_failed] -> [Requeue Context_compaction_retry].
-         The owner loop leaves the selected source pending, so the same doomed
-         request is re-driven every cycle — one summarizer call each time. This
-         is the live livelock: 102 failures and 104 compaction LLM calls in the
-         74 minutes after the #25413 build went live.
-       - Early: the typed [No_compaction] arm of
-         [Keeper_manual_compaction.finish_preparation] becomes
-         [Manual_compaction_not_applied], so the owner loop ACKs the selected
-         source after recording a ledger row and [compaction_rejected] log.
+       Without this precheck, the same canonical validator rejects only at the
+       checkpoint boundary after the exact-output call has already run.
+       [commit_prepared_compaction] now returns that late refusal as typed
+       [Not_committed]; checking here preserves the same feature result while
+       avoiding a provider call that cannot produce a persistable checkpoint.
 
        Terminating is correct here because [validate] rejection is monotone
        under append: appending messages never repairs an existing structural
@@ -303,10 +282,6 @@ let requested_messages_with_plan
            Keeper_compaction_llm_summarizer.completed_exact_execution_evidence
              completed
          in
-         let post_success_terminalizer =
-           Keeper_compaction_llm_summarizer.completed_post_success_terminalizer
-             completed
-         in
          let summarized_indices =
            Keeper_compaction_llm_summarizer.summarized_indices plan
          in
@@ -323,13 +298,12 @@ let requested_messages_with_plan
             then
               Error
                 (terminal_rejection
-                   post_success_terminalizer
+                   exact_execution_evidence
                    Keeper_compaction_outcome.Domain_invalid_output)
             else
               Ok
                 { messages
                 ; exact_execution_evidence
-                ; post_success_terminalizer
                 ; summarized_message_count =
                     selected_message_count
                       units
@@ -412,7 +386,6 @@ let compact_for_request_typed_with
     { context = ctx
     ; decision = Rejected (trigger, reason)
     ; evidence = None
-    ; post_success_terminalizer = None
     }
   | Ok requested ->
     let checkpoint =
@@ -432,7 +405,6 @@ let compact_for_request_typed_with
       { context = ctx
       ; decision = Rejected (trigger, reason)
       ; evidence = None
-      ; post_success_terminalizer = None
       }
     in
     (* Both outcomes are terminal for this attempt, and both used to report
@@ -449,7 +421,7 @@ let compact_for_request_typed_with
        slot_id / call_id / plan fingerprint, which a flat rejection would have dropped
        (keeper_post_turn.ml maps the two shapes to different payloads). *)
     let reject_terminal cause =
-      reject (terminal_rejection requested.post_success_terminalizer cause)
+      reject (terminal_rejection requested.exact_execution_evidence cause)
     in
     if after_bytes = before_bytes
     then reject_terminal Keeper_compaction_outcome.Compaction_produced_no_reduction
@@ -516,19 +488,12 @@ let compact_for_request_typed_with
       in
       match evidence_result with
       | Error error ->
-        (match
-           Keeper_compaction_llm_summarizer.terminalize_post_success
-             requested.post_success_terminalizer
-             Keeper_compaction_outcome.Invalid_structural_evidence
-         with
-         | Keeper_compaction_llm_summarizer.Terminalized terminal ->
-           reject (Invalid_structural_evidence (error, terminal))
-         | Keeper_compaction_llm_summarizer.Terminalization_commit_in_progress _
-         | Keeper_compaction_llm_summarizer.Terminalization_already_committed
-         | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed _ ->
-           reject
-             (summarization_rejection
-                Keeper_compaction_llm_summarizer.Exact_flow_already_started))
+        let terminal =
+          Keeper_compaction_llm_summarizer.exact_execution_terminal
+            ~cause:Keeper_compaction_outcome.Invalid_structural_evidence
+            requested.exact_execution_evidence
+        in
+        reject (Invalid_structural_evidence (error, terminal))
       | Ok evidence ->
         let compacted_ctx = sync_oas_context compacted_ctx in
         Log.Harness.emit
@@ -551,7 +516,6 @@ let compact_for_request_typed_with
         { context = compacted_ctx
         ; decision = Prepared trigger
         ; evidence = Some evidence
-        ; post_success_terminalizer = Some requested.post_success_terminalizer
         })
 ;;
 

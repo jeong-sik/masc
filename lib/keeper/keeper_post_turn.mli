@@ -30,7 +30,7 @@ type post_turn_lifecycle =
     Manual and provider-overflow callers consume the same result. *)
 type compaction_recovery =
   { checkpoint : Agent_sdk.Checkpoint.t
-  ; checkpoint_installation : Keeper_checkpoint_store.checkpoint_installation
+  ; checkpoint_installation : Keeper_checkpoint_store.installed_checkpoint
   ; trigger : Compaction_trigger.t
   ; evidence : Keeper_compaction_evidence.t
   ; turn_generation : int
@@ -43,7 +43,6 @@ type no_compaction = Keeper_compaction_outcome.no_compaction =
 
 type compaction_recovery_error =
   | Checkpoint_ref_load_failed of Keeper_checkpoint_store.checkpoint_ref_load_error
-  | Checkpoint_cas_failed of Keeper_checkpoint_store.checkpoint_cas_error
   | Checkpoint_candidate_failed of string
   | Compaction_rejected of Keeper_compact_policy.compaction_rejection
   | No_compaction of no_compaction
@@ -62,16 +61,9 @@ type prepared_commit_failure =
   ; committed : compaction_recovery option
   }
 
-type prepared_commit_completion =
-  | Commit_completion_committed of compaction_recovery
-  | Commit_completion_rejected of no_compaction
-  | Commit_completion_failed of prepared_commit_failure
-
 type prepared_commit_outcome =
   | Committed of compaction_recovery
-  | Commit_in_progress of prepared_commit_completion Eio.Promise.t
-  | Already_committed of compaction_recovery
-  | Already_rejected of no_compaction
+  | Not_committed of no_compaction
   | Commit_failed of prepared_commit_failure
 
 val compaction_recovery_error_to_tag : compaction_recovery_error -> string
@@ -118,15 +110,8 @@ type prepared_compaction
     source CAS, not the turn slot, is the interleaving guard. The token is
     opaque and owns the exact Keeper identity and commit policy captured at
     preparation; callers cannot construct it or combine a plan with another
-    Keeper's metadata. It also owns the real post-dispatch observation and
-    durable terminalizer used by every uncommitted terminal path. *)
-
-type uncommitted_prepared_outcome =
-  | Uncommitted_terminalized of no_compaction
-  | Uncommitted_commit_in_progress of
-      prepared_commit_completion Eio.Promise.t
-  | Uncommitted_already_committed of compaction_recovery
-  | Uncommitted_failed of compaction_recovery_error
+    Keeper's metadata. The exact execution identity is retained as immutable
+    structural evidence, with no second claim or lifecycle state. *)
 
 (** Phase 1: load the durable source and run the policy + LLM planner.
     Admission-free by contract; the caller must not hold the keeper's turn
@@ -149,35 +134,22 @@ val commit_prepared_compaction :
 module For_testing : sig
   val commit_prepared_compaction_with_history :
     ?after_checkpoint_installed:(unit -> unit) ->
-    ?complete_post_success_commit:
-      (Keeper_compaction_llm_summarizer.post_success_terminalizer ->
-       (unit, string) result) ->
     save_oas_history:
       (session_dir:string -> Agent_sdk.Checkpoint.t -> unit) ->
     prepared_compaction ->
     prepared_commit_outcome
-
-  val post_success_snapshot :
-    prepared_compaction ->
-    Keeper_compaction_llm_summarizer.post_success_snapshot
-
-  val claim_post_success_commit :
-    prepared_compaction ->
-    Keeper_compaction_llm_summarizer.post_success_commit_claim
 end
 
-(** Affine disposition for a prepared exact-output result that cannot enter
-    its commit admission. A reject owner durably quarantines; a commit loser
-    receives the canonical completion waiter/evidence and must not redispatch
-    the provider. *)
-val no_compaction_of_uncommitted_prepared :
+(** Pure typed outcome for a prepared exact-output result that cannot enter
+    its commit admission. The retained execution identity is projected without
+    another claim, lock, persistence write, or provider dispatch. *)
+val no_compaction_of_prepared :
   ?cause:Keeper_compaction_outcome.exact_execution_terminal_cause ->
-  prepared_compaction -> uncommitted_prepared_outcome
+  prepared_compaction -> no_compaction
 
 (** Reload the canonical OAS checkpoint and apply an explicit typed
     compaction request. Composition of {!prepare_compaction} and
-    {!commit_prepared_compaction}; all affine ownership outcomes remain
-    explicit. *)
+    {!commit_prepared_compaction}; the source CAS is the commit authority. *)
 val recover_latest_checkpoint_for_compaction :
   ?before_dispatch_authority:
     Keeper_compaction_llm_summarizer.before_dispatch_authority ->

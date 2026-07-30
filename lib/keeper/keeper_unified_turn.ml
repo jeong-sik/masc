@@ -367,7 +367,6 @@ let recover_provider_context_overflow_in_lane
         refused_without_attempt ~consecutive_failures
       | ( None
         , ( Keeper_post_turn.Checkpoint_ref_load_failed _
-          | Keeper_post_turn.Checkpoint_cas_failed _
           | Keeper_post_turn.Checkpoint_candidate_failed _
           | Keeper_post_turn.Compaction_rejected _
           | Keeper_post_turn.No_compaction _ ) ) ->
@@ -376,26 +375,15 @@ let recover_provider_context_overflow_in_lane
       | Some recovery, _ ->
         Log.Keeper.error
           ~keeper_name:meta.name
-          "provider overflow checkpoint committed with failed exact-domain finalization: %s"
+          "provider overflow checkpoint committed but post-install callback failed: %s"
           (Keeper_post_turn.compaction_recovery_error_to_string error);
         applied recovery
     in
-    let rec commit_outcome = function
-      | Keeper_post_turn.Committed recovery
-      | Keeper_post_turn.Already_committed recovery ->
-        applied recovery
-      | Keeper_post_turn.Already_rejected no_compaction ->
+    let commit_outcome = function
+      | Keeper_post_turn.Committed recovery -> applied recovery
+      | Keeper_post_turn.Not_committed no_compaction ->
         terminal_no_compaction no_compaction
       | Keeper_post_turn.Commit_failed failure -> failed failure
-      | Keeper_post_turn.Commit_in_progress waiter ->
-        commit_completion (Eio.Promise.await waiter)
-    and commit_completion = function
-      | Keeper_post_turn.Commit_completion_committed recovery ->
-        applied recovery
-      | Keeper_post_turn.Commit_completion_rejected no_compaction ->
-        terminal_no_compaction no_compaction
-      | Keeper_post_turn.Commit_completion_failed failure ->
-        failed failure
     in
     (match dispatch "context_overflow_detected" overflow_event with
      | Error reason ->
@@ -457,7 +445,7 @@ let recover_provider_context_overflow_in_lane
              (try
                 commit_outcome
                   (
-                  recover_latest_checkpoint_for_compaction
+                  Keeper_post_turn.recover_latest_checkpoint_for_compaction
                     ~before_dispatch_authority:before_compaction_dispatch
                     ~base_path:config.base_path
                     ~base_dir

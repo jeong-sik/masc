@@ -162,30 +162,6 @@ val dispatch_post_turn_lifecycle_events
   -> post_turn_lifecycle
   -> unit
 
-val recover_latest_checkpoint_for_compaction
-  :  ?before_dispatch_authority:
-       Keeper_compaction_llm_summarizer.before_dispatch_authority
-  -> base_path:string
-  -> base_dir:string
-  -> meta:keeper_meta
-  -> trigger:Compaction_trigger.t
-  -> unit
-  -> Keeper_post_turn.prepared_commit_outcome
-
-val prepare_compaction
-  :  ?before_dispatch_authority:
-       Keeper_compaction_llm_summarizer.before_dispatch_authority
-  -> base_path:string
-  -> base_dir:string
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> trigger:Compaction_trigger.t
-  -> unit
-  -> (Keeper_post_turn.prepared_compaction, Keeper_post_turn.compaction_recovery_error) result
-
-val commit_prepared_compaction
-  :  Keeper_post_turn.prepared_compaction
-  -> Keeper_post_turn.prepared_commit_outcome
-
 (** {1 Trace and Board Utilities} *)
 
 val generate_trace_id : ?now:float -> unit -> string

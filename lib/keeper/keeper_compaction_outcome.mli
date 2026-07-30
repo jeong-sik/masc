@@ -32,8 +32,9 @@ type no_compaction_reason =
           is an operator-actionable precondition failure tied to the durable
           checkpoint source, not a stochastic provider failure. *)
   | Exact_execution_terminal of exact_execution_terminal
-      (** Exact-output execution is affine and terminal. The typed cause plus
-          OAS slot/call identity forbids a second attempt for this source. *)
+      (** Typed outcome of one completed exact-output execution. The retained
+          OAS slot/call identity is evidence only; it creates no second claim,
+          durable replay barrier, or commit authority. *)
 
 type no_compaction =
   { source : Keeper_checkpoint_ref.t

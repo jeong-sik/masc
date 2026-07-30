@@ -62,66 +62,9 @@ type attempt_observation =
 type before_dispatch_authority =
   attempt_observation -> (unit, string) result
 
-type post_success_completion =
-  { waiter : unit Eio.Promise.t
-  ; resolve : unit -> unit
-  }
-
-type post_success_phase =
-  | Open
-  | Commit_claimed of post_success_completion
-  | Installed_pending_valid of post_success_completion
-  | Committed of (unit, string) result
-  | Reject_claimed of
-      Keeper_compaction_outcome.exact_execution_terminal
-      * post_success_completion
-  | Rejected of Keeper_compaction_outcome.exact_execution_terminal
-
-type post_success_terminalizer =
-  { attempt_observation : attempt_observation
-  ; disposition_mutex : Eio.Mutex.t
-  ; mutable phase : post_success_phase
-  ; mutable domain_valid_attempts : int
-  ; mutable domain_rejected_attempts : int
-  }
-
-type post_success_terminalization =
-  | Terminalized of Keeper_compaction_outcome.exact_execution_terminal
-  | Terminalization_commit_in_progress of unit Eio.Promise.t
-  | Terminalization_already_committed
-  | Terminalization_invariant_failed of string
-
-type post_success_commit_claim =
-  | Commit_claim_acquired
-  | Commit_claim_in_progress of unit Eio.Promise.t
-  | Commit_claim_already_committed
-  | Commit_claim_rejected of Keeper_compaction_outcome.exact_execution_terminal
-
-type 'a post_success_commit_boundary =
-  | Post_success_commit_result of 'a
-  | Post_success_commit_in_progress of unit Eio.Promise.t
-  | Post_success_commit_already_committed
-  | Post_success_commit_rejected of
-      Keeper_compaction_outcome.exact_execution_terminal
-
-type post_success_phase_snapshot =
-  | Phase_open
-  | Phase_commit_claimed
-  | Phase_installed_pending_valid
-  | Phase_committed
-  | Phase_reject_claimed
-  | Phase_rejected
-
-type post_success_snapshot =
-  { phase : post_success_phase_snapshot
-  ; domain_valid_attempts : int
-  ; domain_rejected_attempts : int
-  }
-
 type completed_plan =
   { plan : compaction_plan
   ; exact_execution_evidence : exact_execution_evidence
-  ; post_success_terminalizer : post_success_terminalizer
   }
 
 type summarization_failure =
@@ -774,237 +717,6 @@ let terminal_of_observation cause (observation : attempt_observation) =
     }
 ;;
 
-let make_post_success_completion () =
-  let waiter, resolver = Eio.Promise.create () in
-  { waiter
-  ; resolve =
-      (fun () ->
-         match Eio.Promise.try_resolve resolver () with
-         | true
-         | false ->
-           ())
-  }
-;;
-
-let terminal_for terminalizer cause =
-  Keeper_compaction_outcome.
-    { cause
-    ; slot_id = terminalizer.attempt_observation.slot_id
-    ; call_id = terminalizer.attempt_observation.call_id
-    ; plan_fingerprint =
-        terminalizer.attempt_observation.receipt_plan_fingerprint
-    ; request_body_sha256 =
-        terminalizer.attempt_observation.receipt_request_body_sha256
-    }
-;;
-
-let with_disposition terminalizer callback =
-  Eio.Mutex.use_rw ~protect:true terminalizer.disposition_mutex callback
-;;
-
-let finish_rejection
-      terminalizer
-      (terminal : Keeper_compaction_outcome.exact_execution_terminal)
-      completion
-  =
-  Eio.Cancel.protect
-  @@ fun () ->
-  with_disposition terminalizer (fun () ->
-    match terminalizer.phase with
-    | Reject_claimed (claimed, _) when claimed = terminal ->
-      terminalizer.phase <- Rejected terminal
-    | Open
-    | Commit_claimed _
-    | Installed_pending_valid _
-    | Committed _
-    | Reject_claimed _
-    | Rejected _ ->
-      ());
-  completion.resolve ();
-  Terminalized terminal
-;;
-
-let claim_post_success_commit_current terminalizer =
-  with_disposition terminalizer (fun () ->
-    match terminalizer.phase with
-    | Open ->
-      let completion = make_post_success_completion () in
-      terminalizer.phase <- Commit_claimed completion;
-      Commit_claim_acquired
-    | Commit_claimed completion
-    | Installed_pending_valid completion ->
-      Commit_claim_in_progress completion.waiter
-    | Committed _ -> Commit_claim_already_committed
-    | Reject_claimed (_, completion) ->
-      Commit_claim_in_progress completion.waiter
-    | Rejected terminal -> Commit_claim_rejected terminal)
-;;
-
-let claim_post_success_commit terminalizer =
-  claim_post_success_commit_current terminalizer
-;;
-
-let with_post_success_commit terminalizer commit =
-  match claim_post_success_commit_current terminalizer with
-  | Commit_claim_acquired ->
-    Post_success_commit_result (commit ())
-  | Commit_claim_in_progress waiter ->
-    Post_success_commit_in_progress waiter
-  | Commit_claim_already_committed ->
-    Post_success_commit_already_committed
-  | Commit_claim_rejected terminal ->
-    Post_success_commit_rejected terminal
-;;
-
-let mark_post_success_checkpoint_installed terminalizer =
-  with_disposition terminalizer (fun () ->
-    match terminalizer.phase with
-    | Commit_claimed completion ->
-      terminalizer.phase <- Installed_pending_valid completion;
-      Ok ()
-    | Open
-    | Installed_pending_valid _
-    | Committed _
-    | Reject_claimed _
-    | Rejected _ ->
-      Error "post-success checkpoint installation has no commit claimant")
-;;
-
-let complete_post_success_commit terminalizer =
-  let completion =
-    with_disposition terminalizer (fun () ->
-      match terminalizer.phase with
-      | Installed_pending_valid completion ->
-        terminalizer.domain_valid_attempts <-
-          terminalizer.domain_valid_attempts + 1;
-        terminalizer.phase <- Committed (Ok ());
-        Ok (Some completion)
-      | Committed result -> Result.map (fun () -> None) result
-      | Open
-      | Commit_claimed _
-      | Reject_claimed _
-      | Rejected _ ->
-        Error
-          "post-success completion has no installed commit claimant")
-  in
-  match completion with
-  | Error _ as error -> error
-  | Ok None -> Ok ()
-  | Ok (Some completion) ->
-    completion.resolve ();
-    Ok ()
-;;
-
-let finish_post_success_commit_failure terminalizer detail =
-  Eio.Cancel.protect
-  @@ fun () ->
-  let completion =
-    with_disposition terminalizer (fun () ->
-      match terminalizer.phase with
-      | Installed_pending_valid completion ->
-        terminalizer.domain_valid_attempts <-
-          terminalizer.domain_valid_attempts + 1;
-        terminalizer.phase <- Committed (Error detail);
-        Ok (Some completion)
-      | Committed result -> Result.map (fun () -> None) result
-      | Open
-      | Commit_claimed _
-      | Reject_claimed _
-      | Rejected _ ->
-        Error
-          "post-success failure has no installed commit claimant")
-  in
-  match completion with
-  | Error _ as error -> error
-  | Ok None -> Ok ()
-  | Ok (Some completion) ->
-    completion.resolve ();
-    Error detail
-;;
-
-let claim_rejection terminalizer ~from_commit cause =
-  with_disposition terminalizer (fun () ->
-    match terminalizer.phase, from_commit with
-    | Open, false ->
-      let terminal = terminal_for terminalizer cause in
-      let completion = make_post_success_completion () in
-      terminalizer.domain_rejected_attempts <-
-        terminalizer.domain_rejected_attempts + 1;
-      terminalizer.phase <- Reject_claimed (terminal, completion);
-      `Own (terminal, completion)
-    | Commit_claimed completion, true ->
-      let terminal = terminal_for terminalizer cause in
-      terminalizer.domain_rejected_attempts <-
-        terminalizer.domain_rejected_attempts + 1;
-      terminalizer.phase <- Reject_claimed (terminal, completion);
-      `Own (terminal, completion)
-    | Reject_claimed (terminal, completion), _ ->
-      `Await (terminal, completion)
-    | Rejected terminal, _ -> `Done terminal
-    | Commit_claimed completion, false
-    | Installed_pending_valid completion, _ ->
-      `Commit_in_progress completion.waiter
-    | Committed _, _ -> `Already_committed
-    | Open, true ->
-      `Invariant "commit claimant rejection observed an open disposition")
-;;
-
-let finish_claimed_rejection terminalizer role =
-  match role with
-  | `Own (terminal, completion) ->
-    finish_rejection terminalizer terminal completion
-  | `Await (terminal, completion) ->
-    Eio.Promise.await completion.waiter;
-    (match
-       with_disposition terminalizer (fun () ->
-         match terminalizer.phase with
-         | Rejected durable when durable = terminal ->
-           Some ()
-         | Open
-         | Commit_claimed _
-         | Installed_pending_valid _
-         | Committed _
-         | Reject_claimed _
-         | Rejected _ ->
-           None)
-     with
-     | Some () -> Terminalized terminal
-     | None ->
-       Terminalization_invariant_failed
-         "post-success reject waiter completed without canonical rejection")
-  | `Done terminal -> Terminalized terminal
-  | `Commit_in_progress waiter -> Terminalization_commit_in_progress waiter
-  | `Already_committed -> Terminalization_already_committed
-  | `Invariant detail -> Terminalization_invariant_failed detail
-;;
-
-let terminalize_claimed_commit terminalizer cause =
-  claim_rejection terminalizer ~from_commit:true cause
-  |> finish_claimed_rejection terminalizer
-;;
-
-let terminalize_post_success (terminalizer : post_success_terminalizer) cause =
-  claim_rejection terminalizer ~from_commit:false cause
-  |> finish_claimed_rejection terminalizer
-;;
-
-let post_success_snapshot terminalizer =
-  with_disposition terminalizer (fun () ->
-    let phase =
-      match terminalizer.phase with
-      | Open -> Phase_open
-      | Commit_claimed _ -> Phase_commit_claimed
-      | Installed_pending_valid _ -> Phase_installed_pending_valid
-      | Committed _ -> Phase_committed
-      | Reject_claimed _ -> Phase_reject_claimed
-      | Rejected _ -> Phase_rejected
-    in
-    { phase
-    ; domain_valid_attempts = terminalizer.domain_valid_attempts
-    ; domain_rejected_attempts = terminalizer.domain_rejected_attempts
-    })
-;;
-
 let exact_execution_evidence (flow_success : Exact_output.flow_success) =
   let success = Exact_output.flow_success_output flow_success in
   let provenance = success.provenance in
@@ -1340,21 +1052,9 @@ let execute_prepared_lane_current
             observation))
   | `Flow (Ok validated) ->
     let flow_success = validated.transport_success in
-    let observation =
-      flow_success
-      |> Exact_output.flow_success_candidate
-      |> observe_flow_attempt_receipt
-    in
     Ok
       { plan = validated.accepted
       ; exact_execution_evidence = exact_execution_evidence flow_success
-      ; post_success_terminalizer =
-          { attempt_observation = observation
-          ; disposition_mutex = Eio.Mutex.create ()
-          ; phase = Open
-          ; domain_valid_attempts = 0
-          ; domain_rejected_attempts = 0
-          }
       }
   in
   project_execution ()
@@ -1446,11 +1146,6 @@ let make
 
 let completed_plan completed = completed.plan
 let completed_exact_execution_evidence completed = completed.exact_execution_evidence
-let completed_post_success_terminalizer completed = completed.post_success_terminalizer
-
-let completed_attempt_observation completed =
-  completed.post_success_terminalizer.attempt_observation
-;;
 
 let exact_execution_evidence_slot_id (evidence : exact_execution_evidence) = evidence.slot_id
 let exact_execution_evidence_call_id (evidence : exact_execution_evidence) = evidence.call_id
@@ -1477,6 +1172,16 @@ let exact_execution_evidence_plan_fingerprint (evidence : exact_execution_eviden
 let exact_execution_evidence_receipt_request_body_sha256
       (evidence : exact_execution_evidence) =
   evidence.receipt_request_body_sha256
+;;
+
+let exact_execution_terminal ~cause (evidence : exact_execution_evidence) =
+  Keeper_compaction_outcome.
+    { cause
+    ; slot_id = evidence.slot_id
+    ; call_id = evidence.call_id
+    ; plan_fingerprint = evidence.plan_fingerprint
+    ; request_body_sha256 = evidence.receipt_request_body_sha256
+    }
 ;;
 
 module For_testing = struct
@@ -1527,6 +1232,4 @@ module For_testing = struct
         candidate.candidate_id)
       evidence.declared_candidate_snapshot
   ;;
-
-  let post_success_snapshot = post_success_snapshot
 end

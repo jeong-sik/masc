@@ -9,41 +9,6 @@ type exact_execution_evidence
 
 type completed_plan
 
-type post_success_terminalizer
-
-type post_success_terminalization =
-  | Terminalized of Keeper_compaction_outcome.exact_execution_terminal
-  | Terminalization_commit_in_progress of unit Eio.Promise.t
-  | Terminalization_already_committed
-  | Terminalization_invariant_failed of string
-
-type post_success_commit_claim =
-  | Commit_claim_acquired
-  | Commit_claim_in_progress of unit Eio.Promise.t
-  | Commit_claim_already_committed
-  | Commit_claim_rejected of Keeper_compaction_outcome.exact_execution_terminal
-
-type 'a post_success_commit_boundary =
-  | Post_success_commit_result of 'a
-  | Post_success_commit_in_progress of unit Eio.Promise.t
-  | Post_success_commit_already_committed
-  | Post_success_commit_rejected of
-      Keeper_compaction_outcome.exact_execution_terminal
-
-type post_success_phase_snapshot =
-  | Phase_open
-  | Phase_commit_claimed
-  | Phase_installed_pending_valid
-  | Phase_committed
-  | Phase_reject_claimed
-  | Phase_rejected
-
-type post_success_snapshot =
-  { phase : post_success_phase_snapshot
-  ; domain_valid_attempts : int
-  ; domain_rejected_attempts : int
-  }
-
 type prepared_lane
 
 type attempt_observation =
@@ -131,48 +96,6 @@ val plan_of_json
 
 val completed_plan : completed_plan -> compaction_plan
 val completed_exact_execution_evidence : completed_plan -> exact_execution_evidence
-val completed_attempt_observation : completed_plan -> attempt_observation
-val completed_post_success_terminalizer : completed_plan -> post_success_terminalizer
-
-val claim_post_success_commit :
-  post_success_terminalizer -> post_success_commit_claim
-
-(** Only the [Open] claimant executes [commit]. *)
-val with_post_success_commit :
-  post_success_terminalizer ->
-  (unit -> 'a) ->
-  'a post_success_commit_boundary
-
-val mark_post_success_checkpoint_installed :
-  post_success_terminalizer -> (unit, string) result
-
-val terminalize_claimed_commit :
-  post_success_terminalizer ->
-  Keeper_compaction_outcome.exact_execution_terminal_cause ->
-  post_success_terminalization
-
-val terminalize_post_success
-  :  post_success_terminalizer
-  -> Keeper_compaction_outcome.exact_execution_terminal_cause
-  -> post_success_terminalization
-(** Close the process-local post-success phase with the retained OAS attempt
-    identity. The first call atomically owns the canonical cause and releases
-    concurrent waiters; later calls return the same terminal even when they
-    propose a different cause. This does not create or persist a second
-    execution claim. *)
-
-val complete_post_success_commit
-  :  post_success_terminalizer
-  -> (unit, string) result
-(** Complete the existing affine post-success phase after the validated
-    compaction checkpoint is durable. *)
-
-val finish_post_success_commit_failure
-  :  post_success_terminalizer
-  -> string
-  -> (unit, string) result
-(** After durable checkpoint installation, conservatively finalize
-    the affine commit and always release its existing completion waiter. *)
 
 val exact_execution_evidence_slot_id : exact_execution_evidence -> string
 val exact_execution_evidence_call_id : exact_execution_evidence -> string
@@ -181,6 +104,13 @@ val exact_execution_evidence_catalog_generation_fingerprint : exact_execution_ev
 val exact_execution_evidence_catalog_evidence_sha256 : exact_execution_evidence -> string
 val exact_execution_evidence_plan_fingerprint : exact_execution_evidence -> string
 val exact_execution_evidence_receipt_request_body_sha256 : exact_execution_evidence -> string
+val exact_execution_terminal
+  :  cause:Keeper_compaction_outcome.exact_execution_terminal_cause
+  -> exact_execution_evidence
+  -> Keeper_compaction_outcome.exact_execution_terminal
+(** Pure typed projection of the OAS receipt identity retained by a successful
+    exact execution. It owns no claim, lock, waiter, or lifecycle state. *)
+
 val apply : compaction_plan -> Agent_sdk.Types.message list
 val summarized_indices : compaction_plan -> int list
 val dropped_indices : compaction_plan -> int list
@@ -202,8 +132,4 @@ module For_testing : sig
 
   val attempt_observations : prepared_lane -> attempt_observation list
   val candidate_snapshot_slot_ids : prepared_lane -> string list
-
-  val post_success_snapshot :
-    post_success_terminalizer -> post_success_snapshot
-
 end

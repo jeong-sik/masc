@@ -1370,13 +1370,13 @@ export async function moveKeeperChatPendingReceiptToEnd(
 }
 
 export type KeeperEventQueueOperatorAction =
-  | { action: 'cancel'; queueIndex: number; sourceIncarnation: string; reason: string; operationId?: string }
-  | { action: 'transfer'; queueIndex: number; sourceIncarnation: string; targetKeeper: string; operationId?: string }
+  | { action: 'cancel'; expectedRevision: string; queueIndex: number; sourceIncarnation: string; reason: string; operationId?: string }
+  | { action: 'transfer'; expectedRevision: string; queueIndex: number; sourceIncarnation: string; targetKeeper: string; operationId?: string }
   | { action: 'reprioritize'; expectedRevision: string; queueIndex: number; sourceIncarnation: string; urgency: 'immediate' | 'normal' | 'low' }
 
 export type KeeperEventQueueReplayableAction =
-  | { action: 'cancel'; queueIndex: number; sourceIncarnation: string; reason: string; operationId: string }
-  | { action: 'transfer'; queueIndex: number; sourceIncarnation: string; targetKeeper: string; operationId: string }
+  | { action: 'cancel'; expectedRevision: string; queueIndex: number; sourceIncarnation: string; reason: string; operationId: string }
+  | { action: 'transfer'; expectedRevision: string; queueIndex: number; sourceIncarnation: string; targetKeeper: string; operationId: string }
 
 type PreparedKeeperEventQueueOperatorAction =
   | KeeperEventQueueReplayableAction
@@ -1431,6 +1431,7 @@ export async function operateKeeperEventQueue(
   const common = {
     schema: 'keeper_event_queue.operator.request.v1',
     action: prepared.action,
+    expected_revision: prepared.expectedRevision,
     queue_index: prepared.queueIndex,
     source_incarnation: prepared.sourceIncarnation,
   }
@@ -1448,7 +1449,6 @@ export async function operateKeeperEventQueue(
         }
       : {
           ...common,
-          expected_revision: prepared.expectedRevision,
           urgency: prepared.urgency,
         }
   let raw: unknown

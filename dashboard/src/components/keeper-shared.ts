@@ -91,11 +91,13 @@ import { chatShowInternal, chatShowMetadata } from '../lib/chat-view-prefs'
 import {
   cancelKeeperChatPendingReceipt,
   editKeeperChatPendingReceipt,
+  fetchKeeperEventQueuePending,
   fetchKeeperChatPending,
   moveKeeperChatPendingReceiptToEnd,
   operateKeeperEventQueue,
   type DashboardKeeperWaitingKeeper,
   type KeeperChatPendingSnapshot,
+  type KeeperEventQueuePendingSnapshot,
 } from '../api'
 
 // Mirrors `LANE_REFRESH_MS` in keeper-workspace/keeper-lane-strip.ts. That
@@ -662,20 +664,28 @@ function KeeperQueueControlPanel({
   onClose: () => void
 }) {
   const [snapshot, setSnapshot] = useState<KeeperChatPendingSnapshot | null>(null)
+  const [eventSnapshot, setEventSnapshot] = useState<KeeperEventQueuePendingSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<string | null>(null)
   const load = async (clearError = true) => {
     try {
       if (clearError) setError(null)
-      setSnapshot(await fetchKeeperChatPending(keeperName))
+      const [chat, events] = await Promise.all([
+        fetchKeeperChatPending(keeperName),
+        fetchKeeperEventQueuePending(keeperName),
+      ])
+      setSnapshot(chat)
+      setEventSnapshot(events)
     } catch (cause) {
+      setSnapshot(null)
+      setEventSnapshot(null)
       if (clearError) setError(cause instanceof Error ? cause.message : String(cause))
     }
   }
   useEffect(() => {
     void load()
   }, [keeperName])
-  const eventRows = (keeper?.waiting_on ?? []).filter(row => row.source === 'event_queue_pending')
+  const eventRows = eventSnapshot?.pending ?? []
   const mutate = async (key: string, operation: () => Promise<unknown>) => {
     setPendingAction(key)
     try {
@@ -694,20 +704,14 @@ function KeeperQueueControlPanel({
       setPendingAction(null)
     }
   }
-  const eventEvidence = (detail: unknown) => {
-    if (typeof detail !== 'object' || detail === null || Array.isArray(detail)) return null
-    const record = detail as Record<string, unknown>
-    const revision = typeof record.queue_revision === 'string' ? record.queue_revision : null
-    const { queue_index: _queueIndex, queue_revision: _queueRevision, ...source } = record
-    return revision ? { revision, source } : null
-  }
   const mutateEvent = async (key: string, operation: () => Promise<void>) => {
     setPendingAction(key)
     try {
       await operation()
-      await loadTools()
+      await Promise.all([load(), loadTools()])
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
+      await Promise.allSettled([load(false), loadTools()])
       setError(message)
       showToast(message, 'error')
     } finally {
@@ -783,27 +787,25 @@ function KeeperQueueControlPanel({
         })}
       </div>
       <div class="grid gap-2 border-t border-[var(--color-border-subtle)] pt-3">
-        <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">자율 이벤트 대기 ${eventRows.length}</div>
-        ${eventRows.map((row, index) => {
-          const evidence = eventEvidence(row.detail)
-          const key = `event:${index}`
+        <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">자율 이벤트 대기 ${eventSnapshot?.totalPending ?? 0}</div>
+        ${eventRows.map(item => {
+          const key = `event:${item.queueIndex}`
           const busy = pendingAction === key
           return html`
             <div class="grid gap-1 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] p-2" data-operator-event-row>
-              <div class="font-mono text-2xs text-[var(--color-fg-muted)]">#${index + 1} · ${row.waiting_on}</div>
-              <pre class="max-h-48 overflow-auto whitespace-pre-wrap break-all text-2xs text-[var(--color-fg-secondary)]">${JSON.stringify(row.detail, null, 2)}</pre>
+              <div class="font-mono text-2xs text-[var(--color-fg-muted)]">#${item.queueIndex + 1}</div>
+              <pre class="max-h-48 overflow-auto whitespace-pre-wrap break-all text-2xs text-[var(--color-fg-secondary)]">${JSON.stringify(item.source, null, 2)}</pre>
               <div class="flex flex-wrap gap-1.5">
                 ${(['immediate', 'normal', 'low'] as const).map(urgency => html`
                   <button
                     type="button"
-                    disabled=${busy || !evidence}
+                    disabled=${busy}
                     class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1 text-2xs disabled:opacity-50"
                     onClick=${() => {
-                      if (!evidence) return
                       void mutateEvent(key, () => operateKeeperEventQueue(keeperName, {
                         action: 'reprioritize',
-                        expectedRevision: evidence.revision,
-                        source: evidence.source,
+                        expectedRevision: eventSnapshot!.revision,
+                        source: item.source,
                         urgency,
                       }))
                     }}
@@ -811,32 +813,30 @@ function KeeperQueueControlPanel({
                 `)}
                 <button
                   type="button"
-                  disabled=${busy || !evidence}
+                  disabled=${busy}
                   class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1 text-2xs disabled:opacity-50"
                   onClick=${() => {
-                    if (!evidence) return
                     const targetKeeper = window.prompt('이 이벤트를 넘길 Keeper 이름을 입력하세요.')
                     if (targetKeeper === null) return
                     void mutateEvent(key, () => operateKeeperEventQueue(keeperName, {
                       action: 'transfer',
-                      expectedRevision: evidence.revision,
-                      source: evidence.source,
+                      expectedRevision: eventSnapshot!.revision,
+                      source: item.source,
                       targetKeeper,
                     }))
                   }}
                 >이관</button>
                 <button
                   type="button"
-                  disabled=${busy || !evidence}
+                  disabled=${busy}
                   class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-1 text-2xs text-[var(--color-status-err)] disabled:opacity-50"
                   onClick=${() => {
-                    if (!evidence) return
                     const reason = window.prompt('이벤트 취소 이유를 입력하세요.')
                     if (reason === null) return
                     void mutateEvent(key, () => operateKeeperEventQueue(keeperName, {
                       action: 'cancel',
-                      expectedRevision: evidence.revision,
-                      source: evidence.source,
+                      expectedRevision: eventSnapshot!.revision,
+                      source: item.source,
                       reason,
                     }))
                   }}

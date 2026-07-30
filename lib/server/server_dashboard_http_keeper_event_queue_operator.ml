@@ -5,7 +5,10 @@ module Http = Http_server_eio
 let ( let* ) = Result.bind
 let schema = "keeper_event_queue.operator.request.v1"
 let result_schema = "keeper_event_queue.operator.result.v1"
+let pending_result_schema = "keeper_event_queue.pending.v1"
+let pending_page_limit = 100
 let prefix = "/api/v1/keepers/"
+let operator_permission = Masc_domain.CanAdmin
 
 let route path =
   if not (String.starts_with ~prefix path)
@@ -18,6 +21,113 @@ let route path =
     | [ keeper_name; "events"; "operator" ] when keeper_name <> "" ->
       Some keeper_name
     | _ -> None
+;;
+
+let pending_get_route path =
+  if not (String.starts_with ~prefix path)
+  then None
+  else
+    match
+      String.sub path (String.length prefix) (String.length path - String.length prefix)
+      |> String.split_on_char '/'
+    with
+    | [ keeper_name; "events"; "pending" ] when keeper_name <> "" ->
+      Some keeper_name
+    | _ -> None
+;;
+
+let pending_page_request request =
+  let* limit =
+    match Server_utils.query_param request "limit" with
+    | None -> Ok pending_page_limit
+    | Some value ->
+      (match int_of_string_opt value with
+       | Some limit when limit > 0 && limit <= pending_page_limit -> Ok limit
+       | Some _ | None ->
+         Error
+           (Printf.sprintf
+              "limit must be an integer between 1 and %d"
+              pending_page_limit))
+  in
+  let* after =
+    match Server_utils.query_param request "after" with
+    | None -> Ok 0
+    | Some value ->
+      (match int_of_string_opt value with
+       | Some after when after >= 0 -> Ok after
+       | Some _ | None -> Error "after must be a non-negative integer")
+  in
+  Ok (after, limit)
+;;
+
+let pending_page ~after ~limit pending =
+  let rec loop index remaining page_rev = function
+    | [] -> List.rev page_rev
+    | _ :: rest when index < after ->
+      loop (index + 1) remaining page_rev rest
+    | _ when remaining = 0 -> List.rev page_rev
+    | stimulus :: rest ->
+      let item =
+        `Assoc
+          [ "queue_index", `Int index
+          ; "source", Keeper_event_queue.stimulus_to_yojson stimulus
+          ]
+      in
+      loop (index + 1) (remaining - 1) (item :: page_rev) rest
+  in
+  loop 0 limit [] pending
+;;
+
+let handle_get state request reqd ~keeper_name =
+  let respond ?(status = `OK) json =
+    Server_auth.respond_json_value_with_cors ~status request reqd json
+  in
+  let error ~status detail =
+    respond
+      ~status
+      (`Assoc
+        [ "schema", `String pending_result_schema
+        ; "ok", `Bool false
+        ; "error", `String detail
+        ])
+  in
+  if not (Keeper_config.validate_name keeper_name)
+  then error ~status:`Bad_request "invalid keeper name"
+  else
+    match pending_page_request request with
+    | Error detail -> error ~status:`Bad_request detail
+    | Ok (after, limit) ->
+      let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+      (match
+         Keeper_event_queue_persistence.load_state_result
+           ~base_path
+           ~keeper_name
+       with
+       | Error detail -> error ~status:`Service_unavailable detail
+       | Ok queue_state ->
+         let revision = Keeper_event_queue_state.revision queue_state in
+         let pending =
+           Keeper_event_queue_state.pending queue_state
+           |> Keeper_event_queue.to_list
+         in
+         let total_pending = List.length pending in
+         let page = pending_page ~after ~limit pending in
+         let consumed = after + List.length page in
+         let next_after =
+           if consumed < total_pending
+           then `String (string_of_int consumed)
+           else `Null
+         in
+         respond
+           (`Assoc
+             [ "schema", `String pending_result_schema
+             ; "ok", `Bool true
+             ; "keeper_name", `String keeper_name
+             ; "revision", `String (Int64.to_string revision)
+             ; "total_pending", `Int total_pending
+             ; "next_after", next_after
+             ; "pending", `List page
+             ]))
 ;;
 
 type request =

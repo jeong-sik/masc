@@ -776,6 +776,19 @@ export interface KeeperChatPendingMutationResult {
   audit: { recorded: true } | { recorded: false; error: string }
 }
 
+export interface KeeperEventQueuePendingItem {
+  queueIndex: number
+  source: Record<string, unknown>
+}
+
+export interface KeeperEventQueuePendingSnapshot {
+  keeperName: string
+  revision: string
+  totalPending: number
+  nextAfter: string | null
+  pending: KeeperEventQueuePendingItem[]
+}
+
 const KEEPER_CHAT_RECEIPT_FAILURE_KINDS = new Set<KeeperChatReceiptFailureKind>([
   'turn_failed',
   'no_visible_reply',
@@ -1091,6 +1104,135 @@ export async function fetchKeeperChatPending(
   throw new Error('fetchKeeperChatPending: queue changed during pagination')
 }
 
+export function parseKeeperEventQueuePendingSnapshot(
+  value: unknown,
+): KeeperEventQueuePendingSnapshot {
+  if (
+    !isRecord(value)
+    || value.schema !== 'keeper_event_queue.pending.v1'
+    || value.ok !== true
+  ) {
+    throw new Error('Keeper event pending response has an unsupported schema')
+  }
+  const keeperName = asString(value.keeper_name, '').trim()
+  const revision = parseKeeperQueueRevision(value.revision)
+  const totalPending = asNumber(value.total_pending)
+  const nextAfter = value.next_after === null
+    ? null
+    : parseKeeperQueueRevision(value.next_after)
+  if (
+    !keeperName
+    || revision === undefined
+    || typeof totalPending !== 'number'
+    || !Number.isSafeInteger(totalPending)
+    || totalPending < 0
+    || nextAfter === undefined
+    || !Array.isArray(value.pending)
+  ) {
+    throw new Error('Keeper event pending response is missing identity or entries')
+  }
+  const pending = value.pending.map((raw): KeeperEventQueuePendingItem => {
+    if (!isRecord(raw) || !isRecord(raw.source)) {
+      throw new Error('Keeper event pending entry must contain an exact source')
+    }
+    const queueIndex = asNumber(raw.queue_index)
+    const postId = asString(raw.source.post_id, '').trim()
+    const urgency = asString(raw.source.urgency, '').trim()
+    const arrivedAt = asNumber(raw.source.arrived_at_unix)
+    const payload = raw.source.payload
+    const payloadKind = isRecord(payload) ? asString(payload.kind, '').trim() : ''
+    if (
+      typeof queueIndex !== 'number'
+      || !Number.isSafeInteger(queueIndex)
+      || queueIndex < 0
+      || !postId
+      || !['immediate', 'normal', 'low'].includes(urgency)
+      || typeof arrivedAt !== 'number'
+      || !Number.isFinite(arrivedAt)
+      || arrivedAt < 0
+      || !payloadKind
+    ) {
+      throw new Error('Keeper event pending entry has invalid source identity')
+    }
+    return { queueIndex, source: raw.source }
+  })
+  if (pending.length > totalPending) {
+    throw new Error('Keeper event pending page exceeds its total count')
+  }
+  return {
+    keeperName,
+    revision,
+    totalPending,
+    nextAfter,
+    pending,
+  }
+}
+
+async function fetchKeeperEventQueuePendingPage(
+  keeperName: string,
+  after: string | null,
+): Promise<KeeperEventQueuePendingSnapshot> {
+  const baseUrl = `/api/v1/keepers/${encodeURIComponent(keeperName)}/events/pending`
+  const url = `${baseUrl}?limit=100${after === null ? '' : `&after=${encodeURIComponent(after)}`}`
+  const { response, data } = await fetchJsonWithTimeout(
+    url,
+    { headers: jsonHeaders() },
+    DEFAULT_GET_TIMEOUT_MS,
+  )
+  if (!response.ok) {
+    throw await apiRequestErrorFromResponse('GET', url, response)
+  }
+  const snapshot = parseKeeperEventQueuePendingSnapshot(data)
+  if (snapshot.keeperName !== keeperName) {
+    throw new Error('fetchKeeperEventQueuePending: response identity mismatch')
+  }
+  return snapshot
+}
+
+export async function fetchKeeperEventQueuePending(
+  keeperName: string,
+): Promise<KeeperEventQueuePendingSnapshot> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const pending: KeeperEventQueuePendingItem[] = []
+    const seenCursors = new Set<string>()
+    let expectedRevision: string | null = null
+    let totalPending = 0
+    let after: string | null = null
+    let revisionChanged = false
+    do {
+      const page = await fetchKeeperEventQueuePendingPage(keeperName, after)
+      if (expectedRevision === null) {
+        expectedRevision = page.revision
+        totalPending = page.totalPending
+      } else if (
+        page.revision !== expectedRevision
+        || page.totalPending !== totalPending
+      ) {
+        revisionChanged = true
+        break
+      }
+      pending.push(...page.pending)
+      after = page.nextAfter
+      if (after !== null) {
+        if (seenCursors.has(after)) {
+          throw new Error('fetchKeeperEventQueuePending: repeated page cursor')
+        }
+        seenCursors.add(after)
+      }
+    } while (after !== null)
+    if (!revisionChanged && pending.length === totalPending) {
+      return {
+        keeperName,
+        revision: expectedRevision ?? '0',
+        totalPending,
+        nextAfter: null,
+        pending,
+      }
+    }
+  }
+  throw new Error('fetchKeeperEventQueuePending: queue changed during pagination')
+}
+
 export async function cancelKeeperChatPendingReceipt(
   keeperName: string,
   receiptId: string,
@@ -1247,9 +1389,35 @@ export async function operateKeeperEventQueue(
     || raw.schema !== 'keeper_event_queue.operator.result.v1'
     || raw.ok !== true
     || asString(raw.keeper_name, '').trim() !== keeperName
+    || !isRecord(raw.result)
   ) {
     throw new Error('operateKeeperEventQueue: invalid response envelope')
   }
+  const status = asString(raw.result.status, '').trim()
+  if (status === 'committed_followup_failed') {
+    const transitionId = asString(raw.result.transition_id, '').trim()
+    const stage = asString(raw.result.stage, '').trim()
+    const detail = asString(raw.result.detail, '').trim()
+    if (
+      !transitionId
+      || !['checkpoint', 'wal_compaction', 'projection'].includes(stage)
+      || !detail
+    ) {
+      throw new Error('operateKeeperEventQueue: invalid committed failure evidence')
+    }
+    throw new Error(
+      `Event queue mutation committed, but ${stage} follow-up failed (${transitionId}): ${detail}`,
+    )
+  }
+  if (status === 'applied' || status === 'already_applied') {
+    const transitionId = asString(raw.result.transition_id, '').trim()
+    const revision = parseKeeperQueueRevision(raw.result.revision)
+    if (!transitionId && revision === undefined) {
+      throw new Error('operateKeeperEventQueue: applied result lacks durable identity')
+    }
+    return
+  }
+  throw new Error('operateKeeperEventQueue: unknown result status')
 }
 
 export async function resolveKeeperChatRecovery(

@@ -280,6 +280,21 @@ let test_keeper_chat_recovery_route_is_exact () =
   check (option string) "event operator route rejects extra segments" None
     (Server_dashboard_http_keeper_event_queue_operator.route
        "/api/v1/keepers/idealist/events/operator/extra");
+  let event_pending_path = "/api/v1/keepers/idealist/events/pending" in
+  check (option string) "event pending inventory route is exact" (Some "idealist")
+    (Server_dashboard_http_keeper_event_queue_operator.pending_get_route
+       event_pending_path);
+  check (option string) "event pending inventory rejects extra segments" None
+    (Server_dashboard_http_keeper_event_queue_operator.pending_get_route
+       (event_pending_path ^ "/extra"));
+  check bool "Worker cannot enumerate exact pending event payloads" false
+    (Masc_domain.has_permission
+       Masc_domain.Worker
+       Server_dashboard_http_keeper_event_queue_operator.operator_permission);
+  check bool "Admin can enumerate and mutate exact pending events" true
+    (Masc_domain.has_permission
+       Masc_domain.Admin
+       Server_dashboard_http_keeper_event_queue_operator.operator_permission);
   let quarantine_path =
     "/api/v1/keepers/idealist/board-attention/quarantines/ba-root-123/recovery"
   in

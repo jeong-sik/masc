@@ -22,6 +22,7 @@ import {
   clearKeeper,
   deleteKeeperHistorySnapshots,
   editKeeperChatPendingReceipt,
+  fetchKeeperEventQueuePending,
   fetchKeeperChatHistory,
   fetchKeeperChatPending,
   fetchKeeperChatReceipt,
@@ -34,6 +35,7 @@ import {
   pauseKeeper,
   parseKeeperRuntimeTrace,
   parseKeeperChatPendingSnapshot,
+  parseKeeperEventQueuePendingSnapshot,
   parseKeeperChatReceipt,
   resolveKeeperChatRecovery,
   queuedKeeperMessageError,
@@ -450,6 +452,63 @@ describe('Keeper chat durable receipt API', () => {
     )
   })
 
+  it('combines exact event sources only across one stable Admin inventory revision', async () => {
+    const source = (postId: string) => ({
+      post_id: postId,
+      urgency: 'normal',
+      arrived_at_unix: 42,
+      payload: { kind: 'bootstrap' },
+    })
+    const envelope = (
+      queueIndex: number,
+      postId: string,
+      nextAfter: string | null,
+    ) => ({
+      schema: 'keeper_event_queue.pending.v1',
+      ok: true,
+      keeper_name: 'sangsu',
+      revision: '31',
+      total_pending: 2,
+      next_after: nextAfter,
+      pending: [{ queue_index: queueIndex, source: source(postId) }],
+    })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(0, 'post-1', '1')), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(1, 'post-2', null)), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperEventQueuePending('sangsu')
+
+    expect(result).toEqual(parseKeeperEventQueuePendingSnapshot({
+      schema: 'keeper_event_queue.pending.v1',
+      ok: true,
+      keeper_name: 'sangsu',
+      revision: '31',
+      total_pending: 2,
+      next_after: null,
+      pending: [
+        { queue_index: 0, source: source('post-1') },
+        { queue_index: 1, source: source('post-2') },
+      ],
+    }))
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/keepers/sangsu/events/pending?limit=100',
+      expect.objectContaining({ headers: expect.any(Object) }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/keepers/sangsu/events/pending?limit=100&after=1',
+      expect.objectContaining({ headers: expect.any(Object) }),
+    )
+  })
+
   it('sends revision-fenced pending edit and move requests', async () => {
     const receiptId = 'chatq_00000000-0000-4000-8000-000000000014'
     const fetchMock = vi.fn()
@@ -537,6 +596,39 @@ describe('Keeper chat durable receipt API', () => {
           urgency: 'immediate',
         }),
       }),
+    )
+  })
+
+  it('surfaces a committed event mutation follow-up failure with durable identity', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        schema: 'keeper_event_queue.operator.result.v1',
+        ok: true,
+        keeper_name: 'sangsu',
+        result: {
+          status: 'committed_followup_failed',
+          transition_id: 'transition-9',
+          stage: 'projection',
+          detail: 'reaction ledger unavailable',
+        },
+        audit: { recorded: true },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(operateKeeperEventQueue('sangsu', {
+      action: 'cancel',
+      expectedRevision: '8',
+      operationId: 'operation-9',
+      source: {
+        post_id: 'post-9',
+        urgency: 'normal',
+        arrived_at_unix: 42,
+        payload: { kind: 'bootstrap' },
+      },
+      reason: 'operator cancellation',
+    })).rejects.toThrow(
+      'Event queue mutation committed, but projection follow-up failed (transition-9)',
     )
   })
 

@@ -7,6 +7,7 @@ const {
   bootKeeper,
   shutdownKeeper,
   fetchKeeperChatPending,
+  fetchKeeperEventQueuePending,
   cancelKeeperChatPendingReceipt,
   editKeeperChatPendingReceipt,
   moveKeeperChatPendingReceiptToEnd,
@@ -15,6 +16,7 @@ const {
   bootKeeper: vi.fn(),
   shutdownKeeper: vi.fn(),
   fetchKeeperChatPending: vi.fn(),
+  fetchKeeperEventQueuePending: vi.fn(),
   cancelKeeperChatPendingReceipt: vi.fn(),
   editKeeperChatPendingReceipt: vi.fn(),
   moveKeeperChatPendingReceiptToEnd: vi.fn(),
@@ -94,6 +96,7 @@ vi.mock('../api/keeper', () => ({
   bootKeeper,
   shutdownKeeper,
   fetchKeeperChatPending,
+  fetchKeeperEventQueuePending,
   cancelKeeperChatPendingReceipt,
   editKeeperChatPendingReceipt,
   moveKeeperChatPendingReceiptToEnd,
@@ -233,6 +236,7 @@ describe('KeeperConversationPanel', () => {
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReset()
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReturnValue(false)
     fetchKeeperChatPending.mockReset()
+    fetchKeeperEventQueuePending.mockReset()
     cancelKeeperChatPendingReceipt.mockReset()
     editKeeperChatPendingReceipt.mockReset()
     moveKeeperChatPendingReceiptToEnd.mockReset()
@@ -975,6 +979,21 @@ describe('KeeperConversationPanel', () => {
         submittedAt: 42,
       }],
     })
+    fetchKeeperEventQueuePending.mockResolvedValue({
+      keeperName: 'sangsu',
+      revision: '9',
+      totalPending: 1,
+      nextAfter: null,
+      pending: [{
+        queueIndex: 0,
+        source: {
+          post_id: 'board-post-9',
+          urgency: 'normal',
+          arrived_at_unix: 41,
+          payload: { kind: 'board_signal', post_id: 'board-post-9' },
+        },
+      }],
+    })
     mockedToolsData.value = {
       keeper_waiting_inventory: {
         keepers: [{
@@ -991,11 +1010,10 @@ describe('KeeperConversationPanel', () => {
             next_action: 'keeper_drain_event_queue',
             detail: {
               queue_index: 0,
-              queue_revision: '9',
               post_id: 'board-post-9',
               urgency: 'normal',
-              arrived_at: 41,
-              payload: { kind: 'board_signal', post_id: 'board-post-9' },
+              arrived_at_unix: 41,
+              payload_kind: 'board_signal',
             },
           }],
         }],

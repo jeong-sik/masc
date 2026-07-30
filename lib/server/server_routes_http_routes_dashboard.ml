@@ -1635,6 +1635,21 @@ let add_routes ~sw ~clock router =
 
   (* Keeper GET sub-routes: /config, /chat/history, /trajectory *)
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
+       match
+         Keeper_event_queue_operator.pending_get_route
+           (Http.Request.path request)
+       with
+       | Some keeper_name ->
+         with_token_permission_auth
+           ~permission:Keeper_event_queue_operator.operator_permission
+           (fun state _agent_name _req reqd ->
+             Keeper_event_queue_operator.handle_get
+               state
+               request
+               reqd
+               ~keeper_name)
+           request reqd
+       | None ->
        match Keeper_chat_pending.pending_get_route (Http.Request.path request) with
        | Some keeper_name ->
          with_token_permission_auth
@@ -1665,7 +1680,7 @@ let add_routes ~sw ~clock router =
        match Keeper_event_queue_operator.route (Http.Request.path request) with
        | Some keeper_name ->
          with_token_permission_auth
-           ~permission:Masc_domain.CanAdmin
+           ~permission:Keeper_event_queue_operator.operator_permission
            (fun state agent_name req reqd ->
              Http.Request.read_body_async reqd (fun body_str ->
                Keeper_event_queue_operator.handle_post

@@ -166,20 +166,18 @@ let take_with_truncation limit rows =
   loop limit [] rows
 ;;
 
-let rows_for_queue_snapshot ?revision ~keeper_name ~source ~next_action queue =
+let rows_for_queue_snapshot ~keeper_name ~source ~next_action queue =
   Keeper_event_queue.to_list queue
   |> List.mapi (fun queue_index (stimulus : Keeper_event_queue.stimulus) ->
     let detail =
-      match Keeper_event_queue.stimulus_to_yojson stimulus with
-      | `Assoc fields ->
-        `Assoc
-          (("queue_index", `Int queue_index)
-           :: ( "queue_revision"
-              , match revision with
-                | Some value -> `String (Int64.to_string value)
-                | None -> `Null )
-           :: fields)
-      | value -> value
+      `Assoc
+        [ "queue_index", `Int queue_index
+        ; "post_id", `String stimulus.post_id
+        ; "urgency", `String (Keeper_event_queue.urgency_to_string stimulus.urgency)
+        ; "arrived_at_unix", `Float stimulus.arrived_at
+        ; "payload_kind",
+          `String (Keeper_event_queue.payload_kind_label stimulus.payload)
+        ]
     in
     { keeper_name = Some keeper_name
     ; source
@@ -230,13 +228,7 @@ let event_queue_rows ~base_path ~keeper_name =
   let snapshot =
     Keeper_event_queue_persistence.load_snapshot_with_errors ~base_path ~keeper_name
   in
-  let revision =
-    match Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name with
-    | Ok state -> Some (Keeper_event_queue_state.revision state)
-    | Error _ -> None
-  in
   rows_for_queue_snapshot
-    ?revision
     ~keeper_name
     ~source:Event_queue_pending
     ~next_action:"keeper_drain_event_queue"

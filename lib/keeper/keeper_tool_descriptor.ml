@@ -20,6 +20,7 @@ type sandbox =
 type keeper_model_projection =
   | Preferred_public_name
   | Internal_name
+  | Operator_only
   | Transport_alias of { projected_by : string }
 
 type keeper_tool_group =
@@ -150,6 +151,7 @@ let sandbox_to_string = function
 let keeper_model_projection_to_string = function
   | Preferred_public_name -> "preferred_public_name"
   | Internal_name -> "internal_name"
+  | Operator_only -> "operator_only"
   | Transport_alias _ -> "transport_alias"
 ;;
 
@@ -594,7 +596,7 @@ let descriptor_with_public_aliases
     @ (match keeper_model_projection with
        | Transport_alias { projected_by } ->
          [ "transport_alias_of", projected_by ]
-       | Preferred_public_name | Internal_name -> [])
+       | Preferred_public_name | Internal_name | Operator_only -> [])
   in
   { id
   ; keeper_model_projection
@@ -1449,7 +1451,7 @@ let masc_misc_descriptor id name description ~readonly =
 let masc_control_descriptor operation =
   let schema = Tool_schemas_misc.control_schema operation in
   cluster_descriptor_with_schema_source
-    ~keeper_model_projection:Internal_name
+    ~keeper_model_projection:Operator_only
     ~input_schema_source:Canonical_registry
     ~input_schema:schema.input_schema
     ~id:("masc.control." ^ Tool_schemas_misc.control_operation_id operation)
@@ -2039,7 +2041,7 @@ let keeper_model_names descriptor =
     [ descriptor.public_name ]
   | [], Internal_name ->
     [ descriptor.internal_name ]
-  | [], Transport_alias _ -> []
+  | [], (Operator_only | Transport_alias _) -> []
 ;;
 
 let keeper_candidate_names descriptor =
@@ -2050,7 +2052,7 @@ let keeper_candidate_names descriptor =
     |> List.sort_uniq String.compare
   | [], Internal_name ->
     [ descriptor.internal_name ]
-  | [], Transport_alias _ -> []
+  | [], (Operator_only | Transport_alias _) -> []
 ;;
 
 let registered_names descriptor =
@@ -2170,7 +2172,7 @@ let route_evidence_json d =
      (match d.keeper_model_projection with
       | Transport_alias { projected_by } ->
         [ "transport_alias_of", `String projected_by ]
-      | Preferred_public_name | Internal_name -> [])
+      | Preferred_public_name | Internal_name | Operator_only -> [])
      @ common_policy_json_fields ~readonly_key:"readonly" policy)
 ;;
 
@@ -2204,6 +2206,6 @@ let discovery_fields d =
    match d.keeper_model_projection with
    | Transport_alias { projected_by } ->
      [ "transport_alias_of", `String projected_by ]
-   | Preferred_public_name | Internal_name -> [])
+   | Preferred_public_name | Internal_name | Operator_only -> [])
   @ examples_field
 ;;

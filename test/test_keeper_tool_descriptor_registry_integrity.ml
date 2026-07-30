@@ -168,6 +168,15 @@ let test_keeper_model_projection_is_single_and_unique () =
            (descriptor.id ^ " internal model projection")
            [ descriptor.internal_name ]
            projected
+       | Descriptor.Operator_only ->
+         Alcotest.(check (list string))
+           (descriptor.id ^ " operator-only control has no model projection")
+           []
+           projected;
+         Alcotest.(check (list string))
+           (descriptor.id ^ " operator-only control has no Keeper candidates")
+           []
+           candidates
        | Descriptor.Transport_alias _ ->
          Alcotest.(check (list string))
            (descriptor.id ^ " transport alias has no duplicate model projection")
@@ -184,7 +193,9 @@ let test_transport_aliases_name_exact_visible_projection () =
   all_descriptors ()
   |> List.iter (fun (descriptor : Descriptor.t) ->
     match descriptor.keeper_model_projection with
-    | Descriptor.Preferred_public_name | Descriptor.Internal_name -> ()
+    | Descriptor.Preferred_public_name
+    | Descriptor.Internal_name
+    | Descriptor.Operator_only -> ()
     | Descriptor.Transport_alias { projected_by } ->
       let owners =
         all_descriptors ()
@@ -313,6 +324,7 @@ let test_registered_cluster_model_projections_are_explicit () =
       true
       (descriptor.keeper_model_projection = expected)
   in
+  let keeper_model_names = Policy.keeper_model_tool_names () in
   List.iter
     (fun name -> check_projection name Descriptor.Internal_name)
     [ "masc_runtime_verify"
@@ -325,12 +337,18 @@ let test_registered_cluster_model_projections_are_explicit () =
     ; "masc_library_add"
     ; "masc_library_list"
     ; "masc_library_promote"
-    ; "masc_pause"
-    ; "masc_resume"
     ; "masc_heartbeat"
     ; "masc_gc"
     ; "masc_get_metrics"
     ];
+  List.iter
+    (fun name ->
+       check_projection name Descriptor.Operator_only;
+       Alcotest.(check bool)
+         (name ^ " is absent from the autonomous Keeper model bundle")
+         false
+         (List.mem name keeper_model_names))
+    [ "masc_pause"; "masc_resume" ];
   List.iter
     (fun (name, projected_by) ->
        check_projection name (Descriptor.Transport_alias { projected_by }))

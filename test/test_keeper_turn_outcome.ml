@@ -494,35 +494,55 @@ let test_media_only_queued_reply_uses_delivery_path () =
     fail "media-only queued reply must use the delivered assistant path"
 
 let test_media_continuation_uses_assistant_delivery_path () =
-  List.iter
-    (fun has_direct_checkpoint ->
-       match
-         Stream.For_testing.continuation_delivery_plan
-           ~has_direct_checkpoint
-           ~has_visible_blocks:true
-           ~has_tool_calls:true
-       with
-       | `Assistant_reply -> ()
-       | `Tool_calls_only | `No_assistant_reply | `User_only ->
-         fail
-           "media continuation must persist and broadcast the structured assistant row")
-    [ false; true ]
-
-let test_continuation_status_uses_assistant_delivery_path () =
-  let blocks =
-    Stream.For_testing.persisted_reply_blocks
-      ~turn_outcome:TO.Continuation_checkpoint
-      None
+  (* A continuation with accumulated media still persists one assistant row:
+     the typed status block leads and the media blocks survive. *)
+  let media =
+    Masc.Keeper_chat_blocks.Image { src = "/media/generated.png"; cap = None }
   in
   match
-    Stream.For_testing.continuation_delivery_plan
-      ~has_direct_checkpoint:false
-      ~has_visible_blocks:(Option.is_some blocks)
-      ~has_tool_calls:false
+    Stream.For_testing.persisted_reply_blocks
+      ~turn_outcome:TO.Continuation_checkpoint
+      (Some [ media ])
   with
-  | `Assistant_reply -> ()
-  | `Tool_calls_only | `No_assistant_reply | `User_only ->
-    fail "typed continuation status must use the delivered assistant path"
+  | Some
+      [ Masc.Keeper_chat_blocks.Status
+          { kind = Masc.Keeper_chat_blocks.Continuation_checkpoint }
+      ; Masc.Keeper_chat_blocks.Image { src = "/media/generated.png"; cap = None }
+      ] ->
+    ()
+  | Some _ ->
+    fail "media continuation dropped or reordered the persisted blocks"
+  | None -> fail "media continuation did not persist a status block"
+
+let test_continuation_status_uses_assistant_delivery_path () =
+  (* Real invariant behind the stream call site: for
+     [Continuation_checkpoint], [persisted_reply_blocks] always returns
+     [Some] with the status block leading, so the turn always takes the
+     assistant-reply persist path — never a tool-calls-only or user-only
+     path — regardless of media or direct-delivery checkpoint state. *)
+  List.iter
+    (fun media_blocks ->
+       match
+         Stream.For_testing.persisted_reply_blocks
+           ~turn_outcome:TO.Continuation_checkpoint media_blocks
+       with
+       | Some
+           (Masc.Keeper_chat_blocks.Status
+              { kind = Masc.Keeper_chat_blocks.Continuation_checkpoint }
+            :: _) ->
+         ()
+       | Some _ ->
+         fail "continuation status block must lead the persisted blocks"
+       | None ->
+         fail
+           "continuation without visible blocks would miss the assistant \
+            delivery path")
+    [ None
+    ; Some
+        [ Masc.Keeper_chat_blocks.Image
+            { src = "/media/generated.png"; cap = None }
+        ]
+    ]
 
 let body fields = `Assoc fields
 

@@ -228,7 +228,10 @@ val process_single_turn :
     [Continuation_checkpoint]. A media-only ordinary reply is delivered even
     when its text is empty. A continuation persists a typed status block and
     is delivered to the originating connector without inventing assistant
-    prose. The [claim]
+    prose. A continuation always commits a delivered assistant row
+    ([content = ""] plus the typed status block) — including direct turns,
+    which previously could commit [No_assistant_reply] or [Tool_calls_only]
+    instead. The [claim]
     callback atomically claims the exact observed queue receipt after turn
     admission and before transcript or provider effects.
 
@@ -320,11 +323,6 @@ module For_testing : sig
     has_visible_blocks:bool ->
     has_tool_calls:bool ->
     [ `Visible_blocks | `Tool_calls_only | `Failure | `User_only ]
-  val continuation_delivery_plan :
-    has_direct_checkpoint:bool ->
-    has_visible_blocks:bool ->
-    has_tool_calls:bool ->
-    [ `Assistant_reply | `Tool_calls_only | `No_assistant_reply | `User_only ]
   val format_surface_context : Yojson.Safe.t -> string
   val surface_context_to_instructions : Yojson.Safe.t -> string option
   val keeper_tool_failure_log_details :

@@ -721,7 +721,7 @@ let test_shape_changing_post_validation_is_executed () =
 ;;
 
 let test_memory_write_descriptor_schema_is_closed () =
-  let descriptor = required_public_descriptor "keeper_memory_write" in
+  let descriptor = required_internal_descriptor "keeper_memory_write" in
   Alcotest.(check bool)
     "keeper_memory_write schema forbids additional properties"
     true

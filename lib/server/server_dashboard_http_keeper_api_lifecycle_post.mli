@@ -14,7 +14,10 @@ val handle_keeper_lifecycle_post :
     separate boot transaction. *)
 
 val refresh_keeper_execution_surfaces :
-  config:Workspace.config -> name:string -> string -> unit
+  config:Workspace.config ->
+  name:string ->
+  Keeper_lifecycle_events.lifecycle_event ->
+  unit
 (** Invalidate caches and patch execution-surface dependents after a keeper
     lifecycle transition. *)
 

@@ -1048,7 +1048,15 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                                ~detail
                                ())
                            else (
-                             invalidate_config_surfaces ~config ~name (Some "restarted");
+                             invalidate_config_surfaces
+                               ~config
+                               ~name
+                               (Some
+                                  (Keeper_lifecycle_events.Custom_event
+                                     { verb = Keeper_lifecycle_events.Restarted
+                                     ; phase =
+                                         Some Keeper_state_machine.Running
+                                     }));
                              let (_st, json) =
                                Dashboard_http_keeper.keeper_config_json config
                                  name
@@ -1482,7 +1490,7 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
               ])
            reqd
        | Ok success ->
-         refresh_keeper_execution_surfaces ~config ~name "resume_owner";
+         invalidate_keeper_execution_surfaces ~config ();
          let response = resume_result_json ~name success in
          (match success.projection with
           | Applied _ ->
@@ -1546,7 +1554,11 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
             directive;
           (match plain_directive with
            | Plain_pause ->
-             refresh_keeper_execution_surfaces ~config ~name "paused"
+             refresh_keeper_execution_surfaces
+               ~config
+               ~name
+               (Keeper_lifecycle_events.Phase_event
+                  Keeper_state_machine.Paused)
            | Plain_wakeup ->
              invalidate_keeper_execution_surfaces ~config ());
           Http.Response.json_value ~compress:true ~request:req

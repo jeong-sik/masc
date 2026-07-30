@@ -187,7 +187,10 @@ val extract_keeper_name_for_post : string -> string -> string
 (** {1 Execution surface refresh} *)
 
 val refresh_keeper_execution_surfaces :
-  config:Workspace_utils.config -> name:String.t -> string -> unit
+  config:Workspace_utils.config ->
+  name:String.t ->
+  Keeper_lifecycle_events.lifecycle_event ->
+  unit
 (** Re-read the keeper meta for [name] and update derived caches. *)
 
 val invalidate_keeper_execution_surfaces :

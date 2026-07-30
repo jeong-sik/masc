@@ -264,39 +264,26 @@ EOF
 write_benchmark_persona_profile() {
   local persona_name="$1"
   local keeper_profile="$2"
-  local model_label="$3"
   local persona_dir profile_path
-  local display_name role trait goal short_goal mid_goal long_goal instructions
+  local display_name role trait instructions
 
   case "${keeper_profile}" in
     bench-analyst)
       display_name="Benchmark Analyst"
       role="Repeatable tool-quality analyst"
       trait="Deterministic evidence-first analyst"
-      goal="같은 입력에서 같은 도구 선택과 같은 근거 구조가 반복되도록 tool-quality benchmark 과제를 수행한다."
-      short_goal="지정된 과제를 필요한 최소 도구로 해결하고 동일한 evidence 경로를 재현한다."
-      mid_goal="benchmark 전반에서 불필요한 도구 호출을 줄이고 근거 기반 응답만 남긴다."
-      long_goal="provider:model 간 tool 선택 품질 차이를 낮은 분산으로 비교 가능한 형태로 남긴다."
       instructions="너는 tool-quality benchmark 전용 analyst keeper다. 같은 입력에서 같은 근거와 같은 도구 선택이 반복되도록 행동한다. 허용된 도구가 필요할 때만 호출하고, text-only로 해결 가능하면 도구를 호출하지 않는다. 답은 짧고 구조적으로 유지하고, 최종 판단은 evidence 기반으로만 내린다."
       ;;
     bench-executor)
       display_name="Benchmark Executor"
       role="Repeatable tool-quality executor"
       trait="Deterministic completion-focused executor"
-      goal="같은 입력에서 가능한 한 같은 순서와 같은 최소 도구 집합으로 benchmark 과제를 끝낸다."
-      short_goal="max_tool_calls 안에서 필요한 도구만 사용해 과제를 완료한다."
-      mid_goal="tool sequence와 완료 경로를 반복 가능하게 유지한다."
-      long_goal="completion 중심 keeper 프로필의 tool quality를 낮은 분산으로 비교 가능하게 만든다."
       instructions="너는 tool-quality benchmark 전용 executor keeper다. 같은 입력에서는 가능한 한 같은 순서와 같은 최소 도구 집합으로 과제를 끝낸다. 필요한 도구만 호출하고, max_tool_calls 안에서 끝내는 것을 우선한다. 실패하면 무작정 반복하지 말고 한 번 다른 경로로 회복한 뒤 바로 마무리한다. 최종 출력은 완료 여부와 핵심 evidence만 남긴다."
       ;;
     bench-verifier)
       display_name="Benchmark Verifier"
       role="Repeatable tool-quality verifier"
       trait="Deterministic recovery-focused verifier"
-      goal="같은 입력에서 같은 검증 절차를 반복 가능하게 수행하고, 필요한 경우 한 번만 회복한다."
-      short_goal="검증 과제를 측정 가능한 evidence로 판정하고, 회복이 필요하면 한 번만 전환한다."
-      mid_goal="failure 이후 recovery 경로의 품질을 반복 가능한 방식으로 남긴다."
-      long_goal="verification 중심 keeper 프로필의 tool quality와 recovery 품질을 비교 가능하게 만든다."
       instructions="너는 tool-quality benchmark 전용 verifier keeper다. 같은 입력에서 같은 검증 절차를 반복 가능하게 수행한다. 검증이 필요하면 측정 가능한 evidence를 우선하고, 실패 후 회복이 필요하면 다른 도구나 다른 인자로 한 번만 전환한다. 추측으로 통과시키지 않는다. 출력은 pass/fail와 미충족 조건을 명확히 남긴다."
       ;;
     *)
@@ -312,28 +299,17 @@ write_benchmark_persona_profile() {
     --arg name "${display_name}" \
     --arg role "${role}" \
     --arg trait "${trait}" \
-    --arg goal "${goal}" \
-    --arg short_goal "${short_goal}" \
-    --arg mid_goal "${mid_goal}" \
-    --arg long_goal "${long_goal}" \
     --arg instructions "${instructions}" \
     --arg mention "${keeper_profile}" \
-    --arg model "${model_label}" \
     '{
       name: $name,
       role: $role,
       trait: $trait,
       keeper: {
-        goal: $goal,
-        short_goal: $short_goal,
-        mid_goal: $mid_goal,
-        long_goal: $long_goal,
         instructions: $instructions,
         mention_targets: [$mention],
         proactive_enabled: false,
-        telemetry_feedback_enabled: false,
-        runtime_id: "keeper_unified",
-        models: [$model]
+        telemetry_feedback_enabled: false
       }
     }' > "${profile_path}"
 }
@@ -625,12 +601,11 @@ stop_keeper_best_effort() {
 run_live_case() {
   local provider="$1"
   local model="$2"
-  local model_label="$3"
-  local keeper_profile="$4"
-  local repeat_index="$5"
-  local case_json="$6"
+  local keeper_profile="$3"
+  local repeat_index="$4"
+  local case_json="$5"
 
-  local case_id keeper_name run_slug run_dir persona_name
+  local case_id keeper_name run_slug run_dir persona_name runtime_id
   local message create_args create_json status_before_json status_after_json
   local request_json request_id result_json msg_payload final_output tool_log_json
   local tool_calls_json metrics_json prompt_fingerprint tool_surface_fingerprint
@@ -642,17 +617,20 @@ run_live_case() {
   run_slug="$(slugify "${provider}-${model}-${keeper_profile}-${case_id}-r${repeat_index}")"
   keeper_name="bench-${run_slug}"
   persona_name="${keeper_name}"
+  runtime_id="${provider}.${model}"
   run_dir="${RAW_DIR}/${keeper_name}"
   mkdir -p "${run_dir}"
 
-  write_benchmark_persona_profile "${persona_name}" "${keeper_profile}" "${model_label}"
+  write_benchmark_persona_profile "${persona_name}" "${keeper_profile}"
   message="$(build_case_message "${case_json}")"
 
   create_args="$(jq -cn \
     --arg persona_name "${persona_name}" \
+    --arg runtime_id "${runtime_id}" \
     --argjson allowed_paths "$(jq -cn --arg path "${WORKSPACE_ROOT}" '[ $path ]')" \
     '{
       persona_name: $persona_name,
+      runtime_id: $runtime_id,
       autoboot_enabled: false,
       proactive_enabled: false,
       allowed_paths: $allowed_paths
@@ -940,7 +918,7 @@ run_live_harness() {
       while IFS= read -r keeper_profile; do
         [[ -z "${keeper_profile}" ]] && continue
         for (( repeat_index = 1; repeat_index <= REPEATS; repeat_index++ )); do
-          run_live_case "${provider}" "${model}" "${model_label}" "${keeper_profile}" "${repeat_index}" "${case_json}" \
+          run_live_case "${provider}" "${model}" "${keeper_profile}" "${repeat_index}" "${case_json}" \
             >> "${evidence_jsonl}"
         done
       done < <(keeper_profiles_for_case "${case_json}")

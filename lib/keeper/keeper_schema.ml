@@ -164,23 +164,22 @@ let keeper_schemas : tool_schema list = [
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Goal IDs this keeper is allowed to claim work for. Empty clears goal scoping.");
         ]);
-        ("sandbox_profile", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "local"; `String "docker"]);
-          ("default", `String "local");
-          ("description", `String "Sandbox isolation profile. New keepers default to local with playground-only writes when omitted; select docker explicitly when required.");
-        ]);
         ("autoboot_enabled", `Assoc [
           ("type", `String "boolean");
           ("description", `String "If false, persist the keeper but skip auto-start on future server boots.");
         ]);
         ("proactive_enabled", `Assoc [("type", `String "boolean")]);
+        ("runtime_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional opaque runtime id. Creation writes the keeper assignment to runtime.toml; persona profiles never own runtime selection.");
+        ]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
         ]);
       ]);
       ("required", `List [`String "persona_name"]);
+      ("additionalProperties", `Bool false);
     ];
   };
 
@@ -254,6 +253,10 @@ let keeper_schemas : tool_schema list = [
         ("proactive_enabled", `Assoc [
           ("type", `String "boolean");
           ("description", `String "If true, scheduled keeper cycles may produce proactive responses.");
+        ]);
+        ("runtime_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional opaque runtime id. Writes the keeper assignment to runtime.toml.");
         ]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");

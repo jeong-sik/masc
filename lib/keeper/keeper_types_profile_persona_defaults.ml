@@ -11,6 +11,23 @@ type load_error =
   ; detail : string
   }
 
+let supported_keeper_fields =
+  [ "always_allow"
+  ; "instructions"
+  ; "mention_targets"
+  ; "proactive_enabled"
+  ; "telemetry_feedback_enabled"
+  ; "telemetry_feedback_window_hours"
+  ]
+
+let unsupported_keeper_fields = function
+  | `Assoc fields ->
+      fields
+      |> List.filter_map (fun (key, _) ->
+        if List.mem key supported_keeper_fields then None else Some key)
+      |> List.sort_uniq String.compare
+  | _ -> []
+
 let load_from_path ~name path : (keeper_profile_defaults, load_error) result =
   let error kind detail = Error { path; kind; detail } in
   match Safe_ops.read_file_safe path with
@@ -18,7 +35,7 @@ let load_from_path ~name path : (keeper_profile_defaults, load_error) result =
   | Ok content ->
     (match Safe_ops.parse_json_safe ~context:path content with
      | Error detail -> error Persona_parse_error detail
-     | Ok json ->
+     | Ok (`Assoc _ as json) ->
       if
         Keeper_types_profile_persona.reject_placeholder_persona_profile
           ~label:"load_keeper_profile_defaults" ~path json
@@ -29,34 +46,16 @@ let load_from_path ~name path : (keeper_profile_defaults, load_error) result =
           | Some v -> v
           | None -> `Null
         in
-        let removed_fields =
-          [ "goal"
-          ; "tool_access"
-          ; "tool_denylist"
-          ; "shards"
-          ; "policy_voice_enabled"
-          ]
-          |> List.filter (fun key ->
-            Option.is_some (Json_util.assoc_member_opt key keeper_json))
-        in
-        if removed_fields <> [] then
-          error Persona_parse_error
-            (Printf.sprintf
-               "removed persona keeper fields are no longer supported: %s"
-               (String.concat ", " removed_fields))
-        else (
-        (* Persona profiles do not own a
-           runtime/model selection. Warn so stale manifests are visible. *)
-        (match Safe_ops.json_string_opt "model" keeper_json with
-         | Some raw ->
-             Log.Keeper.warn
-               "persona profile %s has a [model] key (%s); ignored - \
-                keeper->runtime assignment lives in runtime.toml \
-                [[runtime.assignments]]"
-               path raw
-         | None -> ());
         match keeper_json with
         | `Assoc _ ->
+          let unsupported_fields = unsupported_keeper_fields keeper_json in
+          if unsupported_fields <> [] then
+            error Persona_parse_error
+              (Printf.sprintf
+                 "unsupported persona keeper fields: %s. Supported fields: %s"
+                 (String.concat ", " unsupported_fields)
+                 (String.concat ", " supported_keeper_fields))
+          else
             Ok
               {
               id = Some (Ids.Keeper_id.generate ~name ~path);
@@ -81,7 +80,13 @@ let load_from_path ~name path : (keeper_profile_defaults, load_error) result =
               oas_env = [];
               unknown_toml_keys = [];
               }
-        | _ -> Ok { empty_keeper_profile_defaults with manifest_path = Some path })))
+        | `Null ->
+            Ok { empty_keeper_profile_defaults with manifest_path = Some path }
+        | _ ->
+            error Persona_parse_error
+              "persona profile field [keeper] must be a JSON object")
+     | Ok _ ->
+       error Persona_parse_error "persona profile root must be a JSON object")
 
 let load_from_dirs ~persona_dirs ~name : (keeper_profile_defaults, load_error) result =
   match

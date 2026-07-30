@@ -1217,19 +1217,32 @@ let test_persona_defaults_load_prompt_fields () =
   check (option string) "instructions load" (Some "legacy instructions")
     defaults.instructions
 
-let test_persona_defaults_reject_legacy_goal () =
+let test_persona_defaults_reject_unsupported_keeper_fields () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
   mkdir_p persona_dir;
   write_file
     (Filename.concat persona_dir "profile.json")
-    {|{"name":"Probe","keeper":{"goal":"removed"}}|};
+    {|{
+  "name": "Probe",
+  "keeper": {
+    "short_goal": "dead horizon",
+    "will": "dead self-model",
+    "model": "dead runtime assignment"
+  }
+}|};
   match KTP.load_keeper_profile_defaults_result "probe" with
-  | Ok _ -> fail "removed persona keeper.goal must fail loading"
+  | Ok _ -> fail "unsupported persona keeper fields must fail loading"
   | Error error ->
     let detail = KTP.keeper_toml_load_error_to_string error in
-    check bool "persona error names goal" true
-      (contains_substring detail "goal")
+    check bool "persona error identifies unsupported contract" true
+      (contains_substring detail "unsupported persona keeper fields");
+    check bool "persona error names short_goal" true
+      (contains_substring detail "short_goal");
+    check bool "persona error names will" true
+      (contains_substring detail "will");
+    check bool "persona error names model" true
+      (contains_substring detail "model")
 
 let test_persona_defaults_reject_removed_shards () =
   with_personas_dir @@ fun personas_dir ->
@@ -1255,6 +1268,28 @@ let test_persona_defaults_reject_removed_shards () =
       "persona error names voice policy"
       true
       (contains_substring detail "policy_voice_enabled")
+
+let test_persona_defaults_reject_non_object_shapes () =
+  with_personas_dir @@ fun personas_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  let profile_path = Filename.concat persona_dir "profile.json" in
+  write_file profile_path {|{"name":"Probe","keeper":"invalid"}|};
+  (match KTP.load_keeper_profile_defaults_result "probe" with
+   | Ok _ -> fail "non-object persona keeper must fail loading"
+   | Error error ->
+     check bool "nested shape error names keeper" true
+       (contains_substring
+          (KTP.keeper_toml_load_error_to_string error)
+          "keeper"));
+  write_file profile_path {|["invalid root"]|};
+  match KTP.load_keeper_profile_defaults_result "probe" with
+  | Ok _ -> fail "non-object persona root must fail loading"
+  | Error error ->
+    check bool "root shape error names root" true
+      (contains_substring
+         (KTP.keeper_toml_load_error_to_string error)
+         "root")
 
 let test_persona_resolver_rejects_operator_todo_profile () =
   with_personas_dir @@ fun personas_dir ->
@@ -1386,6 +1421,61 @@ let test_persona_resolver_preserves_allowed_paths () =
                items
          | _ -> [])
 
+let test_persona_resolver_preserves_runtime_owned_overrides () =
+  with_personas_dir @@ fun personas_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|{"name":"Probe","keeper":{"instructions":"test persona keeper"}}|};
+  match
+    KEP.resolved_keeper_args_from_persona
+      (`Assoc
+        [ "persona_name", `String "probe"
+        ; "runtime_id", `String "runtime.opaque"
+        ; "active_goal_ids", `List [ `String "goal-1" ]
+        ])
+  with
+  | Error e -> fail ("resolver failed: " ^ e)
+  | Ok (_, resolved) ->
+      check string "runtime_id preserved" "runtime.opaque"
+        (Yojson.Safe.Util.member "runtime_id" resolved
+         |> Yojson.Safe.Util.to_string);
+      check (list string) "active_goal_ids preserved" [ "goal-1" ]
+        (Yojson.Safe.Util.member "active_goal_ids" resolved
+         |> Yojson.Safe.Util.to_list
+         |> List.map Yojson.Safe.Util.to_string)
+
+let test_persona_resolver_rejects_unsupported_or_ill_typed_args () =
+  with_personas_dir @@ fun personas_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|{"name":"Probe","keeper":{"instructions":"test persona keeper"}}|};
+  (match
+     KEP.resolved_keeper_args_from_persona
+       (`Assoc
+         [ "persona_name", `String "probe"
+         ; "unknown_arg", `String "must fail closed"
+         ])
+   with
+   | Ok _ -> fail "unknown persona creation argument must fail"
+   | Error e ->
+       check bool "unknown argument named" true
+         (contains_substring e "unknown_arg"));
+  match
+    KEP.resolved_keeper_args_from_persona
+      (`Assoc
+        [ "persona_name", `String "probe"
+        ; "proactive_enabled", `String "not-a-boolean"
+        ])
+  with
+  | Ok _ -> fail "ill-typed persona creation argument must fail"
+  | Error e ->
+      check bool "ill-typed argument named" true
+        (contains_substring e "proactive_enabled")
+
 let test_persona_resolver_renders_durable_keeper_toml () =
   let resolved =
     `Assoc
@@ -1397,6 +1487,8 @@ let test_persona_resolver_renders_durable_keeper_toml () =
         ("mention_targets", `List [ `String "probe"; `String "@probe" ]);
         ("proactive_enabled", `Bool true);
         ("allowed_paths", `List [ `String "/tmp/probe" ]);
+        ("active_goal_ids", `List [ `String "goal-1" ]);
+        ("runtime_id", `String "runtime.opaque");
       ]
   in
   match KEP.render_keeper_toml_from_resolved_args resolved with
@@ -1419,7 +1511,11 @@ let test_persona_resolver_renders_durable_keeper_toml () =
               check (list string) "mention targets"
                 [ "probe"; "@probe" ] defaults.mention_targets;
               check (option (list string)) "allowed_paths"
-                (Some [ "/tmp/probe" ]) defaults.allowed_paths))
+                (Some [ "/tmp/probe" ]) defaults.allowed_paths;
+              check (option (list string)) "active_goal_ids"
+                (Some [ "goal-1" ]) defaults.active_goal_ids;
+              check bool "runtime_id excluded from keeper TOML" false
+                (contains_substring toml "runtime_id")))
 
 (* ================================================================ *)
 (* Unknown-key detection                                             *)
@@ -1991,10 +2087,12 @@ let () =
             test_bundled_issue_king_uses_local_sandbox;
           test_case "persona defaults load prompt fields" `Quick
             test_persona_defaults_load_prompt_fields;
-          test_case "persona defaults reject legacy goal" `Quick
-            test_persona_defaults_reject_legacy_goal;
+          test_case "persona defaults reject unsupported keeper fields" `Quick
+            test_persona_defaults_reject_unsupported_keeper_fields;
           test_case "persona defaults reject removed shards" `Quick
             test_persona_defaults_reject_removed_shards;
+          test_case "persona defaults reject non-object shapes" `Quick
+            test_persona_defaults_reject_non_object_shapes;
           test_case "persona resolver rejects OPERATOR_TODO profile" `Quick
             test_persona_resolver_rejects_operator_todo_profile;
           test_case "persona resolver rejects placeholder in resolved payload" `Quick
@@ -2003,6 +2101,10 @@ let () =
             test_persona_resolver_preserves_autoboot_enabled_arg;
           test_case "persona resolver preserves allowed_paths" `Quick
             test_persona_resolver_preserves_allowed_paths;
+          test_case "persona resolver preserves runtime-owned overrides" `Quick
+            test_persona_resolver_preserves_runtime_owned_overrides;
+          test_case "persona resolver rejects unsupported or ill-typed args" `Quick
+            test_persona_resolver_rejects_unsupported_or_ill_typed_args;
           test_case "persona resolver renders durable keeper TOML" `Quick
             test_persona_resolver_renders_durable_keeper_toml;
         ] );

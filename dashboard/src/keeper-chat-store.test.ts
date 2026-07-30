@@ -7,6 +7,7 @@ import {
   requeueInputFront,
   clearInputQueue,
   hasQueuedInputClientAction,
+  getQueuedMessages,
   getQueueLength,
   getQueueTotal,
   updateQueuedMessage,
@@ -237,6 +238,33 @@ describe('keeper-chat-store input queue', () => {
       mimeType: 'image/png',
       size: 1024,
     }])
+  })
+
+  it('rejects ambiguous semantic text edits without partially mutating the item', () => {
+    const msg = enqueueInput(
+      'keeper-q',
+      'original',
+      undefined,
+      'click-multi-text',
+      undefined,
+      [
+        { type: 'text', text: 'first' },
+        { type: 'text', text: 'second' },
+      ],
+    )
+
+    expect(() => updateQueuedMessage('keeper-q', msg.id, {
+      content: 'edited',
+      editOnOpen: false,
+    })).toThrow('여러 구조화 text block')
+
+    expect(getQueuedMessages('keeper-q')).toEqual([msg])
+    expect(msg.content).toBe('original')
+    expect(msg.clientActionId).toBe('click-multi-text')
+    expect(msg.userBlocks).toEqual([
+      { type: 'text', text: 'first' },
+      { type: 'text', text: 'second' },
+    ])
   })
 })
 

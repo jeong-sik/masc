@@ -390,23 +390,6 @@ let parse_mutation_request mutation body =
          "move request must contain exactly expected_revision and the supported schema")
 ;;
 
-let pending_message ~keeper_name ~receipt_id =
-  let* ({ revision; receipts } : Keeper_chat_queue.pending_snapshot) =
-    Keeper_chat_queue.pending_receipts ~keeper_name
-  in
-  match
-    List.find_opt
-      (fun (receipt : Keeper_chat_queue.active_receipt) ->
-         Keeper_chat_queue.Receipt_id.equal receipt.receipt_id receipt_id)
-      receipts
-  with
-  | Some receipt -> Ok (revision, receipt.message)
-  | None ->
-    Error
-      (Keeper_chat_queue.Receipt_not_pending
-         { receipt_id; observed_state = None })
-;;
-
 let handle_mutation_post
     state
     ~actor
@@ -451,23 +434,11 @@ let handle_mutation_post
            let result, audit_action =
              match parsed with
              | Parsed_edit { expected_revision; content } ->
-               ( (let* observed_revision, message =
-                    pending_message ~keeper_name ~receipt_id
-                  in
-                  if not (Int64.equal observed_revision expected_revision)
-                  then
-                    Error
-                      (Keeper_chat_queue.Pending_revision_mismatch
-                         { receipt_id
-                         ; expected_revision
-                         ; observed_revision
-                         })
-                  else
-                    Keeper_chat_queue.edit_pending
-                      ~keeper_name
-                      ~receipt_id
-                      ~expected_revision
-                      ~message:{ message with content })
+               ( Keeper_chat_queue.edit_pending
+                   ~keeper_name
+                   ~receipt_id
+                   ~expected_revision
+                   ~content
                , "keeper_chat_queue_pending_edit" )
              | Parsed_move_to_end { expected_revision } ->
                ( Keeper_chat_queue.move_pending_to_end

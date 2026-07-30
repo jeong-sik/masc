@@ -395,10 +395,13 @@ val edit_pending :
   keeper_name:string ->
   receipt_id:Receipt_id.t ->
   expected_revision:int64 ->
-  message:queued_message ->
+  content:string ->
   (pending_mutation_report, mutation_error) result
-(** Atomically replace the payload of exactly one durable [Pending] receipt.
-    The receipt identity and FIFO position remain unchanged. *)
+(** Atomically edit the text of exactly one durable [Pending] receipt.
+    Attachment payloads, provenance, timestamp, receipt identity, and FIFO
+    position remain unchanged. A single structured text block is updated in
+    place; a media-only structured input gains one text block; multiple
+    structured text blocks are rejected instead of guessed. *)
 
 val move_pending_to_end :
   keeper_name:string ->

@@ -465,8 +465,44 @@ let test_pending_edit_and_move_are_revision_fenced () =
   let keeper_name = "pending-operator" in
   ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
   let first = enqueue_exn ~keeper_name (message "first") in
-  let second = enqueue_exn ~keeper_name (message "second") in
-  let third = enqueue_exn ~keeper_name (message "third") in
+  let attachment : Keeper_chat_store.attachment =
+    { id = "pending-image"
+    ; att_type = "image"
+    ; name = "pending.png"
+    ; size = 8
+    ; mime_type = "image/png"
+    ; data = "cGF5bG9hZA=="
+    }
+  in
+  let media : Keeper_multimodal_input.user_media_block =
+    { attachment_id = attachment.id
+    ; name = attachment.name
+    ; mime_type = attachment.mime_type
+    ; size = Some attachment.size
+    }
+  in
+  let second =
+    enqueue_exn
+      ~keeper_name
+      (message
+         ~timestamp:2.0
+         ~user_blocks:
+           [ Keeper_multimodal_input.User_image media
+           ; Keeper_multimodal_input.User_text "second"
+           ]
+         ~attachments:[ attachment ]
+         "second")
+  in
+  let third =
+    enqueue_exn
+      ~keeper_name
+      (message
+         ~user_blocks:
+           [ Keeper_multimodal_input.User_text "third-a"
+           ; Keeper_multimodal_input.User_text "third-b"
+           ]
+         "third")
+  in
   let next_after =
     match
       Keeper_chat_queue.pending_receipts_page
@@ -518,7 +554,7 @@ let test_pending_edit_and_move_are_revision_fenced () =
        ~keeper_name
        ~receipt_id:second.receipt_id
        ~expected_revision:3L
-       ~message:(message "second edited")
+       ~content:"second edited"
    with
    | Ok { revision = 4L; pending_index = 1; _ } ->
      check "pending edit preserves the FIFO position" true
@@ -549,23 +585,44 @@ let test_pending_edit_and_move_are_revision_fenced () =
   (match Keeper_chat_queue.pending_receipts ~keeper_name with
    | Ok { revision = 5L; receipts = [ second_pending; third_pending; first_pending ] } ->
      check "edit keeps receipt identity and payload atomic"
-       (Keeper_chat_queue.Receipt_id.equal
-          second.receipt_id
-          second_pending.receipt_id
-        && String.equal second_pending.message.content "second edited");
+        (Keeper_chat_queue.Receipt_id.equal
+           second.receipt_id
+           second_pending.receipt_id
+         && String.equal second_pending.message.content "second edited"
+         && Float.equal second_pending.message.timestamp 2.0
+         && second_pending.message.attachments = [ attachment ]
+         && second_pending.message.user_blocks
+            = [ Keeper_multimodal_input.User_image media
+              ; Keeper_multimodal_input.User_text "second edited"
+              ]);
      check "move-to-end preserves the other FIFO order"
        (Keeper_chat_queue.Receipt_id.equal third.receipt_id third_pending.receipt_id
         && Keeper_chat_queue.Receipt_id.equal first.receipt_id first_pending.receipt_id)
    | Ok _ | Error _ ->
      check "edit keeps receipt identity and payload atomic" false;
      check "move-to-end preserves the other FIFO order" false);
+  (match
+     Keeper_chat_queue.edit_pending
+       ~keeper_name
+       ~receipt_id:third.receipt_id
+       ~expected_revision:5L
+       ~content:"ambiguous edit"
+   with
+   | Error (Keeper_chat_queue.Invalid_input _) ->
+     (match Keeper_chat_queue.pending_receipts ~keeper_name with
+      | Ok { revision = 5L; _ } ->
+        check "ambiguous structured edit is rejected without mutation" true
+      | Ok _ | Error _ ->
+        check "ambiguous structured edit is rejected without mutation" false)
+   | Ok _ | Error _ ->
+     check "ambiguous structured edit is rejected without mutation" false);
   let lease = lease_exn ~keeper_name in
   (match
      Keeper_chat_queue.edit_pending
        ~keeper_name
        ~receipt_id:lease.item.receipt_id
        ~expected_revision:6L
-       ~message:(message "too late")
+       ~content:"too late"
    with
    | Error
        (Keeper_chat_queue.Receipt_not_pending

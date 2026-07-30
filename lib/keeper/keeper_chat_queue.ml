@@ -3410,17 +3410,67 @@ let edit_pending
     ~keeper_name
     ~receipt_id
     ~expected_revision
-    ~message =
-  match canonical_queued_message message with
-  | Error detail -> Error (Invalid_input detail)
-  | Ok message ->
-    mutate_pending
-      ~keeper_name
-      ~receipt_id
-      ~expected_revision
-      ~target_of_row:(fun entry row ->
-        match row.receipt.state with
-        | Stored_pending _ ->
+    ~content =
+  let edit_user_blocks blocks =
+    let text_block_count =
+      List.fold_left
+        (fun count -> function
+           | Keeper_multimodal_input.User_text _ -> count + 1
+           | Keeper_multimodal_input.User_image _
+           | Keeper_multimodal_input.User_document _
+           | Keeper_multimodal_input.User_audio _ ->
+             count)
+        0
+        blocks
+    in
+    if text_block_count > 1
+    then
+      Error
+        (Invalid_input
+           "pending chat edit requires at most one structured text block")
+    else
+      let trimmed_content = String.trim content in
+      let rec replace = function
+        | [] ->
+          if (match blocks with
+              | [] -> true
+              | _ :: _ -> false)
+             || String.equal trimmed_content ""
+          then []
+          else [ Keeper_multimodal_input.User_text content ]
+        | Keeper_multimodal_input.User_text _ :: rest ->
+          if String.equal trimmed_content ""
+          then rest
+          else Keeper_multimodal_input.User_text content :: rest
+        | block :: rest -> block :: replace rest
+      in
+      Ok (replace blocks)
+  in
+  mutate_pending
+    ~keeper_name
+    ~receipt_id
+    ~expected_revision
+    ~target_of_row:(fun entry row ->
+      match row.receipt.state with
+      | Stored_pending message ->
+        if String.equal content message.content
+        then Error (Invalid_input "pending chat edit content is unchanged")
+        else if
+          String.equal (String.trim content) ""
+          &&
+          match message.attachments with
+          | [] -> true
+          | _ :: _ -> false
+        then
+          Error
+            (Invalid_input
+               "pending chat edit requires content or an existing attachment")
+        else
+          let* user_blocks = edit_user_blocks message.user_blocks in
+          let* message =
+            canonical_queued_message { message with content; user_blocks }
+            |> Result.map_error (fun detail -> Invalid_input detail)
+          in
           Ok
             ( { row with
                 receipt =
@@ -3430,15 +3480,15 @@ let edit_pending
               }
             , entry.next_sequence
             , Pending_edit_transition { receipt_id } )
-        | Stored_inflight _
-        | Stored_recovery_required _
-        | Stored_delivered _
-        | Stored_failed _ ->
-          Error
-            (Receipt_not_pending
-               { receipt_id
-               ; observed_state = Some (receipt_state_of_stored row.receipt.state)
-               }))
+      | Stored_inflight _
+      | Stored_recovery_required _
+      | Stored_delivered _
+      | Stored_failed _ ->
+        Error
+          (Receipt_not_pending
+             { receipt_id
+             ; observed_state = Some (receipt_state_of_stored row.receipt.state)
+             }))
 
 let move_pending_to_end
     ~keeper_name

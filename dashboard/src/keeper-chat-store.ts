@@ -141,6 +141,10 @@ function editedUserBlocks(
   if (previousContent === nextText) {
     return retained.length > 0 ? retained : undefined
   }
+  const textBlockCount = retained.filter(block => block.type === 'text').length
+  if (textBlockCount > 1) {
+    throw new Error('여러 구조화 text block이 있는 메시지는 추측해서 수정하지 않습니다.')
+  }
   let replacedText = false
   const edited: KeeperUserInputBlock[] = []
   for (const block of retained) {
@@ -167,24 +171,31 @@ export function updateQueuedMessage(
   if (!q) return null
   const item = q.items.find(i => i.id === id)
   if (!item) return null
-  if ('editOnOpen' in updates) {
-    if (updates.editOnOpen) item.editOnOpen = true
-    else delete item.editOnOpen
-  }
   const previousContent = item.content
   const previousUserBlocks = item.userBlocks
   const contentChanged =
     typeof updates.content === 'string' && updates.content !== item.content
   const attachmentsChanged = 'attachments' in updates
-  if (typeof updates.content === 'string') item.content = updates.content
-  if ('attachments' in updates) {
-    if (updates.attachments && updates.attachments.length > 0) {
-      item.attachments = updates.attachments
-    } else {
-      delete item.attachments
-    }
-  }
   const changed = contentChanged || attachmentsChanged
+  const nextContent = typeof updates.content === 'string' ? updates.content : item.content
+  const nextAttachments = 'attachments' in updates ? updates.attachments : item.attachments
+  const nextUserBlocks = changed
+    ? ('userBlocks' in updates
+        ? updates.userBlocks
+        : editedUserBlocks(
+            previousUserBlocks,
+            previousContent,
+            nextContent,
+            nextAttachments,
+          ))
+    : previousUserBlocks
+  if ('editOnOpen' in updates) {
+    if (updates.editOnOpen) item.editOnOpen = true
+    else delete item.editOnOpen
+  }
+  item.content = nextContent
+  if (nextAttachments && nextAttachments.length > 0) item.attachments = nextAttachments
+  else delete item.attachments
   if (changed) delete item.clientActionId
   if (changed) {
     if ('blocks' in updates && updates.blocks && updates.blocks.length > 0) {
@@ -192,14 +203,6 @@ export function updateQueuedMessage(
     } else {
       delete item.blocks
     }
-    const nextUserBlocks = 'userBlocks' in updates
-      ? updates.userBlocks
-      : editedUserBlocks(
-          previousUserBlocks,
-          previousContent,
-          item.content,
-          item.attachments,
-        )
     if (nextUserBlocks && nextUserBlocks.length > 0) item.userBlocks = nextUserBlocks
     else delete item.userBlocks
   }

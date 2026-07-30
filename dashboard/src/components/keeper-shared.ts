@@ -444,21 +444,29 @@ function QueueItemCard({ keeperName, msg, onMutate, onSave }: QueueItemCardProps
   const [editing, setEditing] = useState(msg.editOnOpen === true)
   const [text, setText] = useState(msg.content)
   const [attachments, setAttachments] = useState(msg.attachments ?? [])
+  const [editError, setEditError] = useState<string | null>(null)
 
   const save = () => {
-    updateQueuedMessage(keeperName, msg.id, {
-      content: text.trim(),
-      attachments: attachments.length > 0 ? attachments : undefined,
-      editOnOpen: false,
-    })
-    setEditing(false)
-    onMutate()
-    onSave()
+    try {
+      const updated = updateQueuedMessage(keeperName, msg.id, {
+        content: text.trim(),
+        attachments: attachments.length > 0 ? attachments : undefined,
+        editOnOpen: false,
+      })
+      if (!updated) throw new Error('수정할 대기 메시지를 찾지 못했습니다.')
+      setEditError(null)
+      setEditing(false)
+      onMutate()
+      onSave()
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : String(error))
+    }
   }
 
   const cancel = () => {
     setText(msg.content)
     setAttachments(msg.attachments ?? [])
+    setEditError(null)
     updateQueuedMessage(keeperName, msg.id, { editOnOpen: false })
     setEditing(false)
   }
@@ -493,6 +501,9 @@ function QueueItemCard({ keeperName, msg, onMutate, onSave }: QueueItemCardProps
                     `)}
                   </div>
                 `
+              : null}
+            ${editError
+              ? html`<div class="mt-2 text-2xs text-[var(--color-status-err)]">${editError}</div>`
               : null}
             <div class="mt-2 flex items-center justify-end gap-2">
               <button type="button" class="text-2xs text-[var(--color-fg-secondary)] hover:text-[var(--color-fg-primary)]" onClick=${cancel}>취소</button>

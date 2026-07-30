@@ -107,11 +107,18 @@ let test_oldest_contiguous_typed_window () =
     ]
   in
   let planning_window = window units in
+  (* Index 1 is a User message and is selected like any other text-bearing unit:
+     position carries no meaning. The run still stops at index 5, the metadata
+     barrier, which is a real structural boundary. *)
   Alcotest.(check (list int))
     "only the oldest contiguous eligible run enters planning"
-    [ 2; 3; 4 ]
+    [ 1; 2; 3; 4 ]
     (C.For_testing.planning_window_source_indices planning_window);
-  Alcotest.(check bool) "a lone first User goal stays exact" false
+  (* The goal is assembled into [system_prompt] every turn and never enters the
+     compacted message list, so no message has to be pinned to preserve it.
+     Excluding the first User message truncated the window at whatever preceded
+     it -- 2 selectable units out of 1,156 on live checkpoints. *)
+  Alcotest.(check bool) "a lone first User message is selectable" true
     (C.has_eligible_units [ ordinary (text T.User "goal") ]);
   let wire = wire_of_window planning_window in
   Alcotest.(check bool) "later User state crosses the typed window" true
@@ -130,9 +137,11 @@ let test_media_and_unseen_tail_stay_outside () =
     ]
   in
   let planning_window = window units in
+  (* Index 1 (User) is selectable now; the media cycle at index 3 is still the
+     boundary that ends the run. *)
   Alcotest.(check (list int))
     "media starts an exact protected boundary"
-    [ 2 ]
+    [ 1; 2 ]
     (C.For_testing.planning_window_source_indices planning_window);
   let wire = wire_of_window planning_window in
   Alcotest.(check bool) "oldest source crosses boundary" true
@@ -177,7 +186,7 @@ let test_boundary_plan_validation_is_constant_size () =
   let valid = plan planning_window ~summary:"faithful memory" ~keep_from_unit_index:4 in
   Alcotest.(check (list int))
     "boundary summarizes a prefix without enumeration"
-    [ 2; 3 ]
+    [ 1; 2; 3 ]
     (C.summarized_indices valid);
   Alcotest.(check (list int)) "boundary drops no implicit units" []
     (C.dropped_indices valid);
@@ -188,7 +197,8 @@ let test_boundary_plan_validation_is_constant_size () =
     (Astring.String.is_infix ~affix:"minimal recent suffix" request_wire);
   let invalid =
     [ plan_json ~summary:"" ~keep_from_unit_index:4
-    ; plan_json ~summary:"x" ~keep_from_unit_index:2
+      (* At or below the window's first source: the window now starts at 1. *)
+    ; plan_json ~summary:"x" ~keep_from_unit_index:1
     ; plan_json ~summary:"x" ~keep_from_unit_index:6
     ; `Assoc
         [ S.compaction_plan_field_summary, `String "x"
@@ -244,10 +254,16 @@ let test_apply_preserves_exact_outside_state_and_cycle () =
     | U.Closed_tool_cycle messages -> messages
     | U.Ordinary_message _ -> Alcotest.fail "expected closed cycle"
   in
+  (* The goal is no longer pinned in the message list: it is assembled into
+     [system_prompt] each turn, so the first User message is summarized with the
+     rest of the window. System messages are still outside the window. *)
   match compacted with
-  | system' :: goal' :: summary :: rest ->
+  | system' :: summary :: rest ->
     Alcotest.(check bool) "system stays exact" true (system' = system);
-    Alcotest.(check bool) "User goal stays exact" true (goal' = goal);
+    Alcotest.(check bool)
+      "the first User message is summarized, not pinned"
+      false
+      (List.mem goal compacted);
     Alcotest.(check bool)
       "summary is explicit derived state"
       true
@@ -277,11 +293,13 @@ let test_whole_tool_cycle_is_summarized_atomically () =
   in
   Alcotest.(check (list int))
     "the complete tool cycle is summarized before one exact suffix"
-    [ 2; 3; 4 ]
+    [ 1; 2; 3; 4 ]
     (C.summarized_indices compacted_plan);
+  (* system + summary + tail. The first User message is inside the summary now
+     rather than pinned ahead of it. *)
   Alcotest.(check int)
-    "one summary replaces assistant plus complete cycle and keeps the tail"
-    4
+    "one summary replaces the window and keeps system and the tail"
+    3
     (List.length (C.apply compacted_plan))
 ;;
 
@@ -338,9 +356,12 @@ let test_derived_summary_folds_hierarchically () =
       (Astring.String.is_infix ~affix:"next-user-state" wire);
     Alcotest.(check bool) "later run becomes the next window" true
       (Astring.String.is_infix ~affix:"next-run" wire);
+    (* One unit shorter than before: the first User message is inside the first
+       summary instead of pinned ahead of it, so the fold's keep boundary moves
+       down by one. *)
     let folded =
       C.apply
-        (plan next ~summary:"one rolling memory" ~keep_from_unit_index:5)
+        (plan next ~summary:"one rolling memory" ~keep_from_unit_index:4)
     in
     let summaries =
       List.filter

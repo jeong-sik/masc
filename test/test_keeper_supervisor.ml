@@ -1618,6 +1618,66 @@ let test_launch_rejected_terminal_state_does_not_announce_running () =
       check bool "rejected launch closes lane join contract"
         true (Reg.lane_has_exited reg))
 
+let test_supervised_stop_joins_board_attention_worker () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  ensure_test_runtime ();
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.For_testing.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+      let name = "supervised-board-worker-stop" in
+      let meta = make_meta name in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register_offline ~base_path:config.base_path name meta in
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = supervisor_agent_name
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = Some (Eio.Stdenv.net env)
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
+        }
+      in
+      (match
+         Masc.Keeper_supervisor_launch.launch_supervised_fiber
+           ~proactive_warmup_sec:0
+           ctx
+           meta
+           reg
+       with
+       | Ok () -> ()
+       | Error error ->
+         fail
+           (Keeper_state_machine.transition_error_to_string error));
+      let joined =
+        Eio.Time.with_timeout_exn ctx.clock 5.0 (fun () ->
+          Masc.Keeper_keepalive.stop_keepalive_and_await
+            ~base_path:config.base_path
+            name)
+      in
+      (match joined with
+       | Masc.Keeper_keepalive.Keeper_not_registered ->
+         fail "supervised Keeper disappeared before joined stop"
+       | Masc.Keeper_keepalive.Keeper_joined { terminal = `Stopped; _ } -> ()
+       | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
+         fail ("supervised stop resolved as crashed: " ^ reason));
+      check bool
+        "board-attention sibling joined with supervised lane"
+        true
+        (Reg.lane_has_exited reg))
+
 (* Codex #24135 finding 5: a rejected [Keeper_lane.fork] (parent switch already
    cancelling, or [claim_start] refused) must propagate [Error] from
    [launch_supervised_fiber] and resolve the done promise through the crash
@@ -2138,6 +2198,8 @@ let () =
         test_supervisor_cleanup_suppresses_cancellation_and_classifies_failures;
       test_case "terminal-state launch reject does not announce Running" `Quick
         test_launch_rejected_terminal_state_does_not_announce_running;
+      test_case "supervised stop joins Board worker" `Quick
+        test_supervised_stop_joins_board_attention_worker;
       test_case "lane fork reject does not announce Running" `Quick
         test_launch_fork_rejection_does_not_announce_running;
       test_case "fork reject preserves newer same-name lane" `Quick

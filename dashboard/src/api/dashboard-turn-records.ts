@@ -11,6 +11,16 @@ export type TurnBlock = {
   digest: string
 }
 
+export type TurnRequestWireObservation =
+  | {
+      request_runtime_profile: string
+      request_body_bytes: number
+    }
+  | {
+      request_runtime_profile: null
+      request_body_bytes: null
+    }
+
 export type TurnRecordEntry = {
   execution_ids: string[]
   keeper: string
@@ -60,7 +70,7 @@ export type TurnRecordEntry = {
   // request_latency_ms - ttfrc_ms (§9.6 fabrication guard).
   ttfrc_ms?: number
   ts: number
-}
+} & TurnRequestWireObservation
 
 export type TurnBlockDiff = {
   added: TurnBlock[]
@@ -317,6 +327,8 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     'absolute_turn',
     'turn_ref',
     'blocks',
+    'request_runtime_profile',
+    'request_body_bytes',
     'runtime_profile',
     'model',
     'finish_reason',
@@ -342,6 +354,20 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   const runtime_profile = decodeExactNonEmptyString(raw.runtime_profile)
   const ts = asNumber(raw.ts)
   const blocks = decodeTurnBlockList(raw.blocks)
+  const request_runtime_profile =
+    raw.request_runtime_profile === null
+      ? null
+      : decodeExactNonEmptyString(raw.request_runtime_profile)
+  const request_body_bytes =
+    raw.request_body_bytes === null
+      ? null
+      : decodeNonNegativeSafeInteger(raw.request_body_bytes)
+  const requestWireObservation: TurnRequestWireObservation | null =
+    request_runtime_profile !== null && request_body_bytes !== null
+      ? { request_runtime_profile, request_body_bytes }
+      : request_runtime_profile === null && request_body_bytes === null
+        ? { request_runtime_profile: null, request_body_bytes: null }
+        : null
   const turn_ref = decodeExactNonEmptyString(raw.turn_ref)
   const model = decodeOptionalField(raw, 'model', decodeExactNonEmptyString)
   const finish_reason = decodeOptionalField(raw, 'finish_reason', decodeExactNonEmptyString)
@@ -374,6 +400,11 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     || runtime_profile === null
     || ts == null
     || blocks === null
+    || !Object.hasOwn(raw, 'request_runtime_profile')
+    || request_runtime_profile === null && raw.request_runtime_profile !== null
+    || !Object.hasOwn(raw, 'request_body_bytes')
+    || request_body_bytes === null && raw.request_body_bytes !== null
+    || requestWireObservation === null
     || !Array.isArray(raw.execution_ids)
     || !raw.execution_ids.every((id): id is string => typeof id === 'string' && id.length > 0)
     || turn_ref === null
@@ -405,6 +436,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     absolute_turn,
     turn_ref,
     blocks,
+    ...requestWireObservation,
     runtime_profile,
     model,
     finish_reason,

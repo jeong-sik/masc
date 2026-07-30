@@ -78,6 +78,8 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
               { block: 'memory_os_recall', bytes: 512, digest: 'memory-digest-cccccccc' },
             ],
             runtime_profile: 'oas-seoul-1',
+            request_runtime_profile: 'oas-seoul-1',
+            request_body_bytes: 65536,
             model: 'runtime',
             finish_reason: 'completed',
             input_tokens: 33000,

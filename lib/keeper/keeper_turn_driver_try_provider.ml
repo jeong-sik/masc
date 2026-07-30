@@ -62,6 +62,8 @@ type try_provider_ctx =
   ; agent_ref : Agent_sdk.Agent.t option ref option
   ; on_runtime_observation :
       (Runtime_observation.runtime_observation -> unit) option
+  ; on_request_wire_observation :
+      (runtime_id:string -> body_bytes:int -> unit) option
   ; (* Event bus *)
     event_bus : Agent_sdk.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
@@ -262,6 +264,7 @@ let run_try_provider
           ; pre_dispatch_serialization_observer =
               Some
                 (Keeper_request_wire_observation.observer
+                   ?on_observation:ctx.on_request_wire_observation
                    ~keeper_name:ctx.keeper_name
                    ~runtime_id:ctx.runtime_id
                    ~max_request_body_bytes:ctx.max_request_body_bytes)

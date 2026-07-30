@@ -39,6 +39,11 @@ type usage =
        [None] on legacy rows and on turns where the provider reported no usage. *)
   }
 
+type request_wire_observation =
+  { runtime_profile : string
+  ; body_bytes : int
+  }
+
 type t =
   { execution_ids : Ids.Execution_id.t list (* tool calls in this turn *)
   ; keeper : string
@@ -103,6 +108,12 @@ type t =
        request_latency_ms - ttfrc_ms: that would fabricate a number
        indistinguishable from a measurement (§9.6), so decode stays
        not_recorded until a provider reports it natively. *)
+  ; request_wire_observation : request_wire_observation option
+    (* Runtime id and exact serialized body size for the latest request that
+       reached OAS's pre-dispatch serialization boundary. This is not derived
+       from prompt blocks or provider token usage. [None] means this turn ended
+       before any provider request reached that boundary; both JSON fields are
+       then required explicit nulls. *)
   ; sampling : sampling
   ; usage : usage
   ; ts : float

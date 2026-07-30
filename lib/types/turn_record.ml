@@ -19,6 +19,11 @@ type usage =
   ; cache_read_input_tokens : int option
   }
 
+type request_wire_observation =
+  { runtime_profile : string
+  ; body_bytes : int
+  }
+
 type t =
   { execution_ids : Ids.Execution_id.t list
   ; keeper : string
@@ -34,6 +39,7 @@ type t =
   ; price_output_per_million : float option
   ; request_latency_ms : int option
   ; ttfrc_ms : float option
+  ; request_wire_observation : request_wire_observation option
   ; sampling : sampling
   ; usage : usage
   ; ts : float
@@ -53,6 +59,12 @@ let prompt_block_to_json (b : prompt_block) : Yojson.Safe.t =
     ]
 
 let to_json (r : t) : Yojson.Safe.t =
+  let request_runtime_profile, request_body_bytes =
+    match r.request_wire_observation with
+    | Some observation ->
+      `String observation.runtime_profile, `Int observation.body_bytes
+    | None -> `Null, `Null
+  in
   `Assoc
     ([ ( "execution_ids"
        , `List (List.map Ids.Execution_id.to_yojson r.execution_ids) )
@@ -61,6 +73,8 @@ let to_json (r : t) : Yojson.Safe.t =
      ; ("absolute_turn", `Int r.absolute_turn)
      ; ("blocks", `List (List.map prompt_block_to_json r.blocks))
      ; ("runtime_profile", `String r.runtime_profile)
+     ; "request_runtime_profile", request_runtime_profile
+     ; "request_body_bytes", request_body_bytes
      ]
     @ opt_field "turn_ref" Ids.Turn_ref.to_yojson r.turn_ref
     @ opt_field "model" (fun v -> `String v) r.model
@@ -96,9 +110,21 @@ let as_string name = function
   | `String s -> Ok s
   | _ -> Error (Printf.sprintf "turn_record: field %S is not a string" name)
 
+let as_nonempty_string name json =
+  let* value = as_string name json in
+  if String.equal (String.trim value) ""
+  then Error (Printf.sprintf "turn_record: field %S is empty" name)
+  else Ok value
+
 let as_int name = function
   | `Int i -> Ok i
   | _ -> Error (Printf.sprintf "turn_record: field %S is not an int" name)
+
+let as_nonnegative_int name json =
+  let* value = as_int name json in
+  if value < 0
+  then Error (Printf.sprintf "turn_record: field %S is negative" name)
+  else Ok value
 
 let as_float name = function
   | `Float f -> Ok f
@@ -109,6 +135,14 @@ let opt_member name fields decode =
   match member name fields with
   | None -> Ok None
   | Some value ->
+      let* decoded = decode name value in
+      Ok (Some decoded)
+
+let nullable name fields decode =
+  let* value = require name fields in
+  match value with
+  | `Null -> Ok None
+  | value ->
       let* decoded = decode name value in
       Ok (Some decoded)
 
@@ -164,6 +198,22 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
       in
       let* profile_json = require "runtime_profile" fields in
       let* runtime_profile = as_string "runtime_profile" profile_json in
+      let* request_runtime_profile =
+        nullable "request_runtime_profile" fields as_nonempty_string
+      in
+      let* request_body_bytes =
+        nullable "request_body_bytes" fields as_nonnegative_int
+      in
+      let* request_wire_observation =
+        match request_runtime_profile, request_body_bytes with
+        | Some runtime_profile, Some body_bytes ->
+          Ok (Some { runtime_profile; body_bytes })
+        | None, None -> Ok None
+        | Some _, None | None, Some _ ->
+          Error
+            "turn_record: request_runtime_profile and request_body_bytes must \
+             both be present or both be null"
+      in
       let* turn_ref = opt_member "turn_ref" fields as_turn_ref in
       let* model = opt_member "model" fields as_string in
       let* finish_reason = opt_member "finish_reason" fields as_string in
@@ -202,6 +252,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; price_output_per_million
         ; request_latency_ms
         ; ttfrc_ms
+        ; request_wire_observation
         ; sampling = { temperature; top_p; max_tokens; thinking_budget; enable_thinking }
         ; usage =
             { input_tokens

@@ -3,15 +3,13 @@ type request =
      unrelated queue revision change must not invalidate them. Reprioritize
      rewrites queue order and therefore retains the queue-wide CAS revision. *)
   | Cancel of
-      { expected_revision : int64
-      ; queue_index : int
+      { queue_index : int
       ; source_incarnation : int64
       ; operator_operation_id : string
       ; reason : string
       }
   | Transfer of
-      { expected_revision : int64
-      ; queue_index : int
+      { queue_index : int
       ; source_incarnation : int64
       ; operator_operation_id : string
       ; target_keeper : string

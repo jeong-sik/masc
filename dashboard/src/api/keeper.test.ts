@@ -671,9 +671,9 @@ describe('Keeper chat durable receipt API', () => {
         body: JSON.stringify({
           schema: 'keeper_event_queue.operator.request.v1',
           action: 'reprioritize',
-          expected_revision: '7',
           queue_index: 0,
           source_incarnation: EVENT_SOURCE_INCARNATION,
+          expected_revision: '7',
           urgency: 'immediate',
         }),
       }),
@@ -702,7 +702,6 @@ describe('Keeper chat durable receipt API', () => {
       await operateKeeperEventQueue('sangsu', {
         action: 'cancel',
         operationId: 'operation-9',
-        expectedRevision: '7',
         queueIndex: 1,
         sourceIncarnation: EVENT_SOURCE_INCARNATION,
         reason: 'operator cancellation',
@@ -717,7 +716,6 @@ describe('Keeper chat durable receipt API', () => {
       operation: {
         action: 'cancel',
         operationId: 'operation-9',
-        expectedRevision: '7',
         queueIndex: 1,
         sourceIncarnation: EVENT_SOURCE_INCARNATION,
         reason: 'operator cancellation',
@@ -741,7 +739,6 @@ describe('Keeper chat durable receipt API', () => {
     try {
       await operateKeeperEventQueue('sangsu', {
         action: 'transfer',
-        expectedRevision: '7',
         queueIndex: 2,
         sourceIncarnation: EVENT_SOURCE_INCARNATION,
         targetKeeper: 'rondo',
@@ -756,7 +753,6 @@ describe('Keeper chat durable receipt API', () => {
       operation: {
         action: 'transfer',
         operationId: '00000000-0000-4000-8000-000000000099',
-        expectedRevision: '7',
         queueIndex: 2,
         sourceIncarnation: EVENT_SOURCE_INCARNATION,
         targetKeeper: 'rondo',
@@ -768,7 +764,6 @@ describe('Keeper chat durable receipt API', () => {
         body: JSON.stringify({
           schema: 'keeper_event_queue.operator.request.v1',
           action: 'transfer',
-          expected_revision: '7',
           queue_index: 2,
           source_incarnation: EVENT_SOURCE_INCARNATION,
           operator_operation_id: '00000000-0000-4000-8000-000000000099',

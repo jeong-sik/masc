@@ -558,11 +558,7 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
        let cancel_request =
          request_body
            "cancel"
-           [ ( "expected_revision"
-             , `String
-                 (Keeper_event_queue_state.revision before_cancel
-                  |> Int64.to_string) )
-           ; "queue_index", `Int 0
+           [ "queue_index", `Int 0
            ; ( "source_incarnation"
              , `String (Int64.to_string cancel_selection.admitted_revision) )
            ; ( "operator_operation_id"
@@ -571,36 +567,6 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
            ]
        in
        enqueue cancel_keeper unrelated_source;
-       let stale_cancel_raw, stale_cancel_response =
-         post_event_operator ~keeper_name:cancel_keeper cancel_request
-       in
-       check bool "stale cancellation returns HTTP conflict" true
-         (String.starts_with ~prefix:"HTTP/1.1 409" stale_cancel_raw);
-       let stale_cancel_detail =
-         match Yojson.Safe.Util.member "error" stale_cancel_response with
-         | `String detail -> detail
-         | _ -> fail "stale cancellation response omitted error"
-       in
-       check bool
-         "fresh cancellation keeps the queue revision fence"
-         true
-         (contains_substring stale_cancel_detail "revision mismatch");
-       let refreshed_cancel_state = load_state cancel_keeper in
-       let cancel_request =
-         request_body
-           "cancel"
-           [ ( "expected_revision"
-             , `String
-                 (Keeper_event_queue_state.revision refreshed_cancel_state
-                  |> Int64.to_string) )
-           ; "queue_index", `Int 0
-           ; ( "source_incarnation"
-             , `String (Int64.to_string cancel_selection.admitted_revision) )
-           ; ( "operator_operation_id"
-             , `String "event-operator-cancel-operation" )
-           ; "reason", `String "operator cancelled exact source"
-           ]
-       in
        let cancel_raw, cancel_response =
          post_event_operator ~keeper_name:cancel_keeper cancel_request
        in
@@ -664,11 +630,7 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
        let conflicting_cancel_request =
          request_body
            "cancel"
-           [ ( "expected_revision"
-             , `String
-                 (Keeper_event_queue_state.revision refreshed_cancel_state
-                  |> Int64.to_string) )
-           ; "queue_index", `Int 0
+           [ "queue_index", `Int 0
            ; ( "source_incarnation"
              , `String
                  (Int64.succ cancel_selection.admitted_revision
@@ -704,11 +666,7 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
        let transfer_request =
          request_body
            "transfer"
-           [ ( "expected_revision"
-             , `String
-                 (Keeper_event_queue_state.revision before_transfer
-                  |> Int64.to_string) )
-           ; "queue_index", `Int 0
+           [ "queue_index", `Int 0
            ; ( "source_incarnation"
              , `String (Int64.to_string transfer_selection.admitted_revision) )
            ; ( "operator_operation_id"

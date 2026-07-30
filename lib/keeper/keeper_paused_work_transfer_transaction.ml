@@ -474,7 +474,7 @@ let transfer_pending_under_admission config ~from_keeper ~to_keeper request =
 
 let transfer_pending config ~from_keeper ~to_keeper request =
   match
-    Keeper_turn_admission.run_admin_if_free
+    Keeper_turn_admission.run_if_free
       ~base_path:config.Workspace.base_path
       ~keeper_name:from_keeper
       (fun () ->

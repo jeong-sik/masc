@@ -330,7 +330,7 @@ let chat_queue_persistence_blocked_rows ~base_path keeper_name =
   | Ok (Some status) ->
     let operation =
       match status.Keeper_chat_consumer.operation with
-      | Keeper_chat_consumer.Lease_next_blocked -> "lease_next"
+      | Keeper_chat_consumer.Pending_claim_blocked -> "pending_claim"
       | Keeper_chat_consumer.Finalize_blocked -> "finalize"
       | Keeper_chat_consumer.Nack_blocked -> "nack"
     in

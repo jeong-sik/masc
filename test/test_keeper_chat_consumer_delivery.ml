@@ -84,6 +84,21 @@ let await_promise ~clock ~seconds promise =
       Eio.Time.sleep clock seconds;
       false)
 
+let await_condition ~clock ~seconds condition =
+  Eio.Fiber.first
+    (fun () ->
+      let rec loop () =
+        if condition ()
+        then true
+        else (
+          Eio.Time.sleep clock 0.01;
+          loop ())
+      in
+      loop ())
+    (fun () ->
+      Eio.Time.sleep clock seconds;
+      false)
+
 let await_receipt ~clock ~seconds ~keeper_name ~receipt_id ~accept =
   Eio.Fiber.first
     (fun () ->
@@ -176,8 +191,39 @@ let start_consumer ~sw ~clock ~base_path ~handle_turn =
        (fun ~base_path:transition_base_path ~keeper_name ~transition:_ ->
           if String.equal transition_base_path canonical_base_path
           then Keeper_chat_consumer.notify_transition ~keeper_name));
+  let handle_admitted_turn
+      ~sw
+      ~keeper_name
+      ~receipt_ids
+      ~queued_message
+      ~on_admitted =
+    let delivery_key =
+      Keeper_chat_delivery_identity.Queue_receipts receipt_ids
+    in
+    match
+      Keeper_turn_admission.run_serialized
+        ~base_path
+        ~keeper_name
+        (fun () ->
+           match on_admitted () with
+           | Ok () ->
+             handle_turn ~sw ~keeper_name ~delivery_key ~queued_message
+           | Error detail ->
+             Keeper_chat_consumer.Failed
+               { kind = Keeper_chat_queue.Internal_error
+               ; detail
+               ; outcome_ref = None
+               })
+    with
+    | `Ran outcome -> outcome
+    | `Rejected rejection -> Keeper_chat_consumer.Deferred { rejection }
+  in
   Eio.Fiber.fork ~sw (fun () ->
-    Keeper_chat_consumer.run ~sw ~clock ~base_path ~handle_turn)
+    Keeper_chat_consumer.run
+      ~sw
+      ~clock
+      ~base_path
+      ~handle_turn:handle_admitted_turn)
 
 exception Stop_consumer
 
@@ -489,8 +535,36 @@ let test_busy_turn_release_wakes_pending_receipt () =
       with
       | None -> Eio.Promise.resolve resolve_release_holder ()
       | Some accepted ->
-        Eio.Fiber.yield ();
+        check "consumer parks on the held turn slot"
+          (await_condition ~clock ~seconds:5.0 (fun () ->
+             Keeper_turn_admission.chat_waiting
+               ~base_path:base
+               ~keeper_name));
         check "consumer never crosses the held turn slot" (!calls = 0);
+        check "parked receipt remains Pending before execution admission"
+          (match
+             Keeper_chat_queue.lookup_receipt
+               ~keeper_name
+               ~receipt_id:accepted.receipt_id
+           with
+           | Ok { receipt = Some { state = Pending; _ }; _ } -> true
+           | Ok
+               { receipt =
+                   None
+                   | Some
+                       { state =
+                           Inflight _
+                           | Recovery_required _
+                           | Delivered _
+                           | Failed _
+                       ; _
+                       }
+               ; _
+               }
+           | Error _ -> false);
+        let waiting_snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+        check "parking does not publish an inflight receipt"
+          (waiting_snapshot.inflight = []);
         Eio.Promise.resolve resolve_release_holder ();
         check "turn release dispatches without fleet polling"
           (match
@@ -500,6 +574,148 @@ let test_busy_turn_release_wakes_pending_receipt () =
            | Some _ -> true
            | None -> false));
     check "busy receipt is delivered exactly once" (!calls = 1))
+
+let test_consumer_cancellation_while_parked_keeps_pending () =
+  Printf.printf
+    "Test: cancelling a parked consumer leaves the exact receipt Pending\n%!";
+  with_env (fun ~base ~clock ->
+    let holder_started, resolve_holder_started = Eio.Promise.create () in
+    let release_holder, resolve_release_holder = Eio.Promise.create () in
+    Eio.Switch.run (fun holder_sw ->
+      Eio.Fiber.fork ~sw:holder_sw (fun () ->
+        ignore
+          (Keeper_turn_admission.run_serialized
+             ~base_path:base
+             ~keeper_name
+             (fun () ->
+                Eio.Promise.resolve resolve_holder_started ();
+                Eio.Promise.await release_holder)
+            : [ `Ran of unit | `Rejected of Keeper_turn_admission.rejection ]));
+      check "cancellation holder owns the lane"
+        (await_promise ~clock ~seconds:5.0 holder_started);
+      match
+        enqueue_checked ~label:"parked cancellation enqueue" ~keeper_name
+          (discord_msg ~content:"stay pending when consumer stops"
+             ~channel_id:"channel-parked-cancel"
+             ~user_id:"user-parked-cancel" ~timestamp:6.3)
+      with
+      | None -> Eio.Promise.resolve resolve_release_holder ()
+      | Some accepted ->
+        let calls = ref 0 in
+        let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
+          incr calls;
+          Keeper_chat_consumer.Delivered
+            { outcome_ref = "must-not-run-before-admission" }
+        in
+        with_consumer_switch (fun sw ->
+          start_consumer ~sw ~clock ~base_path:base ~handle_turn;
+          check "consumer parks before cancellation"
+            (await_condition ~clock ~seconds:5.0 (fun () ->
+               Keeper_turn_admission.chat_waiting
+                 ~base_path:base
+                 ~keeper_name)));
+        check "cancelled waiter is removed from the mutex queue"
+          (not
+             (Keeper_turn_admission.chat_waiting
+                ~base_path:base
+                ~keeper_name));
+        check "cancellation before admission invokes no queued turn" (!calls = 0);
+        check "cancellation before admission preserves Pending"
+          (match
+             Keeper_chat_queue.lookup_receipt
+               ~keeper_name
+               ~receipt_id:accepted.receipt_id
+           with
+           | Ok { receipt = Some { state = Pending; _ }; _ } -> true
+           | Ok
+               { receipt =
+                   None
+                   | Some
+                       { state =
+                           Inflight _
+                           | Recovery_required _
+                           | Delivered _
+                           | Failed _
+                       ; _
+                       }
+               ; _
+               }
+           | Error _ -> false);
+        Eio.Promise.resolve resolve_release_holder ()))
+
+let test_pending_cancellation_while_parked_releases_empty_slot () =
+  Printf.printf
+    "Test: cancelling the pending head while parked releases an empty slot\n%!";
+  with_env (fun ~base ~clock ->
+    let holder_started, resolve_holder_started = Eio.Promise.create () in
+    let release_holder, resolve_release_holder = Eio.Promise.create () in
+    let calls = ref 0 in
+    let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
+      incr calls;
+      Keeper_chat_consumer.Delivered
+        { outcome_ref = "must-not-run-after-pending-cancel" }
+    in
+    with_consumer_switch (fun sw ->
+      Eio.Fiber.fork ~sw (fun () ->
+        ignore
+          (Keeper_turn_admission.run_serialized
+             ~base_path:base
+             ~keeper_name
+             (fun () ->
+                Eio.Promise.resolve resolve_holder_started ();
+                Eio.Promise.await release_holder)
+            : [ `Ran of unit | `Rejected of Keeper_turn_admission.rejection ]));
+      check "empty-queue holder owns the lane"
+        (await_promise ~clock ~seconds:5.0 holder_started);
+      start_consumer ~sw ~clock ~base_path:base ~handle_turn;
+      match
+        enqueue_checked ~label:"parked pending cancellation enqueue" ~keeper_name
+          (discord_msg ~content:"cancel before admission"
+             ~channel_id:"channel-pending-cancel"
+             ~user_id:"user-pending-cancel" ~timestamp:6.4)
+      with
+      | None -> Eio.Promise.resolve resolve_release_holder ()
+      | Some accepted ->
+        check "consumer parks before pending cancellation"
+          (await_condition ~clock ~seconds:5.0 (fun () ->
+             Keeper_turn_admission.chat_waiting
+               ~base_path:base
+               ~keeper_name));
+        (match
+           Keeper_chat_queue.cancel_pending
+             ~keeper_name
+             ~receipt_id:accepted.receipt_id
+             ~cancellation:
+               { cancelled_at = 6.5
+               ; detail = "cancelled while waiting for Keeper admission"
+               }
+         with
+         | Ok { state = Failed { kind = Cancelled; _ }; _ } ->
+           check "pending cancellation commits a terminal receipt" true
+         | Ok _ | Error _ ->
+           check "pending cancellation commits a terminal receipt" false);
+        Eio.Promise.resolve resolve_release_holder ();
+        check "stale parked observation releases the turn slot"
+          (await_condition ~clock ~seconds:5.0 (fun () ->
+             let snapshot =
+               Keeper_turn_admission.snapshot_for
+                 ~base_path:base
+                 ~keeper_name
+             in
+             Option.is_none snapshot.snapshot_in_flight
+             && not
+                  (Keeper_turn_admission.chat_waiting
+                     ~base_path:base
+                     ~keeper_name)));
+        check "cancelled pending head never reaches the turn handler" (!calls = 0);
+        (match
+           Keeper_turn_admission.run_if_free
+             ~base_path:base
+             ~keeper_name
+             (fun () -> ())
+         with
+         | `Ran () -> check "empty lane admits autonomous work again" true
+         | `Busy _ -> check "empty lane admits autonomous work again" false)))
 
 let test_invalid_delivered_turn_ref_fails_closed () =
   Printf.printf
@@ -674,68 +890,6 @@ let test_shutdown_fence_keeps_receipt_pending_until_rollback () =
       check_terminal_snapshot ~label:"shutdown rollback" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
-let test_typed_admission_race_nacks_then_retries () =
-  Printf.printf
-    "Test: typed admission race nacks the lease and retries without Failed\n%!";
-  with_env (fun ~base ~clock ->
-    match
-      enqueue_checked ~label:"typed deferral enqueue" ~keeper_name
-        (discord_msg ~content:"retry typed deferral"
-           ~channel_id:"channel-deferral" ~user_id:"user-deferral"
-           ~timestamp:10.0)
-    with
-    | None -> ()
-    | Some accepted ->
-      let operation_id = Keeper_shutdown_types.Operation_id.generate () in
-      let calls = ref 0 in
-      let first_deferred, resolve_first_deferred = Eio.Promise.create () in
-      let second_started, resolve_second_started = Eio.Promise.create () in
-      let release_second, resolve_release_second = Eio.Promise.create () in
-      let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
-        incr calls;
-        if !calls = 1
-        then (
-          Eio.Promise.resolve resolve_first_deferred ();
-          Keeper_chat_consumer.Deferred
-            { rejection =
-                { Keeper_turn_admission.waiting = 0
-                ; in_flight = None
-                ; shutdown_operation_id = Some operation_id
-                }
-            })
-        else (
-          Eio.Promise.resolve resolve_second_started ();
-          Eio.Promise.await release_second;
-          Keeper_chat_consumer.Delivered
-            { outcome_ref = "trace-typed-deferral#2" })
-      in
-      with_consumer_switch (fun sw ->
-        start_consumer ~sw ~clock ~base_path:base ~handle_turn;
-        check "first leased attempt returns typed Deferred"
-          (await_promise ~clock ~seconds:5.0 first_deferred);
-        check "typed Deferred returns the same receipt to Pending"
-          (match
-             await_receipt ~clock ~seconds:2.0 ~keeper_name
-               ~receipt_id:accepted.receipt_id ~accept:is_pending
-           with
-           | Some _ -> true
-           | None -> false);
-        check "typed Deferred never creates a terminal Failed receipt"
-          (not (receipt_id_is_terminal ~keeper_name accepted.receipt_id));
-        check "consumer retries the same receipt after deferral"
-          (await_promise ~clock ~seconds:5.0 second_started);
-        Eio.Promise.resolve resolve_release_second ();
-        check "retried receipt reaches Delivered"
-          (match
-             await_receipt ~clock ~seconds:5.0 ~keeper_name
-               ~receipt_id:accepted.receipt_id ~accept:is_delivered
-           with
-           | Some _ -> true
-           | None -> false));
-      check "typed deferral causes one retry and no duplicate turn" (!calls = 2);
-      check_terminal_snapshot ~label:"typed deferral retry" ~keeper_name
-        ~receipt_id:accepted.receipt_id)
-
 let () =
   test_delivery_finalizes_terminal_receipt ();
   test_explicit_failure_finalizes_failed_receipt ();
@@ -743,10 +897,11 @@ let () =
   test_dispatch_is_concurrent_per_keeper ();
   test_finalization_persistence_retry_does_not_redeliver ();
   test_busy_turn_release_wakes_pending_receipt ();
+  test_consumer_cancellation_while_parked_keeps_pending ();
+  test_pending_cancellation_while_parked_releases_empty_slot ();
   test_invalid_delivered_turn_ref_fails_closed ();
   test_invalid_delivery_diagnostic_does_not_block_lane ();
   test_shutdown_fence_keeps_receipt_pending_until_rollback ();
-  test_typed_admission_race_nacks_then_retries ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

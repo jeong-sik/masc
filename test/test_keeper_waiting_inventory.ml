@@ -77,6 +77,23 @@ let ensure_keeper config keeper_name =
   | Error err -> fail ("write keeper meta failed: " ^ err)
 ;;
 
+let claim_pending_head keeper_name =
+  match Keeper_chat_queue.observe_pending ~keeper_name with
+  | Ok (Some observation) ->
+    (match Keeper_chat_queue.lease_observed observation with
+     | `Leased lease -> lease
+     | `Stale _ -> fail "pending chat receipt observation became stale"
+     | `Error error ->
+       fail
+         ("pending chat receipt claim failed: "
+          ^ Keeper_chat_queue.mutation_error_to_string error))
+  | Ok None -> fail "pending chat receipt is not observable"
+  | Error error ->
+    fail
+      ("pending chat receipt observation failed: "
+       ^ Keeper_chat_queue.mutation_error_to_string error)
+;;
+
 let keeper_meta_exn config keeper_name =
   match Keeper_meta_store.read_meta config keeper_name with
   | Ok (Some meta) -> meta
@@ -319,12 +336,7 @@ let test_chat_queue_pending_rows_are_visible () =
              |> to_string)
       | rows -> failf "expected one chat queue row, got %d" (List.length rows)))
   ;
-  let lease =
-    match Keeper_chat_queue.lease_next ~keeper_name with
-    | `Leased lease -> lease
-    | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
-      fail "pending chat receipt should lease"
-  in
+  let lease = claim_pending_head keeper_name in
   let inflight_json = Server_keeper_waiting_inventory.dashboard_json config in
   match find_keeper inflight_json keeper_name with
   | None -> fail "inflight keeper row missing"
@@ -371,12 +383,7 @@ let test_chat_queue_recovery_required_row_is_visible () =
         ("chat queue recovery enqueue failed: "
          ^ Keeper_chat_queue.mutation_error_to_string error)
   in
-  let lease =
-    match Keeper_chat_queue.lease_next ~keeper_name with
-    | `Leased lease -> lease
-    | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
-      fail "chat queue recovery receipt should lease"
-  in
+  let lease = claim_pending_head keeper_name in
   Keeper_chat_queue.For_testing.reset ();
   let report =
     Keeper_chat_queue.configure_persistence

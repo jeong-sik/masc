@@ -67,6 +67,19 @@ let queued_message : Keeper_chat_queue.queued_message =
   }
 ;;
 
+let claim_pending_head () =
+  match Keeper_chat_queue.observe_pending ~keeper_name with
+  | Ok (Some observation) ->
+    (match Keeper_chat_queue.lease_observed observation with
+     | `Leased lease -> lease
+     | `Stale _ -> failwith "pending observation became stale before claim"
+     | `Error error ->
+       failwith (Keeper_chat_queue.mutation_error_to_string error))
+  | Ok None -> failwith "expected an observable pending receipt"
+  | Error error ->
+    failwith (Keeper_chat_queue.mutation_error_to_string error)
+;;
+
 let test_autonomous_admits_when_chat_persistence_is_not_configured () =
   Keeper_turn_admission.For_testing.reset ();
   Keeper_chat_queue.For_testing.reset ();
@@ -128,7 +141,7 @@ let test_admin_mutation_is_busy_during_admitted_turn () =
       ~base_path
       ~keeper_name
       (fun _token ->
-         Keeper_turn_admission.run_admin_if_free
+         Keeper_turn_admission.run_if_free
            ~base_path
            ~keeper_name
            (fun () -> ()))
@@ -284,12 +297,7 @@ let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
      check "pending receipt blocks direct admission" true
    | `Busy _ | `Ran () -> check "pending receipt blocks direct admission" false);
   check "pending receipt is not overtaken" (not !direct_ran);
-  let lease =
-    match Keeper_chat_queue.lease_next ~keeper_name with
-    | `Leased lease -> lease
-    | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
-      failwith "expected the committed receipt to lease"
-  in
+  let lease = claim_pending_head () in
   (match
      Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () ->
        direct_ran := true)
@@ -598,35 +606,11 @@ let test_idle_loop_yields_to_parked_chat () =
   check "parked chat admitted after the autonomous turn yielded" !chat_ran
 ;;
 
-let test_autonomous_yields_to_queued_connector_message () =
+let test_pending_receipt_is_not_an_admission_authority () =
   reset ();
   Printf.printf
-    "Test 10: autonomous lane yields while a connector/dashboard message is queued\n%!";
-  (* Sanity: an empty queue lets the autonomous lane run. *)
-  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> 7) with
-   | `Ran 7 -> check "run_if_free admits when the chat queue is empty" true
-   | `Ran _ | `Busy _ -> check "run_if_free admits when the chat queue is empty" false);
-  (* A busy connector (Slack/Discord) message is deferred on the chat queue
-     without parking on the admission slot, so [chat_waiting] stays false. The
-     autonomous lane must still yield, or a long/back-to-back autonomous turn
-     busy-ACKs the connector forever (the starvation this pins). *)
-  (match
-     Keeper_chat_queue.enqueue ~keeper_name
-       { Keeper_chat_queue.content = "deferred slack mention"
-       ; user_blocks = []
-       ; attachments = []
-       ; timestamp = 1.0
-       ; source =
-           Keeper_chat_queue.Slack
-             { channel_id = "C-test"
-             ; user_id = "U-test"
-             ; user_name = "slack-user"
-             ; team_id = Some "T-test"
-             ; thread_ts = Some "171.001"
-             }
-       ; user_row_origin = Keeper_chat_store.Already_persisted_upstream
-       }
-   with
+    "Test 10: a durable pending receipt is not a second admission authority\n%!";
+  (match Keeper_chat_queue.enqueue ~keeper_name queued_message with
    | Ok _ -> ()
    | Error error ->
      check
@@ -635,81 +619,28 @@ let test_autonomous_yields_to_queued_connector_message () =
   let queued = Keeper_chat_queue.snapshot ~keeper_name in
   check "queue depth is 1 after enqueue" (List.length queued.pending = 1);
   check
-    "a queued connector message is not a parked chat"
+    "a pending receipt alone is not a parked chat"
     (not (Keeper_turn_admission.chat_waiting ~base_path ~keeper_name));
-  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
-   | `Busy _ ->
-     check "run_if_free yields (Busy) while a connector message is queued" true
-   | `Ran () ->
-     check "run_if_free must not admit while a connector message is queued" false);
-  (* Leasing changes the receipt to Inflight but does not make it disappear.
-     The actual turn mutex, not that durable receipt, is the execution fence.
-     A free mutex plus an inflight receipt must stay progress-capable even when
-     a second message is pending — this is the live timeout/orphan shape. *)
-  let lease =
-    match Keeper_chat_queue.lease_next ~keeper_name with
-    | `Leased lease -> Some lease
-    | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
-      check "lease_next leases the queued connector message" false;
-      None
-  in
-  (match Keeper_chat_queue.enqueue ~keeper_name { queued_message with content = "next" } with
-   | Ok _ -> ()
-   | Error error ->
-     check
-       ("second enqueue succeeds: "
-        ^ Keeper_chat_queue.mutation_error_to_string error)
-       false);
-  let inflight = Keeper_chat_queue.snapshot ~keeper_name in
-  check "leased receipt remains visible" (List.length inflight.inflight = 1);
-  check "second receipt remains pending" (List.length inflight.pending = 1);
-  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
-   | `Ran () ->
-     check "stranded/finalizing inflight receipt does not become a second lock" true
-   | `Busy _ ->
-     check "inflight receipt with a free turn mutex must not halt progress" false);
-  (match lease with
-   | None -> ()
-   | Some lease ->
-     (match
-        Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
-          ~outcome:
-            (Keeper_chat_queue.Mark_delivered
-               { completed_at = 2.0; outcome_ref = None })
-      with
-      | `Finalized _ -> ()
-      | `Unknown_lease | `Error _ ->
-        check "finalize commits the terminal receipt" false));
-  (* With the inflight receipt gone, the still-pending chat is again the
-     authoritative backlog and the autonomous lane yields to its consumer. *)
-  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
-   | `Busy (Keeper_turn_admission.Chat_backlog
-       { pending_count = 1; inflight_count = 0 }) ->
-     check "pending-only backlog still has chat priority" true
-   | `Busy _ | `Ran () ->
-     check "pending-only backlog must retain chat priority" false);
-  (match Keeper_chat_queue.lease_next ~keeper_name with
-   | `Leased lease ->
-     (match
-        Keeper_chat_queue.finalize
-          ~keeper_name
-          ~lease_id:lease.lease_id
-          ~outcome:
-            (Keeper_chat_queue.Mark_delivered
-               { completed_at = 3.0; outcome_ref = None })
-      with
-      | `Finalized _ -> ()
-      | `Unknown_lease | `Error _ ->
-        check "second finalize commits the terminal receipt" false)
-   | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
-     check "second receipt leases for cleanup" false);
+  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> 7) with
+   | `Ran 7 -> check "the mutex is the only autonomous admission authority" true
+   | `Ran _ | `Busy _ ->
+     check "a pending receipt must not fence a free turn mutex" false);
+  let lease = claim_pending_head () in
+  (match
+     Keeper_chat_queue.finalize
+       ~keeper_name
+       ~lease_id:lease.lease_id
+       ~outcome:
+         (Keeper_chat_queue.Mark_delivered
+            { completed_at = 3.0; outcome_ref = None })
+   with
+   | `Finalized _ -> ()
+   | `Unknown_lease | `Error _ ->
+     check "cleanup finalize commits the terminal receipt" false);
   let settled = Keeper_chat_queue.snapshot ~keeper_name in
   check
     "queue has no active receipts after finalization"
-    (settled.pending = [] && settled.inflight = []);
-  match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> "ok") with
-  | `Ran "ok" -> check "run_if_free admits again once the queue is drained" true
-  | `Ran _ | `Busy _ -> check "run_if_free admits again once the queue is drained" false
+    (settled.pending = [] && settled.inflight = [])
 ;;
 
 let test_shutdown_reservation_fences_and_rolls_back () =
@@ -734,9 +665,7 @@ let test_shutdown_reservation_fences_and_rolls_back () =
      check
        "autonomous lane sees typed shutdown fence"
        (Keeper_shutdown_types.Operation_id.equal reserved operation_id)
-   | `Busy (Keeper_turn_admission.Turn_busy _)
-   | `Busy (Keeper_turn_admission.Chat_backlog _)
-   | `Ran () ->
+   | `Busy (Keeper_turn_admission.Turn_busy _) | `Ran () ->
      check "autonomous lane cannot cross shutdown fence" false);
   (match Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () -> ()) with
    | `Rejected { shutdown_operation_id = Some reserved; _ } ->
@@ -821,74 +750,6 @@ let test_shutdown_reservation_restores_durable_owner () =
     check "registration cannot cross restored fence" false
 ;;
 
-let test_compaction_lane_bypasses_chat_backlog () =
-  reset ();
-  Printf.printf
-    "Test 10b: manual-compaction lane admits despite a durable chat backlog (#24865)\n%!";
-  (match Keeper_chat_queue.enqueue ~keeper_name queued_message with
-   | Ok _ -> ()
-   | Error error ->
-     check
-       ("enqueue succeeds: " ^ Keeper_chat_queue.mutation_error_to_string error)
-       false);
-  (* The standard lane reports the backlog as a typed [Chat_backlog] with the
-     exact counts, not as [Turn_busy None]. Before this variant existed the
-     queue fence logged "holder info not yet published", which mis-directed
-     the #24865 diagnosis toward a stale slot. *)
-  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
-   | `Busy (Keeper_turn_admission.Chat_backlog { pending_count = 1; inflight_count = 0 })
-     -> check "standard lane reports the backlog as typed Chat_backlog" true
-   | `Busy _ | `Ran () ->
-     check "standard lane reports the backlog as typed Chat_backlog" false);
-  (match
-     Keeper_turn_admission.run_compaction_if_free ~base_path ~keeper_name (fun () -> 7)
-   with
-   | `Ran 7 -> check "compaction lane admits despite a pending receipt" true
-   | `Ran _ | `Busy _ -> check "compaction lane admits despite a pending receipt" false);
-  (* Leasing moves the receipt to inflight. Both autonomous entry points use
-     the actual turn mutex as the execution fence; the durable receipt is not
-     a second global lock. *)
-  (match Keeper_chat_queue.lease_next ~keeper_name with
-   | `Leased _ -> ()
-   | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
-     check "lease_next leases the queued message" false);
-  (match
-     Keeper_turn_admission.run_compaction_if_free ~base_path ~keeper_name (fun () -> 8)
-   with
-   | `Ran 8 -> check "compaction lane admits despite an inflight receipt" true
-   | `Ran _ | `Busy _ -> check "compaction lane admits despite an inflight receipt" false);
-  (* Once the compaction admission releases the slot, a follow-up standard
-     turn also remains live despite a stranded/finalizing inflight receipt. *)
-  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
-   | `Ran () ->
-     check "standard lane admits past an inflight receipt after compaction" true
-   | `Busy _ ->
-     check "inflight receipt must not refence standard lane after compaction" false);
-  (* A genuinely held slot still refuses the compaction lane: it must never
-     interleave with an in-flight turn. *)
-  Keeper_turn_admission.For_testing.with_unpublished_turn_lock
-    ~base_path
-    ~keeper_name
-    (fun () ->
-       match
-         Keeper_turn_admission.run_compaction_if_free ~base_path ~keeper_name (fun () -> ())
-       with
-       | `Busy (Keeper_turn_admission.Turn_busy _) ->
-         check "compaction lane still refuses a held slot" true
-       | `Busy _ | `Ran () -> check "compaction lane still refuses a held slot" false);
-  (* A durable shutdown reservation still fences the compaction lane. *)
-  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
-  ignore
-    (Keeper_turn_admission.begin_shutdown ~base_path ~keeper_name ~operation_id
-      : Keeper_turn_admission.begin_shutdown_result);
-  match
-    Keeper_turn_admission.run_compaction_if_free ~base_path ~keeper_name (fun () -> ())
-  with
-  | `Busy (Keeper_turn_admission.Shutdown_requested _) ->
-    check "compaction lane still honors the shutdown fence" true
-  | `Busy _ | `Ran () -> check "compaction lane still honors the shutdown fence" false
-;;
-
 let () =
   Eio_main.run @@ fun _env ->
   test_autonomous_admits_when_chat_persistence_is_not_configured ();
@@ -907,8 +768,7 @@ let () =
   test_cancelled_waiter_leaves_queue ();
   test_autonomous_yields_to_parked_chat ();
   test_idle_loop_yields_to_parked_chat ();
-  test_autonomous_yields_to_queued_connector_message ();
-  test_compaction_lane_bypasses_chat_backlog ();
+  test_pending_receipt_is_not_an_admission_authority ();
   test_shutdown_reservation_fences_and_rolls_back ();
   test_shutdown_reservation_restores_durable_owner ();
   if !failures > 0

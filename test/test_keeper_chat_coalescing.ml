@@ -72,21 +72,22 @@ let enqueue_with_receipt_exn ~keeper_name ~receipt_id queued =
       (Keeper_chat_queue.mutation_error_to_string error);
     failwith "enqueue_with_receipt failed"
 
-let lease_exn ~keeper_name =
-  match Keeper_chat_queue.lease_next ~keeper_name with
-  | `Leased lease -> lease
-  | `Empty ->
+let observe_exn ~keeper_name =
+  match Keeper_chat_queue.observe_pending ~keeper_name with
+  | Ok (Some observation) -> observation
+  | Ok None ->
     fail "lease succeeds" "queue was empty";
     failwith "empty lease"
-  | `Already_leased lease_id ->
-    fail "lease succeeds" ("outstanding lease " ^ lease_id);
-    failwith "already leased"
-  | `Recovery_required evidence ->
-    fail
-      "lease succeeds"
-      ("recovery required for "
-       ^ Keeper_chat_queue.Receipt_id.to_string evidence.receipt_id);
-    failwith "recovery required"
+  | Error error ->
+    fail "lease succeeds" (Keeper_chat_queue.mutation_error_to_string error);
+    failwith "lease failed"
+
+let lease_exn ~keeper_name =
+  match Keeper_chat_queue.lease_observed (observe_exn ~keeper_name) with
+  | `Leased lease -> lease
+  | `Stale _ ->
+    fail "lease succeeds" "pending observation became stale";
+    failwith "stale pending observation"
   | `Error error ->
     fail "lease succeeds" (Keeper_chat_queue.mutation_error_to_string error);
     failwith "lease failed"
@@ -319,6 +320,85 @@ let test_pending_cancellation_is_state_guarded () =
       | `Error of Keeper_chat_queue.mutation_error
       ])
 
+let test_observed_pending_claim_is_exact () =
+  Printf.printf
+    "Test: observed pending claim follows the exact FIFO receipt\n%!";
+  with_base "keeper-chat-observed-claim" @@ fun base_path ->
+  let keeper_name = "observed-claim" in
+  ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
+  let first = enqueue_exn ~keeper_name (message "first observed") in
+  let first_observation =
+    match Keeper_chat_queue.observe_pending ~keeper_name with
+    | Ok (Some observation) -> observation
+    | Ok None ->
+      check "first pending head is observable" false;
+      failwith "missing first observation"
+    | Error error ->
+      fail
+        "first pending head is observable"
+        (Keeper_chat_queue.mutation_error_to_string error);
+      failwith "failed first observation"
+  in
+  let second = enqueue_exn ~keeper_name (message "second observed") in
+  let first_lease =
+    match Keeper_chat_queue.lease_observed first_observation with
+    | `Leased lease ->
+      check "tail enqueue does not invalidate the observed FIFO head"
+        (Keeper_chat_queue.Receipt_id.equal
+           lease.item.receipt_id
+           first.receipt_id);
+      lease
+    | `Stale _ | `Error _ ->
+      check "tail enqueue does not invalidate the observed FIFO head" false;
+      failwith "failed exact observed lease"
+  in
+  (match
+     Keeper_chat_queue.finalize
+       ~keeper_name
+       ~lease_id:first_lease.lease_id
+       ~outcome:
+         (Mark_delivered { completed_at = 3.0; outcome_ref = None })
+   with
+   | `Finalized receipt_id ->
+     check "first observed receipt finalizes"
+       (Keeper_chat_queue.Receipt_id.equal receipt_id first.receipt_id)
+   | `Unknown_lease | `Error _ ->
+     check "first observed receipt finalizes" false);
+  let second_observation =
+    match Keeper_chat_queue.observe_pending ~keeper_name with
+    | Ok (Some observation) -> observation
+    | Ok None ->
+      check "second pending head is observable" false;
+      failwith "missing second observation"
+    | Error error ->
+      fail
+        "second pending head is observable"
+        (Keeper_chat_queue.mutation_error_to_string error);
+      failwith "failed second observation"
+  in
+  (match
+     Keeper_chat_queue.cancel_pending
+       ~keeper_name
+       ~receipt_id:second.receipt_id
+       ~cancellation:
+         { cancelled_at = 4.0
+         ; detail = "invalidate the observed pending head"
+         }
+   with
+   | Ok _ -> ()
+   | Error error ->
+     fail
+       "second pending receipt cancellation"
+       (Keeper_chat_queue.mutation_error_to_string error));
+  match Keeper_chat_queue.lease_observed second_observation with
+  | `Stale { receipt_id; expected_revision; observed_revision } ->
+    check "cancelled observation reports the exact receipt"
+      (Keeper_chat_queue.Receipt_id.equal receipt_id second.receipt_id);
+    check "stale observation retains its original revision"
+      (Int64.compare expected_revision observed_revision < 0)
+  | `Leased _ | `Error _ ->
+    check "cancelled observation cannot lease another receipt" false
+
 let expect_enqueue_indeterminate label expected_receipt_id = function
   | Error
       (Keeper_chat_queue.Persist_failed
@@ -526,8 +606,9 @@ let test_uncertain_lease_compensates_and_other_transitions_reconcile () =
     let keeper_name = "lease-uncertain" in
     ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
     ignore (enqueue_exn ~keeper_name (message "lease me") : Keeper_chat_queue.enqueue_receipt);
+    let observation = observe_exn ~keeper_name in
     Keeper_chat_queue.For_testing.fail_transaction_at_stages [ Commit_returned ];
-    (match Keeper_chat_queue.lease_next ~keeper_name with
+    (match Keeper_chat_queue.lease_observed observation with
      | `Error
          (Keeper_chat_queue.Persist_failed
             { publication =
@@ -535,7 +616,7 @@ let test_uncertain_lease_compensates_and_other_transitions_reconcile () =
             ; _
             }) ->
        check "uncertain lease is not returned to a consumer" true
-     | `Leased _ | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
+     | `Leased _ | `Stale _ | `Error _ ->
        check "uncertain lease is not returned to a consumer" false);
     (match Keeper_chat_queue.reconcile_persistence ~keeper_name with
      | Ok { outcome = Reconciled; revision = 3L } ->
@@ -543,9 +624,14 @@ let test_uncertain_lease_compensates_and_other_transitions_reconcile () =
      | Ok _ | Error _ ->
        check "uncertain durable lease compensates to Pending" false);
     check "compensated receipt is leaseable again"
-      (match Keeper_chat_queue.lease_next ~keeper_name with
-       | `Leased _ -> true
-       | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ -> false)
+      (match
+         Keeper_chat_queue.observe_pending ~keeper_name
+       with
+       | Ok (Some observation) ->
+         (match Keeper_chat_queue.lease_observed observation with
+          | `Leased _ -> true
+          | `Stale _ | `Error _ -> false)
+       | Ok None | Error _ -> false)
   in
   with_base "keeper-chat-lease-uncertain" lease_case;
   let finalize_case base_path =
@@ -636,21 +722,15 @@ let test_restart_requires_explicit_recovery_without_journal () =
      check "restart preserves exact lease evidence"
        (String.equal evidence.lease_id lease.lease_id)
    | _ -> check "restart preserves exact lease evidence" false);
-  (match Keeper_chat_queue.lease_next ~keeper_name with
-   | `Recovery_required evidence ->
-     check "recovery-required lane cannot auto-redeliver"
-       (Keeper_chat_queue.Receipt_id.equal evidence.receipt_id receipt.receipt_id
-        && String.equal evidence.lease_id lease.lease_id)
-   | `Leased _ | `Empty | `Already_leased _ | `Error _ ->
-     check "recovery-required lane cannot auto-redeliver" false);
+  check "recovery-required lane cannot auto-redeliver"
+    (Keeper_chat_queue.observe_pending ~keeper_name = Ok None);
   let healthy_keeper = "healthy" in
   ignore
     (enqueue_exn ~keeper_name:healthy_keeper (message "independent") :
       Keeper_chat_queue.enqueue_receipt);
-  check "recovery blocks only its Keeper lane"
-    (match Keeper_chat_queue.lease_next ~keeper_name:healthy_keeper with
-     | `Leased _ -> true
-     | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ -> false);
+  ignore
+    (lease_exn ~keeper_name:healthy_keeper : Keeper_chat_queue.lease);
+  check "recovery blocks only its Keeper lane" true;
   (match
      Keeper_chat_queue.resolve_recovery_required
        ~keeper_name
@@ -701,13 +781,10 @@ let test_restart_requires_explicit_recovery_without_journal () =
       | Ok { revision = 4L; state = Pending; _ } ->
         check "exact operator decision requeues once" true
       | Ok _ | Error _ -> check "exact operator decision requeues once" false));
-  (match Keeper_chat_queue.lease_next ~keeper_name with
-   | `Leased replay ->
-     check "explicit requeue preserves receipt identity"
-       (Keeper_chat_queue.Receipt_id.equal
-          replay.item.receipt_id receipt.receipt_id)
-   | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
-     check "explicit requeue preserves receipt identity" false)
+  let replay = lease_exn ~keeper_name in
+  check "explicit requeue preserves receipt identity"
+    (Keeper_chat_queue.Receipt_id.equal
+       replay.item.receipt_id receipt.receipt_id)
 
 let test_legacy_json_is_not_a_queue_authority () =
   Printf.printf "Test: removed legacy JSON is never inspected as queue state\n%!";
@@ -991,6 +1068,7 @@ let () =
   test_lifecycle_fifo_terminal_pk_and_restart ();
   test_preallocated_receipt_convergence ();
   test_pending_cancellation_is_state_guarded ();
+  test_observed_pending_claim_is_exact ();
   test_transaction_publication_boundaries ();
   test_commit_observer_exception_and_cancellation ();
   test_transition_observer_outside_lock_exactly_once ();

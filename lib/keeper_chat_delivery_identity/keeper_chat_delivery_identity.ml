@@ -72,6 +72,8 @@ module Receipt_ids = struct
   type t = Receipt_id.t * Receipt_id.t list
   type error = Empty
 
+  let singleton receipt_id = receipt_id, []
+
   let of_list = function
     | [] -> Error Empty
     | first :: rest -> Ok (first, rest)

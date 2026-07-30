@@ -60,6 +60,18 @@ type lease = {
   item : leased_message;
 }
 
+type pending_observation =
+  { keeper_name : string
+  ; revision : int64
+  ; item : leased_message
+  }
+
+type pending_claim_stale =
+  { receipt_id : Receipt_id.t
+  ; expected_revision : int64
+  ; observed_revision : int64
+  }
+
 type recovery_evidence = {
   receipt_id : Receipt_id.t;
   lease_id : string;
@@ -2561,116 +2573,138 @@ let enqueue ~keeper_name message =
 
 let lease_id () = Random_id.prefixed ~prefix:"lease_" ~bytes:16
 
-let lease_next ~keeper_name =
+let lease_pending_row ~base_path ~path entry row =
+  match row.receipt.state with
+  | Stored_pending message ->
+    let lease_id = lease_id () in
+    let target_row =
+      { row with
+        receipt =
+          { row.receipt with
+            state =
+              Stored_inflight
+                { lease_id
+                ; started_at = Time_compat.now ()
+                ; message
+                }
+          }
+      }
+    in
+    (match
+       make_plan entry
+         ~before_row:(Some row)
+         ~target_row:(Some target_row)
+         ~target_next_sequence:entry.next_sequence
+         ~target_terminal_count:entry.terminal_count
+         ~transition:
+           (Lease_transition { receipt_id = row.receipt.receipt_id; lease_id })
+     with
+     | Error error -> `Error error
+     | Ok plan ->
+       let execution =
+         run_transaction
+           ~ownership_root:base_path
+           ~path
+           ~create_if_missing:false
+           plan
+       in
+       (match apply_transaction_result ~path entry plan execution with
+        | Error error -> `Error error
+        | Ok revision ->
+          `Leased
+            ( { lease_id
+              ; item = { receipt_id = row.receipt.receipt_id; message }
+              }
+            , revision )))
+  | Stored_inflight _
+  | Stored_recovery_required _
+  | Stored_delivered _
+  | Stored_failed _ ->
+    `Error
+      (Snapshot_unavailable
+         (load_error Parse_failed ~path
+            "pending FIFO index contains a non-pending receipt"))
+
+let observe_pending ~keeper_name =
+  match mutation_context ~keeper_name ~create:false with
+  | Error _ as error -> error
+  | Ok (_, _, None) -> Ok None
+  | Ok (_, _, Some entry) ->
+    with_entry_lock keeper_name entry (fun () ->
+        match first_blocking_error entry with
+        | Some error -> Error (Snapshot_unavailable error)
+        | None ->
+          (match entry.recovery_required, entry.inflight with
+           | Some _, _ | _, Some _ -> Ok None
+           | None, None ->
+             (match Sequence_map.min_binding_opt entry.pending with
+              | None -> Ok None
+              | Some (_, row) ->
+                (match row.receipt.state with
+                 | Stored_pending message ->
+                   Ok
+                     (Some
+                        { keeper_name
+                        ; revision = entry.revision
+                        ; item = { receipt_id = row.receipt.receipt_id; message }
+                        })
+                 | Stored_inflight _
+                 | Stored_recovery_required _
+                 | Stored_delivered _
+                 | Stored_failed _ ->
+                   Error
+                     (Snapshot_unavailable
+                        (load_error Parse_failed
+                           "pending FIFO index contains a non-pending receipt"))))))
+
+let pending_observation_item observation = observation.item
+
+let stale_pending_claim observation observed_revision =
+  `Stale
+    { receipt_id = observation.item.receipt_id
+    ; expected_revision = observation.revision
+    ; observed_revision
+    }
+
+let lease_observed observation =
+  let keeper_name = observation.keeper_name in
   match mutation_context ~keeper_name ~create:false with
   | Error error -> `Error error
-  | Ok (_, _, None) -> `Empty
+  | Ok (_, _, None) -> stale_pending_claim observation 0L
   | Ok (base_path, path, Some entry) ->
     let result =
       with_entry_lock keeper_name entry (fun () ->
-          match
-            check_entry_store ~base_path ~path entry
-              ~allow_absent:false
-          with
+          match check_entry_store ~base_path ~path entry ~allow_absent:false with
           | Error error -> `Error error
           | Ok Store_absent ->
             `Error
               (Snapshot_unavailable
                  (load_error Read_failed ~path
-                    "chat queue database is absent during lease"))
+                    "chat queue database is absent during observed lease"))
           | Ok Store_present ->
             (match entry.recovery_required, entry.inflight with
-             | ( Some
-                   { receipt =
-                       { receipt_id
-                       ; state =
-                           Stored_recovery_required
-                             { lease_id; started_at; _ }
-                       }
-                   ; _
-                   }
-               , None ) ->
-               `Recovery_required
-                 ({ receipt_id; lease_id; started_at } : recovery_evidence)
-             | Some _, _ ->
-               `Error
-                 (Snapshot_unavailable
-                    (load_error Parse_failed ~path
-                       "in-memory recovery index contains an invalid active lease"))
-             | None, Some { receipt = { state = Stored_inflight { lease_id; _ }; _ }; _ } ->
-               `Already_leased lease_id
-             | None, Some _ ->
-               `Error
-                 (Snapshot_unavailable
-                    (load_error Parse_failed ~path
-                       "in-memory inflight index contains a non-inflight receipt"))
+             | Some _, _ | _, Some _ ->
+               stale_pending_claim observation entry.revision
              | None, None ->
                (match Sequence_map.min_binding_opt entry.pending with
-                | None -> `Empty
+                | None -> stale_pending_claim observation entry.revision
                 | Some (_, row) ->
-                  (match row.receipt.state with
-                   | Stored_pending message ->
-                     let lease_id = lease_id () in
-                     let target_row =
-                       { row with
-                         receipt =
-                           { row.receipt with
-                             state =
-                               Stored_inflight
-                                 { lease_id
-                                 ; started_at = Time_compat.now ()
-                                 ; message
-                                 }
-                           }
-                       }
-                     in
-                     (match
-                        make_plan entry
-                          ~before_row:(Some row)
-                          ~target_row:(Some target_row)
-                          ~target_next_sequence:entry.next_sequence
-                          ~target_terminal_count:entry.terminal_count
-                          ~transition:
-                            (Lease_transition
-                               { receipt_id = row.receipt.receipt_id; lease_id })
-                      with
-                      | Error error -> `Error error
-                      | Ok plan ->
-                        let execution =
-                          run_transaction
-                            ~ownership_root:base_path
-                            ~path
-                            ~create_if_missing:false
-                            plan
-                        in
-                        (match apply_transaction_result ~path entry plan execution with
-                         | Error error -> `Error error
-                         | Ok revision ->
-                           `Leased
-                             ( { lease_id
-                               ; item =
-                                   { receipt_id = row.receipt.receipt_id; message }
-                               }
-                             , revision )))
-                   | Stored_inflight _
-                   | Stored_recovery_required _
-                   | Stored_delivered _
-                   | Stored_failed _ ->
-                     `Error
-                       (Snapshot_unavailable
-                          (load_error Parse_failed ~path
-                             "pending FIFO index contains a non-pending receipt"))))))
+                  if
+                    not
+                      (Receipt_id.equal
+                         row.receipt.receipt_id
+                         observation.item.receipt_id)
+                  then stale_pending_claim observation entry.revision
+                  else lease_pending_row ~base_path ~path entry row)))
     in
     (match result with
      | `Leased (lease, revision) ->
        notify_transition ~keeper_name ~revision;
        `Leased lease
+     | `Stale _ as stale -> stale
      | `Error error ->
        notify_indeterminate ~keeper_name (Error error);
-       `Error error
-     | `Empty -> `Empty
-     | `Already_leased lease_id -> `Already_leased lease_id
-     | `Recovery_required evidence -> `Recovery_required evidence)
+       `Error error)
 
 let canonical_optional_ref = function
   | None -> Ok None

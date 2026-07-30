@@ -224,13 +224,6 @@ let run_keeper_cycle_with
   =
   let busy_outcome block =
     (match block with
-     | Keeper_turn_admission.Chat_backlog { pending_count; inflight_count } ->
-       Log.Keeper.info
-         "%s: yielding autonomous cycle to chat backlog (pending=%d inflight=%d); \
-          skipping until next heartbeat"
-         meta_after_triage.name
-         pending_count
-         inflight_count
      | Keeper_turn_admission.Shutdown_requested operation_id ->
        Log.Keeper.info
          "%s: autonomous turn admission closed by shutdown operation %s"
@@ -277,15 +270,9 @@ let run_keeper_cycle_with
   match manual_compaction_requested with
   | Some false | None -> run_standard_cycle ()
   | Some true ->
-    (* #24865: a manual-compaction cycle is the remedy for the overflow that
-       wedges chat delivery, so its compaction-only critical section admits
-       past the durable chat backlog ([run_compaction_if_free] inside
-       [run_admitted]) and releases the slot the moment the checkpoint
-       commits. The follow-up turn then re-enters the standard lane below,
-       where a chat backlog wins — the remedy may cut the line, an arbitrary
-       LLM turn may not. [Manual_compaction_applied { followup = Busy _; _ }]
-       causes the owner loop to ACK the selected stimulus, so a yielded
-       follow-up does not replay compaction. *)
+    (* Manual compaction and its follow-up remain inside the already admitted
+       cycle. The turn mutex is the only live admission authority; durable chat
+       receipts do not add a separate compaction gate. *)
     (match
        run_manual_compaction
          ~before_dispatch_authority:

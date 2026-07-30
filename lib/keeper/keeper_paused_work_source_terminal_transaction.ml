@@ -346,7 +346,7 @@ let ack_pending_under_admission config ~keeper_name request =
 
 let ack_pending config ~keeper_name request =
   match
-    Keeper_turn_admission.run_admin_if_free
+    Keeper_turn_admission.run_if_free
       ~base_path:config.Workspace.base_path
       ~keeper_name
       (fun () -> ack_pending_under_admission config ~keeper_name request)

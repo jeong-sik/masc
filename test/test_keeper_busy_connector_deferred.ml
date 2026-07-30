@@ -33,6 +33,19 @@ let configure_queue ~base =
   check "chat queue persistence configured without load errors" (report.load_errors = [])
 ;;
 
+let claim_pending_head () =
+  match Keeper_chat_queue.observe_pending ~keeper_name with
+  | Ok (Some observation) ->
+    (match Keeper_chat_queue.lease_observed observation with
+     | `Leased lease -> lease
+     | `Stale _ -> failwith "pending source receipt observation became stale"
+     | `Error error ->
+       failwith (Keeper_chat_queue.mutation_error_to_string error))
+  | Ok None -> failwith "pending source receipt is not observable"
+  | Error error ->
+    failwith (Keeper_chat_queue.mutation_error_to_string error)
+;;
+
 let test_exact_source_identity_converges () =
   Printf.printf
     "Test: durable connector acceptance converges on the producer request id\n%!";
@@ -118,21 +131,18 @@ let test_exact_source_identity_converges () =
        let pending = (Keeper_chat_queue.snapshot ~keeper_name).pending in
        check "active replay keeps one FIFO receipt" (List.length pending = 1);
        check "accepted user transcript row is idempotent" (count_user_lines ~base = 1);
-       (match Keeper_chat_queue.lease_next ~keeper_name with
-        | `Leased lease ->
-          ignore
-            (Keeper_chat_queue.finalize
-               ~keeper_name
-               ~lease_id:lease.lease_id
-               ~outcome:
-                 (Keeper_chat_queue.Mark_delivered
-                    { completed_at = Time_compat.now (); outcome_ref = None })
-             : [ `Finalized of Keeper_chat_queue.Receipt_id.t
-               | `Unknown_lease
-               | `Error of Keeper_chat_queue.mutation_error
-               ])
-        | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
-          check "source receipt leases before terminal replay" false);
+       let lease = claim_pending_head () in
+       ignore
+         (Keeper_chat_queue.finalize
+            ~keeper_name
+            ~lease_id:lease.lease_id
+            ~outcome:
+              (Keeper_chat_queue.Mark_delivered
+                 { completed_at = Time_compat.now (); outcome_ref = None })
+          : [ `Finalized of Keeper_chat_queue.Receipt_id.t
+            | `Unknown_lease
+            | `Error of Keeper_chat_queue.mutation_error
+            ]);
        let terminal = request_of_reply (accept metadata) in
        check
          "terminal replay reports done without redispatch"

@@ -21,10 +21,6 @@ type in_flight_info =
 
 type autonomous_block =
   | Turn_busy of in_flight_info option
-  | Chat_backlog of
-      { pending_count : int
-      ; inflight_count : int
-      }
   | Shutdown_requested of Keeper_shutdown_types.Operation_id.t
 
 type rejection =
@@ -82,7 +78,6 @@ let lane_to_string = function
 
 let autonomous_block_kind = function
   | Turn_busy _ -> "turn_busy"
-  | Chat_backlog _ -> "chat_backlog"
   | Shutdown_requested _ -> "shutdown_requested"
 ;;
 
@@ -93,11 +88,6 @@ let autonomous_block_to_string = function
       "reason=turn_busy holder_lane=%s holder_started_at=%.17g"
       (lane_to_string lane)
       started_at
-  | Chat_backlog { pending_count; inflight_count } ->
-    Printf.sprintf
-      "reason=chat_backlog pending_count=%d inflight_count=%d"
-      pending_count
-      inflight_count
   | Shutdown_requested operation_id ->
     Printf.sprintf
       "reason=shutdown_requested operation_id=%s"
@@ -116,12 +106,6 @@ let autonomous_block_to_yojson = function
           ]
     in
     `Assoc [ "kind", `String "turn_busy"; "holder", holder_json ]
-  | Chat_backlog { pending_count; inflight_count } ->
-    `Assoc
-      [ "kind", `String "chat_backlog"
-      ; "pending_count", `Int pending_count
-      ; "inflight_count", `Int inflight_count
-      ]
   | Shutdown_requested operation_id ->
     `Assoc
       [ "kind", `String "shutdown_requested"
@@ -302,87 +286,32 @@ let shutdown_rejection_snapshot slot operation_id =
     })
 ;;
 
-let admit_autonomous_with_token ~yield_to_chat_backlog ~base_path ~keeper_name f =
+let admit_autonomous_with_token ~base_path ~keeper_name f =
   let slot = slot_for ~base_path ~keeper_name in
-  (* Yield to deferred work before touching the lock. [waiting > 0] implies
-     the slot is held (a waiter only parks because a turn is in flight), so
-     [try_lock] would fail here anyway; the explicit check keeps the
-     autonomous lane from competing for a slot a parked chat is already
-     queued on. A non-empty [Keeper_chat_queue] means a busy connector
-     (Slack/Discord) or dashboard message is deferred for this keeper but
-     has not parked on the slot; the standard autonomous lane must yield for
-     it too, otherwise a long or back-to-back autonomous turn starves that
-     queue indefinitely (the busy-ACK loop). Reading the queue length is a
-     lock-only, non-suspending peek and is the SSOT signal that closes the
-     gap: the autonomous lane cooperates on the same backlog the consumer
-     drains, so the consumer's [in_flight = None] window opens
-     deterministically instead of racing the next autonomous cycle. Once a
-     receipt is leased, the actual per-Keeper turn mutex is the authority for
-     whether its chat turn is still executing. An inflight receipt with a free
-     mutex may be between delivery and finalization or stranded after failure;
-     it must not become a second, durable global turn lock.
-
-     [yield_to_chat_backlog:false] (the manual-compaction lane) skips only
-     that queue peek: the backlog yield presumes the chat consumer can make
-     progress, and a context-overflowed keeper violates that premise — its
-     chat turns fail until compaction rewrites the checkpoint, so queueing
-     the compaction cycle behind the backlog inverts the priority and
-     starves both lanes (#24865). *)
   match peek_shutdown slot with
   | Some operation_id -> `Busy (Shutdown_requested operation_id)
-  | None when waiting_count slot > 0 -> `Busy (Turn_busy (peek_info slot))
   | None ->
-    let chat_backlog =
-      if yield_to_chat_backlog
-      then (
-        let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
-        (* Queue persistence/read failures remain typed Chat-boundary
-           failures. They are not evidence of queued work and therefore
-           cannot close an otherwise independent autonomous lane. *)
-        match List.length snapshot.pending, List.length snapshot.inflight with
-        | 0, _ -> None
-        | pending_count, 0 ->
-          Some (Chat_backlog { pending_count; inflight_count = 0 })
-        | _, _ -> None)
-      else None
-    in
-    (match chat_backlog with
-     | Some block -> `Busy block
-     | None ->
-       if Eio.Mutex.try_lock slot.turn_mu
-       then (
-         match run_locked_with_token slot ~lane:Autonomous f with
-         | `Ran value -> `Ran value
-         | `Shutdown_requested operation_id -> `Busy (Shutdown_requested operation_id))
-       else `Busy (Turn_busy (peek_info slot)))
+    if Eio.Mutex.try_lock slot.turn_mu
+    then (
+      match run_locked_with_token slot ~lane:Autonomous f with
+      | `Ran value -> `Ran value
+      | `Shutdown_requested operation_id -> `Busy (Shutdown_requested operation_id))
+    else `Busy (Turn_busy (peek_info slot))
 ;;
 
-let admit_autonomous ~yield_to_chat_backlog ~base_path ~keeper_name f =
+let admit_autonomous ~base_path ~keeper_name f =
   admit_autonomous_with_token
-    ~yield_to_chat_backlog
     ~base_path
     ~keeper_name
     (fun _token -> f ())
 ;;
 
 let run_if_free_with_token ~base_path ~keeper_name f =
-  admit_autonomous_with_token
-    ~yield_to_chat_backlog:true
-    ~base_path
-    ~keeper_name
-    f
+  admit_autonomous_with_token ~base_path ~keeper_name f
 ;;
 
 let run_if_free ~base_path ~keeper_name f =
-  admit_autonomous ~yield_to_chat_backlog:true ~base_path ~keeper_name f
-;;
-
-let run_compaction_if_free ~base_path ~keeper_name f =
-  admit_autonomous ~yield_to_chat_backlog:false ~base_path ~keeper_name f
-;;
-
-let run_admin_if_free ~base_path ~keeper_name f =
-  admit_autonomous ~yield_to_chat_backlog:false ~base_path ~keeper_name f
+  admit_autonomous ~base_path ~keeper_name f
 ;;
 
 let run_serialized ~base_path ~keeper_name f =

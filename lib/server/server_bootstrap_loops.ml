@@ -200,7 +200,7 @@ let queued_chat_projection (queued_message : Keeper_chat_queue.queued_message) =
 
 (* Queue-consumer turns need the same synthetic
    [Server_routes_http_keeper_stream.keeper_chat_stream_request] built from
-   a dequeued/leased [Keeper_chat_queue.queued_message], and a duplicated
+   an observed Pending [Keeper_chat_queue.queued_message], and a duplicated
    copy would silently drift out of sync with [queued_chat_projection] the
    next time either changes. *)
 let payload_of_queued_message ~keeper_name
@@ -1667,7 +1667,12 @@ let start_keeper_loops_owned
      | Error exn -> raise exn);
     Keeper_chat_consumer.run ~sw ~clock
            ~base_path
-           ~handle_turn:(fun ~sw ~keeper_name ~delivery_key ~queued_message ->
+           ~handle_turn:(fun
+              ~sw
+              ~keeper_name
+              ~receipt_ids
+              ~queued_message
+              ~on_admitted ->
              let open Server_routes_http_keeper_stream in
              let now = Time_compat.now () in
              let run_id =
@@ -1823,8 +1828,12 @@ let start_keeper_loops_owned
                match
                  process_single_turn
                    ~user_row_origin:queued_message.user_row_origin
-                   ~queued_turn:true
-                   ~delivery_key:(Some delivery_key)
+                   ~submission:
+                     (Queued_receipt
+                        { receipt_ids
+                        ; claim = on_admitted
+                        ; execution_sw = sw
+                        })
                    ~state ~clock ~auth_token:None
                    ~thread_id ~continuation_channel ~closed
                    ~client_disconnects:None

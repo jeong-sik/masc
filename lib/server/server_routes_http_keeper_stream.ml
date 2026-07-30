@@ -1179,6 +1179,14 @@ and queued_turn_outcome =
       }
   | Deferred of { rejection : Keeper_turn_admission.rejection }
 
+type turn_submission =
+  | Direct_request
+  | Queued_receipt of
+      { receipt_ids : Keeper_chat_delivery_identity.Receipt_ids.t
+      ; claim : unit -> (unit, string) result
+      ; execution_sw : Eio.Switch.t
+      }
+
 let completion_of_worker_settlement ~queued_turn ~staged_completion
     (settlement : Keeper_msg_async.worker_settlement) =
   let queued_failure kind detail =
@@ -1382,19 +1390,28 @@ type translated_keeper_stream_event =
 let empty_keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.empty_state
 let translate_oas_stream_event = Keeper_chat_oas_stream_bridge.translate
 
-(* [user_row_origin] and [queued_turn] are required labelled arguments. Every
-   caller presents the typed transcript provenance selected at its persistence
-   boundary; this function never infers ownership from a connector label or
-   message content. *)
-let process_single_turn ~user_row_origin ~queued_turn
-    ~delivery_key
+(* [user_row_origin] and [submission] are required labelled arguments. Every
+   caller presents the typed transcript provenance and execution ownership
+   selected at its persistence boundary; this function never infers either
+   from a connector label or message content. *)
+let process_single_turn ~user_row_origin ~submission
     ~state ~clock ~auth_token ~thread_id ~continuation_channel ~closed
     ~client_disconnects
     ~payload ~run_id ~message_id ~agent_name ~submitted_by
     ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t) =
+  let queued_turn =
+    match submission with
+    | Direct_request -> false
+    | Queued_receipt _ -> true
+  in
   let base_path = (Mcp_server.workspace_config state).base_path in
   let direct_delivery_checkpoint : Keeper_chat_direct_delivery.t option ref =
     ref None
+  in
+  let queue_claim_failure = ref None in
+  let queue_claim_committed = ref false in
+  let queued_turn_not_started () =
+    queued_turn && not !queue_claim_committed
   in
   let redaction =
     Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name
@@ -1610,16 +1627,11 @@ let process_single_turn ~user_row_origin ~queued_turn
     direct_delivery_checkpoint := Some checkpoint
   in
   let queue_delivery_key () =
-    match queued_turn, delivery_key with
-    | true, Some (Keeper_chat_delivery_identity.Queue_receipts _ as key) ->
-      Ok key
-    | true, Some
-        (Keeper_chat_delivery_identity.Direct_request _
-        | Keeper_chat_delivery_identity.Async_request _) ->
-      Error "queued Keeper turn received a non-queue delivery identity"
-    | true, None ->
-      Error "queued Keeper turn is missing its receipt delivery identity"
-    | false, _ -> Error "non-queued Keeper turn requested queue delivery identity"
+    match submission with
+    | Queued_receipt { receipt_ids; _ } ->
+      Ok (Keeper_chat_delivery_identity.Queue_receipts receipt_ids)
+    | Direct_request ->
+      Error "non-queued Keeper turn requested queue delivery identity"
   in
   let append_queued_user_row_once () =
     let ( let* ) = Result.bind in
@@ -1746,6 +1758,24 @@ let process_single_turn ~user_row_origin ~queued_turn
     | None -> Error "direct Keeper delivery checkpoint is unavailable"
   in
   let on_queue_turn_admitted () =
+    let ( let* ) = Result.bind in
+    let* () =
+      match submission with
+      | Queued_receipt { claim; _ } ->
+        (match claim () with
+         | Ok () ->
+           queue_claim_committed := true;
+           Ok ()
+         | Error detail ->
+           queue_claim_failure := Some detail;
+           Error detail)
+      | Direct_request ->
+        let detail =
+          "direct Keeper turn reached the queued receipt claim boundary"
+        in
+        queue_claim_failure := Some detail;
+        Error detail
+    in
     append_queued_user_row_once ()
   in
   let commit_direct_terminal ~ok ~body ~data transcript_effect =
@@ -1928,27 +1958,8 @@ let process_single_turn ~user_row_origin ~queued_turn
     push_worker_event (Stream_terminal { status; body; queued_outcome });
     persisted
   in
-  let submit_result =
-    match Keeper_msg_async.server_background_switch () with
-    | Error error ->
-        Error
-          (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
-    | Ok background_sw ->
-      let on_accepted =
-        if dashboard_direct_stream
-        then Some on_direct_request_accepted
-        else None
-      in
-      Keeper_msg_async.submit
-        ?on_accepted
-        ~background_sw
-        ~on_worker_aborted
-        ~on_worker_settled:publish_committed_completion
-        ~base_path
-        ~caller:submitted_by
-        ~keeper_name:payload.name
-        ~f:(fun request_sw ->
-        let start_time = Time_compat.now () in
+  let run_turn request_sw =
+    let start_time = Time_compat.now () in
         let finish_projection_failure kind detail =
           let persisted = persist_failure_reply detail in
           let queued_outcome =
@@ -2024,8 +2035,22 @@ let process_single_turn ~user_row_origin ~queued_turn
                  actually emitted. *)
               Error (Printexc.to_string exn)
         in
-        match dispatch_result with
-        | Ok (`Deferred rejection) ->
+        match !queue_claim_failure, dispatch_result with
+        | Some detail, _ ->
+            (* The exact Pending receipt was not claimed. Close the local event
+               projection without emitting [Event_error]: connector adapters
+               treat an empty [Run_finished] as a failed no-op, so no outbound
+               message or transcript row can escape for a turn that never
+               started. The queue consumer retains the typed claim failure and
+               decides whether to re-observe or require reconciliation. *)
+            push_worker_event
+              (Stream_terminal
+                 { status = Stream_cancelled
+                 ; body = detail
+                 ; queued_outcome = None
+                 });
+            Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail
+        | None, Ok (`Deferred rejection) ->
             push_worker_event (Stream_queued_turn_deferred rejection);
             Tool_result.make_ok
               ~tool_name:"masc_keeper_msg"
@@ -2036,7 +2061,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                    ; ("admission", admission_rejection_to_json rejection)
                    ])
               ()
-        | Ok (`Queued queued) ->
+        | None, Ok (`Queued queued) ->
             let data =
               dashboard_deferred_chat_to_json ~keeper_name:payload.name queued
             in
@@ -2064,7 +2089,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                     ; queued_outcome = None
                     });
                Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail)
-        | Ok (`Ran (true, body)) ->
+        | None, Ok (`Ran (true, body)) ->
           (match canonical_reply_payload_of_body ~redact_text body with
            | Error error ->
              let detail = canonical_reply_payload_error_to_string error in
@@ -2374,7 +2399,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                              ~tool_name:"masc_keeper_msg"
                              ~start_time
                              body)))))
-        | Ok (`Ran (false, err)) ->
+        | None, Ok (`Ran (false, err)) ->
             let persisted = persist_failure_reply err in
             let queued_outcome =
               if not queued_turn then None
@@ -2392,7 +2417,15 @@ let process_single_turn ~user_row_origin ~queued_turn
               (Stream_terminal
                  { status = Stream_error; body = err; queued_outcome });
             Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
-        | Error err ->
+        | None, Error err when queued_turn_not_started () ->
+            push_worker_event
+              (Stream_terminal
+                 { status = Stream_cancelled
+                 ; body = err
+                 ; queued_outcome = None
+                 });
+            Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
+        | None, Error err ->
             let persisted = persist_failure_reply err in
             let queued_outcome =
               if not queued_turn then None
@@ -2409,20 +2442,92 @@ let process_single_turn ~user_row_origin ~queued_turn
             push_worker_event
               (Stream_terminal
                  { status = Stream_error; body = err; queued_outcome });
-            Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err)
-        ()
-      |> Result.map_error (fun error ->
-        Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
+            Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
+  in
+  let publish_inline_completion () =
+    match !staged_completion with
+    | Some completion -> publish_completion completion
+    | None ->
+      let detail =
+        "queued Keeper turn ended without staging a terminal projection"
+      in
+      publish_completion
+        (Completion_terminal
+           { status =
+               (if queued_turn_not_started ()
+                then Stream_cancelled
+                else Stream_error)
+           ; body = detail
+           ; queued_outcome =
+               (if queued_turn_not_started ()
+                then None
+                else Some (Failed { kind = Turn_failed; detail }))
+           })
+  in
+  let submit_result =
+    match submission with
+    | Queued_receipt { execution_sw; _ } ->
+      (try
+         Eio.Fiber.fork ~sw:execution_sw (fun () ->
+           (match Eio.Switch.run (fun request_sw -> run_turn request_sw) with
+            | _ -> publish_inline_completion ()
+            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+            | exception exn ->
+              let detail = Printexc.to_string exn in
+              push_worker_event
+                (Stream_terminal
+                   { status =
+                       (if queued_turn_not_started ()
+                        then Stream_cancelled
+                        else Stream_error)
+                   ; body = detail
+                   ; queued_outcome =
+                       (if queued_turn_not_started ()
+                        then None
+                        else Some (Failed { kind = Turn_failed; detail }))
+                   });
+              publish_inline_completion ()));
+         Ok `Inline
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn -> Error (Printexc.to_string exn))
+    | Direct_request ->
+      (match Keeper_msg_async.server_background_switch () with
+       | Error error ->
+         Error
+           (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
+       | Ok background_sw ->
+         let on_accepted =
+           if dashboard_direct_stream
+           then Some on_direct_request_accepted
+           else None
+         in
+         Keeper_msg_async.submit
+           ?on_accepted
+           ~background_sw
+           ~on_worker_aborted
+           ~on_worker_settled:publish_committed_completion
+           ~base_path
+           ~caller:submitted_by
+           ~keeper_name:payload.name
+           ~f:run_turn
+           ()
+         |> Result.map (fun outcome -> `Async outcome)
+         |> Result.map_error (fun error ->
+           Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string))
   in
   let request_id, durably_accepted =
     match submit_result with
+    | Ok `Inline -> None, false
     | Ok
+        (`Async
         ({ acceptance = Keeper_msg_async.Durably_accepted; request_id }
-          : Keeper_msg_async.submit_outcome) ->
+          : Keeper_msg_async.submit_outcome)) ->
         Some request_id, true
     | Ok
-        ({ acceptance = Keeper_msg_async.Reconciliation_required _; _ } as
-          outcome) ->
+        (`Async
+          ({ acceptance = Keeper_msg_async.Reconciliation_required _; _ } as
+            outcome)) ->
         let body =
           Keeper_msg_async.submit_outcome_to_json outcome |> Yojson.Safe.to_string
         in
@@ -2434,22 +2539,29 @@ let process_single_turn ~user_row_origin ~queued_turn
              });
         Some outcome.request_id, false
     | Error body ->
-        let persisted = persist_failure_reply body in
         let queued_outcome =
-          if not queued_turn then None
+          if queued_turn_not_started ()
+          then None
           else
-            match persisted with
-            | Ok () -> Some (Failed { kind = Turn_failed; detail = body })
-            | Error persist_error ->
-                Some
-                  (Failed
-                     { kind = Transcript_persist_failed
-                     ; detail = persist_error
-                     })
+            let persisted = persist_failure_reply body in
+            if not queued_turn
+            then None
+            else
+              match persisted with
+              | Ok () -> Some (Failed { kind = Turn_failed; detail = body })
+              | Error persist_error ->
+                  Some
+                    (Failed
+                       { kind = Transcript_persist_failed
+                       ; detail = persist_error
+                       })
         in
         publish_completion
           (Completion_terminal
-             { status = Stream_rejected
+             { status =
+                 (if queued_turn_not_started ()
+                  then Stream_cancelled
+                  else Stream_rejected)
              ; body
              ; queued_outcome
              });
@@ -2609,6 +2721,16 @@ let process_single_turn ~user_row_origin ~queued_turn
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Run_finished { run_id });
         Some (Deferred { rejection })
+    | `Completion (Completion_terminal { body; _ })
+      when queued_turn_not_started () ->
+        let message = redact_text body in
+        publish_terminal
+          ~status:(Request_stream Stream_cancelled)
+          ~message
+          ();
+        Keeper_chat_events.publish events Text_message_end;
+        Keeper_chat_events.publish events (Run_finished { run_id });
+        None
     | `Completion (Completion_dashboard_queued queued) ->
         let message =
           dashboard_deferred_ack_text ~keeper_name:payload.name queued
@@ -3071,8 +3193,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
              ignore
                (process_single_turn
                   ~user_row_origin:Keeper_chat_store.Needs_append
-                  ~queued_turn:false ~delivery_key:None
-                  ~state ~clock
+                  ~submission:Direct_request ~state ~clock
                   ~auth_token:(auth_token_from_request request)
                   ~thread_id ~continuation_channel ~closed
                   ~client_disconnects:(Some (stream_sw, client_disconnects))

@@ -330,7 +330,7 @@ let test_transfer_busy_has_zero_mutation () =
   with_transfer_lane (fun config from_keeper to_keeper _source_meta _target_meta request ->
     let base_path = config.Workspace.base_path in
     (match
-       Keeper_turn_admission.run_admin_if_free
+       Keeper_turn_admission.run_if_free
          ~base_path
          ~keeper_name:from_keeper
          (fun () ->

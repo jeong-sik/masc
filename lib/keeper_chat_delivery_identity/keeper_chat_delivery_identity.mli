@@ -26,6 +26,7 @@ module Receipt_ids : sig
   type t
   type error = Empty
 
+  val singleton : Receipt_id.t -> t
   val of_list : Receipt_id.t list -> (t, error) result
   val error_to_string : error -> string
   val to_list : t -> Receipt_id.t list

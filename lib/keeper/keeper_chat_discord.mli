@@ -50,6 +50,7 @@ val adapter_loop :
       chat-block parser.
     - [Event_error]: sends error text as a new message.
     - [Link_block], [Image_block], [Audio_block]: send rich block embeds
+    - [Status_block]: replace the terminal assistant text with typed status UI
       or messages.
     - [Tool_context_block]: enriches the matching tool embed with argument
       and result summaries on [Tool_call_end].

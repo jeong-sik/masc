@@ -2687,6 +2687,13 @@ let process_single_turn ~user_row_origin ~queued_turn
            | None -> ());
           if
             Keeper_turn_outcome.equal turn_outcome
+              Keeper_turn_outcome.External_effect_pending
+          then
+            Keeper_chat_events.publish events
+              (Status_block
+                 { kind = Keeper_chat_blocks.External_effect_pending });
+          if
+            Keeper_turn_outcome.equal turn_outcome
               Keeper_turn_outcome.Continuation_checkpoint
           then
             Keeper_chat_events.publish events
@@ -2990,7 +2997,11 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                     ~tool_call_id:(Some tool_call_id)
                     Tool_call_end)
             then loop ()
-        | Link_block _ | Image_block _ | Audio_block _ | Tool_context_block _ ->
+        | Link_block _
+        | Image_block _
+        | Status_block _
+        | Audio_block _
+        | Tool_context_block _ ->
             (* Connector rich blocks are delivered by non-dashboard adapters;
                the SSE stream already receives the underlying text/audio
                through other events. *)

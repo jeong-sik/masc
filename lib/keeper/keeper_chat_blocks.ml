@@ -85,6 +85,11 @@ type status_kind = External_effect_pending
 
 type status_block = { kind : status_kind }
 
+let status_kind_connector_text = function
+  | External_effect_pending ->
+    "승인 대기: 외부 작업을 실행하기 전에 확인이 필요합니다."
+;;
+
 type trace_tool_status =
   | Trace_tool_pending
   | Trace_tool_ok

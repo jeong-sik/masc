@@ -71,7 +71,7 @@ val adapter_loop :
     blocks on the event stream until [Run_finished] or [Error], then sends
     the accumulated text (or error message) to the given Slack channel.
 
-    Rich events ([Link_block], [Image_block], [Audio_block],
+    Rich events ([Link_block], [Image_block], [Status_block], [Audio_block],
     [Tool_context_block]) are rendered as Slack Block Kit sections and
     included alongside the final message. [Tool_call_start],
     [Tool_call_args], [Tool_call_args_snapshot], and [Tool_call_end] are

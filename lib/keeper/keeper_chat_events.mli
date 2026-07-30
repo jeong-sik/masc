@@ -83,6 +83,9 @@ type keeper_chat_event =
       ; image : string option
       }
   | Image_block of { url : string; caption : string option }
+  | Status_block of Keeper_chat_blocks.status_block
+      (** Typed control status for channel adapters. It is rendered as channel
+          UI and never reclassified as assistant speech. *)
   | Audio_block of
       { token : string
       ; mime : string

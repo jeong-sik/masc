@@ -104,6 +104,10 @@ type status_kind = External_effect_pending
 
 type status_block = { kind : status_kind }
 
+val status_kind_connector_text : status_kind -> string
+(** Channel-facing presentation for a typed status. This is delivery UI text,
+    not assistant output, and must not be persisted as assistant content. *)
+
 type trace_tool_status =
   | Trace_tool_pending
   | Trace_tool_ok

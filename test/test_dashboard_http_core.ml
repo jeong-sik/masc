@@ -335,6 +335,9 @@ let test_keeper_chat_recovery_route_is_exact () =
   check string "event pending projection exposes exact source incarnation"
     "7"
     (pending_json |> member "source_incarnation" |> to_string);
+  check string "event pending projection exposes an opaque exact snapshot coordinate"
+    (Keeper_event_queue.stimulus_snapshot_sha256 source)
+    (pending_json |> member "source_snapshot_sha256" |> to_string);
   check bool "event pending projection omits raw payload content" false
     (contains_substring (Yojson.Safe.to_string pending_json) sensitive_content);
   check bool "event pending projection has no raw source object" true
@@ -436,7 +439,9 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
     ; payload = Bootstrap
     }
   in
+  let predecessor_source = stimulus "event-operator-predecessor" 0.0 in
   let cancelled_source = stimulus "event-operator-cancel" 1.0 in
+  let alias_source = stimulus "event-operator-alias" 1.5 in
   let transferred_source = stimulus "event-operator-transfer" 2.0 in
   let unrelated_source = stimulus "event-operator-unrelated" 3.0 in
   let load_state keeper_name =
@@ -451,6 +456,24 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
       ~keeper_name
       (fun pending -> Keeper_event_queue.enqueue pending source)
     |> require_ok ("enqueue " ^ source.post_id)
+  in
+  let enqueue_batch keeper_name sources =
+    Keeper_event_queue_persistence.update_result
+      ~base_path
+      ~keeper_name
+      (fun pending ->
+        List.fold_left Keeper_event_queue.enqueue pending sources)
+    |> require_ok ("enqueue batch for " ^ keeper_name)
+  in
+  let dequeue_head keeper_name =
+    Keeper_event_queue_persistence.update_result
+      ~base_path
+      ~keeper_name
+      (fun pending ->
+        match Keeper_event_queue.dequeue pending with
+        | Some (_, retained) -> retained
+        | None -> fail ("dequeue head for " ^ keeper_name ^ ": empty queue"))
+    |> require_ok ("dequeue head for " ^ keeper_name)
   in
   let result_status json =
     match Yojson.Safe.Util.member "status" json with
@@ -548,19 +571,88 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
             ~base_path
             transfer_keeper
             transfer_meta);
-       enqueue cancel_keeper cancelled_source;
+       enqueue_batch
+         cancel_keeper
+         [ predecessor_source; cancelled_source; alias_source ];
        let before_cancel = load_state cancel_keeper in
        let cancel_selection =
          Keeper_event_queue_state.pending_selections before_cancel
-         |> fun selections -> List.nth_opt selections 0
+         |> fun selections -> List.nth_opt selections 1
          |> require_some "select cancellation source"
        in
+       let cancel_source_snapshot_sha256 =
+         Keeper_event_queue.stimulus_snapshot_sha256 cancel_selection.source
+       in
+       let incomplete_cancel_request =
+         request_body
+           "cancel"
+           [ "queue_index", `Int 1
+           ; ( "source_incarnation"
+             , `String (Int64.to_string cancel_selection.admitted_revision) )
+           ; ( "operator_operation_id"
+             , `String "event-operator-incomplete-operation" )
+           ; "reason", `String "missing exact source snapshot"
+           ]
+       in
+       let incomplete_raw, _ =
+         post_event_operator
+           ~keeper_name:cancel_keeper
+           incomplete_cancel_request
+       in
+       check bool "cancel hard-cut rejects an incomplete source coordinate" true
+         (String.starts_with ~prefix:"HTTP/1.1 400" incomplete_raw);
+       let stale_cancel_request =
+         request_body
+           "cancel"
+           [ "queue_index", `Int 1
+           ; ( "source_incarnation"
+             , `String (Int64.to_string cancel_selection.admitted_revision) )
+           ; ( "source_snapshot_sha256"
+             , `String cancel_source_snapshot_sha256 )
+           ; ( "operator_operation_id"
+             , `String "event-operator-cancel-operation" )
+           ; "reason", `String "operator cancelled exact source"
+           ]
+       in
+       dequeue_head cancel_keeper;
+       let shifted_alias =
+         Keeper_event_queue_state.pending_selections (load_state cancel_keeper)
+         |> fun selections -> List.nth_opt selections 1
+         |> require_some "select shifted same-incarnation alias"
+       in
+       check int64 "batch entries share the admitted revision"
+         cancel_selection.admitted_revision
+         shifted_alias.admitted_revision;
+       let stale_raw, stale_response =
+         post_event_operator
+           ~keeper_name:cancel_keeper
+           stale_cancel_request
+       in
+       check bool "shifted same-incarnation coordinate is rejected" true
+         (String.starts_with ~prefix:"HTTP/1.1 409" stale_raw);
+       check bool "shifted coordinate fails on the exact source snapshot" true
+         (match Yojson.Safe.Util.member "error" stale_response with
+          | `String detail -> contains_substring detail "source snapshot"
+          | _ -> false);
+       let refreshed_cancel_selection =
+         Keeper_event_queue_state.pending_selections (load_state cancel_keeper)
+         |> fun selections -> List.nth_opt selections 0
+         |> require_some "refresh cancellation source coordinate"
+       in
+       check bool "refreshed coordinate retains the selected source" true
+         (Keeper_event_queue.stimulus_identity_equal
+            cancel_selection.source
+            refreshed_cancel_selection.source);
        let cancel_request =
          request_body
            "cancel"
            [ "queue_index", `Int 0
            ; ( "source_incarnation"
-             , `String (Int64.to_string cancel_selection.admitted_revision) )
+             , `String
+                 (Int64.to_string
+                    refreshed_cancel_selection.admitted_revision) )
+           ; ( "source_snapshot_sha256"
+             , `String cancel_source_snapshot_sha256 )
            ; ( "operator_operation_id"
              , `String "event-operator-cancel-operation" )
            ; "reason", `String "operator cancelled exact source"
@@ -632,9 +724,10 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
            "cancel"
            [ "queue_index", `Int 0
            ; ( "source_incarnation"
+             , `String (Int64.to_string cancel_selection.admitted_revision) )
+           ; ( "source_snapshot_sha256"
              , `String
-                 (Int64.succ cancel_selection.admitted_revision
-                  |> Int64.to_string) )
+                 (Keeper_event_queue.stimulus_snapshot_sha256 alias_source) )
            ; ( "operator_operation_id"
              , `String "event-operator-cancel-operation" )
            ; "reason", `String "operator cancelled exact source"
@@ -653,7 +746,7 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
          | _ -> fail "conflicting replay response omitted error"
        in
        check bool
-         "operation replay rejects another source incarnation"
+         "operation replay rejects another source snapshot"
          true
          (contains_substring conflict_detail "operation ID conflicts");
        enqueue transfer_keeper transferred_source;
@@ -669,6 +762,10 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
            [ "queue_index", `Int 0
            ; ( "source_incarnation"
              , `String (Int64.to_string transfer_selection.admitted_revision) )
+           ; ( "source_snapshot_sha256"
+             , `String
+                 (Keeper_event_queue.stimulus_snapshot_sha256
+                    transfer_selection.source) )
            ; ( "operator_operation_id"
              , `String "event-operator-transfer-operation" )
            ; "target_keeper", `String target_keeper

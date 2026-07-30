@@ -787,6 +787,7 @@ export interface KeeperChatPendingMutationResult {
 export interface KeeperEventQueuePendingItem {
   queueIndex: number
   sourceIncarnation: string
+  sourceSnapshotSha256: string
   postId: string
   urgency: 'immediate' | 'normal' | 'low'
   arrivedAt: number
@@ -1143,6 +1144,7 @@ export function parseKeeperEventQueuePendingSnapshot(
     }
     const queueIndex = asNumber(raw.queue_index)
     const sourceIncarnation = parseKeeperQueueRevision(raw.source_incarnation)
+    const sourceSnapshotSha256 = asString(raw.source_snapshot_sha256, '')
     const postId = asString(raw.post_id, '').trim()
     const urgency = asString(raw.urgency, '').trim()
     const arrivedAt = asNumber(raw.arrived_at_unix)
@@ -1152,6 +1154,7 @@ export function parseKeeperEventQueuePendingSnapshot(
       || !Number.isSafeInteger(queueIndex)
       || queueIndex < 0
       || sourceIncarnation === undefined
+      || !/^[0-9a-f]{64}$/.test(sourceSnapshotSha256)
       || !postId
       || !['immediate', 'normal', 'low'].includes(urgency)
       || typeof arrivedAt !== 'number'
@@ -1164,6 +1167,7 @@ export function parseKeeperEventQueuePendingSnapshot(
     return {
       queueIndex,
       sourceIncarnation,
+      sourceSnapshotSha256,
       postId,
       urgency: urgency as KeeperEventQueuePendingItem['urgency'],
       arrivedAt,
@@ -1370,13 +1374,13 @@ export async function moveKeeperChatPendingReceiptToEnd(
 }
 
 export type KeeperEventQueueOperatorAction =
-  | { action: 'cancel'; queueIndex: number; sourceIncarnation: string; reason: string; operationId?: string }
-  | { action: 'transfer'; queueIndex: number; sourceIncarnation: string; targetKeeper: string; operationId?: string }
+  | { action: 'cancel'; queueIndex: number; sourceIncarnation: string; sourceSnapshotSha256: string; reason: string; operationId?: string }
+  | { action: 'transfer'; queueIndex: number; sourceIncarnation: string; sourceSnapshotSha256: string; targetKeeper: string; operationId?: string }
   | { action: 'reprioritize'; expectedRevision: string; queueIndex: number; sourceIncarnation: string; urgency: 'immediate' | 'normal' | 'low' }
 
 export type KeeperEventQueueReplayableAction =
-  | { action: 'cancel'; queueIndex: number; sourceIncarnation: string; reason: string; operationId: string }
-  | { action: 'transfer'; queueIndex: number; sourceIncarnation: string; targetKeeper: string; operationId: string }
+  | { action: 'cancel'; queueIndex: number; sourceIncarnation: string; sourceSnapshotSha256: string; reason: string; operationId: string }
+  | { action: 'transfer'; queueIndex: number; sourceIncarnation: string; sourceSnapshotSha256: string; targetKeeper: string; operationId: string }
 
 type PreparedKeeperEventQueueOperatorAction =
   | KeeperEventQueueReplayableAction
@@ -1437,12 +1441,14 @@ export async function operateKeeperEventQueue(
   const request = prepared.action === 'cancel'
     ? {
         ...common,
+        source_snapshot_sha256: prepared.sourceSnapshotSha256,
         operator_operation_id: prepared.operationId,
         reason: prepared.reason,
       }
     : prepared.action === 'transfer'
       ? {
           ...common,
+          source_snapshot_sha256: prepared.sourceSnapshotSha256,
           operator_operation_id: prepared.operationId,
           target_keeper: prepared.targetKeeper,
         }

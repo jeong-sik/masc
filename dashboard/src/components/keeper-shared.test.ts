@@ -27,6 +27,7 @@ const {
       action: 'cancel' | 'transfer'
       queueIndex: number
       sourceIncarnation: string
+      sourceSnapshotSha256: string
       operationId: string
       reason?: string
       targetKeeper?: string
@@ -39,6 +40,7 @@ const {
         action: 'cancel' | 'transfer'
         queueIndex: number
         sourceIncarnation: string
+        sourceSnapshotSha256: string
         operationId: string
         reason?: string
         targetKeeper?: string
@@ -1017,6 +1019,7 @@ describe('KeeperConversationPanel', () => {
       pending: [{
         queueIndex: 0,
         sourceIncarnation: '8',
+        sourceSnapshotSha256: 'b'.repeat(64),
         postId: 'board-post-9',
         urgency: 'normal',
         arrivedAt: 41,
@@ -1089,6 +1092,7 @@ describe('KeeperConversationPanel', () => {
       pending: [{
         queueIndex: 0,
         sourceIncarnation: '8',
+        sourceSnapshotSha256: 'b'.repeat(64),
         postId: 'board-post-9',
         urgency: 'normal',
         arrivedAt: 41,
@@ -1110,6 +1114,7 @@ describe('KeeperConversationPanel', () => {
       action: 'transfer' as const,
       queueIndex: 0,
       sourceIncarnation: '8',
+      sourceSnapshotSha256: 'b'.repeat(64),
       operationId: 'operation-replay-9',
       targetKeeper: 'rondo',
     }

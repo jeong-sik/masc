@@ -69,6 +69,7 @@ import { resetDevTokenBootstrap } from './dev-token'
 import { DEFAULT_GET_TIMEOUT_MS } from '../config/constants'
 
 const EVENT_SOURCE_INCARNATION = '6'
+const EVENT_SOURCE_SNAPSHOT_SHA256 = 'a'.repeat(64)
 
 afterEach(() => {
   vi.useRealTimers()
@@ -507,6 +508,7 @@ describe('Keeper chat durable receipt API', () => {
     const item = (queueIndex: number, postId: string) => ({
       queue_index: queueIndex,
       source_incarnation: EVENT_SOURCE_INCARNATION,
+      source_snapshot_sha256: EVENT_SOURCE_SNAPSHOT_SHA256,
       post_id: postId,
       urgency: 'normal',
       arrived_at_unix: 42,
@@ -573,6 +575,7 @@ describe('Keeper chat durable receipt API', () => {
       pending: [{
         queue_index: queueIndex,
         source_incarnation: EVENT_SOURCE_INCARNATION,
+        source_snapshot_sha256: EVENT_SOURCE_SNAPSHOT_SHA256,
         post_id: `post-${revision}`,
         urgency: 'normal',
         arrived_at_unix: 42,
@@ -704,6 +707,7 @@ describe('Keeper chat durable receipt API', () => {
         operationId: 'operation-9',
         queueIndex: 1,
         sourceIncarnation: EVENT_SOURCE_INCARNATION,
+        sourceSnapshotSha256: EVENT_SOURCE_SNAPSHOT_SHA256,
         reason: 'operator cancellation',
       })
     } catch (cause) {
@@ -718,6 +722,7 @@ describe('Keeper chat durable receipt API', () => {
         operationId: 'operation-9',
         queueIndex: 1,
         sourceIncarnation: EVENT_SOURCE_INCARNATION,
+        sourceSnapshotSha256: EVENT_SOURCE_SNAPSHOT_SHA256,
         reason: 'operator cancellation',
       },
     })
@@ -741,6 +746,7 @@ describe('Keeper chat durable receipt API', () => {
         action: 'transfer',
         queueIndex: 2,
         sourceIncarnation: EVENT_SOURCE_INCARNATION,
+        sourceSnapshotSha256: EVENT_SOURCE_SNAPSHOT_SHA256,
         targetKeeper: 'rondo',
       })
     } catch (cause) {
@@ -755,6 +761,7 @@ describe('Keeper chat durable receipt API', () => {
         operationId: '00000000-0000-4000-8000-000000000099',
         queueIndex: 2,
         sourceIncarnation: EVENT_SOURCE_INCARNATION,
+        sourceSnapshotSha256: EVENT_SOURCE_SNAPSHOT_SHA256,
         targetKeeper: 'rondo',
       },
     })
@@ -766,6 +773,7 @@ describe('Keeper chat durable receipt API', () => {
           action: 'transfer',
           queue_index: 2,
           source_incarnation: EVENT_SOURCE_INCARNATION,
+          source_snapshot_sha256: EVENT_SOURCE_SNAPSHOT_SHA256,
           operator_operation_id: '00000000-0000-4000-8000-000000000099',
           target_keeper: 'rondo',
         }),

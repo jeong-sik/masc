@@ -744,6 +744,13 @@ let stimulus_to_yojson (stimulus : stimulus) =
     ; "payload", payload_to_yojson stimulus.payload
     ]
 
+let stimulus_snapshot_sha256 stimulus =
+  stimulus
+  |> stimulus_to_yojson
+  |> Yojson.Safe.to_string
+  |> Digestif.SHA256.digest_string
+  |> Digestif.SHA256.to_hex
+
 let stimulus_of_yojson json =
   let context = "stimulus" in
   let* fields = assoc_fields ~context json in

@@ -886,6 +886,7 @@ function KeeperQueueControlPanel({
                       action: 'transfer',
                       queueIndex: item.queueIndex,
                       sourceIncarnation: item.sourceIncarnation,
+                      sourceSnapshotSha256: item.sourceSnapshotSha256,
                       targetKeeper,
                     })
                   }}
@@ -901,6 +902,7 @@ function KeeperQueueControlPanel({
                       action: 'cancel',
                       queueIndex: item.queueIndex,
                       sourceIncarnation: item.sourceIncarnation,
+                      sourceSnapshotSha256: item.sourceSnapshotSha256,
                       reason,
                     })
                   }}

@@ -4,12 +4,14 @@ type request =
   | Cancel of
       { queue_index : int
       ; source_incarnation : int64
+      ; source_snapshot_sha256 : string
       ; operator_operation_id : string
       ; reason : string
       }
   | Transfer of
       { queue_index : int
       ; source_incarnation : int64
+      ; source_snapshot_sha256 : string
       ; operator_operation_id : string
       ; target_keeper : string
       }
@@ -91,9 +93,30 @@ let resolve_pending_selection
   | None -> Error "event queue selection is no longer pending"
 ;;
 
+let resolve_exact_pending_selection
+      ~queue_state
+      ~queue_index
+      ~source_incarnation
+      ~source_snapshot_sha256
+  =
+  let* selection =
+    resolve_pending_selection
+      ~queue_state
+      ~queue_index
+      ~source_incarnation
+  in
+  if
+    String.equal
+      (Keeper_event_queue.stimulus_snapshot_sha256 selection.source)
+      source_snapshot_sha256
+  then Ok selection
+  else Error "event queue selection no longer matches the observed source snapshot"
+;;
+
 let prior_cancellation_for_request
       ~queue_state
       ~source_incarnation
+      ~source_snapshot_sha256
       ~operator_operation_id
       ~reason
   =
@@ -107,6 +130,10 @@ let prior_cancellation_for_request
     (match receipt.transition with
      | Keeper_event_queue_state.Cancel_accepted cancellation
        when Int64.equal cancellation.source_incarnation source_incarnation
+            && String.equal
+                 (Keeper_event_queue.stimulus_snapshot_sha256
+                    cancellation.source)
+                 source_snapshot_sha256
             && String.equal cancellation.reason reason ->
        Ok (Some { cancellation; applied_at = receipt.applied_at })
      | Keeper_event_queue_state.Cancel_accepted _
@@ -122,14 +149,16 @@ let fresh_cancellation_for_request
       ~owner_nonce
       ~queue_index
       ~source_incarnation
+      ~source_snapshot_sha256
       ~operator_operation_id
       ~reason
   =
   let* selection =
-    resolve_pending_selection
+    resolve_exact_pending_selection
       ~queue_state
       ~queue_index
       ~source_incarnation
+      ~source_snapshot_sha256
   in
   let cancellation : Keeper_registry_event_queue.accepted_cancellation =
     { source = selection.source
@@ -146,6 +175,7 @@ let prior_transfer_for_request
       ~queue_state
       ~keeper_name
       ~source_incarnation
+      ~source_snapshot_sha256
       ~operator_operation_id
       ~target_keeper
   =
@@ -159,6 +189,9 @@ let prior_transfer_for_request
     (match receipt.transition with
      | Keeper_event_queue_state.Transfer_accepted transfer
        when Int64.equal transfer.source_incarnation source_incarnation
+            && String.equal
+                 (Keeper_event_queue.stimulus_snapshot_sha256 transfer.source)
+                 source_snapshot_sha256
             && String.equal transfer.from_keeper keeper_name
             && String.equal transfer.to_keeper target_keeper ->
        Ok (Some { transfer; applied_at = receipt.applied_at })
@@ -176,14 +209,16 @@ let fresh_transfer_for_request
       ~owner_nonce
       ~queue_index
       ~source_incarnation
+      ~source_snapshot_sha256
       ~operator_operation_id
       ~target_keeper
   =
   let* selection =
-    resolve_pending_selection
+    resolve_exact_pending_selection
       ~queue_state
       ~queue_index
       ~source_incarnation
+      ~source_snapshot_sha256
   in
   let transfer : Keeper_registry_event_queue.accepted_transfer =
     { source = selection.source
@@ -314,6 +349,7 @@ let replay_committed_request ~base_path ~keeper_name request =
   | Cancel
       { queue_index = _
       ; source_incarnation
+      ; source_snapshot_sha256
       ; operator_operation_id
       ; reason
       } ->
@@ -326,6 +362,7 @@ let replay_committed_request ~base_path ~keeper_name request =
       prior_cancellation_for_request
         ~queue_state
         ~source_incarnation
+        ~source_snapshot_sha256
         ~operator_operation_id
         ~reason
     in
@@ -337,6 +374,7 @@ let replay_committed_request ~base_path ~keeper_name request =
   | Transfer
       { queue_index = _
       ; source_incarnation
+      ; source_snapshot_sha256
       ; operator_operation_id
       ; target_keeper
       } ->
@@ -350,6 +388,7 @@ let replay_committed_request ~base_path ~keeper_name request =
         ~queue_state
         ~keeper_name
         ~source_incarnation
+        ~source_snapshot_sha256
         ~operator_operation_id
         ~target_keeper
     in
@@ -376,6 +415,7 @@ let run_admitted_request
   | Cancel
       { queue_index
       ; source_incarnation
+      ; source_snapshot_sha256
       ; operator_operation_id
       ; reason
       } ->
@@ -383,6 +423,7 @@ let run_admitted_request
       prior_cancellation_for_request
         ~queue_state
         ~source_incarnation
+        ~source_snapshot_sha256
         ~operator_operation_id
         ~reason
     in
@@ -395,6 +436,7 @@ let run_admitted_request
           ~owner_nonce
           ~queue_index
           ~source_incarnation
+          ~source_snapshot_sha256
           ~operator_operation_id
           ~reason
     in
@@ -402,6 +444,7 @@ let run_admitted_request
   | Transfer
       { queue_index
       ; source_incarnation
+      ; source_snapshot_sha256
       ; operator_operation_id
       ; target_keeper
       } ->
@@ -413,6 +456,7 @@ let run_admitted_request
           ~queue_state
           ~keeper_name
           ~source_incarnation
+          ~source_snapshot_sha256
           ~operator_operation_id
           ~target_keeper
       in
@@ -427,6 +471,7 @@ let run_admitted_request
             ~owner_nonce
             ~queue_index
             ~source_incarnation
+            ~source_snapshot_sha256
             ~operator_operation_id
             ~target_keeper
       in

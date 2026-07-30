@@ -74,6 +74,9 @@ let pending_page ~after ~limit pending =
           [ "queue_index", `Int index
           ; ( "source_incarnation"
             , `String (Int64.to_string selection.admitted_revision) )
+          ; ( "source_snapshot_sha256"
+            , `String
+                (Keeper_event_queue.stimulus_snapshot_sha256 stimulus) )
           ; "post_id", `String stimulus.Keeper_event_queue.post_id
           ; ( "urgency"
             , `String
@@ -146,12 +149,14 @@ type request = Execute.request =
   | Cancel of
       { queue_index : int
       ; source_incarnation : int64
+      ; source_snapshot_sha256 : string
       ; operator_operation_id : string
       ; reason : string
       }
   | Transfer of
       { queue_index : int
       ; source_incarnation : int64
+      ; source_snapshot_sha256 : string
       ; operator_operation_id : string
       ; target_keeper : string
       }
@@ -196,6 +201,19 @@ let source_incarnation fields =
   | Some revision when Int64.compare revision 0L >= 0 -> Ok revision
   | Some _ | None ->
     Error "source_incarnation must be a non-negative int64 string"
+;;
+
+let source_snapshot_sha256 fields =
+  let* value = string_field "source_snapshot_sha256" fields in
+  if
+    String.length value = 64
+    && String.for_all
+         (function
+           | '0' .. '9' | 'a' .. 'f' -> true
+           | _ -> false)
+         value
+  then Ok value
+  else Error "source_snapshot_sha256 must be 64 lowercase hexadecimal characters"
 ;;
 
 let operator_operation_id fields =
@@ -251,9 +269,13 @@ let parse body =
       | "cancel" ->
         let* () =
           require_exact_fields
-            ("operator_operation_id" :: "reason" :: common)
+            ("operator_operation_id"
+             :: "reason"
+             :: "source_snapshot_sha256"
+             :: common)
             fields
         in
+        let* source_snapshot_sha256 = source_snapshot_sha256 fields in
         let* operator_operation_id = operator_operation_id fields in
         let* reason = string_field "reason" fields in
         if reason = "" || not (String.equal reason (String.trim reason))
@@ -263,15 +285,20 @@ let parse body =
             (Cancel
                { queue_index
                ; source_incarnation
+               ; source_snapshot_sha256
                ; operator_operation_id
                ; reason
                })
       | "transfer" ->
         let* () =
           require_exact_fields
-            ("operator_operation_id" :: "target_keeper" :: common)
+            ("operator_operation_id"
+             :: "source_snapshot_sha256"
+             :: "target_keeper"
+             :: common)
             fields
         in
+        let* source_snapshot_sha256 = source_snapshot_sha256 fields in
         let* operator_operation_id = operator_operation_id fields in
         let* target_keeper = string_field "target_keeper" fields in
         if not (Keeper_config.validate_name target_keeper)
@@ -281,6 +308,7 @@ let parse body =
             (Transfer
                { queue_index
                ; source_incarnation
+               ; source_snapshot_sha256
                ; operator_operation_id
                ; target_keeper
                })

@@ -309,6 +309,11 @@ val drain_board_all : t -> stimulus list * t
 val stimulus_to_yojson : stimulus -> Yojson.Safe.t
 (** Stable JSON representation used by MASC-owned durable queue snapshots. *)
 
+val stimulus_snapshot_sha256 : stimulus -> string
+(** SHA-256 of the exact stable stimulus snapshot. Unlike
+    {!stimulus_identity_equal}, this includes display fields and [arrived_at],
+    so an operator coordinate cannot alias another pending row. *)
+
 val stimulus_of_yojson : Yojson.Safe.t -> (stimulus, string) result
 (** Parse a stimulus written by [stimulus_to_yojson]. *)
 

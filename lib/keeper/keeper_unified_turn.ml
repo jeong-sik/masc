@@ -452,7 +452,7 @@ let recover_provider_context_overflow_in_lane
              (try
                 commit_outcome
                   (
-                  recover_latest_checkpoint_for_compaction
+                  Keeper_post_turn.recover_latest_checkpoint_for_compaction
                     ~before_dispatch_authority:before_compaction_dispatch
                     ~base_path:config.base_path
                     ~base_dir

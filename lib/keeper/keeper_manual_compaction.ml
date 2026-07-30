@@ -299,7 +299,7 @@ let run_commit ~config ~meta prepared =
       recovery;
     Ok (Compacted { recovery; installation; lifecycle })
   in
-  match Keeper_context_runtime.commit_prepared_compaction prepared with
+  match Keeper_post_turn.commit_prepared_compaction prepared with
   | Keeper_post_turn.Committed recovery -> committed recovery
   | Keeper_post_turn.Not_committed no_compaction -> terminal no_compaction
   | Keeper_post_turn.Commit_failed { error; committed = None } ->
@@ -458,7 +458,7 @@ let run_admitted
   run_admitted_with
     ~append_compaction_manifest:append_manifest
     ~prepare_compaction:(fun ~base_path ~base_dir ~meta ~trigger ->
-      Keeper_context_runtime.prepare_compaction
+      Keeper_post_turn.prepare_compaction
         ?before_dispatch_authority
         ~base_path
         ~base_dir
@@ -478,7 +478,7 @@ let run_under_admission
   run_admitted_with
     ~append_compaction_manifest:append_manifest
     ~prepare_compaction:(fun ~base_path ~base_dir ~meta ~trigger ->
-      Keeper_context_runtime.prepare_compaction
+      Keeper_post_turn.prepare_compaction
         ?before_dispatch_authority
         ~base_path
         ~base_dir

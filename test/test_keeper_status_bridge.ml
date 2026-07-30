@@ -134,6 +134,75 @@ let test_age_seconds_preserves_missing_timestamp () =
     (Keeper_status_metrics.age_seconds_opt ~now_ts:100.0 75.0)
 ;;
 
+let test_tool_audit_cache_advances_from_negative_by_appended_rows () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
+  let base_path =
+    Filename.temp_dir "keeper_status_tool_audit_cache_" ""
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Eio_guard.disable ();
+      Fs_compat.remove_tree base_path)
+    (fun () ->
+      let config = Workspace.default_config base_path in
+      let keeper_name = "tool-audit-cache" in
+      let store =
+        Keeper_types_support.keeper_metrics_store config keeper_name
+      in
+      let heartbeat sequence =
+        `Assoc
+          (Keeper_metrics_record.fields Keeper_metrics_record.Heartbeat
+           @ [ "ts", `String "2026-07-30T05:00:00Z"
+             ; "ts_unix", `Float 1_785_388_400.0
+             ; "channel", `String "heartbeat"
+             ; "sequence", `Int sequence
+             ])
+      in
+      Dated_jsonl.append store (heartbeat 1);
+      Alcotest.(check bool)
+        "initial current-schema negative lookup"
+        true
+        (Option.is_none
+           (Keeper_status_metrics.latest_tool_audit_snapshot_from_files
+              config
+              ~keeper_name));
+      Dated_jsonl.append store (heartbeat 2);
+      Alcotest.(check bool)
+        "appended heartbeat preserves cached negative result"
+        true
+        (Option.is_none
+           (Keeper_status_metrics.latest_tool_audit_snapshot_from_files
+              config
+              ~keeper_name));
+      Dated_jsonl.append store
+        (`Assoc
+          (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+           @ [ "ts", `String "2026-07-30T05:00:01Z"
+             ; "ts_unix", `Float 1_785_388_401.0
+             ; "trace_id", `String "trace-tool-audit-cache"
+             ; "generation", `Int 0
+             ; "channel", `String "turn"
+             ; "turn_mode", `String "tool_use"
+             ; "latency_ms", `Int 1
+             ; "handoff_performed", `Bool false
+             ; "tool_call_count", `Int 1
+             ; "tools_used", `List [ `String "masc_status" ]
+             ]));
+      match
+        Keeper_status_metrics.latest_tool_audit_snapshot_from_files
+          config
+          ~keeper_name
+      with
+      | Some snapshot ->
+          Alcotest.(check (list string))
+            "new turn advances the incremental audit snapshot"
+            [ "masc_status" ]
+            snapshot.latest_tool_names
+      | None -> Alcotest.fail "expected appended current-schema turn audit")
+;;
+
 let () =
   Alcotest.run
     "keeper_status_bridge"
@@ -158,6 +227,12 @@ let () =
             "missing timestamps do not become zero age"
             `Quick
             test_age_seconds_preserves_missing_timestamp
+        ] );
+      ( "tool audit cache",
+        [ Alcotest.test_case
+            "negative snapshot advances from appended rows"
+            `Quick
+            test_tool_audit_cache_advances_from_negative_by_appended_rows
         ] );
       ( "profile default override provenance",
         [

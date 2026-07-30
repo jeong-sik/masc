@@ -219,6 +219,28 @@ let string_list_member_opt key json =
       decode [] values
   | _ -> None
 
+module Tool_audit_cache = struct
+  type entry =
+    { physical_row_count : int
+    ; snapshot : tool_audit_snapshot option
+    }
+
+  let entries : (string, entry) Hashtbl.t = Hashtbl.create 64
+  let mutex = Stdlib.Mutex.create ()
+  let max_entries = 256
+
+  let find path =
+    Stdlib.Mutex.protect mutex (fun () -> Hashtbl.find_opt entries path)
+
+  let replace path entry =
+    Stdlib.Mutex.protect mutex (fun () ->
+      if
+        (not (Hashtbl.mem entries path))
+        && Hashtbl.length entries >= max_entries
+      then Hashtbl.clear entries;
+      Hashtbl.replace entries path entry)
+end
+
 let latest_tool_audit_snapshot_from_metrics config keeper_name =
   let store =
     Keeper_types_support.keeper_metrics_store config keeper_name
@@ -269,13 +291,53 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
           ~detail:"keeper metrics row is not a JSON object";
         None
   in
-  match Dated_jsonl.find_latest_entry_result store parse_snapshot with
+  let report_read_error error =
+    report_drop
+      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+      ~detail:(Dated_jsonl.read_error_to_string error)
+  in
+  let cache_if_stable ~physical_row_count snapshot =
+    if Dated_jsonl.count_entries store = physical_row_count
+    then
+      Tool_audit_cache.replace
+        metrics_path
+        { physical_row_count; snapshot };
+    snapshot
+  in
+  let physical_row_count = Dated_jsonl.count_entries store in
+  match Tool_audit_cache.find metrics_path with
+  | Some cached when cached.physical_row_count = physical_row_count ->
+      cached.snapshot
+  | Some cached when cached.physical_row_count < physical_row_count ->
+      let appended_row_count =
+        physical_row_count - cached.physical_row_count
+      in
+      (match Dated_jsonl.read_recent_result store appended_row_count with
+       | Error error ->
+           report_read_error error;
+           None
+       | Ok appended_entries ->
+           let appended_snapshot =
+             List.fold_left
+               (fun latest entry ->
+                 match parse_snapshot entry with
+                 | Some snapshot -> Some snapshot
+                 | None -> latest)
+               None
+               appended_entries
+           in
+           let snapshot =
+             match appended_snapshot with
+             | Some _ as snapshot -> snapshot
+             | None -> cached.snapshot
+           in
+           cache_if_stable ~physical_row_count snapshot)
+  | Some _ | None ->
+    (match Dated_jsonl.find_latest_entry_result store parse_snapshot with
     | Error error ->
-        report_drop
-          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
-          ~detail:(Dated_jsonl.read_error_to_string error);
+        report_read_error error;
         None
-    | Ok snapshot -> snapshot
+    | Ok snapshot -> cache_if_stable ~physical_row_count snapshot)
 
 let latest_tool_audit_snapshot_from_files config ~keeper_name =
   latest_tool_audit_snapshot_from_metrics config keeper_name

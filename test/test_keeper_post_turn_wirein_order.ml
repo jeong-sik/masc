@@ -1313,6 +1313,99 @@ let test_suspended_streak_refuses_reactive_prepare () =
    only the self-feeding edge is cut. The second half of this test pins that a
    real compaction failure still advances the streak, so the ceiling that
    #25461 added keeps working. *)
+(* A cancelled exact execution is a torn-down fiber, not a compaction that
+   ran and produced nothing.  Both producers of the cancelled cause now
+   re-raise, so this classification is defensive: it exists so a future
+   producer that returns instead of raising cannot silently advance the
+   streak that suspends compaction. *)
+let test_cancelled_exact_execution_does_not_settle_as_compaction_failure () =
+  Eio_main.run @@ fun _env ->
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String "cancellation-settlement"
+          ; "trace_id", `String "trace-cancellation-settlement"
+          ])
+    with
+    | Ok meta -> meta
+    | Error detail -> failf "cancellation-settlement meta fixture: %s" detail
+  in
+  let source =
+    match
+      Keeper_checkpoint_ref.create
+        ~trace_id:meta.runtime.trace_id
+        ~generation:1
+        ~turn_count:1
+        ~canonical_checkpoint_bytes:"{}"
+    with
+    | Ok source -> source
+    | Error _ -> fail "checkpoint ref fixture could not be built"
+  in
+  let terminal cause : Keeper_event_queue_state.exact_execution_terminal =
+    { cause
+    ; slot_id = "ollama_cloud.deepseek-v4-flash"
+    ; call_id = "call-cancellation-settlement"
+    ; plan_fingerprint = "plan-cancellation-settlement"
+    ; request_body_sha256 = String.make 64 '0'
+    }
+  in
+  let turn_failure_with source_disposition : Masc.Keeper_unified_turn.turn_failure =
+    { error = Agent_sdk.Error.Internal "exact execution terminal"
+    ; runtime_id = "cancellation-characterization"
+    ; route =
+        Keeper_runtime_failure_route.Retry_after_observed
+          { retry_class = Keeper_runtime_failure_route.Rate_limited
+          ; retry_after = None
+          }
+    ; source_disposition
+    ; deferred_runtime_lane = None
+    }
+  in
+  (* [exact_output_terminal_reason] is private, so the disposition is built by
+     the same compiler-checked partition production uses. *)
+  let settle_reason reason =
+    let source_disposition =
+      Masc.Keeper_unified_turn.source_disposition_after_no_compaction
+        { Keeper_event_queue_state.source; reason }
+    in
+    Masc.Keeper_heartbeat_loop.compaction_outcome_of_cycle_outcome
+      (Some (Cycle.Failed { meta; failure = turn_failure_with source_disposition }))
+  in
+  let settle cause =
+    settle_reason
+      (Keeper_event_queue_state.Exact_execution_terminal (terminal cause))
+  in
+  check
+    bool
+    "a cancelled exact execution settles as nothing"
+    true
+    (settle Keeper_event_queue_state.Exact_execution_cancelled = None);
+  (* Everything else on this arm is a compaction that ran and produced nothing
+     usable, so the #25461 ceiling still sees it. *)
+  List.iter
+    (fun (cause, label) ->
+       check
+         bool
+         (label ^ " still settles as a compaction failure")
+         true
+         (settle cause = Some `Failed))
+    [ Keeper_event_queue_state.Exact_execution_failed, "exact_execution_failed"
+    ; ( Keeper_event_queue_state.Compaction_increased_checkpoint
+      , "compaction_increased_checkpoint" )
+    ; ( Keeper_event_queue_state.Compaction_produced_no_reduction
+      , "compaction_produced_no_reduction" )
+    ; ( Keeper_event_queue_state.Checkpoint_persistence_failed
+      , "checkpoint_persistence_failed" )
+    ];
+  (* An unconfigured lane is a precondition failure, not a cancellation. *)
+  check
+    bool
+    "a missing exact lane still settles as a compaction failure"
+    true
+    (settle_reason Keeper_event_queue_state.Exact_lane_unconfigured = Some `Failed)
+;;
+
 let test_refusal_does_not_settle_as_compaction_failure () =
   Eio_main.run @@ fun _env ->
   let meta =
@@ -1440,6 +1533,8 @@ let () =
         `Quick test_suspended_streak_refuses_reactive_prepare;
       test_case "refusal does not settle as a compaction failure"
         `Quick test_refusal_does_not_settle_as_compaction_failure;
+      test_case "cancelled exact execution does not settle as compaction failure"
+        `Quick test_cancelled_exact_execution_does_not_settle_as_compaction_failure;
       test_case "missing exact lane is source-bound no-compaction"
         `Quick test_missing_exact_lane_is_source_bound_no_compaction;
     ];

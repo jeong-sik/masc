@@ -1456,12 +1456,33 @@ let execute_prepared_lane_current
          not inspect OAS receipt phase/count after cancellation. If OAS had
          proved safe advancement it would first invoke [before_advance], whose
          fsynced release clears [bound_observation]. Therefore a still-bound
-         identity is always source-terminal; a pre-bind cancellation is
-         re-raised. *)
+         identity is always quarantined before the cancellation continues.
+
+         Both branches re-raise. A cancellation is the fiber being torn down,
+         not an outcome of this compaction, and returning it as a value made
+         callers settle it as one: it reached the streak that suspends
+         compaction and the durable schedule occurrence, neither of which
+         [Cycle.Cancelled] touches. Quarantine is the only work a cancelled
+         attempt owes, and it runs under [Eio.Cancel.protect] exactly as the
+         sibling handler in [Keeper_post_turn] does. *)
       (match !bound_observation with
        | None -> Printexc.raise_with_backtrace cancellation raw_bt
-      | Some observation ->
-        `Bound_cancellation observation)
+       | Some observation ->
+         Eio.Cancel.protect (fun () ->
+           Log.Keeper.warn
+             ~keeper_name
+             "compaction exact cancellation quarantines only the durably bound \
+              identity slot=%s call_id=%s"
+             observation.slot_id
+             observation.call_id;
+           ignore
+             (terminal_after_quarantine
+                ~keeper_name
+                ~exact_execution_guard
+                ~cause:Keeper_event_queue_state.Exact_execution_cancelled
+                observation
+              : Keeper_event_queue_state.exact_execution_terminal));
+         Printexc.raise_with_backtrace cancellation raw_bt)
   in
   let release_retained_semantic_binding fallback =
     match !bound_observation with
@@ -1481,19 +1502,6 @@ let execute_prepared_lane_current
   in
   let settle_execution () =
   match execution with
-  | `Bound_cancellation observation ->
-    Log.Keeper.warn
-      ~keeper_name
-      "compaction exact cancellation quarantines only the durably bound identity slot=%s call_id=%s"
-      observation.slot_id
-      observation.call_id;
-    Error
-      (Exact_execution_terminal
-         (terminal_after_quarantine
-            ~keeper_name
-            ~exact_execution_guard
-            ~cause:Keeper_event_queue_state.Exact_execution_cancelled
-            observation))
   | `Flow
       (Error
         (Exact_output.Flow_execution_terminal
@@ -1599,7 +1607,6 @@ let execute_prepared_lane_current
       }
   in
   match execution with
-  | `Bound_cancellation _ -> Eio.Cancel.protect settle_execution
   | `Flow _ -> settle_execution ()
 ;;
 

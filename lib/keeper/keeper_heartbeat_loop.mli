@@ -157,7 +157,14 @@ val compaction_outcome_of_cycle_outcome :
     under an incompressible floor must still reach the ceiling), a completed
     overflow-free turn maps to [`Recovered] (resets it), and only the
     operator's manual commit maps to [`Committed] (count + reset).
-    Outcomes with no compaction involvement return [None]. *)
+
+    [None] means no settlement: either the outcome had no compaction
+    involvement, or a compaction was never attempted (an admission-gate
+    refusal), or the attempt was cancelled. A cancellation is fiber teardown
+    rather than an outcome, so it is classified alongside [Cycle.Cancelled]
+    instead of advancing the streak. Every exact-execution terminal cause is
+    enumerated at the match rather than caught by a wildcard, so a new cause
+    must be classified at compile time. *)
 
 
 (** Pure: post-turn status event derived from the registry

@@ -4,4 +4,5 @@
  (libraries
   compaction_exact_output_fixture
   masc_test_deps
+  masc.keeper_checkpoint_ref
   masc.keeper_compaction_evidence))

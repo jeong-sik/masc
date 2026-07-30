@@ -357,7 +357,52 @@ let compaction_outcome_of_cycle_outcome = function
           Counting it advanced the streak the gate itself reads: live keeper
           kidsnote reached 907 against a threshold of 3. *)
        None
-     | Keeper_unified_turn.Escalate_after_exact_output_terminal _ -> Some `Failed
+     | Keeper_unified_turn.Escalate_after_exact_output_terminal
+         (Keeper_unified_turn.Exact_execution_terminal
+            { source = _
+            ; terminal =
+                { Keeper_event_queue_state.cause =
+                    Keeper_event_queue_state.Exact_execution_cancelled
+                ; _
+                }
+            }) ->
+       (* Defensive, and unreachable by construction: a cancelled exact
+          execution is the fiber being torn down, so both producers of this
+          cause re-raise rather than return it
+          ([Keeper_compaction_llm_summarizer]'s bound-cancellation handler and
+          [Keeper_post_turn]'s), and a re-raised cancellation never reaches a
+          settlement at all.  Classified here anyway so that a future producer
+          which returns instead of raising cannot silently advance the streak
+          that suspends compaction — [Cycle.Cancelled] below settles nothing
+          for the same reason. *)
+       None
+     | Keeper_unified_turn.Escalate_after_exact_output_terminal
+         (Keeper_unified_turn.Exact_lane_unconfigured _
+         | Keeper_unified_turn.Exact_execution_terminal
+             { source = _
+             ; terminal =
+                 { Keeper_event_queue_state.cause =
+                     ( Keeper_event_queue_state.Exact_execution_failed
+                     | Keeper_event_queue_state.Domain_invalid_output
+                     | Keeper_event_queue_state.Compaction_produced_no_reduction
+                     | Keeper_event_queue_state.Compaction_increased_checkpoint
+                     | Keeper_event_queue_state.Invalid_structural_evidence
+                     | Keeper_event_queue_state
+                       .Invalid_structural_source_after_dispatch
+                     | Keeper_event_queue_state.Commit_admission_unavailable
+                     | Keeper_event_queue_state
+                       .Lifecycle_transition_failed_after_dispatch
+                     | Keeper_event_queue_state.Checkpoint_source_changed
+                     | Keeper_event_queue_state.Checkpoint_persistence_failed
+                     | Keeper_event_queue_state.Terminal_persistence_failed )
+                 ; _
+                 }
+             }) ->
+       (* Every remaining cause is a compaction attempt that ran and produced
+          nothing usable, so each is one genuine failure.  Enumerated rather
+          than caught by a wildcard: a new cause must be classified here at
+          compile time instead of silently counting toward the suspension. *)
+       Some `Failed
      | Keeper_unified_turn.Follow_failure_route
      | Keeper_unified_turn.Acknowledge_after_in_turn_handling
      | Keeper_unified_turn.Pause_after_transcript_corruption _ -> None)

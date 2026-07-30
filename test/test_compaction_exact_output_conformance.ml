@@ -917,6 +917,16 @@ let test_cancellation_preserves_lifecycle_authorized_identity () =
       snapshot
   in
   let prepared = prepare_exn ~keeper_name:"keeper-cancelled" ~registry () in
+  let quarantined = ref [] in
+  let guard : C.exact_execution_guard =
+    { F.permissive_exact_execution_guard with
+      quarantine =
+        (fun cause observation ->
+           quarantined
+           := (cause, observation.C.slot_id) :: !quarantined;
+           Ok C.Fsync_completed)
+    }
+  in
   let authorized = ref [] in
   let cancel_context, resolve_cancel_context = Eio.Promise.create () in
   let execution =
@@ -927,31 +937,41 @@ let test_cancellation_preserves_lifecycle_authorized_identity () =
           ~keeper_name:"keeper-cancelled"
           ~net
           ~clock
+          ~exact_execution_guard:guard
           ~before_dispatch_authority:(fun observation ->
             authorized := observation.slot_id :: !authorized;
             Ok ())
           prepared))
   in
-  let result =
-    try
+  let outcome =
+    match
       Eio.Time.with_timeout_exn clock 1.0 (fun () ->
         let context = Eio.Promise.await cancel_context in
         F.await_first_request first;
         Eio.Cancel.cancel context Cancel_after_request_arrived;
         Eio.Promise.await_exn execution)
     with
-    | Eio.Time.Timeout -> Alcotest.fail "cancellation watchdog expired"
+    | value -> `Returned value
+    | exception Eio.Time.Timeout -> Alcotest.fail "cancellation watchdog expired"
+    | exception exn -> `Raised exn
   in
-  let terminal =
-    match result with
-    | Error (C.Exact_execution_terminal terminal) -> terminal
-    | Error _ -> Alcotest.fail "cancellation returned the wrong terminal"
-    | Ok _ -> Alcotest.fail "cancelled flow unexpectedly succeeded"
-  in
+  (* A cancellation propagates as an exception instead of being returned as a
+     terminal. Returning it made callers settle it as a compaction outcome:
+     it reached the streak that suspends compaction and the durable schedule
+     occurrence, neither of which a re-raised cancellation touches. The bound
+     identity is still quarantined first, under [Eio.Cancel.protect]. *)
+  (match outcome with
+   | `Raised (Eio.Cancel.Cancelled Cancel_after_request_arrived) -> ()
+   | `Raised exn ->
+     Alcotest.failf "cancellation raised the wrong exception: %s" (Printexc.to_string exn)
+   | `Returned (Error _) ->
+     Alcotest.fail "cancellation was returned as a terminal instead of raised"
+   | `Returned (Ok _) -> Alcotest.fail "cancelled flow unexpectedly succeeded");
   Alcotest.(check bool)
-    "cancellation terminal is phase-neutral"
+    "the bound identity is quarantined before the cancellation continues"
     true
-    (terminal.cause = Keeper_event_queue_state.Exact_execution_cancelled);
+    (List.rev !quarantined
+     = [ Keeper_event_queue_state.Exact_execution_cancelled, first_slot ]);
   Alcotest.(check (list string))
     "only first identity was lifecycle-authorized"
     [ first_slot ]

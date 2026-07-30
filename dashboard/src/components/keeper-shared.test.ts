@@ -7,21 +7,25 @@ const {
   bootKeeper,
   shutdownKeeper,
   fetchKeeperChatPending,
+  fetchKeeperChatReceipt,
   fetchKeeperEventQueuePending,
   cancelKeeperChatPendingReceipt,
   editKeeperChatPendingReceipt,
   moveKeeperChatPendingReceiptToEnd,
   operateKeeperEventQueue,
+  resolveKeeperChatRecovery,
   KeeperEventQueueOperationError,
 } = vi.hoisted(() => ({
   bootKeeper: vi.fn(),
   shutdownKeeper: vi.fn(),
   fetchKeeperChatPending: vi.fn(),
+  fetchKeeperChatReceipt: vi.fn(),
   fetchKeeperEventQueuePending: vi.fn(),
   cancelKeeperChatPendingReceipt: vi.fn(),
   editKeeperChatPendingReceipt: vi.fn(),
   moveKeeperChatPendingReceiptToEnd: vi.fn(),
   operateKeeperEventQueue: vi.fn(),
+  resolveKeeperChatRecovery: vi.fn(),
   KeeperEventQueueOperationError: class KeeperEventQueueOperationError extends Error {
     readonly operation: {
       action: 'cancel' | 'transfer'
@@ -125,11 +129,13 @@ vi.mock('../api/keeper', () => ({
   bootKeeper,
   shutdownKeeper,
   fetchKeeperChatPending,
+  fetchKeeperChatReceipt,
   fetchKeeperEventQueuePending,
   cancelKeeperChatPendingReceipt,
   editKeeperChatPendingReceipt,
   moveKeeperChatPendingReceiptToEnd,
   operateKeeperEventQueue,
+  resolveKeeperChatRecovery,
   KeeperEventQueueOperationError,
 }))
 
@@ -266,11 +272,13 @@ describe('KeeperConversationPanel', () => {
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReset()
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReturnValue(false)
     fetchKeeperChatPending.mockReset()
+    fetchKeeperChatReceipt.mockReset()
     fetchKeeperEventQueuePending.mockReset()
     cancelKeeperChatPendingReceipt.mockReset()
     editKeeperChatPendingReceipt.mockReset()
     moveKeeperChatPendingReceiptToEnd.mockReset()
     operateKeeperEventQueue.mockReset()
+    resolveKeeperChatRecovery.mockReset()
   })
 
   afterEach(() => {
@@ -1004,6 +1012,7 @@ describe('KeeperConversationPanel', () => {
           state: { kind: 'pending' },
         },
         content: 'durable queued operator request',
+        source: { kind: 'dashboard', threadId: 'operator-thread-22' },
         userBlocks: [],
         attachments: [],
         submittedAt: 42,
@@ -1065,11 +1074,181 @@ describe('KeeperConversationPanel', () => {
       expect(panel?.getAttribute('role')).toBe('dialog')
       expect(panel?.textContent).toContain('durable queued operator request')
       expect(panel?.textContent).toContain(receiptId)
+      expect(panel?.textContent).toContain('dashboard · thread operator-thread-22')
       expect(panel?.textContent).toContain('board-post-9')
       expect(panel?.textContent).toContain('수정')
       expect(panel?.textContent).toContain('맨 뒤로')
       expect(panel?.textContent).toContain('이관')
       expect(panel?.textContent).toContain('취소')
+    })
+  })
+
+  it('shows exact inflight and recovery evidence and resolves recovery with a fresh receipt fence', async () => {
+    const inflightReceiptId = 'chatq_00000000-0000-4000-8000-000000000031'
+    const recoveryReceiptId = 'chatq_00000000-0000-4000-8000-000000000032'
+    fetchKeeperChatPending.mockResolvedValue({
+      keeperName: 'sangsu',
+      revision: '31',
+      currentWork: { lane: 'interactive', startedAt: 1_785_000_000 },
+      totalPending: 0,
+      nextAfter: null,
+      pending: [],
+    })
+    fetchKeeperEventQueuePending.mockResolvedValue({
+      keeperName: 'sangsu',
+      revision: '31',
+      totalPending: 0,
+      nextAfter: null,
+      pending: [],
+    })
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'sangsu',
+      receiptId: recoveryReceiptId,
+      revision: '32',
+      state: {
+        kind: 'recovery_required',
+        leaseId: 'lease-recovery-32',
+        startedAt: 1_784_999_000,
+        dispatchable: false,
+      },
+    })
+    resolveKeeperChatRecovery.mockResolvedValue({
+      decision: 'requeue_unconfirmed',
+      receipt: {
+        keeperName: 'sangsu',
+        receiptId: recoveryReceiptId,
+        revision: '33',
+        state: { kind: 'pending' },
+      },
+      audit: { recorded: true },
+    })
+    mockedToolsData.value = {
+      keeper_waiting_inventory: {
+        keepers: [{
+          keeper_name: 'sangsu',
+          state: 'busy',
+          waiting_count: 2,
+          sources: {
+            chat_queue_inflight: 1,
+            chat_queue_recovery_required: 1,
+          },
+          current_execution: {
+            turn_phase: 'executing_tools',
+            decision: { stage: 'tool_loop' },
+            runtime: { state: 'running' },
+            latest_tool: { name: 'keeper_board_list', used_at: 1_785_000_010 },
+            run_state: {
+              kind: 'running',
+              wake_kind: 'interactive',
+              stimulus_kinds: ['chat'],
+              active_tool_count: 1,
+            },
+            live_turn: {
+              turn_id: 77,
+              started_at: 1_785_000_000,
+              last_progress_at: 1_785_000_010,
+              last_progress_kind: 'tool_finished',
+              selected_model: 'operator-model',
+              active_tool_count: 1,
+            },
+          },
+          waiting_on: [
+            {
+              source: 'chat_queue_inflight',
+              waiting_on: 'dashboard',
+              next_action: 'keeper_chat_turn_terminal_receipt',
+              detail: {
+                queue_index: 0,
+                receipt_id: inflightReceiptId,
+                message_source: { kind: 'dashboard', thread_id: 'thread-31' },
+                content_length: 23,
+                lifecycle: {
+                  state: 'inflight',
+                  lease_id: 'lease-inflight-31',
+                  started_at: 1_785_000_000,
+                },
+              },
+            },
+            {
+              source: 'chat_queue_recovery_required',
+              waiting_on: 'slack',
+              next_action: 'resolve_keeper_chat_queue_recovery',
+              detail: {
+                queue_index: 0,
+                receipt_id: recoveryReceiptId,
+                message_source: {
+                  kind: 'slack',
+                  channel_id: 'channel-32',
+                  user_id: 'user-32',
+                },
+                content_length: 17,
+                lifecycle: {
+                  state: 'recovery_required',
+                  lease_id: 'lease-recovery-32',
+                  started_at: 1_784_999_000,
+                  dispatchable: false,
+                },
+              },
+            },
+          ],
+        }],
+      },
+    }
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
+      container,
+    )
+    fireEvent.click(await waitFor(() => {
+      const button = container.querySelector('[data-open-keeper-queue-control]')
+      expect(button).not.toBeNull()
+      return button as HTMLElement
+    }))
+
+    const panel = await waitFor(() => {
+      const node = container.querySelector('[data-keeper-queue-control-panel]')
+      expect(node?.textContent).toContain('executing_tools')
+      expect(node?.textContent).toContain('tool_loop')
+      expect(node?.textContent).toContain('operator-model')
+      expect(node?.textContent).toContain('keeper_board_list')
+      expect(node?.querySelector(
+        `[data-operator-chat-inflight="${inflightReceiptId}"]`,
+      )).not.toBeNull()
+      expect(node?.querySelector(
+        `[data-operator-chat-recovery="${recoveryReceiptId}"]`,
+      )).not.toBeNull()
+      expect(node?.textContent).toContain('자동 재실행이 차단됐습니다')
+      return node as HTMLElement
+    })
+
+    const recovery = panel.querySelector(
+      `[data-operator-chat-recovery="${recoveryReceiptId}"]`,
+    )
+    const requeue = [...(recovery?.querySelectorAll('button') ?? [])]
+      .find(button => button.textContent === '재대기')
+    expect(requeue).not.toBeUndefined()
+    fireEvent.click(requeue as HTMLElement)
+
+    await waitFor(() => {
+      expect(fetchKeeperChatReceipt).toHaveBeenCalledWith(
+        'sangsu',
+        recoveryReceiptId,
+      )
+      expect(resolveKeeperChatRecovery).toHaveBeenCalledWith(
+        'sangsu',
+        recoveryReceiptId,
+        '32',
+        'lease-recovery-32',
+        { kind: 'requeue_unconfirmed' },
+      )
+    })
+
+    const interrupt = [...panel.querySelectorAll('button')]
+      .find(button => button.textContent === '현재 턴 중단')
+    expect(interrupt).not.toBeUndefined()
+    fireEvent.click(interrupt as HTMLElement)
+    await waitFor(() => {
+      expect(interruptKeeperTurn).toHaveBeenCalledWith('sangsu')
     })
   })
 

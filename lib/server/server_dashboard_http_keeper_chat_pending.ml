@@ -7,7 +7,7 @@ let operator_permission = Masc_domain.CanAdmin
 let keeper_api_prefix = "/api/v1/keepers/"
 let request_schema = "keeper_chat_queue.pending_cancel.request.v1"
 let cancel_result_schema = "keeper_chat_queue.pending_cancel.result.v1"
-let pending_result_schema = "keeper_chat_queue.pending.v1"
+let pending_result_schema = "keeper_chat_queue.pending.v2"
 let edit_request_schema = "keeper_chat_queue.pending_edit.request.v1"
 let move_request_schema = "keeper_chat_queue.pending_move_to_end.request.v1"
 let mutation_result_schema = "keeper_chat_queue.pending_mutation.result.v1"
@@ -100,6 +100,9 @@ let pending_receipt_json ~keeper_name ~revision
           ~revision
           { Keeper_chat_queue.receipt_id; state } )
     ; "content", `String message.content
+    ; ( "source"
+      , Server_dashboard_http_keeper_api_types.keeper_chat_message_source_json
+          message.source )
     ; "user_blocks", Keeper_multimodal_input.user_blocks_to_yojson message.user_blocks
     ; "attachments", `List (List.map pending_attachment_json message.attachments)
     ; "submitted_at", `Float message.timestamp

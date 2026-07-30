@@ -262,6 +262,26 @@ let test_keeper_chat_recovery_route_is_exact () =
     (Masc_domain.has_permission
        Masc_domain.Admin
        Server_dashboard_http_keeper_chat_pending.operator_permission);
+  let pending_source_json =
+    Server_dashboard_http_keeper_api_types.keeper_chat_message_source_json
+      (Keeper_chat_queue.Slack
+         { channel_id = "channel-1"
+         ; user_id = "user-1"
+         ; user_name = "operator"
+         ; team_id = Some "team-1"
+         ; thread_ts = Some "42.1"
+         })
+  in
+  let open Yojson.Safe.Util in
+  check string "pending provenance retains source kind"
+    "slack"
+    (pending_source_json |> member "kind" |> to_string);
+  check string "pending provenance retains submitter identity"
+    "user-1"
+    (pending_source_json |> member "user_id" |> to_string);
+  check string "pending provenance retains channel identity"
+    "channel-1"
+    (pending_source_json |> member "channel_id" |> to_string);
   (match
      Server_dashboard_http_keeper_chat_pending.pending_mutation_route
        ("/api/v1/keepers/idealist/chat/receipts/" ^ receipt_id ^ "/edit")

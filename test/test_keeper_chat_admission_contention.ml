@@ -84,8 +84,8 @@ let message content =
   }
 
 (* Wire the same transition observers the runtime installs. Durable queue
-   mutations wake the consumer; a parked chat turn receives the mutex directly,
-   while shutdown rollback explicitly re-arms a rejected Pending receipt. *)
+   mutations wake the consumer; release and shutdown rollback also re-arm a
+   Pending receipt whose preflight ended before it parked on the mutex. *)
 let install_observers ~base =
   let canonical = Keeper_registry_types.canonical_base_path_exn base in
   Keeper_chat_queue.set_transition_observer
@@ -98,9 +98,10 @@ let install_observers ~base =
           if String.equal base_path canonical
           then
             match transition with
-            | Keeper_turn_admission.Shutdown_rolled_back ->
+            | Keeper_turn_admission.Shutdown_rolled_back
+            | Keeper_turn_admission.Turn_released ->
               Keeper_chat_consumer.notify_transition ~keeper_name
-            | Keeper_turn_admission.Turn_released -> ()))
+          ))
 
 exception Budget_reached
 

@@ -1648,17 +1648,18 @@ let start_keeper_loops_owned
              (fun ~keeper_name ~revision ->
                 Keeper_chat_broadcast.queue_changed ~keeper_name ~revision ();
                 Keeper_chat_consumer.notify_transition ~keeper_name));
-        (* A chat consumer waiting behind a running turn is handed the mutex
-           directly, so [Turn_released] needs no second wake. A shutdown
-           rejection happens before the exact claim; rollback only needs to
-           wake the still-Pending receipt. *)
+        (* A queued turn can fail preflight before it parks on the admission
+           mutex. Both release and shutdown rollback therefore re-arm the
+           still-Pending receipt. [notify_transition] coalesces duplicate
+           wakes for turns that were already handed the mutex directly. *)
         Keeper_turn_admission.set_slot_transition_observer
           (Some
              (fun ~base_path:_ ~keeper_name ~transition ->
                 match transition with
-                | Keeper_turn_admission.Shutdown_rolled_back ->
+                | Keeper_turn_admission.Shutdown_rolled_back
+                | Keeper_turn_admission.Turn_released ->
                   Keeper_chat_consumer.notify_transition ~keeper_name
-                | Keeper_turn_admission.Turn_released -> ()));
+                ));
         Ok ()
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1690,6 +1691,14 @@ let start_keeper_loops_owned
              let agent_name = (queued_chat_projection queued_message).agent_name in
              let events = Keeper_chat_events.create () in
              let closed = ref false in
+             let claim_committed = ref false in
+             let claim () =
+               match on_admitted () with
+               | Ok () as result ->
+                 claim_committed := true;
+                 result
+               | Error _ as result -> result
+             in
              let thread_id = "keeper-consumer:" ^ keeper_name in
              let delivery, delivery_resolver = Eio.Promise.create () in
              let resolve_delivery result =
@@ -1834,7 +1843,7 @@ let start_keeper_loops_owned
                    ~submission:
                      (Queued_receipt
                         { receipt_ids
-                        ; claim = on_admitted
+                        ; claim
                         ; execution_sw = sw
                         })
                    ~state ~clock ~auth_token:None
@@ -1847,9 +1856,18 @@ let start_keeper_loops_owned
                | outcome -> outcome
                | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
                | exception exn ->
-                   Keeper_chat_events.publish events
-                     (Keeper_chat_events.Event_error
-                        { message = Printexc.to_string exn });
+                   if !claim_committed
+                   then
+                     Keeper_chat_events.publish events
+                       (Keeper_chat_events.Event_error
+                          { message = Printexc.to_string exn })
+                   else (
+                     Log.Keeper.error
+                       "keeper_chat_consumer: pre-claim turn setup raised for keeper=%s: %s; terminating local delivery without a connector message"
+                       keeper_name
+                       (Printexc.to_string exn);
+                     Keeper_chat_events.publish events
+                       (Keeper_chat_events.Run_finished { run_id }));
                    let _delivery_outcome = Eio.Promise.await delivery in
                    raise exn
              in

@@ -194,7 +194,8 @@ let start_consumer ~sw ~clock ~base_path ~handle_turn =
             match transition with
             | Keeper_turn_admission.Shutdown_rolled_back ->
               Keeper_chat_consumer.notify_transition ~keeper_name
-            | Keeper_turn_admission.Turn_released -> ()));
+            | Keeper_turn_admission.Turn_released ->
+              Keeper_chat_consumer.notify_transition ~keeper_name));
   let handle_admitted_turn
       ~sw
       ~keeper_name
@@ -632,6 +633,18 @@ let test_repeated_claim_failure_waits_for_explicit_wake () =
                with
                | Ok { receipt = Some { state = Pending; _ }; _ } -> true
                | Ok { receipt = None | Some _; _ } | Error _ -> false);
+            check "the repeated uncertain claim is reconciled before return"
+              (match Keeper_chat_queue.lane_status ~keeper_name with
+               | Ok { health = Ready; _ } -> true
+               | Ok
+                   { health =
+                       ( Persistence_reconciliation_required
+                       | Delivery_recovery_required _
+                       | Unavailable _ )
+                   ; _
+                   }
+               | Error _ ->
+                 false);
             Keeper_chat_queue.For_testing.set_transaction_stage_observer None;
             Keeper_chat_consumer.notify_transition ~keeper_name;
             check "a same-revision explicit wake retries the receipt"

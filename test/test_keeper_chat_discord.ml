@@ -168,6 +168,28 @@ let test_terminal_callback_once_for_fallback_post () =
   check_single_ok "fallback terminal result" outcomes;
   check (list string) "one final POST" [ "hello" ] (List.rev !final_posts)
 
+let test_adapter_empty_terminal_is_local_error () =
+  let sends = ref 0 in
+  let outcomes =
+    run_adapter
+      [ Masc.Keeper_chat_events.Run_finished { run_id = "run-empty" } ]
+      ~post_message:(fun ~content:_ ->
+        incr sends;
+        Ok "unexpected-stream-message")
+      ~edit_message:(fun ~message_id:_ ~content:_ ->
+        incr sends;
+        Ok ())
+      ~send_message:(fun ~content:_ ->
+        incr sends;
+        Ok ())
+  in
+  check int "empty terminal makes no Discord call" 0 !sends;
+  match outcomes with
+  | [ Error (Discord_rest_client.Other message) ] ->
+    check bool "empty terminal failure is explicit" true
+      (contains message "contained no text")
+  | _ -> fail "empty terminal settles once with a local delivery error"
+
 let test_terminal_callback_reports_final_patch_failure () =
   let patch_calls = ref 0 in
   let outcomes =
@@ -281,6 +303,8 @@ let () =
             test_final_split_redacts_before_chunking
         ; test_case "callback once for fallback POST" `Quick
             test_terminal_callback_once_for_fallback_post
+        ; test_case "empty terminal is local-only" `Quick
+            test_adapter_empty_terminal_is_local_error
         ; test_case "callback reports final PATCH failure" `Quick
             test_terminal_callback_reports_final_patch_failure
         ; test_case "callback reports overflow failure" `Quick

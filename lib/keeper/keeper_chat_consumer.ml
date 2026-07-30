@@ -483,7 +483,13 @@ let run_observed_turn state ~sw ~clock ~handle_turn ~keeper_name observation =
                 item.receipt_id
             then claim_observation ~may_retry:false retry_observation
             else Error `No_longer_pending))
-    | `Error error -> Error (`Failed error)
+    | `Error error ->
+      (* The one retry is the delivery-attempt bound, not a license to leave
+         the lane quarantined when that retry also has uncertain durability.
+         Reconcile the persistence state once more, but do not lease a third
+         time in this turn. A later explicit wake owns the next attempt. *)
+      ignore (reconcile_claim_failure ~keeper_name error : (unit, _) result);
+      Error (`Failed error)
   in
   let on_admitted () =
     match !claim with

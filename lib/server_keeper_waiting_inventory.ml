@@ -268,8 +268,7 @@ let chat_queue_active_row ~source ~next_action ~lifecycle_fields keeper_name que
             , `String
                 (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id) )
           ; ( "message_source"
-            , Server_dashboard_http_keeper_api_types
-              .keeper_chat_message_source_json
+            , Keeper_chat_receipt_projection.message_source_json
                 msg.source )
           ; "content_length", `Int (String.length msg.content)
           ; "user_block_count", `Int (List.length msg.user_blocks)

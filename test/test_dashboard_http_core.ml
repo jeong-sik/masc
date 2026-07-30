@@ -263,7 +263,7 @@ let test_keeper_chat_recovery_route_is_exact () =
        Masc_domain.Admin
        Server_dashboard_http_keeper_chat_pending.operator_permission);
   let pending_source_json =
-    Server_dashboard_http_keeper_api_types.keeper_chat_message_source_json
+    Masc.Keeper_chat_receipt_projection.message_source_json
       (Keeper_chat_queue.Slack
          { channel_id = "channel-1"
          ; user_id = "user-1"

@@ -121,12 +121,16 @@ let facts_of_json = function
         (match fact_of_json value with
          | Some fact ->
            let identity = claim_identity fact in
-           if String_set.mem identity seen
+           if Set_util.StringSet.mem identity seen
            then None
-           else loop (String_set.add identity seen) (fact :: acc) rest
+           else
+             loop
+               (Set_util.StringSet.add identity seen)
+               (fact :: acc)
+               rest
          | None -> None)
     in
-    loop String_set.empty [] values
+    loop Set_util.StringSet.empty [] values
   | _ -> None
 ;;
 

@@ -33,11 +33,6 @@ val keeper_chat_receipt_json :
   Keeper_chat_queue.receipt_view ->
   Yojson.Safe.t
 
-val keeper_chat_message_source_json :
-  Keeper_chat_queue.message_source -> Yojson.Safe.t
-(** Exact provenance metadata for an operator-visible durable chat input.
-    Message content remains on the queue-specific authenticated surface. *)
-
 (** {1 Dashboard cache keys} *)
 
 val cache_key_string_segment : string -> string

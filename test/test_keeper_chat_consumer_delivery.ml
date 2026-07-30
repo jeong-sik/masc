@@ -199,7 +199,8 @@ let start_consumer ~sw ~clock ~base_path ~handle_turn =
                    ~keeper_name
                with
                | Ok () -> ()
-               | Error error -> fail error)
+               | Error error ->
+                 check_failure "shutdown rollback explicit retry" error)
             | Keeper_turn_admission.Turn_released -> ()));
   let handle_admitted_turn
       ~sw
@@ -600,7 +601,8 @@ let test_claim_commit_uncertainty_waits_for_explicit_retry () =
                  ~keeper_name
              with
              | Ok () -> ()
-             | Error error -> fail error);
+             | Error error ->
+               check_failure "explicit pending-claim retry" error);
             check "explicit retry re-arms the original Pending receipt"
               (match
                  await_receipt ~clock ~seconds:5.0 ~keeper_name

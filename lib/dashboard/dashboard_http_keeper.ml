@@ -619,27 +619,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta m)
               max_context_resolution
           in
-          let checkpoint =
-            let base_dir = Keeper_types_profile.session_base_dir config in
-            let (_session, ctx_opt) =
-              Keeper_execution.load_context_from_checkpoint
-                ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
-                ~base_dir
-            in
-            match ctx_opt with
-            | None ->
-              Keeper_context_observation_projection.No_checkpoint
-            | Some c ->
-              Keeper_context_observation_projection.Checkpoint
-                { serialized_bytes =
-                    Keeper_context_runtime.serialized_bytes c
-                ; message_count = Keeper_context_runtime.message_count c
-                }
-          in
           let context_projection_fields =
-            Keeper_context_observation_projection.missing_context_fields
-              ~checkpoint
-              ()
+            Keeper_context_observation_projection.missing_context_fields ()
           in
 	          let summary =
               let trust_json =

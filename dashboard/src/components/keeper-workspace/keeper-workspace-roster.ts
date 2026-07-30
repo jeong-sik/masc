@@ -54,6 +54,7 @@ type RosterFleetSummary = {
   attention: number
   approvalGate: number
   highContext: number
+  unknownContext: number
 }
 
 const MENU_WIDTH = 190
@@ -120,13 +121,27 @@ function needsAttention(keeper: Keeper): boolean {
   return keeper.needs_attention === true || attentionCount(keeper) > 0
 }
 
-function keeperContextRatio(keeper: Keeper): number {
+function keeperContextRatio(keeper: Keeper): number | null {
   if (typeof keeper.context_ratio === 'number' && Number.isFinite(keeper.context_ratio)) {
     return Math.max(0, Math.min(1, keeper.context_ratio))
   }
-  const current = keeper.context_tokens ?? keeper.context?.context_tokens ?? 0
-  const max = keeper.context_max ?? keeper.context?.context_max ?? 0
-  return max > 0 ? Math.max(0, Math.min(1, current / max)) : 0
+  const current = keeper.context_tokens ?? keeper.context?.context_tokens
+  const max = keeper.context_max ?? keeper.context?.context_max
+  return typeof current === 'number'
+    && Number.isFinite(current)
+    && typeof max === 'number'
+    && Number.isFinite(max)
+    && max > 0
+    ? Math.max(0, Math.min(1, current / max))
+    : null
+}
+
+function compareContextRatioDescending(a: Keeper, b: Keeper): number {
+  const aRatio = keeperContextRatio(a)
+  const bRatio = keeperContextRatio(b)
+  if (aRatio === null) return bRatio === null ? 0 : 1
+  if (bRatio === null) return -1
+  return bRatio - aRatio
 }
 
 /** Bucket resolver threaded through the roster so every grouping/sort/count
@@ -146,7 +161,7 @@ function keeperStatusRank(keeper: Keeper, bucketOf: BucketOf): number {
 function compareFleetRows(bucketOf: BucketOf): (a: Keeper, b: Keeper) => number {
   return (a, b) =>
     keeperStatusRank(a, bucketOf) - keeperStatusRank(b, bucketOf)
-    || keeperContextRatio(b) - keeperContextRatio(a)
+    || compareContextRatioDescending(a, b)
     || a.name.localeCompare(b.name)
 }
 
@@ -163,6 +178,7 @@ export function rosterFleetSummary(
     attention: 0,
     approvalGate: 0,
     highContext: 0,
+    unknownContext: 0,
   }
 
   for (const keeper of rows) {
@@ -173,7 +189,10 @@ export function rosterFleetSummary(
     if (bucket === 'offline') summary.offline += 1
     if (needsAttention(keeper)) summary.attention += 1
     if (keeper.current_gate?.kind === 'approval_required') summary.approvalGate += 1
-    if (keeperContextRatio(keeper) >= 0.8) {
+    const contextRatio = keeperContextRatio(keeper)
+    if (contextRatio === null) {
+      summary.unknownContext += 1
+    } else if (contextRatio >= 0.8) {
       summary.highContext += 1
     }
   }
@@ -194,7 +213,9 @@ function attentionScore(keeper: Keeper): number {
  *  reaches here. Name ties break alphabetically so the order is stable. */
 function compareKeepers(a: Keeper, b: Keeper, sort: 'name' | 'att'): number {
   if (sort === 'name') return a.name.localeCompare(b.name)
-  return attentionScore(b) - attentionScore(a) || keeperContextRatio(b) - keeperContextRatio(a) || a.name.localeCompare(b.name)
+  return attentionScore(b) - attentionScore(a)
+    || compareContextRatioDescending(a, b)
+    || a.name.localeCompare(b.name)
 }
 
 /** Keepers currently expose runtime identity as their scope label. */

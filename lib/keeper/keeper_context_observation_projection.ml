@@ -11,34 +11,16 @@ let missing_measurement_json () =
     ]
 ;;
 
-type checkpoint_metadata =
-  | No_checkpoint
-  | Checkpoint of
-      { serialized_bytes : int
-      ; message_count : int
-      }
-
-let checkpoint_fields = function
-  | None -> []
-  | Some No_checkpoint -> [ "has_checkpoint", `Bool false ]
-  | Some (Checkpoint { serialized_bytes; message_count }) ->
-    [ "has_checkpoint", `Bool true
-    ; "checkpoint_bytes", `Int serialized_bytes
-    ; "message_count", `Int message_count
-    ]
-;;
-
-let missing_context_fields ?checkpoint () =
+let missing_context_fields () =
   let unavailable = missing_measurement_json () in
   let context =
     `Assoc
-      ([ "source", `Null
-       ; "context_ratio", `Null
-       ; "context_tokens", `Null
-       ; "context_max", `Null
-       ; "metrics_unavailable", unavailable
-       ]
-       @ checkpoint_fields checkpoint)
+      [ "source", `Null
+      ; "context_ratio", `Null
+      ; "context_tokens", `Null
+      ; "context_max", `Null
+      ; "metrics_unavailable", unavailable
+      ]
   in
   [ "context_ratio", `Null
   ; "context_tokens", `Null

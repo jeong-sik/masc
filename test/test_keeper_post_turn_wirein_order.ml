@@ -286,17 +286,7 @@ let test_atomic_cycle_and_normalization_cross_evidence_gate () =
         check int (name ^ " dispatches exactly once") 1
           (Exact_fixture.post_count server);
         match preparation.decision, preparation.evidence with
-        | Compact_policy.Prepared Compaction_trigger.Manual, Some _ ->
-          (match preparation.post_success_terminalizer with
-           | None -> failf "%s lost its post-success terminalizer" name
-           | Some terminalizer ->
-             (match
-                Summarizer.terminalize_post_success
-                  terminalizer
-                  Keeper_compaction_outcome.Domain_invalid_output
-              with
-              | Summarizer.Terminalized _ -> ()
-              | _ -> failf "%s could not close its exact attempt" name))
+        | Compact_policy.Prepared Compaction_trigger.Manual, Some _ -> ()
         | _ -> failf "%s did not cross the structural evidence gate" name
       in
       run_case
@@ -708,14 +698,11 @@ let test_prepare_commit_source_cas () =
              failf
                "commit of a fresh prepared plan failed: %s"
                (Post_turn.compaction_recovery_error_to_string error)
-           | Post_turn.Already_rejected no_compaction ->
+           | Post_turn.Not_committed no_compaction ->
              failf
                "fresh prepared plan was rejected: %s"
                (Post_turn.compaction_recovery_error_to_string
-                  (Post_turn.No_compaction no_compaction))
-           | Post_turn.Commit_in_progress _
-           | Post_turn.Already_committed _ ->
-             fail "fresh prepared plan did not own its commit")
+                  (Post_turn.No_compaction no_compaction)))
     in
     (match recovery.checkpoint_installation with
      | Masc.Keeper_checkpoint_store.Installed installed ->
@@ -734,29 +721,13 @@ let test_prepare_commit_source_cas () =
             installed.auxiliary)
      | Masc.Keeper_checkpoint_store.Not_installed _ ->
        fail "history cancellation downgraded the installed checkpoint");
-    let committed_snapshot =
-      Post_turn.For_testing.post_success_snapshot prepared
-    in
-    check bool
-      "installed history cancellation leaves the affine phase committed"
-      true
-      (committed_snapshot.phase
-       = Masc.Keeper_compaction_llm_summarizer.Phase_committed);
-    check int
-      "history cancellation retains one Domain_valid completion"
-      1
-      committed_snapshot.domain_valid_attempts;
-    check int
-      "history cancellation performs no Domain_rejected completion"
-      0
-      committed_snapshot.domain_rejected_attempts;
     (* Both tokens were prepared from the same source. The first commit
-       advances it; the second token now proves the source-CAS rejection
-       without violating the same-token affine commit contract. *)
+       advances it; the second token now proves that source CAS alone rejects
+       the stale candidate. *)
     (match
        Post_turn.commit_prepared_compaction stale_prepared
      with
-     | Post_turn.Already_rejected
+     | Post_turn.Not_committed
          { reason =
              Keeper_compaction_outcome.Exact_execution_terminal
                { cause = Keeper_compaction_outcome.Checkpoint_source_changed
@@ -767,7 +738,7 @@ let test_prepare_commit_source_cas () =
          } ->
        check bool "stale prepared terminal retains slot" true (String.trim slot_id <> "");
        check bool "stale prepared terminal retains call" true (String.trim call_id <> "")
-     | Post_turn.Already_rejected no_compaction ->
+     | Post_turn.Not_committed no_compaction ->
        failf
          "stale prepared value returned an unexpected rejection: %s"
          (Post_turn.compaction_recovery_error_to_string
@@ -776,19 +747,11 @@ let test_prepare_commit_source_cas () =
        failf
          "stale prepared value failed with the wrong error: %s"
          (Post_turn.compaction_recovery_error_to_string error)
-     | Post_turn.Committed _
-     | Post_turn.Already_committed _ ->
-       fail "stale prepared value committed past the source CAS"
-     | Post_turn.Commit_in_progress _ ->
-       fail "stale prepared value did not reach canonical rejection"))
+     | Post_turn.Committed _ ->
+       fail "stale prepared value committed past the source CAS"))
 ;;
 
-let run_post_install_failure
-      ~name
-      ?complete_post_success_commit
-      ?(cancel_after_install = false)
-      ()
-  =
+let test_post_install_cancellation_returns_committed_failure () =
   Eio_main.run @@ fun env ->
   Masc_test_deps.init_eio_clock env;
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -801,6 +764,7 @@ let run_post_install_failure
       Runtime.For_testing.restore runtime_snapshot;
       Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
+       let name = "post-install-cancellation" in
        let meta = make_meta ~name () in
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
@@ -855,34 +819,12 @@ let run_post_install_failure
              "prepare failed: %s"
              (Post_turn.compaction_recovery_error_to_string error)
        in
-       let internal_waiter = ref None in
-       let outer_waiter = ref None in
        let outcome =
          Post_turn.For_testing.commit_prepared_compaction_with_history
            ~after_checkpoint_installed:(fun () ->
-             (match
-                Post_turn.For_testing.claim_post_success_commit prepared
-              with
-              | Summarizer.Commit_claim_in_progress waiter ->
-                internal_waiter := Some waiter;
-                (match Post_turn.commit_prepared_compaction prepared with
-                 | Post_turn.Commit_in_progress waiter ->
-                   outer_waiter := Some waiter
-                 | Post_turn.Committed _
-                 | Post_turn.Commit_failed _
-                 | Post_turn.Already_committed _
-                 | Post_turn.Already_rejected _ ->
-                   fail "installed commit did not expose its outer waiter")
-              | Summarizer.Commit_claim_acquired
-              | Summarizer.Commit_claim_already_committed
-              | Summarizer.Commit_claim_rejected _ ->
-                fail "installed commit did not expose its affine waiter");
-             if cancel_after_install
-             then
-               raise
-                 (Eio.Cancel.Cancelled
-                    (Failure "injected post-install compaction cancellation")))
-           ?complete_post_success_commit
+             raise
+               (Eio.Cancel.Cancelled
+                  (Failure "injected post-install compaction cancellation")))
            ~save_oas_history:(fun ~session_dir:_ _ -> ())
            prepared
        in
@@ -891,80 +833,12 @@ let run_post_install_failure
         | Post_turn.Commit_failed { committed = None; _ } ->
           fail "post-install failure lost the durable recovery"
         | Post_turn.Committed _
-        | Post_turn.Commit_in_progress _
-        | Post_turn.Already_committed _
-        | Post_turn.Already_rejected _ ->
+        | Post_turn.Not_committed _ ->
           fail "post-install failure did not publish typed commit failure");
-       (match !internal_waiter with
-        | Some waiter -> Eio.Promise.await waiter
-        | None -> fail "post-install failure did not capture the commit waiter");
-       (match !outer_waiter with
-        | Some waiter ->
-          (match Eio.Promise.await waiter with
-           | Post_turn.Commit_completion_failed
-               { committed = Some _; _ } ->
-             ()
-           | Post_turn.Commit_completion_failed { committed = None; _ }
-           | Post_turn.Commit_completion_committed _
-           | Post_turn.Commit_completion_rejected _ ->
-             fail "outer waiter did not retain the durable failed commit")
-        | None -> fail "post-install failure did not capture the outer waiter");
-       let snapshot = Post_turn.For_testing.post_success_snapshot prepared in
-       check bool
-         "post-install failure closes the affine commit phase"
-         true
-         (snapshot.phase = Summarizer.Phase_committed);
        check int
-         "post-install failure attempts Domain_valid exactly once"
+         "post-install cancellation performs no provider redispatch"
          1
-         snapshot.domain_valid_attempts;
-       check int
-         "post-install failure never rejects the installed checkpoint"
-         0
-         snapshot.domain_rejected_attempts;
-       check int
-         "post-install finalization performs no provider redispatch"
-         1
-         (Exact_fixture.post_count exact_server);
-       (match
-          Post_turn.For_testing.claim_post_success_commit prepared
-        with
-        | Summarizer.Commit_claim_already_committed -> ()
-        | Summarizer.Commit_claim_acquired
-        | Summarizer.Commit_claim_in_progress _
-        | Summarizer.Commit_claim_rejected _ ->
-          fail "closed Domain_valid failure admitted another claimant");
-       (match Post_turn.commit_prepared_compaction prepared with
-        | Post_turn.Commit_failed { committed = Some _; _ } -> ()
-        | Post_turn.Commit_failed { committed = None; _ }
-        | Post_turn.Committed _
-        | Post_turn.Commit_in_progress _
-        | Post_turn.Already_committed _
-        | Post_turn.Already_rejected _ ->
-          fail "closed Domain_valid failure lost its canonical outer result"))
-;;
-
-let test_post_install_domain_valid_error_resolves_waiters () =
-  run_post_install_failure
-    ~name:"post-install-domain-valid-error"
-    ~complete_post_success_commit:
-      (fun _ -> Error "injected post-success completion error")
-    ()
-;;
-
-let test_post_install_domain_valid_exception_resolves_waiters () =
-  run_post_install_failure
-    ~name:"post-install-domain-valid-exception"
-    ~complete_post_success_commit:
-      (fun _ -> raise (Failure "injected post-success completion exception"))
-    ()
-;;
-
-let test_post_install_cancellation_returns_committed_failure () =
-  run_post_install_failure
-    ~name:"post-install-cancellation"
-    ~cancel_after_install:true
-    ()
+         (Exact_fixture.post_count exact_server))
 ;;
 
 let test_invalid_structural_evidence_after_dispatch_is_terminal () =
@@ -1393,10 +1267,6 @@ let () =
         `Quick test_malformed_structure_preserves_checkpoint;
       test_case "prepare/commit source CAS"
         `Quick test_prepare_commit_source_cas;
-      test_case "post-install Domain_valid error resolves waiters"
-        `Quick test_post_install_domain_valid_error_resolves_waiters;
-      test_case "post-install Domain_valid exception resolves waiters"
-        `Quick test_post_install_domain_valid_exception_resolves_waiters;
       test_case "post-install cancellation returns committed failure"
         `Quick test_post_install_cancellation_returns_committed_failure;
       test_case "ephemeral plan accounting mismatch is post-dispatch terminal"

@@ -157,16 +157,6 @@ let completed_exn = function
   | Error _ -> Alcotest.fail "compaction flow execution failed"
 ;;
 
-let terminalized_exn = function
-  | C.Terminalized terminal -> terminal
-  | C.Terminalization_commit_in_progress _ ->
-    Alcotest.fail "terminalization unexpectedly lost to a commit claimant"
-  | C.Terminalization_already_committed ->
-    Alcotest.fail "terminalization unexpectedly observed a committed checkpoint"
-  | C.Terminalization_invariant_failed detail ->
-    Alcotest.failf "terminalization invariant failed: %s" detail
-;;
-
 let captured_observation_exn label = function
   | Some observation -> observation
   | None -> Alcotest.failf "%s did not observe an OAS attempt identity" label
@@ -881,79 +871,6 @@ let test_admission_rejection_then_cancellation_propagates () =
 ;;
 
 
-let test_post_success_commit_claim_blocks_reject () =
-  run_eio
-  @@ fun ~sw ~net ~clock ->
-  let keeper_name = "keeper-post-success-commit-wins" in
-  let slot_id = "post-success-commit-wins" in
-  let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
-  let snapshot =
-    F.resolver_snapshot
-      ~source:"masc post-success commit wins"
-      [ { id = slot_id; base_url = server.base_url } ]
-  in
-  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-  let prepared = prepare_exn ~keeper_name ~registry () in
-  let completed =
-    execute_prepared_lane
-      ~keeper_name
-      ~net
-      ~clock
-      prepared
-    |> completed_exn
-  in
-  let terminalizer = C.completed_post_success_terminalizer completed in
-  (match C.claim_post_success_commit terminalizer with
-   | C.Commit_claim_acquired -> ()
-   | C.Commit_claim_in_progress _
-   | C.Commit_claim_already_committed
-   | C.Commit_claim_rejected _ ->
-     Alcotest.fail "open post-success disposition did not grant commit claim");
-  (match C.mark_post_success_checkpoint_installed terminalizer with
-   | Ok () -> ()
-   | Error detail -> Alcotest.failf "installed commit mark failed: %s" detail);
-  let completion =
-    match
-      C.terminalize_post_success
-        terminalizer
-        Keeper_compaction_outcome.Commit_admission_unavailable
-    with
-    | C.Terminalization_commit_in_progress waiter -> waiter
-    | C.Terminalized _
-    | C.Terminalization_already_committed
-    | C.Terminalization_invariant_failed _ ->
-      Alcotest.fail "reject crossed an installed commit claim"
-  in
-  let pending = C.For_testing.post_success_snapshot terminalizer in
-  Alcotest.(check bool)
-    "installed checkpoint remains pending valid"
-    true
-    (pending.phase = C.Phase_installed_pending_valid);
-  Alcotest.(check int) "reject has not run" 0 pending.domain_rejected_attempts;
-  (match C.complete_post_success_commit terminalizer with
-   | Ok () -> ()
-   | Error detail ->
-     Alcotest.failf "post-success completion failed: %s" detail);
-  Eio.Promise.await completion;
-  (match
-     C.terminalize_post_success
-       terminalizer
-       Keeper_compaction_outcome.Checkpoint_persistence_failed
-   with
-   | C.Terminalization_already_committed -> ()
-   | C.Terminalized _
-   | C.Terminalization_commit_in_progress _
-   | C.Terminalization_invariant_failed _ ->
-     Alcotest.fail "committed checkpoint was downgraded by a later reject");
-  let committed = C.For_testing.post_success_snapshot terminalizer in
-  Alcotest.(check bool)
-    "post-success disposition is committed"
-    true
-    (committed.phase = C.Phase_committed);
-  Alcotest.(check int) "Domain_valid runs once" 1 committed.domain_valid_attempts;
-  Alcotest.(check int) "Domain_rejected never runs" 0 committed.domain_rejected_attempts
-;;
-
 let () =
   Alcotest.run
     "compaction exact-flow conformance"
@@ -1014,10 +931,6 @@ let () =
             "admission rejection then cancellation propagates"
             `Quick
             test_admission_rejection_then_cancellation_propagates
-        ; Alcotest.test_case
-            "commit claim blocks reject after install"
-            `Quick
-            test_post_success_commit_claim_blocks_reject
         ] )
       (* The "affinity and non-sharing" group held only cases whose functions
          #25993 removed; its registrations were left behind and the group is now

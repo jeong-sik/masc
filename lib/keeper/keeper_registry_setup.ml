@@ -111,6 +111,67 @@ let validate_registry_meta ~base_path:_ name (meta : keeper_meta) =
   else Ok ()
 ;;
 
+let same_runtime_identity
+      (current : keeper_meta)
+      (incoming : keeper_meta)
+  =
+  Keeper_id.Trace_id.equal
+    current.runtime.trace_id
+    incoming.runtime.trace_id
+  && Int.equal current.runtime.nonce incoming.runtime.nonce
+;;
+
+let preserve_process_local_usage_observation
+      ~(current : keeper_meta)
+      (incoming : keeper_meta)
+  =
+  if not (same_runtime_identity current incoming)
+  then incoming
+  else
+    let current_usage = current.runtime.usage in
+    let incoming_usage = incoming.runtime.usage in
+    let observed_usage =
+      match
+        current_usage.last_usage_reported_at,
+        incoming_usage.last_usage_reported_at
+      with
+      | Some current_at, Some incoming_at
+        when Float.compare current_at incoming_at > 0 ->
+        current_usage
+      | Some _, None -> current_usage
+      | Some _, Some _ | None, Some _ | None, None -> incoming_usage
+    in
+    {
+      incoming with
+      runtime =
+        {
+          incoming.runtime with
+          usage =
+            {
+              incoming_usage with
+              last_input_tokens = observed_usage.last_input_tokens;
+              last_output_tokens = observed_usage.last_output_tokens;
+              last_total_tokens = observed_usage.last_total_tokens;
+              last_usage_reported_at =
+                observed_usage.last_usage_reported_at;
+            };
+        };
+    }
+;;
+
+let preserve_entry_process_local_usage
+      (current : registry_entry)
+      (incoming : registry_entry)
+  =
+  {
+    incoming with
+    meta =
+      preserve_process_local_usage_observation
+        ~current:current.meta
+        incoming.meta;
+  }
+;;
+
 let record_invalid_registry_entry ~operation ~name reason =
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string RegistryInvalidEntry)
@@ -196,6 +257,12 @@ let put_entry_key_locked ?lifecycle_token ~base_path name entry =
        let key = registry_key ~base_path name in
        let rec loop () =
          let current = Atomic.get registry in
+         let entry =
+           match StringMap.find_opt key current with
+           | Some existing ->
+             preserve_entry_process_local_usage existing entry
+           | None -> entry
+         in
          let updated = StringMap.add key entry current in
          if Atomic.compare_and_set registry current updated then Ok () else loop ()
        in
@@ -269,7 +336,9 @@ let update_entry_internal ?lifecycle_token ~base_path name f =
           count;
       Ok ()
     | Some entry ->
-      let new_entry = f entry in
+      let new_entry =
+        f entry |> preserve_entry_process_local_usage entry
+      in
       (match validate_registry_entry ~base_path name new_entry with
        | Error err ->
          record_invalid_registry_entry ~operation:"update" ~name err;
@@ -316,7 +385,9 @@ let update_entry_exact_internal ?lifecycle_token (expected : registry_entry) f =
       when not (Keeper_lane.Id.equal expected_lane (Keeper_lane.id entry.lane)) ->
       Exact_update_replaced
     | Some entry ->
-      let new_entry = f entry in
+      let new_entry =
+        f entry |> preserve_entry_process_local_usage entry
+      in
       (match validate_registry_entry ~base_path name new_entry with
        | Error err ->
          record_invalid_registry_entry ~operation:"update_exact" ~name err;
@@ -378,7 +449,10 @@ let install_entry_if_current_internal
                  (Keeper_lane.id entry.lane)) ->
        Entry_install_replaced
      | Some entry when entry != observed -> Entry_install_conflict
-     | Some _ ->
+     | Some entry ->
+       let replacement =
+         preserve_entry_process_local_usage entry replacement
+       in
        let updated = StringMap.add key replacement current in
        if Atomic.compare_and_set registry current updated
        then Entry_installed
@@ -413,6 +487,9 @@ let update_entry_if_registered ~base_path name f =
     | None -> false
     | Some entry ->
       let new_entry, changed = f entry in
+      let new_entry =
+        preserve_entry_process_local_usage entry new_entry
+      in
       if not changed
       then false
       else
@@ -732,6 +809,12 @@ let register_restarting ~base_path name meta
   in
   let rec loop () =
     let current = Atomic.get registry in
+    let new_entry =
+      match StringMap.find_opt key current with
+      | Some existing ->
+        preserve_entry_process_local_usage existing new_entry
+      | None -> new_entry
+    in
     let updated = StringMap.add key new_entry current in
     if Atomic.compare_and_set registry current updated
     then Ok new_entry
@@ -1009,6 +1092,11 @@ let sync_meta_if_registered ~base_path name meta =
         match StringMap.find_opt key current with
         | None -> ()
         | Some entry ->
+            let meta =
+              preserve_process_local_usage_observation
+                ~current:entry.meta
+                meta
+            in
             let updated =
               StringMap.add key { entry with base_path; name; meta } current
             in

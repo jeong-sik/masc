@@ -544,16 +544,31 @@ let resolve_keeper_name_config ~(config : Workspace.config) args =
 let resolve_keeper_name ctx args =
   resolve_keeper_name_config ~config:ctx.config args
 
-let direct_reply_visible_text json =
+let direct_reply_projection json =
   match Keeper_turn_outcome.of_reply_payload (Some json) with
-  | Keeper_turn_outcome.Continuation_checkpoint -> None
-  | Keeper_turn_outcome.No_visible_reply -> None
-  | Keeper_turn_outcome.Visible_reply -> (
+  | Ok Keeper_turn_outcome.Visible_reply ->
+    let reply =
       match Json_util.get_string json "reply" with
-      | None -> None
-      | Some reply ->
-          let visible = String.trim reply in
-          if visible = "" then None else Some visible)
+      | Some reply -> Some reply
+      | None ->
+        invalid_arg
+          "keeper reply payload is missing reply for visible_reply"
+    in
+    Keeper_chat_blocks.connector_projection
+      ~turn_outcome:Keeper_turn_outcome.Visible_reply
+      ~reply
+  | Ok turn_outcome ->
+    Keeper_chat_blocks.connector_projection
+      ~turn_outcome
+      ~reply:(Json_util.get_string json "reply")
+  | Error error ->
+    invalid_arg (Keeper_turn_outcome.decode_error_to_string error)
+;;
+
+let direct_reply_visible_text json =
+  match direct_reply_projection json with
+  | Keeper_chat_blocks.Connector_text text -> Some text
+  | Connector_status _ | Connector_no_visible_reply -> None
 ;;
 
 let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args result =
@@ -566,9 +581,16 @@ let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args re
       Keeper_turn_outcome.turn_ref_of_reply_payload
         (Some (Tool_result.data result))
     in
-    match user_content, direct_reply_visible_text (Tool_result.data result) with
+    let projected_assistant =
+      match direct_reply_projection (Tool_result.data result) with
+      | Keeper_chat_blocks.Connector_text text -> Some (text, None)
+      | Connector_status status ->
+        Some ("", Some [ Keeper_chat_blocks.Status status ])
+      | Connector_no_visible_reply -> None
+    in
+    match user_content, projected_assistant with
     | "", _ | _, None -> ()
-    | _, Some assistant_content ->
+    | _, Some (assistant_content, blocks) ->
         (* Agent-initiated [masc_keeper_msg] path: only the final tool
            result is visible here (no stream events), so no tool lines
            are persisted for this surface. *)
@@ -588,6 +610,7 @@ let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args re
             ~user_attachments:[]
             ~surface:Surface_ref.Agent
             ~assistant_content
+            ?blocks
             ?turn_ref
             ();
           Keeper_chat_broadcast.chat_appended ~keeper_name:name ~source:"agent"
@@ -600,6 +623,7 @@ let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args re
             ~keeper_name:name
             ~content:assistant_content
             ~surface:(Surface_ref.Gate { label = channel; address = [] })
+            ?blocks
             ?turn_ref
             ();
           Keeper_chat_broadcast.chat_appended ~keeper_name:name ~source:channel

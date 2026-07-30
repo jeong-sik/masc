@@ -486,7 +486,7 @@ let test_finalization_blank_response_is_typed_accept_rejection () =
        Alcotest.failf "expected typed keeper error, got %s"
          (Agent_sdk.Error.to_string err))
 
-let test_external_effect_finalization_returns_visible_acknowledgement () =
+let test_external_effect_finalization_returns_no_synthetic_prose () =
   let run_result =
     { (run_result ()) with
       stop_reason = Runtime_agent.Awaiting_external_effect { turns_used = 1 }
@@ -501,14 +501,14 @@ let test_external_effect_finalization_returns_visible_acknowledgement () =
       ~tool_names:[]
       ()
   with
-  | Ok acknowledgement ->
+  | Ok response_text ->
     Alcotest.(check string)
-      "external effect acknowledgement"
-      Masc.Keeper_agent_run_response_text.external_effect_deferred_acknowledgement
-      acknowledgement
+      "external effect status stays out of assistant speech"
+      ""
+      response_text
   | Error error ->
     Alcotest.failf
-      "external effect acknowledgement unexpectedly rejected: %s"
+      "external effect typed status unexpectedly rejected: %s"
       (Agent_sdk.Error.to_string error)
 ;;
 
@@ -539,8 +539,8 @@ let test_finalization_does_not_surface_hidden_reasoning () =
      Alcotest.failf "tool fallback should succeed: %s" (Agent_sdk.Error.to_string err)
    | Ok text ->
      Alcotest.(check string)
-       "hidden reasoning is replaced by the generic tool-list fallback"
-       "No textual reply was produced. Tools invoked: masc_schedule_get."
+       "tool-only completion does not fabricate assistant prose"
+       ""
        text;
      Alcotest.(check bool)
        "Thinking content is not user-facing"
@@ -1754,9 +1754,9 @@ let () =
             `Quick
             test_finalization_blank_response_is_typed_accept_rejection;
           Alcotest.test_case
-            "external effect finalization returns visible acknowledgement"
+            "external effect finalization returns no synthetic prose"
             `Quick
-            test_external_effect_finalization_returns_visible_acknowledgement;
+            test_external_effect_finalization_returns_no_synthetic_prose;
           Alcotest.test_case
             "finalization does not surface hidden reasoning"
             `Quick

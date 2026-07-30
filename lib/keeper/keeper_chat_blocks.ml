@@ -81,6 +81,36 @@ type fusion_block = {
   run_id : string;
 }
 
+type status_kind = External_effect_pending
+
+type status_block = { kind : status_kind }
+
+let status_kind_connector_text = function
+  | External_effect_pending ->
+    "승인 대기: 외부 작업을 실행하기 전에 확인이 필요합니다."
+;;
+
+type connector_projection =
+  | Connector_text of string
+  | Connector_status of status_block
+  | Connector_no_visible_reply
+
+let connector_projection ~turn_outcome ~reply =
+  match turn_outcome, reply with
+  | Keeper_turn_outcome.External_effect_pending, _ ->
+    Connector_status { kind = External_effect_pending }
+  | Keeper_turn_outcome.Visible_reply, Some reply ->
+    let reply = String.trim reply in
+    if String.equal reply ""
+    then Connector_no_visible_reply
+    else Connector_text reply
+  | Keeper_turn_outcome.Visible_reply, None ->
+    Connector_no_visible_reply
+  | Keeper_turn_outcome.Continuation_checkpoint, _
+  | Keeper_turn_outcome.No_visible_reply, _ ->
+    Connector_no_visible_reply
+;;
+
 type trace_tool_status =
   | Trace_tool_pending
   | Trace_tool_ok
@@ -129,6 +159,7 @@ type chat_block =
   | Image of image_block
   | Link of link_block
   | Fusion of fusion_block
+  | Status of status_block
   | Trace of trace_block
   | Thinking of thinking_block
 
@@ -260,6 +291,15 @@ let trace_tool_status_to_label = function
   | Trace_tool_pending -> "pending"
   | Trace_tool_ok -> "ok"
   | Trace_tool_err -> "err"
+;;
+
+let status_kind_to_label = function
+  | External_effect_pending -> "external_effect_pending"
+;;
+
+let status_kind_of_label = function
+  | "external_effect_pending" -> Some External_effect_pending
+  | _ -> None
 ;;
 
 let trace_tool_status_of_label = function
@@ -539,6 +579,11 @@ let block_to_yojson = function
       ; ("board_post_id", `String board_post_id)
       ; ("run_id", `String run_id)
       ]
+  | Status { kind } ->
+    `Assoc
+      [ ("t", `String "status")
+      ; ("kind", `String (status_kind_to_label kind))
+      ]
   | Trace { trace } ->
     `Assoc
       [ ("t", `String "trace")
@@ -725,6 +770,9 @@ let block_of_yojson json : chat_block option =
        Option.bind (get_string "board_post_id") (fun board_post_id ->
          let run_id = Option.value (get_string "run_id") ~default:"" in
          Some (Fusion { board_post_id; run_id }))
+     | Some "status" ->
+       Option.bind (get_string "kind") (fun label ->
+         Option.map (fun kind -> Status { kind }) (status_kind_of_label label))
      | Some "trace" ->
        Option.bind (List.assoc_opt "trace" fields) (fun trace_json ->
          Option.bind (trace_steps_of_yojson trace_json) (fun trace ->

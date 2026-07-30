@@ -235,6 +235,35 @@ let test_error_reply_callback_once () =
   check int "one error POST" 1 !sends;
   check_single_network_error "error POST failure" "error post failed" outcomes
 
+let test_external_effect_status_replaces_assistant_preface () =
+  let posts = ref [] in
+  let edits = ref [] in
+  let outcomes =
+    run_adapter
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-status"; thread_id = "thread-status" }
+      ; Masc.Keeper_chat_events.Text_delta "assistant preface that must not survive"
+      ; Masc.Keeper_chat_events.Status_block
+          { kind = Masc.Keeper_chat_blocks.External_effect_pending }
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-status" }
+      ]
+      ~post_message:(fun ~content ->
+        posts := content :: !posts;
+        Ok "status-message")
+      ~edit_message:(fun ~message_id ~content ->
+        check string "typed status edits the streaming message"
+          "status-message" message_id;
+        edits := content :: !edits;
+        Ok ())
+      ~send_message:(fun ~content:_ ->
+        fail "typed status must replace the existing streaming message")
+  in
+  check_single_ok "typed status terminal result" outcomes;
+  check int "streaming preface is posted once" 1 (List.length !posts);
+  check (list string) "typed status is the terminal message"
+    [ "승인 대기: 외부 작업을 실행하기 전에 확인이 필요합니다." ]
+    (List.rev !edits)
+
 let () =
   run "keeper_chat_discord"
     [ ( "streaming-redaction"
@@ -258,6 +287,8 @@ let () =
             test_terminal_callback_reports_overflow_failure
         ; test_case "error reply callback exactly once" `Quick
             test_error_reply_callback_once
+        ; test_case "typed status replaces assistant preface" `Quick
+            test_external_effect_status_replaces_assistant_preface
         ] )
     ; ( "rich-blocks"
       , [ test_case "audio URL uses base URL" `Quick

@@ -2,25 +2,23 @@
 
     The keeper reply payload declares at the write boundary whether its
     [reply] text is model output ([Visible_reply]), absent from the
-    visible surface ([No_visible_reply]), or the synthetic continuation
-    notice substituted when a run stops at a checkpoint boundary
-    ([Continuation_checkpoint]).  Consumers (lane persistence, stream
+    visible surface ([No_visible_reply]), a continuation boundary
+    ([Continuation_checkpoint]), or a durable external-effect wait
+    ([External_effect_pending]). Consumers (lane persistence, stream
     terminal, direct-reply surface, dashboard) match on the decoded
-    variant; the legacy ["Continuation checkpoint saved;"] prefix sniff
-    is deleted. A typed Gate deferral is instead finalized as a visible,
-    host-authored acknowledgement; it must not be projected as a checkpoint
-    transport failure. *)
+    variant; control state is never synthesized into assistant prose. *)
 
 type t =
   | Visible_reply
   | Continuation_checkpoint
+  | External_effect_pending
   | No_visible_reply
 
 val equal : t -> t -> bool
 
 val to_label : t -> string
 (** Closed wire labels: ["visible_reply"] / ["continuation_checkpoint"] /
-    ["no_visible_reply"]. *)
+    ["external_effect_pending"] / ["no_visible_reply"]. *)
 
 val of_label : string -> t option
 (** Inverse of {!to_label}; [None] on any other string. *)
@@ -46,20 +44,25 @@ val of_result_surface : response_text:string -> Runtime_agent.stop_reason -> t
     [Visible_reply].  This keeps hidden read-only/tool-only runtime turns
     from being reported as user-visible replies while preserving the
     explicit continuation checkpoint outcome for control-yield stops.
-    [Awaiting_external_effect] likewise requires a nonblank response: its
-    producer emits the deterministic Gate acknowledgement so a queued
-    originating request is delivered rather than mistaken for a continuation
-    checkpoint. A runtime execution-limit observation does not create a MASC
-    lifecycle gate. *)
+    [Awaiting_external_effect] is [External_effect_pending] regardless of
+    response text; the dashboard renders that typed state outside the assistant
+    speech surface. A runtime execution-limit observation does not create a
+    MASC lifecycle gate. *)
 
-val of_reply_payload : Yojson.Safe.t option -> t
-(** Decode from a parsed keeper reply payload.  Known labels decode to
-    their declared variant.  Absent payload, absent field, or unknown
-    label decodes to [Visible_reply] (unknown labels are logged at WARN):
-    the bitten failure mode (#20870) was a reply silently {e not}
-    persisted — the lane watermark stalled and the keeper re-answered
-    the same message — so decode failure must fail toward persisting,
-    never toward dropping. *)
+type decode_error =
+  | Payload_missing
+  | Payload_not_object
+  | Turn_outcome_missing
+  | Turn_outcome_duplicate
+  | Turn_outcome_not_string
+  | Turn_outcome_unknown of string
+
+val decode_error_to_string : decode_error -> string
+
+val of_reply_payload : Yojson.Safe.t option -> (t, decode_error) result
+(** Decode the required current [turn_outcome] contract. Missing, malformed,
+    duplicate, or unknown values are explicit errors; there is no legacy
+    visible-reply default. *)
 
 val turn_ref_of_reply_payload : Yojson.Safe.t option -> Ids.Turn_ref.t option
 (** Decode the turn's join key ([turn_ref_wire_key]) from a parsed keeper

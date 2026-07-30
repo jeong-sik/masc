@@ -126,13 +126,14 @@ val persist_connector_assistant_reply :
   surface:Surface_ref.t ->
   ?conversation_id:string ->
   ?turn_ref:Ids.Turn_ref.t ->
+  ?blocks:Keeper_chat_blocks.chat_block list ->
   reply:string ->
   unit ->
   unit
 (** Persist a completed connector direct reply on the same chat lane that
     received the inbound user line. The typed [surface] is the sole lane
-    identity; compact broadcast labels are derived from it. Empty replies are
-    ignored.
+    identity; compact broadcast labels are derived from it. Empty replies
+    without typed blocks are ignored.
     [turn_ref] (RFC-0233 §7) is the join key the keeper minted into the
     reply payload, stamped on the assistant row. *)
 

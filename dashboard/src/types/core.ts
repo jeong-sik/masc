@@ -683,12 +683,13 @@ interface KeeperConversationUsage {
 }
 
 // RFC-0232 P2: producer-typed turn outcome carried in the reply payload
-// (`turn_outcome`). `continuation_checkpoint` marks the synthetic
-// resume-next-cycle notice; `no_visible_reply` marks a completed runtime
-// turn with no assistant text for the chat surface.
+// (`turn_outcome`). `continuation_checkpoint` marks a resume-next-cycle
+// boundary, `external_effect_pending` marks a durable control wait, and
+// `no_visible_reply` marks a completed runtime turn with no assistant text.
 export type KeeperTurnOutcome =
   | 'visible_reply'
   | 'continuation_checkpoint'
+  | 'external_effect_pending'
   | 'no_visible_reply'
 
 export type KeeperQueueReceiptLifecycle =
@@ -857,6 +858,7 @@ export type ChatBroadcastBlock = { t: 'broadcast'; scope: string; via?: string; 
 // keeper_chat_blocks.ml); ChatFusionCard lazy-fetches the board post by
 // board_post_id and renders its meta_json (panel answers + judge synthesis).
 export type ChatFusionBlock = { t: 'fusion'; board_post_id: string; run_id?: string }
+export type ChatStatusBlock = { t: 'status'; kind: 'external_effect_pending' }
 
 export type ChatBlock =
   | ChatTextBlock
@@ -880,6 +882,7 @@ export type ChatBlock =
   | ChatLinkBlock
   | ChatBroadcastBlock
   | ChatFusionBlock
+  | ChatStatusBlock
 export type KeeperConversationStreamState =
   | 'opening'
   | 'thinking'

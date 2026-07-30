@@ -4,17 +4,13 @@ type finalized = {
   response_text : string;
 }
 
-let external_effect_deferred_acknowledgement =
-  "External effect is awaiting Gate approval. The Keeper will continue after the durable resolution."
-;;
-
 let stop_reason_suppresses_visible_response = function
   | Runtime_agent.Yielded_to_chat_waiting _
   | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.Yielded_after_repeated_tool_call _ ->
+  | Runtime_agent.Yielded_after_repeated_tool_call _
+  | Runtime_agent.Awaiting_external_effect _ ->
     true
   | Runtime_agent.Completed
-  | Runtime_agent.Awaiting_external_effect _
   | Runtime_agent.InputRequired _ ->
     false
 ;;

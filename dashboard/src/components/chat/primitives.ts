@@ -10,7 +10,7 @@ import { linkifyHtmlReferences } from './chat-linkify'
 import { UNREAD_DIVIDER_LABEL, unreadDividerAnchorKey } from './unread-divider'
 import { showToast } from '../common/toast'
 import { copyToClipboard } from '../common/copyable-code'
-import { ExternalLink, Mic, Square } from 'lucide-preact'
+import { ArrowRight, ExternalLink, Mic, ShieldCheck, Square } from 'lucide-preact'
 import { prettyJson } from '../tool-call-shared'
 import { useVoiceInput } from './voice-input'
 
@@ -2528,7 +2528,91 @@ const CARD_BLOCK_TYPES: ReadonlySet<ChatBlock['t']> = new Set([
   'broadcast',
   'trace',
   'shell',
+  'status',
 ])
+
+type ChatControlStatus = 'external_effect_pending'
+
+function chatControlStatus(entry: KeeperConversationEntry): ChatControlStatus | null {
+  const persistedStatus = (entry.blocks ?? []).find(
+    (block): block is Extract<ChatBlock, { t: 'status' }> => block.t === 'status',
+  )
+  if (persistedStatus) return persistedStatus.kind
+  return entry.details?.turnOutcome === 'external_effect_pending'
+    ? 'external_effect_pending'
+    : null
+}
+
+function ChatControlStatusCard({
+  entry,
+  action,
+}: {
+  entry: KeeperConversationEntry
+  action?: ChatTranscriptAction
+}) {
+  const status = chatControlStatus(entry)
+  if (status !== 'external_effect_pending') return null
+  const timestamp = timeLabel(entry.timestamp)
+  const supportingBlocks = (entry.blocks ?? []).filter(block => block.t !== 'status')
+
+  return html`
+    <article
+      class="w-full rounded-[var(--r-2)] border border-[var(--warn-35)] bg-[var(--warn-10)] px-4 py-3.5"
+      role="status"
+      aria-live="polite"
+      data-chat-control-status="external_effect_pending"
+      data-chat-entry-id=${entry.id}
+      data-chat-turn-ref=${entry.turnRef ?? undefined}
+    >
+      <div class="flex items-start gap-3">
+        <div
+          class="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full border border-[var(--warn-35)] bg-[var(--color-bg-surface)] text-[var(--color-status-warn)]"
+          aria-hidden="true"
+        >
+          <${ShieldCheck} size=${18} />
+        </div>
+        <div class="min-w-0 flex-1">
+          <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <strong class="text-sm font-semibold text-[var(--color-fg-primary)]">승인 요청됨</strong>
+            ${timestamp
+              ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]">${timestamp}</span>`
+              : null}
+          </div>
+          <p class="mt-1 text-sm leading-paragraph text-[var(--color-fg-secondary)]">
+            외부 작업을 실행하기 위한 확인 요청이 기록되었습니다.
+          </p>
+          <p class="mt-0.5 text-xs leading-paragraph text-[var(--color-fg-muted)]">
+            현재 승인 상태는 승인 화면에서 확인할 수 있습니다.
+          </p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-[var(--r-1)] border border-[var(--warn-35)] bg-[var(--color-bg-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)] ${CHAT_FOCUS_RING}"
+              onClick=${() => navigate('command', { section: 'operations', view: 'gate' })}
+            >
+              승인 화면 열기
+              <${ArrowRight} size=${13} aria-hidden="true" />
+            </button>
+            ${action?.onClick
+              ? html`
+                  <button
+                    type="button"
+                    class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-transparent px-3 py-1.5 text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING}"
+                    onClick=${() => action.onClick?.(entry)}
+                  >
+                    ${action.label ?? '턴 상세'}
+                  </button>
+                `
+              : null}
+          </div>
+        </div>
+      </div>
+      ${supportingBlocks.length > 0
+        ? html`<div class="mt-3"><${ChatBlocks} blocks=${supportingBlocks} fallbackText="" /></div>`
+        : null}
+    </article>
+  `
+}
 
 // Memoized message bubble. A streaming reply re-renders the conversation panel
 // on every SSE event; the transcript reconcile preserves the entry reference of
@@ -2927,6 +3011,32 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
     </article>
   `
 })
+
+function ChatMessageSurface({
+  entry,
+  showMetadata = true,
+  variant = 'default',
+  showSourceBadge = false,
+  action,
+}: {
+  entry: KeeperConversationEntry
+  showMetadata?: boolean
+  variant?: ChatTranscriptVariant
+  showSourceBadge?: boolean
+  action?: ChatTranscriptAction
+}) {
+  return chatControlStatus(entry)
+    ? html`<${ChatControlStatusCard} entry=${entry} action=${action} />`
+    : html`
+        <${ChatMessageBubble}
+          entry=${entry}
+          showMetadata=${showMetadata}
+          variant=${variant}
+          showSourceBadge=${showSourceBadge}
+          action=${action}
+        />
+      `
+}
 
 // Pretty-print a JSON-looking string; leave anything else untouched. Shared by
 // the argument and output renderers so both read consistently.
@@ -3589,7 +3699,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
         toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
         toolOutputHydrationContract=${toolOutputHydrationContract}
       />
-      <${ChatMessageBubble}
+      <${ChatMessageSurface}
         entry=${assistant}
         showMetadata=${showMetadata !== false}
         variant=${variant}
@@ -3788,7 +3898,7 @@ function renderChatTranscriptBody(opts: {
     } else if (unit.entry.role === 'tool') {
       out.push(html`<${ToolCallBubble} key=${unit.entry.id} entry=${unit.entry} />`)
     } else {
-      out.push(html`<${ChatMessageBubble}
+      out.push(html`<${ChatMessageSurface}
         key=${unit.entry.id}
         entry=${unit.entry}
         showMetadata=${showMetadata !== false}

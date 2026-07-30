@@ -204,6 +204,10 @@ export const KeeperChatBlockSchema = union([
     run_id: optional(string()),
   }),
   object({
+    t: literal('status'),
+    kind: literal('external_effect_pending'),
+  }),
+  object({
     t: literal('trace'),
     trace: array(KeeperChatTraceStepSchema),
   }),

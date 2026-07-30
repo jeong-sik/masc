@@ -342,6 +342,7 @@ let rich_embed_of_chat_block = function
   | Keeper_chat_blocks.Voice _
   | Keeper_chat_blocks.Attach _
   | Keeper_chat_blocks.Fusion _
+  | Keeper_chat_blocks.Status _
   | Keeper_chat_blocks.Trace _
   | Keeper_chat_blocks.Thinking _ -> None
 
@@ -568,6 +569,9 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
     | Image_block { url; caption } ->
         send_image_block ?clock ~token ~channel_id ~url ~caption ();
+        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
+    | Status_block { kind } ->
+        let acc_text = Keeper_chat_blocks.status_kind_connector_text kind in
         loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
     | Audio_block { token; mime = _; message_text; duration_sec } ->
         send_audio_block ?clock ~token ~channel_id ~base_url ~audio_token:token

@@ -526,8 +526,9 @@ let response_capture_matches_replayed_history_text () =
       with
       | Ok t -> t
       | Error _ ->
-        Alcotest.fail "normalization should synthesize text when tools are present"
+        Alcotest.fail "tool-only normalization should preserve an empty reply"
     in
+    Alcotest.(check string) "tool-only reply stays empty" "" history_text;
     Wire.capture_response
       ~base_path:base
       ~masc_root:base
@@ -540,9 +541,9 @@ let response_capture_matches_replayed_history_text () =
     Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
     let content = read_file (List.hd files) in
     Alcotest.(check bool)
-      "synthetic replayed history text is captured"
+      "wire capture retains the finalized empty response"
       true
-      (contains ~needle:history_text content);
+      (contains ~needle:"\"response_text\":\"\"" content);
     Alcotest.(check bool)
       "raw whitespace response is not captured as the replayed text"
       false

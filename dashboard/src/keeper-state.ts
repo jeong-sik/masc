@@ -536,6 +536,11 @@ function normalizeBlocks(raw: unknown, role: KeeperConversationRole): ChatBlock[
         const html = asString(item.html)
         return html ? { t: 'h4', html } : null
       }
+      if (t === 'status') {
+        return asString(item.kind) === 'external_effect_pending'
+          ? { t: 'status', kind: 'external_effect_pending' }
+          : null
+      }
       if (t === 'ul') {
         const items = normalizeStringArray(item.items)
         return items && items.length > 0 ? { t: 'ul', items } : null

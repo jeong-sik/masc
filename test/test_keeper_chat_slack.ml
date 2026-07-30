@@ -285,6 +285,31 @@ let test_adapter_empty_terminal_is_error () =
       (contains message "no text or blocks")
   | _ -> fail "empty terminal must settle exactly once with an error"
 
+let test_adapter_external_effect_status_is_terminal_success () =
+  let sends = ref [] in
+  let outcomes =
+    run_adapter
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-status"; thread_id = "thread-status" }
+      ; Masc.Keeper_chat_events.Text_delta "assistant preface that must not survive"
+      ; Masc.Keeper_chat_events.Status_block
+          { kind = Masc.Keeper_chat_blocks.External_effect_pending }
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-status" }
+      ]
+      ~send_plain:(fun ~content:_ -> fail "status uses Slack blocks")
+      ~send_blocks:(fun ~content ~blocks ->
+        sends := (content, blocks) :: !sends;
+        Ok ())
+  in
+  check bool "typed status settles the terminal receipt" true
+    (outcomes = [ Ok () ]);
+  match List.rev !sends with
+  | [ (content, [ block ]) ] ->
+    check string "assistant preface cleared" "" content;
+    check bool "status is visible" true
+      (contains (json_string block) "승인 대기")
+  | _ -> fail "status must produce exactly one Slack block send"
+
 let test_message_body_preserves_reply_thread () =
   let body =
     Masc.Keeper_chat_slack.For_testing.build_message_body
@@ -352,6 +377,8 @@ let () =
             test_protocol_diagnostic_cannot_mask_final_failure
         ; test_case "empty terminal is explicit failure" `Quick
             test_adapter_empty_terminal_is_error
+        ; test_case "typed external-effect status settles successfully" `Quick
+            test_adapter_external_effect_status_is_terminal_success
         ] )
     ; ( "thread-routing"
       , [ test_case "deferred reply keeps thread_ts" `Quick

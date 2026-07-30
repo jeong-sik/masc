@@ -25,6 +25,8 @@ function normalizeKeeperTurnOutcome(value: unknown): KeeperTurnOutcome | null {
       return 'visible_reply'
     case 'continuation_checkpoint':
       return 'continuation_checkpoint'
+    case 'external_effect_pending':
+      return 'external_effect_pending'
     case 'no_visible_reply':
       return 'no_visible_reply'
     default:
@@ -55,7 +57,9 @@ function normalizeKeeperUsage(raw: unknown): NonNullable<KeeperConversationDetai
 export function keeperTurnOutcomeSuppressesReply(
   outcome: KeeperTurnOutcome | null | undefined,
 ): boolean {
-  return outcome === 'continuation_checkpoint' || outcome === 'no_visible_reply'
+  return outcome === 'continuation_checkpoint'
+    || outcome === 'external_effect_pending'
+    || outcome === 'no_visible_reply'
 }
 
 export function normalizeKeeperConversationDetails(raw: unknown): KeeperConversationDetails | null {

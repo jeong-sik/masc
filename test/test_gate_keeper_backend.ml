@@ -200,6 +200,36 @@ let test_persist_connector_assistant_reply_ignores_empty_reply () =
       check int "empty reply does not create chat file" 0
         (List.length (K.load ~base_dir ~keeper_name)))
 
+let test_persist_connector_assistant_reply_records_typed_status () =
+  let base_dir = temp_base_path "gate-keeper-status-reply" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "discord-status-keeper" in
+      let surface =
+        Surface_ref.Gate { label = "discord"; address = [] }
+      in
+      Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
+        ~keeper_name ~surface ~reply:""
+        ~blocks:
+          [ Keeper_chat_blocks.Status
+              { kind = Keeper_chat_blocks.External_effect_pending }
+          ]
+        ();
+      match K.load ~base_dir ~keeper_name with
+      | [ assistant ] ->
+          check string "assistant content stays empty" "" assistant.K.content;
+          (match assistant.K.blocks with
+           | Some
+               [ Keeper_chat_blocks.Status
+                   { kind = Keeper_chat_blocks.External_effect_pending }
+               ] ->
+             ()
+           | Some _ -> fail "connector status changed shape during persistence"
+           | None -> fail "connector status was not persisted")
+      | messages ->
+          failf "expected 1 typed status row, got %d" (List.length messages))
+
 let test_contextualize_message_includes_channel_metadata () =
   let rendered =
     Gate_keeper_backend.contextualize_message
@@ -2797,6 +2827,8 @@ let () =
             test_persist_connector_assistant_reply_records_lane_reply;
           test_case "skips empty connector assistant reply" `Quick
             test_persist_connector_assistant_reply_ignores_empty_reply;
+          test_case "persists typed connector status without prose" `Quick
+            test_persist_connector_assistant_reply_records_typed_status;
           test_case "context envelope includes channel metadata" `Quick
             test_contextualize_message_includes_channel_metadata;
           test_case "stream request accepts connector context" `Quick

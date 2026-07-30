@@ -6,8 +6,7 @@
    - the closed label codec (round-trip, unknown -> None),
    - the stop_reason -> outcome mapping (single mapping site),
    - response_text-aware result-surface classification,
-   - payload decode policy: absent/unknown fails toward Visible_reply
-     (the bitten failure mode, #20870, was silent non-persistence),
+   - payload decode policy: absent/malformed/unknown fails closed,
    - prefix deadness: checkpoint-shaped reply TEXT alone never
      classifies as a checkpoint. *)
 
@@ -23,7 +22,12 @@ let outcome : TO.t testable =
     (fun fmt t -> Format.pp_print_string fmt (TO.to_label t))
     TO.equal
 
-let all = [ TO.Visible_reply; TO.Continuation_checkpoint; TO.No_visible_reply ]
+let all =
+  [ TO.Visible_reply
+  ; TO.Continuation_checkpoint
+  ; TO.External_effect_pending
+  ; TO.No_visible_reply
+  ]
 
 let test_label_round_trip () =
   List.iter
@@ -57,7 +61,7 @@ let test_of_stop_reason () =
   check outcome "durable stimulus yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 }));
-  check outcome "external effect wait -> visible" TO.Visible_reply
+  check outcome "external effect wait -> typed pending" TO.External_effect_pending
     (TO.of_stop_reason
        (Runtime_agent.Awaiting_external_effect { turns_used = 2 }));
   check outcome "repeated tool yield -> checkpoint" TO.Continuation_checkpoint
@@ -78,28 +82,24 @@ let test_of_result_surface () =
     TO.No_visible_reply
     (TO.of_result_surface ~response_text:"   " Runtime_agent.Completed)
 
-let test_external_effect_wait_acknowledgement_is_visible () =
+let test_external_effect_wait_is_typed_status () =
   let stop_reason = Runtime_agent.Awaiting_external_effect { turns_used = 2 } in
-  let acknowledgement = Response_text.external_effect_deferred_acknowledgement in
-  check bool "external effect acknowledgement is not suppressed" false
+  check bool "external effect prose is suppressed" true
     (Response_text.stop_reason_suppresses_visible_response stop_reason);
-  check bool "external effect acknowledgement is nonblank" true
-    (String.trim acknowledgement <> "");
-  check outcome "external effect acknowledgement reaches chat"
-    TO.Visible_reply
-    (TO.of_result_surface ~response_text:acknowledgement stop_reason)
+  check outcome "external effect remains typed with blank text"
+    TO.External_effect_pending
+    (TO.of_result_surface ~response_text:"" stop_reason)
 
-let test_external_effect_acknowledgement_survives_server_projection () =
-  let acknowledgement = Response_text.external_effect_deferred_acknowledgement in
+let test_external_effect_status_survives_server_projection () =
   let turn_outcome =
     TO.of_result_surface
-      ~response_text:acknowledgement
+      ~response_text:""
       (Runtime_agent.Awaiting_external_effect { turns_used = 2 })
   in
   let turn_ref = Ids.Turn_ref.make ~trace_id:"gate-ack" ~absolute_turn:2 in
   let body =
     `Assoc
-      [ "reply", `String acknowledgement
+      [ "reply", `String ""
       ; TO.wire_key, `String (TO.to_label turn_outcome)
       ; TO.turn_ref_wire_key, Ids.Turn_ref.to_yojson turn_ref
       ]
@@ -113,10 +113,10 @@ let test_external_effect_acknowledgement_survives_server_projection () =
       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
          error)
   | Ok canonical ->
-    check outcome "server preserves visible Gate acknowledgement" TO.Visible_reply
+    check outcome "server preserves typed Gate wait" TO.External_effect_pending
       canonical.turn_outcome;
-    check string "server preserves acknowledgement" acknowledgement canonical.visible_reply;
-    check (option string) "server does not turn acknowledgement into a terminal error"
+    check string "server keeps control status out of reply text" "" canonical.visible_reply;
+    check (option string) "server accepts typed control status without prose"
       None
       (Stream.For_testing.direct_reply_terminal_error
          (Some canonical.payload_json)
@@ -126,11 +126,25 @@ let test_external_effect_acknowledgement_survives_server_projection () =
         (Some canonical.turn_ref)
     with
     | Stream.Delivered { outcome_ref } ->
-      check string "queued delivery keeps the exact Gate turn ref"
+      check string "typed Gate wait keeps the exact turn ref"
         (Ids.Turn_ref.to_string turn_ref)
         outcome_ref
     | Stream.Failed _ | Stream.Deferred _ ->
-      fail "Gate acknowledgement did not remain deliverable for a queued turn"
+      fail "typed Gate wait did not remain deliverable for a queued turn"
+
+let test_external_effect_status_becomes_persisted_chat_block () =
+  match
+    Stream.For_testing.persisted_reply_blocks
+      ~turn_outcome:TO.External_effect_pending
+      None
+  with
+  | Some
+      [ Masc.Keeper_chat_blocks.Status
+          { kind = Masc.Keeper_chat_blocks.External_effect_pending }
+      ] ->
+    ()
+  | Some _ -> fail "typed Gate wait persisted the wrong block shape"
+  | None -> fail "typed Gate wait did not persist a status block"
 
 let test_terminal_effect_defer_kinds_remain_distinct () =
   let expect_yield label state expected =
@@ -268,23 +282,42 @@ let test_terminal_effect_handler_contract () =
 
 let payload fields = Some (`Assoc fields)
 
+let decoded_exn payload =
+  match TO.of_reply_payload payload with
+  | Ok outcome -> outcome
+  | Error error -> fail (TO.decode_error_to_string error)
+
+let check_decode_error label expected payload =
+  match TO.of_reply_payload payload with
+  | Error actual -> check bool label true (actual = expected)
+  | Ok actual ->
+    failf "%s: unexpectedly decoded %s" label (TO.to_label actual)
+
 let test_payload_decode () =
-  check outcome "no payload -> visible" TO.Visible_reply
-    (TO.of_reply_payload None);
-  check outcome "field absent -> visible" TO.Visible_reply
-    (TO.of_reply_payload (payload [ ("reply", `String "hi") ]));
+  check_decode_error "no payload fails closed" TO.Payload_missing None;
+  check_decode_error "field absent fails closed" TO.Turn_outcome_missing
+    (payload [ ("reply", `String "hi") ]);
   check outcome "checkpoint label" TO.Continuation_checkpoint
-    (TO.of_reply_payload
+    (decoded_exn
        (payload [ (TO.wire_key, `String "continuation_checkpoint") ]));
   check outcome "visible label" TO.Visible_reply
-    (TO.of_reply_payload
+    (decoded_exn
        (payload [ (TO.wire_key, `String "visible_reply") ]));
   check outcome "no visible reply label" TO.No_visible_reply
-    (TO.of_reply_payload
+    (decoded_exn
        (payload [ (TO.wire_key, `String "no_visible_reply") ]));
-  check outcome "unknown label -> visible (report-and-persist)"
-    TO.Visible_reply
-    (TO.of_reply_payload (payload [ (TO.wire_key, `String "deferred") ]))
+  check_decode_error "unknown label fails closed"
+    (TO.Turn_outcome_unknown "deferred")
+    (payload [ (TO.wire_key, `String "deferred") ]);
+  check_decode_error "duplicate label fails closed" TO.Turn_outcome_duplicate
+    (payload
+       [ (TO.wire_key, `String "visible_reply")
+       ; (TO.wire_key, `String "no_visible_reply")
+       ]);
+  check_decode_error "non-string label fails closed" TO.Turn_outcome_not_string
+    (payload [ (TO.wire_key, `Int 1) ]);
+  check_decode_error "non-object payload fails closed" TO.Payload_not_object
+    (Some (`List []))
 
 let checkpoint_text =
   "Continuation checkpoint saved; keeper remains scheduled for the next \
@@ -296,21 +329,21 @@ let checkpoint_text =
 let test_prefix_is_dead () =
   check outcome "checkpoint-shaped text, declared visible"
     TO.Visible_reply
-    (TO.of_reply_payload
+    (decoded_exn
        (payload
           [ ("reply", `String checkpoint_text);
             (TO.wire_key, `String "visible_reply")
           ]));
   check outcome "ordinary text, declared checkpoint"
     TO.Continuation_checkpoint
-    (TO.of_reply_payload
+    (decoded_exn
        (payload
          [ ("reply", `String "all done");
            (TO.wire_key, `String "continuation_checkpoint")
           ]));
   check outcome "ordinary text, declared no visible reply"
     TO.No_visible_reply
-    (TO.of_reply_payload
+    (decoded_exn
        (payload
           [ ("reply", `String "all done");
             (TO.wire_key, `String "no_visible_reply")
@@ -443,10 +476,14 @@ let test_direct_reply_visible_text () =
           [ ("reply", `String "all done");
             ("turn_outcome", `String "no_visible_reply")
           ]));
-  check (option string) "checkpoint-shaped text without field -> visible"
-    (Some checkpoint_text)
-    (Ops.direct_reply_visible_text
-       (body [ ("reply", `String checkpoint_text) ]));
+  check_raises
+    "missing outcome is a direct-reply contract error"
+    (Invalid_argument "keeper reply payload is missing turn_outcome")
+    (fun () ->
+       ignore
+         (Ops.direct_reply_visible_text
+            (body [ ("reply", `String checkpoint_text) ])
+          : string option));
   check (option string) "declared visible -> reply text" (Some "all done")
     (Ops.direct_reply_visible_text
        (body
@@ -458,7 +495,38 @@ let test_direct_reply_visible_text () =
        (body
           [ ("reply", `String "   ");
             ("turn_outcome", `String "visible_reply")
-          ]))
+          ]));
+  check_raises
+    "visible outcome without reply is a direct-reply contract error"
+    (Invalid_argument
+       "keeper reply payload is missing reply for visible_reply")
+    (fun () ->
+       ignore
+         (Ops.direct_reply_visible_text
+            (body [ ("turn_outcome", `String "visible_reply") ])
+          : string option))
+
+let test_connector_projection_keeps_external_wait_typed () =
+  match
+    Masc.Keeper_chat_blocks.connector_projection
+      ~turn_outcome:TO.External_effect_pending
+      ~reply:(Some "assistant preface that must not survive")
+  with
+  | Connector_status { kind = External_effect_pending } -> ()
+  | Connector_text _ | Connector_no_visible_reply ->
+    fail "external-effect wait must remain a typed connector status"
+
+let test_direct_reply_projection_keeps_external_wait_typed () =
+  match
+    Ops.direct_reply_projection
+      (body
+         [ ("reply", `String "assistant preface that must not survive")
+         ; ("turn_outcome", `String "external_effect_pending")
+         ])
+  with
+  | Connector_status { kind = External_effect_pending } -> ()
+  | Connector_text _ | Connector_no_visible_reply ->
+    fail "direct reply collapsed external-effect wait into silence"
 
 let () =
   run "keeper_turn_outcome"
@@ -472,10 +540,12 @@ let () =
         [
           test_case "of_stop_reason" `Quick test_of_stop_reason;
           test_case "of_result_surface" `Quick test_of_result_surface;
-          test_case "external effect wait acknowledgement is visible" `Quick
-            test_external_effect_wait_acknowledgement_is_visible;
-          test_case "external effect acknowledgement survives server projection" `Quick
-            test_external_effect_acknowledgement_survives_server_projection;
+          test_case "external effect wait is typed status" `Quick
+            test_external_effect_wait_is_typed_status;
+          test_case "external effect status survives server projection" `Quick
+            test_external_effect_status_survives_server_projection;
+          test_case "external effect status becomes persisted chat block" `Quick
+            test_external_effect_status_becomes_persisted_chat_block;
           test_case "terminal effect defer kinds remain distinct" `Quick
             test_terminal_effect_defer_kinds_remain_distinct;
           test_case "repeated exact tool call boundary" `Quick
@@ -504,5 +574,9 @@ let () =
         [
           test_case "direct_reply_visible_text" `Quick
             test_direct_reply_visible_text;
+          test_case "connector projection keeps external wait typed" `Quick
+            test_connector_projection_keeps_external_wait_typed;
+          test_case "direct reply keeps external wait typed" `Quick
+            test_direct_reply_projection_keeps_external_wait_typed;
         ] );
     ]

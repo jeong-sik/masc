@@ -1300,6 +1300,23 @@ describe('thread history merge & persistence', () => {
     ])
   })
 
+  it('keeps a typed control-status block when assistant content is empty', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        content: '',
+        ts: 1_780_000_000,
+        blocks: [{ t: 'status', kind: 'external_effect_pending' }],
+      },
+    ])
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.text).toBe('')
+    expect(entries[0]?.blocks).toEqual([
+      { t: 'status', kind: 'external_effect_pending' },
+    ])
+  })
+
   it('still drops rows that have no content and no attachments', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       { role: 'user', content: '', ts: 1_780_000_000 },

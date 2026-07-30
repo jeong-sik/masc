@@ -158,6 +158,18 @@ let mermaid_block_json ~source =
     ; ("text", `Assoc [ ("type", `String "mrkdwn"); ("text", `String body) ])
     ]
 
+let status_block_json ({ Keeper_chat_blocks.kind } : Keeper_chat_blocks.status_block) =
+  let body =
+    Keeper_chat_blocks.status_kind_connector_text kind
+    |> redact
+    |> escape_mrkdwn_text
+    |> truncate_block_text
+  in
+  `Assoc
+    [ ("type", `String "section")
+    ; ("text", `Assoc [ ("type", `String "mrkdwn"); ("text", `String body) ])
+    ]
+
 (* ── Content → Slack blocks ──────────────────────────────────────── *)
 
 let slack_block_of_chat_block = function
@@ -186,6 +198,7 @@ let slack_block_of_chat_block = function
   | Keeper_chat_blocks.Voice _
   | Keeper_chat_blocks.Attach _
   | Keeper_chat_blocks.Fusion _
+  | Keeper_chat_blocks.Status _
   | Keeper_chat_blocks.Trace _
   | Keeper_chat_blocks.Thinking _ -> None
 
@@ -362,6 +375,9 @@ let adapter_loop_with_transport
     | Image_block { url; caption } ->
         let block = image_block_json ~url ~caption in
         loop ~acc_text ~acc_blocks:(add_block acc_blocks block) ~run_id_opt
+    | Status_block status ->
+        let block = status_block_json status in
+        loop ~acc_text:"" ~acc_blocks:(add_block acc_blocks block) ~run_id_opt
     | Audio_block { token; mime = _; message_text; duration_sec = _ } ->
         let block = audio_block_json ~base_url ~token ~message_text in
         loop ~acc_text ~acc_blocks:(add_block acc_blocks block) ~run_id_opt

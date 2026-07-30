@@ -122,9 +122,10 @@ let test_directory_recreation_forgets_old_file_identity () =
   check int "old file counts 2" 2 (Dated_jsonl.count_entries t);
   Dated_jsonl.prepare_for_directory_removal t;
   Fs_compat.remove_tree base;
-  write_jsonl_line
-    (today_day_path base)
-    {|{"payload":"new file is larger than the old cached byte boundary"}|};
+  Dated_jsonl.append
+    t
+    (`Assoc
+      [ "payload", `String "new file is larger than the old cached byte boundary" ]);
   check
     int
     "recreated file count starts from zero"

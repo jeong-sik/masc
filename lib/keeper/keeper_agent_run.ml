@@ -681,7 +681,7 @@ let run_turn
            current_request_input_messages_ref := None;
            Log.Keeper.warn
              "turn input composition unavailable: keeper=%s trace=%s \
-              reason=model_input_projection_rewrote_prefix"
+              reason=model_input_projection_provenance_unavailable"
              meta.name trace_id);
         result
     in

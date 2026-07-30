@@ -5,6 +5,8 @@
 open Alcotest
 
 let block_id = testable (Fmt.of_to_string Prompt_block_id.to_string) Prompt_block_id.equal
+let turn_ref_t =
+  testable (Fmt.of_to_string Ids.Turn_ref.to_string) Ids.Turn_ref.equal
 
 (* ── Prompt_block_id ──────────────────────────────────── *)
 
@@ -83,12 +85,9 @@ let sample_record () : Turn_record.t =
   ; ts = 1781200000.5
   }
 
-(* The cache counts used to be dropped at the writer, so a row with a large
-   input_tokens could not be read as either a cache-heavy turn or a genuinely large
-   prompt. context_window denominates the ctx-fill percentage against the compaction
-   ceiling, so those two situations look identical on a dashboard while calling for
-   different action. A current provider that omits them carries None rather than a
-   fabricated zero. *)
+(* Cache counts distinguish a cache-heavy turn from a genuinely large prompt.
+   A current provider may omit those usage values; absence stays [None] rather
+   than becoming a fabricated zero. *)
 let test_cache_counts_round_trip_and_stay_optional () =
   let record = sample_record () in
   (match Turn_record.of_json (Turn_record.to_json record) with
@@ -98,7 +97,7 @@ let test_cache_counts_round_trip_and_stay_optional () =
        decoded.usage.cache_creation_input_tokens;
      check (option int) "cache read survives" (Some 15000)
        decoded.usage.cache_read_input_tokens);
-  let without_cache_counts =
+  let without_cache_usage =
     match Turn_record.to_json record with
     | `Assoc fields ->
       `Assoc
@@ -108,8 +107,8 @@ let test_cache_counts_round_trip_and_stay_optional () =
            fields)
     | other -> other
   in
-  match Turn_record.of_json without_cache_counts with
-  | Error e -> failf "row without cache fields failed to decode: %s" e
+  match Turn_record.of_json without_cache_usage with
+  | Error e -> failf "row without provider cache usage failed to decode: %s" e
   | Ok decoded ->
     check (option int) "absent cache creation decodes as None" None
       decoded.usage.cache_creation_input_tokens;
@@ -131,8 +130,7 @@ let test_codec_roundtrip () =
     check string "keeper" record.keeper decoded.keeper;
     check string "trace_id" record.trace_id decoded.trace_id;
     check int "absolute_turn" record.absolute_turn decoded.absolute_turn;
-    check bool "turn_ref preserved" true
-      (Ids.Turn_ref.equal record.turn_ref decoded.turn_ref);
+    check turn_ref_t "turn_ref preserved" record.turn_ref decoded.turn_ref;
     check int "blocks count" 3 (List.length decoded.blocks);
     check bool "blocks preserved in order" true
       (List.for_all2
@@ -289,7 +287,9 @@ let test_codec_optional_fields_absent () =
       decoded.sampling.temperature;
     check (option (float 0.0001)) "top_p absent" None decoded.sampling.top_p;
     check (option int) "max_tokens absent" None decoded.sampling.max_tokens;
-    check (option int) "input_tokens absent" None decoded.usage.input_tokens
+    check (option int) "input_tokens absent" None decoded.usage.input_tokens;
+    check turn_ref_t "required turn_ref remains exact" record.turn_ref
+      decoded.turn_ref
 
 let test_codec_rejects_malformed () =
   (match Turn_record.of_json (`String "not a record") with
@@ -319,6 +319,21 @@ let test_codec_requires_current_observation_fields () =
     ; "request_runtime_profile"
     ; "request_body_bytes"
     ]
+
+let test_codec_rejects_mismatched_turn_ref () =
+  let json =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        (("turn_ref", `String "different-trace#4071")
+         :: List.remove_assoc "turn_ref" fields)
+    | other -> other
+  in
+  match Turn_record.of_json json with
+  | Ok _ -> fail "decoded a turn_ref that disagrees with row identity"
+  | Error message ->
+    check bool "turn_ref mismatch is explicit" true
+      (Astring.String.is_infix ~affix:"does not match" message)
 
 let test_codec_rejects_partial_or_invalid_request_wire_observation () =
   let replace fields =
@@ -403,24 +418,41 @@ let test_codec_rejects_unknown_block () =
     | other -> other
   in
   match Turn_record.of_json json with
-  | Ok _ -> fail "decoded an unknown block"
+  | Ok _ -> fail "decoded a prompt block without a current producer"
   | Error message ->
     check bool "unknown block is explicit" true
-      (Astring.String.is_infix ~affix:"unknown prompt block id" message)
+      (Astring.String.is_infix ~affix:"future_block" message)
 
-let test_codec_rejects_mismatched_turn_ref () =
-  let record =
-    { (sample_record ()) with
-      turn_ref = Ids.Turn_ref.make ~trace_id:"different-trace" ~absolute_turn:4071
-    }
+let test_codec_rejects_unknown_fields () =
+  let record_json = Turn_record.to_json (sample_record ()) in
+  let with_unknown_record_field =
+    match record_json with
+    | `Assoc fields -> `Assoc (("retired_cursor", `String "old") :: fields)
+    | other -> other
   in
-  match Turn_record.of_json (Turn_record.to_json record) with
-  | Ok _ -> fail "decoded a mismatched turn_ref"
+  (match Turn_record.of_json with_unknown_record_field with
+   | Ok _ -> fail "decoded a turn record with an unknown field"
+   | Error message ->
+     check bool "record field rejection is explicit" true
+       (Astring.String.is_infix ~affix:"fields are not exact" message));
+  let with_unknown_block_field =
+    match record_json with
+    | `Assoc fields ->
+      let blocks =
+        match List.assoc "blocks" fields with
+        | `List (`Assoc block_fields :: rest) ->
+          `List (`Assoc (("retired_rank", `Int 1) :: block_fields) :: rest)
+        | other -> other
+      in
+      `Assoc (("blocks", blocks) :: List.remove_assoc "blocks" fields)
+    | other -> other
+  in
+  match Turn_record.of_json with_unknown_block_field with
+  | Ok _ -> fail "decoded a prompt block with an unknown field"
   | Error message ->
-    check bool "turn_ref mismatch is explicit" true
-      (Astring.String.is_infix
-         ~affix:"turn_ref does not match trace_id and absolute_turn"
-         message)
+    check bool "block field rejection is explicit" true
+      (Astring.String.is_infix ~affix:"prompt block fields are not exact" message)
+;;
 
 (* ── Block diff (RFC §5: exact added/removed set) ─────── *)
 
@@ -501,9 +533,6 @@ let test_entries_with_diffs_same_trace_only () =
 
 (* ── Turn_ref (RFC-0233 §7) ───────────────────────────── *)
 
-let turn_ref_t =
-  testable (Fmt.of_to_string Ids.Turn_ref.to_string) Ids.Turn_ref.equal
-
 let test_turn_ref_roundtrip () =
   let r =
     Ids.Turn_ref.make ~trace_id:"trace-1780648779957-00000" ~absolute_turn:4071
@@ -544,6 +573,8 @@ let () =
         ; test_case "rejects malformed rows" `Quick test_codec_rejects_malformed
         ; test_case "current observation fields required" `Quick
             test_codec_requires_current_observation_fields
+        ; test_case "mismatched turn_ref rejected" `Quick
+            test_codec_rejects_mismatched_turn_ref
         ; test_case "partial or invalid request wire observation rejected"
             `Quick
             test_codec_rejects_partial_or_invalid_request_wire_observation
@@ -551,10 +582,10 @@ let () =
             test_codec_rejects_unknown_input_component
         ; test_case "input component extra field rejected" `Quick
             test_codec_rejects_input_component_extra_field
-        ; test_case "unknown block rejected" `Quick
+        ; test_case "unknown block is rejected" `Quick
             test_codec_rejects_unknown_block
-        ; test_case "mismatched turn_ref rejected" `Quick
-            test_codec_rejects_mismatched_turn_ref
+        ; test_case "unknown fields are rejected" `Quick
+            test_codec_rejects_unknown_fields
         ] )
     ; ( "block_diff"
       , [ test_case "exact added/removed/changed sets" `Quick

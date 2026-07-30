@@ -10,8 +10,9 @@
     keeper_turn.ml/keeper_run_prompt.ml (continuity snapshot, skill
     route, worktree, telemetry feedback, turn instructions, recent
     failure memory) — recorded as one block until a real producer
-    introduces a typed decomposition. Constructors without a producer and
-    open-ended catch-alls are intentionally excluded. *)
+    introduces a typed decomposition. This is a closed current contract:
+    constructors without a producer and forward-compatible catch-alls
+    are intentionally excluded. *)
 
 type t =
   | Persona

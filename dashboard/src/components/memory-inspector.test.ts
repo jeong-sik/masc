@@ -20,7 +20,6 @@ import { type MemoryOsFact, type TurnRecordRow } from '../api/dashboard'
 
 const keeper: MemoryKeeper = {
   id: 'masc-improver',
-  ctx: 0,
   status: 'run',
 }
 
@@ -211,7 +210,7 @@ describe('MemoryInspector pure projections', () => {
     expect(memCompositionFromBlocks([
       { block: 'persona', bytes: 1_200, digest: 'a' },
       { block: 'memory_os_recall', bytes: 800, digest: 'b' },
-      { block: 'empty', bytes: 0, digest: 'c' },
+      { block: 'temporal_summary', bytes: 0, digest: 'c' },
     ])).toMatchObject({
       totalBytes: 2_000,
       parts: [{ key: 'persona' }, { key: 'memory_os_recall' }],

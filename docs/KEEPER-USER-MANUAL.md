@@ -34,7 +34,7 @@ Keeper는 OAS(OCaml Agent SDK) 위에 구축된다. OAS가 제공하는 핵심 �
 | `Event_bus.t` | 에이전트 간 이벤트 발행/구독 | `oas_events.ml`을 통해 broadcast, heartbeat, board 이벤트 전달 |
 
 <!-- BEGIN GENERATED: oas-pin-manual -->
-OAS pin metadata is generated from `scripts/oas-agent-sdk-pin.sh`. Current dependency floor: `agent_sdk >= 0.231.4`, runtime pin: `main@2add6bf4a0c7a70dab3b60f82c62643a5bd8a9d6`, declared base version: `v0.231.4`. 최신성 검증이 필요할 때는 문서에 적힌 숫자보다 `dune-project`와 pin script를 우선 truth source로 본다.
+OAS pin metadata is generated from `scripts/oas-agent-sdk-pin.sh`. Current dependency floor: `agent_sdk >= 0.231.6`, runtime pin: `main@ae4cc55363b12ae47b9090e715c15dabba9f9f16`, declared base version: `v0.231.6`. 최신성 검증이 필요할 때는 문서에 적힌 숫자보다 `dune-project`와 pin script를 우선 truth source로 본다.
 <!-- END GENERATED: oas-pin-manual -->
 
 #### 1.1.1 OAS 환경 변수 경계

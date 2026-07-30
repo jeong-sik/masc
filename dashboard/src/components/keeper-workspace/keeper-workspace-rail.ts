@@ -553,7 +553,6 @@ function toMemoryKeeper(k: Keeper): MemoryKeeper {
         : 'off'
   return {
     id: k.name,
-    ctx: contextRatio(k) ?? 0,
     status,
   }
 }

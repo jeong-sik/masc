@@ -285,6 +285,8 @@ export { fetchKeeperToolCalls } from './dashboard-keeper-tool-calls'
 // ── Keeper turn records (RFC-0233 PR-4) ─────────────────
 
 export type {
+  TurnPromptBlockId,
+  TurnInputComponentId,
   TurnBlock,
   TurnInputComponent,
   TurnRecordEntry,

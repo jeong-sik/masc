@@ -133,7 +133,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           turn_ref: 'trace-active#41',
           ts: 1_781_587_500,
           runtime_profile: 'local',
-          blocks: [{ block: 'system', bytes: 1200, digest: '1111222233334444' }],
+          blocks: [{ block: 'persona', bytes: 1200, digest: '1111222233334444' }],
           input_components: [],
           request_runtime_profile: null,
           request_body_bytes: null,
@@ -159,7 +159,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           request_latency_ms: 1234,
           ttfrc_ms: 567.8,
           blocks: [
-            { block: 'system', bytes: 1200, digest: '1111222233334444' },
+            { block: 'persona', bytes: 1200, digest: '1111222233334444' },
             { block: 'memory_os_recall', bytes: 3392, digest: 'aabbccddeeff00112233' },
           ],
           input_components: [

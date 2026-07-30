@@ -3,39 +3,34 @@ import { useSignal } from '@preact/signals'
 import { CollapsibleSection } from './common/collapsible'
 import {
   MemoryInspector,
-  DEFAULT_MEMORY_KEEPERS,
   type MemoryKeeper,
 } from './memory-inspector'
+import type { Keeper } from '../types'
+import { keeperBucket } from './keeper-workspace/keeper-workspace-shared'
 
 interface Props {
   agentName: string
+  keeper?: Keeper | null
 }
 
 function normalizeKeeperName(name: string): string {
   return name.replace(/^keeper-/, '').replace(/-agent$/, '')
 }
 
-// Resolve the MemoryInspector keeper from the surfaced agent. When the agent
-// matches the inspector's ported roster we reuse the fixture keeper (real ctx /
-// status / task counts so the composition math renders); otherwise the keeper
-// id alone is enough — the inspector falls back to empty memory for unknown ids
-// (memory-inspector.ts getKeeperMemory). ctx 0 / status 'off' keeps an unknown
-// keeper's composition bar in the documented "stopped — 활성 컨텍스트 없음" state
-// rather than fabricating window usage.
-function resolveInspectorKeeper(agentName: string): MemoryKeeper {
+function resolveInspectorKeeper(agentName: string, keeper?: Keeper | null): MemoryKeeper {
   const id = normalizeKeeperName(agentName)
-  return (
-    DEFAULT_MEMORY_KEEPERS.find(k => k.id === id) ?? {
-      id,
-      ctx: 0,
-      status: 'off',
-      tasks: 0,
-      traces: 0,
-    }
-  )
+  if (!keeper) return { id, status: 'unknown' }
+  const bucket = keeperBucket(keeper)
+  const status =
+    bucket === 'running' || bucket === 'stuck'
+      ? 'run'
+      : bucket === 'paused'
+        ? 'pause'
+        : 'off'
+  return { id: keeper.name, status }
 }
 
-export function AgentDetailMemory({ agentName }: Props) {
+export function AgentDetailMemory({ agentName, keeper }: Props) {
   const memOpen = useSignal(false)
 
   return html`
@@ -52,7 +47,7 @@ export function AgentDetailMemory({ agentName }: Props) {
       </div>
       ${memOpen.value
         ? html`<${MemoryInspector}
-            keeper=${resolveInspectorKeeper(agentName)}
+            keeper=${resolveInspectorKeeper(agentName, keeper)}
             onClose=${() => { memOpen.value = false }}
           />`
         : null}

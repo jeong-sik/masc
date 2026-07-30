@@ -143,6 +143,13 @@ let ( let* ) = Result.bind
 
 let member name fields = List.assoc_opt name fields
 
+let fields_are_unique_known known fields =
+  let names = List.map fst fields in
+  List.for_all (fun name -> List.mem name known) names
+  && List.length names
+     = List.length (List.sort_uniq String.compare names)
+;;
+
 let require name fields =
   match member name fields with
   | Some value -> Ok value
@@ -200,6 +207,11 @@ let as_turn_ref name json =
 let prompt_block_of_json (json : Yojson.Safe.t) : (prompt_block, string) result =
   match json with
   | `Assoc fields ->
+      let* () =
+        if fields_are_unique_known [ "block"; "bytes"; "digest" ] fields
+        then Ok ()
+        else Error "turn_record: prompt block fields are not exact"
+      in
       let* block_json = require "block" fields in
       let* block_name = as_string "block" block_json in
       let* bytes_json = require "bytes" fields in
@@ -237,9 +249,7 @@ let input_component_id_of_string token =
        | Ok block -> Ok (Prompt_block block)
        | Error _ ->
          Error
-           (Printf.sprintf
-              "turn_record: unknown input component %S"
-              token))
+           (Printf.sprintf "turn_record: unknown input component %S" token))
     else
       Error
         (Printf.sprintf "turn_record: unknown input component %S" token)
@@ -278,6 +288,41 @@ let rec collect_results acc = function
 let of_json (json : Yojson.Safe.t) : (t, string) result =
   match json with
   | `Assoc fields ->
+      let* () =
+        if
+          fields_are_unique_known
+            [ "execution_ids"
+            ; "keeper"
+            ; "trace_id"
+            ; "absolute_turn"
+            ; "turn_ref"
+            ; "blocks"
+            ; "input_components"
+            ; "runtime_profile"
+            ; "request_runtime_profile"
+            ; "request_body_bytes"
+            ; "model"
+            ; "finish_reason"
+            ; "context_window"
+            ; "price_input_per_million"
+            ; "price_output_per_million"
+            ; "request_latency_ms"
+            ; "ttfrc_ms"
+            ; "temperature"
+            ; "top_p"
+            ; "max_tokens"
+            ; "thinking_budget"
+            ; "enable_thinking"
+            ; "input_tokens"
+            ; "cache_creation_input_tokens"
+            ; "cache_read_input_tokens"
+            ; "output_tokens"
+            ; "ts"
+            ]
+            fields
+        then Ok ()
+        else Error "turn_record: fields are not exact"
+      in
       let* ids_json = require "execution_ids" fields in
       let* execution_ids =
         match ids_json with
@@ -299,7 +344,8 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         then Ok ()
         else
           Error
-            "turn_record: turn_ref does not match trace_id and absolute_turn"
+             "turn_record: field \"turn_ref\" does not match trace_id and \
+              absolute_turn"
       in
       let* blocks_json = require "blocks" fields in
       let* blocks =

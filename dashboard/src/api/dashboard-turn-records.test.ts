@@ -301,4 +301,24 @@ describe('keeper turn record final input composition', () => {
       '유효하지 않은 keeper turn record payload',
     )
   })
+
+  it('rejects prompt blocks without a current producer', async () => {
+    getMock.mockResolvedValue(payload(entry({
+      blocks: [{ block: 'continuity', bytes: 1, digest: 'dead-block' }],
+    })))
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects prompt components without a current producer', async () => {
+    getMock.mockResolvedValue(payload(entry({
+      input_components: [{ component: 'prompt.retry_nudge', bytes: 1 }],
+    })))
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
 })

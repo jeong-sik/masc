@@ -405,7 +405,7 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
        metrics.segments)
     metrics.attributed_bytes
 
-let message text = Agent_sdk.Types.user_msg text
+let message text : Agent_sdk.Types.message = Agent_sdk.Types.user_msg text
 
 let test_provider_content_messages_separates_prompt_carrier_and_projection_suffix () =
   let history = [ message "history"; message "current user" ] in

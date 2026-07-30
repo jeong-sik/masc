@@ -23,39 +23,15 @@ let () =
     bucket_upper_bounds_bytes
 ;;
 
-let rejected_body_bytes = function
-  | Agent_sdk.Error.Api
-      (InvalidRequest
-         { reason = Request_body_too_large { actual_bytes; _ }; _ }) ->
-    Some actual_bytes
-  | Agent_sdk.Error.Api
-      ( InvalidRequest
-          { reason =
-              ( Json_parse_error
-              | Request_body_refused_by_provider _
-              | Unknown_invalid_request )
-          ; _
-          }
-      | ContextOverflow _
-      | InputCapacity _
-      | RateLimited _
-      | Overloaded _
-      | ServerError _
-      | AuthError _
-      | AuthorizationError _
-      | PaymentRequired _
-      | NotFound _
-      | NetworkError _
-      | Timeout _ )
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Agent _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.Internal _ ->
-    None
+let record ~keeper_name ~runtime_id ~max_request_body_bytes ~body_bytes =
+  Otel_metric_store.observe_histogram
+    (Keeper_metrics.to_string metric)
+    ~labels:
+      [ "keeper", keeper_name
+      ; "runtime_id", runtime_id
+      ; "max_request_body_bytes", string_of_int max_request_body_bytes
+      ]
+    (Float.of_int body_bytes)
 ;;
 
 let observer ?on_observation ~keeper_name ~runtime_id ~max_request_body_bytes
@@ -64,13 +40,6 @@ let observer ?on_observation ~keeper_name ~runtime_id ~max_request_body_bytes
   fun observation ->
   let body_bytes = observation.Llm_provider.Request_wire_observer.body_bytes in
   Option.iter (fun observe -> observe ~runtime_id ~body_bytes) on_observation;
-  Otel_metric_store.observe_histogram
-    (Keeper_metrics.to_string metric)
-    ~labels:
-      [ "keeper", keeper_name
-      ; "runtime_id", runtime_id
-      ; "max_request_body_bytes", string_of_int max_request_body_bytes
-      ]
-    (Float.of_int body_bytes);
+  record ~keeper_name ~runtime_id ~max_request_body_bytes ~body_bytes;
   Ok ()
 ;;

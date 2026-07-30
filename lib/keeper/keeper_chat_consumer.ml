@@ -51,15 +51,20 @@ end
 let notify_transition ~keeper_name = Wake_inbox.notify keeper_name
 
 module Preclaim_retry = struct
+  type phase =
+    | Watching
+    | Released
+    | Waiting
+
   let mutex = Stdlib.Mutex.create ()
-  let by_base_path : (string, (string, unit) Hashtbl.t) Hashtbl.t =
+  let by_base_path : (string, (string, phase) Hashtbl.t) Hashtbl.t =
     Hashtbl.create 4
 
   let with_lock f =
     Stdlib.Mutex.lock mutex;
     Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock mutex) f
 
-  let mark ~base_path ~keeper_name =
+  let begin_attempt ~base_path ~keeper_name =
     with_lock (fun () ->
       let keepers =
         match Hashtbl.find_opt by_base_path base_path with
@@ -69,7 +74,7 @@ module Preclaim_retry = struct
           Hashtbl.add by_base_path base_path keepers;
           keepers
       in
-      Hashtbl.replace keepers keeper_name ())
+      Hashtbl.replace keepers keeper_name Watching)
 
   let clear ~base_path ~keeper_name =
     with_lock (fun () ->
@@ -80,16 +85,41 @@ module Preclaim_retry = struct
         if Hashtbl.length keepers = 0
         then Hashtbl.remove by_base_path base_path)
 
-  let take ~base_path ~keeper_name =
+  let remove_empty_base_path ~base_path keepers =
+    if Hashtbl.length keepers = 0
+    then Hashtbl.remove by_base_path base_path
+
+  let observe_release ~base_path ~keeper_name =
     with_lock (fun () ->
       match Hashtbl.find_opt by_base_path base_path with
       | None -> false
       | Some keepers ->
-        let waiting = Hashtbl.mem keepers keeper_name in
-        Hashtbl.remove keepers keeper_name;
-        if Hashtbl.length keepers = 0
-        then Hashtbl.remove by_base_path base_path;
-        waiting)
+        (match Hashtbl.find_opt keepers keeper_name with
+         | None -> false
+         | Some Watching ->
+           Hashtbl.replace keepers keeper_name Released;
+           false
+         | Some Released -> false
+         | Some Waiting ->
+           Hashtbl.remove keepers keeper_name;
+           remove_empty_base_path ~base_path keepers;
+           true))
+
+  let arm ~base_path ~keeper_name =
+    with_lock (fun () ->
+      match Hashtbl.find_opt by_base_path base_path with
+      | None -> false
+      | Some keepers ->
+        (match Hashtbl.find_opt keepers keeper_name with
+         | None -> false
+         | Some Watching ->
+           Hashtbl.replace keepers keeper_name Waiting;
+           false
+         | Some Released ->
+           Hashtbl.remove keepers keeper_name;
+           remove_empty_base_path ~base_path keepers;
+           true
+         | Some Waiting -> false))
 
   let clear_base_path base_path =
     with_lock (fun () -> Hashtbl.remove by_base_path base_path)
@@ -98,7 +128,7 @@ module Preclaim_retry = struct
 end
 
 let notify_slot_transition ~base_path ~keeper_name =
-  if Preclaim_retry.take ~base_path ~keeper_name
+  if Preclaim_retry.observe_release ~base_path ~keeper_name
   then notify_transition ~keeper_name
 
 type turn_outcome =
@@ -516,7 +546,7 @@ let run_observed_turn state ~sw ~clock ~handle_turn ~keeper_name observation =
     Keeper_chat_delivery_identity.Receipt_ids.singleton item.receipt_id
   in
   let claim = ref Claim_not_attempted in
-  Preclaim_retry.mark ~base_path:state.base_path ~keeper_name;
+  Preclaim_retry.begin_attempt ~base_path:state.base_path ~keeper_name;
   let rec claim_observation ~may_retry observation =
     match Keeper_chat_queue.lease_observed observation with
     | `Leased lease -> Ok lease
@@ -570,6 +600,10 @@ let run_observed_turn state ~sw ~clock ~handle_turn ~keeper_name observation =
     | Claim_failed _ ->
       Error (claim_error_to_string !claim)
   in
+  let arm_preclaim_retry () =
+    if Preclaim_retry.arm ~base_path:state.base_path ~keeper_name
+    then notify_transition ~keeper_name
+  in
   let outcome =
     match
       handle_turn
@@ -610,8 +644,10 @@ let run_observed_turn state ~sw ~clock ~handle_turn ~keeper_name observation =
          ; outcome_ref = None
          })
   | Claim_not_attempted, `Returned (Deferred { rejection }) ->
+    arm_preclaim_retry ();
     log_deferred_turn ~keeper_name rejection
   | Claim_not_attempted, (`Returned (Delivered _ | Failed _) | `Raised _) ->
+    arm_preclaim_retry ();
     Log.Keeper.error
       "keeper_chat_consumer: queued handler completed without invoking its admission claim keeper=%s receipt_id=%s; receipt remains Pending"
       keeper_name

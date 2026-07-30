@@ -660,6 +660,86 @@ let test_repeated_claim_failure_waits_for_explicit_wake () =
                | None -> false));
           check "the explicitly woken receipt runs exactly once" (!turns = 1)))
 
+let test_handoff_release_does_not_rearm_failed_claim () =
+  Printf.printf
+    "Test: a handoff release cannot re-arm the admitted claim it wakes\n%!";
+  with_env (fun ~base ~clock ->
+    match
+      enqueue_checked ~label:"handoff claim failure enqueue" ~keeper_name
+        (discord_msg ~content:"do not retry the failed handoff claim"
+           ~channel_id:"channel-claim-handoff"
+           ~user_id:"user-claim-handoff" ~timestamp:6.21)
+    with
+    | None -> ()
+    | Some accepted ->
+      let holder_started, resolve_holder_started = Eio.Promise.create () in
+      let release_holder, resolve_release_holder = Eio.Promise.create () in
+      let commit_attempts = ref 0 in
+      let turns = ref 0 in
+      let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
+        incr turns;
+        Keeper_chat_consumer.Delivered
+          { outcome_ref =
+              Printf.sprintf "trace-claim-handoff#%d" !turns
+          }
+      in
+      Fun.protect
+        ~finally:(fun () ->
+          Keeper_chat_queue.For_testing.set_transaction_stage_observer None)
+        (fun () ->
+          Keeper_chat_queue.For_testing.set_transaction_stage_observer
+            (Some
+               (function
+                 | Keeper_chat_queue.For_testing.Commit_invoked ->
+                   incr commit_attempts;
+                   if !commit_attempts <= 2
+                   then
+                     Keeper_chat_queue.For_testing.fail_next_commit_with
+                       Commit_busy
+                 | Transaction_begun
+                 | Mutation_applied
+                 | Before_commit
+                 | Commit_returned
+                 | Before_rollback
+                 | Before_close ->
+                   ()));
+          with_consumer_switch (fun sw ->
+            Eio.Fiber.fork ~sw (fun () ->
+              ignore
+                (Keeper_turn_admission.run_serialized
+                   ~base_path:base
+                   ~keeper_name
+                   (fun () ->
+                      Eio.Promise.resolve resolve_holder_started ();
+                      Eio.Promise.await release_holder)
+                 : [ `Ran of unit | `Rejected of Keeper_turn_admission.rejection ]));
+            check "active turn owns the slot before the queued claim"
+              (await_promise ~clock ~seconds:5.0 holder_started);
+            start_consumer ~sw ~clock ~base_path:base ~handle_turn;
+            check "queued claim is parked behind the active turn"
+              (await_condition ~clock ~seconds:5.0 (fun () ->
+                 Keeper_turn_admission.chat_waiting
+                   ~base_path:base
+                   ~keeper_name));
+            Eio.Promise.resolve resolve_release_holder ();
+            check "the admitted claim performs only its bounded retry"
+              (await_condition ~clock ~seconds:5.0 (fun () ->
+                 !commit_attempts >= 2));
+            Eio.Time.sleep clock 0.2;
+            check "the handoff release leaves no stale consumer wake"
+              (!commit_attempts = 2);
+            check "no turn body runs without a committed claim" (!turns = 0);
+            Keeper_chat_queue.For_testing.set_transaction_stage_observer None;
+            Keeper_chat_consumer.notify_transition ~keeper_name;
+            check "an explicit wake still retries the Pending receipt"
+              (match
+                 await_receipt ~clock ~seconds:5.0 ~keeper_name
+                   ~receipt_id:accepted.receipt_id ~accept:is_delivered
+               with
+               | Some _ -> true
+               | None -> false));
+          check "the explicit wake runs the receipt exactly once" (!turns = 1)))
+
 let test_preclaim_failure_rearms_on_active_turn_release () =
   Printf.printf
     "Test: active turn release re-arms only a pre-claim failure\n%!";
@@ -1147,6 +1227,7 @@ let () =
   test_finalization_persistence_retry_does_not_redeliver ();
   test_claim_commit_uncertainty_retries_lone_receipt ();
   test_repeated_claim_failure_waits_for_explicit_wake ();
+  test_handoff_release_does_not_rearm_failed_claim ();
   test_preclaim_failure_rearms_on_active_turn_release ();
   test_busy_turn_hands_mutex_to_pending_receipt ();
   test_consumer_cancellation_while_parked_keeps_pending ();

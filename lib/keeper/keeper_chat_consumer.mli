@@ -16,10 +16,11 @@
 val notify_transition : keeper_name:string -> unit
 
 (** Wake a Pending receipt after a turn-slot release or shutdown rollback only
-    when its current consumer attempt ended before invoking the exact claim
-    callback. The registration is one-shot and is cleared before every claim,
-    so a claim persistence failure cannot re-arm itself through its own slot
-    release. *)
+    when its current consumer attempt ends before invoking the exact claim
+    callback. A release observed while the attempt is still running is recorded
+    but not enqueued until that pre-claim outcome is known. The registration is
+    one-shot and is cleared before every claim, so neither the handoff release
+    nor a failed claim's own release can re-arm that claim. *)
 val notify_slot_transition : base_path:string -> keeper_name:string -> unit
 
 type persistence_blocked_status =

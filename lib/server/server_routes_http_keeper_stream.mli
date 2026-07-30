@@ -175,12 +175,19 @@ type queued_turn_outcome =
       }
   | Deferred of { rejection : Keeper_turn_admission.rejection }
 
+type turn_submission =
+  | Direct_request
+  | Queued_receipt of
+      { receipt_ids : Keeper_chat_delivery_identity.Receipt_ids.t
+      ; claim : unit -> (unit, string) result
+      ; execution_sw : Eio.Switch.t
+      }
+
 val queued_turn_failure_kind_to_string : queued_turn_failure_kind -> string
 
 val process_single_turn :
   user_row_origin:Keeper_chat_store.user_row_origin ->
-  queued_turn:bool ->
-  delivery_key:Keeper_chat_delivery_identity.delivery_key option ->
+  submission:turn_submission ->
   state:Mcp_server.server_state ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   auth_token:string option ->
@@ -196,14 +203,19 @@ val process_single_turn :
   events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
   queued_turn_outcome option
 (** Execute a single keeper turn, publishing events to the provided
-    event stream. The async keeper_msg worker is always forked under the
-    server root switch and owns a separate per-request cancellation switch.
-    [closed] is a mutable flag that suppresses worker event pushes when
-    set to [true] (used by the SSE adapter when the HTTP stream is
-    closed). [client_disconnects] carries the HTTP stream switch and
-    disconnect signal; it stops only the stream projection and does not
-    cancel the accepted request. [auth_token] is [None] for queue-consumer
-    turns where no HTTP request is available.
+    event stream. Direct HTTP requests enter the durable {!Keeper_msg_async}
+    boundary and run under its server-owned request switch. Queue-consumer
+    turns are already durably owned by {!Keeper_chat_queue}: [Queued_receipt]
+    runs inline under its [execution_sw], parks on the Keeper turn slot, and
+    invokes [claim] for its exact [receipt_ids] only after admission. It does
+    not create a second durable async request. The typed [submission] prevents
+    direct requests from carrying queue claim authority and prevents queued
+    receipts from omitting it. [closed] is a mutable flag that suppresses
+    worker event pushes when set to [true] (used by the SSE adapter when the
+    HTTP stream is closed). [client_disconnects] carries the HTTP stream switch
+    and disconnect signal; it stops only the stream projection and does not
+    cancel an accepted direct request. [auth_token] is [None] for
+    queue-consumer turns where no HTTP request is available.
 
     [user_row_origin] is the durable provenance selected by the accepting
     boundary. [Needs_append] makes this turn own the user row;
@@ -211,18 +223,22 @@ val process_single_turn :
     append. Queue-consumer turns pass the exact provenance stored with their
     receipt instead of deriving ownership from a connector label.
 
-    [queued_turn] (default [false], set [true] only by
-    [Server_bootstrap_loops]'s queue-consumer [handle_turn] wiring) changes
-    terminal handling for [No_visible_reply], an empty [Visible_reply], and
+    [Queued_receipt] (constructed only by [Server_bootstrap_loops]'s
+    queue-consumer [handle_turn] wiring) changes terminal handling for
+    [No_visible_reply], an empty [Visible_reply], and
     [Continuation_checkpoint]. A media-only ordinary reply is delivered even
     when its text is empty. A queued continuation remains a typed failure but
-    retains any streamed media blocks on that durable failure row. With no
-    visible blocks, the interactive HTTP stream keeps recording the user line
+    retains any streamed media blocks on that durable failure row. Its [claim]
+    callback atomically claims the exact observed queue receipt after turn
+    admission and before transcript or provider effects.
+
+    With no visible blocks, the interactive HTTP stream keeps recording the user line
     only ([persist_user_message_only]), matching its existing "the keeper will
     answer on the next turn" semantics; a queued turn instead persists a typed
-    failure row via [persist_failure_reply]. A queued message was already
-    leased from [Keeper_chat_queue] — there is no "next turn" for it to ride
-    along with, so true silence here is terminal, not merely deferred. *)
+    failure row via [persist_failure_reply]. A queued message is claimed from
+    [Keeper_chat_queue] at [claim] — there is no later turn for it
+    to ride along with, so true silence after that claim is terminal, not
+    merely deferred. *)
 
 (** {1 Testing helpers} *)
 

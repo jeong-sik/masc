@@ -404,19 +404,6 @@ let test_admission_busy_http_json_preserves_typed_detail () =
      |> member "holder"
      |> member "started_at"
      |> to_float);
-  let backlog =
-    admission_error_json
-      (Keeper_turn_admission.Chat_backlog
-         { pending_count = 3; inflight_count = 2 })
-  in
-  Alcotest.(check int)
-    "chat pending count"
-    3
-    (backlog |> member "admission" |> member "pending_count" |> to_int);
-  Alcotest.(check int)
-    "chat inflight count"
-    2
-    (backlog |> member "admission" |> member "inflight_count" |> to_int);
   let operation_id = Keeper_shutdown_types.Operation_id.generate () in
   let shutdown =
     admission_error_json

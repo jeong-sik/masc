@@ -141,11 +141,14 @@ val handle_keeper_msg :
   ?on_admitted:(unit -> (unit, string) result) ->
   _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 (** [event_bus] is captured at the handler boundary and reused by the admitted
-    turn body. Callers that omit it keep the legacy process/domain fallback, but
+    turn body. Callers that omit it keep the process/domain fallback, but
     async wrappers should pass an explicit value captured before submitting the
     background turn. [on_admission_rejected] receives the typed admission
-    result before the legacy tool error is rendered; queue consumers use it to
-    keep a leased receipt pending without matching diagnostic strings. *)
+    result before the tool error is rendered; queue consumers use it to leave
+    an unclaimed receipt [Pending] without matching diagnostic strings.
+    [on_admitted] runs while the turn slot is held and before the admitted turn
+    body; the queue consumer uses it as the exact Pending-to-Inflight claim
+    boundary. *)
 
 val handle_keeper_delegate :
   ?event_bus:Agent_sdk.Event_bus.t ->

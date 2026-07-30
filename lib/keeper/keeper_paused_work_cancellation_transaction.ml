@@ -219,7 +219,7 @@ let cancel_with_lifecycle
       }
   | Ok None ->
     (match
-       Keeper_turn_admission.run_admin_if_free
+       Keeper_turn_admission.run_if_free
          ~base_path
          ~keeper_name
          acquire

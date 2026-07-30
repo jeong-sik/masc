@@ -687,7 +687,7 @@ let test_source_terminal_busy_has_zero_mutation () =
   with_source_terminal_lane (fun config keeper_name _meta request ->
     let base_path = config.Workspace.base_path in
     (match
-       Keeper_turn_admission.run_admin_if_free
+       Keeper_turn_admission.run_if_free
          ~base_path
          ~keeper_name
          (fun () -> Transaction.ack_pending config ~keeper_name request)

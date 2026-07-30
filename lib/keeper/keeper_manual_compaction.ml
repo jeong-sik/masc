@@ -454,7 +454,7 @@ let run_admitted_with
     if already_admitted
     then `Ran ()
     else
-      Keeper_turn_admission.run_compaction_if_free
+      Keeper_turn_admission.run_if_free
         ~base_path:config.base_path
         ~keeper_name:meta.name
         (fun () -> ())
@@ -475,7 +475,7 @@ let run_admitted_with
       if already_admitted
       then `Ran (run ())
       else
-        Keeper_turn_admission.run_compaction_if_free
+        Keeper_turn_admission.run_if_free
           ~base_path:config.base_path
           ~keeper_name:meta.name
           run

@@ -200,7 +200,7 @@ let queued_chat_projection (queued_message : Keeper_chat_queue.queued_message) =
 
 (* Queue-consumer turns need the same synthetic
    [Server_routes_http_keeper_stream.keeper_chat_stream_request] built from
-   a dequeued/leased [Keeper_chat_queue.queued_message], and a duplicated
+   an observed Pending [Keeper_chat_queue.queued_message], and a duplicated
    copy would silently drift out of sync with [queued_chat_projection] the
    next time either changes. *)
 let payload_of_queued_message ~keeper_name
@@ -1660,14 +1660,19 @@ let start_keeper_loops_owned
              (fun ~keeper_name ~revision ->
                 Keeper_chat_broadcast.queue_changed ~keeper_name ~revision ();
                 Keeper_chat_consumer.notify_transition ~keeper_name));
-        (* A freed turn slot (turn released / shutdown rolled back) makes the
-           lane dispatchable again; wake the consumer so any receipt that was
-           deferred while the lane was busy is re-examined. The admission
-           observer is non-blocking and its failures cannot alter admission. *)
+        (* A queued turn can fail preflight before it parks on the admission
+           mutex. Release and shutdown rollback re-arm only a consumer attempt
+           that has not reached its exact claim callback. *)
         Keeper_turn_admission.set_slot_transition_observer
           (Some
-             (fun ~base_path:_ ~keeper_name ~transition:_ ->
-                Keeper_chat_consumer.notify_transition ~keeper_name));
+             (fun ~base_path ~keeper_name ~transition ->
+                match transition with
+                | Keeper_turn_admission.Shutdown_rolled_back
+                | Keeper_turn_admission.Turn_released ->
+                  Keeper_chat_consumer.notify_slot_transition
+                    ~base_path
+                    ~keeper_name
+                ));
         Ok ()
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1679,7 +1684,12 @@ let start_keeper_loops_owned
      | Error exn -> raise exn);
     Keeper_chat_consumer.run ~sw ~clock
            ~base_path
-           ~handle_turn:(fun ~sw ~keeper_name ~delivery_key ~queued_message ->
+           ~handle_turn:(fun
+              ~sw
+              ~keeper_name
+              ~receipt_ids
+              ~queued_message
+              ~on_admitted ->
              let open Server_routes_http_keeper_stream in
              let now = Time_compat.now () in
              let run_id =
@@ -1694,6 +1704,14 @@ let start_keeper_loops_owned
              let agent_name = (queued_chat_projection queued_message).agent_name in
              let events = Keeper_chat_events.create () in
              let closed = ref false in
+             let claim_committed = ref false in
+             let claim () =
+               match on_admitted () with
+               | Ok () as result ->
+                 claim_committed := true;
+                 result
+               | Error _ as result -> result
+             in
              let thread_id = "keeper-consumer:" ^ keeper_name in
              let delivery, delivery_resolver = Eio.Promise.create () in
              let resolve_delivery result =
@@ -1835,8 +1853,12 @@ let start_keeper_loops_owned
                match
                  process_single_turn
                    ~user_row_origin:queued_message.user_row_origin
-                   ~queued_turn:true
-                   ~delivery_key:(Some delivery_key)
+                   ~submission:
+                     (Queued_receipt
+                        { receipt_ids
+                        ; claim
+                        ; execution_sw = sw
+                        })
                    ~state ~clock ~auth_token:None
                    ~thread_id ~continuation_channel ~closed
                    ~client_disconnects:None
@@ -1847,9 +1869,18 @@ let start_keeper_loops_owned
                | outcome -> outcome
                | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
                | exception exn ->
-                   Keeper_chat_events.publish events
-                     (Keeper_chat_events.Event_error
-                        { message = Printexc.to_string exn });
+                   if !claim_committed
+                   then
+                     Keeper_chat_events.publish events
+                       (Keeper_chat_events.Event_error
+                          { message = Printexc.to_string exn })
+                   else (
+                     Log.Keeper.error
+                       "keeper_chat_consumer: pre-claim turn setup raised for keeper=%s: %s; terminating local delivery without a connector message"
+                       keeper_name
+                       (Printexc.to_string exn);
+                     Keeper_chat_events.publish events
+                       (Keeper_chat_events.Run_finished { run_id }));
                    let _delivery_outcome = Eio.Promise.await delivery in
                    raise exn
              in

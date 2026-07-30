@@ -84,6 +84,21 @@ let await_promise ~clock ~seconds promise =
       Eio.Time.sleep clock seconds;
       false)
 
+let await_condition ~clock ~seconds condition =
+  Eio.Fiber.first
+    (fun () ->
+      let rec loop () =
+        if condition ()
+        then true
+        else (
+          Eio.Time.sleep clock 0.01;
+          loop ())
+      in
+      loop ())
+    (fun () ->
+      Eio.Time.sleep clock seconds;
+      false)
+
 let await_receipt ~clock ~seconds ~keeper_name ~receipt_id ~accept =
   Eio.Fiber.first
     (fun () ->
@@ -158,12 +173,7 @@ let check_terminal_snapshot ~label ~keeper_name ~receipt_id =
   check (label ^ " retains terminal receipt")
     (receipt_id_is_terminal ~keeper_name receipt_id)
 
-(* Tests own the transition-driven fiber explicitly and install the same queue
-   and admission wake fan-in as the production bootstrap. Production runs the
-   blocking loop inside its supervised subsystem boundary. Raising
-   from the switch body gives each test a structured teardown and, when a turn
-   is active, exercises the same cancellation path as server shutdown. *)
-let start_consumer ~sw ~clock ~base_path ~handle_turn =
+let install_transition_observers ~base_path =
   let canonical_base_path =
     Keeper_registry_types.canonical_base_path_exn base_path
   in
@@ -173,11 +183,56 @@ let start_consumer ~sw ~clock ~base_path ~handle_turn =
           Keeper_chat_consumer.notify_transition ~keeper_name));
   Keeper_turn_admission.set_slot_transition_observer
     (Some
-       (fun ~base_path:transition_base_path ~keeper_name ~transition:_ ->
+       (fun ~base_path:transition_base_path ~keeper_name ~transition ->
           if String.equal transition_base_path canonical_base_path
-          then Keeper_chat_consumer.notify_transition ~keeper_name));
+          then
+            match transition with
+            | Keeper_turn_admission.Shutdown_rolled_back
+            | Keeper_turn_admission.Turn_released ->
+              Keeper_chat_consumer.notify_slot_transition
+                ~base_path:transition_base_path
+                ~keeper_name))
+
+(* Tests own the transition-driven fiber explicitly and install the same queue
+   and admission wake fan-in as the production bootstrap. Production runs the
+   blocking loop inside its supervised subsystem boundary. Raising
+   from the switch body gives each test a structured teardown and, when a turn
+   is active, exercises the same cancellation path as server shutdown. *)
+let start_consumer ~sw ~clock ~base_path ~handle_turn =
+  install_transition_observers ~base_path;
+  let handle_admitted_turn
+      ~sw
+      ~keeper_name
+      ~receipt_ids
+      ~queued_message
+      ~on_admitted =
+    let delivery_key =
+      Keeper_chat_delivery_identity.Queue_receipts receipt_ids
+    in
+    match
+      Keeper_turn_admission.run_serialized
+        ~base_path
+        ~keeper_name
+        (fun () ->
+           match on_admitted () with
+           | Ok () ->
+             handle_turn ~sw ~keeper_name ~delivery_key ~queued_message
+           | Error detail ->
+             Keeper_chat_consumer.Failed
+               { kind = Keeper_chat_queue.Internal_error
+               ; detail
+               ; outcome_ref = None
+               })
+    with
+    | `Ran outcome -> outcome
+    | `Rejected rejection -> Keeper_chat_consumer.Deferred { rejection }
+  in
   Eio.Fiber.fork ~sw (fun () ->
-    Keeper_chat_consumer.run ~sw ~clock ~base_path ~handle_turn)
+    Keeper_chat_consumer.run
+      ~sw
+      ~clock
+      ~base_path
+      ~handle_turn:handle_admitted_turn)
 
 exception Stop_consumer
 
@@ -271,8 +326,8 @@ let test_explicit_failure_finalizes_failed_receipt () =
       check_terminal_snapshot ~label:"explicit failure" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
-let test_structured_cancellation_nacks_and_preserves_receipt () =
-  Printf.printf "Test: structured cancellation nacks the unchanged receipt\n%!";
+let test_structured_cancellation_terminalizes_claimed_receipt () =
+  Printf.printf "Test: structured cancellation terminalizes the claimed receipt\n%!";
   with_env (fun ~base ~clock ->
     match
       enqueue_checked ~label:"cancellation enqueue" ~keeper_name
@@ -303,30 +358,43 @@ let test_structured_cancellation_nacks_and_preserves_receipt () =
            ~receipt_id:accepted.receipt_id
        with
        | Ok
-           { receipt = Some { state = Keeper_chat_queue.Pending; receipt_id }
+           { receipt =
+               Some
+                 { state =
+                     Keeper_chat_queue.Failed
+                       { kind = Keeper_chat_queue.Cancelled; detail; _ }
+                 ; receipt_id
+                 }
            ; _
            } ->
          check "cancellation preserves the accepted receipt id"
-           (Keeper_chat_queue.Receipt_id.equal receipt_id accepted.receipt_id)
+           (Keeper_chat_queue.Receipt_id.equal receipt_id accepted.receipt_id);
+         check "cancellation records unknown external effect"
+           (String.equal detail
+              "Keeper stopped before this claimed turn completed; its external effect is unknown.")
        | Ok
            { receipt =
                Some
                  { state =
-                     Inflight _ | Recovery_required _ | Delivered _ | Failed _
+                     Pending
+                     | Inflight _
+                     | Recovery_required _
+                     | Delivered _
+                     | Failed _
                  ; _
                  }
              | None
            ; _
            }
        | Error _ ->
-         check "cancellation returns the receipt to Pending" false);
+         check "cancellation terminalizes the claimed receipt" false);
       let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
-      check "cancelled receipt remains pending"
-        (receipt_id_in_active accepted.receipt_id snapshot.pending);
+      check "cancelled receipt is not pending"
+        (not (receipt_id_in_active accepted.receipt_id snapshot.pending));
       check "cancelled receipt is not left inflight"
         (not (receipt_id_in_active accepted.receipt_id snapshot.inflight));
-      check "cancelled receipt is not terminal"
-        (not (receipt_id_is_terminal ~keeper_name accepted.receipt_id)))
+      check "cancelled receipt is terminal"
+        (receipt_id_is_terminal ~keeper_name accepted.receipt_id))
 
 let test_dispatch_is_concurrent_per_keeper () =
   Printf.printf "Test: queued turns dispatch concurrently across keepers\n%!";
@@ -456,9 +524,308 @@ let test_finalization_persistence_retry_does_not_redeliver () =
       check_terminal_snapshot ~label:"retried finalization" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
-let test_busy_turn_release_wakes_pending_receipt () =
+let test_claim_commit_uncertainty_retries_lone_receipt () =
   Printf.printf
-    "Test: a busy-turn release wakes the exact pending Keeper lane\n%!";
+    "Test: claim commit uncertainty retries the lone reconciled receipt\n%!";
+  with_env (fun ~base ~clock ->
+    match
+      enqueue_checked ~label:"claim uncertainty enqueue" ~keeper_name
+        (discord_msg ~content:"wait after uncertain claim"
+           ~channel_id:"channel-claim-uncertain"
+           ~user_id:"user-claim-uncertain" ~timestamp:6.1)
+    with
+    | None -> ()
+    | Some first ->
+      let commit_attempts = ref 0 in
+      let turns = ref 0 in
+      let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
+        incr turns;
+        Keeper_chat_consumer.Delivered
+          { outcome_ref =
+              Printf.sprintf "trace-claim-revision#%d" !turns
+          }
+      in
+      Fun.protect
+        ~finally:(fun () ->
+          Keeper_chat_queue.For_testing.set_transaction_stage_observer None)
+        (fun () ->
+          Keeper_chat_queue.For_testing.set_transaction_stage_observer
+            (Some
+               (function
+                 | Keeper_chat_queue.For_testing.Commit_invoked ->
+                   incr commit_attempts;
+                   if !commit_attempts = 1
+                   then
+                     Keeper_chat_queue.For_testing.fail_next_commit_with
+                       Commit_busy
+                 | Transaction_begun
+                 | Mutation_applied
+                 | Before_commit
+                 | Commit_returned
+                 | Before_rollback
+                 | Before_close ->
+                   ()));
+          with_consumer_switch (fun sw ->
+            start_consumer ~sw ~clock ~base_path:base ~handle_turn;
+            check "uncertain claim retries after exact reconciliation"
+              (await_condition ~clock ~seconds:5.0 (fun () ->
+                 !commit_attempts >= 2));
+            check "the original receipt delivers without another queue mutation"
+              (match
+                 await_receipt ~clock ~seconds:5.0 ~keeper_name
+                   ~receipt_id:first.receipt_id ~accept:is_delivered
+               with
+               | Some _ -> true
+               | None -> false));
+          check "the committed receipt runs exactly once" (!turns = 1)))
+
+let test_repeated_claim_failure_waits_for_explicit_wake () =
+  Printf.printf
+    "Test: repeated claim failure stops locally and a same-revision wake retries\n%!";
+  with_env (fun ~base ~clock ->
+    match
+      enqueue_checked ~label:"repeated claim failure enqueue" ~keeper_name
+        (discord_msg ~content:"retry on explicit wake"
+           ~channel_id:"channel-claim-explicit-wake"
+           ~user_id:"user-claim-explicit-wake" ~timestamp:6.2)
+    with
+    | None -> ()
+    | Some accepted ->
+      let commit_attempts = ref 0 in
+      let turns = ref 0 in
+      let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
+        incr turns;
+        Keeper_chat_consumer.Delivered
+          { outcome_ref =
+              Printf.sprintf "trace-claim-explicit-wake#%d" !turns
+          }
+      in
+      Fun.protect
+        ~finally:(fun () ->
+          Keeper_chat_queue.For_testing.set_transaction_stage_observer None)
+        (fun () ->
+          Keeper_chat_queue.For_testing.set_transaction_stage_observer
+            (Some
+               (function
+                 | Keeper_chat_queue.For_testing.Commit_invoked ->
+                   incr commit_attempts;
+                   if !commit_attempts <= 2
+                   then
+                     Keeper_chat_queue.For_testing.fail_next_commit_with
+                       Commit_busy
+                 | Transaction_begun
+                 | Mutation_applied
+                 | Before_commit
+                 | Commit_returned
+                 | Before_rollback
+                 | Before_close ->
+                   ()));
+          with_consumer_switch (fun sw ->
+            start_consumer ~sw ~clock ~base_path:base ~handle_turn;
+            check "one admitted turn performs only the reconciled retry"
+              (await_condition ~clock ~seconds:5.0 (fun () ->
+                 !commit_attempts >= 2));
+            Eio.Time.sleep clock 0.2;
+            check "internal reconciliation creates no retry loop"
+              (!commit_attempts = 2);
+            check "no turn body runs without a committed claim" (!turns = 0);
+            check "the exact receipt remains Pending"
+              (match
+                 Keeper_chat_queue.lookup_receipt
+                   ~keeper_name
+                   ~receipt_id:accepted.receipt_id
+               with
+               | Ok { receipt = Some { state = Pending; _ }; _ } -> true
+               | Ok { receipt = None | Some _; _ } | Error _ -> false);
+            check "the repeated uncertain claim is reconciled before return"
+              (match Keeper_chat_queue.lane_status ~keeper_name with
+               | Ok { health = Ready; _ } -> true
+               | Ok
+                   { health =
+                       ( Persistence_reconciliation_required
+                       | Delivery_recovery_required _
+                       | Unavailable _ )
+                   ; _
+                   }
+               | Error _ ->
+                 false);
+            Keeper_chat_queue.For_testing.set_transaction_stage_observer None;
+            Keeper_chat_consumer.notify_transition ~keeper_name;
+            check "a same-revision explicit wake retries the receipt"
+              (match
+                 await_receipt ~clock ~seconds:5.0 ~keeper_name
+                   ~receipt_id:accepted.receipt_id ~accept:is_delivered
+               with
+               | Some _ -> true
+               | None -> false));
+          check "the explicitly woken receipt runs exactly once" (!turns = 1)))
+
+let test_handoff_release_does_not_rearm_failed_claim () =
+  Printf.printf
+    "Test: a handoff release cannot re-arm the admitted claim it wakes\n%!";
+  with_env (fun ~base ~clock ->
+    match
+      enqueue_checked ~label:"handoff claim failure enqueue" ~keeper_name
+        (discord_msg ~content:"do not retry the failed handoff claim"
+           ~channel_id:"channel-claim-handoff"
+           ~user_id:"user-claim-handoff" ~timestamp:6.21)
+    with
+    | None -> ()
+    | Some accepted ->
+      let holder_started, resolve_holder_started = Eio.Promise.create () in
+      let release_holder, resolve_release_holder = Eio.Promise.create () in
+      let commit_attempts = ref 0 in
+      let turns = ref 0 in
+      let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
+        incr turns;
+        Keeper_chat_consumer.Delivered
+          { outcome_ref =
+              Printf.sprintf "trace-claim-handoff#%d" !turns
+          }
+      in
+      Fun.protect
+        ~finally:(fun () ->
+          Keeper_chat_queue.For_testing.set_transaction_stage_observer None)
+        (fun () ->
+          Keeper_chat_queue.For_testing.set_transaction_stage_observer
+            (Some
+               (function
+                 | Keeper_chat_queue.For_testing.Commit_invoked ->
+                   incr commit_attempts;
+                   if !commit_attempts <= 2
+                   then
+                     Keeper_chat_queue.For_testing.fail_next_commit_with
+                       Commit_busy
+                 | Transaction_begun
+                 | Mutation_applied
+                 | Before_commit
+                 | Commit_returned
+                 | Before_rollback
+                 | Before_close ->
+                   ()));
+          with_consumer_switch (fun sw ->
+            Eio.Fiber.fork ~sw (fun () ->
+              ignore
+                (Keeper_turn_admission.run_serialized
+                   ~base_path:base
+                   ~keeper_name
+                   (fun () ->
+                      Eio.Promise.resolve resolve_holder_started ();
+                      Eio.Promise.await release_holder)
+                 : [ `Ran of unit | `Rejected of Keeper_turn_admission.rejection ]));
+            check "active turn owns the slot before the queued claim"
+              (await_promise ~clock ~seconds:5.0 holder_started);
+            start_consumer ~sw ~clock ~base_path:base ~handle_turn;
+            check "queued claim is parked behind the active turn"
+              (await_condition ~clock ~seconds:5.0 (fun () ->
+                 Keeper_turn_admission.chat_waiting
+                   ~base_path:base
+                   ~keeper_name));
+            Eio.Promise.resolve resolve_release_holder ();
+            check "the admitted claim performs only its bounded retry"
+              (await_condition ~clock ~seconds:5.0 (fun () ->
+                 !commit_attempts >= 2));
+            Eio.Time.sleep clock 0.2;
+            check "the handoff release leaves no stale consumer wake"
+              (!commit_attempts = 2);
+            check "no turn body runs without a committed claim" (!turns = 0);
+            Keeper_chat_queue.For_testing.set_transaction_stage_observer None;
+            Keeper_chat_consumer.notify_transition ~keeper_name;
+            check "an explicit wake still retries the Pending receipt"
+              (match
+                 await_receipt ~clock ~seconds:5.0 ~keeper_name
+                   ~receipt_id:accepted.receipt_id ~accept:is_delivered
+               with
+               | Some _ -> true
+               | None -> false));
+          check "the explicit wake runs the receipt exactly once" (!turns = 1)))
+
+let test_preclaim_failure_rearms_on_active_turn_release () =
+  Printf.printf
+    "Test: active turn release re-arms only a pre-claim failure\n%!";
+  with_env (fun ~base ~clock ->
+    match
+      enqueue_checked ~label:"pre-claim release enqueue" ~keeper_name
+        (discord_msg ~content:"retry after active turn release"
+           ~channel_id:"channel-preclaim-release"
+           ~user_id:"user-preclaim-release" ~timestamp:6.22)
+    with
+    | None -> ()
+    | Some accepted ->
+      let holder_started, resolve_holder_started = Eio.Promise.create () in
+      let release_holder, resolve_release_holder = Eio.Promise.create () in
+      let attempts = ref 0 in
+      let handle_turn
+          ~sw:_
+          ~keeper_name
+          ~receipt_ids:_
+          ~queued_message:_
+          ~on_admitted =
+        incr attempts;
+        if !attempts = 1
+        then
+          Keeper_chat_consumer.Failed
+            { kind = Keeper_chat_queue.Internal_error
+            ; detail = "synthetic pre-claim setup failure"
+            ; outcome_ref = None
+            }
+        else
+          match
+            Keeper_turn_admission.run_serialized
+              ~base_path:base
+              ~keeper_name
+              (fun () ->
+                 match on_admitted () with
+                 | Ok () ->
+                   Keeper_chat_consumer.Delivered
+                     { outcome_ref = "trace-preclaim-release#1" }
+                 | Error detail ->
+                   Keeper_chat_consumer.Failed
+                     { kind = Keeper_chat_queue.Internal_error
+                     ; detail
+                     ; outcome_ref = None
+                     })
+          with
+          | `Ran outcome -> outcome
+          | `Rejected rejection -> Keeper_chat_consumer.Deferred { rejection }
+      in
+      with_consumer_switch (fun sw ->
+        Eio.Fiber.fork ~sw (fun () ->
+          ignore
+            (Keeper_turn_admission.run_serialized
+               ~base_path:base
+               ~keeper_name
+               (fun () ->
+                  Eio.Promise.resolve resolve_holder_started ();
+                  Eio.Promise.await release_holder)
+             : [ `Ran of unit | `Rejected of Keeper_turn_admission.rejection ]));
+        check "active turn owns the slot before consumer preflight"
+          (await_promise ~clock ~seconds:5.0 holder_started);
+        install_transition_observers ~base_path:base;
+        Eio.Fiber.fork ~sw (fun () ->
+          Keeper_chat_consumer.run
+            ~sw
+            ~clock
+            ~base_path:base
+            ~handle_turn);
+        check "pre-claim setup failed exactly once before release"
+          (await_condition ~clock ~seconds:5.0 (fun () -> !attempts = 1));
+        Eio.Time.sleep clock 0.2;
+        check "pre-claim failure does not spin while the turn stays active"
+          (!attempts = 1);
+        Eio.Promise.resolve resolve_release_holder ();
+        check "the exact Pending receipt retries after the active turn releases"
+          (match
+             await_receipt ~clock ~seconds:5.0 ~keeper_name
+               ~receipt_id:accepted.receipt_id ~accept:is_delivered
+           with
+           | Some _ -> true
+           | None -> false));
+      check "the release produces exactly one follow-up attempt" (!attempts = 2))
+
+let test_busy_turn_hands_mutex_to_pending_receipt () =
+  Printf.printf
+    "Test: a busy turn hands its mutex to the exact pending Keeper lane\n%!";
   with_env (fun ~base ~clock ->
     let holder_started, resolve_holder_started = Eio.Promise.create () in
     let release_holder, resolve_release_holder = Eio.Promise.create () in
@@ -489,10 +856,38 @@ let test_busy_turn_release_wakes_pending_receipt () =
       with
       | None -> Eio.Promise.resolve resolve_release_holder ()
       | Some accepted ->
-        Eio.Fiber.yield ();
+        check "consumer parks on the held turn slot"
+          (await_condition ~clock ~seconds:5.0 (fun () ->
+             Keeper_turn_admission.chat_waiting
+               ~base_path:base
+               ~keeper_name));
         check "consumer never crosses the held turn slot" (!calls = 0);
+        check "parked receipt remains Pending before execution admission"
+          (match
+             Keeper_chat_queue.lookup_receipt
+               ~keeper_name
+               ~receipt_id:accepted.receipt_id
+           with
+           | Ok { receipt = Some { state = Pending; _ }; _ } -> true
+           | Ok
+               { receipt =
+                   None
+                   | Some
+                       { state =
+                           Inflight _
+                           | Recovery_required _
+                           | Delivered _
+                           | Failed _
+                       ; _
+                       }
+               ; _
+               }
+           | Error _ -> false);
+        let waiting_snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+        check "parking does not publish an inflight receipt"
+          (waiting_snapshot.inflight = []);
         Eio.Promise.resolve resolve_release_holder ();
-        check "turn release dispatches without fleet polling"
+        check "mutex handoff dispatches without fleet polling"
           (match
              await_receipt ~clock ~seconds:5.0 ~keeper_name
                ~receipt_id:accepted.receipt_id ~accept:is_delivered
@@ -500,6 +895,156 @@ let test_busy_turn_release_wakes_pending_receipt () =
            | Some _ -> true
            | None -> false));
     check "busy receipt is delivered exactly once" (!calls = 1))
+
+let test_consumer_cancellation_while_parked_keeps_pending () =
+  Printf.printf
+    "Test: cancelling a parked consumer leaves the exact receipt Pending\n%!";
+  with_env (fun ~base ~clock ->
+    let holder_started, resolve_holder_started = Eio.Promise.create () in
+    let release_holder, resolve_release_holder = Eio.Promise.create () in
+    Eio.Switch.run (fun holder_sw ->
+      Eio.Fiber.fork ~sw:holder_sw (fun () ->
+        ignore
+          (Keeper_turn_admission.run_serialized
+             ~base_path:base
+             ~keeper_name
+             (fun () ->
+                Eio.Promise.resolve resolve_holder_started ();
+                Eio.Promise.await release_holder)
+            : [ `Ran of unit | `Rejected of Keeper_turn_admission.rejection ]));
+      check "cancellation holder owns the lane"
+        (await_promise ~clock ~seconds:5.0 holder_started);
+      match
+        enqueue_checked ~label:"parked cancellation enqueue" ~keeper_name
+          (discord_msg ~content:"stay pending when consumer stops"
+             ~channel_id:"channel-parked-cancel"
+             ~user_id:"user-parked-cancel" ~timestamp:6.3)
+      with
+      | None -> Eio.Promise.resolve resolve_release_holder ()
+      | Some accepted ->
+        let calls = ref 0 in
+        let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
+          incr calls;
+          Keeper_chat_consumer.Delivered
+            { outcome_ref = "must-not-run-before-admission" }
+        in
+        with_consumer_switch (fun sw ->
+          start_consumer ~sw ~clock ~base_path:base ~handle_turn;
+          check "consumer parks before cancellation"
+            (await_condition ~clock ~seconds:5.0 (fun () ->
+               Keeper_turn_admission.chat_waiting
+                 ~base_path:base
+                 ~keeper_name)));
+        check "cancelled waiter is removed from the mutex queue"
+          (not
+             (Keeper_turn_admission.chat_waiting
+                ~base_path:base
+                ~keeper_name));
+        check "cancellation before admission invokes no queued turn" (!calls = 0);
+        check "cancellation before admission preserves Pending"
+          (match
+             Keeper_chat_queue.lookup_receipt
+               ~keeper_name
+               ~receipt_id:accepted.receipt_id
+           with
+           | Ok { receipt = Some { state = Pending; _ }; _ } -> true
+           | Ok
+               { receipt =
+                   None
+                   | Some
+                       { state =
+                           Inflight _
+                           | Recovery_required _
+                           | Delivered _
+                           | Failed _
+                       ; _
+                       }
+               ; _
+               }
+           | Error _ -> false);
+        Eio.Promise.resolve resolve_release_holder ()))
+
+let test_stale_parked_observation_rearms_next_pending_receipt () =
+  Printf.printf
+    "Test: a stale parked observation rearms the next pending receipt\n%!";
+  with_env (fun ~base ~clock ->
+    let holder_started, resolve_holder_started = Eio.Promise.create () in
+    let release_holder, resolve_release_holder = Eio.Promise.create () in
+    let calls = ref 0 in
+    let handled_content = ref None in
+    let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_
+        ~(queued_message : Keeper_chat_queue.queued_message) =
+      incr calls;
+      handled_content := Some queued_message.content;
+      Keeper_chat_consumer.Delivered
+        { outcome_ref = "trace-stale-rearm#1" }
+    in
+    with_consumer_switch (fun sw ->
+      Eio.Fiber.fork ~sw (fun () ->
+        ignore
+          (Keeper_turn_admission.run_serialized
+             ~base_path:base
+             ~keeper_name
+             (fun () ->
+                Eio.Promise.resolve resolve_holder_started ();
+                Eio.Promise.await release_holder)
+            : [ `Ran of unit | `Rejected of Keeper_turn_admission.rejection ]));
+      check "empty-queue holder owns the lane"
+        (await_promise ~clock ~seconds:5.0 holder_started);
+      start_consumer ~sw ~clock ~base_path:base ~handle_turn;
+      match
+        enqueue_checked ~label:"parked pending cancellation enqueue" ~keeper_name
+          (discord_msg ~content:"cancel before admission"
+             ~channel_id:"channel-pending-cancel"
+             ~user_id:"user-pending-cancel" ~timestamp:6.4)
+      with
+      | None -> Eio.Promise.resolve resolve_release_holder ()
+      | Some accepted ->
+        check "consumer parks before pending cancellation"
+          (await_condition ~clock ~seconds:5.0 (fun () ->
+             Keeper_turn_admission.chat_waiting
+               ~base_path:base
+               ~keeper_name));
+        (* Isolate the consumer's stale-observation recovery edge: both
+           production observers are deliberately silent after the consumer
+           has parked, so only [run_observed_turn]'s typed [Claim_stale]
+           transition can schedule the replacement receipt. *)
+        Keeper_chat_queue.set_transition_observer None;
+        Keeper_turn_admission.set_slot_transition_observer None;
+        (match
+           Keeper_chat_queue.cancel_pending
+             ~keeper_name
+             ~receipt_id:accepted.receipt_id
+             ~cancellation:
+               { cancelled_at = 6.5
+               ; detail = "cancelled while waiting for Keeper admission"
+               }
+         with
+         | Ok { state = Failed { kind = Cancelled; _ }; _ } ->
+           check "pending cancellation commits a terminal receipt" true
+         | Ok _ | Error _ ->
+           check "pending cancellation commits a terminal receipt" false);
+        (match
+           enqueue_checked ~label:"stale replacement enqueue" ~keeper_name
+             (discord_msg ~content:"run after stale head"
+                ~channel_id:"channel-stale-replacement"
+                ~user_id:"user-stale-replacement" ~timestamp:6.6)
+         with
+         | None -> Eio.Promise.resolve resolve_release_holder ()
+         | Some replacement ->
+           Eio.Promise.resolve resolve_release_holder ();
+           check "stale observation rearms the replacement receipt"
+             (match
+                await_receipt ~clock ~seconds:5.0 ~keeper_name
+                  ~receipt_id:replacement.receipt_id ~accept:is_delivered
+              with
+              | Some _ -> true
+              | None -> false);
+           check "cancelled head never reaches the turn handler" (!calls = 1);
+           check "only the replacement content is handled"
+             (!handled_content = Some "run after stale head");
+           check_terminal_snapshot ~label:"stale replacement" ~keeper_name
+             ~receipt_id:replacement.receipt_id)))
 
 let test_invalid_delivered_turn_ref_fails_closed () =
   Printf.printf
@@ -674,79 +1219,22 @@ let test_shutdown_fence_keeps_receipt_pending_until_rollback () =
       check_terminal_snapshot ~label:"shutdown rollback" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
-let test_typed_admission_race_nacks_then_retries () =
-  Printf.printf
-    "Test: typed admission race nacks the lease and retries without Failed\n%!";
-  with_env (fun ~base ~clock ->
-    match
-      enqueue_checked ~label:"typed deferral enqueue" ~keeper_name
-        (discord_msg ~content:"retry typed deferral"
-           ~channel_id:"channel-deferral" ~user_id:"user-deferral"
-           ~timestamp:10.0)
-    with
-    | None -> ()
-    | Some accepted ->
-      let operation_id = Keeper_shutdown_types.Operation_id.generate () in
-      let calls = ref 0 in
-      let first_deferred, resolve_first_deferred = Eio.Promise.create () in
-      let second_started, resolve_second_started = Eio.Promise.create () in
-      let release_second, resolve_release_second = Eio.Promise.create () in
-      let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
-        incr calls;
-        if !calls = 1
-        then (
-          Eio.Promise.resolve resolve_first_deferred ();
-          Keeper_chat_consumer.Deferred
-            { rejection =
-                { Keeper_turn_admission.waiting = 0
-                ; in_flight = None
-                ; shutdown_operation_id = Some operation_id
-                }
-            })
-        else (
-          Eio.Promise.resolve resolve_second_started ();
-          Eio.Promise.await release_second;
-          Keeper_chat_consumer.Delivered
-            { outcome_ref = "trace-typed-deferral#2" })
-      in
-      with_consumer_switch (fun sw ->
-        start_consumer ~sw ~clock ~base_path:base ~handle_turn;
-        check "first leased attempt returns typed Deferred"
-          (await_promise ~clock ~seconds:5.0 first_deferred);
-        check "typed Deferred returns the same receipt to Pending"
-          (match
-             await_receipt ~clock ~seconds:2.0 ~keeper_name
-               ~receipt_id:accepted.receipt_id ~accept:is_pending
-           with
-           | Some _ -> true
-           | None -> false);
-        check "typed Deferred never creates a terminal Failed receipt"
-          (not (receipt_id_is_terminal ~keeper_name accepted.receipt_id));
-        check "consumer retries the same receipt after deferral"
-          (await_promise ~clock ~seconds:5.0 second_started);
-        Eio.Promise.resolve resolve_release_second ();
-        check "retried receipt reaches Delivered"
-          (match
-             await_receipt ~clock ~seconds:5.0 ~keeper_name
-               ~receipt_id:accepted.receipt_id ~accept:is_delivered
-           with
-           | Some _ -> true
-           | None -> false));
-      check "typed deferral causes one retry and no duplicate turn" (!calls = 2);
-      check_terminal_snapshot ~label:"typed deferral retry" ~keeper_name
-        ~receipt_id:accepted.receipt_id)
-
 let () =
   test_delivery_finalizes_terminal_receipt ();
   test_explicit_failure_finalizes_failed_receipt ();
-  test_structured_cancellation_nacks_and_preserves_receipt ();
+  test_structured_cancellation_terminalizes_claimed_receipt ();
   test_dispatch_is_concurrent_per_keeper ();
   test_finalization_persistence_retry_does_not_redeliver ();
-  test_busy_turn_release_wakes_pending_receipt ();
+  test_claim_commit_uncertainty_retries_lone_receipt ();
+  test_repeated_claim_failure_waits_for_explicit_wake ();
+  test_handoff_release_does_not_rearm_failed_claim ();
+  test_preclaim_failure_rearms_on_active_turn_release ();
+  test_busy_turn_hands_mutex_to_pending_receipt ();
+  test_consumer_cancellation_while_parked_keeps_pending ();
+  test_stale_parked_observation_rearms_next_pending_receipt ();
   test_invalid_delivered_turn_ref_fails_closed ();
   test_invalid_delivery_diagnostic_does_not_block_lane ();
   test_shutdown_fence_keeps_receipt_pending_until_rollback ();
-  test_typed_admission_race_nacks_then_retries ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

@@ -50,6 +50,87 @@ end
 
 let notify_transition ~keeper_name = Wake_inbox.notify keeper_name
 
+module Preclaim_retry = struct
+  type phase =
+    | Watching
+    | Released
+    | Waiting
+
+  let mutex = Stdlib.Mutex.create ()
+  let by_base_path : (string, (string, phase) Hashtbl.t) Hashtbl.t =
+    Hashtbl.create 4
+
+  let with_lock f =
+    Stdlib.Mutex.lock mutex;
+    Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock mutex) f
+
+  let begin_attempt ~base_path ~keeper_name =
+    with_lock (fun () ->
+      let keepers =
+        match Hashtbl.find_opt by_base_path base_path with
+        | Some keepers -> keepers
+        | None ->
+          let keepers = Hashtbl.create 16 in
+          Hashtbl.add by_base_path base_path keepers;
+          keepers
+      in
+      Hashtbl.replace keepers keeper_name Watching)
+
+  let clear ~base_path ~keeper_name =
+    with_lock (fun () ->
+      match Hashtbl.find_opt by_base_path base_path with
+      | None -> ()
+      | Some keepers ->
+        Hashtbl.remove keepers keeper_name;
+        if Hashtbl.length keepers = 0
+        then Hashtbl.remove by_base_path base_path)
+
+  let remove_empty_base_path ~base_path keepers =
+    if Hashtbl.length keepers = 0
+    then Hashtbl.remove by_base_path base_path
+
+  let observe_release ~base_path ~keeper_name =
+    with_lock (fun () ->
+      match Hashtbl.find_opt by_base_path base_path with
+      | None -> false
+      | Some keepers ->
+        (match Hashtbl.find_opt keepers keeper_name with
+         | None -> false
+         | Some Watching ->
+           Hashtbl.replace keepers keeper_name Released;
+           false
+         | Some Released -> false
+         | Some Waiting ->
+           Hashtbl.remove keepers keeper_name;
+           remove_empty_base_path ~base_path keepers;
+           true))
+
+  let arm ~base_path ~keeper_name =
+    with_lock (fun () ->
+      match Hashtbl.find_opt by_base_path base_path with
+      | None -> false
+      | Some keepers ->
+        (match Hashtbl.find_opt keepers keeper_name with
+         | None -> false
+         | Some Watching ->
+           Hashtbl.replace keepers keeper_name Waiting;
+           false
+         | Some Released ->
+           Hashtbl.remove keepers keeper_name;
+           remove_empty_base_path ~base_path keepers;
+           true
+         | Some Waiting -> false))
+
+  let clear_base_path base_path =
+    with_lock (fun () -> Hashtbl.remove by_base_path base_path)
+
+  let reset () = with_lock (fun () -> Hashtbl.clear by_base_path)
+end
+
+let notify_slot_transition ~base_path ~keeper_name =
+  if Preclaim_retry.observe_release ~base_path ~keeper_name
+  then notify_transition ~keeper_name
+
 type turn_outcome =
   | Delivered of { outcome_ref : string }
   | Failed of
@@ -59,26 +140,15 @@ type turn_outcome =
       }
   | Deferred of { rejection : Keeper_turn_admission.rejection }
 
-type lease_finalization =
-  | Finalize of Keeper_chat_queue.finalization
-  | Nack
-
-type persistence_blocked_operation =
-  | Lease_next_blocked
-  | Finalize_blocked
-  | Nack_blocked
-
 type persistence_blocked_status =
-  { operation : persistence_blocked_operation
-  ; lease_id : string option
+  { lease_id : string
   ; error : Keeper_chat_queue.mutation_error
   }
 
 type blocked_retry =
-  | Retry_lease_next
   | Retry_finalization of
       { lease_id : string
-      ; action : lease_finalization
+      ; outcome : Keeper_chat_queue.finalization
       }
 
 module Persistence_blocked = struct
@@ -101,21 +171,9 @@ module Persistence_blocked = struct
     with_lock (fun () ->
       Hashtbl.replace entries (key ~base_path ~keeper_name) entry)
 
-  let remember_lease ~base_path ~keeper_name entry =
-    with_lock (fun () ->
-      let key = key ~base_path ~keeper_name in
-      match Hashtbl.find_opt entries key with
-      | Some { retry = Retry_finalization _; _ } -> ()
-      | Some { retry = Retry_lease_next; _ } | None ->
-        Hashtbl.replace entries key entry)
-
   let find ~base_path ~keeper_name =
     with_lock (fun () ->
       Hashtbl.find_opt entries (key ~base_path ~keeper_name))
-
-  let clear ~base_path ~keeper_name =
-    with_lock (fun () ->
-      Hashtbl.remove entries (key ~base_path ~keeper_name))
 
   let clear_finalization ~base_path ~keeper_name ~lease_id =
     with_lock (fun () ->
@@ -138,7 +196,7 @@ type dispatch_state = {
 }
 
 type lane_activity =
-  | Dispatchable of bool
+  | Dispatchable of { has_active : bool }
   | Awaiting_delivery_recovery of Keeper_chat_queue.recovery_evidence
 
 let create_dispatch_state ~base_path =
@@ -186,9 +244,9 @@ let pending_finalization state keeper_name =
       ~base_path:state.base_path
       ~keeper_name
   with
-  | Some { retry = Retry_finalization { lease_id; action }; _ } ->
-    Some (lease_id, action)
-  | Some { retry = Retry_lease_next; _ } | None -> None
+  | Some { retry = Retry_finalization { lease_id; outcome }; _ } ->
+    Some (lease_id, outcome)
+  | None -> None
 
 let clear_pending_finalization state ~keeper_name ~lease_id =
   Persistence_blocked.clear_finalization
@@ -196,42 +254,13 @@ let clear_pending_finalization state ~keeper_name ~lease_id =
     ~keeper_name
     ~lease_id
 
-let operation_of_finalization = function
-  | Finalize _ -> Finalize_blocked
-  | Nack -> Nack_blocked
-
-let remember_pending_finalization state ~keeper_name ~lease_id ~action ~error =
+let remember_pending_finalization state ~keeper_name ~lease_id ~outcome ~error =
   Persistence_blocked.remember
     ~base_path:state.base_path
     ~keeper_name
-    { status =
-        { operation = operation_of_finalization action
-        ; lease_id = Some lease_id
-        ; error
-        }
-    ; retry = Retry_finalization { lease_id; action }
+    { status = { lease_id; error }
+    ; retry = Retry_finalization { lease_id; outcome }
     }
-
-let remember_blocked_lease state ~keeper_name ~error =
-  Persistence_blocked.remember_lease
-    ~base_path:state.base_path
-    ~keeper_name
-    { status =
-        { operation = Lease_next_blocked; lease_id = None; error }
-    ; retry = Retry_lease_next
-    }
-
-let clear_blocked_lease state ~keeper_name =
-  match
-    Persistence_blocked.find
-      ~base_path:state.base_path
-      ~keeper_name
-  with
-  | Some { retry = Retry_lease_next; _ } ->
-    Persistence_blocked.clear
-      ~base_path:state.base_path
-      ~keeper_name
-  | Some { retry = Retry_finalization _; _ } | None -> ()
 
 let persistence_blocked_status ~base_path ~keeper_name =
   match Config_dir_resolver.canonical_base_path base_path with
@@ -252,7 +281,10 @@ module For_testing = struct
   let finish_dispatching_and_reschedule = finish_dispatching_and_reschedule
   let notify_transition = notify_transition
   let take_wake_nonblocking = Wake_inbox.take_nonblocking
-  let reset_wake_inbox = Wake_inbox.reset
+  let reset_wake_inbox () =
+    Wake_inbox.reset ();
+    Preclaim_retry.reset ()
+
   let reset_persistence_blocked = Persistence_blocked.reset
 end
 
@@ -283,120 +315,94 @@ let reconcile_published_transition ~keeper_name error =
     Log.Keeper.info
       "keeper_chat_consumer: reconciled published queue transition keeper=%s revision=%Ld"
       keeper_name
-      report.revision
+      report.revision;
+    Some report.revision
   | Error reconciliation_error ->
     Log.Keeper.error
       "keeper_chat_consumer: published queue transition requires operator reconciliation keeper=%s publication_error=%s reconciliation_error=%s"
       keeper_name
       (Keeper_chat_queue.mutation_error_to_string error)
-      (Keeper_chat_queue.mutation_error_to_string reconciliation_error)
+      (Keeper_chat_queue.mutation_error_to_string reconciliation_error);
+    (match Keeper_chat_queue.lane_status ~keeper_name with
+     | Ok { revision; _ } -> Some revision
+     | Error _ -> None)
 
-let settle_lease state ~keeper_name ~lease_id action =
-  let result =
-    match action with
-    | Finalize outcome ->
-      let rec finalize ~allow_invalid_fallback outcome =
-        match Keeper_chat_queue.finalize ~keeper_name ~lease_id ~outcome with
-        | `Finalized _ ->
-          clear_pending_finalization state ~keeper_name ~lease_id;
-          `Settled
-        | `Unknown_lease ->
-          clear_pending_finalization state ~keeper_name ~lease_id;
-          Log.Keeper.warn
-            "keeper_chat_consumer: finalize found no matching lease=%s for \
-             keeper=%s (already finalized/nacked?)"
-            lease_id
-            keeper_name;
-          `Settled
-        | `Error (Keeper_chat_queue.Invalid_input message)
-          when allow_invalid_fallback ->
-          (match invalid_finalization_fallback message with
-           | Ok fallback ->
-             Log.Keeper.error
-               "keeper_chat_consumer: rejected invalid terminal outcome for \
-                keeper=%s lease=%s: %s; replacing it with a typed internal_error"
-               keeper_name lease_id message;
-             finalize ~allow_invalid_fallback:false fallback
-           | Error error ->
-             let retry_action = Finalize outcome in
-             remember_pending_finalization state ~keeper_name ~lease_id
-               ~action:retry_action ~error;
-             Log.Keeper.error
-               "keeper_chat_consumer: rejected invalid terminal outcome for \
-                keeper=%s lease=%s: %s; typed replacement is unavailable: %s"
-               keeper_name lease_id message
-               (Keeper_chat_queue.mutation_error_to_string error);
-             `Pending)
-        | `Error
-            (Keeper_chat_queue.Persist_failed
-               { publication = Finalize_indeterminate _; _ } as error) ->
-          clear_pending_finalization state ~keeper_name ~lease_id;
-          reconcile_published_transition ~keeper_name error;
-          `Settled
-        | `Error error ->
-          let retry_action = Finalize outcome in
-          remember_pending_finalization state ~keeper_name ~lease_id
-            ~action:retry_action ~error;
-          Log.Keeper.error
-            "keeper_chat_consumer: finalize persist failed for keeper=%s \
-             lease=%s: %s; finalization will retry after the next durable \
-             transition or explicit operator reconciliation"
-            keeper_name
-            lease_id
-            (Keeper_chat_queue.mutation_error_to_string error);
-          `Pending
-      in
-      finalize ~allow_invalid_fallback:true outcome
-    | Nack ->
-      (match Keeper_chat_queue.nack ~keeper_name ~lease_id with
-       | `Requeued _ ->
-         clear_pending_finalization state ~keeper_name ~lease_id;
-         `Settled
-       | `Unknown_lease ->
-         clear_pending_finalization state ~keeper_name ~lease_id;
-         Log.Keeper.warn
-           "keeper_chat_consumer: nack found no matching lease=%s for keeper=%s \
-            (already acked/nacked?)"
-           lease_id
-           keeper_name;
-         `Settled
-       | `Error
-           (Keeper_chat_queue.Persist_failed
-              { publication = Nack_indeterminate _; _ } as error) ->
-         clear_pending_finalization state ~keeper_name ~lease_id;
-         reconcile_published_transition ~keeper_name error;
-         `Settled
-       | `Error error ->
-         remember_pending_finalization state ~keeper_name ~lease_id ~action
-           ~error;
+let settle_lease state ~keeper_name ~lease_id outcome =
+  let rec finalize ~allow_invalid_fallback outcome =
+    match Keeper_chat_queue.finalize ~keeper_name ~lease_id ~outcome with
+    | `Finalized _ ->
+      clear_pending_finalization state ~keeper_name ~lease_id;
+      `Settled
+    | `Unknown_lease ->
+      clear_pending_finalization state ~keeper_name ~lease_id;
+      Log.Keeper.warn
+        "keeper_chat_consumer: finalize found no matching lease=%s for \
+         keeper=%s (already finalized?)"
+        lease_id
+        keeper_name;
+      `Settled
+    | `Error (Keeper_chat_queue.Invalid_input message)
+      when allow_invalid_fallback ->
+      (match invalid_finalization_fallback message with
+       | Ok fallback ->
          Log.Keeper.error
-           "keeper_chat_consumer: nack persist failed for keeper=%s lease=%s: %s; \
-            finalization will retry after the next durable transition or \
-            explicit operator reconciliation"
-           keeper_name
-           lease_id
+           "keeper_chat_consumer: rejected invalid terminal outcome for \
+            keeper=%s lease=%s: %s; replacing it with a typed internal_error"
+           keeper_name lease_id message;
+         finalize ~allow_invalid_fallback:false fallback
+       | Error error ->
+         remember_pending_finalization state ~keeper_name ~lease_id
+           ~outcome ~error;
+         Log.Keeper.error
+           "keeper_chat_consumer: rejected invalid terminal outcome for \
+            keeper=%s lease=%s: %s; typed replacement is unavailable: %s"
+           keeper_name lease_id message
            (Keeper_chat_queue.mutation_error_to_string error);
          `Pending)
+    | `Error
+        (Keeper_chat_queue.Persist_failed
+           { publication = Finalize_indeterminate _; _ } as error) ->
+      clear_pending_finalization state ~keeper_name ~lease_id;
+      (match reconcile_published_transition ~keeper_name error with
+       | Some _ | None -> ());
+      `Settled
+    | `Error error ->
+      remember_pending_finalization state ~keeper_name ~lease_id
+        ~outcome ~error;
+      Log.Keeper.error
+        "keeper_chat_consumer: finalize persist failed for keeper=%s \
+         lease=%s: %s; finalization will retry after the next durable \
+         transition or explicit operator reconciliation"
+        keeper_name
+        lease_id
+        (Keeper_chat_queue.mutation_error_to_string error);
+      `Pending
   in
-  result
+  finalize ~allow_invalid_fallback:true outcome
 
 (* Keep these names at the call sites readable: they now retain the decision
    when persistence is temporarily unavailable instead of silently giving up. *)
 let finalize_or_warn state ~keeper_name ~lease_id outcome =
-  match settle_lease state ~keeper_name ~lease_id (Finalize outcome) with
+  match settle_lease state ~keeper_name ~lease_id outcome with
   | `Settled | `Pending -> ()
 
-let nack_or_warn state ~keeper_name ~lease_id =
-  match settle_lease state ~keeper_name ~lease_id Nack with
-  | `Settled | `Pending -> ()
+let cancel_claimed_or_warn state ~clock ~keeper_name ~lease_id =
+  finalize_or_warn state ~keeper_name ~lease_id
+    (Keeper_chat_queue.Mark_failed
+       { completed_at = Eio.Time.now clock
+       ; kind = Keeper_chat_queue.Cancelled
+       ; detail =
+           "Keeper stopped before this claimed turn completed; its external effect is unknown."
+       ; outcome_ref = None
+       })
 
 (* Kept as a separate helper so a later wake cannot start a new turn while an
-   earlier turn's durable ack/nack is still unresolved. *)
+   earlier turn's durable finalization is still unresolved. *)
 let retry_pending_finalization state ~keeper_name =
   match pending_finalization state keeper_name with
   | None -> false
-  | Some (lease_id, action) ->
-    (match settle_lease state ~keeper_name ~lease_id action with
+  | Some (lease_id, outcome) ->
+    (match settle_lease state ~keeper_name ~lease_id outcome with
     | `Settled | `Pending -> ());
     true
 
@@ -457,62 +463,207 @@ let log_deferred_turn ~keeper_name
   | Some operation_id ->
       Log.Keeper.info
         "keeper_chat_consumer: admission fenced for keeper=%s by shutdown=%s; \
-         returning the leased receipt to Pending"
+         receipt remains Pending"
         keeper_name
         (Keeper_shutdown_types.Operation_id.to_string operation_id)
   | None ->
       Log.Keeper.info
         "keeper_chat_consumer: admission deferred for keeper=%s waiting=%d \
-         in_flight=%b; returning the leased receipt to Pending"
+         in_flight=%b; receipt remains Pending"
         keeper_name waiting (Option.is_some in_flight)
 
-let run_leased_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id
-    ~delivery_key ~queued =
-  match handle_turn ~sw ~keeper_name ~delivery_key ~queued_message:queued with
-  | Deferred { rejection } ->
-      log_deferred_turn ~keeper_name rejection;
-      nack_or_warn state ~keeper_name ~lease_id
-  | Delivered { outcome_ref } ->
-      finalize_or_warn state ~keeper_name ~lease_id
-        (finalization_of_delivered ~clock ~outcome_ref)
-  | Failed { kind; detail; outcome_ref } ->
-      finalize_or_warn state ~keeper_name ~lease_id
-        (finalization_of_failed ~clock ~kind ~detail ~outcome_ref)
-  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  | exception exn ->
-      let detail = Printexc.to_string exn in
-      Log.Keeper.error
-        "keeper_chat_consumer: handle_turn raised for keeper=%s: %s; recording \
-         a terminal internal_error receipt"
-        keeper_name detail;
-      finalize_or_warn state ~keeper_name ~lease_id
-        (Keeper_chat_queue.Mark_failed
-           { completed_at = Eio.Time.now clock
-           ; kind = Keeper_chat_queue.Internal_error
-           ; detail
-           ; outcome_ref = None
-           })
+type observed_claim =
+  | Claim_not_attempted
+  | Claim_leased of Keeper_chat_queue.lease
+  | Claim_stale of Keeper_chat_queue.pending_claim_stale
+  | Claim_no_longer_pending
+  | Claim_failed of Keeper_chat_queue.mutation_error
 
-let dispatch_queued_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id
-    ~delivery_key ~queued =
-  Eio.Fiber.fork ~sw (fun () ->
-      try
-        run_leased_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id
-          ~delivery_key ~queued;
-        finish_dispatching_and_reschedule state keeper_name
-      with
-      | Eio.Cancel.Cancelled _ as e ->
-          Eio.Cancel.protect (fun () -> nack_or_warn state ~keeper_name ~lease_id);
-          finish_dispatching_and_reschedule state keeper_name;
-          raise e
-      | exn ->
-          nack_or_warn state ~keeper_name ~lease_id;
-          finish_dispatching_and_reschedule state keeper_name;
-          Log.Keeper.error
-            "keeper_chat_consumer: dispatch finalization failed unexpectedly \
-             for keeper=%s: %s"
-            keeper_name
-            (Printexc.to_string exn))
+let claim_error_to_string = function
+  | Claim_not_attempted -> "queue claim callback was not invoked"
+  | Claim_leased _ -> "queue claim callback was invoked more than once"
+  | Claim_stale { receipt_id; expected_revision; observed_revision } ->
+    Printf.sprintf
+      "pending receipt %s changed before admission (expected_revision=%Ld observed_revision=%Ld)"
+      (Keeper_chat_queue.Receipt_id.to_string receipt_id)
+      expected_revision
+      observed_revision
+  | Claim_no_longer_pending ->
+    "pending receipt changed while its persistence claim was reconciled"
+  | Claim_failed error -> Keeper_chat_queue.mutation_error_to_string error
+
+let finalize_claimed_outcome state ~clock ~keeper_name ~lease_id = function
+  | Deferred { rejection } ->
+    log_deferred_turn ~keeper_name rejection;
+    finalize_or_warn state ~keeper_name ~lease_id
+      (Keeper_chat_queue.Mark_failed
+         { completed_at = Eio.Time.now clock
+         ; kind = Keeper_chat_queue.Internal_error
+         ; detail = "queued turn deferred after its admission claim committed"
+         ; outcome_ref = None
+         })
+  | Delivered { outcome_ref } ->
+    finalize_or_warn state ~keeper_name ~lease_id
+      (finalization_of_delivered ~clock ~outcome_ref)
+  | Failed { kind; detail; outcome_ref } ->
+    finalize_or_warn state ~keeper_name ~lease_id
+      (finalization_of_failed ~clock ~kind ~detail ~outcome_ref)
+
+let reconcile_claim_failure ~keeper_name error =
+  match error with
+  | (Keeper_chat_queue.Persist_failed
+       { publication =
+           ( Keeper_chat_queue.Not_published
+           | Keeper_chat_queue.Lease_indeterminate _ )
+       ; _
+       }
+    | Keeper_chat_queue.Snapshot_unavailable
+        { kind = Durability_uncertain; _ }) ->
+    (match Keeper_chat_queue.reconcile_persistence ~keeper_name with
+     | Ok report ->
+       Log.Keeper.info
+         "keeper_chat_consumer: reconciled failed receipt claim keeper=%s revision=%Ld"
+         keeper_name
+         report.revision;
+       Ok ()
+     | Error reconciliation_error ->
+       Log.Keeper.error
+         "keeper_chat_consumer: receipt claim reconciliation failed keeper=%s claim_error=%s reconciliation_error=%s"
+         keeper_name
+         (Keeper_chat_queue.mutation_error_to_string error)
+         (Keeper_chat_queue.mutation_error_to_string reconciliation_error);
+       Error reconciliation_error)
+  | _ ->
+    Log.Keeper.error
+      "keeper_chat_consumer: receipt claim failed without a retryable persistence transition keeper=%s error=%s"
+      keeper_name
+      (Keeper_chat_queue.mutation_error_to_string error);
+    Error error
+
+let run_observed_turn state ~sw ~clock ~handle_turn ~keeper_name observation =
+  let item = Keeper_chat_queue.pending_observation_item observation in
+  let receipt_ids =
+    Keeper_chat_delivery_identity.Receipt_ids.singleton item.receipt_id
+  in
+  let claim = ref Claim_not_attempted in
+  Preclaim_retry.begin_attempt ~base_path:state.base_path ~keeper_name;
+  let rec claim_observation ~may_retry observation =
+    match Keeper_chat_queue.lease_observed observation with
+    | `Leased lease -> Ok lease
+    | `Stale stale -> Error (`Stale stale)
+    | `Error error when may_retry ->
+      (match reconcile_claim_failure ~keeper_name error with
+       | Error _ -> Error (`Failed error)
+       | Ok () ->
+         (match Keeper_chat_queue.observe_pending ~keeper_name with
+          | Error retry_error -> Error (`Failed retry_error)
+          | Ok None -> Error `No_longer_pending
+          | Ok (Some retry_observation) ->
+            let retry_item =
+              Keeper_chat_queue.pending_observation_item retry_observation
+            in
+            if
+              Keeper_chat_queue.Receipt_id.equal
+                retry_item.receipt_id
+                item.receipt_id
+            then claim_observation ~may_retry:false retry_observation
+            else Error `No_longer_pending))
+    | `Error error ->
+      (* The one retry is the delivery-attempt bound, not a license to leave
+         the lane quarantined when that retry also has uncertain durability.
+         Reconcile the persistence state once more, but do not lease a third
+         time in this turn. A later explicit wake owns the next attempt. *)
+      (* See [reconcile_claim_failure]: it logs errors before this returns the original. *)
+      ignore (reconcile_claim_failure ~keeper_name error : (unit, _) result);
+      Error (`Failed error)
+  in
+  let on_admitted () =
+    Preclaim_retry.clear ~base_path:state.base_path ~keeper_name;
+    match !claim with
+    | Claim_not_attempted ->
+      (match claim_observation ~may_retry:true observation with
+       | Ok lease ->
+         claim := Claim_leased lease;
+         Ok ()
+       | Error (`Stale stale) ->
+         claim := Claim_stale stale;
+         Error (claim_error_to_string !claim)
+       | Error `No_longer_pending ->
+         claim := Claim_no_longer_pending;
+         Error (claim_error_to_string !claim)
+       | Error (`Failed error) ->
+         claim := Claim_failed error;
+         Error (claim_error_to_string !claim))
+    | Claim_leased _
+    | Claim_stale _
+    | Claim_no_longer_pending
+    | Claim_failed _ ->
+      Error (claim_error_to_string !claim)
+  in
+  let arm_preclaim_retry () =
+    if Preclaim_retry.arm ~base_path:state.base_path ~keeper_name
+    then notify_transition ~keeper_name
+  in
+  let outcome =
+    match
+      handle_turn
+        ~sw
+        ~keeper_name
+        ~receipt_ids
+        ~queued_message:item.message
+        ~on_admitted
+    with
+    | outcome -> `Returned outcome
+    | exception (Eio.Cancel.Cancelled _ as exn) ->
+      (match !claim with
+       | Claim_leased { lease_id; _ } ->
+         Eio.Cancel.protect (fun () ->
+             cancel_claimed_or_warn state ~clock ~keeper_name ~lease_id)
+       | Claim_not_attempted
+       | Claim_stale _
+       | Claim_no_longer_pending
+       | Claim_failed _ ->
+         ());
+      raise exn
+    | exception exn -> `Raised exn
+  in
+  match !claim, outcome with
+  | Claim_leased { lease_id; _ }, `Returned outcome ->
+    finalize_claimed_outcome state ~clock ~keeper_name ~lease_id outcome
+  | Claim_leased { lease_id; _ }, `Raised exn ->
+    let detail = Printexc.to_string exn in
+    Log.Keeper.error
+      "keeper_chat_consumer: admitted handle_turn raised for keeper=%s: %s; recording a terminal internal_error receipt"
+      keeper_name
+      detail;
+    finalize_or_warn state ~keeper_name ~lease_id
+      (Keeper_chat_queue.Mark_failed
+         { completed_at = Eio.Time.now clock
+         ; kind = Keeper_chat_queue.Internal_error
+         ; detail
+         ; outcome_ref = None
+         })
+  | Claim_not_attempted, `Returned (Deferred { rejection }) ->
+    arm_preclaim_retry ();
+    log_deferred_turn ~keeper_name rejection
+  | Claim_not_attempted, (`Returned (Delivered _ | Failed _) | `Raised _) ->
+    arm_preclaim_retry ();
+    Log.Keeper.error
+      "keeper_chat_consumer: queued handler completed without invoking its admission claim keeper=%s receipt_id=%s; receipt remains Pending"
+      keeper_name
+      (Keeper_chat_queue.Receipt_id.to_string item.receipt_id)
+  | (Claim_stale _ | Claim_no_longer_pending), _ ->
+    Log.Keeper.info
+      "keeper_chat_consumer: pending observation changed before admission keeper=%s receipt_id=%s; re-observing lane"
+      keeper_name
+      (Keeper_chat_queue.Receipt_id.to_string item.receipt_id);
+    notify_transition ~keeper_name
+  | Claim_failed error, _ ->
+    Log.Keeper.error
+      "keeper_chat_consumer: exact receipt claim failed after one reconciled retry keeper=%s receipt_id=%s error=%s; receipt remains Pending until the next explicit lane transition"
+      keeper_name
+      (Keeper_chat_queue.Receipt_id.to_string item.receipt_id)
+      (Keeper_chat_queue.mutation_error_to_string error)
 
 let run ~sw ~clock ~base_path ~handle_turn =
   let dispatch_state = create_dispatch_state ~base_path in
@@ -526,7 +677,7 @@ let run ~sw ~clock ~base_path ~handle_turn =
     match Keeper_chat_queue.lane_status ~keeper_name with
     | Error _ as error -> error
     | Ok { health = Keeper_chat_queue.Ready; has_active; _ } ->
-      Ok (Dispatchable has_active)
+      Ok (Dispatchable { has_active })
     | Ok
         { health =
             Keeper_chat_queue.Delivery_recovery_required
@@ -555,7 +706,7 @@ let run ~sw ~clock ~base_path ~handle_turn =
          (match Keeper_chat_queue.lane_status ~keeper_name with
           | Error _ as error -> error
           | Ok { health = Keeper_chat_queue.Ready; has_active; _ } ->
-            Ok (Dispatchable has_active)
+            Ok (Dispatchable { has_active })
           | Ok
               { health =
                   Keeper_chat_queue.Delivery_recovery_required
@@ -582,70 +733,20 @@ let run ~sw ~clock ~base_path ~handle_turn =
                     revision
               }))
   in
-  let dispatch_lease keeper_name
-      ({ Keeper_chat_queue.lease_id; item } : Keeper_chat_queue.lease) =
-    let queued = item.message in
-      let delivery_key =
-        [ item.receipt_id ]
-        |> Keeper_chat_delivery_identity.Receipt_ids.of_list
-        |> Result.map (fun receipt_ids ->
-          Keeper_chat_delivery_identity.Queue_receipts receipt_ids)
-        |> Result.map_error
-             Keeper_chat_delivery_identity.Receipt_ids.error_to_string
-      in
-      let admission =
-        Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
-      in
-      (match
-         admission.snapshot_in_flight,
-         admission.snapshot_shutdown_operation_id
-       with
-       | Some _, _ | _, Some _ ->
-         nack_or_warn dispatch_state ~keeper_name ~lease_id;
-         release keeper_name
-       | None, None ->
-         (match delivery_key with
-          | Error detail ->
-            finalize_or_warn dispatch_state ~keeper_name ~lease_id
-              (Keeper_chat_queue.Mark_failed
-                 { completed_at = Eio.Time.now clock
-                 ; kind = Keeper_chat_queue.Internal_error
-                 ; detail
-                 ; outcome_ref = None
-                 });
-            release keeper_name
-          | Ok delivery_key ->
-            (try
-               dispatch_queued_turn dispatch_state ~sw ~clock ~handle_turn
-                 ~keeper_name ~lease_id ~delivery_key ~queued
-             with
-             | Eio.Cancel.Cancelled _ as exception_ ->
-               Eio.Cancel.protect (fun () ->
-                   nack_or_warn dispatch_state ~keeper_name ~lease_id);
-               release keeper_name;
-               raise exception_
-             | exception_ ->
-               nack_or_warn dispatch_state ~keeper_name ~lease_id;
-               release keeper_name;
-               Log.Keeper.warn
-                 "keeper_chat_consumer: dispatch fork failed for keeper=%s: %s"
-                 keeper_name
-                 (Printexc.to_string exception_))))
-  in
   let inspect_keeper keeper_name =
     try
       match ready_lane_activity keeper_name with
       | Error error ->
-        remember_blocked_lease dispatch_state ~keeper_name ~error;
         Log.Keeper.error
-          "keeper_chat_consumer: lane state unavailable keeper=%s error=%s; lane is persistence_blocked until explicit operator reconciliation or another durable transition"
+          "keeper_chat_consumer: lane state unavailable keeper=%s error=%s; inspection is deferred until a later transition"
           keeper_name
           (Keeper_chat_queue.mutation_error_to_string error);
         release keeper_name
       | Ok _ when retry_pending_finalization dispatch_state ~keeper_name ->
+        Preclaim_retry.clear ~base_path:dispatch_state.base_path ~keeper_name;
         release keeper_name
       | Ok (Awaiting_delivery_recovery evidence) ->
-        clear_blocked_lease dispatch_state ~keeper_name;
+        Preclaim_retry.clear ~base_path:dispatch_state.base_path ~keeper_name;
         Log.Keeper.warn
           "keeper_chat_consumer: lane awaits explicit delivery recovery keeper=%s receipt_id=%s lease_id=%s started_at=%.06f"
           keeper_name
@@ -653,47 +754,29 @@ let run ~sw ~clock ~base_path ~handle_turn =
           evidence.lease_id
           evidence.started_at;
         release keeper_name
-      | Ok (Dispatchable false) ->
-        clear_blocked_lease dispatch_state ~keeper_name;
+      | Ok (Dispatchable { has_active = false; _ }) ->
+        Preclaim_retry.clear ~base_path:dispatch_state.base_path ~keeper_name;
         release keeper_name
-      | Ok (Dispatchable true) ->
-        clear_blocked_lease dispatch_state ~keeper_name;
-        let admission =
-          Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
-        in
-        (match
-           admission.snapshot_in_flight,
-           admission.snapshot_shutdown_operation_id
-         with
-         | Some _, _ | _, Some _ -> release keeper_name
-         | None, None ->
-           (match Keeper_chat_queue.lease_next ~keeper_name with
-            | `Empty -> release keeper_name
-            | `Already_leased _ -> release keeper_name
-            | `Recovery_required evidence ->
-              Log.Keeper.warn
-                "keeper_chat_consumer: lease boundary observed explicit delivery recovery keeper=%s receipt_id=%s lease_id=%s started_at=%.06f"
-                keeper_name
-                (Keeper_chat_queue.Receipt_id.to_string evidence.receipt_id)
-                evidence.lease_id
-                evidence.started_at;
-              release keeper_name
-            | `Error
-                (Keeper_chat_queue.Persist_failed
-                   { publication = Lease_indeterminate _; _ } as error)
-            | `Error
-                (Keeper_chat_queue.Snapshot_unavailable
-                   { kind = Durability_uncertain; _ } as error) ->
-              reconcile_published_transition ~keeper_name error;
-              release keeper_name
-            | `Error error ->
-              remember_blocked_lease dispatch_state ~keeper_name ~error;
-              Log.Keeper.warn
-                "keeper_chat_consumer: lease_next failed for keeper=%s: %s; lane is persistence_blocked until explicit operator reconciliation or another durable transition"
-                keeper_name
-                (Keeper_chat_queue.mutation_error_to_string error);
-              release keeper_name
-            | `Leased lease -> dispatch_lease keeper_name lease))
+      | Ok (Dispatchable { has_active = true }) ->
+        (match Keeper_chat_queue.observe_pending ~keeper_name with
+         | Error error ->
+           Log.Keeper.warn
+             "keeper_chat_consumer: pending head observation failed for keeper=%s: %s; inspection waits for the next explicit lane transition"
+             keeper_name
+             (Keeper_chat_queue.mutation_error_to_string error);
+           release keeper_name
+         | Ok None ->
+           Preclaim_retry.clear ~base_path:dispatch_state.base_path ~keeper_name;
+           release keeper_name
+         | Ok (Some observation) ->
+           run_observed_turn
+             dispatch_state
+             ~sw
+             ~clock
+             ~handle_turn
+             ~keeper_name
+             observation;
+           release keeper_name)
     with
     | Eio.Cancel.Cancelled _ as exception_ ->
       release keeper_name;
@@ -727,4 +810,8 @@ let run ~sw ~clock ~base_path ~handle_turn =
     Eio.Fiber.yield ();
     wake_loop ()
   in
-  wake_loop ()
+  Preclaim_retry.clear_base_path dispatch_state.base_path;
+  Fun.protect
+    ~finally:(fun () ->
+      Preclaim_retry.clear_base_path dispatch_state.base_path)
+    wake_loop

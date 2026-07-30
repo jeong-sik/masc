@@ -76,6 +76,18 @@ type lease = {
   item : leased_message;
 }
 
+type pending_observation
+(** Immutable observation of the exact FIFO head while it is still [Pending].
+    It carries the queue revision internally for stale-claim diagnostics.
+    [lease_observed] claims only the receipt and payload selected before turn
+    admission. *)
+
+type pending_claim_stale =
+  { receipt_id : Receipt_id.t
+  ; expected_revision : int64
+  ; observed_revision : int64
+  }
+
 type recovery_evidence = {
   receipt_id : Receipt_id.t;
   lease_id : string;
@@ -113,11 +125,6 @@ type persistence_publication =
       ; lease_id : string
       }
   | Finalize_indeterminate of
-      { revision : int64
-      ; receipt_id : Receipt_id.t
-      ; lease_id : string
-      }
-  | Nack_indeterminate of
       { revision : int64
       ; receipt_id : Receipt_id.t
       ; lease_id : string
@@ -253,14 +260,25 @@ val enqueue_with_receipt :
     An existing terminal receipt returns [Receipt_already_terminal]; terminal
     rows never retain message bodies and are never overwritten or redispatched. *)
 
-val lease_next :
-  keeper_name:string ->
+val observe_pending :
+  keeper_name:string -> (pending_observation option, mutation_error) result
+(** Observe the exact FIFO head without changing its durable [Pending] state.
+    Returns [None] when the lane has no dispatchable pending head, including
+    while an inflight or recovery-required receipt owns delivery. *)
+
+val pending_observation_item : pending_observation -> leased_message
+
+val lease_observed :
+  pending_observation ->
   [ `Leased of lease
-  | `Empty
-  | `Already_leased of string
-  | `Recovery_required of recovery_evidence
+  | `Stale of pending_claim_stale
   | `Error of mutation_error
   ]
+(** Claim an observed receipt only when it is still the [Pending] FIFO head.
+    Appending receipts behind that head does not invalidate the observation.
+    The transition to [Inflight] is atomic. [`Stale] performs no mutation;
+    callers should re-observe after the durable transition that invalidated
+    the observation. *)
 
 (** Atomically finalize the receipt in the matching lease. Terminal records
     retain correlation metadata but discard message bodies and attachments. *)
@@ -269,16 +287,6 @@ val finalize :
   lease_id:string ->
   outcome:finalization ->
   [ `Finalized of Receipt_id.t
-  | `Unknown_lease
-  | `Error of mutation_error
-  ]
-
-(** Return the receipt in the matching lease to [Pending], preserving its id
-    and FIFO position. *)
-val nack :
-  keeper_name:string ->
-  lease_id:string ->
-  [ `Requeued of Receipt_id.t
   | `Unknown_lease
   | `Error of mutation_error
   ]
@@ -302,7 +310,7 @@ type lane_status = {
 }
 
 (** O(1), memory-only hot-path projection. Consumers should use this instead
-    of materializing [snapshot] before [lease_next]. *)
+    of materializing [snapshot] before [observe_pending]. *)
 val lane_status : keeper_name:string -> (lane_status, mutation_error) result
 
 val snapshot : keeper_name:string -> diagnostic_snapshot
@@ -350,7 +358,9 @@ val reconcile_persistence :
     retained transaction plan. A pre-publication projection is replayed; a
     published projection is verified; an uncertain lease is compensated to
     [Pending]. Any third state remains a typed [Reconciliation_failed] conflict
-    for explicit operator action. *)
+    for explicit operator action. Reconciliation itself emits no queue wake:
+    its owning consumer continues from the returned state, so an internal
+    projection repair cannot create a retry loop. *)
 
 type recovery_cancellation =
   { cancelled_at : float

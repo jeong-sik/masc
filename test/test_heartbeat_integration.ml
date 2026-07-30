@@ -1892,9 +1892,8 @@ let test_keeper_shutdown_store_isolates_corrupt_owner () =
            (Shutdown_types.Operation_id.equal
               corrupt_operation.operation_id
               operation_id)
-       | `Busy (Masc.Keeper_turn_admission.Turn_busy _)
-       | `Busy (Masc.Keeper_turn_admission.Chat_backlog _)
-       | `Ran () -> fail "corrupt owner admission was reopened");
+       | `Busy (Masc.Keeper_turn_admission.Turn_busy _) | `Ran () ->
+         fail "corrupt owner admission was reopened");
       match Shutdown_runtime.recover_operation ~config recoverable_operation with
       | Ok recovered ->
         check bool
@@ -2347,9 +2346,7 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
            "shutdown admission fence retains operation identity"
            true
            (Shutdown_types.Operation_id.equal operation.operation_id operation_id)
-      | `Busy (Masc.Keeper_turn_admission.Turn_busy _)
-      | `Busy (Masc.Keeper_turn_admission.Chat_backlog _)
-      | `Ran () ->
+      | `Busy (Masc.Keeper_turn_admission.Turn_busy _) | `Ran () ->
          fail "shutdown admission fence reopened before finalization"))
 
 let test_keeper_shutdown_prepare_joins_not_started_lane () =
@@ -2462,11 +2459,7 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
       | `Busy (Masc.Keeper_turn_admission.Turn_busy _) ->
         fail
           "failed shutdown prepare left the keeper admission fence closed: \
-           Turn_busy owns the slot"
-      | `Busy (Masc.Keeper_turn_admission.Chat_backlog _) ->
-        fail
-          "failed shutdown prepare left the keeper admission fence closed: \
-           chat backlog fences the slot")
+           Turn_busy owns the slot")
 
 let install_pending_summary ~base_path ~keeper_name ~bind_exact =
   Approval_queue.For_testing.reset_runtime_state ();
@@ -2910,9 +2903,8 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
        | `Busy (Masc.Keeper_turn_admission.Shutdown_requested reserved) ->
          check bool "pending receipt retains exact admission owner" true
            (Shutdown_types.Operation_id.equal operation_id reserved)
-       | `Busy (Masc.Keeper_turn_admission.Turn_busy _)
-       | `Busy (Masc.Keeper_turn_admission.Chat_backlog _)
-       | `Ran () -> fail "pending completion reopened admission");
+       | `Busy (Masc.Keeper_turn_admission.Turn_busy _) | `Ran () ->
+         fail "pending completion reopened admission");
       Masc.Keeper_turn_admission.For_testing.reset ();
       let boot_inventory =
         match Shutdown_store.scan_inventory ~config with
@@ -2940,9 +2932,8 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
        | `Busy (Masc.Keeper_turn_admission.Shutdown_requested reserved) ->
          check bool "boot-restored fence keeps exact completion owner" true
            (Shutdown_types.Operation_id.equal operation_id reserved)
-       | `Busy (Masc.Keeper_turn_admission.Turn_busy _)
-       | `Busy (Masc.Keeper_turn_admission.Chat_backlog _)
-       | `Ran () -> fail "boot recovery reopened pending completion admission");
+       | `Busy (Masc.Keeper_turn_admission.Turn_busy _) | `Ran () ->
+         fail "boot recovery reopened pending completion admission");
       Shutdown_finalize.register_completion_handler
         Tombstone_cleanup.handle_completion;
       let finalized =

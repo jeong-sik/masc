@@ -11,9 +11,9 @@
    These tests run the production Keeper_chat_consumer control loop against an
    autonomous driver on the same slot. The provider call is the only thing
    replaced: handle_turn calls Keeper_turn_admission.run_serialized, which is
-   what the production handler reaches (keeper_chat_consumer.ml run_leased_turn
-   -> server_bootstrap_loops.ml handle_turn -> ... -> keeper_turn.ml
-   handle_keeper_invocation -> run_serialized).
+   what the production handler reaches (keeper_chat_consumer.ml observes
+   Pending -> server_bootstrap_loops.ml handle_turn -> process_single_turn ->
+   keeper_turn.ml handle_keeper_invocation -> run_serialized -> exact claim).
 
    The starvation cases pin that every queued receipt is admitted. The FIFO
    case additionally compares the exact receipt delivery keys and contents in
@@ -83,8 +83,9 @@ let message content =
   ; user_row_origin = Keeper_chat_store.Already_persisted_upstream
   }
 
-(* Wire the same transition observers the runtime installs, so the consumer is
-   edge-woken on durable queue mutations and on turn-slot release. *)
+(* Wire the same transition observers the runtime installs. Durable queue
+   mutations wake the consumer; release and shutdown rollback re-arm only a
+   Pending receipt whose current attempt has not reached its exact claim. *)
 let install_observers ~base =
   let canonical = Keeper_registry_types.canonical_base_path_exn base in
   Keeper_chat_queue.set_transition_observer
@@ -93,9 +94,16 @@ let install_observers ~base =
           Keeper_chat_consumer.notify_transition ~keeper_name));
   Keeper_turn_admission.set_slot_transition_observer
     (Some
-       (fun ~base_path ~keeper_name ~transition:_ ->
+       (fun ~base_path ~keeper_name ~transition ->
           if String.equal base_path canonical
-          then Keeper_chat_consumer.notify_transition ~keeper_name))
+          then
+            match transition with
+            | Keeper_turn_admission.Shutdown_rolled_back
+            | Keeper_turn_admission.Turn_released ->
+              Keeper_chat_consumer.notify_slot_transition
+                ~base_path
+                ~keeper_name
+          ))
 
 exception Budget_reached
 
@@ -124,15 +132,33 @@ let run_contention ~base ~clock ~gap_seconds =
     max_active_turns := max !max_active_turns !active_turns;
     Fun.protect ~finally:(fun () -> decr active_turns) body
   in
-  let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key ~queued_message =
+  let handle_turn
+      ~sw:_
+      ~keeper_name:_
+      ~receipt_ids
+      ~queued_message
+      ~on_admitted =
+    let delivery_key =
+      Keeper_chat_delivery_identity.Queue_receipts receipt_ids
+    in
     match
       Keeper_turn_admission.run_serialized ~base_path:base ~keeper_name
         (fun () ->
-           with_active_turn (fun () ->
-             admitted := (delivery_key, queued_message) :: !admitted;
-             Eio.Time.sleep clock (turn_seconds /. 2.)))
+           match on_admitted () with
+           | Error detail ->
+             Keeper_chat_consumer.Failed
+               { kind = Keeper_chat_queue.Internal_error
+               ; detail
+               ; outcome_ref = None
+               }
+           | Ok () ->
+             with_active_turn (fun () ->
+               admitted := (delivery_key, queued_message) :: !admitted;
+               Eio.Time.sleep clock (turn_seconds /. 2.));
+             Keeper_chat_consumer.Delivered
+               { outcome_ref = "contention-turn" })
     with
-    | `Ran () -> Keeper_chat_consumer.Delivered { outcome_ref = "contention-turn" }
+    | `Ran outcome -> outcome
     | `Rejected rejection -> Keeper_chat_consumer.Deferred { rejection }
   in
   (try
@@ -186,26 +212,6 @@ let run_contention ~base ~clock ~gap_seconds =
   ; max_active_turns = !max_active_turns
   }
 
-let test_back_to_back_autonomous_does_not_starve_chat () =
-  Printf.printf
-    "Test: back-to-back autonomous turns do not starve the queue consumer\n%!";
-  with_env (fun ~base ~clock ->
-    let result = run_contention ~base ~clock ~gap_seconds:0. in
-    check "every receipt was enqueued" (List.length result.enqueued = receipt_count);
-    check
-      (Printf.sprintf
-         "every receipt was admitted (%d/%d)"
-         (List.length result.admitted)
-         receipt_count)
-      (List.length result.admitted = receipt_count);
-    (* The driver must actually have contended, otherwise the test proves
-       nothing about contention. *)
-    check
-      (Printf.sprintf
-         "autonomous lane ran during the test (%d turns)"
-         result.autonomous_turns)
-      (result.autonomous_turns > 0))
-
 let test_heartbeat_shaped_autonomous_does_not_starve_chat () =
   Printf.printf
     "Test: heartbeat-shaped autonomous cycles do not starve the queue consumer\n%!";
@@ -243,14 +249,9 @@ let test_receipts_are_admitted_in_fifo_order () =
     let expected_delivery_keys =
       List.map
         (fun ((receipt : Keeper_chat_queue.enqueue_receipt), _) ->
-           match
-             Keeper_chat_delivery_identity.Receipt_ids.of_list
-               [ receipt.Keeper_chat_queue.receipt_id ]
-           with
-           | Ok receipt_ids ->
-             Keeper_chat_delivery_identity.Queue_receipts receipt_ids
-           | Error Keeper_chat_delivery_identity.Receipt_ids.Empty ->
-             failwith "singleton receipt id list cannot be empty")
+           Keeper_chat_delivery_identity.Queue_receipts
+             (Keeper_chat_delivery_identity.Receipt_ids.singleton
+                receipt.Keeper_chat_queue.receipt_id))
         result.enqueued
     in
     let admitted_delivery_keys = List.map fst result.admitted in
@@ -264,14 +265,145 @@ let test_receipts_are_admitted_in_fifo_order () =
     check "every receipt content is admitted in FIFO order"
       (expected_contents = admitted_contents);
     check "every exact receipt delivery key is admitted in FIFO order" keys_match;
+    (* The driver must actually have contended, otherwise the test proves
+       nothing about autonomous overtaking. *)
+    check
+      (Printf.sprintf
+         "autonomous lane ran during the FIFO test (%d turns)"
+         result.autonomous_turns)
+      (result.autonomous_turns > 0);
     check "chat and autonomous turns never overlap in the slot"
       (result.max_active_turns = 1))
 
+let test_queued_server_turn_has_no_second_durable_request () =
+  Printf.printf
+    "Test: queued server turn reaches exact claim without a second durable request\n%!";
+  with_env (fun ~base ~clock ->
+    Keeper_msg_async.For_testing.clear ();
+    Fun.protect
+      ~finally:Keeper_msg_async.For_testing.clear
+      (fun () ->
+         let claim_count = ref 0 in
+         let continuation_channel =
+           Keeper_continuation_channel.dashboard
+             ~thread_id:"queued-inline-boundary"
+           |> function
+           | Ok channel -> channel
+           | Error detail -> failwith detail
+         in
+         let payload :
+             Server_routes_http_keeper_stream.keeper_chat_stream_request =
+           { name = keeper_name
+           ; message = "queued inline boundary"
+           ; user_blocks = []
+           ; turn_instructions = None
+           ; surface_context = None
+           ; channel = ""
+           ; channel_user_id = ""
+           ; channel_user_name = ""
+           ; channel_workspace_id = ""
+           ; attachments = []
+           }
+         in
+         let receipt_id =
+           match Keeper_chat_queue.enqueue ~keeper_name (message payload.message) with
+           | Ok receipt -> receipt.Keeper_chat_queue.receipt_id
+           | Error error ->
+             failwith (Keeper_chat_queue.mutation_error_to_string error)
+         in
+         let receipt_ids =
+           Keeper_chat_delivery_identity.Receipt_ids.singleton receipt_id
+         in
+         let state = Mcp_server.For_testing.create_state ~base_path:base in
+         let outcome =
+           Eio.Switch.run (fun execution_sw ->
+             Server_routes_http_keeper_stream.process_single_turn
+               ~user_row_origin:Keeper_chat_store.Already_persisted_upstream
+               ~submission:
+                 (Queued_receipt
+                    { receipt_ids
+                    ; claim =
+                        (fun () ->
+                           incr claim_count;
+                           Error "synthetic exact-claim refusal")
+                    ; execution_sw
+                    })
+               ~state
+               ~clock
+               ~auth_token:None
+               ~thread_id:"queued-inline-boundary"
+               ~continuation_channel
+               ~closed:(ref false)
+               ~client_disconnects:None
+               ~payload
+               ~run_id:"queued-inline-run"
+               ~message_id:"queued-inline-message"
+               ~agent_name:keeper_name
+               ~submitted_by:keeper_name
+               ~events:(Keeper_chat_events.create ()))
+         in
+         check "exact Pending claim callback ran once" (!claim_count = 1);
+         check "claim refusal leaves no queued turn outcome" (outcome = None);
+         check
+           "claim refusal leaves the durable receipt Pending"
+           (match Keeper_chat_queue.lookup_receipt ~keeper_name ~receipt_id with
+            | Ok
+                { receipt =
+                    Some { state = Keeper_chat_queue.Pending; _ }
+                ; _
+                } ->
+              true
+            | Ok _ | Error _ -> false);
+         check
+           "claim refusal emits no transcript effect"
+           (Keeper_chat_store.load ~base_dir:base ~keeper_name = []);
+         check
+           "queued server turn reserved no durable async request id"
+           (Keeper_msg_async.For_testing.reserved_request_id_count () = 0);
+         check
+           "queued server turn owns no durable async request switch"
+           (Keeper_msg_async.For_testing.active_switch_count () = 0);
+         let invalid_claim_count = ref 0 in
+         let invalid_payload = { payload with name = "" } in
+         let invalid_outcome =
+           Eio.Switch.run (fun execution_sw ->
+             Server_routes_http_keeper_stream.process_single_turn
+               ~user_row_origin:Keeper_chat_store.Already_persisted_upstream
+               ~submission:
+                 (Queued_receipt
+                    { receipt_ids
+                    ; claim =
+                        (fun () ->
+                           incr invalid_claim_count;
+                           Ok ())
+                    ; execution_sw
+                    })
+               ~state
+               ~clock
+               ~auth_token:None
+               ~thread_id:"queued-pre-claim-rejection"
+               ~continuation_channel
+               ~closed:(ref false)
+               ~client_disconnects:None
+               ~payload:invalid_payload
+               ~run_id:"queued-pre-claim-run"
+               ~message_id:"queued-pre-claim-message"
+               ~agent_name:keeper_name
+               ~submitted_by:keeper_name
+               ~events:(Keeper_chat_events.create ()))
+         in
+         check "pre-claim rejection never invokes the claim callback"
+           (!invalid_claim_count = 0);
+         check "pre-claim rejection leaves no queued turn outcome"
+           (invalid_outcome = None);
+         check "pre-claim rejection emits no transcript effect"
+           (Keeper_chat_store.load ~base_dir:base ~keeper_name:"" = [])))
+
 let () =
   Printf.printf "=== keeper chat/autonomous admission contention ===\n%!";
-  test_back_to_back_autonomous_does_not_starve_chat ();
   test_heartbeat_shaped_autonomous_does_not_starve_chat ();
   test_receipts_are_admitted_in_fifo_order ();
+  test_queued_server_turn_has_no_second_durable_request ();
   if !failures > 0
   then (
     Printf.printf "\n%d check(s) failed\n%!" !failures;

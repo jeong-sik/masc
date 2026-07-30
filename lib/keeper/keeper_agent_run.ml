@@ -657,8 +657,8 @@ let run_turn
     let receipt_response_text_present_ref =
       s.Keeper_run_tools.receipt_response_text_present_ref
     in
-    let request_wire_observation_ref = ref None in
-    let request_input_messages_ref = ref None in
+    let request_evidence_ref = ref None in
+    let current_request_input_messages_ref = ref None in
     let source_model_input_projection =
       s.Keeper_run_tools.model_input_projection
     in
@@ -676,9 +676,9 @@ let run_turn
              ~projected_messages
          with
          | Some provider_content ->
-           request_input_messages_ref := Some provider_content
+           current_request_input_messages_ref := Some provider_content
          | None ->
-           request_input_messages_ref := None;
+           current_request_input_messages_ref := None;
            Log.Keeper.warn
              "turn input composition unavailable: keeper=%s trace=%s \
               reason=model_input_projection_rewrote_prefix"
@@ -872,11 +872,12 @@ let run_turn
                              ~runtime_id
                              ~max_request_body_bytes
                              ~body_bytes;
-                           request_wire_observation_ref :=
+                           request_evidence_ref :=
                              Some
-                               { Turn_record.runtime_profile = runtime_id
-                               ; body_bytes
-                               })
+                               ( { Turn_record.runtime_profile = runtime_id
+                                 ; body_bytes
+                                 }
+                               , !current_request_input_messages_ref ))
                       ())
          in
          (* Trace-store failure isolation: [raw_trace_for_dispatch]
@@ -920,14 +921,14 @@ let run_turn
                  in
                  let usage = Keeper_context_runtime.usage_of_response result.response in
                  let ctx_composition =
-                   match !request_input_messages_ref with
-                   | Some input_messages ->
+                   match !request_evidence_ref with
+                   | Some (_, Some input_messages) ->
                      Keeper_agent_prompt_metrics.build_ctx_composition_metrics
                        ~prompt_blocks:acc.prompt_blocks
                        ~tools
                        ~input_messages
                        ~actual_input_tokens:(Some usage.input_tokens)
-                   | None ->
+                   | Some (_, None) | None ->
                      { Keeper_agent_prompt_metrics.actual_input_tokens =
                          (if usage.input_tokens > 0
                           then Some usage.input_tokens
@@ -1149,17 +1150,17 @@ let run_turn
         in
         let input_components =
           let segments =
-            match turn_result, !request_input_messages_ref with
+            match turn_result, !request_evidence_ref with
             | Ok result, _ ->
               result.Keeper_agent_result.ctx_composition.segments
-            | Error _, Some input_messages ->
+            | Error _, Some (_, Some input_messages) ->
               (Keeper_agent_prompt_metrics.build_ctx_composition_metrics
                  ~prompt_blocks:acc.prompt_blocks
                  ~tools
                  ~input_messages
                  ~actual_input_tokens:None)
                 .segments
-            | Error _, None -> []
+            | Error _, (Some (_, None) | None) -> []
           in
           List.map
             (fun
@@ -1185,7 +1186,7 @@ let run_turn
           ~price_output_per_million
           ~request_latency_ms
           ~ttfrc_ms
-          ~request_wire_observation:!request_wire_observation_ref
+          ~request_wire_observation:(Option.map fst !request_evidence_ref)
           ~sampling:
             { temperature = Some temperature
             ; top_p = Runtime.top_p_of_runtime_id runtime_id_string

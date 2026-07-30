@@ -48,7 +48,7 @@ type t =
   ; keeper : string
   ; trace_id : string
   ; absolute_turn : int
-  ; turn_ref : Ids.Turn_ref.t option
+  ; turn_ref : Ids.Turn_ref.t
   ; blocks : prompt_block list
   ; input_components : input_component list
   ; runtime_profile : string
@@ -111,6 +111,7 @@ let to_json (r : t) : Yojson.Safe.t =
      ; ("keeper", `String r.keeper)
      ; ("trace_id", `String r.trace_id)
      ; ("absolute_turn", `Int r.absolute_turn)
+     ; ("turn_ref", Ids.Turn_ref.to_yojson r.turn_ref)
      ; ("blocks", `List (List.map prompt_block_to_json r.blocks))
      ; ( "input_components"
        , `List (List.map input_component_to_json r.input_components) )
@@ -118,7 +119,6 @@ let to_json (r : t) : Yojson.Safe.t =
      ; "request_runtime_profile", request_runtime_profile
      ; "request_body_bytes", request_body_bytes
      ]
-    @ opt_field "turn_ref" Ids.Turn_ref.to_yojson r.turn_ref
     @ opt_field "model" (fun v -> `String v) r.model
     @ opt_field "finish_reason" (fun v -> `String v) r.finish_reason
     @ opt_field "context_window" (fun v -> `Int v) r.context_window
@@ -206,7 +206,8 @@ let prompt_block_of_json (json : Yojson.Safe.t) : (prompt_block, string) result 
       let* bytes = as_int "bytes" bytes_json in
       let* digest_json = require "digest" fields in
       let* digest = as_string "digest" digest_json in
-      Ok { block = Prompt_block_id.of_string block_name; bytes; digest }
+      let* block = Prompt_block_id.of_string block_name in
+      Ok { block; bytes; digest }
   | _ -> Error "turn_record: block entry is not an object"
 
 let input_component_id_of_string token =
@@ -232,14 +233,9 @@ let input_component_id_of_string token =
           (String.length prefix)
           (String.length token - String.length prefix)
       in
-      (match
-         List.find_opt
-           (fun known ->
-              Prompt_block_id.equal known (Prompt_block_id.of_string name))
-           Prompt_block_id.all_known
-       with
-       | Some block -> Ok (Prompt_block block)
-       | None ->
+      (match Prompt_block_id.of_string name with
+       | Ok block -> Ok (Prompt_block block)
+       | Error _ ->
          Error
            (Printf.sprintf
               "turn_record: unknown input component %S"
@@ -295,6 +291,16 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
       let* trace_id = as_string "trace_id" trace_json in
       let* turn_json = require "absolute_turn" fields in
       let* absolute_turn = as_int "absolute_turn" turn_json in
+      let* turn_ref_json = require "turn_ref" fields in
+      let* turn_ref = as_turn_ref "turn_ref" turn_ref_json in
+      let expected_turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn in
+      let* () =
+        if Ids.Turn_ref.equal turn_ref expected_turn_ref
+        then Ok ()
+        else
+          Error
+            "turn_record: turn_ref does not match trace_id and absolute_turn"
+      in
       let* blocks_json = require "blocks" fields in
       let* blocks =
         match blocks_json with
@@ -326,7 +332,6 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             "turn_record: request_runtime_profile and request_body_bytes must \
              both be present or both be null"
       in
-      let* turn_ref = opt_member "turn_ref" fields as_turn_ref in
       let* model = opt_member "model" fields as_string in
       let* finish_reason = opt_member "finish_reason" fields as_string in
       let* context_window = opt_member "context_window" fields as_int in

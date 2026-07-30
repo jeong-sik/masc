@@ -24,7 +24,7 @@ let write
     ; keeper = keeper_name
     ; trace_id
     ; absolute_turn
-    ; turn_ref = Some (Ids.Turn_ref.make ~trace_id ~absolute_turn)
+    ; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn
     ; blocks
     ; input_components
     ; runtime_profile

@@ -1800,6 +1800,58 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(invalidateDashboardCache).not.toHaveBeenCalled()
   })
 
+  it('keeps an empty continuation checkpoint as a delivered typed status', async () => {
+    streamKeeperMessage.mockImplementation(emitting([
+      { type: 'RUN_STARTED' },
+      {
+        type: 'CUSTOM',
+        name: 'KEEPER_CONTINUATION_CHECKPOINT',
+        value: {
+          message: 'Continuation checkpoint saved; keeper remains scheduled.',
+        },
+      },
+      { type: 'RUN_FINISHED' },
+    ], true))
+
+    await sendKeeperThreadMessage('echo', '계속 진행해')
+
+    const reply = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
+    expect(reply?.delivery).toBe('delivered')
+    expect(reply?.text).toBe('')
+    expect(reply?.blocks).toEqual([
+      { t: 'status', kind: 'continuation_checkpoint' },
+    ])
+    expect(reply?.error).toBeNull()
+    expect(keeperActionErrors.value.echo).toBeNull()
+  })
+
+  it('keeps a checkpoint with tool calls free of tool-only placeholder text', async () => {
+    streamKeeperMessage.mockImplementation(emitting([
+      { type: 'RUN_STARTED' },
+      { type: 'TOOL_CALL_START', toolCallId: 'tc-1', toolCallName: 'keeper_board_list' },
+      { type: 'TOOL_CALL_END', toolCallId: 'tc-1' },
+      {
+        type: 'CUSTOM',
+        name: 'KEEPER_CONTINUATION_CHECKPOINT',
+        value: {
+          message: 'Continuation checkpoint saved; keeper remains scheduled.',
+        },
+      },
+      { type: 'RUN_FINISHED' },
+    ], true))
+
+    await sendKeeperThreadMessage('echo', '계속 진행해')
+
+    const reply = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
+    expect(reply?.delivery).toBe('delivered')
+    expect(reply?.text).toBe('')
+    expect(reply?.blocks).toEqual([
+      { t: 'status', kind: 'continuation_checkpoint' },
+    ])
+    expect(reply?.error).toBeNull()
+    expect(keeperActionErrors.value.echo).toBeNull()
+  })
+
   it('keeps a busy server-accepted message queued after RUN_FINISHED', async () => {
     fetchKeeperChatReceipt.mockResolvedValue({
       keeperName: 'echo',
@@ -2230,6 +2282,56 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     ])
     expect(thread.find(entry => entry.role === 'assistant')?.text).not.toBe('(empty reply)')
     expect(keeperActionErrors.value.echo).toContain('표시할 답변')
+  })
+
+  it('resumes a continuation checkpoint as delivered without assistant prose', async () => {
+    upsertPendingKeeperChatRequest({
+      requestId: 'kmsg_echo_1',
+      keeperName: 'echo',
+      message: '계속 진행해',
+      submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
+    })
+    fetchQueuedKeeperMessageResult.mockResolvedValue({
+      requestId: 'kmsg_echo_1',
+      keeperName: 'echo',
+      status: 'done',
+      ok: true,
+      result: {
+        reply: '',
+        turn_outcome: 'continuation_checkpoint',
+      },
+    })
+    queuedKeeperMessageToReply.mockImplementation(() => ({
+      text: '',
+      details: {
+        traceId: null,
+        turnRef: null,
+        providerMessageId: null,
+        generation: null,
+        modelUsed: null,
+        stopReason: null,
+        latencyMs: null,
+        costUsd: null,
+        usage: null,
+        replyText: null,
+        turnOutcome: 'continuation_checkpoint',
+        rawPayload: {
+          reply: '',
+          turn_outcome: 'continuation_checkpoint',
+        },
+      },
+    }))
+    fetchKeeperChatHistory.mockResolvedValue([])
+
+    await resumePendingKeeperChatRequests('echo')
+
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.map(entry => [entry.role, entry.text, entry.delivery])).toEqual([
+      ['user', '계속 진행해', 'delivered'],
+      ['assistant', '', 'delivered'],
+    ])
+    expect(keeperActionErrors.value.echo).toBeNull()
   })
 
   it('resumes repeated same-message sends as distinct request ids', async () => {

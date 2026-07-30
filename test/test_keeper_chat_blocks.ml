@@ -401,6 +401,21 @@ let test_status_block_roundtrip () =
   | Some _ -> Alcotest.fail "status block changed shape across round-trip"
   | None -> Alcotest.fail "blocks_of_yojson rejected valid status block"
 
+let test_continuation_status_block_roundtrip () =
+  let original = [ B.Status { kind = B.Continuation_checkpoint } ] in
+  match B.blocks_of_yojson (B.blocks_to_yojson original) with
+  | Some [ B.Status { kind = B.Continuation_checkpoint } ] -> ()
+  | Some _ ->
+    Alcotest.fail "continuation status block changed shape across round-trip"
+  | None ->
+    Alcotest.fail "blocks_of_yojson rejected valid continuation status block"
+
+let test_continuation_status_connector_text () =
+  Alcotest.(check string)
+    "continuation status connector text"
+    "작업이 체크포인트에 저장되었습니다. 다음 주기에 이어서 처리합니다."
+    (B.status_kind_connector_text B.Continuation_checkpoint)
+
 (* RFC-0302: the thinking block wire shape is the contract the dashboard
    schema mirrors (t=thinking, content required, redacted omitted when
    false). Pin it so a drift breaks here. *)
@@ -528,6 +543,10 @@ let () =
             test_fusion_block_tolerates_missing_run_id;
           Alcotest.test_case "status block roundtrip" `Quick
             test_status_block_roundtrip;
+          Alcotest.test_case "continuation status block roundtrip" `Quick
+            test_continuation_status_block_roundtrip;
+          Alcotest.test_case "continuation status connector text" `Quick
+            test_continuation_status_connector_text;
           Alcotest.test_case "thinking block roundtrip" `Quick
             test_thinking_block_roundtrip;
           Alcotest.test_case "redacted thinking block roundtrip" `Quick

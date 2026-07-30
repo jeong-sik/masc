@@ -754,13 +754,17 @@ export function applyKeeperStreamEvent(
           : ''
         updateThreadEntry(keeperName, assistantEntryId, entry => ({
           ...entry,
+          blocks: [
+            ...(entry.blocks ?? []).filter(block => block.t !== 'status'),
+            { t: 'status', kind: 'continuation_checkpoint' },
+          ],
           details: {
             ...(entry.details ?? {}),
             turnOutcome: 'continuation_checkpoint',
           },
           text: '',
           rawText: rawText || entry.rawText,
-          delivery: 'queued',
+          delivery: 'delivered',
           streamState: null,
           streamContract: keeperClientObservedSseStreamContract('queue_event', 'queue_request_event', {
             eventName: 'KEEPER_CONTINUATION_CHECKPOINT',

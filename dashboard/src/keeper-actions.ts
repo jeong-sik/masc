@@ -687,7 +687,6 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       }
 
       const reply = queuedKeeperMessageToReply(result)
-      const isCheckpoint = reply.details?.turnOutcome === 'continuation_checkpoint'
       const isNoVisibleReply = reply.details?.turnOutcome === 'no_visible_reply'
       const suppressReply = keeperTurnOutcomeSuppressesReply(reply.details?.turnOutcome)
       const isCancelled = result.status === 'cancelled'
@@ -707,8 +706,6 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       let assistantDelivery: KeeperConversationDelivery = 'delivered'
       if (isCancelled) {
         assistantDelivery = 'cancelled'
-      } else if (isCheckpoint) {
-        assistantDelivery = 'queued'
       } else if (isNoVisibleReply) {
         assistantDelivery = 'error'
       } else if (isError) {
@@ -1707,7 +1704,18 @@ export async function sendKeeperThreadMessage(
       finalEntry?.delivery === 'queued'
         ? 'queued' as KeeperConversationDelivery
         : 'delivered' as KeeperConversationDelivery
-    if (!finalText && finalDelivery !== 'queued' && !toolCallEnded) {
+    const hasContinuationStatus = (
+      finalEntry?.details?.turnOutcome === 'continuation_checkpoint'
+      && finalEntry.blocks?.some(block => (
+        block.t === 'status' && block.kind === 'continuation_checkpoint'
+      )) === true
+    )
+    if (
+      !finalText
+      && finalDelivery !== 'queued'
+      && !toolCallEnded
+      && !hasContinuationStatus
+    ) {
       finalizeAssistantEntry(keeperName, assistantId, {
         text: EMPTY_VISIBLE_REPLY_TEXT,
         rawText: finalEntry?.rawText || EMPTY_VISIBLE_REPLY_TEXT,
@@ -1728,7 +1736,7 @@ export async function sendKeeperThreadMessage(
       return
     }
     let emptyTerminalText = ''
-    if (toolCallEnded) {
+    if (toolCallEnded && !hasContinuationStatus) {
       emptyTerminalText = TOOL_ONLY_EMPTY_REPLY_TEXT
     }
 

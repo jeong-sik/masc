@@ -1064,6 +1064,16 @@ let direct_reply_terminal_error ?(has_visible_blocks = false) payload_json_opt v
 
 let persisted_reply_blocks ~turn_outcome media_blocks =
   match turn_outcome, media_blocks with
+  | Keeper_turn_outcome.Continuation_checkpoint, Some media_blocks ->
+    Some
+      (Keeper_chat_blocks.Status
+         { kind = Keeper_chat_blocks.Continuation_checkpoint }
+       :: media_blocks)
+  | Keeper_turn_outcome.Continuation_checkpoint, None ->
+    Some
+      [ Keeper_chat_blocks.Status
+          { kind = Keeper_chat_blocks.Continuation_checkpoint }
+      ]
   | Keeper_turn_outcome.External_effect_pending, Some media_blocks ->
     Some
       (Keeper_chat_blocks.Status
@@ -1074,9 +1084,8 @@ let persisted_reply_blocks ~turn_outcome media_blocks =
       [ Keeper_chat_blocks.Status
           { kind = Keeper_chat_blocks.External_effect_pending }
       ]
-  | ( Keeper_turn_outcome.Visible_reply
-    | Keeper_turn_outcome.Continuation_checkpoint
-    | Keeper_turn_outcome.No_visible_reply ), media_blocks ->
+  | (Keeper_turn_outcome.Visible_reply | Keeper_turn_outcome.No_visible_reply),
+    media_blocks ->
     media_blocks
 
 type keeper_stream_terminal_status =
@@ -1166,7 +1175,6 @@ and queued_turn_failure_kind =
   | Turn_failed
   | Turn_cancelled
   | No_visible_reply
-  | Continuation_checkpoint_without_reply
   | Missing_turn_ref
   | Transcript_persist_failed
   | Stream_projection_failed
@@ -1333,8 +1341,6 @@ let queued_turn_failure_kind_to_string = function
   | Turn_failed -> "turn_failed"
   | Turn_cancelled -> "turn_cancelled"
   | No_visible_reply -> "no_visible_reply"
-  | Continuation_checkpoint_without_reply ->
-      "continuation_checkpoint_without_reply"
   | Missing_turn_ref -> "missing_turn_ref"
   | Transcript_persist_failed -> "transcript_persist_failed"
   | Stream_projection_failed -> "stream_projection_failed"
@@ -1364,19 +1370,6 @@ let empty_reply_delivery_plan ~queued_turn ~has_visible_blocks ~has_tool_calls =
   then `Tool_calls_only
   else if queued_turn
   then `Failure
-  else `User_only
-
-let continuation_delivery_plan
-      ~has_direct_checkpoint
-      ~has_visible_blocks
-      ~has_tool_calls
-  =
-  if has_visible_blocks
-  then `Assistant_reply
-  else if has_tool_calls
-  then `Tool_calls_only
-  else if has_direct_checkpoint
-  then `No_assistant_reply
   else `User_only
 
 type keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.state
@@ -2252,52 +2245,20 @@ let process_single_turn ~user_row_origin ~submission
                        Ok queued_outcome
                    | Error _ as error -> error
                  in
-                 let broadcast_after_tool_only_persist () =
-                   Keeper_chat_broadcast.chat_appended
-                     ~keeper_name:payload.name ~source:chat_source ();
-                   Ok None
-                 in
                  let turn_outcome = canonical_reply.turn_outcome in
                  let delivery_result =
                    match turn_outcome, String_util.trim_to_option visible_reply with
-                   | Keeper_turn_outcome.Continuation_checkpoint, _ when queued_turn ->
-                       let detail =
-                         "queued turn ended with a continuation checkpoint and no delivered reply"
-                       in
-                       (match persist_failure_reply ?blocks ?turn_ref detail with
-                        | Ok () ->
-                            Ok
-                              (Some
-                                 (Failed
-                                    { kind = Continuation_checkpoint_without_reply
-                                    ; detail
-                                    }))
-                        | Error persist_error -> Error persist_error)
                    | Keeper_turn_outcome.Continuation_checkpoint, _ ->
-                       (match
-                          continuation_delivery_plan
-                            ~has_direct_checkpoint:
-                              (Option.is_some !direct_delivery_checkpoint)
-                            ~has_visible_blocks
-                            ~has_tool_calls:(tool_calls <> [])
-                        with
-                        | `Assistant_reply ->
-                          persist_assistant_reply ~assistant_content:""
-                          |> delivered_after_persist
-                        | `Tool_calls_only ->
-                          Result.bind
-                            (persist_tool_calls_only ())
-                            (fun () -> broadcast_after_tool_only_persist ())
-                        | `No_assistant_reply ->
-                          commit_direct_terminal
-                            ~ok:true
-                            ~body
-                            ~data:payload_json_opt
-                            Keeper_chat_direct_delivery.No_assistant_reply
-                          |> Result.map (fun () -> None)
-                        | `User_only ->
-                          persist_user_message_only ();
-                          Ok None)
+                       (* [persisted_reply_blocks] always returns [Some _] for
+                          [Continuation_checkpoint] (a typed status block), so
+                          [has_visible_blocks] is always true on this arm: a
+                          checkpoint turn always persists a delivered assistant
+                          row with [content = ""] plus the status block —
+                          including turns that also produced tool calls and
+                          turns carrying a direct-delivery checkpoint. There is
+                          no tool-calls-only or user-only continuation path. *)
+                       persist_assistant_reply ~assistant_content:""
+                       |> delivered_after_persist
                    | Keeper_turn_outcome.No_visible_reply, _
                    | Keeper_turn_outcome.Visible_reply, None ->
                        let detail =
@@ -2835,17 +2796,22 @@ let process_single_turn ~user_row_origin ~submission
             Keeper_turn_outcome.equal turn_outcome
               Keeper_turn_outcome.Continuation_checkpoint
           then
-            Keeper_chat_events.publish events
-              (Custom
-                 { name = "KEEPER_CONTINUATION_CHECKPOINT";
-                   value =
-                     `Assoc
-                       (("message", `String visible_reply)
-                        :: (match request_id with
-                            | Some request_id ->
-                                [ ("request_id", `String request_id) ]
-                            | None -> []))
-                 });
+            begin
+              Keeper_chat_events.publish events
+                (Status_block
+                   { kind = Keeper_chat_blocks.Continuation_checkpoint });
+              Keeper_chat_events.publish events
+                (Custom
+                   { name = "KEEPER_CONTINUATION_CHECKPOINT";
+                     value =
+                       `Assoc
+                         (("message", `String visible_reply)
+                          :: (match request_id with
+                              | Some request_id ->
+                                  [ ("request_id", `String request_id) ]
+                              | None -> []))
+                   })
+            end;
           publish_terminal ~status:(Request_stream Stream_done) ();
           Keeper_chat_events.publish events Text_message_end;
           Keeper_chat_events.publish events (Run_finished { run_id });
@@ -3306,7 +3272,6 @@ module For_testing = struct
     queued_delivery_outcome_of_turn_ref
   let committed_delivery_outcome = committed_delivery_outcome
   let empty_reply_delivery_plan = empty_reply_delivery_plan
-  let continuation_delivery_plan = continuation_delivery_plan
   let format_surface_context = format_surface_context
   let surface_context_to_instructions = surface_context_to_instructions
   let keeper_tool_failure_log_details = keeper_tool_failure_log_details

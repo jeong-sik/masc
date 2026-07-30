@@ -621,7 +621,12 @@ let accept_connector ~delivery ~clock ~config ~channel ~channel_user_id
 
 let persist_connector_assistant_reply ~base_dir ~keeper_name ~surface
     ?conversation_id ?turn_ref ?blocks ~reply () =
-  let content = String.trim reply in
+  let has_status =
+    Option.exists
+      (List.exists (function Keeper_chat_blocks.Status _ -> true | _ -> false))
+      blocks
+  in
+  let content = if has_status then "" else String.trim reply in
   let has_blocks =
     match blocks with
     | Some (_ :: _) -> true

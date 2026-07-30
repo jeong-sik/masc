@@ -537,8 +537,9 @@ function normalizeBlocks(raw: unknown, role: KeeperConversationRole): ChatBlock[
         return html ? { t: 'h4', html } : null
       }
       if (t === 'status') {
-        return asString(item.kind) === 'external_effect_pending'
-          ? { t: 'status', kind: 'external_effect_pending' }
+        const kind = asString(item.kind)
+        return kind === 'continuation_checkpoint' || kind === 'external_effect_pending'
+          ? { t: 'status', kind }
           : null
       }
       if (t === 'ul') {

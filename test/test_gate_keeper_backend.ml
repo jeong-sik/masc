@@ -210,7 +210,8 @@ let test_persist_connector_assistant_reply_records_typed_status () =
         Surface_ref.Gate { label = "discord"; address = [] }
       in
       Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
-        ~keeper_name ~surface ~reply:""
+        ~keeper_name ~surface
+        ~reply:"assistant preface that must not survive"
         ~blocks:
           [ Keeper_chat_blocks.Status
               { kind = Keeper_chat_blocks.External_effect_pending }

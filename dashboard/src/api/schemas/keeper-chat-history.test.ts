@@ -36,6 +36,19 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     ])
   })
 
+  it('accepts a typed continuation status block with empty content', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        role: 'assistant',
+        content: '',
+        blocks: [{ t: 'status', kind: 'continuation_checkpoint' }],
+      }),
+    )
+    expect(out?.blocks).toEqual([
+      { t: 'status', kind: 'continuation_checkpoint' },
+    ])
+  })
+
   it('accepts unknown role strings (open enum for backend-ahead deploys)', () => {
     const out = safeParseKeeperChatHistoryMessage(
       validMessage({ role: 'tool-result-v2' }),

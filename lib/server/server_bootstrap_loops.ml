@@ -1910,8 +1910,7 @@ let start_keeper_loops_owned
                    match kind with
                    | Turn_failed -> Keeper_chat_queue.Turn_failed
                    | Turn_cancelled -> Keeper_chat_queue.Cancelled
-                   | No_visible_reply
-                   | Continuation_checkpoint_without_reply ->
+                   | No_visible_reply ->
                        Keeper_chat_queue.No_visible_reply
                    | Missing_turn_ref -> Keeper_chat_queue.Internal_error
                    | Transcript_persist_failed ->

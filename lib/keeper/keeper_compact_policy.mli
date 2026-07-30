@@ -11,15 +11,14 @@ type compaction_rejection =
   | Exact_execution_context_unavailable
   | Exact_execution_authority_absent
   | Exact_execution_authority_rejected
-  | Exact_execution_bind_failed
   | Exact_flow_already_started
-  | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
+  | Exact_execution_terminal of Keeper_compaction_outcome.exact_execution_terminal
   | Invalid_compaction_plan
   | Invalid_structure of Keeper_compaction_unit.structural_error
   | No_eligible_history
   | Invalid_structural_evidence of
       Keeper_compaction_evidence.decode_error
-      * Keeper_event_queue_state.exact_execution_terminal
+      * Keeper_compaction_outcome.exact_execution_terminal
 
 (** [Prepared] is structural only; [Applied] requires a durable save. *)
 type compaction_decision =
@@ -54,7 +53,6 @@ type compaction_preparation =
 val compact_for_request_typed
   :  ?before_dispatch_authority:
        Keeper_compaction_llm_summarizer.before_dispatch_authority
-  -> ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
   -> base_path:string
   -> meta:Keeper_meta_contract.keeper_meta
   -> trigger:Compaction_trigger.t

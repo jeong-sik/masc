@@ -30,10 +30,7 @@ type stimulus_kind =
 type reaction_kind =
   | Turn_started
   | Event_queue_ack
-  | Event_queue_no_compaction
   | Event_queue_cancelled
-  | Event_queue_requeued
-  | Event_queue_escalated
   | Cursor_ack
 
 type reaction_decode_error = Unknown_reaction_kind of string

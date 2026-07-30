@@ -20,79 +20,9 @@ let owner_identity_keeper_name owner =
   Owner_lock.keeper_name owner |> Keeper_id.Keeper_name.to_string
 ;;
 
-type selection_kind = State.selection_kind =
-  | Single
-  | Board_batch
-
-type pending_selection = State.pending_selection =
-  { source_revision : int64
-  ; kind : selection_kind
-  ; stimuli : Keeper_event_queue.stimulus list
-  }
-
-
-type requeue_reason = State.requeue_reason =
-  | Cycle_busy
-  | Turn_not_scheduled
-  | Rotate_now
-  | Cancelled
-  | Cycle_crashed
-  | Registration_recovery
-  | Retry_after_observed
-  | Context_compaction_retry
-
-type exact_execution_terminal_cause = State.exact_execution_terminal_cause =
-  | Exact_execution_failed
-  | Exact_execution_cancelled
-  | Domain_invalid_output
-  | Compaction_produced_no_reduction
-  | Compaction_increased_checkpoint
-  | Invalid_structural_evidence
-  | Invalid_structural_source_after_dispatch
-  | Commit_admission_unavailable
-  | Lifecycle_transition_failed_after_dispatch
-  | Checkpoint_source_changed
-  | Checkpoint_persistence_failed
-  | Terminal_persistence_failed
-
-type exact_execution_terminal = State.exact_execution_terminal =
-  { cause : exact_execution_terminal_cause
-  ; slot_id : string
-  ; call_id : string
-  ; plan_fingerprint : string
-  ; request_body_sha256 : string
-  }
-
 type exact_write_outcome =
   | Fsync_completed
   | Visible_sync_unconfirmed of string
-
-type escalation_reason = State.escalation_reason =
-  | Compaction_exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
-  | Compaction_exact_output_terminal of
-      { source : Keeper_checkpoint_ref.t
-      ; terminal : exact_execution_terminal
-      }
-  | Compaction_retry_exhausted of
-      { attempts : int
-      ; detail : string
-      }
-  | Compaction_floor_exceeded of
-      { attempts : int
-      ; detail : string
-      }
-  | Transcript_corruption_requires_reset of { detail : string }
-
-type no_compaction_reason = State.no_compaction_reason =
-  | No_eligible_history
-  | Invalid_structural_source
-  | Exact_lane_unconfigured
-  | Exact_execution_terminal of exact_execution_terminal
-
-type no_compaction = State.no_compaction =
-  { source : Keeper_checkpoint_ref.t
-  ; reason : no_compaction_reason
-  }
 
 type accepted_cancellation = State.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
@@ -125,20 +55,9 @@ type accepted_source_terminal = State.accepted_source_terminal =
   }
 
 type transition = State.transition =
-  | Ack
-  | Manual_compaction_committed of
-      { commit : State.manual_compaction_commit
-      ; followup : State.manual_compaction_followup
-      }
-  | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
   | Ack_source_terminal of accepted_source_terminal
-  | Requeue of requeue_reason
-  | Escalate of
-      { reason : escalation_reason
-      ; successor : Keeper_event_queue.stimulus option
-      }
 
 type transition_receipt = State.transition_receipt
 type outbox_entry = State.outbox_entry
@@ -157,8 +76,8 @@ type transfer_projection_result = State.transfer_projection_result =
   | Transfer_already_projected
 
 
-let snapshot_filename = "event-queue-v12.json"
-let transition_wal_filename = "event-queue-transitions-v2.jsonl"
+let snapshot_filename = "event-queue-v13.json"
+let transition_wal_filename = "event-queue-transitions-v3.jsonl"
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
 
@@ -380,7 +299,7 @@ let bump_revision state =
   else Ok (State.with_revision (Int64.succ (State.revision state)) state)
 ;;
 
-let transition_wal_schema = "masc.keeper_event_queue.transition.v2"
+let transition_wal_schema = "masc.keeper_event_queue.transition.v3"
 
 let transition_wal_entry_to_line owner entry =
   `Assoc
@@ -547,33 +466,20 @@ let queue_of_stimuli stimuli =
   List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty stimuli
 ;;
 
-(* The current pending-selection protocol has no separate in-flight queue.
-   Keep the empty projection so snapshot/reporting consumers retain their
-   current shape. *)
-let inflight_queue (_ : State.t) = Keeper_event_queue.empty
-
-let replay_queue state =
-  Keeper_event_queue.prepend_list
-    (Keeper_event_queue.to_list (inflight_queue state))
-    (State.pending state)
-  |> Keeper_event_queue.dedup_by_identity
-;;
-
 let load_with_projection ~projection ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map projection
 ;;
 
 let load_result ~base_path ~keeper_name =
-  load_with_projection ~projection:replay_queue ~base_path ~keeper_name
+  load_with_projection ~projection:State.pending ~base_path ~keeper_name
 ;;
 
 let load_pending_result ~base_path ~keeper_name =
-  load_state_result ~base_path ~keeper_name |> Result.map State.pending
+  load_result ~base_path ~keeper_name
 ;;
 
-type snapshot_pair_with_errors =
+type snapshot_with_errors =
   { pending : Keeper_event_queue.t
-  ; inflight : Keeper_event_queue.t
   ; read_errors : snapshot_read_error list
   }
 
@@ -605,13 +511,11 @@ let diagnose_snapshot_read_error ~base_path ~keeper_name message =
      | None -> [ { kind = Parse_failed; path = None; message } ])
 ;;
 
-let load_snapshot_pair_with_errors ~base_path ~keeper_name =
+let load_snapshot_with_errors ~base_path ~keeper_name =
   match load_state_result ~base_path ~keeper_name with
-  | Ok state ->
-    { pending = State.pending state; inflight = inflight_queue state; read_errors = [] }
+  | Ok state -> { pending = State.pending state; read_errors = [] }
   | Error message ->
     { pending = Keeper_event_queue.empty
-    ; inflight = Keeper_event_queue.empty
     ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name message
     }
 ;;
@@ -1218,10 +1122,7 @@ type keeper_summary =
   { keeper_name : string
   ; owner_lifecycle : owner_lifecycle
   ; pending_count : int
-  ; inflight_count : int
   ; pending_oldest : float option
-  ; inflight_oldest : float option
-  ; oldest : float option
   ; outbox_count : int
   ; counts_complete : bool
   ; read_errors : string list
@@ -1242,17 +1143,12 @@ let keeper_summary ~base_path ~owner_lifecycle keeper_name =
   match load_state_result ~base_path ~keeper_name with
   | Ok state ->
     let pending = State.pending state in
-    let inflight = inflight_queue state in
     let pending_oldest = queue_oldest_arrived_at pending in
-    let inflight_oldest = queue_oldest_arrived_at inflight in
     let outbox = State.transition_outbox state in
     { keeper_name
     ; owner_lifecycle
     ; pending_count = Keeper_event_queue.length pending
-    ; inflight_count = Keeper_event_queue.length inflight
     ; pending_oldest
-    ; inflight_oldest
-    ; oldest = min_float_opt pending_oldest inflight_oldest
     ; outbox_count = List.length outbox
     ; counts_complete = lifecycle_read_errors = []
     ; read_errors = lifecycle_read_errors
@@ -1265,10 +1161,7 @@ let keeper_summary ~base_path ~owner_lifecycle keeper_name =
     { keeper_name
     ; owner_lifecycle
     ; pending_count = 0
-    ; inflight_count = 0
     ; pending_oldest = None
-    ; inflight_oldest = None
-    ; oldest = None
     ; outbox_count = 0
     ; counts_complete = false
     ; read_errors = lifecycle_read_errors @ read_errors
@@ -1289,14 +1182,11 @@ let keeper_summary_json ~now (summary : keeper_summary) =
     [ "keeper_name", `String summary.keeper_name
     ; "owner_lifecycle", `String (owner_lifecycle_wire summary.owner_lifecycle)
     ; "pending_count", `Int summary.pending_count
-    ; "inflight_count", `Int summary.inflight_count
-    ; "total_count", `Int (summary.pending_count + summary.inflight_count)
-    ; "oldest_arrived_at_unix", json_of_float_opt summary.oldest
-    ; "oldest_age_seconds", age_seconds_json ~now summary.oldest
+    ; "total_count", `Int summary.pending_count
+    ; "oldest_arrived_at_unix", json_of_float_opt summary.pending_oldest
+    ; "oldest_age_seconds", age_seconds_json ~now summary.pending_oldest
     ; "pending_oldest_arrived_at_unix", json_of_float_opt summary.pending_oldest
     ; "pending_oldest_age_seconds", age_seconds_json ~now summary.pending_oldest
-    ; "inflight_oldest_arrived_at_unix", json_of_float_opt summary.inflight_oldest
-    ; "inflight_oldest_age_seconds", age_seconds_json ~now summary.inflight_oldest
     ; "transition_outbox_count", `Int summary.outbox_count
     ; "counts_complete", `Bool summary.counts_complete
     ; "read_errors", `List (List.map (fun message -> `String message) summary.read_errors)
@@ -1311,27 +1201,17 @@ let compact_pending_count_json ~now (summary : keeper_summary) =
     ]
 ;;
 
-let compact_inflight_count_json ~now (summary : keeper_summary) =
-  `Assoc
-    [ "keeper_name", `String summary.keeper_name
-    ; "inflight_count", `Int summary.inflight_count
-    ; "oldest_age_seconds", age_seconds_json ~now summary.inflight_oldest
-    ]
-;;
-
 let compact_backlog_count_json ~now (summary : keeper_summary) =
   `Assoc
     [ "keeper_name", `String summary.keeper_name
     ; "pending_count", `Int summary.pending_count
-    ; "inflight_count", `Int summary.inflight_count
-    ; "total_count", `Int (summary.pending_count + summary.inflight_count)
-    ; "oldest_age_seconds", age_seconds_json ~now summary.oldest
+    ; "total_count", `Int summary.pending_count
+    ; "oldest_age_seconds", age_seconds_json ~now summary.pending_oldest
     ]
 ;;
 
 type backlog_summary =
   { pending_count : int
-  ; inflight_count : int
   ; oldest : float option
   ; keepers : keeper_summary list
   }
@@ -1344,19 +1224,14 @@ let backlog_summary ~matches summaries =
       0
       keepers
   in
-  let inflight_count =
-    List.fold_left
-      (fun total (summary : keeper_summary) -> total + summary.inflight_count)
-      0
-      keepers
-  in
   let oldest =
     List.fold_left
-      (fun oldest (summary : keeper_summary) -> min_float_opt oldest summary.oldest)
+      (fun oldest (summary : keeper_summary) ->
+         min_float_opt oldest summary.pending_oldest)
       None
       keepers
   in
-  { pending_count; inflight_count; oldest; keepers }
+  { pending_count; oldest; keepers }
 ;;
 
 let fleet_summary_json ~now ~base_path ~owner_lifecycle =
@@ -1370,12 +1245,6 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
       0
       summaries
   in
-  let inflight_count =
-    List.fold_left
-      (fun total (summary : keeper_summary) -> total + summary.inflight_count)
-      0
-      summaries
-  in
   let outbox_count =
     List.fold_left
       (fun total (summary : keeper_summary) -> total + summary.outbox_count)
@@ -1384,7 +1253,8 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
   in
   let oldest =
     List.fold_left
-      (fun oldest (summary : keeper_summary) -> min_float_opt oldest summary.oldest)
+      (fun oldest (summary : keeper_summary) ->
+         min_float_opt oldest summary.pending_oldest)
       None
       summaries
   in
@@ -1473,13 +1343,13 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
   let operator_action_required =
     read_errors <> []
     || outbox_count > 0
-    || recoverable.pending_count + recoverable.inflight_count > 0
-    || retained_disabled.pending_count + retained_disabled.inflight_count > 0
-    || paused_dead.pending_count + paused_dead.inflight_count > 0
-    || shutdown_fenced.pending_count + shutdown_fenced.inflight_count > 0
+    || recoverable.pending_count > 0
+    || retained_disabled.pending_count > 0
+    || paused_dead.pending_count > 0
+    || shutdown_fenced.pending_count > 0
   in
   `Assoc
-    [ "schema", `String "masc.keeper_event_queue.fleet_summary.v2"
+    [ "schema", `String "masc.keeper_event_queue.fleet_summary.v3"
     ; "status", `String (if operator_action_required then "degraded" else "ok")
     ; "operator_action_required", `Bool operator_action_required
     ; "base_path", `String projection_base_path
@@ -1488,39 +1358,31 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
     ; "keeper_count", `Int (List.length discovery.keeper_names)
     ; "keeper_names", `List (List.map (fun name -> `String name) discovery.keeper_names)
     ; "pending_count", `Int pending_count
-    ; "inflight_count", `Int inflight_count
-    ; "total_count", `Int (pending_count + inflight_count)
+    ; "total_count", `Int pending_count
     ; "transition_outbox_count", `Int outbox_count
     ; "counts_complete", `Bool counts_complete
     ; "oldest_arrived_at_unix", json_of_float_opt oldest
     ; "oldest_age_seconds", age_seconds_json ~now oldest
     ; "runnable_pending_count", `Int runnable.pending_count
-    ; "runnable_inflight_count", `Int runnable.inflight_count
-    ; "runnable_backlog_count", `Int (runnable.pending_count + runnable.inflight_count)
+    ; "runnable_backlog_count", `Int runnable.pending_count
     ; "runnable_oldest_arrived_at_unix", json_of_float_opt runnable.oldest
     ; "runnable_oldest_age_seconds", age_seconds_json ~now runnable.oldest
     ; ( "runnable_by_keeper"
       , `List
           (runnable.keepers
-           |> List.filter (fun (summary : keeper_summary) ->
-             summary.pending_count + summary.inflight_count > 0)
+           |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
     ; "recoverable_pending_count", `Int recoverable.pending_count
-    ; "recoverable_inflight_count", `Int recoverable.inflight_count
-    ; ( "recoverable_backlog_count"
-      , `Int (recoverable.pending_count + recoverable.inflight_count) )
+    ; "recoverable_backlog_count", `Int recoverable.pending_count
     ; "recoverable_oldest_arrived_at_unix", json_of_float_opt recoverable.oldest
     ; "recoverable_oldest_age_seconds", age_seconds_json ~now recoverable.oldest
     ; ( "recoverable_by_keeper"
       , `List
           (recoverable.keepers
-           |> List.filter (fun (summary : keeper_summary) ->
-             summary.pending_count + summary.inflight_count > 0)
+           |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
     ; "retained_disabled_pending_count", `Int retained_disabled.pending_count
-    ; "retained_disabled_inflight_count", `Int retained_disabled.inflight_count
-    ; ( "retained_disabled_backlog_count"
-      , `Int (retained_disabled.pending_count + retained_disabled.inflight_count) )
+    ; "retained_disabled_backlog_count", `Int retained_disabled.pending_count
     ; ( "retained_disabled_oldest_arrived_at_unix"
       , json_of_float_opt retained_disabled.oldest )
     ; ( "retained_disabled_oldest_age_seconds"
@@ -1528,25 +1390,19 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
     ; ( "retained_disabled_by_keeper"
       , `List
           (retained_disabled.keepers
-           |> List.filter (fun (summary : keeper_summary) ->
-             summary.pending_count + summary.inflight_count > 0)
+           |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
     ; "paused_dead_pending_count", `Int paused_dead.pending_count
-    ; "paused_dead_inflight_count", `Int paused_dead.inflight_count
-    ; ( "paused_dead_backlog_count"
-      , `Int (paused_dead.pending_count + paused_dead.inflight_count) )
+    ; "paused_dead_backlog_count", `Int paused_dead.pending_count
     ; "paused_dead_oldest_arrived_at_unix", json_of_float_opt paused_dead.oldest
     ; "paused_dead_oldest_age_seconds", age_seconds_json ~now paused_dead.oldest
     ; ( "paused_dead_by_keeper"
       , `List
           (paused_dead.keepers
-           |> List.filter (fun (summary : keeper_summary) ->
-             summary.pending_count + summary.inflight_count > 0)
+           |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
     ; "shutdown_fenced_pending_count", `Int shutdown_fenced.pending_count
-    ; "shutdown_fenced_inflight_count", `Int shutdown_fenced.inflight_count
-    ; ( "shutdown_fenced_backlog_count"
-      , `Int (shutdown_fenced.pending_count + shutdown_fenced.inflight_count) )
+    ; "shutdown_fenced_backlog_count", `Int shutdown_fenced.pending_count
     ; ( "shutdown_fenced_oldest_arrived_at_unix"
       , json_of_float_opt shutdown_fenced.oldest )
     ; ( "shutdown_fenced_oldest_age_seconds"
@@ -1554,30 +1410,22 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
     ; ( "shutdown_fenced_by_keeper"
       , `List
           (shutdown_fenced.keepers
-           |> List.filter (fun (summary : keeper_summary) ->
-             summary.pending_count + summary.inflight_count > 0)
+           |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
     ; "unclassified_pending_count", `Int unclassified.pending_count
-    ; "unclassified_inflight_count", `Int unclassified.inflight_count
-    ; "unclassified_count", `Int (unclassified.pending_count + unclassified.inflight_count)
+    ; "unclassified_count", `Int unclassified.pending_count
     ; "unclassified_oldest_arrived_at_unix", json_of_float_opt unclassified.oldest
     ; "unclassified_oldest_age_seconds", age_seconds_json ~now unclassified.oldest
     ; ( "unclassified_by_keeper"
       , `List
           (unclassified.keepers
-           |> List.filter (fun (summary : keeper_summary) ->
-             summary.pending_count + summary.inflight_count > 0)
+           |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
     ; ( "pending_by_keeper"
       , `List
           (summaries
            |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_pending_count_json ~now)) )
-    ; ( "inflight_by_keeper"
-      , `List
-          (summaries
-           |> List.filter (fun (summary : keeper_summary) -> summary.inflight_count > 0)
-           |> List.map (compact_inflight_count_json ~now)) )
     ; "read_error_count", `Int (List.length read_errors)
     ; "read_errors", `List read_errors
     ; "keepers", `List (List.map (keeper_summary_json ~now) summaries)

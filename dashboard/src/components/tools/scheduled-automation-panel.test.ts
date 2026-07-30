@@ -477,7 +477,6 @@ describe('ScheduledAutomationPanel', () => {
           schedule_id: 'sched-keeper-wake',
           post_id: 'schedule-due:sched-keeper-wake',
           pending_count: 1,
-          inflight_count: 0,
           matched_bucket: 'pending',
           matched_post_id: 'schedule-due:sched-keeper-wake',
           matched_schedule_id: 'sched-keeper-wake',
@@ -572,53 +571,6 @@ describe('ScheduledAutomationPanel', () => {
     expect(v2ReactionEvidence?.textContent).toContain('matched stimulus')
 
     const wakeRequest = auto.requests[0]!
-    const inflightAuto = automation([
-      {
-        ...wakeRequest,
-        schedule_id: 'sched-keeper-wake',
-        keeper_queue_evidence: {
-          ...wakeRequest.keeper_queue_evidence!,
-          projection_status: 'matched_inflight',
-          pending_count: 0,
-          inflight_count: 1,
-          matched_bucket: 'inflight',
-        },
-        keeper_reaction_evidence: {
-          ...wakeRequest.keeper_reaction_evidence!,
-          projection_status: 'matched_turn_started',
-          turn_started_seen: true,
-          matched_record_count: 2,
-          turn_started_recorded_at: 202,
-          turn_started_recorded_at_iso: '2026-06-21T00:03:22Z',
-          latest_recorded_at: 202,
-          latest_recorded_at_iso: '2026-06-21T00:03:22Z',
-        },
-      },
-    ])
-
-    render(null, container)
-    render(html`<${ScheduledAutomationPanel} automation=${inflightAuto} variant="v2" />`, container)
-
-    const inflightDoneFilter = container.querySelector('[data-schedule-filter="done"]') as HTMLButtonElement
-    inflightDoneFilter.click()
-    await Promise.resolve()
-
-    const openInflightDetail = container.querySelector('[data-schedule-detail="sched-keeper-wake"]') as HTMLButtonElement
-    openInflightDetail.click()
-    await Promise.resolve()
-
-    const inflightQueueEvidence = container.querySelector('[data-schedule-keeper-queue-evidence="matched_inflight"]')
-    expect(inflightQueueEvidence).not.toBeNull()
-    expect(inflightQueueEvidence?.textContent).toContain('matched inflight')
-    expect(inflightQueueEvidence?.textContent).toContain('inflight_count')
-    expect(inflightQueueEvidence?.textContent).toContain('1')
-    expect(inflightQueueEvidence?.textContent).toContain('inflight')
-    const turnReactionEvidence = container.querySelector('[data-schedule-keeper-reaction-evidence="matched_turn_started"]')
-    expect(turnReactionEvidence).not.toBeNull()
-    expect(turnReactionEvidence?.textContent).toContain('matched turn started')
-    expect(turnReactionEvidence?.textContent).toContain('turn_started')
-    expect(turnReactionEvidence?.textContent).toContain('true')
-
     const ackedAuto = automation([
       {
         ...wakeRequest,
@@ -627,7 +579,6 @@ describe('ScheduledAutomationPanel', () => {
           ...wakeRequest.keeper_queue_evidence!,
           projection_status: 'not_found',
           pending_count: 0,
-          inflight_count: 0,
           matched_bucket: undefined,
           matched_post_id: undefined,
           matched_schedule_id: undefined,

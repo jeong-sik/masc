@@ -63,7 +63,7 @@ import { Tools } from './tools-main'
 
 function waitingInventoryFixture(): DashboardKeeperWaitingInventory {
   return {
-    schema: 'masc.dashboard.keeper_waiting_inventory.v2',
+    schema: 'masc.dashboard.keeper_waiting_inventory.v3',
     source: 'server_keeper_waiting_inventory',
     keeper_count_known: true,
     keeper_count: 1,

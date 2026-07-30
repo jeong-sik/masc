@@ -96,7 +96,7 @@ val validate_provider_transcript
 val interrupted_tool_result_content : string
 (** SSOT for the body of a synthesized closer. States that the call was issued,
     that no result was recorded, and that whether it took effect is unknown —
-    masc has no per-tool-call settlement authority to consult. *)
+    masc has no durable per-tool-call effect receipt to consult. *)
 
 type tail_closure =
   { messages : Agent_sdk.Types.message list

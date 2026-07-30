@@ -186,11 +186,6 @@ let test_event_queue_pending_is_visible () =
   @@ fun config ->
   let keeper_name = "waiting-inventory-keeper" in
   ensure_keeper config keeper_name;
-  (* This case also asserted an in-flight row: it claimed a lease over a second
-     stimulus so the inventory would report source=event_queue_inflight. #25969
-     moved production to peek/ack, no caller can claim a lease, and the
-     in-flight projection is therefore always empty. The pending half is
-     unchanged and still exercises the dashboard projection. *)
   let pending =
     stimulus ~post_id:"pending-1" ~arrived_at:100.0 Keeper_event_queue.Bootstrap
   in
@@ -212,7 +207,7 @@ let test_event_queue_pending_is_visible () =
        Otel_metric_store.metric_keeper_waiting_age_seconds
        ~labels:[ "scope", "keeper"; "source", "event_queue_pending" ]
      > 0.0);
-  check string "schema" "masc.dashboard.keeper_waiting_inventory.v2"
+  check string "schema" "masc.dashboard.keeper_waiting_inventory.v3"
     (json_string_member "schema" json);
   check int "one keeper" 1 (json_int_member "keeper_count" json);
   check int "one waiting keeper" 1 (json_int_member "waiting_keeper_count" json);
@@ -1000,7 +995,7 @@ let test_unavailable_pending_approval_store_is_read_error () =
 let () =
   run "keeper_waiting_inventory"
     [ ( "dashboard_json"
-      , [ test_case "event queue pending and inflight are visible" `Quick
+      , [ test_case "event queue pending is visible" `Quick
             test_event_queue_pending_is_visible
         ; test_case "manual compaction producer is typed" `Quick
             test_manual_compaction_waiting_row_has_typed_producer

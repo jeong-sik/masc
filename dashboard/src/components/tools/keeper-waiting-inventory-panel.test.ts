@@ -8,20 +8,19 @@ import { KeeperLaneInventoryPanel, KeeperWaitingInventoryPanel } from './keeper-
 
 function inventoryFixture(): DashboardKeeperWaitingInventory {
   return {
-    schema: 'masc.dashboard.keeper_waiting_inventory.v2',
+    schema: 'masc.dashboard.keeper_waiting_inventory.v3',
     source: 'server_keeper_waiting_inventory',
     generated_at: '2026-07-04T00:00:00Z',
     supported_states: ['idle', 'busy', 'waiting', 'deferred'],
     keeper_count_known: true,
     keeper_count: 4,
     waiting_keeper_count: 3,
-    row_count: 6,
+    row_count: 5,
     global_row_count: 1,
     global_pending_confirm_count_known: true,
     global_pending_confirm_count: 1,
     source_counts: {
       event_queue_pending: 1,
-      event_queue_inflight: 1,
       chat_queue_inflight: 1,
       chat_queue_recovery_required: 1,
       schedule_waiting: 1,
@@ -32,10 +31,9 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
       {
         keeper_name: 'sangsu',
         state: 'waiting',
-        waiting_count: 4,
+        waiting_count: 3,
         sources: {
           event_queue_pending: 1,
-          event_queue_inflight: 1,
           chat_queue_inflight: 1,
           chat_queue_recovery_required: 1,
         },
@@ -47,14 +45,6 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
             wake_producer: 'keeper_supervisor',
             since_iso: '2026-07-04T00:00:00Z',
             next_action: 'keeper_drain_event_queue',
-          },
-          {
-            keeper_name: 'sangsu',
-            source: 'event_queue_inflight',
-            waiting_on: 'bootstrap',
-            wake_producer: 'keeper_supervisor',
-            since_iso: '2026-07-04T00:01:00Z',
-            next_action: 'recover_inflight_turn',
           },
           {
             keeper_name: 'sangsu',

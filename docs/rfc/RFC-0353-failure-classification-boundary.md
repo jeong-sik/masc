@@ -22,7 +22,7 @@
 
 **공통점**: 재시도 가능성이 타입이 아니라 (a) catch-all, (b) 문자열 관례(`"retryable …"`), (c) 다른 축과의 결합(`InvalidRequest` 하나가 재시도와 회전을 동시에 차단)으로 결정된다.
 
-† **#25443 은 형태 A 가 아니다 (2026-07-21 재분류).** 초안은 이 행을 "재시도 가능성이 타입에서 소실" 로 분류했으나, 코드 확인 결과 typed 구분이 끝까지 보존된다: `keeper_compact_policy.ml:335-343` 이 `Provider_unavailable` / `Invalid_plan` / `Structurally_unchanged` 를 분리하고, `Structurally_unchanged` 는 `keeper_event_queue_state` 까지 typed 로 round-trip 한다. `No_compaction _` settlement 은 `state.pending` 을 변경하지 않으므로 event queue 의 requeue 도 아니다. 실제 순환은 **오버플로 해소 경로가 compaction 하나뿐**이라 다음 턴이 다시 오버플로에 도달하는 것으로 보인다(미확인). 본 RFC 의 범위 밖이며 #25430(tool block 보존 invariant) 축에서 다뤄야 한다. 행을 삭제하지 않고 남기는 이유는, 같은 증상이 형태 A 로 오분류되기 쉽다는 점 자체가 §2 의 근거이기 때문이다.
+† **#25443 은 형태 A 가 아니다 (2026-07-21 재분류, 2026-07-30 current-state 정정).** typed rejection 구분은 compaction domain 안에서 보존되며 event queue는 pending source와 ACK만 소유한다. `No_compaction`과 compaction outcome을 위한 queue transition이나 decoder는 없다. reactive retry ceiling은 `Keeper_post_turn` admission에서 I/O 전에 판단하고, 실제 attempt outcome만 `Keeper_meta_store.persist_compaction_outcome`으로 streak에 반영한다. 행을 삭제하지 않고 남기는 이유는 같은 증상이 형태 A로 오분류되기 쉽다는 점 자체가 §2의 근거이기 때문이다.
 
 ### 1.2 형태 B — 실패 사유가 소실 → 진단 불가, 이어서 로그 강등으로 은폐
 

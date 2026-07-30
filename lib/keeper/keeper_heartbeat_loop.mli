@@ -58,7 +58,7 @@ type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
-  pending_selection : Keeper_registry_event_queue.pending_selection option;
+  pending_selection : Keeper_event_queue.stimulus option;
   event_queue_intake_error :
     Keeper_heartbeat_stimulus_intake.event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
@@ -127,8 +127,8 @@ val keepalive_cycle_accounting :
 (** Outcome of one keepalive cycle evaluation.
 
     [Turn_cycle_crashed] means the cycle's catch-all swallowed an exception to
-    keep the keeper fiber alive (T6 audit), or a durable event-queue
-    claim/settlement did not commit. The failure has already been recorded via
+    keep the keeper fiber alive (T6 audit), or a durable event-queue transition
+    did not commit. The failure has already been recorded via
     [Keeper_registry.increment_turn_failures], so the caller dispatches
     [Turn_failed]. [Turn_cycle_busy] preserves its typed admission reason and
     must not dispatch either turn status or refresh the work-as-heartbeat
@@ -148,7 +148,7 @@ val record_crashed_cycle_failure :
 val compaction_outcome_of_cycle_outcome :
   Keeper_heartbeat_loop_cycle.cycle_outcome option ->
   [ `Committed | `Overflow_episode_committed | `Failed | `Recovered ] option
-(** Pure mapping from a settled cycle outcome to the compaction-streak stamp
+(** Pure mapping from a cycle outcome to the compaction-streak stamp
     ([Keeper_meta_store.persist_compaction_outcome]). Manual-lane
     applied/failed outcomes and in-lane provider-overflow dispositions join
     the same per-keeper streak. The streak counts consecutive

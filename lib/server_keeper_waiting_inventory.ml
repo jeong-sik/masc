@@ -1,6 +1,5 @@
 type waiting_source =
   | Event_queue_pending
-  | Event_queue_inflight
   | Chat_queue_pending
   | Chat_queue_inflight
   | Chat_queue_recovery_required
@@ -55,7 +54,6 @@ let external_attention_dashboard_row_limit = 64
 
 let source_to_string = function
   | Event_queue_pending -> "event_queue_pending"
-  | Event_queue_inflight -> "event_queue_inflight"
   | Chat_queue_pending -> "chat_queue_pending"
   | Chat_queue_inflight -> "chat_queue_inflight"
   | Chat_queue_recovery_required -> "chat_queue_recovery_required"
@@ -73,7 +71,6 @@ let source_to_string = function
 
 let all_waiting_sources =
   [ Event_queue_pending
-  ; Event_queue_inflight
   ; Chat_queue_pending
   ; Chat_queue_inflight
   ; Chat_queue_recovery_required
@@ -219,18 +216,13 @@ let queue_read_error_rows ~keeper_name errors =
 
 let event_queue_rows ~base_path ~keeper_name =
   let snapshot =
-    Keeper_event_queue_persistence.load_snapshot_pair_with_errors ~base_path ~keeper_name
+    Keeper_event_queue_persistence.load_snapshot_with_errors ~base_path ~keeper_name
   in
   rows_for_queue_snapshot
     ~keeper_name
     ~source:Event_queue_pending
     ~next_action:"keeper_drain_event_queue"
     snapshot.pending
-  @ rows_for_queue_snapshot
-      ~keeper_name
-      ~source:Event_queue_inflight
-      ~next_action:"recover_inflight_turn"
-      snapshot.inflight
   @ queue_read_error_rows ~keeper_name snapshot.read_errors
 ;;
 
@@ -1001,7 +993,7 @@ let dashboard_json_with_pending_reader ~read_pending config =
   in
   record_metrics ~now ~per_keeper ~global_rows;
   `Assoc
-    [ "schema", `String "masc.dashboard.keeper_waiting_inventory.v2"
+    [ "schema", `String "masc.dashboard.keeper_waiting_inventory.v3"
     ; "source", `String "server_keeper_waiting_inventory"
     ; "generated_at", `String (Masc_domain.now_iso ())
     ; "supported_states", `List (List.map (fun value -> `String value) [ "idle"; "busy"; "waiting"; "deferred" ])

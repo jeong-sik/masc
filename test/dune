@@ -1969,7 +1969,7 @@
 (include stanzas/test_keeper_post_turn_wirein_order.inc)
 (include stanzas/test_keeper_request_wire_observation.inc)
 
-(include stanzas/test_keeper_compaction_settlement_counters.inc)
+(include stanzas/test_keeper_compaction_outcome_counters.inc)
 
 (include stanzas/test_otel_histogram_bucket_labels.inc)
 

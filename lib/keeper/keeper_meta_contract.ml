@@ -47,23 +47,19 @@ type compaction_runtime =
   ; last_check_ts : float
   ; last_decision : compaction_runtime_decision
   ; consecutive_failures : int
-    (* RFC-0351 S0 / #25461: consecutive compaction-failure settlements for
-       this keeper — manual-lane [Manual_compaction_failed] and in-lane
-       provider-overflow recoveries that made no durable progress. Incremented
-       on failure, reset to 0 on a committed compaction from either lane. The
-       heartbeat settlement path escalates instead of requeuing once this
-       reaches [compaction_retry_escalation_threshold]; without it a failing
-       compaction requeues forever (measured: 102 failures / 104 compaction
-       LLM calls in 74 minutes). *)
+    (* RFC-0351 S0 / #25461: consecutive manual-compaction failures and
+       reactive provider-overflow episodes for this keeper. In-lane recovery
+       advances the streak even when it durably compacts, because the retried
+       turn can still overflow at an incompressible floor. An overflow-free
+       completed turn or an operator-committed manual compaction resets it. At
+       the threshold, reactive preparation is refused without advancing the
+       streak again. *)
   }
 
-(* RFC-0351 S0 / #25461: consecutive compaction failures tolerated before the
-   settlement escalates instead of retrying. Defined next to
-   [consecutive_failures] so the heartbeat settlement (manual and in-lane
-   provider-overflow) and the status/dashboard projections that surface the
-   suspended state read one constant. Three attempts keeps a transient
-   CAS/source race recoverable while bounding a structurally-stuck
-   compaction. *)
+(* RFC-0351 S0 / #25461: streak entries tolerated before reactive compaction
+   preparation is refused. Defined next to [consecutive_failures] so admission
+   and the status/dashboard projections that surface the suspended state read
+   one constant. *)
 let compaction_retry_escalation_threshold = 3
 
 let compaction_retry_suspended rt =

@@ -55,8 +55,7 @@ type admitted_operation =
   ]
 
 val run_admitted
-  :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
-  -> ?before_dispatch_authority:
+  :  ?before_dispatch_authority:
        Keeper_compaction_llm_summarizer.before_dispatch_authority
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
@@ -81,8 +80,7 @@ val run_admitted
     stages cannot represent completion. *)
 
 val run_under_admission
-  :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
-  -> ?before_dispatch_authority:
+  :  ?before_dispatch_authority:
        Keeper_compaction_llm_summarizer.before_dispatch_authority
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
@@ -93,13 +91,10 @@ val run_under_admission
 
 val failure_to_string : failure -> string
 val observe_manifest : keeper_name:string -> (unit, string) result -> unit
-val queue_commit_of_applied_receipt
-  :  applied_receipt
-  -> Keeper_event_queue_state.manual_compaction_commit
 
 module For_testing : sig
   val preserve_no_compaction_after_final_admission_busy
-    :  Keeper_event_queue_state.no_compaction_reason
+    :  Keeper_compaction_outcome.no_compaction_reason
     -> bool
 
   val checkpoint_installation_auxiliary_to_json :

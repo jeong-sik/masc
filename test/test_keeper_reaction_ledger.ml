@@ -79,9 +79,6 @@ let manual_compaction_stimulus () : Keeper_event_queue.stimulus =
   }
 ;;
 
-(* The retired lease path once produced generic ACK/no-compaction records.
-   Live projection now covers only the three typed pending operations. *)
-
 let check_member_string label expected key json =
   check string label expected (json |> member key |> to_string)
 ;;
@@ -110,7 +107,7 @@ let write_file path content =
 let event_queue_snapshot_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-    "event-queue-v12.json"
+    "event-queue-v13.json"
 ;;
 
 let reaction_ledger_dir ~base_path ~keeper_name =
@@ -127,16 +124,6 @@ let reaction_ledger_store ~base_path ~keeper_name =
   Dated_jsonl.create
     ~base_dir:(reaction_ledger_dir ~base_path ~keeper_name)
     ()
-;;
-
-let retired_reaction_ledger_dir ~base_path ~keeper_name =
-  Filename.concat
-    (Filename.concat
-       (Filename.concat
-          (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
-          keeper_name)
-       "reaction-ledger")
-    "v4"
 ;;
 
 let read_recent_rows ~base_path ~keeper_name ~limit =
@@ -179,42 +166,6 @@ let latest_row rows =
   match List.rev rows with
   | row :: _ -> row
   | [] -> fail "expected at least one reaction ledger row"
-;;
-
-let test_retired_generation_is_not_read () =
-  with_temp_base
-  @@ fun base_path ->
-  let keeper_name = "retired-generation-keeper" in
-  let retired_month =
-    Filename.concat
-      (retired_reaction_ledger_dir ~base_path ~keeper_name)
-      "2026-07"
-  in
-  mkdir_p retired_month;
-  let retired_path = Filename.concat retired_month "29.jsonl" in
-  let retired_bytes =
-    "retired reaction ledger must remain opaque: not-json\000keeper_event_queue_settlement\n"
-  in
-  write_file retired_path retired_bytes;
-  check
-    int
-    "retired generation contributes no current rows"
-    0
-    (List.length (read_recent_rows ~base_path ~keeper_name ~limit:10));
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    (board_stimulus ());
-  check
-    int
-    "current generation receives new rows"
-    1
-    (List.length (read_recent_rows ~base_path ~keeper_name ~limit:10));
-  check
-    string
-    "retired generation is not consumed or rewritten"
-    retired_bytes
-    (In_channel.with_open_bin retired_path In_channel.input_all)
 ;;
 
 let test_event_queue_stimulus_and_turn_reaction () =
@@ -449,9 +400,6 @@ let test_summary_cursor_ack_respects_post_id_tiebreaker () =
     ~base_path
     keeper_name
     (board_stimulus ~post_id:"post-live-backlog-2" ());
-  (* The third stimulus used to be claimed after enqueue so the fixture also
-     carried an in-flight row. No caller can claim since #25969 moved production
-     to peek/ack, so it stays pending and the backlog is entirely pending. *)
   Keeper_registry_event_queue.enqueue
     ~base_path
     keeper_name
@@ -475,8 +423,6 @@ let test_summary_cursor_ack_respects_post_id_tiebreaker () =
     (fleet |> member "durable_event_queue_count" |> to_int);
   check int "durable queue pending backlog counted" 3
     (fleet |> member "durable_event_queue_pending_count" |> to_int);
-  check int "durable queue inflight backlog counted" 0
-    (fleet |> member "durable_event_queue_inflight_count" |> to_int);
   check (float 0.001) "default durable queue stale threshold preserves prior behavior"
     0.0
     (fleet |> member "durable_event_queue_stale_after_sec" |> to_float);
@@ -496,8 +442,6 @@ let test_summary_cursor_ack_respects_post_id_tiebreaker () =
     (keeper_queue |> member "durable_event_queue_count" |> to_int);
   check int "keeper durable queue pending backlog counted" 3
     (keeper_queue |> member "durable_event_queue_pending_count" |> to_int);
-  check int "keeper durable queue inflight backlog counted" 0
-    (keeper_queue |> member "durable_event_queue_inflight_count" |> to_int);
   check int "keeper immediate durable queue backlog counted" 2
     (keeper_queue |> member "immediate_count" |> to_int);
   check bool "keeper durable queue is stale by default" true
@@ -513,7 +457,7 @@ let test_summary_cursor_ack_respects_post_id_tiebreaker () =
          String.equal (json |> member "payload_kind" |> to_string) "board_signal"
          && json |> member "count" |> to_int = 2)
        payload_counts);
-  check bool "inflight fusion_completed durable payload count is surfaced" true
+  check bool "fusion_completed durable payload count is surfaced" true
     (List.exists
        (fun json ->
          String.equal (json |> member "payload_kind" |> to_string) "fusion_completed"
@@ -579,7 +523,7 @@ let test_fleet_summary_surfaces_durable_event_queue_discovery_error () =
   in
   mkdir_p invalid_keeper_dir;
   write_file
-    (Filename.concat invalid_keeper_dir "event-queue-v12.json")
+    (Filename.concat invalid_keeper_dir "event-queue-v13.json")
     (Yojson.Safe.to_string (Keeper_event_queue.queue_to_yojson Keeper_event_queue.empty));
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
@@ -705,7 +649,7 @@ let test_fleet_summary_surfaces_durable_event_queue_parse_error () =
   let keeper_name = "parse-broken-durable-queue-keeper" in
   let path = event_queue_snapshot_path ~base_path ~keeper_name in
   mkdir_p (Filename.dirname path);
-  write_file path {|{"schema":"keeper.event_queue.v1","items":{}}|};
+  write_file path {|{"schema":"unexpected.event.queue.schema","items":{}}|};
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
       ~base_path
@@ -882,10 +826,7 @@ let test_reaction_kind_string_roundtrip () =
       check bool "reaction_kind round-trips through string" true (roundtrips k))
     [ Keeper_reaction_ledger.Turn_started
     ; Keeper_reaction_ledger.Event_queue_ack
-    ; Keeper_reaction_ledger.Event_queue_no_compaction
     ; Keeper_reaction_ledger.Event_queue_cancelled
-    ; Keeper_reaction_ledger.Event_queue_requeued
-    ; Keeper_reaction_ledger.Event_queue_escalated
     ; Keeper_reaction_ledger.Cursor_ack
     ];
   match Keeper_reaction_ledger.reaction_kind_of_string "unknown_custom" with
@@ -1129,10 +1070,6 @@ let () =
             "event queue stimulus and turn reaction are durable"
             `Quick
             test_event_queue_stimulus_and_turn_reaction
-        ; test_case
-            "retired generation is not read"
-            `Quick
-            test_retired_generation_is_not_read
         ; test_case
             "unexpected schema rows cannot double-count current occurrences"
             `Quick

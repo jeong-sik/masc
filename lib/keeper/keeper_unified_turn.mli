@@ -127,14 +127,16 @@ type in_lane_compaction =
   | Compaction_refused_without_attempt of { consecutive_failures : int }
 (** Typed outcome of the in-lane provider-overflow compaction behind a
     [Requeue_after_context_compaction] disposition. [Compaction_committed]
-    proves the checkpoint durably shrank before the requeue, so the transition
-    resets the keeper's compaction-failure streak and the retry reloads real
-    progress. [Compaction_attempt_failed] means the recovery made no durable
-    progress; the transition advances the streak and escalates once it reaches
-    [Keeper_meta_contract.compaction_retry_escalation_threshold] (RFC-0351 S0,
-    #25461 — without the ceiling this lane requeued forever: 284 of 285
-    rejections in the 2026-07-21 storm carried trigger=provider_overflow and
-    only the operator's keeper_down ended it).
+    proves the checkpoint durably shrank before the requeue. It still advances
+    the provider-overflow episode streak; only an overflow-free completed turn
+    or an operator-committed manual compaction resets it. The retry reloads the
+    durable progress. [Compaction_attempt_failed] means the recovery made no
+    durable progress and also advances the streak. Once the streak reaches
+    [Keeper_meta_contract.compaction_retry_escalation_threshold], subsequent
+    reactive admission is refused (RFC-0351 S0, #25461 — without the ceiling
+    this lane requeued forever: 284 of 285 rejections in the 2026-07-21 storm
+    carried trigger=provider_overflow and only the operator's keeper_down ended
+    it).
 
     [Compaction_refused_without_attempt] is the admission gate declining the
     trigger at that same threshold ([Keeper_post_turn.Retry_suspended]): no
@@ -146,20 +148,10 @@ type in_lane_compaction =
     ceiling, the threshold, and the LLM-call bound the gate exists for are all
     unchanged; only this self-feeding edge is cut. *)
 
-type exact_output_terminal_reason = private
-  | Exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
-  | Exact_execution_terminal of
-      { source : Keeper_checkpoint_ref.t
-      ; terminal : Keeper_event_queue_state.exact_execution_terminal
-      }
-(** Closed exact-output reasons that forbid another provider-overflow
-    compaction attempt for the same source. *)
-
 type source_disposition =
   | Follow_failure_route
   | Follow_failure_route_after_no_compaction of
-      { reason : Keeper_event_queue_state.no_compaction_reason }
-  | Escalate_after_exact_output_terminal of exact_output_terminal_reason
+      { reason : Keeper_compaction_outcome.no_compaction_reason }
   | Requeue_after_context_compaction of in_lane_compaction
   | Pause_after_transcript_corruption of { detail : string }
   | Acknowledge_after_in_turn_handling
@@ -169,17 +161,10 @@ type source_disposition =
     to act ([no_compaction_reason]); the terminal transition advances the
     compaction-failure streak, because a turn whose context cannot shrink
     re-overflows deterministically on every retry. It does not replace the
-    route: [Keeper_event_queue_state.Compaction_retry_exhausted] is constructed
-    nowhere outside that module's [of_json], so nothing ever serializes one to
-    decode. What the threshold actually does is make
-    [Keeper_post_turn.prepare_compaction] refuse reactive triggers
+    route. The threshold makes [Keeper_post_turn.prepare_compaction] refuse
+    reactive triggers
     ([Compaction_refused_without_attempt]); only an operator-committed manual
     compaction or an overflow-free completed turn lifts it.
-    [Escalate_after_exact_output_terminal] consumes the selected source into a
-    typed escalation with no successor, so neither the ordinary retry route nor
-    another compaction dispatch can run when the exact lane is unconfigured,
-    after the receipt crossed dispatch, or after a dispatched response failed
-    the MASC domain contract.
     [Requeue_after_context_compaction] preserves the exact source stimulus
     after MASC handled a typed provider overflow in this Keeper lane; the next
     cycle reloads the durably compacted checkpoint.
@@ -188,17 +173,17 @@ type source_disposition =
     heartbeat durably pauses the Keeper and consumes the selected source into an
     operator-reset-required escalation with no retry successor.
     [Acknowledge_after_in_turn_handling] consumes only the source stimulus when
-    the configured in-turn policy already handled the terminal failure; the
-    cycle remains failed for receipts, counters, and heartbeat freshness. *)
+    the exact compaction path already produced a terminal failure. No second
+    durable escalation is claimed; the cycle remains failed for receipts,
+    counters, and heartbeat freshness. *)
 
-val source_disposition_after_no_compaction
-  :  Keeper_event_queue_state.no_compaction
+val source_disposition_after_no_compaction_reason
+  :  Keeper_compaction_outcome.no_compaction_reason
   -> source_disposition
 (** Compiler-checked partition of no-compaction outcomes. Missing-lane,
-    effect-boundary, and domain-invalid outcomes return
-    [Escalate_after_exact_output_terminal]; all other deterministic no-progress
-    outcomes retain the bounded failure route. The full record preserves the
-    durable checkpoint source for typed missing-lane escalation. *)
+    effect-boundary, and domain-invalid outcomes acknowledge the selected
+    source after the in-turn terminal failure; all other deterministic
+    no-progress outcomes retain the bounded failure route. *)
 
 type turn_failure =
   { error : Agent_sdk.Error.sdk_error
@@ -231,8 +216,7 @@ val turn_success_of_stop_reason
 (** Total typed projection used at the successful runtime boundary. *)
 
 val run_keeper_cycle
-  :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
-  -> before_dispatch_authority:(unit -> (unit, string) result)
+  :  before_dispatch_authority:(unit -> (unit, string) result)
   -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
   -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> config:Workspace.config

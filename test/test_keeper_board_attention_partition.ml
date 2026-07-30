@@ -718,7 +718,7 @@ let test_runtime_transitions_append_then_startup_compacts () =
     (List.length (ledger_lines ledger_path));
   match ok "load compacted ledger" (P.load ~base_path ~keeper_name:"sangsu") with
   | [ { P.state = P.Settled _; _ } ] -> ()
-  | _ -> Alcotest.fail "startup compaction lost the Settled receipt"
+  | _ -> Alcotest.fail "startup ledger rewrite lost the Settled receipt"
 ;;
 
 let test_restart_releases_only_unbound_and_quarantines_dispatchable () =

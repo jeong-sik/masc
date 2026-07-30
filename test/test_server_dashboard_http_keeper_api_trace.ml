@@ -462,8 +462,8 @@ let test_checkpoint_load_error_projection_is_always_an_object () =
       check bool "the load-error projection is an object" true
         (match Checkpoints.checkpoint_load_error_json error with
          | `Assoc _ -> true
-         | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _
-         | `Null | `Tuple _ | `Variant _ -> false))
+         | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null
+           -> false))
     [ Store.Not_found;
       Store.Store_error "store unavailable";
       Store.Parse_error "invalid checkpoint";

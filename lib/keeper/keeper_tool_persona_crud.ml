@@ -110,8 +110,8 @@ let validate_create_args args =
      - keeper template defaults, nested under ["keeper"]: ["instructions"],
        ["mention_targets"], ["proactive_enabled"] — read by
        [Keeper_types_profile_persona_defaults.load_from_path], which only ever
-       inspects the ["keeper"] member and rejects removed fields
-       (tool_access/tool_denylist) fail-closed.
+       inspects the ["keeper"] member and rejects every field outside its
+       closed contract.
 
    Earlier this tool wrote every field at the top level under different keys
    (["display_name"] instead of ["name"]; the keeper-template fields at the

@@ -549,6 +549,10 @@ let test_masc_keeper_create_from_persona_schema () =
       | Some props ->
           Alcotest.(check bool) "has persona_name" true
             (List.mem_assoc "persona_name" props);
+          Alcotest.(check bool) "has runtime_id" true
+            (List.mem_assoc "runtime_id" props);
+          Alcotest.(check bool) "omits removed sandbox_profile" false
+            (List.mem_assoc "sandbox_profile" props);
           Alcotest.(check bool) "omits removed goal" false
             (List.mem_assoc "goal" props);
           Alcotest.(check bool) "omits retired shards" false

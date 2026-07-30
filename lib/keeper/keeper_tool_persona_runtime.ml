@@ -40,12 +40,78 @@ let find_jsonl_row_by_action_id rows action_id =
          | Some candidate when candidate = action_id -> Some json
          | _ -> None)
 
+let create_from_persona_arg_names =
+  [ "active_goal_ids"
+  ; "allowed_paths"
+  ; "autoboot_enabled"
+  ; "dry_run"
+  ; "instructions"
+  ; "mention_targets"
+  ; "name"
+  ; "persona_name"
+  ; "proactive_enabled"
+  ; "runtime_id"
+  ]
+
+let validate_create_from_persona_args = function
+  | `Assoc fields ->
+      let unsupported =
+        fields
+        |> List.filter_map (fun (key, _) ->
+          if List.mem key create_from_persona_arg_names then None else Some key)
+        |> List.sort_uniq String.compare
+      in
+      if unsupported <> [] then
+        Error
+          (Printf.sprintf
+             "unsupported masc_keeper_create_from_persona arguments: %s"
+             (String.concat ", " unsupported))
+      else
+        let expected_kind key value =
+          match key, value with
+          | ("active_goal_ids" | "allowed_paths" | "mention_targets"), `List items
+            when List.for_all (function `String _ -> true | _ -> false) items ->
+              None
+          | ("autoboot_enabled" | "dry_run" | "proactive_enabled"), `Bool _ ->
+              None
+          | ("instructions" | "name" | "persona_name" | "runtime_id"), `String _ ->
+              None
+          | ("active_goal_ids" | "allowed_paths" | "mention_targets"), _ ->
+              Some "an array of strings"
+          | ("autoboot_enabled" | "dry_run" | "proactive_enabled"), _ ->
+              Some "a boolean"
+          | ("instructions" | "name" | "persona_name" | "runtime_id"), _ ->
+              Some "a string"
+          | _ -> None
+        in
+        (match
+           List.find_map
+             (fun (key, value) ->
+               Option.map (fun expected -> key, expected, value)
+                 (expected_kind key value))
+             fields
+         with
+         | None -> Ok ()
+         | Some (key, expected, value) ->
+             Error
+               (Printf.sprintf
+                  "%s must be %s (received %s)"
+                  key expected (Json_util.kind_name value)))
+  | value ->
+      Error
+        (Printf.sprintf
+           "masc_keeper_create_from_persona arguments must be an object \
+            (received %s)"
+           (Json_util.kind_name value))
+
 let resolved_keeper_args_to_json
     ~name ~persona_name
     ~instructions
     ~mention_targets
     ~allowed_paths_opt
+    ~active_goal_ids_opt
     ~autoboot_enabled_opt
+    ~runtime_id_opt
     ~proactive_enabled =
   let base =
     [
@@ -66,8 +132,22 @@ let resolved_keeper_args_to_json
     | Some value -> [ ("autoboot_enabled", `Bool value) ]
     | None -> []
   in
+  let active_goal_ids_field =
+    match active_goal_ids_opt with
+    | Some ids -> [("active_goal_ids", Json_util.json_string_list ids)]
+    | None -> []
+  in
+  let runtime_id_field =
+    match runtime_id_opt with
+    | Some runtime_id -> [("runtime_id", `String runtime_id)]
+    | None -> []
+  in
   `Assoc
-    (base @ allowed_paths_field @ autoboot_field)
+    (base
+     @ allowed_paths_field
+     @ active_goal_ids_field
+     @ autoboot_field
+     @ runtime_id_field)
 
 let toml_escape_string value =
   let buf = Buffer.create (String.length value + 8) in
@@ -220,6 +300,9 @@ let resolved_keeper_args_from_persona args :
             ~tool_name:"masc_keeper_create_from_persona" args with
     | Error err -> Error err
     | Ok () ->
+    match validate_create_from_persona_args args with
+    | Error err -> Error err
+    | Ok () ->
     match load_persona_summary persona_name with
     | None ->
         Error
@@ -258,9 +341,30 @@ let resolved_keeper_args_from_persona args :
               |> Option.value ~default:false
             in
             let autoboot_enabled = get_bool_opt args "autoboot_enabled" in
-            (match Keeper_turn_up_args.parse_present_string_list_opt args "allowed_paths" with
-            | Error err -> Error err
-            | Ok allowed_paths_opt ->
+            let runtime_id_result =
+              match Json_util.assoc_member_opt "runtime_id" args with
+              | None -> Ok None
+              | Some (`String value) when String.trim value <> "" ->
+                  Ok (Some (String.trim value))
+              | Some (`String _) -> Error "runtime_id must not be empty"
+              | Some value ->
+                  Error
+                    (Printf.sprintf
+                       "runtime_id must be a string (received %s)"
+                       (Json_util.kind_name value))
+            in
+            (match
+               Keeper_turn_up_args.parse_present_string_list_opt
+                 args "allowed_paths",
+               Keeper_turn_up_args.parse_present_string_list_opt
+                 args "active_goal_ids",
+               runtime_id_result
+             with
+            | Error err, _, _
+            | _, Error err, _
+            | _, _, Error err -> Error err
+            | Ok allowed_paths_opt, Ok active_goal_ids_opt,
+              Ok runtime_id_opt ->
                  let allowed_paths =
                    match allowed_paths_opt with
                    | Some _ as paths -> paths
@@ -273,7 +377,9 @@ let resolved_keeper_args_from_persona args :
                      ~instructions
                      ~mention_targets
                      ~allowed_paths_opt:allowed_paths
+                     ~active_goal_ids_opt
                      ~autoboot_enabled_opt:autoboot_enabled
+                     ~runtime_id_opt
                      ~proactive_enabled
                  in
                  (match json_operator_todo_placeholder_paths resolved with

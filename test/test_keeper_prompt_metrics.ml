@@ -407,7 +407,7 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
 
 let message text : Agent_sdk.Types.message = Agent_sdk.Types.user_msg text
 
-let test_provider_content_messages_separates_prompt_carrier_and_projection_suffix () =
+let test_provider_content_messages_requires_typed_prompt_carrier_provenance () =
   let history = [ message "history"; message "current user" ] in
   let prompt_carrier = message "[system context] dynamic and memory blocks" in
   let gate_evidence = message "typed gate replay payload" in
@@ -418,8 +418,8 @@ let test_provider_content_messages_separates_prompt_carrier_and_projection_suffi
   in
   check
     (option (list string))
-    "history plus projection-only evidence remain"
-    (Some [ "history"; "current user"; "typed gate replay payload" ])
+    "untyped prompt carrier leaves attribution unavailable"
+    None
     (KAPM.provider_content_messages
        ~prompt_context_present:true
        ~projection_input:(history @ [ prompt_carrier ])
@@ -497,9 +497,9 @@ let () =
           test_case "attributes final provider input content" `Quick
             test_ctx_composition_splits_final_provider_input_bytes;
           test_case
-            "separates prompt carrier and projection suffix"
+            "requires typed prompt carrier provenance"
             `Quick
-            test_provider_content_messages_separates_prompt_carrier_and_projection_suffix;
+            test_provider_content_messages_requires_typed_prompt_carrier_provenance;
           test_case
             "rejects projection rewrites"
             `Quick

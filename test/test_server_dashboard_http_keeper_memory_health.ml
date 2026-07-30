@@ -180,8 +180,8 @@ let test_reports_librarian_lane_busy_alert () =
   let keeper_id = "lane-" ^ Filename.basename base in
   ignore (write_snapshot ~keepers_dir ~keeper_id [ fact "lane fact" ]);
   Metrics.inc_counter
-    KeeperMetrics.(to_string MemoryLaneExecutionSlotBusy)
-    ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian_execution_slot" ]
+    KeeperMetrics.(to_string MemoryLaneCoalesced)
+    ~labels:[ "keeper", keeper_id; "lane", "librarian" ]
     ~delta:3.0
     ();
   let json = Health.keeper_memory_health_http_json ~base_path:base in

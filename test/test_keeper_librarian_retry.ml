@@ -167,6 +167,28 @@ let test_duplicate_object_fields_reject () =
   | Ok _ -> fail "duplicate claim field accepted"
 ;;
 
+let test_required_nullable_claim_fields_reject_when_missing () =
+  let remove field =
+    match new_claim () with
+    | `Assoc fields ->
+      `Assoc (List.filter (fun (name, _) -> not (String.equal name field)) fields)
+    | _ -> assert false
+  in
+  List.iter
+    (fun field ->
+       match parse (selection_json ~new_claims:[ remove field ] ()) with
+       | Error Librarian.Claim_schema_mismatch -> ()
+       | Error error ->
+         failf
+           "wrong missing nullable claim field error for %s: %s"
+           field
+           (Librarian.parse_error_to_string error)
+       | Ok _ -> failf "missing nullable claim field %s accepted" field)
+    [ Librarian.wire_field_claim_id
+    ; Librarian.wire_field_source_tool_call_id
+    ]
+;;
+
 let test_required_current_metadata_fields_reject_when_missing_or_null () =
   let remove field =
     match selection_json () with
@@ -267,6 +289,8 @@ let () =
         ; test_case "strict JSON boundary" `Quick test_strict_json_boundary
         ; test_case "duplicate object fields reject" `Quick
             test_duplicate_object_fields_reject
+        ; test_case "required nullable claim fields reject when missing" `Quick
+            test_required_nullable_claim_fields_reject_when_missing
         ; test_case "required current metadata fields reject" `Quick
             test_required_current_metadata_fields_reject_when_missing_or_null
         ; test_case "prompt carries exact current selection" `Quick

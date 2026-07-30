@@ -50,20 +50,20 @@ let provider_content_messages
       ~(projection_input : Agent_sdk.Types.message list)
       ~(projected_messages : Agent_sdk.Types.message list)
   =
-  let projection_input_count = List.length projection_input in
-  match split_at projection_input_count [] projected_messages with
-  | Some (projected_prefix, projection_suffix)
-    when List.equal ( = ) projected_prefix projection_input ->
-    let retained_input_count =
-      projection_input_count - if prompt_context_present then 1 else 0
-    in
-    if retained_input_count < 0
-    then None
-    else
-      Option.map
-        (fun (retained_input, _) -> retained_input @ projection_suffix)
-        (split_at retained_input_count [] projection_input)
-  | Some _ | None -> None
+  if prompt_context_present
+  then
+    (* OAS currently exposes only generic messages here, not typed provenance
+       for its generated prompt-context carrier. Its position is therefore not
+       a contract. Leave attribution unavailable instead of dropping a message
+       by position. *)
+    None
+  else
+    let projection_input_count = List.length projection_input in
+    match split_at projection_input_count [] projected_messages with
+    | Some (projected_prefix, _)
+      when List.equal ( = ) projected_prefix projection_input ->
+      Some projected_messages
+    | Some _ | None -> None
 ;;
 
 let empty_prompt_segment_metrics =

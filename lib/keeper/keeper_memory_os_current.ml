@@ -115,14 +115,18 @@ let string_list_of_json = function
 
 let facts_of_json = function
   | `List values ->
-    let rec loop acc = function
+    let rec loop seen acc = function
       | [] -> Some (List.rev acc)
       | value :: rest ->
         (match fact_of_json value with
-         | Some fact -> loop (fact :: acc) rest
+         | Some fact ->
+           let identity = claim_identity fact in
+           if String_set.mem identity seen
+           then None
+           else loop (String_set.add identity seen) (fact :: acc) rest
          | None -> None)
     in
-    loop [] values
+    loop String_set.empty [] values
   | _ -> None
 ;;
 
@@ -262,11 +266,20 @@ let parse path content =
 
 let read_for_keepers_dir ~keepers_dir ~keeper_id =
   let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-  match Fs_compat.load_file_opt snapshot_path with
-  | None -> Ok None
-  | Some content ->
-    let+ snapshot = parse snapshot_path content in
-    Some snapshot
+  try
+    match Fs_compat.load_file_opt snapshot_path with
+    | None -> Ok None
+    | Some content ->
+      let+ snapshot = parse snapshot_path content in
+      Some snapshot
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Sys_error message ->
+    Error
+      (Printf.sprintf
+         "current Memory OS read failed path=%s: %s"
+         snapshot_path
+         message)
 ;;
 
 module Identity_map = Map.Make (String)

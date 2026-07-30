@@ -42,6 +42,6 @@ let reobserve_fact ~now ~provenance ~existing ~incoming:(_ : fact) =
     existing
   | Independent_observation ->
     (* Record the new observation without changing the producer-supplied
-       [valid_until]. Claim kind is context, not authority for a different merge. *)
+       [valid_until]. *)
     { existing with last_verified_at = Some now }
 ;;

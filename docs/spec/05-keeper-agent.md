@@ -46,7 +46,7 @@ graph LR
     KWC[working_context] --> KEC[exec_context] --> KCS[checkpoint_store]
   end
   subgraph Memory
-    KMO[memory_os_store] --> KMR[memory_recall]
+    KMO[memory_os_io] --> KMR[memory_recall]
   end
   subgraph Turn
     KUT[unified_turn] --> KAR[agent_run] --> KTO[tools_oas]

@@ -29,12 +29,13 @@ let base_tools : Masc_domain.tool_schema list =
     { name = "keeper_memory_search"
     ; description =
         "Search your durable Memory OS facts or conversation history. \
-         Returns results with claim_kind/category metadata. Default searches the \
+         Returns results with category and exact source metadata. Default searches the \
          durable fact store. Use source='history' for raw user messages, \
          source='all' for both."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
+          ; "additionalProperties", `Bool false
           ; ( "properties"
             , `Assoc
                 [ ( "query"

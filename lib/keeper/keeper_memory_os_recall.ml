@@ -218,19 +218,34 @@ let log_truncation ~keeper_id ~kind ~metric ~store_count ~injected_count ~droppe
     budget
 ;;
 
-let render_context_exn ~keeper_id ~now () =
-  let all_facts =
-    File_lock_eio.with_lock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
-      Keeper_memory_os_io.read_facts_all ~keeper_id
-      |> List.filter (fact_is_current ~now))
+let render_context_exn ~keepers_dir ~keeper_id ~now () =
+  let all_facts, all_episodes =
+    Keeper_memory_os_io.with_episode_bundle_lock_for_keepers_dir
+      ~keepers_dir
+      ~keeper_id
+      (fun () ->
+         File_lock_eio.with_lock
+           (Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
+           (fun () ->
+              let all_facts =
+                Keeper_memory_os_io.read_facts_all_for_keepers_dir
+                  ~keepers_dir
+                  ~keeper_id
+              in
+              let all_episodes =
+                Keeper_memory_os_io.read_episodes_all_for_keepers_dir
+                  ~keepers_dir
+                  ~keeper_id
+              in
+              all_facts, all_episodes))
   in
+  let all_facts = List.filter (fact_is_current ~now) all_facts in
   (* Diagnostic: the TOTAL store size, independent of the selection budget
      below -- this is what tells an operator "the store has grown past what
      recall injects" rather than silently equalling whatever got selected. *)
   let n_facts_in_store = List.length all_facts in
   let all_episodes =
-    Keeper_memory_os_io.read_episodes_all ~keeper_id
-    |> List.filter (episode_is_current ~now)
+    List.filter (episode_is_current ~now) all_episodes
   in
   let max_facts = Keeper_config.keeper_memory_os_recall_max_facts () in
   let max_episodes = Keeper_config.keeper_memory_os_recall_max_episodes () in
@@ -334,8 +349,8 @@ let render_context_exn ~keeper_id ~now () =
   { block; injected_fact_keys; injected_episode_keys; n_facts_in_store; failure_reason }
 ;;
 
-let render_context ~keeper_id ~now () =
-  try (render_context_exn ~keeper_id ~now ()).block with
+let render_context ~keepers_dir ~keeper_id ~now () =
+  try (render_context_exn ~keepers_dir ~keeper_id ~now ()).block with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Keeper.warn
@@ -351,7 +366,7 @@ let enabled () =
   Env_config.KeeperMemoryOs.recall_enabled ()
 ;;
 
-let render_if_enabled ~keeper_id ~now ~trace_id ~turn ~masc_root () =
+let render_if_enabled ~keepers_dir ~keeper_id ~now ~trace_id ~turn ~masc_root () =
   if not (enabled ())
   then None
   else (
@@ -361,7 +376,7 @@ let render_if_enabled ~keeper_id ~now ~trace_id ~turn ~masc_root () =
        and never affects the returned block. *)
     let result =
       try
-        render_context_exn ~keeper_id ~now ()
+        render_context_exn ~keepers_dir ~keeper_id ~now ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->

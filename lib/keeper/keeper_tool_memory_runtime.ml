@@ -45,7 +45,6 @@ let valid_memory_search_source_strings =
 type fact_match =
   { claim : string
   ; category : string
-  ; claim_kind : string option
   ; first_seen : float
   ; valid_until : float option
   ; score : float
@@ -56,6 +55,7 @@ type fact_match =
    ([first_seen] desc). Expired facts (past [valid_until]) are excluded the
    same way recall excludes them ([fact_is_current]). *)
 let search_durable_facts
+      ~(keepers_dir : string)
       ~(meta : keeper_meta)
       ~(query : string)
       ~(limit : int)
@@ -63,7 +63,18 @@ let search_durable_facts
   =
   let now = Time_compat.now () in
   let current =
-    Keeper_memory_os_io.read_facts_all ~keeper_id:meta.name
+    Keeper_memory_os_io.with_episode_bundle_lock_for_keepers_dir
+      ~keepers_dir
+      ~keeper_id:meta.name
+      (fun () ->
+         File_lock_eio.with_lock
+           (Keeper_memory_os_io.facts_path_for_keepers_dir
+              ~keepers_dir
+              ~keeper_id:meta.name)
+           (fun () ->
+              Keeper_memory_os_io.read_facts_all_for_keepers_dir
+                ~keepers_dir
+                ~keeper_id:meta.name))
     |> List.filter (Keeper_memory_os_types.fact_is_current ~now)
   in
   let total_candidates = List.length current in
@@ -86,8 +97,6 @@ let search_durable_facts
       in
       { claim = fact.claim
       ; category = Keeper_memory_os_types.category_to_string fact.category
-      ; claim_kind =
-          Option.map Keeper_memory_os_types.claim_kind_to_string fact.claim_kind
       ; first_seen = fact.first_seen
       ; valid_until = fact.valid_until
       ; score = Float.round (score *. 1000.0) /. 1000.0
@@ -104,7 +113,6 @@ let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
   `Assoc
     [ "text", `String m.claim
     ; "category", `String m.category
-    ; "claim_kind", Json_util.string_opt_to_json m.claim_kind
     ; "first_seen_ts_unix", `Float m.first_seen
     ; "valid_until_ts_unix", Json_util.float_opt_to_json m.valid_until
     ; "score", `Float m.score
@@ -195,7 +203,6 @@ let keeper_memory_search_with_outcome
   let query = Safe_ops.json_string ~default:"" "query" args |> String.trim in
   let limit = max 1 (min 10 (Safe_ops.json_int ~default:5 "limit" args)) in
   let source_raw = Safe_ops.json_string ~default:"memory" "source" args in
-  let kind_raw = Safe_ops.json_string ~default:"" "kind" args |> String.trim in
   match memory_search_source_of_string_opt source_raw with
   | None ->
     Keeper_tool_execution.failure
@@ -208,17 +215,11 @@ let keeper_memory_search_with_outcome
              , `List (List.map (fun s -> `String s) valid_memory_search_source_strings) )
            ]
          "invalid keeper_memory_search source")
-  | Some _ when kind_raw <> "" ->
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Policy_rejection
-      (error_json
-         ~fields:
-           [ "error_kind", `String "memory_search_kind_removed"
-           ; "provided_kind", `String kind_raw
-           ]
-         "the kind filter was removed with the memory bank; matches carry \
-          claim_kind and category fields instead")
   | Some source ->
+    let keepers_dir =
+      Config_dir_resolver.keepers_dir_for_base_path
+        ~base_path:config.Workspace.base_path
+    in
     let source_label = memory_search_source_to_string source in
     let result =
     match source with
@@ -234,7 +235,9 @@ let keeper_memory_search_with_outcome
          ]
          @ if no_match then [ "no_match", `Bool true ] else [])
     | All ->
-      let fact_matches, fact_total = search_durable_facts ~meta ~query ~limit in
+      let fact_matches, fact_total =
+        search_durable_facts ~keepers_dir ~meta ~query ~limit
+      in
       let history_limit = max 0 (limit - List.length fact_matches) in
       let history_matches =
         if history_limit > 0
@@ -262,7 +265,9 @@ let keeper_memory_search_with_outcome
          ]
          @ if no_match then [ "no_match", `Bool true ] else [])
     | Memory ->
-      let matches, total_candidates = search_durable_facts ~meta ~query ~limit in
+      let matches, total_candidates =
+        search_durable_facts ~keepers_dir ~meta ~query ~limit
+      in
       let no_match = matches = [] in
       let match_jsons = List.map fact_match_to_json matches in
       `Assoc
@@ -338,9 +343,26 @@ let keeper_context_status_json
       ~(ctx_work : working_context)
   =
   let checkpoint_bytes = Keeper_context_runtime.serialized_bytes ctx_work in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path
+  in
   let memory_facts_total, memory_facts_current =
     let now = Time_compat.now () in
-    let facts = Keeper_memory_os_io.read_facts_all ~keeper_id:meta.name in
+    let facts =
+      Keeper_memory_os_io.with_episode_bundle_lock_for_keepers_dir
+        ~keepers_dir
+        ~keeper_id:meta.name
+        (fun () ->
+           File_lock_eio.with_lock
+             (Keeper_memory_os_io.facts_path_for_keepers_dir
+                ~keepers_dir
+                ~keeper_id:meta.name)
+             (fun () ->
+                Keeper_memory_os_io.read_facts_all_for_keepers_dir
+                  ~keepers_dir
+                  ~keeper_id:meta.name))
+    in
     ( List.length facts
     , List.length
         (List.filter (Keeper_memory_os_types.fact_is_current ~now) facts) )
@@ -532,6 +554,7 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
    advance the truth anchor recall's recency ranking reads. Writing through the
    same rule is the point — an explicit write is not a way around it. *)
 let append_durable_fact
+      ~(keepers_dir : string)
       ~(meta : keeper_meta)
       ~(body : string)
       ~(valid_for_days : int option)
@@ -542,7 +565,6 @@ let append_durable_fact
   let fact : Keeper_memory_os_types.fact =
     { claim = body
     ; category = Keeper_memory_os_types.Fact
-    ; claim_kind = Some Keeper_memory_os_types.Durable_knowledge
     ; source =
         { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
         ; turn = meta.runtime.usage.total_turns
@@ -558,7 +580,6 @@ let append_durable_fact
            inferred from the text. *)
         Option.map (Keeper_memory_os_types.valid_until_of_days ~now) valid_for_days
     ; last_verified_at = None
-    ; schema_version = Keeper_memory_os_types.schema_version
     ; claim_id = None
     }
   in
@@ -577,8 +598,18 @@ let append_durable_fact
     Keeper_memory_os_policy.reobserve_fact ~now ~provenance ~existing ~incoming
   in
   let stats =
-    File_lock_eio.with_lock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
-      Keeper_memory_os_io.merge_facts ~keeper_id ~merge ~incoming:[ fact ])
+    Keeper_memory_os_io.with_episode_bundle_lock_for_keepers_dir
+      ~keepers_dir
+      ~keeper_id
+      (fun () ->
+         File_lock_eio.with_lock
+           (Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
+           (fun () ->
+              Keeper_memory_os_io.merge_facts_for_keepers_dir
+                ~keepers_dir
+                ~keeper_id
+                ~merge
+                ~incoming:[ fact ]))
   in
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string MemoryOsExplicitFactWrite)
@@ -588,7 +619,7 @@ let append_durable_fact
 ;;
 
 let keeper_memory_write_with_outcome
-      ~config:(_ : Workspace.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   : Keeper_tool_execution.t
@@ -607,7 +638,11 @@ let keeper_memory_write_with_outcome
   | Memory_write_invalid { error_kind; extras } ->
     respond ~ok:false ~error_kind extras
   | Memory_write_ok { body; valid_for_days } ->
-    (match append_durable_fact ~meta ~body ~valid_for_days with
+    let keepers_dir =
+      Config_dir_resolver.keepers_dir_for_base_path
+        ~base_path:config.Workspace.base_path
+    in
+    (match append_durable_fact ~keepers_dir ~meta ~body ~valid_for_days with
      | stats ->
        let merged = stats.Keeper_memory_os_io.merged in
        respond

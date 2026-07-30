@@ -45,7 +45,8 @@ val render_gauge_line
     renders as unbounded rather than as a literal zero. *)
 
 val render_context
-  :  keeper_id:string
+  :  keepers_dir:string
+  -> keeper_id:string
   -> now:float
   -> unit
   -> string
@@ -61,14 +62,16 @@ val enabled : unit -> bool
     separately by [MASC_KEEPER_MEMORY_OS_LIBRARIAN]. *)
 
 val render_if_enabled
-  :  keeper_id:string
+  :  keepers_dir:string
+  -> keeper_id:string
   -> now:float
   -> trace_id:string
   -> turn:int
   -> masc_root:string
   -> unit
   -> string option
-(** [render_if_enabled ~keeper_id ~now ~trace_id ~turn ~masc_root ()] is
+(** [render_if_enabled ~keepers_dir ~keeper_id ~now ~trace_id ~turn
+     ~masc_root ()] is
     [Some block] when the flag is on and the store yields advisory content,
     [Some block] with an explicit unavailable advisory when recall fails after
     the flag is on, and [None] when disabled or when no memory exists. Intended

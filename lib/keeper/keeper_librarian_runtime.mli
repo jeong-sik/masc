@@ -99,7 +99,7 @@ type extraction_error_kind =
   | Exact_setup_failure
   | Exact_execution_failure
   | Domain_output_invalid
-  | Memory_fact_upsert_failure
+  | Memory_publication_failure
 
 val extraction_error_kind : extraction_error -> extraction_error_kind
 
@@ -124,8 +124,9 @@ val extract_with_exact_output_classified
     supplies only the immutable prompt, domain schema, minimum JSON guarantee,
     post-success domain validation, and an fsync-backed generation journal for
     OAS's predetermined candidate transitions. An unsettled journal blocks only
-    the same trace generation; historical pre-release journals are not migrated
-    or consulted. [clock] stays optional at the API
+    the same trace generation. Journal paths are resolved from [base_path] once;
+    ambient config state is not consulted afterward. Historical pre-release
+    journals are not migrated or consulted. [clock] stays optional at the API
     boundary because [run_best_effort] may be called from contexts that cannot
     supply an Eio clock; [None] returns a typed
     [Execution_clock_unavailable] classification before OAS I/O. *)
@@ -133,13 +134,25 @@ val extract_with_exact_output_classified
 val extract_and_append_with_exact_output_classified
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> base_path:string
+  -> generation_floor:int
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> keeper_id:string
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, extraction_error) result
+(** Production extraction and publication entrypoint. Generation selection and
+    the complete exact-output attempt are serialized per [(keeper_id,
+    trace_id)]. [generation_floor] is only the caller's lower bound for a new
+    reservation; the reserved generation is the sole episode/journal identity.
+    A current-shape active journal is the durable attempt authority:
+    after process restart its generation is reused so preflight fences the
+    unfinished attempt before any provider dispatch. A terminal journal does
+    not block reservation of a new generation. The entrypoint resolves one
+    keeper directory from [base_path] and uses it for the trace lock, journal,
+    generation counter, facts, episode, and event publication. *)
 
 val run_best_effort
   :  base_path:string
+  -> generation_floor:int
   -> keeper_id:string
   -> Keeper_librarian.input
   -> unit

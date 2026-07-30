@@ -143,7 +143,6 @@ type t =
   | MemoryLanePending
   | MemoryLaneInFlight
   | MemoryLaneLatestPending
-  | MemoryLaneExecutionSlotBusy
   | WriteMetaCycleFailures
   | MetricsSseFailures
   | ChatStoreFailures
@@ -360,7 +359,6 @@ let to_string = function
   | MemoryLanePending -> "masc_keeper_memory_lane_pending"
   | MemoryLaneInFlight -> "masc_keeper_memory_lane_in_flight"
   | MemoryLaneLatestPending -> "masc_keeper_memory_lane_latest_pending"
-  | MemoryLaneExecutionSlotBusy -> "masc_keeper_memory_lane_execution_slot_busy_total"
   | WriteMetaCycleFailures -> "masc_keeper_write_meta_cycle_failures_total"
   | MetricsSseFailures -> "masc_keeper_metrics_sse_failures_total"
   | ChatStoreFailures -> "masc_keeper_chat_store_failures_total"

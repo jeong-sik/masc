@@ -20,7 +20,7 @@ type reobservation_provenance =
 
 (** Fold a re-observation of an existing fact into that fact. An
     [Independent_observation] records [last_verified_at = now] while preserving
-    the exact stored [valid_until], independent of category or claim kind. For a
+    the exact stored [valid_until], independent of category. For a
     [Recalled_echo] the row is inherited whole — an echo must never advance the
     truth anchor that recall's recency ranking reads, or a fact can sustain its
     own recall slot indefinitely (the RFC-0285 §8 flywheel). Identity and

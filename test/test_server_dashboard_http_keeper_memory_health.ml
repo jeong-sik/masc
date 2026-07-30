@@ -2,8 +2,6 @@
 
 module Types = Masc.Keeper_memory_os_types
 module Io = Masc.Keeper_memory_os_io
-module Metrics = Masc.Otel_metric_store
-module KeeperMetrics = Keeper_metrics
 module LibrarianRuntime = Masc.Keeper_librarian_runtime
 module Health = Server_dashboard_http_keeper_memory_health
 
@@ -18,12 +16,10 @@ let fresh_dir prefix = Filename.temp_dir prefix ""
 let fact ?(valid_until = None) ~now claim =
   { Types.claim
   ; Types.category = Types.Fact
-  ; Types.claim_kind = None
   ; Types.source = { Types.trace_id = "health-test"; Types.turn = 1; Types.tool_call_id = None }
   ; Types.first_seen = now
   ; Types.valid_until
   ; Types.last_verified_at = Some now
-  ; Types.schema_version = Types.schema_version
   ; Types.claim_id = None
   }
 ;;
@@ -171,10 +167,12 @@ let test_reports_per_keeper_metric_values () =
   Alcotest.(check (float 1e-9))
     "ratio 0 when no events"
     0.0
-    (float_field "events_to_facts_ratio" k);
+    (float_field "events_bytes_to_facts_bytes_ratio" k);
   Alcotest.(check int) "nothing expired" 0 (int_field "ttl_expired_on_disk" k);
-  Alcotest.(check int) "no duplicates" 0 (int_field "near_duplicate" k);
-  Alcotest.(check int) "no execution slot busy skips" 0 (int_field "execution_slot_busy" k);
+  Alcotest.(check int)
+    "no duplicate claim identity rows"
+    0
+    (int_field "duplicate_claim_identity_rows" k);
   Alcotest.(check int) "no keeper alerts" 0 (List.length (list_field "alerts" k));
   Alcotest.(check int) "totals.facts" 2 (int_field "facts" (totals json));
   Alcotest.(check bool)
@@ -209,76 +207,49 @@ let test_health_reports_expiry_and_exact_duplicate_identity () =
   let k = keeper_obj "gc" json in
   Alcotest.(check int) "all rows counted on disk" 4 (int_field "facts" k);
   Alcotest.(check int) "one TTL-expired row" 1 (int_field "ttl_expired_on_disk" k);
-  Alcotest.(check int) "one duplicate row" 1 (int_field "near_duplicate" k);
+  Alcotest.(check int)
+    "one duplicate claim identity row"
+    1
+    (int_field "duplicate_claim_identity_rows" k);
+  Alcotest.(check int)
+    "totals duplicate claim identity rows"
+    1
+    (int_field "duplicate_claim_identity_rows" (totals json));
   let alerts = list_field "alerts" k in
   Alcotest.(check int) "two keeper alerts" 2 (List.length alerts);
   Alcotest.(check (list string))
     "alert codes"
-    [ "ttl_expired_on_disk"; "near_duplicate" ]
+    [ "ttl_expired_on_disk"; "duplicate_claim_identity_rows" ]
     (List.map (string_field "code") alerts);
   Alcotest.(check (list string))
     "alert targets"
-    [ "ttl_expired_on_disk"; "near_duplicate" ]
+    [ "ttl_expired_on_disk"; "duplicate_claim_identity_rows" ]
     (List.map (string_field "target") alerts);
   Alcotest.(check (list string))
     "alert labels"
-    [ "TTL"; "중복" ]
+    [ "TTL"; "동일 claim identity 행" ]
     (List.map (string_field "label") alerts);
   let summary = alert_summary json in
   Alcotest.(check int) "summary total alerts" 2 (int_field "total_alerts" summary);
   Alcotest.(check int) "summary warn alerts" 2 (int_field "warn_alerts" summary);
   Alcotest.(check int) "summary keepers with alerts" 1 (int_field "keepers_with_alerts" summary);
   Alcotest.(check int) "summary ttl keepers" 1 (int_field "ttl_expired_keepers" summary);
-  Alcotest.(check int) "summary duplicate keepers" 1 (int_field "near_duplicate_keepers" summary);
+  Alcotest.(check int)
+    "summary keepers with duplicate claim identity rows"
+    1
+    (int_field "duplicate_claim_identity_rows_keepers" summary);
+  let thresholds =
+    match assoc_field "thresholds" summary with
+    | Some thresholds -> thresholds
+    | None -> Alcotest.fail "expected alert_summary.thresholds object"
+  in
+  Alcotest.(check (float 1e-9))
+    "duplicate claim identity rows threshold"
+    0.0
+    (float_field "duplicate_claim_identity_rows" thresholds);
   (* dry_run must NOT rewrite the store: a fresh read still sees all 4 rows. *)
   let reread = Io.read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id:"gc" in
   Alcotest.(check int) "store untouched by dry-run gc" 4 (List.length reread)
-;;
-
-let test_reports_execution_slot_busy_metric_as_alert () =
-  Eio_main.run
-  @@ fun _env ->
-  let now = test_now in
-  let base = fresh_dir "masc-memory-health-execution-slot" in
-  (* Otel_metric_store is process-global. Use a temp-derived keeper label so
-     repeated test runs in one process cannot inherit this counter cell. *)
-  let keeper_id = "slotbusy-health-" ^ Filename.basename base in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
-  Io.rewrite_facts_atomically_for_keepers_dir
-    ~keepers_dir
-    ~keeper_id
-    [ fact ~now "slot busy metric keeper fact" ];
-  Metrics.inc_counter
-    KeeperMetrics.(to_string MemoryLaneExecutionSlotBusy)
-    ~labels:
-      [ "keeper", keeper_id
-      ; "site", "memory_os_librarian_execution_slot"
-      ]
-    ~delta:3.0
-    ();
-  let json = Health.keeper_memory_health_http_json ~base_path:base in
-  let k = keeper_obj keeper_id json in
-  Alcotest.(check int) "execution slot busy projected" 3 (int_field "execution_slot_busy" k);
-  Alcotest.(check int)
-    "totals execution slot busy"
-    3
-    (int_field "execution_slot_busy" (totals json));
-  let alerts = list_field "alerts" k in
-  Alcotest.(check (list string))
-    "execution slot alert code"
-    [ "execution_slot_busy" ]
-    (List.map (string_field "code") alerts);
-  Alcotest.(check (list string))
-    "execution slot alert target"
-    [ "execution_slot_busy" ]
-    (List.map (string_field "target") alerts);
-  Alcotest.(check (list string))
-    "execution slot alert label"
-    [ "슬롯" ]
-    (List.map (string_field "label") alerts);
-  let summary = alert_summary json in
-  Alcotest.(check int) "summary execution slot keepers" 1 (int_field "execution_slot_busy_keepers" summary);
-  Alcotest.(check int) "summary total alerts" 1 (int_field "total_alerts" summary)
 ;;
 
 let test_sorts_keepers_by_facts_bytes_desc () =
@@ -312,7 +283,7 @@ let test_empty_store_has_no_keepers_and_zero_totals () =
   Alcotest.(check int) "totals.facts_bytes zero" 0 (int_field "facts_bytes" (totals json))
 ;;
 
-let test_skips_corrupt_jsonl_keeper () =
+let test_surfaces_corrupt_jsonl_keeper_read_error () =
   Eio_main.run
   @@ fun _env ->
   let now = test_now in
@@ -322,16 +293,25 @@ let test_skips_corrupt_jsonl_keeper () =
     ~keepers_dir
     ~keeper_id:"good"
     [ fact ~now "valid durable row" ];
-  (* A malformed facts.jsonl makes the strict GC read raise; the route must skip
-     that keeper rather than abort the whole snapshot (the documented behavior). *)
+  (* A malformed facts.jsonl makes the current-schema reader raise. The healthy
+     keeper remains visible, while the failed keeper is an explicit read error. *)
   let broken_path = Io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id:"broken" in
   Out_channel.with_open_text broken_path (fun oc ->
     Out_channel.output_string oc "{ this is not valid json\n");
   let json = Health.keeper_memory_health_http_json ~base_path:base in
   Alcotest.(check (list string))
-    "corrupt keeper skipped, valid one kept"
+    "valid keeper remains visible"
     [ "good" ]
-    (keeper_ids json)
+    (keeper_ids json);
+  Alcotest.(check int) "one read error" 1 (int_field "read_error_count" json);
+  match list_field "read_errors" json with
+  | [ error ] ->
+    Alcotest.(check string) "failed keeper named" "broken" (string_field "keeper_id" error);
+    Alcotest.(check bool)
+      "decode failure is observable"
+      true
+      (String.length (string_field "error" error) > 0)
+  | errors -> Alcotest.failf "expected one read error, got %d" (List.length errors)
 ;;
 
 let () =
@@ -353,10 +333,6 @@ let () =
             `Quick
             test_health_reports_expiry_and_exact_duplicate_identity
         ; Alcotest.test_case
-            "reports execution slot busy metric as alert"
-            `Quick
-            test_reports_execution_slot_busy_metric_as_alert
-        ; Alcotest.test_case
             "sorts keepers by facts_bytes descending"
             `Quick
             test_sorts_keepers_by_facts_bytes_desc
@@ -365,8 +341,8 @@ let () =
             `Quick
             test_empty_store_has_no_keepers_and_zero_totals
         ; Alcotest.test_case
-            "skips a keeper with a corrupt facts.jsonl"
+            "surfaces a corrupt facts.jsonl read error"
             `Quick
-            test_skips_corrupt_jsonl_keeper
+            test_surfaces_corrupt_jsonl_keeper_read_error
         ] )
     ]

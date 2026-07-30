@@ -1,19 +1,25 @@
 ---
 rfc: "keeper-memory-panel-real-data"
 title: "Keeper memory panel: real-data backing (no fabrication, no score resurrection)"
-status: Draft
+status: Superseded
 created: 2026-06-24
 updated: 2026-06-25
 author: vincent
 supersedes: []
-superseded_by: null
+superseded_by: "RFC-0000 §3.9 current-state contract"
 related: ["0233", "0244", "0247", "0259", "0285"]
 implementation_prs: [22307]
 ---
 
 # RFC (keeper-memory-panel-real-data): Keeper memory panel — real-data backing
 
-Status: Draft · The live "Keeper 메모리" panel renders zeros from an empty-prop wiring, and the
+Status: Superseded (2026-07-30) · The dashboard now consumes a closed,
+current-only Memory OS projection. Memory `claim_kind`,
+`open_items`/`constraints`/`preserved_tool_refs`, nullable policy compatibility,
+and partial-row decoding were removed. The body below is historical design
+evidence and must not be used as current implementation guidance.
+
+The live "Keeper 메모리" panel renders zeros from an empty-prop wiring, and the
 Claude-Design prototype it ports encodes a `score · usage · pin · timeline` model the backend
 deliberately deleted (RFC-0247). This RFC re-derives the panel from what the Memory OS **actually**
 holds — real prompt-block composition, real `fact`/`episode` rows, real recall state — adapts the

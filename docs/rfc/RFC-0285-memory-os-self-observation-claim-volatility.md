@@ -1,10 +1,16 @@
 # RFC-0285: Memory OS — Self-Observation Claim Volatility (closing RFC-0259's internal-state gap)
 
-**Status**: Draft
+**Status**: Superseded
 **Date**: 2026-06-23
+**Superseded by (2026-07-30)**: [RFC-0000 §3.9](./RFC-0000-MASTER-ROADMAP.md)
+current-state contract and the current-only Memory OS hard cut. Memory
+`claim_kind` is removed from the producer, persisted row, API, and dashboard.
+Transient run/queue state is omitted by the Librarian rather than persisted
+with a volatility tag. The body below is historical incident analysis and must
+not be used as implementation guidance.
 **Supersession note (2026-06-25)**: The external-ref side of RFC-0259 is no longer
-active policy. This RFC's self-observation `claim_kind` handling remains relevant,
-but comparisons to external-ref parsing/GitHub grounding are historical context.
+active policy. The later 2026-07-30 hard cut also supersedes this RFC's
+self-observation `claim_kind` handling.
 **Renumbered from 0283/0284**: 0283 taken by `RFC-0283-fusion-judge-of-judges.md` (#22093, merged); 0284 contended by `RFC-0284-keeper-guidance-visibility-drift-guard.md` (#22121, open). Moved to 0285 to separate at the filename level. See PR review thread.
 **Verified against base main**: `08c4ccd50d`
 **Builds on**: [RFC-0259](./RFC-0259-memory-os-volatile-claim-grounding-retraction-decay.md) (volatile external claim grounding/retraction/decay — this RFC is its internal-state symmetric pair), [RFC-0247](./RFC-0247-memory-os-associative-graph-forgetting-brain.md) ("a fact's value is the librarian's judgment, not a number"; exhaustive classification), [RFC-0244](./RFC-0244-memory-os-recall-turn-seeded-lexical-retrieval.md) (Tier-2 shared store / promotability)

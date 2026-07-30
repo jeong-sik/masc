@@ -43,6 +43,18 @@ let required_strings schema =
   | _ -> fail "schema has no required member"
 ;;
 
+let type_strings schema =
+  match schema_member "type" schema with
+  | Some (`List values) ->
+    values
+    |> List.filter_map (function
+      | `String value -> Some value
+      | _ -> None)
+    |> List.sort String.compare
+  | Some (`String value) -> [ value ]
+  | _ -> fail "schema has no type member"
+;;
+
 let allows_additional_properties schema =
   match schema_member "additionalProperties" schema with
   | Some (`Bool value) -> value
@@ -148,6 +160,32 @@ let test_compaction_plan_schema_uses_codec_ssot () =
       schema
   in
   check bool "compaction boundary schema exposes codec fields" true true
+;;
+
+let test_librarian_claim_schema_requires_nullable_metadata () =
+  let claim_schema =
+    Keeper_structured_output_schema.librarian_episode_output_schema
+    |> schema_property Keeper_librarian.wire_field_claims
+    |> schema_items
+  in
+  check
+    (list string)
+    "librarian claim required fields"
+    (List.sort String.compare Keeper_librarian.wire_claim_fields)
+    (required_strings claim_schema);
+  check bool "librarian claim schema is closed" false
+    (allows_additional_properties claim_schema);
+  List.iter
+    (fun (field, non_null_type) ->
+       check
+         (list string)
+         (field ^ " is required but nullable")
+         (List.sort String.compare [ non_null_type; "null" ])
+         (claim_schema |> schema_property field |> type_strings))
+    [ Keeper_librarian.wire_field_source_tool_call_id, "string"
+    ; Keeper_librarian.wire_field_claim_id, "string"
+    ; Keeper_librarian.wire_field_valid_for_days, "integer"
+    ]
 ;;
 
 (* The reviewer config must reach json_object-only providers. Counterfactual
@@ -312,6 +350,12 @@ let () =
             "compaction plan schema uses codec SSOT"
             `Quick
             test_compaction_plan_schema_uses_codec_ssot
+        ] )
+    ; ( "librarian schemas"
+      , [ test_case
+            "nullable claim metadata remains required"
+            `Quick
+            test_librarian_claim_schema_requires_nullable_metadata
         ] )
     ; ( "verdict schemas"
       , [ test_case

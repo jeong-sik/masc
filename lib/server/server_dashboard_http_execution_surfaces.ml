@@ -606,8 +606,24 @@ let keeper_agent_status_opt row =
   | None | Some _ -> keeper_top_level_status_opt row
 ;;
 
+let lifecycle_display_for_row row event =
+  match
+    ( Keeper_lifecycle_events.event_of_string event
+    , Option.bind
+        (keeper_top_level_status_opt row)
+        Keeper_status_runtime.control_plane_status_of_string_opt )
+  with
+  | Some Keeper_lifecycle_events.Reconciled, Some Keeper_status_runtime.Cp_paused ->
+    display_of_phase_or_legacy_event Legacy_paused
+  | Some _, _ | None, _ -> lifecycle_display_of_event event
+;;
+
 let control_status_override_of_lifecycle_event row event =
-  match lifecycle_legacy_wire_event_of_string event with
+  match lifecycle_display_for_row row event with
+  | Some { ld_paused = Some true; _ } ->
+    Some Keeper_status_runtime.Cp_paused
+  | Some _ | None ->
+    (match lifecycle_legacy_wire_event_of_string event with
   | Some Legacy_paused ->
     Some Keeper_status_runtime.Cp_paused
   | Some Legacy_resumed ->
@@ -625,7 +641,7 @@ let control_status_override_of_lifecycle_event row event =
      | Some Keeper_status_runtime.Cp_paused ->
        Some Keeper_status_runtime.Cp_paused
      | Some (Keeper_status_runtime.Cp_surface _) | None -> None)
-  | Some (Legacy_running | Legacy_crashed | Legacy_dead) | None -> None
+  | Some (Legacy_running | Legacy_crashed | Legacy_dead) | None -> None)
 ;;
 
 let patched_keeper_status row ~event ~keepalive_running =
@@ -668,6 +684,7 @@ let patch_keeper_row ~keeper_name ~event ~keepalive_running = function
   | `Assoc fields as row ->
     (match Json_util.assoc_member_opt "name" row with
      | Some (`String name) when String.equal name keeper_name ->
+       let lifecycle_display = lifecycle_display_for_row row event in
        let row_fields : (string * Yojson.Safe.t) list = fields in
        let row_fields =
          row_fields
@@ -677,18 +694,24 @@ let patch_keeper_row ~keeper_name ~event ~keepalive_running = function
               (patched_keeper_status row ~event ~keepalive_running)
        in
        let row_fields =
-         match paused_of_lifecycle_event event with
-         | Some paused -> upsert_assoc_field "paused" (`Bool paused) row_fields
+         match lifecycle_display with
+         | Some { ld_paused = Some paused; _ } ->
+           upsert_assoc_field "paused" (`Bool paused) row_fields
+         | Some { ld_paused = None; _ } | None -> row_fields
+       in
+       let row_fields =
+         match lifecycle_display with
+         | Some { ld_phase; _ } ->
+           upsert_assoc_field "phase" (`String ld_phase) row_fields
          | None -> row_fields
        in
        let row_fields =
-         match phase_of_lifecycle_event event with
-         | Some phase -> upsert_assoc_field "phase" (`String phase) row_fields
-         | None -> row_fields
-       in
-       let row_fields =
-         match pipeline_stage_of_lifecycle_event event with
-         | Some stage -> upsert_assoc_field "pipeline_stage" (`String stage) row_fields
+         match lifecycle_display with
+         | Some { ld_pipeline_stage; _ } ->
+           upsert_assoc_field
+             "pipeline_stage"
+             (`String ld_pipeline_stage)
+             row_fields
          | None -> row_fields
        in
        `Assoc row_fields

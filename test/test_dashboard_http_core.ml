@@ -2050,6 +2050,31 @@ let test_resumed_lifecycle_event_clears_paused_status () =
   check bool "resumed flag clears pause" false
     Yojson.Safe.Util.(patched |> member "paused" |> to_bool)
 
+let test_reconciled_lifecycle_event_preserves_durable_pause () =
+  let patched =
+    Server_dashboard_http_execution_surfaces.patch_keeper_row
+      ~keeper_name:"paused-reconcile-target"
+      ~event:"reconciled"
+      ~keepalive_running:true
+      (`Assoc
+        [ ("name", `String "paused-reconcile-target")
+        ; ("status", `String "paused")
+        ; ("paused", `Bool true)
+        ; ("phase", `String "paused")
+        ; ("pipeline_stage", `String "paused")
+        ; ("agent", `Assoc [ ("status", `String "active") ])
+        ])
+  in
+  let open Yojson.Safe.Util in
+  check string "reconciliation preserves paused status" "paused"
+    (patched |> member "status" |> to_string);
+  check bool "reconciliation preserves durable pause flag" true
+    (patched |> member "paused" |> to_bool);
+  check string "reconciliation preserves paused phase" "paused"
+    (patched |> member "phase" |> to_string);
+  check string "reconciliation preserves paused pipeline" "paused"
+    (patched |> member "pipeline_stage" |> to_string)
+
 let test_stopped_lifecycle_event_stays_offline () =
   let patched =
     Server_dashboard_http_execution_surfaces.patch_keeper_row
@@ -2590,6 +2615,8 @@ let () =
             test_paused_lifecycle_event_keeps_paused_status;
           test_case "resumed lifecycle event clears the paused status" `Quick
             test_resumed_lifecycle_event_clears_paused_status;
+          test_case "reconciled lifecycle event preserves durable pause" `Quick
+            test_reconciled_lifecycle_event_preserves_durable_pause;
           test_case "stopped lifecycle event stays offline" `Quick
             test_stopped_lifecycle_event_stays_offline;
           test_case "stopped lifecycle event preserves durable pause" `Quick

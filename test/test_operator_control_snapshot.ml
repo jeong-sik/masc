@@ -368,12 +368,10 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
           |> member "context_metrics_unavailable"
           |> member "kind"
           |> to_string);
-      Alcotest.(check int) "last-turn usage remains separate" 6_637_033
-        Yojson.Safe.Util.(
-          keeper
-          |> member "last_turn_usage"
-          |> member "input_tokens"
-          |> to_int))
+      Alcotest.(check bool)
+        "persisted token counters do not imply an observed last-turn usage"
+        true
+        Yojson.Safe.Util.(keeper |> member "last_turn_usage" = `Null))
 
 let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
   Eio_main.run @@ fun env ->

@@ -63,17 +63,6 @@ type prepared_transfer =
   ; applied_at : float
   }
 
-let resolve_pending_source
-      ~queue_state
-      ~source_ref
-      ~source_incarnation
-  =
-  Keeper_event_queue_state.resolve_pending_selection
-    ~source_ref
-    ~source_incarnation
-    queue_state
-;;
-
 let prior_cancellation_for_request
       ~queue_state
       ~source_ref
@@ -114,10 +103,10 @@ let fresh_cancellation_for_request
       ~reason
   =
   let* selection =
-    resolve_pending_source
-      ~queue_state
+    Keeper_event_queue_state.resolve_pending_selection
       ~source_ref
       ~source_incarnation
+      queue_state
   in
   let cancellation : Keeper_registry_event_queue.accepted_cancellation =
     { source = selection.source
@@ -173,10 +162,10 @@ let fresh_transfer_for_request
       ~target_keeper
   =
   let* selection =
-    resolve_pending_source
-      ~queue_state
+    Keeper_event_queue_state.resolve_pending_selection
       ~source_ref
       ~source_incarnation
+      queue_state
   in
   let transfer : Keeper_registry_event_queue.accepted_transfer =
     { source = selection.source
@@ -257,10 +246,10 @@ let execute_reprioritization
       ~urgency
   =
   let* selection =
-    resolve_pending_source
-      ~queue_state
+    Keeper_event_queue_state.resolve_pending_selection
       ~source_ref
       ~source_incarnation
+      queue_state
   in
   let* revision =
     Keeper_registry_event_queue.reprioritize_pending_result

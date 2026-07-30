@@ -150,7 +150,9 @@ let duplicate_claim_identity_rows facts =
       (fun counts fact ->
        let key = Keeper_memory_os_types.claim_identity fact in
        let count =
-         Option.value ~default:0 (Claim_identity_map.find_opt key counts)
+         match Claim_identity_map.find_opt key counts with
+         | Some count -> count
+         | None -> 0
        in
        Claim_identity_map.add key (count + 1) counts)
       Claim_identity_map.empty

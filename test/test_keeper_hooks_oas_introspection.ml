@@ -91,7 +91,15 @@ let make_runtime_hooks () : Agent_sdk.Hooks.hooks =
   let config = Masc.Workspace.default_config base_path in
   let meta_ref = make_meta_ref "hook-introspection-keeper" in
   let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
-  Masc.Keeper_hooks_oas.make_hooks ~config ~meta_ref ~turn_ctx_cell ~generation:0 ()
+  Masc.Keeper_hooks_oas.make_hooks
+    ~config
+    ~meta_ref
+    ~turn_ctx_cell
+    ~generation:0
+    ~trace_id:"introspection-trace"
+    ~keeper_turn_id:1
+    ~on_after_turn_ordinal:ignore
+    ()
 
 let runtime_slots_of (hooks : Agent_sdk.Hooks.hooks) =
   [

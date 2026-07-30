@@ -60,6 +60,7 @@ type agent_setup =
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list
+  ; final_oas_turn_ordinal_ref : int option ref
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
@@ -84,6 +85,7 @@ val prepare_agent_setup
   -> context_injector:Agent_sdk.Hooks.context_injector
   -> start_turn_count:int
   -> generation:int
+  -> keeper_turn_id:int
   -> runtime_id:string
   -> is_retry:bool
   -> config_root:string

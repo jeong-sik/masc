@@ -150,7 +150,7 @@ let empty_model_metrics_json ~window ~bucket_min =
     ; "bucket_minutes", `Int bucket_min
     ; "total_entries", `Int 0
     ; "total_error_entries", `Int 0
-    ; "cost_ledger_read", `Assoc [ "status", `String "pending" ]
+    ; "cost_ledger_read", `Assoc [ "state", `String "pending" ]
     ; "latency_buckets", `List []
     ; "models", `List []
     ]
@@ -165,7 +165,7 @@ let empty_cost_latency_json ~window =
     ; "p95", `Null
     ; "total_cost_usd", `Float 0.0
     ; "window_minutes", `Int window
-    ; "cost_ledger_read", `Assoc [ "status", `String "pending" ]
+    ; "cost_ledger_read", `Assoc [ "state", `String "pending" ]
     ; "generated_at", `Float (Unix.gettimeofday ())
     ]
 

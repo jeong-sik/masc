@@ -562,6 +562,7 @@ let run_turn
       ~context_injector
       ~start_turn_count
       ~generation
+      ~keeper_turn_id:manifest_keeper_turn_id
       ~runtime_id
       ~is_retry
       ~config_root
@@ -647,6 +648,9 @@ let run_turn
     in
     let acc = s.Keeper_run_tools.acc in
     let agent_ref : Agent_sdk.Agent.t option ref = ref None in
+    let final_oas_turn_ordinal_ref =
+      s.Keeper_run_tools.final_oas_turn_ordinal_ref
+    in
     let receipt_turn_count_ref = s.Keeper_run_tools.receipt_turn_count_ref in
     let receipt_model_used_ref = s.Keeper_run_tools.receipt_model_used_ref in
     let receipt_stop_reason_ref = s.Keeper_run_tools.receipt_stop_reason_ref in
@@ -916,37 +920,46 @@ let run_turn
                       with
                       | Error e -> Error e
                       | Ok response_text ->
-                        Keeper_agent_run_finalize_response.finalize
-                          ~config ~meta ~generation ~manifest_keeper_turn_id
-                          ~session ~append_manifest ~model
-                          ~acc
-                          ~actual_keeper_tool_names
-                          ~user_turn_record
-                          ~result ~checkpoint_persistence_error
-                          ~post_turn_t0 ~runtime_id_string
-                          ~history_messages
-                          ~prompt_metrics ~ctx_composition ~usage
-                          ~receipt_response_text_present_ref ~history_assistant_source
-                          ~raw_response_text:response_text
-                          ?continuation_delivery_channel
-                          ~capture_replay_response:
-                            (fun ~response_text ->
-                              (* Phase O observability: capture the exact
-                                 assistant text persisted for next-turn replay,
-                                 after response finalization has applied
-                                 suppression and internal-markup stripping. The
-                                 capture is best-effort and gated by
-                                 MASC_KEEPER_WIRE_CAPTURE. *)
-                              Keeper_wire_capture.capture_response
-                                ~base_path:config.base_path
-                                ~masc_root:(Workspace.masc_root_dir config)
-                                ~keeper_name:meta.name
-                                ~turn_id:manifest_keeper_turn_id
-                                ~sdk_turn:result.turns
-                                ~trace_id:meta.runtime.trace_id
-                                ~response_text
-                                ())
-                          ()))
+                        (match !final_oas_turn_ordinal_ref with
+                         | None ->
+                           Error
+                             (Agent_sdk.Error.Internal
+                                "successful Agent.run returned without an \
+                                 AfterTurn ordinal")
+                         | Some final_oas_turn_ordinal ->
+                           Keeper_agent_run_finalize_response.finalize
+                             ~config ~meta ~generation ~manifest_keeper_turn_id
+                             ~session ~append_manifest ~model
+                             ~acc
+                             ~actual_keeper_tool_names
+                             ~user_turn_record
+                             ~result ~final_oas_turn_ordinal
+                             ~checkpoint_persistence_error
+                             ~post_turn_t0 ~runtime_id_string
+                             ~history_messages
+                             ~prompt_metrics ~ctx_composition ~usage
+                             ~receipt_response_text_present_ref
+                             ~history_assistant_source
+                             ~raw_response_text:response_text
+                             ?continuation_delivery_channel
+                             ~capture_replay_response:
+                               (fun ~response_text ->
+                                 (* Phase O observability: capture the exact
+                                    assistant text persisted for next-turn replay,
+                                    after response finalization has applied
+                                    suppression and internal-markup stripping. The
+                                    capture is best-effort and gated by
+                                    MASC_KEEPER_WIRE_CAPTURE. *)
+                                 Keeper_wire_capture.capture_response
+                                   ~base_path:config.base_path
+                                   ~masc_root:(Workspace.masc_root_dir config)
+                                   ~keeper_name:meta.name
+                                   ~turn_id:manifest_keeper_turn_id
+                                   ~sdk_turn:result.turns
+                                   ~trace_id:meta.runtime.trace_id
+                                   ~response_text
+                                   ())
+                             ())))
                in
        let deferred_retry =
          Option.map

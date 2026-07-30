@@ -42,13 +42,16 @@ let bucket_metric_to_json (b : bucket_metric) : Yojson.Safe.t =
 let cost_read_to_json = function
   | Ok diagnostics ->
     `Assoc
-      [ "status", `String "ok"
+      [ "state", `String "available"
       ; "malformed_rows", `Int diagnostics.malformed_rows
       ; "schema_violation_rows", `Int diagnostics.schema_violation_rows
+      ; "identity_conflict_rows", `Int diagnostics.identity_conflict_rows
       ]
   | Error error ->
-    Json_util.error_assoc
-      [ "detail", `String (Dated_jsonl.read_error_to_string error) ]
+    `Assoc
+      [ "state", `String "unavailable"
+      ; "detail", `String (Dated_jsonl.read_error_to_string error)
+      ]
 ;;
 
 let model_stats_to_json ?(model_label = public_runtime_label) (s : model_stats)
@@ -276,8 +279,8 @@ let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
         [ "agent", `String (public_runtime_lane_label m.model_id)
         ; "in_tok", `Int (Option.value ~default:0 m.total_input_tokens)
         ; "out_tok", `Int (Option.value ~default:0 m.total_output_tokens)
-        (* sound-partial: allow missing cost in legacy rows; absence means zero
-           observed spend, not a provider/model routing choice. *)
+        (* Absence means zero observed spend, not a provider/model routing
+           choice. *)
         ; "cost", `Float (Option.value ~default:0.0 m.total_cost_usd)
         ; "p50_ms", Json_util.float_opt_to_json m.p50_latency_ms
         ; "p95_ms", Json_util.float_opt_to_json m.p95_latency_ms

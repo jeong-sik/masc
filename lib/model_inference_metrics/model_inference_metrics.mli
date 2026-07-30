@@ -117,6 +117,7 @@ type model_stats = {
 type cost_read_diagnostics = {
   malformed_rows : int;
   schema_violation_rows : int;
+  identity_conflict_rows : int;
 }
 
 type cost_read_result =

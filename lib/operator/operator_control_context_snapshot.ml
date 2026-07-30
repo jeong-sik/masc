@@ -123,6 +123,7 @@ let keeper_context_snapshot_of_meta config (meta : Keeper_meta_contract.keeper_m
 
 let dated_jsonl_read_error_code = function
   | Dated_jsonl.Invalid_offset _ -> "invalid_offset"
+  | Dated_jsonl.Invalid_date_range _ -> "invalid_date_range"
   | Dated_jsonl.Not_a_directory _ -> "not_a_directory"
   | Dated_jsonl.Invalid_layout_entry _ -> "invalid_layout_entry"
   | Dated_jsonl.Non_regular_file _ -> "non_regular_file"
@@ -130,7 +131,8 @@ let dated_jsonl_read_error_code = function
 ;;
 
 let dated_jsonl_read_error_path = function
-  | Dated_jsonl.Invalid_offset _ -> None
+  | Dated_jsonl.Invalid_offset _
+  | Dated_jsonl.Invalid_date_range _ -> None
   | Dated_jsonl.Not_a_directory { path }
   | Dated_jsonl.Non_regular_file { path; _ }
   | Dated_jsonl.Io_error { path; _ } -> Some path

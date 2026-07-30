@@ -1,0 +1,12 @@
+(include_subdirs no)
+
+(library
+ (name masc_cost_ledger)
+ (public_name masc.cost_ledger)
+ (wrapped false)
+ (modules cost_ledger)
+ (libraries
+  dated_jsonl
+  masc_core
+  masc_types
+  yojson))

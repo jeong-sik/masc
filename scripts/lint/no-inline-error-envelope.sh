@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # lint-no-inline-error-envelope — block inline `("status", `String "error")`
-# in lib/. Mirrors no-inline-ok-envelope. Use Json_util.error_assoc or the
-# Tool_args response/result helpers instead.
+# in lib/. Mirrors no-inline-ok-envelope. Use Tool_args.error_response /
+# error_response_with / error_assoc / error_result instead.
 
 set -euo pipefail
 
@@ -9,7 +9,8 @@ cd "$(git rev-parse --show-toplevel)"
 
 ALLOWLIST=(
   # SSOT definition — canonical helpers themselves.
-  "lib/core/json_util.ml"
+  # Moved to lib/tool_types/ in RFC-0086 PR-2H (PR #15531).
+  "lib/tool_types/tool_args.ml"
 
   # T27 alias backstop (sibling-include runtime for tool_local_runtime_*.ml).
   "lib/tool_local_runtime_core.ml"
@@ -63,7 +64,7 @@ while IFS= read -r match; do
     continue
   fi
 
-  echo "ERROR: inline error-envelope literal (use Json_util.error_assoc or a Tool_args error helper): $match"
+  echo "ERROR: inline error-envelope literal (use Tool_args.error_response / error_response_with / error_assoc / error_result): $match"
   count=$((count + 1))
 done < "$matches_file"
 
@@ -73,7 +74,7 @@ if [[ $count -gt 0 ]]; then
   echo "Migration guide:"
   echo "  - Returns string (msg only)?  Tool_args.error_response msg"
   echo "  - Returns string (+ fields)?  Tool_args.error_response_with fields"
-  echo "  - Returns Yojson.Safe.t?      Json_util.error_assoc fields"
+  echo "  - Returns Yojson.Safe.t?      Tool_args.error_assoc fields"
   echo "  - Returns Tool_result.t?      Tool_args.error_result ~tool_name ~start_time msg"
   exit 1
 fi

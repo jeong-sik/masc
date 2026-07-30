@@ -292,6 +292,7 @@ let finalize
     ~actual_keeper_tool_names
     ~(user_turn_record : Keeper_run_prompt.user_turn_record)
     ~(result : Runtime_agent.run_result)
+    ~final_oas_turn_ordinal
     ~checkpoint_persistence_error
     ~post_turn_t0
     ~runtime_id_string
@@ -477,6 +478,7 @@ let finalize
       ; ctx_composition
       ; runtime_observation = result.runtime_observation
       ; turn_count = result.turns
+      ; final_oas_turn_ordinal
       ; usage
       ; usage_reported = Option.is_some result.response.usage
       ; tool_calls = List.rev acc.tool_calls

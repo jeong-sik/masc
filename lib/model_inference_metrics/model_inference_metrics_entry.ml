@@ -127,6 +127,7 @@ type latency_bucket =
 type cost_read_diagnostics =
   { malformed_rows : int
   ; schema_violation_rows : int
+  ; identity_conflict_rows : int
   }
 
 type cost_read_result =
@@ -162,14 +163,15 @@ type provider_stats =
 type raw_entry =
   { model : string
   ; provider : string option
+  ; inference_identity : Cost_ledger.inference_identity option
   ; ts_unix : float
   ; outcome : string
   ; stop_reason : string option
   ; turn_lane : string option
   ; tok_per_sec : float option
   ; prompt_tok_per_sec : float option
-  ; (* Hardware decode rate when present in telemetry; None for legacy entries
-     and non-Ollama providers whose backend doesn't populate inference_timings. *)
+  ; (* Hardware decode rate when present in telemetry; None when the provider
+       does not populate inference_timings. *)
     hw_decode_tok_per_sec : float option
   ; peak_memory_gb : float option
   ; (* Per-turn thinking_enabled as sent to the model (adaptive classifier output).
@@ -211,10 +213,12 @@ type parse_error =
   | Out_of_window                  (* ts_unix older than [since_unix] *)
   | No_telemetry_object            (* decisions.jsonl entry without telemetry { ... } *)
   | Missing_outcome                (* telemetry.outcome absent on success-branch row *)
+  | Missing_usage_reported
+  | Missing_telemetry_reported
   | Missing_success_model          (* no selected_model / model_used / runtime_id *)
+  | Missing_success_inference_identity
   | Missing_error_model_attribution (* no candidate_models / runtime_id on error turn *)
-  | Missing_cost_model             (* cost row without "model" field *)
-  | Missing_cost_usage_missing     (* costs row without current usage_missing boolean *)
+  | Invalid_current_cost_row of Cost_ledger.decode_error
 
 let parse_error_label = function
   | Not_assoc -> "not_assoc"
@@ -222,10 +226,17 @@ let parse_error_label = function
   | Out_of_window -> "out_of_window"
   | No_telemetry_object -> "no_telemetry_object"
   | Missing_outcome -> "missing_outcome"
+  | Missing_usage_reported -> "missing_usage_reported"
+  | Missing_telemetry_reported -> "missing_telemetry_reported"
   | Missing_success_model -> "missing_success_model"
+  | Missing_success_inference_identity -> "missing_success_inference_identity"
   | Missing_error_model_attribution -> "missing_error_model_attribution"
-  | Missing_cost_model -> "missing_cost_model"
-  | Missing_cost_usage_missing -> "missing_cost_usage_missing"
+  | Invalid_current_cost_row _ -> "invalid_current_cost_row"
+;;
+
+let parse_error_detail = function
+  | Invalid_current_cost_row error -> Cost_ledger.decode_error_to_string error
+  | error -> parse_error_label error
 ;;
 
 (* [Out_of_window] and [Not_assoc] are routine in mixed jsonl streams; we never
@@ -236,10 +247,12 @@ let parse_error_is_schema_violation = function
   | Out_of_window | Not_assoc | No_telemetry_object -> false
   | Missing_ts_unix
   | Missing_outcome
+  | Missing_usage_reported
+  | Missing_telemetry_reported
   | Missing_success_model
+  | Missing_success_inference_identity
   | Missing_error_model_attribution
-  | Missing_cost_model
-  | Missing_cost_usage_missing -> true
+  | Invalid_current_cost_row _ -> true
 ;;
 
 (* ── Percentile / list helpers ──────────────────────────── *)
@@ -342,12 +355,8 @@ let json_string_list_field key (fields : (string * Yojson.Safe.t) list) =
 
 (* ── Usage trust inference ──────────────────────────────── *)
 
-(* [usage_reported] is now an [option]: [None] means the row carried no
-   [usage_reported] field at all (older jsonl rows or providers that don't
-   emit it). The pre-existing semantics treated absent and explicit-[false]
-   identically as "missing" — we preserve that with [None | Some false ->
-   "missing"], but make the absent case distinguishable for future tightening
-   without rewriting trust inference. *)
+(* [None] means the current row did not establish whether usage was reported.
+   The parser decides whether that omission is valid for its source contract. *)
 let infer_usage_trust_from_fields
       fields
       ~(usage_reported : bool option)
@@ -373,18 +382,10 @@ let infer_usage_trust_from_fields
       (match output_tokens with
        | Some n when n < 0 -> add "negative_output_tokens"
        | _ -> ());
-      (match
-         match json_int_field_opt "cache_creation_tokens" fields with
-         | Some _ as value -> value
-         | None -> json_int_field_opt "cache_creation_input_tokens" fields
-       with
+      (match json_int_field_opt "cache_creation_tokens" fields with
        | Some n when n < 0 -> add "negative_cache_creation_tokens"
        | _ -> ());
-      (match
-         match json_int_field_opt "cache_read_tokens" fields with
-         | Some _ as value -> value
-         | None -> json_int_field_opt "cache_read_input_tokens" fields
-       with
+      (match json_int_field_opt "cache_read_tokens" fields with
        | Some n when n < 0 -> add "negative_cache_read_tokens"
        | _ -> ());
       (match json_int_field_opt "reasoning_tokens" fields with

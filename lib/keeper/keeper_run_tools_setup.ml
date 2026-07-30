@@ -107,6 +107,7 @@ let prepare_agent_setup
       ~(context_injector : Agent_sdk.Hooks.context_injector)
       ~(start_turn_count : int)
       ~(generation : int)
+      ~(keeper_turn_id : int)
       ~(runtime_id : string)
       ~(is_retry : bool)
       ~(config_root : string)
@@ -121,16 +122,11 @@ let prepare_agent_setup
   =
   let ( let* ) = Result.bind in
   let runtime_id_string = runtime_id in
-  let manifest_keeper_turn_id =
-    match runtime_manifest_context with
-    | Some ctx -> ctx.Keeper_runtime_manifest.manifest_keeper_turn_id
-    | None -> None
-  in
   let ctx_snapshot = ctx_work in
   let gate_history, gate_history_omitted = gate_history_slice history_messages in
   let gate_context =
     Keeper_gate_causal_context.create
-      ~turn_id:manifest_keeper_turn_id
+      ~turn_id:(Some keeper_turn_id)
       ~initial:
         (gate_causal_initial
            ~gate_history
@@ -378,6 +374,7 @@ let prepare_agent_setup
     in
     ()
   in
+  let final_oas_turn_ordinal_ref : int option ref = ref None in
   let receipt_turn_count_ref : int option ref = ref None in
   let receipt_model_used_ref : string option ref = ref None in
   let receipt_stop_reason_ref : Runtime_agent.stop_reason option ref =
@@ -418,9 +415,10 @@ let prepare_agent_setup
     ; config
     ; keeper_tools_cleanup
     ; terminal_effect_state
-    ; manifest_keeper_turn_id
+    ; keeper_turn_id
     ; meta
     ; turn_ctx_cell
+    ; final_oas_turn_ordinal_ref
     ; receipt_turn_count_ref
     ; receipt_model_used_ref
     ; receipt_stop_reason_ref

@@ -532,6 +532,10 @@ let test_iter_all_entries_result_continues_after_malformed () =
     "01"
     [ "not-json"; {|{"i":2}|} ];
   write_dated_file dir "2026-02" "02" [ {|{"i":3}|} ];
+  Fs_compat.append_file (Filename.concat dir ".DS_Store") "not dated";
+  Fs_compat.append_file
+    (Filename.concat (Filename.concat dir "2026-02") ".DS_Store")
+    "not dated";
   let path = Filename.concat (Filename.concat dir "2026-02") "01.jsonl" in
   let store = Dated_jsonl.create ~base_dir:dir () in
   let seen = ref [] in
@@ -567,6 +571,69 @@ let test_iter_all_entries_result_surfaces_typed_io_error () =
   | Error error ->
     failf "unexpected strict stream error: %s" (Dated_jsonl.read_error_to_string error)
   | Ok () -> fail "strict stream treated base file as an empty store"
+;;
+
+let test_iter_range_entries_result_reads_only_requested_days () =
+  let dir = tmpdir "dated_jsonl_iter_range_entries_result" in
+  write_dated_file dir "2026-01" "31" [ {|{"i":1}|} ];
+  write_dated_file
+    dir
+    "2026-02"
+    "01"
+    [ "not-json"; {|{"i":2}|} ];
+  write_dated_file dir "2026-02" "02" [ {|{"i":3}|} ];
+  let path = Filename.concat (Filename.concat dir "2026-02") "01.jsonl" in
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  let seen = ref [] in
+  (match
+     Dated_jsonl.iter_range_entries_result
+       store
+       ~since:"2026-02-01"
+       ~until:"2026-02-01"
+       (fun entry -> seen := entry :: !seen)
+   with
+   | Ok () -> ()
+   | Error error ->
+     failf
+       "strict range iteration failed: %s"
+       (Dated_jsonl.read_error_to_string error));
+  match List.rev !seen with
+  | [ Dated_jsonl.Malformed_json
+        { path = malformed_path; line_number = Some 1; _ }
+    ; Dated_jsonl.Parsed json
+    ] ->
+    check string "range malformed path" path malformed_path;
+    check int "only requested day parsed" 2 (json_i json)
+  | entries ->
+    failf
+      "expected malformed + parsed requested-day stream, got %d entries"
+      (List.length entries)
+;;
+
+let test_iter_range_entries_result_rejects_invalid_range () =
+  let store =
+    Dated_jsonl.create
+      ~base_dir:(tmpdir "dated_jsonl_iter_range_invalid")
+      ()
+  in
+  let rejects ~name ~since ~until =
+    match Dated_jsonl.iter_range_entries_result store ~since ~until ignore with
+    | Error (Dated_jsonl.Invalid_date_range _) -> ()
+    | Error error ->
+      failf
+        "%s: unexpected strict range error: %s"
+        name
+        (Dated_jsonl.read_error_to_string error)
+    | Ok () -> failf "%s: strict range accepted invalid dates" name
+  in
+  rejects
+    ~name:"reversed"
+    ~since:"2026-02-02"
+    ~until:"2026-02-01";
+  rejects
+    ~name:"invalid calendar day"
+    ~since:"2026-02-30"
+    ~until:"2026-02-30"
 ;;
 
 let test_iter_range_chronological () =
@@ -739,6 +806,10 @@ let () =
             test_iter_all_entries_result_continues_after_malformed;
           test_case "strict entry iteration surfaces typed I/O" `Quick
             test_iter_all_entries_result_surfaces_typed_io_error;
+          test_case "strict range reads only requested days" `Quick
+            test_iter_range_entries_result_reads_only_requested_days;
+          test_case "strict range rejects invalid range" `Quick
+            test_iter_range_entries_result_rejects_invalid_range;
           test_case "iter_range chronological" `Quick test_iter_range_chronological;
         ] );
       ( "prune",

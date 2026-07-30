@@ -28,6 +28,7 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
       |> Array.to_list
       |> List.filter (fun f ->
         String.length f > 16 && Filename.check_suffix f ".decisions.jsonl")
+      |> List.sort String.compare
     in
     List.concat_map
       (fun fname ->
@@ -51,23 +52,29 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
          | Eio.Cancel.Cancelled _ as exn ->
            let bt = Printexc.get_raw_backtrace () in
            Printexc.raise_with_backtrace exn bt
-         | _ -> [])
+         | exn ->
+           Log.Model_inference_metrics.error
+             "decisions.jsonl read failed: path=%s detail=%s"
+             path
+             (Printexc.to_string exn);
+           [])
       files)
 ;;
 
 let read_cost_entries_dated ~base_path ~since_unix
   : (raw_entry list * cost_read_diagnostics, Dated_jsonl.read_error) result
   =
-  let dir = Filename.concat (Common.masc_dir_from_base_path ~base_path) "costs" in
-  if not (Sys.file_exists dir)
-  then Ok ([], { malformed_rows = 0; schema_violation_rows = 0 })
-  else (
-    let store = Dated_jsonl.create ~base_dir:dir () in
-    let entries = ref [] in
-    let malformed_rows = ref 0 in
-    let schema_violation_rows = ref 0 in
-    match
-      Dated_jsonl.iter_all_entries_result store (function
+  let store = Cost_ledger.store_of_base_path ~base_path in
+  let entries = ref [] in
+  let malformed_rows = ref 0 in
+  let schema_violation_rows = ref 0 in
+  let now = Time_compat.now () in
+  match
+    Dated_jsonl.iter_range_entries_result
+      store
+      ~since:(Log.format_utc_date_of since_unix)
+      ~until:(Log.format_utc_date_of now)
+      (function
         | Dated_jsonl.Parsed json ->
           (match parse_cost_entry json ~since_unix with
            | Ok entry -> entries := entry :: !entries
@@ -75,8 +82,9 @@ let read_cost_entries_dated ~base_path ~since_unix
            | Error err ->
              incr schema_violation_rows;
              Log.Model_inference_metrics.warn
-               "costs/dated schema drop: reason=%s"
-               (parse_error_label err))
+               "cost ledger schema drop: reason=%s detail=%s"
+               (parse_error_label err)
+               (parse_error_detail err))
         | Dated_jsonl.Malformed_json { path; line_number; detail } ->
           incr malformed_rows;
           let location =
@@ -85,55 +93,168 @@ let read_cost_entries_dated ~base_path ~since_unix
             | None -> path
           in
           Log.Model_inference_metrics.warn
-            "costs/dated malformed row: %s detail=%s"
+            "cost ledger malformed row: %s detail=%s"
             location
             detail)
-    with
-    | Ok () ->
-      Ok
-        ( List.rev !entries
-        , { malformed_rows = !malformed_rows
-          ; schema_violation_rows = !schema_violation_rows
-          } )
-    | Error error -> Error error)
+  with
+  | Ok () ->
+    Ok
+      ( List.rev !entries
+      , { malformed_rows = !malformed_rows
+        ; schema_violation_rows = !schema_violation_rows
+        ; identity_conflict_rows = 0
+        } )
+  | Error error -> Error error
 ;;
 
 let read_cost_entries ~base_path ~since_unix =
   read_cost_entries_dated ~base_path ~since_unix
 ;;
 
-let same_int_opt a b =
-  match a, b with
-  | Some x, Some y -> x = y
-  | _ -> false
+module Inference_identity_map = Map.Make (struct
+    type t = Cost_ledger.inference_identity
+
+    let compare = Cost_ledger.compare_inference_identity
+  end)
+
+type identity_bucket =
+  { decisions : raw_entry list
+  ; costs : raw_entry list
+  }
+
+let empty_identity_bucket = { decisions = []; costs = [] }
+
+let value_or ~preferred ~fallback =
+  match preferred with
+  | Some _ -> preferred
+  | None -> fallback
 ;;
 
-let same_inference_sample a b =
-  String.equal a.model b.model
-  && Float.abs (a.ts_unix -. b.ts_unix) <= 5.0
-  && same_int_opt a.input_tokens b.input_tokens
-  && same_int_opt a.output_tokens b.output_tokens
+let merge_exact_inference decision cost =
+  { model = cost.model
+  ; provider = value_or ~preferred:cost.provider ~fallback:decision.provider
+  ; inference_identity = cost.inference_identity
+  ; ts_unix = cost.ts_unix
+  ; outcome = decision.outcome
+  ; stop_reason = decision.stop_reason
+  ; turn_lane = decision.turn_lane
+  ; tok_per_sec =
+      value_or ~preferred:cost.tok_per_sec ~fallback:decision.tok_per_sec
+  ; prompt_tok_per_sec =
+      value_or
+        ~preferred:cost.prompt_tok_per_sec
+        ~fallback:decision.prompt_tok_per_sec
+  ; hw_decode_tok_per_sec =
+      value_or
+        ~preferred:cost.hw_decode_tok_per_sec
+        ~fallback:decision.hw_decode_tok_per_sec
+  ; peak_memory_gb =
+      value_or ~preferred:cost.peak_memory_gb ~fallback:decision.peak_memory_gb
+  ; thinking_enabled = decision.thinking_enabled
+  ; latency_ms = value_or ~preferred:cost.latency_ms ~fallback:decision.latency_ms
+  ; input_tokens =
+      value_or ~preferred:cost.input_tokens ~fallback:decision.input_tokens
+  ; output_tokens =
+      value_or ~preferred:cost.output_tokens ~fallback:decision.output_tokens
+  ; cache_read_tokens =
+      value_or
+        ~preferred:cost.cache_read_tokens
+        ~fallback:decision.cache_read_tokens
+  ; cache_creation_tokens =
+      value_or
+        ~preferred:cost.cache_creation_tokens
+        ~fallback:decision.cache_creation_tokens
+  ; reasoning_tokens =
+      value_or
+        ~preferred:cost.reasoning_tokens
+        ~fallback:decision.reasoning_tokens
+  ; fallback_applied = decision.fallback_applied
+  ; cost_usd = value_or ~preferred:cost.cost_usd ~fallback:decision.cost_usd
+  ; tool_call_count = decision.tool_call_count
+  ; tools_used = decision.tools_used
+  ; usage_reported =
+      value_or
+        ~preferred:cost.usage_reported
+        ~fallback:decision.usage_reported
+  ; telemetry_reported =
+      value_or
+        ~preferred:cost.telemetry_reported
+        ~fallback:decision.telemetry_reported
+  ; usage_trust =
+      value_or ~preferred:cost.usage_trust ~fallback:decision.usage_trust
+  ; usage_anomaly_reasons =
+      List.sort_uniq
+        String.compare
+        (decision.usage_anomaly_reasons @ cost.usage_anomaly_reasons)
+  ; coverage_reason = decision.coverage_reason
+  ; coverage_stage = decision.coverage_stage
+  ; is_error = decision.is_error
+  ; streaming_ttfrc_ms = decision.streaming_ttfrc_ms
+  ; streaming_inter_chunk_count = decision.streaming_inter_chunk_count
+  ; streaming_inter_chunk_avg_ms = decision.streaming_inter_chunk_avg_ms
+  }
+;;
+
+let add_identity_entry ~is_decision (buckets, unkeyed) entry =
+  match entry.inference_identity with
+  | None -> buckets, entry :: unkeyed
+  | Some identity ->
+    let bucket =
+      match Inference_identity_map.find_opt identity buckets with
+      | Some bucket -> bucket
+      | None -> empty_identity_bucket
+    in
+    let bucket =
+      if is_decision
+      then { bucket with decisions = entry :: bucket.decisions }
+      else { bucket with costs = entry :: bucket.costs }
+    in
+    Inference_identity_map.add identity bucket buckets, unkeyed
 ;;
 
 let merge_decision_and_cost_entries decisions costs =
-  let decision_shadowed_by_cost d =
-    d.tok_per_sec = None
-    && List.exists (fun c -> c.tok_per_sec <> None && same_inference_sample d c) costs
+  let buckets, unkeyed =
+    List.fold_left
+      (add_identity_entry ~is_decision:true)
+      (Inference_identity_map.empty, [])
+      decisions
   in
-  let decisions_kept =
-    List.filter (fun d -> not (decision_shadowed_by_cost d)) decisions
+  let buckets, unkeyed =
+    List.fold_left
+      (add_identity_entry ~is_decision:false)
+      (buckets, unkeyed)
+      costs
   in
-  let cost_duplicate_of_decision c =
-    List.exists (fun d -> d.tok_per_sec <> None && same_inference_sample d c) decisions
-  in
-  decisions_kept @ List.filter (fun c -> not (cost_duplicate_of_decision c)) costs
+  Inference_identity_map.fold
+    (fun _identity bucket (entries, identity_conflict_rows) ->
+       let decisions = List.rev bucket.decisions in
+       let costs = List.rev bucket.costs in
+       match decisions, costs with
+       | [ decision ], [ cost ] ->
+         merge_exact_inference decision cost :: entries, identity_conflict_rows
+       | [ decision ], [] -> decision :: entries, identity_conflict_rows
+       | [], [ cost ] -> cost :: entries, identity_conflict_rows
+       | [], [] -> entries, identity_conflict_rows
+       | _ ->
+         ( entries
+         , identity_conflict_rows + List.length decisions + List.length costs ))
+    buckets
+    (unkeyed, 0)
 ;;
 
 let read_all_entries ~base_path ~since_unix =
   let decisions = read_all_decisions ~base_path ~since_unix in
   match read_cost_entries ~base_path ~since_unix with
   | Ok (costs, diagnostics) ->
-    merge_decision_and_cost_entries decisions costs, Ok diagnostics
+    let entries, identity_conflict_rows =
+      merge_decision_and_cost_entries decisions costs
+    in
+    if identity_conflict_rows > 0
+    then
+      Log.Model_inference_metrics.warn
+        "cost ledger exact identity conflict: rows=%d action=excluded"
+        identity_conflict_rows;
+    entries, Ok { diagnostics with identity_conflict_rows }
   | Error error ->
     Log.Model_inference_metrics.error
       "costs/dated read failed: %s"

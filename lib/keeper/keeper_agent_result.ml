@@ -76,6 +76,7 @@ type run_result =
   ; ctx_composition : ctx_composition_metrics
   ; runtime_observation : Runtime_observation.runtime_observation option
   ; turn_count : int
+  ; final_oas_turn_ordinal : int
   ; usage : Agent_sdk.Types.api_usage
   ; usage_reported : bool
   ; tool_calls : tool_call_detail list

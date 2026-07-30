@@ -2,17 +2,9 @@
     Track token usage and costs per agent/task. *)
 
 open Printf
+open Cost_ledger
 
-type cost_entry =
-  { agent : string
-  ; task_id : string option
-  ; model : string
-  ; input_tokens : int option
-  ; output_tokens : int option
-  ; cost_usd : float option
-  ; timestamp : string
-  ; ts_unix : float
-  }
+type cost_entry = Cost_ledger.t
 
 type period =
   | Hourly
@@ -25,127 +17,19 @@ type agent_total =
   { agent : string
   ; tokens : int
   ; cost_usd : float
-  ; model : string
   ; usage_missing_entries : int
   }
 
 let ( let* ) = Result.bind
 
-let get_masc_root () =
-  let base_path = Config_dir_resolver.base_path_or_cwd () in
-  Config_dir_resolver.masc_root ~base_path
+let cost_store () =
+  Config_dir_resolver.base_path_or_cwd ()
+  |> fun base_path -> Cost_ledger.store_of_base_path ~base_path
 ;;
-
-let costs_dir () = Filename.concat (get_masc_root ()) "costs"
 
 let nonblank value =
   let trimmed = String.trim value in
   if String.equal trimmed "" then None else Some trimmed
-;;
-
-let required_string fields key =
-  match List.assoc_opt key fields with
-  | Some (`String value) ->
-    (match nonblank value with
-     | Some value -> Ok value
-     | None -> Error (key ^ " must be a non-empty string"))
-  | _ -> Error (key ^ " must be a non-empty string")
-;;
-
-let required_optional_string fields key =
-  match List.assoc_opt key fields with
-  | Some `Null -> Ok None
-  | Some (`String value) ->
-    (match nonblank value with
-     | Some value -> Ok (Some value)
-     | None -> Error (key ^ " must be null or a non-empty string"))
-  | _ -> Error (key ^ " must be null or a non-empty string")
-;;
-
-let required_bool fields key =
-  match List.assoc_opt key fields with
-  | Some (`Bool value) -> Ok value
-  | _ -> Error (key ^ " must be a boolean")
-;;
-
-let required_nonnegative_int fields key =
-  match List.assoc_opt key fields with
-  | Some (`Int value) when value >= 0 -> Ok value
-  | _ -> Error (key ^ " must be a non-negative integer")
-;;
-
-let required_nonnegative_float fields key =
-  let value =
-    match List.assoc_opt key fields with
-    | Some (`Float value) -> Some value
-    | Some (`Int value) -> Some (Float.of_int value)
-    | _ -> None
-  in
-  match value with
-  | Some value when Float.is_finite value && value >= 0.0 -> Ok value
-  | _ -> Error (key ^ " must be a finite non-negative number")
-;;
-
-let required_null fields key =
-  match List.assoc_opt key fields with
-  | Some `Null -> Ok ()
-  | _ -> Error (key ^ " must be null when usage_missing is true")
-;;
-
-let parse_cost_json = function
-  | `Assoc fields ->
-    let* agent = required_string fields "agent" in
-    let* task_id = required_optional_string fields "task_id" in
-    let* model = required_string fields "model" in
-    let* timestamp = required_string fields "timestamp" in
-    let* _source = required_string fields "source" in
-    let* usage_missing = required_bool fields "usage_missing" in
-    let* ts_unix =
-      match Masc_domain.parse_iso8601_opt timestamp with
-      | Some value -> Ok value
-      | None -> Error "timestamp must be a valid ISO-8601 UTC value"
-    in
-    let* input_tokens, output_tokens, cost_usd =
-      if usage_missing
-      then (
-        let* () = required_null fields "input_tokens" in
-        let* () = required_null fields "output_tokens" in
-        let* () = required_null fields "cost_usd" in
-        Ok (None, None, None))
-      else (
-        let* input_tokens = required_nonnegative_int fields "input_tokens" in
-        let* output_tokens = required_nonnegative_int fields "output_tokens" in
-        let* cost_usd = required_nonnegative_float fields "cost_usd" in
-        Ok (Some input_tokens, Some output_tokens, Some cost_usd))
-    in
-    Ok
-      { agent
-      ; task_id
-      ; model
-      ; input_tokens
-      ; output_tokens
-      ; cost_usd
-      ; timestamp
-      ; ts_unix
-      }
-  | _ -> Error "cost row must be a JSON object"
-;;
-
-let cost_json ~agent ~task_id ~model ~input_tokens ~output_tokens ~cost_usd =
-  `Assoc
-    [ "agent", `String agent
-    ; ( "task_id"
-      , match task_id with
-        | Some value -> `String value
-        | None -> `Null )
-    ; "model", `String model
-    ; "input_tokens", `Int input_tokens
-    ; "output_tokens", `Int output_tokens
-    ; "cost_usd", `Float cost_usd
-    ; "usage_missing", `Bool false
-    ; "timestamp", `String (Masc_domain.now_iso ())
-    ; "source", `String "manual_cli"
-    ]
 ;;
 
 let validate_log_input ~agent ~model ~input_tokens ~output_tokens ~cost_usd =
@@ -163,11 +47,35 @@ let validate_log_input ~agent ~model ~input_tokens ~output_tokens ~cost_usd =
 ;;
 
 let log_cost ~agent ~task_id ~model ~input_tokens ~output_tokens ~cost_usd =
-  let store = Dated_jsonl.create ~base_dir:(costs_dir ()) () in
-  Dated_jsonl.append
-    store
-    (cost_json ~agent ~task_id ~model ~input_tokens ~output_tokens ~cost_usd);
-  printf "Cost logged: %s → $%.4f\n" agent cost_usd
+  let now = Time_compat.now () in
+  let row : Cost_ledger.t =
+    { agent
+    ; task_id
+    ; model
+    ; usage =
+        Usage_reported
+          { input_tokens
+          ; output_tokens
+          ; cost_usd
+          }
+    ; timestamp = Masc_domain.iso8601_of_unix_seconds now
+    ; ts_unix = now
+    ; source = Manual_cli
+    }
+  in
+  let store = cost_store () in
+  try
+    Dated_jsonl.append store (Cost_ledger.to_json row);
+    printf "Cost logged: %s → $%.4f\n" agent cost_usd;
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as error -> raise error
+  | exn ->
+    Error
+      (sprintf
+         "failed to append cost row under %s: %s"
+         (Dated_jsonl.base_dir store)
+         (Printexc.to_string exn))
 ;;
 
 let line_label path line_number =
@@ -176,24 +84,45 @@ let line_label path line_number =
   | None -> path
 ;;
 
-let read_costs () =
-  let store = Dated_jsonl.create ~base_dir:(costs_dir ()) () in
+let period_cutoff now = function
+  | Hourly -> now -. 3600.0
+  | Daily -> now -. 86400.0
+  | Weekly -> now -. 604800.0
+  | Monthly -> now -. 2592000.0
+  | All -> 0.0
+;;
+
+let read_costs period =
+  let store = cost_store () in
   let entries = ref [] in
   let invalid_rows = ref 0 in
   let note_invalid location reason =
     incr invalid_rows;
     eprintf "Warning: skipped invalid cost row at %s: %s\n" location reason
   in
-  match
-    Dated_jsonl.iter_all_entries_result store (function
-      | Dated_jsonl.Malformed_json { path; line_number; detail } ->
-        note_invalid (line_label path line_number) detail
-      | Dated_jsonl.Parsed json ->
-        (match parse_cost_json json with
-         | Ok entry -> entries := entry :: !entries
-         | Error reason ->
-           note_invalid (Dated_jsonl.base_dir store) reason))
-  with
+  let consume = function
+    | Dated_jsonl.Malformed_json { path; line_number; detail } ->
+      note_invalid (line_label path line_number) detail
+    | Dated_jsonl.Parsed json ->
+      (match Cost_ledger.of_json json with
+       | Ok entry -> entries := entry :: !entries
+       | Error error ->
+         note_invalid
+           (Dated_jsonl.base_dir store)
+           (Cost_ledger.decode_error_to_string error))
+  in
+  let read_result =
+    match period with
+    | All -> Dated_jsonl.iter_all_entries_result store consume
+    | Hourly | Daily | Weekly | Monthly ->
+      let now = Time_compat.now () in
+      Dated_jsonl.iter_range_entries_result
+        store
+        ~since:(Log.format_utc_date_of (period_cutoff now period))
+        ~until:(Log.format_utc_date_of now)
+        consume
+  in
+  match read_result with
   | Ok () -> Ok (List.rev !entries, !invalid_rows)
   | Error error -> Error (Dated_jsonl.read_error_to_string error)
 ;;
@@ -220,16 +149,11 @@ let period_label = function
 ;;
 
 let filter_by_period period (entries : cost_entry list) =
-  let now = Unix.gettimeofday () in
-  let cutoff =
-    match period with
-    | Hourly -> now -. 3600.0
-    | Daily -> now -. 86400.0
-    | Weekly -> now -. 604800.0
-    | Monthly -> now -. 2592000.0
-    | All -> 0.0
-  in
-  List.filter (fun (entry : cost_entry) -> entry.ts_unix >= cutoff) entries
+  match period with
+  | All -> entries
+  | Hourly | Daily | Weekly | Monthly ->
+    let cutoff = period_cutoff (Time_compat.now ()) period in
+    List.filter (fun (entry : cost_entry) -> entry.ts_unix >= cutoff) entries
 ;;
 
 let filter_by_agent agent (entries : cost_entry list) =
@@ -246,27 +170,22 @@ let filter_by_task task_id (entries : cost_entry list) =
 ;;
 
 let known_tokens (entry : cost_entry) =
-  let input =
-    match entry.input_tokens with
-    | Some value -> value
-    | None -> 0
-  in
-  let output =
-    match entry.output_tokens with
-    | Some value -> value
-    | None -> 0
-  in
-  input + output
+  match entry.usage with
+  | Usage_missing -> 0
+  | Usage_reported { input_tokens; output_tokens; _ } ->
+    input_tokens + output_tokens
 ;;
 
 let known_cost (entry : cost_entry) =
-  match entry.cost_usd with
-  | Some value -> value
-  | None -> 0.0
+  match entry.usage with
+  | Usage_missing -> 0.0
+  | Usage_reported { cost_usd; _ } -> cost_usd
 ;;
 
 let usage_missing (entry : cost_entry) =
-  entry.input_tokens = None || entry.output_tokens = None || entry.cost_usd = None
+  match entry.usage with
+  | Usage_missing -> true
+  | Usage_reported _ -> false
 ;;
 
 let aggregate_by_agent (entries : cost_entry list) =
@@ -280,7 +199,6 @@ let aggregate_by_agent (entries : cost_entry list) =
            { agent = entry.agent
            ; tokens = 0
            ; cost_usd = 0.0
-           ; model = entry.model
            ; usage_missing_entries = 0
            }
        in
@@ -297,10 +215,13 @@ let aggregate_by_agent (entries : cost_entry list) =
          })
     entries;
   Hashtbl.fold (fun _ value acc -> value :: acc) totals []
+  |> List.sort (fun left right ->
+    let by_cost = Float.compare right.cost_usd left.cost_usd in
+    if by_cost <> 0 then by_cost else String.compare left.agent right.agent)
 ;;
 
 let filtered_costs ~agent ~task_id ~period =
-  let* entries, invalid_rows = read_costs () in
+  let* entries, invalid_rows = read_costs period in
   Ok
     ( entries
       |> filter_by_period period
@@ -341,7 +262,6 @@ let print_report ~agent ~task_id ~period =
     printf "╠══════════════════════════════════════════════╣\n";
     printf "║  📊 By Agent:                              \n";
     by_agent
-    |> List.sort (fun left right -> Float.compare right.cost_usd left.cost_usd)
     |> List.iter (fun total ->
       let pct =
         if total_cost > 0.0 then total.cost_usd /. total_cost *. 100.0 else 0.0
@@ -364,7 +284,6 @@ let agent_total_to_json total =
     [ "agent", `String total.agent
     ; "tokens_known", `Int total.tokens
     ; "cost_usd_known", `Float total.cost_usd
-    ; "model", `String total.model
     ; "usage_missing_entries", `Int total.usage_missing_entries
     ]
 ;;
@@ -449,13 +368,17 @@ let run () =
          | Some value -> Some value
          | None -> None
        in
-       log_cost
-         ~agent:(String.trim !agent)
-         ~task_id
-         ~model:(String.trim !model)
-         ~input_tokens:!input_tokens
-         ~output_tokens:!output_tokens
-         ~cost_usd:!cost_usd)
+       (match
+          log_cost
+            ~agent:(String.trim !agent)
+            ~task_id
+            ~model:(String.trim !model)
+            ~input_tokens:!input_tokens
+            ~output_tokens:!output_tokens
+            ~cost_usd:!cost_usd
+        with
+        | Ok () -> ()
+        | Error message -> fatal message))
   | Report ->
     (match period_of_string !period with
      | Error message -> fatal message

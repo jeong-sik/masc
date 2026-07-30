@@ -823,6 +823,18 @@ jobs:
           oas_pin_targets="@test/runtest-test_keeper_hooks_oas_introspection @test/runtest-test_keeper_execution_join @test/runtest-test_hitl_summary_worker @test/runtest-test_librarian_exact_output_conformance"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${oas_pin_targets}"
 
+      - name: Run model inference metrics suite
+        id: model_inference_metrics_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_model_inference_metrics"
+
       - name: Run tool blob retention suite
         id: tool_blob_retention_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}

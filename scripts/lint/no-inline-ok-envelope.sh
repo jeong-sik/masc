@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # no-inline-ok-envelope.sh — Block inline `("status", `String "ok")` literals
-# in lib/. Use Json_util.ok_assoc or Tool_args response/result helpers instead.
+# in lib/. Use Tool_args.ok_response / ok_assoc / ok_result instead.
 #
 # Rationale: T27/T28/T29 consolidated 11+ inline ok-envelope sites into
 # Tool_args SSOT helpers. Without a lint guard, the inline pattern
@@ -8,7 +8,7 @@
 # remaining intentional sites can be misread as license to add more.
 #
 # Allowlisted files fall into three categories:
-#   1. SSOT definition itself (json_util.ml).
+#   1. SSOT definition itself (tool_args.ml).
 #   2. T27 alias backstop for sibling-include runtime
 #      (tool_local_runtime_core.ml).
 #   3. Tier B/C intentional inline sites where wire format reordering
@@ -21,7 +21,8 @@ cd "$(git rev-parse --show-toplevel)"
 
 ALLOWLIST=(
   # SSOT definition — the canonical helper itself.
-  "lib/core/json_util.ml"
+  # Moved to lib/tool_types/ in RFC-0086 PR-2H (PR #15531).
+  "lib/tool_types/tool_args.ml"
 
   # T27 alias backstop. sibling tool_local_runtime_*.ml modules
   # consume `json_ok` / `json_error` via `include Tool_local_runtime_core`;

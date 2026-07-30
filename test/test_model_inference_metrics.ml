@@ -49,6 +49,14 @@ let iso_of_unix ts =
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
+let inference_identity_values ?identity_seed ~model ~ts () =
+  let seed =
+    match identity_seed with
+    | Some seed -> seed
+    | None -> Printf.sprintf "%s|%.6f" model ts
+  in
+  "trace-" ^ Digest.to_hex (Digest.string seed), 1, 0
+
 let write_costs base entries =
   let costs_dir = Filename.concat base ".masc/costs" in
   let store = Dated_jsonl.create ~base_dir:costs_dir () in
@@ -79,24 +87,6 @@ let append_raw_line path line =
        output_string oc line;
        output_char oc '\n')
 
-let write_retired_costs base entries =
-  let masc_dir = Filename.concat base ".masc" in
-  let rec mkdir_p dir =
-    if not (Sys.file_exists dir) then begin
-      mkdir_p (Filename.dirname dir);
-      Unix.mkdir dir 0o755
-    end
-  in
-  mkdir_p masc_dir;
-  let path = Filename.concat masc_dir "costs.jsonl" in
-  let oc = open_out path in
-  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
-    List.iter (fun json ->
-      output_string oc (Yojson.Safe.to_string json);
-      output_char oc '\n'
-    ) entries
-  )
-
 let now_unix () = Unix.gettimeofday ()
 
 let recent_hour_bucket_timestamp () =
@@ -120,11 +110,14 @@ let contains_substring haystack needle =
     in
     loop 0
 
-let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
+let success_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=50)
     ?(cache_read_tokens=0) ?(cache_creation_tokens=0)
     ?(latency_ms=500) ?prompt_per_second ?peak_memory_gb
     ?provider ?provider_kind ?usage_trust ?(usage_anomaly_reasons=[])
     ?(cost_usd=0.01) ?(tools_used=[]) () =
+  let trace_id, keeper_turn_id, oas_turn_ordinal =
+    inference_identity_values ?identity_seed ~model ~ts ()
+  in
   let extra_telemetry_fields =
     (match prompt_per_second with
      | Some v -> [("prompt_per_second", `Float v)]
@@ -156,11 +149,17 @@ let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
   in
   `Assoc [
     ("ts_unix", `Float ts);
+    ("trace_id", `String trace_id);
+    ("turn_id", `Int keeper_turn_id);
     ("tool_call_count", `Int (List.length tools_used));
     ("tools_used", `List (List.map (fun s -> `String s) tools_used));
     ("telemetry", `Assoc ([
       ("model_used", `String model);
       ("outcome", `String "success");
+      ("turn_count", `Int 1);
+      ("oas_turn_ordinal", `Int oas_turn_ordinal);
+      ("usage_reported", `Bool true);
+      ("telemetry_reported", `Bool true);
       ("tokens_per_second", `Float (Float.of_int output_tokens /. (Float.of_int latency_ms /. 1000.0)));
       ("request_latency_ms", `Int latency_ms);
       ("input_tokens", `Int input_tokens);
@@ -173,9 +172,12 @@ let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
     ] @ extra_telemetry_fields));
   ]
 
-let cost_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
+let cost_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=50)
     ?(latency_ms=500) ?tokens_per_second ?provider
     ?(provider_kind="ollama") () =
+  let trace_id, keeper_turn_id, oas_turn_ordinal =
+    inference_identity_values ?identity_seed ~model ~ts ()
+  in
   let tok_fields =
     match tokens_per_second with
     | Some v -> [("tokens_per_second", `Float v)]
@@ -189,6 +191,7 @@ let cost_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
   `Assoc ([
     ("timestamp", `String (iso_of_unix ts));
     ("agent", `String "keeper");
+    ("task_id", `Null);
     ("provider_kind", `String provider_kind);
     ("model", `String model);
     ("input_tokens", `Int input_tokens);
@@ -196,6 +199,9 @@ let cost_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
     ("cost_usd", `Float 0.0);
     ("usage_missing", `Bool false);
     ("source", `String "auto_trajectory");
+    ("trace_id", `String trace_id);
+    ("keeper_turn_id", `Int keeper_turn_id);
+    ("oas_turn_ordinal", `Int oas_turn_ordinal);
     ("request_latency_ms", `Int latency_ms);
   ] @ provider_fields @ tok_fields)
 
@@ -213,6 +219,8 @@ let error_entry ~runtime_id ~ts ?provider () =
       ("candidate_models", `List [`String "claude"; `String "model-b"]);
       ("error_category", `String "timeout");
       ("outcome", `String "error");
+      ("usage_reported", `Bool false);
+      ("telemetry_reported", `Bool false);
     ]);
   ]
 
@@ -223,6 +231,9 @@ let success_entry_without_usage ~model ~ts ?provider
     ?turn_lane
     ?stop_reason
     () =
+  let trace_id, keeper_turn_id, oas_turn_ordinal =
+    inference_identity_values ~model ~ts ()
+  in
   let extra_fields =
     match provider with
     | Some value -> [ ("provider", `String value) ]
@@ -245,18 +256,27 @@ let success_entry_without_usage ~model ~ts ?provider
   in
   `Assoc [
     ("ts_unix", `Float ts);
+    ("trace_id", `String trace_id);
+    ("turn_id", `Int keeper_turn_id);
     ("tool_call_count", `Int 0);
     ("tools_used", `List []);
     ("telemetry", `Assoc ([
       ("model_used", `String model);
       ("outcome", `String "success");
+      ("turn_count", `Int 1);
+      ("oas_turn_ordinal", `Int oas_turn_ordinal);
       ("fallback_applied", `Bool false);
     ] @ extra_fields @ diag_fields));
   ]
 
 let success_entry_without_model ~runtime_id ~ts ?(tool_count = 1) () =
+  let trace_id, keeper_turn_id, oas_turn_ordinal =
+    inference_identity_values ~model:runtime_id ~ts ()
+  in
   `Assoc [
     ("ts_unix", `Float ts);
+    ("trace_id", `String trace_id);
+    ("turn_id", `Int keeper_turn_id);
     ("tool_call_count", `Int tool_count);
     ("tools_used", `List [ `String "keeper_board_comment" ]);
     ( "telemetry",
@@ -265,6 +285,8 @@ let success_entry_without_model ~runtime_id ~ts ?(tool_count = 1) () =
         ("selected_model", `Null);
         ("runtime_id", `String runtime_id);
         ("outcome", `String "success");
+        ("turn_count", `Int 1);
+        ("oas_turn_ordinal", `Int oas_turn_ordinal);
         ("stop_reason", `String "completed");
         ("usage_reported", `Bool false);
         ("telemetry_reported", `Bool false);
@@ -275,8 +297,21 @@ let success_entry_without_model ~runtime_id ~ts ?(tool_count = 1) () =
   ]
 
 let sparse_provider_context_entry ~outcome ~runtime_id ~ts () =
+  let trace_id, keeper_turn_id, oas_turn_ordinal =
+    inference_identity_values ~model:runtime_id ~ts ()
+  in
+  let identity_fields =
+    if String.equal outcome "success"
+    then
+      [ "turn_count", `Int 1
+      ; "oas_turn_ordinal", `Int oas_turn_ordinal
+      ]
+    else []
+  in
   `Assoc [
     ("ts_unix", `Float ts);
+    ("trace_id", `String trace_id);
+    ("turn_id", `Int keeper_turn_id);
     ("outcome", `String outcome);
     ("tool_call_count", `Int 0);
     ("tools_used", `List []);
@@ -287,7 +322,8 @@ let sparse_provider_context_entry ~outcome ~runtime_id ~ts () =
         ("candidate_models", `List []);
       ] );
     ( "telemetry",
-      `Assoc [
+      `Assoc ([
+        ("outcome", `String outcome);
         ("model_used", `Null);
         ("selected_model", `Null);
         ("usage_reported", `Bool false);
@@ -300,7 +336,7 @@ let sparse_provider_context_entry ~outcome ~runtime_id ~ts () =
              then "error_turn"
              else "missing_usage_and_inference") );
         ("fallback_applied", `Bool false);
-      ] );
+      ] @ identity_fields) );
   ]
 
 let check_hw_decode_field ~name json expected =
@@ -312,17 +348,26 @@ let check_hw_decode_field ~name json expected =
   | Error _ -> fail (name ^ ": telemetry row did not parse")
 ;;
 
-let test_hw_decode_parser_uses_current_field_only () =
+let test_hw_decode_parser_reads_current_field () =
   let ts = now_unix () in
+  let trace_id, keeper_turn_id, oas_turn_ordinal =
+    inference_identity_values ~model:"model" ~ts ()
+  in
   let row key =
     `Assoc
       [ "ts_unix", `Float ts
+      ; "trace_id", `String trace_id
+      ; "turn_id", `Int keeper_turn_id
       ; "tool_call_count", `Int 0
       ; "tools_used", `List []
       ; ( "telemetry"
         , `Assoc
             [ "model_used", `String "model"
             ; "outcome", `String "success"
+            ; "turn_count", `Int 1
+            ; "oas_turn_ordinal", `Int oas_turn_ordinal
+            ; "usage_reported", `Bool false
+            ; "telemetry_reported", `Bool true
             ; "fallback_applied", `Bool false
             ; key, `Float 42.0
             ] )
@@ -331,14 +376,10 @@ let test_hw_decode_parser_uses_current_field_only () =
   check_hw_decode_field
     ~name:"current field"
     (row "hw_decode_tokens_per_second")
-    (Some 42.0);
-  check_hw_decode_field
-    ~name:"retired alias ignored"
-    (row "provider_tokens_per_second")
-    None
+    (Some 42.0)
 ;;
 
-let test_cost_parser_uses_current_hw_decode_field_only () =
+let test_cost_parser_reads_current_hw_decode_field () =
   let ts = now_unix () in
   let row key =
     match cost_entry ~model:"model" ~ts () with
@@ -351,11 +392,7 @@ let test_cost_parser_uses_current_hw_decode_field_only () =
       check (option (float 0.001)) name expected entry.hw_decode_tok_per_sec
     | Error _ -> fail (name ^ ": cost row did not parse")
   in
-  parse
-    "current cost field"
-    (row "hw_decode_tokens_per_second")
-    (Some 42.0);
-  parse "retired cost alias ignored" (row "provider_tokens_per_second") None
+  parse "current cost field" (row "hw_decode_tokens_per_second") (Some 42.0)
 ;;
 
 let test_cost_parser_requires_usage_missing () =
@@ -367,7 +404,7 @@ let test_cost_parser_requires_usage_missing () =
     | _ -> fail "cost entry must be an object"
   in
   match Model_inference_metrics_parser.parse_cost_entry row ~since_unix:0.0 with
-  | Error Model_inference_metrics_entry.Missing_cost_usage_missing -> ()
+  | Error (Model_inference_metrics_entry.Invalid_current_cost_row _) -> ()
   | Error error ->
     fail
       ("wrong parse error: "
@@ -422,7 +459,7 @@ let test_single_model_success () =
     check bool "tok/s > 0" true
       (Option.value ~default:0.0 s.avg_tok_per_sec > 0.0))
 
-let test_provider_kind_is_not_reconstructed_from_legacy_fields () =
+let test_provider_kind_is_not_reconstructed () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
     let path = make_keeper_dir base "kinded" in
@@ -451,7 +488,7 @@ let test_canonical_provider_label_delegates_to_oas_provider_config () =
     (Runtime_provider_labels.canonical_provider_label "  AnThRoPiC  ");
   check (option string) "blank provider kind" None
     (Runtime_provider_labels.canonical_provider_label "   ");
-  check (option string) "historical custom provider" (Some "custom-provider")
+  check (option string) "custom provider" (Some "custom-provider")
     (Runtime_provider_labels.canonical_provider_label "Custom-Provider")
 
 let test_usage_labels_never_suppress_raw_aggregates () =
@@ -491,11 +528,11 @@ let test_usage_labels_never_suppress_raw_aggregates () =
           recent.re_input_tokens = Some 1_721_506)
         s.recent_entries
     in
-    check (option string) "legacy trust label retained as provenance"
+    check (option string) "trust label retained as provenance"
       (Some "untrusted") large.re_usage_trust;
     check (option int) "large input remains visible" (Some 1_721_506)
       large.re_input_tokens;
-    check (list string) "legacy anomaly reason retained as provenance"
+    check (list string) "anomaly reason retained as provenance"
       ["input_tokens_gt_1m"] large.re_usage_anomaly_reasons;
     let negative =
       List.find
@@ -845,7 +882,7 @@ let test_provider_context_attribution_survives_sparse_telemetry () =
     check int "success count" 1 s.success_count;
     check int "error count" 1 s.error_count)
 
-let test_costs_jsonl_backfills_wall_tok_per_sec () =
+let test_cost_ledger_backfills_wall_tok_per_sec () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
     let ts = now_unix () in
@@ -855,14 +892,14 @@ let test_costs_jsonl_backfills_wall_tok_per_sec () =
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
-    check string "cost model" "ollama:qwen3.6:27b-coding-nvfp4" s.model_id;
+    check string "cost model" "qwen3.6:27b-coding-nvfp4" s.model_id;
     check int "one cost entry" 1 s.entry_count;
     check (option (float 0.001)) "wall tok/sec from cost latency"
       (Some 200.0) s.avg_tok_per_sec;
     check int "usage sample" 1 s.usage_sample_count;
     check int "telemetry sample" 1 s.telemetry_sample_count)
 
-let test_costs_jsonl_disambiguates_matching_model_names_by_provider () =
+let test_cost_model_field_is_not_rewritten_from_provider () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
     let ts = now_unix () in
@@ -873,28 +910,14 @@ let test_costs_jsonl_disambiguates_matching_model_names_by_provider () =
         ~input_tokens:20 ~output_tokens:10 ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
-    check int "provider-qualified model buckets" 2 (List.length agg.models);
-    let ids = List.map (fun (s : M.model_stats) -> s.model_id) agg.models |> List.sort compare in
-    check
-      (list string)
-      "private provider keys stay distinct"
-      (* sorted: "anthropic" < "ollama" after the anthropic->anthropic de-cipher *)
-      ["anthropic:shared-model"; "ollama:shared-model"]
-      ids;
-    let token_totals =
-      agg.models
-      |> List.map (fun (s : M.model_stats) ->
-        s.model_id, Option.value ~default:0 s.total_input_tokens)
-      |> List.sort (fun (left, _) (right, _) -> compare left right)
-    in
-    check
-      (list (pair string int))
-      "tokens are not merged across provider lanes"
-      (* sorted by model_id: "anthropic" < "ollama" after anthropic->anthropic *)
-      ["anthropic:shared-model", 20; "ollama:shared-model", 10]
-      token_totals)
+    check int "one model bucket" 1 (List.length agg.models);
+    let stats = List.hd agg.models in
+    check string "model field remains authoritative" "shared-model" stats.model_id;
+    check int "both rows retained" 2 stats.entry_count;
+    check (option int) "tokens aggregate without provider rewrite" (Some 30)
+      stats.total_input_tokens)
 
-let test_costs_jsonl_zero_latency_is_missing () =
+let test_cost_ledger_zero_latency_is_missing () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
     let ts = now_unix () in
@@ -923,7 +946,7 @@ let test_costs_jsonl_zero_latency_is_missing () =
     in
     check int "zero latency skipped from buckets" 0 bucket_total)
 
-let test_costs_jsonl_dedupes_matching_decision_sample () =
+let test_exact_identity_merges_decision_and_cost () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
     let path = make_keeper_dir base "dedupe" in
@@ -938,28 +961,73 @@ let test_costs_jsonl_dedupes_matching_decision_sample () =
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
-    check int "matching cost sample deduped" 1 s.entry_count;
-    check (option (float 0.001)) "decision tok/sec preserved"
-      (Some 100.0) s.avg_tok_per_sec)
+    check int "exactly matching rows merged" 1 s.entry_count;
+    check (option (float 0.001)) "cost observation supplies wall tok/sec"
+      (Some 200.0) s.avg_tok_per_sec;
+    check int "decision tool fields survive merge" 0 s.total_tool_calls)
+;;
 
-let test_retired_single_file_cost_store_is_ignored () =
+let test_nearby_equal_usage_without_identity_match_stays_distinct () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "nearby-distinct" in
     let ts = now_unix () in
-    write_retired_costs
-      base
-      [ cost_entry ~model:"retired-single-file" ~ts () ];
+    write_decisions
+      path
+      [ success_entry
+          ~model:"same-model"
+          ~ts
+          ~input_tokens:100
+          ~output_tokens:50
+          () ];
     write_costs
       base
-      [ cost_entry ~model:"current-dated-store" ~ts () ];
+      [ cost_entry
+          ~model:"same-model"
+          ~ts:(ts -. 1.0)
+          ~input_tokens:100
+          ~output_tokens:50
+          () ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
-    check int "only current store row is loaded" 1 agg.total_entries;
     let stats = List.hd agg.models in
-    check
-      string
-      "retired single-file row ignored"
-      "ollama:current-dated-store"
-      stats.model_id)
+    check int "both exact identities remain" 2 stats.entry_count)
+;;
+
+let test_duplicate_exact_identity_is_excluded_and_diagnosed () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "identity-conflict" in
+    let ts = now_unix () in
+    write_decisions
+      path
+      [ success_entry
+          ~model:"same-model"
+          ~ts
+          ~identity_seed:"duplicate-identity"
+          () ];
+    write_costs
+      base
+      [ cost_entry
+          ~model:"same-model"
+          ~ts
+          ~identity_seed:"duplicate-identity"
+          ()
+      ; cost_entry
+          ~model:"same-model"
+          ~ts:(ts -. 1.0)
+          ~identity_seed:"duplicate-identity"
+          ()
+      ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    check int "conflicting identity is excluded" 0 agg.total_entries;
+    check int "conflicting identity creates no aggregate" 0
+      (List.length agg.models);
+    match agg.cost_read with
+    | Error error ->
+      failf "cost store read failed: %s" (Dated_jsonl.read_error_to_string error)
+    | Ok diagnostics ->
+      check int "all conflicting rows diagnosed" 3
+        diagnostics.identity_conflict_rows)
 ;;
 
 let test_cost_read_diagnostics_reach_api () =
@@ -974,12 +1042,14 @@ let test_cost_read_diagnostics_reach_api () =
     append_raw_line (cost_day_file base) "{";
     let json = M.compute ~base_path:base ~window_minutes:60 |> M.to_json in
     let diagnostics = Yojson.Safe.Util.member "cost_ledger_read" json in
-    check string "cost read status" "ok"
-      Yojson.Safe.Util.(diagnostics |> member "status" |> to_string);
+    check string "cost read state" "available"
+      Yojson.Safe.Util.(diagnostics |> member "state" |> to_string);
     check int "malformed rows" 1
       Yojson.Safe.Util.(diagnostics |> member "malformed_rows" |> to_int);
     check int "schema violation rows" 1
-      Yojson.Safe.Util.(diagnostics |> member "schema_violation_rows" |> to_int))
+      Yojson.Safe.Util.(diagnostics |> member "schema_violation_rows" |> to_int);
+    check int "identity conflicts" 0
+      Yojson.Safe.Util.(diagnostics |> member "identity_conflict_rows" |> to_int))
 ;;
 
 let test_cost_read_failure_is_not_empty_success () =
@@ -990,18 +1060,23 @@ let test_cost_read_failure_is_not_empty_success () =
       keeper_path
       [ success_entry ~model:"decision-model" ~ts:(now_unix ()) () ];
     let costs_dir = Filename.concat base ".masc/costs" in
-    Unix.mkdir costs_dir 0o755;
-    let invalid_entry = Filename.concat costs_dir "not-a-month" in
-    Unix.mkdir invalid_entry 0o755;
+    (* A read failure must surface as [unavailable], not empty success:
+       [.masc/costs] as a regular file is present but not listable. *)
+    let masc_dir = Filename.concat base ".masc" in
+    if not (Sys.file_exists masc_dir) then Unix.mkdir masc_dir 0o755;
+    let oc = open_out costs_dir in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc "{}");
     let json = M.compute ~base_path:base ~window_minutes:60 |> M.to_json in
     check int "decision metrics remain available" 1
       Yojson.Safe.Util.(json |> member "total_entries" |> to_int);
     let diagnostics = Yojson.Safe.Util.member "cost_ledger_read" json in
-    check string "cost read status" "error"
-      Yojson.Safe.Util.(diagnostics |> member "status" |> to_string);
+    check string "cost read state" "unavailable"
+      Yojson.Safe.Util.(diagnostics |> member "state" |> to_string);
+    let detail = Yojson.Safe.Util.(diagnostics |> member "detail" |> to_string) in
     check bool "typed read detail is surfaced" true
-      (Yojson.Safe.Util.(diagnostics |> member "detail" |> to_string)
-       |> contains_substring "not-a-month"))
+      (contains_substring detail costs_dir))
 ;;
 
 let test_cost_latency_json_composes_axes_and_percentiles () =
@@ -1108,14 +1183,24 @@ let test_cost_latency_json_preserves_missing_latency_as_null () =
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
     let path = make_keeper_dir base "cost_latency_missing" in
     let ts = now_unix () in
+    let row_ts = ts -. 10.0 in
+    let trace_id, keeper_turn_id, oas_turn_ordinal =
+      inference_identity_values ~model:"unlatenced-model" ~ts:row_ts ()
+    in
     write_decisions path [
       `Assoc [
-        ("ts_unix", `Float (ts -. 10.0));
+        ("ts_unix", `Float row_ts);
+        ("trace_id", `String trace_id);
+        ("turn_id", `Int keeper_turn_id);
         ("tool_call_count", `Int 0);
         ("tools_used", `List []);
         ("telemetry", `Assoc [
           ("model_used", `String "unlatenced-model");
           ("outcome", `String "success");
+          ("turn_count", `Int 1);
+          ("oas_turn_ordinal", `Int oas_turn_ordinal);
+          ("usage_reported", `Bool true);
+          ("telemetry_reported", `Bool false);
           ("provider", `String "local");
           ("input_tokens", `Int 100);
           ("output_tokens", `Int 50);
@@ -1140,17 +1225,26 @@ let test_cost_latency_json_preserves_missing_latency_as_null () =
 (* ── thinking_fraction tests ─────────────────────── *)
 
 let success_entry_with_thinking ~model ~ts ~thinking_enabled () =
+  let trace_id, keeper_turn_id, oas_turn_ordinal =
+    inference_identity_values ~model ~ts ()
+  in
   let thinking_field = match thinking_enabled with
     | Some b -> [("thinking_enabled", `Bool b)]
     | None -> []
   in
   `Assoc [
     ("ts_unix", `Float ts);
+    ("trace_id", `String trace_id);
+    ("turn_id", `Int keeper_turn_id);
     ("tool_call_count", `Int 0);
     ("tools_used", `List []);
     ("telemetry", `Assoc ([
       ("model_used", `String model);
       ("outcome", `String "success");
+      ("turn_count", `Int 1);
+      ("oas_turn_ordinal", `Int oas_turn_ordinal);
+      ("usage_reported", `Bool true);
+      ("telemetry_reported", `Bool true);
       ("tokens_per_second", `Float 10.0);
       ("request_latency_ms", `Int 500);
       ("input_tokens", `Int 100);
@@ -1229,13 +1323,22 @@ let test_thinking_fraction_json_serialization () =
 (* ── Bucket tests ───────────────────────────────── *)
 
 let success_entry_with_cache ~model ~ts ?(input_tokens=100) ~cache_read () =
+  let trace_id, keeper_turn_id, oas_turn_ordinal =
+    inference_identity_values ~model ~ts ()
+  in
   `Assoc [
     ("ts_unix", `Float ts);
+    ("trace_id", `String trace_id);
+    ("turn_id", `Int keeper_turn_id);
     ("tool_call_count", `Int 0);
     ("tools_used", `List []);
     ("telemetry", `Assoc [
       ("model_used", `String model);
       ("outcome", `String "success");
+      ("turn_count", `Int 1);
+      ("oas_turn_ordinal", `Int oas_turn_ordinal);
+      ("usage_reported", `Bool true);
+      ("telemetry_reported", `Bool true);
       ("tokens_per_second", `Float 10.0);
       ("request_latency_ms", `Int 500);
       ("input_tokens", `Int input_tokens);
@@ -1386,7 +1489,11 @@ let zero_model_stats (model_id : string) ~provider ~entry_count
   }
 
 let successful_cost_read : M.cost_read_result =
-  Ok { malformed_rows = 0; schema_violation_rows = 0 }
+  Ok
+    { malformed_rows = 0
+    ; schema_violation_rows = 0
+    ; identity_conflict_rows = 0
+    }
 
 let test_provider_rollup_empty_aggregate () =
   let agg : M.aggregate =
@@ -1589,6 +1696,7 @@ let test_usage_signal_uses_tokens_not_cost () =
   let entry : Model_inference_metrics_entry.raw_entry =
     { model = "runtime"
     ; provider = None
+    ; inference_identity = None
     ; ts_unix = 0.0
     ; outcome = "success"
     ; stop_reason = None
@@ -1636,7 +1744,7 @@ let () =
       test_case "empty dir" `Quick test_empty_dir;
       test_case "single model success" `Quick test_single_model_success;
       test_case "provider_kind is not reconstructed" `Quick
-        test_provider_kind_is_not_reconstructed_from_legacy_fields;
+        test_provider_kind_is_not_reconstructed;
       test_case "provider labels delegate to OAS Provider_config" `Quick
         test_canonical_provider_label_delegates_to_oas_provider_config;
       test_case "usage labels never suppress raw aggregates" `Quick
@@ -1655,19 +1763,24 @@ let () =
         test_success_without_model_uses_runtime_attribution;
       test_case "provider_context attribution survives sparse telemetry" `Quick
         test_provider_context_attribution_survives_sparse_telemetry;
-      test_case "decision parser uses current hw-decode field only" `Quick
-        test_hw_decode_parser_uses_current_field_only;
-      test_case "cost parser uses current hw-decode field only" `Quick
-        test_cost_parser_uses_current_hw_decode_field_only;
+      test_case "decision parser reads current hw-decode field" `Quick
+        test_hw_decode_parser_reads_current_field;
+      test_case "cost parser reads current hw-decode field" `Quick
+        test_cost_parser_reads_current_hw_decode_field;
       test_case "cost parser requires usage_missing" `Quick
         test_cost_parser_requires_usage_missing;
-      test_case "costs.jsonl backfills wall tok/sec" `Quick test_costs_jsonl_backfills_wall_tok_per_sec;
-      test_case "costs.jsonl disambiguates matching model names by provider" `Quick
-        test_costs_jsonl_disambiguates_matching_model_names_by_provider;
-      test_case "costs.jsonl zero latency stays missing" `Quick test_costs_jsonl_zero_latency_is_missing;
-      test_case "costs.jsonl dedupes matching decision sample" `Quick test_costs_jsonl_dedupes_matching_decision_sample;
-      test_case "retired single-file cost store is ignored" `Quick
-        test_retired_single_file_cost_store_is_ignored;
+      test_case "cost ledger backfills wall tok/sec" `Quick
+        test_cost_ledger_backfills_wall_tok_per_sec;
+      test_case "cost model field is not rewritten from provider" `Quick
+        test_cost_model_field_is_not_rewritten_from_provider;
+      test_case "cost ledger zero latency stays missing" `Quick
+        test_cost_ledger_zero_latency_is_missing;
+      test_case "exact identity merges decision and cost" `Quick
+        test_exact_identity_merges_decision_and_cost;
+      test_case "nearby equal usage stays distinct" `Quick
+        test_nearby_equal_usage_without_identity_match_stays_distinct;
+      test_case "duplicate exact identity is excluded" `Quick
+        test_duplicate_exact_identity_is_excluded_and_diagnosed;
       test_case "cost read diagnostics reach API" `Quick
         test_cost_read_diagnostics_reach_api;
       test_case "cost read failure is not empty success" `Quick

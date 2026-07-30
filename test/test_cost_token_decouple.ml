@@ -82,6 +82,10 @@ let payload
   H.cost_event_payload
     ~agent_name:"test_agent"
     ~task_id:None
+    ~trace_id:"test-trace"
+    ~keeper_turn_id:1
+    ~oas_turn_ordinal:0
+    ~model:"test-model"
     ~input_tokens
     ~output_tokens
     ~cost_usd
@@ -130,6 +134,8 @@ let test_trusted_tokens_positive_cost_unchanged () =
   (* Regression guard: the always-trusted path is unaffected. *)
   let p =
     H.cost_event_payload ~agent_name:"test_agent" ~task_id:None
+      ~trace_id:"test-trace" ~keeper_turn_id:1 ~oas_turn_ordinal:0
+      ~model:"test-model"
       ~input_tokens:100 ~output_tokens:50 ~cost_usd:0.0042
       ~usage_trust:Trust.Usage_trusted ()
   in
@@ -138,7 +144,9 @@ let test_trusted_tokens_positive_cost_unchanged () =
   check string "trusted positive cost => computed" "computed"
     (string_field p "cost_usd_source");
   check string "trusted positive cost => reported" "reported"
-    (string_field p "cost_status")
+    (string_field p "cost_status");
+  check int "zero-based OAS ordinal is retained" 0
+    (int_field p "oas_turn_ordinal")
 
 let test_trusted_tokens_include_cache_delta () =
   let p =
@@ -232,6 +240,10 @@ let test_native_decode_rate_uses_current_field_only () =
     H.cost_event_payload
       ~agent_name:"test_agent"
       ~task_id:None
+      ~trace_id:"test-trace"
+      ~keeper_turn_id:1
+      ~oas_turn_ordinal:0
+      ~model:"test-model"
       ~input_tokens:10
       ~output_tokens:5
       ~cost_usd:0.0

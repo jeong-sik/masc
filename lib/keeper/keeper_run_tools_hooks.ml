@@ -20,6 +20,7 @@ type agent_setup =
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list
+  ; final_oas_turn_ordinal_ref : int option ref
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
@@ -39,11 +40,12 @@ type ctx =
   ; config : Workspace.config
   ; keeper_tools_cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_oas.terminal_effect_state
-  ; manifest_keeper_turn_id : int option
+  ; keeper_turn_id : int
   ; meta : Keeper_meta_contract.keeper_meta
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
     (* RFC-0225 §3.3: per-run carrier; written by the pre-request hook
        below, read by the post-tool hooks in Keeper_hooks_oas. *)
+  ; final_oas_turn_ordinal_ref : int option ref
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
@@ -148,9 +150,10 @@ let assemble_hooks
   let config = ctx.config in
   let keeper_tools_cleanup = ctx.keeper_tools_cleanup in
   let terminal_effect_state = ctx.terminal_effect_state in
-  let manifest_keeper_turn_id = ctx.manifest_keeper_turn_id in
+  let keeper_turn_id = ctx.keeper_turn_id in
   let meta = ctx.meta in
   let turn_ctx_cell = ctx.turn_ctx_cell in
+  let final_oas_turn_ordinal_ref = ctx.final_oas_turn_ordinal_ref in
   let receipt_turn_count_ref = ctx.receipt_turn_count_ref in
   let receipt_model_used_ref = ctx.receipt_model_used_ref in
   let receipt_stop_reason_ref = ctx.receipt_stop_reason_ref in
@@ -179,6 +182,9 @@ let assemble_hooks
         ~meta_ref
         ~turn_ctx_cell
         ~generation
+        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+        ~keeper_turn_id
+        ~on_after_turn_ordinal:(fun turn -> final_oas_turn_ordinal_ref := Some turn)
         ?trajectory_acc
         ~on_tool_executed:
           (fun
@@ -280,7 +286,7 @@ let assemble_hooks
              ~duration_ms:(int_of_float (Float.round duration_ms))
              ~typed_outcome
              ~provider
-             ~keeper_turn_id:manifest_keeper_turn_id
+             ~keeper_turn_id:(Some keeper_turn_id)
              ~oas_turn:acc.current_turn
              ~task_id
              ()))
@@ -421,7 +427,7 @@ let assemble_hooks
                   ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                   ~generation
                   ~turn
-                  ?keeper_turn_id:manifest_keeper_turn_id
+                  ~keeper_turn_id
                   ?task_id:
                     (Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id)
                   ~goal_ids:meta.active_goal_ids
@@ -529,22 +535,19 @@ let assemble_hooks
                 (* Phase O observability: capture the effective OAS request
                    boundary after keeper-owned context injection has finalized
                    [extra_system_context]. *)
-                Option.iter
-                  (fun turn_id ->
-                     Keeper_wire_capture.capture_request
-                       ~base_path:config.base_path
-                       ~masc_root:(Workspace.masc_root_dir config)
-                       ~keeper_name:meta.name
-                       ~turn_id
-                       ~trace_id:meta.runtime.trace_id
-                       ~sdk_turn:turn
-                       ~system_prompt:turn_system_prompt
-                       ~extra_system_context:ctx
-                       ~user_message
-                       ~history_messages:messages
-                       ~tools
-                       ())
-                  manifest_keeper_turn_id;
+                Keeper_wire_capture.capture_request
+                  ~base_path:config.base_path
+                  ~masc_root:(Workspace.masc_root_dir config)
+                  ~keeper_name:meta.name
+                  ~turn_id:keeper_turn_id
+                  ~trace_id:meta.runtime.trace_id
+                  ~sdk_turn:turn
+                  ~system_prompt:turn_system_prompt
+                  ~extra_system_context:ctx
+                  ~user_message
+                  ~history_messages:messages
+                  ~tools
+                  ();
                 Eio.Fiber.yield ();
                 Agent_sdk.Hooks.AdjustParams
                   { current_params with
@@ -581,6 +584,7 @@ let assemble_hooks
       ; gate_replay_evidence
       ; acc
       ; all_tool_names
+      ; final_oas_turn_ordinal_ref
       ; receipt_turn_count_ref
       ; receipt_model_used_ref
       ; receipt_stop_reason_ref

@@ -40,11 +40,21 @@ describe('queueDrainStatusOf', () => {
   })
 
   it('treats not_found + a recorded keeper reaction as a healthy 완료 (drained), never a miss', () => {
-    for (const reaction of ['matched_consumed_ack', 'matched_turn_started', 'matched_stimulus'] as const) {
+    for (const reaction of ['matched_consumed_ack', 'matched_turn_started'] as const) {
       const status = queueDrainStatusOf(req('not_found', reaction))
       expect(status?.state, `reaction=${reaction}`).toBe('drained')
       expect(status?.label).toBe('완료')
     }
+  })
+
+  it('treats not_found + matched_stimulus as a miss: the stimulus row is only the producer dispatch record', () => {
+    // The stimulus row is written fail-closed at dispatch time, so every
+    // dispatched wake has one. A receipt leaves the queue only via
+    // ack/cancel/drop — stimulus-only means no keeper ever consumed it.
+    const status = queueDrainStatusOf(req('not_found', 'matched_stimulus'))
+    expect(status?.state).toBe('missed')
+    expect(status?.label).toBe('누락 ⚠')
+    expect(status?.tone).toBe('warn')
   })
 
   it('flags a genuine miss only when the wake is in no queue AND the keeper never reacted', () => {
@@ -86,21 +96,24 @@ describe('isCalendarVisible', () => {
     expect(visible('read_error')).toBe(true)
     expect(visible('not_found', 'quarantined')).toBe(true)
     expect(visible('not_found', 'matched_consumed_ack')).toBe(false) // drained
+    expect(visible('not_found', 'matched_stimulus')).toBe(true) // missed — dispatch record only
     expect(visible('unrecognized_receipt')).toBe(false) // indeterminate
   })
 })
 
 describe('countQueueDrainMisses', () => {
-  it('counts only genuine misses (queue=not_found AND reaction=not_found)', () => {
+  it('counts genuine misses (not_found without a keeper reaction), including stimulus-only receipts', () => {
     const requests: DashboardScheduledAutomationRequest[] = [
       req('matched_pending'),
       req('not_found', 'not_found'), // miss
+      req('not_found', 'matched_stimulus'), // miss — dispatch record only
       req('not_found', 'matched_turn_started'), // drained — not a miss
+      req('not_found', 'matched_consumed_ack'), // drained — not a miss
       req('not_found', 'not_found'), // miss
       req('read_error'), // read error — not counted as a miss
       req(null), // no evidence
     ]
-    expect(countQueueDrainMisses(requests)).toBe(2)
+    expect(countQueueDrainMisses(requests)).toBe(3)
   })
 
   it('returns 0 for an empty list', () => {

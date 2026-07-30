@@ -862,7 +862,16 @@ let run_turn
                         (fun observation ->
                            receipt_runtime_observation_ref := Some observation)
                       ~on_request_wire_observation:
-                        (fun ~runtime_id ~body_bytes ->
+                        (fun
+                          ~runtime_id
+                          ~max_request_body_bytes
+                          ~body_bytes
+                        ->
+                           Keeper_request_wire_observation.record
+                             ~keeper_name:meta.name
+                             ~runtime_id
+                             ~max_request_body_bytes
+                             ~body_bytes;
                            request_wire_observation_ref :=
                              Some
                                { Turn_record.runtime_profile = runtime_id

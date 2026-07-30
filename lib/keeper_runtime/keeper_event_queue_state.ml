@@ -684,17 +684,11 @@ let turn_attempt_terminal_operation_id
       ~admitted_revision
       source
   =
-  let source_fingerprint =
-    Keeper_event_queue.stimulus_to_yojson source
-    |> Yojson.Safe.to_string
-    |> Digestif.SHA256.digest_string
-    |> Digestif.SHA256.to_hex
-  in
   Printf.sprintf
     "turn-attempt-terminal:%d:%Ld:%s"
     owner_nonce
     admitted_revision
-    source_fingerprint
+    (source_snapshot_ref source)
 ;;
 
 let ack_pending_source_terminal

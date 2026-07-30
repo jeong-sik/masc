@@ -250,7 +250,7 @@ let dispatch_after_provider_transcript_admission ~messages ~dispatch =
 ;;
 
 let request_body_bytes_for_turn_record ~observed = function
-  | Ok result -> result.Runtime_agent.request_body_bytes
+  | Ok (result : run_result) -> result.request_body_bytes
   | Error error ->
     (match observed with
      | Some _ as bytes -> bytes

@@ -11,23 +11,29 @@ let block_id = testable (Fmt.of_to_string Prompt_block_id.to_string) Prompt_bloc
 let test_block_id_roundtrip () =
   List.iter
     (fun block ->
-      check block_id
-        (Printf.sprintf "roundtrip %s" (Prompt_block_id.to_string block))
-        block
-        (Prompt_block_id.of_string (Prompt_block_id.to_string block)))
-    Prompt_block_id.all_known
+      match Prompt_block_id.of_string (Prompt_block_id.to_string block) with
+      | Ok decoded ->
+        check block_id
+          (Printf.sprintf "roundtrip %s" (Prompt_block_id.to_string block))
+          block
+          decoded
+      | Error error -> failf "known prompt block failed: %s" error)
+    Prompt_block_id.all
 
-let test_block_id_unknown_maps_to_other () =
-  check block_id "unknown name survives as Other"
-    (Prompt_block_id.Other "future_block")
-    (Prompt_block_id.of_string "future_block");
-  check string "Other renders its name" "future_block"
-    (Prompt_block_id.to_string (Prompt_block_id.Other "future_block"))
+let test_block_id_unknown_fails_closed () =
+  match Prompt_block_id.of_string "future_block" with
+  | Ok _ -> fail "decoded an unknown prompt block"
+  | Error error ->
+    check bool "unknown prompt block is explicit" true
+      (Astring.String.is_infix ~affix:"future_block" error)
 
 (* ── TurnRecord codec ─────────────────────────────────── *)
 
 let sample_block block digest =
   { Turn_record.block; bytes = String.length digest; digest }
+
+let sample_component component bytes =
+  { Turn_record.component = component; bytes }
 
 let sample_record () : Turn_record.t =
   { execution_ids =
@@ -38,11 +44,20 @@ let sample_record () : Turn_record.t =
   ; trace_id = "trace-1780648779957-00000"
   ; absolute_turn = 4071
   ; turn_ref =
-      Some (Ids.Turn_ref.make ~trace_id:"trace-1780648779957-00000" ~absolute_turn:4071)
+      Ids.Turn_ref.make
+        ~trace_id:"trace-1780648779957-00000"
+        ~absolute_turn:4071
   ; blocks =
       [ sample_block Prompt_block_id.Persona "aaaa"
       ; sample_block Prompt_block_id.Dynamic_context "bbbb"
       ; sample_block Prompt_block_id.Memory_os_recall "cccc"
+      ]
+  ; input_components =
+      [ sample_component
+          (Turn_record.Prompt_block Prompt_block_id.Persona)
+          4
+      ; sample_component Turn_record.Tool_schemas 2048
+      ; sample_component Turn_record.Message_tool_result 512
       ]
   ; runtime_profile = "ollama_cloud.deepseek-v4-flash"
   ; model = Some "deepseek-v4-flash"
@@ -52,6 +67,8 @@ let sample_record () : Turn_record.t =
   ; price_output_per_million = Some 0.6
   ; request_latency_ms = Some 1234
   ; ttfrc_ms = Some 567.8
+  ; request_runtime_profile = Some "ollama_cloud.deepseek-v4-flash"
+  ; request_body_bytes = Some 560_513
   ; sampling =
       { temperature = Some 0.3
       ; top_p = Some 0.9
@@ -72,8 +89,8 @@ let sample_record () : Turn_record.t =
    input_tokens could not be read as either a cache-heavy turn or a genuinely large
    prompt. context_window denominates the ctx-fill percentage against the compaction
    ceiling, so those two situations look identical on a dashboard while calling for
-   different action. A row that omits them still decodes — legacy rows and turns where
-   the provider reported no usage carry None rather than a fabricated zero. *)
+   different action. A current turn whose provider reports no cache usage omits
+   them and decodes to None rather than a fabricated zero. *)
 let test_cache_counts_round_trip_and_stay_optional () =
   let record = sample_record () in
   (match Turn_record.of_json (Turn_record.to_json record) with
@@ -83,8 +100,7 @@ let test_cache_counts_round_trip_and_stay_optional () =
        decoded.usage.cache_creation_input_tokens;
      check (option int) "cache read survives" (Some 15000)
        decoded.usage.cache_read_input_tokens);
-  (* A row written before these fields existed. *)
-  let legacy =
+  let without_cache_usage =
     match Turn_record.to_json record with
     | `Assoc fields ->
       `Assoc
@@ -94,8 +110,8 @@ let test_cache_counts_round_trip_and_stay_optional () =
            fields)
     | other -> other
   in
-  match Turn_record.of_json legacy with
-  | Error e -> failf "legacy row without cache fields failed to decode: %s" e
+  match Turn_record.of_json without_cache_usage with
+  | Error e -> failf "row without provider cache usage failed to decode: %s" e
   | Ok decoded ->
     check (option int) "absent cache creation decodes as None" None
       decoded.usage.cache_creation_input_tokens;
@@ -118,10 +134,7 @@ let test_codec_roundtrip () =
     check string "trace_id" record.trace_id decoded.trace_id;
     check int "absolute_turn" record.absolute_turn decoded.absolute_turn;
     check bool "turn_ref preserved" true
-      (match record.turn_ref, decoded.turn_ref with
-       | Some a, Some b -> Ids.Turn_ref.equal a b
-       | None, None -> true
-       | Some _, None | None, Some _ -> false);
+      (Ids.Turn_ref.equal record.turn_ref decoded.turn_ref);
     check int "blocks count" 3 (List.length decoded.blocks);
     check bool "blocks preserved in order" true
       (List.for_all2
@@ -130,6 +143,22 @@ let test_codec_roundtrip () =
            && a.bytes = b.bytes
            && String.equal a.digest b.digest)
          record.blocks decoded.blocks);
+    check (list string) "input component ids preserved in order"
+      (List.map
+         (fun (component : Turn_record.input_component) ->
+           Turn_record.input_component_id_to_string component.component)
+         record.input_components)
+      (List.map
+         (fun (component : Turn_record.input_component) ->
+           Turn_record.input_component_id_to_string component.component)
+         decoded.input_components);
+    check (list int) "input component bytes preserved"
+      (List.map
+         (fun (component : Turn_record.input_component) -> component.bytes)
+         record.input_components)
+      (List.map
+         (fun (component : Turn_record.input_component) -> component.bytes)
+         decoded.input_components);
     check string "runtime_profile" record.runtime_profile decoded.runtime_profile;
     check (option string) "model" record.model decoded.model;
     check (option string) "finish_reason" record.finish_reason decoded.finish_reason;
@@ -142,6 +171,10 @@ let test_codec_roundtrip () =
       decoded.request_latency_ms;
     check (option (float 0.0001)) "ttfrc_ms round-trip" record.ttfrc_ms
       decoded.ttfrc_ms;
+    check (option string) "request runtime profile round-trip"
+      record.request_runtime_profile decoded.request_runtime_profile;
+    check (option int) "request_body_bytes round-trip"
+      record.request_body_bytes decoded.request_body_bytes;
     check (option (float 0.0001)) "temperature" record.sampling.temperature
       decoded.sampling.temperature;
     check (option (float 0.0001)) "top_p" record.sampling.top_p
@@ -166,8 +199,10 @@ let test_codec_optional_fields_absent () =
     ; context_window = None
     ; price_input_per_million = None
     ; price_output_per_million = None
-  ; request_latency_ms = None
-  ; ttfrc_ms = None
+    ; request_latency_ms = None
+    ; ttfrc_ms = None
+    ; request_runtime_profile = None
+    ; request_body_bytes = None
     ; sampling =
         { temperature = None
         ; top_p = None
@@ -181,7 +216,6 @@ let test_codec_optional_fields_absent () =
         ; cache_creation_input_tokens = None
         ; cache_read_input_tokens = None
         }
-    ; turn_ref = None
     }
   in
   let json = Turn_record.to_json record in
@@ -205,7 +239,15 @@ let test_codec_optional_fields_absent () =
      check bool "request_latency_ms key omitted when None" false
        (List.mem_assoc "request_latency_ms" fields);
      check bool "ttfrc_ms key omitted when None" false
-       (List.mem_assoc "ttfrc_ms" fields)
+       (List.mem_assoc "ttfrc_ms" fields);
+     check bool "request_body_bytes key remains required" true
+       (List.mem_assoc "request_body_bytes" fields);
+     check bool "request_body_bytes None is explicit null" true
+       (List.assoc_opt "request_body_bytes" fields = Some `Null);
+     check bool "request_runtime_profile key remains required" true
+       (List.mem_assoc "request_runtime_profile" fields);
+     check bool "request_runtime_profile None is explicit null" true
+       (List.assoc_opt "request_runtime_profile" fields = Some `Null)
    | _ -> fail "to_json did not produce an object");
   match Turn_record.of_json json with
   | Error e -> failf "decode failed: %s" e
@@ -222,12 +264,15 @@ let test_codec_optional_fields_absent () =
       decoded.request_latency_ms;
     check (option (float 0.0001)) "ttfrc_ms absent" None
       decoded.ttfrc_ms;
+    check (option int) "request body observation absent" None
+      decoded.request_body_bytes;
+    check (option string) "request runtime profile absent" None
+      decoded.request_runtime_profile;
     check (option (float 0.0001)) "temperature absent" None
       decoded.sampling.temperature;
     check (option (float 0.0001)) "top_p absent" None decoded.sampling.top_p;
     check (option int) "max_tokens absent" None decoded.sampling.max_tokens;
-    check (option int) "input_tokens absent" None decoded.usage.input_tokens;
-    check bool "turn_ref absent" true (decoded.turn_ref = None)
+    check (option int) "input_tokens absent" None decoded.usage.input_tokens
 
 let test_codec_rejects_malformed () =
   (match Turn_record.of_json (`String "not a record") with
@@ -239,20 +284,139 @@ let test_codec_rejects_malformed () =
     check bool "error names the missing field" true
       (Astring.String.is_infix ~affix:"execution_ids" msg)
 
-let test_codec_unknown_block_decodes_as_other () =
+let test_codec_requires_current_input_composition () =
+  let without_components =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc (List.remove_assoc "input_components" fields)
+    | other -> other
+  in
+  match Turn_record.of_json without_components with
+  | Ok _ -> fail "decoded a row without current input composition"
+  | Error msg ->
+    check bool "missing current field is explicit" true
+      (Astring.String.is_infix ~affix:"input_components" msg)
+
+let test_codec_requires_turn_ref () =
+  let without_turn_ref =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields -> `Assoc (List.remove_assoc "turn_ref" fields)
+    | other -> other
+  in
+  match Turn_record.of_json without_turn_ref with
+  | Ok _ -> fail "decoded a row without current turn_ref"
+  | Error msg ->
+    check bool "missing current field is explicit" true
+      (Astring.String.is_infix ~affix:"turn_ref" msg)
+
+let test_codec_rejects_mismatched_turn_ref () =
+  let mismatched =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        ( ( "turn_ref"
+          , Ids.Turn_ref.to_yojson
+              (Ids.Turn_ref.make ~trace_id:"other-trace" ~absolute_turn:9) )
+        :: List.remove_assoc "turn_ref" fields )
+    | other -> other
+  in
+  match Turn_record.of_json mismatched with
+  | Ok _ -> fail "decoded a turn_ref that disagrees with its source fields"
+  | Error msg ->
+    check bool "mismatched derived field is explicit" true
+      (Astring.String.is_infix ~affix:"does not match" msg)
+
+let test_codec_requires_current_request_body_observation () =
+  let without_request_body_bytes =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc (List.remove_assoc "request_body_bytes" fields)
+    | other -> other
+  in
+  match Turn_record.of_json without_request_body_bytes with
+  | Ok _ -> fail "decoded a row without current request body observation"
+  | Error msg ->
+    check bool "missing current field is explicit" true
+      (Astring.String.is_infix ~affix:"request_body_bytes" msg)
+
+let test_codec_requires_current_request_runtime_profile () =
+  let without_request_runtime_profile =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc (List.remove_assoc "request_runtime_profile" fields)
+    | other -> other
+  in
+  match Turn_record.of_json without_request_runtime_profile with
+  | Ok _ -> fail "decoded a row without current request runtime attribution"
+  | Error msg ->
+    check bool "missing current field is explicit" true
+      (Astring.String.is_infix ~affix:"request_runtime_profile" msg)
+
+let test_codec_rejects_invalid_request_body_observation () =
+  let with_request_body_bytes value =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        (("request_body_bytes", value)
+         :: List.remove_assoc "request_body_bytes" fields)
+    | other -> other
+  in
+  List.iter
+    (fun value ->
+      match Turn_record.of_json (with_request_body_bytes value) with
+      | Ok _ -> fail "decoded an invalid request body observation"
+      | Error msg ->
+        check bool "invalid current field is explicit" true
+          (Astring.String.is_infix ~affix:"request_body_bytes" msg))
+    [ `Int (-1); `String "560513" ]
+
+let test_codec_rejects_unknown_input_component () =
+  let with_component component =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        ( ( "input_components"
+          , `List
+              [ `Assoc
+                  [ "component", `String component
+                  ; "bytes", `Int 1
+                  ]
+              ] )
+        :: List.remove_assoc "input_components" fields )
+    | other -> other
+  in
+  List.iter
+    (fun (component, error_token) ->
+      match Turn_record.of_json (with_component component) with
+      | Ok _ -> failf "decoded unknown input component %s" component
+      | Error msg ->
+        check bool "unknown component is explicit" true
+          (Astring.String.is_infix ~affix:error_token msg))
+    [ "history_guess", "history_guess"
+    ; "prompt.future_block", "future_block"
+    ]
+
+let test_codec_unknown_block_fails_closed () =
   let json =
-    Turn_record.to_json
-      { (sample_record ()) with
-        blocks = [ sample_block (Prompt_block_id.Other "future_block") "dddd" ]
-      }
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        ( ( "blocks"
+          , `List
+              [ `Assoc
+                  [ "block", `String "future_block"
+                  ; "bytes", `Int 4
+                  ; "digest", `String "dddd"
+                  ]
+              ] )
+        :: List.remove_assoc "blocks" fields )
+    | other -> other
   in
   match Turn_record.of_json json with
-  | Error e -> failf "decode failed: %s" e
-  | Ok decoded ->
-    (match decoded.blocks with
-     | [ { block; _ } ] ->
-       check block_id "forward-open block id" (Prompt_block_id.Other "future_block") block
-     | _ -> fail "expected exactly one block")
+  | Ok _ -> fail "decoded an unknown prompt block"
+  | Error error ->
+    check bool "unknown prompt block is explicit" true
+      (Astring.String.is_infix ~affix:"future_block" error)
 
 (* ── Block diff (RFC §5: exact added/removed set) ─────── *)
 
@@ -263,7 +427,7 @@ let test_diff_added_removed_changed () =
     record_with_blocks
       [ sample_block Prompt_block_id.Persona "aaaa"
       ; sample_block Prompt_block_id.Dynamic_context "bbbb"
-      ; sample_block Prompt_block_id.Retry_nudge "rrrr"
+      ; sample_block Prompt_block_id.Temporal_summary "tttt"
       ]
   in
   let next =
@@ -277,8 +441,8 @@ let test_diff_added_removed_changed () =
   check (list block_id) "added = exactly memory_os_recall"
     [ Prompt_block_id.Memory_os_recall ]
     (List.map (fun (b : Turn_record.prompt_block) -> b.block) diff.added);
-  check (list block_id) "removed = exactly retry_nudge"
-    [ Prompt_block_id.Retry_nudge ]
+  check (list block_id) "removed = exactly temporal_summary"
+    [ Prompt_block_id.Temporal_summary ]
     (List.map (fun (b : Turn_record.prompt_block) -> b.block) diff.removed);
   check (list block_id) "changed = exactly dynamic_context"
     [ Prompt_block_id.Dynamic_context ]
@@ -303,7 +467,7 @@ let test_entries_with_diffs_same_trace_only () =
   let r2 =
     { (record_with_blocks
          [ sample_block Prompt_block_id.Persona "aaaa"
-         ; sample_block Prompt_block_id.Retry_nudge "rrrr"
+         ; sample_block Prompt_block_id.Memory_os_recall "mmmm"
          ])
       with
       trace_id = "trace-A"
@@ -321,8 +485,8 @@ let test_entries_with_diffs_same_trace_only () =
     check bool "first record has no predecessor" true (first = None);
     (match second with
      | Some diff ->
-       check (list block_id) "same-trace diff sees the added nudge"
-         [ Prompt_block_id.Retry_nudge ]
+       check (list block_id) "same-trace diff sees the added recall block"
+         [ Prompt_block_id.Memory_os_recall ]
          (List.map (fun (b : Turn_record.prompt_block) -> b.block) diff.added)
      | None -> fail "expected a diff for the same-trace successor");
     check bool "trace boundary yields no diff" true (third = None)
@@ -363,7 +527,8 @@ let () =
   run "turn_record"
     [ ( "prompt_block_id"
       , [ test_case "all known constructors roundtrip" `Quick test_block_id_roundtrip
-        ; test_case "unknown maps to Other" `Quick test_block_id_unknown_maps_to_other
+        ; test_case "unknown fails closed" `Quick
+            test_block_id_unknown_fails_closed
         ] )
     ; ( "codec"
       , [ test_case "roundtrip" `Quick test_codec_roundtrip
@@ -371,8 +536,21 @@ let () =
             test_cache_counts_round_trip_and_stay_optional
         ; test_case "optional fields absent" `Quick test_codec_optional_fields_absent
         ; test_case "rejects malformed rows" `Quick test_codec_rejects_malformed
-        ; test_case "unknown block decodes as Other" `Quick
-            test_codec_unknown_block_decodes_as_other
+        ; test_case "current input composition required" `Quick
+            test_codec_requires_current_input_composition
+        ; test_case "turn_ref required" `Quick test_codec_requires_turn_ref
+        ; test_case "mismatched turn_ref rejected" `Quick
+            test_codec_rejects_mismatched_turn_ref
+        ; test_case "current request body observation required" `Quick
+            test_codec_requires_current_request_body_observation
+        ; test_case "current request runtime attribution required" `Quick
+            test_codec_requires_current_request_runtime_profile
+        ; test_case "invalid request body observation rejected" `Quick
+            test_codec_rejects_invalid_request_body_observation
+        ; test_case "unknown input component rejected" `Quick
+            test_codec_rejects_unknown_input_component
+        ; test_case "unknown prompt block rejected" `Quick
+            test_codec_unknown_block_fails_closed
         ] )
     ; ( "block_diff"
       , [ test_case "exact added/removed/changed sets" `Quick

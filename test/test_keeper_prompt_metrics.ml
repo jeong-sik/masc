@@ -9,8 +9,10 @@
 open Alcotest
 
 module KAR = Masc.Keeper_agent_run
+module KAPM = Masc.Keeper_agent_prompt_metrics
 module KP = Masc.Keeper_prompt
 module KRP = Masc.Keeper_run_prompt
+module KRTH = Masc.Keeper_run_tools_hooks
 
 let measure_bytes = String.length
 
@@ -302,8 +304,8 @@ let test_user_message_sanitizer_preserves_semantic_content () =
   check bool "preserves useful user request" true
     (has_in sanitized "Please inspect the current board status.")
 
-let test_ctx_composition_splits_history_bytes () =
-  let history_messages =
+let test_ctx_composition_splits_provider_input_bytes () =
+  let input_messages =
     [
       {
         Agent_sdk.Types.role = Agent_sdk.Types.User;
@@ -347,38 +349,110 @@ let test_ctx_composition_splits_history_bytes () =
       };
     ]
   in
+  let system_prompt_block =
+    { Turn_record.block = Prompt_block_id.Persona
+    ; bytes = String.length "System prompt"
+    ; digest = "persona-digest"
+    }
+  in
+  let tool =
+    Agent_sdk.Tool.create
+      ~name:"probe_tool"
+      ~description:"probe tool"
+      ~parameters:[]
+      (fun _input -> Ok { Agent_sdk.Types.content = "ok"; _meta = None })
+  in
+  let input_components =
+    KAPM.build_input_components
+      ~system_prompt_block:(Some system_prompt_block)
+      ~tools:[ tool ]
+      ~input_messages
+  in
   let metrics =
-    KAR.build_ctx_composition_metrics
-      ~system_prompt:"System prompt"
-      ~dynamic_context:"Dynamic context"
-      ~memory_context:"Memory context"
-      ~temporal_context:"Temporal context"
-      ~user_message:"Current user message"
-      ~history_messages
+    KAPM.build_ctx_composition_metrics
+      ~input_components
       ~actual_input_tokens:(Some 1000)
   in
-  let segment_bytes key =
+  let segment_bytes component =
     metrics.segments
-    |> List.assoc_opt key
-    |> Option.map (fun segment -> segment.KAR.bytes)
+    |> List.find_opt (fun (candidate, _) -> candidate = component)
+    |> Option.map (fun (_, segment) -> segment.KAPM.bytes)
     |> Option.value ~default:0
   in
-  check bool "system prompt bucket present" true
-    (segment_bytes "system_prompt" > 0);
-  check bool "history user bucket present" true
-    (segment_bytes "history_user" > 0);
-  check bool "history assistant text bucket present" true
-    (segment_bytes "history_assistant_text" > 0);
-  check bool "history tool use bucket present" true
-    (segment_bytes "history_tool_use" > 0);
-  check bool "history tool result bucket present" true
-    (segment_bytes "history_tool_result" > 0);
+  check int "persona prompt bytes are exact"
+    (String.length "System prompt")
+    (segment_bytes (Turn_record.Prompt_block Prompt_block_id.Persona));
+  check int "tool schema bytes are canonical"
+    (String.length
+       (Yojson.Safe.to_string (Agent_sdk.Tool.schema_to_json tool)))
+    (segment_bytes Turn_record.Tool_schemas);
+  check bool "user message bucket present" true
+    (segment_bytes Turn_record.Message_user > 0);
+  check bool "assistant text bucket present" true
+    (segment_bytes Turn_record.Message_assistant_text > 0);
+  check bool "tool use bucket present" true
+    (segment_bytes Turn_record.Message_tool_use > 0);
+  check bool "tool result bucket present" true
+    (segment_bytes Turn_record.Message_tool_result > 0);
   check (option int) "provider token observation remains separate" (Some 1000)
     metrics.actual_input_tokens;
   check int "total bytes equal segment sum"
-    (List.fold_left (fun total (_, segment) -> total + segment.KAR.bytes) 0
+    (List.fold_left (fun total (_, segment) -> total + segment.KAPM.bytes) 0
        metrics.segments)
     metrics.attributed_bytes
+
+let test_projection_snapshot_counts_flattened_messages_without_recovery () =
+  let dynamic = "dynamic" in
+  let temporal = "temporal" in
+  let context = dynamic ^ "\n\n" ^ temporal in
+  let flattened_context = "opaque context envelope:" ^ context in
+  let message text = Agent_sdk.Types.user_msg text in
+  let prepared_messages =
+    [ message "prior"
+    ; message flattened_context
+    ]
+  in
+  let projected_messages = prepared_messages @ [ message "gate evidence" ] in
+  let prompt_blocks =
+    [ { Turn_record.block = Prompt_block_id.Persona
+      ; bytes = String.length "persona"
+      ; digest = "persona-digest"
+      }
+    ; { Turn_record.block = Prompt_block_id.Dynamic_context
+      ; bytes = String.length dynamic
+      ; digest = "dynamic-digest"
+      }
+    ; { Turn_record.block = Prompt_block_id.Temporal_summary
+      ; bytes = String.length temporal
+      ; digest = "temporal-digest"
+      }
+    ]
+  in
+  let input_components =
+    KRTH.provider_input_components
+      ~prompt_blocks
+      ~tools:[]
+      ~projected_messages
+  in
+  let bytes component =
+    input_components
+    |> List.find_opt (fun (candidate : Turn_record.input_component) ->
+      candidate.component = component)
+    |> Option.map (fun (component : Turn_record.input_component) ->
+      component.bytes)
+    |> Option.value ~default:0
+  in
+  check int "system prompt remains a separate provider component"
+    (String.length "persona")
+    (bytes (Turn_record.Prompt_block Prompt_block_id.Persona));
+  check int "dynamic provenance is not double-counted as a provider component"
+    0
+    (bytes (Turn_record.Prompt_block Prompt_block_id.Dynamic_context));
+  check int "flattened context and projected tail are counted exactly once"
+    (String.length "prior"
+     + String.length flattened_context
+     + String.length "gate evidence")
+    (bytes Turn_record.Message_user)
 
 (* ── Suite ────────────────────────────────────────────── *)
 
@@ -424,7 +498,10 @@ let () =
         ] );
       ( "ctx_composition",
         [
-          test_case "splits history byte buckets" `Quick
-            test_ctx_composition_splits_history_bytes;
+          test_case "splits exact provider input byte buckets" `Quick
+            test_ctx_composition_splits_provider_input_bytes;
+          test_case "projection counts flattened messages without recovery"
+            `Quick
+            test_projection_snapshot_counts_flattened_messages_without_recovery;
         ] );
     ]

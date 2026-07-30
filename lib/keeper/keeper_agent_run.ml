@@ -249,6 +249,30 @@ let dispatch_after_provider_transcript_admission ~messages ~dispatch =
   | Ok () -> dispatch ()
 ;;
 
+let serialized_request_body_bytes_of_error error =
+  match Keeper_turn_runtime_budget.capacity_refusal_of_error error with
+  | Some
+      (Keeper_turn_runtime_budget.Serialized_request_body { actual_bytes; _ }) ->
+    Some actual_bytes
+  | Some
+      (Keeper_turn_runtime_budget.Provider_context_window _
+      | Keeper_turn_runtime_budget.Provider_request_body_refusal _)
+  | None ->
+    None
+;;
+
+let request_body_bytes_for_error ~observed error =
+  match serialized_request_body_bytes_of_error error with
+  | Some _ as actual -> actual
+  | None -> observed
+;;
+
+type request_observation =
+  { runtime_profile : string option
+  ; body_bytes : int
+  ; input_components : Turn_record.input_component list
+  }
+
 let terminal_effect_boundary_decision = function
   | Keeper_tools_oas.Terminal_effect_open -> Ok Runtime_agent.Continue
   | Keeper_tools_oas.Deferred_tool_result ->
@@ -281,6 +305,7 @@ module For_testing = struct
   let provider_transcript_admission = provider_transcript_admission
   let dispatch_after_provider_transcript_admission =
     dispatch_after_provider_transcript_admission
+  let request_body_bytes_for_error = request_body_bytes_for_error
 end
 
 (** Run a single keeper turn via OAS Agent.run().
@@ -660,6 +685,8 @@ let run_turn
     let receipt_response_text_present_ref =
       s.Keeper_run_tools.receipt_response_text_present_ref
     in
+    let current_request_runtime_profile_ref = ref None in
+    let observed_request_ref : request_observation option ref = ref None in
     (* 8. Run Agent *)
     let record_turn_progress, yield_on_tool, on_yield, on_resume, on_event =
       Turn_helpers.turn_progress_callbacks
@@ -836,6 +863,18 @@ let run_turn
                       ~on_runtime_observation:
                         (fun observation ->
                            receipt_runtime_observation_ref := Some observation)
+                      ~on_request_attempt_started:
+                        (fun ~runtime_id ->
+                           current_request_runtime_profile_ref := Some runtime_id)
+                      ~on_request_body_bytes:
+                        (fun ~runtime_id ~bytes ->
+                           current_request_runtime_profile_ref := Some runtime_id;
+                           observed_request_ref :=
+                             Some
+                               { runtime_profile = Some runtime_id
+                               ; body_bytes = bytes
+                               ; input_components = acc.input_components
+                               })
                       ())
          in
          (* Trace-store failure isolation: [raw_trace_for_dispatch]
@@ -878,14 +917,14 @@ let run_turn
                      ~tool_calls:acc.tool_calls
                  in
                  let usage = Keeper_context_runtime.usage_of_response result.response in
+                 let input_components =
+                   match !observed_request_ref with
+                   | Some observation -> observation.input_components
+                   | None -> []
+                 in
                  let ctx_composition =
-                   build_ctx_composition_metrics
-                     ~system_prompt:turn_system_prompt
-                     ~dynamic_context
-                     ~memory_context
-                     ~temporal_context
-                     ~user_message
-                     ~history_messages
+                   Keeper_agent_prompt_metrics.build_ctx_composition_metrics
+                     ~input_components
                      ~actual_input_tokens:(Some usage.input_tokens)
                  in
                  let completion_observation ()
@@ -1099,6 +1138,33 @@ let run_turn
         let (price_input_per_million, price_output_per_million) =
           Runtime.pricing_of_runtime_id runtime_id_string
         in
+        let request_observation =
+          match turn_result with
+          | Error error -> (
+            match serialized_request_body_bytes_of_error error with
+            | Some actual_bytes ->
+              Some
+                { runtime_profile = !current_request_runtime_profile_ref
+                ; body_bytes = actual_bytes
+                ; input_components = acc.input_components
+                }
+            | None -> !observed_request_ref)
+          | Ok _ -> !observed_request_ref
+        in
+        let request_runtime_profile =
+          Option.bind request_observation (fun observation ->
+            observation.runtime_profile)
+        in
+        let request_body_bytes =
+          Option.map
+            (fun observation -> observation.body_bytes)
+            request_observation
+        in
+        let input_components =
+          match request_observation with
+          | Some observation -> observation.input_components
+          | None -> []
+        in
         Keeper_turn_record_writer.write
           ~config
           ~keeper_name:meta.name
@@ -1115,6 +1181,8 @@ let run_turn
           ~price_output_per_million
           ~request_latency_ms
           ~ttfrc_ms
+          ~request_runtime_profile
+          ~request_body_bytes
           ~sampling:
             { temperature = Some temperature
             ; top_p = Runtime.top_p_of_runtime_id runtime_id_string
@@ -1125,6 +1193,7 @@ let run_turn
           ~usage
           ~execution_ids
           ~blocks:acc.prompt_blocks
+          ~input_components
           ();
         (* RFC-0233 §2.3 PR-4: project the same record onto the ambient
            turn span. Both turn drivers (unified "invoke_agent <keeper>"

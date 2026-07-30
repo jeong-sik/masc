@@ -288,8 +288,8 @@ type TurnPhase = {
 
 type TurnDetail = {
   traceId: string
-  tokIn: number
-  tokOut: number
+  tokIn: number | null
+  tokOut: number | null
   // RFC-0233 §8 — null when context_window/price are absent on the record
   // (runtime unknown or operator left runtime.toml unset); render "미상".
   ctxPct: number | null
@@ -334,16 +334,14 @@ function approxTokens(str: string): number {
 }
 
 function buildSystemPrompt(keeperName: string, record: TurnRecordEntry): string {
-  return `당신은 MASC 코디네이션 서버의 keeper "${keeperName}" 입니다.
-runtime · profile : ${record.runtime_profile}
-absolute turn     : T${record.absolute_turn}
-trace id          : ${record.trace_id}
+  return `시스템 프롬프트 원문은 TurnRecord에 저장되지 않습니다.
+keeper        = ${keeperName}
+runtime       = ${record.runtime_profile}
+absolute turn = T${record.absolute_turn}
+trace id      = ${record.trace_id}
 
-원칙
-- 모든 작업은 trace 로 기록한다.
-- 컨텍스트 사용량이 85% 를 넘으면 compact() 를 호출한다.
-- 소유하지 않은 태스크는 핸드오프(HandingOff)로 넘긴다.
-- 답변은 근거(도구 결과·trace)를 함께 제시한다.`
+확인 가능한 값은 context 탭의 prompt block digest/bytes와
+final provider input component bytes입니다. 원문을 복원하거나 추정하지 않습니다.`
 }
 
 function thinkingStateLabel(record: TurnRecordEntry): string {
@@ -364,10 +362,14 @@ function formatCtxWindowK(cw: number | null | undefined): string {
   return cw != null ? `${Math.round(cw / 1000)}K` : '미상'
 }
 
-function buildInjectedCtx(record: TurnRecordEntry, ctxPct: number | null, tokIn: number): string {
+function buildInjectedCtx(
+  record: TurnRecordEntry,
+  ctxPct: number | null,
+  tokIn: number | null,
+): string {
   const ctxLine = ctxPct != null
-    ? `${ctxPct.toFixed(1)}%   (${tokIn.toLocaleString()} / ${record.context_window?.toLocaleString() ?? '미상'} tok)`
-    : `미상   (${tokIn.toLocaleString()} / 미상 tok, runtime 미구성)`
+    ? `${ctxPct.toFixed(1)}%   (${tokIn?.toLocaleString() ?? '미상'} / ${record.context_window?.toLocaleString() ?? '미상'} tok)`
+    : `미상   (${tokIn?.toLocaleString() ?? '미상'} / ${record.context_window?.toLocaleString() ?? '미상'} tok)`
   return `# world snapshot
 fsm.state      = n/a
 model          = ${record.model ?? 'n/a'}
@@ -381,6 +383,14 @@ thinking.budget= ${record.thinking_budget ?? '—'}
 ${record.blocks.length
     ? record.blocks.map(b => `  - ${b.block}  ${b.bytes}B  ${b.digest.slice(0, 12)}`).join('\n')
     : '  (none)'}
+
+# final provider input components
+${record.input_components.length
+    ? record.input_components.map(component => `  - ${component.component}  ${component.bytes}B`).join('\n')
+    : '  (none)'}
+
+request.runtime = ${record.request_runtime_profile ?? 'not observed'}
+request.wire    = ${record.request_body_bytes != null ? `${record.request_body_bytes}B` : 'not observed'}
 
 # tool executions
 ${record.execution_ids.length
@@ -505,18 +515,21 @@ function buildTurnDetail(
   toolEntries: readonly ToolCallEntry[],
 ): TurnDetail {
   const traceId = `${record.trace_id}_${String(record.absolute_turn).padStart(4, '0')}`
-  const tokIn = record.input_tokens ?? Math.max(1, Math.round(record.blocks.reduce((sum, b) => sum + b.bytes, 0) / 4))
-  const tokOut = record.output_tokens ?? 120
+  const tokIn = record.input_tokens ?? null
+  const tokOut = record.output_tokens ?? null
   // RFC-0233 §8 — ctx-fill% and cost grounded in runtime.toml-declared facts.
   // context_window is the keeper-resolved effective budget (replaces the
   // hardcoded 200K); prices are USD/1M from the binding (replace Claude $3/$15).
   // Either is null when the record lacks the fact — the view renders "미상".
   const ctxPct =
-    record.context_window != null && record.context_window > 0
+    tokIn != null && record.context_window != null && record.context_window > 0
       ? Math.min(100, (tokIn / record.context_window) * 100)
       : null
   const cost =
-    record.price_input_per_million != null && record.price_output_per_million != null
+    tokIn != null
+    && tokOut != null
+    && record.price_input_per_million != null
+    && record.price_output_per_million != null
       ? (tokIn * record.price_input_per_million + tokOut * record.price_output_per_million) / 1e6
       : null
   const toolIndex = toolCallIndexByExecutionId(toolEntries)
@@ -776,16 +789,12 @@ function MessagesTab({
   let seq = 0
   const userLines = transcript.kind === 'loaded' ? transcript.data.user : []
   const assistantLines = transcript.kind === 'loaded' ? transcript.data.assistant : []
-  // 2 synthetic (system + context) + real user lines + tools + real assistant
-  // lines. Falls back to one placeholder slot each while loading/absent.
-  const userSlots = userLines.length || 1
-  const assistantSlots = assistantLines.length || 1
-  const messageCount = 2 + userSlots + t.tools.length + assistantSlots
+  const linkedCount = userLines.length + t.tools.length + assistantLines.length
   return html`
     <div class="kti-sec">
       <div class="kti-sec-h">
-        <h4>모델에 전달된 시퀀스</h4>
-        <span class="n">${messageCount} 메시지</span>
+        <h4>연결된 transcript · provider 입력 증거</h4>
+        <span class="n">${linkedCount} 연결 항목</span>
       </div>
       ${transcript.kind === 'loading'
         ? html`<div class="text-2xs text-[var(--color-fg-muted)] px-1 pb-1" data-testid="turn-transcript-loading">전사 불러오는 중…</div>`
@@ -797,7 +806,7 @@ function MessagesTab({
         <div class="kti-msg">
           <div class="kti-msg-h">
             <span class="kti-msg-role system">system</span>
-            <span class="who">시스템 프롬프트</span>
+            <span class="who">시스템 프롬프트 · 원문 미기록</span>
             <span class="seq">#${++seq}</span>
           </div>
           <div class="kti-msg-b mono">${t.systemPrompt}</div>
@@ -805,7 +814,7 @@ function MessagesTab({
         <div class="kti-msg">
           <div class="kti-msg-h">
             <span class="kti-msg-role context">context</span>
-            <span class="who">주입 컨텍스트</span>
+            <span class="who">TurnRecord provider 입력 attribution</span>
             <span class="seq">#${++seq}</span>
           </div>
           <div class="kti-msg-b mono">${t.injectedCtx}</div>
@@ -863,8 +872,8 @@ function ContextTab({ t }: { t: TurnDetail }) {
     <div class="kti-sec">
       <div class="kti-ctx-card">
         <div class="kti-ctx-h">
-          <span class="t">시스템 프롬프트</span>
-          <span class="tok">~${approxTokens(t.systemPrompt)} tok</span>
+          <span class="t">시스템 프롬프트 · 원문 미기록</span>
+          <span class="tok">bytes/digest만 보존</span>
           <${CopyBtn} text=${t.systemPrompt} />
         </div>
         <pre>${t.systemPrompt}</pre>
@@ -873,8 +882,8 @@ function ContextTab({ t }: { t: TurnDetail }) {
     <div class="kti-sec">
       <div class="kti-ctx-card">
         <div class="kti-ctx-h">
-          <span class="t">주입 컨텍스트 · blocks · executions</span>
-          <span class="tok">~${approxTokens(t.injectedCtx)} tok</span>
+          <span class="t">provider 입력 attribution · blocks · executions</span>
+          <span class="tok">실측 byte 구성</span>
           <${CopyBtn} text=${t.injectedCtx} />
         </div>
         <pre>${t.injectedCtx}</pre>
@@ -899,8 +908,11 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
         <span class="k">model</span><span class="v">${record.model ?? 'n/a'}</span>
         <span class="k">runtime</span><span class="v">${record.runtime_profile}</span>
         <span class="k">fsm.state</span><span class="v">n/a</span>
-        <span class="k">input tokens</span><span class="v">${t.tokIn.toLocaleString()}</span>
-        <span class="k">output tokens</span><span class="v">${t.tokOut.toLocaleString()}</span>
+        <span class="k">input tokens</span><span class="v">${t.tokIn?.toLocaleString() ?? '미상'}</span>
+        <span class="k">output tokens</span><span class="v">${t.tokOut?.toLocaleString() ?? '미상'}</span>
+        <span class="k">attributed content bytes</span><span class="v">${record.input_components.reduce((sum, component) => sum + component.bytes, 0).toLocaleString()}</span>
+        <span class="k">serialized request bytes</span><span class="v">${record.request_body_bytes?.toLocaleString() ?? '미관측'}</span>
+        <span class="k">request runtime</span><span class="v">${record.request_runtime_profile ?? '미관측'}</span>
         <span class="k">cache read tokens</span><span class="v">${record.cache_read_input_tokens?.toLocaleString() ?? '미상'}</span>
         <span class="k">cache write tokens</span><span class="v">${record.cache_creation_input_tokens?.toLocaleString() ?? '미상'}</span>
         <span class="k">ctx window${record.context_window != null ? '' : ' · 미상'}</span><span class="v">${t.ctxPct != null ? `${t.ctxPct.toFixed(1)}% / ${record.context_window?.toLocaleString() ?? '미상'}` : '미상'}</span>
@@ -1027,18 +1039,18 @@ function TurnDetailDrawer({
           </div>
           <div class="kti-stat">
             <div class="k">입력</div>
-            <div class="v">${(t.tokIn / 1000).toFixed(1)}<small>k</small></div>
+            <div class="v">${t.tokIn != null ? (t.tokIn / 1000).toFixed(1) : '미상'}${t.tokIn != null ? html`<small>k</small>` : null}</div>
           </div>
           <div class="kti-stat">
             <div class="k">출력</div>
-            <div class="v volt">${t.tokOut.toLocaleString()}</div>
+            <div class="v volt">${t.tokOut?.toLocaleString() ?? '미상'}</div>
           </div>
           <div class="kti-stat">
             <div class="k">도구</div>
             <div class="v">${t.tools.length}</div>
           </div>
           <div class="kti-stat">
-            <div class="k">추정비용</div>
+            <div class="k">계산 비용</div>
             <div class="v ok">${t.cost != null ? `$${t.cost.toFixed(2)}` : '미상'}</div>
           </div>
         </div>
@@ -1049,18 +1061,22 @@ function TurnDetailDrawer({
             <span class="ctxpct">${t.ctxPct != null ? `컨텍스트 ${t.ctxPct.toFixed(1)}% / ${formatCtxWindowK(t.contextWindow)}` : '컨텍스트 미상'}</span>
           </div>
           <div class="kti-tok-bar">
-            <span
-              class="seg-in"
-              style=${{ width: `${(t.tokIn / (t.tokIn + t.tokOut)) * 100}%` }}
-            />
-            <span
-              class="seg-out"
-              style=${{ width: `${(t.tokOut / (t.tokIn + t.tokOut)) * 100}%` }}
-            />
+            ${t.tokIn != null && t.tokOut != null && t.tokIn + t.tokOut > 0
+              ? html`
+                <span
+                  class="seg-in"
+                  style=${{ width: `${(t.tokIn / (t.tokIn + t.tokOut)) * 100}%` }}
+                />
+                <span
+                  class="seg-out"
+                  style=${{ width: `${(t.tokOut / (t.tokIn + t.tokOut)) * 100}%` }}
+                />
+              `
+              : null}
           </div>
           <div class="kti-tok-legend">
-            <span class="in"><i></i>입력 <b>${t.tokIn.toLocaleString()}</b></span>
-            <span class="out"><i></i>출력 <b>${t.tokOut.toLocaleString()}</b></span>
+            <span class="in"><i></i>입력 <b>${t.tokIn?.toLocaleString() ?? '미상'}</b></span>
+            <span class="out"><i></i>출력 <b>${t.tokOut?.toLocaleString() ?? '미상'}</b></span>
           </div>
         </div>
 

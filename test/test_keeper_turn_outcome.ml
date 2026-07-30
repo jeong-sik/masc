@@ -207,6 +207,29 @@ let test_repeated_exact_tool_call_boundary () =
        ; tool_call ~input:None "keeper_tasks_list"
        ])
 
+let test_request_body_refusal_overrides_prior_observation () =
+  let error =
+    Agent_sdk.Error.Api
+      (Agent_sdk.Retry.InvalidRequest
+         { message = "serialized request body exceeds the declared limit"
+         ; reason =
+             Agent_sdk.Retry.Request_body_too_large
+               { actual_bytes = 777_777; limit_bytes = 524_288 }
+         })
+  in
+  check (option int) "final typed refusal is authoritative"
+    (Some 777_777)
+    (Masc.Keeper_agent_run.For_testing.request_body_bytes_for_error
+       ~observed:(Some 111_111)
+       error)
+
+let test_non_capacity_error_keeps_latest_serialized_observation () =
+  check (option int) "latest actual serialization survives later failure"
+    (Some 111_111)
+    (Masc.Keeper_agent_run.For_testing.request_body_bytes_for_error
+       ~observed:(Some 111_111)
+       (Agent_sdk.Error.Internal "failed after serialization"))
+
 let test_autonomous_yield_boundary_contract () =
   let module F = Masc.Keeper_agent_run.For_testing in
   let chat : Masc.Keeper_agent_run.autonomous_yield_request =
@@ -583,6 +606,10 @@ let () =
             test_terminal_effect_defer_kinds_remain_distinct;
           test_case "repeated exact tool call boundary" `Quick
             test_repeated_exact_tool_call_boundary;
+          test_case "typed body refusal overrides prior observation" `Quick
+            test_request_body_refusal_overrides_prior_observation;
+          test_case "non-capacity failure keeps latest serialization" `Quick
+            test_non_capacity_error_keeps_latest_serialized_observation;
           test_case "autonomous yield boundary contract" `Quick
             test_autonomous_yield_boundary_contract;
           test_case "terminal effect handler contract" `Quick

@@ -19,6 +19,9 @@ function entry(overrides: Record<string, unknown> = {}) {
       ts: 1_700_000_000,
       execution_ids: ['exec-1'],
       blocks: [],
+      input_components: [],
+      request_runtime_profile: null,
+      request_body_bytes: null,
       input_tokens: 1200,
       output_tokens: 340,
       ...overrides,
@@ -71,8 +74,8 @@ afterEach(() => {
 
 // #25779 made the provider cache token counts durable on the turn record, but
 // the decoder rebuilt each entry without them, so they were discarded before
-// reaching the inspector. Absent stays absent — a legacy row must not decode to
-// a fabricated 0.
+// reaching the inspector. Provider absence stays absent rather than becoming a
+// fabricated 0.
 describe('keeper turn record cache token counts', () => {
   it('carries the durable cache counts through the decoder', async () => {
     getMock.mockResolvedValue(
@@ -144,6 +147,16 @@ describe('keeper turn record cache token counts', () => {
     )
   })
 
+  it('rejects an unknown prompt block identity', async () => {
+    getMock.mockResolvedValue(payload(entry({
+      blocks: [{ block: 'future_block', bytes: 1, digest: 'digest' }],
+    })))
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
   it('rejects a response count that disagrees with the exact decoded rows', async () => {
     const raw = payload(entry())
     raw.count = 2
@@ -201,6 +214,51 @@ describe('keeper turn record cache token counts', () => {
 
   it('rejects a turn_ref that disagrees with trace_id and absolute_turn', async () => {
     getMock.mockResolvedValue(payload(entry({ turn_ref: 'trace-1#8' })))
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+})
+
+describe('keeper turn record final provider input', () => {
+  it('keeps attributed content, wire bytes, and fallback runtime separate', async () => {
+    getMock.mockResolvedValue(payload(entry({
+      input_components: [
+        { component: 'prompt.persona', bytes: 1200 },
+        { component: 'prompt.dynamic_context', bytes: 11 },
+        { component: 'tool_schemas', bytes: 64000 },
+        { component: 'message_tool_result', bytes: 2800 },
+      ],
+      request_runtime_profile: 'anthropic.fallback',
+      request_body_bytes: 560_513,
+    })))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response.entries[0]?.record).toMatchObject({
+      input_components: [
+        { component: 'prompt.persona', bytes: 1200 },
+        { component: 'prompt.dynamic_context', bytes: 11 },
+        { component: 'tool_schemas', bytes: 64000 },
+        { component: 'message_tool_result', bytes: 2800 },
+      ],
+      request_runtime_profile: 'anthropic.fallback',
+      request_body_bytes: 560_513,
+    })
+  })
+
+  it.each([
+    { input_components: undefined },
+    { request_runtime_profile: undefined },
+    { request_body_bytes: undefined },
+    { input_components: [{ component: 'history_guess', bytes: 1 }] },
+    { input_components: [{ component: 'prompt.', bytes: 1 }] },
+    { input_components: [{ component: 'prompt.future_block', bytes: 1 }] },
+    { request_runtime_profile: '' },
+    { request_body_bytes: -1 },
+  ])('rejects malformed current contracts: %j', async (override) => {
+    getMock.mockResolvedValue(payload(entry(override)))
 
     await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
       '유효하지 않은 keeper turn record payload',

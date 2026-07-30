@@ -5,10 +5,35 @@
 import { get, type AbortableRequestOptions } from './core'
 import { isRecord, asBoolean, asNumber, asNullableString, asString, asRecordArray } from '../components/common/normalize'
 
+export type TurnBlockId =
+  | 'persona'
+  | 'dynamic_context'
+  | 'temporal_summary'
+  | 'memory_os_recall'
+
 export type TurnBlock = {
-  block: string
+  block: TurnBlockId
   bytes: number
   digest: string
+}
+
+export type TurnInputComponentId =
+  | `prompt.${TurnBlockId}`
+  | 'tool_schemas'
+  | 'message_user'
+  | 'message_system'
+  | 'message_assistant_text'
+  | 'message_thinking'
+  | 'message_redacted_thinking'
+  | 'message_tool_use'
+  | 'message_tool_result'
+  | 'message_image'
+  | 'message_document'
+  | 'message_audio'
+
+export type TurnInputComponent = {
+  component: TurnInputComponentId
+  bytes: number
 }
 
 export type TurnRecordEntry = {
@@ -18,10 +43,13 @@ export type TurnRecordEntry = {
   absolute_turn: number
   turn_ref: string
   blocks: TurnBlock[]
+  input_components: TurnInputComponent[]
+  request_runtime_profile: string | null
+  request_body_bytes: number | null
   runtime_profile: string
   // RFC-0233 §2.3 — grounded from the backend turn record (boundary-redacted
-  // model label + keeper stop reason). Absent (undefined) on error turns and
-  // pre-grounding rows; the inspector renders absence, never a fabricated value.
+  // model label + keeper stop reason). Absent (undefined) when an error turn
+  // did not record them; the inspector renders absence, never a fabricated value.
   model?: string
   finish_reason?: string
   temperature?: number
@@ -32,10 +60,9 @@ export type TurnRecordEntry = {
   input_tokens?: number
   output_tokens?: number
   // #25779 made the provider cache counts durable on the turn record
-  // (lib/types/turn_record.ml:79-82 writes them as optional fields). Same
-  // absent-means-absent contract as the neighbours: a legacy row that predates
-  // #25779, or a provider that reports no cache usage, leaves these undefined
-  // and the inspector renders absence rather than a fabricated zero.
+  // (lib/types/turn_record.ml writes them as optional fields). A provider that
+  // reports no cache usage leaves these undefined; the inspector renders
+  // absence rather than a fabricated zero.
   cache_creation_input_tokens?: number
   cache_read_input_tokens?: number
   // RFC-0233 §8 — runtime model metadata. context_window is the keeper-resolved
@@ -266,9 +293,22 @@ export type KeeperCompactionSnapshotsResponse = {
   readonly items: KeeperCompactionSnapshot[]
 }
 
+const TURN_BLOCK_IDS = new Set<TurnBlockId>([
+  'persona',
+  'dynamic_context',
+  'temporal_summary',
+  'memory_os_recall',
+])
+
+function decodeTurnBlockId(raw: unknown): TurnBlockId | null {
+  return typeof raw === 'string' && TURN_BLOCK_IDS.has(raw as TurnBlockId)
+    ? raw as TurnBlockId
+    : null
+}
+
 function decodeTurnBlock(raw: unknown): TurnBlock | null {
   if (!isRecord(raw) || !hasExactKeys(raw, ['block', 'bytes', 'digest'])) return null
-  const block = decodeExactNonEmptyString(raw.block)
+  const block = decodeTurnBlockId(raw.block)
   const digest = decodeExactNonEmptyString(raw.digest)
   const bytes = asNumber(raw.bytes)
   if (
@@ -309,6 +349,43 @@ function decodeTurnBlockList(raw: unknown): TurnBlock[] | null {
   return blocks.every((block): block is TurnBlock => block !== null) ? blocks : null
 }
 
+const TURN_FIXED_INPUT_COMPONENTS = new Set<TurnInputComponentId>([
+  'tool_schemas',
+  'message_user',
+  'message_system',
+  'message_assistant_text',
+  'message_thinking',
+  'message_redacted_thinking',
+  'message_tool_use',
+  'message_tool_result',
+  'message_image',
+  'message_document',
+  'message_audio',
+])
+
+function decodeTurnInputComponentId(raw: unknown): TurnInputComponentId | null {
+  if (typeof raw !== 'string') return null
+  if (TURN_FIXED_INPUT_COMPONENTS.has(raw as TurnInputComponentId)) {
+    return raw as TurnInputComponentId
+  }
+  if (!raw.startsWith('prompt.')) return null
+  const block = decodeTurnBlockId(raw.slice('prompt.'.length))
+  return block === null ? null : `prompt.${block}`
+}
+
+function decodeTurnInputComponents(raw: unknown): TurnInputComponent[] | null {
+  if (!Array.isArray(raw)) return null
+  const components: TurnInputComponent[] = []
+  for (const item of raw) {
+    if (!isRecord(item) || !hasExactKeys(item, ['component', 'bytes'])) return null
+    const component = decodeTurnInputComponentId(item.component)
+    const bytes = decodeNonNegativeSafeInteger(item.bytes)
+    if (component === null || bytes === null) return null
+    components.push({ component, bytes })
+  }
+  return components
+}
+
 function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   if (!isRecord(raw) || !hasNoUnknownKeys(raw, [
     'execution_ids',
@@ -317,6 +394,9 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     'absolute_turn',
     'turn_ref',
     'blocks',
+    'input_components',
+    'request_runtime_profile',
+    'request_body_bytes',
     'runtime_profile',
     'model',
     'finish_reason',
@@ -342,6 +422,15 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   const runtime_profile = decodeExactNonEmptyString(raw.runtime_profile)
   const ts = asNumber(raw.ts)
   const blocks = decodeTurnBlockList(raw.blocks)
+  const input_components = decodeTurnInputComponents(raw.input_components)
+  const request_runtime_profile =
+    raw.request_runtime_profile === null
+      ? null
+      : decodeExactNonEmptyString(raw.request_runtime_profile)
+  const request_body_bytes =
+    raw.request_body_bytes === null
+      ? null
+      : decodeNonNegativeSafeInteger(raw.request_body_bytes)
   const turn_ref = decodeExactNonEmptyString(raw.turn_ref)
   const model = decodeOptionalField(raw, 'model', decodeExactNonEmptyString)
   const finish_reason = decodeOptionalField(raw, 'finish_reason', decodeExactNonEmptyString)
@@ -374,6 +463,11 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     || runtime_profile === null
     || ts == null
     || blocks === null
+    || input_components === null
+    || !Object.hasOwn(raw, 'request_runtime_profile')
+    || (request_runtime_profile === null && raw.request_runtime_profile !== null)
+    || !Object.hasOwn(raw, 'request_body_bytes')
+    || (request_body_bytes === null && raw.request_body_bytes !== null)
     || !Array.isArray(raw.execution_ids)
     || !raw.execution_ids.every((id): id is string => typeof id === 'string' && id.length > 0)
     || turn_ref === null
@@ -405,6 +499,9 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     absolute_turn,
     turn_ref,
     blocks,
+    input_components,
+    request_runtime_profile,
+    request_body_bytes,
     runtime_profile,
     model,
     finish_reason,

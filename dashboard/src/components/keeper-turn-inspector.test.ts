@@ -146,7 +146,10 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           turn_ref: 'trace-active#41',
           ts: 1_781_587_500,
           runtime_profile: 'local',
-          blocks: [{ block: 'system', bytes: 1200, digest: '1111222233334444' }],
+          blocks: [{ block: 'persona', bytes: 1200, digest: '1111222233334444' }],
+          input_components: [{ component: 'prompt.persona', bytes: 1200 }],
+          request_runtime_profile: 'local',
+          request_body_bytes: 1540,
           execution_ids: [],
         },
         diff_vs_prev: null,
@@ -169,9 +172,17 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           request_latency_ms: 1234,
           ttfrc_ms: 567.8,
           blocks: [
-            { block: 'system', bytes: 1200, digest: '1111222233334444' },
+            { block: 'persona', bytes: 1200, digest: '1111222233334444' },
             { block: 'memory_os_recall', bytes: 3392, digest: 'aabbccddeeff00112233' },
           ],
+          input_components: [
+            { component: 'prompt.persona', bytes: 1200 },
+            { component: 'prompt.memory_os_recall', bytes: 3392 },
+            { component: 'tool_schemas', bytes: 8400 },
+            { component: 'message_user', bytes: 24 },
+          ],
+          request_runtime_profile: 'local',
+          request_body_bytes: 14_322,
           execution_ids: ['exec-42'],
         },
         diff_vs_prev: {
@@ -418,7 +429,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.querySelector('[data-testid="turn-tab-messages"]')?.classList.contains('on')).toBe(true)
     })
 
-    expect(container.textContent).toContain('모델에 전달된 시퀀스')
+    expect(container.textContent).toContain('연결된 transcript · provider 입력 증거')
 
     fireEvent.click(container.querySelector('[data-testid="turn-tab-meta"]')!)
 
@@ -508,7 +519,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
 
   it('renders finish_reason absence as n/a without fabricating a value', async () => {
     const response = turnRecordsWithMemoryOs()
-    // strip the grounded meta fields → simulate an error turn / pre-grounding row
+    // Strip grounded meta fields to simulate an error turn without observations.
     response.entries[1] = {
       ...response.entries[1]!,
       record: {
@@ -617,7 +628,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(stats).toContain('280')
     expect(stats).toContain('도구')
     expect(stats).toContain('1')
-    expect(stats).toContain('추정비용')
+    expect(stats).toContain('계산 비용')
     // RFC-0233 §8: turn 42 fixture carries real context_window + prices, so
     // the nullable ctxPct/cost render grounded values — not "미상". Guards the
     // number|null widening against a regression that drops the grounded path.

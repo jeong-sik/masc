@@ -66,6 +66,27 @@ let project_model_input ~base_path ~gate_replay_evidence messages =
     Keeper_gate_replay.project_model_input ~base_path evidence messages
 ;;
 
+let provider_input_components
+      ~(prompt_blocks : Turn_record.prompt_block list)
+      ~(tools : Agent_sdk.Tool.t list)
+      ~(projected_messages : Agent_sdk.Types.message list)
+  =
+  let system_prompt_block =
+    List.find_opt
+      (fun (block : Turn_record.prompt_block) ->
+        match block.block with
+        | Prompt_block_id.Persona -> true
+        | Prompt_block_id.Dynamic_context
+        | Prompt_block_id.Temporal_summary
+        | Prompt_block_id.Memory_os_recall -> false)
+      prompt_blocks
+  in
+  Keeper_agent_prompt_metrics.build_input_components
+    ~system_prompt_block
+    ~tools
+    ~input_messages:projected_messages
+;;
+
 let relative_path_has_segment_prefix prefix raw =
   String.equal raw prefix || String.starts_with ~prefix:(prefix ^ "/") raw
 ;;
@@ -313,6 +334,7 @@ let assemble_hooks
                   { turn; current_params; messages; last_tool_results; _ } ->
                 let hook_t0 = Time_compat.now () in
                 acc.current_turn <- turn;
+                acc.input_components <- [];
                 (* RFC-0045: signal an SDK-turn boundary so the in-turn FSM
                   fields ([turn_phase], [runtime_state], [decision_stage])
                   are reset before the hook writes [Runtime_selecting] /
@@ -574,10 +596,22 @@ let assemble_hooks
       (* Stored Tool results are already the canonical provider-bound
          representation. Fetching their bytes here would undo externalization
          and make one large result expand every later provider request. *)
-      project_model_input
-        ~base_path:ctx.config.base_path
-        ~gate_replay_evidence
-        messages
+      match
+        project_model_input
+          ~base_path:ctx.config.base_path
+          ~gate_replay_evidence
+          messages
+      with
+      | Error _ as error ->
+        acc.input_components <- [];
+        error
+      | Ok projected as result ->
+        acc.input_components <-
+          provider_input_components
+            ~prompt_blocks:acc.prompt_blocks
+            ~tools
+            ~projected_messages:projected;
+        result
     in
     Ok
       { tools

@@ -27,6 +27,7 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   ; mutable receipt_actionable_signal :
       Keeper_contract_classifier.actionable_signal option
   ; mutable prompt_blocks : Turn_record.prompt_block list
+  ; mutable input_components : Turn_record.input_component list
   ; mutable extra_system_context_digest : string option
   ; mutable extra_system_context_size : int option
   }

@@ -368,6 +368,8 @@ let run_named
     ?trace_link
     ?event_bus
     ?on_runtime_observation
+    ?on_request_attempt_started
+    ?on_request_body_bytes
     ?runtime_manifest_context
     ?runtime_manifest_append
     ?deferred_runtime_lane
@@ -716,6 +718,8 @@ let run_named
             ; on_resume
             ; agent_ref
             ; on_runtime_observation
+            ; on_request_attempt_started
+            ; on_request_body_bytes
             ; event_bus
             ; runtime_manifest_context
             ; runtime_manifest_append

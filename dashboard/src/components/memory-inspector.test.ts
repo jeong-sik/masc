@@ -7,8 +7,8 @@ import {
   MemoryInspector,
   factCategoryMeta,
   factSelectionReason,
-  latestEntryWithBlocks,
-  memCompositionFromBlocks,
+  latestEntryWithInputComponents,
+  memCompositionFromInputComponents,
   memFmtBytes,
   memFmtTok,
   promptBlockMeta,
@@ -16,7 +16,11 @@ import {
   sortMemoryFactsForReview,
   type MemoryKeeper,
 } from './memory-inspector'
-import { type MemoryOsFact, type TurnRecordRow } from '../api/dashboard'
+import {
+  type MemoryOsFact,
+  type TurnBlockId,
+  type TurnRecordRow,
+} from '../api/dashboard'
 
 afterEach(() => {
   cleanup()
@@ -124,8 +128,16 @@ function turnRecordsPayload() {
             { block: 'persona', bytes: 1200, digest: 'aaaa1111bbbb' },
             { block: 'memory_os_recall', bytes: 800, digest: 'cccc2222dddd' },
             { block: 'dynamic_context', bytes: 400, digest: 'eeee3333ffff' },
-            { block: 'zero_block', bytes: 0, digest: '000000000000' },
+            { block: 'temporal_summary', bytes: 0, digest: '000000000000' },
           ],
+          input_components: [
+            { component: 'prompt.persona', bytes: 1200 },
+            { component: 'prompt.memory_os_recall', bytes: 800 },
+            { component: 'prompt.dynamic_context', bytes: 400 },
+            { component: 'tool_schemas', bytes: 600 },
+          ],
+          request_runtime_profile: 'local',
+          request_body_bytes: 3412,
           execution_ids: [],
           input_tokens: 3500,
           context_window: 200000,
@@ -178,7 +190,7 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/masc-improver/turn-records?limit=24')
   })
 
-  it('builds the composition bar from real prompt-block bytes (zero blocks dropped)', async () => {
+  it('builds the composition bar from final provider input components', async () => {
     stubFetch()
     const { container } = renderInspector()
     const bar = await waitFor(() => {
@@ -186,11 +198,11 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
       expect(b).toBeTruthy()
       return b!
     })
-    // 4 blocks in payload, 1 has 0 bytes → 3 segments + 3 legend rows.
-    expect(bar.querySelectorAll('span').length).toBe(3)
-    expect(container.querySelectorAll('.mem-leg').length).toBe(3)
-    // total bytes = 1200+800+400 = 2400, shown as KB; token readout from input_tokens.
-    expect(container.querySelector('.mem-compo-tot')?.textContent).toBe('2.3KB')
+    // 4 non-zero input components → 4 segments + 4 legend rows.
+    expect(bar.querySelectorAll('span').length).toBe(4)
+    expect(container.querySelectorAll('.mem-leg').length).toBe(4)
+    // Attributed bytes and provider token usage stay separate measurements.
+    expect(container.querySelector('.mem-compo-tot')?.textContent).toBe('attributed 2.9KB')
     expect(container.querySelector('.mem-compo-sub')?.textContent).toContain('3.5k tok')
     // block labels come from the Prompt_block_id mirror, not raw tokens.
     expect(container.textContent).toContain('메모리 회상')
@@ -531,37 +543,47 @@ describe('memory view-model helpers', () => {
     expect(memFmtBytes(2 * 1024 * 1024)).toBe('2.0MB')
   })
 
-  it('memCompositionFromBlocks sums real bytes and drops zero-byte blocks', () => {
-    const comp = memCompositionFromBlocks([
-      { block: 'persona', bytes: 1200, digest: 'x' },
-      { block: 'memory_os_recall', bytes: 800, digest: 'y' },
-      { block: 'empty', bytes: 0, digest: 'z' },
+  it('memCompositionFromInputComponents sums real bytes and drops zero-byte components', () => {
+    const comp = memCompositionFromInputComponents([
+      { component: 'prompt.persona', bytes: 1200 },
+      { component: 'prompt.memory_os_recall', bytes: 800 },
+      { component: 'message_user', bytes: 0 },
     ])
     expect(comp.totalBytes).toBe(2000)
-    expect(comp.parts.map(p => p.key)).toEqual(['persona', 'memory_os_recall'])
+    expect(comp.parts.map(p => p.key)).toEqual(['prompt.persona', 'prompt.memory_os_recall'])
     expect(comp.parts[0]?.lbl).toBe('페르소나')
   })
 
-  it('latestEntryWithBlocks skips an empty-block tail turn and returns the last assembled prompt', () => {
-    const mkRow = (turn: number, blocks: { block: string; bytes: number; digest: string }[]): TurnRecordRow => ({
+  it('latestEntryWithInputComponents skips a pre-serialization tail turn', () => {
+    const mkRow = (
+      turn: number,
+      input_components: TurnRecordRow['record']['input_components'],
+    ): TurnRecordRow => ({
       record: {
         keeper: 'k', trace_id: 't', absolute_turn: turn, ts: turn, runtime_profile: 'local',
         turn_ref: `t#${turn}`,
-        blocks, execution_ids: [],
+        blocks: [],
+        input_components,
+        request_runtime_profile: input_components.length > 0 ? 'local' : null,
+        request_body_bytes: input_components.length > 0 ? 100 : null,
+        execution_ids: [],
       },
       diff_vs_prev: null,
     })
-    const assembled = mkRow(1, [{ block: 'persona', bytes: 100, digest: 'd' }])
-    const errorTail = mkRow(2, []) // e.g. an error turn with no prompt blocks
-    // last row has no blocks → fall back to the most recent row that does
-    expect(latestEntryWithBlocks([assembled, errorTail])?.record.absolute_turn).toBe(1)
+    const assembled = mkRow(1, [{ component: 'prompt.persona', bytes: 100 }])
+    const errorTail = mkRow(2, [])
+    expect(latestEntryWithInputComponents([assembled, errorTail])?.record.absolute_turn).toBe(1)
     // empty input → null, not a fabricated row
-    expect(latestEntryWithBlocks([])).toBeNull()
-    expect(latestEntryWithBlocks([errorTail])).toBeNull()
+    expect(latestEntryWithInputComponents([])).toBeNull()
+    expect(latestEntryWithInputComponents([errorTail])).toBeNull()
   })
 
   it('recentMemoryRecallInjections returns newest real memory_os_recall blocks only', () => {
-    const mkRow = (turn: number, block: string, bytes: number): TurnRecordRow => ({
+    const mkRow = (
+      turn: number,
+      block: TurnBlockId,
+      bytes: number,
+    ): TurnRecordRow => ({
       record: {
         keeper: 'k',
         trace_id: `trace-${turn}`,
@@ -570,6 +592,9 @@ describe('memory view-model helpers', () => {
         ts: turn,
         runtime_profile: 'local',
         blocks: [{ block, bytes, digest: `digest-${turn}` }],
+        input_components: [],
+        request_runtime_profile: null,
+        request_body_bytes: null,
         execution_ids: [],
       },
       diff_vs_prev: null,
@@ -585,9 +610,11 @@ describe('memory view-model helpers', () => {
     ])
   })
 
-  it('promptBlockMeta maps known Prompt_block_id tokens and keeps unknown tokens raw', () => {
-    expect(promptBlockMeta('connected_surface').lbl).toBe('연결 표면')
-    expect(promptBlockMeta('some_future_block').lbl).toBe('some_future_block')
+  it('promptBlockMeta maps every current Prompt_block_id token', () => {
+    expect(promptBlockMeta('persona').lbl).toBe('페르소나')
+    expect(promptBlockMeta('dynamic_context').lbl).toBe('동적 컨텍스트')
+    expect(promptBlockMeta('temporal_summary').lbl).toBe('시간 요약')
+    expect(promptBlockMeta('memory_os_recall').lbl).toBe('메모리 회상')
   })
 
   it('factCategoryMeta covers every closed taxonomy arm', () => {

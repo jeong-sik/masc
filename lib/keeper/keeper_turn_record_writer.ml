@@ -11,10 +11,13 @@ let write
       ~price_output_per_million
       ~request_latency_ms
       ~ttfrc_ms
+      ~request_runtime_profile
+      ~request_body_bytes
       ~sampling
       ~usage
       ~execution_ids
       ~blocks
+      ~input_components
       ()
   =
   let record : Turn_record.t =
@@ -22,8 +25,9 @@ let write
     ; keeper = keeper_name
     ; trace_id
     ; absolute_turn
-    ; turn_ref = Some (Ids.Turn_ref.make ~trace_id ~absolute_turn)
+    ; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn
     ; blocks
+    ; input_components
     ; runtime_profile
     ; model
     ; finish_reason
@@ -32,6 +36,8 @@ let write
     ; price_output_per_million
     ; request_latency_ms
     ; ttfrc_ms
+    ; request_runtime_profile
+    ; request_body_bytes
     ; sampling
     ; usage
     ; ts = Time_compat.now ()

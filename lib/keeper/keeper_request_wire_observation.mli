@@ -24,13 +24,17 @@ val metric : Keeper_metrics.t
     request. *)
 
 val observer :
+  ?on_request_body_bytes:(int -> unit) ->
   keeper_name:string ->
   runtime_id:string ->
   max_request_body_bytes:int ->
   Agent_sdk.Agent.pre_dispatch_serialization_observer
-(** [observer ~keeper_name ~runtime_id ~max_request_body_bytes] records
+(** [observer ?on_request_body_bytes ~keeper_name ~runtime_id
+    ~max_request_body_bytes] records
     [body_bytes] under {!metric} and admits the observation. The cap is the
     value already validated on the final provider config, so a hot-reload that
-    changes a runtime's cap starts a distinct metric series. It never rejects:
-    this path exists only to measure, and a rejection would manufacture typed
-    failure evidence out of measurement. *)
+    changes a runtime's cap starts a distinct metric series. The optional
+    callback receives the same exact boundary value before dispatch, including
+    attempts that later return an error. It never rejects: this path exists
+    only to measure, and a rejection would manufacture typed failure evidence
+    out of measurement. *)

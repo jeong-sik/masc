@@ -31,6 +31,7 @@ type hook_accumulator =
        [operator_disposition] can replace the [goal_ids = []] proxy. [None]
        until the contract-status write site sets it. *)
   ; mutable prompt_blocks : Turn_record.prompt_block list
+  ; mutable input_components : Turn_record.input_component list
   ; mutable extra_system_context_digest : string option
   ; mutable extra_system_context_size : int option
   }

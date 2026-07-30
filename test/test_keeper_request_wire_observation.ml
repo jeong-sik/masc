@@ -221,6 +221,28 @@ let test_admits_a_zero_byte_observation () =
     (observe series 0)
 ;;
 
+let test_forwards_exact_bytes_to_error_surviving_callback () =
+  let observed = ref None in
+  let observation_result =
+    Observation.observer
+      ~on_request_body_bytes:(fun bytes -> observed := Some bytes)
+      ~keeper_name:"wire-observation-callback"
+      ~runtime_id:"wire-runtime-callback"
+      ~max_request_body_bytes:524_288
+      (observation ~body_bytes:333_777)
+  in
+  check
+    (result unit reject)
+    "callback observation admitted"
+    (Ok ())
+    observation_result;
+  check
+    (option int)
+    "callback receives exact pre-dispatch bytes"
+    (Some 333_777)
+    !observed
+;;
+
 let test_metric_name_is_stable () =
   check
     string
@@ -257,6 +279,10 @@ let () =
             "admits a zero-byte observation"
             `Quick
             test_admits_a_zero_byte_observation
+        ; test_case
+            "forwards exact bytes to the turn callback"
+            `Quick
+            test_forwards_exact_bytes_to_error_surviving_callback
         ; test_case "metric name is stable" `Quick test_metric_name_is_stable
         ] )
     ]

@@ -149,6 +149,7 @@ let prepare_agent_setup
         Keeper_execution_receipt.Completion_observation_unknown
     ; receipt_actionable_signal = None
     ; prompt_blocks = []
+    ; input_components = []
     ; extra_system_context_digest = None
     ; extra_system_context_size = None
     }

@@ -8,7 +8,8 @@
 // salience/uses/lastUsed score fields) is gone.
 //
 // Section data sources (RFC-keeper-memory-panel-real-data §4; hybrid treatment confirmed 2026-06-24):
-//   컨텍스트 구성        ← real prompt-assembly block bytes (entries[latest].blocks)
+//   컨텍스트 구성        ← final provider-bound attributed bytes
+//                          (entries[latest].input_components)
 //   장기 메모리 스토어    ← real memory_os.facts.items (typed category, provenance)
 //   압축 유지·요약        ← real memory_os.episodes.items
 //   최근 회상·주입        ← real memory_os_recall prompt blocks (entries[*].blocks)
@@ -31,6 +32,9 @@ import {
   type MemoryOsFactCategory,
   type MemoryOsSelectionPolicy,
   type TurnBlock,
+  type TurnBlockId,
+  type TurnInputComponent,
+  type TurnInputComponentId,
   type TurnRecordRow,
 } from '../api/dashboard'
 
@@ -72,10 +76,7 @@ export function memFmtBytes(n: number): string {
 }
 
 // ── prompt-block composition (real, from turn_record blocks) ──
-// PROMPT_BLOCK_META mirrors the OCaml Prompt_block_id closed sum
-// (lib/types/prompt_block_id.ml — to_string is the wire SSOT). A token outside
-// the closed set is an `Other name` block; it keeps its raw label so a new
-// block id surfaces verbatim rather than as a silent miscolour.
+// PROMPT_BLOCK_META mirrors the current OCaml Prompt_block_id closed sum.
 interface BlockMeta {
   readonly lbl: string
   readonly color: string
@@ -84,18 +85,14 @@ interface BlockMeta {
   // carries recalled memory; the rest are persona/context/surface.
   readonly mem: boolean
 }
-const PROMPT_BLOCK_META: Readonly<Record<string, BlockMeta>> = {
+const PROMPT_BLOCK_META: Readonly<Record<TurnBlockId, BlockMeta>> = {
   persona: { lbl: '페르소나', color: 'var(--text-dim)', mem: false },
-  continuity: { lbl: '연속성', color: 'var(--info)', mem: false },
   dynamic_context: { lbl: '동적 컨텍스트', color: 'var(--volt)', mem: false },
   temporal_summary: { lbl: '시간 요약', color: 'var(--status-warn)', mem: false },
-  claimed_task_nudge: { lbl: '태스크 넛지', color: 'var(--status-ok)', mem: false },
-  retry_nudge: { lbl: '재시도 넛지', color: 'var(--status-bad)', mem: false },
   memory_os_recall: { lbl: '메모리 회상', color: 'var(--volt-strong)', mem: true },
-  connected_surface: { lbl: '연결 표면', color: 'var(--status-warn)', mem: false },
 }
-export function promptBlockMeta(token: string): BlockMeta {
-  return PROMPT_BLOCK_META[token] ?? { lbl: token, color: 'var(--text-dim)', mem: false }
+export function promptBlockMeta(token: TurnBlockId): BlockMeta {
+  return PROMPT_BLOCK_META[token]
 }
 
 export interface CompositionPart {
@@ -110,28 +107,62 @@ export interface Composition {
   readonly parts: readonly CompositionPart[]
 }
 
-// Composition from a turn's assembled prompt blocks. The bar is a BYTES ratio
-// (each block's real byte size); no token magic, no fabricated parts. Zero-byte
-// blocks are dropped so the legend matches the bar.
-export function memCompositionFromBlocks(blocks: readonly TurnBlock[]): Composition {
-  const parts: CompositionPart[] = blocks
-    .filter(b => b.bytes > 0)
-    .map(b => {
-      const meta = promptBlockMeta(b.block)
-      return { key: b.block, lbl: meta.lbl, bytes: b.bytes, color: meta.color, mem: meta.mem }
+const INPUT_COMPONENT_META: Readonly<
+  Record<TurnInputComponentId, Omit<CompositionPart, 'key' | 'bytes'>>
+> = {
+  'prompt.persona': PROMPT_BLOCK_META.persona,
+  'prompt.dynamic_context': PROMPT_BLOCK_META.dynamic_context,
+  'prompt.temporal_summary': PROMPT_BLOCK_META.temporal_summary,
+  'prompt.memory_os_recall': PROMPT_BLOCK_META.memory_os_recall,
+  tool_schemas: { lbl: '도구 스키마', color: 'var(--info)', mem: false },
+  message_user: { lbl: '메시지 · user', color: 'var(--volt)', mem: false },
+  message_system: { lbl: '메시지 · system', color: 'var(--status-warn)', mem: false },
+  message_assistant_text: { lbl: '메시지 · assistant', color: 'var(--status-ok)', mem: false },
+  message_thinking: { lbl: '메시지 · thinking', color: 'var(--volt-strong)', mem: false },
+  message_redacted_thinking: { lbl: '메시지 · redacted thinking', color: 'var(--status-bad)', mem: false },
+  message_tool_use: { lbl: '메시지 · tool use', color: 'var(--info)', mem: false },
+  message_tool_result: { lbl: '메시지 · tool result', color: 'var(--status-ok)', mem: false },
+  message_image: { lbl: '메시지 · image', color: 'var(--volt-strong)', mem: false },
+  message_document: { lbl: '메시지 · document', color: 'var(--status-warn)', mem: false },
+  message_audio: { lbl: '메시지 · audio', color: 'var(--info)', mem: false },
+}
+
+function inputComponentMeta(
+  component: TurnInputComponentId,
+): Omit<CompositionPart, 'key' | 'bytes'> {
+  return INPUT_COMPONENT_META[component]
+}
+
+// Composition is captured at the final model-input projection boundary. The
+// bar contains disjoint attributed content bytes only; serialized body bytes
+// and provider token usage stay separate measurements.
+export function memCompositionFromInputComponents(
+  components: readonly TurnInputComponent[],
+): Composition {
+  const parts: CompositionPart[] = components
+    .filter(component => component.bytes > 0)
+    .map(component => {
+      const meta = inputComponentMeta(component.component)
+      return {
+        key: component.component,
+        lbl: meta.lbl,
+        bytes: component.bytes,
+        color: meta.color,
+        mem: meta.mem,
+      }
     })
   const totalBytes = parts.reduce((sum, p) => sum + p.bytes, 0)
   return { totalBytes, parts }
 }
 
-// The most recent turn that actually assembled a prompt (has blocks). Entries
-// are append-ordered; an error/empty-block turn at the tail is skipped so the
-// composition reflects the last real prompt assembly — and the header token
-// figures are read from this same row, never a blank tail.
-export function latestEntryWithBlocks(rows: readonly TurnRecordRow[]): TurnRecordRow | null {
+// Entries are append-ordered. Pick the latest request with a captured provider
+// input composition; a pre-serialization error legitimately has none.
+export function latestEntryWithInputComponents(
+  rows: readonly TurnRecordRow[],
+): TurnRecordRow | null {
   for (let i = rows.length - 1; i >= 0; i--) {
     const row = rows[i]
-    if (row && row.record.blocks.length > 0) return row
+    if (row && row.record.input_components.length > 0) return row
   }
   return null
 }
@@ -224,16 +255,16 @@ function latestMemoryRecallBlock(row: TurnRecordRow | null): TurnBlock | null {
 
 function MemBar({ parts, total }: { parts: readonly CompositionPart[]; total: number }) {
   return html`
-    <div class="mem-bar" title="프롬프트 구성 (bytes)">
+    <div class="mem-bar" title="최종 provider 입력 구성 (attributed bytes)">
       ${parts.map(p => html`<span key=${p.key} style=${{ width: `${(p.bytes / total) * 100}%`, background: p.color }}></span>`)}
     </div>`
 }
 
 function MemCompoReal({ row }: { row: TurnRecordRow | null }) {
-  const blocks = row?.record.blocks ?? []
-  const { totalBytes, parts } = memCompositionFromBlocks(blocks)
+  const inputComponents = row?.record.input_components ?? []
+  const { totalBytes, parts } = memCompositionFromInputComponents(inputComponents)
   if (!row || totalBytes === 0) {
-    return html`<div class="mem-empty">조립된 프롬프트 블록 없음 — 활성 컨텍스트 없음.</div>`
+    return html`<div class="mem-empty">관측된 provider 입력 구성 없음.</div>`
   }
   const inputTok = row.record.input_tokens
   const ctxWin = row.record.context_window
@@ -243,11 +274,14 @@ function MemCompoReal({ row }: { row: TurnRecordRow | null }) {
   return html`
     <div class="mem-compo">
       <div class="mem-compo-head">
-        <span class="mono mem-compo-tot">${memFmtBytes(totalBytes)}</span>
+        <span class="mono mem-compo-tot">attributed ${memFmtBytes(totalBytes)}</span>
         <span class="mem-compo-sub">
           ${inputTok != null
             ? html`${memFmtTok(inputTok)} tok${ctxWin != null ? html` / ${memFmtTok(ctxWin)} 윈도우` : null}${pct != null ? html` · ${pct}%` : null}`
-            : html`${parts.length}개 블록`}
+            : html`provider token 미보고`}
+          ${row.record.request_body_bytes != null
+            ? html` · wire ${memFmtBytes(row.record.request_body_bytes)} · ${row.record.request_runtime_profile ?? 'runtime 미상'}`
+            : html` · wire 미관측`}
         </span>
       </div>
       <${MemBar} parts=${parts} total=${totalBytes} />
@@ -437,7 +471,7 @@ function OneKeeperMemoryReal({
   rows: readonly TurnRecordRow[]
 }) {
   const kindFilter = useSignal<string>('all')
-  const latestPromptRow = latestEntryWithBlocks(rows)
+  const latestPromptRow = latestEntryWithInputComponents(rows)
   const facts = sortMemoryFactsForReview(snapshot.facts.items)
   const episodes = snapshot.episodes.items
   const seen = new Set<string>()
@@ -610,7 +644,7 @@ function aggregateMemoryRowFromResponse(
   keeper: MemoryKeeper,
   response: TurnRecordsResponse,
 ): AggregateMemoryRow {
-  const latestPromptRow = latestEntryWithBlocks(response.entries)
+  const latestPromptRow = latestEntryWithInputComponents(response.entries)
   const memoryBlock = latestMemoryRecallBlock(latestPromptRow)
   const latestPrompt = latestPromptRow
     ? `${latestPromptRow.record.trace_id}#${latestPromptRow.record.absolute_turn}`

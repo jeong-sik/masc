@@ -255,8 +255,8 @@ let test_empty_completion_exemption_budget_is_bounded () =
 let test_extra_system_context_preserves_typed_blocks () =
   let blocks =
     [ Prompt_block_id.Dynamic_context, "dynamic"
-    ; Prompt_block_id.Retry_nudge, "retry"
-    ; Prompt_block_id.Connected_surface, "surface"
+    ; Prompt_block_id.Temporal_summary, "temporal"
+    ; Prompt_block_id.Memory_os_recall, "memory"
     ]
   in
   let assembly =
@@ -267,7 +267,7 @@ let test_extra_system_context_preserves_typed_blocks () =
   Alcotest.(check bool) "typed blocks unchanged" true (assembly.blocks = blocks);
   Alcotest.(check (option string))
     "complete source order reaches OAS"
-    (Some "existing\n\ndynamic\n\nretry\n\nsurface")
+    (Some "existing\n\ndynamic\n\ntemporal\n\nmemory")
     assembly.extra_system_context
 
 let () =

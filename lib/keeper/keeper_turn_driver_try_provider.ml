@@ -62,6 +62,8 @@ type try_provider_ctx =
   ; agent_ref : Agent_sdk.Agent.t option ref option
   ; on_runtime_observation :
       (Runtime_observation.runtime_observation -> unit) option
+  ; on_request_attempt_started : (runtime_id:string -> unit) option
+  ; on_request_body_bytes : (runtime_id:string -> bytes:int -> unit) option
   ; (* Event bus *)
     event_bus : Agent_sdk.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
@@ -190,6 +192,9 @@ let run_try_provider
       ?enable_thinking_override
       candidate
   =
+  Option.iter
+    (fun notify -> notify ~runtime_id:ctx.runtime_id)
+    ctx.on_request_attempt_started;
   (* [enable_thinking_override] lets the caller re-issue the SAME candidate with a
      different thinking policy without mutating [ctx]. RFC-0271 §4.1 uses it for the
      [Retry_no_thinking] recovery arm: a [Thinking_only_no_progress] rejection is
@@ -262,6 +267,11 @@ let run_try_provider
           ; pre_dispatch_serialization_observer =
               Some
                 (Keeper_request_wire_observation.observer
+                   ?on_request_body_bytes:
+                     (Option.map
+                        (fun notify bytes ->
+                          notify ~runtime_id:ctx.runtime_id ~bytes)
+                        ctx.on_request_body_bytes)
                    ~keeper_name:ctx.keeper_name
                    ~runtime_id:ctx.runtime_id
                    ~max_request_body_bytes:ctx.max_request_body_bytes)

@@ -33,7 +33,7 @@ type prompt_metrics =
 type ctx_composition_metrics =
   { actual_input_tokens : int option
   ; attributed_bytes : int
-  ; segments : (string * prompt_segment_metrics) list
+  ; segments : (Turn_record.input_component_id * prompt_segment_metrics) list
   }
 
 let empty_prompt_segment_metrics =
@@ -98,8 +98,8 @@ let prompt_metrics_to_json (metrics : prompt_metrics) : Yojson.Safe.t =
     ]
 
 let add_segment_metric
-    (totals : (string, prompt_segment_metrics) Hashtbl.t)
-    ~(bucket : string)
+    (totals : (Turn_record.input_component_id, prompt_segment_metrics) Hashtbl.t)
+    ~(bucket : Turn_record.input_component_id)
     (metric : prompt_segment_metrics) : unit =
   let prev =
     match Hashtbl.find_opt totals bucket with
@@ -137,71 +137,109 @@ let metric_of_block
           match block with
           | Agent_sdk.Types.Text text ->
               String.length (Inference_utils.sanitize_text_utf8 text)
+          | Agent_sdk.Types.Thinking { content; _ } ->
+              String.length (Inference_utils.sanitize_text_utf8 content)
+          | Agent_sdk.Types.ReasoningDetails { reasoning_content; details } ->
+              Agent_sdk.Types.reasoning_details_text ~reasoning_content ~details
+              |> Inference_utils.sanitize_text_utf8
+              |> String.length
+          | Agent_sdk.Types.RedactedThinking text ->
+              String.length (Inference_utils.sanitize_text_utf8 text)
+          | Agent_sdk.Types.Image { data; _ }
+          | Agent_sdk.Types.Document { data; _ }
+          | Agent_sdk.Types.Audio { data; _ } -> String.length data
           | Agent_sdk.Types.ToolResult _ ->
               invalid_arg
                 "keeper_agent_prompt_metrics: OAS canonical tool-result projection unavailable"
           | Agent_sdk.Types.ToolUse _ ->
               invalid_arg
-                "keeper_agent_prompt_metrics: OAS canonical tool-call projection unavailable"
-          | _ -> 0))
+                "keeper_agent_prompt_metrics: OAS canonical tool-call projection unavailable"))
   in
   { bytes; fingerprint = None }
 
-let history_bucket_of_block
+let input_component_of_block
     ~(role : Agent_sdk.Types.role)
-    (block : Agent_sdk.Types.content_block) : string =
-  if Option.is_some (Canonical_tool.tool_call_of_block block) then
-    "history_tool_use"
-  else
+    (block : Agent_sdk.Types.content_block) : Turn_record.input_component_id =
+  match
+    Canonical_tool.tool_call_of_block block,
+    Canonical_tool.tool_result_of_block block
+  with
+  | Some _, _ -> Turn_record.Message_tool_use
+  | None, Some _ -> Turn_record.Message_tool_result
+  | None, None -> (
     match block with
-  | Agent_sdk.Types.ToolResult _ -> "history_tool_result"
-  | Agent_sdk.Types.ToolUse _ ->
+    | Agent_sdk.Types.ToolResult _ -> Turn_record.Message_tool_result
+    | Agent_sdk.Types.ToolUse _ ->
       invalid_arg
         "keeper_agent_prompt_metrics: OAS canonical tool-call projection unavailable"
-  | Agent_sdk.Types.Text _ -> (
+    | Agent_sdk.Types.Text _ -> (
       match role with
-      | Agent_sdk.Types.User -> "history_user"
-      | Agent_sdk.Types.Assistant | Agent_sdk.Types.System ->
-          "history_assistant_text"
-      | Agent_sdk.Types.Tool -> "history_tool_result")
-  | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.ReasoningDetails _ ->
-      "history_thinking"
-  | Agent_sdk.Types.RedactedThinking _ -> "history_redacted_thinking"
-  | Agent_sdk.Types.Image _ -> "history_image"
-  | Agent_sdk.Types.Document _ -> "history_document"
-  | Agent_sdk.Types.Audio _ -> "history_audio"
+      | Agent_sdk.Types.User -> Turn_record.Message_user
+      | Agent_sdk.Types.System -> Turn_record.Message_system
+      | Agent_sdk.Types.Assistant -> Turn_record.Message_assistant_text
+      | Agent_sdk.Types.Tool -> Turn_record.Message_tool_result)
+    | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.ReasoningDetails _ ->
+      Turn_record.Message_thinking
+    | Agent_sdk.Types.RedactedThinking _ ->
+      Turn_record.Message_redacted_thinking
+    | Agent_sdk.Types.Image _ -> Turn_record.Message_image
+    | Agent_sdk.Types.Document _ -> Turn_record.Message_document
+    | Agent_sdk.Types.Audio _ -> Turn_record.Message_audio)
 
-let build_ctx_composition_metrics
-    ~(system_prompt : string)
-    ~(dynamic_context : string)
-    ~(memory_context : string)
-    ~(temporal_context : string)
-    ~(user_message : string)
-    ~(history_messages : Agent_sdk.Types.message list)
-    ~(actual_input_tokens : int option) : ctx_composition_metrics =
-  let totals : (string, prompt_segment_metrics) Hashtbl.t = Hashtbl.create 16 in
-  let add_text_segment bucket text =
-    let metric = prompt_segment_metrics_of_text text in
-    if metric.bytes > 0 then add_segment_metric totals ~bucket metric
+let build_input_components
+    ~(system_prompt_block : Turn_record.prompt_block option)
+    ~(tools : Agent_sdk.Tool.t list)
+    ~(input_messages : Agent_sdk.Types.message list)
+  : Turn_record.input_component list =
+  let totals :
+      (Turn_record.input_component_id, prompt_segment_metrics) Hashtbl.t =
+    Hashtbl.create 16
   in
-  add_text_segment "system_prompt" system_prompt;
-  add_text_segment "dynamic_context" dynamic_context;
-  add_text_segment "memory_context" memory_context;
-  add_text_segment "temporal_context" temporal_context;
-  add_text_segment "user_message" user_message;
+  Option.iter
+    (fun (block : Turn_record.prompt_block) ->
+      if block.bytes > 0
+      then
+        add_segment_metric totals
+          ~bucket:(Turn_record.Prompt_block block.block)
+          { bytes = block.bytes; fingerprint = Some block.digest })
+    system_prompt_block;
+  let tool_schema_bytes =
+    List.fold_left
+      (fun total tool ->
+        total
+        + String.length
+            (Yojson.Safe.to_string (Agent_sdk.Tool.schema_to_json tool)))
+      0 tools
+  in
+  if tool_schema_bytes > 0
+  then
+    add_segment_metric totals
+      ~bucket:Turn_record.Tool_schemas
+      { bytes = tool_schema_bytes; fingerprint = None };
   List.iter
     (fun (message : Agent_sdk.Types.message) ->
       List.iter
         (fun block ->
-          let bucket = history_bucket_of_block ~role:message.role block in
+          let bucket = input_component_of_block ~role:message.role block in
           let metric = metric_of_block ~role:message.role block in
           if metric.bytes > 0 then add_segment_metric totals ~bucket metric)
         message.content)
-    history_messages;
+    input_messages;
+  Hashtbl.to_seq totals
+  |> List.of_seq
+  |> List.sort (fun (left, _) (right, _) -> Stdlib.compare left right)
+  |> List.map (fun (component, metric) ->
+    { Turn_record.component; bytes = metric.bytes })
+
+let build_ctx_composition_metrics
+    ~(input_components : Turn_record.input_component list)
+    ~(actual_input_tokens : int option) : ctx_composition_metrics =
   let segments =
-    Hashtbl.to_seq totals
-    |> List.of_seq
-    |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+    List.map
+      (fun (component : Turn_record.input_component) ->
+        ( component.component
+        , { bytes = component.bytes; fingerprint = None } ))
+      input_components
   in
   let attributed_bytes =
     List.fold_left
@@ -227,6 +265,8 @@ let ctx_composition_to_json (metrics : ctx_composition_metrics) : Yojson.Safe.t 
       ( "segments",
         `Assoc
           (List.map
-             (fun (key, value) -> (key, prompt_segment_metrics_to_json value))
+             (fun (key, value) ->
+               ( Turn_record.input_component_id_to_string key
+               , prompt_segment_metrics_to_json value ))
              metrics.segments) );
     ]

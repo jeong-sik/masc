@@ -17,6 +17,25 @@ type prompt_block =
   ; digest : string (* sha256 hex of the raw block text *)
   }
 
+type input_component_id =
+  | Prompt_block of Prompt_block_id.t
+  | Tool_schemas
+  | Message_user
+  | Message_system
+  | Message_assistant_text
+  | Message_thinking
+  | Message_redacted_thinking
+  | Message_tool_use
+  | Message_tool_result
+  | Message_image
+  | Message_document
+  | Message_audio
+
+type input_component =
+  { component : input_component_id
+  ; bytes : int
+  }
+
 type sampling =
   { temperature : float option
   ; top_p : float option
@@ -36,7 +55,7 @@ type usage =
        matters against [context_window] below: the fill percentage it denominates is
        read as pressure on the compaction ceiling, and cache-heavy turns and
        genuinely large prompts are different situations with the same numerator.
-       [None] on legacy rows and on turns where the provider reported no usage. *)
+       [None] when the provider reported no cache usage. *)
   }
 
 type t =
@@ -44,17 +63,22 @@ type t =
   ; keeper : string
   ; trace_id : string
   ; absolute_turn : int
-  ; turn_ref : Ids.Turn_ref.t option
-    (* RFC-0233 §7 — "<trace_id>#<absolute_turn>" join key for chat/board.
-       [option] so pre-§7 rows decode as [None]. *)
+  ; turn_ref : Ids.Turn_ref.t
+    (* "<trace_id>#<absolute_turn>" join key for chat/board. *)
   ; blocks : prompt_block list (* assembly order *)
+  ; input_components : input_component list
+    (* Exact attributed content bytes for the final provider request of this
+       keeper turn. System prompt, canonical tool schemas, and final projected
+       message content are disjoint buckets. Prompt-assembly provenance remains
+       in [blocks] and is not reverse-engineered from flattened messages.
+       Provider-reported [usage.input_tokens] remains a separate unit;
+       serialization metadata is not invented as content. *)
   ; runtime_profile : string
   ; model : string option
     (* RFC-0233 §2.2/§2.3 — boundary-redacted runtime model label, the
        same value the execution receipt surfaces (RFC-0132 redaction
-       SSOT). [option] so error turns and pre-grounding rows decode as
-       [None]; the inspector renders absence rather than a fabricated
-       name. *)
+       SSOT). [None] when an error turn recorded no model; the inspector
+       renders absence rather than a fabricated name. *)
   ; finish_reason : string option
     (* RFC-0233 §2.3 — keeper turn stop reason, serialized via the
        receipt SSOT [Keeper_execution_receipt.stop_reason_to_string].
@@ -63,8 +87,8 @@ type t =
   ; context_window : int option
     (* RFC-0233 §8 — keeper-resolved effective context budget (tokens) for
        this turn, the denominator the dashboard ctx-fill% uses. [None] on
-       legacy rows or the error path; the inspector renders absence rather
-       than the fabricated 200K. This is the keeper compaction ceiling
+       the error path; the inspector renders absence rather than the
+       fabricated 200K. This is the keeper compaction ceiling
        ([max_context]), NOT the provider's per-request num-ctx cap (an
        Ollama-only transport detail). *)
   ; price_input_per_million : float option
@@ -81,9 +105,9 @@ type t =
        [inference_telemetry.request_latency_ms] (the OAS transport layer
        synthesizes it for every provider — [complete_common.patch_telemetry]
        non-streaming, [complete_stream] streaming — so it is populated
-       whenever a response is produced). [None] on the error path or legacy
-       rows; the inspector renders absence rather than a fabricated duration
-       for the response-generation phase. Phase-level splits
+       whenever a response is produced). [None] on the error path; the
+       inspector renders absence rather than a fabricated duration for the
+       response-generation phase. Phase-level splits
        (prefill/decode) are deliberately deferred: only the provider's
        native timing objects carry prefill/predicted durations and most
        keepers' runtimes do not report them, so emitting them would show
@@ -103,6 +127,15 @@ type t =
        request_latency_ms - ttfrc_ms: that would fabricate a number
        indistinguishable from a measurement (§9.6), so decode stays
        not_recorded until a provider reports it natively. *)
+  ; request_runtime_profile : string option
+    (* Runtime candidate that produced [request_body_bytes]. This remains
+       separate from [runtime_profile], the turn's configured profile, so
+       fallback attribution is not rewritten or guessed. *)
+  ; request_body_bytes : int option
+    (* Exact serialized body size observed after provider-specific request
+       construction. [None] means the turn did not reach that boundary. This
+       is intentionally separate from attributed content bytes and
+       provider-reported token usage. *)
   ; sampling : sampling
   ; usage : usage
   ; ts : float
@@ -110,13 +143,15 @@ type t =
 
 val prompt_block_to_json : prompt_block -> Yojson.Safe.t
 
+val input_component_id_to_string : input_component_id -> string
+val input_component_to_json : input_component -> Yojson.Safe.t
+
 val to_json : t -> Yojson.Safe.t
 
 val of_json : Yojson.Safe.t -> (t, string) result
 (** Fails loudly on malformed rows (missing fields, unparseable
-    execution ids) instead of repairing them — RFC-0233 §4. Unknown
-    block names decode as [Prompt_block_id.Other] (that field alone is
-    forward-open by design). *)
+    execution ids, or unknown prompt block identities) instead of repairing
+    them. *)
 
 (** Result of diffing two consecutive records by [(block, digest)]. *)
 type block_diff =

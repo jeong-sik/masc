@@ -999,7 +999,7 @@ let test_prompt_slice_and_provenance_share_one_input () =
             Ids.Turn_ref.make
               ~trace_id:"trace-prompt-provenance-snapshot"
               ~absolute_turn:1
-         ; messages =
+        ; messages =
             text_message "dropped-before-prompt"
             :: tool_result_message
                  ~tool_use_id

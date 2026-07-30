@@ -370,6 +370,29 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
    instead of completing re-reads the same entry on the next cycle and the
    Keeper makes no progress for as long as that entry stays spent. Retire them
    here, before a turn is spent on them. *)
+(* After a successful ack the durable transition sits in the event-queue
+   outbox until the maintenance sweep projects it into the reaction ledger.
+   That lag left drained wakes with dispatch-only evidence, which is exactly
+   the shape the drain-status miss detector must treat as a loss (#26430).
+   Project the outbox now, through the canonical claim-guarded projector, so
+   consumption evidence is durable before the next dashboard read. Failure is
+   logged and left to the sweep — the projection is convergent, not exact-once. *)
+let project_reaction_evidence_best_effort ~base_path ~keeper_name =
+  match
+    Keeper_event_queue_recovery.project_owner_result ~base_path ~keeper_name
+  with
+  | Ok
+      ( Keeper_event_queue_recovery.No_pending_transition
+      | Keeper_event_queue_recovery.Transition_converged
+      | Keeper_event_queue_recovery.Claim_busy ) ->
+    ()
+  | Error error ->
+    Log.Keeper.warn
+      "event queue reaction projection deferred to sweep keeper=%s: %s"
+      keeper_name
+      (Keeper_event_queue_recovery.projection_error_to_string error)
+;;
+
 type spent_selection_reconciliation =
   | Selection_actionable
   | Spent_schedule_acknowledged
@@ -411,7 +434,11 @@ let reconcile_spent_selection ~config ~keeper_name selection =
            with
            | Error message ->
              Error ("schedule terminal reconciliation ack failed: " ^ message)
-           | Ok () -> Ok Spent_schedule_acknowledged)
+           | Ok () ->
+             project_reaction_evidence_best_effort
+               ~base_path:config.Workspace_utils.base_path
+               ~keeper_name;
+             Ok Spent_schedule_acknowledged)
         | Some
             { Schedule_domain.status =
                 ( Schedule_domain.Execution_running
@@ -449,7 +476,11 @@ let reconcile_spent_selection ~config ~keeper_name selection =
         with
         | Error message ->
            Error ("spent grant replay ack failed: " ^ message)
-        | Ok () -> Ok Spent_grant_replay_acknowledged)
+        | Ok () ->
+          project_reaction_evidence_best_effort
+            ~base_path:config.Workspace_utils.base_path
+            ~keeper_name;
+          Ok Spent_grant_replay_acknowledged)
      | Ok
          { state =
              ( Keeper_approval_queue.Resolution_unconsumed

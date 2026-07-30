@@ -828,6 +828,14 @@ let run_keepalive_unified_turn
              with
              | Ok () ->
                selection_acked := true;
+               (* Project the ack transition into the reaction ledger now, so
+                  drained wakes carry consumption evidence before the next
+                  dashboard read instead of waiting for the maintenance sweep
+                  (#26430). Convergent; failure defers to the sweep. *)
+               Keeper_heartbeat_stimulus_intake
+               .project_reaction_evidence_best_effort
+                 ~base_path:ctx.config.base_path
+                 ~keeper_name:meta_after_triage.name;
                mark_connector_attention_ignored_after_turn
                  ~base_path:ctx.config.base_path
                  ~keeper_name:meta_after_triage.name

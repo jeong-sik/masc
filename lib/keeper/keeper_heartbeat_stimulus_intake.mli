@@ -119,6 +119,17 @@ val reconcile_spent_selection
     monotonic, so a consumed state cannot revert to usable. A read error leaves
     the selection actionable rather than discarding a possibly live grant. *)
 
+val project_reaction_evidence_best_effort
+  :  base_path:string
+  -> keeper_name:string
+  -> unit
+(** Project the keeper's durable event-queue transition outbox into the
+    reaction ledger through the canonical claim-guarded projector, so a wake
+    acked this turn carries consumption evidence before the next dashboard
+    read instead of waiting for the maintenance sweep (#26430). Convergent and
+    best-effort: [Claim_busy] and projection errors are logged and left to the
+    sweep. *)
+
 (** [heartbeat_event_intake ~ctx ~meta_after_triage
      ~pending_board_events]
     peeks at most one ready Event-Layer stimulus (per RFC-0020 §3 Rule 4)

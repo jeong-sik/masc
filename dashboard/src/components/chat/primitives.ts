@@ -2573,16 +2573,16 @@ function ChatControlStatusCard({
         </div>
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <strong class="text-sm font-semibold text-[var(--color-fg-primary)]">승인 대기</strong>
+            <strong class="text-sm font-semibold text-[var(--color-fg-primary)]">승인 요청됨</strong>
             ${timestamp
               ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]">${timestamp}</span>`
               : null}
           </div>
           <p class="mt-1 text-sm leading-paragraph text-[var(--color-fg-secondary)]">
-            외부 작업을 실행하기 전에 확인이 필요합니다.
+            외부 작업을 실행하기 위한 확인 요청이 기록되었습니다.
           </p>
           <p class="mt-0.5 text-xs leading-paragraph text-[var(--color-fg-muted)]">
-            승인 또는 거절되면 Keeper가 이 대화에서 자동으로 계속합니다.
+            현재 승인 상태는 승인 화면에서 확인할 수 있습니다.
           </p>
           <div class="mt-3 flex flex-wrap gap-2">
             <button

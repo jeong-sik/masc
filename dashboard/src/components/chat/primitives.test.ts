@@ -173,8 +173,8 @@ describe('ChatTranscript', () => {
       '[data-chat-control-status="external_effect_pending"]',
     )
     expect(status).not.toBeNull()
-    expect(status?.textContent).toContain('승인 대기')
-    expect(status?.textContent).toContain('자동으로 계속합니다')
+    expect(status?.textContent).toContain('승인 요청됨')
+    expect(status?.textContent).toContain('현재 승인 상태')
     expect(status?.textContent).not.toContain('External effect is awaiting')
     expect(container.querySelector('.chat-bubble')).toBeNull()
 
@@ -185,6 +185,34 @@ describe('ChatTranscript', () => {
     expect(window.location.hash).toContain('command')
     expect(window.location.hash).toContain('view=gate')
     window.location.hash = originalHash
+  })
+
+  it('renders the live turn outcome before the persisted status block arrives', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'gate-wait-live',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            rawText: '',
+            details: { turnOutcome: 'external_effect_pending' },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="external_effect_pending"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.textContent).toContain('승인 요청됨')
+    expect(container.querySelector('.chat-bubble')).toBeNull()
   })
 
   it('renders failure rows as a typed card with collapsed diagnostic detail', async () => {

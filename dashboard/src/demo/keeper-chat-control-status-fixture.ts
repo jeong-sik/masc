@@ -126,7 +126,7 @@ export function ControlStatusFixture() {
             작업 상태는 대화문이 아닙니다
           </h1>
           <p class="mt-2 text-sm" style="color: var(--text-muted);">
-            도구 실행만 있는 턴은 작업 타임라인으로, 승인 대기는 다음 행동이 있는 상태 카드로 표시합니다.
+            도구 실행만 있는 턴은 작업 타임라인으로, 승인 요청은 다음 행동이 있는 상태 카드로 표시합니다.
           </p>
         </header>
         <div

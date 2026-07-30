@@ -31,7 +31,7 @@ def verify(page: Page, screenshot: str) -> None:
         if text in body_text:
             raise RuntimeError(f"internal fallback prose leaked into fixture: {text}")
 
-    if "승인 대기" not in status.inner_text():
+    if "승인 요청됨" not in status.inner_text():
         raise RuntimeError("typed status did not render the user-facing label")
     if (
         page.locator('[data-chat-entry-id="assistant-gate-wait"].chat-bubble').count()

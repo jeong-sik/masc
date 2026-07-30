@@ -113,11 +113,6 @@ type persistence_publication =
       ; receipt_id : Receipt_id.t
       ; lease_id : string
       }
-  | Nack_indeterminate of
-      { revision : int64
-      ; receipt_id : Receipt_id.t
-      ; lease_id : string
-      }
   | Startup_recovery_indeterminate of
       { revision : int64
       ; receipt_id : Receipt_id.t
@@ -185,7 +180,6 @@ type persistence_transition =
   | Enqueue_transition of { receipt_id : Receipt_id.t }
   | Lease_transition of { receipt_id : Receipt_id.t; lease_id : string }
   | Finalize_transition of { receipt_id : Receipt_id.t; lease_id : string }
-  | Nack_transition of { receipt_id : Receipt_id.t; lease_id : string }
   | Startup_recovery_transition of
       { receipt_id : Receipt_id.t
       ; lease_id : string
@@ -204,7 +198,6 @@ let persistence_transition_to_string = function
   | Enqueue_transition _ -> "enqueue"
   | Lease_transition _ -> "lease"
   | Finalize_transition _ -> "finalize"
-  | Nack_transition _ -> "nack"
   | Startup_recovery_transition _ -> "startup_recovery"
   | Recovery_requeue_transition _ -> "recovery_requeue"
   | Recovery_cancel_transition _ -> "recovery_cancel"
@@ -214,7 +207,6 @@ let transition_receipt_id = function
   | Enqueue_transition { receipt_id }
   | Lease_transition { receipt_id; _ }
   | Finalize_transition { receipt_id; _ }
-  | Nack_transition { receipt_id; _ }
   | Startup_recovery_transition { receipt_id; _ }
   | Recovery_requeue_transition { receipt_id; _ }
   | Recovery_cancel_transition { receipt_id; _ }
@@ -225,7 +217,6 @@ let publication_transition = function
   | Enqueue_indeterminate _ -> Some "enqueue"
   | Lease_indeterminate _ -> Some "lease"
   | Finalize_indeterminate _ -> Some "finalize"
-  | Nack_indeterminate _ -> Some "nack"
   | Startup_recovery_indeterminate _ -> Some "startup_recovery"
   | Recovery_requeue_indeterminate _ -> Some "recovery_requeue"
   | Recovery_cancel_indeterminate _ -> Some "recovery_cancel"
@@ -236,7 +227,6 @@ let publication_evidence = function
   | Enqueue_indeterminate { revision; receipt_id }
   | Lease_indeterminate { revision; receipt_id; _ }
   | Finalize_indeterminate { revision; receipt_id; _ }
-  | Nack_indeterminate { revision; receipt_id; _ }
   | Startup_recovery_indeterminate { revision; receipt_id; _ }
   | Recovery_requeue_indeterminate { revision; receipt_id; _ }
   | Recovery_cancel_indeterminate { revision; receipt_id; _ }
@@ -246,7 +236,6 @@ let publication_evidence = function
 let publication_lease_id = function
   | Lease_indeterminate { lease_id; _ }
   | Finalize_indeterminate { lease_id; _ }
-  | Nack_indeterminate { lease_id; _ }
   | Startup_recovery_indeterminate { lease_id; _ }
   | Recovery_requeue_indeterminate { lease_id; _ }
   | Recovery_cancel_indeterminate { lease_id; _ } -> Some lease_id
@@ -2045,8 +2034,6 @@ let indeterminate_publication revision = function
     Lease_indeterminate { revision; receipt_id; lease_id }
   | Finalize_transition { receipt_id; lease_id } ->
     Finalize_indeterminate { revision; receipt_id; lease_id }
-  | Nack_transition { receipt_id; lease_id } ->
-    Nack_indeterminate { revision; receipt_id; lease_id }
   | Startup_recovery_transition { receipt_id; lease_id } ->
     Startup_recovery_indeterminate { revision; receipt_id; lease_id }
   | Recovery_requeue_transition { receipt_id; lease_id } ->
@@ -2804,70 +2791,6 @@ let finalize ~keeper_name ~lease_id ~outcome =
           `Error error
         | `Unknown_lease -> `Unknown_lease))
 
-let nack ~keeper_name ~lease_id =
-  match mutation_context ~keeper_name ~create:false with
-  | Error error -> `Error error
-  | Ok (_, _, None) -> `Unknown_lease
-  | Ok (base_path, path, Some entry) ->
-    let result =
-      with_entry_lock keeper_name entry (fun () ->
-          match
-            check_entry_store ~base_path ~path entry
-              ~allow_absent:false
-          with
-          | Error error -> `Error error
-          | Ok Store_absent ->
-            `Error
-              (Snapshot_unavailable
-                 (load_error Read_failed ~path
-                    "chat queue database is absent during nack"))
-          | Ok Store_present ->
-            (match entry.inflight with
-             | Some
-                 ({ receipt =
-                      { receipt_id
-                      ; state = Stored_inflight current
-                      }
-                  ; _
-                  } as row)
-               when String.equal current.lease_id lease_id ->
-               let target_row =
-                 { row with
-                   receipt =
-                     { receipt_id; state = Stored_pending current.message }
-                 }
-               in
-               (match
-                  make_plan entry
-                    ~before_row:(Some row)
-                    ~target_row:(Some target_row)
-                    ~target_next_sequence:entry.next_sequence
-                    ~target_terminal_count:entry.terminal_count
-                    ~transition:(Nack_transition { receipt_id; lease_id })
-                with
-                | Error error -> `Error error
-                | Ok plan ->
-                  let execution =
-                    run_transaction
-                      ~ownership_root:base_path
-                      ~path
-                      ~create_if_missing:false
-                      plan
-                  in
-                  (match apply_transaction_result ~path entry plan execution with
-                   | Ok revision -> `Requeued (receipt_id, revision)
-                   | Error error -> `Error error))
-             | None | Some _ -> `Unknown_lease))
-    in
-    (match result with
-     | `Requeued (receipt_id, revision) ->
-       notify_transition ~keeper_name ~revision;
-       `Requeued receipt_id
-     | `Error error ->
-       notify_indeterminate ~keeper_name (Error error);
-       `Error error
-     | `Unknown_lease -> `Unknown_lease)
-
 let has_active_receipts ~keeper_name =
   match mutation_context ~keeper_name ~create:false with
   | Error _ as error -> error
@@ -3283,7 +3206,7 @@ let compensate_uncertain_lease entry plan =
       ; before_row = plan.target_row
       ; target_row = Some target_row
       ; transition =
-          Nack_transition
+          Recovery_requeue_transition
             { receipt_id; lease_id = inflight.lease_id }
       }
   | None
@@ -3383,7 +3306,6 @@ let reconcile_persistence ~keeper_name =
                            | Error _ as error -> error))
                      | ( Enqueue_transition _
                        | Finalize_transition _
-                       | Nack_transition _
                        | Startup_recovery_transition _
                        | Recovery_requeue_transition _
                        | Recovery_cancel_transition _
@@ -3394,7 +3316,6 @@ let reconcile_persistence ~keeper_name =
                        Ok { outcome = Reconciled; revision = plan.target_revision }
                      | ( Enqueue_transition _
                        | Finalize_transition _
-                       | Nack_transition _
                        | Startup_recovery_transition _
                        | Recovery_requeue_transition _
                        | Recovery_cancel_transition _

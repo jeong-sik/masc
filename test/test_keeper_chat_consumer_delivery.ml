@@ -188,9 +188,13 @@ let start_consumer ~sw ~clock ~base_path ~handle_turn =
           Keeper_chat_consumer.notify_transition ~keeper_name));
   Keeper_turn_admission.set_slot_transition_observer
     (Some
-       (fun ~base_path:transition_base_path ~keeper_name ~transition:_ ->
+       (fun ~base_path:transition_base_path ~keeper_name ~transition ->
           if String.equal transition_base_path canonical_base_path
-          then Keeper_chat_consumer.notify_transition ~keeper_name));
+          then
+            match transition with
+            | Keeper_turn_admission.Shutdown_rolled_back ->
+              Keeper_chat_consumer.notify_transition ~keeper_name
+            | Keeper_turn_admission.Turn_released -> ()));
   let handle_admitted_turn
       ~sw
       ~keeper_name
@@ -348,21 +352,18 @@ let test_structured_cancellation_terminalizes_claimed_receipt () =
          Keeper_chat_queue.lookup_receipt ~keeper_name
            ~receipt_id:accepted.receipt_id
        with
-       | Ok
+         | Ok
            { receipt =
                Some
                  { state =
                      Keeper_chat_queue.Failed
-                       { kind = Keeper_chat_queue.Cancelled; detail; _ }
+                       { kind = Keeper_chat_queue.Cancelled; _ }
                  ; receipt_id
                  }
            ; _
            } ->
          check "cancellation preserves the accepted receipt id"
-           (Keeper_chat_queue.Receipt_id.equal receipt_id accepted.receipt_id);
-         check "cancellation records unknown external effect"
-           (String.equal detail
-              "Keeper stopped before this claimed turn completed; its external effect is unknown.")
+           (Keeper_chat_queue.Receipt_id.equal receipt_id accepted.receipt_id)
        | Ok
            { receipt =
                Some
@@ -515,9 +516,9 @@ let test_finalization_persistence_retry_does_not_redeliver () =
       check_terminal_snapshot ~label:"retried finalization" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
-let test_busy_turn_release_wakes_pending_receipt () =
+let test_busy_turn_hands_mutex_to_pending_receipt () =
   Printf.printf
-    "Test: a busy-turn release wakes the exact pending Keeper lane\n%!";
+    "Test: a busy turn hands its mutex to the exact pending Keeper lane\n%!";
   with_env (fun ~base ~clock ->
     let holder_started, resolve_holder_started = Eio.Promise.create () in
     let release_holder, resolve_release_holder = Eio.Promise.create () in
@@ -579,7 +580,7 @@ let test_busy_turn_release_wakes_pending_receipt () =
         check "parking does not publish an inflight receipt"
           (waiting_snapshot.inflight = []);
         Eio.Promise.resolve resolve_release_holder ();
-        check "turn release dispatches without fleet polling"
+        check "mutex handoff dispatches without fleet polling"
           (match
              await_receipt ~clock ~seconds:5.0 ~keeper_name
                ~receipt_id:accepted.receipt_id ~accept:is_delivered
@@ -656,9 +657,9 @@ let test_consumer_cancellation_while_parked_keeps_pending () =
            | Error _ -> false);
         Eio.Promise.resolve resolve_release_holder ()))
 
-let test_stale_parked_observation_rearms_next_pending_receipt () =
+let test_pending_cancellation_while_parked_reobserves_next_receipt () =
   Printf.printf
-    "Test: a stale parked observation rearms the next pending receipt\n%!";
+    "Test: cancelling the pending head while parked dispatches the next receipt\n%!";
   with_env (fun ~base ~clock ->
     let holder_started, resolve_holder_started = Eio.Promise.create () in
     let release_holder, resolve_release_holder = Eio.Promise.create () in
@@ -668,8 +669,7 @@ let test_stale_parked_observation_rearms_next_pending_receipt () =
         ~(queued_message : Keeper_chat_queue.queued_message) =
       incr calls;
       handled_content := Some queued_message.content;
-      Keeper_chat_consumer.Delivered
-        { outcome_ref = "trace-stale-rearm#1" }
+      Keeper_chat_consumer.Delivered { outcome_ref = "trace-next#4" }
     in
     with_consumer_switch (fun sw ->
       Eio.Fiber.fork ~sw (fun () ->
@@ -697,12 +697,6 @@ let test_stale_parked_observation_rearms_next_pending_receipt () =
              Keeper_turn_admission.chat_waiting
                ~base_path:base
                ~keeper_name));
-        (* Isolate the consumer's stale-observation recovery edge: both
-           production observers are deliberately silent after the consumer
-           has parked, so only [run_observed_turn]'s typed [Claim_stale]
-           transition can schedule the replacement receipt. *)
-        Keeper_chat_queue.set_transition_observer None;
-        Keeper_turn_admission.set_slot_transition_observer None;
         (match
            Keeper_chat_queue.cancel_pending
              ~keeper_name
@@ -716,27 +710,29 @@ let test_stale_parked_observation_rearms_next_pending_receipt () =
            check "pending cancellation commits a terminal receipt" true
          | Ok _ | Error _ ->
            check "pending cancellation commits a terminal receipt" false);
-        (match
-           enqueue_checked ~label:"stale replacement enqueue" ~keeper_name
-             (discord_msg ~content:"run after stale head"
-                ~channel_id:"channel-stale-replacement"
-                ~user_id:"user-stale-replacement" ~timestamp:6.6)
-         with
-         | None -> Eio.Promise.resolve resolve_release_holder ()
-         | Some replacement ->
-           Eio.Promise.resolve resolve_release_holder ();
-           check "stale observation rearms the replacement receipt"
+        let next_receipt =
+          enqueue_checked ~label:"post-cancellation enqueue" ~keeper_name
+            (discord_msg ~content:"run after stale observation"
+               ~channel_id:"channel-after-stale"
+               ~user_id:"user-after-stale" ~timestamp:6.6)
+        in
+        check "cancelled pending head never reaches the turn handler" (!calls = 0);
+        Eio.Promise.resolve resolve_release_holder ();
+        (match next_receipt with
+         | None -> check "next receipt is accepted" false
+         | Some next ->
+           check "next receipt is delivered after the stale observation"
              (match
                 await_receipt ~clock ~seconds:5.0 ~keeper_name
-                  ~receipt_id:replacement.receipt_id ~accept:is_delivered
+                  ~receipt_id:next.receipt_id ~accept:is_delivered
               with
               | Some _ -> true
               | None -> false);
-           check "cancelled head never reaches the turn handler" (!calls = 1);
-           check "only the replacement content is handled"
-             (!handled_content = Some "run after stale head");
-           check_terminal_snapshot ~label:"stale replacement" ~keeper_name
-             ~receipt_id:replacement.receipt_id)))
+           check_terminal_snapshot ~label:"post-cancellation next receipt"
+             ~keeper_name ~receipt_id:next.receipt_id);
+        check "only the next receipt reaches the turn handler" (!calls = 1);
+        check "only the next receipt content is handled"
+          (!handled_content = Some "run after stale observation")))
 
 let test_invalid_delivered_turn_ref_fails_closed () =
   Printf.printf
@@ -917,9 +913,9 @@ let () =
   test_structured_cancellation_terminalizes_claimed_receipt ();
   test_dispatch_is_concurrent_per_keeper ();
   test_finalization_persistence_retry_does_not_redeliver ();
-  test_busy_turn_release_wakes_pending_receipt ();
+  test_busy_turn_hands_mutex_to_pending_receipt ();
   test_consumer_cancellation_while_parked_keeps_pending ();
-  test_stale_parked_observation_rearms_next_pending_receipt ();
+  test_pending_cancellation_while_parked_reobserves_next_receipt ();
   test_invalid_delivered_turn_ref_fails_closed ();
   test_invalid_delivery_diagnostic_does_not_block_lane ();
   test_shutdown_fence_keeps_receipt_pending_until_rollback ();

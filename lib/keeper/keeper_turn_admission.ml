@@ -290,12 +290,22 @@ let admit_autonomous_with_token ~base_path ~keeper_name f =
   let slot = slot_for ~base_path ~keeper_name in
   match peek_shutdown slot with
   | Some operation_id -> `Busy (Shutdown_requested operation_id)
+  | None when waiting_count slot > 0 -> `Busy (Turn_busy (peek_info slot))
   | None ->
     if Eio.Mutex.try_lock slot.turn_mu
     then (
-      match run_locked_with_token slot ~lane:Autonomous f with
-      | `Ran value -> `Ran value
-      | `Shutdown_requested operation_id -> `Busy (Shutdown_requested operation_id))
+      (* A chat waiter can register between the first check and [try_lock].
+         Recheck while holding the turn mutex so autonomous work cannot
+         overtake a waiter that has already joined this slot. *)
+      if waiting_count slot > 0
+      then (
+        Eio.Mutex.unlock slot.turn_mu;
+        `Busy (Turn_busy (peek_info slot)))
+      else
+        match run_locked_with_token slot ~lane:Autonomous f with
+        | `Ran value -> `Ran value
+        | `Shutdown_requested operation_id ->
+          `Busy (Shutdown_requested operation_id))
     else `Busy (Turn_busy (peek_info slot))
 ;;
 

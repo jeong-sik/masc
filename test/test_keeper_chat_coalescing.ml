@@ -600,8 +600,8 @@ let test_transition_observer_outside_lock_exactly_once () =
     (Result.is_ok second && List.length (Keeper_chat_queue.snapshot ~keeper_name).pending = 2);
   check "failing wake observer was invoked exactly once" (!calls = 2)
 
-let test_uncertain_lease_compensates_and_other_transitions_reconcile () =
-  Printf.printf "Test: lease uncertainty compensates; finalize/nack converge exactly\n%!";
+let test_uncertain_lease_compensates_and_finalize_reconciles () =
+  Printf.printf "Test: lease uncertainty compensates; finalize converges exactly\n%!";
   let lease_case base_path =
     let keeper_name = "lease-uncertain" in
     ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
@@ -663,26 +663,7 @@ let test_uncertain_lease_compensates_and_other_transitions_reconcile () =
      | Ok _ | Error _ ->
        check "finalize reconciliation reapplies exact terminal target" false)
   in
-  with_base "keeper-chat-finalize-uncertain" finalize_case;
-  let nack_case base_path =
-    let keeper_name = "nack-uncertain" in
-    ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
-    ignore (enqueue_exn ~keeper_name (message "requeue me") : Keeper_chat_queue.enqueue_receipt);
-    let lease = lease_exn ~keeper_name in
-    Keeper_chat_queue.For_testing.fail_transaction_at_stages [ Commit_returned ];
-    (match Keeper_chat_queue.nack ~keeper_name ~lease_id:lease.lease_id with
-     | `Error
-         (Keeper_chat_queue.Persist_failed
-            { publication = Keeper_chat_queue.Nack_indeterminate _; _ }) ->
-       check "uncertain nack is typed" true
-     | `Requeued _ | `Unknown_lease | `Error _ -> check "uncertain nack is typed" false);
-    (match Keeper_chat_queue.reconcile_persistence ~keeper_name with
-     | Ok { outcome = Reconciled; _ } ->
-       check "nack reconciliation retains Pending"
-         (List.length (Keeper_chat_queue.snapshot ~keeper_name).pending = 1)
-     | Ok _ | Error _ -> check "nack reconciliation retains Pending" false)
-  in
-  with_base "keeper-chat-nack-uncertain" nack_case
+  with_base "keeper-chat-finalize-uncertain" finalize_case
 
 let test_restart_requires_explicit_recovery_without_journal () =
   Printf.printf
@@ -1072,7 +1053,7 @@ let () =
   test_transaction_publication_boundaries ();
   test_commit_observer_exception_and_cancellation ();
   test_transition_observer_outside_lock_exactly_once ();
-  test_uncertain_lease_compensates_and_other_transitions_reconcile ();
+  test_uncertain_lease_compensates_and_finalize_reconciles ();
   test_restart_requires_explicit_recovery_without_journal ();
   test_legacy_json_is_not_a_queue_authority ();
   test_runtime_root_typed_filename_authority ();

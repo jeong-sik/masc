@@ -129,11 +129,6 @@ type persistence_publication =
       ; receipt_id : Receipt_id.t
       ; lease_id : string
       }
-  | Nack_indeterminate of
-      { revision : int64
-      ; receipt_id : Receipt_id.t
-      ; lease_id : string
-      }
   | Startup_recovery_indeterminate of
       { revision : int64
       ; receipt_id : Receipt_id.t
@@ -292,16 +287,6 @@ val finalize :
   lease_id:string ->
   outcome:finalization ->
   [ `Finalized of Receipt_id.t
-  | `Unknown_lease
-  | `Error of mutation_error
-  ]
-
-(** Return the receipt in the matching lease to [Pending], preserving its id
-    and FIFO position. *)
-val nack :
-  keeper_name:string ->
-  lease_id:string ->
-  [ `Requeued of Receipt_id.t
   | `Unknown_lease
   | `Error of mutation_error
   ]

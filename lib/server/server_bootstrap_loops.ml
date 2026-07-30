@@ -1648,14 +1648,17 @@ let start_keeper_loops_owned
              (fun ~keeper_name ~revision ->
                 Keeper_chat_broadcast.queue_changed ~keeper_name ~revision ();
                 Keeper_chat_consumer.notify_transition ~keeper_name));
-        (* A freed turn slot (turn released / shutdown rolled back) makes the
-           lane dispatchable again; wake the consumer so any receipt that was
-           deferred while the lane was busy is re-examined. The admission
-           observer is non-blocking and its failures cannot alter admission. *)
+        (* A chat consumer waiting behind a running turn is handed the mutex
+           directly, so [Turn_released] needs no second wake. A shutdown
+           rejection does not park on that mutex; rollback must explicitly
+           re-arm the still-Pending receipt. *)
         Keeper_turn_admission.set_slot_transition_observer
           (Some
-             (fun ~base_path:_ ~keeper_name ~transition:_ ->
-                Keeper_chat_consumer.notify_transition ~keeper_name));
+             (fun ~base_path:_ ~keeper_name ~transition ->
+                match transition with
+                | Keeper_turn_admission.Shutdown_rolled_back ->
+                  Keeper_chat_consumer.notify_transition ~keeper_name
+                | Keeper_turn_admission.Turn_released -> ()));
         Ok ()
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn

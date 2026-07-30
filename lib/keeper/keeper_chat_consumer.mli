@@ -53,9 +53,9 @@ type turn_outcome =
     boundary instead of escaping through an unobserved child fiber.
 
     Startup performs one inventory of restored queue lanes. Thereafter the
-    consumer is driven only by durable queue transitions, Keeper admission
-    release, and explicit operator reconciliation; it performs no fleet-wide
-    timer polling.
+    consumer is driven only by durable queue transitions, direct Keeper mutex
+    handoff, shutdown rollback, and explicit operator reconciliation; it
+    performs no fleet-wide timer polling.
 
     Per Keeper wake, the exact FIFO head is observed without changing its
     durable [Pending] state. [handle_turn] parks on the Keeper turn mutex, then

@@ -2399,6 +2399,14 @@ let process_single_turn ~user_row_origin ~submission
                              ~tool_name:"masc_keeper_msg"
                              ~start_time
                              body)))))
+        | None, Ok (`Ran (false, err)) when queued_turn_not_started () ->
+            push_worker_event
+              (Stream_terminal
+                 { status = Stream_cancelled
+                 ; body = err
+                 ; queued_outcome = None
+                 });
+            Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
         | None, Ok (`Ran (false, err)) ->
             let persisted = persist_failure_reply err in
             let queued_outcome =

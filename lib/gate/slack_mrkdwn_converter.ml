@@ -1,6 +1,7 @@
 (** Slack_mrkdwn_converter — Converts standard markdown text to Slack mrkdwn format safely. *)
 
-(* Static pre-compiled regular expressions for high performance (0 allocation per call) *)
+(* Static pre-compiled regular expressions for high performance *)
+let re_code_block = Re.Pcre.regexp "```[\\s\\S]*?```|`[^`\\n]+`"
 let re_link = Re.Pcre.regexp "\\[([^\\]]+)\\]\\((https?://[^\\s)]+)\\)?"
 let re_bold = Re.Pcre.regexp "\\*\\*([^*]+)\\*\\*"
 let re_header = Re.Pcre.regexp "^#{1,6}\\s+(.+)$"
@@ -18,13 +19,32 @@ let escape_slack_raw text =
     text;
   Buffer.contents buf
 
+(** Preserve code blocks from being corrupted during markdown conversion *)
+let preserve_code_blocks text =
+  let blocks = ref [] in
+  let counter = ref 0 in
+  let protected_text =
+    Re.Pcre.substitute ~rex:re_code_block ~subst:(fun matched ->
+      let placeholder = Printf.sprintf "\x00SLACK_CODE_%d\x00" !counter in
+      incr counter;
+      blocks := (placeholder, matched) :: !blocks;
+      placeholder
+    ) text
+  in
+  (protected_text, List.rev !blocks)
+
+let restore_code_blocks text blocks =
+  List.fold_left (fun acc (placeholder, original_code) ->
+    let re_place = Re.Pcre.regexp (Re.Pcre.quote placeholder) in
+    Re.Pcre.substitute ~rex:re_place ~subst:(fun _ -> original_code) acc
+  ) text blocks
+
 let convert_markdown_links text =
   Re.Pcre.substitute ~rex:re_link ~subst:(fun matched ->
     try
       let groups = Re.Pcre.exec ~rex:re_link matched in
       let label = Re.Pcre.get_substring groups 1 in
       let url = Re.Pcre.get_substring groups 2 in
-      (* Clean label and format Slack mrkdwn link *)
       Printf.sprintf "<%s|%s>" url (escape_slack_raw label)
     with _ -> matched
   ) text
@@ -60,7 +80,8 @@ let convert_bullets line =
     line
 
 let to_slack_mrkdwn input =
-  let lines = String.split_on_char '\n' input in
+  let protected_text, code_blocks = preserve_code_blocks input in
+  let lines = String.split_on_char '\n' protected_text in
   let converted_lines =
     List.map (fun line ->
       let l1 = convert_headers line in
@@ -70,4 +91,5 @@ let to_slack_mrkdwn input =
       l4
     ) lines
   in
-  String.concat "\n" converted_lines
+  let formatted = String.concat "\n" converted_lines in
+  restore_code_blocks formatted code_blocks

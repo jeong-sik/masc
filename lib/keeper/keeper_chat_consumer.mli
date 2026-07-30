@@ -15,14 +15,6 @@
     running schedules exactly one follow-up inspection. *)
 val notify_transition : keeper_name:string -> unit
 
-(** Clear a pending-claim retry block for the exact BasePath/Keeper lane and
-    wake it once. Queue transition observers must use {!notify_transition};
-    this authority is only for an explicit non-queue state change such as a
-    shutdown rollback or operator retry. Finalization retry state is preserved
-    and consumes the wake through its own exact decision. *)
-val notify_explicit_retry :
-  base_path:string -> keeper_name:string -> (unit, string) result
-
 type persistence_blocked_operation =
   | Pending_claim_blocked
   | Finalize_blocked
@@ -33,9 +25,10 @@ type persistence_blocked_status =
   ; error : Keeper_chat_queue.mutation_error
   }
 
-(** Observe the exact Keeper-local queue mutation that is waiting for an
-    explicit retry trigger. This is operational state, not a retry timer or an
-    admission constraint. *)
+(** Observe the exact Keeper-local queue mutation that is blocked. A
+    pending-claim block is retried only after the durable queue revision
+    advances; this is operational state, not a retry timer or admission
+    constraint. *)
 val persistence_blocked_status :
   base_path:string ->
   keeper_name:string ->

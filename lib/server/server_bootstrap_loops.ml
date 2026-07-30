@@ -1650,25 +1650,14 @@ let start_keeper_loops_owned
                 Keeper_chat_consumer.notify_transition ~keeper_name));
         (* A chat consumer waiting behind a running turn is handed the mutex
            directly, so [Turn_released] needs no second wake. A shutdown
-           rejection does not park on that mutex; rollback must explicitly
-           re-arm the still-Pending receipt. *)
+           rejection happens before the exact claim; rollback only needs to
+           wake the still-Pending receipt. *)
         Keeper_turn_admission.set_slot_transition_observer
           (Some
-             (fun ~base_path ~keeper_name ~transition ->
+             (fun ~base_path:_ ~keeper_name ~transition ->
                 match transition with
                 | Keeper_turn_admission.Shutdown_rolled_back ->
-                  (match
-                     Keeper_chat_consumer.notify_explicit_retry
-                       ~base_path
-                       ~keeper_name
-                   with
-                   | Ok () -> ()
-                   | Error error ->
-                     Log.Keeper.error
-                       "keeper chat consumer explicit retry failed after shutdown rollback keeper=%s: %s"
-                       keeper_name
-                       error;
-                     Keeper_chat_consumer.notify_transition ~keeper_name)
+                  Keeper_chat_consumer.notify_transition ~keeper_name
                 | Keeper_turn_admission.Turn_released -> ()));
         Ok ()
       with

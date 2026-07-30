@@ -193,14 +193,7 @@ let start_consumer ~sw ~clock ~base_path ~handle_turn =
           then
             match transition with
             | Keeper_turn_admission.Shutdown_rolled_back ->
-              (match
-                 Keeper_chat_consumer.notify_explicit_retry
-                   ~base_path:transition_base_path
-                   ~keeper_name
-               with
-               | Ok () -> ()
-               | Error error ->
-                 check_failure "shutdown rollback explicit retry" error)
+              Keeper_chat_consumer.notify_transition ~keeper_name
             | Keeper_turn_admission.Turn_released -> ()));
   let handle_admitted_turn
       ~sw
@@ -526,9 +519,9 @@ let test_finalization_persistence_retry_does_not_redeliver () =
       check_terminal_snapshot ~label:"retried finalization" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
-let test_claim_commit_uncertainty_waits_for_explicit_retry () =
+let test_claim_commit_uncertainty_waits_for_later_revision () =
   Printf.printf
-    "Test: claim commit uncertainty waits for an explicit retry\n%!";
+    "Test: claim commit uncertainty waits for a later durable revision\n%!";
   with_env (fun ~base ~clock ->
     match
       enqueue_checked ~label:"claim uncertainty enqueue" ~keeper_name
@@ -599,21 +592,28 @@ let test_claim_commit_uncertainty_waits_for_explicit_retry () =
                | Error _ -> false);
             Keeper_chat_queue.For_testing.set_transaction_stage_observer None;
             (match
-               Keeper_chat_consumer.notify_explicit_retry
-                 ~base_path:base
-                 ~keeper_name
+               enqueue_checked ~label:"claim retry revision enqueue" ~keeper_name
+                 (discord_msg ~content:"advance the durable revision"
+                    ~channel_id:"channel-claim-retry"
+                    ~user_id:"user-claim-retry" ~timestamp:6.2)
              with
-             | Ok () -> ()
-             | Error error ->
-               check_failure "explicit pending-claim retry" error);
-            check "explicit retry re-arms the original Pending receipt"
-              (match
-                 await_receipt ~clock ~seconds:5.0 ~keeper_name
-                   ~receipt_id:first.receipt_id ~accept:is_delivered
-               with
-               | Some _ -> true
-               | None -> false));
-          check "the committed receipt runs exactly once" (!turns = 1)))
+             | None -> ()
+             | Some second ->
+               check "later revision re-arms the original Pending receipt"
+                 (match
+                    await_receipt ~clock ~seconds:5.0 ~keeper_name
+                      ~receipt_id:first.receipt_id ~accept:is_delivered
+                  with
+                  | Some _ -> true
+                  | None -> false);
+               check "the later receipt remains FIFO behind the retried head"
+                 (match
+                    await_receipt ~clock ~seconds:5.0 ~keeper_name
+                      ~receipt_id:second.receipt_id ~accept:is_delivered
+                  with
+                  | Some _ -> true
+                  | None -> false)));
+          check "both committed receipts run exactly once" (!turns = 2)))
 
 let test_busy_turn_hands_mutex_to_pending_receipt () =
   Printf.printf
@@ -1017,7 +1017,7 @@ let () =
   test_structured_cancellation_terminalizes_claimed_receipt ();
   test_dispatch_is_concurrent_per_keeper ();
   test_finalization_persistence_retry_does_not_redeliver ();
-  test_claim_commit_uncertainty_waits_for_explicit_retry ();
+  test_claim_commit_uncertainty_waits_for_later_revision ();
   test_busy_turn_hands_mutex_to_pending_receipt ();
   test_consumer_cancellation_while_parked_keeps_pending ();
   test_stale_parked_observation_rearms_next_pending_receipt ();

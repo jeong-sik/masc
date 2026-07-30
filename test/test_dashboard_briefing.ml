@@ -352,55 +352,63 @@ let test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidenc
       check bool "no observed tools without evidence" true
         ((brief |> member "latest_tool_names" |> to_list) = []))
 
-let test_dashboard_briefing_keeper_tool_audit_uses_decision_log () =
-  let keeper_name = "audit-keeper-decision-fixture" in
+let test_dashboard_keeper_unknown_context_requires_attention () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       with_test_env @@ fun ~clock:_ ~sw:_ ->
       let config = Workspace_utils.default_config dir in
-      Workspace_utils.mkdir_p
-        (Filename.dirname (Lib.Keeper_types_support.keeper_decision_log_path config keeper_name));
-      Fs_compat.append_jsonl
-        (Lib.Keeper_types_support.keeper_decision_log_path config keeper_name)
-        (`Assoc
+      let keeper name context_ratio =
+        `Assoc
           [
-            ("ts", `String (Masc_domain.now_iso ()));
-            ("selected_mode", `String "text_response");
-            ("action_source", `String "structured_model");
-            ("tool_call_count", `Int 0);
-            ("tools_used", `List []);
-          ]);
-      let briefs =
-        Dashboard_briefing_assembly.build_keeper_briefs config
-          [
-            `Assoc
-              [
-                ("name", `String keeper_name);
-                ("agent_name", `String keeper_name);
-                ("status", `String "active");
-                ("updated_at", `String (Masc_domain.now_iso ()));
-                ("latest_tool_names", `List []);
-                ("latest_tool_call_count", `Null);
-                ("tool_audit_source", `Null);
-                ("tool_audit_at", `Null);
-              ];
+            ("name", `String name);
+            ("agent_name", `String name);
+            ("status", `String "active");
+            ("updated_at", `String (Masc_domain.now_iso ()));
+            ("context_ratio", context_ratio);
+            ( "context_metrics_unavailable",
+              match context_ratio with
+              | `Null ->
+                `Assoc
+                  [
+                    ("kind", `String "not_observed");
+                    ("reason", `String "context_measurement_missing");
+                  ]
+              | _ -> `Null );
+            ("autonomous_turn_count", `Int 1);
+            ("turn_count", `Int 1);
           ]
       in
+      let unknown = keeper "unknown-context" `Null in
+      let observed = keeper "observed-context" (`Float 0.1) in
       let open Yojson.Safe.Util in
-      let brief =
-        briefs |> List.find (fun row -> row |> member "name" |> to_string = keeper_name)
+      let briefs =
+        Dashboard_briefing_assembly.build_keeper_briefs config [ observed; unknown ]
       in
-      check string "decision log source present in keeper brief" "keeper_decision_log"
-        (brief |> member "tool_audit_source" |> to_string);
-      check string "decision log action source present in keeper brief"
-        "structured_model"
-        (brief |> member "latest_action_source" |> to_string);
-      check int "decision log zero tool count preserved" 0
-        (brief |> member "latest_tool_call_count" |> to_int);
-      check bool "decision log still reports empty tool list" true
-        ((brief |> member "latest_tool_names" |> to_list) = []))
+      check string "unknown context is ordered as attention" "unknown-context"
+        (briefs |> List.hd |> member "name" |> to_string);
+      check string "brief preserves unavailable context kind" "not_observed"
+        (briefs
+         |> List.hd
+         |> member "context_metrics_unavailable"
+         |> member "kind"
+         |> to_string);
+      let continuity =
+        Dashboard_execution_builders.build_continuity_briefs
+          ~now_ts:(Unix.gettimeofday ()) [ unknown ] []
+        |> List.hd
+      in
+      check string "unknown context cannot be healthy" "warning"
+        (continuity.json |> member "state" |> to_string);
+      check string "unknown context has an explicit note" "컨텍스트 측정값 없음"
+        (continuity.json |> member "note" |> to_string);
+      check string "continuity preserves unavailable context reason"
+        "context_measurement_missing"
+        (continuity.json
+         |> member "context_metrics_unavailable"
+         |> member "reason"
+         |> to_string))
 
 let make_message ~seq ~from_agent ~content : Types.message =
   { seq;
@@ -446,7 +454,7 @@ let () =
             test_dashboard_briefing_http_cache_isolation;
           Alcotest.test_case "keeper brief keeps in-band tools without evidence" `Quick
             test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidence;
-          Alcotest.test_case "keeper brief uses decision log fallback" `Quick
-            test_dashboard_briefing_keeper_tool_audit_uses_decision_log;
+          Alcotest.test_case "unknown keeper context requires attention" `Quick
+            test_dashboard_keeper_unknown_context_requires_attention;
         ] );
     ]

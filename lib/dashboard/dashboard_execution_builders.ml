@@ -304,7 +304,9 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
       | Lc_preparing | Lc_compacting ->
           (Exec_warning, Tone_warn, "연속성 압력이 높습니다")
       | Lc_offline | Lc_active | Lc_idle ->
-          if autonomous_turn_count = 0 && turn_count > 0 then
+          if Option.is_none context_ratio then
+            (Exec_warning, Tone_warn, "컨텍스트 측정값 없음")
+          else if autonomous_turn_count = 0 && turn_count > 0 then
             (Exec_warning, Tone_warn,
              Printf.sprintf "자율 턴 없음 (턴 %d회 수행)" turn_count)
           else if effective_activity_age_s >= keeper_action_stale_sec then

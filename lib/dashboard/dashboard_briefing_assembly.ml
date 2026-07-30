@@ -186,10 +186,15 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
            in
            let pressure_rank =
              if Dashboard_utils.is_keeper_offline status then 3
-             else
-               match context_ratio with
-               | Some ratio when ratio >= lane_pressure_ctx_ratio -> 2
-               | Some _ | None -> if status = "idle" then 1 else 0
+             else if
+               Option.is_none context_ratio
+               || Option.exists
+                    (fun ratio -> ratio >= lane_pressure_ctx_ratio)
+                    context_ratio
+             then
+               2
+             else if status = "idle" then 1
+             else 0
            in
            Some
              {

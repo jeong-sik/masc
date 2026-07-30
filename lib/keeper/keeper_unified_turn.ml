@@ -168,13 +168,88 @@ let autonomous_yield_request ~base_path ~keeper_name =
                 { reason = Durable_stimulus_waiting summary })))
 ;;
 
+let is_manual_compaction_payload = function
+  | Keeper_event_queue.Manual_compaction_requested -> true
+  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_attention _
+  | Keeper_event_queue.Bootstrap
+  | Keeper_event_queue.Fusion_completed _
+  | Keeper_event_queue.Bg_completed _
+  | Keeper_event_queue.Schedule_due _
+  | Keeper_event_queue.Connector_attention _
+  | Keeper_event_queue.Hitl_resolved _
+  | Keeper_event_queue.Goal_assigned _
+  | Keeper_event_queue.Goal_reconciliation_ready _ ->
+    false
+;;
+
+let manual_compaction_preemption_request ~wake ~now pending =
+  let source_can_yield =
+    match wake with
+    | Keeper_registry.Woken (_ :: _ as payloads) ->
+      not (List.exists is_manual_compaction_payload payloads)
+    | Keeper_registry.Proactive_tick | Keeper_registry.Woken [] -> false
+  in
+  if not source_can_yield
+  then None
+  else
+    let stimuli = Keeper_event_queue.to_list pending in
+    match
+      List.find_opt
+        (fun (stimulus : Keeper_event_queue.stimulus) ->
+           is_manual_compaction_payload stimulus.payload)
+        stimuli
+    with
+    | None -> None
+    | Some selected ->
+      let summary = Keeper_agent_run.durable_stimulus_summary ~now pending in
+      Some
+        Keeper_agent_run.
+          { reason =
+              Durable_stimulus_waiting
+                { summary with
+                  head = Some selected
+                ; head_age_sec = Float.max 0. (now -. selected.arrived_at)
+                }
+          }
+;;
+
+let manual_compaction_yield_request ~wake ~base_path ~keeper_name =
+  match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+  | Error _ as error -> error
+  | Ok pending ->
+    let now = Time_compat.now () in
+    let request = manual_compaction_preemption_request ~wake ~now pending in
+    Option.iter
+      (fun (request : Keeper_agent_run.autonomous_yield_request) ->
+         match request.reason with
+         | Keeper_agent_run.Chat_waiting -> ()
+         | Keeper_agent_run.Durable_stimulus_waiting summary ->
+           Log.Keeper.info
+             ~keeper_name
+             "autonomous source turn yields to manual compaction: %s"
+             (Keeper_agent_run.durable_stimulus_summary_to_string summary))
+      request;
+    Ok request
+;;
+
 let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
   match wake with
   (* A nonempty [Woken] is the event queue input already selected for this
-     turn. It may yield for chat delivery, but a queued successor waits until
-     that source reaches its terminal settlement. *)
+     turn. It may yield for chat delivery. An explicit owner-lane manual
+     compaction is the sole successor allowed to preempt at a persisted
+     post-tool boundary; the selected source remains pending and resumes after
+     compaction. Other queued successors still wait for the source terminal. *)
   | Keeper_registry.Woken (_ :: _) ->
-    fun () -> chat_yield_request ~base_path ~keeper_name
+    fun () ->
+      (match chat_yield_request ~base_path ~keeper_name with
+       | Error _ as error -> error
+       | Ok (Some _) as request -> request
+       | Ok None ->
+         manual_compaction_yield_request
+           ~wake
+           ~base_path
+           ~keeper_name)
   | Keeper_registry.Proactive_tick | Keeper_registry.Woken [] ->
     fun () -> autonomous_yield_request ~base_path ~keeper_name
 ;;

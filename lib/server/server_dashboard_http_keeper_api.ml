@@ -153,10 +153,6 @@ let state_diagram_runtime_fsm_mermaid
     ()
 ;;
 
-let memory_os_count pred xs =
-  List.fold_left (fun count value -> if pred value then count + 1 else count) 0 xs
-;;
-
 let keeper_chat_allowed_trace_ids (m : Keeper_meta_contract.keeper_meta) =
   Keeper_id.Trace_id.to_string m.runtime.trace_id :: m.runtime.trace_history
   |> Json_util.dedupe_keep_order
@@ -189,7 +185,6 @@ let memory_os_episode_json (episode : Keeper_memory_os_types.episode) =
     [ "trace_id", `String episode.trace_id
     ; "generation", `Int episode.generation
     ; "created_at", `Float episode.created_at
-    ; "terminal_marker", json_string_opt episode.terminal_marker
     ; "claim_count", `Int (List.length episode.claims)
     ; ( "source_turn_range"
       , match episode.source_turn_range with
@@ -259,15 +254,8 @@ let memory_os_dashboard_json_unlocked ~keepers_dir ~keeper_id =
     Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id
   in
   let episodes_store = Filename.concat (Filename.concat keepers_dir keeper_id) "episodes" in
-  let terminal_marker_count =
-    memory_os_count
-      (fun (episode : Keeper_memory_os_types.episode) ->
-         Option.is_some episode.terminal_marker)
-      episodes
-  in
   `Assoc
-    [ "schema", `String "keeper.memory_os.recall_observability.v2"
-    ; "keeper", `String keeper_id
+    [ "keeper", `String keeper_id
     ; "source", `String "memory_os_files"
     ; "producer", `String "keeper_librarian|keeper_memory_os_recall"
     ; ( "selection_policy"
@@ -284,7 +272,6 @@ let memory_os_dashboard_json_unlocked ~keepers_dir ~keeper_id =
     ; ( "episodes"
       , `Assoc
           [ "shown", `Int (List.length episodes)
-          ; "terminal_markers", `Int terminal_marker_count
           ; "items", `List (List.map memory_os_episode_json episodes)
           ] )
     ; ( "facts"

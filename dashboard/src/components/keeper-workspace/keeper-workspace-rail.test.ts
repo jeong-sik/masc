@@ -47,7 +47,6 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
       stale_reason: null,
       coverage_gaps: [],
       memory_os: {
-        schema: 'keeper.memory_os.recall_observability.v2',
         keeper: 'masc-improver',
         source: 'memory_os_files',
         producer: 'keeper_librarian|keeper_memory_os_recall',
@@ -63,7 +62,7 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
         episodes_store: '.masc/config/keepers/masc-improver/episodes',
         recall_enabled: true,
         read_errors: [],
-        episodes: { shown: 0, current: 0, expired: 0, terminal_markers: 0, items: [] },
+        episodes: { shown: 0, current: 0, expired: 0, items: [] },
         facts: { shown: 0, current: 0, expired: 0, items: [] },
       },
       entries: [

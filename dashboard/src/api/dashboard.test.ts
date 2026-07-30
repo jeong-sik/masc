@@ -481,7 +481,6 @@ describe('keeper tool telemetry fetchers', () => {
         health: 'ok',
         stale_reason: null,
         memory_os: {
-          schema: 'keeper.memory_os.recall_observability.v2',
           keeper: 'keeper-alpha',
           source: 'memory_os_files',
           producer: 'keeper_librarian|keeper_memory_os_recall',
@@ -497,7 +496,7 @@ describe('keeper tool telemetry fetchers', () => {
           episodes_store: '.masc/config/keepers/keeper-alpha/episodes',
           recall_enabled: true,
           read_errors: [],
-          episodes: { shown: 0, terminal_markers: 0, items: [] },
+          episodes: { shown: 0, items: [] },
           facts: { shown: 0, items: [] },
         },
         entries: [
@@ -752,7 +751,6 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
       stale_reason: 'no_entries',
       entries: [],
       memory_os: {
-        schema: 'keeper.memory_os.recall_observability.v2',
         keeper: 'keeper-alpha',
         source: 'memory_os_files',
         producer: 'keeper_librarian|keeper_memory_os_recall',
@@ -768,7 +766,7 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
         episodes_store: '.masc/config/keepers/keeper-alpha/episodes',
         recall_enabled: true,
         read_errors: [],
-        episodes: { shown: 0, terminal_markers: 0, items: [] },
+        episodes: { shown: 0, items: [] },
         facts: {
           shown: 2,
           items: [
@@ -830,9 +828,11 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
     expect(result.memory_os.facts.items[0]?.claim).toBe('  exact claim bytes  ')
   })
 
-  it('rejects a non-current Memory OS schema token', async () => {
+  it('rejects the retired Memory OS schema field', async () => {
     const payload = turnRecordsPayload()
-    payload.memory_os.schema = 'keeper.memory_os.recall_observability.v0'
+    Object.assign(payload.memory_os, {
+      schema: 'keeper.memory_os.recall_observability.v2',
+    })
     stubTurnRecords(payload)
 
     await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
@@ -994,12 +994,10 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
     const payload = turnRecordsPayload()
     Object.assign(payload.memory_os.episodes, {
       shown: 1,
-      terminal_markers: 0,
       items: [{
         trace_id: 'episode-trace',
         generation: 1,
         created_at: 1_789_000_000,
-        terminal_marker: null,
         claim_count: 0,
         source_turn_range: {
           lo: Number.MAX_SAFE_INTEGER + 1,

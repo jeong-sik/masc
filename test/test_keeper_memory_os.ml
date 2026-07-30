@@ -317,7 +317,6 @@ let episode_fixture ~now ~trace_id ~generation ~summary =
   ; Types.claims = [ fact ]
   ; Types.source_turn_range = Some (0, 0)
   ; Types.created_at = now
-  ; Types.terminal_marker = None
   }
 ;;
 
@@ -338,7 +337,6 @@ let test_json_roundtrip () =
     ; Types.claims = [ f ]
     ; Types.source_turn_range = Some (5, 5)
     ; Types.created_at = now
-    ; Types.terminal_marker = Some "handoff_complete"
     }
   in
   let e2 = Option.get (Types.episode_of_json (Types.episode_to_json e)) in
@@ -346,11 +344,7 @@ let test_json_roundtrip () =
     "episode summary round-trip"
     e.episode_summary
     e2.Types.episode_summary;
-  Alcotest.(check int) "claims length" 1 (List.length e2.Types.claims);
-  Alcotest.(check (option string))
-    "episode terminal_marker round-trip"
-    e.terminal_marker
-    e2.Types.terminal_marker
+  Alcotest.(check int) "claims length" 1 (List.length e2.Types.claims)
 ;;
 
 let test_episode_decoder_rejects_removed_metadata_fields () =
@@ -515,7 +509,6 @@ let test_persisted_memory_decoders_reject_invalid_semantics () =
     ; "generation", `Int (-1)
     ; "episode_summary", `String ""
     ; "created_at", `Float Float.infinity
-    ; "terminal_marker", `String ""
     ; "source_turn_range", `Assoc [ "lo", `Int (-1); "hi", `Int 0 ]
     ; "source_turn_range", `Assoc [ "lo", `Int 2; "hi", `Int 1 ]
     ]
@@ -586,7 +579,8 @@ let test_episode_provenance_invariants () =
 
 let test_librarian_prompt_renders () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-abc"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-abc" ~absolute_turn:1
     ; messages = [ text_message "Please remember the project constraint." ]
     }
   in
@@ -652,7 +646,10 @@ let test_librarian_prompt_omits_private_blocks () =
     }
   in
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-abc"; messages = [ msg ] }
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-abc" ~absolute_turn:1
+    ; messages = [ msg ]
+    }
   in
   with_prompt_registry (fun () ->
     let prompt = render_librarian_user_prompt inp in
@@ -693,7 +690,8 @@ let valid_librarian_output () =
 
 let test_librarian_rejects_extra_confidence_field () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-extra-confidence"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-extra-confidence" ~absolute_turn:1
     ; messages = [ text_message "turn-indexed memory" ]
     }
   in
@@ -731,7 +729,8 @@ let test_librarian_rejects_extra_confidence_field () =
 
 let test_librarian_rejects_removed_claim_kind_field () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-invalid-kind"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-invalid-kind" ~absolute_turn:1
     ; messages = [ text_message "typed memory" ]
     }
   in
@@ -769,7 +768,8 @@ let test_librarian_rejects_removed_claim_kind_field () =
 
 let test_librarian_rejects_duplicate_json_fields () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-duplicate-fields"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-duplicate-fields" ~absolute_turn:1
     ; messages = [ text_message "duplicate fields are invalid" ]
     }
   in
@@ -817,7 +817,10 @@ let test_librarian_rejects_duplicate_json_fields () =
 
 let test_librarian_rejects_duplicate_claim_identity () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-duplicate-claim-identity"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make
+          ~trace_id:"trace-duplicate-claim-identity"
+          ~absolute_turn:1
     ; messages =
         [ text_message "first source observation"
         ; text_message "second source observation"
@@ -861,7 +864,8 @@ let test_librarian_rejects_duplicate_claim_identity () =
 
 let test_librarian_generation_override () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-generation-override"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-generation-override" ~absolute_turn:1
     ; messages = [ text_message "turn-indexed memory" ]
     }
   in
@@ -878,7 +882,8 @@ let test_librarian_generation_override () =
 
 let test_librarian_rejects_removed_lifetime_and_category () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-current-only-contract"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-current-only-contract" ~absolute_turn:1
     ; messages = [ text_message "current-only memory" ]
     }
   in
@@ -929,7 +934,8 @@ let test_librarian_rejects_removed_lifetime_and_category () =
 
 let test_librarian_accepts_nullable_claim_fields () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-nullable-claim-fields"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-nullable-claim-fields" ~absolute_turn:1
     ; messages = [ text_message "nullable structured output" ]
     }
   in
@@ -963,7 +969,10 @@ let test_librarian_accepts_nullable_claim_fields () =
 
 let test_librarian_rejects_missing_nullable_claim_fields () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-missing-nullable-claim-fields"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make
+          ~trace_id:"trace-missing-nullable-claim-fields"
+          ~absolute_turn:1
     ; messages = [ text_message "closed JSON memory contract" ]
     }
   in
@@ -1202,7 +1211,8 @@ let test_memory_os_config_snapshot_surfaces_effective_envs () =
 
 let test_librarian_rejects_out_of_range_source_turn () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-source-turn-out-of-range"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-source-turn-out-of-range" ~absolute_turn:1
     ; messages = [ text_message "Only turn zero exists in this input." ]
     }
   in
@@ -1238,7 +1248,10 @@ let test_librarian_rejects_out_of_range_source_turn () =
 
 let test_librarian_rejects_unrelated_source_tool_call_id () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-unrelated-source-tool-call"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make
+          ~trace_id:"trace-unrelated-source-tool-call"
+          ~absolute_turn:1
     ; messages = [ text_message "This message contains no tool call." ]
     }
   in
@@ -1292,7 +1305,10 @@ let test_librarian_accepts_exact_source_tool_result_id () =
     }
   in
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-exact-source-tool-result"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make
+          ~trace_id:"trace-exact-source-tool-result"
+          ~absolute_turn:1
     ; messages = [ tool_result_message ]
     }
   in
@@ -1335,7 +1351,10 @@ let test_librarian_accepts_exact_source_tool_result_id () =
 
 let test_librarian_rejects_invalid_claims () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-invalid"; messages = [] }
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-invalid" ~absolute_turn:1
+    ; messages = []
+    }
   in
   let reject name json =
     let accepted =
@@ -2036,7 +2055,6 @@ let test_render_if_enabled_renders_persisted_memory () =
           ; Types.claims = [ fact ]
           ; Types.source_turn_range = Some (5, 5)
           ; Types.created_at = now
-          ; Types.terminal_marker = None
           }
         in
         Memory_io.append_episode_bundle ~keeper_id episode;
@@ -2084,7 +2102,6 @@ let test_render_if_enabled_offmain_wrap_is_transparent () =
           ; Types.claims = [ fact ]
           ; Types.source_turn_range = Some (5, 5)
           ; Types.created_at = now
-          ; Types.terminal_marker = None
           }
         in
         Memory_io.append_episode_bundle ~keeper_id episode;
@@ -2139,7 +2156,6 @@ let test_render_if_enabled_keeps_diagnostic_context () =
           ; Types.claims = [ diagnostic_fact ]
           ; Types.source_turn_range = Some (5, 5)
           ; Types.created_at = now
-          ; Types.terminal_marker = Some "diagnostic"
           }
         in
         Memory_io.append_episode_bundle ~keeper_id diagnostic_episode;
@@ -2172,7 +2188,6 @@ let test_render_if_enabled_preserves_empty_claim_episode () =
           ; Types.claims = []
           ; Types.source_turn_range = None
           ; Types.created_at = now
-          ; Types.terminal_marker = None
           }
         in
         Memory_io.append_episode_bundle ~keeper_id episode;
@@ -2365,33 +2380,6 @@ let test_recall_no_prefix_for_plain_fact () =
             (contains "[UNVERIFIED — re-check before acting]" block))))
 ;;
 
-let test_recall_renders_terminal_episode_marker () =
-  with_prompt_registry (fun () ->
-    with_temp_keepers_dir (fun keepers_dir ->
-      let keeper_id = "episode-terminal-keeper" in
-      let now = 1_000_000.0 in
-      let episode =
-        { (episode_fixture
-             ~now
-             ~trace_id:"trace-terminal"
-             ~generation:3
-             ~summary:"terminal handoff summary")
-          with
-          Types.terminal_marker = Some "handoff_complete"
-        }
-      in
-      Memory_io.append_episode_bundle ~keeper_id episode;
-      let ctx = Recall.render_context ~keepers_dir ~keeper_id ~now () in
-      Alcotest.(check bool)
-        "terminal marker is visible in episode line"
-        true
-        (contains "terminal=handoff_complete" ctx);
-      Alcotest.(check bool)
-        "terminal summary still renders"
-        true
-        (contains "terminal handoff summary" ctx)))
-;;
-
 (* Recall preserves every persisted row, including repeated producer identities. *)
 let test_recall_preserves_repeated_claims () =
   with_prompt_registry (fun () ->
@@ -2433,7 +2421,6 @@ let test_recall_preserves_repeated_claims () =
             ]
         ; Types.source_turn_range = Some (1, 9)
         ; Types.created_at = now
-        ; Types.terminal_marker = None
         }
       in
       Memory_io.append_episode_bundle ~keeper_id episode;
@@ -2630,7 +2617,6 @@ let test_recall_context_preserves_semantic_memory_content () =
         ; Types.claims = [ normal_fact; injection_fact ]
         ; Types.source_turn_range = Some (4, 6)
         ; Types.created_at = now
-        ; Types.terminal_marker = None
         }
       in
       Memory_io.append_episode_bundle ~keeper_id episode;
@@ -2694,7 +2680,6 @@ let test_recall_context_preserves_durable_current_rows () =
         ; Types.claims = [ preference_fact ]
         ; Types.source_turn_range = Some (5, 5)
         ; Types.created_at = now
-        ; Types.terminal_marker = None
         }
       in
       let path_episode =
@@ -2704,7 +2689,6 @@ let test_recall_context_preserves_durable_current_rows () =
         ; Types.claims = [ path_fact ]
         ; Types.source_turn_range = Some (7, 7)
         ; Types.created_at = now +. 1.0
-        ; Types.terminal_marker = None
         }
       in
       Memory_io.append_episode_bundle ~keeper_id preference_episode;
@@ -4291,10 +4275,6 @@ let () =
             "plain fact never gets the hard prefix"
             `Quick
             test_recall_no_prefix_for_plain_fact
-        ; Alcotest.test_case
-            "terminal episode marker is rendered"
-            `Quick
-            test_recall_renders_terminal_episode_marker
         ; Alcotest.test_case
             "preserves repeated claim rows"
             `Quick

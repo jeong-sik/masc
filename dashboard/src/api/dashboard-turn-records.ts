@@ -78,7 +78,6 @@ export type MemoryOsEpisodeSummary = {
   trace_id: string
   generation: number
   created_at: number
-  terminal_marker: string | null
   claim_count: number
   // Inclusive [lo, hi] absolute-turn span the episode compacted, or null when the
   // record carries none (memory_os_episode_json → Keeper_memory_os_types.episode.source_turn_range).
@@ -151,7 +150,6 @@ export type MemoryOsSelectionPolicy = {
 }
 
 export type MemoryOsTurnRecordSnapshot = {
-  schema: 'keeper.memory_os.recall_observability.v2'
   keeper: string
   source: 'memory_os_files'
   producer: 'keeper_librarian|keeper_memory_os_recall'
@@ -162,7 +160,6 @@ export type MemoryOsTurnRecordSnapshot = {
   read_errors: { scope: string; error: string }[]
   episodes: {
     shown: number
-    terminal_markers: number
     items: MemoryOsEpisodeSummary[]
   }
   facts: {
@@ -530,7 +527,6 @@ function decodeMemoryOsEpisode(raw: unknown): MemoryOsEpisodeSummary | null {
     'trace_id',
     'generation',
     'created_at',
-    'terminal_marker',
     'claim_count',
     'source_turn_range',
     'summary',
@@ -538,7 +534,6 @@ function decodeMemoryOsEpisode(raw: unknown): MemoryOsEpisodeSummary | null {
   const trace_id = decodeExactNonEmptyString(raw.trace_id)
   const generation = asNumber(raw.generation)
   const created_at = asNumber(raw.created_at)
-  const terminal_marker = decodeNullableString(raw.terminal_marker)
   const claim_count = asNumber(raw.claim_count)
   const source_turn_range = raw.source_turn_range === null
     ? null
@@ -550,7 +545,6 @@ function decodeMemoryOsEpisode(raw: unknown): MemoryOsEpisodeSummary | null {
     || !Number.isSafeInteger(generation)
     || generation < 0
     || created_at == null
-    || terminal_marker === undefined
     || claim_count == null
     || !Number.isSafeInteger(claim_count)
     || claim_count < 0
@@ -561,7 +555,6 @@ function decodeMemoryOsEpisode(raw: unknown): MemoryOsEpisodeSummary | null {
     trace_id,
     generation,
     created_at,
-    terminal_marker,
     claim_count,
     source_turn_range,
     summary,
@@ -689,7 +682,7 @@ function decodeMemoryOsSelectionPolicy(raw: unknown): MemoryOsSelectionPolicy | 
 
 function decodeMemoryOsCount(raw: unknown): { shown: number } | null {
   if (!isRecord(raw)) return null
-  if (!hasNoUnknownKeys(raw, ['shown', 'terminal_markers', 'items'])) {
+  if (!hasNoUnknownKeys(raw, ['shown', 'items'])) {
     return null
   }
   const shown = asNumber(raw.shown)
@@ -704,7 +697,6 @@ function decodeMemoryOsCount(raw: unknown): { shown: number } | null {
 function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null {
   if (!isRecord(raw)) return null
   if (!hasExactKeys(raw, [
-    'schema',
     'keeper',
     'source',
     'producer',
@@ -716,9 +708,6 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
     'episodes',
     'facts',
   ])) return null
-  const schema = raw.schema === 'keeper.memory_os.recall_observability.v2'
-    ? raw.schema
-    : null
   const keeper = decodeExactNonEmptyString(raw.keeper)
   const source = raw.source === 'memory_os_files' ? raw.source : null
   const producer = raw.producer === 'keeper_librarian|keeper_memory_os_recall'
@@ -733,8 +722,7 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
   const factsRaw = isRecord(raw.facts) ? raw.facts : null
   const facts = decodeMemoryOsCount(raw.facts)
   if (
-    schema === null
-    || keeper === null
+    keeper === null
     || source === null
     || producer === null
     || !selection_policy
@@ -750,27 +738,21 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
   }
   const episodesCounts = decodeMemoryOsCount(episodesRaw)
   if (!episodesCounts) return null
-  if (!hasExactKeys(episodesRaw, ['shown', 'terminal_markers', 'items'])) {
+  if (!hasExactKeys(episodesRaw, ['shown', 'items'])) {
     return null
   }
   if (!hasExactKeys(factsRaw, ['shown', 'items'])) return null
-  const terminal_markers = asNumber(episodesRaw.terminal_markers)
   const episodes = decodeArray(episodesRaw.items, decodeMemoryOsEpisode)
   const factItems = decodeArray(factsRaw.items, decodeMemoryOsFact)
   if (
-    terminal_markers == null
-    || !Number.isSafeInteger(terminal_markers)
-    || terminal_markers < 0
-    || !episodes
+    !episodes
     || !factItems
   ) return null
   if (
     episodesCounts.shown !== episodes.length
-    || terminal_markers !== episodes.filter(episode => episode.terminal_marker !== null).length
     || facts.shown !== factItems.length
   ) return null
   return {
-    schema,
     keeper,
     source,
     producer,
@@ -781,7 +763,6 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
     read_errors,
     episodes: {
       ...episodesCounts,
-      terminal_markers,
       items: episodes,
     },
     facts: {

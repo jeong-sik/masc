@@ -90,7 +90,7 @@ that are legitimate against the existing memory model.
 | store — `uses` (`access_count`) | Deleted (RFC-0247). | **Drop.** |
 | store — `lastUsed` (`last_accessed`) | Deleted (RFC-0247). | **Drop** (use `reference_time` age instead). |
 | 핀 고정 사실 (operator pin: by/tag/at) | No mechanism. Pinning = operator judgment annotation; aligns with RFC-0247 ("value is judgment") and is **not** a score. | **New feature, P2** (write path; immutable annotation keyed by `claim_id`). |
-| 회상·주입 타임라인 (op + tok delta) | No per-event log. But episodes ARE real memory-shaping events (`created_at`, `terminal_marker`, `source_turn_range`, `claim_count`); `keeper_compact_audit` holds `before/after_tokens`, `tokens_freed`. | **Adapt/extend, P3**: derive a real timeline from episodes (+ compact audit join). Not a synthetic op log. |
+| 회상·주입 타임라인 (op + tok delta) | No per-event log. But episodes ARE real memory-shaping events (`created_at`, `source_turn_range`, `claim_count`); `keeper_compact_audit` holds `before/after_tokens`, `tokens_freed`. | **Adapt/extend, P3**: derive a real timeline from episodes (+ compact audit join). Not a synthetic op log. |
 | 압축 유지/요약/폐기 (3-column items) | `episode.episode_summary` (summarized), `preserved_tool_refs` (kept refs), `open_items`/`constraints` (kept), `source_turn_range`; compact audit token aggregates. Item-level kept/dropped lists do not exist. | **Adapt, P3**: map to real episode fields; "dropped" derived from range − kept. No fabricated item lists. |
 
 Summary: **2 sections fully real after a 1-field serializer add (composition, store), 1 new legitimate
@@ -229,7 +229,7 @@ fact's identity:
 Replace the fabricated op-timeline with a timeline derived from real events:
 
 - **Episodes** (already served, `memory_os.episodes.items`): each is a compaction/summary boundary —
-  `created_at`, `terminal_marker`, `source_turn_range`, `claim_count`, `summary`. Rendered as
+  `created_at`, `source_turn_range`, `claim_count`, `summary`. Rendered as
   `compact`/`summarize` events.
 - **Compact audit** (`keeper_compact_audit`: `before_tokens`, `after_tokens`, `tokens_freed`): joined
   to give the real token delta per compaction (the design's `tok` column, now measured not invented).

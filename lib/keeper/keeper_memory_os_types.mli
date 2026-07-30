@@ -26,7 +26,6 @@ val wire_field_source_turn_range : string
 val wire_field_lo : string
 val wire_field_hi : string
 val wire_field_created_at : string
-val wire_field_terminal_marker : string
 
 (** Episode-object fields accepted from the librarian and rendered in retry
     prompts. *)
@@ -101,7 +100,6 @@ type episode =
   ; claims : fact list
   ; source_turn_range : (int * int) option
   ; created_at : float
-  ; terminal_marker : string option
   }
 
 (** Producer identity SSOT. A non-empty [claim_id] is preserved exactly. When it

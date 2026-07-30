@@ -43,7 +43,6 @@ function payload(...entries: ReturnType<typeof entry>[]) {
     health: 'ok',
     stale_reason: null,
     memory_os: {
-      schema: 'keeper.memory_os.recall_observability.v2',
       keeper: 'sangsu',
       source: 'memory_os_files',
       producer: 'keeper_librarian|keeper_memory_os_recall',
@@ -59,7 +58,7 @@ function payload(...entries: ReturnType<typeof entry>[]) {
       episodes_store: '.masc/config/keepers/sangsu/episodes',
       recall_enabled: true,
       read_errors: [],
-      episodes: { shown: 0, terminal_markers: 0, items: [] },
+      episodes: { shown: 0, items: [] },
       facts: { shown: 0, items: [] },
     },
     entries,

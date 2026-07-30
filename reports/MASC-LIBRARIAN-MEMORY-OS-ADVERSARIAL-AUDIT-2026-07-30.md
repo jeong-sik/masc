@@ -37,6 +37,14 @@ closed decoder가 명시적으로 거부한다. 이 개선은 아직 새 PR CI·
 cutover가 증명되지 않았고, canonical TurnRef·recency selection·latest-wins·
 echo/dedupe 휴리스틱·비원자 publication이 남으므로 최종 판정은 계속 NO-GO다.
 
+2026-07-30 16:53 KST 후속 hard cut은 production producer가 항상 `None`만
+기록하던 `terminal_marker`를 episode type/codec/recall/dashboard/viewer/test에서
+완전히 제거했다. dashboard의 `terminal_markers` 파생 카운트와 실질적인 호환
+권한이 없던 versioned `schema` 문자열도 함께 제거했다. 새 closed decoder는
+이 사망 필드가 다시 들어오면 unknown field로 거부한다. 이 slice는 원자
+publication의 선행 정리이며, atomic Memory authority 자체가 완료됐다는 뜻은
+아니다.
+
 가장 중요한 차단 사유는 다음과 같다.
 
 1. 사용되지 않는 canonical store와 실제 JSONL store가 병존한다.
@@ -66,6 +74,8 @@ echo/dedupe 휴리스틱·비원자 publication이 남으므로 최종 판정은
   `407ae5bb92509f06bfb6fc5614e8539e230b2902`
 - 후속 구현 branch:
   `refactor/memory-current-only-hard-cut-20260730`
+- 사망 필드/원자 publication 후속 branch:
+  `refactor/memory-atomic-publication-20260730`
 - current-only 1차 source slice:
   `6f8bf76a816d822ca0165b6a8c42986b3d466e5c`
 - TTL authority 제거 2차 source slice:
@@ -120,7 +130,7 @@ binary SHA는 미증명으로 남긴다.
 | [#26410](https://github.com/jeong-sik/masc/pull/26410) `park chat before claiming receipt` | 직접 재검토 필요 | **Merged**, head `bde47167ea442db9e91b91a61c27832d66485e10`, 2026-07-30 16:03 KST merge | lease-before-admission을 줄이고 pending receipt를 admission 뒤 claim하는 ordering은 개선한다. 그러나 `park`를 공식 흐름으로 만들고 별도 `lease_id` lifecycle을 유지한다. | **merge됐어도 숙청 기준과 충돌. TurnRef/AttemptId 단일 FSM으로 재구성 필요** |
 | [#26428](https://github.com/jeong-sik/masc/pull/26428) `make current memory and provider input observable` | 직접 충돌 | **Draft**, head `508d77896e12f26652950d68c040830e0cb34691`, `MERGEABLE/BLOCKED`, `status:do-not-merge`, `reviewed:adversarial-non-pass` | immutable current snapshot/CAS와 provider-input observability 방향은 유효하다. 그러나 current head에도 TTL/`claim_kind`/dead episode fields/latest-wins/cadence/prompt-local provenance가 그대로다. | **전체 채택 금지. atomic snapshot/관측성만 분리 재구성** |
 | [#26435](https://github.com/jeong-sik/masc/pull/26435) `collapse compaction commit onto source CAS` | 직접 인접 | **Merged**, head `5866b26c14b91088349d21033a884ab6f1c65136`, merge commit `07a3d4f19d1f0c9563be01b8b6f8b4c90da14841`; exact-head `Build and Test`/`CI Gate`는 merge 뒤 취소 | compaction terminal projection을 source CAS에 접어 settlement 중복 authority를 줄인다. | **exact-head full CI green 없이 admin merge. Memory facts→episode→event publication/TurnRef/FIFO는 해결하지 않음** |
-| [#26440](https://github.com/jeong-sik/masc/pull/26440) `hard-cut retired Memory OS authority` | 본 감사 후속 구현 | **Draft**, branch `refactor/memory-current-only-hard-cut-20260730`, current `origin/main` rebase 뒤 `MERGEABLE/BLOCKED`; CI 생성 대기 | 1·2차 hard-cut과 본 보고서, wire v2/dead facade 보완을 함께 검증한다. | **cold cutover·CI·runtime 증명 전 do-not-merge** |
+| [#26440](https://github.com/jeong-sik/masc/pull/26440) `hard-cut retired Memory OS authority` | 본 감사 후속 구현 | **Merged**, head `120dcc8fbc905aa3ea0c4651dc1f0a19fcfb7767`, squash merge `8701b4a9e4cec823c535912374ae11759125f596` | 1·2차 hard-cut과 본 보고서를 main에 반영했다. 그러나 merge 시점에 exact-head `Build and Test`, Dashboard, ocamlformat, CI Gate가 아직 실행 중이었고 merge 뒤 취소됐다. | **source hard cut은 병합됐으나 exact-head full CI green 증거 없음. cold cutover·runtime 증명 전 NO-GO** |
 | [#26436](https://github.com/jeong-sik/masc/pull/26436) `enforce current-only Memory OS contracts` | 본 감사 1차 구현 | **Closed**, head `1c4692b806dd34e948afa99ea34d627092e880cc`, `status:do-not-merge`, `reviewed:adversarial-non-pass` | 1차 hard-cut의 CI Meta Guard 문제는 local 2차 slice에서 수정됐고 TTL authority도 추가 삭제했다. | **reopen 금지. 새 exact-head Draft PR로 다시 증명** |
 | [#26389](https://github.com/jeong-sik/masc/pull/26389) `separate Keeper context from turn usage` | 원칙상 인접 | **Merged**, head `bc4ab6d0fde691a4c43e588d549b4a3389e5d31e`, merge commit `407ae5bb92509f06bfb6fc5614e8539e230b2902` | producer 없는 context 추정과 legacy metric surface를 제거한다. | Memory OS persistence/context flow의 직접 수정은 아님 |
 | [#26392](https://github.com/jeong-sik/masc/pull/26392) `cost ledger exact runtime identity` | 원칙상 인접 | **Merged**, head `a332706ec04f49d8ac03e5de684dcf0e11003e3d`, merge commit `e19a05f6ca926eed0de054bd1371ae6f34a075e2` | timestamp/token heuristic 대신 exact identity를 사용한다. | 좋은 선례지만 Memory Turn identity는 수정하지 않음 |
@@ -915,7 +925,7 @@ Acceptance:
 | G3 | latest-wins와 park/lease/settlement를 서로 다른 SSOT로 분해; Librarian exact journal은 current-only closed state/trace/generation, trace-scoped restart fence, canonical path identity로 강화 | **부분 완료** — lossless per-Keeper FIFO/outbox 미구현 |
 | G4 | Memory `claim_kind`, `open_items`, episode `constraints`, `preserved_tool_refs`, `valid_for_days`/`valid_until`/`Ephemeral`와 expiry authority 제거 | **부분 완료** — echo window, recency/byte cap, substring score, first-100-byte dedupe 잔존 |
 | G5 | public fact/episode reader partial-drop 제거, recall unavailable 및 dashboard read error 노출, publication phase failure를 typed result로 분류 | **부분 완료** — journal terminal이 publication보다 앞서고 facts→episode→event partial commit/rollback이 없어 atomic revision/failover receipt 미구현 |
-| G6 | stale claim-kind projection 제거, 축소된 dashboard wire를 새 `keeper.memory_os.recall_observability.v2` closed contract로 고정, per-Keeper read error 추가 | **부분 완료** — receipt/age/stale generation 미구현 |
+| G6 | stale claim-kind projection 제거, versioned `schema`와 사망 `terminal_marker`/`terminal_markers`를 제거한 unversioned closed dashboard contract, per-Keeper read error 추가 | **부분 완료** — receipt/age/stale generation 미구현 |
 
 Focused verification:
 
@@ -924,6 +934,11 @@ Focused verification:
   `ocamlformat --check`, `ocamlc -stop-after parsing` 통과
 - dashboard: `tsc --noEmit` 통과
 - dashboard focused Vitest: 7 files, 255 tests 통과
+- 사망 필드 후속 slice: dashboard `tsc --noEmit`, focused Vitest
+  5 files / 231 tests 통과
+- production tree의 `terminal_marker`/`terminal_markers` 및 versioned
+  `keeper.memory_os.recall_observability.v2` symbol scan 0; dashboard 회귀 test는
+  retired `schema` 입력을 unknown field로 거부함을 고정
 - Python judge eval: 24 tests, Ruff, Pyright 통과
 - `git diff --check` 통과
 - `scripts/check-doc-code-refs.sh` 통과

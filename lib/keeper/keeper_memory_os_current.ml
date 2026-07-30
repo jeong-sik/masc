@@ -163,9 +163,9 @@ let to_json snapshot =
     ; "source", source_to_json snapshot.source
     ; "summary", `String snapshot.summary
     ; "facts", facts_to_json snapshot.facts
-    ; "open_items", `List (List.map (fun value -> `String value) snapshot.open_items)
-    ; "constraints", `List (List.map (fun value -> `String value) snapshot.constraints)
-    ; ( "preserved_tool_refs"
+    ; wire_field_open_items, `List (List.map (fun value -> `String value) snapshot.open_items)
+    ; wire_field_constraints, `List (List.map (fun value -> `String value) snapshot.constraints)
+    ; ( wire_field_preserved_tool_refs
       , `List (List.map (fun value -> `String value) snapshot.preserved_tool_refs) )
     ; "change", change_to_json snapshot.change
     ]
@@ -180,9 +180,9 @@ let of_json = function
            ; "source"
            ; "summary"
            ; "facts"
-           ; "open_items"
-           ; "constraints"
-           ; "preserved_tool_refs"
+           ; wire_field_open_items
+           ; wire_field_constraints
+           ; wire_field_preserved_tool_refs
            ; "change"
            ]
            fields ->
@@ -193,9 +193,9 @@ let of_json = function
        , List.assoc_opt "source" fields
        , List.assoc_opt "summary" fields
        , List.assoc_opt "facts" fields
-       , List.assoc_opt "open_items" fields
-       , List.assoc_opt "constraints" fields
-       , List.assoc_opt "preserved_tool_refs" fields
+       , List.assoc_opt wire_field_open_items fields
+       , List.assoc_opt wire_field_constraints fields
+       , List.assoc_opt wire_field_preserved_tool_refs fields
        , List.assoc_opt "change" fields
      with
      | ( Some (`String observed_schema)

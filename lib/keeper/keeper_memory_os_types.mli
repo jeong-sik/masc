@@ -18,6 +18,9 @@ val wire_field_claim_id : string
 
 val wire_field_source_turn : string
 val wire_field_source_tool_call_id : string
+val wire_field_open_items : string
+val wire_field_constraints : string
+val wire_field_preserved_tool_refs : string
 
 (** Claim-object fields accepted from the librarian and rendered in retry
     prompts. *)

@@ -14,6 +14,9 @@ let wire_field_last_verified_at = "last_verified_at"
 let wire_field_claim_id = "claim_id"
 let wire_field_source_turn = "source_turn"
 let wire_field_source_tool_call_id = "source_tool_call_id"
+let wire_field_open_items = "open_items"
+let wire_field_constraints = "constraints"
+let wire_field_preserved_tool_refs = "preserved_tool_refs"
 
 module Wire_field_set = Set.Make (String)
 

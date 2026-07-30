@@ -289,7 +289,7 @@ let run_request ~base_path ~keeper_name request =
   | Some entry ->
     let owner_nonce = entry.meta.runtime.nonce in
     (match
-       Keeper_turn_admission.run_admin_if_free ~base_path ~keeper_name (fun () ->
+       Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () ->
          match Keeper_registry.get ~base_path keeper_name with
          | None -> Error "keeper registration disappeared"
          | Some current when current.meta.runtime.nonce <> owner_nonce ->

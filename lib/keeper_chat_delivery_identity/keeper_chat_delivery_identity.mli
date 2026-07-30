@@ -36,6 +36,7 @@ type delivery_key =
   | Direct_request of Request_id.t
   | Async_request of Request_id.t
   | Queue_receipts of Receipt_ids.t
+  | Autonomous_turn of Ids.Turn_ref.t
 
 type transcript_slot =
   | Accepted_user

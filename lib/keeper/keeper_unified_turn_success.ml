@@ -92,6 +92,76 @@ let terminal_outcome_to_log_label = function
   | Terminal_checkpoint -> "checkpoint"
   | Terminal_input_required -> "input_required"
 
+let successful_surface_post (detail : Keeper_agent_run.tool_call_detail) =
+  String.equal
+    (Keeper_tool_resolution.canonical_tool_name detail.tool_name)
+    "keeper_surface_post"
+  &&
+  match detail.execution_outcome with
+  | Tool_result.Ok -> true
+  | Tool_result.Error | Tool_result.Unknown -> false
+;;
+
+let should_project_autonomous_chat
+      ~response_text
+      ~has_tool_calls
+      ~surface_already_persisted
+  =
+  String.trim response_text <> ""
+  && has_tool_calls
+  && not surface_already_persisted
+;;
+
+let project_autonomous_chat
+      ~config
+      ~meta
+      ~keeper_turn_id
+      (result : Keeper_agent_run.run_result)
+  =
+  let surface_already_persisted =
+    List.exists successful_surface_post result.tool_calls
+  in
+  if
+    should_project_autonomous_chat
+      ~response_text:result.response_text
+      ~has_tool_calls:(result.tool_calls <> [])
+      ~surface_already_persisted
+  then (
+    let turn_ref =
+      Ids.Turn_ref.make
+        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+        ~absolute_turn:keeper_turn_id
+    in
+    let delivery_key =
+      Keeper_chat_delivery_identity.Autonomous_turn turn_ref
+    in
+    match
+      Keeper_chat_store.append_assistant_message_once
+        ~base_dir:config.Workspace.base_path
+        ~keeper_name:meta.name
+        ~delivery_key
+        ~content:result.response_text
+        ~surface:Surface_ref.Agent
+        ~assistant_kind:Keeper_chat_store.Row_kind.Autonomous_activity
+        ~blocks:(Keeper_chat_blocks.parse_text_to_blocks result.response_text)
+        ~turn_ref
+        ()
+    with
+    | Ok (Keeper_chat_store.Appended _) ->
+      Keeper_chat_broadcast.chat_appended
+        ~keeper_name:meta.name
+        ~source:(Surface_ref.lane_label Surface_ref.Agent)
+        ~content:result.response_text
+        ()
+    | Ok (Keeper_chat_store.Already_present _) -> ()
+    | Error detail ->
+      Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
+        ~config
+        ~keeper_name:meta.name
+        ~side_effect:"autonomous chat projection"
+        detail)
+;;
+
 let append_metrics_snapshot
       ~config
       ~meta
@@ -524,6 +594,7 @@ module For_testing = struct
 
   let reset_turn_failures_for_stop_reason = reset_turn_failures_for_stop_reason
   let acknowledge_pending_messages = acknowledge_pending_messages
+  let should_project_autonomous_chat = should_project_autonomous_chat
 
   type nonrec cycle_post_action = cycle_post_action =
     | Assign_task
@@ -619,6 +690,11 @@ let handle
     ~lifecycle
     ~wall_tokens_per_second
     ~terminal_outcome;
+  project_autonomous_chat
+    ~config
+    ~meta
+    ~keeper_turn_id
+    result;
   KUM.broadcast_lifecycle_events
     ~name:updated_meta.name
     ~turn_generation:lifecycle.turn_generation

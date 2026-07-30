@@ -974,6 +974,54 @@ let test_failure_turn_kind_roundtrip () =
       | messages ->
           Alcotest.failf "expected 2 rows, got %d" (List.length messages))
 
+let test_autonomous_activity_is_idempotent_and_not_direct_reply () =
+  let base_dir = temp_base_path "keeper-chat-store-autonomous-activity" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-autonomous-activity" in
+      let turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-autonomous" ~absolute_turn:42
+      in
+      let delivery_key =
+        Keeper_chat_delivery_identity.Autonomous_turn turn_ref
+      in
+      let append () =
+        K.append_assistant_message_once ~base_dir ~keeper_name ~delivery_key
+          ~content:"Implemented and verified task-119."
+          ~surface:Masc.Surface_ref.Agent
+          ~assistant_kind:K.Row_kind.Autonomous_activity
+          ~turn_ref
+          ()
+      in
+      (match append () with
+       | Ok (K.Appended _) -> ()
+       | Ok (K.Already_present _) ->
+         Alcotest.fail "autonomous row unexpectedly already present"
+       | Error detail -> Alcotest.fail detail);
+      (match append () with
+       | Ok (K.Already_present _) -> ()
+       | Ok (K.Appended _) ->
+         Alcotest.fail "autonomous row duplicated on retry"
+       | Error detail -> Alcotest.fail detail);
+      match K.load ~base_dir ~keeper_name with
+      | [ activity ] ->
+        Alcotest.(check bool) "typed autonomous kind" true
+          (K.Row_kind.equal activity.kind K.Row_kind.Autonomous_activity);
+        Alcotest.(check int) "not direct-conversation context" 0
+          (MS.recent_direct_conversation_of_messages [ activity ]
+           |> List.length);
+        let open Yojson.Safe.Util in
+        (match K.to_json_array [ activity ] with
+         | `List [ row ] ->
+           Alcotest.(check string) "history kind" "autonomous_activity"
+             (row |> member "kind" |> to_string);
+           Alcotest.(check string) "history surface" "agent"
+             (row |> member "surface" |> member "kind" |> to_string)
+         | _ -> Alcotest.fail "expected one history row")
+      | messages ->
+        Alcotest.failf "expected 1 row, got %d" (List.length messages))
+
 let test_kind_absent_reads_utterance () =
   (* Every row written before the [kind] field existed is an utterance;
      the writer also omits the field for utterances, so ordinary rows
@@ -2120,6 +2168,10 @@ let () =
         [
           Alcotest.test_case "failure turn kind roundtrip" `Quick
             test_failure_turn_kind_roundtrip;
+          Alcotest.test_case
+            "autonomous activity is idempotent and not a direct reply"
+            `Quick
+            test_autonomous_activity_is_idempotent_and_not_direct_reply;
           Alcotest.test_case "absent kind reads utterance" `Quick
             test_kind_absent_reads_utterance;
           Alcotest.test_case "unknown kind reported, reads utterance" `Quick

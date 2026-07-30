@@ -109,6 +109,7 @@ function normalizeConversationSource(
   if (
     source === 'direct_user'
     || source === 'direct_assistant'
+    || source === 'autonomous_activity'
     || source === 'world_state_prompt'
     || source === 'internal_assistant'
     || source === 'tool_result'
@@ -903,7 +904,16 @@ function normalizeHistoryEntry(
   // particular, persisted thinking/trace/fusion blocks may intentionally have
   // no visible `content`; rejecting them here erased completed work on reload.
   if (!rawText && !attachments?.length && !audio && !hasRenderableBlocks) return null
-  const source = normalizeConversationSource(raw.source, role, rawText, previousSource)
+  const declaredSource =
+    role === 'assistant' && asString(raw.kind) === 'autonomous_activity'
+      ? 'autonomous_activity'
+      : raw.source
+  const source = normalizeConversationSource(
+    declaredSource,
+    role,
+    rawText,
+    previousSource,
+  )
   const text = formatKeeperVisibleReply(rawText)
   if (!text && !attachments?.length && !audio && !hasRenderableBlocks) return null
   const timestamp = toIsoTimestamp(raw.ts_unix) ?? toIsoTimestamp(raw.timestamp)

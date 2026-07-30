@@ -128,7 +128,7 @@ val build :
     Sources (all filtered to activity strictly after [since_unix]):
     - [chat]: [Keeper_chat_store] paged backward from the tail; utterances
       count as [new_messages], [Row_kind.Transport_failure] rows as
-      [transport_failures].
+      [transport_failures], and autonomous-activity/tool rows are ignored.
     - [turns.completed]: keeper-local [turn-records] day-files.
     - [turns.failed]: activity-events [keeper.turn_failed] for the keeper.
     - [turns.crashes]: [Keeper_crash_persistence] recent crash events.

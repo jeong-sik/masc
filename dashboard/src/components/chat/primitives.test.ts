@@ -3287,6 +3287,21 @@ describe('ChatMessageBubble — workspace source badge (C2)', () => {
     expect(badge?.textContent).toContain('월드')
   })
 
+  it('badges autonomous activity when enabled', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'a', text: 'task completed', role: 'assistant', source: 'autonomous_activity' })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    const badge = container.querySelector('.kw-src-badge.autonomous')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toContain('자율 활동')
+  })
+
   it('leaves an ordinary user turn unbadged', () => {
     render(
       html`<${ChatTranscript}

@@ -59,12 +59,16 @@ end
     advance the lane watermark, so the user line it failed to answer
     stays pending until the keeper's next real utterance, and
     observation never quotes it back as the keeper's own words.
+    [Autonomous_activity] is a Keeper-initiated work result projected for
+    operator visibility. It renders in chat but is not a reply to a pending
+    user row and is not quoted back into direct-conversation context.
     Persisted as ["kind"]; the field is absent for utterances, so rows
     written before it existed read unchanged. *)
 module Row_kind : sig
   type t =
     | Utterance
     | Transport_failure
+    | Autonomous_activity
 
   val to_label : t -> string
   val of_label : string -> t option

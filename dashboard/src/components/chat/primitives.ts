@@ -623,6 +623,7 @@ function avatarMonogram(entry: KeeperConversationEntry): string {
 // (world-state injection, internal prompt, tool result, system) and leave the
 // two ordinary cases (direct_user / direct_assistant) unbadged.
 const SOURCE_BADGE: Partial<Record<KeeperConversationSource, { label: string; cls: string }>> = {
+  autonomous_activity: { label: '자율 활동', cls: 'autonomous' },
   world_state_prompt: { label: '월드', cls: 'world' },
   internal_assistant: { label: '내부', cls: 'internal' },
   tool_result: { label: '도구', cls: 'tool' },

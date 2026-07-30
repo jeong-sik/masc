@@ -360,6 +360,7 @@ let read_chat ~base_dir ~keeper_name ~since ~errs =
       Hashtbl.add seen id ();
       (match kind with
        | Keeper_chat_store.Row_kind.Transport_failure -> incr transport
+       | Keeper_chat_store.Row_kind.Autonomous_activity -> ()
        | Keeper_chat_store.Row_kind.Utterance ->
          (match role with
           | Keeper_chat_store.Role.User | Keeper_chat_store.Role.Assistant ->

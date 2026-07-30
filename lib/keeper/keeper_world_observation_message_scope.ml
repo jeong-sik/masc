@@ -143,7 +143,8 @@ let recent_direct_conversation_of_messages
           }
       | Keeper_chat_store.Role.Assistant ->
         (match m.kind with
-         | Keeper_chat_store.Row_kind.Transport_failure -> None
+         | Keeper_chat_store.Row_kind.Transport_failure
+         | Keeper_chat_store.Row_kind.Autonomous_activity -> None
          | Keeper_chat_store.Row_kind.Utterance ->
            (match m.audio with
             | Some _ -> None
@@ -217,6 +218,9 @@ let acknowledged_turn_refs messages =
         StringSet.add (Ids.Turn_ref.to_string turn_ref) refs
       | Keeper_chat_store.Role.Assistant,
         Keeper_chat_store.Row_kind.Transport_failure,
+        _
+      | Keeper_chat_store.Role.Assistant,
+        Keeper_chat_store.Row_kind.Autonomous_activity,
         _
       | Keeper_chat_store.Role.Assistant,
         Keeper_chat_store.Row_kind.Utterance,

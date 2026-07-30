@@ -90,6 +90,7 @@ type delivery_key =
   | Direct_request of Request_id.t
   | Async_request of Request_id.t
   | Queue_receipts of Receipt_ids.t
+  | Autonomous_turn of Ids.Turn_ref.t
 
 type transcript_slot =
   | Accepted_user
@@ -150,6 +151,11 @@ let delivery_key_to_yojson = function
                (fun receipt_id -> `String (Receipt_id.to_string receipt_id))
                (Receipt_ids.to_list receipt_ids)) )
       ]
+  | Autonomous_turn turn_ref ->
+    `Assoc
+      [ "kind", `String "autonomous_turn"
+      ; "turn_ref", Ids.Turn_ref.to_yojson turn_ref
+      ]
 ;;
 
 let delivery_key_of_yojson = function
@@ -205,6 +211,17 @@ let delivery_key_of_yojson = function
          | Error error -> Error (Receipt_ids.error_to_string error)
        in
        Ok (Queue_receipts receipt_ids)
+     | "autonomous_turn" ->
+       let* () =
+         validate_fields
+           ~context:"autonomous turn delivery identity"
+           ~expected:[ "kind"; "turn_ref" ]
+           fields
+       in
+       let* turn_ref = string_field "turn_ref" fields in
+       (match Ids.Turn_ref.of_string turn_ref with
+        | Some turn_ref -> Ok (Autonomous_turn turn_ref)
+        | None -> Error "autonomous turn identity has an invalid turn_ref")
      | _ -> Error (Printf.sprintf "unsupported delivery identity kind %S" kind))
   | _ -> Error "delivery identity must be an object"
 ;;
@@ -222,9 +239,11 @@ let delivery_key_equal left right =
       | [], _ :: _ | _ :: _, [] -> false
     in
     equal_lists (Receipt_ids.to_list left) (Receipt_ids.to_list right)
-  | Direct_request _, (Async_request _ | Queue_receipts _)
-  | Async_request _, (Direct_request _ | Queue_receipts _)
-  | Queue_receipts _, (Direct_request _ | Async_request _) -> false
+  | Autonomous_turn left, Autonomous_turn right -> Ids.Turn_ref.equal left right
+  | Direct_request _, (Async_request _ | Queue_receipts _ | Autonomous_turn _)
+  | Async_request _, (Direct_request _ | Queue_receipts _ | Autonomous_turn _)
+  | Queue_receipts _, (Direct_request _ | Async_request _ | Autonomous_turn _)
+  | Autonomous_turn _, (Direct_request _ | Async_request _ | Queue_receipts _) -> false
 ;;
 
 let delivery_key_file_stem key =
@@ -239,6 +258,7 @@ let delivery_key_file_stem key =
   | Direct_request _ -> "direct-" ^ digest
   | Async_request _ -> "async-" ^ digest
   | Queue_receipts _ -> "queue-" ^ digest
+  | Autonomous_turn _ -> "autonomous-" ^ digest
 ;;
 
 let transcript_slot_to_yojson = function

@@ -631,6 +631,29 @@ describe('thread history merge & persistence', () => {
     expect(entries[1]?.externalMessageId).toBe('message-1')
   })
 
+  it('maps an agent-surface assistant row to visible autonomous activity', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        content: 'task-119 구현 및 검증 완료',
+        ts: 1_780_000_001,
+        kind: 'autonomous_activity',
+        turn_ref: 'trace-autonomous#42',
+        delivery_key: {
+          kind: 'autonomous_turn',
+          turn_ref: 'trace-autonomous#42',
+        },
+        surface: { kind: 'agent' },
+      },
+    ])
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.source).toBe('autonomous_activity')
+    expect(entries[0]?.surface).toEqual({ kind: 'agent' })
+    expect(entries[0]?.turnRef).toBe('trace-autonomous#42')
+    expect(isDefaultVisibleConversationEntry(entries[0]!)).toBe(true)
+  })
+
   it('prefers backend stream contracts from REST chat history', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       {

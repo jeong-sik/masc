@@ -92,29 +92,34 @@ end
    [Utterance] is something the keeper actually said; [Transport_failure]
    is the server persisting a failed request terminal ("Keeper request
    failed: ...") so the operator still sees the failure after a reload.
-   Readers branch on the type: a transport failure is not a self reply —
-   it does not advance the lane watermark, so the user line it failed to
-   answer stays pending until the keeper's next real utterance — and it
-   is never quoted back as the keeper's own words. On disk the field is
-   ["kind"], absent for utterances so pre-existing rows read unchanged. *)
+   [Autonomous_activity] is a Keeper-initiated work result shown to the
+   operator, not a reply to any pending user row. Readers branch on the type:
+   only utterances advance the lane watermark or enter direct-conversation
+   context. On disk the field is ["kind"], absent for utterances so
+   pre-existing rows read unchanged. *)
 module Row_kind = struct
   type t =
     | Utterance
     | Transport_failure
+    | Autonomous_activity
 
   let to_label = function
     | Utterance -> "utterance"
     | Transport_failure -> "transport_failure"
+    | Autonomous_activity -> "autonomous_activity"
 
   let of_label = function
     | "utterance" -> Some Utterance
     | "transport_failure" -> Some Transport_failure
+    | "autonomous_activity" -> Some Autonomous_activity
     | _ -> None
 
   let equal a b =
     match a, b with
-    | Utterance, Utterance | Transport_failure, Transport_failure -> true
-    | (Utterance | Transport_failure), _ -> false
+    | Utterance, Utterance
+    | Transport_failure, Transport_failure
+    | Autonomous_activity, Autonomous_activity -> true
+    | (Utterance | Transport_failure | Autonomous_activity), _ -> false
 end
 
 type stream_lifecycle_event =
@@ -572,7 +577,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
   let kind_field =
     match kind with
     | Row_kind.Utterance -> []
-    | Row_kind.Transport_failure ->
+    | Row_kind.Transport_failure | Row_kind.Autonomous_activity ->
         [ ("kind", `String (Row_kind.to_label kind)) ]
   in
   let all_fields =
@@ -1917,7 +1922,7 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
                  failure apart from keeper speech. *)
               @ (match m.kind with
                  | Row_kind.Utterance -> []
-                 | Row_kind.Transport_failure ->
+                 | Row_kind.Transport_failure | Row_kind.Autonomous_activity ->
                      [ ("kind", `String (Row_kind.to_label m.kind)) ])
               @ opt_string_field "tool_call_id" m.tool_call_id
               @ opt_string_field "tool_call_name" m.tool_call_name
@@ -2009,7 +2014,7 @@ let transcript_line_to_json (m : chat_message) : Yojson.Safe.t =
          back as the keeper's own words. *)
     @ (match m.kind with
        | Row_kind.Utterance -> []
-       | Row_kind.Transport_failure ->
+       | Row_kind.Transport_failure | Row_kind.Autonomous_activity ->
            [ ("kind", `String (Row_kind.to_label m.kind)) ]))
 
 let turn_transcript_to_json ~keeper ~turn_ref (t : turn_transcript) :

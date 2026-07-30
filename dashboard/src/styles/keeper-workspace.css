@@ -1672,6 +1672,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   background: var(--color-bg-surface); border: 1px solid var(--color-border-default);
 }
 .kw-src-badge.world    { color: var(--color-accent-fg); border-color: var(--color-accent-fg-dim); }
+.kw-src-badge.autonomous { color: var(--color-status-ok); border-color: rgb(var(--color-status-ok-glow) / 0.4); }
 .kw-src-badge.internal { color: var(--color-fg-muted); }
 .kw-src-badge.tool     { color: var(--color-status-ok); border-color: rgb(var(--color-status-ok-glow) / 0.4); }
 .kw-src-badge.system   { color: var(--color-status-warn); border-color: rgb(var(--color-status-warn-glow) / 0.4); }

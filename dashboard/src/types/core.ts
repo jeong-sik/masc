@@ -641,6 +641,7 @@ export const SYSTEM_ACTOR_NAME = 'system' as const
 export type KeeperConversationSource =
   | 'direct_user'
   | 'direct_assistant'
+  | 'autonomous_activity'
   | 'world_state_prompt'
   | 'internal_assistant'
   | 'tool_result'

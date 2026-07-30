@@ -391,6 +391,31 @@ let test_bootstrap_stimulus_keeps_reactive_post_action () =
     Alcotest.fail
       "bootstrap stimulus must not be reclassified from reactive to scheduled"
 
+let test_autonomous_chat_projection_requires_work_evidence () =
+  let should_project =
+    Masc.Keeper_unified_turn_success.For_testing.should_project_autonomous_chat
+  in
+  check bool "tool-backed result projects" true
+    (should_project
+       ~response_text:"Implemented task-119."
+       ~has_tool_calls:true
+       ~surface_already_persisted:false);
+  check bool "idle prose does not project" false
+    (should_project
+       ~response_text:"No actionable work."
+       ~has_tool_calls:false
+       ~surface_already_persisted:false);
+  check bool "surface post is not duplicated" false
+    (should_project
+       ~response_text:"Already posted."
+       ~has_tool_calls:true
+       ~surface_already_persisted:true);
+  check bool "blank tool result does not invent speech" false
+    (should_project
+       ~response_text:" "
+       ~has_tool_calls:true
+       ~surface_already_persisted:false)
+
 let test_preview_does_not_invent_wake_reason () =
   let preview_meta =
     { meta with
@@ -531,6 +556,8 @@ let () =
             test_threaded_stimulus_decision_renders_wake_reason;
           test_case "bootstrap keeps reactive post-action" `Quick
             test_bootstrap_stimulus_keeps_reactive_post_action;
+          test_case "chat projection requires work evidence" `Quick
+            test_autonomous_chat_projection_requires_work_evidence;
           test_case "preview invents no wake reason" `Quick
             test_preview_does_not_invent_wake_reason;
         ] );

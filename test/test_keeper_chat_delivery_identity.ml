@@ -69,6 +69,24 @@ let test_async_roundtrip () =
        (Identity.delivery_key_file_stem decoded))
 ;;
 
+let test_autonomous_turn_roundtrip () =
+  let turn_ref =
+    Ids.Turn_ref.make ~trace_id:"trace-autonomous-chat" ~absolute_turn:42
+  in
+  let key = Identity.Autonomous_turn turn_ref in
+  let decoded =
+    Identity.delivery_key_to_yojson key
+    |> Identity.delivery_key_of_yojson
+    |> expect_ok
+  in
+  check bool "autonomous turn identity roundtrips" true
+    (Identity.delivery_key_equal key decoded);
+  check bool "autonomous filename namespace is stable" true
+    (String.equal
+       (Identity.delivery_key_file_stem key)
+       (Identity.delivery_key_file_stem decoded))
+;;
+
 let test_transcript_slot_roundtrip () =
   let slots =
     [ Identity.Accepted_user
@@ -137,6 +155,10 @@ let () =
             "queue identity is nonempty"
             `Quick
             test_queue_requires_nonempty_receipts
+        ; test_case
+            "autonomous turn roundtrip"
+            `Quick
+            test_autonomous_turn_roundtrip
         ; test_case
             "transcript slots roundtrip"
             `Quick

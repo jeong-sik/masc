@@ -354,6 +354,30 @@ let test_keeper_chat_recovery_route_is_exact () =
           selected)
    | None ->
      fail "event selection must address duplicate post ids independently");
+  let selection_state =
+    Keeper_event_queue_state.empty
+    |> Keeper_event_queue_state.with_revision 17L
+    |> Keeper_event_queue_state.with_pending duplicate_post_id_queue
+    |> Keeper_event_queue_state.with_revision 23L
+  in
+  (match
+     Server_dashboard_http_keeper_event_queue_operator.For_testing.pending_selection_at
+       ~queue_index:1
+       selection_state
+   with
+   | Some selection ->
+     check bool
+       "event selection keeps the exact typed source"
+       true
+       (Keeper_event_queue.stimulus_identity_equal
+          same_post_id_source
+          selection.source);
+     check int64
+       "event selection keeps source incarnation instead of snapshot revision"
+       17L
+       selection.admitted_revision
+   | None ->
+     fail "event selection lost its durable source incarnation");
   let quarantine_path =
     "/api/v1/keepers/idealist/board-attention/quarantines/ba-root-123/recovery"
   in

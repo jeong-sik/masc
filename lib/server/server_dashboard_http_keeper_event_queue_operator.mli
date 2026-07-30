@@ -18,6 +18,11 @@ module For_testing : sig
     queue_index:int ->
     Keeper_event_queue.t ->
     Keeper_event_queue.stimulus option
+
+  val pending_selection_at :
+    queue_index:int ->
+    Keeper_event_queue_state.t ->
+    Keeper_event_queue_state.pending_selection option
 end
 
 val handle_get :

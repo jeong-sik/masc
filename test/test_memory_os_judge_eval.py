@@ -20,29 +20,32 @@ spec.loader.exec_module(memory_os_judge_eval)
 
 class MemoryOsJudgeEvalTest(unittest.TestCase):
     def test_extract_json_array_skips_prose_brackets(self) -> None:
-        text = '[analysis] judge rationale\n[{"i":1,"label":"durable"}]'
+        text = '[analysis] judge rationale\n[{"i":1,"label":"useful"}]'
         self.assertEqual(
             memory_os_judge_eval._extract_json_array(text),
-            '[{"i":1,"label":"durable"}]',
+            '[{"i":1,"label":"useful"}]',
         )
 
     def test_extract_json_array_keeps_nested_arrays(self) -> None:
-        text = '```json\n[{"i":1,"label":"durable","why":["a","b"]}]\n```'
+        text = '```json\n[{"i":1,"label":"useful","why":["a","b"]}]\n```'
         self.assertEqual(
             memory_os_judge_eval._extract_json_array(text),
-            '[{"i":1,"label":"durable","why":["a","b"]}]',
+            '[{"i":1,"label":"useful","why":["a","b"]}]',
         )
 
     def test_extract_json_array_skips_valid_non_answer_arrays(self) -> None:
-        text = 'valid labels: ["durable","ephemeral","uncertain"]\n[{"i":1,"label":"durable"}]'
+        text = 'valid labels: ["useful","noise","uncertain"]\n[{"i":1,"label":"useful"}]'
         self.assertEqual(
             memory_os_judge_eval._extract_json_array(text),
-            '[{"i":1,"label":"durable"}]',
+            '[{"i":1,"label":"useful"}]',
         )
 
-    # noise_rate — ephemeral / (ephemeral + durable), uncertain excluded
+    def test_valid_labels_are_eval_only_vocabulary(self) -> None:
+        self.assertEqual(memory_os_judge_eval.VALID, {"useful", "noise", "uncertain"})
+
+    # noise_rate — noise / (noise + useful), uncertain excluded
     def test_noise_rate_excludes_uncertain(self) -> None:
-        labels = ["ephemeral", "durable", "durable", "uncertain"]
+        labels = ["noise", "useful", "useful", "uncertain"]
         self.assertEqual(memory_os_judge_eval.noise_rate(labels), 1 / 3)
 
     def test_noise_rate_empty_is_zero(self) -> None:
@@ -51,8 +54,8 @@ class MemoryOsJudgeEvalTest(unittest.TestCase):
     def test_noise_rate_all_uncertain_is_zero(self) -> None:
         self.assertEqual(memory_os_judge_eval.noise_rate(["uncertain", "uncertain"]), 0.0)
 
-    def test_noise_rate_all_ephemeral_is_one(self) -> None:
-        self.assertEqual(memory_os_judge_eval.noise_rate(["ephemeral", "ephemeral"]), 1.0)
+    def test_noise_rate_all_noise_is_one(self) -> None:
+        self.assertEqual(memory_os_judge_eval.noise_rate(["noise", "noise"]), 1.0)
 
     # _parse_index — 1-based judge index to 0-based position; malformed -> None
     def test_parse_index_one_based_to_zero_based(self) -> None:
@@ -117,12 +120,12 @@ class MemoryOsJudgeEvalTest(unittest.TestCase):
     # _looks_like_answer_array — list of dicts carrying an "i" index key
     def test_looks_like_answer_array_true(self) -> None:
         self.assertTrue(
-            memory_os_judge_eval._looks_like_answer_array([{"i": 1, "label": "durable"}])
+            memory_os_judge_eval._looks_like_answer_array([{"i": 1, "label": "useful"}])
         )
 
     def test_looks_like_answer_array_false_for_label_list(self) -> None:
         self.assertFalse(
-            memory_os_judge_eval._looks_like_answer_array(["durable", "ephemeral"])
+            memory_os_judge_eval._looks_like_answer_array(["useful", "noise"])
         )
 
     def test_looks_like_answer_array_false_for_non_list(self) -> None:

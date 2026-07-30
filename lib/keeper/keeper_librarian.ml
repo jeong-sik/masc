@@ -16,7 +16,6 @@ let wire_field_category = Keeper_memory_os_types.wire_field_category
 let wire_field_source_turn = Keeper_memory_os_types.wire_field_source_turn
 let wire_field_source_tool_call_id = Keeper_memory_os_types.wire_field_source_tool_call_id
 let wire_field_claim_id = Keeper_memory_os_types.wire_field_claim_id
-let wire_field_valid_for_days = Keeper_memory_os_types.wire_field_valid_for_days
 let wire_episode_fields = Keeper_memory_os_types.wire_librarian_episode_fields
 let wire_claim_fields = Keeper_memory_os_types.wire_librarian_claim_fields
 
@@ -182,23 +181,6 @@ let claim_id_field fields =
   | value -> value
 ;;
 
-(* Producer-declared lifetime in whole days, same contract as the explicit
-   keeper_memory_write surface (RFC-0351 S2). Explicit null = durable. A
-   missing field violates the provider schema, while a
-   present value outside [1, max_valid_for_days] or of the wrong JSON type
-   rejects the claim (strict, like every other field here): a malformed
-   lifetime silently stored as "forever" is exactly the ephemeral-immortality
-   drift this field closes. *)
-let valid_for_days_field fields =
-  match List.assoc_opt wire_field_valid_for_days fields with
-  | None -> None
-  | Some `Null -> Some None
-  | Some (`Int days)
-    when days >= 1 && days <= Keeper_memory_os_types.max_valid_for_days ->
-    Some (Some days)
-  | Some _ -> None
-;;
-
 let fact_of_json ~trace_id ~messages ~now (json : Yojson.Safe.t) : fact option =
   match json with
   | `Assoc fields ->
@@ -210,14 +192,8 @@ let fact_of_json ~trace_id ~messages ~now (json : Yojson.Safe.t) : fact option =
        , int_field wire_field_source_turn fields
        , claim_id_field fields
        , required_nullable_string_field wire_field_source_tool_call_id fields
-       , valid_for_days_field fields
      with
-     | ( Some claim
-       , Some category
-       , Some turn
-       , Some claim_id
-       , Some tool_call_id
-       , Some valid_for_days )
+     | Some claim, Some category, Some turn, Some claim_id, Some tool_call_id
        when
          turn >= 0
          && source_is_in_input ~messages ~turn ~tool_call_id ->
@@ -226,22 +202,13 @@ let fact_of_json ~trace_id ~messages ~now (json : Yojson.Safe.t) : fact option =
         ; category
         ; source = claim_source ~trace_id turn tool_call_id
         ; first_seen = now
-        ; valid_until =
-             (* RFC-0351 S2: the extracting model's own lifetime judgment for
-                the claim; explicit null = durable. Closes the librarian half of the
-                "ephemeral is kept briefly and forgotten" prompt promise —
-                the read side (fact_is_current + expiry GC) has been waiting
-                on a producer since #25519. *)
-             Option.map
-               (Keeper_memory_os_types.valid_until_of_days ~now)
-               valid_for_days
-         ; last_verified_at = None (* RFC-0285 §3.3 / RFC-0259 P7: re-extraction must not advance last_verified_at *)
-         ; claim_id
-         }
-     | (Some _, Some _, Some _, _, _, _)
-     | (Some _, Some _, None, _, _, _)
-     | (Some _, None, _, _, _, _)
-     | (None, _, _, _, _, _) -> None)
+        ; last_verified_at = None (* RFC-0285 §3.3 / RFC-0259 P7: re-extraction must not advance last_verified_at *)
+        ; claim_id
+        }
+     | (Some _, Some _, Some _, _, _)
+     | (Some _, Some _, None, _, _)
+     | (Some _, None, _, _, _)
+     | (None, _, _, _, _) -> None)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
@@ -299,7 +266,6 @@ let episode_of_json_result ?now ~generation (inp : input) (json : Yojson.Safe.t)
                   ; source_turn_range =
                       Keeper_memory_os_types.source_turn_range_of_facts claims
                   ; created_at = now
-                  ; valid_until = None
                   ; terminal_marker = None
                   }
               | Some _ | None -> Error Claim_schema_mismatch))

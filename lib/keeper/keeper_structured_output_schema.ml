@@ -5,7 +5,6 @@ let number_schema = `Assoc [ "type", `String "number" ]
 let integer_schema = `Assoc [ "type", `String "integer" ]
 let boolean_schema = `Assoc [ "type", `String "boolean" ]
 let nullable_string_schema = `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
-let nullable_integer_schema = `Assoc [ "type", `List [ `String "integer"; `String "null" ] ]
 
 let string_array_schema =
   `Assoc [ "type", `String "array"; "items", string_schema ]
@@ -41,7 +40,6 @@ let librarian_claim_schema =
     ; Keeper_librarian.wire_field_source_turn, integer_schema
     ; Keeper_librarian.wire_field_source_tool_call_id, nullable_string_schema
     ; Keeper_librarian.wire_field_claim_id, nullable_string_schema
-    ; Keeper_librarian.wire_field_valid_for_days, nullable_integer_schema
     ]
   in
   object_schema ~required:(List.map fst fields) fields

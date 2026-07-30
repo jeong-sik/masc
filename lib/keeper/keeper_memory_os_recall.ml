@@ -18,15 +18,9 @@ let record_unavailable reason =
     ()
 ;;
 
-let episode_is_current ~now (episode : episode) =
-  match episode.valid_until with
-  | None -> true
-  | Some ts -> ts >= now
-;;
-
 (* Recall carries typed context and the exact claim. It does not synthesize an
    age bucket or an UNVERIFIED/stale verdict from timestamps. *)
-let render_fact ~now:_ fact =
+let render_fact fact =
   let source = fact.source in
   Printf.sprintf
     "- [category=%s turn=%d] %s"
@@ -218,7 +212,7 @@ let log_truncation ~keeper_id ~kind ~metric ~store_count ~injected_count ~droppe
     budget
 ;;
 
-let render_context_exn ~keepers_dir ~keeper_id ~now () =
+let render_context_exn ~keepers_dir ~keeper_id ~now:_ () =
   let all_facts, all_episodes =
     Keeper_memory_os_io.with_episode_bundle_lock_for_keepers_dir
       ~keepers_dir
@@ -239,14 +233,10 @@ let render_context_exn ~keepers_dir ~keeper_id ~now () =
               in
               all_facts, all_episodes))
   in
-  let all_facts = List.filter (fact_is_current ~now) all_facts in
   (* Diagnostic: the TOTAL store size, independent of the selection budget
      below -- this is what tells an operator "the store has grown past what
      recall injects" rather than silently equalling whatever got selected. *)
   let n_facts_in_store = List.length all_facts in
-  let all_episodes =
-    List.filter (episode_is_current ~now) all_episodes
-  in
   let max_facts = Keeper_config.keeper_memory_os_recall_max_facts () in
   let max_episodes = Keeper_config.keeper_memory_os_recall_max_episodes () in
   let facts, facts_dropped =
@@ -280,7 +270,7 @@ let render_context_exn ~keepers_dir ~keeper_id ~now () =
       ~dropped:episodes_dropped
       ~budget:max_episodes;
   let max_bytes = Keeper_config.keeper_memory_os_recall_max_bytes () in
-  let fact_lines = List.map (render_fact ~now) facts in
+  let fact_lines = List.map render_fact facts in
   let fact_bytes =
     List.fold_left (fun acc line -> acc + String.length line + 1) 0 fact_lines
   in

@@ -43,7 +43,6 @@ val keeper_context_status_json
     - [title] — short hook (≤120 chars). May be empty; then [content]
       stands alone.
     - [content] — body. Required; must be non-empty.
-    - [valid_for_days] — optional producer-declared lifetime.
 
     Returns a JSON string with [{ok, error_kind, ...}]:
     - On success: [ok=true], [rows_written], [outcome], [store].
@@ -74,7 +73,6 @@ type memory_write_error_kind =
   | Title_too_long
   | Content_empty
   | Content_too_long
-  | Invalid_valid_for_days
   | Persistence_failed
   | No_memory_write_error
 
@@ -82,9 +80,7 @@ val memory_write_error_kind_to_string : memory_write_error_kind -> string
 
 type memory_write_validation =
   | Memory_write_ok of
-      { body : string
-      ; valid_for_days : int option
-      }
+      { body : string }
   | Memory_write_invalid of
       { error_kind : memory_write_error_kind
       ; extras : (string * Yojson.Safe.t) list

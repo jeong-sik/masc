@@ -19,13 +19,6 @@ val wire_field_source_turn : string
 val wire_field_source_tool_call_id : string
 val wire_field_claim_id : string
 
-val wire_field_valid_for_days : string
-(** Producer-declared lifetime in whole days (1..
-    {!Keeper_memory_os_types.max_valid_for_days}); explicit [null] = durable.
-    The field is required by the current provider contract. The
-    extracting model's own judgment — categories never infer a validity
-    boundary (RFC-0351 S2). *)
-
 val wire_episode_fields : string list
 (** Canonical episode-object wire field names accepted by the parser and used by
     retry prompt rendering. *)

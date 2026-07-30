@@ -9,7 +9,7 @@
 //
 // Section data sources (RFC-keeper-memory-panel-real-data §4; hybrid treatment confirmed 2026-06-24):
 //   컨텍스트 구성        ← real prompt-assembly block bytes (entries[latest].blocks)
-//   장기 메모리 스토어    ← real memory_os.facts.items (typed category, provenance, TTL)
+//   장기 메모리 스토어    ← real memory_os.facts.items (typed category, provenance)
 //   압축 유지·요약        ← real memory_os.episodes.items (summary + terminal_marker)
 //   최근 회상·주입        ← real memory_os_recall prompt blocks (entries[*].blocks)
 // Any future-only section must render an honest disclosure rather than fabricated
@@ -19,7 +19,7 @@ import { Fragment } from 'preact'
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
-import { formatDateTimeKo, formatTimeAgo, formatTimeUntil } from '../lib/format-time'
+import { formatDateTimeKo, formatTimeAgo } from '../lib/format-time'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { isAbortError } from '../lib/async-state'
 import {
@@ -187,8 +187,6 @@ export function factCategoryMeta(category: MemoryOsFactCategory): FactKindMeta {
       return { lbl: '목표', glyph: '◎', color: 'var(--volt)' }
     case 'constraint':
       return { lbl: '제약', glyph: '▢', color: 'var(--status-warn)' }
-    case 'ephemeral':
-      return { lbl: '임시', glyph: '◌', color: 'var(--text-dim)' }
     case 'validated_approach':
       return { lbl: '검증된 접근', glyph: '✓', color: 'var(--status-ok)' }
     case 'lesson':
@@ -200,18 +198,9 @@ export function factCategoryMeta(category: MemoryOsFactCategory): FactKindMeta {
   }
 }
 
-// claim age (staleness anchor = reference_time) and TTL display.
+// claim age (staleness anchor = reference_time).
 function factAgeLabel(fact: MemoryOsFact): string {
   return formatTimeAgo(fact.reference_time)
-}
-export function factTtlLabel(fact: MemoryOsFact): string {
-  if (fact.valid_until == null) return '영구'
-  // current ⟺ valid_until is in the future: show the remaining TTL ("…후").
-  // formatTimeAgo would floor the future delta to 0 and render "만료 지금",
-  // the exact opposite of a not-yet-elapsed deadline. Past expiry keeps "…전".
-  return fact.current
-    ? `만료 ${formatTimeUntil(fact.valid_until)}`
-    : `만료됨 ${formatTimeAgo(fact.valid_until)}`
 }
 
 export function sortMemoryFactsForReview(facts: readonly MemoryOsFact[]): MemoryOsFact[] {
@@ -224,8 +213,7 @@ function formatFactInstant(ts: number, iso: string | null): string {
 
 export function factSelectionReason(fact: MemoryOsFact): string {
   const meta = factCategoryMeta(fact.category)
-  const state = fact.current ? 'current row' : 'expired row'
-  return `${state} · ${meta.lbl}`
+  return `persisted row · ${meta.lbl}`
 }
 
 function latestMemoryRecallBlock(row: TurnRecordRow | null): TurnBlock | null {
@@ -291,8 +279,8 @@ function MemoryTrustStrip({
     <div class="mem-trust">
       <div class="mem-trust-card">
         <span class="mem-trust-k">store</span>
-        <span class="mem-trust-v mono">${snapshot.facts.current}/${snapshot.facts.shown} current</span>
-        <span class="mem-trust-sub mono">${snapshot.facts.expired} expired · ${snapshot.source}</span>
+        <span class="mem-trust-v mono">${snapshot.facts.shown} rows</span>
+        <span class="mem-trust-sub mono">${snapshot.source}</span>
       </div>
       <div class="mem-trust-card">
         <span class="mem-trust-k">scope</span>
@@ -392,7 +380,6 @@ function FactRow({ fact, srcOverride }: { fact: MemoryOsFact; srcOverride?: stri
           ${fact.last_verified_at != null
             ? html`<span class="mono">검증 ${formatFactInstant(fact.last_verified_at, null)}</span>`
             : null}
-          <span class=${`mem-ttl ${fact.current ? 'current' : 'expired'}`}>${factTtlLabel(fact)}</span>
           <span class="mem-src mono">${srcOverride ?? provenance}</span>
         </div>
         <div class="mem-store-why">${factSelectionReason(fact)}</div>
@@ -500,7 +487,7 @@ function OneKeeperMemoryReal({
                 : html`
                   <div class="mem-empty">
                     현재 필터에 표시할 memory-os fact가 없습니다.<br />
-                    <span class="mono">current=${snapshot.facts.current} · expired=${snapshot.facts.expired} · total=${facts.length}</span>
+                    <span class="mono">total=${facts.length}</span>
                   </div>
                 `}
             </>`
@@ -530,7 +517,7 @@ function OneKeeperMemoryReal({
 function EpisodeRow({ episode }: { episode: MemoryOsEpisodeSummary }) {
   return html`
     <div class="mem-store-row">
-      <span class="mem-kind" style=${{ color: episode.current ? 'var(--status-ok)' : 'var(--text-dim)', borderColor: episode.current ? 'var(--status-ok)' : 'var(--text-dim)' }}>
+      <span class="mem-kind">
         ${'◉'} g${episode.generation.toString().padStart(4, '0')}
       </span>
       <div class="mem-store-main">
@@ -545,7 +532,6 @@ function EpisodeRow({ episode }: { episode: MemoryOsEpisodeSummary }) {
           ${episode.terminal_marker
             ? html`<span class="mem-tag">terminal=${episode.terminal_marker}</span>`
             : null}
-          <span class=${`mono ${episode.current ? '' : 'mem-expired'}`}>${episode.current ? '활성' : '만료'}</span>
           <span class="mem-src mono">${episode.trace_id}</span>
         </div>
       </div>
@@ -569,15 +555,13 @@ interface AggregateMemoryRow {
   readonly keeper: MemoryKeeper
   readonly error: string | null
   readonly source: string
-  readonly currentFacts: number
-  readonly expiredFacts: number
   readonly shownFacts: number
   readonly episodes: number
   readonly recallBlockBytes: number
   readonly latestPrompt: string
   readonly readErrors: number
-  // Category tally over this keeper's projected facts (all rows, current or not),
-  // and its most-recently-verified facts. Empty for error / no-memory keepers.
+  // Category tally over this keeper's projected facts and its stored facts.
+  // Empty for error / no-memory keepers.
   readonly categoryCounts: readonly AggregateCategoryCount[]
   readonly recentFacts: readonly MemoryOsFact[]
 }
@@ -639,8 +623,6 @@ function aggregateMemoryRowFromResponse(
     keeper,
     error: null,
     source: snapshot.source,
-    currentFacts: snapshot.facts.current,
-    expiredFacts: snapshot.facts.expired,
     shownFacts: snapshot.facts.shown,
     episodes: snapshot.episodes.items.length,
     recallBlockBytes: memoryBlock?.bytes ?? 0,
@@ -656,8 +638,6 @@ function aggregateMemoryErrorRow(keeper: MemoryKeeper, error: unknown): Aggregat
     keeper,
     error: error instanceof Error ? error.message : String(error),
     source: 'fetch_error',
-    currentFacts: 0,
-    expiredFacts: 0,
     shownFacts: 0,
     episodes: 0,
     recallBlockBytes: 0,
@@ -716,9 +696,7 @@ function AggregateMemoryReal({
   const data = rows ?? []
   const loadedCount = data.length
   const failedCount = data.filter(row => row.error != null).length
-  const currentTotal = data.reduce((sum, row) => sum + row.currentFacts, 0)
   const shownTotal = data.reduce((sum, row) => sum + row.shownFacts, 0)
-  const expiredTotal = data.reduce((sum, row) => sum + row.expiredFacts, 0)
   const episodeTotal = data.reduce((sum, row) => sum + row.episodes, 0)
   const linkedCount = data.filter(row => row.recallBlockBytes > 0).length
   const recallBytes = data.reduce((sum, row) => sum + row.recallBlockBytes, 0)
@@ -737,8 +715,8 @@ function AggregateMemoryReal({
           </div>
           <div class="mem-trust-card">
             <span class="mem-trust-k">facts</span>
-            <span class="mem-trust-v mono">${currentTotal}/${shownTotal} current</span>
-            <span class="mem-trust-sub mono">${expiredTotal} expired</span>
+            <span class="mem-trust-v mono">${shownTotal} rows</span>
+            <span class="mem-trust-sub mono">persisted facts</span>
           </div>
           <div class="mem-trust-card">
             <span class="mem-trust-k">prompt links</span>
@@ -770,7 +748,7 @@ function AggregateMemoryReal({
       <div class="turn-sec">
         <h4>keeper별 메모리 · ${keepers.length}</h4>
         <div class="mem-table">
-          <div class="mem-tr mem-th"><span>keeper</span><span>current</span><span>expired</span><span>episode</span><span>prompt link</span></div>
+          <div class="mem-tr mem-th"><span>keeper</span><span>facts</span><span>read</span><span>episode</span><span>prompt link</span></div>
           ${data.map(row => html`
             <button key=${row.keeper.id} type="button" class="mem-tr" title=${row.error ?? row.source} onClick=${() => onPick(row.keeper.id)}>
               <span class="mem-td-id"><span class=${`mem-dot ${memDotState(row.keeper.status)}`}></span><span class="mono">${row.keeper.id}</span></span>
@@ -782,8 +760,8 @@ function AggregateMemoryReal({
                   <span class="mono">${row.error}</span>
                 `
                 : html`
-                  <span class="mono">${row.currentFacts}/${row.shownFacts}</span>
-                  <span class="mono">${row.expiredFacts}${row.readErrors > 0 ? html` · err ${row.readErrors}` : null}</span>
+                  <span class="mono">${row.shownFacts}</span>
+                  <span class="mono">${row.readErrors > 0 ? html`err ${row.readErrors}` : 'ok'}</span>
                   <span class="mono">${row.episodes}</span>
                   <span class="mono">${row.recallBlockBytes > 0 ? html`${memFmtBytes(row.recallBlockBytes)} · ${row.latestPrompt}` : html`no memory block · ${row.latestPrompt}`}</span>
                 `}

@@ -265,10 +265,9 @@ val keeper_chat_receipt_route : string -> (string * string) option
 
 (** {1 Memory-OS dashboard JSON} *)
 
-val memory_os_fact_json :
-  now:float -> Keeper_memory_os_types.fact -> Yojson.Safe.t
+val memory_os_fact_json : Keeper_memory_os_types.fact -> Yojson.Safe.t
 (** RFC-keeper-memory-panel-real-data §4a: one fact's read-only dashboard projection — claim, typed
-    category, provenance, the three timestamps, and current-ness. Serializes
+    category, provenance, first-seen, verification, and derived reference timestamps. Serializes
     only fields present on [fact]; it
     cannot emit the score fields RFC-0247 deleted (they are not on the record).
     Exported so the test suite can assert the JSON shape (and that drift guard)

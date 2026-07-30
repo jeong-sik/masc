@@ -13,7 +13,6 @@ let wire_field_claim = "claim"
 let wire_field_category = "category"
 let wire_field_source = "source"
 let wire_field_first_seen = "first_seen"
-let wire_field_valid_until = "valid_until"
 let wire_field_last_verified_at = "last_verified_at"
 let wire_field_claim_id = "claim_id"
 let wire_field_generation = "generation"
@@ -56,7 +55,6 @@ let fact_wire_fields =
     ; wire_field_category
     ; wire_field_source
     ; wire_field_first_seen
-    ; wire_field_valid_until
     ; wire_field_last_verified_at
     ; wire_field_claim_id
     ]
@@ -72,14 +70,11 @@ let episode_wire_fields =
     ; wire_field_claims
     ; wire_field_source_turn_range
     ; wire_field_created_at
-    ; wire_field_valid_until
     ; wire_field_terminal_marker
     ]
 ;;
 
 let wire_librarian_episode_fields = [ wire_field_episode_summary; wire_field_claims ]
-
-let wire_field_valid_for_days = "valid_for_days"
 
 let wire_librarian_claim_fields =
   [ wire_field_claim
@@ -87,7 +82,6 @@ let wire_librarian_claim_fields =
   ; wire_field_source_turn
   ; wire_field_source_tool_call_id
   ; wire_field_claim_id
-  ; wire_field_valid_for_days
   ]
 ;;
 
@@ -107,7 +101,6 @@ type category =
   | Blocker
   | Goal
   | Constraint
-  | Ephemeral
   | Validated_approach
   | Lesson
 
@@ -118,7 +111,6 @@ let category_to_string = function
   | Blocker -> "blocker"
   | Goal -> "goal"
   | Constraint -> "constraint"
-  | Ephemeral -> "ephemeral"
   | Validated_approach -> "validated_approach"
   | Lesson -> "lesson"
 ;;
@@ -129,7 +121,6 @@ let all_categories =
   ; Blocker
   ; Goal
   ; Constraint
-  ; Ephemeral
   ; Validated_approach
   ; Lesson
   ; Code_change
@@ -144,7 +135,6 @@ let category_of_string s =
   | "blocker" -> Some Blocker
   | "goal" -> Some Goal
   | "constraint" -> Some Constraint
-  | "ephemeral" -> Some Ephemeral
   | "validated_approach" -> Some Validated_approach
   | "lesson" -> Some Lesson
   | _ -> None
@@ -158,39 +148,14 @@ type fact =
   ; category : category
   ; source : provenance_event
   ; first_seen : float
-  ; valid_until : float option
   ; last_verified_at : float option
   ; claim_id : string option
     (* Optional producer-emitted stable conclusion id. It is preserved exactly;
        absent ids use exact observation identity, never normalized prose. *)
   }
 
-let fact_effective_valid_until (fact : fact) = fact.valid_until
-
-let fact_is_current ~now (fact : fact) =
-  match fact_effective_valid_until fact with
-  | None -> true
-  | Some ts -> ts >= now
-;;
-
-let seconds_per_day = 86_400.
-let max_valid_for_days = 365
-
-(* RFC-0351 S2: a producer-declared lifetime in whole days becomes the exact
-   [valid_until] boundary that [fact_is_current] and expiry GC already honor.
-   The number is the producer's own claim about the claim's scope — judged by
-   the model that wrote it, never inferred from the text by a fixed
-   write-side TTL (#24332 removed exactly those). *)
-let valid_until_of_days ~now days = now +. (float_of_int days *. seconds_per_day)
-
-(* Split facts only on the exact stored [valid_until] boundary. No category or
-   timestamp-derived fallback participates. *)
-let partition_expired ~now (facts : fact list) =
-  List.partition (fact_is_current ~now) facts
-;;
-
-(* Presentation timestamp used by recall and dashboard ordering. It is not an
-   expiry boundary or a truth verdict; only [valid_until] has that authority. *)
+(* Presentation timestamp used by recall and dashboard ordering. It is not a
+   retention boundary or a truth verdict. *)
 let reference_time (f : fact) =
   match f.last_verified_at with
   | Some t -> t
@@ -223,7 +188,6 @@ type episode =
   ; claims : fact list
   ; source_turn_range : (int * int) option
   ; created_at : float
-  ; valid_until : float option
   ; terminal_marker : string option
   }
 
@@ -358,8 +322,6 @@ let fact_to_json (f : fact) =
   then invalid_arg "memory fact provenance is invalid";
   if not (Float.is_finite f.first_seen)
   then invalid_arg "memory fact first_seen must be finite";
-  if not (optional_finite_float f.valid_until)
-  then invalid_arg "memory fact valid_until must be finite";
   if not (optional_finite_float f.last_verified_at)
   then invalid_arg "memory fact last_verified_at must be finite";
   let fields =
@@ -368,7 +330,6 @@ let fact_to_json (f : fact) =
     ; wire_field_source, provenance_event_to_json f.source
     ; wire_field_first_seen, `Float f.first_seen
     ]
-    @ optional_float_field wire_field_valid_until f.valid_until
     @ optional_float_field wire_field_last_verified_at f.last_verified_at
     @ (match f.claim_id with
        | Some id when claim_id_is_valid id -> [ wire_field_claim_id, `String id ]
@@ -399,7 +360,6 @@ let fact_of_json (json : Yojson.Safe.t) =
           | None -> Some None
           | Some (`String id) when claim_id_is_valid id -> Some (Some id)
           | Some _ -> None)
-       , optional_float_json_field wire_field_valid_until fields
        , optional_float_json_field wire_field_last_verified_at fields )
      with
      | ( Some claim
@@ -407,7 +367,6 @@ let fact_of_json (json : Yojson.Safe.t) =
        , Some source_json
        , Some first_seen
        , Some claim_id
-       , Some valid_until
        , Some last_verified_at ) ->
        (match provenance_event_of_json source_json with
         | Some source ->
@@ -416,14 +375,12 @@ let fact_of_json (json : Yojson.Safe.t) =
            | Some category
              when non_empty_string claim
                   && Float.is_finite first_seen
-                  && optional_finite_float valid_until
                   && optional_finite_float last_verified_at ->
              Some
                { claim
                ; category
                ; source
                ; first_seen
-               ; valid_until
                ; last_verified_at
                ; claim_id
                }
@@ -449,8 +406,6 @@ let episode_to_json (e : episode) =
   then invalid_arg "memory episode summary must be non-empty";
   if not (Float.is_finite e.created_at)
   then invalid_arg "memory episode created_at must be finite";
-  if not (optional_finite_float e.valid_until)
-  then invalid_arg "memory episode valid_until must be finite";
   if not (optional_non_empty_string e.terminal_marker)
   then invalid_arg "memory episode terminal_marker must be non-empty";
   if
@@ -478,9 +433,8 @@ let episode_to_json (e : episode) =
        , `List (List.rev (List.rev_map fact_to_json e.claims)) )
      ; wire_field_created_at, `Float e.created_at
      ]
-     @ range_json
-     @ optional_float_field wire_field_valid_until e.valid_until
-     @ (match e.terminal_marker with
+    @ range_json
+    @ (match e.terminal_marker with
         | Some marker -> [ wire_field_terminal_marker, `String marker ]
         | None -> []))
 ;;
@@ -527,7 +481,6 @@ let episode_of_json (json : Yojson.Safe.t) =
           | Some _ | None -> None)
        , source_turn_range_field fields
        , json_float_field wire_field_created_at fields
-       , optional_float_json_field wire_field_valid_until fields
        , optional_string_json_field wire_field_terminal_marker fields )
      with
      | ( Some trace_id
@@ -536,14 +489,12 @@ let episode_of_json (json : Yojson.Safe.t) =
        , Some claims
        , Some source_turn_range
        , Some created_at
-       , Some valid_until
        , Some terminal_marker ) ->
        if
          non_empty_string trace_id
          && generation >= 0
          && non_empty_string episode_summary
          && Float.is_finite created_at
-         && optional_finite_float valid_until
          && optional_non_empty_string terminal_marker
          && List.for_all
               (fun fact -> String.equal fact.source.trace_id trace_id)
@@ -557,7 +508,6 @@ let episode_of_json (json : Yojson.Safe.t) =
            ; claims
            ; source_turn_range
            ; created_at
-           ; valid_until
            ; terminal_marker
            }
        else None

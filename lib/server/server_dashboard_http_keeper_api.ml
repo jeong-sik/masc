@@ -59,11 +59,6 @@ let json_float_opt = function
   | None -> `Null
 ;;
 
-let json_time_iso_opt = function
-  | Some value -> `String (Masc_domain.iso8601_of_unix_seconds value)
-  | None -> `Null
-;;
-
 type state_diagram_runtime_projection =
   { runtime_models : string list
   ; last_provider_result : string option
@@ -158,18 +153,6 @@ let state_diagram_runtime_fsm_mermaid
     ()
 ;;
 
-let memory_os_fact_is_current ~now (fact : Keeper_memory_os_types.fact) =
-  match fact.valid_until with
-  | None -> true
-  | Some ts -> ts >= now
-;;
-
-let memory_os_episode_is_current ~now (episode : Keeper_memory_os_types.episode) =
-  match episode.valid_until with
-  | None -> true
-  | Some ts -> ts >= now
-;;
-
 let memory_os_count pred xs =
   List.fold_left (fun count value -> if pred value then count + 1 else count) 0 xs
 ;;
@@ -201,14 +184,11 @@ let memory_os_read_facts ~keepers_dir ~keeper_id =
   | exn -> [], Some (Printexc.to_string exn)
 ;;
 
-let memory_os_episode_json ~now (episode : Keeper_memory_os_types.episode) =
+let memory_os_episode_json (episode : Keeper_memory_os_types.episode) =
   `Assoc
     [ "trace_id", `String episode.trace_id
     ; "generation", `Int episode.generation
     ; "created_at", `Float episode.created_at
-    ; "valid_until", json_float_opt episode.valid_until
-    ; "valid_until_iso", json_time_iso_opt episode.valid_until
-    ; "current", `Bool (memory_os_episode_is_current ~now episode)
     ; "terminal_marker", json_string_opt episode.terminal_marker
     ; "claim_count", `Int (List.length episode.claims)
     ; ( "source_turn_range"
@@ -228,7 +208,7 @@ let memory_os_episode_json ~now (episode : Keeper_memory_os_types.episode) =
    anchor (last_verified_at else first_seen), reused rather than re-inlined.
    Product-specific references remain connector/tool context rather than Memory
    schema fields. *)
-let memory_os_fact_json ~now (fact : Keeper_memory_os_types.fact) =
+let memory_os_fact_json (fact : Keeper_memory_os_types.fact) =
   `Assoc
     [ "claim", `String fact.claim
     ; "category", `String (Keeper_memory_os_types.category_to_string fact.category)
@@ -236,10 +216,7 @@ let memory_os_fact_json ~now (fact : Keeper_memory_os_types.fact) =
     ; "first_seen", `Float fact.first_seen
     ; "first_seen_iso", `String (Masc_domain.iso8601_of_unix_seconds fact.first_seen)
     ; "reference_time", `Float (Keeper_memory_os_types.reference_time fact)
-    ; "valid_until", json_float_opt fact.valid_until
-    ; "valid_until_iso", json_time_iso_opt fact.valid_until
     ; "last_verified_at", json_float_opt fact.last_verified_at
-    ; "current", `Bool (memory_os_fact_is_current ~now fact)
     ]
 ;;
 
@@ -274,7 +251,6 @@ let memory_os_selection_policy ~keeper_id =
 ;;
 
 let memory_os_dashboard_json_unlocked ~keepers_dir ~keeper_id =
-  let now = Time_compat.now () in
   let episodes, episode_error =
     memory_os_read_episodes ~keepers_dir ~keeper_id
   in
@@ -283,8 +259,6 @@ let memory_os_dashboard_json_unlocked ~keepers_dir ~keeper_id =
     Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id
   in
   let episodes_store = Filename.concat (Filename.concat keepers_dir keeper_id) "episodes" in
-  let current_episodes = memory_os_count (memory_os_episode_is_current ~now) episodes in
-  let current_facts = memory_os_count (memory_os_fact_is_current ~now) facts in
   let terminal_marker_count =
     memory_os_count
       (fun (episode : Keeper_memory_os_types.episode) ->
@@ -310,18 +284,13 @@ let memory_os_dashboard_json_unlocked ~keepers_dir ~keeper_id =
     ; ( "episodes"
       , `Assoc
           [ "shown", `Int (List.length episodes)
-          ; "current", `Int current_episodes
-          ; "expired", `Int (List.length episodes - current_episodes)
           ; "terminal_markers", `Int terminal_marker_count
-          ; "items", `List (List.map (memory_os_episode_json ~now) episodes)
+          ; "items", `List (List.map memory_os_episode_json episodes)
           ] )
     ; ( "facts"
       , `Assoc
           [ "shown", `Int (List.length facts)
-          ; "current", `Int current_facts
-          ; "expired", `Int (List.length facts - current_facts)
-            (* RFC-keeper-memory-panel-real-data §4a: every individual fact row. *)
-          ; "items", `List (List.map (memory_os_fact_json ~now) facts)
+          ; "items", `List (List.map memory_os_fact_json facts)
           ] )
     ]
 ;;

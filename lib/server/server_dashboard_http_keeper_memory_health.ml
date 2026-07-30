@@ -1,7 +1,7 @@
 (** Keeper Memory Health dashboard HTTP JSON helper.
 
-    Produces a read-only snapshot of per-keeper fact-store sizes, GC-dry-run
-    statistics, and the fleet-wide librarian cadence counter for the
+    Produces a read-only snapshot of per-keeper fact-store sizes and the
+    fleet-wide librarian cadence counter for the
     /api/v1/dashboard/keeper-memory-health endpoint.
 
     Data sources:
@@ -12,8 +12,6 @@
       facts count/bytes.
     - [Keeper_memory_os_io.events_path_for_keepers_dir] + file stat for events
       bytes.
-    - [Keeper_memory_os_types.partition_expired] over that same immutable fact
-      snapshot for explicitly expired rows.
     - [Keeper_librarian_runtime.cadence_counter_entries] for the cadence table
       size (one fleet-wide value). *)
 
@@ -24,18 +22,15 @@ type keeper_health =
   ; events : int
   ; events_bytes : int
   ; events_bytes_to_facts_bytes_ratio : float
-  ; ttl_expired_on_disk : int
   ; duplicate_claim_identity_rows : int
   }
 
 type alert_code =
-  | Ttl_expired_on_disk
   | Duplicate_claim_identity_rows
 
 type alert_severity = Warn
 
 type alert_target =
-  | Ttl_expired_on_disk_target
   | Duplicate_claim_identity_rows_target
 
 type keeper_alert =
@@ -48,11 +43,9 @@ type keeper_alert =
   ; threshold : float
   }
 
-let ttl_expired_on_disk_threshold = 0.0
 let duplicate_claim_identity_rows_threshold = 0.0
 
 let alert_code_to_string = function
-  | Ttl_expired_on_disk -> "ttl_expired_on_disk"
   | Duplicate_claim_identity_rows -> "duplicate_claim_identity_rows"
 ;;
 
@@ -61,7 +54,6 @@ let alert_severity_to_string = function
 ;;
 
 let alert_target_to_string = function
-  | Ttl_expired_on_disk_target -> "ttl_expired_on_disk"
   | Duplicate_claim_identity_rows_target -> "duplicate_claim_identity_rows"
 ;;
 
@@ -69,7 +61,6 @@ let alert_target_to_string = function
    taxonomy. The dashboard renders the label as data from this endpoint instead
    of maintaining a second code -> label classifier. *)
 let alert_label = function
-  | Ttl_expired_on_disk -> "TTL"
   | Duplicate_claim_identity_rows -> "동일 claim identity 행"
 ;;
 
@@ -79,17 +70,6 @@ let alert ~code ~target ~message ~value ~threshold =
 
 let keeper_alerts h =
   []
-  |> (fun alerts ->
-    if h.ttl_expired_on_disk > 0
-    then
-      alert
-        ~code:Ttl_expired_on_disk
-        ~target:Ttl_expired_on_disk_target
-        ~message:"TTL-expired Memory OS fact rows remain on disk; GC dry-run would prune them."
-        ~value:(float_of_int h.ttl_expired_on_disk)
-        ~threshold:ttl_expired_on_disk_threshold
-      :: alerts
-    else alerts)
   |> (fun alerts ->
     if h.duplicate_claim_identity_rows > 0
     then
@@ -150,7 +130,9 @@ let duplicate_claim_identity_rows facts =
       (fun counts fact ->
        let key = Keeper_memory_os_types.claim_identity fact in
        let count =
-         Option.value ~default:0 (Claim_identity_map.find_opt key counts)
+         match Claim_identity_map.find_opt key counts with
+         | Some count -> count
+         | None -> 0
        in
        Claim_identity_map.add key (count + 1) counts)
       Claim_identity_map.empty
@@ -162,7 +144,7 @@ let duplicate_claim_identity_rows facts =
     0
 ;;
 
-let keeper_health_unlocked ~keepers_dir ~now keeper_id =
+let keeper_health_unlocked ~keepers_dir keeper_id =
   let facts =
     (* [read_facts_all] raises on malformed JSONL — treated as a read failure
        for this keeper; the caller catches and skips it. *)
@@ -177,9 +159,6 @@ let keeper_health_unlocked ~keepers_dir ~now keeper_id =
     Keeper_memory_os_io.events_path_for_keepers_dir ~keepers_dir ~keeper_id
   in
   let events_bytes = file_size_bytes events_p in
-  let _, expired =
-    Keeper_memory_os_types.partition_expired ~now facts
-  in
   { keeper_id
   ; facts = facts_count
   ; facts_bytes
@@ -187,12 +166,11 @@ let keeper_health_unlocked ~keepers_dir ~now keeper_id =
   ; events_bytes
   ; events_bytes_to_facts_bytes_ratio =
       float_of_int events_bytes /. float_of_int (max 1 facts_bytes)
-  ; ttl_expired_on_disk = List.length expired
   ; duplicate_claim_identity_rows = duplicate_claim_identity_rows facts
   }
 ;;
 
-let keeper_health ~keepers_dir ~now keeper_id =
+let keeper_health ~keepers_dir keeper_id =
   Keeper_memory_os_io.with_episode_bundle_lock_for_keepers_dir
     ~keepers_dir
     ~keeper_id
@@ -200,7 +178,7 @@ let keeper_health ~keepers_dir ~now keeper_id =
        File_lock_eio.with_lock
          (Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
          (fun () ->
-            keeper_health_unlocked ~keepers_dir ~now keeper_id))
+            keeper_health_unlocked ~keepers_dir keeper_id))
 ;;
 
 let keeper_health_entry_to_json (h, alerts) : Yojson.Safe.t =
@@ -212,15 +190,12 @@ let keeper_health_entry_to_json (h, alerts) : Yojson.Safe.t =
     ; "events_bytes", `Int h.events_bytes
     ; ( "events_bytes_to_facts_bytes_ratio"
       , `Float h.events_bytes_to_facts_bytes_ratio )
-    ; "ttl_expired_on_disk", `Int h.ttl_expired_on_disk
     ; "duplicate_claim_identity_rows", `Int h.duplicate_claim_identity_rows
     ; "alerts", `List (List.map keeper_alert_to_json alerts)
     ]
 ;;
 
 let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
-  (* One wall-clock instant is shared by the snapshot timestamp and dry-run GC
-     scans; no retention or control logic depends on the exact value. *)
   (* NDT-OK: diagnostic snapshot timestamp only. *)
   let now = Unix.gettimeofday () in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
@@ -228,7 +203,7 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
   let health_results =
     Keeper_memory_os_io.list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir
     |> List.map (fun keeper_id ->
-      match keeper_health ~keepers_dir ~now keeper_id with
+      match keeper_health ~keepers_dir keeper_id with
       | h -> Ok h
       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
       | exception exn ->
@@ -278,7 +253,6 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
           [ "facts", `Int (sum (fun h -> h.facts))
           ; "facts_bytes", `Int (sum (fun h -> h.facts_bytes))
           ; "events_bytes", `Int (sum (fun h -> h.events_bytes))
-          ; "ttl_expired_on_disk", `Int (sum (fun h -> h.ttl_expired_on_disk))
           ; ( "duplicate_claim_identity_rows"
             , `Int (sum (fun h -> h.duplicate_claim_identity_rows)) )
           ] )
@@ -295,13 +269,11 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
                    (fun acc (_, alerts) -> if alerts = [] then acc else acc + 1)
                    0
                    entries) )
-          ; "ttl_expired_keepers", `Int (alert_count_by_code Ttl_expired_on_disk)
           ; ( "duplicate_claim_identity_rows_keepers"
             , `Int (alert_count_by_code Duplicate_claim_identity_rows) )
           ; ( "thresholds"
             , `Assoc
-                [ "ttl_expired_on_disk", `Float ttl_expired_on_disk_threshold
-                ; ( "duplicate_claim_identity_rows"
+                [ ( "duplicate_claim_identity_rows"
                   , `Float duplicate_claim_identity_rows_threshold )
                 ] )
           ] )

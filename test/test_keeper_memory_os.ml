@@ -3,7 +3,6 @@
 module Types = Masc.Keeper_memory_os_types
 module Policy = Masc.Keeper_memory_os_policy
 module Memory_io = Masc.Keeper_memory_os_io
-module GC = Masc.Keeper_memory_os_gc
 module Librarian = Masc.Keeper_librarian
 module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Keeper_registry = Masc.Keeper_registry
@@ -69,7 +68,6 @@ let fact_fixture ~now () =
   ; Types.category = Types.Preference
   ; Types.source = { Types.trace_id = "trace-123"; Types.turn = 5; Types.tool_call_id = None }
   ; Types.first_seen = now -. 86400.0
-  ; Types.valid_until = None
   ; Types.last_verified_at = Some (now -. 3600.0)
   ; Types.claim_id = None
   }
@@ -319,7 +317,6 @@ let episode_fixture ~now ~trace_id ~generation ~summary =
   ; Types.claims = [ fact ]
   ; Types.source_turn_range = Some (0, 0)
   ; Types.created_at = now
-  ; Types.valid_until = None
   ; Types.terminal_marker = None
   }
 ;;
@@ -341,7 +338,6 @@ let test_json_roundtrip () =
     ; Types.claims = [ f ]
     ; Types.source_turn_range = Some (5, 5)
     ; Types.created_at = now
-    ; Types.valid_until = Some (now +. days 1)
     ; Types.terminal_marker = Some "handoff_complete"
     }
   in
@@ -351,10 +347,6 @@ let test_json_roundtrip () =
     e.episode_summary
     e2.Types.episode_summary;
   Alcotest.(check int) "claims length" 1 (List.length e2.Types.claims);
-  Alcotest.(check (option (float 0.001)))
-    "episode valid_until round-trip"
-    e.valid_until
-    e2.Types.valid_until;
   Alcotest.(check (option string))
     "episode terminal_marker round-trip"
     e.terminal_marker
@@ -409,6 +401,20 @@ let test_persisted_memory_decoders_reject_unknown_fields () =
     true
     (Option.is_none (Types.fact_of_json fact_with_unknown));
   Alcotest.(check bool)
+    "fact wire rejects removed valid_until"
+    true
+    (Option.is_none
+       (Types.fact_of_json
+          (`Assoc (("valid_until", `Null) :: fact_fields))));
+  Alcotest.(check bool)
+    "fact wire rejects removed ephemeral category"
+    true
+    (Option.is_none
+       (Types.fact_of_json
+          (`Assoc
+             (("category", `String "ephemeral")
+              :: List.remove_assoc "category" fact_fields))));
+  Alcotest.(check bool)
     "fact wire rejects duplicate keys"
     true
     (Option.is_none
@@ -433,6 +439,12 @@ let test_persisted_memory_decoders_reject_unknown_fields () =
     "episode wire is closed"
     true
     (Option.is_none (Types.episode_of_json episode_with_unknown));
+  Alcotest.(check bool)
+    "episode wire rejects removed valid_until"
+    true
+    (Option.is_none
+       (Types.episode_of_json
+          (`Assoc (("valid_until", `Null) :: episode_fields))));
   Alcotest.(check bool)
     "episode wire rejects duplicate keys"
     true
@@ -674,7 +686,6 @@ let valid_librarian_output () =
               ; "source_turn", `Int 0
               ; "source_tool_call_id", `Null
               ; "claim_id", `Null
-              ; "valid_for_days", `Null
               ]
           ] )
     ]
@@ -698,7 +709,6 @@ let test_librarian_rejects_extra_confidence_field () =
                 ; "source_turn", `Int 0
                 ; "source_tool_call_id", `Null
                 ; "claim_id", `Null
-                ; "valid_for_days", `Null
                 ]
             ] )
       ]
@@ -737,7 +747,6 @@ let test_librarian_rejects_removed_claim_kind_field () =
                 ; "source_turn", `Int 0
                 ; "source_tool_call_id", `Null
                 ; "claim_id", `Null
-                ; "valid_for_days", `Null
                 ]
             ] )
       ]
@@ -801,7 +810,6 @@ let test_librarian_rejects_duplicate_json_fields () =
                  ; "source_turn", `Int 0
                  ; "source_tool_call_id", `Null
                  ; "claim_id", `Null
-                 ; "valid_for_days", `Null
                  ]
              ] )
        ])
@@ -823,7 +831,6 @@ let test_librarian_rejects_duplicate_claim_identity () =
       ; "source_turn", `Int turn
       ; "source_tool_call_id", `Null
       ; "claim_id", `String "same-producer-identity"
-      ; "valid_for_days", `Null
       ]
   in
   let json =
@@ -869,166 +876,55 @@ let test_librarian_generation_override () =
   | _ -> Alcotest.fail "expected librarian JSON to parse"
 ;;
 
-let test_librarian_does_not_infer_validity () =
-  let now = 1_000_000.0 in
-  let output =
+let test_librarian_rejects_removed_lifetime_and_category () =
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-current-only-contract"
+    ; messages = [ text_message "current-only memory" ]
+    }
+  in
+  let claim category extra_fields =
     `Assoc
-      [ "episode_summary", `String "mixed durability claims"
-      ; ( "claims"
-        , `List
-            [ `Assoc
-                [ "claim", `String "checkpoint saved for task T-1"
-                ; "category", `String "ephemeral"
-                ; "source_turn", `Int 0
-                ; "source_tool_call_id", `Null
-                ; "claim_id", `Null
-                ; "valid_for_days", `Null
-                ]
-            ; `Assoc
-                [ "claim", `String "the build uses dune 3.x"
-                ; "category", `String "fact"
-                ; "source_turn", `Int 1
-                ; "source_tool_call_id", `Null
-                ; "claim_id", `Null
-                ; "valid_for_days", `Null
-                ]
-            ] )
+      ([ "claim", `String "Only the current closed claim shape is accepted."
+       ; "category", `String category
+       ; "source_turn", `Int 0
+       ; "source_tool_call_id", `Null
+       ; "claim_id", `Null
+       ]
+       @ extra_fields)
+  in
+  let episode claim =
+    `Assoc
+      [ "episode_summary", `String "Current-only contract"
+      ; "claims", `List [ claim ]
       ]
   in
-  let inp : Librarian.input =
-    { Librarian.trace_id = "trace-ttl"
-    ; messages = [ text_message "ephemeral source"; text_message "durable source" ]
-    }
-  in
-  match Librarian.episode_of_json_result ~now ~generation:0 inp output with
-  | Ok episode ->
-    let find cat =
-      List.find (fun f -> f.Types.category = cat) episode.Types.claims
-    in
-    let eph = find Types.Ephemeral in
-    let durable = find Types.Fact in
-    Alcotest.(check (option (float 0.001)))
-      "ephemeral category does not invent validity"
-      None
-      eph.Types.valid_until;
-    Alcotest.(check (option (float 0.001)))
-      "durable fact never hard-expires"
-      None
-      durable.Types.valid_until
+  (match
+     Librarian.episode_of_json_result
+       ~now:1_000_000.0
+       ~generation:0
+       inp
+       (episode (claim "fact" [ "valid_for_days", `Int 2 ]))
+   with
+   | Error (Librarian.Unexpected_field field) ->
+     Alcotest.(check string) "removed lifetime field" "valid_for_days" field
+   | Error error ->
+     Alcotest.failf
+       "expected valid_for_days to be an unexpected field, got %s"
+       (Librarian.parse_error_to_string error)
+   | Ok _ -> Alcotest.fail "removed valid_for_days must not be accepted");
+  match
+    Librarian.episode_of_json_result
+      ~now:1_000_000.0
+      ~generation:0
+      inp
+      (episode (claim "ephemeral" []))
+  with
+  | Error Librarian.Claim_schema_mismatch -> ()
   | Error error ->
     Alcotest.failf
-      "expected librarian JSON to parse: %s"
+      "expected ephemeral category schema rejection, got %s"
       (Librarian.parse_error_to_string error)
-;;
-
-(* RFC-0351 S2: the extracting model may declare a lifetime per claim; the
-   parser stamps the exact valid_until boundary the recall filter and expiry
-   GC already honor. Declaration only — categories still never infer one
-   (locked by test_librarian_does_not_infer_validity above). *)
-let test_librarian_stamps_declared_lifetime () =
-  let now = 1_000_000.0 in
-  let output =
-    `Assoc
-      [ "episode_summary", `String "declared lifetime claims"
-      ; ( "claims"
-        , `List
-            [ `Assoc
-                [ "claim", `String "the agent is blocked on a sandbox limit today"
-                ; "category", `String "ephemeral"
-                ; "source_turn", `Int 0
-                ; "source_tool_call_id", `Null
-                ; "claim_id", `Null
-                ; "valid_for_days", `Int 2
-                ]
-            ; `Assoc
-                [ "claim", `String "parse boundaries own validation"
-                ; "category", `String "lesson"
-                ; "source_turn", `Int 1
-                ; "source_tool_call_id", `Null
-                ; "claim_id", `Null
-                ; "valid_for_days", `Null
-                ]
-            ] )
-      ]
-  in
-  let inp : Librarian.input =
-    { Librarian.trace_id = "trace-declared-lifetime"
-    ; messages = [ text_message "bounded source"; text_message "durable source" ]
-    }
-  in
-  match Librarian.episode_of_json_result ~now ~generation:0 inp output with
-  | Ok episode ->
-    let find cat = List.find (fun f -> f.Types.category = cat) episode.Types.claims in
-    let declared = find Types.Ephemeral in
-    let durable = find Types.Lesson in
-    Alcotest.(check (option (float 0.001)))
-      "declared lifetime becomes the exact expiry boundary"
-      (Some (now +. (2. *. 86_400.)))
-      declared.Types.valid_until;
-    Alcotest.(check (option (float 0.001)))
-      "undeclared lifetime stays durable"
-      None
-      durable.Types.valid_until;
-    Alcotest.(check bool)
-      "declared-lifetime claim is current before its boundary"
-      true
-      (Types.fact_is_current ~now:(now +. 86_400.) declared);
-    Alcotest.(check bool)
-      "declared-lifetime claim expires after its boundary"
-      false
-      (Types.fact_is_current ~now:(now +. (3. *. 86_400.)) declared)
-  | Error error ->
-    Alcotest.failf
-      "expected librarian JSON to parse: %s"
-      (Librarian.parse_error_to_string error)
-;;
-
-let test_librarian_rejects_invalid_lifetime () =
-  let inp : Librarian.input =
-    { Librarian.trace_id = "trace-invalid-lifetime"
-    ; messages = [ text_message "x" ]
-    }
-  in
-  List.iter
-    (fun (label, value) ->
-       let json =
-         `Assoc
-           [ "episode_summary", `String "summary"
-           ; ( "claims"
-             , `List
-                 [ `Assoc
-                     [ "claim", `String "claim with a malformed lifetime"
-                     ; "category", `String "ephemeral"
-                     ; "source_turn", `Int 0
-                     ; "source_tool_call_id", `Null
-                     ; "claim_id", `Null
-                     ; "valid_for_days", value
-                     ]
-                 ] )
-           ]
-       in
-       match
-         Librarian.episode_of_json_result
-           ~now:1_000_000.0
-           ~generation:0
-           inp
-           json
-       with
-       | Error Librarian.Claim_schema_mismatch -> ()
-       | Error error ->
-         Alcotest.failf
-           "%s: expected Claim_schema_mismatch, got %s"
-           label
-           (Librarian.parse_error_to_string error)
-       | Ok _ ->
-         Alcotest.failf
-           "%s: a malformed lifetime must not be stored as forever"
-           label)
-    [ "zero days", `Int 0
-    ; "negative days", `Int (-3)
-    ; "beyond the shared bound", `Int 999
-    ; "wrong JSON type", `String "7"
-    ]
+  | Ok _ -> Alcotest.fail "removed ephemeral category must not be accepted"
 ;;
 
 let test_librarian_accepts_nullable_claim_fields () =
@@ -1048,7 +944,6 @@ let test_librarian_accepts_nullable_claim_fields () =
                 ; "source_turn", `Int 0
                 ; "source_tool_call_id", `Null
                 ; "claim_id", `Null
-                ; "valid_for_days", `Null
                 ]
             ] )
       ]
@@ -1062,8 +957,7 @@ let test_librarian_accepts_nullable_claim_fields () =
     (match episode.Types.claims with
      | [ claim ] ->
        Alcotest.(check (option string)) "tool call id" None claim.source.tool_call_id;
-       Alcotest.(check (option string)) "claim id" None claim.claim_id;
-       Alcotest.(check (option (float 0.0001))) "validity" None claim.valid_until
+       Alcotest.(check (option string)) "claim id" None claim.claim_id
      | claims -> Alcotest.failf "expected one claim, got %d" (List.length claims))
 ;;
 
@@ -1079,7 +973,6 @@ let test_librarian_rejects_missing_nullable_claim_fields () =
     ; Librarian.wire_field_source_turn, `Int 0
     ; Librarian.wire_field_source_tool_call_id, `Null
     ; Librarian.wire_field_claim_id, `Null
-    ; Librarian.wire_field_valid_for_days, `Null
     ]
   in
   List.iter
@@ -1112,7 +1005,6 @@ let test_librarian_rejects_missing_nullable_claim_fields () =
            missing_field)
     [ Librarian.wire_field_source_tool_call_id
     ; Librarian.wire_field_claim_id
-    ; Librarian.wire_field_valid_for_days
     ]
 ;;
 
@@ -1149,12 +1041,7 @@ let test_memory_os_bool_env_accepts_enabled_disabled () =
     Alcotest.(check bool)
       "disabled disables librarian"
       false
-      (Env_config.KeeperMemoryOs.librarian_enabled ()));
-  with_memory_os_env Env_config.KeeperMemoryOs.gc_env_key "enabled" (fun () ->
-    Alcotest.(check bool)
-      "enabled enables GC"
-      true
-      (Env_config.KeeperMemoryOs.gc_enabled ()))
+      (Env_config.KeeperMemoryOs.librarian_enabled ()))
 ;;
 
 let test_memory_os_env_invalid_values_fail_closed_or_default () =
@@ -1179,14 +1066,6 @@ let test_memory_os_env_invalid_values_fail_closed_or_default () =
         false
         (Env_config.KeeperMemoryOs.librarian_enabled ()));
     check_log_contains lines Env_config.KeeperMemoryOs.librarian_env_key;
-    check_log_contains lines "fail-closed false");
-  with_captured_console_lines (fun lines ->
-    with_memory_os_env Env_config.KeeperMemoryOs.gc_env_key "maybe" (fun () ->
-      Alcotest.(check bool)
-        "invalid GC flag fail-closes"
-        false
-        (Env_config.KeeperMemoryOs.gc_enabled ()));
-    check_log_contains lines Env_config.KeeperMemoryOs.gc_env_key;
     check_log_contains lines "fail-closed false");
   with_captured_console_lines (fun lines ->
     with_memory_os_env Env_config.KeeperMemoryOs.librarian_max_messages_env_key "bogus" (fun () ->
@@ -1252,8 +1131,6 @@ let memory_os_knob_readers : (string * (unit -> unit)) list =
     , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_cadence_turns () : int) )
   ; ( Env_config.KeeperMemoryOs.librarian_max_messages_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_max_messages () : int) )
-  ; ( Env_config.KeeperMemoryOs.gc_env_key
-    , fun () -> ignore (Env_config.KeeperMemoryOs.gc_enabled () : bool) )
   ]
 ;;
 
@@ -1340,7 +1217,6 @@ let test_librarian_rejects_out_of_range_source_turn () =
                 ; "source_turn", `Int 1
                 ; "source_tool_call_id", `Null
                 ; "claim_id", `Null
-                ; "valid_for_days", `Null
                 ]
             ] )
       ]
@@ -1377,7 +1253,6 @@ let test_librarian_rejects_unrelated_source_tool_call_id () =
                 ; "source_turn", `Int 0
                 ; "source_tool_call_id", `String "call-missing"
                 ; "claim_id", `Null
-                ; "valid_for_days", `Null
                 ]
             ] )
       ]
@@ -1432,7 +1307,6 @@ let test_librarian_accepts_exact_source_tool_result_id () =
                 ; "source_turn", `Int 0
                 ; "source_tool_call_id", `String "call-exact"
                 ; "claim_id", `Null
-                ; "valid_for_days", `Null
                 ]
             ] )
       ]
@@ -1489,7 +1363,6 @@ let test_librarian_rejects_invalid_claims () =
                  ; "source_turn", `Int 0
                  ; "source_tool_call_id", `Null
                  ; "claim_id", `Null
-                 ; "valid_for_days", `Null
                  ]
              ] )
        ]);
@@ -1507,7 +1380,6 @@ let test_librarian_rejects_invalid_claims () =
                  ; "category", `String "fact"
                  ; "source_tool_call_id", `Null
                  ; "claim_id", `Null
-                 ; "valid_for_days", `Null
                  ]
              ] )
        ])
@@ -1527,15 +1399,15 @@ let test_reference_time_is_observation_only () =
   let durable =
     { base with Types.category = Types.Fact; Types.last_verified_at = Some (now -. 100.0) }
   in
-  let ephemeral_fresh =
-    { base with Types.category = Types.Ephemeral; Types.last_verified_at = Some now }
+  let preference_fresh =
+    { base with Types.category = Types.Preference; Types.last_verified_at = Some now }
   in
   Alcotest.(check bool)
     "category does not change recorded time"
     true
     (Float.equal
-       (Types.reference_time ephemeral_fresh)
-       (Option.get ephemeral_fresh.Types.last_verified_at));
+       (Types.reference_time preference_fresh)
+       (Option.get preference_fresh.Types.last_verified_at));
   let durable_old =
     { base with Types.category = Types.Fact; Types.last_verified_at = Some (now -. 1000.0) }
   in
@@ -1905,342 +1777,6 @@ let test_with_facts_lock_timeout_uses_on_timeout () =
       Alcotest.(check string) "lock reacquired after timeout" "reacquired" reacquired))
 ;;
 
-(* RFC-0247 (purge): GC hard-expires past-TTL facts and preserves every other
-   row. It does not deduplicate claims or apply a score threshold; semantic
-   supersession remains outside this retention pass. *)
-let test_gc_dry_run_and_rewrite () =
-  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
-  with_temp_keepers_dir (fun _keepers_dir ->
-    let keeper_id = "gc-keeper" in
-    let now = 1_000_000.0 in
-    let base = fact_fixture ~now () in
-    let keep =
-      { base with
-        Types.claim = "keep this fact"
-      ; Types.first_seen = now
-      ; Types.last_verified_at = Some now
-      }
-    in
-    let expired =
-      { keep with
-        Types.claim = "expired fact"
-      ; Types.valid_until = Some (now -. 1.0)
-      }
-    in
-    let duplicate_old =
-      { keep with
-        Types.claim = "Duplicate Claim"
-      ; Types.last_verified_at = Some (now -. 100.0)
-      ; Types.source = { keep.source with turn = 10 }
-      }
-    in
-    let duplicate_recent =
-      { keep with
-        Types.claim = "duplicate claim"
-      ; Types.last_verified_at = Some now
-      ; Types.source = { keep.source with turn = 11 }
-      }
-    in
-    List.iter
-      (Memory_io.append_fact ~keeper_id)
-      [ keep; expired; duplicate_old; duplicate_recent ];
-    let dry = GC.run_gc ~dry_run:true ~keeper_id ~now () in
-    Alcotest.(check bool) "dry-run flag" true dry.GC.dry_run;
-    Alcotest.(check int) "dry-run leaves file untouched" 4
-      (List.length (Memory_io.read_facts_all ~keeper_id));
-    let report = GC.run_gc ~keeper_id ~now () in
-    Alcotest.(check int) "total input" 4 report.GC.total_input;
-    Alcotest.(check int) "ttl expired" 1 report.ttl_expired;
-    Alcotest.(check int) "written" 3 report.written;
-    let survivors = Memory_io.read_facts_all ~keeper_id in
-    Alcotest.(check int) "survivor count" 3 (List.length survivors);
-    Alcotest.(check bool)
-      "preserves duplicate rows for Memory/LLM judgment"
-      true
-      (List.exists (fun f -> String.equal f.Types.claim "duplicate claim") survivors);
-    Alcotest.(check bool)
-      "drops expired"
-      false
-      (List.exists (fun f -> String.equal f.Types.claim "expired fact") survivors)))
-;;
-
-(* RFC-0247 forgetting safety: a malformed JSONL row must not be silently dropped
-   and the surrounding facts overwritten. GC now reads strictly under the facts
-   lock, so a corrupt store is left byte-for-byte untouched and the error
-   surfaces. Regression for the pre-fix lenient [read_facts_all] + unconditional
-   [rewrite_facts_atomically], which erased every unparseable row on the next
-   sweep — silent, permanent loss on a durability path. *)
-let test_gc_preserves_corrupt_store () =
-  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
-  with_temp_keepers_dir (fun _keepers_dir ->
-    let keeper_id = "gc-corrupt-keeper" in
-    let now = 1_000_000.0 in
-    let valid = { (fact_fixture ~now ()) with Types.claim = "durable knowledge" } in
-    Memory_io.append_fact ~keeper_id valid;
-    (* Append a torn / non-JSON line, as a crash mid-append or disk corruption
-       would leave behind. *)
-    let path = Memory_io.facts_path ~keeper_id in
-    let oc = open_out_gen [ Open_append; Open_creat ] 0o644 path in
-    output_string oc "{ broken json\n";
-    close_out oc;
-    let read_raw () = In_channel.with_open_bin path In_channel.input_all in
-    let before = read_raw () in
-    (match GC.run_gc ~keeper_id ~now () with
-     | _report -> Alcotest.fail "expected run_gc to raise on a corrupt store"
-     | exception GC.Fact_store_corrupt _ -> ());
-    Alcotest.(check string)
-      "corrupt store left untouched (no silent drop + overwrite)"
-      before
-      (read_raw ());
-    match Memory_io.read_facts_all ~keeper_id with
-    | _ -> Alcotest.fail "public reader silently accepted the corrupt store"
-    | exception Memory_io.Fact_store_decode_error _ -> ()))
-;;
-
-let test_gc_waits_for_fact_writer_lock () =
-  with_eio (fun ~sw ~net:_ ~clock ->
-  let restore_eio_guard = Eio_guard.is_ready () in
-  Eio_guard.enable ();
-  Fun.protect
-    ~finally:(fun () -> if not restore_eio_guard then Eio_guard.disable ())
-    (fun () ->
-  with_temp_keepers_dir (fun _keepers_dir ->
-    let keeper_id = "gc-lock-waits-keeper" in
-    let now = 1_000_000.0 in
-    let expired =
-      { (fact_fixture ~now ()) with
-        Types.claim = "expired fact already on disk"
-      ; Types.valid_until = Some (now -. 1.0)
-      }
-    in
-    let fresh =
-      let base = fact_fixture ~now () in
-      { base with
-        Types.claim = "fresh writer fact committed under lock"
-      ; Types.last_verified_at = Some now
-      ; Types.source = { base.source with turn = 2 }
-      }
-    in
-    Memory_io.append_fact ~keeper_id expired;
-    let writer_entered, resolve_writer_entered = Eio.Promise.create () in
-    let allow_writer, resolve_allow_writer = Eio.Promise.create () in
-    let writer_done, resolve_writer_done = Eio.Promise.create () in
-    let gc_result = ref None in
-    Eio.Fiber.fork ~sw (fun () ->
-      File_lock_eio.with_lock (Memory_io.facts_path ~keeper_id) (fun () ->
-        Eio.Promise.resolve resolve_writer_entered ();
-        Eio.Promise.await allow_writer;
-        let (_ : Memory_io.fact_merge_stats) =
-          Memory_io.merge_facts
-            ~keeper_id
-            ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
-            ~incoming:[ fresh ]
-        in
-        Eio.Promise.resolve resolve_writer_done ()));
-    Eio.Promise.await writer_entered;
-    Eio.Fiber.fork ~sw (fun () ->
-      gc_result := Some (GC.run_gc ~keeper_id ~now ()));
-    Eio.Time.sleep clock 0.02;
-    Alcotest.(check bool)
-      "gc waits for the same facts lock held by a writer"
-      true
-      (Option.is_none !gc_result);
-    Eio.Promise.resolve resolve_allow_writer ();
-    Eio.Promise.await writer_done;
-    wait_for_ref ~clock "gc after writer lock" gc_result;
-    let report =
-      match !gc_result with
-      | Some report -> report
-      | None -> Alcotest.fail "expected GC to finish after writer releases lock"
-    in
-    Alcotest.(check int) "gc sees both committed rows" 2 report.GC.total_input;
-    Alcotest.(check int)
-      "gc expires the explicit past bound"
-      1
-      report.ttl_expired;
-    let survivors = Memory_io.read_facts_all ~keeper_id in
-    Alcotest.(check int) "fresh fact survives GC" 1 (List.length survivors);
-    Alcotest.(check bool)
-      "survivor is the writer fact"
-      true
-      (List.exists
-         (fun f -> String.equal f.Types.claim "fresh writer fact committed under lock")
-         survivors))))
-;;
-
-(* Episode-store retention sweep: the per-file episode store
-   ([keeper_id/episodes/*.json]) expires only episodes whose explicit
-   [valid_until] has passed — the same exact producer boundary the facts sweep
-   uses. Survivors stay byte-identical; a corrupt store aborts the sweep with
-   every file (even expired ones) left on disk. *)
-let episode_file_snapshot ~keeper_id =
-  let dir = Memory_io.episodes_dir ~keeper_id in
-  Sys.readdir dir
-  |> Array.to_list
-  |> List.filter (fun name -> Filename.check_suffix name ".json")
-  |> List.sort String.compare
-  |> List.map (fun name ->
-    name, In_channel.with_open_bin (Filename.concat dir name) In_channel.input_all)
-;;
-
-let snapshot_entry_with_summary snapshot summary =
-  match List.find_opt (fun (_name, bytes) -> contains summary bytes) snapshot with
-  | Some entry -> entry
-  | None -> Alcotest.fail ("missing episode file containing summary: " ^ summary)
-;;
-
-let episode_retention_metric_value keeper_id =
-  Metrics.metric_value_or_zero
-    Keeper_metrics.(to_string MemoryOsEpisodeRetentionPruned)
-    ~labels:[ "keeper", keeper_id ]
-    ()
-;;
-
-let test_episode_gc_deletes_only_expired () =
-  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
-  with_temp_keepers_dir (fun _keepers_dir ->
-    let keeper_id = "episode-gc-keeper" in
-    let now = 1_000_000.0 in
-    let expired_a =
-      { (episode_fixture
-           ~now
-           ~trace_id:"trace-expired-a"
-           ~generation:0
-           ~summary:"expired episode a")
-        with
-        Types.valid_until = Some (now -. 1.0)
-      }
-    in
-    let expired_b =
-      { (episode_fixture
-           ~now
-           ~trace_id:"trace-expired-b"
-           ~generation:0
-           ~summary:"expired episode b")
-        with
-        Types.valid_until = Some (now -. 2.0)
-      }
-    in
-    let current =
-      { (episode_fixture ~now ~trace_id:"trace-current" ~generation:0 ~summary:"current episode") with
-        Types.valid_until = Some (now +. 60.0)
-      }
-    in
-    let boundary =
-      { (episode_fixture ~now ~trace_id:"trace-boundary" ~generation:0 ~summary:"boundary episode") with
-        Types.valid_until = Some now
-      }
-    in
-    let indefinite =
-      episode_fixture ~now ~trace_id:"trace-indefinite" ~generation:0 ~summary:"indefinite episode"
-    in
-    List.iter
-      (Memory_io.append_episode ~keeper_id)
-      [ expired_a; expired_b; current; boundary; indefinite ];
-    let before = episode_file_snapshot ~keeper_id in
-    Alcotest.(check int) "five episode files on disk" 5 (List.length before);
-    let report = GC.run_episode_gc ~keeper_id ~now () in
-    Alcotest.(check int) "episodes total" 5 report.GC.episodes_total;
-    Alcotest.(check int) "episodes expired" 2 report.GC.episodes_expired;
-    Alcotest.(check int) "episodes deleted" 2 report.GC.episodes_deleted;
-    Alcotest.(check bool) "real sweep, not dry-run" false report.GC.dry_run;
-    let after = episode_file_snapshot ~keeper_id in
-    Alcotest.(check int) "three episode files survive" 3 (List.length after);
-    List.iter
-      (fun summary ->
-         let survivor = snapshot_entry_with_summary before summary in
-         Alcotest.(check bool)
-           (summary ^ " survives byte-identical")
-           true
-           (List.mem survivor after))
-      [ "current episode"; "boundary episode"; "indefinite episode" ];
-    Alcotest.(check (float 0.001))
-      "pruned metric counts exactly the deleted files"
-      2.0
-      (episode_retention_metric_value keeper_id)))
-;;
-
-let test_episode_gc_dry_run_reports_without_deleting () =
-  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
-  with_temp_keepers_dir (fun _keepers_dir ->
-    let keeper_id = "episode-gc-dry-run-keeper" in
-    let now = 1_000_000.0 in
-    let expired =
-      { (episode_fixture
-           ~now
-           ~trace_id:"trace-expired"
-           ~generation:0
-           ~summary:"dry-run expired episode")
-        with
-        Types.valid_until = Some (now -. 1.0)
-      }
-    in
-    let live =
-      episode_fixture ~now ~trace_id:"trace-live" ~generation:0 ~summary:"dry-run live episode"
-    in
-    List.iter (Memory_io.append_episode ~keeper_id) [ expired; live ];
-    let before = episode_file_snapshot ~keeper_id in
-    let report = GC.run_episode_gc ~dry_run:true ~keeper_id ~now () in
-    Alcotest.(check bool) "dry-run flag" true report.GC.dry_run;
-    Alcotest.(check int) "episodes total" 2 report.GC.episodes_total;
-    Alcotest.(check int) "episodes expired reported" 1 report.GC.episodes_expired;
-    Alcotest.(check int) "dry-run deletes nothing" 0 report.GC.episodes_deleted;
-    Alcotest.(check (list (pair string string)))
-      "dry-run leaves every file byte-identical"
-      before
-      (episode_file_snapshot ~keeper_id);
-    Alcotest.(check (float 0.001))
-      "dry-run does not count prunes"
-      0.0
-      (episode_retention_metric_value keeper_id)))
-;;
-
-(* Preserve over delete, same rule as the facts sweep: one malformed episode
-   file aborts the sweep and even expired files stay on disk — the error
-   surfaces instead of a corrupt store being silently pruned around. *)
-let test_episode_gc_corrupt_store_fails_loud_and_deletes_nothing () =
-  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
-  with_temp_keepers_dir (fun _keepers_dir ->
-    let keeper_id = "episode-gc-corrupt-keeper" in
-    let now = 1_000_000.0 in
-    let expired =
-      { (episode_fixture
-           ~now
-           ~trace_id:"trace-expired"
-           ~generation:0
-           ~summary:"corrupt-store expired episode")
-        with
-        Types.valid_until = Some (now -. 1.0)
-      }
-    in
-    let live =
-      episode_fixture
-        ~now
-        ~trace_id:"trace-live"
-        ~generation:0
-        ~summary:"corrupt-store live episode"
-    in
-    List.iter (Memory_io.append_episode ~keeper_id) [ expired; live ];
-    (* A torn write, as a crash mid-publish or disk corruption would leave
-       behind. *)
-    write_text_file
-      (Filename.concat (Memory_io.episodes_dir ~keeper_id) "torn-g0000-t0000000000001.json")
-      "{ broken json";
-    let before = episode_file_snapshot ~keeper_id in
-    Alcotest.(check int) "three episode files on disk" 3 (List.length before);
-    (match GC.run_episode_gc ~keeper_id ~now () with
-     | _report -> Alcotest.fail "expected run_episode_gc to raise on a corrupt store"
-     | exception GC.Episode_store_corrupt _ -> ());
-    Alcotest.(check (list (pair string string)))
-      "corrupt store left untouched — even expired episodes survive"
-      before
-      (episode_file_snapshot ~keeper_id);
-    Alcotest.(check (float 0.001))
-      "no prune counted for the aborted sweep"
-      0.0
-      (episode_retention_metric_value keeper_id)))
-;;
-
 (* Cold-start contract (RFC-0351 L1): an empty store still renders the
    wrapper so the keeper sees the gauge and the "belongs in a fact" advisory
    from its very first turn. Short-circuiting to "" hid the L1 nudge from
@@ -2504,7 +2040,6 @@ let test_render_if_enabled_renders_persisted_memory () =
           ; Types.claims = [ fact ]
           ; Types.source_turn_range = Some (5, 5)
           ; Types.created_at = now
-          ; Types.valid_until = None
           ; Types.terminal_marker = None
           }
         in
@@ -2553,7 +2088,6 @@ let test_render_if_enabled_offmain_wrap_is_transparent () =
           ; Types.claims = [ fact ]
           ; Types.source_turn_range = Some (5, 5)
           ; Types.created_at = now
-          ; Types.valid_until = None
           ; Types.terminal_marker = None
           }
         in
@@ -2594,13 +2128,12 @@ let test_render_if_enabled_keeps_diagnostic_context () =
         let diagnostic_fact =
           { (fact_fixture ~now ()) with
             Types.claim = "Raw parse-failure fallback should not enter prompt recall"
-          ; Types.category = Types.Ephemeral
+          ; Types.category = Types.Lesson
           ; Types.source =
               { Types.trace_id = "trace-diagnostic-recall"
               ; Types.turn = 5
               ; Types.tool_call_id = None
               }
-          ; Types.valid_until = Some (now +. 3600.0)
           }
         in
         let diagnostic_episode =
@@ -2610,7 +2143,6 @@ let test_render_if_enabled_keeps_diagnostic_context () =
           ; Types.claims = [ diagnostic_fact ]
           ; Types.source_turn_range = Some (5, 5)
           ; Types.created_at = now
-          ; Types.valid_until = Some (now +. 3600.0)
           ; Types.terminal_marker = Some "diagnostic"
           }
         in
@@ -2644,7 +2176,6 @@ let test_render_if_enabled_preserves_empty_claim_episode () =
           ; Types.claims = []
           ; Types.source_turn_range = None
           ; Types.created_at = now
-          ; Types.valid_until = None
           ; Types.terminal_marker = None
           }
         in
@@ -2838,48 +2369,6 @@ let test_recall_no_prefix_for_plain_fact () =
             (contains "[UNVERIFIED — re-check before acting]" block))))
 ;;
 
-let test_recall_filters_expired_episodes () =
-  with_prompt_registry (fun () ->
-    with_temp_keepers_dir (fun _keepers_dir ->
-      let keeper_id = "episode-ttl-keeper" in
-      let now = 1_000_000.0 in
-      let expired =
-        { (episode_fixture
-             ~now
-             ~trace_id:"trace-expired"
-             ~generation:1
-             ~summary:"expired episode should not render")
-          with
-          Types.valid_until = Some (now -. 1.0)
-        }
-      in
-      let active =
-        { (episode_fixture
-             ~now
-             ~trace_id:"trace-active"
-             ~generation:2
-             ~summary:"active episode should render")
-          with
-          Types.valid_until = Some (now +. 1.0)
-        }
-      in
-      Memory_io.append_episode_bundle ~keeper_id expired;
-      Memory_io.append_episode_bundle ~keeper_id active;
-      let ctx = Recall.render_context ~keepers_dir ~keeper_id ~now () in
-      Alcotest.(check bool)
-        "expired episode row is omitted"
-        false
-        (contains "[trace-expired g0001]" ctx);
-      Alcotest.(check bool)
-        "the episode claim has its own explicit validity and remains visible"
-        true
-        (contains "expired episode should not render fact" ctx);
-      Alcotest.(check bool)
-        "active episode summary remains"
-        true
-        (contains "active episode should render" ctx)))
-;;
-
 let test_recall_renders_terminal_episode_marker () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
@@ -2948,7 +2437,6 @@ let test_recall_preserves_repeated_claims () =
             ]
         ; Types.source_turn_range = Some (1, 9)
         ; Types.created_at = now
-        ; Types.valid_until = None
         ; Types.terminal_marker = None
         }
       in
@@ -2982,100 +2470,14 @@ let test_fact_store_preserves_all_appends () =
     Alcotest.(check int) "all facts preserved" 10 (List.length remaining))
 ;;
 
-(* RFC-0259 §3.6 (P5): the cap drops valid_until-expired rows on the same typed
-   boundary the GC sweep uses. Pure split — durable (None) and fresh stay live,
-   expired goes to the second partition, order preserved. *)
-let test_partition_expired_splits_on_valid_until () =
-  let now = 1_000_000.0 in
-  let base = fact_fixture ~now () in
-  let durable = { base with Types.claim = "durable"; Types.valid_until = None } in
-  let expired = { base with Types.claim = "expired"; Types.valid_until = Some (now -. 1.0) } in
-  let fresh = { base with Types.claim = "fresh"; Types.valid_until = Some (now +. days 1) } in
-  let live, gone = Types.partition_expired ~now [ durable; expired; fresh ] in
-  Alcotest.(check (list string))
-    "live keeps durable + fresh in order"
-    [ "durable"; "fresh" ]
-    (List.map (fun f -> f.Types.claim) live);
-  Alcotest.(check (list string))
-    "expired partition holds only the expired row"
-    [ "expired" ]
-    (List.map (fun f -> f.Types.claim) gone)
-;;
-
-let test_gc_uses_only_explicit_valid_until () =
-  let now = 1_000_000.0 in
-  let base = fact_fixture ~now () in
-  let old_external =
-    { base with
-      Types.claim = "old external state"
-    ; Types.first_seen = now -. 1_000_000.0
-    ; Types.valid_until = None
-    }
-  in
-  let explicitly_expired =
-    { old_external with Types.claim = "explicitly expired"; valid_until = Some (now -. 1.0) }
-  in
-  let durable =
-    { old_external with
-      Types.claim = "durable row"
-    }
-  in
-  Alcotest.(check bool)
-    "GC keeps old external_state without an explicit horizon"
-    false
-    (GC.ttl_expired ~now old_external);
-  Alcotest.(check bool)
-    "GC expires exact explicit horizon"
-    true
-    (GC.ttl_expired ~now explicitly_expired);
-  Alcotest.(check bool)
-    "GC keeps durable no-horizon fact"
-    false
-    (GC.ttl_expired ~now durable);
-  let live, gone =
-    Types.partition_expired ~now [ old_external; explicitly_expired; durable ]
-  in
-  Alcotest.(check (list string))
-    "partition_expired shares exact explicit horizon"
-    [ "explicitly expired" ]
-    (List.map (fun f -> f.Types.claim) gone);
-  Alcotest.(check (list string))
-    "live keeps unbounded external + durable"
-    [ "old external state"; "durable row" ]
-    (List.map (fun f -> f.Types.claim) live)
-;;
-
-let test_fact_store_preserves_expired_for_explicit_gc () =
-  with_temp_keepers_dir (fun _ ->
-    let keeper_id = "virtual-memory-keeper" in
-    let now = 1_000_000.0 in
-    let base = fact_fixture ~now () in
-    let durable = { base with Types.claim = "durable-keep"; Types.valid_until = None } in
-    let expired =
-      { base with Types.claim = "expired-drop"; Types.valid_until = Some (now -. 1.0) }
-    in
-    let fresh =
-      { base with Types.claim = "fresh-keep"; Types.valid_until = Some (now +. days 1) }
-    in
-    List.iter (Memory_io.append_fact ~keeper_id) [ durable; expired; fresh ];
-    let remaining =
-      List.map (fun f -> f.Types.claim) (Memory_io.read_facts_all ~keeper_id)
-    in
-    Alcotest.(check bool) "durable survives" true (List.mem "durable-keep" remaining);
-    Alcotest.(check bool) "fresh survives" true (List.mem "fresh-keep" remaining);
-    Alcotest.(check bool) "expired remains for explicit GC" true (List.mem "expired-drop" remaining))
-;;
-
 let test_merge_preserves_rows_without_incoming () =
   with_temp_keepers_dir (fun _ ->
     let keeper_id = "virtual-memory-keeper" in
     let now = 1_000_000.0 in
     let base = fact_fixture ~now () in
-    let durable = { base with Types.claim = "durable"; Types.valid_until = None } in
-    let expired =
-      { base with Types.claim = "expired"; Types.valid_until = Some (now -. 1.0) }
-    in
-    List.iter (Memory_io.append_fact ~keeper_id) [ durable; expired ];
+    let first = { base with Types.claim = "first row" } in
+    let second = { base with Types.claim = "second row" } in
+    List.iter (Memory_io.append_fact ~keeper_id) [ first; second ];
     let stats =
       Memory_io.merge_facts
         ~keeper_id
@@ -3086,7 +2488,10 @@ let test_merge_preserves_rows_without_incoming () =
     let remaining =
       List.map (fun f -> f.Types.claim) (Memory_io.read_facts_all ~keeper_id)
     in
-    Alcotest.(check (list string)) "both rows remain" [ "durable"; "expired" ] remaining)
+    Alcotest.(check (list string))
+      "both rows remain"
+      [ "first row"; "second row" ]
+      remaining)
 ;;
 
 let test_event_log_preserves_all_entries () =
@@ -3229,7 +2634,6 @@ let test_recall_context_preserves_semantic_memory_content () =
         ; Types.claims = [ normal_fact; injection_fact ]
         ; Types.source_turn_range = Some (4, 6)
         ; Types.created_at = now
-        ; Types.valid_until = None
         ; Types.terminal_marker = None
         }
       in
@@ -3294,7 +2698,6 @@ let test_recall_context_preserves_durable_current_rows () =
         ; Types.claims = [ preference_fact ]
         ; Types.source_turn_range = Some (5, 5)
         ; Types.created_at = now
-        ; Types.valid_until = None
         ; Types.terminal_marker = None
         }
       in
@@ -3305,7 +2708,6 @@ let test_recall_context_preserves_durable_current_rows () =
         ; Types.claims = [ path_fact ]
         ; Types.source_turn_range = Some (7, 7)
         ; Types.created_at = now +. 1.0
-        ; Types.valid_until = None
         ; Types.terminal_marker = None
         }
       in
@@ -3421,7 +2823,7 @@ let test_merge_appends_distinct_claims () =
     Alcotest.(check int) "all three preserved" 3 (List.length rows))
 ;;
 
-(* ---------- Context does not infer validity ---------- *)
+(* ---------- Closed category codec ---------- *)
 
 let test_category_codec_roundtrip () =
   let known =
@@ -3431,7 +2833,6 @@ let test_category_codec_roundtrip () =
     ; "blocker", Types.Blocker
     ; "goal", Types.Goal
     ; "code_change", Types.Code_change
-    ; "ephemeral", Types.Ephemeral
     ; "validated_approach", Types.Validated_approach
     ; "lesson", Types.Lesson
     ]
@@ -3452,33 +2853,13 @@ let test_category_codec_roundtrip () =
     true
     (Option.is_none (Types.category_of_string "checkpoint_saved"));
   Alcotest.(check bool)
+    "removed ephemeral label is rejected"
+    true
+    (Option.is_none (Types.category_of_string "ephemeral"));
+  Alcotest.(check bool)
     "non-canonical label is rejected"
     true
     (Option.is_none (Types.category_of_string " Fact "))
-;;
-
-let test_all_categories_are_validity_context () =
-  let now = 1_000_000.0 in
-  List.iter
-    (fun category ->
-       let fact = { (fact_fixture ~now ()) with Types.category; valid_until = None } in
-       Alcotest.(check bool)
-         (Types.category_to_string category)
-         true
-         (Types.fact_is_current ~now fact))
-    Types.all_categories
-;;
-
-let test_no_category_infers_validity () =
-  let now = 1_000_000.0 in
-  List.iter
-    (fun category ->
-       let fact = { (fact_fixture ~now ()) with Types.category; valid_until = None } in
-       Alcotest.(check (option (float 0.001)))
-         (Types.category_to_string category ^ " does not infer validity")
-         None
-         (Types.fact_effective_valid_until fact))
-    Types.all_categories
 ;;
 
 let with_env name value f =
@@ -3487,11 +2868,6 @@ let with_env name value f =
   Fun.protect ~finally:(fun () -> restore_env name old) f
 ;;
 
-(* masc#25052 P1: selection budget. Below budget, recall's behavior is
-   unchanged (asserted throughout the rest of this file, all of which use far
-   fewer than the 500-fact/500-episode default). This proves the truncation
-   case: over budget, only the most-recent-[last_verified_at] facts survive,
-   the drop is counted, and the dropped items are gone from the block. *)
 let test_recall_selection_budget_truncates_facts_by_recency () =
   with_env "MASC_KEEPER_MEMORY_OS_RECALL_MAX_FACTS" "3" (fun () ->
     with_prompt_registry (fun () ->
@@ -3571,66 +2947,6 @@ let test_recall_selection_budget_no_truncation_below_budget () =
 ;;
 
 (* ---------- Explicit validity only ---------- *)
-
-let test_fact_validity_uses_only_stored_value () =
-  let now = 1_000_000.0 in
-  let absent =
-    { (fact_fixture ~now ()) with
-      category = Types.Ephemeral
-    ; valid_until = None
-    }
-  in
-  Alcotest.(check (option (float 0.001)))
-    "context does not infer validity"
-    None
-    (Types.fact_effective_valid_until absent);
-  let explicit = { absent with Types.valid_until = Some (now +. 42.0) } in
-  Alcotest.(check (option (float 0.001)))
-    "stored validity remains exact"
-    (Some (now +. 42.0))
-    (Types.fact_effective_valid_until explicit)
-;;
-
-(* Re-observation never invents or changes validity; an explicit bound remains exact. *)
-let test_reobservation_uses_only_explicit_validity () =
-  let now = 1_000_000.0 in
-  let mk_bounded ?(first_seen = now) () =
-    { (fact_fixture ~now ()) with
-      Types.claim = "the agent is idle this turn"
-    ; Types.category = Types.Lesson
-    ; Types.first_seen
-    ; Types.valid_until = Some (now +. 3_600.0)
-    ; Types.claim_id = Some "self-obs-idle"
-    }
-  in
-  let existing = mk_bounded () in
-  Alcotest.(check bool)
-    "explicit validity is preserved"
-    true
-    (Option.is_some existing.Types.valid_until);
-  let later = now +. 1_800.0 in
-  let incoming = mk_bounded ~first_seen:later () in
-  let merged = Policy.reobserve_fact ~now:later ~provenance:Policy.Independent_observation ~existing ~incoming in
-  Alcotest.(check (option (float 0.001)))
-    "reobservation does not alter explicit validity"
-    existing.Types.valid_until
-    merged.Types.valid_until;
-  let past = now +. 3_601.0 in
-  Alcotest.(check bool)
-    "bounded fact drops from recall after its horizon"
-    false
-    (Types.fact_is_current ~now:past existing);
-  let durable =
-    { (fact_fixture ~now ()) with
-      Types.category = Types.Lesson
-    ; Types.valid_until = None
-    }
-  in
-  Alcotest.(check bool)
-    "unbounded fact survives past the bounded horizon"
-    true
-    (Types.fact_is_current ~now:past durable)
-;;
 
 let test_fact_of_json_rejects_unknown_category () =
   let first_seen = 1_000_000.0 in
@@ -3912,70 +3228,33 @@ let test_reobserve_advances_durable_anchor () =
     (String.equal (Types.claim_identity p) (Types.claim_identity distinct))
 ;;
 
-let test_reobserve_preserves_explicit_validity () =
-  let now = 5_000_000.0 in
-  let older = now -. 100_000.0 in
-  let v0 = older +. 12_345.0 in
-  let existing =
-    { (fact_fixture ~now:older ()) with
-      Types.claim = "deployment state remains active"
-    ; Types.first_seen = older
-    ; Types.valid_until = Some v0
-    ; Types.last_verified_at = Some (older +. 1_000.0)
-    }
-  in
-  let incoming = { existing with Types.claim = "deployment remains active" } in
-  let reobserved = Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation ~existing ~incoming in
-  Alcotest.(check (float 0.001))
-    "first_seen inherited (not advanced to now)"
-    older
-    reobserved.Types.first_seen;
-  Alcotest.(check (option (float 0.001)))
-    "valid_until inherited (not re-anchored to now)"
-    (Some v0)
-    reobserved.Types.valid_until;
-  Alcotest.(check (option (float 0.001)))
-    "last_verified_at advances on re-observe"
-    (Some now)
-    reobserved.Types.last_verified_at
-;;
-
-(* The dashboard fact projection serializes the real [fact] structure and never
-   reconstructs deleted score fields. *)
-(* Honest scope: the score keys are absent by construction today — [type fact]
-   carries no such fields, so [memory_os_fact_json] structurally cannot emit
-   them. This case therefore guards a *re-introduction*: it would go red only if
-   a score field were added back to BOTH the record and the projection. It is
-   not (and cannot be) load-bearing against the current code alone. *)
 let test_dashboard_fact_json_omits_score_keys () =
   let now = 1_000_000.0 in
   let f =
     { (fact_fixture ~now ()) with
       Types.category = Types.Validated_approach
-    ; Types.valid_until = Some (now +. 3600.0)
     }
   in
   let fields =
-    match Server_dashboard_http_keeper_api.memory_os_fact_json ~now f with
+    match Server_dashboard_http_keeper_api.memory_os_fact_json f with
     | `Assoc fields -> fields
     | _ -> Alcotest.fail "memory_os_fact_json must be a JSON object"
   in
   let has k = List.mem_assoc k fields in
   List.iter
     (fun k -> Alcotest.(check bool) (Printf.sprintf "present: %s" k) true (has k))
-	    [ "claim"; "category"; "source"; "first_seen"; "first_seen_iso"
-	    ; "reference_time"; "valid_until"; "last_verified_at"; "current" ];
+    [ "claim"; "category"; "source"; "first_seen"; "first_seen_iso"
+    ; "reference_time"; "last_verified_at"
+    ];
   List.iter
     (fun k -> Alcotest.(check bool) (Printf.sprintf "deleted score key absent: %s" k) false (has k))
     [ "claim_kind"; "confidence"; "access_count"; "last_accessed"; "stale_factor"
-    ; "expected_lifetime_cycles"; "salience"; "uses" ];
-  (match List.assoc_opt "category" fields with
-   | Some (`String s) ->
-     Alcotest.(check string) "category is the typed producer string" "validated_approach" s
-   | _ -> Alcotest.fail "category must be a string");
-  match List.assoc_opt "current" fields with
-   | Some (`Bool b) -> Alcotest.(check bool) "current when valid_until is in the future" true b
-   | _ -> Alcotest.fail "current must be a bool"
+    ; "expected_lifetime_cycles"; "salience"; "uses"; "valid_until"; "current"
+    ];
+  match List.assoc_opt "category" fields with
+  | Some (`String s) ->
+    Alcotest.(check string) "category is the typed producer string" "validated_approach" s
+  | _ -> Alcotest.fail "category must be a string"
 ;;
 
 (* The staleness anchor [reference_time] uses last_verified_at when set. *)
@@ -3983,7 +3262,7 @@ let test_dashboard_fact_json_reference_time () =
   let now = 1_000_000.0 in
   let fields =
     match
-      Server_dashboard_http_keeper_api.memory_os_fact_json ~now (fact_fixture ~now ())
+      Server_dashboard_http_keeper_api.memory_os_fact_json (fact_fixture ~now ())
     with
     | `Assoc fields -> fields
     | _ -> Alcotest.fail "memory_os_fact_json must be a JSON object"
@@ -4721,15 +4000,6 @@ let test_compaction_snapshots_json_surfaces_manifest_read_errors () =
       (json_int_field "compaction_snapshots" top "read_error_count"))
 ;;
 
-let test_gc_default_on () =
-  (* Defaults are module-load constants; env overrides are tested separately. *)
-  Alcotest.(check bool) "gc default is true" true Env_config.KeeperMemoryOs.gc_enabled_default
-;;
-
-(* Regression for the duplicate-creation root: the librarian's turn numbers
-   are sliding-window indices, so the same observation re-extracted after the
-   window moves used to mint a fresh identity and write-time dedupe never
-   fired. Identity now keys on trace + tool call + exact claim bytes only. *)
 let test_claim_identity_ignores_window_turn () =
   let now = 1_000_000.0 in
   let base = fact_fixture ~now () in
@@ -4820,17 +4090,9 @@ let () =
             `Quick
             test_librarian_generation_override
         ; Alcotest.test_case
-            "librarian does not infer validity"
+            "librarian rejects removed lifetime field and category"
             `Quick
-            test_librarian_does_not_infer_validity
-        ; Alcotest.test_case
-            "librarian stamps a declared lifetime"
-            `Quick
-            test_librarian_stamps_declared_lifetime
-        ; Alcotest.test_case
-            "librarian rejects a malformed lifetime"
-            `Quick
-            test_librarian_rejects_invalid_lifetime
+            test_librarian_rejects_removed_lifetime_and_category
         ; Alcotest.test_case
             "librarian accepts schema-valid nullable claim fields"
             `Quick
@@ -4911,10 +4173,6 @@ let () =
             "dashboard compaction snapshots surface manifest read errors"
             `Quick
             test_compaction_snapshots_json_surfaces_manifest_read_errors
-        ; Alcotest.test_case
-            "gc default is on"
-            `Quick
-            test_gc_default_on
         ] )
     ; ( "policy"
       , [ Alcotest.test_case
@@ -4967,30 +4225,6 @@ let () =
             "facts lock timeout uses on_timeout"
             `Quick
             test_with_facts_lock_timeout_uses_on_timeout
-        ; Alcotest.test_case
-            "gc dry-run and rewrite"
-            `Quick
-            test_gc_dry_run_and_rewrite
-        ; Alcotest.test_case
-            "gc preserves a corrupt store instead of erasing it"
-            `Quick
-            test_gc_preserves_corrupt_store
-        ; Alcotest.test_case
-            "gc waits for fact writer lock"
-            `Quick
-            test_gc_waits_for_fact_writer_lock
-        ; Alcotest.test_case
-            "episode gc deletes only expired episodes"
-            `Quick
-            test_episode_gc_deletes_only_expired
-        ; Alcotest.test_case
-            "episode gc dry-run reports without deleting"
-            `Quick
-            test_episode_gc_dry_run_reports_without_deleting
-        ; Alcotest.test_case
-            "episode gc fails loud on a corrupt store"
-            `Quick
-            test_episode_gc_corrupt_store_fails_loud_and_deletes_nothing
         ] )
     ; ( "recall"
       , [ Alcotest.test_case
@@ -5062,10 +4296,6 @@ let () =
             `Quick
             test_recall_no_prefix_for_plain_fact
         ; Alcotest.test_case
-            "expired episodes are omitted"
-            `Quick
-            test_recall_filters_expired_episodes
-        ; Alcotest.test_case
             "terminal episode marker is rendered"
             `Quick
             test_recall_renders_terminal_episode_marker
@@ -5087,18 +4317,6 @@ let () =
             "fact store preserves all appends"
             `Quick
             test_fact_store_preserves_all_appends
-        ; Alcotest.test_case
-            "partition_expired splits on valid_until (RFC-0259 P5)"
-            `Quick
-            test_partition_expired_splits_on_valid_until
-        ; Alcotest.test_case
-            "GC uses only explicit valid_until"
-            `Quick
-            test_gc_uses_only_explicit_valid_until
-        ; Alcotest.test_case
-            "fact store preserves expired rows for explicit GC"
-            `Quick
-            test_fact_store_preserves_expired_for_explicit_gc
         ; Alcotest.test_case
             "merge preserves rows without incoming"
             `Quick
@@ -5124,30 +4342,14 @@ let () =
             `Quick
             test_merge_appends_distinct_claims
         ] )
-    ; ( "memory context validity"
+    ; ( "memory categories"
       , [ Alcotest.test_case
             "category codec round-trips"
             `Quick
             test_category_codec_roundtrip
-        ; Alcotest.test_case
-            "all categories are validity context"
-            `Quick
-            test_all_categories_are_validity_context
-        ; Alcotest.test_case
-            "no category infers validity"
-            `Quick
-            test_no_category_infers_validity
         ] )
-    ; ( "rfc-0259 volatile"
+    ; ( "rfc-0259 identity"
       , [ Alcotest.test_case
-            "fact validity uses only stored value"
-            `Quick
-            test_fact_validity_uses_only_stored_value
-        ; Alcotest.test_case
-            "re-observation uses only explicit validity"
-            `Quick
-            test_reobservation_uses_only_explicit_validity
-        ; Alcotest.test_case
             "fact_of_json rejects unknown category"
             `Quick
             test_fact_of_json_rejects_unknown_category
@@ -5159,10 +4361,6 @@ let () =
             "claim_id codec round-trips Some and omits None (RFC-0259 §3.7 P6)"
             `Quick
             test_claim_id_codec_roundtrip
-        ; Alcotest.test_case
-            "reobserve preserves explicit validity"
-            `Quick
-            test_reobserve_preserves_explicit_validity
         ; Alcotest.test_case
             "claim_identity: same claim_id shares a key, distinct claim_id stays distinct (RFC-0259 §3.7 P6/E)"
             `Quick

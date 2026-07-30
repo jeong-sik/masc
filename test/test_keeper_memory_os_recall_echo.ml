@@ -26,7 +26,6 @@ let fact ?(claim = "keeper must do zero tool calls and emit one short line")
   ; Types.category
   ; Types.source = { Types.trace_id = "trace-echo"; Types.turn = 58; Types.tool_call_id = None }
   ; Types.first_seen = now -. 86_400.0
-  ; Types.valid_until = None
   ; Types.last_verified_at
   ; Types.claim_id
   }
@@ -44,8 +43,6 @@ let test_echo_does_not_advance_truth_anchor () =
   in
   check (option (float 0.001)) "echo: last_verified_at unchanged" stale
     echoed.Types.last_verified_at;
-  check (option (float 0.001)) "echo: valid_until unchanged" None
-    echoed.Types.valid_until;
   let independent =
     Policy.reobserve_fact
       ~now

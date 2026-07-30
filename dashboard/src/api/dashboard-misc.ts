@@ -50,15 +50,11 @@ export function fetchMemorySubsystems(
 
 // --- Keeper Memory Health ---
 
-export type KeeperMemoryHealthAlertCode =
-  | 'ttl_expired_on_disk'
-  | 'duplicate_claim_identity_rows'
+export type KeeperMemoryHealthAlertCode = 'duplicate_claim_identity_rows'
 
 export type KeeperMemoryHealthAlertSeverity = 'warn'
 
-export type KeeperMemoryHealthAlertTarget =
-  | 'ttl_expired_on_disk'
-  | 'duplicate_claim_identity_rows'
+export type KeeperMemoryHealthAlertTarget = 'duplicate_claim_identity_rows'
 
 export interface KeeperMemoryHealthAlert {
   code: KeeperMemoryHealthAlertCode
@@ -77,7 +73,6 @@ export interface KeeperMemoryHealthKeeperEntry {
   events: number
   events_bytes: number
   events_bytes_to_facts_bytes_ratio: number
-  ttl_expired_on_disk: number
   duplicate_claim_identity_rows: number
   alerts: KeeperMemoryHealthAlert[]
 }
@@ -97,17 +92,14 @@ export interface KeeperMemoryHealthResponse {
     facts: number
     facts_bytes: number
     events_bytes: number
-    ttl_expired_on_disk: number
     duplicate_claim_identity_rows: number
   }
   alert_summary: {
     total_alerts: number
     warn_alerts: number
     keepers_with_alerts: number
-    ttl_expired_keepers: number
     duplicate_claim_identity_rows_keepers: number
     thresholds: {
-      ttl_expired_on_disk: number
       duplicate_claim_identity_rows: number
     }
   }
@@ -145,7 +137,6 @@ function decodeExactArray<T>(
 
 function decodeKeeperMemoryHealthAlertCode(raw: unknown): KeeperMemoryHealthAlertCode | null {
   switch (raw) {
-    case 'ttl_expired_on_disk':
     case 'duplicate_claim_identity_rows':
       return raw
     default:
@@ -190,7 +181,6 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     'events',
     'events_bytes',
     'events_bytes_to_facts_bytes_ratio',
-    'ttl_expired_on_disk',
     'duplicate_claim_identity_rows',
     'alerts',
   ])) return null
@@ -201,7 +191,6 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
   const events_bytes = decodeNonNegativeInteger(raw.events_bytes)
   const events_bytes_to_facts_bytes_ratio =
     decodeNonNegativeNumber(raw.events_bytes_to_facts_bytes_ratio)
-  const ttl_expired_on_disk = decodeNonNegativeInteger(raw.ttl_expired_on_disk)
   const duplicate_claim_identity_rows =
     decodeNonNegativeInteger(raw.duplicate_claim_identity_rows)
   const alerts = decodeExactArray(raw.alerts, decodeKeeperMemoryHealthAlert)
@@ -212,7 +201,6 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     || events === null
     || events_bytes === null
     || events_bytes_to_facts_bytes_ratio === null
-    || ttl_expired_on_disk === null
     || duplicate_claim_identity_rows === null
     || alerts === null
   ) return null
@@ -223,7 +211,6 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     events,
     events_bytes,
     events_bytes_to_facts_bytes_ratio,
-    ttl_expired_on_disk,
     duplicate_claim_identity_rows,
     alerts,
   }
@@ -243,27 +230,23 @@ function decodeKeeperMemoryHealthTotals(
     'facts',
     'facts_bytes',
     'events_bytes',
-    'ttl_expired_on_disk',
     'duplicate_claim_identity_rows',
   ])) return null
   const facts = decodeNonNegativeInteger(raw.facts)
   const facts_bytes = decodeNonNegativeInteger(raw.facts_bytes)
   const events_bytes = decodeNonNegativeInteger(raw.events_bytes)
-  const ttl_expired_on_disk = decodeNonNegativeInteger(raw.ttl_expired_on_disk)
   const duplicate_claim_identity_rows =
     decodeNonNegativeInteger(raw.duplicate_claim_identity_rows)
   if (
     facts === null
     || facts_bytes === null
     || events_bytes === null
-    || ttl_expired_on_disk === null
     || duplicate_claim_identity_rows === null
   ) return null
   return {
     facts,
     facts_bytes,
     events_bytes,
-    ttl_expired_on_disk,
     duplicate_claim_identity_rows,
   }
 }
@@ -275,41 +258,32 @@ function decodeKeeperMemoryHealthAlertSummary(
     'total_alerts',
     'warn_alerts',
     'keepers_with_alerts',
-    'ttl_expired_keepers',
     'duplicate_claim_identity_rows_keepers',
     'thresholds',
   ])) return null
   const thresholds = raw.thresholds
-  if (!isRecord(thresholds) || !hasExactKeys(thresholds, [
-    'ttl_expired_on_disk',
-    'duplicate_claim_identity_rows',
-  ])) return null
+  if (!isRecord(thresholds)
+    || !hasExactKeys(thresholds, ['duplicate_claim_identity_rows'])) return null
   const total_alerts = decodeNonNegativeInteger(raw.total_alerts)
   const warn_alerts = decodeNonNegativeInteger(raw.warn_alerts)
   const keepers_with_alerts = decodeNonNegativeInteger(raw.keepers_with_alerts)
-  const ttl_expired_keepers = decodeNonNegativeInteger(raw.ttl_expired_keepers)
   const duplicate_claim_identity_rows_keepers =
     decodeNonNegativeInteger(raw.duplicate_claim_identity_rows_keepers)
-  const ttl_expired_on_disk = decodeNonNegativeNumber(thresholds.ttl_expired_on_disk)
   const duplicate_claim_identity_rows =
     decodeNonNegativeNumber(thresholds.duplicate_claim_identity_rows)
   if (
     total_alerts === null
     || warn_alerts === null
     || keepers_with_alerts === null
-    || ttl_expired_keepers === null
     || duplicate_claim_identity_rows_keepers === null
-    || ttl_expired_on_disk === null
     || duplicate_claim_identity_rows === null
   ) return null
   return {
     total_alerts,
     warn_alerts,
     keepers_with_alerts,
-    ttl_expired_keepers,
     duplicate_claim_identity_rows_keepers,
     thresholds: {
-      ttl_expired_on_disk,
       duplicate_claim_identity_rows,
     },
   }
@@ -349,7 +323,6 @@ function decodeKeeperMemoryHealthResponse(raw: unknown): KeeperMemoryHealthRespo
     totals.facts !== sum(entry => entry.facts)
     || totals.facts_bytes !== sum(entry => entry.facts_bytes)
     || totals.events_bytes !== sum(entry => entry.events_bytes)
-    || totals.ttl_expired_on_disk !== sum(entry => entry.ttl_expired_on_disk)
     || totals.duplicate_claim_identity_rows
       !== sum(entry => entry.duplicate_claim_identity_rows)
     || keepers.some(entry =>
@@ -364,7 +337,6 @@ function decodeKeeperMemoryHealthResponse(raw: unknown): KeeperMemoryHealthRespo
     || [...keeperIds].some(keeperId => readErrorKeeperIds.has(keeperId))
   ) return null
   const alertCodes: readonly KeeperMemoryHealthAlertCode[] = [
-    'ttl_expired_on_disk',
     'duplicate_claim_identity_rows',
   ]
   const metricFor = (
@@ -395,7 +367,6 @@ function decodeKeeperMemoryHealthResponse(raw: unknown): KeeperMemoryHealthRespo
     || alert_summary.warn_alerts !== allAlerts.length
     || alert_summary.keepers_with_alerts
       !== keepers.filter(entry => entry.alerts.length > 0).length
-    || alert_summary.ttl_expired_keepers !== alertCount('ttl_expired_on_disk')
     || alert_summary.duplicate_claim_identity_rows_keepers
       !== alertCount('duplicate_claim_identity_rows')
   ) return null

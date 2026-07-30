@@ -32,7 +32,6 @@ function makeEntry(
     events: 20,
     events_bytes: 1024,
     events_bytes_to_facts_bytes_ratio: 0,
-    ttl_expired_on_disk: 0,
     duplicate_claim_identity_rows: 0,
     alerts: [],
     ...overrides,
@@ -54,7 +53,6 @@ function makeResponse(
       facts: 0,
       facts_bytes: 0,
       events_bytes: 0,
-      ttl_expired_on_disk: 0,
       duplicate_claim_identity_rows: 0,
       ...totalsOverrides,
     },
@@ -69,10 +67,8 @@ function makeAlertSummary(
     total_alerts: 0,
     warn_alerts: 0,
     keepers_with_alerts: 0,
-    ttl_expired_keepers: 0,
     duplicate_claim_identity_rows_keepers: 0,
     thresholds: {
-      ttl_expired_on_disk: 0,
       duplicate_claim_identity_rows: 0,
     },
     ...overrides,
@@ -124,7 +120,6 @@ describe('KeeperMemoryHealth', () => {
           makeEntry({
             keeper_id: 'raw-high-ratio',
             events_bytes_to_facts_bytes_ratio: 3,
-            ttl_expired_on_disk: 0,
           }),
         ]),
       )
@@ -134,51 +129,6 @@ describe('KeeperMemoryHealth', () => {
       expect(container.querySelector('.kmh-row--warn')).toBeNull()
       expect(container.querySelector('.kmh-badge--warn')).toBeNull()
       expect(screen.getByText('3.00')).not.toBeNull()
-    })
-
-    it('flags a ttl row when the backend emits a ttl alert', async () => {
-      mockFetch.mockResolvedValue(
-        makeResponse([
-          makeEntry({
-            keeper_id: 'ttl-expired',
-            events_bytes_to_facts_bytes_ratio: 0,
-            ttl_expired_on_disk: 4,
-            alerts: [{
-              code: 'ttl_expired_on_disk',
-              severity: 'warn',
-              target: 'ttl_expired_on_disk',
-              label: 'TTL',
-              message: 'TTL-expired Memory OS fact rows remain on disk',
-              value: 4,
-              threshold: 0,
-            }],
-          }),
-        ], { ttl_expired_on_disk: 4 }),
-      )
-      const { container } = render(html`<${KeeperMemoryHealth} />`)
-      await waitFor(() => expect(screen.getByText('ttl-expired')).not.toBeNull())
-
-      expect(container.querySelector('.kmh-row--warn')).not.toBeNull()
-      expect(screen.getByText('TTL')).not.toBeNull()
-    })
-
-    it('does not style a raw ttl count as a warning without a backend alert', async () => {
-      mockFetch.mockResolvedValue(
-        makeResponse([
-          makeEntry({
-            keeper_id: 'raw-counts',
-            ttl_expired_on_disk: 4,
-            alerts: [],
-          }),
-        ], { ttl_expired_on_disk: 4 }),
-      )
-      const { container } = render(html`<${KeeperMemoryHealth} />`)
-      await waitFor(() => expect(screen.getByText('raw-counts')).not.toBeNull())
-
-      expect(container.querySelector('.kmh-row--warn')).toBeNull()
-      expect(container.querySelector('.kmh-badge--warn')).toBeNull()
-      expect(container.querySelector('[data-stat-key="ttl-expired"] .kmh-stat-value--warn')).toBeNull()
-      expect(statValue(container, 'ttl-expired')).toContain('4')
     })
 
     it('renders exact duplicate claim identity rows from the backend alert', async () => {
@@ -225,23 +175,23 @@ describe('KeeperMemoryHealth', () => {
         ...makeResponse([
           makeEntry({
             keeper_id: 'alerted',
-            ttl_expired_on_disk: 2,
+            duplicate_claim_identity_rows: 2,
             alerts: [{
-              code: 'ttl_expired_on_disk',
+              code: 'duplicate_claim_identity_rows',
               severity: 'warn',
-              target: 'ttl_expired_on_disk',
-              label: 'TTL',
-              message: 'TTL-expired Memory OS fact rows remain on disk',
+              target: 'duplicate_claim_identity_rows',
+              label: '동일 claim identity 행',
+              message: 'Duplicate Memory OS claim identities remain on disk',
               value: 2,
               threshold: 0,
             }],
           }),
-        ], { ttl_expired_on_disk: 2 }),
+        ], { duplicate_claim_identity_rows: 2 }),
         alert_summary: makeAlertSummary({
           total_alerts: 1,
           warn_alerts: 1,
           keepers_with_alerts: 1,
-          ttl_expired_keepers: 1,
+          duplicate_claim_identity_rows_keepers: 1,
         }),
       })
       const { container } = render(html`<${KeeperMemoryHealth} />`)

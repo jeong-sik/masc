@@ -78,9 +78,6 @@ export type MemoryOsEpisodeSummary = {
   trace_id: string
   generation: number
   created_at: number
-  valid_until: number | null
-  valid_until_iso: string | null
-  current: boolean
   terminal_marker: string | null
   claim_count: number
   // Inclusive [lo, hi] absolute-turn span the episode compacted, or null when the
@@ -102,7 +99,6 @@ export type MemoryOsFactCategoryTag =
   | 'blocker'
   | 'goal'
   | 'constraint'
-  | 'ephemeral'
   | 'validated_approach'
   | 'lesson'
 export type MemoryOsFactCategory = { readonly tag: MemoryOsFactCategoryTag }
@@ -116,7 +112,6 @@ const MEMORY_OS_FACT_CATEGORY_TAGS: readonly MemoryOsFactCategoryTag[] = [
   'blocker',
   'goal',
   'constraint',
-  'ephemeral',
   'validated_approach',
   'lesson',
 ]
@@ -143,10 +138,7 @@ export type MemoryOsFact = {
   readonly first_seen_iso: string
   // last_verified_at else first_seen — the shared staleness anchor (reference_time).
   readonly reference_time: number
-  readonly valid_until: number | null
-  readonly valid_until_iso: string | null
   readonly last_verified_at: number | null
-  readonly current: boolean
 }
 
 export type MemoryOsSelectionPolicy = {
@@ -170,15 +162,11 @@ export type MemoryOsTurnRecordSnapshot = {
   read_errors: { scope: string; error: string }[]
   episodes: {
     shown: number
-    current: number
-    expired: number
     terminal_markers: number
     items: MemoryOsEpisodeSummary[]
   }
   facts: {
     shown: number
-    current: number
-    expired: number
     // RFC-keeper-memory-panel-real-data §4a: every persisted fact row.
     items: MemoryOsFact[]
   }
@@ -542,9 +530,6 @@ function decodeMemoryOsEpisode(raw: unknown): MemoryOsEpisodeSummary | null {
     'trace_id',
     'generation',
     'created_at',
-    'valid_until',
-    'valid_until_iso',
-    'current',
     'terminal_marker',
     'claim_count',
     'source_turn_range',
@@ -553,32 +538,18 @@ function decodeMemoryOsEpisode(raw: unknown): MemoryOsEpisodeSummary | null {
   const trace_id = decodeExactNonEmptyString(raw.trace_id)
   const generation = asNumber(raw.generation)
   const created_at = asNumber(raw.created_at)
-  const valid_until = decodeNullableNumber(raw.valid_until)
-  const valid_until_iso = decodeNullableString(raw.valid_until_iso)
-  const current = asBoolean(raw.current)
   const terminal_marker = decodeNullableString(raw.terminal_marker)
   const claim_count = asNumber(raw.claim_count)
   const source_turn_range = raw.source_turn_range === null
     ? null
     : decodeSourceTurnRange(raw.source_turn_range)
   const summary = decodeExactNonEmptyString(raw.summary)
-  const expected_valid_until_iso = valid_until === null
-    ? null
-    : valid_until === undefined
-      ? undefined
-      : wholeSecondIsoOfUnixSeconds(valid_until)
   if (
     trace_id === null
     || generation == null
     || !Number.isSafeInteger(generation)
     || generation < 0
     || created_at == null
-    || valid_until === undefined
-    || valid_until_iso === undefined
-    || expected_valid_until_iso === undefined
-    || valid_until_iso !== expected_valid_until_iso
-    || (valid_until === null && current !== true)
-    || current == null
     || terminal_marker === undefined
     || claim_count == null
     || !Number.isSafeInteger(claim_count)
@@ -590,9 +561,6 @@ function decodeMemoryOsEpisode(raw: unknown): MemoryOsEpisodeSummary | null {
     trace_id,
     generation,
     created_at,
-    valid_until,
-    valid_until_iso,
-    current,
     terminal_marker,
     claim_count,
     source_turn_range,
@@ -628,10 +596,7 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
     'first_seen',
     'first_seen_iso',
     'reference_time',
-    'valid_until',
-    'valid_until_iso',
     'last_verified_at',
-    'current',
   ])) return null
   const claim = decodeExactNonEmptyString(raw.claim)
   const category = typeof raw.category === 'string'
@@ -641,20 +606,12 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
   const first_seen = asNumber(raw.first_seen)
   const first_seen_iso = decodeExactNonEmptyString(raw.first_seen_iso)
   const reference_time = asNumber(raw.reference_time)
-  const valid_until = decodeNullableNumber(raw.valid_until)
-  const valid_until_iso = decodeNullableString(raw.valid_until_iso)
   const last_verified_at = decodeNullableNumber(raw.last_verified_at)
-  const current = asBoolean(raw.current)
   const expected_first_seen_iso = first_seen == null
     ? null
     : wholeSecondIsoOfUnixSeconds(first_seen)
   const expected_reference_time =
     last_verified_at === undefined ? undefined : (last_verified_at ?? first_seen)
-  const expected_valid_until_iso = valid_until === null
-    ? null
-    : valid_until === undefined
-      ? undefined
-      : wholeSecondIsoOfUnixSeconds(valid_until)
   if (
     claim === null
     || !category
@@ -666,13 +623,7 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
     || reference_time == null
     || expected_reference_time === undefined
     || reference_time !== expected_reference_time
-    || valid_until === undefined
-    || valid_until_iso === undefined
-    || expected_valid_until_iso === undefined
-    || valid_until_iso !== expected_valid_until_iso
     || last_verified_at === undefined
-    || current == null
-    || (valid_until === null && current !== true)
   ) {
     return null
   }
@@ -683,10 +634,7 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
     first_seen,
     first_seen_iso,
     reference_time,
-    valid_until,
-    valid_until_iso,
     last_verified_at,
-    current,
   }
 }
 
@@ -739,31 +687,18 @@ function decodeMemoryOsSelectionPolicy(raw: unknown): MemoryOsSelectionPolicy | 
   }
 }
 
-function decodeMemoryOsCounts(raw: unknown): {
-  shown: number
-  current: number
-  expired: number
-} | null {
+function decodeMemoryOsCount(raw: unknown): { shown: number } | null {
   if (!isRecord(raw)) return null
-  if (!hasNoUnknownKeys(raw, ['shown', 'current', 'expired', 'terminal_markers', 'items'])) {
+  if (!hasNoUnknownKeys(raw, ['shown', 'terminal_markers', 'items'])) {
     return null
   }
   const shown = asNumber(raw.shown)
-  const current = asNumber(raw.current)
-  const expired = asNumber(raw.expired)
   if (
     shown == null
-    || current == null
-    || expired == null
     || !Number.isSafeInteger(shown)
-    || !Number.isSafeInteger(current)
-    || !Number.isSafeInteger(expired)
     || shown < 0
-    || current < 0
-    || expired < 0
   ) return null
-  if (current + expired !== shown) return null
-  return { shown, current, expired }
+  return { shown }
 }
 
 function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null {
@@ -796,7 +731,7 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
   const read_errors = decodeArray(raw.read_errors, decodeMemoryOsReadError)
   const episodesRaw = isRecord(raw.episodes) ? raw.episodes : null
   const factsRaw = isRecord(raw.facts) ? raw.facts : null
-  const facts = decodeMemoryOsCounts(raw.facts)
+  const facts = decodeMemoryOsCount(raw.facts)
   if (
     schema === null
     || keeper === null
@@ -813,12 +748,12 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
   ) {
     return null
   }
-  const episodesCounts = decodeMemoryOsCounts(episodesRaw)
+  const episodesCounts = decodeMemoryOsCount(episodesRaw)
   if (!episodesCounts) return null
-  if (!hasExactKeys(episodesRaw, ['shown', 'current', 'expired', 'terminal_markers', 'items'])) {
+  if (!hasExactKeys(episodesRaw, ['shown', 'terminal_markers', 'items'])) {
     return null
   }
-  if (!hasExactKeys(factsRaw, ['shown', 'current', 'expired', 'items'])) return null
+  if (!hasExactKeys(factsRaw, ['shown', 'items'])) return null
   const terminal_markers = asNumber(episodesRaw.terminal_markers)
   const episodes = decodeArray(episodesRaw.items, decodeMemoryOsEpisode)
   const factItems = decodeArray(factsRaw.items, decodeMemoryOsFact)
@@ -831,10 +766,8 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
   ) return null
   if (
     episodesCounts.shown !== episodes.length
-    || episodesCounts.current !== episodes.filter(episode => episode.current).length
     || terminal_markers !== episodes.filter(episode => episode.terminal_marker !== null).length
     || facts.shown !== factItems.length
-    || facts.current !== factItems.filter(fact => fact.current).length
   ) return null
   return {
     schema,

@@ -59,8 +59,8 @@ function payload(...entries: ReturnType<typeof entry>[]) {
       episodes_store: '.masc/config/keepers/sangsu/episodes',
       recall_enabled: true,
       read_errors: [],
-      episodes: { shown: 0, current: 0, expired: 0, terminal_markers: 0, items: [] },
-      facts: { shown: 0, current: 0, expired: 0, items: [] },
+      episodes: { shown: 0, terminal_markers: 0, items: [] },
+      facts: { shown: 0, items: [] },
     },
     entries,
   }
@@ -166,6 +166,16 @@ describe('keeper turn record cache token counts', () => {
 
   it('rejects fields outside the exact current nested record', async () => {
     getMock.mockResolvedValue(payload(entry({ lease_id: 'retired' })))
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects removed Memory OS retention fields', async () => {
+    const raw = payload(entry())
+    Object.assign(raw.memory_os.facts, { current: 0, expired: 0 })
+    getMock.mockResolvedValue(raw)
 
     await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
       '유효하지 않은 keeper turn record payload',

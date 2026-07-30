@@ -21,7 +21,6 @@ function keeperMemoryHealthPayload() {
       events: 2,
       events_bytes: 256,
       events_bytes_to_facts_bytes_ratio: 0.5,
-      ttl_expired_on_disk: 0,
       duplicate_claim_identity_rows: 1,
       alerts: [{
         code: 'duplicate_claim_identity_rows',
@@ -37,17 +36,14 @@ function keeperMemoryHealthPayload() {
       facts: 4,
       facts_bytes: 512,
       events_bytes: 256,
-      ttl_expired_on_disk: 0,
       duplicate_claim_identity_rows: 1,
     },
     alert_summary: {
       total_alerts: 1,
       warn_alerts: 1,
       keepers_with_alerts: 1,
-      ttl_expired_keepers: 0,
       duplicate_claim_identity_rows_keepers: 1,
       thresholds: {
-        ttl_expired_on_disk: 0,
         duplicate_claim_identity_rows: 0,
       },
     },
@@ -106,7 +102,7 @@ describe('fetchKeeperMemoryHealth', () => {
 
   it('rejects an alert whose target disagrees with its typed code', async () => {
     const payload = keeperMemoryHealthPayload()
-    payload.keepers[0]!.alerts[0]!.target = 'ttl_expired_on_disk'
+    payload.keepers[0]!.alerts[0]!.target = 'retired_target'
     getMock.mockResolvedValue(payload)
 
     await expect(fetchKeeperMemoryHealth()).rejects.toThrow(
@@ -177,7 +173,6 @@ describe('fetchKeeperMemoryHealth', () => {
       events: 0,
       events_bytes: 0,
       events_bytes_to_facts_bytes_ratio: 0,
-      ttl_expired_on_disk: 0,
       duplicate_claim_identity_rows: 0,
       alerts: [],
     })

@@ -497,8 +497,8 @@ describe('keeper tool telemetry fetchers', () => {
           episodes_store: '.masc/config/keepers/keeper-alpha/episodes',
           recall_enabled: true,
           read_errors: [],
-          episodes: { shown: 0, current: 0, expired: 0, terminal_markers: 0, items: [] },
-          facts: { shown: 0, current: 0, expired: 0, items: [] },
+          episodes: { shown: 0, terminal_markers: 0, items: [] },
+          facts: { shown: 0, items: [] },
         },
         entries: [
           {
@@ -721,7 +721,6 @@ describe('parseMemoryOsFactCategory (SSOT mirror of category_of_string)', () => 
       'blocker',
       'goal',
       'constraint',
-      'ephemeral',
       'validated_approach',
       'lesson',
     ] as const
@@ -730,6 +729,7 @@ describe('parseMemoryOsFactCategory (SSOT mirror of category_of_string)', () => 
     }
     expect(parseMemoryOsFactCategory('  FACT ')).toBeNull()
     expect(parseMemoryOsFactCategory('Speculation')).toBeNull()
+    expect(parseMemoryOsFactCategory('ephemeral')).toBeNull()
     expect(parseMemoryOsFactCategory('')).toBeNull()
   })
 })
@@ -768,11 +768,9 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
         episodes_store: '.masc/config/keepers/keeper-alpha/episodes',
         recall_enabled: true,
         read_errors: [],
-        episodes: { shown: 0, current: 0, expired: 0, terminal_markers: 0, items: [] },
+        episodes: { shown: 0, terminal_markers: 0, items: [] },
         facts: {
           shown: 2,
-          current: 1,
-          expired: 1,
           items: [
             {
               claim: 'retention D0 = signup day',
@@ -781,22 +779,16 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
               first_seen: 1_789_000_000,
               first_seen_iso: '2026-09-10T00:26:40Z',
               reference_time: 1_789_500_000,
-              valid_until: null,
-              valid_until_iso: null,
               last_verified_at: 1_789_500_000,
-              current: true,
             },
             {
-              claim: 'temporary provider observation',
-              category: 'ephemeral',
+              claim: 'provider observation',
+              category: 'fact',
               source: { trace_id: 't-2', turn: 5 },
               first_seen: 1_789_100_000,
               first_seen_iso: '2026-09-11T04:13:20Z',
               reference_time: 1_789_100_000,
-              valid_until: 1_789_900_000,
-              valid_until_iso: '2026-09-20T10:26:40Z',
               last_verified_at: null,
-              current: false,
             },
           ],
         },
@@ -822,13 +814,10 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
     expect(first?.claim).toBe('retention D0 = signup day')
     expect(first?.category).toEqual({ tag: 'constraint' })
     expect(first?.source).toEqual({ trace_id: 't-1', turn: 4, tool_call_id: 'call_9' })
-    expect(first?.current).toBe(true)
-    expect(first?.valid_until).toBeNull()
     expect(first?.reference_time).toBe(1_789_500_000)
 
-    expect(second?.category).toEqual({ tag: 'ephemeral' })
+    expect(second?.category).toEqual({ tag: 'fact' })
     expect(second?.source.tool_call_id).toBeNull()
-    expect(second?.current).toBe(false)
   })
 
   it('preserves exact persisted claim bytes instead of trimming them', async () => {
@@ -864,7 +853,6 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
   it('rejects inconsistent fact counts instead of rendering a misleading store total', async () => {
     const payload = turnRecordsPayload()
     payload.memory_os.facts.shown = 3
-    payload.memory_os.facts.current = 2
     stubTurnRecords(payload)
 
     await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
@@ -976,10 +964,12 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
     )
   })
 
-  it('rejects a validity ISO that disagrees with valid_until', async () => {
+  it('rejects removed validity fields', async () => {
     const payload = turnRecordsPayload()
     Object.assign(payload.memory_os.facts.items[1]!, {
-      valid_until_iso: '2026-09-20T10:26:41Z',
+      valid_until: 1_789_900_000,
+      valid_until_iso: '2026-09-20T10:26:40Z',
+      current: true,
     })
     stubTurnRecords(payload)
 
@@ -1004,16 +994,11 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
     const payload = turnRecordsPayload()
     Object.assign(payload.memory_os.episodes, {
       shown: 1,
-      current: 1,
-      expired: 0,
       terminal_markers: 0,
       items: [{
         trace_id: 'episode-trace',
         generation: 1,
         created_at: 1_789_000_000,
-        valid_until: null,
-        valid_until_iso: null,
-        current: true,
         terminal_marker: null,
         claim_count: 0,
         source_turn_range: {

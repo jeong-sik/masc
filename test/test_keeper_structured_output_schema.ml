@@ -162,7 +162,7 @@ let test_compaction_plan_schema_uses_codec_ssot () =
   check bool "compaction boundary schema exposes codec fields" true true
 ;;
 
-let test_librarian_claim_schema_requires_nullable_metadata () =
+let test_librarian_claim_schema_requires_current_nullable_metadata () =
   let claim_schema =
     Keeper_structured_output_schema.librarian_episode_output_schema
     |> schema_property Keeper_librarian.wire_field_claims
@@ -184,7 +184,6 @@ let test_librarian_claim_schema_requires_nullable_metadata () =
          (claim_schema |> schema_property field |> type_strings))
     [ Keeper_librarian.wire_field_source_tool_call_id, "string"
     ; Keeper_librarian.wire_field_claim_id, "string"
-    ; Keeper_librarian.wire_field_valid_for_days, "integer"
     ]
 ;;
 
@@ -353,9 +352,9 @@ let () =
         ] )
     ; ( "librarian schemas"
       , [ test_case
-            "nullable claim metadata remains required"
+            "current nullable claim metadata remains required"
             `Quick
-            test_librarian_claim_schema_requires_nullable_metadata
+            test_librarian_claim_schema_requires_current_nullable_metadata
         ] )
     ; ( "verdict schemas"
       , [ test_case

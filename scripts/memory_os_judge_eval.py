@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """memory_os_judge_eval.py — RFC-0247 §-1 P-1 step 0b: LLM-as-judge value eval.
 
-Auto-labels memory-os facts durable | ephemeral | uncertain and reports the
+Auto-labels memory-os facts useful | noise | uncertain and reports the
 noise_rate that the OCaml harness (test/eval_memory_os_value.ml) defines:
 
-    noise_rate = ephemeral / (ephemeral + durable)   # uncertain excluded
+    noise_rate = noise / (noise + useful)   # uncertain excluded
+
+These labels are eval-only measurements of later-turn usefulness. They are not
+persisted Memory OS categories and never authorize retention, expiry, or any
+other runtime lifecycle decision.
 
 ANTI-RIG (mirrors judge_accuracy in the OCaml harness; user directive 2026-06-16
 "가짜 성공 테스트 금지"): the judge is validated against the hand-labelled GOLD set
@@ -15,8 +19,8 @@ so it cannot silently flatter the score.
 Modes:
   calibrate  — only run the gold check (cheap; proves the judge before any spend)
   measure    — sample N facts from the store, report noise_rate (+ the _shared tier)
-  relabel    — judge ALL facts, write relabelled JSONL (retroactive cleanup of the
-               pre-#21257 legacy backlog the producer can no longer fix)
+  relabel    — judge ALL facts and write a separate evaluation JSONL artifact;
+               the input Memory OS store is never mutated
 
 The judge model is chosen by the masc runtime config (NOT hardcoded): [memory_os]
 judge = "provider.model" if set, else the [runtime] default. The resolved provider's
@@ -26,7 +30,7 @@ not on a Second Brain shell tool (`sb glm-text`). store dir is --store-dir. Make
 LLM calls — run on demand. Deterministic given fixed model output (temperature 0),
 reproducible via the recorded label output.
 
-This "judge" is the memory-os VALUE-EVAL judge (labels a fact durable/ephemeral). It
+This "judge" is the memory-os VALUE-EVAL judge (labels a fact useful/noise). It
 is NOT the keeper `verifier` persona (a keeper that approves tasks), and NOT the
 [fusion] judge (RFC-0252, synthesizes a panel of model answers). Three distinct roles,
 three distinct config keys: [runtime.assignments] verifier / [fusion] judge /
@@ -57,38 +61,41 @@ from dataclasses import dataclass
 # the only non-manual alternative is a SEPARATE stronger reference model labelling it
 # (cross-model), which is a deliberate future option, not the default.
 GOLD: list[tuple[str, str]] = [
-    ("The rondo sandbox blocks Write/Read tools on the masc repo", "durable"),
-    ("The Write tool has a destructive guard that blocks ${} expansion", "durable"),
-    ("sed -i does not persist across Docker turn containers", "durable"),
+    ("The rondo sandbox blocks Write/Read tools on the masc repo", "useful"),
+    ("The Write tool has a destructive guard that blocks ${} expansion", "useful"),
+    ("sed -i does not persist across Docker turn containers", "useful"),
     (
         "DUNE_CACHE=disabled is required to rebuild after cross-lib .mli changes",
-        "durable",
+        "useful",
     ),
     (
         "A continuation checkpoint was saved and the keeper remains scheduled",
-        "ephemeral",
+        "noise",
     ),
-    ("No claimable or unclaimed tasks remain", "ephemeral"),
-    ("Board curation was submitted", "ephemeral"),
-    ("desire, intention, blocker, and need are all none", "ephemeral"),
-    ("A continuation checkpoint was saved at turn 22", "ephemeral"),
+    ("No claimable or unclaimed tasks remain", "noise"),
+    ("Board curation was submitted", "noise"),
+    ("desire, intention, blocker, and need are all none", "noise"),
+    ("A continuation checkpoint was saved at turn 22", "noise"),
 ]
 
 JUDGE_SYSTEM = (
-    "You classify each memory claim written by an autonomous agent as exactly one of:\n"
-    "- durable: knowledge that would still be TRUE and USEFUL to a DIFFERENT agent on a "
+    "You evaluate each memory claim written by an autonomous agent as exactly one of:\n"
+    "- useful: knowledge that would still be TRUE and USEFUL to a DIFFERENT agent on a "
     "later day, independent of the run that wrote it (a constraint, invariant, "
     "externally-verifiable fact, decision-with-rationale, or concrete code/config change).\n"
-    "- ephemeral: lifecycle/coordination boilerplate that is true only right now (a "
+    "- noise: lifecycle/coordination boilerplate that lacks later-turn usefulness (a "
     "checkpoint was saved, the keeper is scheduled/woken, the current task-queue/backlog "
     "state whether full or empty, a curation was submitted, heartbeat/status ticks, the "
     "agent's present desire/intention/blocker/need).\n"
     "- uncertain: genuinely cannot tell.\n"
-    "Judge the claim's content, not its phrasing. Reply with ONLY a JSON array, one object "
-    'per input line, in order: [{"i":1,"label":"durable"}, ...]. No prose, no markdown.'
+    "These are evaluation-only quality labels, not persisted categories or authority for "
+    "retention, expiry, or lifetime. Judge later-turn usefulness only; do not infer a "
+    "lifecycle policy. Judge the claim's content, not its phrasing. Reply with ONLY a JSON "
+    'array, one object per input line, in order: [{"i":1,"label":"useful"}, ...]. '
+    "No prose, no markdown."
 )
 
-VALID = {"durable", "ephemeral", "uncertain"}
+VALID = {"useful", "noise", "uncertain"}
 
 # One-shot judge call; generous because the store can return a large batch.
 JUDGE_TIMEOUT_SEC = 180
@@ -317,7 +324,7 @@ def _parse_index(raw_i, n: int) -> int | None:
 
 def run_judge(claims: list[str], backend: JudgeBackend) -> list[str]:
     """Label a batch of claims. Unparseable items default to 'uncertain' (never a
-    silent durable/ephemeral guess)."""
+    silent useful/noise guess)."""
     numbered = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(claims))
     prompt = f"Classify these {len(claims)} claims:\n{numbered}"
     try:
@@ -364,9 +371,9 @@ def judge_all(claims: list[str], backend: JudgeBackend, batch: int) -> list[str]
 
 
 def noise_rate(labels: list[str]) -> float:
-    eph = labels.count("ephemeral")
-    dur = labels.count("durable")
-    return eph / (eph + dur) if (eph + dur) else 0.0
+    noise = labels.count("noise")
+    useful = labels.count("useful")
+    return noise / (noise + useful) if (noise + useful) else 0.0
 
 
 def calibrate(backend: JudgeBackend, min_acc: float) -> float:
@@ -496,30 +503,32 @@ def main() -> int:
             sl = judge_all([c for c, _ in shared_facts], backend, args.batch)
             print(
                 f"\n_shared tier ({len(shared_facts)} facts): noise_rate = {noise_rate(sl):.0%} "
-                f"(eph {sl.count('ephemeral')} / dur {sl.count('durable')} / unc {sl.count('uncertain')})"
+                f"(noise {sl.count('noise')} / useful {sl.count('useful')} / "
+                f"uncertain {sl.count('uncertain')})"
             )
         sample = deterministic_sample(keeper_facts, args.sample)
         sl = judge_all([c for c, _ in sample], backend, args.batch)
         print(
             f"\nkeeper store sample ({len(sample)} of {len(keeper_facts)}): "
             f"noise_rate = {noise_rate(sl):.0%} "
-            f"(eph {sl.count('ephemeral')} / dur {sl.count('durable')} / unc {sl.count('uncertain')})"
+            f"(noise {sl.count('noise')} / useful {sl.count('useful')} / "
+            f"uncertain {sl.count('uncertain')})"
         )
-        # producer-disagreement: how often the producer's category=fact is judged ephemeral
+        # Eval-only producer disagreement: category=fact rows judged as noise.
         mis = sum(
-            1 for (_, cat), j in zip(sample, sl) if cat == "fact" and j == "ephemeral"
+            1 for (_, cat), label in zip(sample, sl) if cat == "fact" and label == "noise"
         )
         nfact = sum(1 for _, cat in sample if cat == "fact")
         if nfact:
             print(
-                f"producer mislabel: {mis}/{nfact} of category=fact are judged ephemeral "
+                f"producer disagreement: {mis}/{nfact} of category=fact are judged noise "
                 f"= {mis / nfact:.0%}"
             )
         return 0
 
     if args.mode == "relabel":
         labels = judge_all([c for c, _ in keeper_facts], backend, args.batch)
-        out_path = args.out or "memory_os_relabel.jsonl"
+        out_path = args.out or "memory_os_value_eval.jsonl"
         with open(out_path, "w") as f:
             for (claim, cat), lab in zip(keeper_facts, labels):
                 f.write(
@@ -529,7 +538,7 @@ def main() -> int:
                     + "\n"
                 )
         print(
-            f"\nwrote {len(labels)} relabelled rows -> {out_path}; "
+            f"\nwrote {len(labels)} eval rows -> {out_path}; "
             f"store noise_rate = {noise_rate(labels):.0%}"
         )
         return 0

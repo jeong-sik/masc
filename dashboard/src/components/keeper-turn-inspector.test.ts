@@ -114,17 +114,12 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
       read_errors: [],
       episodes: {
         shown: 2,
-        current: 1,
-        expired: 1,
         terminal_markers: 1,
         items: [
           {
             trace_id: 'trace-active',
             generation: 7,
             created_at: 1_781_583_000,
-            valid_until: 1_781_590_000,
-            valid_until_iso: '2026-06-16T02:40:00Z',
-            current: true,
             terminal_marker: null,
             claim_count: 2,
             source_turn_range: [1, 6],
@@ -134,20 +129,15 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
             trace_id: 'trace-done',
             generation: 3,
             created_at: 1_781_580_000,
-            valid_until: 1_781_585_400,
-            valid_until_iso: '2026-06-16T01:23:20Z',
-            current: false,
             terminal_marker: 'handoff_complete',
             claim_count: 1,
             source_turn_range: null,
-            summary: 'Terminal memory should stay visible as expired source evidence.',
+            summary: 'Terminal memory remains visible as source evidence.',
           },
         ],
       },
       facts: {
         shown: 0,
-        current: 0,
-        expired: 0,
         items: [],
       },
     },
@@ -221,7 +211,7 @@ afterEach(() => {
 })
 
 describe('KeeperMemoryOsRecallPanel', () => {
-  it('surfaces Memory OS recall blocks and episode TTL evidence', async () => {
+  it('surfaces Memory OS recall blocks and episode evidence', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 
     const { container } = render(html`<${KeeperMemoryOsRecallPanel} keeperName="albini" />`)
@@ -240,12 +230,10 @@ describe('KeeperMemoryOsRecallPanel', () => {
     expect(text).toContain('enabled')
     expect(text).toContain('latest block')
     expect(text).toContain('3392B')
-    expect(text).toContain('ep 1/2')
-    expect(text).toContain('expired 1')
+    expect(text).toContain('ep 2')
     expect(text).toContain('terminal 1')
-    expect(text).toContain('facts 0/0')
+    expect(text).toContain('facts 0')
     expect(text).toContain('terminal=handoff_complete')
-    expect(text).toContain('expired 2026-06-16 01:23:20Z')
     expect(text).toContain('facts: .masc/config/keepers/albini.facts.jsonl')
     expect(text).toContain('episodes: .masc/config/keepers/albini/episodes')
   })

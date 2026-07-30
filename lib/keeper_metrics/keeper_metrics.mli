@@ -182,7 +182,6 @@ type t =
   | MemoryOsRecallFactsTruncated
   | MemoryOsRecallEpisodesTruncated
   | MemoryOsRecallBytesOverBudget
-  | MemoryOsEpisodeRetentionPruned
   | RuntimeRequestWireBytes
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze

@@ -46,14 +46,12 @@ type fact_match =
   { claim : string
   ; category : string
   ; first_seen : float
-  ; valid_until : float option
   ; score : float
   }
 
 (* Match + rank over the keeper's Memory OS durable facts. Ranking is the
    matched-token ratio against the claim text, tie-broken by recency
-   ([first_seen] desc). Expired facts (past [valid_until]) are excluded the
-   same way recall excludes them ([fact_is_current]). *)
+   ([first_seen] desc). *)
 let search_durable_facts
       ~(keepers_dir : string)
       ~(meta : keeper_meta)
@@ -61,8 +59,7 @@ let search_durable_facts
       ~(limit : int)
   : fact_match list * int
   =
-  let now = Time_compat.now () in
-  let current =
+  let facts =
     Keeper_memory_os_io.with_episode_bundle_lock_for_keepers_dir
       ~keepers_dir
       ~keeper_id:meta.name
@@ -75,17 +72,16 @@ let search_durable_facts
               Keeper_memory_os_io.read_facts_all_for_keepers_dir
                 ~keepers_dir
                 ~keeper_id:meta.name))
-    |> List.filter (Keeper_memory_os_types.fact_is_current ~now)
   in
-  let total_candidates = List.length current in
+  let total_candidates = List.length facts in
   let matched =
     if query = ""
-    then current
+    then facts
     else
       List.filter
         (fun (fact : Keeper_memory_os_types.fact) ->
           String_util.count_matched_tokens_ci fact.claim query > 0)
-        current
+        facts
   in
   let scored =
     matched
@@ -98,7 +94,6 @@ let search_durable_facts
       { claim = fact.claim
       ; category = Keeper_memory_os_types.category_to_string fact.category
       ; first_seen = fact.first_seen
-      ; valid_until = fact.valid_until
       ; score = Float.round (score *. 1000.0) /. 1000.0
       })
     |> List.sort (fun a b ->
@@ -114,7 +109,6 @@ let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
     [ "text", `String m.claim
     ; "category", `String m.category
     ; "first_seen_ts_unix", `Float m.first_seen
-    ; "valid_until_ts_unix", Json_util.float_opt_to_json m.valid_until
     ; "score", `Float m.score
     ]
 ;;
@@ -347,25 +341,20 @@ let keeper_context_status_json
     Config_dir_resolver.keepers_dir_for_base_path
       ~base_path:config.Workspace.base_path
   in
-  let memory_facts_total, memory_facts_current =
-    let now = Time_compat.now () in
-    let facts =
-      Keeper_memory_os_io.with_episode_bundle_lock_for_keepers_dir
-        ~keepers_dir
-        ~keeper_id:meta.name
-        (fun () ->
-           File_lock_eio.with_lock
-             (Keeper_memory_os_io.facts_path_for_keepers_dir
+  let memory_facts_total =
+    Keeper_memory_os_io.with_episode_bundle_lock_for_keepers_dir
+      ~keepers_dir
+      ~keeper_id:meta.name
+      (fun () ->
+         File_lock_eio.with_lock
+           (Keeper_memory_os_io.facts_path_for_keepers_dir
+              ~keepers_dir
+              ~keeper_id:meta.name)
+           (fun () ->
+              Keeper_memory_os_io.read_facts_all_for_keepers_dir
                 ~keepers_dir
-                ~keeper_id:meta.name)
-             (fun () ->
-                Keeper_memory_os_io.read_facts_all_for_keepers_dir
-                  ~keepers_dir
-                  ~keeper_id:meta.name))
-    in
-    ( List.length facts
-    , List.length
-        (List.filter (Keeper_memory_os_types.fact_is_current ~now) facts) )
+                ~keeper_id:meta.name))
+    |> List.length
   in
   (* Give the keeper sandbox-relative paths from the SSOT so it never needs
      to interpolate host storage paths such as ".masc/playground/<name>/". *)
@@ -390,7 +379,6 @@ let keeper_context_status_json
          @ Keeper_sandbox.context_status_fields sandbox
          @ [ "sandbox_live", sandbox_live
            ; "memory_facts_total", `Int memory_facts_total
-           ; "memory_facts_current", `Int memory_facts_current
            ]))
 ;;
 
@@ -403,46 +391,6 @@ let keeper_memory_write_max_title_chars = 120
    so existing producers see the same boundary. *)
 let keeper_memory_write_max_body_chars = 4096
 
-(* An explicit lifetime is a claim about scope, so it has to be a real
-   boundary: a claim that expires today or a decade out is a producer mistake,
-   not a lifetime. Rejecting both ends keeps [valid_until] meaningful rather
-   than becoming a second way to say "forever". Bound and day arithmetic are
-   the shared producer SSOT in [Keeper_memory_os_types] (the librarian
-   extraction path declares lifetimes through the same contract). *)
-let keeper_memory_write_min_valid_days = 1
-let keeper_memory_write_max_valid_days = Keeper_memory_os_types.max_valid_for_days
-
-(* [Safe_ops.json_int] cannot tell "absent" from "0", and 0 days is exactly
-   the mistake this field must reject, so the member is read raw. A wrong JSON
-   type is its own producer error and keeps its own arm: collapsing it into a
-   number would answer a type mistake with a range complaint the caller already
-   satisfied. *)
-type valid_for_days_arg =
-  | Lifetime_absent
-  | Lifetime_days of int
-  | Lifetime_not_an_integer of string (* the JSON type actually supplied *)
-
-let json_type_name : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "intlit"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
-;;
-
-let parse_valid_for_days (args : Yojson.Safe.t) : valid_for_days_arg =
-  match args with
-  | `Assoc fields ->
-    (match List.assoc_opt "valid_for_days" fields with
-     | None | Some `Null -> Lifetime_absent
-     | Some (`Int n) -> Lifetime_days n
-     | Some other -> Lifetime_not_an_integer (json_type_name other))
-  | _ -> Lifetime_absent
-;;
-
 (** Pure validation result for a [keeper_memory_write] call. Splitting
     this from the persistence step lets tests pin the error_kind
     taxonomy without constructing a [Workspace.config]. *)
@@ -450,7 +398,6 @@ type memory_write_error_kind =
   | Title_too_long
   | Content_empty
   | Content_too_long
-  | Invalid_valid_for_days
   | Persistence_failed
   | No_memory_write_error
 
@@ -458,60 +405,21 @@ let memory_write_error_kind_to_string = function
   | Title_too_long -> "title_too_long"
   | Content_empty -> "content_empty"
   | Content_too_long -> "content_too_long"
-  | Invalid_valid_for_days -> "invalid_valid_for_days"
   | Persistence_failed -> "persistence_failed"
   | No_memory_write_error -> ""
 ;;
 
 type memory_write_validation =
   | Memory_write_ok of
-      { body : string
-      ; valid_for_days : int option
-        (** Producer-declared lifetime (RFC-0351 S2). [None] means the claim
-            carries no expiry, which is what every stored fact says today
-            because nothing has ever been able to say otherwise. *)
-      }
+      { body : string }
   | Memory_write_invalid of
       { error_kind : memory_write_error_kind
       ; extras : (string * Yojson.Safe.t) list
       }
 
-(* Each way a lifetime can be wrong gets its own answer. A producer that sent
-   the wrong JSON type has not violated the range, and telling it the range is
-   1-365 sends it looking for a bug it does not have. *)
-let check_lifetime lifetime : (int option, memory_write_validation) result =
-  let out_of_range d =
-    d < keeper_memory_write_min_valid_days || d > keeper_memory_write_max_valid_days
-  in
-  match lifetime with
-  | Lifetime_absent -> Ok None
-  | Lifetime_not_an_integer provided_type ->
-    Error
-      (Memory_write_invalid
-         { error_kind = Invalid_valid_for_days
-         ; extras =
-             [ "reason", `String "not_an_integer"
-             ; "provided_type", `String provided_type
-             ]
-         })
-  | Lifetime_days d when out_of_range d ->
-    Error
-      (Memory_write_invalid
-         { error_kind = Invalid_valid_for_days
-         ; extras =
-             [ "reason", `String "out_of_range"
-             ; "provided_days", `Int d
-             ; "min_days", `Int keeper_memory_write_min_valid_days
-             ; "max_days", `Int keeper_memory_write_max_valid_days
-             ]
-         })
-  | Lifetime_days d -> Ok (Some d)
-;;
-
 let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation =
   let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in
   let content = Safe_ops.json_string ~default:"" "content" args |> String.trim in
-  let lifetime = parse_valid_for_days args in
   if String.length title > keeper_memory_write_max_title_chars
   then
     Memory_write_invalid
@@ -523,23 +431,20 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
       }
   else if content = ""
   then Memory_write_invalid { error_kind = Content_empty; extras = [] }
-  else (
-    match check_lifetime lifetime with
-    | Error invalid -> invalid
-    | Ok valid_for_days ->
-      let body =
-        if title = "" then content else Printf.sprintf "**%s** %s" title content
-      in
-      if String.length body > keeper_memory_write_max_body_chars
-      then
-        Memory_write_invalid
-          { error_kind = Content_too_long
-          ; extras =
-              [ "max_chars", `Int keeper_memory_write_max_body_chars
-              ; "body_chars", `Int (String.length body)
-              ]
-          }
-      else Memory_write_ok { body; valid_for_days })
+  else
+    let body =
+      if title = "" then content else Printf.sprintf "**%s** %s" title content
+    in
+    if String.length body > keeper_memory_write_max_body_chars
+    then
+      Memory_write_invalid
+        { error_kind = Content_too_long
+        ; extras =
+            [ "max_chars", `Int keeper_memory_write_max_body_chars
+            ; "body_chars", `Int (String.length body)
+            ]
+        }
+    else Memory_write_ok { body }
 ;;
 
 (* An explicit write is a durable claim a later turn reads back; the Memory OS
@@ -557,7 +462,6 @@ let append_durable_fact
       ~(keepers_dir : string)
       ~(meta : keeper_meta)
       ~(body : string)
-      ~(valid_for_days : int option)
   : Keeper_memory_os_io.fact_merge_stats
   =
   let keeper_id = meta.name in
@@ -571,14 +475,6 @@ let append_durable_fact
         ; tool_call_id = None
         }
     ; first_seen = now
-    ; valid_until =
-        (* RFC-0351 S2. Recall has always dropped expired facts
-           ([Keeper_memory_os_types.fact_is_current]), but no producer could
-           ever set the boundary, so every stored fact reads as permanent —
-           747 of 747 across the live fleet. This is the first writer. The
-           lifetime is the producer's own claim about scope, not a rule
-           inferred from the text. *)
-        Option.map (Keeper_memory_os_types.valid_until_of_days ~now) valid_for_days
     ; last_verified_at = None
     ; claim_id = None
     }
@@ -637,12 +533,12 @@ let keeper_memory_write_with_outcome
   match validate_memory_write_args args with
   | Memory_write_invalid { error_kind; extras } ->
     respond ~ok:false ~error_kind extras
-  | Memory_write_ok { body; valid_for_days } ->
+  | Memory_write_ok { body } ->
     let keepers_dir =
       Config_dir_resolver.keepers_dir_for_base_path
         ~base_path:config.Workspace.base_path
     in
-    (match append_durable_fact ~keepers_dir ~meta ~body ~valid_for_days with
+    (match append_durable_fact ~keepers_dir ~meta ~body with
      | stats ->
        let merged = stats.Keeper_memory_os_io.merged in
        respond

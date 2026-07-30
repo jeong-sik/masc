@@ -1,9 +1,8 @@
 // KeeperMemoryHealth — per-keeper fact-store observability panel.
 //
 // Read-only diagnostic surface for Lab > 키퍼 메모리 상태.
-// Shows fact-store sizes, GC dry-run statistics, and the fleet-wide
-// librarian cadence counter so operators can monitor what the
-// disabled GC leaves on disk.
+// Shows fact-store sizes, duplicate claim-identity diagnostics, and the
+// fleet-wide librarian cadence counter.
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
@@ -16,7 +15,6 @@ import {
 } from '../../api/dashboard'
 import { DEFAULT_PANEL_REFRESH_MS, formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 
-const TTL_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'ttl_expired_on_disk'
 const DUPLICATE_CLAIM_IDENTITY_ROWS_ALERT_TARGET: KeeperMemoryHealthAlertTarget =
   'duplicate_claim_identity_rows'
 
@@ -42,7 +40,6 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
   const ratioStr = entry.events_bytes_to_facts_bytes_ratio.toFixed(2)
   const alerts = entryAlerts(entry)
   const warn = isRowWarning(entry)
-  const ttlWarn = hasTargetAlert(alerts, TTL_ALERT_TARGET)
   const duplicateClaimIdentityRowsWarn =
     hasTargetAlert(alerts, DUPLICATE_CLAIM_IDENTITY_ROWS_ALERT_TARGET)
 
@@ -53,11 +50,6 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
       <td>${formatBytes(entry.facts_bytes)}</td>
       <td>
         <span>${ratioStr}</span>
-      </td>
-      <td>
-        ${ttlWarn
-          ? html`<span class="kmh-badge kmh-badge--warn">${entry.ttl_expired_on_disk}</span>`
-          : html`<span class="kmh-badge kmh-badge--ok">${entry.ttl_expired_on_disk}</span>`}
       </td>
       <td>
         ${duplicateClaimIdentityRowsWarn
@@ -135,7 +127,6 @@ export function KeeperMemoryHealth() {
 
   const generatedAt = new Date(data.generated_at * 1000).toLocaleTimeString()
   const totalAlerts = data.alert_summary.total_alerts
-  const ttlExpiredWarn = data.alert_summary.ttl_expired_keepers > 0
   const duplicateClaimIdentityRowsWarn =
     data.alert_summary.duplicate_claim_identity_rows_keepers > 0
 
@@ -155,12 +146,6 @@ export function KeeperMemoryHealth() {
           <div class="kmh-stat" data-stat-key="events-bytes">
             <span class="kmh-stat-label">이벤트 크기</span>
             <span class="kmh-stat-value">${formatBytes(data.totals.events_bytes)}</span>
-          </div>
-          <div class="kmh-stat" data-stat-key="ttl-expired">
-            <span class="kmh-stat-label">TTL 만료(디스크)</span>
-            <span class=${`kmh-stat-value${ttlExpiredWarn ? ' kmh-stat-value--warn' : ''}`}>
-              ${data.totals.ttl_expired_on_disk}
-            </span>
           </div>
           <div class="kmh-stat" data-stat-key="duplicate-claim-identity-rows">
             <span class="kmh-stat-label">동일 claim identity 행</span>
@@ -221,7 +206,6 @@ export function KeeperMemoryHealth() {
                   <th>사실</th>
                   <th>bytes</th>
                   <th>event bytes:fact bytes 비율</th>
-                  <th>만료(디스크)</th>
                   <th>동일 claim identity 행</th>
                   <th>경보</th>
                 </tr>

@@ -170,7 +170,6 @@ let valid_output =
               ; "source_turn", `Int 0
               ; "source_tool_call_id", `Null
               ; "claim_id", `String "oas-exact-output-owns-admission"
-              ; "valid_for_days", `Null
               ]
           ] )
     ]
@@ -974,7 +973,6 @@ let test_prompt_slice_and_provenance_share_one_input () =
                     ; "source_turn", `Int 0
                     ; "source_tool_call_id", `String tool_use_id
                     ; "claim_id", `Null
-                    ; "valid_for_days", `Null
                     ]
                 ] )
           ]

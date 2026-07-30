@@ -13,12 +13,11 @@ let test_now = 1_700_000_000.0
    regression gate. *)
 let fresh_dir prefix = Filename.temp_dir prefix ""
 
-let fact ?(valid_until = None) ~now claim =
+let fact ~now claim =
   { Types.claim
   ; Types.category = Types.Fact
   ; Types.source = { Types.trace_id = "health-test"; Types.turn = 1; Types.tool_call_id = None }
   ; Types.first_seen = now
-  ; Types.valid_until
   ; Types.last_verified_at = Some now
   ; Types.claim_id = None
   }
@@ -136,11 +135,6 @@ let test_uses_explicit_base_path_not_ambient_resolver () =
     Alcotest.(check (list string)) "explicit base-path keeper ids" [ "target" ] (keeper_ids json))
 ;;
 
-(* The route computes [now] internally from the wall clock, so the dry-run GC
-   TTL check runs against the real current time. Fact horizons are therefore
-   pinned to the extremes — far past (always expired) or far future (always
-   live) — to stay deterministic without a clock seam. *)
-
 let test_reports_per_keeper_metric_values () =
   Eio_main.run
   @@ fun _env ->
@@ -151,12 +145,7 @@ let test_reports_per_keeper_metric_values () =
     ~keepers_dir
     ~keeper_id:"solo"
     [ fact ~now "alpha durable note one"
-    ; fact
-        ~now
-        (* Far-future horizon: serialized [valid_until] is preserved on read,
-           so this stays live regardless of the wall clock. *)
-        ~valid_until:(Some (now +. 1e12))
-        "beta tagged row two"
+    ; fact ~now "beta tagged row two"
     ];
   let json = Health.keeper_memory_health_http_json ~base_path:base in
   let k = keeper_obj "solo" json in
@@ -168,7 +157,6 @@ let test_reports_per_keeper_metric_values () =
     "ratio 0 when no events"
     0.0
     (float_field "events_bytes_to_facts_bytes_ratio" k);
-  Alcotest.(check int) "nothing expired" 0 (int_field "ttl_expired_on_disk" k);
   Alcotest.(check int)
     "no duplicate claim identity rows"
     0
@@ -189,24 +177,23 @@ let test_reports_per_keeper_metric_values () =
     (float_field "generated_at" json >= 0.0)
 ;;
 
-let test_health_reports_expiry_and_exact_duplicate_identity () =
+let test_health_reports_exact_duplicate_identity () =
   Eio_main.run
   @@ fun _env ->
   let now = test_now in
-  let base = fresh_dir "masc-memory-health-gc" in
+  let base = fresh_dir "masc-memory-health-duplicates" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   Io.rewrite_facts_atomically_for_keepers_dir
     ~keepers_dir
-    ~keeper_id:"gc"
+    ~keeper_id:"duplicates"
     [ fact ~now "shared claim row"
     ; fact ~now "shared claim row" (* exact same observation identity *)
-    ; fact ~now ~valid_until:(Some (now -. 1.0)) "expired horizon row" (* past TTL *)
-    ; fact ~now "live durable row"
+    ; fact ~now "independent row one"
+    ; fact ~now "independent row two"
     ];
   let json = Health.keeper_memory_health_http_json ~base_path:base in
-  let k = keeper_obj "gc" json in
+  let k = keeper_obj "duplicates" json in
   Alcotest.(check int) "all rows counted on disk" 4 (int_field "facts" k);
-  Alcotest.(check int) "one TTL-expired row" 1 (int_field "ttl_expired_on_disk" k);
   Alcotest.(check int)
     "one duplicate claim identity row"
     1
@@ -216,24 +203,23 @@ let test_health_reports_expiry_and_exact_duplicate_identity () =
     1
     (int_field "duplicate_claim_identity_rows" (totals json));
   let alerts = list_field "alerts" k in
-  Alcotest.(check int) "two keeper alerts" 2 (List.length alerts);
+  Alcotest.(check int) "one keeper alert" 1 (List.length alerts);
   Alcotest.(check (list string))
     "alert codes"
-    [ "ttl_expired_on_disk"; "duplicate_claim_identity_rows" ]
+    [ "duplicate_claim_identity_rows" ]
     (List.map (string_field "code") alerts);
   Alcotest.(check (list string))
     "alert targets"
-    [ "ttl_expired_on_disk"; "duplicate_claim_identity_rows" ]
+    [ "duplicate_claim_identity_rows" ]
     (List.map (string_field "target") alerts);
   Alcotest.(check (list string))
     "alert labels"
-    [ "TTL"; "동일 claim identity 행" ]
+    [ "동일 claim identity 행" ]
     (List.map (string_field "label") alerts);
   let summary = alert_summary json in
-  Alcotest.(check int) "summary total alerts" 2 (int_field "total_alerts" summary);
-  Alcotest.(check int) "summary warn alerts" 2 (int_field "warn_alerts" summary);
+  Alcotest.(check int) "summary total alerts" 1 (int_field "total_alerts" summary);
+  Alcotest.(check int) "summary warn alerts" 1 (int_field "warn_alerts" summary);
   Alcotest.(check int) "summary keepers with alerts" 1 (int_field "keepers_with_alerts" summary);
-  Alcotest.(check int) "summary ttl keepers" 1 (int_field "ttl_expired_keepers" summary);
   Alcotest.(check int)
     "summary keepers with duplicate claim identity rows"
     1
@@ -247,9 +233,10 @@ let test_health_reports_expiry_and_exact_duplicate_identity () =
     "duplicate claim identity rows threshold"
     0.0
     (float_field "duplicate_claim_identity_rows" thresholds);
-  (* dry_run must NOT rewrite the store: a fresh read still sees all 4 rows. *)
-  let reread = Io.read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id:"gc" in
-  Alcotest.(check int) "store untouched by dry-run gc" 4 (List.length reread)
+  let reread =
+    Io.read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id:"duplicates"
+  in
+  Alcotest.(check int) "read-only health snapshot leaves store untouched" 4 (List.length reread)
 ;;
 
 let test_sorts_keepers_by_facts_bytes_desc () =
@@ -329,9 +316,9 @@ let () =
             `Quick
             test_reports_per_keeper_metric_values
         ; Alcotest.test_case
-            "dry-run gc reports expired and duplicate rows"
+            "reports exact duplicate claim identities"
             `Quick
-            test_health_reports_expiry_and_exact_duplicate_identity
+            test_health_reports_exact_duplicate_identity
         ; Alcotest.test_case
             "sorts keepers by facts_bytes descending"
             `Quick

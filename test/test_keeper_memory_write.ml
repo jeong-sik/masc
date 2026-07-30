@@ -8,13 +8,6 @@ let make_args ~title ~content =
   `Assoc [ "title", `String title; "content", `String content ]
 ;;
 
-let with_field args key value =
-  match args with
-  | `Assoc fields -> `Assoc (fields @ [ key, value ])
-  | other -> other
-;;
-
-let with_days args days = with_field args "valid_for_days" (`Int days)
 let error_label = Runtime.memory_write_error_kind_to_string
 
 let assert_invalid ~expected = function
@@ -24,9 +17,8 @@ let assert_invalid ~expected = function
     Alcotest.failf "expected invalid memory write: %s" expected
 ;;
 
-let assert_ok ?(valid_for_days = None) ~body = function
+let assert_ok ~body = function
   | Runtime.Memory_write_ok valid ->
-    Alcotest.(check (option int)) "valid_for_days" valid_for_days valid.valid_for_days;
     Alcotest.(check string) "body" body valid.body
   | Runtime.Memory_write_invalid { error_kind; _ } ->
     Alcotest.failf "unexpected validation error: %s" (error_label error_kind)
@@ -111,7 +103,6 @@ let fact claim : Masc.Keeper_memory_os_types.fact =
   ; category = Masc.Keeper_memory_os_types.Fact
   ; source = { trace_id = "seed-trace"; turn = 1; tool_call_id = None }
   ; first_seen = now
-  ; valid_until = None
   ; last_verified_at = None
   ; claim_id = None
   }
@@ -125,42 +116,12 @@ let test_validation_taxonomy () =
   |> assert_invalid ~expected:"title_too_long";
   Runtime.validate_memory_write_args
     (make_args ~title:"" ~content:(String.make 4097 'x'))
-  |> assert_invalid ~expected:"content_too_long";
-  (* RFC-0351 S2: a lifetime is a claim about scope, so both ends are real
-     boundaries. *)
-  Runtime.validate_memory_write_args
-    (with_days (make_args ~title:"" ~content:"body") 0)
-  |> assert_invalid ~expected:"invalid_valid_for_days";
-  Runtime.validate_memory_write_args
-    (with_days (make_args ~title:"" ~content:"body") 366)
-  |> assert_invalid ~expected:"invalid_valid_for_days";
-  (* A wrong JSON type is not a range violation. Answering it with the range
-     would send the producer looking for a bug it does not have. *)
-  (match
-     Runtime.validate_memory_write_args
-       (with_field (make_args ~title:"" ~content:"body") "valid_for_days"
-          (`String "7"))
-   with
-   | Runtime.Memory_write_invalid { error_kind; extras } ->
-     Alcotest.(check string)
-       "error kind"
-       "invalid_valid_for_days"
-       (error_label error_kind);
-     Alcotest.(check (option string))
-       "reason names the type, not the range"
-       (Some "not_an_integer")
-       (match List.assoc_opt "reason" extras with
-        | Some (`String r) -> Some r
-        | _ -> None)
-   | Runtime.Memory_write_ok _ -> Alcotest.fail "a string lifetime must be rejected")
+  |> assert_invalid ~expected:"content_too_long"
 ;;
 
 let test_valid_body_composition () =
   Runtime.validate_memory_write_args (make_args ~title:"" ~content:"body")
   |> assert_ok ~body:"body";
-  Runtime.validate_memory_write_args
-    (with_days (make_args ~title:"" ~content:"body") 30)
-  |> assert_ok ~valid_for_days:(Some 30) ~body:"body";
   Runtime.validate_memory_write_args
     (make_args ~title:"hook" ~content:"body text")
   |> assert_ok ~body:"**hook** body text"
@@ -218,68 +179,7 @@ let test_write_comes_back_through_recall () =
   Alcotest.(check bool)
     "no borrowed tool provenance"
     true
-    (fact.Masc.Keeper_memory_os_types.source.tool_call_id = None);
-  Alcotest.(check bool)
-    "a claim with no declared lifetime stays permanent"
-    true
-    (fact.Masc.Keeper_memory_os_types.valid_until = None)
-;;
-
-(* RFC-0351 S2. The declared lifetime reaches the store, and the reader
-   recall uses actually drops the claim past it. *)
-let test_declared_lifetime_expires () =
-  with_temp_dir
-  @@ fun base_path ->
-  let config = Masc.Workspace.default_config base_path in
-  let meta = make_meta "expiring-write" in
-  let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
-  in
-  let response =
-    Runtime.keeper_memory_write_json
-      ~config
-      ~meta
-      ~args:
-        (with_days
-           (make_args ~title:"" ~content:"task-2288 is blocked on the git-root gate")
-           7)
-    |> Yojson.Safe.from_string
-  in
-  Alcotest.(check bool)
-    "write succeeds"
-    true
-    (match json_field "ok" response with
-     | `Bool value -> value
-     | _ -> false);
-  let fact =
-    Masc.Keeper_memory_os_io.read_facts_all_for_keepers_dir
-      ~keepers_dir
-      ~keeper_id:meta.name
-    |> List.hd
-  in
-  let valid_until =
-    match fact.Masc.Keeper_memory_os_types.valid_until with
-    | Some ts -> ts
-    | None -> Alcotest.fail "declared lifetime did not reach the store"
-  in
-  let first_seen = fact.Masc.Keeper_memory_os_types.first_seen in
-  (* 7 days from the write, to the second. *)
-  Alcotest.(check (float 1.0))
-    "boundary is the declared span"
-    (7.0 *. 86_400.)
-    (valid_until -. first_seen);
-  Alcotest.(check bool)
-    "still current inside the window"
-    true
-    (Masc.Keeper_memory_os_types.fact_is_current
-       ~now:(valid_until -. 86_400.)
-       fact);
-  Alcotest.(check bool)
-    "recall drops it past the window"
-    false
-    (Masc.Keeper_memory_os_types.fact_is_current
-       ~now:(valid_until +. 1.0)
-       fact)
+    (fact.Masc.Keeper_memory_os_types.source.tool_call_id = None)
 ;;
 
 let test_tools_isolate_workspace_base_path_from_ambient_decoy () =
@@ -364,11 +264,7 @@ let test_tools_isolate_workspace_base_path_from_ambient_decoy () =
     Alcotest.(check int)
       "context status counts only target facts"
       1
-      (int_field "memory_facts_total" status);
-    Alcotest.(check int)
-      "context status counts only target current facts"
-      1
-      (int_field "memory_facts_current" status))
+      (int_field "memory_facts_total" status))
 ;;
 
 let () =
@@ -386,10 +282,6 @@ let () =
             "write comes back through recall"
             `Quick
             test_write_comes_back_through_recall
-        ; Alcotest.test_case
-            "declared lifetime reaches the store and expires"
-            `Quick
-            test_declared_lifetime_expires
         ; Alcotest.test_case
             "tools isolate config BasePath from ambient decoy"
             `Quick

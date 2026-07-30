@@ -7,7 +7,6 @@ import {
   MemoryInspector,
   factCategoryMeta,
   factSelectionReason,
-  factTtlLabel,
   latestEntryWithBlocks,
   memCompositionFromBlocks,
   memFmtBytes,
@@ -61,17 +60,12 @@ function turnRecordsPayload() {
       read_errors: [{ scope: 'facts', error: 'fact store decode failed' }],
       episodes: {
         shown: 2,
-        current: 2,
-        expired: 0,
         terminal_markers: 2,
         items: [
           {
             trace_id: 'trace-ep1',
             generation: 3,
             created_at: 1_789_900_000,
-            valid_until: null,
-            valid_until_iso: null,
-            current: true,
             terminal_marker: 'handoff_complete',
             claim_count: 4,
             source_turn_range: { lo: 1, hi: 28 },
@@ -81,9 +75,6 @@ function turnRecordsPayload() {
             trace_id: 'trace-diagnostic',
             generation: 4,
             created_at: 1_789_950_000,
-            valid_until: null,
-            valid_until_iso: null,
-            current: true,
             terminal_marker: 'diagnostic',
             claim_count: 1,
             source_turn_range: null,
@@ -93,8 +84,6 @@ function turnRecordsPayload() {
       },
       facts: {
         shown: 3,
-        current: 2,
-        expired: 1,
         items: [
           {
             claim: 'retention D0 = 가입일, 첫 세션 기준',
@@ -103,10 +92,7 @@ function turnRecordsPayload() {
             first_seen: 1_789_000_000,
             first_seen_iso: '2026-09-10T00:26:40Z',
             reference_time: 1_789_500_000,
-            valid_until: null,
-            valid_until_iso: null,
             last_verified_at: 1_789_500_000,
-            current: true,
           },
           {
             claim: 'diagnostic row: operator pin backend source absent',
@@ -115,22 +101,16 @@ function turnRecordsPayload() {
             first_seen: 1_789_700_000,
             first_seen_iso: '2026-09-18T02:53:20Z',
             reference_time: 1_789_700_000,
-            valid_until: null,
-            valid_until_iso: null,
             last_verified_at: null,
-            current: true,
           },
           {
-            claim: 'amplitude 캐시는 만료됨',
+            claim: 'amplitude 캐시 기준이 변경됨',
             category: 'lesson',
             source: { trace_id: 'trace-b', turn: 5 },
             first_seen: 1_789_100_000,
             first_seen_iso: '2026-09-11T04:13:20Z',
             reference_time: 1_789_100_000,
-            valid_until: 1_789_200_000,
-            valid_until_iso: '2026-09-12T08:00:00Z',
             last_verified_at: null,
-            current: false,
           },
         ],
       },
@@ -221,7 +201,7 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(container.textContent).toContain('동적 컨텍스트')
   })
 
-  it('renders all facts in persisted source order with stored time and validity', async () => {
+  it('renders all facts in persisted source order with stored timestamps', async () => {
     stubFetch()
     const { container } = renderInspector()
     await waitFor(() => expect(container.querySelectorAll('.mem-store-row').length).toBeGreaterThan(0))
@@ -229,12 +209,12 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(container.textContent).toContain('제약') // constraint chip label
     expect(container.textContent).toContain('저장')
     expect(container.textContent).toContain('검증')
-    expect(container.textContent).toContain('current row')
-    expect(container.textContent).toContain('2/3 current')
+    expect(container.textContent).toContain('persisted row')
+    expect(container.textContent).toContain('3 rows')
     expect(container.textContent).not.toContain('핵심 회상 후보')
     expect(container.textContent).toContain('diagnostic row: operator pin backend source absent')
     expect(container.textContent).toContain('provider response diagnostic')
-    expect(container.textContent).toContain('amplitude 캐시는 만료됨')
+    expect(container.textContent).toContain('amplitude 캐시 기준이 변경됨')
   })
 
   it('renders a closed taxonomy category without a score model', async () => {
@@ -242,7 +222,7 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     const { container } = renderInspector()
     await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
     expect(container.textContent).toContain('교훈')
-    expect(container.textContent).toContain('expired row')
+    expect(container.textContent).toContain('persisted row')
     // NO salience meter — the deleted score model must not reappear.
     expect(container.querySelector('.mem-sal')).toBeFalsy()
   })
@@ -252,7 +232,7 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     const { container } = renderInspector()
     await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
     expect(container.textContent).toContain('diagnostic row: operator pin backend source absent')
-    expect(container.textContent).toContain('amplitude 캐시는 만료됨')
+    expect(container.textContent).toContain('amplitude 캐시 기준이 변경됨')
     expect(container.textContent).toContain('provider response diagnostic')
   })
 
@@ -293,7 +273,7 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     const disclosures = [...container.querySelectorAll('.mem-disclosure')].map(d => d.textContent ?? '')
     expect(disclosures.some(t => t.includes('Phase 2'))).toBe(false)
     expect(container.textContent).toContain('diagnostic row: operator pin backend source absent')
-    expect(container.textContent).toContain('amplitude 캐시는 만료됨')
+    expect(container.textContent).toContain('amplitude 캐시 기준이 변경됨')
     // no prototype fixture leakage
     expect(container.querySelector('.mem-pin')).toBeFalsy()
   })
@@ -350,7 +330,7 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
       String(c[0]).includes('/api/v1/keepers/sangsu/turn-records?limit=24'))).toBe(true)
   })
 
-  it('marks memory-os prompt blocks with a legend tag and renders a current TTL pill', async () => {
+  it('marks only memory-os prompt blocks with a legend tag', async () => {
     stubFetch()
     const { container } = renderInspector()
     await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
@@ -362,18 +342,7 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
       (r.querySelector('.mem-leg-lbl')?.textContent ?? '').includes('동적 컨텍스트'))
     expect(ctxLegRow).toBeTruthy()
     expect(ctxLegRow?.querySelector('.mem-leg-tag')).toBeFalsy()
-    // current fact renders a TTL pill, not the removed plain mono span.
-    expect(container.querySelector('.mem-ttl.current')).toBeTruthy()
-  })
-
-  it('renders an expired TTL pill without an expansion gate', async () => {
-    stubFetch()
-    const { container } = renderInspector()
-    await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
-    const expiredRow = [...container.querySelectorAll('.mem-store-row')].find(r =>
-      (r.textContent ?? '').includes('amplitude 캐시는 만료됨'))
-    expect(expiredRow?.querySelector('.mem-ttl.expired')).toBeTruthy()
-    expect(expiredRow?.querySelector('.mem-ttl.current')).toBeFalsy()
+    expect(container.querySelector('.mem-ttl')).toBeFalsy()
   })
 
   it('fails loudly when the required memory_os projection is null', async () => {
@@ -420,7 +389,7 @@ describe('MemoryInspector — scope toggle', () => {
       String(call[0]).includes('/api/v1/keepers/nick0cave/turn-records?limit=12'))).toBe(true)
     expect(container.textContent).toContain('전체 memory-os')
     expect(container.textContent).toContain(`${DEFAULT_MEMORY_KEEPERS.length}/${DEFAULT_MEMORY_KEEPERS.length} loaded`)
-    expect(container.textContent).toContain(`${DEFAULT_MEMORY_KEEPERS.length * 2}/18 current`)
+    expect(container.textContent).toContain(`${DEFAULT_MEMORY_KEEPERS.length * 3} rows`)
     expect(container.textContent).toContain('800B · trace-a#7')
     expect([...container.querySelectorAll('.mem-disclosure')].some(d => (d.textContent ?? '').includes('읽기 전용 집계'))).toBe(true)
     expect(container.textContent).not.toContain('추후 연결')
@@ -629,7 +598,7 @@ describe('memory view-model helpers', () => {
   it('factCategoryMeta covers every closed taxonomy arm', () => {
     const tags = [
       'code_change', 'fact', 'preference', 'blocker', 'goal',
-      'constraint', 'ephemeral', 'validated_approach', 'lesson',
+      'constraint', 'validated_approach', 'lesson',
     ] as const
     for (const tag of tags) {
       const meta = factCategoryMeta({ tag })
@@ -638,54 +607,24 @@ describe('memory view-model helpers', () => {
     }
   })
 
-  it('factTtlLabel renders a future expiry as remaining TTL ("…후"), never "지금"', () => {
-    const makeFact = (over: Partial<MemoryOsFact>): MemoryOsFact => ({
-      claim: 'x',
-      category: { tag: 'fact' },
-      source: { trace_id: 't', turn: 0, tool_call_id: null },
-      first_seen: 0,
-      first_seen_iso: '1970-01-01T00:00:00Z',
-      reference_time: 0,
-      valid_until: null,
-      valid_until_iso: null,
-      last_verified_at: null,
-      current: true,
-      ...over,
-    })
-    const nowSec = Math.floor(Date.now() / 1000)
-    // permanent fact
-    expect(factTtlLabel(makeFact({ valid_until: null, current: true }))).toBe('영구')
-    // current ⟺ valid_until in the future: must show remaining TTL, not collapse
-    // to "지금" (the drift this guards — formatTimeAgo floors the future to 0).
-    const live = factTtlLabel(makeFact({ valid_until: nowSec + 2 * 3600, current: true }))
-    expect(live).not.toContain('지금')
-    expect(live).toContain('후')
-    // an already-expired fact keeps the past form
-    const dead = factTtlLabel(makeFact({ valid_until: nowSec - 2 * 3600, current: false }))
-    expect(dead).toContain('전')
-  })
-
   it('sortMemoryFactsForReview preserves persisted source order', () => {
-    const mkFact = (claim: string, current: boolean, reference_time: number): MemoryOsFact => ({
+    const mkFact = (claim: string, reference_time: number): MemoryOsFact => ({
       claim,
       category: { tag: 'fact' },
       source: { trace_id: 't', turn: 1, tool_call_id: null },
       first_seen: reference_time,
       first_seen_iso: '1970-01-01T00:00:00Z',
       reference_time,
-      valid_until: null,
-      valid_until_iso: null,
       last_verified_at: null,
-      current,
     })
     expect(sortMemoryFactsForReview([
-      mkFact('expired-new', false, 30),
-      mkFact('current-old', true, 10),
-      mkFact('current-new', true, 20),
-    ]).map(f => f.claim)).toEqual(['expired-new', 'current-old', 'current-new'])
+      mkFact('first', 30),
+      mkFact('second', 10),
+      mkFact('third', 20),
+    ]).map(f => f.claim)).toEqual(['first', 'second', 'third'])
   })
 
-  it('factSelectionReason explains currentness and category', () => {
+  it('factSelectionReason explains persistence and category', () => {
     const fact: MemoryOsFact = {
       claim: 'x',
       category: { tag: 'constraint' },
@@ -693,11 +632,8 @@ describe('memory view-model helpers', () => {
       first_seen: 0,
       first_seen_iso: '1970-01-01T00:00:00Z',
       reference_time: 0,
-      valid_until: null,
-      valid_until_iso: null,
       last_verified_at: null,
-      current: true,
     }
-    expect(factSelectionReason(fact)).toBe('current row · 제약')
+    expect(factSelectionReason(fact)).toBe('persisted row · 제약')
   })
 })

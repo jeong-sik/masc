@@ -20,7 +20,6 @@ let field_category = Lib.wire_field_category
 let field_source_turn = Lib.wire_field_source_turn
 let field_source_tool_call_id = Lib.wire_field_source_tool_call_id
 let field_claim_id = Lib.wire_field_claim_id
-let field_valid_for_days = Lib.wire_field_valid_for_days
 
 let claim_json ?confidence ?(claim = "c") ?(source_turn = `Int 0) () =
   let fields =
@@ -29,7 +28,6 @@ let claim_json ?confidence ?(claim = "c") ?(source_turn = `Int 0) () =
     ; field_source_turn, source_turn
     ; field_source_tool_call_id, `Null
     ; field_claim_id, `Null
-    ; field_valid_for_days, `Null
     ]
   in
   let fields =

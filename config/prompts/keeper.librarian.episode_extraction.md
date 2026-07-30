@@ -28,7 +28,6 @@ Additional rules:
 3. Each claim must include an approximate source_turn from the conversation slice. Use source_tool_call_id only when a tool call id is explicitly visible.
 4. If you are unsure a claim is durable, omit it. The store records durable knowledge only; uncertainty is a reason to leave a claim out, not to store it with a hedge. Do not emit a confidence number — the store no longer reads one; spend the words on a precise claim instead.
 5. claim_id (nullable): a short lowercase kebab-case slug identifying the CONCLUSION, not the wording — derive it deterministically from the subject and the asserted state (e.g. "pr-21249-verification-complete", "pr-123-open", "pr-123-merged"). Re-stating the same conclusion later MUST reuse the same slug; a changed conclusion (e.g. open -> merged) MUST use a new slug. Use null if you cannot form a stable slug.
-6. valid_for_days (nullable integer, 1-365): YOUR judgment of how many days this claim stays worth re-reading — after that the store forgets it. Short-lived external state (an open PR, a pending deploy) usually deserves 7-30. Use null ONLY for genuinely durable knowledge. Transient first-person state must be omitted by the durability gate instead of encoded as a claim.
 
 Output schema:
 {
@@ -39,8 +38,7 @@ Output schema:
       "category": "code_change|fact|preference|blocker|goal|constraint|validated_approach|lesson",
       "source_turn": 12,
       "source_tool_call_id": null,
-      "claim_id": "pr-123-open",
-      "valid_for_days": 7
+      "claim_id": "pr-123-open"
     }
   ]
 }

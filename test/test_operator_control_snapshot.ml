@@ -236,6 +236,38 @@ let test_usage_does_not_create_context_snapshot () =
     "keeper_runtime_usage"
     Yojson.Safe.Util.(usage_json |> member "source" |> to_string)
 
+let init_runtime_default_for_snapshot base_dir =
+  let path = Filename.concat base_dir "runtime.toml" in
+  let content =
+    {|
+version = 1
+
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+max-concurrent = 1
+|}
+  in
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content);
+  match Runtime.init_default ~config_path:path with
+  | Ok () -> ()
+  | Error err -> Alcotest.failf "Runtime.init_default failed: %s" err
+
 let test_snapshot_keeps_context_unobserved_and_usage_separate () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -245,6 +277,7 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let config = Workspace.default_config base_dir in
+      init_runtime_default_for_snapshot base_dir;
       ignore (Workspace.init config ~agent_name:(Some "owner"));
       ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       let keeper_ctx : _ Keeper_tool_surface.context =
@@ -273,7 +306,10 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
-      Keeper_keepalive.stop_keepalive keeper_name;
+      ignore
+        (Keeper_keepalive.stop_keepalive_and_await
+           ~base_path:config.base_path
+           keeper_name);
       let meta =
         match Keeper_meta_store.read_meta config keeper_name with
         | Ok (Some meta) -> meta

@@ -137,7 +137,7 @@ let test_write_comes_back_through_recall () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "durable-write" in
   let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
   in
   let response =
     Runtime.keeper_memory_write_with_outcome

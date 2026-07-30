@@ -1952,7 +1952,7 @@ let test_render_if_enabled_surfaces_store_decode_failure () =
           Alcotest.(check bool)
             "surfaces the unavailable advisory"
             true
-            (contains "Memory recall unavailable" block);
+            (contains "Historical memory recall is unavailable" block);
           Alcotest.(check bool)
             "does not inject the valid prefix as partial memory"
             false
@@ -1960,11 +1960,7 @@ let test_render_if_enabled_surfaces_store_decode_failure () =
           Alcotest.(check (option string))
             "records the typed recall failure"
             (Some "read_error")
-            (recall_failure_reason
-               ~masc_root:keepers_dir
-               ~keeper_id
-               ~trace_id:"trace-recall-render-test"
-               ~turn:1))))
+            (recent_recall_injection_failure_reason keepers_dir))))
 ;;
 
 let test_render_if_enabled_surfaces_prompt_render_failure () =
@@ -2371,7 +2367,7 @@ let test_recall_no_prefix_for_plain_fact () =
 
 let test_recall_renders_terminal_episode_marker () =
   with_prompt_registry (fun () ->
-    with_temp_keepers_dir (fun _keepers_dir ->
+    with_temp_keepers_dir (fun keepers_dir ->
       let keeper_id = "episode-terminal-keeper" in
       let now = 1_000_000.0 in
       let episode =
@@ -2399,7 +2395,7 @@ let test_recall_renders_terminal_episode_marker () =
 (* Recall preserves every persisted row, including repeated producer identities. *)
 let test_recall_preserves_repeated_claims () =
   with_prompt_registry (fun () ->
-    with_temp_keepers_dir (fun _keepers_dir ->
+    with_temp_keepers_dir (fun keepers_dir ->
       let keeper_id = "virtual-memory-keeper" in
       let now = 1_000_000.0 in
       let base = fact_fixture ~now () in
@@ -2599,7 +2595,7 @@ let test_memory_io_preserves_entries_with_installed_domain_pool () =
 
 let test_recall_context_preserves_semantic_memory_content () =
   with_prompt_registry (fun () ->
-    with_temp_keepers_dir (fun _keepers_dir ->
+    with_temp_keepers_dir (fun keepers_dir ->
       let keeper_id = "virtual-memory-keeper" in
       let now = 1_000_000.0 in
       let base_fact = fact_fixture ~now () in
@@ -2665,7 +2661,7 @@ let test_recall_context_preserves_semantic_memory_content () =
 
 let test_recall_context_preserves_durable_current_rows () =
   with_prompt_registry (fun () ->
-    with_temp_keepers_dir (fun _keepers_dir ->
+    with_temp_keepers_dir (fun keepers_dir ->
       let keeper_id = "virtual-memory-keeper" in
       let now = 1_000_000.0 in
       let base_fact = fact_fixture ~now () in
@@ -2871,7 +2867,7 @@ let with_env name value f =
 let test_recall_selection_budget_truncates_facts_by_recency () =
   with_env "MASC_KEEPER_MEMORY_OS_RECALL_MAX_FACTS" "3" (fun () ->
     with_prompt_registry (fun () ->
-      with_temp_keepers_dir (fun _keepers_dir ->
+      with_temp_keepers_dir (fun keepers_dir ->
         let keeper_id = "budget-truncation-keeper" in
         let now = 1_000_000.0 in
         (* last_verified_at strictly increases with i, so i=5 is most recent
@@ -2915,7 +2911,7 @@ let test_recall_selection_budget_truncates_facts_by_recency () =
 let test_recall_selection_budget_no_truncation_below_budget () =
   with_env "MASC_KEEPER_MEMORY_OS_RECALL_MAX_FACTS" "3" (fun () ->
     with_prompt_registry (fun () ->
-      with_temp_keepers_dir (fun _keepers_dir ->
+      with_temp_keepers_dir (fun keepers_dir ->
         let keeper_id = "budget-under-keeper" in
         let now = 1_000_000.0 in
         List.iter

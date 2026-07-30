@@ -5,7 +5,7 @@ type intent =
   }
 
 type append_result =
-  | Appended
+  | Appended of intent
   | Already_present
 
 type issue_stage =
@@ -19,8 +19,13 @@ type issue =
   ; detail : string
   }
 
+type pending_batch =
+  { intents : intent list
+  ; issues : string list
+  }
+
 type io =
-  { load_pending : unit -> (intent list, string) result
+  { load_pending : unit -> (pending_batch, string) result
   ; persist : intent -> (unit, string) result
   ; append : intent -> (append_result, string) result
   ; retire : intent -> (unit, string) result
@@ -34,8 +39,10 @@ val issue_to_string : issue -> string
     failure leaves the intent durable for {!retry_pending}. *)
 val record_and_project : io -> intent -> issue list
 
-(** Retry all durable intents. Chat append is idempotent by [turn_ref], so a
-    crash after append but before retirement cannot duplicate the row. *)
+(** Retry all valid durable intents in exact absolute-turn order. Invalid
+    entries are reported independently without blocking valid intents. Chat
+    append is idempotent by [turn_ref], so a crash after append but before
+    retirement cannot duplicate the row. *)
 val retry_pending : io -> issue list
 
 val production_io : base_dir:string -> keeper_name:string -> io

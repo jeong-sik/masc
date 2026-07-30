@@ -433,27 +433,27 @@ let test_autonomous_chat_projection_retries_durable_intent () =
     { load_pending =
         (fun () ->
            record "load";
-           Ok !pending)
+           Ok { ACP.intents = !pending; issues = [] })
     ; persist =
         (fun stored ->
            record "persist";
            pending := [ stored ];
            Ok ())
     ; append =
-        (fun _ ->
+        (fun stored ->
            if !fail_append
            then (
              record "append_failed";
              Error "chat unavailable")
            else (
              record "append";
-             Ok ACP.Appended))
+             Ok (ACP.Appended { stored with content = "[REDACTED]" })))
     ; retire =
         (fun _ ->
            record "retire";
            pending := [];
            Ok ())
-    ; broadcast = (fun _ -> record "broadcast")
+    ; broadcast = (fun stored -> record ("broadcast:" ^ stored.content))
     }
   in
   (match ACP.record_and_project io intent with
@@ -468,8 +468,73 @@ let test_autonomous_chat_projection_retries_durable_intent () =
   check (list string) "retry succeeds" [] (ACP.retry_pending io |> List.map ACP.issue_to_string);
   check int "successful retry retires intent" 0 (List.length !pending);
   check (list string) "retry appends once before retirement"
-    [ "persist"; "append_failed"; "load"; "append"; "broadcast"; "retire" ]
+    [ "persist"
+    ; "append_failed"
+    ; "load"
+    ; "append"
+    ; "broadcast:[REDACTED]"
+    ; "retire"
+    ]
     (List.rev !events)
+
+let test_autonomous_chat_projection_orders_and_isolates_pending () =
+  let intent absolute_turn content : ACP.intent =
+    { keeper_name = "echo"
+    ; turn_ref =
+        Ids.Turn_ref.make ~trace_id:"projection-order" ~absolute_turn
+    ; content
+    }
+  in
+  let appended = ref [] in
+  let io : ACP.io =
+    { load_pending =
+        (fun () ->
+           Ok
+             { ACP.intents =
+                 [ intent 19 "later"; intent 18 "earlier" ]
+             ; issues = [ "bad.json is invalid" ]
+             })
+    ; persist = (fun _ -> Ok ())
+    ; append =
+        (fun stored ->
+           appended := Ids.Turn_ref.absolute_turn stored.turn_ref :: !appended;
+           Ok (ACP.Appended stored))
+    ; retire = (fun _ -> Ok ())
+    ; broadcast = (fun _ -> ())
+    }
+  in
+  check
+    (list string)
+    "invalid entry is explicit"
+    [ "load_pending: bad.json is invalid" ]
+    (ACP.retry_pending io |> List.map ACP.issue_to_string);
+  check (list int) "valid intents retain turn order" [ 18; 19 ] (List.rev !appended);
+  appended := [];
+  let ambiguous_io =
+    { io with
+      load_pending =
+        (fun () ->
+           Ok
+             { ACP.intents =
+                 [ { (intent 20 "left") with
+                     turn_ref =
+                       Ids.Turn_ref.make ~trace_id:"left" ~absolute_turn:20
+                   }
+                 ; { (intent 20 "right") with
+                     turn_ref =
+                       Ids.Turn_ref.make ~trace_id:"right" ~absolute_turn:20
+                   }
+                 ]
+             ; issues = []
+             })
+    }
+  in
+  check
+    (list string)
+    "ambiguous order is rejected"
+    [ "load_pending: projection intents have ambiguous absolute turn 20" ]
+    (ACP.retry_pending ambiguous_io |> List.map ACP.issue_to_string);
+  check (list int) "ambiguous intents are not guessed" [] !appended
 
 let test_preview_does_not_invent_wake_reason () =
   let preview_meta =
@@ -615,6 +680,8 @@ let () =
             test_autonomous_chat_projection_uses_typed_turn_effect;
           test_case "chat projection retries durable intent" `Quick
             test_autonomous_chat_projection_retries_durable_intent;
+          test_case "chat projection orders and isolates pending" `Quick
+            test_autonomous_chat_projection_orders_and_isolates_pending;
           test_case "preview invents no wake reason" `Quick
             test_preview_does_not_invent_wake_reason;
         ] );

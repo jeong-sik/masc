@@ -5,7 +5,7 @@ type intent =
   }
 
 type append_result =
-  | Appended
+  | Appended of intent
   | Already_present
 
 type issue_stage =
@@ -19,8 +19,13 @@ type issue =
   ; detail : string
   }
 
+type pending_batch =
+  { intents : intent list
+  ; issues : string list
+  }
+
 type io =
-  { load_pending : unit -> (intent list, string) result
+  { load_pending : unit -> (pending_batch, string) result
   ; persist : intent -> (unit, string) result
   ; append : intent -> (append_result, string) result
   ; retire : intent -> (unit, string) result
@@ -91,7 +96,7 @@ let project_persisted io intent =
   | Error detail -> [ { stage = Append_chat; detail } ]
   | Ok append_result ->
     (match append_result with
-     | Appended -> io.broadcast intent
+     | Appended appended_intent -> io.broadcast appended_intent
      | Already_present -> ());
     (match io.retire intent with
      | Ok () -> []
@@ -107,11 +112,38 @@ let record_and_project io intent =
      | Ok () -> project_persisted io intent)
 ;;
 
+let order_pending intents =
+  let compare_intent left right =
+    Int.compare
+      (Ids.Turn_ref.absolute_turn left.turn_ref)
+      (Ids.Turn_ref.absolute_turn right.turn_ref)
+  in
+  let intents = List.sort compare_intent intents in
+  let rec reject_ambiguous_order = function
+    | left :: right :: _
+      when Ids.Turn_ref.absolute_turn left.turn_ref
+           = Ids.Turn_ref.absolute_turn right.turn_ref ->
+      Error
+        (Printf.sprintf
+           "projection intents have ambiguous absolute turn %d"
+           (Ids.Turn_ref.absolute_turn left.turn_ref))
+    | _ :: rest -> reject_ambiguous_order rest
+    | [] -> Ok intents
+  in
+  reject_ambiguous_order intents
+;;
+
 let retry_pending io =
   match io.load_pending () with
   | Error detail -> [ { stage = Load_pending; detail } ]
-  | Ok intents ->
-    List.concat_map (project_persisted io) intents
+  | Ok { intents; issues } ->
+    let load_issues =
+      List.map (fun detail -> { stage = Load_pending; detail }) issues
+    in
+    (match order_pending intents with
+     | Error detail -> load_issues @ [ { stage = Load_pending; detail } ]
+     | Ok intents ->
+       load_issues @ List.concat_map (project_persisted io) intents)
 ;;
 
 let sha256 value = Digestif.SHA256.(digest_string value |> to_hex)
@@ -153,38 +185,48 @@ let production_io ~base_dir ~keeper_name =
   let load_pending () =
     let dir = keeper_dir ~base_dir keeper_name in
     if not (Fs_compat.file_exists dir)
-    then Ok []
+    then Ok { intents = []; issues = [] }
     else
       try
         let names = Fs_compat.read_dir dir in
-        let unexpected =
-          List.find_opt
-            (fun name -> not (String.equal (Filename.extension name) ".json"))
-            names
+        let rec load intents issues = function
+          | [] -> Ok { intents; issues = List.rev issues }
+          | name :: rest ->
+            if not (String.equal (Filename.extension name) ".json")
+            then
+              load
+                intents
+                (Printf.sprintf
+                   "projection outbox contains unexpected entry %S"
+                   name
+                 :: issues)
+                rest
+            else
+              let path = Filename.concat dir name in
+              (match load_intent path with
+               | Error detail ->
+                 load
+                   intents
+                   (Printf.sprintf
+                      "projection outbox entry %S is invalid: %s"
+                      name
+                      detail
+                    :: issues)
+                   rest
+               | Ok intent ->
+                 if String.equal intent.keeper_name keeper_name
+                 then load (intent :: intents) issues rest
+                 else
+                   load
+                     intents
+                     (Printf.sprintf
+                        "projection outbox entry %S belongs to keeper %S"
+                        name
+                        intent.keeper_name
+                      :: issues)
+                     rest)
         in
-        let* () =
-          match unexpected with
-          | None -> Ok ()
-          | Some name ->
-            Error
-              (Printf.sprintf
-                 "projection outbox contains unexpected entry %S"
-                 name)
-        in
-        let paths =
-          names
-          |> List.sort String.compare
-          |> List.map (Filename.concat dir)
-        in
-        let rec load acc = function
-          | [] -> Ok (List.rev acc)
-          | path :: rest ->
-            let* intent = load_intent path in
-            if String.equal intent.keeper_name keeper_name
-            then load (intent :: acc) rest
-            else Error "projection intent keeper does not match its directory"
-        in
-        load [] paths
+        load [] [] names
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -199,22 +241,32 @@ let production_io ~base_dir ~keeper_name =
     |> Result.map_error Keeper_fs.durable_write_error_to_string
   in
   let append intent =
-    let turn_ref = intent.turn_ref in
+    let redaction =
+      Keeper_secret_redaction.snapshot
+        ~base_path:base_dir
+        ~keeper_name:intent.keeper_name
+    in
+    let appended_intent =
+      { intent with
+        content = Keeper_secret_redaction.redact_text redaction intent.content
+      }
+    in
+    let turn_ref = appended_intent.turn_ref in
     let delivery_key =
       Keeper_chat_delivery_identity.Autonomous_turn turn_ref
     in
     Keeper_chat_store.append_assistant_message_once
       ~base_dir
-      ~keeper_name:intent.keeper_name
+      ~keeper_name:appended_intent.keeper_name
       ~delivery_key
-      ~content:intent.content
+      ~content:appended_intent.content
       ~surface:Surface_ref.Agent
       ~assistant_kind:Keeper_chat_store.Row_kind.Autonomous_activity
-      ~blocks:(Keeper_chat_blocks.parse_text_to_blocks intent.content)
+      ~blocks:(Keeper_chat_blocks.parse_text_to_blocks appended_intent.content)
       ~turn_ref
       ()
     |> Result.map (function
-      | Keeper_chat_store.Appended _ -> Appended
+      | Keeper_chat_store.Appended _ -> Appended appended_intent
       | Keeper_chat_store.Already_present _ -> Already_present)
   in
   let retire intent =

@@ -2100,6 +2100,8 @@ describe('setGateMode', () => {
     recovery_error: null,
     started: 1,
     queued: 1,
+    recovery_failure_count: 0,
+    recovery_failures: [],
   } as const
 
   it('posts the exact non-hierarchical Gate mode contract', async () => {
@@ -2126,6 +2128,20 @@ describe('setGateMode', () => {
   })
 
   it.each([
+    {
+      label: 'partial owner recovery',
+      requestedMode: 'auto_judge' as const,
+      response: {
+        ...completedResponse,
+        recovery_status: 'partial',
+        recovery_failure_count: 1,
+        recovery_failures: [{
+          keeper_name: 'keeper-a',
+          approval_id: 'approval-a',
+          operator_detail: 'worker unavailable',
+        }],
+      },
+    },
     {
       label: 'failed recovery',
       requestedMode: 'auto_judge' as const,
@@ -2172,6 +2188,26 @@ describe('setGateMode', () => {
       recovery_status: 'failed',
       started: 0,
       queued: 0,
+    }],
+    ['partial recovery without owner failure', {
+      ...completedResponse,
+      recovery_status: 'partial',
+    }],
+    ['owner failure count mismatch', {
+      ...completedResponse,
+      recovery_status: 'partial',
+      recovery_failure_count: 1,
+    }],
+    ['owner failure with unknown field', {
+      ...completedResponse,
+      recovery_status: 'partial',
+      recovery_failure_count: 1,
+      recovery_failures: [{
+        keeper_name: 'keeper-a',
+        approval_id: null,
+        operator_detail: 'queue unavailable',
+        extra: true,
+      }],
     }],
     ['negative count', { ...completedResponse, started: -1 }],
     ['non-zero not-requested outcome', {

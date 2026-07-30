@@ -109,6 +109,8 @@ async function loadSurface(
       recovery_error: null,
       started: 0,
       queued: 0,
+      recovery_failure_count: 0,
+      recovery_failures: [],
     })
   const response = hitl
     ? responseWithQueue(

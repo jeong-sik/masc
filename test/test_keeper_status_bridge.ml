@@ -202,6 +202,62 @@ let test_tool_audit_cache_advances_from_negative_by_appended_rows () =
       | None -> Alcotest.fail "expected appended current-schema turn audit")
 ;;
 
+let test_tool_audit_cache_invalidation_for_recreated_keeper () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
+  let base_path =
+    Filename.temp_dir "keeper_status_tool_audit_recreated_" ""
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Eio_guard.disable ();
+      Fs_compat.remove_tree base_path)
+    (fun () ->
+      let config = Workspace.default_config base_path in
+      let keeper_name = "recreated-keeper" in
+      let store =
+        Keeper_types_support.keeper_metrics_store config keeper_name
+      in
+      let turn tool_name =
+        `Assoc
+          (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+           @ [ "ts", `String "2026-07-30T05:00:01Z"
+             ; "ts_unix", `Float 1_785_388_401.0
+             ; "trace_id", `String "trace-recreated-keeper"
+             ; "generation", `Int 0
+             ; "channel", `String "turn"
+             ; "turn_mode", `String "tool_use"
+             ; "latency_ms", `Int 1
+             ; "handoff_performed", `Bool false
+             ; "tool_call_count", `Int 1
+             ; "tools_used", `List [ `String tool_name ]
+             ])
+      in
+      let latest_tool_names () =
+        match
+          Keeper_status_metrics.latest_tool_audit_snapshot_from_files
+            config
+            ~keeper_name
+        with
+        | Some snapshot -> snapshot.latest_tool_names
+        | None -> Alcotest.fail "expected current Keeper tool audit"
+      in
+      Dated_jsonl.append store (turn "old_tool");
+      Alcotest.(check (list string))
+        "initial Keeper audit"
+        [ "old_tool" ]
+        (latest_tool_names ());
+      Fs_compat.remove_tree
+        (Keeper_types_support.keeper_metrics_dir config keeper_name);
+      Keeper_status_metrics.invalidate_tool_audit_cache config ~keeper_name;
+      Dated_jsonl.append store (turn "new_tool");
+      Alcotest.(check (list string))
+        "recreated Keeper does not inherit deleted audit"
+        [ "new_tool" ]
+        (latest_tool_names ()))
+;;
+
 let () =
   Alcotest.run
     "keeper_status_bridge"
@@ -231,7 +287,11 @@ let () =
         [ Alcotest.test_case
             "negative snapshot advances from appended rows"
             `Quick
-            test_tool_audit_cache_advances_from_negative_by_appended_rows
+            test_tool_audit_cache_advances_from_negative_by_appended_rows;
+          Alcotest.test_case
+            "recreated Keeper does not inherit deleted audit"
+            `Quick
+            test_tool_audit_cache_invalidation_for_recreated_keeper
         ] );
       ( "profile default override provenance",
         [

@@ -17,6 +17,11 @@ val summarize_metrics_lines : string list -> metrics_summary
 val empty_tool_audit_snapshot : tool_audit_snapshot
 val latest_tool_audit_snapshot_from_files :
   Workspace.config -> keeper_name:string -> tool_audit_snapshot option
+val invalidate_tool_audit_cache :
+  Workspace.config -> keeper_name:string -> unit
+(** Forget the process-local tool-audit snapshot when a Keeper metrics
+    directory is removed. A later Keeper with the same name must not inherit
+    the deleted runtime's audit state. *)
 val accountability_summary_lookup :
   Workspace.config ->
   keeper_name:string ->

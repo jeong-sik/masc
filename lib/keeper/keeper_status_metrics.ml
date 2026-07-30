@@ -232,6 +232,9 @@ module Tool_audit_cache = struct
   let find path =
     Stdlib.Mutex.protect mutex (fun () -> Hashtbl.find_opt entries path)
 
+  let remove path =
+    Stdlib.Mutex.protect mutex (fun () -> Hashtbl.remove entries path)
+
   let replace path entry =
     Stdlib.Mutex.protect mutex (fun () ->
       if
@@ -240,6 +243,10 @@ module Tool_audit_cache = struct
       then Hashtbl.clear entries;
       Hashtbl.replace entries path entry)
 end
+
+let invalidate_tool_audit_cache config ~keeper_name =
+  Keeper_types_support.keeper_metrics_dir config keeper_name
+  |> Tool_audit_cache.remove
 
 let latest_tool_audit_snapshot_from_metrics config keeper_name =
   let store =
@@ -297,12 +304,23 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
       ~detail:(Dated_jsonl.read_error_to_string error)
   in
   let cache_if_stable ~physical_row_count snapshot =
-    if Dated_jsonl.count_entries store = physical_row_count
-    then
+    let stable =
+      Dated_jsonl.count_entries store = physical_row_count
+    in
+    if stable then
       Tool_audit_cache.replace
         metrics_path
         { physical_row_count; snapshot };
-    snapshot
+    stable
+  in
+  let scan_full physical_row_count =
+    match Dated_jsonl.find_latest_entry_result store parse_snapshot with
+    | Error error ->
+        report_read_error error;
+        None
+    | Ok snapshot ->
+        ignore (cache_if_stable ~physical_row_count snapshot : bool);
+        snapshot
   in
   let physical_row_count = Dated_jsonl.count_entries store in
   match Tool_audit_cache.find metrics_path with
@@ -331,13 +349,10 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
              | Some _ as snapshot -> snapshot
              | None -> cached.snapshot
            in
-           cache_if_stable ~physical_row_count snapshot)
-  | Some _ | None ->
-    (match Dated_jsonl.find_latest_entry_result store parse_snapshot with
-    | Error error ->
-        report_read_error error;
-        None
-    | Ok snapshot -> cache_if_stable ~physical_row_count snapshot)
+           if cache_if_stable ~physical_row_count snapshot
+           then snapshot
+           else scan_full (Dated_jsonl.count_entries store))
+  | Some _ | None -> scan_full physical_row_count
 
 let latest_tool_audit_snapshot_from_files config ~keeper_name =
   latest_tool_audit_snapshot_from_metrics config keeper_name

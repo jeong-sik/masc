@@ -412,7 +412,10 @@ let purge_dashboard_keeper_artifacts config operation =
               (match artifact with
                | Keeper_runtime_directory_artifact ->
                  Keeper_fs.invalidate_dir path
-               | Keeper_metrics_store_artifact
+               | Keeper_metrics_store_artifact ->
+                 Keeper_status_metrics.invalidate_tool_audit_cache
+                   config
+                   ~keeper_name:operation.keeper_name
                | Keeper_generation_index_artifact
                | Keeper_decision_log_artifact
                | Keeper_feedback_log_artifact

@@ -990,7 +990,6 @@ describe('SettingsSurface', () => {
           supports_reasoning_budget: true,
           supports_response_format_json: true,
           supports_structured_output: true,
-          supports_native_streaming: true,
           supports_system_prompt: true,
           supports_caching: true,
           supports_prompt_caching: true,
@@ -1136,7 +1135,6 @@ describe('SettingsSurface', () => {
                 supports_multimodal_inputs: true,
                 supports_response_format_json: true,
                 supports_structured_output: true,
-                supports_native_streaming: true,
                 supports_system_prompt: true,
                 supports_caching: true,
                 supports_prompt_caching: true,
@@ -1213,7 +1211,7 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('audio:on')
       expect(cards[0]?.textContent).toContain('video:off')
       expect(cards[0]?.textContent).toContain(
-        'controls:tool-choice,required,named,parallel,extended-thinking,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
+        'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
       )
       expect(cards[0]?.textContent).toContain('note:verified by runtime discovery')
       expect(cards[0]?.textContent).toContain('source:oas-provider-config')
@@ -1239,7 +1237,7 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('temp:0.65')
       expect(cards[0]?.textContent).toContain('budget:8192')
       expect(cards[0]?.textContent).toContain(
-        'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
+        'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
       )
       expect(cards[0]?.textContent).toContain('behavior:inline-tools,argv-preflight,anthropic-cache')
       expect(container.querySelector('[data-testid="runtime-catalog-default"]')?.textContent).toBe('default')

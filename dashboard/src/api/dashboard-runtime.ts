@@ -107,7 +107,6 @@ export interface DashboardRuntimeDeclaredModelCapabilities {
   supports_multimodal_inputs?: boolean
   supports_response_format_json?: boolean
   supports_structured_output?: boolean
-  supports_native_streaming?: boolean
   supports_system_prompt?: boolean
   supports_caching?: boolean
   supports_prompt_caching?: boolean
@@ -247,7 +246,6 @@ export interface DashboardRuntimeProviderSnapshot {
   thinking_control_format?: string | null
   supports_response_format_json?: boolean
   supports_structured_output?: boolean
-  supports_native_streaming?: boolean
   supports_system_prompt?: boolean
   supports_caching?: boolean
   supports_prompt_caching?: boolean
@@ -572,7 +570,6 @@ function decodeRuntimeDeclaredModelCapabilities(
     supports_multimodal_inputs: asBoolean(raw.supports_multimodal_inputs),
     supports_response_format_json: asBoolean(raw.supports_response_format_json),
     supports_structured_output: asBoolean(raw.supports_structured_output),
-    supports_native_streaming: asBoolean(raw.supports_native_streaming),
     supports_system_prompt: asBoolean(raw.supports_system_prompt),
     supports_caching: asBoolean(raw.supports_caching),
     supports_prompt_caching: asBoolean(raw.supports_prompt_caching),
@@ -750,7 +747,6 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     thinking_control_format: asNullableString(raw.thinking_control_format),
     supports_response_format_json: asBoolean(raw.supports_response_format_json),
     supports_structured_output: asBoolean(raw.supports_structured_output),
-    supports_native_streaming: asBoolean(raw.supports_native_streaming),
     supports_system_prompt: asBoolean(raw.supports_system_prompt),
     supports_caching: asBoolean(raw.supports_caching),
     supports_prompt_caching: asBoolean(raw.supports_prompt_caching),

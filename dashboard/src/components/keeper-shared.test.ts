@@ -25,7 +25,6 @@ const {
   KeeperEventQueueOperationError: class KeeperEventQueueOperationError extends Error {
     readonly operation: {
       action: 'cancel' | 'transfer'
-      expectedRevision: string
       queueIndex: number
       sourceIncarnation: string
       operationId: string
@@ -38,7 +37,6 @@ const {
       message: string,
       operation: {
         action: 'cancel' | 'transfer'
-        expectedRevision: string
         queueIndex: number
         sourceIncarnation: string
         operationId: string
@@ -1110,7 +1108,6 @@ describe('KeeperConversationPanel', () => {
     }
     const recoveryOperation = {
       action: 'transfer' as const,
-      expectedRevision: '9',
       queueIndex: 0,
       sourceIncarnation: '8',
       operationId: 'operation-replay-9',

@@ -995,10 +995,7 @@ let test_prompt_slice_and_provenance_share_one_input () =
           (fun index -> text_message (Printf.sprintf "retained-%d" index))
       in
       let input : Librarian.input =
-        { turn_ref =
-            Ids.Turn_ref.make
-              ~trace_id:"trace-prompt-provenance-snapshot"
-              ~absolute_turn:1
+        { trace_id = "trace-prompt-provenance-snapshot"
         ; messages =
             text_message "dropped-before-prompt"
             :: tool_result_message

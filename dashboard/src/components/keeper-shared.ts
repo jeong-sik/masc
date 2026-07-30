@@ -884,7 +884,6 @@ function KeeperQueueControlPanel({
                     if (targetKeeper === null) return
                     void mutateEvent(key, {
                       action: 'transfer',
-                      expectedRevision: eventSnapshot!.revision,
                       queueIndex: item.queueIndex,
                       sourceIncarnation: item.sourceIncarnation,
                       targetKeeper,
@@ -900,7 +899,6 @@ function KeeperQueueControlPanel({
                     if (reason === null) return
                     void mutateEvent(key, {
                       action: 'cancel',
-                      expectedRevision: eventSnapshot!.revision,
                       queueIndex: item.queueIndex,
                       sourceIncarnation: item.sourceIncarnation,
                       reason,

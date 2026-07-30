@@ -347,7 +347,7 @@ let test_keeper_chat_recovery_route_is_exact () =
     ]
   in
   (match
-     Server_dashboard_http_keeper_event_queue_operator.For_testing.pending_selection_at
+     Server_dashboard_http_keeper_event_queue_operator_execute.pending_selection_at
        ~queue_index:1
        selections
    with
@@ -363,6 +363,30 @@ let test_keeper_chat_recovery_route_is_exact () =
        selected.admitted_revision
    | None ->
      fail "event selection must address duplicate post ids independently");
+  let selection_state =
+    Keeper_event_queue_state.empty
+    |> Keeper_event_queue_state.with_revision 17L
+    |> Keeper_event_queue_state.with_pending duplicate_post_id_queue
+    |> Keeper_event_queue_state.with_revision 23L
+  in
+  (match
+     Server_dashboard_http_keeper_event_queue_operator.For_testing.pending_selection_at
+       ~queue_index:1
+       selection_state
+   with
+   | Some selection ->
+     check bool
+       "event selection keeps the exact typed source"
+       true
+       (Keeper_event_queue.stimulus_identity_equal
+          same_post_id_source
+          selection.source);
+     check int64
+       "event selection keeps source incarnation instead of snapshot revision"
+       17L
+       selection.admitted_revision
+   | None ->
+     fail "event selection lost its durable source incarnation");
   let quarantine_path =
     "/api/v1/keepers/idealist/board-attention/quarantines/ba-root-123/recovery"
   in
@@ -466,7 +490,7 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
       ~keeper_name
     |> require_ok ("load event queue state for " ^ keeper_name)
   in
-  let enqueue (source : Keeper_event_queue.stimulus) =
+  let enqueue source =
     Keeper_event_queue_persistence.update_result
       ~base_path
       ~keeper_name:source_keeper
@@ -487,9 +511,9 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
         ~base_path
         target_keeper)
     (fun () ->
-       Masc.Keeper_meta_store.write_meta config source_meta
+       Keeper_meta_store.write_meta config source_meta
        |> require_ok "persist source keeper metadata";
-       Masc.Keeper_meta_store.write_meta config target_meta
+       Keeper_meta_store.write_meta config target_meta
        |> require_ok "persist target keeper metadata";
        ignore
          (Masc.Keeper_registry.For_testing.register
@@ -501,49 +525,25 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
        let before_cancel = load_state source_keeper in
        let cancel_selection =
          Keeper_event_queue_state.pending_selections before_cancel
-         |> fun selections -> List.nth_opt selections 0
+         |> List.nth_opt 0
          |> require_some "select cancellation source"
        in
        let cancel_request :
-           Server_dashboard_http_keeper_event_queue_operator.request =
-         Server_dashboard_http_keeper_event_queue_operator.Cancel
-           { expected_revision =
-               Keeper_event_queue_state.revision before_cancel
-           ; queue_index = 0
+           Server_dashboard_http_keeper_event_queue_operator_execute.request =
+         Cancel
+           { queue_index = 0
            ; source_incarnation = cancel_selection.admitted_revision
            ; operator_operation_id = "event-operator-cancel-operation"
            ; reason = "operator cancelled exact source"
            }
        in
        enqueue unrelated_source;
-       let stale_cancel_detail =
-         Server_dashboard_http_keeper_event_queue_operator.For_testing.run
-           ~config
-           ~keeper_name:source_keeper
-           cancel_request
-         |> require_error "reject stale cancellation coordinates"
-       in
-       check bool
-         "fresh cancellation keeps the queue revision fence"
-         true
-         (contains_substring stale_cancel_detail "revision mismatch");
-       let refreshed_cancel_state = load_state source_keeper in
-       let cancel_request =
-         Server_dashboard_http_keeper_event_queue_operator.Cancel
-           { expected_revision =
-               Keeper_event_queue_state.revision refreshed_cancel_state
-           ; queue_index = 0
-           ; source_incarnation = cancel_selection.admitted_revision
-           ; operator_operation_id = "event-operator-cancel-operation"
-           ; reason = "operator cancelled exact source"
-           }
-       in
        let cancelled, cancel_result =
-         Server_dashboard_http_keeper_event_queue_operator.For_testing.run
+         Server_dashboard_http_keeper_event_queue_operator_execute.run
            ~config
            ~keeper_name:source_keeper
            cancel_request
-         |> require_ok "cancel refreshed exact pending source"
+         |> require_ok "cancel exact pending source"
        in
        check bool
          "cancellation returns the exact selected source"
@@ -571,7 +571,7 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
         | Some _ -> fail "cancellation operation stored the wrong transition"
         | None -> fail "cancellation operation receipt was not durable");
        let replayed_cancelled, cancel_replay_result =
-         Server_dashboard_http_keeper_event_queue_operator.For_testing.run
+         Server_dashboard_http_keeper_event_queue_operator_execute.run
            ~config
            ~keeper_name:source_keeper
            cancel_request
@@ -588,17 +588,15 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
          "already_applied"
          (result_status cancel_replay_result);
        let conflicting_cancel_request =
-         Server_dashboard_http_keeper_event_queue_operator.Cancel
-           { expected_revision =
-               Keeper_event_queue_state.revision refreshed_cancel_state
-           ; queue_index = 0
+         Cancel
+           { queue_index = 0
            ; source_incarnation = Int64.succ cancel_selection.admitted_revision
            ; operator_operation_id = "event-operator-cancel-operation"
            ; reason = "operator cancelled exact source"
            }
        in
        let conflict_detail =
-         Server_dashboard_http_keeper_event_queue_operator.For_testing.run
+         Server_dashboard_http_keeper_event_queue_operator_execute.run
            ~config
            ~keeper_name:source_keeper
            conflicting_cancel_request
@@ -608,30 +606,23 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
          "operation replay rejects another source incarnation"
          true
          (contains_substring conflict_detail "operation ID conflicts");
-       Keeper_event_queue_persistence.project_transition_outbox_result
-         ~append_before_retire:(fun _ -> Ok ())
-         ~base_path
-         ~keeper_name:source_keeper
-       |> require_ok "project cancellation transition";
        let before_transfer = load_state source_keeper in
        let transfer_selection =
          Keeper_event_queue_state.pending_selections before_transfer
-         |> fun selections -> List.nth_opt selections 0
+         |> List.nth_opt 0
          |> require_some "select transfer source"
        in
        let transfer_request :
-           Server_dashboard_http_keeper_event_queue_operator.request =
-         Server_dashboard_http_keeper_event_queue_operator.Transfer
-           { expected_revision =
-               Keeper_event_queue_state.revision before_transfer
-           ; queue_index = 0
+           Server_dashboard_http_keeper_event_queue_operator_execute.request =
+         Transfer
+           { queue_index = 0
            ; source_incarnation = transfer_selection.admitted_revision
            ; operator_operation_id = "event-operator-transfer-operation"
            ; target_keeper
            }
        in
        let transferred, transfer_result =
-         Server_dashboard_http_keeper_event_queue_operator.For_testing.run
+         Server_dashboard_http_keeper_event_queue_operator_execute.run
            ~config
            ~keeper_name:source_keeper
            transfer_request
@@ -663,7 +654,7 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
         | Some _ -> fail "transfer operation stored the wrong transition"
         | None -> fail "transfer operation receipt was not durable");
        let replayed_transferred, transfer_replay_result =
-         Server_dashboard_http_keeper_event_queue_operator.For_testing.run
+         Server_dashboard_http_keeper_event_queue_operator_execute.run
            ~config
            ~keeper_name:source_keeper
            transfer_request

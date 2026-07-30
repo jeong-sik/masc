@@ -3,15 +3,13 @@ type request =
      unrelated queue revision change must not invalidate them. Reprioritize
      rewrites queue order and therefore retains the queue-wide CAS revision. *)
   | Cancel of
-      { expected_revision : int64
-      ; queue_index : int
+      { queue_index : int
       ; source_incarnation : int64
       ; operator_operation_id : string
       ; reason : string
       }
   | Transfer of
-      { expected_revision : int64
-      ; queue_index : int
+      { queue_index : int
       ; source_incarnation : int64
       ; operator_operation_id : string
       ; target_keeper : string
@@ -26,6 +24,11 @@ type request =
 val pending_selection_at :
   queue_index:int ->
   Keeper_event_queue_state.pending_selection list ->
+  Keeper_event_queue_state.pending_selection option
+
+val pending_selection_at :
+  queue_index:int ->
+  Keeper_event_queue_state.t ->
   Keeper_event_queue_state.pending_selection option
 
 val run :

@@ -779,8 +779,24 @@ jobs:
           DUNE_JOBS: 1
         run: |
           chmod +x scripts/ci-run-tests.sh
-          keeper_chat_claim_targets="@test/runtest-test_keeper_chat_coalescing @test/runtest-test_keeper_chat_consumer_delivery @test/runtest-test_keeper_chat_admission_contention @test/runtest-test_keeper_busy_connector_deferred @test/runtest-test_keeper_turn_admission @test/runtest-test_keeper_waiting_inventory @test/runtest-test_dashboard_http_core @test/runtest-test_keeper_structured_output_schema @test/runtest-test_mcp_server_eio @test/runtest-test_tools_coverage"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${keeper_chat_claim_targets}"
+          keeper_chat_claim_targets=(
+            @test/runtest-test_keeper_chat_coalescing
+            @test/runtest-test_keeper_chat_consumer_delivery
+            @test/runtest-test_keeper_chat_admission_contention
+            @test/runtest-test_keeper_busy_connector_deferred
+            @test/runtest-test_keeper_turn_admission
+            @test/runtest-test_keeper_waiting_inventory
+            @test/runtest-test_dashboard_http_core
+            @test/runtest-test_keeper_structured_output_schema
+            @test/runtest-test_mcp_server_eio
+            @test/runtest-test_tools_coverage
+          )
+          for target in "${keeper_chat_claim_targets[@]}"; do
+            echo "::group::${target}"
+            timeout --signal=TERM --kill-after=30s 5m \
+              scripts/ci-run-tests.sh "opam exec -- dune build --root . ${target}"
+            echo "::endgroup::"
+          done
 
       # NOTE: the "Shell IR differential-safety harness gate" step was removed
       # here. #24332 (nonhierarchical Gate refactor) retired the entire

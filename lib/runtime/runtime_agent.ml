@@ -110,6 +110,8 @@ type config =
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
   model_input_projection : Agent_sdk.Agent.model_input_projection option;
+  pre_dispatch_serialization_observer :
+    Agent_sdk.Agent.pre_dispatch_serialization_observer option;
   raw_trace : Agent_sdk.Raw_trace.t option;
   trace_link : (string * string) option;
   enable_thinking : bool option;
@@ -1001,6 +1003,8 @@ let resume_from_checkpoint
            ~tools:config.tools ?context:config.context
            ~context_fit_admission:prepared_resume.context_fit_admission
            ?model_input_projection:config.model_input_projection
+           ?pre_dispatch_serialization_observer:
+             config.pre_dispatch_serialization_observer
            ~options ~config:prepared_resume.agent_config
            ?checkpoint_sink:config.checkpoint_sink
            ()))

@@ -170,7 +170,7 @@ let consolidate_keeper
   =
   match Runtime.validate_request_body_cap ~runtime_id provider_cfg with
   | Error error -> Provider_config_invalid error
-  | Ok () ->
+  | Ok _ ->
     match Io.read_facts_all_strict ~keeper_id with
     | Error msg -> Unparseable ("consolidation fact store read failed: " ^ msg)
     | Ok facts ->

@@ -58,6 +58,17 @@ type config = {
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
   model_input_projection : Agent_sdk.Agent.model_input_projection option;
+  pre_dispatch_serialization_observer :
+    Agent_sdk.Agent.pre_dispatch_serialization_observer option;
+      (** Observer for the exact serialized request body, invoked by OAS after
+          stream-field injection and after the serialized-body admission check.
+          This is the only reading of the byte quantity admitted against
+          [max_request_body_bytes]:
+          [Keeper_context_core_accessors.serialize_context] covers
+          [{system_prompt, messages}] and excludes tool schemas, and only a
+          refused request reports its size today. Diagnostic and
+          non-authoritative — a rejection or raised callback becomes typed
+          failure evidence and does not rewrite the provider result. *)
   raw_trace : Agent_sdk.Raw_trace.t option;
   trace_link : (string * string) option;
   enable_thinking : bool option;

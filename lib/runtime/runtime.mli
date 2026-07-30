@@ -137,10 +137,11 @@ val request_body_cap_error_to_string : request_body_cap_error -> string
 val validate_request_body_cap :
   runtime_id:string
   -> Llm_provider.Provider_config.t
-  -> (unit, request_body_cap_error) result
+  -> (int, request_body_cap_error) result
 (** Pure final-provider-config guard shared by every Keeper provider-call
     boundary. Config admission uses it for statically reachable routes; call
-    sites must invoke it again after feature-local transforms. *)
+    sites must invoke it again after feature-local transforms. The successful
+    value is the exact positive cap validated on that final provider config. *)
 
 (** {1 Lazy default runtime singleton}
 

@@ -94,6 +94,14 @@ let register_histogram_buckets name bounds =
     with_lock (fun () -> Hashtbl.replace histogram_buckets name bounds))
 ;;
 
+let histogram_bound_label bound =
+  let label = Float.to_string bound in
+  let last = String.length label - 1 in
+  if last >= 0 && Char.equal label.[last] '.'
+  then String.sub label 0 last
+  else label
+;;
+
 let inc_counter name ?(labels = []) ?(delta = 1.0) () =
   best_effort (fun () ->
     let key = metric_key name labels in
@@ -194,7 +202,7 @@ let observe_histogram name ?(labels = []) value =
        | Some bounds ->
          List.iter
            (fun bound ->
-              let le = Printf.sprintf "%g" bound in
+              let le = histogram_bound_label bound in
               let bucket_labels = ("le", le) :: labels in
               let bucket_key = metric_key (name ^ "_bucket") bucket_labels in
               if value <= bound

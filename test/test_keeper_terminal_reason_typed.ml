@@ -335,7 +335,10 @@ let () =
       meta_fixture_exn
         (`Assoc
           [ "name", `String "corrupted-transcript"
-          ; "agent_name", `String (Keeper_identity.keeper_agent_name "corrupted-transcript")
+          ; ( "agent_name"
+            , `String
+                (Masc.Keeper_identity.keeper_agent_name
+                   "corrupted-transcript") )
           ; "trace_id", `String "trace-corrupted-transcript"
           ])
     in
@@ -380,7 +383,7 @@ let () =
           [ "name", `String "replaced-transcript-owner"
           ; ( "agent_name"
             , `String
-                (Keeper_identity.keeper_agent_name
+                (Masc.Keeper_identity.keeper_agent_name
                    "replaced-transcript-owner") )
           ; "trace_id", `String "trace-replaced-transcript-owner-old"
           ])
@@ -805,7 +808,9 @@ let () =
     meta_fixture_exn
       (`Assoc
         [ "name", `String keeper_name
-        ; "agent_name", `String keeper_name
+        ; ( "agent_name"
+          , `String
+              (Masc.Keeper_identity.keeper_agent_name keeper_name) )
         ; "trace_id", `String "trace-checkpoint-turn-persist"
         ])
   in
@@ -848,7 +853,9 @@ let () =
     meta_fixture_exn
       (`Assoc
         [ "name", `String keeper_name
-        ; "agent_name", `String keeper_name
+        ; ( "agent_name"
+          , `String
+              (Masc.Keeper_identity.keeper_agent_name keeper_name) )
         ; "trace_id", `String "trace-success-clears-stale-provider-failure"
         ])
   in

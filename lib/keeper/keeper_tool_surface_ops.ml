@@ -546,6 +546,17 @@ let resolve_keeper_name ctx args =
 
 let direct_reply_projection json =
   match Keeper_turn_outcome.of_reply_payload (Some json) with
+  | Ok Keeper_turn_outcome.Visible_reply ->
+    let reply =
+      match Json_util.get_string json "reply" with
+      | Some reply -> Some reply
+      | None ->
+        invalid_arg
+          "keeper reply payload is missing reply for visible_reply"
+    in
+    Keeper_chat_blocks.connector_projection
+      ~turn_outcome:Keeper_turn_outcome.Visible_reply
+      ~reply
   | Ok turn_outcome ->
     Keeper_chat_blocks.connector_projection
       ~turn_outcome

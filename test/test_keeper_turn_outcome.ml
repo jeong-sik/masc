@@ -495,7 +495,16 @@ let test_direct_reply_visible_text () =
        (body
           [ ("reply", `String "   ");
             ("turn_outcome", `String "visible_reply")
-          ]))
+          ]));
+  check_raises
+    "visible outcome without reply is a direct-reply contract error"
+    (Invalid_argument
+       "keeper reply payload is missing reply for visible_reply")
+    (fun () ->
+       ignore
+         (Ops.direct_reply_visible_text
+            (body [ ("turn_outcome", `String "visible_reply") ])
+          : string option))
 
 let test_connector_projection_keeps_external_wait_typed () =
   match

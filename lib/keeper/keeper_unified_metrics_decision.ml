@@ -181,7 +181,6 @@ let append_decision_record
                      (observation.unclaimed_task_count
                       - observation.claimable_task_count)) );
               ("failed_task_count", `Int observation.failed_task_count);
-              ("pending_verification_count", `Int observation.pending_verification_count);
               ( "scheduled_automation_active_count",
                 `Int observation.scheduled_automation.active_count );
               ( "scheduled_automation_due_ready_count",

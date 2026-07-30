@@ -12,7 +12,6 @@ let base_observation : WO.world_observation =
     unclaimed_task_count = 0;
     claimable_task_count = 0;
     failed_task_count = 0;
-    pending_verification_count = 0;
     scheduled_automation = WO.empty_scheduled_automation_observation;
     backlog_updated_since_last_scheduled_autonomous = false;
     running_keeper_fiber_count = 0;
@@ -126,25 +125,18 @@ let init_runtime_default_for_tests () =
   | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
 ;;
 
-let test_task_verify_affordance_for_keeper () =
-  let meta = { minimal_meta with mention_targets = [ "analyst" ] } in
-  let obs = { base_observation with pending_verification_count = 3 } in
-  let affordances = UM.observed_affordances_of_observation ~meta obs in
-  check bool "task_verify present for keeper" true
-    (List.mem "task_verify" affordances)
-
-let test_task_verify_affordance_for_verifier_tag () =
-  let meta = { minimal_meta with mention_targets = [ "verifier" ] } in
-  let obs = { base_observation with pending_verification_count = 3 } in
-  let affordances = UM.observed_affordances_of_observation ~meta obs in
-  check bool "task_verify present for verifier-tagged keeper" true
-    (List.mem "task_verify" affordances)
-
-let test_task_verify_affordance_without_meta () =
-  let obs = { base_observation with pending_verification_count = 2 } in
-  let affordances = UM.observed_affordances_of_observation obs in
-  check bool "task_verify present without meta" true
-    (List.mem "task_verify" affordances)
+(* A verifier is not a Keeper. An AwaitingVerification obligation is decided by
+   the completion authority (HITL confirmation / fusion judge), never through
+   keeper tool surface, so no keeper — whatever its mention tags — is offered a
+   task_verify affordance. Guards against a keeper named "verifier" re-acquiring
+   approval authority. *)
+let test_no_task_verify_affordance_for_any_keeper () =
+  let tagged = { minimal_meta with mention_targets = [ "verifier" ] } in
+  check bool "no task_verify for verifier-tagged keeper" false
+    (List.mem "task_verify"
+       (UM.observed_affordances_of_observation ~meta:tagged base_observation));
+  check bool "no task_verify without meta" false
+    (List.mem "task_verify" (UM.observed_affordances_of_observation base_observation))
 
 let test_board_activity_exposes_curation_affordance_without_threshold () =
   let obs =
@@ -306,19 +298,16 @@ let test_unclaimable_backlog_is_not_a_claim_trigger () =
   check bool "unclaimable backlog is not a claimable task trigger" false
     (List.mem "claimable_task" triggers)
 
-let test_pending_verification_trigger_for_keeper () =
-  let meta = { minimal_meta with mention_targets = [ "scholar" ] } in
-  let obs = { base_observation with pending_verification_count = 5 } in
-  let triggers = UM.observed_triggers_of_observation ~meta obs in
-  check bool "pending_verification present for keeper" true
-    (List.mem "pending_verification" triggers)
-
-let test_pending_verification_trigger_for_verifier_tag () =
-  let meta = { minimal_meta with mention_targets = [ "검증자" ] } in
-  let obs = { base_observation with pending_verification_count = 1 } in
-  let triggers = UM.observed_triggers_of_observation ~meta obs in
-  check bool "pending_verification present for verifier-tagged keeper" true
-    (List.mem "pending_verification" triggers)
+(* Same boundary as the affordance guard above, at the wake-trigger layer: an
+   AwaitingVerification obligation is not a keeper wake signal. *)
+let test_no_pending_verification_trigger_for_any_keeper () =
+  let tagged = { minimal_meta with mention_targets = [ "검증자" ] } in
+  check bool "no pending_verification trigger for verifier-tagged keeper" false
+    (List.mem "pending_verification"
+       (UM.observed_triggers_of_observation ~meta:tagged base_observation));
+  check bool "no pending_verification trigger without meta" false
+    (List.mem "pending_verification"
+       (UM.observed_triggers_of_observation base_observation))
 
 let test_scheduled_automation_triggers_and_affordances () =
   let obs =

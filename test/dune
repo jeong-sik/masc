@@ -34,7 +34,6 @@
   test_keeper_memory_os_external_state_decay
   test_keeper_memory_os_recall_echo
   test_keeper_memory_lane
-  test_keeper_verification_audit
   test_keeper_connector_attention_wake
   test_keeper_raw_task_signal_wake
   test_broadcast_wakeup_policy
@@ -338,7 +337,6 @@
   test_keeper_memory_os_recall_echo
   test_keeper_memory_lane
   test_env_keeper_scrub
-  test_keeper_verification_audit
   test_keeper_connector_attention_wake
   test_keeper_raw_task_signal_wake
   test_broadcast_wakeup_policy

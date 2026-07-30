@@ -480,6 +480,7 @@ let finalize
       ; runtime_observation = result.runtime_observation
       ; turn_count = result.turns
       ; final_oas_turn_ordinal
+      ; request_body_bytes = result.request_body_bytes
       ; usage
       ; usage_reported = Option.is_some result.response.usage
       ; tool_calls = List.rev acc.tool_calls

@@ -19,6 +19,7 @@ function entry(overrides: Record<string, unknown> = {}) {
       execution_ids: ['exec-1'],
       blocks: [],
       input_components: [],
+      request_body_bytes: null,
       input_tokens: 1200,
       output_tokens: 340,
       ...overrides,
@@ -79,6 +80,22 @@ describe('keeper turn record cache token counts', () => {
 })
 
 describe('keeper turn record final input composition', () => {
+  it('carries exact serialized request body bytes independently', async () => {
+    getMock.mockResolvedValue(payload(entry({ request_body_bytes: 560_513 })))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response.entries[0]?.record.request_body_bytes).toBe(560_513)
+  })
+
+  it('rejects rows without the current request-body observation contract', async () => {
+    getMock.mockResolvedValue(payload(entry({ request_body_bytes: undefined })))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response.entries).toHaveLength(0)
+  })
+
   it('carries typed content components through the decoder', async () => {
     getMock.mockResolvedValue(payload(entry({
       input_components: [

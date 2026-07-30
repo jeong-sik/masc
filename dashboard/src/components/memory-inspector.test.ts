@@ -157,6 +157,7 @@ function turnRecordsPayload() {
             { component: 'message_user', bytes: 100 },
             { component: 'message_tool_result', bytes: 500 },
           ],
+          request_body_bytes: 560_513,
           execution_ids: [],
           input_tokens: 3500,
           context_window: 200000,
@@ -219,7 +220,7 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     })
     expect(bar.querySelectorAll('span').length).toBe(6)
     expect(container.querySelectorAll('.mem-leg').length).toBe(6)
-    expect(container.querySelector('.mem-compo-tot')?.textContent).toBe('4.5KB content')
+    expect(container.querySelector('.mem-compo-tot')?.textContent).toBe('547.4KB wire · 4.5KB content')
     expect(container.querySelector('.mem-compo-sub')?.textContent).toContain('3.5k provider tok')
     expect(container.textContent).toContain('메모리 회상')
     expect(container.textContent).toContain('동적 컨텍스트')
@@ -606,7 +607,7 @@ describe('memory view-model helpers', () => {
     const mkRow = (turn: number, blocks: { block: string; bytes: number; digest: string }[]): TurnRecordRow => ({
       record: {
         keeper: 'k', trace_id: 't', absolute_turn: turn, ts: turn, runtime_profile: 'local',
-        blocks, input_components: [], execution_ids: [],
+        blocks, input_components: [], request_body_bytes: null, execution_ids: [],
       },
       diff_vs_prev: null,
     })
@@ -623,7 +624,7 @@ describe('memory view-model helpers', () => {
     const mkRow = (turn: number, input_components: { component: string; bytes: number }[]): TurnRecordRow => ({
       record: {
         keeper: 'k', trace_id: 't', absolute_turn: turn, ts: turn, runtime_profile: 'local',
-        blocks: [], input_components, execution_ids: [],
+        blocks: [], input_components, request_body_bytes: null, execution_ids: [],
       },
       diff_vs_prev: null,
     })
@@ -643,6 +644,7 @@ describe('memory view-model helpers', () => {
         runtime_profile: 'local',
         blocks: [{ block, bytes, digest: `digest-${turn}` }],
         input_components: [],
+        request_body_bytes: null,
         execution_ids: [],
       },
       diff_vs_prev: null,

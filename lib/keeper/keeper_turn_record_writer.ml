@@ -11,6 +11,7 @@ let write
       ~price_output_per_million
       ~request_latency_ms
       ~ttfrc_ms
+      ~request_body_bytes
       ~sampling
       ~usage
       ~execution_ids
@@ -34,6 +35,7 @@ let write
     ; price_output_per_million
     ; request_latency_ms
     ; ttfrc_ms
+    ; request_body_bytes
     ; sampling
     ; usage
     ; ts = Time_compat.now ()

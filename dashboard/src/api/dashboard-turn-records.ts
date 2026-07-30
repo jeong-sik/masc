@@ -24,6 +24,7 @@ export type TurnRecordEntry = {
   absolute_turn: number
   blocks: TurnBlock[]
   input_components: TurnInputComponent[]
+  request_body_bytes: number | null
   runtime_profile: string
   // RFC-0233 §2.3 — grounded from the backend turn record (boundary-redacted
   // model label + keeper stop reason). Absent (undefined) on error turns and
@@ -348,7 +349,21 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   const runtime_profile = asString(raw.runtime_profile)
   const ts = asNumber(raw.ts)
   const input_components = decodeTurnInputComponents(raw.input_components)
-  if (!keeper || !trace_id || absolute_turn == null || !runtime_profile || ts == null || input_components == null) {
+  const request_body_bytes =
+    raw.request_body_bytes === null ? null : asNumber(raw.request_body_bytes)
+  if (
+    !keeper
+    || !trace_id
+    || absolute_turn == null
+    || !runtime_profile
+    || ts == null
+    || input_components == null
+    || !('request_body_bytes' in raw)
+    || (request_body_bytes !== null
+      && (request_body_bytes == null
+        || !Number.isInteger(request_body_bytes)
+        || request_body_bytes < 0))
+  ) {
     return null
   }
   const execution_ids = Array.isArray(raw.execution_ids)
@@ -361,6 +376,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     absolute_turn,
     blocks: decodeTurnBlockList(raw.blocks),
     input_components,
+    request_body_bytes,
     runtime_profile,
     model: asString(raw.model),
     finish_reason: asString(raw.finish_reason),

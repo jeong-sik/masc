@@ -32,6 +32,7 @@ type run_result =
   ; runtime_observation : Runtime_observation.runtime_observation option
   ; turn_count : int
   ; final_oas_turn_ordinal : int
+  ; request_body_bytes : int option
   ; usage : Agent_sdk.Types.api_usage
   ; usage_reported : bool
   ; tool_calls : tool_call_detail list

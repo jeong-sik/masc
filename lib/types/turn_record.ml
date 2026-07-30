@@ -54,6 +54,7 @@ type t =
   ; price_output_per_million : float option
   ; request_latency_ms : int option
   ; ttfrc_ms : float option
+  ; request_body_bytes : int option
   ; sampling : sampling
   ; usage : usage
   ; ts : float
@@ -102,6 +103,10 @@ let to_json (r : t) : Yojson.Safe.t =
      ; ("blocks", `List (List.map prompt_block_to_json r.blocks))
      ; ( "input_components"
        , `List (List.map input_component_to_json r.input_components) )
+     ; ( "request_body_bytes"
+       , match r.request_body_bytes with
+         | Some bytes -> `Int bytes
+         | None -> `Null )
      ; ("runtime_profile", `String r.runtime_profile)
      ]
     @ opt_field "turn_ref" Ids.Turn_ref.to_yojson r.turn_ref
@@ -157,6 +162,15 @@ let opt_member name fields decode =
 let as_bool name = function
   | `Bool b -> Ok b
   | _ -> Error (Printf.sprintf "turn_record: field %S is not a bool" name)
+
+let as_nullable_nonnegative_int name = function
+  | `Null -> Ok None
+  | `Int value when value >= 0 -> Ok (Some value)
+  | `Int _ ->
+    Error (Printf.sprintf "turn_record: field %S must be nonnegative" name)
+  | _ ->
+    Error
+      (Printf.sprintf "turn_record: field %S is not an int or null" name)
 
 let as_turn_ref name json =
   match Ids.Turn_ref.of_yojson json with
@@ -262,6 +276,12 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
           collect_results [] (List.map input_component_of_json items)
         | _ -> Error "turn_record: input_components is not a list"
       in
+      let* request_body_bytes_json = require "request_body_bytes" fields in
+      let* request_body_bytes =
+        as_nullable_nonnegative_int
+          "request_body_bytes"
+          request_body_bytes_json
+      in
       let* profile_json = require "runtime_profile" fields in
       let* runtime_profile = as_string "runtime_profile" profile_json in
       let* turn_ref = opt_member "turn_ref" fields as_turn_ref in
@@ -303,6 +323,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; price_output_per_million
         ; request_latency_ms
         ; ttfrc_ms
+        ; request_body_bytes
         ; sampling = { temperature; top_p; max_tokens; thinking_budget; enable_thinking }
         ; usage =
             { input_tokens

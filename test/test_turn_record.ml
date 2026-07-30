@@ -62,6 +62,7 @@ let sample_record () : Turn_record.t =
   ; price_output_per_million = Some 0.6
   ; request_latency_ms = Some 1234
   ; ttfrc_ms = Some 567.8
+  ; request_body_bytes = Some 560_513
   ; sampling =
       { temperature = Some 0.3
       ; top_p = Some 0.9
@@ -168,6 +169,8 @@ let test_codec_roundtrip () =
       decoded.request_latency_ms;
     check (option (float 0.0001)) "ttfrc_ms round-trip" record.ttfrc_ms
       decoded.ttfrc_ms;
+    check (option int) "request_body_bytes round-trip"
+      record.request_body_bytes decoded.request_body_bytes;
     check (option (float 0.0001)) "temperature" record.sampling.temperature
       decoded.sampling.temperature;
     check (option (float 0.0001)) "top_p" record.sampling.top_p
@@ -194,6 +197,7 @@ let test_codec_optional_fields_absent () =
     ; price_output_per_million = None
   ; request_latency_ms = None
   ; ttfrc_ms = None
+  ; request_body_bytes = None
     ; sampling =
         { temperature = None
         ; top_p = None
@@ -231,7 +235,11 @@ let test_codec_optional_fields_absent () =
      check bool "request_latency_ms key omitted when None" false
        (List.mem_assoc "request_latency_ms" fields);
      check bool "ttfrc_ms key omitted when None" false
-       (List.mem_assoc "ttfrc_ms" fields)
+       (List.mem_assoc "ttfrc_ms" fields);
+     check bool "request_body_bytes key remains required" true
+       (List.mem_assoc "request_body_bytes" fields);
+     check bool "request_body_bytes None is explicit null" true
+       (List.assoc_opt "request_body_bytes" fields = Some `Null)
    | _ -> fail "to_json did not produce an object");
   match Turn_record.of_json json with
   | Error e -> failf "decode failed: %s" e
@@ -248,6 +256,8 @@ let test_codec_optional_fields_absent () =
       decoded.request_latency_ms;
     check (option (float 0.0001)) "ttfrc_ms absent" None
       decoded.ttfrc_ms;
+    check (option int) "request body observation absent" None
+      decoded.request_body_bytes;
     check (option (float 0.0001)) "temperature absent" None
       decoded.sampling.temperature;
     check (option (float 0.0001)) "top_p absent" None decoded.sampling.top_p;
@@ -280,6 +290,37 @@ let test_codec_requires_current_input_composition () =
   | Error msg ->
     check bool "missing current field is explicit" true
       (Astring.String.is_infix ~affix:"input_components" msg)
+
+let test_codec_requires_current_request_body_observation () =
+  let without_request_body_bytes =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc (List.remove_assoc "request_body_bytes" fields)
+    | other -> other
+  in
+  match Turn_record.of_json without_request_body_bytes with
+  | Ok _ -> fail "decoded a row without current request body observation"
+  | Error msg ->
+    check bool "missing current field is explicit" true
+      (Astring.String.is_infix ~affix:"request_body_bytes" msg)
+
+let test_codec_rejects_invalid_request_body_observation () =
+  let with_request_body_bytes value =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        (("request_body_bytes", value)
+         :: List.remove_assoc "request_body_bytes" fields)
+    | other -> other
+  in
+  List.iter
+    (fun value ->
+       match Turn_record.of_json (with_request_body_bytes value) with
+       | Ok _ -> fail "decoded an invalid request body observation"
+       | Error msg ->
+         check bool "invalid current field is explicit" true
+           (Astring.String.is_infix ~affix:"request_body_bytes" msg))
+    [ `Int (-1); `String "560513" ]
 
 let test_codec_rejects_unknown_input_component () =
   let json =
@@ -436,6 +477,10 @@ let () =
         ; test_case "rejects malformed rows" `Quick test_codec_rejects_malformed
         ; test_case "current input composition required" `Quick
             test_codec_requires_current_input_composition
+        ; test_case "current request body observation required" `Quick
+            test_codec_requires_current_request_body_observation
+        ; test_case "invalid request body observation rejected" `Quick
+            test_codec_rejects_invalid_request_body_observation
         ; test_case "unknown input component rejected" `Quick
             test_codec_rejects_unknown_input_component
         ; test_case "unknown block decodes as Other" `Quick

@@ -125,6 +125,7 @@ type run_result = {
   checkpoint : Agent_sdk.Checkpoint.t option;
   session_id : string;
   turns : int;
+  request_body_bytes : int option;
   trace_ref : Agent_sdk.Raw_trace.run_ref option;
   run_validation : Agent_sdk.Raw_trace.run_validation option;
   runtime_observation : Runtime_observation.runtime_observation option;

@@ -137,6 +137,7 @@ type run_result = {
   checkpoint : Agent_sdk.Checkpoint.t option;
   session_id : string;
   turns : int;
+  request_body_bytes : int option;
   trace_ref : Agent_sdk.Raw_trace.run_ref option;
   run_validation : Agent_sdk.Raw_trace.run_validation option;
   runtime_observation : Runtime_observation.runtime_observation option;
@@ -1073,6 +1074,21 @@ let config_with_boundary_response_capture
   { config with hooks = Some hooks }
 ;;
 
+let config_with_request_body_capture
+      (config : config)
+      request_body_bytes
+  =
+  let downstream = config.pre_dispatch_serialization_observer in
+  let observer observation =
+    request_body_bytes :=
+      Some observation.Llm_provider.Request_wire_observer.body_bytes;
+    match downstream with
+    | None -> Ok ()
+    | Some observe -> observe observation
+  in
+  { config with pre_dispatch_serialization_observer = Some observer }
+;;
+
 let run_blocks
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
@@ -1095,11 +1111,13 @@ let run_blocks
   | Error _ as err -> err
   | Ok () ->
   let boundary_response = ref None in
+  let request_body_bytes = ref None in
   let config =
     match cooperative_yield_probe with
     | None -> config
     | Some _ -> config_with_boundary_response_capture config boundary_response
   in
+  let config = config_with_request_body_capture config request_body_bytes in
   let goal_detail =
     match goal_detail with
     | Some detail -> detail
@@ -1297,6 +1315,7 @@ let run_blocks
           checkpoint;
           session_id;
           turns;
+          request_body_bytes = !request_body_bytes;
           trace_ref;
           run_validation;
           runtime_observation = Some runtime_observation;
@@ -1324,6 +1343,7 @@ let run_blocks
         ; checkpoint
         ; session_id
         ; turns = yielded.turn
+        ; request_body_bytes = !request_body_bytes
         ; trace_ref
         ; run_validation
         ; runtime_observation = Some runtime_observation
@@ -1356,6 +1376,7 @@ let run_blocks
         ; checkpoint
         ; session_id
         ; turns
+        ; request_body_bytes = !request_body_bytes
         ; trace_ref
         ; run_validation
         ; runtime_observation = Some runtime_observation

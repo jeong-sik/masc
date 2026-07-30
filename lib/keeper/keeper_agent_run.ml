@@ -1155,6 +1155,10 @@ let run_turn
           ~price_output_per_million
           ~request_latency_ms
           ~ttfrc_ms
+          ~request_body_bytes:
+            (match turn_result with
+             | Ok result -> result.request_body_bytes
+             | Error _ -> None)
           ~sampling:
             { temperature = Some temperature
             ; top_p = Runtime.top_p_of_runtime_id runtime_id_string

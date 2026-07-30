@@ -127,6 +127,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           runtime_profile: 'local',
           blocks: [{ block: 'system', bytes: 1200, digest: '1111222233334444' }],
           input_components: [],
+          request_body_bytes: null,
           execution_ids: [],
         },
         diff_vs_prev: null,
@@ -155,6 +156,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
             { component: 'prompt.persona', bytes: 1200 },
             { component: 'prompt.memory_os_recall', bytes: 3392 },
           ],
+          request_body_bytes: 560_513,
           execution_ids: ['exec-42'],
         },
         diff_vs_prev: {

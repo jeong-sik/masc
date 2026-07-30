@@ -127,6 +127,11 @@ type t =
        request_latency_ms - ttfrc_ms: that would fabricate a number
        indistinguishable from a measurement (§9.6), so decode stays
        not_recorded until a provider reports it natively. *)
+  ; request_body_bytes : int option
+    (* Exact serialized body size observed after provider-specific request
+       construction and admission. [None] means the current turn did not reach
+       that boundary. This is intentionally separate from attributed content
+       bytes and provider-reported token usage. *)
   ; sampling : sampling
   ; usage : usage
   ; ts : float

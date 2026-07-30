@@ -318,6 +318,7 @@ function MemCompoReal({ row }: { row: TurnRecordRow | null }) {
     return html`<div class="mem-empty">최종 provider 입력 구성 관측 없음.</div>`
   }
   const inputTok = row.record.input_tokens
+  const requestBodyBytes = row.record.request_body_bytes
   const ctxWin = row.record.context_window
   const pct = inputTok != null && ctxWin != null && ctxWin > 0
     ? Math.round((inputTok / ctxWin) * 100)
@@ -325,7 +326,11 @@ function MemCompoReal({ row }: { row: TurnRecordRow | null }) {
   return html`
     <div class="mem-compo">
       <div class="mem-compo-head">
-        <span class="mono mem-compo-tot">${memFmtBytes(totalBytes)} content</span>
+        <span class="mono mem-compo-tot">
+          ${requestBodyBytes == null
+            ? html`wire 측정 없음 · ${memFmtBytes(totalBytes)} content`
+            : html`${memFmtBytes(requestBodyBytes)} wire · ${memFmtBytes(totalBytes)} content`}
+        </span>
         <span class="mem-compo-sub">
           ${inputTok != null
             ? html`${memFmtTok(inputTok)} provider tok${ctxWin != null ? html` / ${memFmtTok(ctxWin)} 윈도우` : null}${pct != null ? html` · ${pct}%` : null}`

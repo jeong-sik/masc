@@ -1,18 +1,17 @@
 (** Keeper Memory Health dashboard HTTP JSON helper.
 
-    Produces a read-only snapshot of per-keeper fact-store sizes, GC-dry-run
-    statistics, and the fleet-wide librarian cadence counter for the
+    Produces a read-only snapshot of per-keeper fact-store sizes and the
+    fleet-wide librarian cadence counter for the
     /api/v1/dashboard/keeper-memory-health endpoint.
 
     Data sources:
     - [Config_dir_resolver.keepers_dir_for_base_path] for request-scoped paths.
-    - [Keeper_memory_os_io.list_fact_store_keeper_ids] for the keeper list.
-    - [Keeper_memory_os_io.read_facts_all] and file stat for facts count/bytes.
-    - [Keeper_memory_os_io.events_path] + file stat for events bytes.
-    - [Keeper_memory_os_gc.run_gc ~dry_run:true] for explicitly expired rows
-      without mutating the store.
-    - [Otel_metric_store] execution-slot-busy counters for skipped librarian
-      extraction attempts, grouped by keeper.
+    - [Keeper_memory_os_io.list_fact_store_keeper_ids_for_keepers_dir] for the
+      keeper list.
+    - [Keeper_memory_os_io.read_facts_all_for_keepers_dir] and file stat for
+      facts count/bytes.
+    - [Keeper_memory_os_io.events_path_for_keepers_dir] + file stat for events
+      bytes.
     - [Keeper_librarian_runtime.cadence_counter_entries] for the cadence table
       size (one fleet-wide value). *)
 
@@ -22,23 +21,17 @@ type keeper_health =
   ; facts_bytes : int
   ; events : int
   ; events_bytes : int
-  ; events_to_facts_ratio : float
-  ; ttl_expired_on_disk : int
-  ; near_duplicate : int
-  ; execution_slot_busy : int
+  ; events_bytes_to_facts_bytes_ratio : float
+  ; duplicate_claim_identity_rows : int
   }
 
 type alert_code =
-  | Ttl_expired_on_disk
-  | Near_duplicate
-  | Execution_slot_busy
+  | Duplicate_claim_identity_rows
 
 type alert_severity = Warn
 
 type alert_target =
-  | Ttl_expired_on_disk_target
-  | Near_duplicate_target
-  | Execution_slot_busy_target
+  | Duplicate_claim_identity_rows_target
 
 type keeper_alert =
   { code : alert_code
@@ -50,20 +43,10 @@ type keeper_alert =
   ; threshold : float
   }
 
-let ttl_expired_on_disk_threshold = 0.0
-let near_duplicate_threshold = 0.0
-
-let execution_slot_busy_threshold = 0.0
-
-let execution_slot_busy_metric =
-  Keeper_metrics.(to_string MemoryLaneExecutionSlotBusy)
-let execution_slot_busy_site = "memory_os_librarian_execution_slot"
-;;
+let duplicate_claim_identity_rows_threshold = 0.0
 
 let alert_code_to_string = function
-  | Ttl_expired_on_disk -> "ttl_expired_on_disk"
-  | Near_duplicate -> "near_duplicate"
-  | Execution_slot_busy -> "execution_slot_busy"
+  | Duplicate_claim_identity_rows -> "duplicate_claim_identity_rows"
 ;;
 
 let alert_severity_to_string = function
@@ -71,18 +54,14 @@ let alert_severity_to_string = function
 ;;
 
 let alert_target_to_string = function
-  | Ttl_expired_on_disk_target -> "ttl_expired_on_disk"
-  | Near_duplicate_target -> "near_duplicate"
-  | Execution_slot_busy_target -> "execution_slot_busy"
+  | Duplicate_claim_identity_rows_target -> "duplicate_claim_identity_rows"
 ;;
 
 (* Alert labels are endpoint-owned wire copy for this backend-defined diagnostic
    taxonomy. The dashboard renders the label as data from this endpoint instead
    of maintaining a second code -> label classifier. *)
 let alert_label = function
-  | Ttl_expired_on_disk -> "TTL"
-  | Near_duplicate -> "중복"
-  | Execution_slot_busy -> "슬롯"
+  | Duplicate_claim_identity_rows -> "동일 claim identity 행"
 ;;
 
 let alert ~code ~target ~message ~value ~threshold =
@@ -92,37 +71,16 @@ let alert ~code ~target ~message ~value ~threshold =
 let keeper_alerts h =
   []
   |> (fun alerts ->
-    if h.ttl_expired_on_disk > 0
+    if h.duplicate_claim_identity_rows > 0
     then
       alert
-        ~code:Ttl_expired_on_disk
-        ~target:Ttl_expired_on_disk_target
-        ~message:"TTL-expired Memory OS fact rows remain on disk; GC dry-run would prune them."
-        ~value:(float_of_int h.ttl_expired_on_disk)
-        ~threshold:ttl_expired_on_disk_threshold
-      :: alerts
-    else alerts)
-  |> (fun alerts ->
-    if h.near_duplicate > 0
-    then
-      alert
-        ~code:Near_duplicate
-        ~target:Near_duplicate_target
-        ~message:"Near-duplicate Memory OS fact rows remain on disk; GC dry-run would deduplicate them."
-        ~value:(float_of_int h.near_duplicate)
-        ~threshold:near_duplicate_threshold
-      :: alerts
-    else alerts)
-  |> (fun alerts ->
-    if h.execution_slot_busy > 0
-    then
-      alert
-        ~code:Execution_slot_busy
-        ~target:Execution_slot_busy_target
+        ~code:Duplicate_claim_identity_rows
+        ~target:Duplicate_claim_identity_rows_target
         ~message:
-          "Memory OS librarian execution slot was busy; extraction was skipped and remains due."
-        ~value:(float_of_int h.execution_slot_busy)
-        ~threshold:execution_slot_busy_threshold
+          "Memory OS fact rows with an already-present claim identity remain on disk; \
+           operator review is required."
+        ~value:(float_of_int h.duplicate_claim_identity_rows)
+        ~threshold:duplicate_claim_identity_rows_threshold
       :: alerts
     else alerts)
   |> List.rev
@@ -151,15 +109,12 @@ let count_lines_in_file path =
     Fun.protect
       ~finally:(fun () -> close_in_noerr ic)
       (fun () ->
-         let count = ref 0 in
-         (try
-            while true do
-              let _ = input_line ic in
-              incr count
-            done
-          with
-          | End_of_file -> ());
-         !count))
+         let rec count_lines count =
+           match input_line ic with
+           | _ -> count_lines (count + 1)
+           | exception End_of_file -> count
+         in
+         count_lines 0))
 ;;
 
 let file_size_bytes path =
@@ -167,29 +122,29 @@ let file_size_bytes path =
   if not (Sys.file_exists path) then 0 else (Unix.stat path).Unix.st_size
 ;;
 
-let execution_slot_busy_for_keeper keeper_id =
-  (* MemoryLaneExecutionSlotBusy is emitted through [inc_counter], so values are
-     integral counts even though the metric store carries floats. Keep the JSON
-     field as an int to match the rest of this count-oriented health snapshot. *)
-  Otel_metric_store.metric_value_or_zero
-    execution_slot_busy_metric
-    ~labels:[ "keeper", keeper_id; "site", execution_slot_busy_site ]
-    ()
-  |> int_of_float
-;;
+module Claim_identity_map = Map.Make (String)
 
 let duplicate_claim_identity_rows facts =
-  let counts = Hashtbl.create (List.length facts) in
-  List.iter
-    (fun fact ->
+  let counts =
+    List.fold_left
+      (fun counts fact ->
        let key = Keeper_memory_os_types.claim_identity fact in
-       let count = Option.value ~default:0 (Hashtbl.find_opt counts key) in
-       Hashtbl.replace counts key (count + 1))
-    facts;
-  Hashtbl.fold (fun _ count total -> total + max 0 (count - 1)) counts 0
+       let count =
+         match Claim_identity_map.find_opt key counts with
+         | Some count -> count
+         | None -> 0
+       in
+       Claim_identity_map.add key (count + 1) counts)
+      Claim_identity_map.empty
+      facts
+  in
+  Claim_identity_map.fold
+    (fun _ count total -> total + max 0 (count - 1))
+    counts
+    0
 ;;
 
-let keeper_health ~keepers_dir ~now keeper_id =
+let keeper_health_unlocked ~keepers_dir keeper_id =
   let facts =
     (* [read_facts_all] raises on malformed JSONL — treated as a read failure
        for this keeper; the caller catches and skips it. *)
@@ -204,27 +159,26 @@ let keeper_health ~keepers_dir ~now keeper_id =
     Keeper_memory_os_io.events_path_for_keepers_dir ~keepers_dir ~keeper_id
   in
   let events_bytes = file_size_bytes events_p in
-  (* dry_run keeps the scan read-only: it reports only rows whose explicit
-     [valid_until] has passed, without rewriting the store. *)
-  let gc_report =
-    Keeper_memory_os_gc.run_gc_for_keepers_dir
-      ~keepers_dir
-      ~dry_run:true
-      ~keeper_id
-      ~now
-      ()
-  in
   { keeper_id
   ; facts = facts_count
   ; facts_bytes
   ; events = count_lines_in_file events_p
   ; events_bytes
-  ; events_to_facts_ratio =
+  ; events_bytes_to_facts_bytes_ratio =
       float_of_int events_bytes /. float_of_int (max 1 facts_bytes)
-  ; ttl_expired_on_disk = gc_report.ttl_expired
-  ; near_duplicate = duplicate_claim_identity_rows facts
-  ; execution_slot_busy = execution_slot_busy_for_keeper keeper_id
+  ; duplicate_claim_identity_rows = duplicate_claim_identity_rows facts
   }
+;;
+
+let keeper_health ~keepers_dir keeper_id =
+  Keeper_memory_os_io.with_episode_bundle_lock_for_keepers_dir
+    ~keepers_dir
+    ~keeper_id
+    (fun () ->
+       File_lock_eio.with_lock
+         (Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
+         (fun () ->
+            keeper_health_unlocked ~keepers_dir keeper_id))
 ;;
 
 let keeper_health_entry_to_json (h, alerts) : Yojson.Safe.t =
@@ -234,37 +188,47 @@ let keeper_health_entry_to_json (h, alerts) : Yojson.Safe.t =
     ; "facts_bytes", `Int h.facts_bytes
     ; "events", `Int h.events
     ; "events_bytes", `Int h.events_bytes
-    ; "events_to_facts_ratio", `Float h.events_to_facts_ratio
-    ; "ttl_expired_on_disk", `Int h.ttl_expired_on_disk
-    ; "near_duplicate", `Int h.near_duplicate
-    ; "execution_slot_busy", `Int h.execution_slot_busy
+    ; ( "events_bytes_to_facts_bytes_ratio"
+      , `Float h.events_bytes_to_facts_bytes_ratio )
+    ; "duplicate_claim_identity_rows", `Int h.duplicate_claim_identity_rows
     ; "alerts", `List (List.map keeper_alert_to_json alerts)
     ]
 ;;
 
 let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
-  (* One wall-clock instant is shared by the snapshot timestamp and dry-run GC
-     scans; no retention or control logic depends on the exact value. *)
   (* NDT-OK: diagnostic snapshot timestamp only. *)
   let now = Unix.gettimeofday () in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let cadence_counter_entries = Keeper_librarian_runtime.cadence_counter_entries () in
-  let entries =
+  let health_results =
     Keeper_memory_os_io.list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir
-    |> List.filter_map (fun keeper_id ->
-      match keeper_health ~keepers_dir ~now keeper_id with
-      | h -> Some h
+    |> List.map (fun keeper_id ->
+      match keeper_health ~keepers_dir keeper_id with
+      | h -> Ok h
       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
       | exception exn ->
+        let error = Printexc.to_string exn in
         Log.Dashboard.warn
-          "[keeper_memory_health] skipping keeper %s: %s"
+          "[keeper_memory_health] keeper read failed %s: %s"
           keeper_id
-          (Printexc.to_string exn);
-        None)
+          error;
+        Error (keeper_id, error))
+  in
+  let entries, read_errors =
+    List.fold_left
+      (fun (entries, errors) -> function
+         | Ok entry -> entry :: entries, errors
+         | Error error -> entries, error :: errors)
+      ([], [])
+      health_results
+  in
+  let entries =
+    List.rev entries
     |> List.map (fun h -> h, keeper_alerts h)
     (* Largest stores first so the worst offenders surface at the top. *)
     |> List.sort (fun (a, _) (b, _) -> compare b.facts_bytes a.facts_bytes)
   in
+  let read_errors = List.rev read_errors in
   let sum f = List.fold_left (fun acc (h, _) -> acc + f h) 0 entries in
   let all_alerts = List.concat_map snd entries in
   let alert_count_by_code code =
@@ -276,15 +240,21 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
   `Assoc
     [ "generated_at", `Float now
     ; "cadence_counter_entries", `Int cadence_counter_entries
+    ; "read_error_count", `Int (List.length read_errors)
+    ; ( "read_errors"
+      , `List
+          (List.map
+             (fun (keeper_id, error) ->
+                `Assoc [ "keeper_id", `String keeper_id; "error", `String error ])
+             read_errors) )
     ; "keepers", `List (List.map keeper_health_entry_to_json entries)
     ; ( "totals"
       , `Assoc
           [ "facts", `Int (sum (fun h -> h.facts))
           ; "facts_bytes", `Int (sum (fun h -> h.facts_bytes))
           ; "events_bytes", `Int (sum (fun h -> h.events_bytes))
-          ; "ttl_expired_on_disk", `Int (sum (fun h -> h.ttl_expired_on_disk))
-          ; "near_duplicate", `Int (sum (fun h -> h.near_duplicate))
-          ; "execution_slot_busy", `Int (sum (fun h -> h.execution_slot_busy))
+          ; ( "duplicate_claim_identity_rows"
+            , `Int (sum (fun h -> h.duplicate_claim_identity_rows)) )
           ] )
     ; ( "alert_summary"
       , `Assoc
@@ -299,14 +269,12 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
                    (fun acc (_, alerts) -> if alerts = [] then acc else acc + 1)
                    0
                    entries) )
-          ; "ttl_expired_keepers", `Int (alert_count_by_code Ttl_expired_on_disk)
-          ; "near_duplicate_keepers", `Int (alert_count_by_code Near_duplicate)
-          ; "execution_slot_busy_keepers", `Int (alert_count_by_code Execution_slot_busy)
+          ; ( "duplicate_claim_identity_rows_keepers"
+            , `Int (alert_count_by_code Duplicate_claim_identity_rows) )
           ; ( "thresholds"
             , `Assoc
-                [ "ttl_expired_on_disk", `Float ttl_expired_on_disk_threshold
-                ; "near_duplicate", `Float near_duplicate_threshold
-                ; "execution_slot_busy", `Float execution_slot_busy_threshold
+                [ ( "duplicate_claim_identity_rows"
+                  , `Float duplicate_claim_identity_rows_threshold )
                 ] )
           ] )
     ]

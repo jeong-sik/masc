@@ -83,36 +83,43 @@ function toolCallsForTurn(): ToolCallsResponse {
 function turnRecordsWithMemoryOs(): TurnRecordsResponse {
   return {
     source: 'turn_record',
+    producer: 'keeper_agent_run.run_turn|keeper_turn_record_writer',
+    durable_store: '.masc/config/keepers/albini.turn-records.jsonl',
+    dashboard_surface: '/api/v1/keepers/:name/turn-records',
+    freshness_slo_s: 300,
+    latest_ts_unix: 1_781_587_560,
+    latest_ts_iso: '2026-06-16T05:26:00Z',
+    latest_age_s: 0,
     health: 'ok',
+    stale_reason: null,
     keeper: 'albini',
     count: 2,
     skipped_rows: 0,
     memory_os: {
-      schema: 'masc.memory_os.dashboard.v1',
+      schema: 'keeper.memory_os.recall_observability.v2',
       keeper: 'albini',
-      source: 'memory_os',
-      producer: 'keeper_memory_os.recall',
-      selection_policy: null,
+      source: 'memory_os_files',
+      producer: 'keeper_librarian|keeper_memory_os_recall',
+      selection_policy: {
+        keeper_scope: 'albini',
+        facts_source: 'Keeper_memory_os_io.read_facts_all_for_keepers_dir',
+        episodes_source: 'Keeper_memory_os_io.read_episodes_all_for_keepers_dir',
+        category_source: 'Keeper_memory_os_types.category_to_string',
+        recall_block: 'Keeper_memory_os_recall.render_if_enabled',
+        prompt_record: 'Keeper_run_tools_hooks.record_block Prompt_block_id.Memory_os_recall',
+      },
       facts_store: '.masc/config/keepers/albini.facts.jsonl',
       episodes_store: '.masc/config/keepers/albini/episodes',
       recall_enabled: true,
-      now: 1_781_587_600,
-      now_iso: '2026-06-16T02:00:00Z',
       read_errors: [],
       episodes: {
         shown: 2,
-        current: 1,
-        expired: 1,
         terminal_markers: 1,
         items: [
           {
             trace_id: 'trace-active',
             generation: 7,
             created_at: 1_781_583_000,
-            created_at_iso: '2026-06-16T00:43:20Z',
-            valid_until: 1_781_590_000,
-            valid_until_iso: '2026-06-16T02:40:00Z',
-            current: true,
             terminal_marker: null,
             claim_count: 2,
             source_turn_range: [1, 6],
@@ -122,21 +129,15 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
             trace_id: 'trace-done',
             generation: 3,
             created_at: 1_781_580_000,
-            created_at_iso: '2026-06-15T23:53:20Z',
-            valid_until: 1_781_585_400,
-            valid_until_iso: '2026-06-16T01:23:20Z',
-            current: false,
             terminal_marker: 'handoff_complete',
             claim_count: 1,
             source_turn_range: null,
-            summary: 'Terminal memory should stay visible as expired source evidence.',
+            summary: 'Terminal memory remains visible as source evidence.',
           },
         ],
       },
       facts: {
-        shown: 9,
-        current: 8,
-        expired: 1,
+        shown: 0,
         items: [],
       },
     },
@@ -146,6 +147,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           keeper: 'albini',
           trace_id: 'trace-active',
           absolute_turn: 41,
+          turn_ref: 'trace-active#41',
           ts: 1_781_587_500,
           runtime_profile: 'local',
           blocks: [{ block: 'system', bytes: 1200, digest: '1111222233334444' }],
@@ -158,6 +160,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           keeper: 'albini',
           trace_id: 'trace-active',
           absolute_turn: 42,
+          turn_ref: 'trace-active#42',
           ts: 1_781_587_560,
           runtime_profile: 'local',
           model: 'deepseek-v4-flash',
@@ -208,7 +211,7 @@ afterEach(() => {
 })
 
 describe('KeeperMemoryOsRecallPanel', () => {
-  it('surfaces Memory OS recall blocks and episode TTL evidence', async () => {
+  it('surfaces Memory OS recall blocks and episode evidence', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 
     const { container } = render(html`<${KeeperMemoryOsRecallPanel} keeperName="albini" />`)
@@ -227,31 +230,23 @@ describe('KeeperMemoryOsRecallPanel', () => {
     expect(text).toContain('enabled')
     expect(text).toContain('latest block')
     expect(text).toContain('3392B')
-    expect(text).toContain('ep 1/2')
-    expect(text).toContain('expired 1')
+    expect(text).toContain('ep 2')
     expect(text).toContain('terminal 1')
-    expect(text).toContain('facts 8/9')
+    expect(text).toContain('facts 0')
     expect(text).toContain('terminal=handoff_complete')
-    expect(text).toContain('expired 2026-06-16 01:23:20Z')
     expect(text).toContain('facts: .masc/config/keepers/albini.facts.jsonl')
     expect(text).toContain('episodes: .masc/config/keepers/albini/episodes')
   })
 
-  it('shows a source-missing state when the API has no Memory OS snapshot', async () => {
-    fetchKeeperTurnRecordsMock.mockResolvedValue({
-      source: 'turn_record',
-      health: 'ok',
-      keeper: 'albini',
-      count: 0,
-      skipped_rows: 0,
-      memory_os: null,
-      entries: [],
-    })
+  it('surfaces a contract error when the required Memory OS snapshot is unavailable', async () => {
+    fetchKeeperTurnRecordsMock.mockRejectedValue(
+      new Error('유효하지 않은 keeper turn record payload'),
+    )
 
     const { container } = render(html`<${KeeperMemoryOsRecallPanel} keeperName="albini" />`)
 
     await waitFor(() => {
-      expect(container.textContent).toContain('Memory OS recall source 없음')
+      expect(container.textContent).toContain('유효하지 않은 keeper turn record payload')
     })
   })
 })

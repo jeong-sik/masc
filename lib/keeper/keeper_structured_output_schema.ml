@@ -5,7 +5,6 @@ let number_schema = `Assoc [ "type", `String "number" ]
 let integer_schema = `Assoc [ "type", `String "integer" ]
 let boolean_schema = `Assoc [ "type", `String "boolean" ]
 let nullable_string_schema = `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
-let nullable_integer_schema = `Assoc [ "type", `List [ `String "integer"; `String "null" ] ]
 
 let string_array_schema =
   `Assoc [ "type", `String "array"; "items", string_schema ]
@@ -17,13 +16,6 @@ let enum_schema values =
   `Assoc
     [ "type", `String "string"
     ; "enum", `List (List.map (fun value -> `String value) values)
-    ]
-;;
-
-let nullable_enum_schema values =
-  `Assoc
-    [ "type", `List [ `String "string"; `String "null" ]
-    ; "enum", `List ((`Null) :: List.map (fun value -> `String value) values)
     ]
 ;;
 
@@ -41,11 +33,6 @@ let category_tokens =
   |> List.map Keeper_memory_os_types.category_to_string
 ;;
 
-let librarian_claim_kind_tokens =
-  Keeper_memory_os_types.librarian_claim_kinds
-  |> List.map Keeper_memory_os_types.claim_kind_to_string
-;;
-
 let librarian_claim_schema =
   let fields =
     [ Keeper_librarian.wire_field_claim, string_schema
@@ -53,8 +40,6 @@ let librarian_claim_schema =
     ; Keeper_librarian.wire_field_source_turn, integer_schema
     ; Keeper_librarian.wire_field_source_tool_call_id, nullable_string_schema
     ; Keeper_librarian.wire_field_claim_id, nullable_string_schema
-    ; Keeper_librarian.wire_field_claim_kind, nullable_enum_schema librarian_claim_kind_tokens
-    ; Keeper_librarian.wire_field_valid_for_days, nullable_integer_schema
     ]
   in
   object_schema ~required:(List.map fst fields) fields
@@ -65,9 +50,6 @@ let librarian_episode_output_schema =
     [ Keeper_librarian.wire_field_episode_summary, string_schema
     ; ( Keeper_librarian.wire_field_claims
       , `Assoc [ "type", `String "array"; "items", librarian_claim_schema ] )
-    ; Keeper_librarian.wire_field_open_items, string_array_schema
-    ; Keeper_librarian.wire_field_constraints, string_array_schema
-    ; Keeper_librarian.wire_field_preserved_tool_refs, string_array_schema
     ]
   in
   object_schema ~required:(List.map fst fields) fields
@@ -212,11 +194,9 @@ let fusion_judge_output_schema =
    the same prompt path anyway while logging one INFO line per keeper per tick.
 
    Two failure modes traced to that branch are closed by not taking it. The
-   librarian schema marks every claim field [required] with nullable types, so
-   a schema-conforming provider emits ["claim_id": null] — which
-   [Keeper_librarian.optional_string_field_strict] rejects, dropping the whole
-   episode, while the prompt tells the model to omit the key instead. And the
-   json_object tier only 400s because a response_format was set at all.
+   librarian schema and parser share one closed claim shape: nullable metadata
+   is still required on the wire, with explicit [null] representing absence.
+   The json_object tier only 400s because a response_format was set at all.
 
    Note the parse path never read a provider-side structured field:
    [Agent_sdk.Structured.response_json_extractor] extracts JSON from the

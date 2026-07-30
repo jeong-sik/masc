@@ -1,10 +1,9 @@
 ---
 status: reference
-last_verified: 2026-07-28
+last_verified: 2026-07-30
 code_refs:
   - lib/keeper/keeper_memory_recall.ml
   - lib/keeper/keeper_librarian.ml
-  - lib/keeper/keeper_memory_os_store.ml
 ---
 
 # Memory Systems
@@ -25,16 +24,17 @@ side derives memory from a model-authored state envelope.
 Memory OS fact store path:
 `.masc/config/keepers/<keeper_name>.facts.jsonl`.
 
-The legacy per-keeper memory bank (`.masc/keepers/<keeper_name>.memory.jsonl`
-and its kind/horizon vocabulary) was removed
-(RFC keeper-memory-consolidation Stage 4); keeper purge still deletes a
-pre-removal file left on disk.
+Only the current Memory OS paths are read. Removed memory-bank files and
+retired Memory OS shapes are neither loaded nor repaired; deployment uses an
+explicit cold reset/reseed rather than compatibility or migration code.
 
 ## Write Contract
 
 A memory record must come from an explicit memory operation, a typed tool
 result selected by the memory policy, or the librarian lane's typed result.
-Every durable row carries its Keeper/trace/turn provenance and source kind.
+Every durable row carries exact trace/turn provenance and, when the cited
+message contains one, its exact tool-call identity. The librarian parser
+rejects provenance outside the supplied message slice.
 
 Assistant reply text is never parsed into goal, progress, future work,
 questions, constraints, or any other memory category. An ordinary reply may
@@ -43,6 +43,11 @@ without an explicit memory boundary.
 
 Write failures return or record an explicit error. The caller must not present
 the memory as saved when persistence failed.
+
+All fact/event/episode readers are current-shape strict. One malformed row makes
+that Keeper's Memory OS projection unavailable; it is never decoded as an empty
+or partial store. The affected Keeper may continue other work, while recall,
+health, and dashboard surfaces report the read failure explicitly.
 
 ## Recall Contract
 

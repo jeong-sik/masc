@@ -134,7 +134,6 @@ type t =
   | MemoryLanePending
   | MemoryLaneInFlight
   | MemoryLaneLatestPending
-  | MemoryLaneExecutionSlotBusy
   | WriteMetaCycleFailures
   | MetricsSseFailures
   | ChatStoreFailures
@@ -183,7 +182,6 @@ type t =
   | MemoryOsRecallFactsTruncated
   | MemoryOsRecallEpisodesTruncated
   | MemoryOsRecallBytesOverBudget
-  | MemoryOsEpisodeRetentionPruned
   | RuntimeRequestWireBytes
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze

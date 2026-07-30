@@ -9,7 +9,7 @@
 //
 // Section data sources (RFC-keeper-memory-panel-real-data §4; hybrid treatment confirmed 2026-06-24):
 //   컨텍스트 구성        ← real prompt-assembly block bytes (entries[latest].blocks)
-//   장기 메모리 스토어    ← real memory_os.facts.items (typed category, provenance, TTL)
+//   장기 메모리 스토어    ← real memory_os.facts.items (typed category, provenance)
 //   압축 유지·요약        ← real memory_os.episodes.items (summary + terminal_marker)
 //   최근 회상·주입        ← real memory_os_recall prompt blocks (entries[*].blocks)
 // Any future-only section must render an honest disclosure rather than fabricated
@@ -19,7 +19,7 @@ import { Fragment } from 'preact'
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
-import { formatDateTimeKo, formatTimeAgo, formatTimeUntil } from '../lib/format-time'
+import { formatDateTimeKo, formatTimeAgo } from '../lib/format-time'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { isAbortError } from '../lib/async-state'
 import {
@@ -187,33 +187,20 @@ export function factCategoryMeta(category: MemoryOsFactCategory): FactKindMeta {
       return { lbl: '목표', glyph: '◎', color: 'var(--volt)' }
     case 'constraint':
       return { lbl: '제약', glyph: '▢', color: 'var(--status-warn)' }
-    case 'ephemeral':
-      return { lbl: '임시', glyph: '◌', color: 'var(--text-dim)' }
     case 'validated_approach':
       return { lbl: '검증된 접근', glyph: '✓', color: 'var(--status-ok)' }
     case 'lesson':
       return { lbl: '교훈', glyph: '★', color: 'var(--volt-strong)' }
-    case 'unknown':
-      return { lbl: category.raw || '미분류', glyph: '◇', color: 'var(--text-dim)' }
     default: {
-      const _exhaustive: never = category
+      const _exhaustive: never = category.tag
       return _exhaustive
     }
   }
 }
 
-// claim age (staleness anchor = reference_time) and TTL display.
+// claim age (staleness anchor = reference_time).
 function factAgeLabel(fact: MemoryOsFact): string {
   return formatTimeAgo(fact.reference_time)
-}
-export function factTtlLabel(fact: MemoryOsFact): string {
-  if (fact.valid_until == null) return '영구'
-  // current ⟺ valid_until is in the future: show the remaining TTL ("…후").
-  // formatTimeAgo would floor the future delta to 0 and render "만료 지금",
-  // the exact opposite of a not-yet-elapsed deadline. Past expiry keeps "…전".
-  return fact.current
-    ? `만료 ${formatTimeUntil(fact.valid_until)}`
-    : `만료됨 ${formatTimeAgo(fact.valid_until)}`
 }
 
 export function sortMemoryFactsForReview(facts: readonly MemoryOsFact[]): MemoryOsFact[] {
@@ -224,29 +211,9 @@ function formatFactInstant(ts: number, iso: string | null): string {
   return formatDateTimeKo(iso ?? ts)
 }
 
-function factClaimKindLabel(fact: MemoryOsFact): string {
-  switch (fact.claim_kind) {
-    case 'durable_knowledge':
-      return 'durable'
-    case 'external_state':
-      return 'external'
-    case 'self_observation':
-      return 'self'
-    case 'diagnostic':
-      return 'diagnostic'
-    case null:
-      return 'untyped'
-    default: {
-      const _exhaustive: never = fact.claim_kind
-      return _exhaustive
-    }
-  }
-}
-
 export function factSelectionReason(fact: MemoryOsFact): string {
   const meta = factCategoryMeta(fact.category)
-  const state = fact.current ? 'current row' : 'expired row'
-  return `${state} · ${meta.lbl} · ${factClaimKindLabel(fact)}`
+  return `persisted row · ${meta.lbl}`
 }
 
 function latestMemoryRecallBlock(row: TurnRecordRow | null): TurnBlock | null {
@@ -307,13 +274,13 @@ function MemoryTrustStrip({
   const promptTurn = latestPromptRow
     ? `${latestPromptRow.record.trace_id}#${latestPromptRow.record.absolute_turn}`
     : 'none'
-  const scopeLabel = policy?.keeper_scope ?? snapshot.keeper
+  const scopeLabel = policy.keeper_scope
   return html`
     <div class="mem-trust">
       <div class="mem-trust-card">
         <span class="mem-trust-k">store</span>
-        <span class="mem-trust-v mono">${snapshot.facts.current}/${snapshot.facts.shown} current</span>
-        <span class="mem-trust-sub mono">${snapshot.facts.expired} expired · ${snapshot.source}</span>
+        <span class="mem-trust-v mono">${snapshot.facts.shown} rows</span>
+        <span class="mem-trust-sub mono">${snapshot.source}</span>
       </div>
       <div class="mem-trust-card">
         <span class="mem-trust-k">scope</span>
@@ -329,15 +296,12 @@ function MemoryTrustStrip({
   `
 }
 
-function MemoryPolicyDisclosure({ policy }: { policy: MemoryOsSelectionPolicy | null }) {
-  if (!policy) {
-    return html`<${DisclosureNote} text="selection_policy 없음 — 대시보드는 fact timestamps/provenance만 표시." />`
-  }
+function MemoryPolicyDisclosure({ policy }: { policy: MemoryOsSelectionPolicy }) {
   return html`
     <div class="mem-policy">
       <div class="mem-policy-row"><span>facts</span><code>${policy.facts_source}</code><b>all rows · source order</b></div>
       <div class="mem-policy-row"><span>episodes</span><code>${policy.episodes_source}</code><b>all rows · source order</b></div>
-      <div class="mem-policy-row"><span>librarian</span><code>${policy.category_source} + ${policy.claim_kind_source}</code><b>typed labels</b></div>
+      <div class="mem-policy-row"><span>librarian</span><code>${policy.category_source}</code><b>typed category</b></div>
       <div class="mem-policy-row"><span>prompt</span><code>${policy.recall_block}</code><b>${policy.prompt_record}</b></div>
     </div>
   `
@@ -416,7 +380,6 @@ function FactRow({ fact, srcOverride }: { fact: MemoryOsFact; srcOverride?: stri
           ${fact.last_verified_at != null
             ? html`<span class="mono">검증 ${formatFactInstant(fact.last_verified_at, null)}</span>`
             : null}
-          <span class=${`mem-ttl ${fact.current ? 'current' : 'expired'}`}>${factTtlLabel(fact)}</span>
           <span class="mem-src mono">${srcOverride ?? provenance}</span>
         </div>
         <div class="mem-store-why">${factSelectionReason(fact)}</div>
@@ -429,27 +392,6 @@ function FactRow({ fact, srcOverride }: { fact: MemoryOsFact; srcOverride?: stri
 // data, and is visually distinct from a real-data section.
 function DisclosureNote({ text }: { text: string }) {
   return html`<div class="mem-empty mem-disclosure">${'ⓘ'} ${text}</div>`
-}
-
-function MemoryOsMissingState({ response }: { response: TurnRecordsResponse | null | undefined }) {
-  const recordCount = response?.count ?? 0
-  const source = response?.source ?? 'turn_record'
-  const health = response?.health ?? 'unknown'
-  const staleReason = response?.stale_reason ?? 'none'
-  const skipped = response?.skipped_rows ?? 0
-  const durableStore = response?.durable_store ?? null
-  const hasTurnRecords = recordCount > 0
-  return html`
-    <div class="mem-empty">
-      <strong>memory-os 소스 없음</strong><br />
-      ${hasTurnRecords
-        ? html`turn-records ${recordCount}건은 있지만 memory_os projection이 null입니다.`
-        : html`이 keeper의 turn-records가 비어 있습니다.`}
-      <br />
-      <span class="mono">source=${source} · health=${health} · stale=${staleReason} · skipped=${skipped}</span>
-      ${durableStore ? html`<br /><span class="mono">${durableStore}</span>` : null}
-    </div>
-  `
 }
 
 function ReadErrors({ snapshot }: { snapshot: MemoryOsTurnRecordSnapshot }) {
@@ -477,14 +419,14 @@ function CategoryFilters({
       <button class=${`mem-filter ${active === 'all' ? 'on' : ''}`} onClick=${() => onPick('all')}>전체</button>
       ${cats.map(c => {
         const meta = factCategoryMeta(c)
-        const tag = c.tag === 'unknown' ? `unknown:${c.raw}` : c.tag
+        const tag = c.tag
         return html`<button key=${tag} class=${`mem-filter ${active === tag ? 'on' : ''}`} onClick=${() => onPick(tag)}>${meta.glyph} ${meta.lbl}</button>`
       })}
     </div>`
 }
 
 function factTag(fact: MemoryOsFact): string {
-  return fact.category.tag === 'unknown' ? `unknown:${fact.category.raw}` : fact.category.tag
+  return fact.category.tag
 }
 
 function OneKeeperMemoryReal({
@@ -545,7 +487,7 @@ function OneKeeperMemoryReal({
                 : html`
                   <div class="mem-empty">
                     현재 필터에 표시할 memory-os fact가 없습니다.<br />
-                    <span class="mono">current=${snapshot.facts.current} · expired=${snapshot.facts.expired} · total=${facts.length}</span>
+                    <span class="mono">total=${facts.length}</span>
                   </div>
                 `}
             </>`
@@ -575,7 +517,7 @@ function OneKeeperMemoryReal({
 function EpisodeRow({ episode }: { episode: MemoryOsEpisodeSummary }) {
   return html`
     <div class="mem-store-row">
-      <span class="mem-kind" style=${{ color: episode.current ? 'var(--status-ok)' : 'var(--text-dim)', borderColor: episode.current ? 'var(--status-ok)' : 'var(--text-dim)' }}>
+      <span class="mem-kind">
         ${'◉'} g${episode.generation.toString().padStart(4, '0')}
       </span>
       <div class="mem-store-main">
@@ -590,7 +532,6 @@ function EpisodeRow({ episode }: { episode: MemoryOsEpisodeSummary }) {
           ${episode.terminal_marker
             ? html`<span class="mem-tag">terminal=${episode.terminal_marker}</span>`
             : null}
-          <span class=${`mono ${episode.current ? '' : 'mem-expired'}`}>${episode.current ? '활성' : '만료'}</span>
           <span class="mem-src mono">${episode.trace_id}</span>
         </div>
       </div>
@@ -612,24 +553,20 @@ interface AggregateRecentFact {
 
 interface AggregateMemoryRow {
   readonly keeper: MemoryKeeper
-  readonly memoryPresent: boolean
   readonly error: string | null
   readonly source: string
-  readonly currentFacts: number
-  readonly expiredFacts: number
   readonly shownFacts: number
   readonly episodes: number
   readonly recallBlockBytes: number
   readonly latestPrompt: string
   readonly readErrors: number
-  // Category tally over this keeper's projected facts (all rows, current or not),
-  // and its most-recently-verified facts. Empty for error / no-memory keepers.
+  // Category tally over this keeper's projected facts and its stored facts.
+  // Empty for error / no-memory keepers.
   readonly categoryCounts: readonly AggregateCategoryCount[]
   readonly recentFacts: readonly MemoryOsFact[]
 }
 
-// Tally facts by typed category tag. An `unknown` arm keys on its raw label so
-// two distinct out-of-vocabulary categories stay separate rows, not merged.
+// Tally facts by the closed typed category tag.
 function tallyFactCategories(facts: readonly MemoryOsFact[]): readonly AggregateCategoryCount[] {
   const byTag = new Map<string, AggregateCategoryCount>()
   for (const fact of facts) {
@@ -650,7 +587,7 @@ function mergeAggregateCategoryCounts(
   const byTag = new Map<string, AggregateCategoryCount>()
   for (const row of rows) {
     for (const entry of row.categoryCounts) {
-      const tag = entry.category.tag === 'unknown' ? `unknown:${entry.category.raw}` : entry.category.tag
+      const tag = entry.category.tag
       const existing = byTag.get(tag)
       byTag.set(tag, existing
         ? { category: existing.category, count: existing.count + entry.count }
@@ -682,30 +619,10 @@ function aggregateMemoryRowFromResponse(
     ? `${latestPromptRow.record.trace_id}#${latestPromptRow.record.absolute_turn}`
     : 'none'
   const snapshot = response.memory_os
-  if (!snapshot) {
-    return {
-      keeper,
-      memoryPresent: false,
-      error: null,
-      source: response.source ?? 'turn_record',
-      currentFacts: 0,
-      expiredFacts: 0,
-      shownFacts: 0,
-      episodes: 0,
-      recallBlockBytes: memoryBlock?.bytes ?? 0,
-      latestPrompt,
-      readErrors: 0,
-      categoryCounts: [],
-      recentFacts: [],
-    }
-  }
   return {
     keeper,
-    memoryPresent: true,
     error: null,
     source: snapshot.source,
-    currentFacts: snapshot.facts.current,
-    expiredFacts: snapshot.facts.expired,
     shownFacts: snapshot.facts.shown,
     episodes: snapshot.episodes.items.length,
     recallBlockBytes: memoryBlock?.bytes ?? 0,
@@ -719,11 +636,8 @@ function aggregateMemoryRowFromResponse(
 function aggregateMemoryErrorRow(keeper: MemoryKeeper, error: unknown): AggregateMemoryRow {
   return {
     keeper,
-    memoryPresent: false,
     error: error instanceof Error ? error.message : String(error),
     source: 'fetch_error',
-    currentFacts: 0,
-    expiredFacts: 0,
     shownFacts: 0,
     episodes: 0,
     recallBlockBytes: 0,
@@ -782,10 +696,7 @@ function AggregateMemoryReal({
   const data = rows ?? []
   const loadedCount = data.length
   const failedCount = data.filter(row => row.error != null).length
-  const noMemoryCount = data.filter(row => row.error == null && !row.memoryPresent).length
-  const currentTotal = data.reduce((sum, row) => sum + row.currentFacts, 0)
   const shownTotal = data.reduce((sum, row) => sum + row.shownFacts, 0)
-  const expiredTotal = data.reduce((sum, row) => sum + row.expiredFacts, 0)
   const episodeTotal = data.reduce((sum, row) => sum + row.episodes, 0)
   const linkedCount = data.filter(row => row.recallBlockBytes > 0).length
   const recallBytes = data.reduce((sum, row) => sum + row.recallBlockBytes, 0)
@@ -800,12 +711,12 @@ function AggregateMemoryReal({
           <div class="mem-trust-card">
             <span class="mem-trust-k">keepers</span>
             <span class="mem-trust-v mono">${loadedCount}/${keepers.length} loaded</span>
-            <span class="mem-trust-sub mono">${failedCount} failed · ${noMemoryCount} no memory_os</span>
+            <span class="mem-trust-sub mono">${failedCount} failed</span>
           </div>
           <div class="mem-trust-card">
             <span class="mem-trust-k">facts</span>
-            <span class="mem-trust-v mono">${currentTotal}/${shownTotal} current</span>
-            <span class="mem-trust-sub mono">${expiredTotal} expired</span>
+            <span class="mem-trust-v mono">${shownTotal} rows</span>
+            <span class="mem-trust-sub mono">persisted facts</span>
           </div>
           <div class="mem-trust-card">
             <span class="mem-trust-k">prompt links</span>
@@ -823,7 +734,7 @@ function AggregateMemoryReal({
             <div class="mem-kinds-dist">
               ${categoryTotals.map(entry => {
                 const meta = factCategoryMeta(entry.category)
-                const tag = entry.category.tag === 'unknown' ? `unknown:${entry.category.raw}` : entry.category.tag
+                const tag = entry.category.tag
                 return html`
                   <div key=${tag} class="mem-kd-row">
                     <span class="mem-kind" style=${{ color: meta.color, borderColor: meta.color }}>${meta.glyph} ${meta.lbl}</span>
@@ -837,7 +748,7 @@ function AggregateMemoryReal({
       <div class="turn-sec">
         <h4>keeper별 메모리 · ${keepers.length}</h4>
         <div class="mem-table">
-          <div class="mem-tr mem-th"><span>keeper</span><span>current</span><span>expired</span><span>episode</span><span>prompt link</span></div>
+          <div class="mem-tr mem-th"><span>keeper</span><span>facts</span><span>read</span><span>episode</span><span>prompt link</span></div>
           ${data.map(row => html`
             <button key=${row.keeper.id} type="button" class="mem-tr" title=${row.error ?? row.source} onClick=${() => onPick(row.keeper.id)}>
               <span class="mem-td-id"><span class=${`mem-dot ${memDotState(row.keeper.status)}`}></span><span class="mono">${row.keeper.id}</span></span>
@@ -849,8 +760,8 @@ function AggregateMemoryReal({
                   <span class="mono">${row.error}</span>
                 `
                 : html`
-                  <span class="mono">${row.currentFacts}/${row.shownFacts}</span>
-                  <span class="mono">${row.expiredFacts}${row.readErrors > 0 ? html` · err ${row.readErrors}` : null}</span>
+                  <span class="mono">${row.shownFacts}</span>
+                  <span class="mono">${row.readErrors > 0 ? html`err ${row.readErrors}` : 'ok'}</span>
                   <span class="mono">${row.episodes}</span>
                   <span class="mono">${row.recallBlockBytes > 0 ? html`${memFmtBytes(row.recallBlockBytes)} · ${row.latestPrompt}` : html`no memory block · ${row.latestPrompt}`}</span>
                 `}
@@ -970,9 +881,9 @@ export function MemoryInspector({
               ? html`<div class="mem-empty">메모리 불러오는 중…</div>`
               : state.error
                 ? html`<div class="mem-read-error" role="alert">${'⚠'} 메모리 불러오기 실패 — ${state.error}</div>`
-                : response?.memory_os
+                : response
                   ? html`<${OneKeeperMemoryReal} snapshot=${response.memory_os} rows=${response.entries} />`
-                  : html`<${MemoryOsMissingState} response=${response} />`}
+                  : html`<div class="mem-read-error" role="alert">${'⚠'} memory-os 응답 상태 없음</div>`}
         </div>
       </div>
     </div>`

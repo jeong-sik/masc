@@ -160,6 +160,8 @@ type exact_setup_error =
       { position : int
       ; slot_id : string
       }
+  | Exact_trace_id_invalid
+  | Exact_generation_invalid of int
   | Exact_journal_unavailable of string
   | Exact_previous_attempt_unsettled of
       { state : string
@@ -187,13 +189,22 @@ type exact_execution_error =
 type exact_flow_callback_error =
   | Callback_persistence_failed of string
 
+type memory_publication_phase =
+  | Publication_bundle_lock
+  | Publication_facts
+  | Publication_episode
+  | Publication_event
+
 type extraction_error =
   | Prompt_render_failed of string
   | Execution_clock_unavailable
   | Exact_setup_failed of exact_setup_error
   | Exact_execution_failed of exact_execution_error
   | Domain_output_invalid of string
-  | Memory_fact_upsert_failed of string
+  | Memory_publication_failed of
+      { phase : memory_publication_phase
+      ; detail : string
+      }
 
 type extraction_error_kind =
   | Prompt_render_failure
@@ -201,7 +212,7 @@ type extraction_error_kind =
   | Exact_setup_failure
   | Exact_execution_failure
   | Domain_output_invalid
-  | Memory_fact_upsert_failure
+  | Memory_publication_failure
 
 let extraction_error_kind = function
   | Prompt_render_failed _ -> Prompt_render_failure
@@ -209,11 +220,18 @@ let extraction_error_kind = function
   | Exact_setup_failed _ -> Exact_setup_failure
   | Exact_execution_failed _ -> Exact_execution_failure
   | Domain_output_invalid _ -> Domain_output_invalid
-  | Memory_fact_upsert_failed _ -> Memory_fact_upsert_failure
+  | Memory_publication_failed _ -> Memory_publication_failure
 ;;
 
 let librarian_execution_clock_unavailable_error =
   "memory os librarian execution clock unavailable"
+;;
+
+let memory_publication_phase_to_string = function
+  | Publication_bundle_lock -> "bundle_lock"
+  | Publication_facts -> "facts"
+  | Publication_episode -> "episode"
+  | Publication_event -> "event"
 ;;
 
 let exact_setup_error_to_string = function
@@ -227,6 +245,9 @@ let exact_setup_error_to_string = function
       "exact lane candidate invalid position=%d slot=%S"
       position
       slot_id
+  | Exact_trace_id_invalid -> "exact trace_id must be non-empty"
+  | Exact_generation_invalid generation ->
+    Printf.sprintf "exact generation must be non-negative, got %d" generation
   | Exact_journal_unavailable detail ->
     "exact receipt journal unavailable: " ^ detail
   | Exact_previous_attempt_unsettled { state; trace_id; generation } ->
@@ -270,7 +291,11 @@ let extraction_error_to_string = function
       detail
   | Domain_output_invalid msg ->
     "librarian domain output invalid: " ^ msg
-  | Memory_fact_upsert_failed msg -> "memory os fact upsert failed: " ^ msg
+  | Memory_publication_failed { phase; detail } ->
+    Printf.sprintf
+      "memory os publication failed phase=%s: %s"
+      (memory_publication_phase_to_string phase)
+      detail
 ;;
 
 let should_record_cadence_backoff_after_error = function
@@ -281,7 +306,7 @@ let should_record_cadence_backoff_after_error = function
   | Execution_clock_unavailable
   | Prompt_render_failed _
   | Exact_setup_failed _
-  | Memory_fact_upsert_failed _ ->
+  | Memory_publication_failed _ ->
     false
 ;;
 
@@ -295,8 +320,8 @@ let render_prompt key variables =
   | Error msg -> Error (Printf.sprintf "%s: %s" key msg)
 ;;
 
-let messages_for_librarian (inp : Keeper_librarian.input) =
-  let input =
+let prepare_librarian_prompt (inp : Keeper_librarian.input) =
+  let source_input =
     { inp with messages = select_recent_messages ~max_messages:(prompt_max_messages ()) inp.messages }
   in
   match render_prompt Keeper_prompt_names.librarian_system [] with
@@ -305,14 +330,19 @@ let messages_for_librarian (inp : Keeper_librarian.input) =
     (match
        render_prompt
          Keeper_prompt_names.librarian_episode_extraction
-         (Keeper_librarian.prompt_variables input)
+         (Keeper_librarian.prompt_variables source_input)
      with
      | Error _ as e -> e
      | Ok user ->
        Ok
-         [ message Agent_sdk.Types.System system
-         ; message Agent_sdk.Types.User user
-         ])
+         ( source_input
+         , [ message Agent_sdk.Types.System system
+           ; message Agent_sdk.Types.User user
+           ] ))
+;;
+
+let messages_for_librarian inp =
+  Result.map snd (prepare_librarian_prompt inp)
 ;;
 
 let receipt_json (receipt : Exact_output.receipt) =
@@ -349,38 +379,100 @@ let attempt_receipt_json (attempt : Exact_output.flow_attempt_receipt) =
     ]
 ;;
 
-let exact_flow_state_dir ~keeper_id =
-  Keeper_memory_os_io.facts_path ~keeper_id
-  |> Filename.dirname
-  |> fun keepers_dir -> Filename.concat keepers_dir keeper_id
+type exact_journal_state =
+  | Exact_flow_started
+  | Exact_candidate_bound of Yojson.Safe.t
+  | Exact_candidate_advance_committed of
+      { candidate : Yojson.Safe.t
+      ; failure_cause : string
+      }
+  | Exact_oas_success of Yojson.Safe.t
+  | Exact_domain_valid of Yojson.Safe.t
+  | Exact_domain_invalid of
+      { candidate : Yojson.Safe.t
+      ; parse_error : string
+      }
+  | Exact_execution_terminal of
+      { candidate : Yojson.Safe.t option
+      ; failure_cause : string option
+      }
+
+let exact_journal_state_label = function
+  | Exact_flow_started -> "flow_started"
+  | Exact_candidate_bound _ -> "candidate_bound"
+  | Exact_candidate_advance_committed _ -> "candidate_advance_committed"
+  | Exact_oas_success _ -> "oas_success"
+  | Exact_domain_valid _ -> "domain_valid"
+  | Exact_domain_invalid _ -> "domain_invalid"
+  | Exact_execution_terminal _ -> "execution_terminal"
+;;
+
+let exact_journal_state_fields state =
+  let state_field = "state", `String (exact_journal_state_label state) in
+  match state with
+  | Exact_flow_started -> [ state_field ]
+  | Exact_candidate_bound candidate
+  | Exact_oas_success candidate
+  | Exact_domain_valid candidate ->
+    [ state_field; "candidate", candidate ]
+  | Exact_candidate_advance_committed { candidate; failure_cause } ->
+    [ state_field
+    ; "candidate", candidate
+    ; "failure_cause", `String failure_cause
+    ]
+  | Exact_domain_invalid { candidate; parse_error } ->
+    [ state_field
+    ; "candidate", candidate
+    ; "parse_error", `String parse_error
+    ]
+  | Exact_execution_terminal { candidate; failure_cause } ->
+    [ state_field ]
+    @ (match candidate with
+       | Some candidate -> [ "candidate", candidate ]
+       | None -> [])
+    @ (match failure_cause with
+       | Some failure_cause -> [ "failure_cause", `String failure_cause ]
+       | None -> [])
+;;
+
+let exact_flow_state_dir ~keepers_dir ~keeper_id =
+  Filename.concat keepers_dir keeper_id
   |> fun keeper_dir -> Filename.concat keeper_dir "exact-output"
 ;;
 
-let exact_flow_state_path ~keeper_id ~trace_id ~generation =
-  let generation_key =
-    String.concat "\000" [ trace_id; string_of_int generation ]
-    |> Digestif.SHA256.digest_string
-    |> Digestif.SHA256.to_hex
-  in
-  Filename.concat
-    (exact_flow_state_dir ~keeper_id)
-    ("librarian-exact-state-v2-" ^ generation_key ^ ".json")
+let exact_trace_key trace_id =
+  trace_id
+  |> Digestif.SHA256.digest_string
+  |> Digestif.SHA256.to_hex
 ;;
 
-let persist_exact_flow_state ~keeper_id ~trace_id ~generation ~state fields =
-  let (_ : string) = Keeper_fs.ensure_dir (exact_flow_state_dir ~keeper_id) in
+let exact_flow_trace_dir ~keepers_dir ~keeper_id ~trace_id =
+  Filename.concat
+    (exact_flow_state_dir ~keepers_dir ~keeper_id)
+    (exact_trace_key trace_id)
+;;
+
+let exact_flow_state_path ~keepers_dir ~keeper_id ~trace_id ~generation =
+  Filename.concat
+    (exact_flow_trace_dir ~keepers_dir ~keeper_id ~trace_id)
+    (Printf.sprintf "librarian-exact-state-%d.json" generation)
+;;
+
+let persist_exact_flow_state ~keepers_dir ~keeper_id ~trace_id ~generation state =
+  let (_ : string) =
+    Keeper_fs.ensure_dir
+      (exact_flow_trace_dir ~keepers_dir ~keeper_id ~trace_id)
+  in
   let payload =
     `Assoc
-      ([ "schema_version", `Int 2
-       ; "trace_id", `String trace_id
+      ([ "trace_id", `String trace_id
        ; "generation", `Int generation
-       ; "state", `String state
        ]
-       @ fields)
+       @ exact_journal_state_fields state)
     |> Yojson.Safe.pretty_to_string
   in
   Fs_compat.save_file_atomic_strict
-    (exact_flow_state_path ~keeper_id ~trace_id ~generation)
+    (exact_flow_state_path ~keepers_dir ~keeper_id ~trace_id ~generation)
     payload
 ;;
 
@@ -389,23 +481,183 @@ type exact_journal_disposition =
   | Journal_terminal
 
 let exact_journal_disposition_of_state = function
-  | "flow_started"
-  | "candidate_bound"
-  | "candidate_advance_committed" ->
-    Ok Journal_active
+  | Exact_flow_started
+  | Exact_candidate_bound _
+  | Exact_candidate_advance_committed _ ->
+    Journal_active
   (* The provider response is not resumable because its body is deliberately
      absent from the journal, but no Memory OS domain write has begun. A later
      cadence may therefore start a fresh exact-output flow safely. *)
-  | "oas_success"
-  | "domain_valid"
-  | "domain_invalid"
-  | "execution_terminal" ->
-    Ok Journal_terminal
-  | state -> Error state
+  | Exact_oas_success _
+  | Exact_domain_valid _
+  | Exact_domain_invalid _
+  | Exact_execution_terminal _ ->
+    Journal_terminal
 ;;
 
-let preflight_exact_flow_state ~keeper_id ~trace_id ~generation =
-  let path = exact_flow_state_path ~keeper_id ~trace_id ~generation in
+let exact_fields fields expected =
+  List.length fields = List.length expected
+  && List.for_all (fun expected_field -> List.mem_assoc expected_field fields) expected
+;;
+
+let exact_string_field field fields =
+  match List.assoc_opt field fields with
+  | Some (`String value) when not (String.equal value "") -> Some value
+  | Some _ | None -> None
+;;
+
+let exact_int_field field fields =
+  match List.assoc_opt field fields with
+  | Some (`Int value) -> Some value
+  | Some _ | None -> None
+;;
+
+let exact_nullable_int_field field fields =
+  match List.assoc_opt field fields with
+  | Some (`Int _ | `Null) -> true
+  | Some _ | None -> false
+;;
+
+let exact_receipt_json = function
+  | `Assoc fields ->
+    exact_fields
+      fields
+      [ "call_id"
+      ; "http_status"
+      ; "plan_fingerprint"
+      ; "request_body_sha256"
+      ; "catalog_generation"
+      ; "catalog_evidence_sha256"
+      ; "target_identity"
+      ]
+    && Option.is_some (exact_string_field "call_id" fields)
+    && exact_nullable_int_field "http_status" fields
+    && Option.is_some (exact_string_field "plan_fingerprint" fields)
+    && Option.is_some (exact_string_field "request_body_sha256" fields)
+    && Option.is_some (exact_string_field "catalog_generation" fields)
+    && Option.is_some (exact_string_field "catalog_evidence_sha256" fields)
+    && Option.is_some (exact_string_field "target_identity" fields)
+  | _ -> false
+;;
+
+let exact_candidate_field field fields =
+  match List.assoc_opt field fields with
+  | Some (`Assoc candidate_fields as value)
+    when exact_fields candidate_fields [ "candidate_id"; "receipt" ]
+         && Option.is_some
+              (exact_string_field "candidate_id" candidate_fields)
+         && (match List.assoc_opt "receipt" candidate_fields with
+             | Some receipt -> exact_receipt_json receipt
+             | None -> false) ->
+    Some value
+  | Some _ | None -> None
+;;
+
+let decode_exact_journal_state fields =
+  match exact_string_field "state" fields with
+  | Some "flow_started" when exact_fields fields [ "trace_id"; "generation"; "state" ] ->
+    Some Exact_flow_started
+  | Some "candidate_bound"
+    when exact_fields fields [ "trace_id"; "generation"; "state"; "candidate" ] ->
+    Option.map
+      (fun candidate -> Exact_candidate_bound candidate)
+      (exact_candidate_field "candidate" fields)
+  | Some "candidate_advance_committed"
+    when
+      exact_fields
+        fields
+        [ "trace_id"; "generation"; "state"; "candidate"; "failure_cause" ] ->
+    (match
+       exact_candidate_field "candidate" fields
+       , exact_string_field "failure_cause" fields
+     with
+     | Some candidate, Some failure_cause ->
+       Some (Exact_candidate_advance_committed { candidate; failure_cause })
+     | _ -> None)
+  | Some "oas_success"
+    when exact_fields fields [ "trace_id"; "generation"; "state"; "candidate" ] ->
+    Option.map
+      (fun candidate -> Exact_oas_success candidate)
+      (exact_candidate_field "candidate" fields)
+  | Some "domain_valid"
+    when exact_fields fields [ "trace_id"; "generation"; "state"; "candidate" ] ->
+    Option.map
+      (fun candidate -> Exact_domain_valid candidate)
+      (exact_candidate_field "candidate" fields)
+  | Some "domain_invalid"
+    when
+      exact_fields
+        fields
+        [ "trace_id"; "generation"; "state"; "candidate"; "parse_error" ] ->
+    (match exact_candidate_field "candidate" fields, exact_string_field "parse_error" fields with
+     | Some candidate, Some parse_error ->
+       Some (Exact_domain_invalid { candidate; parse_error })
+     | _ -> None)
+  | Some "execution_terminal"
+    when exact_fields fields [ "trace_id"; "generation"; "state" ] ->
+    Some (Exact_execution_terminal { candidate = None; failure_cause = None })
+  | Some "execution_terminal"
+    when
+      exact_fields
+        fields
+        [ "trace_id"; "generation"; "state"; "candidate"; "failure_cause" ] ->
+    (match
+       exact_candidate_field "candidate" fields
+       , exact_string_field "failure_cause" fields
+     with
+     | Some candidate, Some failure_cause ->
+       Some
+         (Exact_execution_terminal
+            { candidate = Some candidate; failure_cause = Some failure_cause })
+     | _ -> None)
+  | Some _
+  | None -> None
+;;
+
+type exact_journal =
+  { trace_id : string
+  ; generation : int
+  ; state : exact_journal_state
+  }
+
+let decode_exact_journal_identity = function
+  | `Assoc fields ->
+    (match
+       exact_string_field "trace_id" fields
+       , exact_int_field "generation" fields
+       , decode_exact_journal_state fields
+     with
+     | Some trace_id, Some generation, Some state ->
+       Ok { trace_id; generation; state }
+     | _ -> Error "journal does not match the current closed shape")
+  | _ -> Error "journal must be a JSON object"
+;;
+
+let decode_exact_journal ~trace_id ~generation json =
+  match decode_exact_journal_identity json with
+  | Error _ as error -> error
+  | Ok journal ->
+    if not (String.equal journal.trace_id trace_id)
+    then
+       Error
+         (Printf.sprintf
+            "journal trace mismatch: expected=%S actual=%S"
+            trace_id
+            journal.trace_id)
+    else if not (Int.equal journal.generation generation)
+    then
+      Error
+        (Printf.sprintf
+           "journal generation mismatch: expected=%d actual=%d"
+           generation
+           journal.generation)
+    else Ok journal.state
+;;
+
+let preflight_exact_flow_state ~keepers_dir ~keeper_id ~trace_id ~generation =
+  let path =
+    exact_flow_state_path ~keepers_dir ~keeper_id ~trace_id ~generation
+  in
   if not (Sys.file_exists path)
   then Ok ()
   else
@@ -414,22 +666,127 @@ let preflight_exact_flow_state ~keeper_id ~trace_id ~generation =
         In_channel.with_open_bin path In_channel.input_all
         |> Yojson.Safe.from_string
       in
-      let open Yojson.Safe.Util in
-      let state = json |> member "state" |> to_string in
-      match exact_journal_disposition_of_state state with
-      | Ok Journal_terminal -> Ok ()
-      | Ok Journal_active ->
-        Error
-          (Exact_previous_attempt_unsettled
-             { state
-             ; trace_id = json |> member "trace_id" |> to_string
-             ; generation = json |> member "generation" |> to_int
-             })
-      | Error state ->
-        Error (Exact_journal_unavailable ("unknown state " ^ state))
+      match decode_exact_journal ~trace_id ~generation json with
+      | Error detail -> Error (Exact_journal_unavailable detail)
+      | Ok state ->
+        (match exact_journal_disposition_of_state state with
+         | Journal_terminal -> Ok ()
+         | Journal_active ->
+           Error
+             (Exact_previous_attempt_unsettled
+                { state = exact_journal_state_label state
+                ; trace_id
+                ; generation
+                }))
     with
     | Eio.Cancel.Cancelled _ as error -> raise error
     | exn -> Error (Exact_journal_unavailable (Printexc.to_string exn))
+;;
+
+let exact_trace_lock_path ~keepers_dir ~keeper_id ~trace_id =
+  Filename.concat
+    (exact_flow_trace_dir ~keepers_dir ~keeper_id ~trace_id)
+    "librarian-exact-trace"
+;;
+
+let exact_journal_paths ~keepers_dir ~keeper_id ~trace_id =
+  let dir =
+    exact_flow_trace_dir ~keepers_dir ~keeper_id ~trace_id
+  in
+  if not (Sys.file_exists dir)
+  then Ok []
+  else
+    try
+      Sys.readdir dir
+      |> Array.to_list
+      |> List.filter (fun name ->
+        String.equal (Filename.extension name) ".json")
+      |> List.sort String.compare
+      |> List.map (Filename.concat dir)
+      |> fun paths -> Ok paths
+    with
+    | Eio.Cancel.Cancelled _ as error -> raise error
+    | Sys_error detail -> Error detail
+;;
+
+let read_exact_journal path =
+  try
+    In_channel.with_open_bin path In_channel.input_all
+    |> Yojson.Safe.from_string
+    |> decode_exact_journal_identity
+    |> Result.map_error (fun detail ->
+      Printf.sprintf "%s: %s" path detail)
+  with
+  | Eio.Cancel.Cancelled _ as error -> raise error
+  | Sys_error detail -> Error (Printf.sprintf "%s: %s" path detail)
+  | Yojson.Json_error detail -> Error (Printf.sprintf "%s: %s" path detail)
+;;
+
+let discover_active_exact_generation_blocking
+      ~keepers_dir
+      ~keeper_id
+      ~trace_id
+  =
+  let ( let* ) = Result.bind in
+  let* paths =
+    exact_journal_paths ~keepers_dir ~keeper_id ~trace_id
+  in
+  let* active =
+    List.fold_left
+      (fun result path ->
+         let* active = result in
+         let* journal = read_exact_journal path in
+         if not (String.equal journal.trace_id trace_id)
+         then
+           Error
+             (Printf.sprintf
+                "%s: journal trace mismatch inside trace authority directory"
+                path)
+         else
+           let canonical_path =
+             exact_flow_state_path
+               ~keepers_dir
+               ~keeper_id
+               ~trace_id
+               ~generation:journal.generation
+           in
+           if not (String.equal path canonical_path)
+           then
+             Error
+               (Printf.sprintf
+                  "%s: journal path does not match decoded generation"
+                  path)
+           else if
+             exact_journal_disposition_of_state journal.state = Journal_active
+           then Ok ((path, journal.generation) :: active)
+           else Ok active)
+      (Ok [])
+      paths
+  in
+  match active with
+  | [] -> Ok None
+  | [ _, generation ] -> Ok (Some generation)
+  | active ->
+    let evidence =
+      active
+      |> List.rev
+      |> List.map (fun (path, generation) ->
+        Printf.sprintf "%s:g%d" path generation)
+      |> String.concat ","
+    in
+    Error
+      (Printf.sprintf
+         "multiple active exact journals for trace_id=%S: %s"
+         trace_id
+         evidence)
+;;
+
+let discover_active_exact_generation ~keepers_dir ~keeper_id ~trace_id =
+  Eio_guard.run_in_systhread (fun () ->
+    discover_active_exact_generation_blocking
+      ~keepers_dir
+      ~keeper_id
+      ~trace_id)
 ;;
 
 let flow_candidates selected_slots =
@@ -486,6 +843,7 @@ let exact_execution_error error =
 ;;
 
 let persist_exact_execution_terminal
+      ~keepers_dir
       ~keeper_id
       ~trace_id
       ~generation
@@ -496,22 +854,23 @@ let persist_exact_execution_terminal
       { candidate; cause; evidence = _ } ->
     ignore cause;
     persist_exact_flow_state
+      ~keepers_dir
       ~keeper_id
       ~trace_id
       ~generation
-      ~state:"execution_terminal"
-      [ "candidate", attempt_receipt_json candidate
-      ; "failure_cause", `String "oas_execution_failed"
-      ]
+      (Exact_execution_terminal
+         { candidate = Some (attempt_receipt_json candidate)
+         ; failure_cause = Some "oas_execution_failed"
+         })
   | Flow_attempt_start_failed _
   | Flow_measurement_start_failed _
   | Flow_candidates_exhausted _ ->
     persist_exact_flow_state
+      ~keepers_dir
       ~keeper_id
       ~trace_id
       ~generation
-      ~state:"execution_terminal"
-      []
+      (Exact_execution_terminal { candidate = None; failure_cause = None })
   | Flow_attempt_already_started _ -> Ok ()
   | Flow_before_measurement_dispatch_callback_failed { cause; _ }
   | Flow_measurement_terminal_callback_failed { cause; _ }
@@ -523,7 +882,7 @@ let persist_exact_execution_terminal
 
 let extract_with_exact_output_classified_unlocked
     ?clock
-    ~base_path
+    ~keepers_dir
     ~net
     ~keeper_id
     ~generation
@@ -533,6 +892,7 @@ let extract_with_exact_output_classified_unlocked
   let prepare_attempt messages =
     let* () =
       preflight_exact_flow_state
+        ~keepers_dir
         ~keeper_id
         ~trace_id:inp.trace_id
         ~generation
@@ -576,11 +936,11 @@ let extract_with_exact_output_classified_unlocked
       in
       let* () =
         persist_exact_flow_state
+          ~keepers_dir
           ~keeper_id
           ~trace_id:inp.trace_id
           ~generation
-          ~state:"flow_started"
-          []
+          Exact_flow_started
         |> Result.map_error (fun detail ->
           Exact_setup_failed (Exact_journal_unavailable detail))
       in
@@ -594,21 +954,22 @@ let extract_with_exact_output_classified_unlocked
         | None -> Ok ()
         | Some previous ->
           persist_exact_flow_state
+            ~keepers_dir
             ~keeper_id
             ~trace_id:inp.trace_id
             ~generation
-            ~state:"candidate_advance_committed"
-            [ "candidate", attempt_receipt_json previous
-            ; "failure_cause", `String "domain_invalid_output"
-            ]
+            (Exact_candidate_advance_committed
+               { candidate = attempt_receipt_json previous
+               ; failure_cause = "domain_invalid_output"
+               })
       in
       let* () =
         persist_exact_flow_state
+          ~keepers_dir
           ~keeper_id
           ~trace_id:inp.trace_id
           ~generation
-          ~state:"candidate_bound"
-          [ "candidate", attempt_receipt_json candidate ]
+          (Exact_candidate_bound (attempt_receipt_json candidate))
       in
       bound_candidate := Some candidate;
       Ok ()
@@ -622,13 +983,14 @@ let extract_with_exact_output_classified_unlocked
       | Exact_output.Flow_candidate_execution_failed { candidate; cause } ->
         ignore cause;
         persist_exact_flow_state
+          ~keepers_dir
           ~keeper_id
           ~trace_id:inp.trace_id
           ~generation
-          ~state:"candidate_advance_committed"
-          [ "candidate", attempt_receipt_json candidate
-          ; "failure_cause", `String "oas_execution_failed"
-          ]
+          (Exact_candidate_advance_committed
+             { candidate = attempt_receipt_json candidate
+             ; failure_cause = "oas_execution_failed"
+             })
     in
     let* () =
       Result.map_error (fun detail -> Callback_persistence_failed detail) result
@@ -647,21 +1009,21 @@ let extract_with_exact_output_classified_unlocked
     in
     match
       persist_exact_flow_state
+        ~keepers_dir
         ~keeper_id
         ~trace_id:inp.trace_id
         ~generation
-        ~state:"oas_success"
-        [ "candidate", attempt_receipt_json candidate ]
+        (Exact_oas_success (attempt_receipt_json candidate))
     with
     | Error detail -> persistence_failure detail
     | Ok () ->
       (match
          persist_exact_flow_state
+           ~keepers_dir
            ~keeper_id
            ~trace_id:inp.trace_id
            ~generation
-           ~state:"domain_valid"
-           [ "candidate", attempt_receipt_json candidate ]
+           (Exact_domain_valid (attempt_receipt_json candidate))
        with
        | Ok () -> Ok episode
        | Error detail -> persistence_failure detail)
@@ -669,14 +1031,19 @@ let extract_with_exact_output_classified_unlocked
   match clock with
   | None -> Error (Execution_clock_unavailable : extraction_error)
   | Some clock ->
-    let* messages =
-      messages_for_librarian inp
+    let* source_input, messages =
+      prepare_librarian_prompt inp
       |> Result.map_error (fun detail -> Prompt_render_failed detail)
     in
     let* attempt = prepare_attempt messages in
     let validate flow_success =
       let output = Exact_output.flow_success_output flow_success in
-      match Keeper_librarian.episode_of_json_result ~generation inp output.output with
+      match
+        Keeper_librarian.episode_of_json_result
+          ~generation
+          source_input
+          output.output
+      with
       | Ok episode -> Exact_output.Accept episode
       | Error error -> Exact_output.Reject_and_advance error
     in
@@ -695,6 +1062,7 @@ let extract_with_exact_output_classified_unlocked
       let classified = exact_execution_error error in
       (match
          persist_exact_execution_terminal
+           ~keepers_dir
            ~keeper_id
            ~trace_id:inp.trace_id
            ~generation
@@ -724,13 +1092,12 @@ let extract_with_exact_output_classified_unlocked
       in
       (match
          persist_exact_flow_state
+           ~keepers_dir
            ~keeper_id
            ~trace_id:inp.trace_id
            ~generation
-           ~state:"domain_invalid"
-           [ "candidate", attempt_receipt_json candidate
-           ; "parse_error", `String parse_error
-           ]
+           (Exact_domain_invalid
+              { candidate = attempt_receipt_json candidate; parse_error })
        with
        | Error detail ->
          Error
@@ -756,24 +1123,50 @@ let extract_with_exact_output_classified
       ~generation
       inp
   =
-  extract_with_exact_output_classified_unlocked
-    ?clock
-    ~base_path
-    ~net
-    ~keeper_id
-    ~generation
-    inp
+  if String.equal (String.trim inp.Keeper_librarian.trace_id) ""
+  then Error (Exact_setup_failed Exact_trace_id_invalid)
+  else if generation < 0
+  then Error (Exact_setup_failed (Exact_generation_invalid generation))
+  else
+    let keepers_dir =
+      Config_dir_resolver.keepers_dir_for_base_path ~base_path
+    in
+    extract_with_exact_output_classified_unlocked
+      ?clock
+      ~keepers_dir
+      ~net
+      ~keeper_id
+      ~generation
+      inp
 ;;
 
 let append_episode
     ?clock
+    ~keepers_dir
     ~keeper_id
     episode
   =
   let now = episode.Keeper_memory_os_types.created_at in
-  Keeper_memory_os_io.with_episode_bundle_lock ?clock ~keeper_id (fun () ->
-    match
-      try
+  let fail phase exn =
+    let detail = Printexc.to_string exn in
+    Log.Keeper.warn
+      "memory os publication failed keeper=%s phase=%s: %s"
+      keeper_id
+      (memory_publication_phase_to_string phase)
+      detail;
+    Error (Memory_publication_failed { phase; detail })
+  in
+  let protect phase f =
+    try Ok (f ()) with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> fail phase exn
+  in
+  try
+    Keeper_memory_os_io.with_episode_bundle_lock_for_keepers_dir
+      ?clock
+      ~keepers_dir
+      ~keeper_id
+      (fun () ->
         let merge ~existing ~incoming =
           let provenance =
             let key = Keeper_memory_os_types.claim_identity incoming in
@@ -792,68 +1185,134 @@ let append_episode
             ~existing
             ~incoming
         in
-        let (_ : Keeper_memory_os_io.fact_merge_stats) =
-          File_lock_eio.with_lock
-            ?clock
-            (Keeper_memory_os_io.facts_path ~keeper_id)
-            (fun () ->
-               Keeper_memory_os_io.merge_facts
+        match
+          protect Publication_facts (fun () ->
+            File_lock_eio.with_lock
+              ?clock
+              (Keeper_memory_os_io.facts_path_for_keepers_dir
+                 ~keepers_dir
+                 ~keeper_id)
+              (fun () ->
+                 Keeper_memory_os_io.merge_facts_for_keepers_dir
+                   ~keepers_dir
+                   ~keeper_id
+                   ~merge
+                   ~incoming:episode.Keeper_memory_os_types.claims))
+        with
+        | Error _ as error -> error
+        | Ok (_ : Keeper_memory_os_io.fact_merge_stats) ->
+          (match
+             protect Publication_episode (fun () ->
+               Keeper_memory_os_io.append_episode_for_keepers_dir
+                 ~keepers_dir
                  ~keeper_id
-                 ~merge
-                 ~incoming:episode.Keeper_memory_os_types.claims)
-        in
-        Ok ()
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        let message = Printexc.to_string exn in
-        Log.Keeper.warn
-          "memory os fact upsert failed keeper=%s: %s"
-          keeper_id
-          message;
-        Error message
-    with
-    | Ok () ->
-      Keeper_memory_os_io.append_episode ~keeper_id episode;
-      Keeper_memory_os_io.append_event ~keeper_id episode;
-      Ok episode
-    | Error message -> Error (Memory_fact_upsert_failed message))
+                 episode)
+           with
+           | Error _ as error -> error
+           | Ok () ->
+             (match
+                protect Publication_event (fun () ->
+                  Keeper_memory_os_io.append_event_for_keepers_dir
+                    ~keepers_dir
+                    ~keeper_id
+                    episode)
+              with
+              | Error _ as error -> error
+              | Ok () -> Ok episode)))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> fail Publication_bundle_lock exn
 ;;
 
 let extract_and_append_with_exact_output_classified
     ?clock
     ~base_path
+    ~generation_floor
     ~net
     ~keeper_id
     inp
   : (Keeper_memory_os_types.episode, extraction_error) result =
   match clock with
   | None -> Error Execution_clock_unavailable
-  | Some _ ->
-    let generation =
-      Keeper_memory_os_io.next_generation_with_floor
-        ~floor:inp.Keeper_librarian.generation
-        ~keeper_id
-        ~trace_id:inp.Keeper_librarian.trace_id
+  | Some _ when String.equal (String.trim inp.Keeper_librarian.trace_id) "" ->
+    Error (Exact_setup_failed Exact_trace_id_invalid)
+  | Some _ when generation_floor < 0 ->
+    Error (Exact_setup_failed (Exact_generation_invalid generation_floor))
+  | Some clock ->
+    let trace_id = inp.Keeper_librarian.trace_id in
+    let keepers_dir =
+      Config_dir_resolver.keepers_dir_for_base_path ~base_path
     in
-    (match
-       extract_with_exact_output_classified
-         ?clock
-         ~base_path
-         ~net
-         ~keeper_id
-         ~generation
-         inp
+    (try
+       let (_ : string) =
+         Keeper_fs.ensure_dir
+           (exact_flow_trace_dir ~keepers_dir ~keeper_id ~trace_id)
+       in
+       File_lock_eio.with_lock
+         ~clock
+         (exact_trace_lock_path ~keepers_dir ~keeper_id ~trace_id)
+         (fun () ->
+            let generation =
+              match
+                discover_active_exact_generation
+                  ~keepers_dir
+                  ~keeper_id
+                  ~trace_id
+              with
+              | Error detail ->
+                Error (Exact_setup_failed (Exact_journal_unavailable detail))
+              | Ok (Some generation) -> Ok generation
+              | Ok None ->
+                (try
+                   Ok
+                     (Keeper_memory_os_io.next_generation_with_floor_for_keepers_dir
+                        ~keepers_dir
+                        ~floor:generation_floor
+                        ~keeper_id
+                        ~trace_id)
+                 with
+                 | Eio.Cancel.Cancelled _ as error -> raise error
+                 | exn ->
+                   Error
+                     (Exact_setup_failed
+                        (Exact_journal_unavailable
+                           ("generation reservation failed: "
+                            ^ Printexc.to_string exn))))
+            in
+            match generation with
+            | Error _ as error -> error
+            | Ok generation ->
+              (match
+                 extract_with_exact_output_classified_unlocked
+                   ~clock
+                   ~keepers_dir
+                   ~net
+                   ~keeper_id
+                   ~generation
+                   inp
+               with
+               | Error _ as error -> error
+               | Ok episode ->
+                 append_episode
+                   ~clock
+                   ~keepers_dir
+                   ~keeper_id
+                   episode))
      with
-     | Error _ as error -> error
-     | Ok episode ->
-       append_episode
-         ?clock
-         ~keeper_id
-         episode)
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Exact_setup_failed
+            (Exact_journal_unavailable
+               ("exact flow authority failed: " ^ Printexc.to_string exn))))
 ;;
 
-let run_best_effort ~base_path ~keeper_id (inp : Keeper_librarian.input) =
+let run_best_effort
+      ~base_path
+      ~generation_floor
+      ~keeper_id
+      (inp : Keeper_librarian.input)
+  =
   (* [cadence_due] short-circuits after [enabled]: a disabled keeper never
      advances its cadence counter, and a not-due turn skips extraction entirely
      (the messages remain in the window for the next due turn). The cadence
@@ -868,6 +1327,7 @@ let run_best_effort ~base_path ~keeper_id (inp : Keeper_librarian.input) =
            extract_and_append_with_exact_output_classified
              ~clock
              ~base_path
+             ~generation_floor
              ~net
              ~keeper_id
              inp

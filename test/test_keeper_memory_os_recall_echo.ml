@@ -20,16 +20,13 @@ module Window = Masc.Keeper_recall_injection_window
 let now = 2_000_000.0
 
 let fact ?(claim = "keeper must do zero tool calls and emit one short line")
-    ?(claim_id = None) ?(claim_kind = None) ?(category = Types.Lesson)
+    ?(claim_id = None) ?(category = Types.Lesson)
     ?(last_verified_at = Some (now -. 3_600.0)) () : Types.fact =
   { Types.claim
   ; Types.category
-  ; Types.claim_kind
   ; Types.source = { Types.trace_id = "trace-echo"; Types.turn = 58; Types.tool_call_id = None }
   ; Types.first_seen = now -. 86_400.0
-  ; Types.valid_until = None
   ; Types.last_verified_at
-  ; Types.schema_version = Types.schema_version
   ; Types.claim_id
   }
 ;;
@@ -46,8 +43,6 @@ let test_echo_does_not_advance_truth_anchor () =
   in
   check (option (float 0.001)) "echo: last_verified_at unchanged" stale
     echoed.Types.last_verified_at;
-  check (option (float 0.001)) "echo: valid_until unchanged" None
-    echoed.Types.valid_until;
   let independent =
     Policy.reobserve_fact
       ~now
@@ -59,31 +54,7 @@ let test_echo_does_not_advance_truth_anchor () =
     independent.Types.last_verified_at
 ;;
 
-(* 2. Echo inheritance is uniform across claim_kinds: the arms that already
-   preserved the anchor (Self_observation, External_state) keep doing so, and
-   Durable_knowledge — the arm the albini flywheel ran through, because the
-   librarian affirmatively mistagged inaction doctrine as durable — no longer
-   advances on echo. *)
-let test_echo_inherits_for_every_claim_kind () =
-  let stale = Some (now -. 3_600.0) in
-  List.iter
-    (fun claim_kind ->
-      let existing = fact ~claim_kind ~last_verified_at:stale () in
-      let incoming = fact ~claim_kind () in
-      let echoed =
-        Policy.reobserve_fact ~now ~provenance:Policy.Recalled_echo ~existing ~incoming
-      in
-      check (option (float 0.001)) "echo inherits anchor for every claim_kind" stale
-        echoed.Types.last_verified_at)
-    [ None
-    ; Some Types.Durable_knowledge
-    ; Some Types.Self_observation
-    ; Some Types.External_state
-    ; Some Types.Diagnostic
-    ]
-;;
-
-(* 3. Window membership: keys noted for a keeper are visible to that keeper
+(* 2. Window membership: keys noted for a keeper are visible to that keeper
    only, and only within [window_turns]. *)
 let test_window_membership_and_isolation () =
   let keeper_id = "echo-test-membership" in
@@ -188,8 +159,6 @@ let () =
     [ ( "rfc-0285-s8"
       , [ test_case "echo does not advance truth anchor" `Quick
             test_echo_does_not_advance_truth_anchor
-        ; test_case "echo inherits for every claim_kind" `Quick
-            test_echo_inherits_for_every_claim_kind
         ; test_case "window membership and isolation" `Quick
             test_window_membership_and_isolation
         ; test_case "window prunes old and reset entries" `Quick

@@ -70,34 +70,6 @@ let list_fact_store_keeper_ids () =
   list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir:(keepers_dir ())
 ;;
 
-(* Read-only existence check — unlike [episodes_dir_for_keepers_dir] it never
-   creates the directory. *)
-let has_episode_store_for_keepers_dir ~keepers_dir ~keeper_id =
-  let dir = Filename.concat keepers_dir (Filename.concat keeper_id "episodes") in
-  Sys.file_exists dir && Sys.is_directory dir
-;;
-
-(* Keeper ids with an on-disk episode store ([<id>/episodes/]), for the episode
-   retention sweep. A keeper whose extracted episodes all carried zero claims
-   has no [*.facts.jsonl] but still accumulates episode files, so the sweep
-   cannot enumerate from fact stores alone. Sorted for deterministic sweep
-   order. *)
-let list_episode_store_keeper_ids_for_keepers_dir ~keepers_dir =
-  let dir = keepers_dir in
-  if not (Sys.file_exists dir && Sys.is_directory dir)
-  then []
-  else
-    Sys.readdir dir
-    |> Array.to_list
-    |> List.filter (fun name ->
-      has_episode_store_for_keepers_dir ~keepers_dir ~keeper_id:name)
-    |> List.sort String.compare
-;;
-
-let list_episode_store_keeper_ids () =
-  list_episode_store_keeper_ids_for_keepers_dir ~keepers_dir:(keepers_dir ())
-;;
-
 let list_fact_store_keeper_ids_for_base_path ~base_path =
   list_fact_store_keeper_ids_for_keepers_dir
     ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
@@ -115,12 +87,20 @@ let episode_bundle_lock_path_for_keepers_dir ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ ".episode-bundle")
 ;;
 
-let episode_bundle_lock_path ~keeper_id =
-  episode_bundle_lock_path_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
+let with_episode_bundle_lock_for_keepers_dir ?clock ~keepers_dir ~keeper_id f =
+  ensure_dir keepers_dir;
+  File_lock_eio.with_lock
+    ?clock
+    (episode_bundle_lock_path_for_keepers_dir ~keepers_dir ~keeper_id)
+    f
 ;;
 
 let with_episode_bundle_lock ?clock ~keeper_id f =
-  File_lock_eio.with_lock ?clock (episode_bundle_lock_path ~keeper_id) f
+  with_episode_bundle_lock_for_keepers_dir
+    ?clock
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
+    f
 ;;
 
 let episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id =
@@ -271,13 +251,13 @@ let next_generation_with_floor_for_base_path ~base_path ~floor ~keeper_id ~trace
     ~trace_id
 ;;
 
-let unique_episode_path ~keeper_id episode =
+let unique_episode_path_for_keepers_dir ~keepers_dir ~keeper_id episode =
   let created_ms =
     episode.created_at *. 1000.0 |> Float.max 0.0 |> Int64.of_float
   in
   let base =
     Filename.concat
-      (episodes_dir ~keeper_id)
+      (episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id)
       (Printf.sprintf
          "%s-g%04d-t%013Ld"
          episode.trace_id
@@ -293,6 +273,13 @@ let unique_episode_path ~keeper_id episode =
     if Sys.file_exists path then loop (suffix + 1) else path
   in
   loop 0
+;;
+
+let unique_episode_path ~keeper_id episode =
+  unique_episode_path_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
+    episode
 ;;
 
 (* ---------- Append helpers ---------- *)
@@ -311,13 +298,31 @@ let append_fact ~keeper_id fact =
   append_json (facts_path ~keeper_id) (fact_to_json fact)
 ;;
 
+let append_event_for_keepers_dir ~keepers_dir ~keeper_id episode =
+  append_json
+    (events_path_for_keepers_dir ~keepers_dir ~keeper_id)
+    (episode_to_json episode)
+;;
+
 let append_event ~keeper_id episode =
-  append_json (events_path ~keeper_id) (episode_to_json episode)
+  append_event_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
+    episode
+;;
+
+let append_episode_for_keepers_dir ~keepers_dir ~keeper_id episode =
+  let path =
+    unique_episode_path_for_keepers_dir ~keepers_dir ~keeper_id episode
+  in
+  write_file_atomically path (Yojson.Safe.pretty_to_string (episode_to_json episode))
 ;;
 
 let append_episode ~keeper_id episode =
-  let path = unique_episode_path ~keeper_id episode in
-  write_file_atomically path (Yojson.Safe.pretty_to_string (episode_to_json episode))
+  append_episode_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
+    episode
 ;;
 
 let append_episode_bundle ~keeper_id episode =
@@ -465,24 +470,22 @@ let parse_json_line parse line =
   | Yojson.Json_error _ -> None
 ;;
 
-let parse_fact_json_line_strict ~path ~line_number line =
+let parse_fact_json_strict ~location line =
   try
     match fact_of_json (Yojson.Safe.from_string line) with
     | Some fact -> Ok fact
-    | None -> Error (Printf.sprintf "%s:%d: invalid fact JSON shape" path line_number)
+    | None -> Error (location ^ ": invalid fact JSON shape")
   with
   | Yojson.Json_error message ->
-    Error (Printf.sprintf "%s:%d: invalid fact JSON: %s" path line_number message)
+    Error (Printf.sprintf "%s: invalid fact JSON: %s" location message)
 ;;
 
-let read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id =
-  read_lines_all (facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
-  |> List.filter_map (parse_json_line fact_of_json)
+let parse_fact_json_line_strict ~path ~line_number line =
+  parse_fact_json_strict ~location:(Printf.sprintf "%s:%d" path line_number) line
 ;;
 
-let read_facts_all ~keeper_id =
-  read_facts_all_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
-;;
+exception Fact_store_decode_error of string
+exception Episode_store_decode_error of string
 
 let read_facts_all_strict_for_keepers_dir ~keepers_dir ~keeper_id =
   let path = facts_path_for_keepers_dir ~keepers_dir ~keeper_id in
@@ -499,10 +502,32 @@ let read_facts_all_strict ~keeper_id =
   read_facts_all_strict_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
 ;;
 
+let facts_or_raise = function
+  | Ok facts -> facts
+  | Error message -> raise (Fact_store_decode_error message)
+;;
+
+let read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id =
+  read_facts_all_strict_for_keepers_dir ~keepers_dir ~keeper_id |> facts_or_raise
+;;
+
+let read_facts_all ~keeper_id =
+  read_facts_all_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
+;;
+
 let read_facts_tail_for_keepers_dir ~keepers_dir ~keeper_id ~n =
-  read_lines_tail (facts_path_for_keepers_dir ~keepers_dir ~keeper_id) ~n
-  |> List.filter_map (parse_json_line fact_of_json)
-  |> take_last n
+  let path = facts_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let rec loop tail_index acc = function
+    | [] -> List.rev acc
+    | line :: rest ->
+      let location = Printf.sprintf "%s:tail:%d" path tail_index in
+      (match parse_fact_json_strict ~location line with
+       | Ok fact -> loop (tail_index + 1) (fact :: acc) rest
+       | Error message -> raise (Fact_store_decode_error message))
+  in
+  if n <= 0
+  then []
+  else read_lines_tail path ~n |> take_last n |> loop 1 []
 ;;
 
 let read_facts_tail ~keeper_id ~n =
@@ -516,11 +541,7 @@ let read_facts_tail_for_base_path ~base_path ~keeper_id ~n =
     ~n
 ;;
 
-let read_all_facts ~keeper_id =
-  read_facts_all ~keeper_id
-;;
-
-let read_facts_for_rewrite ~keeper_id =
+let read_facts_for_rewrite_for_keepers_dir ~keepers_dir ~keeper_id =
   (* RFC-0302 (#22823) phase-2b: resolve keepers_dir on the main domain (it touches
      the Config_dir_resolver plain-ref memo), then offload the blocking full read +
      strict parse of the fact store off the main Eio scheduler. This is the
@@ -531,13 +552,18 @@ let read_facts_for_rewrite ~keeper_id =
      File_lock_eio flock on main across this (inline-in-tests) submit; the closure
      reads only [keepers]/[keeper_id] and no shared mutable state, and the
      Fs_compat rewrite that follows stays on main. *)
-  let keepers = keepers_dir () in
   match
     Domain_pool_ref.submit_io_or_inline (fun () ->
-      read_facts_all_strict_for_keepers_dir ~keepers_dir:keepers ~keeper_id)
+      read_facts_all_strict_for_keepers_dir ~keepers_dir ~keeper_id)
   with
   | Ok facts -> facts
-  | Error message -> invalid_arg message
+  | Error message -> raise (Fact_store_decode_error message)
+;;
+
+let read_facts_for_rewrite ~keeper_id =
+  read_facts_for_rewrite_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
 ;;
 
 type fact_merge_stats =
@@ -578,30 +604,71 @@ let merge_episode_facts ~merge ~existing ~incoming =
 
 (* Librarian write path: upsert explicit incoming facts and preserve every row.
    The old keep/trigger/rank parameters no longer authorize deletion. *)
-let merge_facts ~keeper_id ~merge ~incoming =
-  let existing = read_facts_for_rewrite ~keeper_id in
+let merge_facts_for_keepers_dir ~keepers_dir ~keeper_id ~merge ~incoming =
+  let existing =
+    read_facts_for_rewrite_for_keepers_dir ~keepers_dir ~keeper_id
+  in
   let merged_list, merged, appended = merge_episode_facts ~merge ~existing ~incoming in
   (match incoming with
    | [] -> ()
-   | _ :: _ -> rewrite_facts_atomically ~keeper_id merged_list);
+   | _ :: _ ->
+     rewrite_facts_atomically_for_keepers_dir
+       ~keepers_dir
+       ~keeper_id
+       merged_list);
   { merged; appended }
 ;;
 
-let read_events_tail ~keeper_id ~n =
-  read_lines_tail (events_path ~keeper_id) ~n
-  |> List.filter_map (parse_json_line episode_of_json)
-  |> take_last n
+let merge_facts ~keeper_id ~merge ~incoming =
+  merge_facts_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
+    ~merge
+    ~incoming
 ;;
 
-let read_events_all ~keeper_id =
-  let path = events_path ~keeper_id in
+let read_events_tail_for_keepers_dir ~keepers_dir ~keeper_id ~n =
+  let path = events_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  if n <= 0
+  then []
+  else
+    read_lines_tail path ~n
+    |> take_last n
+    |> List.mapi (fun index line ->
+      match parse_json_line episode_of_json line with
+      | Some episode -> episode
+      | None ->
+        raise
+          (Episode_store_decode_error
+             (Printf.sprintf
+                "%s:tail:%d: invalid episode JSON"
+                path
+                (index + 1))))
+;;
+
+let read_events_tail ~keeper_id ~n =
+  read_events_tail_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
+    ~n
+;;
+
+let read_events_all_for_keepers_dir ~keepers_dir ~keeper_id =
+  let path = events_path_for_keepers_dir ~keepers_dir ~keeper_id in
   read_lines_all path
   |> List.mapi (fun index line ->
     match parse_json_line episode_of_json line with
     | Some episode -> episode
     | None ->
-      invalid_arg
-        (Printf.sprintf "memory episode decode failed: %s:%d" path (index + 1)))
+      raise
+        (Episode_store_decode_error
+           (Printf.sprintf "%s:%d: invalid episode JSON" path (index + 1))))
+;;
+
+let read_events_all ~keeper_id =
+  read_events_all_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
 ;;
 
 let read_episode_file path =
@@ -612,58 +679,6 @@ let read_episode_file path =
        let len = in_channel_length ic in
        let buf = really_input_string ic len in
        parse_json_line episode_of_json buf)
-;;
-
-(* Strict counterpart of [read_episode_file]: a malformed episode file is an
-   [Error], not a silently dropped [None] — a destructive sweep must classify
-   the whole store before deleting anything (same preserve-over-delete rule as
-   [read_facts_all_strict]). *)
-let parse_episode_file_strict ~path buf =
-  try
-    match episode_of_json (Yojson.Safe.from_string buf) with
-    | Some episode -> Ok (path, episode)
-    | None -> Error (Printf.sprintf "%s: invalid episode JSON shape" path)
-  with
-  | Yojson.Json_error message ->
-    Error (Printf.sprintf "%s: invalid episode JSON: %s" path message)
-;;
-
-let read_episode_file_strict path =
-  let ic = open_in_bin path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () ->
-       let len = in_channel_length ic in
-       let buf = really_input_string ic len in
-       parse_episode_file_strict ~path buf)
-;;
-
-(* Every [<keeper_id>/episodes/*.json] file as [(path, episode)] in filename
-   order. Never creates the directory: a keeper with no episode store is
-   [Ok []], not a side effect. *)
-let read_episode_files_all_strict_for_keepers_dir ~keepers_dir ~keeper_id =
-  let dir = Filename.concat keepers_dir (Filename.concat keeper_id "episodes") in
-  if not (Sys.file_exists dir && Sys.is_directory dir)
-  then Ok []
-  else (
-    let paths =
-      Sys.readdir dir
-      |> Array.to_list
-      |> List.filter (fun name -> Filename.check_suffix name ".json")
-      |> List.sort String.compare
-      |> List.map (fun name -> Filename.concat dir name)
-    in
-    let rec loop acc = function
-      | [] -> Ok (List.rev acc)
-      | path :: rest ->
-        let* parsed = read_episode_file_strict path in
-        loop (parsed :: acc) rest
-    in
-    loop [] paths)
-;;
-
-let read_episode_files_all_strict ~keeper_id =
-  read_episode_files_all_strict_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
 ;;
 
 let compare_episode_recency a b =
@@ -681,8 +696,8 @@ let compare_episode_recency a b =
       else String.compare a.episode_summary b.episode_summary))
 ;;
 
-let read_episode_files_tail ~keeper_id ~n =
-  let dir = Filename.concat (keepers_dir ()) (Filename.concat keeper_id "episodes") in
+let read_episode_files_tail_for_keepers_dir ~keepers_dir ~keeper_id ~n =
+  let dir = Filename.concat keepers_dir (Filename.concat keeper_id "episodes") in
   if n <= 0 || not (Sys.file_exists dir && Sys.is_directory dir)
   then []
   else (
@@ -690,14 +705,26 @@ let read_episode_files_tail ~keeper_id ~n =
     |> Array.to_list
     |> List.filter (fun name -> Filename.check_suffix name ".json")
     |> List.map (fun name -> Filename.concat dir name)
-    |> List.filter Sys.file_exists
-    |> List.filter_map read_episode_file
+    |> List.map (fun path ->
+      match read_episode_file path with
+      | Some episode -> episode
+      | None ->
+        raise
+          (Episode_store_decode_error
+             (Printf.sprintf "%s: invalid episode JSON" path)))
     |> List.sort compare_episode_recency
     |> take_last n)
 ;;
 
-let read_episode_files_all ~keeper_id =
-  let dir = Filename.concat (keepers_dir ()) (Filename.concat keeper_id "episodes") in
+let read_episode_files_tail ~keeper_id ~n =
+  read_episode_files_tail_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
+    ~n
+;;
+
+let read_episode_files_all_for_keepers_dir ~keepers_dir ~keeper_id =
+  let dir = Filename.concat keepers_dir (Filename.concat keeper_id "episodes") in
   if not (Sys.file_exists dir && Sys.is_directory dir)
   then []
   else
@@ -709,15 +736,45 @@ let read_episode_files_all ~keeper_id =
     |> List.map (fun path ->
       match read_episode_file path with
       | Some episode -> episode
-      | None -> invalid_arg (Printf.sprintf "memory episode decode failed: %s" path))
+      | None ->
+        raise
+          (Episode_store_decode_error
+             (Printf.sprintf "%s: invalid episode JSON" path)))
+;;
+
+let read_episode_files_all ~keeper_id =
+  read_episode_files_all_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
+;;
+
+let read_episodes_tail_for_keepers_dir ~keepers_dir ~keeper_id ~n =
+  let events =
+    read_events_tail_for_keepers_dir ~keepers_dir ~keeper_id ~n
+  in
+  if events = []
+  then read_episode_files_tail_for_keepers_dir ~keepers_dir ~keeper_id ~n
+  else events
 ;;
 
 let read_episodes_tail ~keeper_id ~n =
-  let events = read_events_tail ~keeper_id ~n in
-  if events = [] then read_episode_files_tail ~keeper_id ~n else events
+  read_episodes_tail_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
+    ~n
+;;
+
+let read_episodes_all_for_keepers_dir ~keepers_dir ~keeper_id =
+  let events =
+    read_events_all_for_keepers_dir ~keepers_dir ~keeper_id
+  in
+  if events = []
+  then read_episode_files_all_for_keepers_dir ~keepers_dir ~keeper_id
+  else events
 ;;
 
 let read_episodes_all ~keeper_id =
-  let events = read_events_all ~keeper_id in
-  if events = [] then read_episode_files_all ~keeper_id else events
+  read_episodes_all_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
 ;;

@@ -4,7 +4,6 @@
 
 import { get, type AbortableRequestOptions } from './core'
 import { isRecord, asBoolean, asNumber, asNullableString, asString, asRecordArray } from '../components/common/normalize'
-import { decodeTelemetryFreshnessMetadata, type TelemetryFreshnessMetadata } from './dashboard-shared'
 
 export type TurnBlock = {
   block: string
@@ -17,6 +16,7 @@ export type TurnRecordEntry = {
   keeper: string
   trace_id: string
   absolute_turn: number
+  turn_ref: string
   blocks: TurnBlock[]
   runtime_profile: string
   // RFC-0233 §2.3 — grounded from the backend turn record (boundary-redacted
@@ -78,10 +78,6 @@ export type MemoryOsEpisodeSummary = {
   trace_id: string
   generation: number
   created_at: number
-  created_at_iso: string | null
-  valid_until: number | null
-  valid_until_iso: string | null
-  current: boolean
   terminal_marker: string | null
   claim_count: number
   // Inclusive [lo, hi] absolute-turn span the episode compacted, or null when the
@@ -93,11 +89,9 @@ export type MemoryOsEpisodeSummary = {
 // RFC-keeper-memory-panel-real-data §4a: the librarian taxonomy as a closed TS union mirroring the OCaml
 // `category` sum (keeper_memory_os_types.ml — category_to_string is the wire SSOT).
 // The wire carries a string token; it is parsed once at this decode boundary into
-// a tagged value. An out-of-vocabulary token becomes { tag: 'unknown', raw } — the
-// same drift-absorbing arm the backend's `Unknown of string` defines — so a
-// renamed/typo'd category surfaces as a typed unknown the panel can flag, never a
-// silent miscategorization. This is exact-membership parse-don't-validate, not a
-// substring/prefix classifier.
+// a tagged value. The backend emits only the closed OCaml sum. Any other spelling
+// is a contract violation and rejects the payload rather than becoming a
+// compatibility arm.
 export type MemoryOsFactCategoryTag =
   | 'code_change'
   | 'fact'
@@ -105,12 +99,9 @@ export type MemoryOsFactCategoryTag =
   | 'blocker'
   | 'goal'
   | 'constraint'
-  | 'ephemeral'
   | 'validated_approach'
   | 'lesson'
-export type MemoryOsFactCategory =
-  | { readonly tag: MemoryOsFactCategoryTag }
-  | { readonly tag: 'unknown'; readonly raw: string }
+export type MemoryOsFactCategory = { readonly tag: MemoryOsFactCategoryTag }
 
 // SSOT token list — must stay byte-identical to the known arms of
 // category_of_string/category_to_string. A drift-guard test pins this set.
@@ -121,35 +112,13 @@ const MEMORY_OS_FACT_CATEGORY_TAGS: readonly MemoryOsFactCategoryTag[] = [
   'blocker',
   'goal',
   'constraint',
-  'ephemeral',
   'validated_approach',
   'lesson',
 ]
 
-export function parseMemoryOsFactCategory(raw: string): MemoryOsFactCategory {
-  // Mirror category_of_string: trim + lowercase, then exact membership.
-  const token = raw.trim().toLowerCase()
-  const known = MEMORY_OS_FACT_CATEGORY_TAGS.find(tag => tag === token)
-  return known ? { tag: known } : { tag: 'unknown', raw }
-}
-
-// RFC-0285 §3.1 claim_kind — closed vocabulary, no Unknown arm on the backend.
-// Mirrors claim_kind_of_string: an unrecognized/absent token yields undefined,
-// the backend's own None degrade to the durable path.
-export type MemoryOsClaimKind =
-  | 'self_observation'
-  | 'external_state'
-  | 'durable_knowledge'
-  | 'diagnostic'
-const MEMORY_OS_CLAIM_KINDS: readonly MemoryOsClaimKind[] = [
-  'self_observation',
-  'external_state',
-  'durable_knowledge',
-  'diagnostic',
-]
-export function parseMemoryOsClaimKind(raw: string): MemoryOsClaimKind | undefined {
-  const token = raw.trim().toLowerCase()
-  return MEMORY_OS_CLAIM_KINDS.find(kind => kind === token)
+export function parseMemoryOsFactCategory(raw: string): MemoryOsFactCategory | null {
+  const known = MEMORY_OS_FACT_CATEGORY_TAGS.find(tag => tag === raw)
+  return known ? { tag: known } : null
 }
 
 export type MemoryOsFactProvenance = {
@@ -166,60 +135,59 @@ export type MemoryOsFact = {
   readonly category: MemoryOsFactCategory
   readonly source: MemoryOsFactProvenance
   readonly first_seen: number
-  readonly first_seen_iso: string | null
+  readonly first_seen_iso: string
   // last_verified_at else first_seen — the shared staleness anchor (reference_time).
   readonly reference_time: number
-  readonly valid_until: number | null
-  readonly valid_until_iso: string | null
   readonly last_verified_at: number | null
-  readonly current: boolean
-  readonly claim_kind: MemoryOsClaimKind | null
 }
 
 export type MemoryOsSelectionPolicy = {
   readonly keeper_scope: string
-  readonly facts_source: string
-  readonly episodes_source: string
-  readonly category_source: string
-  readonly claim_kind_source: string
-  readonly recall_block: string
-  readonly prompt_record: string
+  readonly facts_source: 'Keeper_memory_os_io.read_facts_all_for_keepers_dir'
+  readonly episodes_source: 'Keeper_memory_os_io.read_episodes_all_for_keepers_dir'
+  readonly category_source: 'Keeper_memory_os_types.category_to_string'
+  readonly recall_block: 'Keeper_memory_os_recall.render_if_enabled'
+  readonly prompt_record: 'Keeper_run_tools_hooks.record_block Prompt_block_id.Memory_os_recall'
 }
 
 export type MemoryOsTurnRecordSnapshot = {
-  schema: string
+  schema: 'keeper.memory_os.recall_observability.v2'
   keeper: string
-  source: string
-  producer: string
-  selection_policy: MemoryOsSelectionPolicy | null
+  source: 'memory_os_files'
+  producer: 'keeper_librarian|keeper_memory_os_recall'
+  selection_policy: MemoryOsSelectionPolicy
   facts_store: string
   episodes_store: string
   recall_enabled: boolean
-  now: number | null
-  now_iso: string | null
   read_errors: { scope: string; error: string }[]
   episodes: {
     shown: number
-    current: number
-    expired: number
     terminal_markers: number
     items: MemoryOsEpisodeSummary[]
   }
   facts: {
     shown: number
-    current: number
-    expired: number
     // RFC-keeper-memory-panel-real-data §4a: every persisted fact row.
     items: MemoryOsFact[]
   }
 }
 
-export type TurnRecordsResponse = TelemetryFreshnessMetadata & {
+export type TurnRecordsResponse = {
+  source: 'turn_record'
+  producer: 'keeper_agent_run.run_turn|keeper_turn_record_writer'
+  durable_store: string
+  dashboard_surface: '/api/v1/keepers/:name/turn-records'
+  freshness_slo_s: number
+  latest_ts_unix: number | null
+  latest_ts_iso: string | null
+  latest_age_s: number | null
+  health: 'empty' | 'stale' | 'ok'
+  stale_reason: 'no_entries' | 'freshness_slo_exceeded' | null
   keeper: string
   count: number
   // malformed JSONL rows the server refused to decode (never repaired)
   skipped_rows: number
-  memory_os: MemoryOsTurnRecordSnapshot | null
+  memory_os: MemoryOsTurnRecordSnapshot
   entries: TurnRecordRow[]
 }
 
@@ -302,84 +270,242 @@ export type KeeperCompactionSnapshotsResponse = {
 }
 
 function decodeTurnBlock(raw: unknown): TurnBlock | null {
-  if (!isRecord(raw)) return null
-  const block = asString(raw.block)
-  const digest = asString(raw.digest)
+  if (!isRecord(raw) || !hasExactKeys(raw, ['block', 'bytes', 'digest'])) return null
+  const block = decodeExactNonEmptyString(raw.block)
+  const digest = decodeExactNonEmptyString(raw.digest)
   const bytes = asNumber(raw.bytes)
-  if (!block || !digest || bytes == null) return null
+  if (
+    block === null
+    || digest === null
+    || bytes == null
+    || !Number.isSafeInteger(bytes)
+    || bytes < 0
+  ) return null
   return { block, bytes, digest }
 }
 
-function decodeTurnBlockList(raw: unknown): TurnBlock[] {
-  return asRecordArray(raw)
-    .map(decodeTurnBlock)
-    .filter((block): block is TurnBlock => block !== null)
+function decodeOptionalField<T>(
+  raw: Record<string, unknown>,
+  key: string,
+  decode: (value: unknown) => T | null,
+): T | undefined | null {
+  if (!Object.hasOwn(raw, key)) return undefined
+  return decode(raw[key])
+}
+
+function decodeNonNegativeSafeInteger(raw: unknown): number | null {
+  const value = asNumber(raw)
+  return value != null && Number.isSafeInteger(value) && value >= 0 ? value : null
+}
+
+function decodeFiniteNumber(raw: unknown): number | null {
+  return asNumber(raw) ?? null
+}
+
+function decodeBoolean(raw: unknown): boolean | null {
+  return asBoolean(raw) ?? null
+}
+
+function decodeTurnBlockList(raw: unknown): TurnBlock[] | null {
+  if (!Array.isArray(raw)) return null
+  const blocks = raw.map(decodeTurnBlock)
+  return blocks.every((block): block is TurnBlock => block !== null) ? blocks : null
 }
 
 function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
-  if (!isRecord(raw)) return null
-  const keeper = asString(raw.keeper)
-  const trace_id = asString(raw.trace_id)
+  if (!isRecord(raw) || !hasNoUnknownKeys(raw, [
+    'execution_ids',
+    'keeper',
+    'trace_id',
+    'absolute_turn',
+    'turn_ref',
+    'blocks',
+    'runtime_profile',
+    'model',
+    'finish_reason',
+    'context_window',
+    'price_input_per_million',
+    'price_output_per_million',
+    'request_latency_ms',
+    'ttfrc_ms',
+    'temperature',
+    'top_p',
+    'max_tokens',
+    'thinking_budget',
+    'enable_thinking',
+    'input_tokens',
+    'cache_creation_input_tokens',
+    'cache_read_input_tokens',
+    'output_tokens',
+    'ts',
+  ])) return null
+  const keeper = decodeExactNonEmptyString(raw.keeper)
+  const trace_id = decodeExactNonEmptyString(raw.trace_id)
   const absolute_turn = asNumber(raw.absolute_turn)
-  const runtime_profile = asString(raw.runtime_profile)
+  const runtime_profile = decodeExactNonEmptyString(raw.runtime_profile)
   const ts = asNumber(raw.ts)
-  if (!keeper || !trace_id || absolute_turn == null || !runtime_profile || ts == null) {
+  const blocks = decodeTurnBlockList(raw.blocks)
+  const turn_ref = decodeExactNonEmptyString(raw.turn_ref)
+  const model = decodeOptionalField(raw, 'model', decodeExactNonEmptyString)
+  const finish_reason = decodeOptionalField(raw, 'finish_reason', decodeExactNonEmptyString)
+  const context_window = decodeOptionalField(raw, 'context_window', decodeNonNegativeSafeInteger)
+  const price_input_per_million =
+    decodeOptionalField(raw, 'price_input_per_million', decodeFiniteNumber)
+  const price_output_per_million =
+    decodeOptionalField(raw, 'price_output_per_million', decodeFiniteNumber)
+  const request_latency_ms =
+    decodeOptionalField(raw, 'request_latency_ms', decodeNonNegativeSafeInteger)
+  const ttfrc_ms = decodeOptionalField(raw, 'ttfrc_ms', decodeFiniteNumber)
+  const temperature = decodeOptionalField(raw, 'temperature', decodeFiniteNumber)
+  const top_p = decodeOptionalField(raw, 'top_p', decodeFiniteNumber)
+  const max_tokens = decodeOptionalField(raw, 'max_tokens', decodeNonNegativeSafeInteger)
+  const thinking_budget =
+    decodeOptionalField(raw, 'thinking_budget', decodeNonNegativeSafeInteger)
+  const enable_thinking = decodeOptionalField(raw, 'enable_thinking', decodeBoolean)
+  const input_tokens = decodeOptionalField(raw, 'input_tokens', decodeNonNegativeSafeInteger)
+  const output_tokens = decodeOptionalField(raw, 'output_tokens', decodeNonNegativeSafeInteger)
+  const cache_creation_input_tokens =
+    decodeOptionalField(raw, 'cache_creation_input_tokens', decodeNonNegativeSafeInteger)
+  const cache_read_input_tokens =
+    decodeOptionalField(raw, 'cache_read_input_tokens', decodeNonNegativeSafeInteger)
+  if (
+    keeper === null
+    || trace_id === null
+    || absolute_turn == null
+    || !Number.isSafeInteger(absolute_turn)
+    || absolute_turn < 0
+    || runtime_profile === null
+    || ts == null
+    || blocks === null
+    || !Array.isArray(raw.execution_ids)
+    || !raw.execution_ids.every((id): id is string => typeof id === 'string' && id.length > 0)
+    || turn_ref === null
+    || model === null
+    || finish_reason === null
+    || context_window === null
+    || price_input_per_million === null
+    || price_output_per_million === null
+    || request_latency_ms === null
+    || ttfrc_ms === null
+    || temperature === null
+    || top_p === null
+    || max_tokens === null
+    || thinking_budget === null
+    || enable_thinking === null
+    || input_tokens === null
+    || output_tokens === null
+    || cache_creation_input_tokens === null
+    || cache_read_input_tokens === null
+    || turn_ref !== `${trace_id}#${absolute_turn}`
+  ) {
     return null
   }
-  const execution_ids = Array.isArray(raw.execution_ids)
-    ? raw.execution_ids.filter((id): id is string => typeof id === 'string')
-    : []
+  const execution_ids = raw.execution_ids
   return {
     execution_ids,
     keeper,
     trace_id,
     absolute_turn,
-    blocks: decodeTurnBlockList(raw.blocks),
+    turn_ref,
+    blocks,
     runtime_profile,
-    model: asString(raw.model),
-    finish_reason: asString(raw.finish_reason),
-    temperature: asNumber(raw.temperature),
-    top_p: asNumber(raw.top_p),
-    max_tokens: asNumber(raw.max_tokens),
-    thinking_budget: asNumber(raw.thinking_budget),
-    enable_thinking: typeof raw.enable_thinking === 'boolean' ? raw.enable_thinking : undefined,
-    input_tokens: asNumber(raw.input_tokens),
-    output_tokens: asNumber(raw.output_tokens),
-    cache_creation_input_tokens: asNumber(raw.cache_creation_input_tokens),
-    cache_read_input_tokens: asNumber(raw.cache_read_input_tokens),
-    context_window: asNumber(raw.context_window),
-    price_input_per_million: asNumber(raw.price_input_per_million),
-    price_output_per_million: asNumber(raw.price_output_per_million),
-    request_latency_ms: asNumber(raw.request_latency_ms),
-    ttfrc_ms: asNumber(raw.ttfrc_ms),
+    model,
+    finish_reason,
+    temperature,
+    top_p,
+    max_tokens,
+    thinking_budget,
+    enable_thinking,
+    input_tokens,
+    output_tokens,
+    cache_creation_input_tokens,
+    cache_read_input_tokens,
+    context_window,
+    price_input_per_million,
+    price_output_per_million,
+    request_latency_ms,
+    ttfrc_ms,
     ts,
   }
 }
 
 function decodeTurnBlockDiff(raw: unknown): TurnBlockDiff | null {
-  if (!isRecord(raw)) return null
-  const changed = asRecordArray(raw.changed)
-    .map((pair) => {
-      const prev = decodeTurnBlock(pair.prev)
-      const next = decodeTurnBlock(pair.next)
-      return prev && next ? { prev, next } : null
-    })
-    .filter((pair): pair is { prev: TurnBlock; next: TurnBlock } => pair !== null)
+  if (!isRecord(raw) || !hasExactKeys(raw, ['added', 'removed', 'changed'])) return null
+  const added = decodeTurnBlockList(raw.added)
+  const removed = decodeTurnBlockList(raw.removed)
+  if (!Array.isArray(raw.changed) || added === null || removed === null) return null
+  const changed = raw.changed.map((value) => {
+    if (!isRecord(value) || !hasExactKeys(value, ['prev', 'next'])) return null
+    const prev = decodeTurnBlock(value.prev)
+    const next = decodeTurnBlock(value.next)
+    return prev && next ? { prev, next } : null
+  })
+  if (!changed.every((pair): pair is { prev: TurnBlock; next: TurnBlock } => pair !== null)) {
+    return null
+  }
   return {
-    added: decodeTurnBlockList(raw.added),
-    removed: decodeTurnBlockList(raw.removed),
+    added,
+    removed,
     changed,
   }
 }
 
 function decodeTurnRecordRow(raw: unknown): TurnRecordRow | null {
-  if (!isRecord(raw)) return null
+  if (!isRecord(raw) || !hasExactKeys(raw, ['record', 'diff_vs_prev'])) return null
   const record = decodeTurnRecordEntry(raw.record)
-  if (!record) return null
+  const diff_vs_prev = raw.diff_vs_prev === null
+    ? null
+    : decodeTurnBlockDiff(raw.diff_vs_prev)
+  if (!record || (raw.diff_vs_prev !== null && diff_vs_prev === null)) return null
   return {
     record,
-    diff_vs_prev: decodeTurnBlockDiff(raw.diff_vs_prev),
+    diff_vs_prev,
   }
+}
+
+function hasExactKeys(raw: Record<string, unknown>, allowed: readonly string[]): boolean {
+  const keys = Object.keys(raw)
+  return keys.length === allowed.length && keys.every(key => allowed.includes(key))
+}
+
+function hasNoUnknownKeys(raw: Record<string, unknown>, allowed: readonly string[]): boolean {
+  return Object.keys(raw).every(key => allowed.includes(key))
+}
+
+function decodeNullableString(raw: unknown): string | null | undefined {
+  if (raw === null) return null
+  return typeof raw === 'string' && raw.length > 0 ? raw : undefined
+}
+
+function decodeExactNonEmptyString(raw: unknown): string | null {
+  return typeof raw === 'string' && raw.length > 0 ? raw : null
+}
+
+function decodeNullableNumber(raw: unknown): number | null | undefined {
+  if (raw === null) return null
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined
+}
+
+function wholeSecondIsoOfUnixSeconds(raw: number): string | null {
+  const date = new Date(Math.floor(raw) * 1000)
+  if (!Number.isFinite(date.getTime())) return null
+  return date.toISOString().replace('.000Z', 'Z')
+}
+
+function decodeArray<T>(
+  raw: unknown,
+  decode: (item: unknown) => T | null,
+): T[] | null {
+  if (!Array.isArray(raw)) return null
+  const decoded = raw.map(decode)
+  return decoded.every((item): item is T => item !== null) ? decoded : null
+}
+
+function decodeMemoryOsReadError(raw: unknown): { scope: string; error: string } | null {
+  if (!isRecord(raw) || !hasExactKeys(raw, ['scope', 'error'])) return null
+  const scope = decodeExactNonEmptyString(raw.scope)
+  const error = decodeExactNonEmptyString(raw.error)
+  return scope === null || error === null ? null : { scope, error }
 }
 
 // Decode the { lo, hi } object memory_os_episode_json emits for a present range,
@@ -389,99 +515,165 @@ function decodeTurnRecordRow(raw: unknown): TurnRecordRow | null {
 // than displaying an impossible span. An incomplete pair also collapses to null.
 function decodeSourceTurnRange(raw: unknown): readonly [number, number] | null {
   if (!isRecord(raw)) return null
+  if (!hasExactKeys(raw, ['lo', 'hi'])) return null
   const lo = asNumber(raw.lo)
   const hi = asNumber(raw.hi)
   if (lo == null || hi == null) return null
-  if (!Number.isInteger(lo) || !Number.isInteger(hi)) return null
+  if (!Number.isSafeInteger(lo) || !Number.isSafeInteger(hi)) return null
   if (lo < 0 || hi < lo) return null
   return [lo, hi]
 }
 
 function decodeMemoryOsEpisode(raw: unknown): MemoryOsEpisodeSummary | null {
   if (!isRecord(raw)) return null
-  const trace_id = asString(raw.trace_id)
+  if (!hasExactKeys(raw, [
+    'trace_id',
+    'generation',
+    'created_at',
+    'terminal_marker',
+    'claim_count',
+    'source_turn_range',
+    'summary',
+  ])) return null
+  const trace_id = decodeExactNonEmptyString(raw.trace_id)
   const generation = asNumber(raw.generation)
   const created_at = asNumber(raw.created_at)
-  const summary = asString(raw.summary)
-  if (!trace_id || generation == null || created_at == null || !summary) return null
+  const terminal_marker = decodeNullableString(raw.terminal_marker)
+  const claim_count = asNumber(raw.claim_count)
+  const source_turn_range = raw.source_turn_range === null
+    ? null
+    : decodeSourceTurnRange(raw.source_turn_range)
+  const summary = decodeExactNonEmptyString(raw.summary)
+  if (
+    trace_id === null
+    || generation == null
+    || !Number.isSafeInteger(generation)
+    || generation < 0
+    || created_at == null
+    || terminal_marker === undefined
+    || claim_count == null
+    || !Number.isSafeInteger(claim_count)
+    || claim_count < 0
+    || (raw.source_turn_range !== null && source_turn_range === null)
+    || summary === null
+  ) return null
   return {
     trace_id,
     generation,
     created_at,
-    created_at_iso: asNullableString(raw.created_at_iso),
-    valid_until: asNumber(raw.valid_until) ?? null,
-    valid_until_iso: asNullableString(raw.valid_until_iso),
-    current: asBoolean(raw.current, true) ?? true,
-    terminal_marker: asNullableString(raw.terminal_marker),
-    claim_count: asNumber(raw.claim_count, 0) ?? 0,
-    source_turn_range: decodeSourceTurnRange(raw.source_turn_range),
+    terminal_marker,
+    claim_count,
+    source_turn_range,
     summary,
   }
 }
 
 function decodeMemoryOsFactProvenance(raw: unknown): MemoryOsFactProvenance | null {
   if (!isRecord(raw)) return null
-  const trace_id = asString(raw.trace_id)
+  if (!hasNoUnknownKeys(raw, ['trace_id', 'turn', 'tool_call_id'])) return null
+  const trace_id = decodeExactNonEmptyString(raw.trace_id)
   const turn = asNumber(raw.turn)
-  if (!trace_id || turn == null) return null
-  return { trace_id, turn, tool_call_id: asNullableString(raw.tool_call_id) }
+  const has_tool_call_id = Object.hasOwn(raw, 'tool_call_id')
+  const tool_call_id = has_tool_call_id
+    ? decodeExactNonEmptyString(raw.tool_call_id)
+    : null
+  if (
+    trace_id === null
+    || turn == null
+    || !Number.isSafeInteger(turn)
+    || turn < 0
+    || (has_tool_call_id && tool_call_id === null)
+  ) return null
+  return { trace_id, turn, tool_call_id }
 }
 
 function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
   if (!isRecord(raw)) return null
-  const claim = asString(raw.claim)
-  const categoryToken = asString(raw.category)
+  if (!hasExactKeys(raw, [
+    'claim',
+    'category',
+    'source',
+    'first_seen',
+    'first_seen_iso',
+    'reference_time',
+    'last_verified_at',
+  ])) return null
+  const claim = decodeExactNonEmptyString(raw.claim)
+  const category = typeof raw.category === 'string'
+    ? parseMemoryOsFactCategory(raw.category)
+    : null
   const source = decodeMemoryOsFactProvenance(raw.source)
   const first_seen = asNumber(raw.first_seen)
+  const first_seen_iso = decodeExactNonEmptyString(raw.first_seen_iso)
   const reference_time = asNumber(raw.reference_time)
-  const current = asBoolean(raw.current)
-  // Required keys are exactly the always-present ones in memory_os_fact_json.
-  // A row missing any of them is a contract violation — dropped here rather
-  // than rendered with a guessed default (no silent fabrication).
+  const last_verified_at = decodeNullableNumber(raw.last_verified_at)
+  const expected_first_seen_iso = first_seen == null
+    ? null
+    : wholeSecondIsoOfUnixSeconds(first_seen)
+  const expected_reference_time =
+    last_verified_at === undefined ? undefined : (last_verified_at ?? first_seen)
   if (
-    !claim
-    || !categoryToken
+    claim === null
+    || !category
     || !source
     || first_seen == null
+    || first_seen_iso === null
+    || expected_first_seen_iso === null
+    || first_seen_iso !== expected_first_seen_iso
     || reference_time == null
-    || current == null
+    || expected_reference_time === undefined
+    || reference_time !== expected_reference_time
+    || last_verified_at === undefined
   ) {
     return null
   }
-  // claim_kind is omitted by the server when None.
-  const claimKindToken = asString(raw.claim_kind)
   return {
     claim,
-    category: parseMemoryOsFactCategory(categoryToken),
+    category,
     source,
     first_seen,
-    first_seen_iso: asNullableString(raw.first_seen_iso),
+    first_seen_iso,
     reference_time,
-    valid_until: asNumber(raw.valid_until) ?? null,
-    valid_until_iso: asNullableString(raw.valid_until_iso),
-    last_verified_at: asNumber(raw.last_verified_at) ?? null,
-    current,
-    claim_kind: claimKindToken ? (parseMemoryOsClaimKind(claimKindToken) ?? null) : null,
+    last_verified_at,
   }
 }
 
 function decodeMemoryOsSelectionPolicy(raw: unknown): MemoryOsSelectionPolicy | null {
   if (!isRecord(raw)) return null
-  const keeper_scope = asString(raw.keeper_scope)
-  const facts_source = asString(raw.facts_source)
-  const episodes_source = asString(raw.episodes_source)
-  const category_source = asString(raw.category_source)
-  const claim_kind_source = asString(raw.claim_kind_source)
-  const recall_block = asString(raw.recall_block)
-  const prompt_record = asString(raw.prompt_record)
+  if (!hasExactKeys(raw, [
+    'keeper_scope',
+    'facts_source',
+    'episodes_source',
+    'category_source',
+    'recall_block',
+    'prompt_record',
+  ])) return null
+  const keeper_scope = decodeExactNonEmptyString(raw.keeper_scope)
+  const facts_source =
+    raw.facts_source === 'Keeper_memory_os_io.read_facts_all_for_keepers_dir'
+    ? raw.facts_source
+    : null
+  const episodes_source =
+    raw.episodes_source === 'Keeper_memory_os_io.read_episodes_all_for_keepers_dir'
+    ? raw.episodes_source
+    : null
+  const category_source = raw.category_source === 'Keeper_memory_os_types.category_to_string'
+    ? raw.category_source
+    : null
+  const recall_block = raw.recall_block === 'Keeper_memory_os_recall.render_if_enabled'
+    ? raw.recall_block
+    : null
+  const prompt_record =
+    raw.prompt_record === 'Keeper_run_tools_hooks.record_block Prompt_block_id.Memory_os_recall'
+      ? raw.prompt_record
+      : null
   if (
-    !keeper_scope
-    || !facts_source
-    || !episodes_source
-    || !category_source
-    || !claim_kind_source
-    || !recall_block
-    || !prompt_record
+    keeper_scope === null
+    || facts_source === null
+    || episodes_source === null
+    || category_source === null
+    || recall_block === null
+    || prompt_record === null
   ) {
     return null
   }
@@ -490,88 +682,230 @@ function decodeMemoryOsSelectionPolicy(raw: unknown): MemoryOsSelectionPolicy | 
     facts_source,
     episodes_source,
     category_source,
-    claim_kind_source,
     recall_block,
     prompt_record,
   }
 }
 
-function decodeMemoryOsCounts(raw: unknown): {
-  shown: number
-  current: number
-  expired: number
-} | null {
+function decodeMemoryOsCount(raw: unknown): { shown: number } | null {
   if (!isRecord(raw)) return null
-  return {
-    shown: asNumber(raw.shown, 0) ?? 0,
-    current: asNumber(raw.current, 0) ?? 0,
-    expired: asNumber(raw.expired, 0) ?? 0,
+  if (!hasNoUnknownKeys(raw, ['shown', 'terminal_markers', 'items'])) {
+    return null
   }
+  const shown = asNumber(raw.shown)
+  if (
+    shown == null
+    || !Number.isSafeInteger(shown)
+    || shown < 0
+  ) return null
+  return { shown }
 }
 
 function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null {
   if (!isRecord(raw)) return null
-  const schema = asString(raw.schema)
-  const keeper = asString(raw.keeper)
-  const source = asString(raw.source)
-  const producer = asString(raw.producer)
-  const facts_store = asString(raw.facts_store)
-  const episodes_store = asString(raw.episodes_store)
+  if (!hasExactKeys(raw, [
+    'schema',
+    'keeper',
+    'source',
+    'producer',
+    'selection_policy',
+    'facts_store',
+    'episodes_store',
+    'recall_enabled',
+    'read_errors',
+    'episodes',
+    'facts',
+  ])) return null
+  const schema = raw.schema === 'keeper.memory_os.recall_observability.v2'
+    ? raw.schema
+    : null
+  const keeper = decodeExactNonEmptyString(raw.keeper)
+  const source = raw.source === 'memory_os_files' ? raw.source : null
+  const producer = raw.producer === 'keeper_librarian|keeper_memory_os_recall'
+    ? raw.producer
+    : null
+  const selection_policy = decodeMemoryOsSelectionPolicy(raw.selection_policy)
+  const facts_store = decodeExactNonEmptyString(raw.facts_store)
+  const episodes_store = decodeExactNonEmptyString(raw.episodes_store)
+  const recall_enabled = asBoolean(raw.recall_enabled)
+  const read_errors = decodeArray(raw.read_errors, decodeMemoryOsReadError)
   const episodesRaw = isRecord(raw.episodes) ? raw.episodes : null
   const factsRaw = isRecord(raw.facts) ? raw.facts : null
-  const facts = decodeMemoryOsCounts(raw.facts)
-  if (!schema || !keeper || !source || !producer || !facts_store || !episodes_store || !episodesRaw || !factsRaw || !facts) {
+  const facts = decodeMemoryOsCount(raw.facts)
+  if (
+    schema === null
+    || keeper === null
+    || source === null
+    || producer === null
+    || !selection_policy
+    || facts_store === null
+    || episodes_store === null
+    || recall_enabled == null
+    || !read_errors
+    || !episodesRaw
+    || !factsRaw
+    || !facts
+  ) {
     return null
   }
-  const episodesCounts = decodeMemoryOsCounts(episodesRaw)
+  const episodesCounts = decodeMemoryOsCount(episodesRaw)
   if (!episodesCounts) return null
+  if (!hasExactKeys(episodesRaw, ['shown', 'terminal_markers', 'items'])) {
+    return null
+  }
+  if (!hasExactKeys(factsRaw, ['shown', 'items'])) return null
+  const terminal_markers = asNumber(episodesRaw.terminal_markers)
+  const episodes = decodeArray(episodesRaw.items, decodeMemoryOsEpisode)
+  const factItems = decodeArray(factsRaw.items, decodeMemoryOsFact)
+  if (
+    terminal_markers == null
+    || !Number.isSafeInteger(terminal_markers)
+    || terminal_markers < 0
+    || !episodes
+    || !factItems
+  ) return null
+  if (
+    episodesCounts.shown !== episodes.length
+    || terminal_markers !== episodes.filter(episode => episode.terminal_marker !== null).length
+    || facts.shown !== factItems.length
+  ) return null
   return {
     schema,
     keeper,
     source,
     producer,
-    selection_policy: decodeMemoryOsSelectionPolicy(raw.selection_policy),
+    selection_policy,
     facts_store,
     episodes_store,
-    recall_enabled: asBoolean(raw.recall_enabled, true) ?? true,
-    now: asNumber(raw.now) ?? null,
-    now_iso: asNullableString(raw.now_iso),
-    read_errors: asRecordArray(raw.read_errors)
-      .map((item) => {
-        const scope = asString(item.scope)
-        const error = asString(item.error)
-        return scope && error ? { scope, error } : null
-      })
-      .filter((item): item is { scope: string; error: string } => item !== null),
+    recall_enabled,
+    read_errors,
     episodes: {
       ...episodesCounts,
-      terminal_markers: asNumber(episodesRaw.terminal_markers, 0) ?? 0,
-      items: asRecordArray(episodesRaw.items)
-        .map(decodeMemoryOsEpisode)
-        .filter((item): item is MemoryOsEpisodeSummary => item !== null),
+      terminal_markers,
+      items: episodes,
     },
     facts: {
       ...facts,
-      items: asRecordArray(factsRaw.items)
-        .map(decodeMemoryOsFact)
-        .filter((item): item is MemoryOsFact => item !== null),
+      items: factItems,
     },
   }
 }
 
 function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
   if (!isRecord(raw)) return null
-  const keeper = asString(raw.keeper)
-  if (!keeper) return null
+  if (!hasExactKeys(raw, [
+    'keeper',
+    'count',
+    'skipped_rows',
+    'source',
+    'producer',
+    'durable_store',
+    'dashboard_surface',
+    'freshness_slo_s',
+    'latest_ts_unix',
+    'latest_ts_iso',
+    'latest_age_s',
+    'health',
+    'stale_reason',
+    'memory_os',
+    'entries',
+  ])) return null
+  const keeper = decodeExactNonEmptyString(raw.keeper)
+  const memory_os = decodeMemoryOsSnapshot(raw.memory_os)
+  const count = asNumber(raw.count)
+  const skipped_rows = asNumber(raw.skipped_rows)
+  const entries = decodeArray(raw.entries, decodeTurnRecordRow)
+  const source = raw.source === 'turn_record' ? raw.source : null
+  const producer = raw.producer === 'keeper_agent_run.run_turn|keeper_turn_record_writer'
+    ? raw.producer
+    : null
+  const durable_store = decodeExactNonEmptyString(raw.durable_store)
+  const dashboard_surface = raw.dashboard_surface === '/api/v1/keepers/:name/turn-records'
+    ? raw.dashboard_surface
+    : null
+  const freshness_slo_s = asNumber(raw.freshness_slo_s)
+  const latest_ts_unix = decodeNullableNumber(raw.latest_ts_unix)
+  const latest_ts_iso = decodeNullableString(raw.latest_ts_iso)
+  const latest_age_s = decodeNullableNumber(raw.latest_age_s)
+  const health =
+    raw.health === 'empty' || raw.health === 'stale' || raw.health === 'ok'
+      ? raw.health
+      : null
+  const stale_reason =
+    raw.stale_reason === null
+    || raw.stale_reason === 'no_entries'
+    || raw.stale_reason === 'freshness_slo_exceeded'
+      ? raw.stale_reason
+      : undefined
+  const latestRecordTs = entries === null || entries.length === 0
+    ? null
+    : Math.max(...entries.map(row => row.record.ts))
+  const expectedLatestTsIso = latest_ts_unix === null || latest_ts_unix === undefined
+    ? latest_ts_unix
+    : wholeSecondIsoOfUnixSeconds(latest_ts_unix)
+  if (
+    keeper === null
+    || !memory_os
+    || memory_os.keeper !== keeper
+    || memory_os.selection_policy.keeper_scope !== keeper
+    || count == null
+    || !Number.isSafeInteger(count)
+    || count < 0
+    || skipped_rows == null
+    || !Number.isSafeInteger(skipped_rows)
+    || skipped_rows < 0
+    || entries === null
+    || count !== entries.length
+    || source === null
+    || producer === null
+    || durable_store === null
+    || dashboard_surface === null
+    || freshness_slo_s == null
+    || freshness_slo_s <= 0
+    || latest_ts_unix === undefined
+    || latest_ts_iso === undefined
+    || latest_age_s === undefined
+    || (latest_age_s !== null && latest_age_s < 0)
+    || health === null
+    || stale_reason === undefined
+    || entries.some(row => row.record.keeper !== keeper)
+    || (entries.length === 0) !== (health === 'empty')
+    || latest_ts_unix !== latestRecordTs
+    || latest_ts_iso !== expectedLatestTsIso
+    || (health === 'empty'
+      && (latest_ts_unix !== null
+        || latest_ts_iso !== null
+        || latest_age_s !== null
+        || stale_reason !== 'no_entries'))
+    || (health === 'stale'
+      && (latest_ts_unix === null
+        || latest_ts_iso === null
+        || latest_age_s === null
+        || latest_age_s <= freshness_slo_s
+        || stale_reason !== 'freshness_slo_exceeded'))
+    || (health === 'ok'
+      && (latest_ts_unix === null
+        || latest_ts_iso === null
+        || latest_age_s === null
+        || latest_age_s > freshness_slo_s
+        || stale_reason !== null))
+  ) return null
   return {
-    ...decodeTelemetryFreshnessMetadata(raw),
+    source,
+    producer,
+    durable_store,
+    dashboard_surface,
+    freshness_slo_s,
+    latest_ts_unix,
+    latest_ts_iso,
+    latest_age_s,
+    health,
+    stale_reason,
     keeper,
-    count: asNumber(raw.count, 0),
-    skipped_rows: asNumber(raw.skipped_rows, 0),
-    memory_os: decodeMemoryOsSnapshot(raw.memory_os),
-    entries: asRecordArray(raw.entries)
-      .map(decodeTurnRecordRow)
-      .filter((row): row is TurnRecordRow => row !== null),
+    count,
+    skipped_rows,
+    memory_os,
+    entries,
   }
 }
 

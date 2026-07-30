@@ -25,7 +25,6 @@ import {
   fetchKeeperCompactionSnapshots,
   fetchKeeperTurnRecords,
   parseMemoryOsFactCategory,
-  parseMemoryOsClaimKind,
   fetchKeeperTurnTranscript,
   fetchDashboardMemory,
   fetchDashboardMission,
@@ -470,13 +469,44 @@ describe('keeper tool telemetry fetchers', () => {
       new Response(JSON.stringify({
         keeper: 'keeper-alpha',
         count: 2,
+        skipped_rows: 0,
         source: 'turn_record',
+        producer: 'keeper_agent_run.run_turn|keeper_turn_record_writer',
+        durable_store: '.masc/keepers/keeper-alpha/turn-records',
+        dashboard_surface: '/api/v1/keepers/:name/turn-records',
+        freshness_slo_s: 300,
+        latest_ts_unix: 11,
+        latest_ts_iso: '1970-01-01T00:00:11Z',
+        latest_age_s: 1,
+        health: 'ok',
+        stale_reason: null,
+        memory_os: {
+          schema: 'keeper.memory_os.recall_observability.v2',
+          keeper: 'keeper-alpha',
+          source: 'memory_os_files',
+          producer: 'keeper_librarian|keeper_memory_os_recall',
+          selection_policy: {
+            keeper_scope: 'keeper-alpha',
+            facts_source: 'Keeper_memory_os_io.read_facts_all_for_keepers_dir',
+            episodes_source: 'Keeper_memory_os_io.read_episodes_all_for_keepers_dir',
+            category_source: 'Keeper_memory_os_types.category_to_string',
+            recall_block: 'Keeper_memory_os_recall.render_if_enabled',
+            prompt_record: 'Keeper_run_tools_hooks.record_block Prompt_block_id.Memory_os_recall',
+          },
+          facts_store: '.masc/config/keepers/keeper-alpha.facts.jsonl',
+          episodes_store: '.masc/config/keepers/keeper-alpha/episodes',
+          recall_enabled: true,
+          read_errors: [],
+          episodes: { shown: 0, terminal_markers: 0, items: [] },
+          facts: { shown: 0, items: [] },
+        },
         entries: [
           {
             record: {
               keeper: 'keeper-alpha',
               trace_id: 'trace-grounded',
               absolute_turn: 7,
+              turn_ref: 'trace-grounded#7',
               ts: 10,
               runtime_profile: 'local',
               model: 'deepseek-v4-flash',
@@ -493,6 +523,7 @@ describe('keeper tool telemetry fetchers', () => {
               keeper: 'keeper-alpha',
               trace_id: 'trace-grounded',
               absolute_turn: 8,
+              turn_ref: 'trace-grounded#8',
               ts: 11,
               runtime_profile: 'local',
               blocks: [],
@@ -682,7 +713,7 @@ describe('keeper tool telemetry fetchers', () => {
 })
 
 describe('parseMemoryOsFactCategory (SSOT mirror of category_of_string)', () => {
-  it('maps every known token to its tag and absorbs the rest as a typed Unknown', () => {
+  it('accepts only the exact tokens emitted by the closed backend sum', () => {
     const known = [
       'code_change',
       'fact',
@@ -690,141 +721,298 @@ describe('parseMemoryOsFactCategory (SSOT mirror of category_of_string)', () => 
       'blocker',
       'goal',
       'constraint',
-      'ephemeral',
       'validated_approach',
       'lesson',
     ] as const
     for (const token of known) {
       expect(parseMemoryOsFactCategory(token)).toEqual({ tag: token })
     }
-    // trim + lowercase, like the backend's String.lowercase_ascii (String.trim s)
-    expect(parseMemoryOsFactCategory('  FACT ')).toEqual({ tag: 'fact' })
-    // out-of-vocabulary preserves the raw label so a rising-Unknown rate is visible
-    expect(parseMemoryOsFactCategory('Speculation')).toEqual({ tag: 'unknown', raw: 'Speculation' })
-    expect(parseMemoryOsFactCategory('')).toEqual({ tag: 'unknown', raw: '' })
-  })
-})
-
-describe('parseMemoryOsClaimKind (SSOT mirror of claim_kind_of_string)', () => {
-  it('maps the known kinds and yields undefined for anything else', () => {
-    expect(parseMemoryOsClaimKind('self_observation')).toBe('self_observation')
-    expect(parseMemoryOsClaimKind('external_state')).toBe('external_state')
-    expect(parseMemoryOsClaimKind('durable_knowledge')).toBe('durable_knowledge')
-    expect(parseMemoryOsClaimKind('diagnostic')).toBe('diagnostic')
-    expect(parseMemoryOsClaimKind(' DURABLE_KNOWLEDGE ')).toBe('durable_knowledge')
-    expect(parseMemoryOsClaimKind('nonsense')).toBeUndefined()
+    expect(parseMemoryOsFactCategory('  FACT ')).toBeNull()
+    expect(parseMemoryOsFactCategory('Speculation')).toBeNull()
+    expect(parseMemoryOsFactCategory('ephemeral')).toBeNull()
+    expect(parseMemoryOsFactCategory('')).toBeNull()
   })
 })
 
 describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel-real-data §4a)', () => {
-  it('decodes fact rows with typed category / provenance / TTL, absorbs Unknown, drops malformed and the deleted score model', async () => {
-    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
-      new Response(JSON.stringify({
+  function turnRecordsPayload() {
+    return {
+      keeper: 'keeper-alpha',
+      count: 0,
+      skipped_rows: 0,
+      source: 'turn_record',
+      producer: 'keeper_agent_run.run_turn|keeper_turn_record_writer',
+      durable_store: '.masc/keepers/keeper-alpha/turn-records',
+      dashboard_surface: '/api/v1/keepers/:name/turn-records',
+      freshness_slo_s: 300,
+      latest_ts_unix: null,
+      latest_ts_iso: null,
+      latest_age_s: null,
+      health: 'empty',
+      stale_reason: 'no_entries',
+      entries: [],
+      memory_os: {
+        schema: 'keeper.memory_os.recall_observability.v2',
         keeper: 'keeper-alpha',
-        count: 0,
-        source: 'turn_record',
-        entries: [],
-        memory_os: {
-          schema: 'keeper.memory_os.recall_observability.v1',
-          keeper: 'keeper-alpha',
-          source: 'memory_os_files',
-          producer: 'keeper_librarian|keeper_memory_os_recall',
-          facts_store: '.masc/config/keepers/keeper-alpha.facts.jsonl',
-          episodes_store: '.masc/config/keepers/keeper-alpha/episodes',
-          recall_enabled: true,
-          now: 1_790_000_000,
-          now_iso: '2026-09-21T00:00:00Z',
-          read_errors: [],
-          episodes: { shown: 0, current: 0, expired: 0, terminal_markers: 0, items: [] },
-          facts: {
-            shown: 3,
-            current: 2,
-            expired: 1,
-            items: [
-              {
-                claim: 'retention D0 = signup day',
-                category: 'constraint',
-                source: { trace_id: 't-1', turn: 4, tool_call_id: 'call_9' },
-                first_seen: 1_789_000_000,
-                first_seen_iso: '2026-09-09T...Z',
-                reference_time: 1_789_500_000,
-                valid_until: null,
-                valid_until_iso: null,
-                last_verified_at: 1_789_500_000,
-                current: true,
-                claim_kind: 'durable_knowledge',
-                // RFC-0247-deleted score fields: present on the wire here as a
-                // poison payload; the decoder must never copy them through.
-                salience: 0.92,
-                uses: 14,
-                confidence: 0.8,
-              },
-              {
-                claim: 'librarian emitted a category outside the taxonomy',
-                category: 'Speculation', // out-of-vocabulary → Unknown drift absorber
-                source: { trace_id: 't-2', turn: 5 }, // tool_call_id omitted → null
-                first_seen: 1_789_100_000,
-                first_seen_iso: '2026-09-09T...Z',
-                reference_time: 1_789_100_000,
-                valid_until: 1_789_900_000,
-                valid_until_iso: '2026-09-10T...Z',
-                last_verified_at: null,
-                current: false,
-                // claim_kind omitted entirely → null
-              },
-              {
-                // malformed: missing required `claim` → dropped, never fabricated
-                category: 'fact',
-                source: { trace_id: 't-3', turn: 6 },
-                first_seen: 1,
-                reference_time: 1,
-                current: true,
-              },
-            ],
-          },
+        source: 'memory_os_files',
+        producer: 'keeper_librarian|keeper_memory_os_recall',
+        selection_policy: {
+          keeper_scope: 'keeper-alpha',
+          facts_source: 'Keeper_memory_os_io.read_facts_all_for_keepers_dir',
+          episodes_source: 'Keeper_memory_os_io.read_episodes_all_for_keepers_dir',
+          category_source: 'Keeper_memory_os_types.category_to_string',
+          recall_block: 'Keeper_memory_os_recall.render_if_enabled',
+          prompt_record: 'Keeper_run_tools_hooks.record_block Prompt_block_id.Memory_os_recall',
         },
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+        facts_store: '.masc/config/keepers/keeper-alpha.facts.jsonl',
+        episodes_store: '.masc/config/keepers/keeper-alpha/episodes',
+        recall_enabled: true,
+        read_errors: [],
+        episodes: { shown: 0, terminal_markers: 0, items: [] },
+        facts: {
+          shown: 2,
+          items: [
+            {
+              claim: 'retention D0 = signup day',
+              category: 'constraint',
+              source: { trace_id: 't-1', turn: 4, tool_call_id: 'call_9' },
+              first_seen: 1_789_000_000,
+              first_seen_iso: '2026-09-10T00:26:40Z',
+              reference_time: 1_789_500_000,
+              last_verified_at: 1_789_500_000,
+            },
+            {
+              claim: 'provider observation',
+              category: 'fact',
+              source: { trace_id: 't-2', turn: 5 },
+              first_seen: 1_789_100_000,
+              first_seen_iso: '2026-09-11T04:13:20Z',
+              reference_time: 1_789_100_000,
+              last_verified_at: null,
+            },
+          ],
+        },
+      },
+    }
+  }
+
+  function stubTurnRecords(payload: unknown): void {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify(payload), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     ))
     vi.stubGlobal('fetch', fetchMock)
+  }
+
+  it('decodes the exact current fact, provenance, and selection-policy contract', async () => {
+    stubTurnRecords(turnRecordsPayload())
 
     const result = await fetchKeeperTurnRecords('keeper-alpha')
-    const items = result.memory_os?.facts.items ?? []
-
-    // 3 rows in, malformed row dropped, 2 decoded
+    const items = result.memory_os.facts.items
     expect(items).toHaveLength(2)
 
     const [first, second] = items
     expect(first?.claim).toBe('retention D0 = signup day')
     expect(first?.category).toEqual({ tag: 'constraint' })
     expect(first?.source).toEqual({ trace_id: 't-1', turn: 4, tool_call_id: 'call_9' })
-    expect(first?.current).toBe(true)
-    expect(first?.valid_until).toBeNull()
     expect(first?.reference_time).toBe(1_789_500_000)
-    expect(first?.claim_kind).toBe('durable_knowledge')
 
-    // out-of-vocabulary category → typed Unknown arm carrying the raw label
-    expect(second?.category).toEqual({ tag: 'unknown', raw: 'Speculation' })
-    // omitted optionals are null, not fabricated
+    expect(second?.category).toEqual({ tag: 'fact' })
     expect(second?.source.tool_call_id).toBeNull()
-    expect(second?.claim_kind).toBeNull()
-    expect(second?.current).toBe(false)
+  })
 
-    // RFC-0247 drift guard: the deleted composite-score fields never reappear,
-    // even when the wire payload carries them.
-    const deletedScoreKeys = [
-      'salience',
-      'uses',
-      'lastUsed',
-      'confidence',
-      'access_count',
-      'last_accessed',
-      'stale_factor',
-      'expected_lifetime_cycles',
-    ]
-    for (const key of deletedScoreKeys) {
-      expect(first as Record<string, unknown>).not.toHaveProperty(key)
-    }
+  it('preserves exact persisted claim bytes instead of trimming them', async () => {
+    const payload = turnRecordsPayload()
+    payload.memory_os.facts.items[0]!.claim = '  exact claim bytes  '
+    stubTurnRecords(payload)
 
+    const result = await fetchKeeperTurnRecords('keeper-alpha')
+
+    expect(result.memory_os.facts.items[0]?.claim).toBe('  exact claim bytes  ')
+  })
+
+  it('rejects a non-current Memory OS schema token', async () => {
+    const payload = turnRecordsPayload()
+    payload.memory_os.schema = 'keeper.memory_os.recall_observability.v0'
+    stubTurnRecords(payload)
+
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects keeper scope drift across the response and Memory OS projection', async () => {
+    const payload = turnRecordsPayload()
+    payload.memory_os.selection_policy.keeper_scope = 'other-keeper'
+    stubTurnRecords(payload)
+
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects inconsistent fact counts instead of rendering a misleading store total', async () => {
+    const payload = turnRecordsPayload()
+    payload.memory_os.facts.shown = 3
+    stubTurnRecords(payload)
+
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects dead observability fields outside the current closed projection', async () => {
+    const payload = turnRecordsPayload()
+    Object.assign(payload.memory_os, {
+      now: 1_790_000_000,
+      now_iso: '2026-09-21T00:00:00Z',
+    })
+    stubTurnRecords(payload)
+
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it.each([
+    'claim_kind',
+    'salience',
+    'uses',
+    'confidence',
+    'access_count',
+    'last_accessed',
+  ])('rejects retired fact field %s instead of silently stripping it', async (field) => {
+    const payload = turnRecordsPayload()
+    Object.assign(payload.memory_os.facts.items[0]!, { [field]: 'retired' })
+    stubTurnRecords(payload)
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects retired selection-policy fields', async () => {
+    const payload = turnRecordsPayload()
+    Object.assign(payload.memory_os.selection_policy, {
+      claim_kind_source: 'Keeper_memory_os_types.claim_kind_to_string',
+    })
+    stubTurnRecords(payload)
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it.each(['Speculation', '  FACT '])(
+    'rejects non-canonical category token %s',
+    async (category) => {
+      const payload = turnRecordsPayload()
+      payload.memory_os.facts.items[0]!.category = category
+      stubTurnRecords(payload)
+      await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+        '유효하지 않은 keeper turn record payload',
+      )
+    },
+  )
+
+  it('rejects malformed rows instead of silently dropping them', async () => {
+    const payload = turnRecordsPayload()
+    Object.assign(payload.memory_os.facts.items[0]!, { claim: undefined })
+    stubTurnRecords(payload)
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects unknown provenance fields', async () => {
+    const payload = turnRecordsPayload()
+    Object.assign(payload.memory_os.facts.items[0]!.source, { lease: 'retired' })
+    stubTurnRecords(payload)
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects a nullable first-seen ISO that the current producer cannot emit', async () => {
+    const payload = turnRecordsPayload()
+    Object.assign(payload.memory_os.facts.items[0]!, { first_seen_iso: null })
+    stubTurnRecords(payload)
+
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects fact timestamp projections that disagree with their numeric SSOT', async () => {
+    const payload = turnRecordsPayload()
+    Object.assign(payload.memory_os.facts.items[0]!, {
+      first_seen_iso: '2026-09-10T00:26:41Z',
+    })
+    stubTurnRecords(payload)
+
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects a fact reference_time that is not last_verified_at else first_seen', async () => {
+    const payload = turnRecordsPayload()
+    Object.assign(payload.memory_os.facts.items[0]!, {
+      reference_time: 1_789_500_001,
+    })
+    stubTurnRecords(payload)
+
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects removed validity fields', async () => {
+    const payload = turnRecordsPayload()
+    Object.assign(payload.memory_os.facts.items[1]!, {
+      valid_until: 1_789_900_000,
+      valid_until_iso: '2026-09-20T10:26:40Z',
+      current: true,
+    })
+    stubTurnRecords(payload)
+
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects explicit null tool provenance that the current producer omits', async () => {
+    const payload = turnRecordsPayload()
+    Object.assign(payload.memory_os.facts.items[1]!.source, {
+      tool_call_id: null,
+    })
+    stubTurnRecords(payload)
+
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects an unsafe source turn range', async () => {
+    const payload = turnRecordsPayload()
+    Object.assign(payload.memory_os.episodes, {
+      shown: 1,
+      terminal_markers: 0,
+      items: [{
+        trace_id: 'episode-trace',
+        generation: 1,
+        created_at: 1_789_000_000,
+        terminal_marker: null,
+        claim_count: 0,
+        source_turn_range: {
+          lo: Number.MAX_SAFE_INTEGER + 1,
+          hi: Number.MAX_SAFE_INTEGER + 1,
+        },
+        summary: 'unsafe range',
+      }],
+    })
+    stubTurnRecords(payload)
+
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
   })
 })
 

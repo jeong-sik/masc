@@ -204,7 +204,7 @@ let manual_help_entry name =
               "Do not use for transient scratch notes.";
             ];
           details_markdown =
-            "Writes a bounded durable claim into the Memory OS fact store that recall renders into later turns. Optional valid_for_days declares an expiry.";
+            "Writes a bounded durable claim into the Memory OS fact store that recall renders into later turns.";
           doc_refs = [];
           prompt_hints = [];
           examples =

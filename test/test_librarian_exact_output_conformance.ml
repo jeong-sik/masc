@@ -35,16 +35,31 @@ let with_prompt_registry f =
       f ())
 ;;
 
+let exact_flow_base_path_ref = ref None
+
+let exact_flow_base_path () =
+  match !exact_flow_base_path_ref with
+  | Some base_path -> base_path
+  | None -> failwith "exact-flow test base path is unavailable outside its scope"
+;;
+
 let with_temp_keepers_dir f =
   let marker = Filename.temp_file "librarian-exact-output-" ".tmp" in
   Sys.remove marker;
-  Memory_io.For_testing.with_keepers_dir marker (fun () -> f marker)
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:marker
+  in
+  let previous = !exact_flow_base_path_ref in
+  exact_flow_base_path_ref := Some marker;
+  Fun.protect
+    ~finally:(fun () -> exact_flow_base_path_ref := previous)
+    (fun () ->
+       Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
+         f keepers_dir))
 ;;
 
-let exact_flow_base_path = "/tmp/masc-librarian-exact-flow"
-
 let ensure_registered_keeper keeper_id =
-  match Masc.Keeper_registry.get ~base_path:exact_flow_base_path keeper_id with
+  match Masc.Keeper_registry.get ~base_path:(exact_flow_base_path ()) keeper_id with
   | Some _ -> ()
   | None ->
     let meta =
@@ -57,7 +72,7 @@ let ensure_registered_keeper keeper_id =
     in
     ignore
       (Masc.Keeper_registry.register_offline
-         ~base_path:exact_flow_base_path
+         ~base_path:(exact_flow_base_path ())
          keeper_id
          meta)
 ;;
@@ -72,7 +87,7 @@ let extract_with_exact_output_classified
   ensure_registered_keeper keeper_id;
   Librarian_runtime.extract_with_exact_output_classified
     ?clock
-    ~base_path:exact_flow_base_path
+    ~base_path:(exact_flow_base_path ())
     ~net
     ~keeper_id
     ~generation
@@ -104,7 +119,8 @@ let extract_and_append_with_exact_output ?clock ~net ~keeper_id input =
   match
     Librarian_runtime.extract_and_append_with_exact_output_classified
       ?clock
-      ~base_path:exact_flow_base_path
+      ~base_path:(exact_flow_base_path ())
+      ~generation_floor:1
       ~net
       ~keeper_id
       input
@@ -120,9 +136,25 @@ let text_message text =
     [ Agent_sdk.Types.Text text ]
 ;;
 
+let tool_result_message ~tool_use_id text : Agent_sdk.Types.message =
+  { role = Agent_sdk.Types.Assistant
+  ; content =
+      [ Agent_sdk.Types.ToolResult
+          { tool_use_id
+          ; content = text
+          ; outcome = Agent_sdk.Types.Tool_succeeded
+          ; json = None
+          ; content_blocks = None
+          }
+      ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+;;
+
 let librarian_input trace_id =
   { Librarian.trace_id
-  ; generation = 1
   ; messages = [ text_message "Remember the exact-output boundary." ]
   }
 ;;
@@ -138,13 +170,8 @@ let valid_output =
               ; "source_turn", `Int 0
               ; "source_tool_call_id", `Null
               ; "claim_id", `String "oas-exact-output-owns-admission"
-              ; "claim_kind", `String "durable_knowledge"
-              ; "valid_for_days", `Null
               ]
           ] )
-    ; "open_items", `List []
-    ; "constraints", `List []
-    ; "preserved_tool_refs", `List []
     ]
 ;;
 
@@ -174,20 +201,37 @@ let has_response_format body =
   | _ -> false
 ;;
 
-let exact_journal_path ~keeper_id ~trace_id ~generation =
-  let exact_output_dir =
-    Memory_io.episodes_dir ~keeper_id
-    |> Filename.dirname
+let exact_journal_path_for_keepers_dir
+      ~keepers_dir
+      ~keeper_id
+      ~trace_id
+      ~generation
+  =
+  let exact_trace_dir =
+    Filename.concat keepers_dir keeper_id
     |> fun keeper_dir -> Filename.concat keeper_dir "exact-output"
-  in
-  let generation_key =
-    String.concat "\000" [ trace_id; string_of_int generation ]
-    |> Digestif.SHA256.digest_string
-    |> Digestif.SHA256.to_hex
+    |> fun exact_output_dir ->
+    Filename.concat
+      exact_output_dir
+      (trace_id
+       |> Digestif.SHA256.digest_string
+       |> Digestif.SHA256.to_hex)
   in
   Filename.concat
-    exact_output_dir
-    ("librarian-exact-state-v2-" ^ generation_key ^ ".json")
+    exact_trace_dir
+    (Printf.sprintf "librarian-exact-state-%d.json" generation)
+;;
+
+let exact_journal_path ~keeper_id ~trace_id ~generation =
+  let keepers_dir =
+    Memory_io.facts_path ~keeper_id
+    |> Filename.dirname
+  in
+  exact_journal_path_for_keepers_dir
+    ~keepers_dir
+    ~keeper_id
+    ~trace_id
+    ~generation
 ;;
 
 let exact_journal_state ~keeper_id ~trace_id ~generation =
@@ -199,24 +243,48 @@ let exact_journal_state ~keeper_id ~trace_id ~generation =
   Yojson.Safe.Util.(json |> member "state" |> to_string)
 ;;
 
-let write_exact_journal ~keeper_id ~trace_id ~generation ~state =
+let write_exact_journal_json ~keeper_id ~trace_id ~generation json =
+  let path = exact_journal_path ~keeper_id ~trace_id ~generation in
   let (_ : string) =
-    Memory_io.episodes_dir ~keeper_id
-    |> Filename.dirname
-    |> fun keeper_dir -> Filename.concat keeper_dir "exact-output"
+    Filename.dirname path
     |> Keeper_fs.ensure_dir
   in
-  let path = exact_journal_path ~keeper_id ~trace_id ~generation in
-  let payload =
-    `Assoc
-      [ "schema_version", `Int 2
-      ; "trace_id", `String trace_id
-      ; "generation", `Int generation
-      ; "state", `String state
-      ]
-    |> Yojson.Safe.to_string
-  in
+  let payload = Yojson.Safe.to_string json in
   Out_channel.with_open_bin path (fun channel -> output_string channel payload)
+;;
+
+let write_exact_journal ~keeper_id ~trace_id ~generation ~state =
+  write_exact_journal_json
+    ~keeper_id
+    ~trace_id
+    ~generation
+    (`Assoc
+       [ "trace_id", `String trace_id
+       ; "generation", `Int generation
+       ; "state", `String state
+       ])
+;;
+
+let exact_candidate_journal ~trace_id ~generation =
+  `Assoc
+    [ "trace_id", `String trace_id
+    ; "generation", `Int generation
+    ; "state", `String "candidate_bound"
+    ; ( "candidate"
+      , `Assoc
+          [ "candidate_id", `String "restart-bound-candidate"
+          ; ( "receipt"
+            , `Assoc
+                [ "call_id", `String "restart-bound-call"
+                ; "http_status", `Null
+                ; "plan_fingerprint", `String "restart-bound-plan"
+                ; "request_body_sha256", `String "restart-bound-request"
+                ; "catalog_generation", `String "restart-bound-catalog"
+                ; "catalog_evidence_sha256", `String "restart-bound-evidence"
+                ; "target_identity", `String "restart-bound-target"
+                ] )
+          ] )
+    ]
 ;;
 
 let run_eio f =
@@ -275,6 +343,85 @@ let test_prompt_only_target_is_admitted_and_persisted () =
                ~keeper_id
                ~trace_id:"trace-json-only"
                ~generation:1))))
+;;
+
+let test_production_write_uses_explicit_base_path () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun keepers_dir ->
+      let decoy_keepers_dir =
+        Filename.temp_file "librarian-exact-output-decoy-" ".tmp"
+      in
+      Sys.remove decoy_keepers_dir;
+      Memory_io.For_testing.with_keepers_dir decoy_keepers_dir (fun () ->
+        run_eio (fun ~sw ~net ~clock ->
+          let response = Fixture.openai_response valid_output in
+          let server =
+            Fixture.start_server ~sw ~net ~clock (Fixture.Reply response)
+          in
+          publish_lane
+            [ { id = "librarian-base-path-authority"
+              ; base_url = server.base_url
+              }
+            ];
+          let keeper_id = "librarian-base-path-authority-keeper" in
+          let trace_id = "trace-base-path-authority" in
+          match
+            extract_and_append_with_exact_output
+              ~clock
+              ~net
+              ~keeper_id
+              (librarian_input trace_id)
+          with
+          | Error error -> Alcotest.fail error
+          | Ok episode ->
+            Alcotest.(check int)
+              "explicit base path owns the fact"
+              1
+              (List.length
+                 (Memory_io.read_facts_all_for_keepers_dir
+                    ~keepers_dir
+                    ~keeper_id));
+            Alcotest.(check int)
+              "ambient override receives no fact"
+              0
+              (List.length
+                 (Memory_io.read_facts_all_for_keepers_dir
+                    ~keepers_dir:decoy_keepers_dir
+                    ~keeper_id));
+            Alcotest.(check int)
+              "explicit base path owns the event"
+              1
+              (List.length
+                 (Memory_io.read_events_tail_for_keepers_dir
+                    ~keepers_dir
+                    ~keeper_id
+                    ~n:10));
+            Alcotest.(check int)
+              "ambient override receives no event"
+              0
+              (List.length
+                 (Memory_io.read_events_tail_for_keepers_dir
+                    ~keepers_dir:decoy_keepers_dir
+                    ~keeper_id
+                    ~n:10));
+            Alcotest.(check bool)
+              "explicit base path owns the exact journal"
+              true
+              (Sys.file_exists
+                 (exact_journal_path_for_keepers_dir
+                    ~keepers_dir
+                    ~keeper_id
+                    ~trace_id
+                    ~generation:episode.Types.generation));
+            Alcotest.(check bool)
+              "ambient override receives no exact journal"
+              false
+              (Sys.file_exists
+                 (exact_journal_path_for_keepers_dir
+                    ~keepers_dir:decoy_keepers_dir
+                    ~keeper_id
+                    ~trace_id
+                    ~generation:episode.Types.generation))))))
 ;;
 
 let test_prompt_only_target_needs_no_wire_json_capability () =
@@ -390,7 +537,7 @@ let test_unsettled_restart_state_fails_before_dispatch () =
         ~keeper_id
         ~trace_id:"trace-after-restart"
         ~generation:42
-        ~state:"candidate_bound";
+        ~state:"flow_started";
       match
         extract_with_exact_output_classified
           ~clock
@@ -410,7 +557,88 @@ let test_unsettled_restart_state_fails_before_dispatch () =
       | Ok _ -> Alcotest.fail "unsettled prior exact attempt must fail closed")))
 ;;
 
-let test_oas_success_restart_state_starts_fresh_flow () =
+let test_production_restart_reuses_active_generation_before_dispatch () =
+  with_prompt_registry (fun () ->
+  with_temp_keepers_dir (fun _ ->
+    run_eio (fun ~sw ~net ~clock ->
+      let server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (Fixture.openai_response valid_output))
+      in
+      publish_lane
+        [ { id = "librarian-production-restart"; base_url = server.base_url } ];
+      let cases =
+        [ ( "flow_started"
+          , fun ~trace_id ~generation ->
+              `Assoc
+                [ "trace_id", `String trace_id
+                ; "generation", `Int generation
+                ; "state", `String "flow_started"
+                ] )
+        ; "candidate_bound", exact_candidate_journal
+        ]
+      in
+      List.iteri
+        (fun index (state, journal) ->
+           let keeper_id =
+             Printf.sprintf "librarian-production-restart-%d" index
+           in
+           let trace_id =
+             Printf.sprintf "trace-production-restart-%d" index
+           in
+           ensure_registered_keeper keeper_id;
+           let generation =
+             Memory_io.next_generation_with_floor
+               ~floor:42
+               ~keeper_id
+               ~trace_id
+           in
+           Alcotest.(check int)
+             (state ^ " reserved generation")
+             42
+             generation;
+           write_exact_journal_json
+             ~keeper_id
+             ~trace_id
+             ~generation
+             (journal ~trace_id ~generation);
+           (match
+              Librarian_runtime.extract_and_append_with_exact_output_classified
+                ~clock
+                ~base_path:(exact_flow_base_path ())
+                ~generation_floor:1
+                ~net
+                ~keeper_id
+                (librarian_input trace_id)
+            with
+            | Error error
+              when Librarian_runtime.extraction_error_kind error
+                   = Librarian_runtime.Exact_setup_failure ->
+              ()
+            | Error error ->
+              Alcotest.failf
+                "%s: expected typed restart fence, got %s"
+                state
+                (Librarian_runtime.extraction_error_to_string error)
+            | Ok _ ->
+              Alcotest.failf
+                "%s: production restart bypassed its active generation"
+                state);
+           Alcotest.(check int)
+             (state ^ " did not reserve past active generation")
+             43
+             (Memory_io.next_generation ~keeper_id ~trace_id))
+        cases;
+      Alcotest.(check int)
+        "production restart dispatched nothing"
+        0
+        (Fixture.post_count server))))
+;;
+
+let test_terminal_restart_state_starts_fresh_flow () =
   with_prompt_registry (fun () ->
   with_temp_keepers_dir (fun _ ->
     run_eio (fun ~sw ~net ~clock ->
@@ -425,23 +653,23 @@ let test_oas_success_restart_state_starts_fresh_flow () =
         { id = "librarian-oas-success-restart"; base_url = server.base_url }
       in
       publish_lane [ slot ];
-      let keeper_id = "librarian-oas-success-restart-keeper" in
+      let keeper_id = "librarian-terminal-restart-keeper" in
       write_exact_journal
         ~keeper_id
-        ~trace_id:"trace-after-oas-success"
+        ~trace_id:"trace-after-terminal"
         ~generation:42
-        ~state:"oas_success";
+        ~state:"execution_terminal";
       match
         extract_with_exact_output_classified
           ~clock
           ~net
           ~keeper_id
           ~generation:42
-          (librarian_input "trace-after-oas-success")
+          (librarian_input "trace-after-terminal")
       with
       | Error error ->
         Alcotest.failf
-          "oas-success restart should start a fresh flow, got %s"
+          "terminal restart should start a fresh flow, got %s"
           (Librarian_runtime.extraction_error_to_string error)
       | Ok _ ->
         Alcotest.(check int)
@@ -453,8 +681,358 @@ let test_oas_success_restart_state_starts_fresh_flow () =
           "domain_valid"
           (exact_journal_state
              ~keeper_id
-             ~trace_id:"trace-after-oas-success"
+             ~trace_id:"trace-after-terminal"
              ~generation:42))))
+;;
+
+let test_production_terminal_restart_reserves_new_generation () =
+  with_prompt_registry (fun () ->
+  with_temp_keepers_dir (fun _ ->
+    run_eio (fun ~sw ~net ~clock ->
+      let server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (Fixture.openai_response valid_output))
+      in
+      publish_lane
+        [ { id = "librarian-production-terminal-restart"
+          ; base_url = server.base_url
+          }
+        ];
+      let keeper_id = "librarian-production-terminal-restart-keeper" in
+      let trace_id = "trace-production-terminal-restart" in
+      ensure_registered_keeper keeper_id;
+      let generation =
+        Memory_io.next_generation_with_floor
+          ~floor:42
+          ~keeper_id
+          ~trace_id
+      in
+      write_exact_journal
+        ~keeper_id
+        ~trace_id
+        ~generation
+        ~state:"execution_terminal";
+      match
+        Librarian_runtime.extract_and_append_with_exact_output_classified
+          ~clock
+          ~base_path:(exact_flow_base_path ())
+          ~generation_floor:1
+          ~net
+          ~keeper_id
+          (librarian_input trace_id)
+      with
+      | Error error ->
+        Alcotest.failf
+          "terminal production restart failed: %s"
+          (Librarian_runtime.extraction_error_to_string error)
+      | Ok episode ->
+        Alcotest.(check int)
+          "terminal restart advances generation"
+          43
+          episode.Types.generation;
+        Alcotest.(check int)
+          "terminal restart dispatched once"
+          1
+          (Fixture.post_count server);
+        Alcotest.(check string)
+          "new generation reached domain-valid terminal"
+          "domain_valid"
+          (exact_journal_state
+             ~keeper_id
+             ~trace_id
+             ~generation:43))))
+;;
+
+let test_invalid_current_journal_fails_before_dispatch () =
+  with_prompt_registry (fun () ->
+  with_temp_keepers_dir (fun _ ->
+    run_eio (fun ~sw ~net ~clock ->
+      let server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (Fixture.openai_response valid_output))
+      in
+      let slot : Fixture.target_fixture =
+        { id = "librarian-invalid-current-journal"; base_url = server.base_url }
+      in
+      publish_lane [ slot ];
+      let cases =
+        [ ( "missing trace"
+          , fun ~trace_id:_ ~generation ->
+              `Assoc
+                [ "generation", `Int generation
+                ; "state", `String "execution_terminal"
+                ] )
+        ; ( "mismatched trace"
+          , fun ~trace_id:_ ~generation ->
+              `Assoc
+                [ "trace_id", `String "different-trace"
+                ; "generation", `Int generation
+                ; "state", `String "execution_terminal"
+                ] )
+        ; ( "mismatched generation"
+          , fun ~trace_id ~generation ->
+              `Assoc
+                [ "trace_id", `String trace_id
+                ; "generation", `Int (generation + 1)
+                ; "state", `String "execution_terminal"
+                ] )
+        ; ( "unknown field"
+          , fun ~trace_id ~generation ->
+              `Assoc
+                [ "trace_id", `String trace_id
+                ; "generation", `Int generation
+                ; "state", `String "execution_terminal"
+                ; "legacy", `Bool true
+                ] )
+        ; ( "unknown state"
+          , fun ~trace_id ~generation ->
+              `Assoc
+                [ "trace_id", `String trace_id
+                ; "generation", `Int generation
+                ; "state", `String "future_state"
+                ] )
+        ; ( "duplicate state"
+          , fun ~trace_id ~generation ->
+              `Assoc
+                [ "trace_id", `String trace_id
+                ; "generation", `Int generation
+                ; "state", `String "execution_terminal"
+                ; "state", `String "execution_terminal"
+                ] )
+        ; ( "malformed candidate evidence"
+          , fun ~trace_id ~generation ->
+              `Assoc
+                [ "trace_id", `String trace_id
+                ; "generation", `Int generation
+                ; "state", `String "domain_valid"
+                ; "candidate", `Assoc []
+                ] )
+        ]
+      in
+      List.iteri
+        (fun index (label, journal) ->
+           let keeper_id =
+             Printf.sprintf "librarian-invalid-current-journal-%d" index
+           in
+           let trace_id = Printf.sprintf "trace-invalid-current-journal-%d" index in
+           let generation = 42 in
+           write_exact_journal_json
+             ~keeper_id
+             ~trace_id
+             ~generation
+             (journal ~trace_id ~generation);
+           match
+             extract_with_exact_output_classified
+               ~clock
+               ~net
+               ~keeper_id
+               ~generation
+               (librarian_input trace_id)
+           with
+           | Error error
+             when Librarian_runtime.extraction_error_kind error
+                  = Librarian_runtime.Exact_setup_failure ->
+             ()
+           | Error error ->
+             Alcotest.failf
+               "%s: expected typed journal setup failure, got %s"
+               label
+               (Librarian_runtime.extraction_error_to_string error)
+           | Ok _ ->
+             Alcotest.failf
+               "%s: invalid current journal must fail before dispatch"
+               label)
+        cases;
+      Alcotest.(check int)
+        "invalid current journals dispatched nothing"
+        0
+        (Fixture.post_count server))))
+;;
+
+let test_noncanonical_journal_identity_fails_production_before_dispatch () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _ ->
+      run_eio (fun ~sw ~net ~clock ->
+        let server =
+          Fixture.start_server
+            ~sw
+            ~net
+            ~clock
+            (Fixture.Reply (Fixture.openai_response valid_output))
+        in
+        publish_lane
+          [ { id = "librarian-noncanonical-journal"
+            ; base_url = server.base_url
+            }
+          ];
+        let keeper_id = "librarian-noncanonical-journal-keeper" in
+        let trace_id = "trace-noncanonical-journal" in
+        write_exact_journal_json
+          ~keeper_id
+          ~trace_id
+          ~generation:42
+          (`Assoc
+             [ "trace_id", `String trace_id
+             ; "generation", `Int 43
+             ; "state", `String "flow_started"
+             ]);
+        match
+          Librarian_runtime.extract_and_append_with_exact_output_classified
+            ~clock
+            ~base_path:(exact_flow_base_path ())
+            ~generation_floor:1
+            ~net
+            ~keeper_id
+            (librarian_input trace_id)
+        with
+        | Error error
+          when Librarian_runtime.extraction_error_kind error
+               = Librarian_runtime.Exact_setup_failure ->
+          Alcotest.(check int)
+            "noncanonical journal dispatched nothing"
+            0
+            (Fixture.post_count server)
+        | Error error ->
+          Alcotest.failf
+            "expected typed setup failure, got %s"
+            (Librarian_runtime.extraction_error_to_string error)
+        | Ok _ ->
+          Alcotest.fail
+            "production ignored a journal whose file identity disagreed with its payload")))
+;;
+
+let test_corrupt_unrelated_trace_does_not_block_current_trace () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _ ->
+      run_eio (fun ~sw ~net ~clock ->
+        let server =
+          Fixture.start_server
+            ~sw
+            ~net
+            ~clock
+            (Fixture.Reply (Fixture.openai_response valid_output))
+        in
+        publish_lane
+          [ { id = "librarian-unrelated-trace-isolation"
+            ; base_url = server.base_url
+            }
+          ];
+        let keeper_id = "librarian-unrelated-trace-isolation-keeper" in
+        write_exact_journal_json
+          ~keeper_id
+          ~trace_id:"trace-corrupt-unrelated"
+          ~generation:9
+          (`Assoc
+             [ "trace_id", `String "trace-corrupt-unrelated"
+             ; "generation", `Int 9
+             ; "state", `String "unknown_state"
+             ]);
+        match
+          extract_and_append_with_exact_output
+            ~clock
+            ~net
+            ~keeper_id
+            (librarian_input "trace-current-isolated")
+        with
+        | Error error ->
+          Alcotest.failf
+            "an unrelated corrupt trace blocked the current trace: %s"
+            error
+        | Ok _ ->
+          Alcotest.(check int)
+            "current trace dispatched once"
+            1
+            (Fixture.post_count server))))
+;;
+
+let test_prompt_slice_and_provenance_share_one_input () =
+  with_prompt_registry (fun () ->
+  with_temp_keepers_dir (fun _ ->
+    run_eio (fun ~sw ~net ~clock ->
+      let prompt_capacity =
+        Librarian_runtime.max_messages ()
+        * Librarian_runtime.cadence_turns ()
+      in
+      if prompt_capacity < 1
+      then Alcotest.fail "librarian prompt capacity must be positive";
+      let tool_use_id = "tool-at-first-retained-message" in
+      let output =
+        `Assoc
+          [ "episode_summary", `String "The retained tool result is cited."
+          ; ( "claims"
+            , `List
+                [ `Assoc
+                    [ "claim", `String "The retained tool result remains attributable."
+                    ; "category", `String "fact"
+                    ; "source_turn", `Int 0
+                    ; "source_tool_call_id", `String tool_use_id
+                    ; "claim_id", `Null
+                    ]
+                ] )
+          ]
+      in
+      let server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (Fixture.openai_response output))
+      in
+      publish_lane
+        [ { id = "librarian-prompt-provenance-snapshot"
+          ; base_url = server.base_url
+          }
+        ];
+      let retained_tail =
+        List.init
+          (prompt_capacity - 1)
+          (fun index -> text_message (Printf.sprintf "retained-%d" index))
+      in
+      let input : Librarian.input =
+        { trace_id = "trace-prompt-provenance-snapshot"
+        ; messages =
+            text_message "dropped-before-prompt"
+            :: tool_result_message
+                 ~tool_use_id
+                 "The configured source remains visible."
+            :: retained_tail
+        }
+      in
+      match
+        extract_with_exact_output
+          ~clock
+          ~net
+          ~keeper_id:"librarian-prompt-provenance-snapshot-keeper"
+          ~generation:1
+          input
+      with
+      | Error error ->
+        Alcotest.failf
+          "prompt-local provenance was validated against another input: %s"
+          error
+      | Ok episode ->
+        (match episode.Types.claims with
+         | [ fact ] ->
+           Alcotest.(check int)
+             "source turn refers to the first retained message"
+             0
+             fact.Types.source.turn;
+           Alcotest.(check (option string))
+             "source tool id belongs to that retained message"
+             (Some tool_use_id)
+             fact.Types.source.tool_call_id
+         | claims ->
+           Alcotest.failf "expected one claim, got %d" (List.length claims));
+        Alcotest.(check int)
+          "single exact-output dispatch"
+          1
+          (Fixture.post_count server))))
 ;;
 
 let test_missing_clock_fails_before_dispatch () =
@@ -518,12 +1096,122 @@ let test_fact_upsert_failure_does_not_publish_episode () =
         Alcotest.(check bool)
           "typed write error is returned"
           true
-          (String.starts_with ~prefix:"memory os fact upsert failed:" error);
+          (String.starts_with
+             ~prefix:"memory os publication failed phase=facts:"
+             error);
         Alcotest.(check int)
           "episode commit marker was not published"
           0
           (List.length (Memory_io.read_events_tail ~keeper_id ~n:10))
       | Ok _ -> Alcotest.fail "fact upsert failure must block episode publication")))
+;;
+
+let test_episode_publication_failure_is_typed () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun keepers_dir ->
+      run_eio (fun ~sw ~net ~clock ->
+        let server =
+          Fixture.start_server
+            ~sw
+            ~net
+            ~clock
+            (Fixture.Reply (Fixture.openai_response valid_output))
+        in
+        publish_lane
+          [ { id = "librarian-episode-write-failure"
+            ; base_url = server.base_url
+            }
+          ];
+        let keeper_id = "librarian-episode-write-failure-keeper" in
+        let keeper_dir =
+          Filename.concat keepers_dir keeper_id
+          |> Keeper_fs.ensure_dir
+        in
+        Out_channel.with_open_bin
+          (Filename.concat keeper_dir "episodes")
+          (fun channel -> output_string channel "not-a-directory");
+        match
+          extract_and_append_with_exact_output
+            ~clock
+            ~net
+            ~keeper_id
+            (librarian_input "trace-episode-write-failure")
+        with
+        | Error error ->
+          Alcotest.(check bool)
+            "episode failure keeps its publication phase"
+            true
+            (String.starts_with
+               ~prefix:"memory os publication failed phase=episode:"
+               error);
+          Alcotest.(check int)
+            "facts were already written before the episode failure"
+            1
+            (List.length
+               (Memory_io.read_facts_all_for_keepers_dir
+                  ~keepers_dir
+                  ~keeper_id))
+        | Ok _ ->
+          Alcotest.fail "episode publication failure escaped its typed result")))
+;;
+
+let test_event_publication_failure_is_typed () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun keepers_dir ->
+      run_eio (fun ~sw ~net ~clock ->
+        let server =
+          Fixture.start_server
+            ~sw
+            ~net
+            ~clock
+            (Fixture.Reply (Fixture.openai_response valid_output))
+        in
+        publish_lane
+          [ { id = "librarian-event-write-failure"
+            ; base_url = server.base_url
+            }
+          ];
+        let keeper_id = "librarian-event-write-failure-keeper" in
+        let keeper_dir =
+          Filename.concat keepers_dir keeper_id
+          |> Keeper_fs.ensure_dir
+        in
+        Unix.mkdir
+          (Memory_io.events_path_for_keepers_dir
+             ~keepers_dir
+             ~keeper_id)
+          0o700;
+        match
+          extract_and_append_with_exact_output
+            ~clock
+            ~net
+            ~keeper_id
+            (librarian_input "trace-event-write-failure")
+        with
+        | Error error ->
+          Alcotest.(check bool)
+            "event failure keeps its publication phase"
+            true
+            (String.starts_with
+               ~prefix:"memory os publication failed phase=event:"
+               error);
+          Alcotest.(check int)
+            "facts were already written before the event failure"
+            1
+            (List.length
+               (Memory_io.read_facts_all_for_keepers_dir
+                  ~keepers_dir
+                  ~keeper_id));
+          let episode_dir = Filename.concat keeper_dir "episodes" in
+          Alcotest.(check int)
+            "episode was already written before the event failure"
+            1
+            (Sys.readdir episode_dir
+             |> Array.to_list
+             |> List.filter (fun name -> Filename.check_suffix name ".json")
+             |> List.length)
+        | Ok _ ->
+          Alcotest.fail "event publication failure escaped its typed result")))
 ;;
 
 let test_zero_dispatch_failure_advances_to_next_candidate () =
@@ -574,7 +1262,11 @@ let test_owner_replacement_does_not_invalidate_memory_observation () =
       let keeper_id = "librarian-owner-replaced-keeper" in
       ensure_registered_keeper keeper_id;
       let old_entry =
-        match Keeper_registry.get ~base_path:exact_flow_base_path keeper_id with
+        match
+          Keeper_registry.get
+            ~base_path:(exact_flow_base_path ())
+            keeper_id
+        with
         | Some entry -> entry
         | None -> Alcotest.fail "librarian owner was not registered"
       in
@@ -592,7 +1284,7 @@ let test_owner_replacement_does_not_invalidate_memory_observation () =
         in
         ignore
           (Keeper_registry.register_offline
-             ~base_path:exact_flow_base_path
+             ~base_path:(exact_flow_base_path ())
              keeper_id
              replacement_meta)
       in
@@ -678,6 +1370,10 @@ let () =
             `Quick
             test_prompt_only_target_needs_no_wire_json_capability
         ; Alcotest.test_case
+            "production write uses explicit base path"
+            `Quick
+            test_production_write_uses_explicit_base_path
+        ; Alcotest.test_case
             "domain-invalid output advances to declared successor"
             `Quick
             test_domain_invalid_output_advances_to_declared_successor
@@ -686,9 +1382,33 @@ let () =
             `Quick
             test_unsettled_restart_state_fails_before_dispatch
         ; Alcotest.test_case
-            "OAS success restart state starts a fresh flow"
+            "production restart reuses active generation before dispatch"
             `Quick
-            test_oas_success_restart_state_starts_fresh_flow
+            test_production_restart_reuses_active_generation_before_dispatch
+        ; Alcotest.test_case
+            "terminal restart state starts a fresh flow"
+            `Quick
+            test_terminal_restart_state_starts_fresh_flow
+        ; Alcotest.test_case
+            "production terminal restart reserves new generation"
+            `Quick
+            test_production_terminal_restart_reserves_new_generation
+        ; Alcotest.test_case
+            "invalid current journal fails before dispatch"
+            `Quick
+            test_invalid_current_journal_fails_before_dispatch
+        ; Alcotest.test_case
+            "noncanonical journal identity fails production before dispatch"
+            `Quick
+            test_noncanonical_journal_identity_fails_production_before_dispatch
+        ; Alcotest.test_case
+            "corrupt unrelated trace does not block current trace"
+            `Quick
+            test_corrupt_unrelated_trace_does_not_block_current_trace
+        ; Alcotest.test_case
+            "prompt slice and provenance share one input"
+            `Quick
+            test_prompt_slice_and_provenance_share_one_input
         ; Alcotest.test_case
             "missing clock fails before dispatch"
             `Quick
@@ -697,6 +1417,14 @@ let () =
             "fact upsert failure does not publish episode"
             `Quick
             test_fact_upsert_failure_does_not_publish_episode
+        ; Alcotest.test_case
+            "episode publication failure is typed"
+            `Quick
+            test_episode_publication_failure_is_typed
+        ; Alcotest.test_case
+            "event publication failure is typed"
+            `Quick
+            test_event_publication_failure_is_typed
         ; Alcotest.test_case
             "zero-dispatch failure advances to next candidate"
             `Quick

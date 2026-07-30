@@ -1,11 +1,8 @@
 (** Keeper_memory_os_types — typed schema for the tiered Memory OS.
 
     This module defines the canonical fact and episode records used by
-    the librarian, the I/O layer, and Memory projections. Every persisted
-    record carries the exact current [schema_version]; other versions reject. *)
-
-(** Current schema version written to disk. *)
-val schema_version : string
+    the librarian, the I/O layer, and Memory projections. The persisted shape
+    is current-only and closed; version or compatibility fields reject. *)
 
 (** Canonical JSON wire field names for Memory OS persistence and librarian
     ingestion. The schema module owns these strings so parser, retry prompt,
@@ -17,21 +14,12 @@ val wire_field_claim : string
 val wire_field_category : string
 val wire_field_source : string
 val wire_field_first_seen : string
-val wire_field_valid_until : string
 val wire_field_last_verified_at : string
 val wire_field_claim_id : string
-val wire_field_claim_kind : string
 
-val wire_field_valid_for_days : string
-(** Producer-declared lifetime in whole days on the librarian claim wire —
-    same vocabulary as the explicit keeper_memory_write argument. *)
-val wire_field_schema_version : string
 val wire_field_generation : string
 val wire_field_episode_summary : string
 val wire_field_claims : string
-val wire_field_open_items : string
-val wire_field_constraints : string
-val wire_field_preserved_tool_refs : string
 val wire_field_source_turn : string
 val wire_field_source_tool_call_id : string
 val wire_field_source_turn_range : string
@@ -65,7 +53,6 @@ type category =
   | Blocker
   | Goal
   | Constraint
-  | Ephemeral
   | Validated_approach
   | Lesson
 
@@ -78,82 +65,33 @@ val all_categories : category list
 (** Parse an exact category token. Unknown or non-canonical tokens reject. *)
 val category_of_string : string -> category option
 
-(** Producer-emitted origin tag, orthogonal to {!category}. It is parsed once at
-    the librarian boundary and preserved as model context; it does not create a
-    validity horizon or promotion hierarchy. *)
-type claim_kind =
-  | Self_observation
-  | External_state
-  | Durable_knowledge
-  | Diagnostic
-
-(** Canonical lowercase token (round-trips with [claim_kind_of_string]). *)
-val claim_kind_to_string : claim_kind -> string
-
-(** All closed claim-kind tokens. *)
-val all_claim_kinds : claim_kind list
-
-(** Claim-kind tokens the librarian prompt should ask a provider to emit.
-    [Diagnostic] is system-authored and intentionally excluded from the LLM
-    retry contract. *)
-val librarian_claim_kinds : claim_kind list
-
-(** Parse a claim-kind token. Persisted invalid labels are rejected rather than
-    silently treated as absent. *)
-val claim_kind_of_string : string -> claim_kind option
-
 (** A single semantic claim extracted from conversation history.
 
     RFC-0247 (purge): the fact carries only structure — claim, typed category,
-    provenance, the distinct-keeper corroboration set, and the timestamps. The
+    provenance, and producer timestamps. The
     deleted fields (confidence, access_count, last_accessed, stale_factor,
     expected_lifetime_cycles) fed the removed composite score; a fact's value is
     the librarian's judgment, not a number on the row. *)
 type fact =
   { claim : string
   ; category : category
-  ; claim_kind : claim_kind option
-    (** Producer-emitted origin tag, orthogonal to [category]. It is model
-        context only; it does not create a lifetime or a
-        promotion hierarchy. Omitted from JSON when [None]. *)
   ; source : provenance_event
   ; first_seen : float
-  ; valid_until : float option
   ; last_verified_at : float option
-  ; schema_version : string
   ; claim_id : string option
     (** Optional producer-emitted stable conclusion id. It is preserved exactly;
         absent ids use exact observation identity, never normalized prose. *)
   }
 
-(** The exact producer-supplied hard-expiry horizon. No category, claim-kind, or
-    timestamp-derived fallback is applied. *)
-val fact_effective_valid_until : fact -> float option
-
-(** Whether a fact's hard-expiry horizon still admits it at [now]. Facts with no
-    effective [valid_until] are durable and current. *)
-val fact_is_current : now:float -> fact -> bool
-
-val seconds_per_day : float
-
-val max_valid_for_days : int
-(** Upper bound on a producer-declared lifetime in whole days (365). Shared by
-    every [valid_for_days] producer surface. *)
-
-val valid_until_of_days : now:float -> int -> float
-(** [valid_until_of_days ~now days] is the exact expiry boundary that
-    {!fact_is_current} and expiry GC honor for a producer-declared lifetime of
-    [days] whole days. The lifetime is the writing model's own judgment about
-    the claim's scope — no fixed write-side TTL infers it from text. *)
-
-(** Partition facts into [(live, expired)] at [now] using only the exact stored
-    [valid_until]. Facts with [None] are always in [live]. *)
-val partition_expired : now:float -> fact list -> fact list * fact list
-
 (** Presentation timestamp: [last_verified_at] if set, else [first_seen]. Recall
     and dashboard share it for ordering, but it is not an expiry or truth
     boundary. *)
 val reference_time : fact -> float
+
+(** Exact inclusive source-turn span of [facts], or [None] iff [facts] is empty.
+    Episode producers and persisted decoders share this derivation; a caller
+    cannot supply an independent range authority. *)
+val source_turn_range_of_facts : fact list -> (int * int) option
 
 (** A librarian extraction result: a summary plus structured claims. *)
 type episode =
@@ -161,14 +99,9 @@ type episode =
   ; generation : int
   ; episode_summary : string
   ; claims : fact list
-  ; open_items : string list
-  ; constraints : string list
-  ; preserved_tool_refs : string list
   ; source_turn_range : (int * int) option
   ; created_at : float
-  ; valid_until : float option
   ; terminal_marker : string option
-  ; schema_version : string
   }
 
 (** Producer identity SSOT. A non-empty [claim_id] is preserved exactly. When it

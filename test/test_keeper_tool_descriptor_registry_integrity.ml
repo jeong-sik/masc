@@ -728,6 +728,26 @@ let test_memory_write_descriptor_schema_is_closed () =
     (schema_forbids_additional_properties descriptor.input_schema)
 ;;
 
+let test_memory_write_rejects_retired_lifetime_argument () =
+  let descriptor = required_internal_descriptor "keeper_memory_write" in
+  match
+    Resolution.prepare_model_input_for_descriptor
+      ~tool_name:"keeper_memory_write"
+      descriptor
+      ~input:
+        (`Assoc
+            [ "content", `String "durable conclusion"
+            ; "valid_for_days", `Int 2
+            ])
+  with
+  | Error validation_result ->
+    check_contains
+      "retired lifetime argument is rejected at descriptor admission"
+      ~sub:"valid_for_days"
+      (Tool_result.data validation_result |> Yojson.Safe.to_string)
+  | Ok _ -> Alcotest.fail "retired lifetime argument bypassed descriptor admission"
+;;
+
 let test_read_public_validation_rejects_line_fields () =
   let input =
     `Assoc
@@ -1540,6 +1560,10 @@ let () =
             "keeper_memory_write descriptor schema is closed"
             `Quick
             test_memory_write_descriptor_schema_is_closed
+        ; test_case
+            "keeper_memory_write rejects retired lifetime arguments"
+            `Quick
+            test_memory_write_rejects_retired_lifetime_argument
         ; test_case
             "Read public descriptor schema is closed"
             `Quick

@@ -260,11 +260,9 @@ let load_facts ~keepers_dir =
       | None -> None
       | Some keeper ->
         let facts =
-          read_lines (Filename.concat keepers_dir name)
-          |> List.filter_map (fun line ->
-            match Yojson.Safe.from_string line with
-            | json -> Types.fact_of_json json
-            | exception _ -> None)
+          Masc.Keeper_memory_os_io.read_facts_all_for_keepers_dir
+            ~keepers_dir
+            ~keeper_id:keeper
         in
         Some (keeper, facts))
 ;;
@@ -276,11 +274,9 @@ let report_composition facts =
   else (
     let all = List.concat_map snd facts in
     let total = List.length all in
-    let durable = List.length (List.filter (fun (f : Types.fact) -> f.valid_until = None) all) in
     let with_id = List.length (List.filter (fun (f : Types.fact) -> f.claim_id <> None) all) in
     note "keepers with fact store: %d" (List.length facts);
     note "total facts: %d" total;
-    note "durable (valid_until=None): %d (%.0f%%)" durable (pct durable total);
     note "with claim_id: %d (%.0f%%)" with_id (pct with_id total);
     let idtbl = Hashtbl.create 256 in
     List.iter

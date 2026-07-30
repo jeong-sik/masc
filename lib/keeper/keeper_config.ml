@@ -38,10 +38,7 @@ let keeper_status_fast_default () : bool =
    Keeper_memory_os_recall.render_context_exn injected the keeper's ENTIRE
    current fact/episode store into every turn's prompt -- no selection
    contract existed, so a keeper that accumulated facts/episodes without
-   bound grew its per-turn prompt injection without limit. (Retention for
-   both stores lives in Keeper_memory_os_gc: run_gc deletes facts and
-   run_episode_gc deletes episode files, each only past the exact
-   producer-declared valid_until, default-on from the maintenance fiber.)
+   bound grew its per-turn prompt injection without limit.
    These three knobs are the boundary: how many facts, how many episodes,
    and how many rendered bytes recall may inject per turn.
 

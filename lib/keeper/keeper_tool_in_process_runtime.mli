@@ -92,12 +92,6 @@ val handle_memory_search
   -> args:Yojson.Safe.t
   -> string
 
-val handle_memory_write
-  :  config:Workspace.config
-  -> meta:keeper_meta
-  -> args:Yojson.Safe.t
-  -> string
-
 val handle_library_search_with_outcome
   : meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
 val handle_library_read_with_outcome

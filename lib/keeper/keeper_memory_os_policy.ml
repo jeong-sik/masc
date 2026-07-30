@@ -41,7 +41,6 @@ let reobserve_fact ~now ~provenance ~existing ~incoming:(_ : fact) =
        rotates out of the recall window. *)
     existing
   | Independent_observation ->
-    (* Record the new observation without changing the producer-supplied
-       [valid_until]. Claim kind is context, not authority for a different merge. *)
+    (* Record the new independent observation. *)
     { existing with last_verified_at = Some now }
 ;;

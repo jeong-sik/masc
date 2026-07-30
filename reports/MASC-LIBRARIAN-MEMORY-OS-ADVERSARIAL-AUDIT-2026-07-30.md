@@ -9,7 +9,8 @@
 
 ## 1. Executive Summary
 
-Librarian과 Memory OS는 라이브 런타임에서 실제로 동작한다.
+#26500 이전 배포 라이브 런타임에서 Librarian과 Memory OS가 실제로 동작한 것은
+확인했다. 아래 항목은 현재 source나 현재 배포를 뜻하지 않는 역사 증거다.
 
 - Keeper turn마다 `memory_os_recall` 블록이 prompt에 주입된다.
 - post-turn Librarian이 episode와 fact를 기록한다.
@@ -20,8 +21,11 @@ Librarian과 Memory OS는 라이브 런타임에서 실제로 동작한다.
 > `a8683ea2ccc26c168664e114dbc0b01b8e1ed770`으로 merge됐다. 아래 runtime
 > 관측은 merge 전 배포의 역사 증거이며, 현재 source가 배포됐다는 증거가 아니다.
 
-그러나 현재 구현을 production-correct로 승인할 수 없다. 사용자 계약을 기준으로
-**P0 9개, P1 7개**가 확인됐다.
+최초 감사에서는 사용자 계약 기준 **P0 9개, P1 7개**를 확인했다. #26500 merge 뒤
+current `origin/main` `0d193fe1422bc943d079ffe12e4b527db5acaff3`을
+2026-07-30 22:59 KST에 다시 추적한 source 판정은 P0 9개 중 **해결 5, 부분 해결 1,
+미해결 3**, P1 7개 중 **해결 4, 미해결 3**이다. 따라서 현재 source blocker는
+P0 4개(부분 해결 포함), P1 3개이며 production-correct 승인은 여전히 불가하다.
 
 후속 current-only worktree는 dead Store와 Memory `claim_kind`/persisted
 `schema_version`/episode 사망 field를 삭제하고, 모든 public Memory reader,
@@ -33,9 +37,12 @@ trace를 사용하므로 canonical TurnRef가 아니다. 파일 I/O는 productio
 `episode-bundle → facts` 락 순서를 적용했다. 두 번째 hard-cut은
 `valid_for_days`/`valid_until`/`Ephemeral`, expiry GC·sanity sweep·maintenance
 fiber와 dashboard TTL projection까지 삭제했다. retired TTL 입력과 persisted field는
-closed decoder가 명시적으로 거부한다. 이 개선은 아직 새 PR CI·배포·fresh-state
-cutover가 증명되지 않았고, canonical TurnRef·recency selection·latest-wins·
-echo/dedupe 휴리스틱·비원자 publication이 남으므로 최종 판정은 계속 NO-GO다.
+closed decoder가 명시적으로 거부한다. #26500 post-merge source에서는 단일
+`*.memory-current.json` snapshot, closed decoder, revision CAS와 atomic file replace가
+실제 production caller에 연결됐다. 그러나 canonical fact provenance, substring
+search와 first-100-byte history dedupe, Librarian latest coalescing,
+chat-waiting/lease와 async settlement 중복 authority가 남으므로 최종 판정은 계속
+NO-GO다.
 
 2026-07-30 16:53 KST 후속 hard cut은 production producer가 항상 `None`만
 기록하던 `terminal_marker`를 episode type/codec/recall/dashboard/viewer/test에서
@@ -45,7 +52,9 @@ echo/dedupe 휴리스틱·비원자 publication이 남으므로 최종 판정은
 publication의 선행 정리이며, atomic Memory authority 자체가 완료됐다는 뜻은
 아니다.
 
-2026-07-30 20:02 KST OAS 경계 재검토에서는 더 앞선 P0 두 개를 확인했다. 기존
+2026-07-30 20:02 KST OAS 경계 재검토에서는 G5를 막는 OAS 결함 두 개를 확인했다.
+이 둘은 본 Memory 감사의 P0-1~P0-9 finding count에 추가하지 않고 cross-boundary
+supporting defect로 분류한다. 기존
 `flow_evidence`는 성공한 `before_advance` 전이를 보존하지 않아 failover 경로를
 복원할 수 없고, HTTP 400 provider 오류 문구를 문자열 문법으로 해석해 typed
 context-overflow 사실으로 승격했다. MASC shadow codec은 OAS private invariant의 두
@@ -98,23 +107,20 @@ CI Gate 포함)는 전부 green이다. 또한
 current contract`, merge commit
 `101d9efa1623e62b16b90f4011ff877e5eb49e65`)이 2026-07-30 22:01 KST에 merge돼
 main의 current Memory contract를 `*.memory-current.json`으로 hard cut했다.
-따라서 본 보고서의 잔여 heuristic/pin/caller 증거 목록은 #26500 이전 main
-기준이며, durable evidence production caller/runtime 증거는 여전히 별도 차단
-상태다(2026-07-30 22:10 KST `gh pr view` 확인, 신뢰도 High).
+2026-07-30 22:59 KST post-merge source 재감사에서 old Store/JSONL/episode/event,
+legacy field, partial reader, recency/byte-cap recall, consolidation, TTL authority가
+production tree에서 제거된 것을 확인했다. durable evidence production
+caller/runtime 증거는 여전히 별도 차단 상태다.
 
 가장 중요한 차단 사유는 다음과 같다.
 
-1. 사용되지 않는 canonical store와 실제 JSONL store가 병존한다.
-2. schema migration과 legacy row 수용 코드가 명시적으로 존재한다.
-3. 동일 TurnRef가 서로 다른 context를 가리키며 user input에는 TurnRef가 없다.
-4. 손상된 fact row가 recall/search/dashboard에서 무음으로 사라진다.
-5. recall과 search가 recency, byte budget, substring, 고정 window로 의미를 결정한다.
-6. consolidation이 부분 파싱된 모델 출력을 사용해 거의 전체 memory를 삭제할 수 있다.
-7. `claim_kind`, `valid_until`과 여러 episode field가 context에는 기여하지 않으면서
-   Gate·expiry·merge authority로 동작한다.
-8. `park`/`lease`가 별도 lifecycle 개념으로 증식해 waiting chat이 autonomous Keeper를
+1. fact가 canonical source TurnRef/event edge를 보존하지 않고 user input의 exact
+   TurnRef 증거도 닫히지 않았다.
+2. prompt recall은 LLM-selected current snapshot으로 고쳐졌지만 explicit search와
+   history 조립에는 substring/token match와 first-100-byte dedupe가 남는다.
+3. `park`/`lease`가 별도 lifecycle 개념으로 증식해 waiting chat이 autonomous Keeper를
    종료시키고, Turn attempt identity와 중복되는 authority를 만든다.
-9. `settlement`가 canonical terminal request 위에 두 번째 projection contract를 만든다.
+4. `settlement`가 canonical terminal request 위에 두 번째 projection contract를 만든다.
 
 따라서 새 Gate나 retrieval 기능을 추가하기 전에 다음 순서로 기반을 바로잡아야 한다.
 
@@ -129,6 +135,8 @@ main의 current Memory contract를 `*.memory-current.json`으로 hard cut했다.
   `8c4dae264e6b1d03708029718f868efbb3c2613b`
 - 2026-07-30 16:17 KST current `origin/main` 및 rebase base:
   `407ae5bb92509f06bfb6fc5614e8539e230b2902`
+- 2026-07-30 22:59 KST #26500 post-merge 재감사 `origin/main`:
+  `0d193fe1422bc943d079ffe12e4b527db5acaff3`
 - 후속 구현 branch:
   `refactor/memory-current-only-hard-cut-20260730`
 - 사망 필드/원자 publication 후속 branch:
@@ -193,7 +201,7 @@ binary SHA는 미증명으로 남긴다.
 | [#26450](https://github.com/jeong-sik/masc/pull/26450) `prepare current-only atomic publication` | 본 감사 후속 구현 | **Merged**, head `3cf500c78b16e80c17ee1867ac6c4eb3512d27ba`, merge commit `1910149d9e42c7e91b79915157506d695be72f18`; `Build and Test`/Dashboard 등 full CI skipped, 다수 check cancelled | `terminal_marker`/versioned dashboard schema를 숙청하고 Librarian input을 `TurnRef`로 key했다. atomic revision은 구현하지 않았다. | **사망 필드 제거는 유효. CI·atomic commit·production caller 증거 없음** |
 | [#26489](https://github.com/jeong-sik/masc/pull/26489) `pin agent sdk v0.231.10` | OAS release pin | **Merged**, head `c146ee46773f1813257dfad18060a679017bc31e`, merge commit `163f375010311b1798faeb42718439adfc1e4a41`; exact-head Build/CI Gate 취소 | OAS v0.231.10 SHA `1fa61251936758d37c3a33eac07b8d95c5f26d35`를 manifest/API-surface SSOT에 반영한다. | **source pin은 main 반영. exact-head MASC CI와 runtime proof 전 NO-GO** |
 | [#26491](https://github.com/jeong-sik/masc/pull/26491) `bind turn evidence to serialized requests` | typed consumer/observability 후속 | **Merged**, head `41561bd0220fc6afdd1a732ed217f9616ee61a26`, merge commit `8c84975577338aa2a78f21161c0c121b1038b531`, 2026-07-30 21:53 KST merge; exact-head Build and Test/Dashboard/CI Gate 등 전부 green(2026-07-30 22:10 KST 확인) | #26489 pin 위에서 HITL summary가 typed advance를 직접 소비한다. request wire/prompt blocks/messages를 같은 serialized-request snapshot으로 묶고 unavailable composition을 `null`로 보존한다. | **source 병합 + exact-head CI green. durable evidence production caller/runtime proof 전 NO-GO** |
-| [#26500](https://github.com/jeong-sik/masc/pull/26500) `hard-cut minimal current contract` | 본 감사 후속 구현 | **Merged**, head `ae2f017ed462024f8fe07928d33bbf07af5f6724`, merge commit `101d9efa1623e62b16b90f4011ff877e5eb49e65`, 2026-07-30 22:01 KST merge | current Memory contract를 exact `claim`/`category`/`first_seen`의 `*.memory-current.json`으로 hard cut하고 model-authored identity/TTL/recency ranking/`score`를 제거한다. migration/compat reader 없음 | **main 반영. 본 보고서의 잔여 증거 목록은 #26500 이전 main 기준이므로 post-merge 재감사 필요** |
+| [#26500](https://github.com/jeong-sik/masc/pull/26500) `hard-cut minimal current contract` | 본 감사 후속 구현 | **Merged**, head `ae2f017ed462024f8fe07928d33bbf07af5f6724`, merge commit `101d9efa1623e62b16b90f4011ff877e5eb49e65`, 2026-07-30 22:01 KST merge | current Memory contract를 exact `claim`/`category`/`first_seen`의 `*.memory-current.json`으로 hard cut하고 model-authored identity/TTL/recency ranking/`score`를 제거한다. migration/compat reader 없음 | **main 반영. 22:59 KST post-merge source 재감사 완료: P0 5건/P1 4건 해결, P0 1건 부분 해결, P0 3건/P1 3건 미해결** |
 | [OAS #2892](https://github.com/jeong-sik/oas/pull/2892) `preserve typed advance evidence` | G5 선행 경계 | **Merged**, head `d2a56f315fc452d00a5ed55ea729746c800adfb2`, merge commit `7ce45ee3aa218b49dc13aaaebba1e2698aa22e2c`; exact-head CI 완료 전 merge | 성공한 `before_advance`를 동일 atomic flow progress에 기록하고 HTTP 400 오류 문구 기반 context-overflow 승격과 dead variant를 제거한다. | **source P0 없음. MASC/masc-mcp의 제거된 variant 소비자 hard cut 전 pin 금지** |
 | [OAS #2896](https://github.com/jeong-sik/oas/pull/2896) `persist validated flow evidence` | G5 durable evidence | **Merged**, head `e89c5d9e57b5e8cd2077468cc2e04fa21d0b09f6`, merge commit `f6cc38056`; 최초 CI는 `Yojson.Safe.t` 추론 오류와 godfile `+1`로 실패 | actual mixed flow의 admission rejection → invalid JSON advance → semantic rejection → acceptance를 current-only canonical snapshot으로 보존한다. projector exactly-once, strict decode, integrity 및 re-hashed structural tamper test를 추가한다. | **기능 경계 유효. 최초 head는 compile/ratchet 불합격; #2899/#2903 후속 필수** |
 | [OAS #2899](https://github.com/jeong-sik/oas/pull/2899) `constrain canonical JSON to Safe.t` | #2896 compile repair | **Merged**, merge commit `b1fe0ec06`; OAS main `0.231.8` release 전 포함 | canonicalizer 입력/출력을 명시적 `Yojson.Safe.t`로 닫아 `Floatlit`/`Tuple`/`Variant` polymorphic variant 추론 오류를 제거한다. | **정확한 compiler root fix. full downstream proof는 #2903 CI와 pin 이후** |
@@ -247,39 +255,41 @@ phase/version/visit-count처럼 valid successful transcript에서 항상 파생�
 
 따라서 본 보고서의 **P0-6 destructive consolidation**은 #26324 merge로 제거됐다.
 
-### 3.2 PR #26324가 해결하지 않는 부분
+### 3.2 #26500 post-merge source 재감사
 
-> 2026-07-30 22:10 KST 갱신: 아래 잔여 목록은 #26500 merge 이전 main 기준이다.
-> #26500(merge commit `101d9efa…`)이 current Memory contract를
-> `*.memory-current.json`으로 hard cut하고 model-authored identity/TTL/recency
-> ranking/`score`를 제거했으므로, main 기준 잔여 항목은 post-merge 재감사가
-> 필요하다(출처: `gh pr view 26500 -R jeong-sik/masc`, 신뢰도 High).
+대상은 `origin/main`
+`0d193fe1422bc943d079ffe12e4b527db5acaff3`이며 2026-07-30 22:59 KST에
+entrypoint → typed store → recall/search/dashboard consumer → caller를 다시 추적했다.
 
-merge된 main에 그대로 남는 항목:
+해결된 source finding:
 
-- `Keeper_memory_os_store`와 JSONL store의 이중 authority
-- persisted record의 `schema_version`
-- `Persisted_claim_kind_absent` legacy row 수용
-- optional `claim_kind`
-- 사용되지 않는 `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT`
-- lenient `read_facts_all`의 malformed-row `filter_map`
-- 500/500/65,536-byte recall truncation
-- recency selection
-- 32-turn recall echo window
-- cadence/message-window/inert-turn skip
-- substring search와 first-100-byte dedupe
-- Librarian `Replace_latest` coalescing
-- TurnRef 중복과 null user TurnRef
-- facts → episode → event 비원자 publication
-- spatial namespace/ACL 부재
+- **P0-1:** dead `Keeper_memory_os_store`와 JSONL facts/episode/event authority가
+  사라지고 production read/write/Librarian/dashboard가
+  `Keeper_memory_os_current` 한 snapshot을 사용한다.
+- **P0-2/P0-7:** Memory `schema_version`, `claim_kind`, TTL/expiry, episode 사망
+  field와 compatibility reader가 current contract에서 제거됐다.
+- **P0-4:** snapshot은 closed whole-object decode이며 한 fact 오류도 전체 typed
+  read error로 노출된다.
+- **P0-6:** destructive consolidation producer/caller가 삭제됐다.
+- **P1-2/P1-3/P1-5/P1-6:** facts/episode/event 다단 publication과 모순된 episode
+  prompt, fleet consolidation, episode/store 오표기 ledger가 current path에서
+  제거됐다. revision CAS와 atomic snapshot replace가 실제 writer에 연결됐다.
 
-후속 audit worktree는 이 목록 중 dead `Keeper_memory_os_store`, Memory
-`claim_kind`, persisted Memory `schema_version`, serialization-only episode fields,
-global slot facade, lenient reader뿐 아니라 `valid_for_days`/`valid_until`/`Ephemeral`,
-expiry GC·sanity sweep·maintenance·TTL dashboard를 삭제했다. retired row/field는
-current decoder가 명시적으로 거부한다. 이는 아직 main/CI/runtime 증거가 아니며,
-recall budget/recency, echo/dedupe, latest-wins, production Memory authority·atomic
-receipt·Turn identity 문제는 그대로 남는다.
+남은 source finding:
+
+- **P0-3:** Librarian input에는 typed `Turn_ref`가 있지만 fact schema에는 source
+  TurnRef/event edge가 없고 user input exact join 증거도 닫히지 않았다.
+- **P0-5(부분):** automatic recall은 LLM-selected current facts 전체를 그대로
+  주입하도록 고쳐졌다. 그러나 `keeper_memory_search`는 substring/token match를,
+  history 조립은 first-100-byte dedupe를 사용한다.
+- **P0-8/P0-9:** `Yielded_to_chat_waiting`, chat waiting authority, queue
+  `lease_id`, `worker_settlement`/`Status_settlement`/
+  `Settlement_projection_error`가 그대로 남는다.
+- **P1-1/P1-4/P1-7:** Librarian `Replace_latest` coalescing, tool/multimodal
+  placeholder와 fact provenance 손실, log/metric-only Librarian failure가 남는다.
+
+[근거] `git rev-parse origin/main`, `rg` production caller scan, 위 exact files;
+확인일시 2026-07-30T22:59:03+09:00; 신뢰도 High.
 
 ### 3.3 PR #26410의 정확한 경계
 
@@ -327,27 +337,23 @@ concept가 되어서는 안 된다. Busy Keeper는 현재 활동을 계속하고
 
 ```mermaid
 flowchart TD
-    A[Keeper turn admission] --> B[Memory OS JSONL read]
-    B --> C[recency/count/byte selection]
+    A[Keeper turn admission] --> B[current snapshot strict read]
+    B --> C[all LLM-selected current facts]
     C --> D[memory_os_recall prompt injection]
     D --> E[OAS agent run: thinking/tools]
     E --> F[checkpoint + TurnRecord]
     F --> G{meaningful turn?}
     G -->|No| H[Librarian skip]
-    G -->|Yes| I[per-Keeper Librarian drain]
-    I -->|busy| J[keep only latest snapshot]
+    G -->|Yes| I[per-Keeper Librarian latest drain]
+    I -->|busy| J[replace pending latest closure]
     I --> K{cadence due?}
-    K -->|Yes| L[OAS exact-output Librarian]
-    L --> M[32-turn echo + claim identity merge]
-    M --> N[facts JSONL rewrite]
-    N --> O[episode file append]
-    O --> P[event JSONL append]
-    P --> B
+    K -->|Yes| L[OAS exact-output current selection]
+    L --> M[retained IDs + new claims validation]
+    M --> N[revision CAS + atomic snapshot replace]
+    N --> B
 
-    Q[600s maintenance] --> R[serial all-Keeper consolidation]
-    R --> S[prompt-only JSON provider call]
-    S --> T[partial plan salvage/apply]
-    T --> N
+    Q[explicit memory write] --> R[exact identity upsert]
+    R --> N
 ```
 
 ## 5. P0 Findings
@@ -766,9 +772,9 @@ Rondo 1686–1689에서 dashboard user input 직후 persona/dynamic digest가 di
 단, 마지막 항목은 horizon policy가 제거됐다는 의미가 아니다. `valid_for_days`, TTL,
 recency, 32-turn window가 같은 역할을 수행한다.
 
-## 9. OCaml 5.5 / Eio 기준
+## 9. OCaml 5.4 / Eio 기준
 
-OCaml 5.5 공식 문서 기준:
+OCaml 5.4 공식 문서 기준:
 
 - Domain은 OS thread와 1:1인 heavyweight parallel unit이다.
 - immutable value는 domain 사이에서 자유롭게 공유할 수 있다.
@@ -1023,12 +1029,12 @@ Acceptance:
 
 | Goal | 현재 증거 | 판정 |
 |---|---|---|
-| G0 | dead `Keeper_memory_os_store`/전용 test/stanza 삭제, production Memory file entrypoint를 explicit `keepers_dir` 하나로 통일, Recall/search/status/write/Librarian/dashboard/maintenance GC의 `episode-bundle → facts` 순서 정합화 | **부분 완료** — facts/episode/event atomic commit/receipt 미구현; test-only ambient IO facade 정리 필요 |
-| G1 | duplicate/null TurnRef 원인과 admission-time durable binding 위치 추적 완료; dashboard TurnRecord는 canonical `${trace_id}#${absolute_turn}`을 강제 | **미완료** — Librarian source provenance는 prompt-local turn/current trace라 canonical TurnRef가 아님 |
+| G0 | #26500에서 dead Store/JSONL facts·episode·event를 삭제하고 read/write/Librarian/dashboard를 exact `*.memory-current.json` snapshot 하나로 연결. closed decoder, revision CAS, atomic replace 사용 | **source 완료** — fresh-state deployment/runtime proof는 별도 미완료 |
+| G1 | Librarian input과 snapshot source는 typed `${trace_id}#${absolute_turn}`/trace/generation을 사용 | **미완료** — 개별 fact source TurnRef/event edge와 user input exact join 없음 |
 | G2 | 목표 수식과 N→N+3 acceptance 정의, 구현 없음 | **미완료** |
-| G3 | latest-wins와 park/lease/settlement를 서로 다른 SSOT로 분해; Librarian exact journal은 current-only closed state/trace/generation, trace-scoped restart fence, canonical path identity로 강화 | **부분 완료** — lossless per-Keeper FIFO/outbox 미구현 |
-| G4 | Memory `claim_kind`, `open_items`, episode `constraints`, `preserved_tool_refs`, `valid_for_days`/`valid_until`/`Ephemeral`와 expiry authority 제거 | **부분 완료** — echo window, recency/byte cap, substring score, first-100-byte dedupe 잔존(단, 이 잔존 목록은 #26500 merge 이전 main 기준. #26500이 recency ranking/`score`를 제거했으므로 post-merge 재확인 필요, 2026-07-30 22:10 KST) |
-| G5 | public fact/episode reader partial-drop 제거, recall unavailable/dashboard read error 노출, publication phase failure typed result 분류, OAS 성공 transport advance evidence/prose heuristic hard cut(#2892), current-only validated-flow snapshot/direct adapter(#2896), Safe.t compiler fix(#2899), private leaf split(#2903), typed compile repair(#2904/#2906/#2907/#2908) | **부분 완료** — OAS v0.231.10 exact release CI green(최종 green SHA `1fa61251…`); MASC #26489 exact pin과 #26491 typed advance consumer는 각각 main 반영·exact-head CI green(2026-07-30 22:10 KST 확인). atomic revision/CURRENT CAS/durable evidence production caller/runtime proof 미구현 |
+| G3 | latest-wins와 park/lease/settlement를 서로 다른 SSOT로 분해; Librarian writer는 closed current snapshot과 revision CAS를 사용 | **부분 완료** — lossless per-Keeper FIFO/outbox 미구현 |
+| G4 | claim/TTL/episode authority와 deterministic recall ranking·byte cap·echo window 제거. LLM current selection을 그대로 recall | **부분 완료** — explicit search substring/token match와 first-100-byte history dedupe 잔존 |
+| G5 | current snapshot closed read, revision CAS/atomic replace, unavailable/dashboard read error, OAS typed evidence chain과 MASC direct consumer | **부분 완료** — OAS v0.231.10 exact release와 #26491 exact-head CI green. power-loss durability receipt와 production runtime proof 미구현 |
 | G6 | stale claim-kind projection 제거, versioned `schema`와 사망 `terminal_marker`/`terminal_markers`를 제거한 unversioned closed dashboard contract, per-Keeper read error 추가 | **부분 완료** — receipt/age/stale generation 미구현 |
 
 Focused verification:
@@ -1180,7 +1186,7 @@ fresh-state hard cut을 적용한 좁고 독립적인 PR들로 진행해야 한�
 
 - `항목`: Librarian/Memory OS current source contract
 - `출처`: `git rev-parse origin/main`, `git diff HEAD`, production caller scan
-- `확인일시`: `2026-07-30T16:14:00+09:00`
+- `확인일시`: `2026-07-30T22:59:03+09:00`
 - `신뢰도`: `High`
 - `제한조건`: 후속 2개 source slice와 report update는 아직 새 Draft PR CI 전
 
@@ -1207,9 +1213,9 @@ fresh-state hard cut을 적용한 좁고 독립적인 PR들로 진행해야 한�
 
 #### OCaml / Eio
 
-- `항목`: OCaml 5.5 memory model과 Eio cancellation/mutex 기준
-- `출처`: [OCaml 5.5 official manual](https://ocaml.org/manual/5.5/index.html),
-  [OCaml 5.5 parallel programming](https://ocaml.org/manual/5.5/parallelism.html),
+- `항목`: OCaml 5.4 memory model과 Eio cancellation/mutex 기준
+- `출처`: [OCaml 5.4 official manual](https://ocaml.org/manual/5.4/index.html),
+  [OCaml 5.4 parallel programming](https://ocaml.org/manual/5.4/parallelism.html),
   Eio official API docs
 - `확인일시`: `2026-07-30T18:29:00+09:00`
 - `신뢰도`: `High`
@@ -1242,9 +1248,10 @@ fresh-state hard cut을 적용한 좁고 독립적인 PR들로 진행해야 한�
   release CI `30536256908`만 13/13 jobs green이다(2026-07-30 22:10 KST 재확인).
   MASC #26489는 exact pin을 main에 반영했고 #26491은 typed advance consumer를
   green exact-head CI로 merge했다(2026-07-30 21:53 KST). #26500 minimal
-  current contract도 merge됐다(2026-07-30 22:01 KST). 다만 durable evidence
-  production caller/runtime cutover와 #26500 post-merge 잔여 증거 재감사는
-  미검증이다.
+  current contract도 merge됐다(2026-07-30 22:01 KST). #26500 이후
+  `0d193fe1422bc943d079ffe12e4b527db5acaff3` source를 재감사해 original
+  P0 5건/P1 4건 해결, P0 1건 부분 해결, P0 3건/P1 3건 미해결로 재분류했다.
+  durable evidence production caller/runtime cutover는 미검증이다.
 
 ### 15.4 불확실성 (Uncertainty)
 
@@ -1254,14 +1261,13 @@ fresh-state hard cut을 적용한 좁고 독립적인 PR들로 진행해야 한�
 - `추가 확인 필요`: build artifact에 commit SHA를 embed하고 health가 그 값을 직접 반환
 
 - `미확인 항목`: merge된 MASC #26440/#26450/#26489의 exact-head full CI,
-  durable evidence production caller/runtime proof, #26500 post-merge 잔여 증거
+  durable evidence production caller/runtime proof
 - `영향`: MASC source hard cut은 병합됐지만 #26440/#26450/#26489의
   Build/Dashboard가 취소 또는 skipped됐고(#26491 exact-head CI는 2026-07-30
   22:10 KST 기준 green), failover evidence와 exact pin은 source에 들어왔지만
   MASC runtime의 durable production caller로 연결됐다는 증거는 없음. #26500
-  merge로 본 보고서의 잔여 heuristic 목록도 pre-merge main 기준이 됨
-- `추가 확인 필요`: production caller/N→N+3 restart proof, #26500 이후 main의
-  잔여 pin/caller/heuristic 증거 재감사
+  post-merge source 재감사는 완료했지만 deployed runtime proof는 아님
+- `추가 확인 필요`: production caller/N→N+3 restart 및 deployed-runtime proof
 
 ### 15.5 적용범위 (Scope)
 

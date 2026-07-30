@@ -1624,7 +1624,7 @@ let internal_descriptors : t list =
       ~id:"keeper.memory.search"
       ~name:"keeper_memory_search"
       ~description:
-        "Search keeper memory (semantic + recency) for relevant prior context."
+        "Search keeper memory or history; current facts use explicit substring filtering and snapshot order."
       ~input_schema:memory_search_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_memory_search

@@ -93,12 +93,7 @@ let run
         | None -> None, None
         | Some snapshot ->
           ( Some
-              { Keeper_librarian.summary = snapshot.summary
-              ; facts = snapshot.facts
-              ; open_items = snapshot.open_items
-              ; constraints = snapshot.constraints
-              ; preserved_tool_refs = snapshot.preserved_tool_refs
-              }
+              { Keeper_librarian.facts = snapshot.facts }
           , Some snapshot.revision )
       in
       let trace_id =

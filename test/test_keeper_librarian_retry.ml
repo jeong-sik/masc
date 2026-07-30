@@ -4,18 +4,17 @@ module Librarian = Masc.Keeper_librarian
 module Runtime = Masc.Keeper_librarian_runtime
 module Memory = Masc.Keeper_memory_os_types
 
-let fact ~claim_id ~claim : Memory.fact =
+let fact ~claim : Memory.fact =
   { claim
   ; category = Memory.Fact
-  ; source = { trace_id = "trace-current"; turn = 1; tool_call_id = None }
   ; first_seen = 1_000_000.
-  ; last_verified_at = None
-  ; claim_id = Some claim_id
   }
 ;;
 
-let current_a = fact ~claim_id:"a" ~claim:"keep A"
-let current_b = fact ~claim_id:"b" ~claim:"drop B"
+let current_a = fact ~claim:"keep A"
+let current_b = fact ~claim:"drop B"
+let current_a_id = Memory.memory_id current_a
+let current_b_id = Memory.memory_id current_b
 
 let input () : Librarian.input =
   { turn_ref =
@@ -25,12 +24,7 @@ let input () : Librarian.input =
   ; generation = 7
   ; current =
       Some
-        { Librarian.summary = "prior summary"
-        ; facts = [ current_a; current_b ]
-        ; open_items = [ "prior open item" ]
-        ; constraints = [ "prior constraint" ]
-        ; preserved_tool_refs = [ "call-prior" ]
-        }
+        { Librarian.facts = [ current_a; current_b ] }
   ; messages =
       [ Agent_sdk.Types.make_message
           ~role:Agent_sdk.Types.User
@@ -39,25 +33,18 @@ let input () : Librarian.input =
   }
 ;;
 
-let new_claim ?(claim_id = "c") ?(claim = "add C") () =
+let new_claim ?(claim = "add C") () =
   `Assoc
     [ Librarian.wire_field_claim, `String claim
     ; Librarian.wire_field_category, `String "fact"
-    ; Librarian.wire_field_source_turn, `Int 0
-    ; Librarian.wire_field_source_tool_call_id, `Null
-    ; Librarian.wire_field_claim_id, `String claim_id
     ]
 ;;
 
-let selection_json ?(retained = [ "id:a" ]) ?(new_claims = []) () =
+let selection_json ?(retained = [ current_a_id ]) ?(new_claims = []) () =
   `Assoc
-    [ Librarian.wire_field_summary, `String "small current memory"
-    ; Librarian.wire_field_retained_claim_ids
+    [ Librarian.wire_field_retained_memory_ids
     , `List (List.map (fun id -> `String id) retained)
     ; Librarian.wire_field_new_claims, `List new_claims
-    ; Librarian.wire_field_open_items, `List []
-    ; Librarian.wire_field_constraints, `List []
-    ; Librarian.wire_field_preserved_tool_refs, `List []
     ]
 ;;
 
@@ -70,7 +57,7 @@ let test_omission_deletes_and_retention_preserves_exact_fact () =
   | Error error ->
     failf "selection rejected: %s" (Librarian.parse_error_to_string error)
   | Ok selection ->
-    check (list string) "retained ids" [ "id:a" ] selection.retained_claim_ids;
+    check (list string) "retained ids" [ current_a_id ] selection.retained_memory_ids;
     check int "one fact remains" 1 (List.length selection.facts);
     check string "exact retained claim" current_a.claim (List.hd selection.facts).claim
 ;;
@@ -86,13 +73,14 @@ let test_new_claim_is_materialized_after_retained_facts () =
 ;;
 
 let test_unknown_and_duplicate_retained_ids_reject () =
-  (match parse (selection_json ~retained:[ "id:missing" ] ()) with
-   | Error (Librarian.Unknown_retained_claim_id "id:missing") -> ()
+  (match parse (selection_json ~retained:[ "missing" ] ()) with
+   | Error (Librarian.Unknown_retained_memory_id "missing") -> ()
    | Error error ->
      failf "wrong unknown-id error: %s" (Librarian.parse_error_to_string error)
    | Ok _ -> fail "unknown retained id accepted");
-  match parse (selection_json ~retained:[ "id:a"; "id:a" ] ()) with
-  | Error (Librarian.Duplicate_retained_claim_id "id:a") -> ()
+  match parse (selection_json ~retained:[ current_a_id; current_a_id ] ()) with
+  | Error (Librarian.Duplicate_retained_memory_id identity)
+    when String.equal identity current_a_id -> ()
   | Error error ->
     failf "wrong duplicate-id error: %s" (Librarian.parse_error_to_string error)
   | Ok _ -> fail "duplicate retained id accepted"
@@ -102,11 +90,12 @@ let test_new_claim_cannot_collide_with_retained_identity () =
   match
     parse
       (selection_json
-         ~retained:[ "id:a" ]
-         ~new_claims:[ new_claim ~claim_id:"a" ~claim:"rewritten A" () ]
+         ~retained:[ current_a_id ]
+         ~new_claims:[ new_claim ~claim:"keep A" () ]
          ())
   with
-  | Error (Librarian.Duplicate_selected_claim_id "id:a") -> ()
+  | Error (Librarian.Duplicate_selected_memory_id identity)
+    when String.equal identity current_a_id -> ()
   | Error error ->
     failf "wrong collision error: %s" (Librarian.parse_error_to_string error)
   | Ok _ -> fail "retained/new identity collision accepted"
@@ -117,10 +106,11 @@ let test_new_claim_cannot_recreate_omitted_current_identity () =
     parse
       (selection_json
          ~retained:[]
-         ~new_claims:[ new_claim ~claim_id:"a" ~claim:"recreated A" () ]
+         ~new_claims:[ new_claim ~claim:"keep A" () ]
          ())
   with
-  | Error (Librarian.Duplicate_selected_claim_id "id:a") -> ()
+  | Error (Librarian.Duplicate_selected_memory_id identity)
+    when String.equal identity current_a_id -> ()
   | Error error ->
     failf
       "wrong omitted-current collision error: %s"
@@ -144,12 +134,15 @@ let test_duplicate_object_fields_reject () =
   let duplicate_top =
     match selection_json () with
     | `Assoc fields ->
-      `Assoc ((Librarian.wire_field_summary, `String "duplicate") :: fields)
+      `Assoc
+        (( Librarian.wire_field_retained_memory_ids
+         , `List [ `String current_a_id ] )
+         :: fields)
     | _ -> assert false
   in
   (match parse duplicate_top with
    | Error (Librarian.Duplicate_field field)
-     when String.equal field Librarian.wire_field_summary -> ()
+     when String.equal field Librarian.wire_field_retained_memory_ids -> ()
    | Error error ->
      failf "wrong duplicate top-level error: %s" (Librarian.parse_error_to_string error)
    | Ok _ -> fail "duplicate top-level field accepted");
@@ -167,79 +160,45 @@ let test_duplicate_object_fields_reject () =
   | Ok _ -> fail "duplicate claim field accepted"
 ;;
 
-let test_required_nullable_claim_fields_reject_when_missing () =
-  let remove field =
+let test_removed_contract_fields_reject () =
+  let with_removed_claim_field =
     match new_claim () with
-    | `Assoc fields ->
-      `Assoc (List.filter (fun (name, _) -> not (String.equal name field)) fields)
+    | `Assoc fields -> `Assoc (("claim_id", `String "retired") :: fields)
     | _ -> assert false
   in
+  (match parse (selection_json ~new_claims:[ with_removed_claim_field ] ()) with
+   | Error (Librarian.Unexpected_field "claim_id") -> ()
+   | Error error ->
+     failf "wrong removed claim-field error: %s" (Librarian.parse_error_to_string error)
+   | Ok _ -> fail "removed claim_id field accepted");
   List.iter
-    (fun field ->
-       match parse (selection_json ~new_claims:[ remove field ] ()) with
-       | Error Librarian.Claim_schema_mismatch -> ()
+    (fun (field, value) ->
+       let with_removed_top_field =
+         match selection_json () with
+         | `Assoc fields -> `Assoc ((field, value) :: fields)
+         | _ -> assert false
+       in
+       match parse with_removed_top_field with
+       | Error (Librarian.Unexpected_field observed)
+         when String.equal observed field -> ()
        | Error error ->
          failf
-           "wrong missing nullable claim field error for %s: %s"
+           "wrong removed top-field error for %s: %s"
            field
            (Librarian.parse_error_to_string error)
-       | Ok _ -> failf "missing nullable claim field %s accepted" field)
-    [ Librarian.wire_field_claim_id
-    ; Librarian.wire_field_source_tool_call_id
-    ]
-;;
-
-let test_required_current_metadata_fields_reject_when_missing_or_null () =
-  let remove field =
-    match selection_json () with
-    | `Assoc fields ->
-      `Assoc (List.filter (fun (name, _) -> not (String.equal name field)) fields)
-    | _ -> assert false
-  in
-  let set_null field =
-    match selection_json () with
-    | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (name, value) ->
-              if String.equal name field then name, `Null else name, value)
-           fields)
-    | _ -> assert false
-  in
-  List.iter
-    (fun field ->
-       List.iter
-         (fun json ->
-            match parse json with
-            | Error Librarian.Missing_required_fields -> ()
-            | Error error ->
-              failf
-                "wrong missing metadata error for %s: %s"
-                field
-                (Librarian.parse_error_to_string error)
-            | Ok _ -> failf "missing/null metadata field %s accepted" field)
-         [ remove field; set_null field ])
-    [ Librarian.wire_field_open_items
-    ; Librarian.wire_field_constraints
-    ; Librarian.wire_field_preserved_tool_refs
-    ]
+       | Ok _ -> failf "removed top-level field %s accepted" field)
+    [ "summary", `String "retired"; "open_items", `List [] ]
 ;;
 
 let test_prompt_contains_exact_current_selection () =
   let variables = Librarian.prompt_variables (input ()) in
   let current_memory = List.assoc "current_memory" variables in
   check bool "contains A identity" true
-    (String_util.contains_substring current_memory "\"memory_id\": \"id:a\"");
+    (String_util.contains_substring current_memory ("\"memory_id\": \"" ^ current_a_id ^ "\""));
   check bool "contains B identity" true
-    (String_util.contains_substring current_memory "\"memory_id\": \"id:b\"");
-  check bool "contains summary" true
-    (String_util.contains_substring current_memory "\"summary\": \"prior summary\"");
-  check bool "contains open item" true
-    (String_util.contains_substring current_memory "\"prior open item\"");
-  check bool "contains constraint" true
-    (String_util.contains_substring current_memory "\"prior constraint\"");
-  check bool "contains preserved tool ref" true
-    (String_util.contains_substring current_memory "\"call-prior\"")
+    (String_util.contains_substring current_memory ("\"memory_id\": \"" ^ current_b_id ^ "\""));
+  check bool "presentation timestamp is not prompt context" false
+    (String_util.contains_substring current_memory "first_seen")
 ;;
 
 let test_cadence_fresh_then_periodic () =
@@ -289,10 +248,8 @@ let () =
         ; test_case "strict JSON boundary" `Quick test_strict_json_boundary
         ; test_case "duplicate object fields reject" `Quick
             test_duplicate_object_fields_reject
-        ; test_case "required nullable claim fields reject when missing" `Quick
-            test_required_nullable_claim_fields_reject_when_missing
-        ; test_case "required current metadata fields reject" `Quick
-            test_required_current_metadata_fields_reject_when_missing_or_null
+        ; test_case "removed contract fields reject" `Quick
+            test_removed_contract_fields_reject
         ; test_case "prompt carries exact current selection" `Quick
             test_prompt_contains_exact_current_selection
         ] )

@@ -102,10 +102,7 @@ let fact claim : Masc.Keeper_memory_os_types.fact =
   let now = Time_compat.now () in
   { claim
   ; category = Masc.Keeper_memory_os_types.Fact
-  ; source = { trace_id = "seed-trace"; turn = 1; tool_call_id = None }
   ; first_seen = now
-  ; last_verified_at = None
-  ; claim_id = None
   }
 ;;
 
@@ -123,11 +120,7 @@ let replace_current_facts ~keepers_dir ~keeper_id facts =
     ~expected_revision:None
     ~now:(Time_compat.now ())
     ~source:{ Current.kind = Current.Librarian; trace_id = "seed"; generation = 1 }
-    ~summary:"seed"
     ~facts
-    ~open_items:[]
-    ~constraints:[]
-    ~preserved_tool_refs:[]
     ()
   |> function
   | Ok _ -> ()
@@ -193,16 +186,58 @@ let test_write_comes_back_through_recall () =
     "the claim reaches a later turn"
     "reasoning_content must be replayed unmodified"
     fact.Masc.Keeper_memory_os_types.claim;
-  Alcotest.(check int)
-    "provenance carries this turn"
-    7
-    fact.Masc.Keeper_memory_os_types.source.turn;
-  (* The model asserted this itself; it did not carry it out of another
-     tool's result, and the field says where an observation came from. *)
   Alcotest.(check bool)
-    "no borrowed tool provenance"
+    "producer timestamp recorded"
     true
-    (fact.Masc.Keeper_memory_os_types.source.tool_call_id = None)
+    (fact.Masc.Keeper_memory_os_types.first_seen > 0.0)
+;;
+
+let test_search_filters_exact_substring_without_ranking () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "search-order" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let first_match =
+    { (fact "prefix alpha beta suffix") with first_seen = 100.0 }
+  in
+  let newer_match =
+    { (fact "alpha beta newer") with first_seen = 1_000.0 }
+  in
+  replace_current_facts
+    ~keepers_dir
+    ~keeper_id:meta.name
+    [ fact "alpha only"; first_match; newer_match ];
+  let response =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+      ~args:
+        (`Assoc
+           [ "query", `String "alpha beta"
+           ; "source", `String "memory"
+           ; "limit", `Int 10
+           ])
+    |> Yojson.Safe.from_string
+  in
+  Alcotest.(check (list string))
+    "stored order survives exact substring filtering"
+    [ first_match.claim; newer_match.claim ]
+    (match_texts response);
+  match json_field "matches" response with
+  | `List matches ->
+    Alcotest.(check bool)
+      "search emits no heuristic score"
+      true
+      (List.for_all
+         (function
+           | `Assoc fields -> Option.is_none (List.assoc_opt "score" fields)
+           | _ -> false)
+         matches)
+  | _ -> Alcotest.fail "expected matches array"
 ;;
 
 let test_tools_isolate_workspace_base_path_from_ambient_decoy () =
@@ -308,6 +343,10 @@ let () =
             "tools isolate config BasePath from ambient decoy"
             `Quick
             test_tools_isolate_workspace_base_path_from_ambient_decoy
+        ; Alcotest.test_case
+            "search filters exact substring without ranking"
+            `Quick
+            test_search_filters_exact_substring_without_ranking
         ] )
     ]
 ;;

@@ -294,7 +294,6 @@ export type {
   TurnRecordRow,
   MemoryOsFactCategoryTag,
   MemoryOsFactCategory,
-  MemoryOsFactProvenance,
   MemoryOsFact,
   MemoryOsUpdateSource,
   MemoryOsTurnRecordSnapshot,

@@ -33,11 +33,7 @@ function fact(
     memory_id: memoryId,
     claim,
     category,
-    source: { trace_id: 'trace-a', turn: 7 },
     first_seen: 1_700_000_000,
-    first_seen_iso: '2023-11-14T22:13:20Z',
-    reference_time: 1_700_000_000,
-    last_verified_at: null,
     current,
   }
 }
@@ -61,22 +57,16 @@ function turnRecordsPayload() {
     health: 'ok',
     stale_reason: null,
     memory_os: {
-      schema: 'keeper.memory_os.current_observability.v1',
       keeper: keeper.id,
-      source: 'current_memory_snapshot',
-      producer: 'keeper_librarian',
-      snapshot_store: '.masc/keepers/masc-improver.memory.json',
+      snapshot_store: '.masc/keepers/masc-improver.memory-current.json',
       recall_enabled: true,
       revision: 12,
       updated_at: 1_700_000_000,
-      summary: '현재 작업에 필요한 기억.',
       update_source: {
         kind: 'librarian',
         trace_id: 'trace-a',
         generation: 12,
       },
-      now: 1_700_000_000,
-      now_iso: '2023-11-14T22:13:20Z',
       read_errors: [],
       facts: {
         shown: 2,
@@ -151,7 +141,7 @@ describe('MemoryInspector current snapshot', () => {
     expect(text).toContain('계속 유지할 핵심 기억')
     expect(text).toContain('이번 revision에서 사라진 기억')
     expect(text).toContain('revision 12')
-    expect(text).toContain('LLM current-memory choice')
+    expect(text).toContain('latest snapshot writer')
     expect(text).toContain('exact current facts · no ranking/truncation')
     expect(text).toContain('547.4KB wire')
     expect(text).toContain('anthropic.fallback')
@@ -276,11 +266,7 @@ describe('MemoryInspector pure projections', () => {
       memory_id,
       claim,
       category: { tag: 'fact' },
-      source: { trace_id: 'trace', turn: 1, tool_call_id: null },
       first_seen: 1,
-      first_seen_iso: '1970-01-01T00:00:01Z',
-      reference_time: 1,
-      last_verified_at: null,
       current: true,
     })
     const first = mkFact('id:first', 'first')

@@ -46,7 +46,6 @@ type fact_match =
   { claim : string
   ; category : string
   ; first_seen : float
-  ; score : float
   }
 
 let read_current_facts ~keepers_dir ~keeper_id =
@@ -58,9 +57,9 @@ let read_current_facts ~keepers_dir ~keeper_id =
   | Error detail -> failwith detail
 ;;
 
-(* Match + rank over the keeper's Memory OS durable facts. Ranking is the
-   matched-token ratio against the claim text, tie-broken by recency
-   ([first_seen] desc). *)
+(* Filter the keeper's current facts by an explicit query substring while
+   preserving snapshot order. Search does not assign value scores or introduce
+   a recency authority. *)
 let search_durable_facts
       ~(keepers_dir : string)
       ~(meta : keeper_meta)
@@ -71,33 +70,23 @@ let search_durable_facts
   let facts = read_current_facts ~keepers_dir ~keeper_id:meta.name in
   let total_candidates = List.length facts in
   let matched =
-    if query = ""
+    if String.equal query ""
     then facts
     else
       List.filter
         (fun (fact : Keeper_memory_os_types.fact) ->
-          String_util.count_matched_tokens_ci fact.claim query > 0)
+          String_util.contains_substring_ci fact.claim query)
         facts
   in
-  let scored =
+  let matches =
     matched
     |> List.map (fun (fact : Keeper_memory_os_types.fact) ->
-      let score =
-        if query = ""
-        then 1.0
-        else String_util.matched_token_ratio_ci fact.claim query
-      in
       { claim = fact.claim
       ; category = Keeper_memory_os_types.category_to_string fact.category
       ; first_seen = fact.first_seen
-      ; score = Float.round (score *. 1000.0) /. 1000.0
       })
-    |> List.sort (fun a b ->
-      match Float.compare b.score a.score with
-      | 0 -> Float.compare b.first_seen a.first_seen
-      | c -> c)
   in
-  take limit scored, total_candidates
+  take limit matches, total_candidates
 ;;
 
 let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
@@ -105,7 +94,6 @@ let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
     [ "text", `String m.claim
     ; "category", `String m.category
     ; "first_seen_ts_unix", `Float m.first_seen
-    ; "score", `Float m.score
     ]
 ;;
 
@@ -269,8 +257,7 @@ let keeper_memory_search_with_outcome
          ]
          @ if no_match then [ "no_match", `Bool true ] else [])
   in
-  (* Day-1 search logging: append search event to decisions log.
-     Extract match_count and top_score from the already-computed result. *)
+  (* Day-1 search logging: append search event to decisions log. *)
   let log_match_count =
     match result with
     | `Assoc fields ->
@@ -279,33 +266,15 @@ let keeper_memory_search_with_outcome
        | _ -> 0)
     | _ -> 0
   in
-  let log_top_score =
-    match result with
-    | `Assoc fields ->
-      (match List.assoc_opt "matches" fields with
-       | Some (`List (first :: _)) ->
-         (match first with
-          | `Assoc mfields ->
-            (match List.assoc_opt "score" mfields with
-             | Some (`Float s) -> Some s
-             | _ -> None)
-          | _ -> None)
-       | _ -> None)
-    | _ -> None
-  in
   (try
      let log_entry =
        `Assoc
-         ([ "ts_unix", `Float (Time_compat.now ())
-          ; "event", `String "memory_search"
-          ; "query", `String query
-          ; "source", `String source_label
-          ; "match_count", `Int log_match_count
-          ]
-          @
-          match log_top_score with
-          | Some s -> [ "top_score", `Float s ]
-          | None -> [])
+         [ "ts_unix", `Float (Time_compat.now ())
+         ; "event", `String "memory_search"
+         ; "query", `String query
+         ; "source", `String source_label
+         ; "match_count", `Int log_match_count
+         ]
      in
      Keeper_types_support.append_jsonl_line
        (Keeper_types_support.keeper_decision_log_path config meta.name)
@@ -434,10 +403,6 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
 (* An explicit write is a claim a later turn reads back; the current Memory OS
    snapshot is the only store it reaches.
 
-   Provenance is this turn and [tool_call_id] is [None]: the claim is the
-   model's own assertion, not an observation carried out of some other tool's
-   result, and that field records where an observation came from.
-
    No local importance, recency, or echo heuristic participates. The explicit
    write upserts one exact identity; the Librarian remains responsible for
    deciding the complete current selection on its next pass. *)
@@ -452,14 +417,7 @@ let upsert_explicit_fact
   let fact : Keeper_memory_os_types.fact =
     { claim = body
     ; category = Keeper_memory_os_types.Fact
-    ; source =
-        { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
-        ; turn = meta.runtime.usage.total_turns
-        ; tool_call_id = None
-        }
     ; first_seen = now
-    ; last_verified_at = None
-    ; claim_id = None
     }
   in
   let result =

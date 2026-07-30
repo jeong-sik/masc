@@ -481,18 +481,12 @@ describe('keeper tool telemetry fetchers', () => {
         health: 'ok',
         stale_reason: null,
         memory_os: {
-          schema: 'keeper.memory_os.current_observability.v1',
           keeper: 'keeper-alpha',
-          source: 'current_memory_snapshot',
-          producer: 'keeper_librarian',
-          snapshot_store: '.masc/keepers/keeper-alpha.memory.json',
+          snapshot_store: '.masc/keepers/keeper-alpha.memory-current.json',
           recall_enabled: true,
           revision: 0,
           updated_at: null,
-          summary: null,
           update_source: null,
-          now: 11,
-          now_iso: '1970-01-01T00:00:11Z',
           read_errors: [],
           facts: { shown: 0, current: 0, items: [] },
           change: { added: [], removed: [], retained: 0 },
@@ -743,22 +737,14 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
       memory_id: 'id:retention-d0',
       claim: 'retention D0 = signup day',
       category: 'constraint',
-      source: { trace_id: 't-1', turn: 4, tool_call_id: 'call_9' },
       first_seen: 1_789_000_000,
-      first_seen_iso: '2026-09-10T00:26:40Z',
-      reference_time: 1_789_500_000,
-      last_verified_at: 1_789_500_000,
       current: true,
     }
     const second = {
       memory_id: 'id:provider-observation',
       claim: 'provider observation',
       category: 'fact',
-      source: { trace_id: 't-2', turn: 5 },
       first_seen: 1_789_100_000,
-      first_seen_iso: '2026-09-11T04:13:20Z',
-      reference_time: 1_789_100_000,
-      last_verified_at: null,
       current: true,
     }
     return {
@@ -777,22 +763,16 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
       stale_reason: 'no_entries',
       entries: [],
       memory_os: {
-        schema: 'keeper.memory_os.current_observability.v1',
         keeper: 'keeper-alpha',
-        source: 'current_memory_snapshot',
-        producer: 'keeper_librarian',
-        snapshot_store: '.masc/keepers/keeper-alpha.memory.json',
+        snapshot_store: '.masc/keepers/keeper-alpha.memory-current.json',
         recall_enabled: true,
         revision: 1,
         updated_at: 1_789_000_000,
-        summary: 'current selection',
         update_source: {
           kind: 'librarian',
           trace_id: 't-1',
           generation: 1,
         },
-        now: 1_789_000_000,
-        now_iso: '2026-09-10T00:26:40Z',
         read_errors: [],
         facts: {
           shown: 2,
@@ -821,11 +801,8 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
     const [first, second] = items
     expect(first?.claim).toBe('retention D0 = signup day')
     expect(first?.category).toEqual({ tag: 'constraint' })
-    expect(first?.source).toEqual({ trace_id: 't-1', turn: 4, tool_call_id: 'call_9' })
-    expect(first?.reference_time).toBe(1_789_500_000)
 
     expect(second?.category).toEqual({ tag: 'fact' })
-    expect(second?.source.tool_call_id).toBeNull()
   })
 
   it('preserves exact persisted claim bytes instead of trimming them', async () => {
@@ -838,9 +815,11 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
     expect(result.memory_os.facts.items[0]?.claim).toBe('  exact claim bytes  ')
   })
 
-  it('rejects a non-current Memory OS schema token', async () => {
+  it('rejects the removed Memory OS schema field', async () => {
     const payload = turnRecordsPayload()
-    payload.memory_os.schema = 'keeper.memory_os.recall_observability.v0'
+    Object.assign(payload.memory_os, {
+      schema: 'keeper.memory_os.recall_observability.v0',
+    })
     stubTurnRecords(payload)
 
     await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
@@ -928,41 +907,21 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
     )
   })
 
-  it('rejects unknown provenance fields', async () => {
-    const payload = turnRecordsPayload()
-    Object.assign(payload.memory_os.facts.items[0]!.source, { lease: 'retired' })
-    stubTurnRecords(payload)
-    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
-      '유효하지 않은 keeper turn record payload',
-    )
-  })
-
-  it('rejects a nullable first-seen ISO that the current producer cannot emit', async () => {
-    const payload = turnRecordsPayload()
-    Object.assign(payload.memory_os.facts.items[0]!, { first_seen_iso: null })
-    stubTurnRecords(payload)
-
-    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
-      '유효하지 않은 keeper turn record payload',
-    )
-  })
-
-  it('rejects fact timestamp projections that disagree with their numeric SSOT', async () => {
+  it('rejects removed fact provenance', async () => {
     const payload = turnRecordsPayload()
     Object.assign(payload.memory_os.facts.items[0]!, {
-      first_seen_iso: '2026-09-10T00:26:41Z',
+      source: { trace_id: 'retired', turn: 1 },
     })
     stubTurnRecords(payload)
-
     await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
       '유효하지 않은 keeper turn record payload',
     )
   })
 
-  it('rejects a fact reference_time that is not last_verified_at else first_seen', async () => {
+  it('rejects the removed first-seen ISO projection', async () => {
     const payload = turnRecordsPayload()
     Object.assign(payload.memory_os.facts.items[0]!, {
-      reference_time: 1_789_500_001,
+      first_seen_iso: '2026-09-10T00:26:40Z',
     })
     stubTurnRecords(payload)
 
@@ -977,18 +936,6 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
       valid_until: 1_789_900_000,
       valid_until_iso: '2026-09-20T10:26:40Z',
       current: true,
-    })
-    stubTurnRecords(payload)
-
-    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
-      '유효하지 않은 keeper turn record payload',
-    )
-  })
-
-  it('rejects explicit null tool provenance that the current producer omits', async () => {
-    const payload = turnRecordsPayload()
-    Object.assign(payload.memory_os.facts.items[1]!.source, {
-      tool_call_id: null,
     })
     stubTurnRecords(payload)
 

@@ -162,7 +162,7 @@ let test_compaction_plan_schema_uses_codec_ssot () =
   check bool "compaction boundary schema exposes codec fields" true true
 ;;
 
-let test_librarian_claim_schema_requires_current_nullable_metadata () =
+let test_librarian_claim_schema_is_closed () =
   let claim_schema =
     Keeper_structured_output_schema.librarian_current_output_schema
     |> schema_property Keeper_librarian.wire_field_new_claims
@@ -174,17 +174,7 @@ let test_librarian_claim_schema_requires_current_nullable_metadata () =
     (List.sort String.compare Keeper_librarian.wire_claim_fields)
     (required_strings claim_schema);
   check bool "librarian claim schema is closed" false
-    (allows_additional_properties claim_schema);
-  List.iter
-    (fun (field, non_null_type) ->
-       check
-         (list string)
-         (field ^ " is required but nullable")
-         (List.sort String.compare [ non_null_type; "null" ])
-         (claim_schema |> schema_property field |> type_strings))
-    [ Keeper_librarian.wire_field_source_tool_call_id, "string"
-    ; Keeper_librarian.wire_field_claim_id, "string"
-    ]
+    (allows_additional_properties claim_schema)
 ;;
 
 (* The reviewer config must reach json_object-only providers. Counterfactual
@@ -352,9 +342,9 @@ let () =
         ] )
     ; ( "librarian schemas"
       , [ test_case
-            "current nullable claim metadata remains required"
+            "minimal claim fields remain required"
             `Quick
-            test_librarian_claim_schema_requires_current_nullable_metadata
+            test_librarian_claim_schema_is_closed
         ] )
     ; ( "verdict schemas"
       , [ test_case

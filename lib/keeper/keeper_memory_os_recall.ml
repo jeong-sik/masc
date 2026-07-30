@@ -45,7 +45,7 @@ let render_unavailable_context reason =
 let render_fact fact =
   Printf.sprintf
     "- [memory_id=%s category=%s] %s"
-    (claim_identity fact)
+    (memory_id fact)
     (category_to_string fact.category)
     fact.claim
 ;;
@@ -78,7 +78,7 @@ let render_snapshot ~now:_ snapshot =
      with
      | Ok block ->
        { block
-       ; injected_fact_keys = List.map claim_identity facts
+       ; injected_fact_keys = List.map memory_id facts
        ; n_facts_in_store = List.length facts
        ; failure_reason = None
        }

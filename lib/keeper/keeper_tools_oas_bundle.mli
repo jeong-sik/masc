@@ -34,4 +34,9 @@ val make_tools
 
 module For_testing : sig
   val is_terminal_effect_handler : Keeper_tool_descriptor.runtime_handler -> bool
+
+  val terminal_externalization_failure :
+    Keeper_tools_oas.terminal_effect_state ->
+    Tool_bridge.externalization_error ->
+    Keeper_tools_oas.terminal_effect_failure option
 end

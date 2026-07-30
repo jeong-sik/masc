@@ -57,6 +57,13 @@ let relax_strict_tool_choice_for_keeper = function
     Some Agent_sdk.Types.Auto
   | other -> other
 
+let project_model_input ~base_path ~gate_replay_evidence messages =
+  match gate_replay_evidence with
+  | None -> Ok messages
+  | Some evidence ->
+    Keeper_gate_replay.project_model_input ~base_path evidence messages
+;;
+
 let relative_path_has_segment_prefix prefix raw =
   String.equal raw prefix || String.starts_with ~prefix:(prefix ^ "/") raw
 ;;
@@ -555,21 +562,14 @@ let assemble_hooks
       }
     in
     let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
-    let hydrate_model_input =
-      let store = Tool_blob_store.create ~base_path:ctx.config.base_path in
-      Keeper_artifact_hydrator.hydrate_recent
-        ~store
-        ~keep_recent:(Keeper_artifact_hydrator.keep_recent_from_env ())
-    in
     let model_input_projection messages =
-      let messages = hydrate_model_input messages in
-      match gate_replay_evidence with
-      | None -> Ok messages
-      | Some evidence ->
-        Keeper_gate_replay.project_model_input
-          ~base_path:ctx.config.base_path
-          evidence
-          messages
+      (* Stored Tool results are already the canonical provider-bound
+         representation. Fetching their bytes here would undo externalization
+         and make one large result expand every later provider request. *)
+      project_model_input
+        ~base_path:ctx.config.base_path
+        ~gate_replay_evidence
+        messages
     in
     Ok
       { tools

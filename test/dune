@@ -277,7 +277,6 @@
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
   test_tool_bridge_externalize
-  test_keeper_artifact_hydrator
   test_artifacts_endpoint
   test_tool_output_washing_e2e
   test_keeper_compaction_unit
@@ -586,7 +585,6 @@
   ; test_risk_digest removed (team session cleanup)
   test_tool_blob_store
   test_tool_bridge_externalize
-  test_keeper_artifact_hydrator
   test_artifacts_endpoint
   test_tool_output_washing_e2e
   test_keeper_compaction_unit

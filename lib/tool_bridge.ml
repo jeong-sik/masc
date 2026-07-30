@@ -35,9 +35,9 @@ module Float = Stdlib.Float
     ([Tool_output.encode_for_oas (Stored {...})]). Smaller outputs flow
     through unchanged.
 
-    The hydrator reducer (see [keeper_artifact_hydrator], PR 4) lazily
-    re-inflates the most recent stored refs before LLM dispatch; older
-    refs stay as markers in the message history.
+    Stored results remain content-addressed references at the durable and
+    provider boundaries. Their exact bytes remain available from the artifact
+    store and HTTP artifact route without expanding every later model request.
 
     Disabled when [MASC_BASE_PATH] is unset (no store root resolvable),
     which keeps unit tests free from filesystem side effects unless they
@@ -45,53 +45,63 @@ module Float = Stdlib.Float
 
 let default_externalize_threshold_bytes = 2048
 
-let externalize_threshold_bytes () =
-  match Sys.getenv_opt "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" with
-  | None -> default_externalize_threshold_bytes
-  | Some s ->
-      (match Stdlib.int_of_string_opt (String.trim s) with
-       | Some n when n >= 0 -> n
-       | _ -> default_externalize_threshold_bytes)
+type externalization_error = { message : string }
 
-let externalization_disabled () =
-  match Sys.getenv_opt "MASC_TOOL_EXTERNALIZE" with
-  | Some ("0" | "false" | "no" | "off") -> true
-  | _ -> false
-
-let resolve_blob_store () =
-  match (Host_config.from_env ()).base_path with
+let resolve_blob_store ?base_path () =
+  let base_path =
+    match base_path with
+    | Some _ as explicit -> explicit
+    | None -> (Host_config.from_env ()).base_path
+  in
+  match base_path with
   | None -> None
   | Some base_path -> Some (Tool_blob_store.create ~base_path)
 
-(** Externalize [msg] when it exceeds the threshold AND a blob store is
-    available; otherwise pass through unchanged. Best-effort — any
-    failure inside the store falls back to the original [msg] so the
-    keeper never loses tool output bytes due to a storage hiccup. *)
-let maybe_externalize ?(mime = "text/plain") (msg : string) : string =
-  if externalization_disabled () then msg
+(** Externalize [msg] when it exceeds the threshold and a blob store is
+    available; otherwise pass through unchanged. A configured store that
+    cannot persist the bytes returns a typed error: putting the oversized
+    payload back on the provider wire would defeat this boundary. *)
+let maybe_externalize ?base_path ?(mime = "text/plain") (msg : string)
+  : (string, externalization_error) result
+  =
+  if String.length msg <= default_externalize_threshold_bytes then Ok msg
   else
-    let threshold = externalize_threshold_bytes () in
-    if String.length msg <= threshold then msg
-    else
-      match resolve_blob_store () with
-      | None -> msg
-      | Some store ->
-          (try
-             let stored = Tool_blob_store.put store ~bytes:msg ~mime in
-             Tool_output.encode_for_oas stored
-           with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-            Log.Misc.warn
-              "tool_bridge: blob externalization failed; preserving inline output: %s"
-              (Printexc.to_string exn);
-            msg)
+    match resolve_blob_store ?base_path () with
+    | None -> Ok msg
+    | Some store ->
+        (try
+           let reference =
+             Tool_blob_store.put_durable store ~bytes:msg ~mime
+           in
+           Ok
+             (Tool_output.encode_for_oas
+                (Tool_output.Stored reference))
+         with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          let message = Printexc.to_string exn in
+          Log.Misc.error "tool_bridge: blob externalization failed: %s" message;
+          Error { message })
 
 (** {1 Result Conversion} *)
 
 let make_tool_error ?(recoverable = false) ?error_class message
   : Agent_sdk.Types.tool_result =
   Error { Agent_sdk.Types.message; recoverable; error_class }
+
+let project_content ?base_path message =
+  maybe_externalize ?base_path message
+;;
+
+let externalization_tool_error ~recoverable _error =
+  make_tool_error
+    ~recoverable
+    ~error_class:
+      (if recoverable
+       then Agent_sdk.Types.Transient
+       else Agent_sdk.Types.Unknown)
+    "tool output artifact storage failed"
+;;
 
 let oas_error_class_of_tool_failure_class = function
   | Tool_result.Transient_error -> Agent_sdk.Types.Transient
@@ -116,13 +126,39 @@ let params_of_json_schema schema =
     Create OAS [Tool.t] from MASC schema definition + dispatch handler.
     This allows incremental migration: each tool can be converted independently. *)
 
-let to_oas_typed_result (tr : Tool_result.result) : Agent_sdk.Types.tool_result =
+let project_result
+      ?base_path
+      ?on_externalization_error
+      ~externalization_error_recoverable
+      message
+      on_content
+  : Agent_sdk.Types.tool_result
+  =
+  match project_content ?base_path message with
+  | Ok content -> on_content content
+  | Error error ->
+    Option.iter (fun observe -> observe error) on_externalization_error;
+    externalization_tool_error
+      ~recoverable:externalization_error_recoverable
+      error
+;;
+
+let to_oas_typed_result
+      ?base_path
+      ?on_externalization_error
+      ?(externalization_error_recoverable = true)
+      (tr : Tool_result.result)
+  : Agent_sdk.Types.tool_result
+  =
   match tr with
   | Tool_result.Completed output ->
-    Ok
-      { Agent_sdk.Types.content = maybe_externalize (Tool_result.message tr)
-      ; _meta = output.metadata
-      }
+    project_result
+      ?base_path
+      ?on_externalization_error
+      ~externalization_error_recoverable
+      (Tool_result.message tr)
+      (fun content ->
+         Ok { Agent_sdk.Types.content; _meta = output.metadata })
   | Tool_result.Deferred output ->
     let disposition_field =
       "masc.tool_disposition", `String (Tool_result.string_of_disposition tr)
@@ -133,15 +169,24 @@ let to_oas_typed_result (tr : Tool_result.result) : Agent_sdk.Types.tool_result 
       | Some metadata ->
         `Assoc [ disposition_field; "masc.payload", metadata ]
     in
-    Ok
-      { Agent_sdk.Types.content = maybe_externalize (Tool_result.message tr)
-      ; _meta = Some metadata
-      }
+    project_result
+      ?base_path
+      ?on_externalization_error
+      ~externalization_error_recoverable
+      (Tool_result.message tr)
+      (fun content ->
+         Ok { Agent_sdk.Types.content; _meta = Some metadata })
   | Tool_result.Failed { class_; message; _ } ->
-    make_tool_error
-      ~recoverable:(Tool_result.is_retryable class_)
-      ~error_class:(oas_error_class_of_tool_failure_class class_)
-      (maybe_externalize message)
+    project_result
+      ?base_path
+      ?on_externalization_error
+      ~externalization_error_recoverable
+      message
+      (fun message ->
+       make_tool_error
+         ~recoverable:(Tool_result.is_retryable class_)
+         ~error_class:(oas_error_class_of_tool_failure_class class_)
+         message)
 
 (** Create an OAS [Tool.t] from a MASC tool schema and a typed handler.
 
@@ -155,16 +200,30 @@ let to_oas_typed_result (tr : Tool_result.result) : Agent_sdk.Types.tool_result 
         ~input_schema:schema_json
         (fun args -> handle_board_post ctx args)
     ]} *)
-let oas_tool_of_masc ?descriptor ~name ~description ~input_schema
+let oas_tool_of_masc
+    ?descriptor
+    ?base_path
+    ?on_externalization_error
+    ?externalization_error_recoverable
+    ~name
+    ~description
+    ~input_schema
     handler : Agent_sdk.Tool.t =
   let parameters = params_of_json_schema input_schema in
   let oas_handler json_args =
-    to_oas_typed_result (handler json_args)
+    to_oas_typed_result
+      ?base_path
+      ?on_externalization_error
+      ?externalization_error_recoverable
+      (handler json_args)
   in
   Agent_sdk.Tool.create ?descriptor ~name ~description ~parameters oas_handler
 
 let oas_tool_of_masc_with_execution_env
     ?descriptor
+    ?base_path
+    ?on_externalization_error
+    ?externalization_error_recoverable
     ~name
     ~description
     ~input_schema
@@ -173,7 +232,11 @@ let oas_tool_of_masc_with_execution_env
   =
   let parameters = params_of_json_schema input_schema in
   let oas_handler execution_env json_args =
-    to_oas_typed_result (handler execution_env json_args)
+    to_oas_typed_result
+      ?base_path
+      ?on_externalization_error
+      ?externalization_error_recoverable
+      (handler execution_env json_args)
   in
   Agent_sdk.Tool.create_with_execution_env
     ?descriptor

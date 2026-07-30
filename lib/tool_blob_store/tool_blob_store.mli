@@ -45,8 +45,9 @@ val put : t -> bytes:string -> mime:string -> Tool_output.t
     address, repairing any corrupt prior bytes without a duplicate read/hash.
 
     @raises Sys_error if the blob write fails (disk full, EACCES, ...). Callers
-    that must not lose bytes should catch this and fall back to the inline
-    payload rather than emitting a marker for bytes that were never persisted. *)
+    must handle this at their typed boundary and must not emit a marker for
+    bytes that were never persisted. A provider projection must not put an
+    oversized payload back inline because that defeats externalization. *)
 
 val put_durable : t -> bytes:string -> mime:string -> Tool_output.artifact_ref
 (** Strict variant of {!put}. The payload and its parent directory must both

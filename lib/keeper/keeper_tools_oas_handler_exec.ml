@@ -46,7 +46,7 @@ let execute_with_observers
           ~meta
           ~publication_recovery
           ~ctx_work:ctx_snapshot
-            ?turn_sandbox_factory
+          ?turn_sandbox_factory
           ?search_fn
           ?sw
           ?clock

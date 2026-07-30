@@ -171,6 +171,7 @@ let run_named_with_masc_tools
   : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
   let oas_tools = List.map (fun (td : Masc_domain.tool_schema) ->
     Tool_bridge.oas_tool_of_masc
+      ~base_path
       ~name:td.name ~description:td.description
       ~input_schema:td.input_schema
       (fun input -> dispatch ~name:td.name ~args:input)

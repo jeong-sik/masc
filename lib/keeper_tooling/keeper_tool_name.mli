@@ -24,6 +24,7 @@ type t =
   | Board_vote
   | Broadcast
   | Context_status
+  | Artifact_read
   | Fs_edit
   | Fs_write
   | Fs_read

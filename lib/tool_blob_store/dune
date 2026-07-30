@@ -3,7 +3,7 @@
 ; This store keeps SHA256-addressed bytes blobs, sharded by sha[0..1].
 ;
 ; Used by tool_bridge to externalize large tool outputs and by the keeper
-; artifact hydrator to lazily resolve refs at LLM-call time.
+; explicit artifact consumers resolve refs without expanding LLM history.
 
 (include_subdirs no)
 

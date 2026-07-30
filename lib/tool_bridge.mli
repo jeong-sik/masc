@@ -12,33 +12,49 @@
 
 (** {1 Tool Output Externalization}
 
-    Tool outputs above [externalize_threshold_bytes ()] are stored in
+    Tool outputs above [default_externalize_threshold_bytes] are stored in
     the content-addressed blob store ([Tool_blob_store]) and the OAS
     [content] field carries a blob marker
-    ([Tool_output.encode_for_oas (Stored ...)]).
+    ([Tool_output.encode_for_oas (Stored ...)]). The marker remains the
+    provider-bound representation; exact bytes are retrieved explicitly from
+    the artifact store rather than re-inflated into later requests.
+    Blob bytes and their parent directory are synced before the marker is
+    returned, so a later durable checkpoint cannot get ahead of its artifact.
 
-    Disabled when [MASC_BASE_PATH] is unset OR when [MASC_TOOL_EXTERNALIZE]
-    is one of [0|false|no|off]. *)
+    Disabled when no base path is available. The storage threshold is a single
+    compile-time producer contract; there is no environment-specific
+    projection policy. *)
 
 val default_externalize_threshold_bytes : int
-(** Compile-time default; overridable via [MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES]. *)
+(** Compile-time storage threshold. *)
 
-val externalize_threshold_bytes : unit -> int
-(** Resolved threshold in bytes. *)
+type externalization_error = { message : string }
 
-val maybe_externalize : ?mime:string -> string -> string
+val maybe_externalize :
+  ?base_path:string ->
+  ?mime:string ->
+  string ->
+  (string, externalization_error) result
 (** Externalize when over threshold and a blob store is available;
-    pass through otherwise. Storage failures are logged and fall back to the
-    original [msg], preserving every output byte. *)
+    pass through otherwise. Storage failures remain typed instead of putting
+    the oversized payload back on the provider wire. *)
 
 (** {1 Result Conversion} *)
 
-val to_oas_typed_result : Tool_result.result -> Agent_sdk.Types.tool_result
+val to_oas_typed_result :
+  ?base_path:string ->
+  ?on_externalization_error:(externalization_error -> unit) ->
+  ?externalization_error_recoverable:bool ->
+  Tool_result.result ->
+  Agent_sdk.Types.tool_result
 (** Convert a {!Tool_result.result} to OAS [tool_result].  [Completed] and
     [Deferred] project one-way to OAS [Ok]; [Deferred] carries an opaque MASC
     disposition marker in [_meta].  The adapter never parses that metadata
     back into MASC semantics.  [Failed] maps its typed [failure_class] directly
-    to OAS [recoverable]/[error_class]. *)
+    to OAS [recoverable]/[error_class]. [on_externalization_error] lets an
+    owning runtime keep its terminal state consistent when storage fails.
+    [externalization_error_recoverable] projects the owning tool's existing
+    retry policy; the provider receives only a bounded generic error. *)
 
 (** {1 Schema Conversion} *)
 
@@ -51,6 +67,9 @@ val params_of_json_schema : Yojson.Safe.t -> Agent_sdk.Types.tool_param list
 
 val oas_tool_of_masc :
   ?descriptor:Agent_sdk.Tool.descriptor ->
+  ?base_path:string ->
+  ?on_externalization_error:(externalization_error -> unit) ->
+  ?externalization_error_recoverable:bool ->
   name:string ->
   description:string ->
   input_schema:Yojson.Safe.t ->
@@ -69,6 +88,9 @@ val oas_tool_of_masc :
 
 val oas_tool_of_masc_with_execution_env :
   ?descriptor:Agent_sdk.Tool.descriptor ->
+  ?base_path:string ->
+  ?on_externalization_error:(externalization_error -> unit) ->
+  ?externalization_error_recoverable:bool ->
   name:string ->
   description:string ->
   input_schema:Yojson.Safe.t ->

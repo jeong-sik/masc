@@ -1,29 +1,36 @@
-(** End-to-end integration test for the tool-output-washing series.
+(** End-to-end integration test for stored Keeper tool output.
 
-    Exercises the data flow across all the PRs in this series in one
-    test, against real disk + real module boundaries:
+    Exercises the production data flow against real disk and module
+    boundaries:
 
-      [Tool_blob_store.put]   <- PR 1 (foundation)
+      [Tool_bridge.maybe_externalize]
         \u2193 sha256 + blob marker
-      [Tool_output.encode_for_oas]   <- PR 1 (encoder)
-        \u2193 marker string
       [Agent_sdk.Types.ToolResult { content = marker }]
-        \u2193 message list with marker
-      [Keeper_artifact_hydrator.hydrate_recent]   <- PR 4 (projection)
-        \u2193 hydrated message list
-      [Server_routes_http_routes_artifacts.blob_response]   <- PR 5 (endpoint)
+        \u2193 provider-bound message keeps marker
+      [Keeper_artifact_read.handle]
+        \u2193 one bounded typed page
+      [Server_routes_http_routes_artifacts.blob_response]
         \u2193 JSON envelope with full content
 
-    What this test buys: any cross-PR contract drift (marker format
-    change in PR 1 not reflected in PR 4 decoder, or PR 5 returning a
-    different envelope shape than the dashboard FE expects) shows up
-    here as a single failure. *)
+    Marker projection, explicit model retrieval, and dashboard retrieval must
+    all resolve the same Workspace base path without putting full bytes back
+    into later provider requests. *)
 
-module B = Tool_blob_store
 module O = Tool_output
-module H = Masc.Keeper_artifact_hydrator
 module A = Server_routes_http_routes_artifacts
+module Bridge = Masc.Tool_bridge
+module K = Masc.Keeper_run_tools_hooks
+module R = Masc.Keeper_artifact_read
+module E = Masc.Keeper_tool_execution
 module T = Agent_sdk.Types
+
+let project_completed_exn ~base_path ~tool_name data =
+  let result =
+    Tool_result.make_ok ~tool_name ~start_time:0.0 ~data ()
+  in
+  match Bridge.to_oas_typed_result ~base_path result with
+  | Ok { content; _ } -> content
+  | Error { message; _ } -> Alcotest.fail message
 
 let with_temp_base_path f =
   let dir = Filename.temp_file "masc_e2e_test" "" in
@@ -57,22 +64,76 @@ let extract_tool_content (msg : T.message) : string =
   | [ T.ToolResult { content; _ } ] -> content
   | _ -> Alcotest.fail "expected single ToolResult block"
 
+let test_artifact_page_makes_progress () =
+  let request offset max_bytes =
+    match
+      R.For_testing.request_of_json
+        (`Assoc
+           [ "sha256", `String (String.make 64 'a')
+           ; "offset", `Int offset
+           ; "max_bytes", `Int max_bytes
+           ])
+    with
+    | Ok request -> request
+    | Error error -> Alcotest.fail error
+  in
+  let emoji = "\240\159\152\128x" in
+  let utf8_page =
+    match R.For_testing.page (request 0 4) emoji with
+    | Ok page -> page
+    | Error error -> Alcotest.fail error
+  in
+  Alcotest.(check int) "UTF-8 page advances by one codepoint"
+    4 utf8_page.next_offset;
+  (match utf8_page.encoding with
+   | R.Utf_8 -> ()
+   | R.Base64 -> Alcotest.fail "valid UTF-8 page was encoded as base64");
+  Alcotest.(check string) "UTF-8 content"
+    "\240\159\152\128" utf8_page.content;
+  let binary_page =
+    match R.For_testing.page (request 1 1) emoji with
+    | Ok page -> page
+    | Error error -> Alcotest.fail error
+  in
+  Alcotest.(check int) "mid-codepoint byte still advances"
+    2 binary_page.next_offset;
+  (match binary_page.encoding with
+   | R.Base64 -> ()
+   | R.Utf_8 -> Alcotest.fail "invalid UTF-8 byte was returned as text");
+  Alcotest.(check string) "binary page preserves exact byte"
+    (Base64.encode_string "\159")
+    binary_page.content;
+  let invalid_byte_page =
+    match R.For_testing.page (request 0 1) "\128" with
+    | Ok page -> page
+    | Error error -> Alcotest.fail error
+  in
+  Alcotest.(check int) "arbitrary byte makes monotonic progress"
+    1 invalid_byte_page.next_offset
+
 (* --- The full data flow in one test --- *)
 
-let test_full_flow_externalize_hydrate_serve () =
+let test_full_flow_externalize_reference_serve () =
   with_temp_base_path (fun dir ->
-      (* Step 1: Store a payload via the blob store directly (bypasses
-         tool_bridge's one-shot Lazy singleton, but exercises the same
-         module the bridge would use). *)
-      let store = B.create ~base_path:dir in
-      let payload = String.make 5_000 'x' in
-      let stored_marker_value = B.put store ~bytes:payload ~mime:"text/plain" in
+      (* Step 1: Externalize through the production MASC -> OAS bridge with
+         the same explicit Workspace base path the reader receives. The byte
+         count reproduces the exact executor artifact that expanded an 88 KB
+         checkpoint into a 9 MB provider request. *)
+      let payload = String.make 8_922_079 'x' in
+      let marker =
+        project_completed_exn
+          ~base_path:dir
+          ~tool_name:"Execute"
+          (`String payload)
+      in
 
       (* Step 2: Verify the file landed in the sharded location. *)
       let sha256 =
-        match stored_marker_value with
-        | O.Stored { sha256; _ } -> sha256
-        | O.Inline _ -> Alcotest.fail "put returned Inline"
+        match O.decode_from_oas marker with
+        | O.Decoded { sha256; _ } -> sha256
+        | O.Not_marker -> Alcotest.fail "bridge did not externalize payload"
+        | O.Invalid_marker { detail } ->
+          Alcotest.failf "bridge returned invalid marker: %s" detail
       in
       let expected_path =
         Filename.concat dir
@@ -81,8 +142,7 @@ let test_full_flow_externalize_hydrate_serve () =
       Alcotest.(check bool) "blob file exists" true
         (Sys.file_exists expected_path);
 
-      (* Step 3: Encode for OAS (blob marker string). *)
-      let marker = O.encode_for_oas stored_marker_value in
+      (* Step 3: The bridge returned an exact OAS marker. *)
       Alcotest.(check bool) "blob marker recognized" true (O.is_marker marker);
 
       (* Step 4: Marker round-trips through Tool_output.decode. *)
@@ -95,8 +155,8 @@ let test_full_flow_externalize_hydrate_serve () =
        | O.Invalid_marker { detail } ->
            Alcotest.failf "decode reported Invalid_marker: %s" detail);
 
-      (* Step 5: Build a message list with the marker as a ToolResult.
-         The hydrator should re-inflate it because keep_recent >= 1. *)
+      (* Step 5: The provider-bound ToolResult keeps the marker. Full bytes
+         must not be re-inflated into every later model request. *)
       let msg : T.message =
         {
           T.role = T.Tool;
@@ -116,14 +176,94 @@ let test_full_flow_externalize_hydrate_serve () =
       metadata = [];
         }
       in
-      let hydrated_msgs =
-        H.hydrate_recent ~store ~keep_recent:3 [ msg ]
+      let projected =
+        match
+          K.project_model_input
+            ~base_path:dir
+            ~gate_replay_evidence:None
+            [ msg ]
+        with
+        | Ok messages -> messages
+        | Error error ->
+          Alcotest.failf
+            "provider projection failed: %s"
+            error
       in
-      Alcotest.(check string) "hydrated content matches original payload"
-        payload
-        (extract_tool_content (List.hd hydrated_msgs));
+      let projected_content = extract_tool_content (List.hd projected) in
+      Alcotest.(check string) "provider content keeps artifact reference"
+        marker projected_content;
+      Alcotest.(check bool) "provider content excludes stored payload"
+        false
+        (String.equal payload projected_content);
 
-      (* Step 6: The HTTP endpoint helper returns the same bytes. The
+      (* Step 6: The model-visible read tool resolves only the explicit
+         requested page. Its bounded typed JSON remains inline, so the generic
+         bridge cannot turn it into a nested artifact reference. *)
+      let read_result =
+        R.handle
+          ~base_path:dir
+          ~args:
+            (`Assoc
+               [ "sha256", `String sha256
+               ; "offset", `Int 1_000
+               ; "max_bytes", `Int 128
+               ])
+      in
+      (match read_result.E.disposition with
+       | Tool_result.Completed () -> ()
+       | Tool_result.Deferred () | Tool_result.Failed _ ->
+         Alcotest.fail "explicit artifact read did not complete");
+      let read_output =
+        project_completed_exn
+          ~base_path:dir
+          ~tool_name:"keeper_artifact_read"
+          (Option.value
+             ~default:(`String read_result.raw_output)
+             read_result.data)
+      in
+      Alcotest.(check string) "bounded page remains inline"
+        read_result.raw_output read_output;
+      Alcotest.(check bool) "bounded page is not a marker"
+        false (O.is_marker read_output);
+      let read_json = Yojson.Safe.from_string read_output in
+      Alcotest.(check int) "page offset"
+        1_000
+        Yojson.Safe.Util.(read_json |> member "offset" |> to_int);
+      Alcotest.(check int) "page next offset"
+        1_128
+        Yojson.Safe.Util.(read_json |> member "next_offset" |> to_int);
+      Alcotest.(check string) "page encoding"
+        "utf-8"
+        Yojson.Safe.Util.(read_json |> member "encoding" |> to_string);
+      Alcotest.(check string) "page content"
+        (String.make 128 'x')
+        Yojson.Safe.Util.(read_json |> member "content" |> to_string);
+
+      (* A sha256 is the same public-read capability used by the HTTP route;
+         the model tool deliberately adds no run-local claim or Gate. *)
+      let second_marker =
+        project_completed_exn
+          ~base_path:dir
+          ~tool_name:"Execute"
+          (`String (String.make 4_096 'z'))
+      in
+      let second_sha =
+        match O.decode_from_oas second_marker with
+        | O.Decoded { sha256; _ } -> sha256
+        | O.Not_marker | O.Invalid_marker _ ->
+          Alcotest.fail "second artifact setup failed"
+      in
+      let second_read =
+        R.handle
+          ~base_path:dir
+          ~args:(`Assoc [ "sha256", `String second_sha; "max_bytes", `Int 1 ])
+      in
+      (match second_read.E.disposition with
+       | Tool_result.Completed () -> ()
+       | Tool_result.Failed _ | Tool_result.Deferred () ->
+         Alcotest.fail "public-read artifact capability was rejected");
+
+      (* Step 7: The HTTP endpoint helper returns the same bytes. The
          endpoint reads MASC_BASE_PATH, so it sees the same store our
          bridge wrote into. This catches base-path drift between
          producer and consumer. *)
@@ -144,57 +284,6 @@ let test_full_flow_externalize_hydrate_serve () =
       in
       Alcotest.(check string) "endpoint sha matches" sha256 envelope_sha)
 
-(* --- Older messages keep markers (recency budget enforced cumulatively) --- *)
-
-let test_recency_budget_holds_across_modules () =
-  with_temp_base_path (fun dir ->
-      let store = B.create ~base_path:dir in
-      let stored payload =
-        let v = B.put store ~bytes:payload ~mime:"text/plain" in
-        O.encode_for_oas v
-      in
-      let m1 = stored "ancient one" in
-      let m2 = stored "older one" in
-      let m3 = stored "recent one" in
-      let m4 = stored "newest one" in
-      let make_msg ~id content : T.message =
-        {
-          T.role = T.Tool;
-          content =
-            [
-              T.ToolResult
-                { tool_use_id = id
-                ; content
-                ; outcome = T.Tool_succeeded
-                ; json = None
-                ; content_blocks = None
-                };
-            ];
-          name = None;
-          tool_call_id = Some id;
-      metadata = [];
-        }
-      in
-      let msgs =
-        [
-          make_msg ~id:"t1" m1;
-          make_msg ~id:"t2" m2;
-          make_msg ~id:"t3" m3;
-          make_msg ~id:"t4" m4;
-        ]
-      in
-      let result = H.hydrate_recent ~store ~keep_recent:2 msgs in
-      let contents = List.map extract_tool_content result in
-      match contents with
-      | [ c1; c2; c3; c4 ] ->
-          (* First two stayed as markers; last two got hydrated. *)
-          Alcotest.(check bool) "ancient stays marker" true (O.is_marker c1);
-          Alcotest.(check bool) "older stays marker" true (O.is_marker c2);
-          Alcotest.(check string) "recent hydrated" "recent one" c3;
-          Alcotest.(check string) "newest hydrated" "newest one" c4
-      | _ -> Alcotest.fail "expected 4 messages"
-)
-
 (* --- Endpoint validation rejects bad shas --- *)
 
 let test_endpoint_rejects_invalid_sha () =
@@ -213,14 +302,17 @@ let () =
     [
       ( "full data flow",
         [
-          Alcotest.test_case "externalize -> hydrate -> serve" `Quick
-            test_full_flow_externalize_hydrate_serve;
-          Alcotest.test_case "recency budget across modules" `Quick
-            test_recency_budget_holds_across_modules;
+          Alcotest.test_case "externalize -> reference -> serve" `Quick
+            test_full_flow_externalize_reference_serve;
         ] );
       ( "endpoint hardening",
         [
           Alcotest.test_case "rejects invalid sha shapes" `Quick
             test_endpoint_rejects_invalid_sha;
+        ] );
+      ( "range contract",
+        [
+          Alcotest.test_case "artifact pages make progress" `Quick
+            test_artifact_page_makes_progress;
         ] );
     ]

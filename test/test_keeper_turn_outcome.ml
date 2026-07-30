@@ -280,6 +280,39 @@ let test_terminal_effect_handler_contract () =
   check bool "filesystem write is not a reply terminal" false
     (is_terminal Masc.Keeper_tool_descriptor.Tool_write_file)
 
+let test_terminal_externalization_failure_contract () =
+  let classify =
+    Masc.Keeper_tools_oas_bundle.For_testing.terminal_externalization_failure
+  in
+  let error : Masc.Tool_bridge.externalization_error =
+    { message = "disk unavailable" }
+  in
+  List.iter
+    (fun state ->
+       check bool "non-completed state remains authoritative" true
+         (Option.is_none (classify state error)))
+    [ Masc.Keeper_tools_oas.Terminal_effect_open
+    ; Masc.Keeper_tools_oas.Deferred_tool_result
+    ; Masc.Keeper_tools_oas.External_effect_deferred
+    ; Masc.Keeper_tools_oas.Terminal_effect_failed
+        { failure_class = Tool_result.Workflow_rejection
+        ; effect_disposition = Tool_result.Proven_pre_effect
+        ; diagnostic = "original failure"
+        }
+    ];
+  match
+    classify Masc.Keeper_tools_oas.Terminal_effect_completed error
+  with
+  | Some
+      { failure_class = Tool_result.Runtime_failure
+      ; effect_disposition = Tool_result.Proven_post_effect
+      ; diagnostic
+      } ->
+    check bool "internal diagnostic is retained" true
+      (String_util.contains_substring diagnostic "disk unavailable")
+  | Some _ | None ->
+    fail "completed terminal effect did not become proven post-effect failure"
+
 let payload fields = Some (`Assoc fields)
 
 let decoded_exn payload =
@@ -554,6 +587,8 @@ let () =
             test_autonomous_yield_boundary_contract;
           test_case "terminal effect handler contract" `Quick
             test_terminal_effect_handler_contract;
+          test_case "terminal externalization failure contract" `Quick
+            test_terminal_externalization_failure_contract;
         ] );
       ( "payload_decode",
         [

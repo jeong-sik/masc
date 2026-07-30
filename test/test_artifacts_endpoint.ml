@@ -56,6 +56,19 @@ let test_valid_sha256 () =
        "ghi1234567890123456789012345678901234567890123456789012345678901");
   Alcotest.(check bool) "empty" false (A.is_valid_sha256 "")
 
+let test_strict_auth_public_read_contract () =
+  let sha256 = String.make 64 'a' in
+  Alcotest.(check bool)
+    "artifact route stays public in strict auth mode"
+    true
+    (Server_auth.is_public_read_path
+       ("/api/v1/artifacts/" ^ sha256));
+  Alcotest.(check bool)
+    "prefix-confusable route is not public"
+    false
+    (Server_auth.is_public_read_path
+       ("/api/v1/artifacts-evil/" ^ sha256))
+
 (* --- blob_response shape --- *)
 
 let assert_json_field key expected json =
@@ -103,7 +116,10 @@ let () =
   Alcotest.run "artifacts_endpoint"
     [
       ( "sha256 validation",
-        [ Alcotest.test_case "valid + invalid forms" `Quick test_valid_sha256 ] );
+        [ Alcotest.test_case "valid + invalid forms" `Quick test_valid_sha256
+        ; Alcotest.test_case "strict auth public-read contract" `Quick
+            test_strict_auth_public_read_contract
+        ] );
       ( "blob_response",
         [
           Alcotest.test_case "unavailable when MASC_BASE_PATH unset" `Quick

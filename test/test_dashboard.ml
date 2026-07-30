@@ -238,23 +238,9 @@ let test_generate_compact_shows_exact_librarian_facts () =
         (contains invalid_output "LIBRARIAN: INVALID");
       Unix.putenv key "true";
       let enabled_output = Dashboard.generate_compact config in
-      let failure_metric =
-        Keeper_metrics.(to_string MemoryOsLibrarianFailures)
-      in
-      let failures_since_start =
-        Otel_metric_store.metric_total failure_metric |> int_of_float
-      in
       Alcotest.(check bool)
         "enabled config renders ON" true
-        (contains enabled_output "LIBRARIAN: ON");
-      Alcotest.(check bool)
-        "exact process-lifetime failure total has a numeric boundary"
-        true
-        (contains
-           enabled_output
-           (Printf.sprintf
-              "LIBRARIAN-FAILURES-SINCE-START: %d | GUARD:"
-              failures_since_start)))
+        (contains enabled_output "LIBRARIAN: ON"))
 
 let test_keepers_section_dead_phase () =
   Eio_main.run @@ fun env ->

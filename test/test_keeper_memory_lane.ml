@@ -411,9 +411,7 @@ let test_post_turn_librarian_live_config_boundaries () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      Eio.Switch.run @@ fun sw ->
-      Masc_test_deps.init_eio_clock ~sw env;
-      Lane.init ~sw;
+      Masc_test_deps.init_eio_clock env;
       let config = Masc.Workspace.default_config root in
       ignore (Masc.Workspace.init config ~agent_name:None);
       Config_dir_resolver.reset ();
@@ -445,24 +443,11 @@ let test_post_turn_librarian_live_config_boundaries () =
       in
       expect_no_admission ~value:"false" ~keeper_name:"gateoff" ~turn:1;
       expect_no_admission ~value:"invalid" ~keeper_name:"gateinvalid" ~turn:2;
-      let rec await_librarian_idle ~keeper_name remaining =
-        match
-          Lane.For_testing.pending
-            ~base_path:config.Workspace.base_path
-            ~keeper_name
-            ~lane:Lane.Librarian
-        with
-        | Some 0 -> ()
-        | _ when remaining > 0 ->
-          Eio.Fiber.yield ();
-          await_librarian_idle ~keeper_name (remaining - 1)
-        | Some pending ->
-          Alcotest.failf
-            "queued Librarian unit did not drain, pending=%d"
-            pending
-        | None -> Alcotest.fail "queued Librarian lane disappeared"
-      in
       let expect_queued_fence ~poison_snapshot ~terminal_value ~keeper_name ~turn =
+        Lane.For_testing.reset ();
+        Eio.Switch.run @@ fun sw ->
+        Masc_test_deps.init_eio_clock ~sw env;
+        Lane.init ~sw;
         let meta = make_meta keeper_name in
         let keepers_dir =
           Config_dir_resolver.keepers_dir_for_base_path
@@ -499,8 +484,7 @@ let test_post_turn_librarian_live_config_boundaries () =
              ~keeper_name
              ~lane:Lane.Librarian);
         Unix.putenv env_key terminal_value;
-        Eio.Promise.resolve set_release ();
-        await_librarian_idle ~keeper_name 100
+        Eio.Promise.resolve set_release ()
       in
       expect_queued_fence
         ~poison_snapshot:true

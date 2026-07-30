@@ -1239,28 +1239,24 @@ let execute_prepared_lane_current
     with
     | Eio.Cancel.Cancelled _ as cancellation ->
       let raw_bt = Printexc.get_raw_backtrace () in
-      (* OAS owns execution state. MASC records only whether its source
-         authority callback passed for a dispatched candidate. An admission
-         rejection cannot erase the last dispatched observation; an execution
-         failure clears it before OAS selects a successor. *)
-      (match !authorized_observation with
-       | None -> Printexc.raise_with_backtrace cancellation raw_bt
-       | Some observation ->
-        `Authorized_cancellation observation)
+      (* OAS owns execution state; MASC retains only the source-authority
+         observation. Cancellation is fiber teardown, not a compaction result:
+         returning a typed terminal made the heartbeat settle the schedule and
+         failure streak even though [Cycle.Cancelled] settles neither. Preserve
+         the authorized source and continue the original cancellation. *)
+      Option.iter
+        (fun observation ->
+           Log.Keeper.warn
+             ~keeper_name
+             "compaction exact cancellation retained the authorized source \
+              slot=%s call_id=%s"
+             observation.slot_id
+             observation.call_id)
+        !authorized_observation;
+      Printexc.raise_with_backtrace cancellation raw_bt
   in
   let project_execution () =
   match execution with
-  | `Authorized_cancellation observation ->
-    Log.Keeper.warn
-      ~keeper_name
-      "compaction exact cancellation retained the authorized source slot=%s call_id=%s"
-      observation.slot_id
-      observation.call_id;
-    Error
-      (Exact_execution_terminal
-         (terminal_of_observation
-            Keeper_compaction_outcome.Exact_execution_cancelled
-            observation))
   | `Flow
       (Error
         (Exact_output.Flow_execution_terminal
@@ -1358,9 +1354,7 @@ let execute_prepared_lane_current
           }
       }
   in
-  match execution with
-  | `Authorized_cancellation _ -> Eio.Cancel.protect project_execution
-  | `Flow _ -> project_execution ()
+  project_execution ()
 ;;
 
 let execute_prepared_lane

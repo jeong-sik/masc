@@ -776,26 +776,29 @@ let test_cancellation_preserves_lifecycle_authorized_identity () =
             Ok ())
           prepared))
   in
-  let result =
-    try
+  let outcome =
+    match
       Eio.Time.with_timeout_exn clock 1.0 (fun () ->
         let context = Eio.Promise.await cancel_context in
         F.await_first_request first;
         Eio.Cancel.cancel context Cancel_after_request_arrived;
         Eio.Promise.await_exn execution)
     with
-    | Eio.Time.Timeout -> Alcotest.fail "cancellation watchdog expired"
+    | value -> `Returned value
+    | exception Eio.Time.Timeout ->
+      Alcotest.fail "cancellation watchdog expired"
+    | exception exn -> `Raised exn
   in
-  let terminal =
-    match result with
-    | Error (C.Exact_execution_terminal terminal) -> terminal
-    | Error _ -> Alcotest.fail "cancellation returned the wrong terminal"
-    | Ok _ -> Alcotest.fail "cancelled flow unexpectedly succeeded"
-  in
-  Alcotest.(check bool)
-    "cancellation terminal is phase-neutral"
-    true
-    (terminal.cause = Keeper_compaction_outcome.Exact_execution_cancelled);
+  (match outcome with
+   | `Raised (Eio.Cancel.Cancelled Cancel_after_request_arrived) -> ()
+   | `Raised exn ->
+     Alcotest.failf
+       "cancellation raised the wrong exception: %s"
+       (Printexc.to_string exn)
+   | `Returned (Error _) ->
+     Alcotest.fail "cancellation was returned as a terminal instead of raised"
+   | `Returned (Ok _) ->
+     Alcotest.fail "cancelled flow unexpectedly succeeded");
   Alcotest.(check (list string))
     "only first identity was lifecycle-authorized"
     [ first_slot ]
@@ -804,7 +807,7 @@ let test_cancellation_preserves_lifecycle_authorized_identity () =
   Alcotest.(check int) "cancellation never dispatches successor" 0 (F.post_count successor)
 ;;
 
-let test_admission_rejection_preserves_prior_authorized_identity () =
+let test_admission_rejection_then_cancellation_propagates () =
   run_eio
   @@ fun ~sw ~net ~clock ->
   let first_slot = "semantic-rejection-before-admission-rejection" in
@@ -835,36 +838,36 @@ let test_admission_rejection_preserves_prior_authorized_identity () =
       ()
   in
   let authorized = ref [] in
-  let result =
-    Eio.Cancel.sub (fun context ->
-      execute_prepared_lane
-        ~keeper_name:"keeper-admission-rejection-cancelled"
-        ~net
-        ~clock
-        ~before_dispatch_authority:
-          (fun observation ->
-             authorized := observation.slot_id :: !authorized;
-             if String.equal observation.slot_id cancelled_slot
-             then (
-               Eio.Cancel.cancel context Cancel_after_request_arrived;
-               Eio.Cancel.check context);
-             Ok ())
-        prepared)
+  let outcome =
+    match
+      Eio.Cancel.sub (fun context ->
+        execute_prepared_lane
+          ~keeper_name:"keeper-admission-rejection-cancelled"
+          ~net
+          ~clock
+          ~before_dispatch_authority:
+            (fun observation ->
+               authorized := observation.slot_id :: !authorized;
+               if String.equal observation.slot_id cancelled_slot
+               then (
+                 Eio.Cancel.cancel context Cancel_after_request_arrived;
+                 Eio.Cancel.check context);
+               Ok ())
+          prepared)
+    with
+    | value -> `Returned value
+    | exception exn -> `Raised exn
   in
-  let terminal =
-    match result with
-    | Error (C.Exact_execution_terminal terminal) -> terminal
-    | Error _ -> Alcotest.fail "cancellation returned the wrong terminal"
-    | Ok _ -> Alcotest.fail "cancelled flow unexpectedly succeeded"
-  in
-  Alcotest.(check string)
-    "admission rejection retains the prior dispatched source"
-    first_slot
-    terminal.slot_id;
-  Alcotest.(check bool)
-    "cancellation remains typed"
-    true
-    (terminal.cause = Keeper_compaction_outcome.Exact_execution_cancelled);
+  (match outcome with
+   | `Raised (Eio.Cancel.Cancelled Cancel_after_request_arrived) -> ()
+   | `Raised exn ->
+     Alcotest.failf
+       "cancellation raised the wrong exception: %s"
+       (Printexc.to_string exn)
+   | `Returned (Error _) ->
+     Alcotest.fail "cancellation was returned as a terminal instead of raised"
+   | `Returned (Ok _) ->
+     Alcotest.fail "cancelled flow unexpectedly succeeded");
   Alcotest.(check (list string))
     "only admitted candidates reach source authority"
     [ first_slot; cancelled_slot ]
@@ -1008,9 +1011,9 @@ let () =
             `Quick
             test_cancellation_preserves_lifecycle_authorized_identity
         ; Alcotest.test_case
-            "admission rejection preserves prior authorized identity"
+            "admission rejection then cancellation propagates"
             `Quick
-            test_admission_rejection_preserves_prior_authorized_identity
+            test_admission_rejection_then_cancellation_propagates
         ; Alcotest.test_case
             "commit claim blocks reject after install"
             `Quick

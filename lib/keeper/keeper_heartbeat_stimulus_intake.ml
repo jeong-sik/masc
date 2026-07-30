@@ -7,8 +7,9 @@
     - per-class string labels used in Otel_metric_store and log lines;
     - per-stimulus consumption ([consume_single_heartbeat_stimulus]);
     - the top-level RFC-0020 §3 Rule 4 draining function
-      ([heartbeat_event_intake]) that selects the earliest ready stimulus
-      without assigning priority to a payload family. *)
+      ([heartbeat_event_intake]) that selects the earliest ready stimulus,
+      except for explicit owner-lane manual compaction. That control-plane
+      request preempts without removing or rewriting the current source. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -487,18 +488,39 @@ let heartbeat_event_intake
       ~meta_after_triage
       ~pending_board_events
   =
-(* RFC-0020 §3 Rule 4 — select at most one new Event Layer stimulus per
-     turn. The queue chooses the earliest ready stimulus while preserving
-     every skipped unready entry in place. Board, Connector, HITL, Schedule,
-     Fusion, and Goal inputs therefore share one lane order instead of a
-     payload-family priority hierarchy. *)
+  (* RFC-0020 §3 Rule 4 — select at most one new Event Layer stimulus per
+     turn. Data-plane payloads share one lane order. Explicit manual compaction
+     is the sole control-plane exception: it can run after the current source
+     checkpoints while that exact source stays pending for continuation. *)
   let base_path = ctx.config.base_path in
   let keeper_name = meta_after_triage.name in
-  let select_pending () =
+  let select_pending_matching ready =
     Keeper_registry_event_queue.peek_when_result
       ~base_path
       keeper_name
-      ~ready:(stimulus_ready_for_intake ~base_path)
+      ~ready
+  in
+  let select_pending () =
+    let manual_compaction_ready (stimulus : Keeper_event_queue.stimulus) =
+      match stimulus.payload with
+      | Keeper_event_queue.Manual_compaction_requested -> true
+      | Keeper_event_queue.Board_signal _
+      | Keeper_event_queue.Board_attention _
+      | Keeper_event_queue.Bootstrap
+      | Keeper_event_queue.Fusion_completed _
+      | Keeper_event_queue.Bg_completed _
+      | Keeper_event_queue.Schedule_due _
+      | Keeper_event_queue.Connector_attention _
+      | Keeper_event_queue.Hitl_resolved _
+      | Keeper_event_queue.Goal_assigned _
+      | Keeper_event_queue.Goal_reconciliation_ready _ ->
+        false
+    in
+    match select_pending_matching manual_compaction_ready with
+    | Error _ as error -> error
+    | Ok (Some _) as selected -> selected
+    | Ok None ->
+      select_pending_matching (stimulus_ready_for_intake ~base_path)
   in
   let rec select_pending_after_spent_reconciliation () =
     match select_pending () with

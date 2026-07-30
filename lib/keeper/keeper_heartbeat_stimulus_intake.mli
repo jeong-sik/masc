@@ -1,8 +1,10 @@
 (** Event-Layer stimulus intake for the keeper heartbeat loop.
 
     Selects the earliest ready Event Layer stimulus per turn following
-    RFC-0020 §3 Rule 4. Payload families share one order; an unready input
-    remains queued without blocking later ready work in the same Keeper lane. *)
+    RFC-0020 §3 Rule 4. Payload families share one order except for explicit
+    owner-lane manual compaction, which preempts at a persisted turn boundary
+    without removing the current source. An unready input remains queued
+    without blocking later ready work in the same Keeper lane. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -121,9 +123,13 @@ val reconcile_spent_selection
 
 (** [heartbeat_event_intake ~ctx ~meta_after_triage
      ~pending_board_events]
-    peeks at most one ready Event-Layer stimulus (per RFC-0020 §3 Rule 4)
-    and merges its observation with the [pending_board_events] already
-    accumulated by the caller, deduplicating by [post_id]. A
+    peeks at most one ready Event-Layer stimulus (per RFC-0020 §3 Rule 4).
+    A pending [Manual_compaction_requested] is the sole control-plane
+    exception: it is selected ahead of data-plane stimuli so an in-flight
+    source checkpoint can yield, compact, and then resume from the unchanged
+    durable queue. The selected observation is merged with the
+    [pending_board_events] already accumulated by the caller, deduplicating by
+    [post_id]. A
     [Hitl_resolved] stimulus remains queued until its exact approval id has
     left the pending map, while later ready stimuli can still be selected.
     A transient Board read returns no consumed stimuli, keeps the exact

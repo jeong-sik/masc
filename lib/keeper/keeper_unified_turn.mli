@@ -215,6 +215,16 @@ val turn_success_of_stop_reason
   -> turn_success
 (** Total typed projection used at the successful runtime boundary. *)
 
+val manual_compaction_preemption_request
+  :  wake:Keeper_registry.wake_reason
+  -> now:float
+  -> Keeper_event_queue.t
+  -> Keeper_agent_run.autonomous_yield_request option
+(** Pure post-tool boundary decision for an in-flight source turn. Returns a
+    durable-stimulus yield only when a separate owner-lane manual compaction is
+    pending. The summary names that exact control-plane stimulus as the next
+    source; a turn already consuming manual compaction never yields to itself. *)
+
 val run_keeper_cycle
   :  before_dispatch_authority:(unit -> (unit, string) result)
   -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane

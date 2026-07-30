@@ -7,12 +7,7 @@
     participates. *)
 
 type current_selection =
-  { summary : string
-  ; facts : Keeper_memory_os_types.fact list
-  ; open_items : string list
-  ; constraints : string list
-  ; preserved_tool_refs : string list
-  }
+  { facts : Keeper_memory_os_types.fact list }
 
 type input =
   { turn_ref : Ids.Turn_ref.t
@@ -22,26 +17,15 @@ type input =
   }
 
 type selection =
-  { summary : string
-  ; retained_claim_ids : string list
+  { retained_memory_ids : string list
   ; new_claims : Keeper_memory_os_types.fact list
   ; facts : Keeper_memory_os_types.fact list
-  ; open_items : string list
-  ; constraints : string list
-  ; preserved_tool_refs : string list
   }
 
-val wire_field_summary : string
-val wire_field_retained_claim_ids : string
+val wire_field_retained_memory_ids : string
 val wire_field_new_claims : string
-val wire_field_open_items : string
-val wire_field_constraints : string
-val wire_field_preserved_tool_refs : string
 val wire_field_claim : string
 val wire_field_category : string
-val wire_field_source_turn : string
-val wire_field_source_tool_call_id : string
-val wire_field_claim_id : string
 val wire_current_fields : string list
 val wire_claim_fields : string list
 
@@ -53,9 +37,9 @@ type parse_error =
   | Duplicate_field of string
   | Missing_required_fields
   | Claim_schema_mismatch
-  | Unknown_retained_claim_id of string
-  | Duplicate_retained_claim_id of string
-  | Duplicate_selected_claim_id of string
+  | Unknown_retained_memory_id of string
+  | Duplicate_retained_memory_id of string
+  | Duplicate_selected_memory_id of string
 
 val parse_error_to_string : parse_error -> string
 

@@ -388,11 +388,7 @@ let extract_and_commit_with_exact_output_classified
       ; trace_id = input_trace_id inp
       ; generation = inp.generation
       }
-    ~summary:selection.summary
     ~facts:selection.facts
-    ~open_items:selection.open_items
-    ~constraints:selection.constraints
-    ~preserved_tool_refs:selection.preserved_tool_refs
     ()
   |> Result.map_error (fun detail ->
     Memory_snapshot_write_failed detail)

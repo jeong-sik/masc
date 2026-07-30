@@ -3,8 +3,7 @@
 open Keeper_memory_os_types
 open Result.Syntax
 
-let schema = "keeper.memory.current.v1"
-let suffix = ".memory.json"
+let suffix = ".memory-current.json"
 
 type source_kind =
   | Librarian
@@ -26,11 +25,7 @@ type t =
   { revision : int
   ; updated_at : float
   ; source : source
-  ; summary : string
   ; facts : fact list
-  ; open_items : string list
-  ; constraints : string list
-  ; preserved_tool_refs : string list
   ; change : change
   }
 
@@ -100,19 +95,6 @@ let source_of_json = function
   | _ -> None
 ;;
 
-let string_list_of_json = function
-  | `List values ->
-    let rec loop acc = function
-      | [] -> Some (List.rev acc)
-      | `String value :: rest ->
-        let value = String.trim value in
-        if String.equal value "" then None else loop (value :: acc) rest
-      | _ :: _ -> None
-    in
-    loop [] values
-  | _ -> None
-;;
-
 let facts_of_json = function
   | `List values ->
     let rec loop seen acc = function
@@ -120,7 +102,7 @@ let facts_of_json = function
       | value :: rest ->
         (match fact_of_json value with
          | Some fact ->
-           let identity = claim_identity fact in
+           let identity = memory_id fact in
            if Set_util.StringSet.mem identity seen
            then None
            else
@@ -165,16 +147,10 @@ let change_of_json = function
 
 let to_json snapshot =
   `Assoc
-    [ "schema", `String schema
-    ; "revision", `Int snapshot.revision
+    [ "revision", `Int snapshot.revision
     ; "updated_at", `Float snapshot.updated_at
     ; "source", source_to_json snapshot.source
-    ; "summary", `String snapshot.summary
     ; "facts", facts_to_json snapshot.facts
-    ; wire_field_open_items, `List (List.map (fun value -> `String value) snapshot.open_items)
-    ; wire_field_constraints, `List (List.map (fun value -> `String value) snapshot.constraints)
-    ; ( wire_field_preserved_tool_refs
-      , `List (List.map (fun value -> `String value) snapshot.preserved_tool_refs) )
     ; "change", change_to_json snapshot.change
     ]
 ;;
@@ -182,39 +158,24 @@ let to_json snapshot =
 let of_json = function
   | `Assoc fields
     when exact_object_fields
-           [ "schema"
-           ; "revision"
+           [ "revision"
            ; "updated_at"
            ; "source"
-           ; "summary"
            ; "facts"
-           ; wire_field_open_items
-           ; wire_field_constraints
-           ; wire_field_preserved_tool_refs
            ; "change"
            ]
            fields ->
     (match
-       List.assoc_opt "schema" fields
-       , List.assoc_opt "revision" fields
+       List.assoc_opt "revision" fields
        , List.assoc_opt "updated_at" fields
        , List.assoc_opt "source" fields
-       , List.assoc_opt "summary" fields
        , List.assoc_opt "facts" fields
-       , List.assoc_opt wire_field_open_items fields
-       , List.assoc_opt wire_field_constraints fields
-       , List.assoc_opt wire_field_preserved_tool_refs fields
        , List.assoc_opt "change" fields
      with
-     | ( Some (`String observed_schema)
-       , Some (`Int revision)
+     | ( Some (`Int revision)
        , Some updated_at_json
        , Some source_json
-       , Some (`String summary)
        , Some facts_json
-       , Some open_items_json
-       , Some constraints_json
-       , Some preserved_tool_refs_json
        , Some change_json ) ->
        let updated_at =
          match updated_at_json with
@@ -226,31 +187,20 @@ let of_json = function
           updated_at
           , source_of_json source_json
           , facts_of_json facts_json
-          , string_list_of_json open_items_json
-          , string_list_of_json constraints_json
-          , string_list_of_json preserved_tool_refs_json
           , change_of_json change_json
         with
         | ( Some updated_at
           , Some source
           , Some facts
-          , Some open_items
-          , Some constraints
-          , Some preserved_tool_refs
           , Some change )
-          when String.equal observed_schema schema
-               && revision >= 1
+          when revision >= 1
                && Float.is_finite updated_at
                && updated_at >= 0.0 ->
           Some
             { revision
             ; updated_at
             ; source
-            ; summary
             ; facts
-            ; open_items
-            ; constraints
-            ; preserved_tool_refs
             ; change
             }
         | _ -> None)
@@ -296,7 +246,7 @@ let map_facts facts =
   let rec loop map = function
     | [] -> Ok map
     | fact :: rest ->
-      let identity = claim_identity fact in
+      let identity = memory_id fact in
       if Identity_map.mem identity map
       then Error (Printf.sprintf "duplicate Memory OS fact identity: %s" identity)
       else loop (Identity_map.add identity fact map) rest
@@ -307,31 +257,33 @@ let map_facts facts =
 let compute_change ~previous ~next =
   let* previous_by_id = map_facts previous in
   let* next_by_id = map_facts next in
-  let added, retained =
-    Identity_map.fold
-      (fun identity next_fact (added, retained) ->
+  let added_rev, retained =
+    List.fold_left
+      (fun (added_rev, retained) next_fact ->
+         let identity = memory_id next_fact in
          match Identity_map.find_opt identity previous_by_id with
          | Some previous_fact
            when String.equal (fact_payload previous_fact) (fact_payload next_fact) ->
-           added, retained + 1
-         | Some _ | None -> next_fact :: added, retained)
-      next_by_id
+           added_rev, retained + 1
+         | Some _ | None -> next_fact :: added_rev, retained)
       ([], 0)
+      next
   in
-  let removed =
-    Identity_map.fold
-      (fun identity previous_fact removed ->
+  let removed_rev =
+    List.fold_left
+      (fun removed_rev previous_fact ->
+         let identity = memory_id previous_fact in
          match Identity_map.find_opt identity next_by_id with
          | Some next_fact
            when String.equal (fact_payload previous_fact) (fact_payload next_fact) ->
-           removed
-         | Some _ | None -> previous_fact :: removed)
-      previous_by_id
+           removed_rev
+         | Some _ | None -> previous_fact :: removed_rev)
       []
+      previous
   in
   Ok
-    { added = List.rev added
-    ; removed = List.rev removed
+    { added = List.rev added_rev
+    ; removed = List.rev removed_rev
     ; retained
     }
 ;;
@@ -370,11 +322,7 @@ let make_snapshot
       ~previous
       ~now
       ~source
-      ~summary
       ~facts
-      ~open_items
-      ~constraints
-      ~preserved_tool_refs
       ()
   =
   let previous_facts, revision =
@@ -386,11 +334,7 @@ let make_snapshot
   { revision
   ; updated_at = now
   ; source
-  ; summary
   ; facts
-  ; open_items
-  ; constraints
-  ; preserved_tool_refs
   ; change
   }
 ;;
@@ -402,11 +346,7 @@ let replace
       ~expected_revision
       ~now
       ~source
-      ~summary
       ~facts
-      ~open_items
-      ~constraints
-      ~preserved_tool_refs
       ()
   =
   update_locked ?clock ~keepers_dir ~keeper_id (fun previous ->
@@ -425,11 +365,7 @@ let replace
         ~previous
         ~now
         ~source
-        ~summary
         ~facts
-        ~open_items
-        ~constraints
-        ~preserved_tool_refs
         ())
 ;;
 
@@ -442,25 +378,20 @@ let upsert_fact
       incoming
   =
   update_locked ?clock ~keepers_dir ~keeper_id (fun previous ->
-    let current_facts, summary, open_items, constraints, preserved_tool_refs =
+    let current_facts =
       match previous with
-      | None -> [], "Explicit keeper memory write.", [], [], []
-      | Some snapshot ->
-        ( snapshot.facts
-        , snapshot.summary
-        , snapshot.open_items
-        , snapshot.constraints
-        , snapshot.preserved_tool_refs )
+      | None -> []
+      | Some snapshot -> snapshot.facts
     in
-    let incoming_identity = claim_identity incoming in
+    let incoming_identity = memory_id incoming in
     let found = ref false in
     let facts =
       List.map
         (fun existing ->
-           if String.equal (claim_identity existing) incoming_identity
+           if String.equal (memory_id existing) incoming_identity
            then (
              found := true;
-             incoming)
+             { incoming with first_seen = existing.first_seen })
            else existing)
         current_facts
     in
@@ -469,10 +400,6 @@ let upsert_fact
       ~previous
       ~now
       ~source
-      ~summary
       ~facts
-      ~open_items
-      ~constraints
-      ~preserved_tool_refs
       ())
 ;;

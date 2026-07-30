@@ -45,9 +45,6 @@ let librarian_claim_schema =
   let fields =
     [ Keeper_librarian.wire_field_claim, string_schema
     ; Keeper_librarian.wire_field_category, enum_schema category_tokens
-    ; Keeper_librarian.wire_field_source_turn, integer_schema
-    ; Keeper_librarian.wire_field_source_tool_call_id, nullable_string_schema
-    ; Keeper_librarian.wire_field_claim_id, nullable_string_schema
     ]
   in
   object_schema ~required:(List.map fst fields) fields
@@ -55,13 +52,9 @@ let librarian_claim_schema =
 
 let librarian_current_output_schema =
   let fields =
-    [ Keeper_librarian.wire_field_summary, string_schema
-    ; Keeper_librarian.wire_field_retained_claim_ids, string_array_schema
+    [ Keeper_librarian.wire_field_retained_memory_ids, string_array_schema
     ; ( Keeper_librarian.wire_field_new_claims
       , `Assoc [ "type", `String "array"; "items", librarian_claim_schema ] )
-    ; Keeper_librarian.wire_field_open_items, string_array_schema
-    ; Keeper_librarian.wire_field_constraints, string_array_schema
-    ; Keeper_librarian.wire_field_preserved_tool_refs, string_array_schema
     ]
   in
   object_schema ~required:(List.map fst fields) fields
@@ -206,10 +199,8 @@ let fusion_judge_output_schema =
    the same prompt path anyway while logging one INFO line per keeper per tick.
 
    Two failure modes traced to that branch are closed by not taking it. The
-   librarian schema marks every claim field [required] with nullable types, so
-   a schema-conforming provider emits optional values in a different shape from
-   prompt-only candidates. The json_object tier also 400s solely because a
-   response_format was set at all.
+   The json_object tier also 400s solely because a response_format was set at
+   all.
 
    Note the parse path never read a provider-side structured field:
    [Agent_sdk.Structured.response_json_extractor] extracts JSON from the

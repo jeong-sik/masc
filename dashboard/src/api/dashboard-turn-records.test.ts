@@ -46,18 +46,12 @@ function payload(...entries: ReturnType<typeof entry>[]) {
     health: 'ok',
     stale_reason: null,
     memory_os: {
-      schema: 'keeper.memory_os.current_observability.v1',
       keeper: 'sangsu',
-      source: 'current_memory_snapshot',
-      producer: 'keeper_librarian',
-      snapshot_store: '.masc/keepers/sangsu.memory.json',
+      snapshot_store: '.masc/keepers/sangsu.memory-current.json',
       recall_enabled: true,
       revision: 0,
       updated_at: null,
-      summary: null,
       update_source: null,
-      now: 1_700_000_000,
-      now_iso: '2023-11-14T22:13:20Z',
       read_errors: [],
       facts: { shown: 0, current: 0, items: [] },
       change: { added: [], removed: [], retained: 0 },
@@ -204,7 +198,7 @@ describe('keeper turn record cache token counts', () => {
     )
   })
 
-  it('rejects the retired Memory OS wire contract token', async () => {
+  it('rejects the retired Memory OS schema field', async () => {
     const raw = payload(entry())
     Object.assign(raw.memory_os, { schema: 'keeper.memory_os.recall_observability.v1' })
     getMock.mockResolvedValue(raw)

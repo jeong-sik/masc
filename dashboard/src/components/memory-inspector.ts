@@ -10,7 +10,7 @@
 // Section data sources (RFC-keeper-memory-panel-real-data §4; hybrid treatment confirmed 2026-06-24):
 //   최종 provider 입력   ← real final-input content bytes + provider wire bytes/runtime
 //                           (entries[latest].input_components/request_* fields)
-//   현재 메모리 스냅샷    ← real memory_os.facts.items (typed category, provenance)
+//   현재 메모리 스냅샷    ← real memory_os.facts.items (typed category, derived memory_id)
 //   최근 기억 변화        ← real memory_os.change.{added,removed,retained}
 //   최근 회상·주입        ← real memory_os_recall prompt blocks (entries[*].blocks)
 // Any future-only section must render an honest disclosure rather than fabricated
@@ -202,7 +202,7 @@ export function recentMemoryRecallInjections(
 }
 
 // ── fact category meta (real, exhaustive over the typed union) ──
-export interface FactKindMeta {
+export interface FactCategoryMeta {
   readonly lbl: string
   readonly glyph: string
   readonly color: string
@@ -210,7 +210,7 @@ export interface FactKindMeta {
 // Exhaustive switch over MemoryOsFactCategory. A new arm added to the OCaml
 // `category` sum (and its TS mirror) forces a compile error here via the
 // `never` guard — no `_ -> default` swallow, no silent miscolour.
-export function factCategoryMeta(category: MemoryOsFactCategory): FactKindMeta {
+export function factCategoryMeta(category: MemoryOsFactCategory): FactCategoryMeta {
   const tag = category.tag
   switch (tag) {
     case 'code_change':
@@ -234,18 +234,18 @@ export function factCategoryMeta(category: MemoryOsFactCategory): FactKindMeta {
   return _exhaustive
 }
 
-// Claim age uses the persisted verification anchor. Snapshot membership is
+// Claim age uses the producer-owned insertion timestamp. Snapshot membership is
 // the only current-state authority.
 function factAgeLabel(fact: MemoryOsFact): string {
-  return formatTimeAgo(fact.reference_time)
+  return formatTimeAgo(fact.first_seen)
 }
 
 export function sortMemoryFactsForReview(facts: readonly MemoryOsFact[]): MemoryOsFact[] {
   return [...facts]
 }
 
-function formatFactInstant(ts: number, iso: string | null): string {
-  return formatDateTimeKo(iso ?? ts)
+function formatInstant(ts: number): string {
+  return formatDateTimeKo(ts)
 }
 
 export function factSelectionReason(fact: MemoryOsFact): string {
@@ -333,7 +333,7 @@ function MemoryTrustStrip({
       <div class="mem-trust-card">
         <span class="mem-trust-k">store</span>
         <span class="mem-trust-v mono">revision ${snapshot.revision}</span>
-        <span class="mem-trust-sub mono">${snapshot.facts.shown} facts · ${snapshot.source}</span>
+        <span class="mem-trust-sub mono">${snapshot.facts.shown} facts · current snapshot</span>
       </div>
       <div class="mem-trust-card">
         <span class="mem-trust-k">scope</span>
@@ -350,9 +350,10 @@ function MemoryTrustStrip({
 }
 
 function MemoryCurrentContract({ snapshot }: { snapshot: MemoryOsTurnRecordSnapshot }) {
+  const writer = snapshot.update_source?.kind ?? 'fresh state'
   return html`
     <div class="mem-policy">
-      <div class="mem-policy-row"><span>selection</span><code>${snapshot.producer}</code><b>LLM current-memory choice</b></div>
+      <div class="mem-policy-row"><span>writer</span><code>${writer}</code><b>latest snapshot writer</b></div>
       <div class="mem-policy-row"><span>commit</span><code>${snapshot.snapshot_store}</code><b>single atomic snapshot</b></div>
       <div class="mem-policy-row"><span>recall</span><code>memory_os_recall</code><b>exact current facts · no ranking/truncation</b></div>
       <div class="mem-policy-row"><span>delta</span><code>revision ${snapshot.revision}</code><b>exact added / removed / retained</b></div>
@@ -368,11 +369,12 @@ function MemoryPromptEvidence({
   row: TurnRecordRow | null
 }) {
   const memoryBlock = latestMemoryRecallBlock(row)
+  const writer = snapshot.update_source?.kind ?? 'fresh state'
   return html`
     <div class="mem-prompt-evidence">
       <div class="mem-prompt-step">
         <span class="mem-prompt-n">1</span>
-        <div><b>librarian</b><span>${snapshot.producer}</span></div>
+        <div><b>snapshot writer</b><span>${writer}</span></div>
       </div>
       <div class="mem-prompt-step">
         <span class="mem-prompt-n">2</span>
@@ -388,7 +390,7 @@ function MemoryPromptEvidence({
       </div>
       ${row ? html`
         <div class="mem-prompt-foot mono">
-          latest assembly ${row.record.trace_id}#${row.record.absolute_turn} · ${formatFactInstant(row.record.ts, null)}
+          latest assembly ${row.record.trace_id}#${row.record.absolute_turn} · ${formatInstant(row.record.ts)}
         </div>
       ` : null}
     </div>
@@ -417,24 +419,19 @@ function RecentRecallTimeline({ rows }: { rows: readonly TurnRecordRow[] }) {
   `
 }
 
-// `srcOverride` replaces the trace#turn provenance in the meta row with a caller
-// label (used by the aggregate "recent facts" list to show the owning keeper).
+// `srcOverride` adds the owning keeper label in the aggregate current-facts list.
 function FactRow({ fact, srcOverride }: { fact: MemoryOsFact; srcOverride?: string }) {
   const meta = factCategoryMeta(fact.category)
-  const provenance = `${fact.source.trace_id}#${fact.source.turn}`
   return html`
     <div class="mem-store-row">
       <span class="mem-kind" style=${{ color: meta.color, borderColor: meta.color }}>${meta.glyph} ${meta.lbl}</span>
       <div class="mem-store-main">
         <div class="mem-store-text">${fact.claim}</div>
         <div class="mem-store-meta">
-          <span class="mono">저장 ${formatFactInstant(fact.first_seen, fact.first_seen_iso)}</span>
+          <span class="mono">저장 ${formatInstant(fact.first_seen)}</span>
           <span class="mono">기준 ${factAgeLabel(fact)}</span>
-          ${fact.last_verified_at != null
-            ? html`<span class="mono">검증 ${formatFactInstant(fact.last_verified_at, null)}</span>`
-            : null}
-          <span class="mem-ttl current">현재</span>
-          <span class="mem-src mono">${srcOverride ?? provenance}</span>
+          <span>현재</span>
+          ${srcOverride ? html`<span class="mem-src mono">${srcOverride}</span>` : null}
         </div>
         <div class="mem-store-why">${factSelectionReason(fact)}</div>
       </div>
@@ -490,7 +487,6 @@ function MemoryChangeFacts({
               <div class="mem-store-text">${fact.claim}</div>
               <div class="mem-store-meta">
                 <span class="mono">${fact.memory_id}</span>
-                <span class="mem-src mono">${fact.source.trace_id}#${fact.source.turn}</span>
               </div>
             </div>
           </div>
@@ -699,8 +695,8 @@ function mergeAggregateCategoryCounts(
   return [...byTag.values()].sort((a, b) => b.count - a.count)
 }
 
-// Fleet-wide most-recently-verified facts with their owning keeper, newest first
-// (reference_time = last_verified_at else first_seen). NOT a salience sort (RFC-0247).
+// Fleet-wide current facts with their owning keeper. Ordering comes from the
+// current snapshot, not from a local salience or verification heuristic.
 function mergeAggregateFacts(rows: readonly AggregateMemoryRow[]): readonly AggregateRecentFact[] {
   const flattened: AggregateRecentFact[] = []
   for (const row of rows) {
@@ -743,7 +739,7 @@ function aggregateMemoryRowFromResponse(
     keeper,
     memoryPresent: true,
     error: null,
-    source: snapshot.source,
+    source: snapshot.snapshot_store,
     currentFacts: snapshot.facts.current,
     shownFacts: snapshot.facts.shown,
     revision: snapshot.revision,

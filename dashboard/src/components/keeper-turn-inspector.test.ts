@@ -96,22 +96,16 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
     count: 2,
     skipped_rows: 0,
     memory_os: {
-      schema: 'keeper.memory_os.current_observability.v1',
       keeper: 'albini',
-      source: 'current_memory_snapshot',
-      producer: 'keeper_librarian',
-      snapshot_store: '.masc/config/keepers/albini.memory.json',
+      snapshot_store: '.masc/config/keepers/albini.memory-current.json',
       recall_enabled: true,
       revision: 7,
       updated_at: 1_781_587_590,
-      summary: 'Current memory selected by the Librarian.',
       update_source: {
         kind: 'librarian',
         trace_id: 'trace-active',
         generation: 7,
       },
-      now: 1_781_587_600,
-      now_iso: '2026-06-16T02:00:00Z',
       read_errors: [],
       facts: {
         shown: 1,
@@ -227,7 +221,7 @@ describe('KeeperMemoryOsRecallPanel', () => {
     expect(text).toContain('+0 / −0')
     expect(text).toContain('retained 1')
     expect(text).toContain('latest revision memory change 없음')
-    expect(text).toContain('store: .masc/config/keepers/albini.memory.json')
+    expect(text).toContain('store: .masc/config/keepers/albini.memory-current.json')
     expect(text).toContain('source: librarian · trace-active · g7')
   })
 
@@ -235,7 +229,6 @@ describe('KeeperMemoryOsRecallPanel', () => {
     const response = turnRecordsWithMemoryOs()
     response.memory_os.revision = 0
     response.memory_os.updated_at = null
-    response.memory_os.summary = null
     response.memory_os.update_source = null
     response.memory_os.facts = { shown: 0, current: 0, items: [] }
     response.memory_os.change = { added: [], removed: [], retained: 0 }

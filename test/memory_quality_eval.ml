@@ -263,22 +263,19 @@ let load_facts ~keepers_dir =
 let report_composition facts =
   section "FACT COMPOSITION (current snapshot)";
   if facts = []
-  then note "no current snapshot found (keepers/*.memory.json) — composition skipped"
+  then note "no current snapshot found (keepers/*.memory-current.json) — composition skipped"
   else (
     let all = List.concat_map snd facts in
-    let total = List.length all in
-    let with_id = List.length (List.filter (fun (f : Types.fact) -> f.claim_id <> None) all) in
     note "keepers with fact store: %d" (List.length facts);
-    note "total facts: %d" total;
-    note "with claim_id: %d (%.0f%%)" with_id (pct with_id total);
+    note "total facts: %d" (List.length all);
     let idtbl = Hashtbl.create 256 in
     List.iter
       (fun f ->
-         let id = Types.claim_identity f in
+         let id = Types.memory_id f in
          Hashtbl.replace idtbl id (1 + Option.value (Hashtbl.find_opt idtbl id) ~default:0))
       all;
     let dups = Hashtbl.fold (fun _ c acc -> if c > 1 then acc + (c - 1) else acc) idtbl 0 in
-    note "duplicate rows (same claim_identity): %d" dups)
+    note "duplicate rows (same memory_id): %d" dups)
 ;;
 
 (* ---------- main ---------- *)

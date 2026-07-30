@@ -29,15 +29,9 @@ type t =
   { revision : int
   ; updated_at : float
   ; source : source
-  ; summary : string
   ; facts : Keeper_memory_os_types.fact list
-  ; open_items : string list
-  ; constraints : string list
-  ; preserved_tool_refs : string list
   ; change : change
   }
-
-val schema : string
 
 val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
@@ -53,11 +47,7 @@ val replace
   -> expected_revision:int option
   -> now:float
   -> source:source
-  -> summary:string
   -> facts:Keeper_memory_os_types.fact list
-  -> open_items:string list
-  -> constraints:string list
-  -> preserved_tool_refs:string list
   -> unit
   -> (t, string) result
 (** Atomically replace the complete current snapshot only when its revision
@@ -76,7 +66,7 @@ val upsert_fact
   -> (t, string) result
 (** Atomically insert or replace one explicit keeper-authored fact while
     preserving the rest of the current snapshot. A matching identity is
-    replaced by the explicit incoming fact; no local importance, recency, or
-    echo heuristic participates. *)
+    updated from the explicit incoming fact while preserving its original
+    [first_seen]; no local importance, recency, or echo heuristic participates. *)
 
 val to_json : t -> Yojson.Safe.t

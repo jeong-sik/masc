@@ -163,27 +163,15 @@ let keeper_chat_allowed_trace_ids (m : Keeper_meta_contract.keeper_meta) =
   |> Json_util.dedupe_keep_order
 ;;
 
-(* RFC-keeper-memory-panel-real-data §4a: surface the fact rows the panel renders.
-   Serializes ONLY the current [fact] structure —
-   claim, typed category, provenance, the three timestamps, and current-ness —
-   never the deleted score fields (confidence / access_count / last_accessed,
-   RFC-0247): they are absent from the [fact] record, so the type system makes
-   re-emitting them unrepresentable. [reference_time] is the shared staleness
-   anchor (last_verified_at else first_seen), reused rather than re-inlined.
-   Product-specific references remain connector/tool context rather than
-   Memory schema fields. [current] is derived solely from membership in this
-   current snapshot and is never persisted as another authority. *)
+(* Surface only the current fact structure. [current] is derived solely from
+   membership in this snapshot and is never persisted as another authority. *)
 let memory_os_fact_json ~current (fact : Keeper_memory_os_types.fact) =
   `Assoc
-    [ "memory_id", `String (Keeper_memory_os_types.claim_identity fact)
-     ; "claim", `String fact.claim
-     ; "category", `String (Keeper_memory_os_types.category_to_string fact.category)
-     ; "source", Keeper_memory_os_types.provenance_event_to_json fact.source
-     ; "first_seen", `Float fact.first_seen
-     ; "first_seen_iso", `String (Masc_domain.iso8601_of_unix_seconds fact.first_seen)
-     ; "reference_time", `Float (Keeper_memory_os_types.reference_time fact)
-     ; "last_verified_at", json_float_opt fact.last_verified_at
-     ; "current", `Bool current
+    [ "memory_id", `String (Keeper_memory_os_types.memory_id fact)
+    ; "claim", `String fact.claim
+    ; "category", `String (Keeper_memory_os_types.category_to_string fact.category)
+    ; "first_seen", `Float fact.first_seen
+    ; "current", `Bool current
      ]
 ;;
 
@@ -196,7 +184,6 @@ let memory_os_change_json (change : Keeper_memory_os_current.change) =
 ;;
 
 let memory_os_dashboard_json ~(config : Workspace.config) ~keeper_id =
-  let now = Time_compat.now () in
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path
       ~base_path:config.Workspace.base_path
@@ -208,13 +195,12 @@ let memory_os_dashboard_json ~(config : Workspace.config) ~keeper_id =
     | Ok snapshot -> snapshot, None
     | Error message -> None, Some message
   in
-  let facts, change, revision, updated_at, summary, source =
+  let facts, change, revision, updated_at, source =
     match snapshot with
     | None ->
       ( []
       , `Assoc [ "added", `List []; "removed", `List []; "retained", `Int 0 ]
       , 0
-      , None
       , None
       , `Null )
     | Some snapshot ->
@@ -223,7 +209,6 @@ let memory_os_dashboard_json ~(config : Workspace.config) ~keeper_id =
       , memory_os_change_json snapshot.change
       , snapshot.revision
       , Some snapshot.updated_at
-      , Some snapshot.summary
       , `Assoc
           [ ( "kind"
             , `String
@@ -236,10 +221,7 @@ let memory_os_dashboard_json ~(config : Workspace.config) ~keeper_id =
   in
   let current_facts = List.length facts in
   `Assoc
-    [ "schema", `String "keeper.memory_os.current_observability.v1"
-    ; "keeper", `String keeper_id
-    ; "source", `String "current_memory_snapshot"
-    ; "producer", `String "keeper_librarian"
+    [ "keeper", `String keeper_id
     ; ( "snapshot_store"
       , `String
           (Keeper_memory_os_current.path_for_keepers_dir
@@ -248,10 +230,7 @@ let memory_os_dashboard_json ~(config : Workspace.config) ~keeper_id =
     ; "recall_enabled", `Bool (Keeper_memory_os_recall.enabled ())
     ; "revision", `Int revision
     ; "updated_at", (match updated_at with Some value -> `Float value | None -> `Null)
-    ; "summary", (match summary with Some value -> `String value | None -> `Null)
     ; "update_source", source
-    ; "now", `Float now
-    ; "now_iso", `String (Masc_domain.iso8601_of_unix_seconds now)
     ; ( "read_errors"
       , match read_error with
         | None -> `List []

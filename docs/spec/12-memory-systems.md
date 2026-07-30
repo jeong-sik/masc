@@ -23,18 +23,18 @@ side derives memory from a model-authored state envelope.
 | Tool/history logs | MASC | observable evidence and recall source |
 
 Memory OS snapshot path:
-`<base-path>/.masc/keepers/<keeper_name>.memory.json`.
+`<base-path>/.masc/keepers/<keeper_name>.memory-current.json`.
 A missing snapshot means fresh empty state. Memory OS does not import, migrate,
 or fall back to alternate store layouts.
 
 ## Write Contract
 
 A memory claim must come from an explicit memory operation or the librarian
-lane's typed result. Every claim carries exact trace/turn provenance and, when
-the cited message contains one, its exact tool-call identity. The librarian
-parser rejects provenance outside the supplied message slice. The complete
-snapshot carries its revision, source trace/generation, and exact
-added/removed/retained delta.
+lane's typed result. A claim stores only its exact text, typed category, and
+insertion timestamp. Its `memory_id` is the SHA-256 digest of the exact claim
+bytes and is used only for retention references, duplicate rejection, recall
+evidence, and observability. The complete snapshot carries its revision,
+direct writer trace/generation, and exact added/removed/retained delta.
 
 Assistant reply text is never parsed into goal, progress, future work,
 questions, constraints, or any other memory category. An ordinary reply may
@@ -56,6 +56,9 @@ every claim in stored order; it does not rank, trim, or apply a count/byte
 budget. A malformed snapshot is reported as recall unavailable rather than
 silently treated as empty memory.
 
+Explicit Memory OS search filters exact query substrings and preserves snapshot
+order. It does not emit a relevance score or reorder facts by timestamp.
+
 The runtime may inject selected memory into a future prompt as context. That
 context is advisory and cannot mutate task, goal, lifecycle, HITL, connector,
 or scheduler state.
@@ -66,7 +69,7 @@ OAS reduces active context through its checkpoint/context APIs. MASC may
 request a configured strategy and observe the outcome, but must not rewrite
 the transcript through domain-specific text parsing.
 
-The librarian LLM returns retained current claim IDs and new claims. Omission
+The librarian LLM returns retained current memory IDs and new claims. Omission
 removes a current claim. Deterministic code validates the exact schema and
 claim identities, then atomically replaces the snapshot only if its observed
 revision still matches. No threshold, priority score, recency rule, or

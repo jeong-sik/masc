@@ -142,9 +142,6 @@ function MemoryOsChangeRow({
         <span class="text-3xs font-mono text-[var(--color-fg-muted)]">
           ${fact.memory_id}
         </span>
-        <span class="text-3xs text-[var(--color-fg-disabled)]">
-          ${fact.source.trace_id}#${fact.source.turn}
-        </span>
       </div>
       <div class="line-clamp-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
         ${fact.claim}
@@ -224,9 +221,6 @@ function MemoryOsRecallSourcePanel({
         <div class="mt-1 break-all font-mono">store: ${snapshot.snapshot_store}</div>
         <div class="mt-1 break-all font-mono">updated: ${updatedAt}</div>
         <div class="mt-1 break-all font-mono">source: ${updateSource}</div>
-        ${snapshot.summary
-          ? html`<div class="mt-1 break-all">summary: ${snapshot.summary}</div>`
-          : null}
       </details>
     </section>
   `

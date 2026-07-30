@@ -9,13 +9,10 @@ module Health = Server_dashboard_http_keeper_memory_health
 let test_now = 1_700_000_000.0
 let fresh_dir prefix = Filename.temp_dir prefix ""
 
-let fact ?(claim_id = "fact") claim : Types.fact =
+let fact claim : Types.fact =
   { claim
   ; category = Types.Fact
-  ; source = { trace_id = "health-test"; turn = 1; tool_call_id = None }
   ; first_seen = test_now
-  ; last_verified_at = Some test_now
-  ; claim_id = Some claim_id
   }
 ;;
 
@@ -45,11 +42,7 @@ let write_snapshot ~keepers_dir ~keeper_id facts =
     ~expected_revision
     ~now:test_now
     ~source
-    ~summary:"current memory"
     ~facts
-    ~open_items:[]
-    ~constraints:[]
-    ~preserved_tool_refs:[]
     ()
   |> require_ok
 ;;
@@ -153,9 +146,9 @@ let test_uses_explicit_base_path_not_ambient_resolver () =
 let test_reports_revision_snapshot_bytes_and_latest_delta () =
   let base = fresh_dir "masc-memory-health-current" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
-  let first = fact ~claim_id:"a" "A" in
-  let changed = fact ~claim_id:"a" "A revised" in
-  let second = fact ~claim_id:"b" "B" in
+  let first = fact "A" in
+  let changed = fact "A revised" in
+  let second = fact "B" in
   ignore (write_snapshot ~keepers_dir ~keeper_id:"solo" [ first ]);
   ignore (write_snapshot ~keepers_dir ~keeper_id:"solo" [ changed; second ]);
   let json = Health.keeper_memory_health_http_json ~base_path:base in
@@ -227,8 +220,8 @@ let test_sorts_by_snapshot_bytes_and_handles_empty_store () =
     (write_snapshot
        ~keepers_dir
        ~keeper_id:"large"
-       [ fact ~claim_id:"a" "a much longer current memory claim"
-       ; fact ~claim_id:"b" "another much longer current memory claim"
+       [ fact "a much longer current memory claim"
+       ; fact "another much longer current memory claim"
        ]);
   let json = Health.keeper_memory_health_http_json ~base_path:base in
   Alcotest.(check (list string))

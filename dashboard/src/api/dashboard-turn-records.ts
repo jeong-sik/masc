@@ -149,12 +149,6 @@ export function parseMemoryOsFactCategory(raw: string): MemoryOsFactCategory | n
   return known ? { tag: known } : null
 }
 
-export type MemoryOsFactProvenance = {
-  readonly trace_id: string
-  readonly turn: number
-  readonly tool_call_id: string | null
-}
-
 // One fact row as projected by memory_os_fact_json (server_dashboard_http_keeper_api.ml).
 // Carries only the structure RFC-0247 left on the record — there is no salience /
 // uses / confidence field to decode because the backend has none to emit.
@@ -162,12 +156,7 @@ export type MemoryOsFact = {
   readonly memory_id: string
   readonly claim: string
   readonly category: MemoryOsFactCategory
-  readonly source: MemoryOsFactProvenance
   readonly first_seen: number
-  readonly first_seen_iso: string | null
-  // last_verified_at else first_seen — the shared staleness anchor (reference_time).
-  readonly reference_time: number
-  readonly last_verified_at: number | null
   // Derived from membership in the current snapshot; never persisted as a
   // second Memory authority.
   readonly current: boolean
@@ -180,18 +169,12 @@ export type MemoryOsUpdateSource = {
 }
 
 export type MemoryOsTurnRecordSnapshot = {
-  schema: string
   keeper: string
-  source: string
-  producer: string
   snapshot_store: string
   recall_enabled: boolean
   revision: number
   updated_at: number | null
-  summary: string | null
   update_source: MemoryOsUpdateSource | null
-  now: number | null
-  now_iso: string | null
   read_errors: { scope: string; error: string }[]
   facts: {
     shown: number
@@ -621,36 +604,12 @@ function decodeTurnRecordRow(raw: unknown): TurnRecordRow | null {
   }
 }
 
-function decodeMemoryOsFactProvenance(raw: unknown): MemoryOsFactProvenance | null {
-  if (!isRecord(raw) || !hasNoUnknownKeys(raw, ['trace_id', 'turn', 'tool_call_id'])) {
-    return null
-  }
-  const trace_id = decodeExactNonEmptyString(raw.trace_id)
-  const turn = asNumber(raw.turn)
-  const hasToolCallId = Object.hasOwn(raw, 'tool_call_id')
-  const tool_call_id = hasToolCallId
-    ? decodeExactNonEmptyString(raw.tool_call_id)
-    : null
-  if (
-    trace_id === null
-    || turn == null
-    || !Number.isSafeInteger(turn)
-    || turn < 0
-    || (hasToolCallId && tool_call_id === null)
-  ) return null
-  return { trace_id, turn, tool_call_id }
-}
-
 function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
   if (!isRecord(raw) || !hasExactKeys(raw, [
     'memory_id',
     'claim',
     'category',
-    'source',
     'first_seen',
-    'first_seen_iso',
-    'reference_time',
-    'last_verified_at',
     'current',
   ])) return null
   const memory_id = decodeExactNonEmptyString(raw.memory_id)
@@ -658,30 +617,13 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
   const category = typeof raw.category === 'string'
     ? parseMemoryOsFactCategory(raw.category)
     : null
-  const source = decodeMemoryOsFactProvenance(raw.source)
   const first_seen = asNumber(raw.first_seen)
-  const first_seen_iso = decodeExactNonEmptyString(raw.first_seen_iso)
-  const reference_time = asNumber(raw.reference_time)
-  const last_verified_at = decodeNullableNumber(raw.last_verified_at)
   const current = asBoolean(raw.current)
-  const expectedFirstSeenIso = first_seen == null
-    ? null
-    : wholeSecondIsoOfUnixSeconds(first_seen)
-  const expectedReferenceTime =
-    last_verified_at === undefined ? undefined : (last_verified_at ?? first_seen)
   if (
     memory_id === null
     || claim === null
     || category === null
-    || !source
     || first_seen == null
-    || first_seen_iso === null
-    || expectedFirstSeenIso === null
-    || first_seen_iso !== expectedFirstSeenIso
-    || reference_time == null
-    || expectedReferenceTime === undefined
-    || reference_time !== expectedReferenceTime
-    || last_verified_at === undefined
     || current == null
   ) {
     return null
@@ -690,11 +632,7 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
     memory_id,
     claim,
     category,
-    source,
     first_seen,
-    first_seen_iso,
-    reference_time,
-    last_verified_at,
     current,
   }
 }
@@ -734,39 +672,24 @@ function decodeMemoryOsCounts(raw: unknown): {
 
 function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null {
   if (!isRecord(raw) || !hasExactKeys(raw, [
-    'schema',
     'keeper',
-    'source',
-    'producer',
     'snapshot_store',
     'recall_enabled',
     'revision',
     'updated_at',
-    'summary',
     'update_source',
-    'now',
-    'now_iso',
     'read_errors',
     'facts',
     'change',
   ])) return null
-  const schema = raw.schema === 'keeper.memory_os.current_observability.v1'
-    ? raw.schema
-    : null
   const keeper = decodeExactNonEmptyString(raw.keeper)
-  const source = raw.source === 'current_memory_snapshot' ? raw.source : null
-  const producer = raw.producer === 'keeper_librarian' ? raw.producer : null
   const snapshot_store = decodeExactNonEmptyString(raw.snapshot_store)
   const recall_enabled = asBoolean(raw.recall_enabled)
   const revision = decodeNonNegativeSafeInteger(raw.revision)
   const updated_at = decodeNullableNumber(raw.updated_at)
-  const summary = decodeNullableString(raw.summary)
   const update_source = raw.update_source === null
     ? null
     : decodeMemoryOsUpdateSource(raw.update_source)
-  const now = asNumber(raw.now)
-  const now_iso = decodeExactNonEmptyString(raw.now_iso)
-  const expectedNowIso = now == null ? null : wholeSecondIsoOfUnixSeconds(now)
   const read_errors = decodeArray(raw.read_errors, (item) => {
     if (!isRecord(item) || !hasExactKeys(item, ['scope', 'error'])) return null
     const scope = decodeExactNonEmptyString(item.scope)
@@ -777,20 +700,12 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
   const changeRaw = isRecord(raw.change) ? raw.change : null
   const facts = decodeMemoryOsCounts(raw.facts)
   if (
-    schema === null
-    || keeper === null
-    || source === null
-    || producer === null
+    keeper === null
     || snapshot_store === null
     || recall_enabled == null
     || revision === null
     || updated_at === undefined
-    || summary === undefined
     || (raw.update_source !== null && update_source === null)
-    || now == null
-    || now_iso === null
-    || expectedNowIso === null
-    || now_iso !== expectedNowIso
     || read_errors === null
     || !factsRaw
     || !changeRaw
@@ -818,7 +733,6 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
     || retained + added.length !== facts.shown
     || (revision === 0
       && (updated_at !== null
-        || summary !== null
         || update_source !== null
         || facts.shown !== 0
         || added.length !== 0
@@ -828,18 +742,12 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
       && (updated_at === null || update_source === null))
   ) return null
   return {
-    schema,
     keeper,
-    source,
-    producer,
     snapshot_store,
     recall_enabled,
     revision,
     updated_at,
-    summary,
     update_source,
-    now,
-    now_iso,
     read_errors,
     facts: {
       ...facts,

@@ -407,6 +407,261 @@ let with_test_env f =
           Server_request_authority.with_current request_authority (fun () ->
             f ~env ~sw ~config)))
 
+let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let require_ok label = function
+    | Ok value -> value
+    | Error detail -> failf "%s: %s" label detail
+  in
+  let require_some label = function
+    | Some value -> value
+    | None -> fail (label ^ ": missing value")
+  in
+  let make_meta ~name ~trace_id ~nonce =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String name
+          ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
+          ; "trace_id", `String trace_id
+          ])
+    with
+    | Error detail -> failf "meta fixture %s: %s" name detail
+    | Ok meta -> { meta with runtime = { meta.runtime with nonce } }
+  in
+  let base_path = config.Workspace.base_path in
+  let cancel_keeper = "event-source-ref-cancel-source" in
+  let transfer_keeper = "event-source-ref-transfer-source" in
+  let target_keeper = "event-source-ref-target" in
+  let cancel_meta =
+    make_meta ~name:cancel_keeper ~trace_id:"event-source-ref-cancel-trace"
+      ~nonce:41
+  in
+  let transfer_meta =
+    make_meta ~name:transfer_keeper ~trace_id:"event-source-ref-transfer-trace"
+      ~nonce:42
+  in
+  let target_meta =
+    make_meta ~name:target_keeper ~trace_id:"event-source-ref-target-trace"
+      ~nonce:43
+  in
+  let stimulus post_id arrived_at : Keeper_event_queue.stimulus =
+    { post_id; urgency = Normal; arrived_at; payload = Bootstrap }
+  in
+  let cancelled_source = stimulus "event-source-ref-cancel" 1.0 in
+  let transferred_source = stimulus "event-source-ref-transfer" 2.0 in
+  let unrelated_source = stimulus "event-source-ref-unrelated" 3.0 in
+  let later_unrelated_source = stimulus "event-source-ref-later" 4.0 in
+  let load_state keeper_name =
+    Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+    |> require_ok ("load event queue state for " ^ keeper_name)
+  in
+  let enqueue keeper_name (source : Keeper_event_queue.stimulus) =
+    Keeper_event_queue_persistence.update_result
+      ~base_path
+      ~keeper_name
+      (fun pending -> Keeper_event_queue.enqueue pending source)
+    |> require_ok ("enqueue " ^ source.post_id)
+  in
+  let selection_for (source : Keeper_event_queue.stimulus) state =
+    Keeper_event_queue_state.select_when
+      ~ready:(Keeper_event_queue.stimulus_identity_equal source)
+      state
+    |> require_some ("select " ^ source.post_id)
+  in
+  let result_status json =
+    match Yojson.Safe.Util.member "status" json with
+    | `String status -> status
+    | _ -> fail "event operator result omitted status"
+  in
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path in
+  let post_event_operator ~keeper_name body =
+    let output = Buffer.create 512 in
+    let connection =
+      Httpun.Server_connection.create (fun reqd ->
+        Server_dashboard_http_keeper_event_queue_operator.handle_post
+          state
+          ~actor:"event-source-ref-test"
+          (Httpun.Reqd.request reqd)
+          reqd
+          ~keeper_name
+          body)
+    in
+    let request =
+      Printf.sprintf
+        "POST /api/v1/keepers/%s/events/operator HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n%s"
+        keeper_name
+        (String.length body)
+        body
+    in
+    let input =
+      Bigstringaf.of_string ~off:0 ~len:(String.length request) request
+    in
+    ignore
+      (Httpun.Server_connection.read_eof
+         connection
+         input
+         ~off:0
+         ~len:(Bigstringaf.length input));
+    let rec drain () =
+      match Httpun.Server_connection.next_write_operation connection with
+      | `Write iovecs ->
+        let bytes =
+          List.fold_left
+            (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+              Buffer.add_string
+                output
+                (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+              total + iov.len)
+            0
+            iovecs
+        in
+        Httpun.Server_connection.report_write_result connection (`Ok bytes);
+        drain ()
+      | `Yield | `Close _ -> ()
+    in
+    drain ();
+    let raw = Buffer.contents output in
+    let response_body =
+      match List.rev (String.split_on_char '\n' raw) with
+      | body :: _ -> String.trim body
+      | [] -> fail "event operator HTTP response has no body"
+    in
+    raw, Yojson.Safe.from_string response_body
+  in
+  let request_body
+        action
+        (selection : Keeper_event_queue_state.pending_selection)
+        fields
+    =
+    `Assoc
+      ([ "schema", `String "keeper_event_queue.operator.request.v2"
+       ; "action", `String action
+       ; ( "source_incarnation"
+         , `String (Int64.to_string selection.admitted_revision) )
+       ; ( "source_ref"
+         , `String
+             (Keeper_event_queue_state.source_snapshot_ref
+                selection.source) )
+       ]
+       @ fields)
+    |> Yojson.Safe.to_string
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister ~base_path cancel_keeper;
+      Masc.Keeper_registry.For_testing.unregister ~base_path transfer_keeper;
+      Masc.Keeper_registry.For_testing.unregister ~base_path target_keeper)
+    (fun () ->
+       Masc.Keeper_meta_store.write_meta config cancel_meta
+       |> require_ok "persist cancellation source keeper metadata";
+       Masc.Keeper_meta_store.write_meta config transfer_meta
+       |> require_ok "persist transfer source keeper metadata";
+       Masc.Keeper_meta_store.write_meta config target_meta
+       |> require_ok "persist target keeper metadata";
+       ignore
+         (Masc.Keeper_registry.For_testing.register
+            ~base_path
+            cancel_keeper
+            cancel_meta);
+       ignore
+         (Masc.Keeper_registry.For_testing.register
+            ~base_path
+            transfer_keeper
+            transfer_meta);
+       enqueue cancel_keeper cancelled_source;
+       enqueue transfer_keeper transferred_source;
+       let cancel_selection =
+         load_state cancel_keeper |> selection_for cancelled_source
+       in
+       enqueue cancel_keeper unrelated_source;
+       let cancel_request =
+         request_body
+           "cancel"
+           cancel_selection
+           [ ( "operator_operation_id"
+             , `String "event-source-ref-cancel-operation" )
+           ; "reason", `String "operator cancelled exact source"
+           ]
+       in
+       let cancel_raw, cancel_response =
+         post_event_operator ~keeper_name:cancel_keeper cancel_request
+       in
+       check bool "cancellation HTTP request succeeds" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" cancel_raw);
+       check string "cancellation applies once" "applied"
+         (cancel_response |> Yojson.Safe.Util.member "result" |> result_status);
+       check bool "cancellation removes only the selected source" false
+         (Keeper_event_queue_state.pending (load_state cancel_keeper)
+          |> Keeper_event_queue.to_list
+          |> List.exists (fun source ->
+            Keeper_event_queue.stimulus_identity_equal
+              cancel_selection.source
+              source));
+       check bool "unrelated enqueue survives cancellation" true
+         (Keeper_event_queue_state.pending (load_state cancel_keeper)
+          |> Keeper_event_queue.to_list
+          |> List.exists (fun source ->
+            Keeper_event_queue.stimulus_identity_equal
+              unrelated_source
+              source));
+       let cancel_replay_raw, cancel_replay_response =
+         post_event_operator ~keeper_name:cancel_keeper cancel_request
+       in
+       check bool "cancellation replay HTTP request succeeds" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" cancel_replay_raw);
+       check string "cancellation replay uses its durable receipt"
+         "already_applied"
+         (cancel_replay_response
+          |> Yojson.Safe.Util.member "result"
+          |> result_status);
+       let transfer_selection =
+         load_state transfer_keeper |> selection_for transferred_source
+       in
+       enqueue transfer_keeper later_unrelated_source;
+       let transfer_request =
+         request_body
+           "transfer"
+           transfer_selection
+           [ ( "operator_operation_id"
+             , `String "event-source-ref-transfer-operation" )
+           ; "target_keeper", `String target_keeper
+           ]
+       in
+       let transfer_raw, transfer_response =
+         post_event_operator ~keeper_name:transfer_keeper transfer_request
+       in
+       check bool "transfer HTTP request succeeds" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" transfer_raw);
+       check string "transfer applies once" "applied"
+         (transfer_response
+          |> Yojson.Safe.Util.member "result"
+          |> result_status);
+       let transfer_replay_raw, transfer_replay_response =
+         post_event_operator ~keeper_name:transfer_keeper transfer_request
+       in
+       check bool "transfer replay HTTP request succeeds" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" transfer_replay_raw);
+       check string "transfer replay uses its durable receipt"
+         "already_applied"
+         (transfer_replay_response
+          |> Yojson.Safe.Util.member "result"
+          |> result_status);
+       let target_pending =
+         load_state target_keeper
+         |> Keeper_event_queue_state.pending
+         |> Keeper_event_queue.to_list
+       in
+       check int "transfer replay projects one target source" 1
+         (List.length target_pending);
+       check bool "target projection contains the exact transfer" true
+         (match target_pending with
+          | [ source ] ->
+            Keeper_event_queue.stimulus_identity_equal
+              transferred_source
+              source
+          | [] | _ :: _ :: _ -> false))
+
 let test_run_dashboard_compute_without_pool_stays_in_current_domain () =
   with_test_env @@ fun ~env ~sw ~config ->
   let caller_domain = Domain.self () in
@@ -2760,6 +3015,8 @@ let () =
             test_keeper_chat_receipt_route_and_json;
           test_case "keeper chat recovery route is exact" `Quick
             test_keeper_chat_recovery_route_is_exact;
+          test_case "event operator keeps exact source refs across queue changes" `Quick
+            test_event_operator_uses_exact_source_refs_across_unrelated_enqueues;
           test_case "observation metadata does not override terminal contract" `Quick
             test_composite_blocked_uses_terminal_contract_not_observational_metadata;
         ] );

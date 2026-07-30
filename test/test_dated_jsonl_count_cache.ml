@@ -114,6 +114,25 @@ let test_shrunk_file_rescans () =
   check int "shrunk file rescanned from zero" 2 (Dated_jsonl.count_entries t)
 ;;
 
+let test_directory_recreation_forgets_old_file_identity () =
+  Dated_jsonl.reset_count_cache_for_testing ();
+  let base = tmpdir "count_incr_recreated" in
+  seed_store base 2;
+  let t = Dated_jsonl.create ~base_dir:base () in
+  check int "old file counts 2" 2 (Dated_jsonl.count_entries t);
+  Dated_jsonl.prepare_for_directory_removal t;
+  Fs_compat.remove_tree base;
+  write_jsonl_line
+    (today_day_path base)
+    {|{"payload":"new file is larger than the old cached byte boundary"}|};
+  check
+    int
+    "recreated file count starts from zero"
+    (Dated_jsonl.count_entries_uncached t)
+    (Dated_jsonl.count_entries t);
+  check int "recreated file counts 1" 1 (Dated_jsonl.count_entries t)
+;;
+
 let test_reset_clears_cache () =
   Dated_jsonl.reset_count_cache_for_testing ();
   let base = tmpdir "count_incr_reset" in
@@ -185,6 +204,10 @@ let () =
             `Quick
             test_unterminated_trailing_line
         ; test_case "shrunk file forces full rescan" `Quick test_shrunk_file_rescans
+        ; test_case
+            "directory recreation forgets old file identity"
+            `Quick
+            test_directory_recreation_forgets_old_file_identity
         ; test_case "reset clears the cache" `Quick test_reset_clears_cache
         ; test_case
             "distinct stores have independent caches"

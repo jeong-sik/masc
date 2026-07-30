@@ -173,12 +173,6 @@ let create ~base_dir ?mutex ?retention_days ?max_bytes () =
 
 let base_dir t = t.base_dir
 
-let prepare_for_directory_removal t =
-  let dated = Jsonl_writer.dated_path_now ~base_dir:t.base_dir in
-  Fs_compat.invalidate_cached_writer dated.path;
-  Fs_compat.invalidate_mkdir_memo (Filename.dirname dated.path)
-;;
-
 (** Parse ["YYYY-MM-DD"] into [("YYYY-MM", "DD")].
     Returns [None] for malformed strings. *)
 let year_is_leap year =
@@ -1101,6 +1095,14 @@ type file_count_entry =
 
 let file_count_cache : (string, file_count_entry) Hashtbl.t = Hashtbl.create 64
 let file_count_cache_mu = Stdlib.Mutex.create ()
+
+let prepare_for_directory_removal t =
+  let dated = Jsonl_writer.dated_path_now ~base_dir:t.base_dir in
+  Fs_compat.invalidate_cached_writer dated.path;
+  Fs_compat.invalidate_mkdir_memo (Filename.dirname dated.path);
+  Stdlib.Mutex.protect file_count_cache_mu (fun () ->
+    Hashtbl.remove file_count_cache dated.path)
+;;
 
 let count_non_empty_lines_cached path =
   let size = try (Unix.stat path).Unix.st_size with Unix.Unix_error _ -> -1 in

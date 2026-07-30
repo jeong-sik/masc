@@ -507,19 +507,43 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
        let cancel_request :
            Server_dashboard_http_keeper_event_queue_operator.request =
          Server_dashboard_http_keeper_event_queue_operator.Cancel
-           { queue_index = 0
+           { expected_revision =
+               Keeper_event_queue_state.revision before_cancel
+           ; queue_index = 0
            ; source_incarnation = cancel_selection.admitted_revision
            ; operator_operation_id = "event-operator-cancel-operation"
            ; reason = "operator cancelled exact source"
            }
        in
        enqueue unrelated_source;
+       let stale_cancel_detail =
+         Server_dashboard_http_keeper_event_queue_operator.For_testing.run
+           ~config
+           ~keeper_name:source_keeper
+           cancel_request
+         |> require_error "reject stale cancellation coordinates"
+       in
+       check bool
+         "fresh cancellation keeps the queue revision fence"
+         true
+         (contains_substring stale_cancel_detail "revision mismatch");
+       let refreshed_cancel_state = load_state source_keeper in
+       let cancel_request =
+         Server_dashboard_http_keeper_event_queue_operator.Cancel
+           { expected_revision =
+               Keeper_event_queue_state.revision refreshed_cancel_state
+           ; queue_index = 0
+           ; source_incarnation = cancel_selection.admitted_revision
+           ; operator_operation_id = "event-operator-cancel-operation"
+           ; reason = "operator cancelled exact source"
+           }
+       in
        let cancelled, cancel_result =
          Server_dashboard_http_keeper_event_queue_operator.For_testing.run
            ~config
            ~keeper_name:source_keeper
            cancel_request
-         |> require_ok "cancel exact pending source"
+         |> require_ok "cancel refreshed exact pending source"
        in
        check bool
          "cancellation returns the exact selected source"
@@ -565,7 +589,9 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
          (result_status cancel_replay_result);
        let conflicting_cancel_request =
          Server_dashboard_http_keeper_event_queue_operator.Cancel
-           { queue_index = 0
+           { expected_revision =
+               Keeper_event_queue_state.revision refreshed_cancel_state
+           ; queue_index = 0
            ; source_incarnation = Int64.succ cancel_selection.admitted_revision
            ; operator_operation_id = "event-operator-cancel-operation"
            ; reason = "operator cancelled exact source"
@@ -596,7 +622,9 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
        let transfer_request :
            Server_dashboard_http_keeper_event_queue_operator.request =
          Server_dashboard_http_keeper_event_queue_operator.Transfer
-           { queue_index = 0
+           { expected_revision =
+               Keeper_event_queue_state.revision before_transfer
+           ; queue_index = 0
            ; source_incarnation = transfer_selection.admitted_revision
            ; operator_operation_id = "event-operator-transfer-operation"
            ; target_keeper

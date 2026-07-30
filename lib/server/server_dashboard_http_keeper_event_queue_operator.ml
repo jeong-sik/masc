@@ -146,13 +146,15 @@ let handle_get state request reqd ~keeper_name =
 
 type request = Execute.request =
   | Cancel of
-      { queue_index : int
+      { expected_revision : int64
+      ; queue_index : int
       ; source_incarnation : int64
       ; operator_operation_id : string
       ; reason : string
       }
   | Transfer of
-      { queue_index : int
+      { expected_revision : int64
+      ; queue_index : int
       ; source_incarnation : int64
       ; operator_operation_id : string
       ; target_keeper : string
@@ -240,10 +242,12 @@ let parse body =
     then Error ("unsupported schema: " ^ request_schema)
     else
       let* action = string_field "action" fields in
+      let* expected_revision = expected_revision fields in
       let* queue_index = queue_index fields in
       let* source_incarnation = source_incarnation fields in
       let common =
         [ "action"
+        ; "expected_revision"
         ; "queue_index"
         ; "schema"
         ; "source_incarnation"
@@ -263,7 +267,8 @@ let parse body =
         else
           Ok
             (Cancel
-               { queue_index
+               { expected_revision
+               ; queue_index
                ; source_incarnation
                ; operator_operation_id
                ; reason
@@ -281,18 +286,16 @@ let parse body =
         else
           Ok
             (Transfer
-               { queue_index
+               { expected_revision
+               ; queue_index
                ; source_incarnation
                ; operator_operation_id
                ; target_keeper
                })
       | "reprioritize" ->
         let* () =
-          require_exact_fields
-            ("expected_revision" :: "urgency" :: common)
-            fields
+          require_exact_fields ("urgency" :: common) fields
         in
-        let* expected_revision = expected_revision fields in
         let* urgency_value = string_field "urgency" fields in
         let* urgency = Keeper_event_queue.urgency_of_string urgency_value in
         Ok

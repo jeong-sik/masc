@@ -9,13 +9,15 @@ val pending_get_route : string -> string option
 
 type request =
   | Cancel of
-      { queue_index : int
+      { expected_revision : int64
+      ; queue_index : int
       ; source_incarnation : int64
       ; operator_operation_id : string
       ; reason : string
       }
   | Transfer of
-      { queue_index : int
+      { expected_revision : int64
+      ; queue_index : int
       ; source_incarnation : int64
       ; operator_operation_id : string
       ; target_keeper : string

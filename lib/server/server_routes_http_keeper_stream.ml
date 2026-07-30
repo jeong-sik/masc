@@ -31,17 +31,24 @@ type user_input_block = Keeper_multimodal_input.user_input_block =
   | User_document of user_media_block
   | User_audio of user_media_block
 
-type keeper_chat_stream_request = {
-  name : string;
-  message : string;
-  enqueue_only : bool;
-  user_blocks : user_input_block list;
+type keeper_chat_direct_context = {
   turn_instructions : string option;
   surface_context : Yojson.Safe.t option;
   channel : string;
   channel_user_id : string;
   channel_user_name : string;
   channel_workspace_id : string;
+}
+
+type keeper_chat_admission =
+  | Direct of keeper_chat_direct_context
+  | Durable_enqueue of Keeper_chat_queue.Receipt_id.t
+
+type keeper_chat_stream_request = {
+  name : string;
+  message : string;
+  admission : keeper_chat_admission;
+  user_blocks : user_input_block list;
   attachments : Keeper_chat_store.attachment list;
 }
 
@@ -66,61 +73,86 @@ let format_surface_context ctx =
      string-returning boundary for [turn_instructions_for_request]. *)
   Option.value ~default:"" (surface_context_to_instructions ctx)
 
-let has_connector_context (payload : keeper_chat_stream_request) =
-  payload.channel <> "" && payload.channel_workspace_id <> ""
+let direct_context = function
+  | { admission = Direct context; _ } -> Some context
+  | { admission = Durable_enqueue _; _ } -> None
 
-let has_external_speaker (payload : keeper_chat_stream_request) =
-  has_connector_context payload && payload.channel_user_id <> ""
+let has_connector_context payload =
+  match direct_context payload with
+  | Some context ->
+    context.channel <> "" && context.channel_workspace_id <> ""
+  | None -> false
+
+let has_external_speaker payload =
+  match direct_context payload with
+  | Some context ->
+    context.channel <> ""
+    && context.channel_workspace_id <> ""
+    && context.channel_user_id <> ""
+  | None -> false
+
+let channel_of_request payload =
+  match direct_context payload with
+  | Some context when has_connector_context payload -> context.channel
+  | Some _ | None -> "dashboard"
 
 let gate_address_of_request payload =
   let field key value =
     let value = String.trim value in
     if value = "" then [] else [ (key, value) ]
   in
-  field "connector" payload.channel
-  @ field "workspace_id" payload.channel_workspace_id
+  match direct_context payload with
+  | None -> []
+  | Some context ->
+    field "connector" context.channel
+    @ field "workspace_id" context.channel_workspace_id
 
 let message_for_request payload =
-  if has_external_speaker payload then
+  match direct_context payload with
+  | Some context when has_external_speaker payload ->
     Gate_keeper_backend.contextualize_message
-      ~channel:payload.channel
-      ~channel_user_id:payload.channel_user_id
-      ~channel_user_name:payload.channel_user_name
-      ~channel_workspace_id:payload.channel_workspace_id
+      ~channel:context.channel
+      ~channel_user_id:context.channel_user_id
+      ~channel_user_name:context.channel_user_name
+      ~channel_workspace_id:context.channel_workspace_id
       ~metadata:[]
       ~content:payload.message
-  else
-    payload.message
+  | Some _ | None -> payload.message
 
 let chat_surface_of_request payload =
-  if has_connector_context payload then
+  match direct_context payload with
+  | Some context when has_connector_context payload ->
     Surface_ref.Gate
-      { label = payload.channel; address = gate_address_of_request payload }
-  else Surface_ref.Dashboard { session_id = None }
+      { label = context.channel; address = gate_address_of_request payload }
+  | Some _ | None -> Surface_ref.Dashboard { session_id = None }
 
 let chat_speaker_of_request payload =
-  if has_external_speaker payload then
-    { Keeper_chat_store.speaker_id = Some payload.channel_user_id;
+  match direct_context payload with
+  | Some context when has_external_speaker payload ->
+    { Keeper_chat_store.speaker_id = Some context.channel_user_id;
       speaker_name =
-        (let name = String.trim payload.channel_user_name in
+        (let name = String.trim context.channel_user_name in
          if name = "" then None else Some name);
       speaker_authority = Keeper_chat_store.External }
-  else
+  | Some _ | None ->
     { Keeper_chat_store.speaker_id = None;
       speaker_name = None;
       speaker_authority = Keeper_chat_store.Owner }
 
 let turn_instructions_for_request payload =
-  let ctx_text =
-    match payload.surface_context with
-    | Some ctx -> format_surface_context ctx
-    | None -> ""
-  in
-  match payload.turn_instructions with
-  | None -> if ctx_text = "" then None else Some ctx_text
-  | Some ti ->
-      if ctx_text = "" then Some ti
-      else Some (ti ^ "\n\n" ^ ctx_text)
+  match direct_context payload with
+  | None -> None
+  | Some context ->
+    let ctx_text =
+      match context.surface_context with
+      | Some ctx -> format_surface_context ctx
+      | None -> ""
+    in
+    (match context.turn_instructions with
+     | None -> if ctx_text = "" then None else Some ctx_text
+     | Some ti ->
+       if ctx_text = "" then Some ti
+       else Some (ti ^ "\n\n" ^ ctx_text))
 
 let args_of_request payload : Yojson.Safe.t =
   let message = message_for_request payload in
@@ -135,18 +167,21 @@ let args_of_request payload : Yojson.Safe.t =
      | _ -> [])
   in
   let connector_fields =
-    (if has_connector_context payload then
-       [ ("channel", `String payload.channel);
-         ("channel_workspace_id", `String payload.channel_workspace_id) ]
-     else [])
-    @
-    (if payload.channel_user_id <> "" then
-       [ ("channel_user_id", `String payload.channel_user_id) ]
-     else [])
-    @
-    (if payload.channel_user_name <> "" then
-       [ ("channel_user_name", `String payload.channel_user_name) ]
-     else [])
+    match direct_context payload with
+    | None -> []
+    | Some context ->
+      (if has_connector_context payload then
+         [ ("channel", `String context.channel);
+           ("channel_workspace_id", `String context.channel_workspace_id) ]
+       else [])
+      @
+      (if context.channel_user_id <> "" then
+         [ ("channel_user_id", `String context.channel_user_id) ]
+       else [])
+      @
+      (if context.channel_user_name <> "" then
+         [ ("channel_user_name", `String context.channel_user_name) ]
+       else [])
   in
   let fields = base_fields @ connector_fields in
   let fields =
@@ -262,21 +297,33 @@ let dashboard_deferred_chat_to_json ~keeper_name
 let enqueue_dashboard_payload
       ~clock
       ~thread_id
+      ~actor
       ~user_row_origin
       payload
       ~in_flight
       ~chat_waiting
       ~shutdown_operation_id
   =
-  match
-    Keeper_chat_queue.enqueue ~keeper_name:payload.name
-      { Keeper_chat_queue.content = payload.message
-      ; user_blocks = payload.user_blocks
-      ; attachments = payload.attachments
-      ; timestamp = Eio.Time.now clock
-      ; source = Keeper_chat_queue.Dashboard { thread_id }
-      ; user_row_origin
-      }
+  let message =
+    { Keeper_chat_queue.content = payload.message
+    ; user_blocks = payload.user_blocks
+    ; attachments = payload.attachments
+    ; timestamp = Eio.Time.now clock
+    ; source = Keeper_chat_queue.Dashboard { thread_id; actor }
+    ; user_row_origin
+    }
+  in
+  let enqueue =
+    match payload.admission with
+    | Direct _ ->
+      Keeper_chat_queue.enqueue ~keeper_name:payload.name message
+    | Durable_enqueue receipt_id ->
+      Keeper_chat_queue.enqueue_with_receipt
+        ~keeper_name:payload.name
+        ~receipt_id
+        message
+  in
+  match enqueue
   with
   | Error error -> Error (Keeper_chat_queue.mutation_error_to_string error)
   | Ok receipt ->
@@ -294,6 +341,7 @@ let enqueue_dashboard_payload
 let dashboard_deferred_chat_of_rejection
       ~clock
       ~thread_id
+      ~actor
       ~user_row_origin
       payload
      ({ Keeper_turn_admission.waiting
@@ -306,13 +354,14 @@ let dashboard_deferred_chat_of_rejection
   enqueue_dashboard_payload
     ~clock
     ~thread_id
+    ~actor
     ~user_row_origin
     payload
     ~in_flight
     ~chat_waiting:(waiting > 0)
     ~shutdown_operation_id
 
-let defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id payload =
+let defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id ~actor payload =
   match dashboard_busy_queue_state ~base_path ~keeper_name:payload.name with
   | None -> `Not_busy
   | Some (in_flight, chat_waiting, shutdown_operation_id) ->
@@ -320,6 +369,7 @@ let defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id payload =
          enqueue_dashboard_payload
            ~clock
            ~thread_id
+           ~actor
            ~user_row_origin:Keeper_chat_store.Needs_append
            payload
            ~in_flight
@@ -329,7 +379,7 @@ let defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id payload =
        | Ok queued -> `Queued queued
        | Error message -> `Queue_error message)
 
-let enqueue_dashboard_payload_now ~base_path ~clock ~thread_id payload =
+let enqueue_dashboard_payload_now ~base_path ~clock ~thread_id ~actor payload =
   let admission =
     Keeper_turn_admission.snapshot_for
       ~base_path
@@ -339,6 +389,7 @@ let enqueue_dashboard_payload_now ~base_path ~clock ~thread_id payload =
     enqueue_dashboard_payload
       ~clock
       ~thread_id
+      ~actor
       ~user_row_origin:Keeper_chat_store.Needs_append
       payload
       ~in_flight:admission.snapshot_in_flight
@@ -555,6 +606,20 @@ let parse_keeper_chat_stream_request body_str =
     if not (match json with `Assoc _ -> true | _ -> false) then
       Error "request body must be a JSON object"
     else
+      let malformed_string_field =
+        [ "name"
+        ; "message"
+        ; "channel"
+        ; "channel_user_id"
+        ; "channel_user_name"
+        ; "channel_workspace_id"
+        ; "turn_instructions"
+        ]
+        |> List.find_opt (fun key ->
+          match Json_util.assoc_member_opt key json with
+          | None | Some `Null | Some (`String _) -> false
+          | Some _ -> true)
+      in
       let name = Json_util.get_string_with_default json ~key:"name" ~default:"" |> String.trim in
       let raw_message =
         Json_util.get_string_with_default json ~key:"message" ~default:""
@@ -591,17 +656,34 @@ let parse_keeper_chat_stream_request body_str =
         | Some (`Bool enqueue_only) -> Ok enqueue_only
         | Some _ -> Error "enqueue_only must be a boolean"
       in
-      let surface_context : Yojson.Safe.t option =
-        match Json_util.assoc_member_opt "surface_context" json with
-        | Some (`Assoc _ as obj) -> Some obj
-        | Some `Null | None -> None
-        | Some _ -> None
+      let receipt_id_result =
+        match Json_util.assoc_member_opt "receipt_id" json with
+        | None | Some `Null -> Ok None
+        | Some (`String receipt_id) ->
+          Keeper_chat_queue.Receipt_id.of_string (String.trim receipt_id)
+          |> Result.map Option.some
+        | Some _ -> Error "receipt_id must be a string"
       in
+      let surface_context_result : (Yojson.Safe.t option, string) result =
+        match Json_util.assoc_member_opt "surface_context" json with
+        | Some (`Assoc _ as obj) -> Ok (Some obj)
+        | Some `Null | None -> Ok None
+        | Some _ -> Error "surface_context must be a JSON object"
+      in
+      let surface_context = Result.value ~default:None surface_context_result in
       let has_connector_context =
         channel <> "" || channel_user_id <> ""
         || channel_user_name <> "" || channel_workspace_id <> ""
       in
-      let attachments = Keeper_multimodal_input.parse_attachments json in
+      let has_nonqueue_context =
+        has_connector_context
+        || Option.is_some turn_instructions
+        || Option.is_some surface_context
+      in
+      let attachments_result =
+        Keeper_multimodal_input.parse_attachments json
+      in
+      let attachments = Result.value ~default:[] attachments_result in
       let user_blocks_result = Keeper_multimodal_input.parse_user_blocks json in
       let message_of_blocks user_blocks =
         match raw_message with
@@ -609,19 +691,11 @@ let parse_keeper_chat_stream_request body_str =
             Keeper_multimodal_input.fallback_message ~attachments user_blocks
         | message -> message
       in
-      if name = "" then
-        Error "name is required"
-      else if has_connector_context
-              && (channel = "" || channel_workspace_id = "")
-      then
-        Error
-          "channel and channel_workspace_id are required when connector context is supplied"
-      else
-        match enqueue_only_result with
-        | Error err -> Error err
-        | Ok enqueue_only ->
+      let parse_admitted admission =
         match
-          Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg" json
+          Keeper_meta_contract.reject_removed_model_args
+            ~tool_name:"masc_keeper_msg"
+            json
         with
         | Error err -> Error err
         | Ok () -> (
@@ -639,21 +713,59 @@ let parse_keeper_chat_stream_request body_str =
               if message = "" then
                 Error "message is required"
               else
-              Ok
-                {
-                  name;
-                  message;
-                  enqueue_only;
-                  user_blocks;
-                  turn_instructions;
-                  surface_context;
-                  channel;
-                  channel_user_id;
-                  channel_user_name;
-                  channel_workspace_id;
-                  attachments;
-                }
+                Ok
+                  {
+                    name;
+                    message;
+                    admission;
+                    user_blocks;
+                    attachments;
+                  }
           ))
+      in
+      if name = "" then
+        Error "name is required"
+      else if Option.is_some malformed_string_field then
+        Error
+          (Printf.sprintf
+             "%s must be a string"
+             (Option.get malformed_string_field))
+      else if has_connector_context
+              && (channel = "" || channel_workspace_id = "")
+      then
+        Error
+          "channel and channel_workspace_id are required when connector context is supplied"
+      else
+        match
+          surface_context_result,
+          attachments_result,
+          enqueue_only_result,
+          receipt_id_result
+        with
+        | Error err, _, _, _
+        | _, Error err, _, _
+        | _, _, Error err, _
+        | _, _, _, Error err ->
+          Error err
+        | Ok _, Ok _, Ok false, Ok (Some _) ->
+          Error "receipt_id requires enqueue_only=true"
+        | Ok _, Ok _, Ok true, Ok None ->
+          Error "enqueue_only=true requires receipt_id"
+        | Ok _, Ok _, Ok true, Ok (Some _) when has_nonqueue_context ->
+          Error
+            "enqueue_only does not support connector, turn-instruction, or surface context"
+        | Ok _, Ok _, Ok false, Ok None ->
+          parse_admitted
+            (Direct
+               { turn_instructions
+               ; surface_context
+               ; channel
+               ; channel_user_id
+               ; channel_user_name
+               ; channel_workspace_id
+               })
+        | Ok _, Ok _, Ok true, Ok (Some receipt_id) ->
+          parse_admitted (Durable_enqueue receipt_id)
   with Yojson.Json_error e ->
     Error ("invalid json: " ^ e)
 
@@ -2032,6 +2144,7 @@ let process_single_turn ~user_row_origin ~submission
                         dashboard_deferred_chat_of_rejection
                           ~clock
                           ~thread_id
+                          ~actor:submitted_by
                           ~user_row_origin
                           payload
                           rejection
@@ -2636,7 +2749,7 @@ let process_single_turn ~user_row_origin ~submission
        Log.Keeper.info
          "keeper_stream: queued request keeper=%s request_id=%s surface=%s"
          payload.name request_id
-         (if has_connector_context payload then payload.channel else "dashboard");
+         (channel_of_request payload);
        Keeper_chat_events.publish events
          (Custom
             { name = "KEEPER_QUEUE_REQUEST"
@@ -2645,9 +2758,7 @@ let process_single_turn ~user_row_origin ~submission
                   { request_id
                   ; destination_type = "keeper"
                   ; destination_id = payload.name
-                  ; channel =
-                      (if has_connector_context payload then payload.channel
-                       else "dashboard")
+                  ; channel = channel_of_request payload
                   ; actor_id = Some agent_name
                   ; status = Gate_protocol.Queued
                   ; modalities = modalities_for_request payload
@@ -3201,12 +3312,13 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
            Eio.Switch.on_release stream_sw close_stream;
            let has_external_actor = has_external_speaker payload in
            let agent_name =
-             if has_external_actor then
+             match direct_context payload with
+             | Some context when has_external_actor ->
                Gate_keeper_backend.agent_name_for_channel_actor
-                 ~channel:payload.channel
-                 ~channel_workspace_id:payload.channel_workspace_id
-                 ~channel_user_id:payload.channel_user_id
-             else submitted_by
+                 ~channel:context.channel
+                 ~channel_workspace_id:context.channel_workspace_id
+                 ~channel_user_id:context.channel_user_id
+             | Some _ | None -> submitted_by
            in
            let run_id = Printf.sprintf "keeper-run-%d" (now_id ()) in
            let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
@@ -3240,12 +3352,17 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
              wait_for_adapter_finished ()
            in
            let publish_queued queued =
+             let durable_enqueue =
+               match payload.admission with
+               | Direct _ -> false
+               | Durable_enqueue _ -> true
+             in
              Log.Keeper.info
                "keeper_stream: queued dashboard message keeper=%s pending_count=%d inflight_count=%d enqueue_only=%b"
                payload.name
                queued.pending_count
                queued.inflight_count
-               payload.enqueue_only;
+               durable_enqueue;
              Keeper_chat_events.publish events
                (Run_started { run_id; thread_id });
              Keeper_chat_events.publish events
@@ -3271,18 +3388,20 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
            else
              match
                try
-                 if payload.enqueue_only
-                 then
+                 match payload.admission with
+                 | Durable_enqueue _ ->
                    enqueue_dashboard_payload_now
                      ~base_path
                      ~clock
                      ~thread_id
+                     ~actor:submitted_by
                      payload
-                 else
+                 | Direct _ ->
                    defer_dashboard_payload_if_busy
                      ~base_path
                      ~clock
                      ~thread_id
+                     ~actor:submitted_by
                      payload
                with
                | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -3322,10 +3441,11 @@ module For_testing = struct
         ~base_path
         ~clock
         ~thread_id
+        ~actor
         payload
     =
     match
-      defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id payload
+      defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id ~actor payload
     with
     | `Not_busy -> `Not_busy
     | `Queued queued ->
@@ -3334,17 +3454,17 @@ module For_testing = struct
           , dashboard_deferred_ack_text ~keeper_name:payload.name queued )
     | `Queue_error message -> `Queue_error message
 
-  let defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id payload =
+  let defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id ~actor payload =
     match
-      defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id payload
+      defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id ~actor payload
     with
     | `Not_busy -> `Not_busy
     | `Queued queued -> `Queued queued.pending_count
     | `Queue_error message -> `Queue_error message
 
-  let enqueue_dashboard_payload_now ~base_path ~clock ~thread_id payload =
+  let enqueue_dashboard_payload_now ~base_path ~clock ~thread_id ~actor payload =
     match
-      enqueue_dashboard_payload_now ~base_path ~clock ~thread_id payload
+      enqueue_dashboard_payload_now ~base_path ~clock ~thread_id ~actor payload
     with
     | `Queued queued -> `Queued queued.pending_count
     | `Queue_error message -> `Queue_error message

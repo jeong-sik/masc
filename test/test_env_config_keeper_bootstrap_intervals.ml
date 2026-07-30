@@ -184,6 +184,24 @@ let test_discord_queue_projection_matches_gateway_context () =
     "gate:discord:discord-channel-1:discord-user-9"
     projection.agent_name
 
+let test_dashboard_queue_projection_keeps_authenticated_actor () =
+  let queued : Chat_queue.queued_message =
+    { content = "hello"
+    ; user_blocks = []
+    ; attachments = []
+    ; timestamp = 0.0
+    ; source =
+        Chat_queue.Dashboard
+          { thread_id = "thread-1"; actor = "operator-7" }
+    ; user_row_origin = Masc.Keeper_chat_store.Needs_append
+    }
+  in
+  let projection = Boot.queued_chat_projection queued in
+  check string "no connector channel" "" projection.payload_channel;
+  check string
+    "dashboard draft replays under the enqueued actor, not a hardcoded label"
+    "operator-7" projection.agent_name
+
 let test_slack_queue_projection_matches_gateway_context () =
   let queued : Chat_queue.queued_message =
     { content = "hello"
@@ -252,6 +270,8 @@ let () =
         [
           test_case "Discord queue source keeps connector context" `Quick
             test_discord_queue_projection_matches_gateway_context;
+          test_case "Dashboard queue source keeps authenticated actor" `Quick
+            test_dashboard_queue_projection_keeps_authenticated_actor;
           test_case "Slack queue source keeps connector context" `Quick
             test_slack_queue_projection_matches_gateway_context;
         ] );

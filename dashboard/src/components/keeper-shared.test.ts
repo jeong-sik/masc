@@ -8,6 +8,7 @@ const {
   shutdownKeeper,
   fetchKeeperChatPending,
   fetchKeeperChatReceipt,
+  lookupKeeperChatReceipt,
   fetchKeeperEventQueuePending,
   cancelKeeperChatPendingReceipt,
   editKeeperChatPendingReceipt,
@@ -15,17 +16,20 @@ const {
   operateKeeperEventQueue,
   resolveKeeperChatRecovery,
   KeeperEventQueueOperationError,
+  isKeeperThreadServerRejectedError,
 } = vi.hoisted(() => ({
   bootKeeper: vi.fn(),
   shutdownKeeper: vi.fn(),
   fetchKeeperChatPending: vi.fn(),
   fetchKeeperChatReceipt: vi.fn(),
+  lookupKeeperChatReceipt: vi.fn(),
   fetchKeeperEventQueuePending: vi.fn(),
   cancelKeeperChatPendingReceipt: vi.fn(),
   editKeeperChatPendingReceipt: vi.fn(),
   moveKeeperChatPendingReceiptToEnd: vi.fn(),
   operateKeeperEventQueue: vi.fn(),
   resolveKeeperChatRecovery: vi.fn(),
+  isKeeperThreadServerRejectedError: vi.fn((_error: unknown) => false),
   KeeperEventQueueOperationError: class KeeperEventQueueOperationError extends Error {
     readonly operation: {
       action: 'cancel' | 'transfer'
@@ -81,6 +85,7 @@ vi.mock('../keeper-actions', () => ({
   recoverKeeperRuntime: vi.fn(),
   resumePendingKeeperChatRequests: vi.fn(async () => undefined),
   sendKeeperThreadMessage: vi.fn(async () => null),
+  isKeeperThreadServerRejectedError,
   interruptKeeperTurn: vi.fn(async () => true),
   isKeeperThreadMessageSendInFlight: vi.fn(() => false),
 }))
@@ -130,6 +135,7 @@ vi.mock('../api/keeper', () => ({
   shutdownKeeper,
   fetchKeeperChatPending,
   fetchKeeperChatReceipt,
+  lookupKeeperChatReceipt,
   fetchKeeperEventQueuePending,
   cancelKeeperChatPendingReceipt,
   editKeeperChatPendingReceipt,
@@ -271,8 +277,11 @@ describe('KeeperConversationPanel', () => {
     vi.mocked(cancelActiveKeeperThreadMessage).mockResolvedValue(true)
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReset()
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReturnValue(false)
+    isKeeperThreadServerRejectedError.mockReset()
+    isKeeperThreadServerRejectedError.mockReturnValue(false)
     fetchKeeperChatPending.mockReset()
     fetchKeeperChatReceipt.mockReset()
+    lookupKeeperChatReceipt.mockReset()
     fetchKeeperEventQueuePending.mockReset()
     cancelKeeperChatPendingReceipt.mockReset()
     editKeeperChatPendingReceipt.mockReset()
@@ -774,8 +783,8 @@ describe('KeeperConversationPanel', () => {
   })
 
   it('keeps queued client action ids attached when draining the queue as independent turns', async () => {
-    enqueueInput('sangsu', 'queued one', undefined, 'queued-click-1')
-    enqueueInput('sangsu', 'queued two', undefined, 'queued-click-2')
+    const first = enqueueInput('sangsu', 'queued one', undefined, 'queued-click-1')
+    const second = enqueueInput('sangsu', 'queued two', undefined, 'queued-click-2')
 
     render(
       html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
@@ -795,11 +804,13 @@ describe('KeeperConversationPanel', () => {
     expect(vi.mocked(sendKeeperThreadMessage).mock.calls[1]?.[2]).toEqual(expect.objectContaining({
       clientActionId: 'queued-click-1',
       enqueueOnly: true,
+      receiptId: first.receiptId,
     }))
     expect(vi.mocked(sendKeeperThreadMessage).mock.calls[2]?.[1]).toBe('queued two')
     expect(vi.mocked(sendKeeperThreadMessage).mock.calls[2]?.[2]).toEqual(expect.objectContaining({
       clientActionId: 'queued-click-2',
       enqueueOnly: true,
+      receiptId: second.receiptId,
     }))
   })
 
@@ -834,7 +845,8 @@ describe('KeeperConversationPanel', () => {
     expect(getQueueLength('sangsu')).toBe(0)
   })
 
-  it('drops an aborted queued send instead of requeueing it', async () => {
+  it('retains an aborted queued send until its durable receipt is acknowledged', async () => {
+    lookupKeeperChatReceipt.mockResolvedValue({ kind: 'absent' })
     vi.mocked(sendKeeperThreadMessage).mockImplementation(async (_keeperName, message) => {
       if (message === 'queued one') throw new DOMException('cancelled', 'AbortError')
     })
@@ -856,7 +868,97 @@ describe('KeeperConversationPanel', () => {
 
     await waitFor(() => expect(sendKeeperThreadMessage).toHaveBeenCalledTimes(2))
     expect(vi.mocked(sendKeeperThreadMessage).mock.calls[1]?.[1]).toBe('queued one')
+    expect(getQueuedMessages('sangsu').map(msg => msg.content)).toEqual([
+      'queued one',
+      'queued two',
+    ])
+    expect(getQueuedMessages('sangsu')[0]?.serverAcceptanceUnknown).toBeUndefined()
+    expect(container.textContent).not.toContain('서버 접수 확인 필요')
+  })
+
+  it('locks an aborted queued send when receipt lookup is unavailable', async () => {
+    lookupKeeperChatReceipt.mockResolvedValue({
+      kind: 'unavailable',
+      error: new Error('receipt lookup timed out'),
+    })
+    vi.mocked(sendKeeperThreadMessage).mockImplementation(async (_keeperName, message) => {
+      if (message === 'queued one') throw new DOMException('cancelled', 'AbortError')
+    })
+    enqueueInput('sangsu', 'queued one', undefined, 'queued-click-1')
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+    fireEvent.input(container.querySelector('textarea') as HTMLTextAreaElement, {
+      target: { value: 'trigger drain' },
+    })
+    await Promise.resolve()
+    fireEvent.click(container.querySelector('.send') as HTMLButtonElement)
+
+    await waitFor(() => expect(lookupKeeperChatReceipt).toHaveBeenCalledTimes(1))
+    expect(getQueuedMessages('sangsu')[0]?.serverAcceptanceUnknown).toBe(true)
+    expect(container.textContent).toContain('서버 접수 확인 필요')
+  })
+
+  it('removes an aborted queued send after exact receipt reconciliation', async () => {
+    vi.mocked(sendKeeperThreadMessage).mockImplementation(async (_keeperName, message) => {
+      if (message === 'queued one') throw new DOMException('cancelled', 'AbortError')
+    })
+    const queued = enqueueInput('sangsu', 'queued one', undefined, 'queued-click-1')
+    enqueueInput('sangsu', 'queued two', undefined, 'queued-click-2')
+    lookupKeeperChatReceipt.mockResolvedValue({
+      kind: 'present',
+      receipt: {
+        keeperName: 'sangsu',
+        receiptId: queued.receiptId,
+        revision: '1',
+        state: { kind: 'pending' },
+      },
+    })
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    fireEvent.input(textarea, { target: { value: 'trigger drain' } })
+    await Promise.resolve()
+    fireEvent.click(container.querySelector('.send') as HTMLButtonElement)
+
+    await waitFor(() => expect(lookupKeeperChatReceipt).toHaveBeenCalledWith(
+      'sangsu',
+      queued.receiptId,
+    ))
     expect(getQueuedMessages('sangsu').map(msg => msg.content)).toEqual(['queued two'])
+  })
+
+  it('does not mask a definitive receipt collision as successful admission', async () => {
+    const rejection = new Error('receipt payload collision')
+    isKeeperThreadServerRejectedError.mockImplementation(error => error === rejection)
+    vi.mocked(sendKeeperThreadMessage).mockImplementation(async (_keeperName, message) => {
+      if (message === 'queued one') throw rejection
+    })
+    enqueueInput('sangsu', 'queued one', undefined, 'queued-click-1')
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    fireEvent.input(textarea, { target: { value: 'trigger drain' } })
+    await Promise.resolve()
+    fireEvent.click(container.querySelector('.send') as HTMLButtonElement)
+
+    await waitFor(() => expect(sendKeeperThreadMessage).toHaveBeenCalledTimes(2))
+    expect(lookupKeeperChatReceipt).not.toHaveBeenCalled()
+    expect(getQueuedMessages('sangsu').map(message => message.content))
+      .toContain('queued one')
   })
 
   it('forwards the message-level turn inspector action to the transcript', async () => {

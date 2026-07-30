@@ -170,9 +170,9 @@ val make_hooks :
   ?trajectory_acc:Trajectory.accumulator ->
   unit -> Agent_sdk.Hooks.hooks
 (** Build the [Agent_sdk.Hooks.hooks] record used by the keeper turn loop:
-    passive pre-tool timing, post-tool accounting, idle detection, and
-    trajectory hooks wired together. Cost remains part of post-turn
-    observation. *)
+    post-tool accounting, idle detection, and trajectory hooks wired
+    together. OAS [PostToolUse] duration/result fields are the timing and
+    size authority. Cost remains part of post-turn observation. *)
 
 val hook_introspection_json : unit -> Yojson.Safe.t
 (** JSON snapshot describing which hooks are active for the dashboard
@@ -185,4 +185,8 @@ module For_testing : sig
   (** Exact projection used by the turn-complete SSE payload. *)
   val usage_missing_of_usage : Agent_sdk.Types.api_usage option -> bool
   (** Hook usage-evidence decision delegated to {!usage_has_tokens}. *)
+  val original_result_bytes :
+    oas_result_bytes:int -> string -> (int, string) result
+  (** Preserve the verified original byte count carried by an externalized
+      {!Tool_output} marker; inline output keeps the OAS hook count. *)
 end

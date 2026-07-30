@@ -32,7 +32,9 @@ let with_base prefix body =
     (fun () -> body base_path)
 
 let message
-    ?(source = Keeper_chat_queue.Dashboard { thread_id = "keeper:queue-test" })
+    ?(source =
+      Keeper_chat_queue.Dashboard
+        { thread_id = "keeper:queue-test"; actor = "dashboard" })
     ?(timestamp = 1.0)
     ?(user_blocks = [])
     ?(attachments = [])

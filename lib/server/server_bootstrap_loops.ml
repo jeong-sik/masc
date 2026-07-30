@@ -165,13 +165,13 @@ let discord_channel_label = "discord"
 
 let queued_chat_projection (queued_message : Keeper_chat_queue.queued_message) =
   match queued_message.source with
-  | Keeper_chat_queue.Dashboard _ ->
+  | Keeper_chat_queue.Dashboard { thread_id = _; actor } ->
     {
       payload_channel = "";
       payload_channel_user_id = "";
       payload_channel_user_name = "";
       payload_channel_workspace_id = "";
-      agent_name = "dashboard";
+      agent_name = actor;
     }
   | Keeper_chat_queue.Discord { channel_id; user_id } ->
     {
@@ -209,13 +209,15 @@ let payload_of_queued_message ~keeper_name
   let projection = queued_chat_projection queued_message in
   { Server_routes_http_keeper_stream.name = keeper_name
   ; message = queued_message.content
-  ; enqueue_only = false
-  ; turn_instructions = None
-  ; surface_context = None
-  ; channel = projection.payload_channel
-  ; channel_user_id = projection.payload_channel_user_id
-  ; channel_user_name = projection.payload_channel_user_name
-  ; channel_workspace_id = projection.payload_channel_workspace_id
+  ; admission =
+      Direct
+        { turn_instructions = None
+        ; surface_context = None
+        ; channel = projection.payload_channel
+        ; channel_user_id = projection.payload_channel_user_id
+        ; channel_user_name = projection.payload_channel_user_name
+        ; channel_workspace_id = projection.payload_channel_workspace_id
+        }
   ; user_blocks = queued_message.user_blocks
   ; attachments = queued_message.attachments
   }

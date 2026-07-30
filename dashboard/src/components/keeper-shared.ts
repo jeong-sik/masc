@@ -31,6 +31,7 @@ import {
   recoverKeeperRuntime,
   resumePendingKeeperChatRequests,
   sendKeeperThreadMessage,
+  isKeeperThreadServerRejectedError,
 } from '../keeper-actions'
 import {
   keeperActionErrors,
@@ -92,6 +93,7 @@ import {
   cancelKeeperChatPendingReceipt,
   editKeeperChatPendingReceipt,
   fetchKeeperChatReceipt,
+  lookupKeeperChatReceipt,
   fetchKeeperEventQueuePending,
   fetchKeeperChatPending,
   KeeperEventQueueOperationError,
@@ -488,6 +490,7 @@ function QueueItemCard({ keeperName, msg, onMutate, onSave }: QueueItemCardProps
       data-chat-queue-item=${msg.id}
       data-chat-queue-seq=${msg.sequence}
       data-chat-queue-client-action-id=${msg.clientActionId ?? undefined}
+      data-chat-queue-acceptance=${msg.serverAcceptanceUnknown ? 'unknown' : 'not_submitted'}
     >
       ${editing
         ? html`
@@ -534,8 +537,15 @@ function QueueItemCard({ keeperName, msg, onMutate, onSave }: QueueItemCardProps
                   : null}
               </div>
               <div class="flex items-center gap-1.5 flex-none">
-                <button type="button" class="text-2xs text-[var(--color-fg-secondary)] hover:text-[var(--color-fg-primary)]" onClick=${() => { setEditing(true) }}>수정</button>
-                <button type="button" class="text-2xs text-[var(--color-status-err)] hover:text-[var(--color-status-err)]" onClick=${() => { removeQueuedMessage(keeperName, msg.id); onMutate() }}>삭제</button>
+                ${msg.serverAcceptanceUnknown
+                  ? html`
+                      <span class="text-2xs text-[var(--color-status-warn)]">서버 접수 확인 필요</span>
+                      <button type="button" class="text-2xs underline text-[var(--color-fg-secondary)] hover:text-[var(--color-fg-primary)]" onClick=${onSave}>다시 확인</button>
+                    `
+                  : html`
+                      <button type="button" class="text-2xs text-[var(--color-fg-secondary)] hover:text-[var(--color-fg-primary)]" onClick=${() => { setEditing(true) }}>수정</button>
+                      <button type="button" class="text-2xs text-[var(--color-status-err)] hover:text-[var(--color-status-err)]" onClick=${() => { removeQueuedMessage(keeperName, msg.id); onMutate() }}>삭제</button>
+                    `}
               </div>
             </div>
           `}
@@ -1320,6 +1330,8 @@ export function KeeperConversationPanel({
     [keeperName, queueVersion],
   )
   const queueCount = queuedMessages.length
+  const acceptanceUnknownCount =
+    queuedMessages.filter(message => message.serverAcceptanceUnknown).length
   const visibleThreadWithQueue = useMemo(
     () =>
       queuedMessages.length > 0
@@ -1475,18 +1487,50 @@ export function KeeperConversationPanel({
             blocks: queued.blocks,
             clientActionId: queued.clientActionId,
             enqueueOnly: true,
+            receiptId: queued.receiptId,
             userBlocks: queued.userBlocks,
           })
           markInputSent(keeperName)
           bumpQueue()
         } catch (err) {
-          if (isAbortError(err)) {
-            markInputSent(keeperName)
+          if (isKeeperThreadServerRejectedError(err)) {
+            requeueInputFront(keeperName, queued)
             bumpQueue()
+            showToast(err.message, 'error')
             return
           }
-          requeueInputFront(keeperName, queued)
+          const lookup = await lookupKeeperChatReceipt(keeperName, queued.receiptId)
+          if (
+            lookup.kind === 'present'
+            && lookup.receipt.keeperName === keeperName
+            && lookup.receipt.receiptId === queued.receiptId
+          ) {
+            markInputSent(keeperName)
+            bumpQueue()
+            void reconcileKeeperChatReceipts(keeperName)
+            return
+          }
+          const acceptanceUnavailable =
+            lookup.kind === 'unavailable'
+            || lookup.kind === 'present'
+          if (lookup.kind === 'unavailable') {
+            console.warn(
+              `[keeper] durable receipt lookup failed receipt=${queued.receiptId}`,
+              lookup.error,
+            )
+          } else if (lookup.kind === 'present') {
+            console.warn(
+              `[keeper] durable receipt identity mismatch expected=${keeperName}/${queued.receiptId}`,
+              lookup.receipt,
+            )
+          }
+          requeueInputFront(
+            keeperName,
+            queued,
+            { serverAcceptanceUnknown: acceptanceUnavailable },
+          )
           bumpQueue()
+          if (isAbortError(err)) return
           const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
           showToast(message, 'error')
           return
@@ -1599,8 +1643,15 @@ export function KeeperConversationPanel({
     ? html`
         <div class="mb-3 flex flex-col gap-2" data-chat-queue-list>
           <div class="flex items-center justify-between gap-2 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row" data-chat-queue-row>
-            <span>${queueCount}개 브라우저 초안 · 서버 미접수</span>
-            <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
+            <span>
+              ${queueCount}개 브라우저 초안
+              · ${acceptanceUnknownCount > 0
+                ? `${acceptanceUnknownCount}개 서버 접수 확인 필요`
+                : '서버 미접수'}
+            </span>
+            ${queueCount > acceptanceUnknownCount
+              ? html`<button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>미접수 초안 취소</button>`
+              : null}
           </div>
           ${queuedMessages.map(msg => html`
             <${QueueItemCard}

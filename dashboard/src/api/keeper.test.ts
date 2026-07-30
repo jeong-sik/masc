@@ -26,6 +26,7 @@ import {
   fetchKeeperChatHistory,
   fetchKeeperChatPending,
   fetchKeeperChatReceipt,
+  lookupKeeperChatReceipt,
   fetchKeeperCheckpoints,
   fetchQueuedKeeperMessageResult,
   fetchKeeperRuntimeTrace,
@@ -259,6 +260,29 @@ describe('Keeper chat durable receipt API', () => {
       '/api/v1/keepers/keeper%20sangsu/chat/receipts/chatq_00000000-0000-4000-8000-000000000001',
       expect.objectContaining({ headers: expect.any(Object) }),
     )
+  })
+
+  it('classifies a missing exact receipt separately from lookup unavailability', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response('{}', { status: 404, statusText: 'Not Found' }),
+      )
+      .mockResolvedValueOnce(
+        new Response('{}', { status: 503, statusText: 'Unavailable' }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      lookupKeeperChatReceipt(
+        'keeper sangsu',
+        'chatq_00000000-0000-4000-8000-000000000001',
+      ),
+    ).resolves.toEqual({ kind: 'absent' })
+    const unavailable = await lookupKeeperChatReceipt(
+      'keeper sangsu',
+      'chatq_00000000-0000-4000-8000-000000000001',
+    )
+    expect(unavailable.kind).toBe('unavailable')
   })
 
   it('resolves one exact recovery receipt with string revision and lease evidence', async () => {
@@ -1135,6 +1159,7 @@ describe('streamKeeperMessage', () => {
 
     await streamKeeperMessage('sangsu', 'queued draft', {
       enqueueOnly: true,
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000042',
       onEvent: () => {},
     })
 
@@ -1144,7 +1169,36 @@ describe('streamKeeperMessage', () => {
       message: 'queued draft',
       direct_reply: true,
       enqueue_only: true,
+      receipt_id: 'chatq_00000000-0000-4000-8000-000000000042',
     })
+  })
+
+  it('rejects durable enqueue without a receipt before issuing HTTP', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const invalidOptions = {
+      enqueueOnly: true,
+      onEvent: () => {},
+    } as unknown as Parameters<typeof streamKeeperMessage>[2]
+
+    await expect(
+      streamKeeperMessage('sangsu', 'queued draft', invalidOptions),
+    ).rejects.toThrow('enqueueOnly requires receiptId')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a receipt on direct admission before issuing HTTP', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const invalidOptions = {
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000042',
+      onEvent: () => {},
+    } as unknown as Parameters<typeof streamKeeperMessage>[2]
+
+    await expect(
+      streamKeeperMessage('sangsu', 'direct draft', invalidOptions),
+    ).rejects.toThrow('receiptId requires enqueueOnly')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('forwards copilot context fields to the stream endpoint', async () => {

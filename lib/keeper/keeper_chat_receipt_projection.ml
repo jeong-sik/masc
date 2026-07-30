@@ -1,8 +1,9 @@
 let message_source_json = function
-  | Keeper_chat_queue.Dashboard { thread_id } ->
+  | Keeper_chat_queue.Dashboard { thread_id; actor } ->
     `Assoc
       [ "kind", `String "dashboard"
       ; "thread_id", `String thread_id
+      ; "actor", `String actor
       ]
   | Keeper_chat_queue.Discord { channel_id; user_id } ->
     `Assoc

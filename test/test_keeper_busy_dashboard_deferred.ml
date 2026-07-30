@@ -24,14 +24,16 @@ let payload ?(name = keeper_name) ?(content = "are you there?") ()
     : Server_routes_http_keeper_stream.keeper_chat_stream_request =
   { name
   ; message = content
-  ; enqueue_only = false
+  ; admission =
+      Direct
+        { turn_instructions = None
+        ; surface_context = None
+        ; channel = ""
+        ; channel_user_id = ""
+        ; channel_user_name = ""
+        ; channel_workspace_id = ""
+        }
   ; user_blocks = []
-  ; turn_instructions = None
-  ; surface_context = None
-  ; channel = ""
-  ; channel_user_id = ""
-  ; channel_user_name = ""
-  ; channel_workspace_id = ""
   ; attachments = []
   }
 ;;
@@ -130,7 +132,8 @@ let test_busy_dashboard_enqueues () =
        ~base_path:base
        ~clock
        ~thread_id
-       (payload ())
+       ~actor:"dashboard"
+(payload ())
    with
    | `Queued len -> check "queue length is reported" (len = 1)
    | `Not_busy | `Queue_error _ -> check "busy keeper was deferred" false);
@@ -141,7 +144,10 @@ let test_busy_dashboard_enqueues () =
   check "dashboard queue revision advances" (snapshot.revision = 1L);
   (match snapshot.pending with
    | [ { Keeper_chat_queue.message =
-           { Keeper_chat_queue.content; source = Dashboard { thread_id = queued_thread_id }; _ }
+           { Keeper_chat_queue.content
+           ; source = Dashboard { thread_id = queued_thread_id; actor = _ }
+           ; _
+           }
        ; _
        } ] ->
      check "queued content is the user's message" (String.equal content "are you there?")
@@ -158,7 +164,8 @@ let test_free_dashboard_not_enqueued () =
        ~base_path:base
        ~clock
        ~thread_id
-       (payload ~content:"run now" ())
+       ~actor:"dashboard"
+(payload ~content:"run now" ())
    with
    | `Not_busy -> check "free keeper stays on direct stream path" true
    | `Queued _ | `Queue_error _ -> check "free keeper must not enqueue" false);
@@ -171,13 +178,19 @@ let test_enqueue_only_dashboard_is_durable_while_free () =
     "Test: enqueue-only dashboard dispatch persists without waiting for a turn\n%!";
   with_env
   @@ fun ~base ~clock ->
-  let queued_payload = { (payload ~content:"queue now" ()) with enqueue_only = true } in
+  let receipt_id = Keeper_chat_queue.Receipt_id.generate () in
+  let queued_payload =
+    { (payload ~content:"queue now" ()) with
+      admission = Durable_enqueue receipt_id
+    }
+  in
   (match
      Server_routes_http_keeper_stream.For_testing.enqueue_dashboard_payload_now
        ~base_path:base
        ~clock
        ~thread_id
-       queued_payload
+       ~actor:"dashboard"
+queued_payload
    with
    | `Queued len ->
      check "free keeper accepts enqueue-only receipt" (len = 1)
@@ -192,6 +205,75 @@ let test_enqueue_only_dashboard_is_durable_while_free () =
      = [ "queue now" ])
 ;;
 
+let test_enqueue_only_retry_reuses_producer_receipt () =
+  Printf.printf
+    "Test: enqueue-only retry converges on the producer receipt\n%!";
+  with_env
+  @@ fun ~base ~clock ->
+  let receipt_id =
+    Keeper_chat_queue.Receipt_id.of_string
+      "chatq_00000000-0000-4000-8000-000000000042"
+    |> Result.get_ok
+  in
+  let queued_payload =
+    { (payload ~content:"queue once" ()) with
+      admission = Durable_enqueue receipt_id
+    }
+  in
+  let enqueue () =
+    Server_routes_http_keeper_stream.For_testing.enqueue_dashboard_payload_now
+      ~base_path:base
+      ~clock
+      ~thread_id
+      ~actor:"dashboard"
+queued_payload
+  in
+  (match enqueue (), enqueue () with
+   | `Queued first_count, `Queued repeated_count ->
+     check "first enqueue has one pending receipt" (first_count = 1);
+     check "retry does not append a second receipt" (repeated_count = 1)
+   | _ -> check "both enqueue attempts succeed" false);
+  let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+  check "producer receipt is stored exactly once"
+    (match snapshot.pending with
+     | [ receipt ] ->
+       Keeper_chat_queue.Receipt_id.equal receipt.receipt_id receipt_id
+     | _ -> false)
+;;
+
+let test_enqueue_only_stores_the_authenticated_actor () =
+  Printf.printf
+    "Test: enqueue-only draft stores the authorized dashboard actor\n%!";
+  with_env
+  @@ fun ~base ~clock ->
+  let receipt_id = Keeper_chat_queue.Receipt_id.generate () in
+  let queued_payload =
+    { (payload ~content:"attribute me" ()) with
+      admission = Durable_enqueue receipt_id
+    }
+  in
+  (match
+     Server_routes_http_keeper_stream.For_testing.enqueue_dashboard_payload_now
+       ~base_path:base
+       ~clock
+       ~thread_id
+       ~actor:"operator-7"
+       queued_payload
+   with
+   | `Queued _ -> ()
+   | `Queue_error message ->
+     check ("enqueue succeeds: " ^ message) false);
+  let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+  check "stored draft keeps the authenticated actor"
+    (match snapshot.pending with
+     | [ receipt ] ->
+       (match receipt.message.source with
+        | Keeper_chat_queue.Dashboard { actor; _ } ->
+          String.equal actor "operator-7"
+        | _ -> false)
+     | _ -> false)
+;;
+
 let test_existing_backlog_defers_new_dashboard_message () =
   Printf.printf "Test: existing dashboard backlog keeps newer messages queued\n%!";
   with_env
@@ -202,7 +284,7 @@ let test_existing_backlog_defers_new_dashboard_message () =
        ; user_blocks = []
        ; attachments = []
        ; timestamp = Eio.Time.now clock
-       ; source = Dashboard { thread_id }
+       ; source = Dashboard { thread_id; actor = "dashboard" }
        ; user_row_origin = Keeper_chat_store.Needs_append
        }
    with
@@ -215,7 +297,8 @@ let test_existing_backlog_defers_new_dashboard_message () =
        ~base_path:base
        ~clock
        ~thread_id
-       (payload ~content:"newer dashboard message" ())
+       ~actor:"dashboard"
+(payload ~content:"newer dashboard message" ())
    with
    | `Queued len -> check "newer message joins existing backlog" (len = 2)
    | `Not_busy | `Queue_error _ ->
@@ -255,7 +338,8 @@ let test_concurrent_busy_dashboard_enqueues_are_per_keeper () =
           ~base_path:base
           ~clock
           ~thread_id:(Printf.sprintf "%s-%d" thread_id i)
-          (payload ~name:keeper_name
+          ~actor:"dashboard"
+(payload ~name:keeper_name
              ~content:(Printf.sprintf "burst message %d" i)
              ())
       in
@@ -313,7 +397,8 @@ let test_busy_dashboard_persist_failure_is_explicit () =
        ~base_path:base
        ~clock
        ~thread_id
-       (payload ~content:"do not acknowledge this as queued" ())
+       ~actor:"dashboard"
+(payload ~content:"do not acknowledge this as queued" ())
    with
    | `Queue_error message ->
      check "dashboard receives the persistence error" (String.length message > 0)
@@ -355,6 +440,7 @@ let test_shutdown_fenced_dashboard_ack_preserves_cause () =
      .defer_dashboard_payload_if_busy_evidence
        ~base_path:base ~clock
        ~thread_id
+       ~actor:"dashboard"
        (payload ~content:"keep this through shutdown" ())
    with
    | `Queued (json, ack) ->
@@ -497,10 +583,35 @@ let test_delegate_resource_error_uses_typed_tool_name () =
           (Tool_result.message result)))
 ;;
 
+let test_dashboard_source_without_actor_decodes_as_legacy_anonymous () =
+  Printf.printf
+    "Test: dashboard durable source without actor decodes as legacy anonymous\n%!";
+  let without_actor =
+    `Assoc
+      [ "kind", `String "dashboard"
+      ; "thread_id", `String thread_id
+      ]
+  in
+  (* Rows persisted before actor attribution must not be quarantined on
+     upgrade; their historical projection was the anonymous ["dashboard"]
+     actor, so decoding restores exactly that attribution. *)
+  match
+    Keeper_chat_queue.For_testing.decode_message_source without_actor
+  with
+  | Ok (Keeper_chat_queue.Dashboard { thread_id = decoded_thread; actor }) ->
+    check "legacy thread id retained" (String.equal decoded_thread thread_id);
+    check "legacy actor is the historical anonymous projection"
+      (String.equal actor "dashboard")
+  | Ok _ -> check "legacy dashboard source decodes" false
+  | Error _ -> check "legacy dashboard source decodes" false
+;;
+
 let () =
   test_busy_dashboard_enqueues ();
   test_free_dashboard_not_enqueued ();
   test_enqueue_only_dashboard_is_durable_while_free ();
+  test_enqueue_only_retry_reuses_producer_receipt ();
+  test_enqueue_only_stores_the_authenticated_actor ();
   test_existing_backlog_defers_new_dashboard_message ();
   test_concurrent_busy_dashboard_enqueues_are_per_keeper ();
   test_busy_dashboard_persist_failure_is_explicit ();
@@ -509,6 +620,7 @@ let () =
   test_stream_surface_preserves_typed_shutdown_rejection ();
   test_delegate_surface_uses_serialized_shutdown_fence ();
   test_delegate_resource_error_uses_typed_tool_name ();
+  test_dashboard_source_without_actor_decodes_as_legacy_anonymous ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

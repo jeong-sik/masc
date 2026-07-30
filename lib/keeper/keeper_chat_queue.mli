@@ -15,7 +15,11 @@
     @since 2.145.0 *)
 
 type message_source =
-  | Dashboard of { thread_id : string }
+  | Dashboard of { thread_id : string; actor : string }
+    (** [actor] is the authorized dashboard caller resolved at the HTTP auth
+        boundary (token-bound agent, or the anonymous ["dashboard"] fallback).
+        Rows persisted before actor attribution decode with [actor =
+        "dashboard"], matching their historical projection. *)
   | Discord of { channel_id : string; user_id : string }
   | Slack of {
       channel_id : string;
@@ -477,6 +481,9 @@ module For_testing : sig
     | Commit_io_error
 
   val reset : unit -> unit
+  val decode_message_source :
+    Yojson.Safe.t -> (message_source, string) result
+  (** Exposes the strict durable source decoder for contract tests. *)
   val fail_transaction_at_stages : transaction_stage list -> unit
   val fail_next_commit_with : commit_failure -> unit
   val set_transaction_stage_observer :

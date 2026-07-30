@@ -1495,17 +1495,34 @@ function fallbackMessageForUserBlocks(blocks: KeeperUserInputBlock[]): string {
     : `[첨부 ${media.length}개]`
 }
 
+type SendKeeperThreadMessageOptions = {
+  attachments?: KeeperConversationAttachment[]
+  clientActionId?: string
+  clientActionIds?: readonly string[]
+  blocks?: ChatBlock[]
+  userBlocks?: KeeperUserInputBlock[]
+} & (
+  | { enqueueOnly: true; receiptId: string }
+  | { enqueueOnly?: false; receiptId?: never }
+)
+
+export class KeeperThreadServerRejectedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'KeeperThreadServerRejectedError'
+  }
+}
+
+export function isKeeperThreadServerRejectedError(
+  error: unknown,
+): error is KeeperThreadServerRejectedError {
+  return error instanceof KeeperThreadServerRejectedError
+}
+
 export async function sendKeeperThreadMessage(
   name: string,
   prompt: string,
-  options: {
-    attachments?: KeeperConversationAttachment[]
-    clientActionId?: string
-    clientActionIds?: readonly string[]
-    enqueueOnly?: boolean
-    blocks?: ChatBlock[]
-    userBlocks?: KeeperUserInputBlock[]
-  } = {},
+  options: SendKeeperThreadMessageOptions = {},
 ): Promise<void> {
   const keeperName = name.trim()
   const attachments =
@@ -1581,9 +1598,12 @@ export async function sendKeeperThreadMessage(
   try {
     finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered' })
 
+    const admissionOptions = options.enqueueOnly
+      ? { enqueueOnly: true as const, receiptId: options.receiptId }
+      : {}
     const outcome = await streamKeeperMessage(keeperName, message, {
       signal: controller.signal,
-      enqueueOnly: options.enqueueOnly,
+      ...admissionOptions,
       attachments,
       userBlocks,
       onEvent: event => {
@@ -1643,7 +1663,7 @@ export async function sendKeeperThreadMessage(
         }
         const error = applyKeeperStreamEvent(keeperName, assistantId, event)
         if (error) {
-          throw new Error(error)
+          throw new KeeperThreadServerRejectedError(error)
         }
         if (event.type === 'CUSTOM' && event.name === 'KEEPER_CHAT_QUEUED' && isRecord(event.value)) {
           const queueReceiptId = asString(event.value.receipt_id, '').trim()

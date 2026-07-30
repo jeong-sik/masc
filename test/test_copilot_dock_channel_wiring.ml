@@ -26,6 +26,11 @@ let parse_ok body =
   | Ok payload -> payload
   | Error err -> fail ("expected parse to succeed: " ^ err)
 
+let direct_context payload =
+  match payload.Stream.admission with
+  | Direct context -> context
+  | Durable_enqueue _ -> fail "expected direct admission"
+
 let args_assoc args =
   match args with
   | `Assoc fields -> fields
@@ -50,22 +55,28 @@ let test_copilot_parse_accepts_operator_workspace () =
     {|{"name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","turn_instructions":"focus on overview"}|}
   in
   let payload = parse_ok body in
-  check string "channel" "copilot" payload.channel;
-  check string "workspace id" "session-7" payload.channel_workspace_id;
-  check string "user id optional" "" payload.channel_user_id;
+  let context = direct_context payload in
+  check string "channel" "copilot" context.channel;
+  check string "workspace id" "session-7" context.channel_workspace_id;
+  check string "user id optional" "" context.channel_user_id;
   check (option string) "turn instructions" (Some "focus on overview")
-    payload.turn_instructions;
+    context.turn_instructions;
   check bool "connector context" true
     (Stream.For_testing.has_connector_context payload);
   check bool "external speaker" false
     (Stream.For_testing.has_external_speaker payload)
 
 let test_dashboard_enqueue_only_is_typed () =
-  let payload =
-    parse_ok
-      {|{"name":"luna","message":"hello","enqueue_only":true}|}
-  in
-  check bool "enqueue only" true payload.enqueue_only;
+  (match
+     Stream.For_testing.parse_request
+       {|{"name":"luna","message":"hello","enqueue_only":true}|}
+   with
+   | Error error ->
+     check string
+       "enqueue-only requires receipt identity"
+       "enqueue_only=true requires receipt_id"
+       error
+   | Ok _ -> fail "enqueue_only without receipt_id must be rejected");
   match
     Stream.For_testing.parse_request
       {|{"name":"luna","message":"hello","enqueue_only":"true"}|}

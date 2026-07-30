@@ -5,27 +5,6 @@
 
     @since 2.249.0 *)
 
-val set_truncation_info :
-  keeper_name:string ->
-  original_bytes:int ->
-  ?truncated_to:int ->
-  unit ->
-  unit
-(** [set_truncation_info ~keeper_name ~original_bytes ?truncated_to ()]
-    records pre-truncation output size for the given keeper. Called by
-    the tool handler wrapper before returning the (possibly truncated)
-    result to OAS. Per-keeper isolation prevents cross-keeper corruption
-    under concurrent tool execution. *)
-
-val consume_truncation_info :
-  keeper_name:string ->
-  unit ->
-  int * int option
-(** [consume_truncation_info ~keeper_name ()] returns
-    [(original_bytes, truncated_to)] for the given keeper and clears
-    the pending state. Returns [(0, None)] when no truncation info
-    was set (e.g. OAS-internal tool call that bypassed the wrapper). *)
-
 type turn_ctx_cell = Keeper_tool_call_log_context.cell
 (** Per-run turn-context carrier (RFC-0225 §3.3). Created once per
     [run_turn] invocation and threaded to every context reader of the

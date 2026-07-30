@@ -128,6 +128,13 @@ let usage_missing_of_usage = function
   | None -> true
   | Some usage -> not (usage_has_tokens usage)
 
+let original_result_bytes ~oas_result_bytes output_text =
+  match Tool_output.decode_from_oas output_text with
+  | Tool_output.Not_marker -> Ok oas_result_bytes
+  | Tool_output.Decoded reference -> Ok reference.bytes
+  | Tool_output.Invalid_marker { detail } -> Error detail
+;;
+
 let make_hooks
     ~(config : Workspace.config)
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
@@ -145,7 +152,6 @@ let make_hooks
     ()
   : Agent_sdk.Hooks.hooks =
   let sse_turn_complete = "keeper_turn_complete" in
-  let tool_start_time = ref 0.0 in
   (* Per-turn tool call counter for SSE enrichment.
      Incremented in post_tool_use, reset in after_turn. *)
   let tool_call_count_ref = ref 0 in
@@ -158,13 +164,6 @@ let make_hooks
   ignore trajectory_acc;
   let hooks =
     { Agent_sdk.Hooks.empty with
-    pre_tool_use = Some (fun event ->
-      match event with
-      | Agent_sdk.Hooks.PreToolUse _ ->
-        tool_start_time := Time_compat.now ();
-        Agent_sdk.Hooks.Continue
-      | _event -> Agent_sdk.Hooks.Continue);
-
     before_turn = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.BeforeTurn _ ->
@@ -411,6 +410,7 @@ let make_hooks
           ; tool_name
           ; input
           ; output
+          ; result_bytes = oas_result_bytes
           ; duration_ms = hook_duration_ms
           ; _
           } ->
@@ -447,14 +447,10 @@ let make_hooks
           "keeper:%s tool_call tool=%s params=[%s] input_shape=[%s] outcome=%s out_len=%d error_preview=%s"
           (!meta_ref).name tool_name input_keys input_shape outcome_s out_len
           error_preview;
-        (* Persistent tool call I/O log for dashboard inspector.
-           tool_start_time is keeper-local (one ref per make_hooks call).
-           Tool calls within Agent.run are sequential, so no race. *)
-        let duration_ms =
-          if hook_duration_ms > 0.0
-          then hook_duration_ms
-          else (Time_compat.now () -. !tool_start_time) *. ms_per_second
-        in
+        (* OAS measures this exact handler occurrence and carries the result
+           on PostToolUse. Keep that typed value as the single timing
+           authority, including a legitimate zero-duration sample. *)
+        let duration_ms = hook_duration_ms in
         let model =
           current_keeper_model !meta_ref
         in
@@ -468,14 +464,17 @@ let make_hooks
         record_keeper_tool_duration_metric
           ~keeper_name:(!meta_ref).name
           summary;
-        (* Consume truncation info set by keeper_tools_oas before returning
-           the (possibly truncated) result to OAS. Falls back to out_len
-           when no truncation info was set (e.g. OAS-internal tool calls). *)
-        let (original_bytes, truncated_to) =
-          Keeper_tool_call_log.consume_truncation_info
-            ~keeper_name:(!meta_ref).name ()
+        let result_bytes =
+          match original_result_bytes ~oas_result_bytes output_text with
+          | Ok bytes -> bytes
+          | Error detail ->
+            Log.Keeper.warn
+              ~keeper_name:(!meta_ref).name
+              "tool=%s invalid externalized output marker: %s"
+              tool_name
+              detail;
+            oas_result_bytes
         in
-        let result_bytes = if original_bytes > 0 then original_bytes else out_len in
         (* Full record read: log_call no longer falls back to ambient
            context (RFC-0225 §3.3), so every field this row should carry
            must be passed explicitly from the run's own cell. *)
@@ -518,7 +517,7 @@ let make_hooks
              ?allowed_paths:tctx.allowed_paths
              ?network_mode:tctx.network_mode
              ?runtime_profile:tctx.runtime_profile
-             ~result_bytes ?truncated_to ()
+             ~result_bytes ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
@@ -687,4 +686,5 @@ module For_testing = struct
   let tool_input_keys_for_log = tool_input_keys_for_log
   let cost_usd_json = cost_usd_json
   let usage_missing_of_usage = usage_missing_of_usage
+  let original_result_bytes = original_result_bytes
 end

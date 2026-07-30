@@ -1,7 +1,7 @@
 (** Durable per-Keeper chat receipt queue. *)
 
 type message_source =
-  | Dashboard of { thread_id : string }
+  | Dashboard of { thread_id : string; actor : string }
   | Discord of { channel_id : string; user_id : string }
   | Slack of {
       channel_id : string;
@@ -609,7 +609,7 @@ let registry_mutex = Eio.Mutex.create ()
 let registry : (string, queue_entry) Hashtbl.t = Hashtbl.create 16
 
 let continuation_channel_of_message_source = function
-  | Dashboard { thread_id } ->
+  | Dashboard { thread_id; actor = _ } ->
     (match Keeper_continuation_channel.dashboard ~thread_id with
      | Ok channel -> channel
      | Error message -> invalid_arg message)
@@ -662,8 +662,12 @@ let snapshot_path ~base_path ~keeper_name =
 let load_error kind ?path message = { kind; path; message }
 
 let source_to_yojson = function
-  | Dashboard { thread_id } ->
-    `Assoc [ "kind", `String "dashboard"; "thread_id", `String thread_id ]
+  | Dashboard { thread_id; actor } ->
+    `Assoc
+      [ "kind", `String "dashboard"
+      ; "thread_id", `String thread_id
+      ; "actor", `String actor
+      ]
   | Discord { channel_id; user_id } ->
     `Assoc
       [ "kind", `String "discord"
@@ -729,11 +733,18 @@ let source_of_yojson json =
   match required_string json "kind" with
   | Error _ as error -> error
   | Ok "dashboard" ->
-    (match required_string json "thread_id" with
-     | Ok thread_id when not (String.equal (String.trim thread_id) "") ->
-       Ok (Dashboard { thread_id })
-     | Ok _ -> Error "dashboard chat queue source requires a non-empty thread_id"
-     | Error _ as error -> error)
+    (match required_string json "thread_id", optional_string json "actor" with
+     | Ok thread_id, Ok actor_opt
+       when not (String.equal (String.trim thread_id) "") ->
+       (* Rows persisted before dashboard actor attribution carry no [actor]
+          field; their historical projection was the anonymous ["dashboard"]
+          actor, so decoding restores exactly that attribution instead of
+          quarantining the receipt. *)
+       let actor = Option.value ~default:"dashboard" actor_opt in
+       Ok (Dashboard { thread_id; actor })
+     | Ok _, Ok _ ->
+       Error "dashboard chat queue source requires a non-empty thread_id"
+     | Error error, _ | _, Error error -> Error error)
   | Ok "discord" ->
     (match required_string json "channel_id", required_string json "user_id" with
      | Ok channel_id, Ok user_id
@@ -4364,6 +4375,8 @@ module For_testing = struct
   type nonrec commit_failure = commit_failure =
     | Commit_busy
     | Commit_io_error
+
+  let decode_message_source = source_of_yojson
 
   let reset () =
     Atomic.set transaction_failures_for_testing [];

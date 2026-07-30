@@ -61,11 +61,6 @@ let hook_introspection_json () : Yojson.Safe.t =
       slot
         ~active:true
         ~source:"keeper_hooks_oas"
-        ~features:[ "tool_start_timing" ]
-        "pre_tool_use";
-      slot
-        ~active:true
-        ~source:"keeper_hooks_oas"
         ~features:
           [
             "tool_callback";

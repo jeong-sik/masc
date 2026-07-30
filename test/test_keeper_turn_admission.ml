@@ -62,7 +62,9 @@ let queued_message : Keeper_chat_queue.queued_message =
   ; user_blocks = []
   ; attachments = []
   ; timestamp = 1.0
-  ; source = Keeper_chat_queue.Dashboard { thread_id = "keeper:admission" }
+  ; source =
+      Keeper_chat_queue.Dashboard
+        { thread_id = "keeper:admission"; actor = "dashboard" }
   ; user_row_origin = Keeper_chat_store.Needs_append
   }
 ;;
@@ -282,7 +284,9 @@ let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
     ; user_blocks = []
     ; attachments = []
     ; timestamp = Time_compat.now ()
-    ; source = Keeper_chat_queue.Dashboard { thread_id = "keeper:admission" }
+    ; source =
+        Keeper_chat_queue.Dashboard
+          { thread_id = "keeper:admission"; actor = "dashboard" }
     ; user_row_origin = Keeper_chat_store.Needs_append
     }
   in

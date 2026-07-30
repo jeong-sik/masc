@@ -70,31 +70,38 @@ type user_input_block = Keeper_multimodal_input.user_input_block =
     MASC request-boundary type, intentionally distinct from dashboard
     rich-render [ChatBlock] values and from OAS provider blocks. *)
 
-type keeper_chat_stream_request = {
-  name : string;
-  message : string;
-  enqueue_only : bool;
-  user_blocks : user_input_block list;
+type keeper_chat_direct_context = {
   turn_instructions : string option;
   surface_context : Yojson.Safe.t option;
   channel : string;
   channel_user_id : string;
   channel_user_name : string;
   channel_workspace_id : string;
+}
+
+type keeper_chat_admission =
+  | Direct of keeper_chat_direct_context
+  | Durable_enqueue of Keeper_chat_queue.Receipt_id.t
+(** Dashboard admission mode. [Durable_enqueue] carries its required
+    idempotency identity, so enqueue-only requests without a receipt and
+    direct requests with a receipt are not representable after parsing. *)
+
+type keeper_chat_stream_request = {
+  name : string;
+  message : string;
+  admission : keeper_chat_admission;
+  user_blocks : user_input_block list;
   attachments : Keeper_chat_store.attachment list;
 }
 (** Parsed payload of a keeper chat-stream HTTP request.
     [message] is the text fallback used by the existing direct keeper
-    path; [enqueue_only] requests durable admission without waiting for
-    the keeper turn to run; [user_blocks] preserves semantic text/media
-    input for the block-aware runtime path. [turn_instructions] and [surface_context]
-    are optional copilot context fields; when
-    [turn_instructions] is absent but [surface_context]
-    is present, the surface context is formatted and
-    injected as turn instructions.  [channel] and
-    [channel_workspace_id] are required together when any
-    connector context is supplied; [channel_user_id] and
-    [channel_user_name] are optional. *)
+    path; [admission] keeps direct dispatch distinct from durable admission
+    with its required producer-allocated idempotency identity; [user_blocks]
+    preserves semantic text/media input for the block-aware runtime path.
+    [Direct] owns the optional copilot and connector context, so durable
+    enqueue cannot silently discard those fields. Within direct context,
+    [channel] and [channel_workspace_id] are required together when any
+    connector context is supplied. *)
 
 (** {1 Parsing} *)
 
@@ -103,7 +110,7 @@ val parse_keeper_chat_stream_request :
 (** Parses the HTTP body string into a
     {!keeper_chat_stream_request}.  Returns
     [Error reason] on JSON shape mismatches, missing
-    [name] / content, malformed [user_blocks], partial connector context, or a
+    [name] / content, malformed [receipt_id] / [user_blocks], partial connector context, or a
     removed Keeper argument (including the retired request-level
     [timeout_sec]). *)
 
@@ -289,12 +296,14 @@ module For_testing : sig
     base_path:string ->
     clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     thread_id:string ->
+    actor:string ->
     keeper_chat_stream_request ->
     [ `Not_busy | `Queued of int | `Queue_error of string ]
   val defer_dashboard_payload_if_busy_evidence :
     base_path:string ->
     clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     thread_id:string ->
+    actor:string ->
     keeper_chat_stream_request ->
     [ `Not_busy
     | `Queued of Yojson.Safe.t * string
@@ -304,6 +313,7 @@ module For_testing : sig
     base_path:string ->
     clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     thread_id:string ->
+    actor:string ->
     keeper_chat_stream_request ->
     [ `Queued of int | `Queue_error of string ]
   val canonical_reply_payload_of_body :

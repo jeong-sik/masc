@@ -744,7 +744,10 @@ let start_supervisor_sweep ctx =
                             any other reconciled fields) immediately.  Without
                             this the file is updated but the in-memory
                             [registry_entry.meta] stays stale until restart. *)
-                         Keeper_registry.update_meta ~base_path entry.name updated_meta;
+                         Keeper_registry.update_meta_from_persisted
+                           ~base_path
+                           entry.name
+                           updated_meta;
                          Keeper_reconcile_state.record_success ~keeper:entry.name
                      | Error e ->
                          let outcome =

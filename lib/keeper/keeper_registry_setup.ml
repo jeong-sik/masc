@@ -111,6 +111,42 @@ let validate_registry_meta ~base_path:_ name (meta : keeper_meta) =
   else Ok ()
 ;;
 
+let preserve_process_local_usage_observation
+      ~(current : keeper_meta)
+      ~(incoming : keeper_meta)
+  =
+  let same_runtime_identity =
+    Keeper_id.Trace_id.equal
+      current.runtime.trace_id
+      incoming.runtime.trace_id
+    && Int.equal current.runtime.nonce incoming.runtime.nonce
+  in
+  match
+    same_runtime_identity,
+    current.runtime.usage.last_usage_reported_at,
+    incoming.runtime.usage.last_usage_reported_at
+  with
+  | true, Some _, None ->
+    let observed_usage = current.runtime.usage in
+    {
+      incoming with
+      runtime =
+        {
+          incoming.runtime with
+          usage =
+            {
+              incoming.runtime.usage with
+              last_input_tokens = observed_usage.last_input_tokens;
+              last_output_tokens = observed_usage.last_output_tokens;
+              last_total_tokens = observed_usage.last_total_tokens;
+              last_usage_reported_at =
+                observed_usage.last_usage_reported_at;
+            };
+        };
+    }
+  | true, _, _ | false, _, _ -> incoming
+;;
+
 let record_invalid_registry_entry ~operation ~name reason =
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string RegistryInvalidEntry)
@@ -967,6 +1003,24 @@ let update_meta ~base_path name meta =
       update_entry_unit ~base_path name (fun e -> { e with base_path; name; meta })
 ;;
 
+let update_meta_from_persisted ~base_path name meta =
+  let base_path = canonical_base_path_exn base_path in
+  match validate_registry_meta ~base_path name meta with
+  | Error reason ->
+    record_invalid_registry_entry
+      ~operation:"update_meta_from_persisted"
+      ~name
+      reason
+  | Ok () ->
+    update_entry_unit ~base_path name (fun entry ->
+      let meta =
+        preserve_process_local_usage_observation
+          ~current:entry.meta
+          ~incoming:meta
+      in
+      { entry with base_path; name; meta })
+;;
+
 let reload_meta_from_disk ~base_path name =
   let base_path = canonical_base_path_exn base_path in
   let config = Workspace.default_config base_path in
@@ -990,6 +1044,11 @@ let reload_meta_from_disk ~base_path name =
           | Ok () ->
               let updated =
                 update_entry_if_registered ~base_path name (fun e ->
+                  let effective_meta =
+                    preserve_process_local_usage_observation
+                      ~current:e.meta
+                      ~incoming:effective_meta
+                  in
                   { e with base_path; name; meta = effective_meta }, true)
               in
               if updated then Ok (get ~base_path name) else Ok None)))
@@ -998,23 +1057,7 @@ let reload_meta_from_disk ~base_path name =
 (* Runtime-attempt cluster (runtime_attempt_merge / meta_for_runtime_attempt / record_runtime_attempt / runtime_attempt_suffix / last_runtime_attempt / runtime_attempt_freshness_threshold_sec / enrich... *)
 
 let sync_meta_if_registered ~base_path name meta =
-  let base_path = canonical_base_path_exn base_path in
-  match validate_registry_meta ~base_path name meta with
-  | Error reason ->
-      record_invalid_registry_entry ~operation:"sync_meta_if_registered" ~name reason
-  | Ok () ->
-      let key = registry_key ~base_path name in
-      let rec loop () =
-        let current = Atomic.get registry in
-        match StringMap.find_opt key current with
-        | None -> ()
-        | Some entry ->
-            let updated =
-              StringMap.add key { entry with base_path; name; meta } current
-            in
-            if not (Atomic.compare_and_set registry current updated) then loop ()
-      in
-      loop ()
+  update_meta_from_persisted ~base_path name meta
 ;;
 
 let () =

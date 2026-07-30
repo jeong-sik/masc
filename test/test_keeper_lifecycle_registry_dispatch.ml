@@ -219,14 +219,104 @@ let test_registry_reload_meta_from_disk_repairs_stale_meta () =
         ];
       let persisted_meta = make_keeper_meta ~name () in
       let stale_meta = { persisted_meta with instructions = "stale instructions" } in
-      ignore (KR.For_testing.register ~base_path:config.base_path name stale_meta);
+      let observed_meta =
+        {
+          stale_meta with
+          runtime =
+            {
+              stale_meta.runtime with
+              usage =
+                {
+                  stale_meta.runtime.usage with
+                  last_input_tokens = 123;
+                  last_output_tokens = 4;
+                  last_total_tokens = 127;
+                  last_usage_reported_at = Some 1_700_000_000.0;
+                };
+            };
+        }
+      in
+      ignore (KR.For_testing.register ~base_path:config.base_path name observed_meta);
+      Masc.Keeper_meta_store.runtime_meta_write_sync_hook config persisted_meta;
+      (match KR.get ~base_path:config.base_path name with
+       | Some entry ->
+         check
+           (option (float 0.0))
+           "runtime write sync preserves live observation timestamp"
+           (Some 1_700_000_000.0)
+           entry.meta.runtime.usage.last_usage_reported_at
+       | None -> fail "expected registered keeper after runtime write sync");
       write_keeper_meta_json_for_name config name persisted_meta;
       match KR.For_testing.reload_meta_from_disk ~base_path:config.base_path name with
       | Ok (Some entry) ->
           check string "reload applies base-path TOML instructions" "fresh instructions"
-            entry.meta.instructions
+            entry.meta.instructions;
+          check int "reload preserves live observed input" 123
+            entry.meta.runtime.usage.last_input_tokens;
+          check
+            (option (float 0.0))
+            "reload preserves live observation timestamp"
+            (Some 1_700_000_000.0)
+            entry.meta.runtime.usage.last_usage_reported_at
       | Ok None -> fail "expected reload to update registered keeper"
       | Error msg -> fail ("reload_meta_from_disk failed: " ^ msg))
+
+let test_registry_explicit_meta_update_remains_authoritative () =
+  let base_dir = temp_dir "keeper_lifecycle_registry_explicit_meta_update" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      KR.For_testing.clear ();
+      let config = Masc.Workspace.default_config base_dir in
+      let name = "keeper-registry-explicit-meta-update" in
+      let unobserved_meta = make_keeper_meta ~name () in
+      let observed_meta =
+        {
+          unobserved_meta with
+          runtime =
+            {
+              unobserved_meta.runtime with
+              usage =
+                {
+                  unobserved_meta.runtime.usage with
+                  last_input_tokens = 123;
+                  last_output_tokens = 4;
+                  last_total_tokens = 127;
+                  last_usage_reported_at = Some 1_700_000_000.0;
+                };
+            };
+        }
+      in
+      ignore
+        (KR.For_testing.register
+           ~base_path:config.base_path
+           name
+           observed_meta);
+      KR.update_meta ~base_path:config.base_path name unobserved_meta;
+      (match KR.get ~base_path:config.base_path name with
+       | Some entry ->
+         check bool "explicit update clears usage observation" true
+           (Option.is_none entry.meta.runtime.usage.last_usage_reported_at);
+         check int "explicit update installs its input value" 0
+           entry.meta.runtime.usage.last_input_tokens
+       | None -> fail "expected registered keeper after explicit meta update");
+      KR.update_meta ~base_path:config.base_path name observed_meta;
+      let new_identity = make_keeper_meta ~name ~trace_id:"trace-new" () in
+      KR.update_meta_from_persisted
+        ~base_path:config.base_path
+        name
+        new_identity;
+      match KR.get ~base_path:config.base_path name with
+      | Some entry ->
+        check bool "new persisted identity starts usage unobserved" true
+          (Option.is_none entry.meta.runtime.usage.last_usage_reported_at);
+        check int "new persisted identity installs its input value" 0
+          entry.meta.runtime.usage.last_input_tokens
+      | None -> fail "expected registered keeper after persisted identity update")
 
 let test_dispatch_keeper_phase_event_uses_workspace_base_path () =
   let base_dir = temp_dir "keeper_lifecycle_registry_phase" in
@@ -687,5 +777,7 @@ let () =
             test_registry_canonicalizes_mismatched_meta_on_register;
           test_case "registry reload repairs stale meta from disk" `Quick
             test_registry_reload_meta_from_disk_repairs_stale_meta;
+          test_case "explicit registry meta update remains authoritative" `Quick
+            test_registry_explicit_meta_update_remains_authoritative;
         ] );
     ]

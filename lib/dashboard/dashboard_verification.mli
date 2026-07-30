@@ -1,8 +1,9 @@
 (** Dashboard projection for immutable verification submissions.
 
     Requests contain the submit-time completion contract and evidence envelope.
-    Task status is the sole source of verifier assignment and outcome; this
-    projection therefore exposes no request-level status, verdict, or approver. *)
+    Task status is the sole source of the pending obligation and terminal
+    outcome; this projection therefore exposes no request-level status, verdict,
+    or authority identity. *)
 
 val requests_json :
   base_path:string ->

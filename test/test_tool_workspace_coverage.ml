@@ -941,14 +941,13 @@ let () =
 ;;
 
 let () =
-  test "next_hint_awaiting_verification lists approve and reject" (fun () ->
+  test "next_hint_awaiting_verification has no agent action" (fun () ->
     let h =
       next_hint
         (Masc_domain.AwaitingVerification
            { assignee = "a"; submitted_at = "t"; verification_id = "v" })
     in
-    assert (str_contains h "approve");
-    assert (str_contains h "reject"))
+    assert (String.equal h ""))
 ;;
 
 let () =

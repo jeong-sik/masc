@@ -292,7 +292,7 @@ let task_operation_status (task : Masc_domain.task) =
   match task.task_status with
   | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> Some "active"
   (* RFC-0323 G-6: awaiting verification is the normal completion lane,
-     not a pause — the operation is still moving (verifier's turn). *)
+     not a pause — it is waiting for an out-of-band authority verdict. *)
   | Masc_domain.AwaitingVerification _ -> Some "active"
   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
 

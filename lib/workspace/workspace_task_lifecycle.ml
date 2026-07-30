@@ -7,6 +7,7 @@ type invalid =
   | Verification_submission_required
   | Verification_pending_verdict
       (** An [AwaitingVerification] obligation is not claimable by any agent. *)
+  | Verdict_authority_identity_required
   | Verdict_rejection_reason_required
   | Invalid_transition
 
@@ -156,11 +157,9 @@ type verdict_decision =
 (** Terminal verdict on an [AwaitingVerification] obligation.
 
     Deliberately not an arm of {!decide}: a verdict is not an agent action. The
-    [authority] parameter is a proof obligation — every constructor of
-    [Masc_domain.completion_authority] requires an identity no agent can mint, so
-    a call site holding only an [agent_name] cannot construct one and does not
-    typecheck. This is the compile-time replacement for the old
-    [same_agent verifier] string comparison. *)
+    [authority] parameter carries provenance from an authenticated operator or
+    typed judge boundary. The sum keeps verdicts out of the agent action FSM;
+    authentication remains the caller's responsibility. *)
 let decide_verdict
       ~(authority : Masc_domain.completion_authority)
       ~(verdict : Masc_domain.completion_verdict)
@@ -170,11 +169,14 @@ let decide_verdict
       ~notes
   =
   let provenance decision =
-    Ok
-      { decision
-      ; authority_kind = Masc_domain.completion_authority_kind authority
-      ; authority_actor = Masc_domain.completion_authority_actor authority
-      }
+    if not (Masc_domain.completion_authority_has_identity authority)
+    then Error Verdict_authority_identity_required
+    else
+      Ok
+        { decision
+        ; authority_kind = Masc_domain.completion_authority_kind authority
+        ; authority_actor = Masc_domain.completion_authority_actor authority
+        }
   in
   match task_status with
   | Masc_domain.AwaitingVerification { assignee; _ } ->

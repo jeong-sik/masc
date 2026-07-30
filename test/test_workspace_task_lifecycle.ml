@@ -88,9 +88,9 @@ let test_verdict_is_not_an_agent_action () =
     [ "approve"; "reject" ]
 ;;
 
-(* The verdict path requires a [completion_authority]. Both constructors take an
-   identity no agent can mint, so this test is also the compile-time proof: there
-   is no way to write this call with an agent name. *)
+(* The verdict path is separate from agent actions. The producer boundary owns
+   authentication; the leaf still refuses empty provenance so audit identity
+   cannot disappear. *)
 let test_verdict_requires_authority_and_reason () =
   let operator = D.Human_operator { operator_id = "op-1" } in
   (match
@@ -116,6 +116,17 @@ let test_verdict_requires_authority_and_reason () =
    with
    | Error L.Verdict_rejection_reason_required -> ()
    | Ok _ | Error _ -> failwith "a blank rejection reason must be refused");
+  (match
+     L.decide_verdict
+       ~authority:(D.Human_operator { operator_id = " " })
+       ~verdict:D.Verdict_approved
+       ~task_id:"task-1"
+       ~task_status:awaiting
+       ~now
+       ~notes:""
+   with
+   | Error L.Verdict_authority_identity_required -> ()
+   | Ok _ | Error _ -> failwith "a blank authority identity must be refused");
   match
     L.decide_verdict
       ~authority:(D.Auto_judge { judge_run_id = "fusion-run-9" })

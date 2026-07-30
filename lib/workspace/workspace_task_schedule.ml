@@ -359,14 +359,10 @@ let claim_next_r
               }
           , None )
          | task :: _ ->
-           (* Claim this task. [resolve_claim] yields the post-claim status:
-              [Claimed] for a Todo worker claim, or a verifier-bound
-              [AwaitingVerification] for a cross-agent verification claim
-              (RFC-0220 §3.5 — preserve the obligation as the satisfier, do not
-              clobber it to [Claimed]). The [Self_owned]/[Held_by_other] arms
-              are unreachable here: [unclaimed] admits only tasks that resolve
-              to a claim (same [resolve_claim]); the defensive fallback keeps
-              the worker-claim behavior rather than raising on the claim path. *)
+           (* [unclaimed] admits only Todo tasks for which [resolve_claim]
+              returns [Worker_claim]. The remaining arms are defensive and must
+              not make AwaitingVerification eligible: that status belongs to
+              the out-of-band completion-authority lane. *)
            let claimed_status =
              match
                Workspace_task_lifecycle.resolve_claim
@@ -464,4 +460,3 @@ let claim_next_r
   | Ok (result, _) -> result
   | Error err -> Claim_next_error (Masc_domain.masc_error_to_string err)
 ;;
-

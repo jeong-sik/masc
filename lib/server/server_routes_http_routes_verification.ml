@@ -14,9 +14,12 @@
       cfg coverage (see {!Dashboard_tla_specs}).
     - [GET /api/v1/verification/tlc-results] — latest observed TLC log
       projection for each clean / buggy cfg.
+    - [GET /api/v1/verification/evidence] — submitted evidence for an
+      authenticated operator.
+    - [POST /api/v1/verification/verdict] — authenticated operator verdict.
 
-    Async Task verification is read-only here. Verdicts are issued only by the
-    ordinary Keeper that claimed the Task verifier phase. *)
+    The two authority routes require a token-bound [CanAdmin] credential. A
+    Keeper task action cannot reach them. *)
 
 open Server_auth
 
@@ -26,6 +29,134 @@ let trimmed_query_param req key =
   match Server_utils.query_param req key |> Option.map String.trim with
   | Some v when v <> "" -> Some v
   | _ -> None
+
+type operator_verdict_request =
+  { task_id : string
+  ; verdict : Masc_domain.completion_verdict
+  ; notes : string
+  }
+
+let non_empty_string_field fields key =
+  match List.assoc_opt key fields with
+  | Some (`String value) when String.trim value <> "" -> Ok (String.trim value)
+  | Some _ -> Error (Printf.sprintf "%s must be a non-empty string" key)
+  | None -> Error (Printf.sprintf "%s is required" key)
+;;
+
+let optional_string_field fields key =
+  match List.assoc_opt key fields with
+  | None | Some `Null -> Ok ""
+  | Some (`String value) -> Ok (String.trim value)
+  | Some _ -> Error (Printf.sprintf "%s must be a string" key)
+;;
+
+let parse_operator_verdict_json = function
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let* task_id = non_empty_string_field fields "task_id" in
+    let* verdict_name = non_empty_string_field fields "verdict" in
+    let* notes = optional_string_field fields "notes" in
+    let* verdict =
+      match String.lowercase_ascii verdict_name with
+      | "approve" -> Ok Masc_domain.Verdict_approved
+      | "reject" ->
+        let* reason = non_empty_string_field fields "reason" in
+        Ok (Masc_domain.Verdict_rejected { reason })
+      | _ -> Error "verdict must be \"approve\" or \"reject\""
+    in
+    Ok { task_id; verdict; notes }
+  | _ -> Error "request body must be a JSON object"
+;;
+
+let awaiting_task config task_id =
+  match
+    Workspace.get_tasks_raw config
+    |> List.find_opt (fun (task : Masc_domain.task) ->
+           String.equal task.id task_id)
+  with
+  | None -> Error (Printf.sprintf "Task %s was not found" task_id)
+  | Some
+      ({ task_status =
+           Masc_domain.AwaitingVerification
+             { assignee; verification_id; _ }
+       ; _
+       } as task) ->
+    Ok (task, assignee, verification_id)
+  | Some task ->
+    Error
+      (Printf.sprintf
+         "Task %s is %s; operator evidence and verdicts require \
+          awaiting_verification"
+         task_id
+         (Masc_domain.task_status_to_string task.task_status))
+;;
+
+let operator_evidence_json ~config ~operator_id ~task_id =
+  let open Result.Syntax in
+  let* _task, producer, verification_id = awaiting_task config task_id in
+  let authority = Masc_domain.Human_operator { operator_id } in
+  let evidence =
+    Workspace_verification_store.inspect_submitted_evidence_for_authority
+      ~base_path:config.Workspace.base_path
+      ~request_id:verification_id
+      ~task_id
+      ~task_worker:producer
+      ~authority
+  in
+  Ok
+    (`Assoc
+      [ "task_id", `String task_id
+      ; "verification_id", `String verification_id
+      ; "producer", `String producer
+      ; "authority_kind", `String "human_operator"
+      ; "authority_actor", `String operator_id
+      ; ( "evidence"
+        , Workspace_verification_store.submitted_evidence_access_to_yojson
+            evidence )
+      ])
+;;
+
+let wake_rejected_producer ~config producer =
+  Keeper_current_task_reconcile.sync_current_task_id_for_agent_name
+    ~config
+    ~agent_name:producer;
+  match Keeper_identity.canonical_keeper_name_from_agent_name producer with
+  | None -> ()
+  | Some keeper_name ->
+    ignore
+      (Keeper_registry.wakeup_running
+         ~intent:Keeper_registry.Reactive_signal
+         ~base_path:config.Workspace.base_path
+         keeper_name
+        : Keeper_registry.wakeup_outcome)
+;;
+
+let commit_operator_verdict ~config ~operator_id request =
+  let open Result.Syntax in
+  let* _task, producer, _verification_id =
+    awaiting_task config request.task_id
+  in
+  let authority = Masc_domain.Human_operator { operator_id } in
+  let* outcome =
+    Workspace.commit_verdict_r
+      config
+      ~authority
+      ~verdict:request.verdict
+      ~task_id:request.task_id
+      ~notes:request.notes
+      ()
+    |> Result.map_error Masc_domain.masc_error_to_string
+  in
+  (match request.verdict with
+   | Masc_domain.Verdict_approved -> ()
+   | Masc_domain.Verdict_rejected _ ->
+     wake_rejected_producer ~config producer);
+  Ok outcome
+;;
+
+let error_json message =
+  `Assoc [ "ok", `Bool false; "error", `String message ]
+;;
 
 let add_routes router =
   router
@@ -64,3 +195,80 @@ let add_routes router =
          let json = Dashboard_tla_specs.tlc_results_json () in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/verification/evidence" (fun request reqd ->
+       with_token_permission_auth
+         ~permission:Masc_domain.CanAdmin
+         (fun state operator_id req reqd ->
+            let config = Mcp_server.workspace_config state in
+            match trimmed_query_param req "task_id" with
+            | None ->
+              respond_json_value_with_cors
+                ~status:`Bad_request
+                request
+                reqd
+                (error_json "task_id query parameter is required")
+            | Some task_id ->
+              (match operator_evidence_json ~config ~operator_id ~task_id with
+               | Ok json ->
+                 respond_json_value_with_cors
+                   request
+                   reqd
+                   (`Assoc [ "ok", `Bool true; "result", json ])
+               | Error message ->
+                 respond_json_value_with_cors
+                   ~status:`Bad_request
+                   request
+                   reqd
+                   (error_json message)))
+         request
+         reqd)
+  |> Http.Router.post "/api/v1/verification/verdict" (fun request reqd ->
+       with_token_permission_auth
+         ~permission:Masc_domain.CanAdmin
+         (fun state operator_id _req reqd ->
+            Http.Request.read_body_async reqd (fun body ->
+              let parsed =
+                try
+                  Yojson.Safe.from_string body
+                  |> parse_operator_verdict_json
+                with Yojson.Json_error message ->
+                  Error ("invalid JSON: " ^ message)
+              in
+              match parsed with
+              | Error message ->
+                respond_json_value_with_cors
+                  ~status:`Bad_request
+                  request
+                  reqd
+                  (error_json message)
+              | Ok verdict_request ->
+                let config = Mcp_server.workspace_config state in
+                (match
+                   commit_operator_verdict
+                     ~config
+                     ~operator_id
+                     verdict_request
+                 with
+                 | Error message ->
+                   respond_json_value_with_cors
+                     ~status:`Bad_request
+                     request
+                     reqd
+                     (error_json message)
+                 | Ok outcome ->
+                   respond_json_value_with_cors
+                     request
+                     reqd
+                     (`Assoc
+                       [ "ok", `Bool true
+                       ; "message", `String outcome.Workspace.message
+                       ; "noop", `Bool outcome.noop
+                       ]))))
+         request
+         reqd)
+
+module For_testing = struct
+  let parse_operator_verdict_json = parse_operator_verdict_json
+  let operator_evidence_json = operator_evidence_json
+  let commit_operator_verdict = commit_operator_verdict
+end

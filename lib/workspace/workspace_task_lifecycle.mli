@@ -7,6 +7,7 @@ type invalid =
   | Verification_submission_required
   | Verification_pending_verdict
       (** An [AwaitingVerification] obligation is not claimable by any agent. *)
+  | Verdict_authority_identity_required
   | Verdict_rejection_reason_required
   | Invalid_transition
 
@@ -56,11 +57,9 @@ type verdict_decision =
 
 (** Terminal verdict on an [AwaitingVerification] obligation.
 
-    [authority] is a proof obligation, not data the function branches on: every
-    constructor of [Masc_domain.completion_authority] requires an identity no
-    agent can mint, so a call site holding only an [agent_name] cannot build one
-    and fails to compile. This replaces the previous [same_agent verifier] string
-    comparison, which authorised whichever keeper had won the claim race. *)
+    [authority] carries provenance from a caller that authenticated an operator
+    or accepted a typed judge result. The type separates verdicts from agent
+    actions; it does not perform authentication itself. *)
 val decide_verdict
   :  authority:Masc_domain.completion_authority
   -> verdict:Masc_domain.completion_verdict

@@ -495,7 +495,7 @@ let handle_update_priority ~tool_name ~start_time ctx args =
   let priority = get_int args "priority" 3 in
   Tool_result.ok ~tool_name ~start_time (Workspace.update_priority ctx.config ~task_id ~priority)
 
-let handle_tasks_with_projection ~task_list_projection ~tool_name ~start_time ctx args =
+let handle_tasks ~tool_name ~start_time ctx args =
   let include_done = get_bool args "include_done" false in
   let include_cancelled = get_bool args "include_cancelled" false in
   let status =
@@ -503,26 +503,12 @@ let handle_tasks_with_projection ~task_list_projection ~tool_name ~start_time ct
     | `String s when not (String.equal s "") -> Some s
     | _ -> None
   in
-  let verification_viewer =
-    match task_list_projection with
-    | Tool_capability_projection.Keeper_tasks_list -> Some ctx.agent_name
-    | Tool_capability_projection.External_masc_tasks -> None
-  in
   Tool_result.ok ~tool_name ~start_time
     (Workspace.list_tasks
        ctx.config
        ~include_done
        ~include_cancelled
-       ?status
-       ?verification_viewer)
-
-let handle_tasks ~tool_name ~start_time ctx args =
-  handle_tasks_with_projection
-    ~task_list_projection:Tool_capability_projection.External_masc_tasks
-    ~tool_name
-    ~start_time
-    ctx
-    args
+       ?status)
 
 let read_event_lines config ~limit =
   let events_dir = Filename.concat (Workspace.masc_dir config) "events" in
@@ -606,7 +592,7 @@ let handle_task_history ~tool_name ~start_time ctx args =
 
 include Tool_task_schemas
 (* Dispatch function *)
-let dispatch_with_task_list_projection ?created_by task_list_projection ctx ~name ~args =
+let dispatch_internal ?created_by ctx ~name ~args =
   let start = Time_compat.now () in
   match name with
   | "masc_add_task" ->
@@ -629,28 +615,14 @@ let dispatch_with_task_list_projection ?created_by task_list_projection ctx ~nam
   | "masc_task_set_goal" -> Some (handle_set_goal ~tool_name:name ~start_time:start ctx args)
   | "masc_tasks" ->
     Some
-      (handle_tasks_with_projection
-         ~task_list_projection
-         ~tool_name:name
-         ~start_time:start
-         ctx
-         args)
+      (handle_tasks ~tool_name:name ~start_time:start ctx args)
   | "masc_task_history" -> Some (handle_task_history ~tool_name:name ~start_time:start ctx args)
   | _ -> None
 
 let dispatch ctx ~name ~args =
-  dispatch_with_task_list_projection
-    Tool_capability_projection.External_masc_tasks
-    ctx
-    ~name
-    ~args
+  dispatch_internal ctx ~name ~args
 ;;
 
 let dispatch_for_keeper ~created_by ctx ~name ~args =
-  dispatch_with_task_list_projection
-    ~created_by
-    Tool_capability_projection.Keeper_tasks_list
-    ctx
-    ~name
-    ~args
+  dispatch_internal ~created_by ctx ~name ~args
 ;;

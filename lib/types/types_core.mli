@@ -55,8 +55,9 @@ val iso8601_of_unix_seconds : float -> string
 val normalize_agent_last_seen : session_bound_at:Yojson.Safe.t option -> Yojson.Safe.t -> Yojson.Safe.t option
 val short_json_repr : Yojson.Safe.t -> string
 
-(** Actions an *agent* may drive. A completion verdict is not among them: it
-    requires a [completion_authority], which no agent can construct. *)
+(** Actions an *agent* may drive. A completion verdict is not among them; a
+    trusted operator or judge caller constructs its authority provenance
+    outside this surface. *)
 type task_action =
   | Claim
   | Start
@@ -74,8 +75,8 @@ val task_action_to_string : task_action -> string
 val all_task_actions : task_action list
 val valid_task_action_strings : string list
 
-(** Who may issue a completion verdict. Closed sum with no agent or keeper
-    constructor, so a verdict cannot be built from an [agent_name]. *)
+(** Verdict provenance. Constructors do not authenticate their string payload;
+    a trusted operator or judge boundary must construct the value. *)
 type completion_authority =
   | Human_operator of { operator_id : string }
   | Auto_judge of { judge_run_id : string }
@@ -88,6 +89,8 @@ type completion_verdict =
 
 val completion_authority_actor : completion_authority -> string
 val completion_authority_kind : completion_authority -> string
+val completion_authority_has_identity : completion_authority -> bool
+(** Whether the provenance carries a non-empty authenticated identity. *)
 
 type task_status =
   | Todo

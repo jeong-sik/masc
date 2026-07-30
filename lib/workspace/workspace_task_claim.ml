@@ -111,13 +111,11 @@ let claim_task_r config ~agent_name ~task_id ()
              (fun (state, acc) (t : task) ->
                 if t.id = task_id
                 then (
-                  (* RFC-0220 §3.5: one claim decision, shared with the
-                     auto-claim path ([claim_next_r]). [resolve_claim] owns the
-                     self-check (normalized via [same_task_actor]) and, for a
-                     cross-agent verification claim, binds the verifier into the
-                     [AwaitingVerification] status — no longer a status-
-                     preserving no-op that deferred verifier identity to a
-                     separate store (#19314). *)
+                  (* One claim decision is shared with the auto-claim path
+                     ([claim_next_r]). [resolve_claim] owns the self-check
+                     (normalized via [same_task_actor]) and rejects every
+                     [AwaitingVerification] obligation as pending a completion
+                     authority's verdict. *)
                   match
                     Workspace_task_lifecycle.resolve_claim
                       ~same_actor:(fun a ->

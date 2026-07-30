@@ -144,9 +144,9 @@ let task_is_blocked (task : Masc_domain.task) =
      to any future status (e.g. a hypothetical [BlockedOnReview]) which
      would be exactly the wrong default for a blocked-task detector.
      RFC-0323 G-6: [AwaitingVerification] is the normal completion lane
-     (submit -> verifier approve), not a blocked state — no current status
-     is blocked; the exhaustive match stays as the decision point for any
-     future genuinely-blocked constructor. *)
+     (submit -> out-of-band completion-authority verdict), not a blocked state
+     — no current status is blocked; the exhaustive match stays as the decision
+     point for any future genuinely-blocked constructor. *)
   match task.task_status with
   | Masc_domain.AwaitingVerification _
   | Masc_domain.Todo

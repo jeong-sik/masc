@@ -1,6 +1,6 @@
 (** Verification_protocol -- immutable verification submission plus
     notifications for committed Task FSM transitions. The request stores only
-    submit-time evidence; Task status owns verifier assignment and outcome. *)
+    submit-time evidence; Task status owns the pending obligation and outcome. *)
 
 (** {1 Submit phase} *)
 

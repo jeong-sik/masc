@@ -116,7 +116,7 @@ let empty_task_contract =
    pasting those two literal tokens into the completion notes. That mechanism
    simultaneously over-blocked unaware keepers and let a completion be faked by
    copying labels. [required_evidence] now serves only as a fact supplied to the
-   LLM reviewer and human verifier; the workspace FSM does not interpret it. *)
+   completion authority; the workspace FSM does not interpret it. *)
 let default_verification_evidence_refs = []
 
 let first_line text =

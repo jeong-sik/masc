@@ -52,10 +52,9 @@ let gc config ~days () =
         Only terminal states are archive-eligible.  masc_transition and the
         dashboard verification resolve path read the *live* backlog only, so
         archiving a non-terminal task strands it: an AwaitingVerification
-        obligation can no longer be approved/rejected and a Claimed/InProgress
-        task can no longer be released, with no unarchive path.  RFC-0220
-        requires an AwaitingVerification obligation to stay claimable by a
-        verifier.  Live incident: task-1537 (submitted 2026-06-29) was orphaned
+        obligation can no longer receive an authority verdict and a
+        Claimed/InProgress task can no longer be released, with no unarchive
+        path. Live incident: task-1537 (submitted 2026-06-29) was orphaned
         into tasks-archive.json for days because the old [not is_done]
         predicate archived every non-[Done] task, including
         AwaitingVerification.

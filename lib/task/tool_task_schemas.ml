@@ -40,8 +40,8 @@ let schemas : Masc_domain.tool_schema list = [
     description = Printf.sprintf
       "Add a new task to the backlog for agents to claim. \
 Tasks default to an advisory verification contract with completion/evidence requirements. \
-Only tasks with contract.strict=true must be submitted for an assigned verifier's approve/reject verdict; advisory/default tasks may complete directly. \
-submit_for_verification creates an asynchronous review state; any non-producer may race to claim it, but only the committed phase-assigned distinct verifier may approve/reject. \
+Only tasks with contract.strict=true must be submitted for an out-of-band completion-authority verdict; advisory/default tasks may complete directly. \
+submit_for_verification creates an asynchronous review state that no agent or Keeper can claim. An authenticated human operator or typed auto judge reads the submitted evidence and commits the verdict. \
 To re-run completed work, create a new task with predecessor_task_id instead of touching the done one. \
 Priority 1=urgent, 5=low (default 3). \
 Returns task-XXX ID for tracking. \
@@ -172,7 +172,7 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
     description = "List tasks in backlog with their status and assignee. \
 Defaults to active tasks (todo/claimed/in_progress/awaiting_verification). \
 Use include_done/include_cancelled or status to filter. \
-awaiting_verification tasks are pending reviewer approval. \
+awaiting_verification tasks are pending a completion-authority verdict and are not claimable agent work. \
 Output includes task ID, title, priority, assignee, timestamps. \
 Tip: Look for status='todo' tasks to claim.";
     input_schema = `Assoc [
@@ -219,7 +219,7 @@ Tip: Look for status='todo' tasks to claim.";
   {
     name = "masc_transition";
     description =
-      "Move a Task through claim, start, submit_for_verification, approve, reject, done, cancel, or release. Ownership is exact and cannot be overridden by caller arguments. Direct done is terminal for advisory/default tasks. Tasks with contract.strict=true require the assignee to submit completion evidence, then a distinct phase-assigned verifier may approve or reject. Supports expected_version CAS.";
+      "Move a Task through the agent actions claim, start, submit_for_verification, done, cancel, or release. Ownership is exact and cannot be overridden by caller arguments. Direct done is terminal for advisory/default tasks. Tasks with contract.strict=true require the assignee to submit completion evidence, then wait for an authenticated human-operator or typed auto-judge verdict outside this tool. approve/reject are deliberately unavailable here. Supports expected_version CAS.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -233,7 +233,8 @@ Tip: Look for status='todo' tasks to claim.";
         ]);
         ("action", `Assoc [
           ("type", `String "string");
-          ("description", `String "Transition action: claim | start | submit_for_verification | approve | reject | done | cancel | release");
+          ("description", `String "Agent transition action: claim | start | submit_for_verification | done | cancel | release");
+          ("enum", `List (List.map (fun action -> `String action) Masc_domain.valid_task_action_strings));
         ]);
         ("expected_version", `Assoc [
           ("type", `String "integer");
@@ -241,7 +242,7 @@ Tip: Look for status='todo' tasks to claim.";
         ]);
         ("notes", `Assoc [
           ("type", `String "string");
-          ("description", `String "Evidence summary for submit_for_verification, or verifier rationale for approve/reject");
+          ("description", `String "Evidence summary for submit_for_verification, or completion notes for done");
         ]);
         ("reason", `Assoc [
           ("type", `String "string");

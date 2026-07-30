@@ -32,16 +32,17 @@ You have access to MASC MCP tools via mcp__masc__* prefix.
    - action: "submit_for_verification"
    - notes: completion summary
 
-   A verifier (a different agent) then approves it to done. Strict-contract
-   tasks reject direct completion; only non-strict tasks may skip verification
-   with action: "done".
+   An authenticated human operator or typed auto judge then issues the verdict
+   outside the agent task-action surface. No agent claims or approves the
+   pending obligation. Strict-contract tasks reject direct completion; only
+   non-strict tasks may use action: "done".
 
 7. **Broadcast progress**: Call `mcp__masc__masc_broadcast` to notify others
 
 ## Available MCP Tools:
 - mcp__masc__masc_status - Get project status
 - mcp__masc__masc_tasks - List all tasks
-- mcp__masc__masc_transition - Claim/start/done/cancel/release a task
+- mcp__masc__masc_transition - Claim/start/submit/done/cancel/release a task
 - mcp__masc__masc_claim_next - Auto-claim highest priority
 - mcp__masc__masc_broadcast - Send message to all
 - mcp__masc__masc_heartbeat - Update your heartbeat

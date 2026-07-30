@@ -48,9 +48,9 @@ val transition_task_outcome_r :
 (** Commit a completion verdict issued by a [Masc_domain.completion_authority].
 
     Separate from {!transition_task_outcome_r} because a verdict is not an agent
-    action: no [agent_name] appears here, and the [authority] argument cannot be
-    constructed by an agent. This is the only path that resolves an
-    [AwaitingVerification] obligation. *)
+    action. The caller must authenticate or otherwise validate the authority
+    before constructing its provenance value. This is the only path that
+    resolves an [AwaitingVerification] obligation. *)
 val commit_verdict_r :
   config ->
   authority:Masc_domain.completion_authority ->

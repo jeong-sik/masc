@@ -27,8 +27,8 @@ let backlog_updated_since_last_scheduled_autonomous
    authored 367 of the active tasks, 272 of them the same four "Route g0700 #N"
    templates re-emitted once per iteration (#28..#90), none ever claimed.
 
-   Only unclaimed [Todo] work is excluded. Once another keeper submits an
-   authored task for verification, the author remains a valid verifier. *)
+   Only unclaimed [Todo] work is excluded. [AwaitingVerification] is not
+   claimable or actionable by any Keeper, regardless of who authored it. *)
 let task_is_self_authored_todo ~(meta : keeper_meta) (task : Masc_domain.task) =
   match task.task_status, task.created_by with
   | Masc_domain.Todo, Some author -> String.equal author meta.name

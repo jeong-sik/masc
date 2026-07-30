@@ -245,7 +245,8 @@ let task_action_of_string s =
   | ("approve" | "reject") as verdict ->
     (* Explicit rejection rather than "unknown action": the caller asked for a
        real operation that is no longer reachable from the agent action surface.
-       A verdict requires a [completion_authority], which no agent can build. *)
+       A trusted operator or judge boundary constructs the authority provenance
+       and calls the separate verdict entrypoint. *)
     Error
       (Printf.sprintf
          "Task action %S is not an agent action: a completion verdict is issued \
@@ -267,15 +268,10 @@ let all_task_actions =
   [ Claim; Start; Done_action; Cancel; Release; Submit_for_verification ]
 let valid_task_action_strings = List.map task_action_to_string all_task_actions
 
-(** Who may issue a completion verdict. Closed sum with NO agent or keeper
-    constructor: every constructor requires an identity a Keeper cannot produce
-    (an operator confirmation, or a fusion judge run). Code that tries to build
-    a verdict from [agent_name] does not typecheck, which is the whole point —
-    RFC-0220 §140 assumed "a pending verification must be claimable by some
-    verifier keeper", and RFC-0308 withdrew verifier-required routing precisely
-    because that turns one unavailable participant into a Keeper-wide stop.
-    Shape follows the existing precedent in
-    {!Keeper_approval_queue_rules_types.decision_source}. *)
+(** Provenance carried by a completion verdict. This type separates verdicts
+    from the agent task-action surface; it does not authenticate the embedded
+    identity. The producer boundary must construct it only after authenticating
+    an operator or accepting a typed judge result. *)
 type completion_authority =
   | Human_operator of { operator_id: string }
   | Auto_judge of { judge_run_id: string }
@@ -296,6 +292,10 @@ let completion_authority_actor = function
 let completion_authority_kind = function
   | Human_operator _ -> "human_operator"
   | Auto_judge _ -> "auto_judge"
+
+let completion_authority_has_identity authority =
+  not (String.equal (String.trim (completion_authority_actor authority)) "")
+;;
 
 type task_status =
   | Todo
@@ -484,10 +484,10 @@ type task_execution_links = {
   session_id : string option; [@default None]
 } [@@deriving show, yojson { strict = false }]
 
-(** Task contract - persisted verifier criteria and evidence facts.
+(** Task contract - persisted completion criteria and evidence facts.
 
     [completion_contract], [required_evidence], and [verify_gate_evidence] are
-    supplied to the assigned verifier as task facts. The workspace FSM never
+    supplied to the completion authority as task facts. The workspace FSM never
     interprets their prose, counts entries, or derives a completion verdict.
 
     A [required_tools : string list] field was also removed (2026-06-03,

@@ -330,10 +330,12 @@ let eligible_source ~first_user_seen source_index = function
     None
 
 let eligible_sources units =
-  (* The first User message is the exact goal anchor. Later plain User messages
-     are part of the typed conversation state: protecting every one would split
-     a real Keeper history into one tiny window per turn and defeat boundary
-     compaction. *)
+  (* Keep the first User message outside the window because current-format
+     summaries may already sit immediately behind it. Selecting that message
+     would put an eligible source before the summary and make the checkpoint
+     unplannable. Later plain User messages remain part of the typed
+     conversation state: protecting every one would split a real Keeper history
+     into one tiny window per turn and defeat boundary compaction. *)
   let rec loop source_index first_user_seen sources_rev = function
     | [] -> List.rev sources_rev
     | unit_ :: rest ->

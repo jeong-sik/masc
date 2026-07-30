@@ -49,14 +49,20 @@ val of_result_surface : response_text:string -> Runtime_agent.stop_reason -> t
     speech surface. A runtime execution-limit observation does not create a
     MASC lifecycle gate. *)
 
-val of_reply_payload : Yojson.Safe.t option -> t
-(** Decode from a parsed keeper reply payload.  Known labels decode to
-    their declared variant.  Absent payload, absent field, or unknown
-    label decodes to [Visible_reply] (unknown labels are logged at WARN):
-    the bitten failure mode (#20870) was a reply silently {e not}
-    persisted — the lane watermark stalled and the keeper re-answered
-    the same message — so decode failure must fail toward persisting,
-    never toward dropping. *)
+type decode_error =
+  | Payload_missing
+  | Payload_not_object
+  | Turn_outcome_missing
+  | Turn_outcome_duplicate
+  | Turn_outcome_not_string
+  | Turn_outcome_unknown of string
+
+val decode_error_to_string : decode_error -> string
+
+val of_reply_payload : Yojson.Safe.t option -> (t, decode_error) result
+(** Decode the required current [turn_outcome] contract. Missing, malformed,
+    duplicate, or unknown values are explicit errors; there is no legacy
+    visible-reply default. *)
 
 val turn_ref_of_reply_payload : Yojson.Safe.t option -> Ids.Turn_ref.t option
 (** Decode the turn's join key ([turn_ref_wire_key]) from a parsed keeper

@@ -1043,15 +1043,24 @@ let empty_direct_reply_error =
   "Keeper completed without a visible reply; the runtime returned only thinking or internal state."
 
 let direct_reply_terminal_error ?(has_visible_blocks = false) payload_json_opt visible_reply =
-  let turn_outcome = Keeper_turn_outcome.of_reply_payload payload_json_opt in
-  match (turn_outcome, String_util.trim_to_option visible_reply, has_visible_blocks) with
-  | Keeper_turn_outcome.Continuation_checkpoint, _, _ -> None
-  | Keeper_turn_outcome.External_effect_pending, _, _ -> None
-  | Keeper_turn_outcome.No_visible_reply, _, true -> None
-  | Keeper_turn_outcome.Visible_reply, None, true -> None
-  | Keeper_turn_outcome.No_visible_reply, _, false -> Some empty_direct_reply_error
-  | Keeper_turn_outcome.Visible_reply, None, false -> Some empty_direct_reply_error
-  | Keeper_turn_outcome.Visible_reply, Some _, _ -> None
+  match Keeper_turn_outcome.of_reply_payload payload_json_opt with
+  | Error error ->
+    Some
+      ("Keeper reply contract error: "
+       ^ Keeper_turn_outcome.decode_error_to_string error)
+  | Ok turn_outcome ->
+    (match
+       turn_outcome, String_util.trim_to_option visible_reply, has_visible_blocks
+     with
+     | Keeper_turn_outcome.Continuation_checkpoint, _, _ -> None
+     | Keeper_turn_outcome.External_effect_pending, _, _ -> None
+     | Keeper_turn_outcome.No_visible_reply, _, true -> None
+     | Keeper_turn_outcome.Visible_reply, None, true -> None
+     | Keeper_turn_outcome.No_visible_reply, _, false ->
+       Some empty_direct_reply_error
+     | Keeper_turn_outcome.Visible_reply, None, false ->
+       Some empty_direct_reply_error
+     | Keeper_turn_outcome.Visible_reply, Some _, _ -> None)
 
 let persisted_reply_blocks ~turn_outcome media_blocks =
   match turn_outcome, media_blocks with

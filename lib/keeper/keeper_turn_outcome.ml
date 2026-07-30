@@ -55,25 +55,44 @@ let of_result_surface ~response_text = function
   | Runtime_agent.Awaiting_external_effect _ -> External_effect_pending
   | Runtime_agent.InputRequired _ -> Visible_reply
 
+type decode_error =
+  | Payload_missing
+  | Payload_not_object
+  | Turn_outcome_missing
+  | Turn_outcome_duplicate
+  | Turn_outcome_not_string
+  | Turn_outcome_unknown of string
+
+let decode_error_to_string = function
+  | Payload_missing -> "keeper reply payload is missing"
+  | Payload_not_object -> "keeper reply payload must be an object"
+  | Turn_outcome_missing -> "keeper reply payload is missing turn_outcome"
+  | Turn_outcome_duplicate ->
+    "keeper reply payload contains duplicate turn_outcome fields"
+  | Turn_outcome_not_string ->
+    "keeper reply payload field turn_outcome must be a string"
+  | Turn_outcome_unknown label ->
+    Printf.sprintf "keeper reply payload contains unknown turn_outcome %S" label
+;;
+
 let of_reply_payload payload =
   match payload with
-  | None -> Visible_reply
-  | Some json -> (
-      match Json_util.get_string json wire_key with
-      | None -> Visible_reply
-      | Some label -> (
-          match of_label label with
-          | Some outcome -> outcome
-          | None ->
-              (* Unknown label: report, then fail toward persisting —
-                 the bitten failure mode (#20870) was silent
-                 non-persistence (watermark stall, keeper re-answering
-                 the same message).  Never widen [of_label] itself. *)
-              Log.Keeper.warn
-                "turn_outcome: unknown label %S; treating as \
-                 visible_reply"
-                label;
-              Visible_reply))
+  | None -> Error Payload_missing
+  | Some (`Assoc fields) ->
+    (match
+       List.filter_map
+         (fun (key, value) ->
+            if String.equal key wire_key then Some value else None)
+         fields
+     with
+     | [] -> Error Turn_outcome_missing
+     | [ `String label ] ->
+       (match of_label label with
+        | Some outcome -> Ok outcome
+        | None -> Error (Turn_outcome_unknown label))
+     | [ _ ] -> Error Turn_outcome_not_string
+     | _ -> Error Turn_outcome_duplicate)
+  | Some _ -> Error Payload_not_object
 
 let turn_ref_of_reply_payload payload =
   (* RFC-0233 §7: read the turn's join key the keeper minted into the

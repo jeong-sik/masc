@@ -6,8 +6,7 @@
    - the closed label codec (round-trip, unknown -> None),
    - the stop_reason -> outcome mapping (single mapping site),
    - response_text-aware result-surface classification,
-   - payload decode policy: absent/unknown fails toward Visible_reply
-     (the bitten failure mode, #20870, was silent non-persistence),
+   - payload decode policy: absent/malformed/unknown fails closed,
    - prefix deadness: checkpoint-shaped reply TEXT alone never
      classifies as a checkpoint. *)
 
@@ -283,23 +282,42 @@ let test_terminal_effect_handler_contract () =
 
 let payload fields = Some (`Assoc fields)
 
+let decoded_exn payload =
+  match TO.of_reply_payload payload with
+  | Ok outcome -> outcome
+  | Error error -> fail (TO.decode_error_to_string error)
+
+let check_decode_error label expected payload =
+  match TO.of_reply_payload payload with
+  | Error actual -> check bool label true (actual = expected)
+  | Ok actual ->
+    failf "%s: unexpectedly decoded %s" label (TO.to_label actual)
+
 let test_payload_decode () =
-  check outcome "no payload -> visible" TO.Visible_reply
-    (TO.of_reply_payload None);
-  check outcome "field absent -> visible" TO.Visible_reply
-    (TO.of_reply_payload (payload [ ("reply", `String "hi") ]));
+  check_decode_error "no payload fails closed" TO.Payload_missing None;
+  check_decode_error "field absent fails closed" TO.Turn_outcome_missing
+    (payload [ ("reply", `String "hi") ]);
   check outcome "checkpoint label" TO.Continuation_checkpoint
-    (TO.of_reply_payload
+    (decoded_exn
        (payload [ (TO.wire_key, `String "continuation_checkpoint") ]));
   check outcome "visible label" TO.Visible_reply
-    (TO.of_reply_payload
+    (decoded_exn
        (payload [ (TO.wire_key, `String "visible_reply") ]));
   check outcome "no visible reply label" TO.No_visible_reply
-    (TO.of_reply_payload
+    (decoded_exn
        (payload [ (TO.wire_key, `String "no_visible_reply") ]));
-  check outcome "unknown label -> visible (report-and-persist)"
-    TO.Visible_reply
-    (TO.of_reply_payload (payload [ (TO.wire_key, `String "deferred") ]))
+  check_decode_error "unknown label fails closed"
+    (TO.Turn_outcome_unknown "deferred")
+    (payload [ (TO.wire_key, `String "deferred") ]);
+  check_decode_error "duplicate label fails closed" TO.Turn_outcome_duplicate
+    (payload
+       [ (TO.wire_key, `String "visible_reply")
+       ; (TO.wire_key, `String "no_visible_reply")
+       ]);
+  check_decode_error "non-string label fails closed" TO.Turn_outcome_not_string
+    (payload [ (TO.wire_key, `Int 1) ]);
+  check_decode_error "non-object payload fails closed" TO.Payload_not_object
+    (Some (`List []))
 
 let checkpoint_text =
   "Continuation checkpoint saved; keeper remains scheduled for the next \
@@ -311,21 +329,21 @@ let checkpoint_text =
 let test_prefix_is_dead () =
   check outcome "checkpoint-shaped text, declared visible"
     TO.Visible_reply
-    (TO.of_reply_payload
+    (decoded_exn
        (payload
           [ ("reply", `String checkpoint_text);
             (TO.wire_key, `String "visible_reply")
           ]));
   check outcome "ordinary text, declared checkpoint"
     TO.Continuation_checkpoint
-    (TO.of_reply_payload
+    (decoded_exn
        (payload
          [ ("reply", `String "all done");
            (TO.wire_key, `String "continuation_checkpoint")
           ]));
   check outcome "ordinary text, declared no visible reply"
     TO.No_visible_reply
-    (TO.of_reply_payload
+    (decoded_exn
        (payload
           [ ("reply", `String "all done");
             (TO.wire_key, `String "no_visible_reply")
@@ -458,10 +476,14 @@ let test_direct_reply_visible_text () =
           [ ("reply", `String "all done");
             ("turn_outcome", `String "no_visible_reply")
           ]));
-  check (option string) "checkpoint-shaped text without field -> visible"
-    (Some checkpoint_text)
-    (Ops.direct_reply_visible_text
-       (body [ ("reply", `String checkpoint_text) ]));
+  check_raises
+    "missing outcome is a direct-reply contract error"
+    (Invalid_argument "keeper reply payload is missing turn_outcome")
+    (fun () ->
+       ignore
+         (Ops.direct_reply_visible_text
+            (body [ ("reply", `String checkpoint_text) ])
+          : string option));
   check (option string) "declared visible -> reply text" (Some "all done")
     (Ops.direct_reply_visible_text
        (body

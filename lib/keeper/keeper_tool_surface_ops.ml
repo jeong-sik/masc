@@ -545,9 +545,13 @@ let resolve_keeper_name ctx args =
   resolve_keeper_name_config ~config:ctx.config args
 
 let direct_reply_projection json =
-  Keeper_chat_blocks.connector_projection
-    ~turn_outcome:(Keeper_turn_outcome.of_reply_payload (Some json))
-    ~reply:(Option.value ~default:"" (Json_util.get_string json "reply"))
+  match Keeper_turn_outcome.of_reply_payload (Some json) with
+  | Ok turn_outcome ->
+    Keeper_chat_blocks.connector_projection
+      ~turn_outcome
+      ~reply:(Option.value ~default:"" (Json_util.get_string json "reply"))
+  | Error error ->
+    invalid_arg (Keeper_turn_outcome.decode_error_to_string error)
 ;;
 
 let direct_reply_visible_text json =

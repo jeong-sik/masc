@@ -842,39 +842,49 @@ let dispatch_core ?on_text_snapshot ~submitted_by ~sw ~clock ~proc_mgr ~net
         with Yojson.Json_error _ -> None
       in
       let reply = extract_reply_text body |> redact_text in
-      let connector_reply, blocks =
-        match
-          Keeper_chat_blocks.connector_projection
-            ~turn_outcome:
-              (Keeper_turn_outcome.of_reply_payload payload_json_opt)
-            ~reply
-        with
-        | Connector_text text -> text, None
-        | Connector_status { kind } ->
-          ( Keeper_chat_blocks.status_kind_connector_text kind
-          , Some
-              [ Keeper_chat_blocks.Status
-                  { kind }
-              ] )
-        | Connector_no_visible_reply -> "", None
-      in
-      let structured = Option.map redact_json (extract_structured body) in
-      let stats = match extract_turn_stats body with
-        | Some s -> Some { s with duration_ms }
-        | None -> Some { Gate_protocol.model_used = "runtime"; duration_ms; tokens_used = 0 }
-      in
-      (* RFC-0233 §7: pull the turn's join key out of the same reply payload
-         (parse, don't repair) so the connector assistant row joins to its
-         Turn_record. *)
-      let turn_ref =
-        Keeper_turn_outcome.turn_ref_of_reply_payload
-          payload_json_opt
-      in
-      persist_connector_assistant_reply
-        ~base_dir:config.Workspace.base_path ~keeper_name ~surface
-        ?conversation_id ?turn_ref ?blocks ~reply ();
-      Gate_protocol.Reply
-        { content = connector_reply; structured; stats; message_request = None }
+      (match Keeper_turn_outcome.of_reply_payload payload_json_opt with
+       | Error error ->
+         Gate_protocol.Keeper_error_result
+           (redact_text
+              ("keeper reply contract error: "
+               ^ Keeper_turn_outcome.decode_error_to_string error))
+       | Ok turn_outcome ->
+         let connector_reply, blocks =
+           match
+             Keeper_chat_blocks.connector_projection ~turn_outcome ~reply
+           with
+           | Connector_text text -> text, None
+           | Connector_status { kind } ->
+             ( Keeper_chat_blocks.status_kind_connector_text kind
+             , Some [ Keeper_chat_blocks.Status { kind } ] )
+           | Connector_no_visible_reply -> "", None
+         in
+         let structured = Option.map redact_json (extract_structured body) in
+         let stats =
+           match extract_turn_stats body with
+           | Some s -> Some { s with duration_ms }
+           | None ->
+             Some
+               { Gate_protocol.model_used = "runtime"
+               ; duration_ms
+               ; tokens_used = 0
+               }
+         in
+         (* RFC-0233 §7: pull the turn's join key out of the same reply payload
+            (parse, don't repair) so the connector assistant row joins to its
+            Turn_record. *)
+         let turn_ref =
+           Keeper_turn_outcome.turn_ref_of_reply_payload payload_json_opt
+         in
+         persist_connector_assistant_reply
+           ~base_dir:config.Workspace.base_path ~keeper_name ~surface
+           ?conversation_id ?turn_ref ?blocks ~reply ();
+         Gate_protocol.Reply
+           { content = connector_reply
+           ; structured
+           ; stats
+           ; message_request = None
+           })
   | `Async_ack (_, Some result) | `Streaming (Some result) ->
       Gate_protocol.Keeper_error_result (redact_text (Tool_result.message result))
   | `Async_ack (_, None) | `Streaming None ->

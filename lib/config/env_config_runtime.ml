@@ -348,10 +348,10 @@ end
 (** {1 OAS SSE Bridge Configuration} *)
 
 module Oas_sse = struct
-  (** SSE drain interval (seconds). Default: 2.0. *)
+  (** SSE drain interval (seconds). Default: 0.1s for fast reactive draining. *)
   let drain_interval_sec =
-    let v = get_float ~default:2.0 "MASC_OAS_SSE_DRAIN_INTERVAL_SEC" in
-    if v < 0.1 then 2.0 else v
+    let v = get_float ~default:0.1 "MASC_OAS_SSE_DRAIN_INTERVAL_SEC" in
+    if v < 0.001 then 0.05 else v
 end
 
 (** {1 Lane failover} *)

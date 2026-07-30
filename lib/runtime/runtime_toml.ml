@@ -497,7 +497,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
       ; supports_multimodal_inputs = b "supports-multimodal-inputs"
       ; supports_response_format_json = b "supports-response-format-json"
       ; supports_structured_output = b "supports-structured-output"
-      ; supports_native_streaming = b "supports-native-streaming"
+      ; supports_native_streaming = b_default_true "supports-native-streaming"
       ; supports_system_prompt = b "supports-system-prompt"
       ; supports_caching = b "supports-caching"
       ; supports_prompt_caching = b "supports-prompt-caching"

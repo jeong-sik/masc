@@ -42,7 +42,11 @@ type try_provider_ctx =
   ; on_runtime_observation :
       (Runtime_observation.runtime_observation -> unit) option
   ; on_request_wire_observation :
-      (runtime_id:string -> body_bytes:int -> unit) option
+      (runtime_id:string ->
+       max_request_body_bytes:int ->
+       body_bytes:int ->
+       unit)
+        option
   ; event_bus : Agent_sdk.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option
@@ -77,8 +81,13 @@ module For_testing : sig
 
   val observe_request_wire_error :
     runtime_id:string ->
+    max_request_body_bytes:int ->
     on_request_wire_observation:
-      (runtime_id:string -> body_bytes:int -> unit) option ->
+      (runtime_id:string ->
+       max_request_body_bytes:int ->
+       body_bytes:int ->
+       unit)
+        option ->
     Agent_sdk.Error.sdk_error ->
     unit
 end

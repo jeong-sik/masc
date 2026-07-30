@@ -277,7 +277,8 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     | Cl_paused | Cl_live -> false
   in
   let lifecycle =
-    if continuity_offline then Lc_offline
+    if liveness = Cl_paused then Lc_idle
+    else if continuity_offline then Lc_offline
     else if Option.value ~default:0.0 context_ratio >= ctx_handoff_imminent then Lc_handoff_imminent
     else if Option.value ~default:0.0 context_ratio >= ctx_preparing then Lc_preparing
     else if Option.value ~default:0.0 context_ratio >= ctx_compacting then Lc_compacting

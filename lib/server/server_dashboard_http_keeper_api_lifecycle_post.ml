@@ -359,7 +359,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                 | "shutdown" ->
                   if persist_keeper_pause ()
                   then (
-                    refresh_keeper_execution_surfaces ~config ~name "stopped";
+                    refresh_keeper_execution_surfaces ~config ~name "paused";
                     Ok ())
                   else Error "paused-state persist failed after shutdown"
                 | _ ->

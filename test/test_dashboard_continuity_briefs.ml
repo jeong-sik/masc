@@ -118,6 +118,7 @@ let test_paused_keeper_with_fresh_activity_is_not_healthy () =
          ())
   in
   check string "status" "paused" (status_of row);
+  check string "lifecycle" "idle" (lifecycle_of row);
   check string "state" "warning" (state_of row);
   check string "note" "운영자 일시정지" (note_of row)
 

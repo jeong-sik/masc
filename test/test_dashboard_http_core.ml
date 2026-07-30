@@ -1987,7 +1987,7 @@ let test_lifecycle_event_display_values () =
       ("purged", false, "stopped", "offline", false);
       ("admission_denied", false, "offline", "offline", false);
       ("dead_cleaned", false, "dead", "offline", false);
-      ("stopped", false, "stopped", "offline", true);
+      ("stopped", false, "stopped", "offline", false);
       ("crashed", false, "crashed", "crashed", false);
       ("dead", false, "dead", "offline", false);
     ]
@@ -2050,7 +2050,7 @@ let test_resumed_lifecycle_event_clears_paused_status () =
   check bool "resumed flag clears pause" false
     Yojson.Safe.Util.(patched |> member "paused" |> to_bool)
 
-let test_stopped_lifecycle_event_keeps_operator_pause () =
+let test_stopped_lifecycle_event_stays_offline () =
   let patched =
     Server_dashboard_http_execution_surfaces.patch_keeper_row
       ~keeper_name:"stop-target"
@@ -2062,9 +2062,9 @@ let test_stopped_lifecycle_event_keeps_operator_pause () =
         ; ("paused", `Bool false)
         ])
   in
-  check string "operator stop is paused" "paused"
+  check string "stopped status is offline" "offline"
     Yojson.Safe.Util.(patched |> member "status" |> to_string);
-  check bool "operator stop sets pause" true
+  check bool "stopped event does not manufacture a pause" false
     Yojson.Safe.Util.(patched |> member "paused" |> to_bool)
 
 let test_lifecycle_cache_patch_rejects_missing_or_unknown_status () =
@@ -2573,7 +2573,7 @@ let () =
           test_case "resumed lifecycle event clears the paused status" `Quick
             test_resumed_lifecycle_event_clears_paused_status;
           test_case "stopped lifecycle event keeps the operator pause" `Quick
-            test_stopped_lifecycle_event_keeps_operator_pause;
+            test_stopped_lifecycle_event_stays_offline;
           test_case "cache patch rejects missing or unknown status" `Quick
             test_lifecycle_cache_patch_rejects_missing_or_unknown_status;
           test_case "running keeper reconciliation rebuilds continuity brief" `Quick

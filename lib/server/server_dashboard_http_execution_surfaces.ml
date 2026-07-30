@@ -551,7 +551,7 @@ let display_of_phase_or_legacy_event = function
     Some { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = false }
   | Legacy_stopped ->
     Some
-      { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = true }
+      { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = false }
   | Legacy_crashed ->
     Some
       { ld_keepalive_running = false; ld_phase = "crashed"; ld_pipeline_stage = "crashed"; ld_paused = false }
@@ -564,13 +564,15 @@ let display_of_phase_or_legacy_event = function
 
 let control_status_override_of_lifecycle_event event =
   match lifecycle_legacy_wire_event_of_string event with
-  | Some (Legacy_paused | Legacy_stopped) ->
+  | Some Legacy_paused ->
     Some Keeper_status_runtime.Cp_paused
   | Some Legacy_resumed ->
     Some
       (Keeper_status_runtime.Cp_surface
          Keeper_status_runtime.Surface_idle)
-  | Some (Legacy_running | Legacy_crashed | Legacy_dead) | None -> None
+  | Some (Legacy_running | Legacy_stopped | Legacy_crashed | Legacy_dead)
+  | None ->
+    None
 
 let display_of_phase_or_legacy_string s =
   match lifecycle_legacy_wire_event_of_string s with

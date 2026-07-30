@@ -90,7 +90,13 @@ let checkpoint_load_failure_json
   in
   match checkpoint_load_error_json error with
   | `Assoc error_fields -> `Assoc (identity_fields @ error_fields)
-  | _ -> assert false
+  | json ->
+    `Assoc
+      (identity_fields
+       @ [ "status", `String "error"
+         ; "error_kind", `String "unexpected_checkpoint_format"
+         ; "error_detail", json
+         ])
 ;;
 
 let inventory_json (config : Workspace.config) (name : string)

@@ -174,7 +174,7 @@ let test_owner_intake_compacts_then_resumes_source () =
       check string
         "manual compaction is selected ahead of the source"
         Q.manual_compaction_post_id
-        selected.Keeper_event_queue_state.source.post_id;
+        selected.source.post_id;
       selected
     | None -> fail "manual compaction preemption selected no source"
   in
@@ -203,7 +203,7 @@ let test_owner_intake_compacts_then_resumes_source () =
     check string
       "the exact original source resumes after compaction"
       source.post_id
-      selected.post_id
+      selected.source.post_id
   | None -> fail "the original source disappeared after manual compaction"
 ;;
 

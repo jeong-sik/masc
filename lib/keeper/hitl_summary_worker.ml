@@ -523,20 +523,13 @@ let candidate_rejection_detail (rejection : Exact_output.candidate_rejection_rec
 
 (* [Flow_exact_execution_failed] is the branch that carries the provider's own
    verdict, and it was the only flow error settled with no log line at all. *)
-let capacity_refusal_detail : Exact_output.input_capacity_refusal -> string = function
-  | Context_window_refused _ ->
-    "context window refused"
-  | Serialized_request_refused _ ->
-    "serialized request refused"
-;;
-
 let execution_cause_detail : Exact_output.execution_error_cause -> string = function
   | Attempt_already_started -> "attempt already started"
   | Clock_required_for_timeout -> "clock required for timeout"
   | Frozen_request_mismatch -> "frozen request mismatch"
   | Completion_failed -> "completion failed"
-  | Input_capacity_refused refusal ->
-    Printf.sprintf "input capacity refused: %s" (capacity_refusal_detail refusal)
+  | Serialized_request_refused { http_status } ->
+    Printf.sprintf "serialized request refused (http_status=%d)" http_status
   | Incomplete_output -> "incomplete output"
   | Missing_output -> "missing output"
   | Ambiguous_output count -> Printf.sprintf "ambiguous output (candidates=%d)" count

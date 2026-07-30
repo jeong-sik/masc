@@ -132,7 +132,7 @@ let fresh_cancellation_for_request
   in
   let cancellation : Keeper_registry_event_queue.accepted_cancellation =
     { source
-    ; source_revision = expected_revision
+    ; source_incarnation = expected_revision
     ; owner_nonce
     ; operator_operation_id
     ; reason
@@ -157,7 +157,7 @@ let prior_transfer_for_request
   | Some receipt ->
     (match receipt.transition with
      | Keeper_event_queue_state.Transfer_accepted transfer
-       when Int64.equal transfer.source_revision expected_revision
+       when Int64.equal transfer.source_incarnation expected_revision
             && String.equal transfer.from_keeper keeper_name
             && String.equal transfer.to_keeper target_keeper ->
        Ok (Some { transfer; applied_at = receipt.applied_at })
@@ -186,7 +186,7 @@ let fresh_transfer_for_request
   in
   let transfer : Keeper_registry_event_queue.accepted_transfer =
     { source
-    ; source_revision = expected_revision
+    ; source_incarnation = expected_revision
     ; owner_nonce
     ; operator_operation_id
     ; from_keeper = keeper_name

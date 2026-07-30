@@ -1108,7 +1108,7 @@ let test_fact_upsert_failure_does_not_publish_episode () =
       | Ok _ -> Alcotest.fail "fact upsert failure must block episode publication")))
 ;;
 
-let test_episode_publication_failure_is_typed () =
+let test_episode_corruption_fails_before_publication () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun keepers_dir ->
       run_eio (fun ~sw ~net ~clock ->
@@ -1129,6 +1129,10 @@ let test_episode_publication_failure_is_typed () =
           Filename.concat keepers_dir keeper_id
           |> Keeper_fs.ensure_dir
         in
+        (* The episodes directory doubles as the generation authority (counter
+           + [trace-gNNNN] scan), so corrupting it fails generation
+           reservation — a typed exact-setup error — before any publication
+           phase runs. *)
         Out_channel.with_open_bin
           (Filename.concat keeper_dir "episodes")
           (fun channel -> output_string channel "not-a-directory");
@@ -1141,20 +1145,22 @@ let test_episode_publication_failure_is_typed () =
         with
         | Error error ->
           Alcotest.(check bool)
-            "episode failure keeps its publication phase"
+            "corrupted episodes authority fails generation reservation"
             true
             (String.starts_with
-               ~prefix:"memory os publication failed phase=episode:"
+               ~prefix:
+                 "exact receipt journal unavailable: generation reservation \
+                  failed:"
                error);
           Alcotest.(check int)
-            "facts were already written before the episode failure"
-            1
+            "no fact was published before the setup failure"
+            0
             (List.length
                (Memory_io.read_facts_all_for_keepers_dir
                   ~keepers_dir
                   ~keeper_id))
         | Ok _ ->
-          Alcotest.fail "episode publication failure escaped its typed result")))
+          Alcotest.fail "corrupted episodes authority escaped its typed result")))
 ;;
 
 let test_event_publication_failure_is_typed () =
@@ -1420,9 +1426,9 @@ let () =
             `Quick
             test_fact_upsert_failure_does_not_publish_episode
         ; Alcotest.test_case
-            "episode publication failure is typed"
+            "corrupted episodes authority fails before publication"
             `Quick
-            test_episode_publication_failure_is_typed
+            test_episode_corruption_fails_before_publication
         ; Alcotest.test_case
             "event publication failure is typed"
             `Quick

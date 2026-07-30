@@ -2,15 +2,28 @@ open Alcotest
 
 module Metrics = Dashboard_http_keeper_metrics
 module Detail = Dashboard_http_keeper_detail
+module Keeper_metrics_record = Masc.Keeper_metrics_record
 
 let metric ?(channel = "turn") tools =
+  let kind =
+    if String.equal channel "heartbeat"
+    then Keeper_metrics_record.Heartbeat
+    else Keeper_metrics_record.Turn
+  in
   `Assoc
-    [
+    (Keeper_metrics_record.fields kind
+    @ [
+      ("ts", `String "2026-07-30T00:00:00Z");
       ("ts_unix", `Float 1.0);
       ("channel", `String channel);
+      ("trace_id", `String "trace-current");
+      ("generation", `Int 1);
+      ("latency_ms", `Int 1);
+      ("turn_mode", `String "tool_use");
+      ("handoff_performed", `Bool false);
       ("tools_used", `List (List.map (fun tool -> `String tool) tools));
       ("tool_call_count", `Int (List.length tools));
-    ]
+    ])
 
 let sparse_tool_event () =
   `Assoc
@@ -21,31 +34,50 @@ let sparse_tool_event () =
       ("tools_used", `List []);
     ]
 
-let context_snapshot ?(ts_unix = 10.0) ?(context_ratio = 0.75) () =
+let current_turn_metric () =
   `Assoc
-    [
-      ("ts_unix", `Float ts_unix);
+    (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+    @ [
+      ("ts", `String "2026-07-30T00:00:00Z");
+      ("ts_unix", `Float 10.0);
       ("channel", `String "turn");
-      ("context_ratio", `Float context_ratio);
+      ("trace_id", `String "trace-current");
+      ("generation", `Int 1);
+      ("latency_ms", `Int 20);
+      ("turn_mode", `String "text_response");
+      ("handoff_performed", `Bool false);
+      (* Retired persisted fields must not regain authority. *)
+      ("context_ratio", `Float 0.75);
       ("context_tokens", `Int 750);
       ("context_max", `Int 1000);
       ("message_count", `Int 12);
+      ( "usage",
+        `Assoc
+          [
+            ("input_tokens", `Int 120);
+            ("output_tokens", `Int 80);
+            ("total_tokens", `Int 200);
+          ] );
+      ( "ctx_composition",
+        `Assoc
+          [
+            ("actual_input_tokens", `Int 120);
+            ("attributed_bytes", `Int 640);
+          ] );
+      ( "runtime",
+        `Assoc
+          [
+            ("runtime_id", `String "runtime.current");
+            ("outcome", `String "completed");
+          ] );
       ("tool_call_count", `Int 0);
       ("tools_used", `List []);
-    ]
-
-let json_line json = Yojson.Safe.to_string json
+    ])
 
 let summary_int field summary =
   match Yojson.Safe.Util.(summary |> member field) with
   | `Int value -> value
   | other -> failf "expected int field %s, got %s" field (Yojson.Safe.to_string other)
-
-let summary_float field summary =
-  match Yojson.Safe.Util.(summary |> member field) with
-  | `Float value -> value
-  | `Int value -> float_of_int value
-  | other -> failf "expected float field %s, got %s" field (Yojson.Safe.to_string other)
 
 let summary_missing field summary =
   Yojson.Safe.Util.(summary |> member field) = `Null
@@ -79,7 +111,7 @@ let test_contains_ci_preserves_literal_ascii_semantics () =
     (Metrics.contains_ci "keeper" "keeper-agent")
 
 let test_metrics_window_does_not_classify_execute_as_pr_work () =
-  let _, summary, _, _ =
+  let _, summary, _ =
     Detail.compute_metrics_window
       ~parsed_metrics:
         [
@@ -91,126 +123,93 @@ let test_metrics_window_does_not_classify_execute_as_pr_work () =
             ];
           metric ~channel:"heartbeat" [ "tool_execute" ];
         ]
-      ~generation:0
       ~compact:false
       ~series_points:80
-      ~metrics_window_max_bytes:200_000
-      ~primary_model_norm:""
-      ~primary_model:""
   in
   check int "tool calls remain generic" 3 (summary_int "tool_call_count" summary);
   List.iter
     (fun field -> check bool field true (summary_missing field summary))
     retired_pr_work_summary_fields
 
-let test_24h_context_ignores_sparse_tool_events () =
-  let rows, summary =
-    Metrics.keeper_metrics_24h_json
-      ~metrics_lines:
-        [
-          json_line (context_snapshot ~context_ratio:0.75 ());
-          json_line (sparse_tool_event ());
-        ]
-      ~now_ts:100.0
-  in
-  check int "sample points skip sparse rows" 1
-    (summary_int "sample_points" summary);
-  match rows with
-  | `List [ row ] ->
-      check int "bucket sample points" 1
-        (summary_int "sample_points" row);
-      check (float 0.0001) "context avg ignores sparse rows" 0.75
-        (summary_float "context_ratio_avg" row)
-  | other ->
-      failf "expected one 24h bucket, got %s" (Yojson.Safe.to_string other)
-
-let test_context_snapshot_classifier_rejects_sparse_tool_events () =
-  check bool "context row qualifies" true
-    (Metrics.metrics_row_has_context_snapshot (context_snapshot ()));
-  check bool "tool event row is sparse" false
-    (Metrics.metrics_row_has_context_snapshot (sparse_tool_event ()))
-
-let test_metrics_series_ignores_sparse_tool_events () =
-  let items, summary, _, _ =
+let test_metrics_series_preserves_current_turn_telemetry () =
+  let items, summary, _ =
     Detail.compute_metrics_window
       ~parsed_metrics:
         [
-          context_snapshot ~context_ratio:0.55 ();
+          current_turn_metric ();
           sparse_tool_event ();
         ]
-      ~generation:0
       ~compact:false
       ~series_points:80
-      ~metrics_window_max_bytes:200_000
-      ~primary_model_norm:""
-      ~primary_model:""
   in
   check int "series skips sparse rows" 1 (List.length items);
   check bool "sparse rows do not create PR work signals" true
     (summary_missing ("pr_" ^ "work_signal_count") summary);
   match items with
   | [ row ] ->
-      check (float 0.0001) "context sample preserved" 0.55
-        (summary_float "context_ratio" row)
+      let open Yojson.Safe.Util in
+      check bool "retired context ratio ignored" true
+        (row |> member "context_ratio" = `Null);
+      check int "current usage retained" 120
+        (row |> member "usage" |> member "input_tokens" |> to_int);
+      check int "current composition retained" 640
+        (row |> member "ctx_composition" |> member "attributed_bytes" |> to_int);
+      check string "current runtime retained" "completed"
+        (row |> member "runtime" |> member "outcome" |> to_string)
   | other ->
       failf "expected one metrics series row, got %d" (List.length other)
 
-let test_metrics_window_redacts_model_and_handoff_labels () =
+let test_metrics_window_omits_retired_model_and_handoff_labels () =
   let row =
     `Assoc
-      [
+      (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+      @ [
+        ("ts", `String "2026-07-30T00:00:00Z");
         ("ts_unix", `Float 20.0);
         ("channel", `String "turn");
-        ("context_ratio", `Float 0.42);
-        ("context_tokens", `Int 420);
-        ("context_max", `Int 1000);
+        ("trace_id", `String "trace-a");
+        ("generation", `Int 1);
+        ("latency_ms", `Int 20);
+        ("turn_mode", `String "text_response");
+        ("tool_call_count", `Int 0);
+        ("tools_used", `List []);
         ("message_count", `Int 4);
-        ("model_used", `String "openai:gpt-5.4");
+        ("handoff_performed", `Bool true);
         ( "handoff",
           `Assoc
             [
               ("performed", `Bool true);
-              ("to_model", `String "anthropic:claude-sonnet");
               ("prev_trace_id", `String "trace-a");
               ("new_trace_id", `String "trace-b");
-              ("new_generation", `Int 2);
+              ("to_generation", `Int 2);
             ] );
-      ]
+      ])
   in
-  let items, summary, last_handoff, _ =
+  let items, _summary, last_handoff =
     Detail.compute_metrics_window
       ~parsed_metrics:[ row ]
-      ~generation:0
       ~compact:false
       ~series_points:80
-      ~metrics_window_max_bytes:200_000
-      ~primary_model_norm:"gpt-5.4"
-      ~primary_model:"openai:gpt-5.4"
   in
-  let open Yojson.Safe.Util in
-  check string "primary model preserved" "openai:gpt-5.4"
-    (summary |> member "primary_model" |> to_string);
-  (match summary |> member "top_models" |> to_list with
-  | [ top ] ->
-      check string "model bucket is runtime" "runtime"
-        (top |> member "model" |> to_string);
-      check int "model bucket count" 1 (top |> member "count" |> to_int)
-  | other ->
-      failf "expected one runtime model bucket, got %d" (List.length other));
+  let has_field key = function
+    | `Assoc fields -> List.mem_assoc key fields
+    | _ -> false
+  in
   (match items with
   | [ item ] ->
-      check bool "series model_used redacted" true
-        (item |> member "model_used" = `Null);
-      check bool "series handoff_to_model redacted" true
-        (item |> member "handoff_to_model" = `Null);
-      check bool "nested handoff to_model redacted" true
-        (item |> member "handoff" |> member "to_model" = `Null)
+      check bool "series model_used omitted" false
+        (has_field "model_used" item);
+      check bool "series handoff_to_model omitted" false
+        (has_field "handoff_to_model" item);
+      let handoff = Yojson.Safe.Util.member "handoff" item in
+      check bool "nested handoff to_model omitted" false
+        (has_field "to_model" handoff)
   | other ->
       failf "expected one metrics series row, got %d" (List.length other));
   (match last_handoff with
   | Some handoff ->
-      check bool "last handoff to_model redacted" true
-        (handoff |> member "to_model" = `Null)
+      check bool "last handoff to_model omitted" false
+        (has_field "to_model" handoff)
   | None -> fail "expected last handoff summary")
 
 let with_temp_history content f =
@@ -269,14 +268,10 @@ let () =
         [
           test_case "does not classify Execute as PR work" `Quick
             test_metrics_window_does_not_classify_execute_as_pr_work;
-          test_case "24h context ignores sparse tool events" `Quick
-            test_24h_context_ignores_sparse_tool_events;
-          test_case "classifies sparse tool events" `Quick
-            test_context_snapshot_classifier_rejects_sparse_tool_events;
-          test_case "series ignores sparse tool events" `Quick
-            test_metrics_series_ignores_sparse_tool_events;
-          test_case "redacts model and handoff labels" `Quick
-            test_metrics_window_redacts_model_and_handoff_labels;
+          test_case "preserves current turn telemetry" `Quick
+            test_metrics_series_preserves_current_turn_telemetry;
+          test_case "omits retired model and handoff labels" `Quick
+            test_metrics_window_omits_retired_model_and_handoff_labels;
         ] );
       ( "history_summary",
         [

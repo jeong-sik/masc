@@ -105,6 +105,15 @@ val write_meta :
   Keeper_meta_contract.keeper_meta ->
   (unit, string) result
 
+(** Same CAS persistence as {!write_meta}, but does not invoke the runtime
+    registry-sync hook. This is reserved for a caller that reconstructed meta
+    from persistence and will immediately install it through the typed
+    persisted-sync registry boundary. *)
+val write_meta_deferred_runtime_sync :
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  (unit, string) result
+
 (** Lifecycle-owner variant of [write_meta]. The opaque reservation token is
     checked against the same BasePath/name key before entering the per-path
     CAS critical section. *)

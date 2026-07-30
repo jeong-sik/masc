@@ -608,7 +608,7 @@ function handleEvent(event: SSEEvent): void {
     case 'keeper_heartbeat':
       addTypedJournalEntry(
         event.name ?? agent,
-        `Heartbeat gen=${event.generation ?? '?'} ctx=${event.context_ratio != null ? Math.round(event.context_ratio * 100) + '%' : '?'}`,
+        `Heartbeat gen=${event.generation ?? '?'}`,
         'keepers',
         'keeper_heartbeat',
         {
@@ -616,7 +616,7 @@ function handleEvent(event: SSEEvent): void {
           source: event.source,
           narrativeText:
             `${actorLabel(event.name ?? agent)}가 하트비트를 보냈습니다`
-            + ` (gen ${event.generation ?? '?'}, ctx ${event.context_ratio != null ? Math.round(event.context_ratio * 100) + '%' : '?'})`,
+            + ` (gen ${event.generation ?? '?'})`,
         },
       )
       break
@@ -769,31 +769,6 @@ function handleEvent(event: SSEEvent): void {
       break
     }
     // OAS bridge events
-    case 'oas:masc:keeper:snapshot': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const snap = {
-        keeper_name: (p.keeper_name as string) ?? '',
-        generation: (p.generation as number) ?? 0,
-        context_ratio: (p.context_ratio as number) ?? 0,
-        message_count: (p.message_count as number) ?? 0,
-        timestamp: (p.timestamp as number) ?? Date.now() / 1000,
-      }
-      addTypedJournalEntry(
-        snap.keeper_name,
-        `Keeper snapshot gen=${snap.generation} ctx=${Math.round(snap.context_ratio * 100)}%`,
-        'oas',
-        'oas_keeper_snapshot',
-        {
-          severity: event.severity,
-          source: event.source,
-          narrativeText:
-            `${actorLabel(snap.keeper_name)}의 keeper snapshot이 갱신되었습니다`
-            + ` (gen ${snap.generation}, ctx ${Math.round(snap.context_ratio * 100)}%)`,
-          ...envelopeFromEvent(event),
-        },
-      )
-      break
-    }
     case 'oas:masc:keeper:lifecycle': {
       break
     }

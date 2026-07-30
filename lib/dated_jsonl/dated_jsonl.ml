@@ -598,6 +598,76 @@ let load_tail_lines_result path ~max_lines =
              Error (Io_error { operation = Read_file; path; detail }))
 ;;
 
+let recent_entry_of_line ~path ?line_number line =
+  match Yojson.Safe.from_string line with
+  | json -> Parsed json
+  | exception Yojson.Json_error detail ->
+    Malformed_json { path; line_number; detail }
+;;
+
+let find_latest_line_from_channel input f =
+  let chunk_size = 8192 in
+  let rec scan position right_fragment =
+    if position <= 0
+    then
+      right_fragment
+      |> String.split_on_char '\n'
+      |> List.rev
+      |> List.find_map (fun line ->
+        if line_is_non_empty line then f line else None)
+    else
+      let read_start = max 0 (position - chunk_size) in
+      let read_len = position - read_start in
+      seek_in input read_start;
+      let chunk = Bytes.create read_len in
+      really_input input chunk 0 read_len;
+      let combined = Bytes.to_string chunk ^ right_fragment in
+      let parts = String.split_on_char '\n' combined in
+      let left_fragment, complete_lines =
+        if read_start = 0
+        then "", parts
+        else
+          match parts with
+          | [] -> "", []
+          | first :: rest -> first, rest
+      in
+      match
+        complete_lines
+        |> List.rev
+        |> List.find_map (fun line ->
+          if line_is_non_empty line then f line else None)
+      with
+      | Some _ as found -> found
+      | None -> scan read_start left_fragment
+  in
+  scan (in_channel_length input) ""
+;;
+
+let find_latest_entry_in_file_result path f =
+  match open_regular_input_result path with
+  | Error _ as error -> error
+  | Ok input ->
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr input)
+      (fun () ->
+         match
+           find_latest_line_from_channel input (fun line ->
+             f (recent_entry_of_line ~path line))
+         with
+         | found -> Ok found
+         | exception Sys_error detail ->
+           Error (Io_error { operation = Read_file; path; detail })
+         | exception End_of_file ->
+           Error
+             (Io_error
+                { operation = Read_file
+                ; path
+                ; detail = "file changed while scanning backwards"
+                })
+         | exception Invalid_argument detail ->
+           Error (Io_error { operation = Read_file; path; detail }))
+;;
+
 let prune_unlocked t ~days =
   if days <= 0 then 0
   else begin
@@ -754,13 +824,6 @@ let read_recent ?(offset=0) t n =
     !collected
   end
 
-let recent_entry_of_line ~path ?line_number line =
-  match Yojson.Safe.from_string line with
-  | json -> Parsed json
-  | exception Yojson.Json_error detail ->
-    Malformed_json { path; line_number; detail }
-;;
-
 let read_recent_result ?(offset=0) t n =
   if offset < 0
   then Error (Invalid_offset { offset })
@@ -807,6 +870,34 @@ let read_recent_result ?(offset=0) t n =
     let* months = list_month_dirs_result t.base_dir in
     let* () = visit_months months in
     Ok !collected
+;;
+
+let find_latest_entry_result t f =
+  let ( let* ) = Result.bind in
+  let rec visit_days month_path = function
+    | [] -> Ok None
+    | day :: rest ->
+      let* found =
+        find_latest_entry_in_file_result
+          (Filename.concat month_path day)
+          f
+      in
+      (match found with
+       | Some _ -> Ok found
+       | None -> visit_days month_path rest)
+  in
+  let rec visit_months = function
+    | [] -> Ok None
+    | month :: rest ->
+      let month_path = Filename.concat t.base_dir month in
+      let* days = list_day_files_result month_path in
+      let* found = visit_days month_path days in
+      (match found with
+       | Some _ -> Ok found
+       | None -> visit_months rest)
+  in
+  let* months = list_month_dirs_result t.base_dir in
+  visit_months months
 ;;
 
 let read_recent_lines ?(offset=0) t n =
@@ -1004,6 +1095,14 @@ type file_count_entry =
 
 let file_count_cache : (string, file_count_entry) Hashtbl.t = Hashtbl.create 64
 let file_count_cache_mu = Stdlib.Mutex.create ()
+
+let prepare_for_directory_removal t =
+  let dated = Jsonl_writer.dated_path_now ~base_dir:t.base_dir in
+  Fs_compat.invalidate_cached_writer dated.path;
+  Fs_compat.invalidate_mkdir_memo (Filename.dirname dated.path);
+  Stdlib.Mutex.protect file_count_cache_mu (fun () ->
+    Hashtbl.remove file_count_cache dated.path)
+;;
 
 let count_non_empty_lines_cached path =
   let size = try (Unix.stat path).Unix.st_size with Unix.Unix_error _ -> -1 in

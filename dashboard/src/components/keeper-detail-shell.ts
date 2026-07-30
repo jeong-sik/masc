@@ -5,22 +5,10 @@ import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
 import { keepers } from '../store'
 import { KeeperPhaseAndStage } from './keeper-phase-indicator'
-import { keeperDisplayModel } from '../lib/keeper-runtime-display'
 import { KeeperBadge } from './keeper-badge'
 
 function SectionLabel({ children }: { children: unknown }) {
   return html`<div class="text-3xs font-semibold uppercase tracking-[var(--track-label)] text-[var(--color-fg-muted)]">${children}</div>`
-}
-
-function KeeperModelChip({ keeper }: { keeper: Keeper }) {
-  const display = keeperDisplayModel(keeper)
-  if (!display) return null
-  return html`
-    <span
-      class="inline-flex max-w-full min-w-0 items-center py-0.5 px-2 rounded-[var(--r-1)] text-3xs font-mono bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-20)]"
-      title=${`${display.label}: ${display.value}`}
-    ><span class="block min-w-0 truncate">${display.value}</span></span>
-  `
 }
 
 export function KeeperDetailMissingState({
@@ -98,7 +86,6 @@ export function KeeperDetailHeaderInfo({
             pipelineStageDetail=${keeper.pipeline_stage_detail}
             phaseEnteredAtSec=${phaseEnteredAtSec}
           />
-          <${KeeperModelChip} keeper=${keeper} />
         </div>
         ${keeper.koreanName || keeper.created_at ? html`
           <div class="flex flex-wrap items-center gap-2 text-xs text-[var(--color-fg-muted)]">

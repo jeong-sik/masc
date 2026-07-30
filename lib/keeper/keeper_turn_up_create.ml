@@ -206,6 +206,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_input_tokens = 0;
             last_output_tokens = 0;
             last_total_tokens = 0;
+            last_usage_reported_at = None;
             last_latency_ms = 0;
           };
           compaction_rt = {

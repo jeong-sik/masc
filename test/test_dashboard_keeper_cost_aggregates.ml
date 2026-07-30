@@ -4,6 +4,7 @@ module Workspace = Masc.Workspace
 module Dashboard_http_keeper = Dashboard_http_keeper
 module Keeper_types = Keeper_types
 module Keeper_types_support = Masc.Keeper_types_support
+module Keeper_metrics_record = Masc.Keeper_metrics_record
 
 let test_counter = ref 0
 
@@ -73,7 +74,7 @@ let list_field key json =
         (Printf.sprintf "field %s is not list: %s"
            key (Yojson.Safe.to_string other))
 
-let test_heartbeat_snapshots_do_not_count_as_cost_samples () =
+let test_only_current_turn_rows_count_as_cost_samples () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Masc_test_deps.init_eio_clock env;
@@ -83,55 +84,47 @@ let test_heartbeat_snapshots_do_not_count_as_cost_samples () =
   let keeper_name = "cost-keeper" in
   let meta = make_meta keeper_name in
   let ts = Unix.gettimeofday () -. 1.0 in
+  (* Retired versionless row: never decoded, regardless of its shape. *)
   append_metric config keeper_name
     [
       ("ts_unix", `Float ts);
-      ("channel", `String "heartbeat");
-      ("work_kind", `String "llm_call");
       ("cost_usd", `Float 42.0);
       ("latency_ms", `Int 500);
       ("input_tokens", `Int 1000);
       ("output_tokens", `Int 1000);
       ("total_tokens", `Int 2000);
-      ("model_used", `String "heartbeat-model");
     ];
   append_metric config keeper_name
-    [
+    (Keeper_metrics_record.fields Keeper_metrics_record.Heartbeat
+    @ [
       ("ts_unix", `Float ts);
-      ("channel", `String "turn");
-      ("work_kind", `String "status_tick");
+      ("channel", `String "heartbeat");
       ("cost_usd", `Float 13.0);
       ("latency_ms", `Int 300);
-      ("input_tokens", `Int 300);
-      ("output_tokens", `Int 300);
-      ("total_tokens", `Int 600);
-      ("model_used", `String "status-model");
-    ];
+      ( "usage"
+      , `Assoc
+          [ "input_tokens", `Int 300
+          ; "output_tokens", `Int 300
+          ; "total_tokens", `Int 600
+          ] )
+    ]);
   append_metric config keeper_name
-    [
-      ("ts_unix", `Float ts);
-      ("snapshot_source", `String "keeper_context_status");
-      ("cost_usd", `Float 7.0);
-      ("latency_ms", `Int 150);
-      ("input_tokens", `Int 200);
-      ("output_tokens", `Int 200);
-      ("total_tokens", `Int 400);
-      ("model_used", `String "snapshot-model");
-    ];
-  append_metric config keeper_name
-    [
+    (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+    @ [
       ("ts_unix", `Float ts);
       ("channel", `String "turn");
-      ("work_kind", `String "llm_call");
       ("cost_usd", `Float 0.25);
       ("latency_ms", `Int 100);
-      ("input_tokens", `Int 10);
-      ("output_tokens", `Int 5);
-      ("total_tokens", `Int 15);
-      ("model_used", `String "test-model");
-    ];
+      ( "usage"
+      , `Assoc
+          [ "input_tokens", `Int 10
+          ; "output_tokens", `Int 5
+          ; "total_tokens", `Int 15
+          ] )
+    ]);
   append_metric config keeper_name
-    [
+    (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+    @ [
       ("ts_unix", `Float ts);
       ("channel", `String "turn");
       ("cost_usd", `Float 0.25);
@@ -143,15 +136,14 @@ let test_heartbeat_snapshots_do_not_count_as_cost_samples () =
            ("output_tokens", `Int 3);
            ("total_tokens", `Int 10);
          ]);
-      ("model_used", `String "test-model");
-    ];
+    ]);
   let aggregate =
     Dashboard_http_keeper.keeper_cost_aggregates_json
       ~config ~keepers:[ meta ] ~window_minutes:60
     |> keeper_item
   in
-  check int "only real calls counted" 2 (int_field "sample_count" aggregate);
-  check (float 0.0001) "total cost excludes snapshots" 0.5
+  check int "only current turns counted" 2 (int_field "sample_count" aggregate);
+  check (float 0.0001) "total cost excludes retired rows and heartbeat" 0.5
     (float_field "total_cost_usd" aggregate);
   check int "input tokens include nested current schema" 17
     (int_field "total_input_tokens" aggregate);
@@ -179,7 +171,7 @@ let () =
     [
       ( "keeper cost aggregates",
         [
-          test_case "ignores heartbeat status snapshots" `Quick
-            test_heartbeat_snapshots_do_not_count_as_cost_samples;
+          test_case "accepts only current turn rows" `Quick
+            test_only_current_turn_rows_count_as_cost_samples;
         ] );
     ]

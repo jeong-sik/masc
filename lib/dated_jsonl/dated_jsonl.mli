@@ -76,6 +76,11 @@ val create :
 val base_dir : t -> string
 (** Return the base directory of this store. *)
 
+val prepare_for_directory_removal : t -> unit
+(** Close the current append writer and forget its memoized month directory
+    and row count before application-owned code removes [base_dir t]. A later
+    append can then recreate the directory and observe the new file identity. *)
+
 val append : t -> Yojson.Safe.t -> unit
 (** Append [json] to today's [DD.jsonl] inside [YYYY-MM/].
     Creates directories as needed.  Thread-safe via internal mutex. *)
@@ -106,6 +111,14 @@ val read_recent_result :
     [Ok []]. The reader accepts only [YYYY-MM/DD.jsonl] layout entries and
     regular day files; symbolic links, other file kinds, and I/O failures are
     returned explicitly. Results are chronological (oldest first). *)
+
+val find_latest_entry_result :
+  t -> (recent_entry -> 'a option) -> ('a option, read_error) result
+(** Scan physical rows from newest to oldest and return the first value
+    selected by the callback. The scan reads each visited byte at most once,
+    keeps only one reverse-I/O chunk in memory, and stops immediately after a
+    match. Malformed rows are delivered to the callback. Missing stores return
+    [Ok None]; layout and I/O failures remain explicit. *)
 
 val read_recent_lines : ?offset:int -> t -> int -> string list
 (** Like {!read_recent} but returns raw JSONL strings (no parse).

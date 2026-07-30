@@ -57,21 +57,25 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
       {
         meta.runtime with
         usage =
-          {
-            total_turns = meta.runtime.usage.total_turns + 1;
-            total_input_tokens =
-              meta.runtime.usage.total_input_tokens + observed_input_tokens;
-            total_output_tokens =
-              meta.runtime.usage.total_output_tokens + observed_output_tokens;
-            total_tokens =
-              meta.runtime.usage.total_tokens + observed_total_tokens;
-            total_cost_usd = meta.runtime.usage.total_cost_usd +. turn_cost;
-            last_turn_ts = now_ts;
-            last_input_tokens = observed_input_tokens;
-            last_output_tokens = observed_output_tokens;
-            last_total_tokens = observed_total_tokens;
-            last_latency_ms = latency_ms;
-          };
+          with_last_reported_usage
+            {
+              meta.runtime.usage with
+              total_turns = meta.runtime.usage.total_turns + 1;
+              total_input_tokens =
+                meta.runtime.usage.total_input_tokens + observed_input_tokens;
+              total_output_tokens =
+                meta.runtime.usage.total_output_tokens + observed_output_tokens;
+              total_tokens =
+                meta.runtime.usage.total_tokens + observed_total_tokens;
+              total_cost_usd = meta.runtime.usage.total_cost_usd +. turn_cost;
+              last_turn_ts = now_ts;
+              last_latency_ms = latency_ms;
+            }
+            ~usage_reported:result.usage_reported
+            ~input_tokens:observed_input_tokens
+            ~output_tokens:observed_output_tokens
+            ~total_tokens:observed_total_tokens
+            ~observed_at:now_ts;
       };
   } in
   Keeper_unified_metrics.record_keeper_total_cost_usd
@@ -891,7 +895,6 @@ let run_keeper_invocation_turn_admitted
                    ~turn_cost:(turn_cost_for_result result)
                    ~turn_generation:lifecycle.turn_generation
                    ~channel:Keeper_world_observation.Reactive
-                   ~snapshot_source:"keeper_turn_msg"
                    ~checkpoint_bytes:lifecycle.checkpoint_bytes
                    ~message_count:lifecycle.message_count
                    ~handoff_json:lifecycle.handoff_json

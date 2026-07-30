@@ -297,7 +297,7 @@ function PressureWatchlist({ rows }: { rows: FleetRow[] }) {
     .filter(row =>
       row.keepalive_running
       && (
-        row.context_ratio >= PRESSURE_WARN_RATIO
+        (row.context_ratio != null && row.context_ratio >= PRESSURE_WARN_RATIO)
         || (row.last_activity_ago_s != null && row.last_activity_ago_s >= STALE_ACTIVITY_SEC)
       ),
     )
@@ -320,11 +320,17 @@ function PressureWatchlist({ rows }: { rows: FleetRow[] }) {
             <div class="text-[var(--color-fg-disabled)]">
               ${row.last_activity_ago_s != null && row.last_activity_ago_s >= STALE_ACTIVITY_SEC
                 ? `stale ${formatActivitySignal(row)}`
-                : `ctx ${formatPercent(row.context_ratio * 100, 1)}`}
+                : `ctx ${formatPercent(
+                  row.context_ratio == null ? null : row.context_ratio * 100,
+                  1,
+                )}`}
             </div>
           </div>
           <div class="text-right">
-            <div class="font-mono ${pressureClass(row.context_ratio)}">${formatPercent(row.context_ratio * 100, 1)}</div>
+            <div class="font-mono ${pressureClass(row.context_ratio)}">${formatPercent(
+              row.context_ratio == null ? null : row.context_ratio * 100,
+              1,
+            )}</div>
             <div class="text-[var(--color-fg-disabled)]">${formatActivitySignal(row)}</div>
           </div>
         </div>
@@ -483,7 +489,10 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
               />
               <${TrendCell}
                 name=${row.name} metric="context_ratio"
-                value=${formatPercent(row.context_ratio * 100, 1)}
+                value=${formatPercent(
+                  row.context_ratio == null ? null : row.context_ratio * 100,
+                  1,
+                )}
                 valueClass=${pressureClass(row.context_ratio)}
               />
               <${TrendCell}

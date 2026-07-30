@@ -1,7 +1,7 @@
 (** Dashboard HTTP keeper — keepers_dashboard_json rendering.
 
     Extracted from server_dashboard_http.ml. Contains the keeper dashboard
-    rendering: per-keeper metrics series, 24h buckets, conversation history,
+    rendering: per-keeper metrics series, conversation history,
     memory bank, and diagnostic summaries. *)
 
 
@@ -451,37 +451,24 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
              §3.3 sunsets.  No replacement needed: unresolved runtimes
              surface on the canonical JSON field via the Result-returning
              resolver at the other call site below. *)
-          let primary_model = Keeper_meta_contract.runtime_id_of_meta m in
-          let primary_model_norm = normalize_model_name primary_model in
           let last_compaction_saved_tokens =
             max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
           in
 
           let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
           (* Cap metrics lines to avoid O(n) slowdown as keepers accumulate turns.
-             series_points (120) suffices for the chart; 500 covers 24h summary.
-             Previous value of 12000 caused 60K+ lines across 5 keepers. *)
-          let metrics_cap = if compact then series_points else 500 in
-          let metrics_window_max_bytes = if compact then 50000 else 200000 in
-          let all_metrics_lines = Dated_jsonl.read_recent_lines metrics_store metrics_cap in
-          let (metrics_24h, metrics_24h_summary) =
-            if compact then (`Null, `Null)
-            else keeper_metrics_24h_json ~metrics_lines:all_metrics_lines ~now_ts
-          in
-          let metrics_lines = all_metrics_lines in
+             [series_points] is both the read and output bound. *)
+          let metrics_cap = series_points in
+          let metrics_lines = Dated_jsonl.read_recent_lines metrics_store metrics_cap in
           let parsed_metrics =
-            List.filter_map (fun line ->
-              try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None
-            ) metrics_lines
+            Fs_compat.parse_jsonl_lines
+              ~source:"keeper_dashboard_metrics"
+              metrics_lines
+            |> fst
           in
-          let last_metrics =
-            List.find_opt metrics_row_has_context_snapshot
-              (List.rev parsed_metrics)
-          in
-          let (metrics_series_items, metrics_window_summary, last_handoff_event, last_compaction_event) =
+          let metrics_series_items, metrics_window_summary, last_handoff_event =
             compute_metrics_window
-              ~parsed_metrics ~generation:m.runtime.nonce ~compact ~series_points
-              ~metrics_window_max_bytes ~primary_model_norm ~primary_model
+              ~parsed_metrics ~compact ~series_points
           in
           let metrics_series = `List metrics_series_items in
 
@@ -632,41 +619,9 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta m)
               max_context_resolution
           in
-          let context =
-            match last_metrics with
-            | Some metrics ->
-                `Assoc [
-                  ("source", `String "metrics");
-                  ( "checkpoint_bytes"
-                  , `Int (Safe_ops.json_int "checkpoint_bytes" metrics) );
-                  ("message_count", `Int (Safe_ops.json_int "message_count" metrics));
-                ]
-            | None ->
-                (let base_dir = Keeper_types_profile.session_base_dir config in
-                     let (_session, ctx_opt) =
-                       Keeper_execution.load_context_from_checkpoint
-                         ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
-                         ~base_dir
-                     in
-                     match ctx_opt with
-                     | None -> `Assoc [("has_checkpoint", `Bool false)]
-                     | Some c ->
-                         `Assoc [
-                           ("has_checkpoint", `Bool true);
-                           ("source", `String "checkpoint");
-                           ( "checkpoint_bytes"
-                           , `Int (Keeper_context_runtime.serialized_bytes c) );
-                           ("message_count", `Int (Keeper_context_runtime.message_count c));
-                         ])
+          let context_projection_fields =
+            Keeper_context_observation_projection.missing_context_fields ()
           in
-	          let context_source =
-	            match context with
-	            | `Assoc fields ->
-	                (match List.assoc_opt "source" fields with
-	                 | Some s -> s
-	                 | None -> `Null)
-	            | _ -> `Null
-	          in
 	          let summary =
               let trust_json =
                 keeper_trust_json ~include_receipt:(not compact) config m
@@ -747,9 +702,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               let detail_fields =
                 if compact then []
                 else [
-                  ("last_metrics", match last_metrics with None -> `Null | Some j -> j);
                   ("metrics_series", metrics_series);
-                  ("metrics_24h", metrics_24h);
                   ("conversation_tail", conversation_tail);
                   ("k2k_recent", k2k_recent);
                   ("trust_observatory", trust_observatory);
@@ -947,9 +900,13 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
 	                else `String m.runtime.proactive_rt.last_preview);
             ]
             @ live_activity_fields
+            @ context_projection_fields
             @ [
+              ( "last_turn_usage"
+              , Keeper_context_observation_projection.last_turn_usage_json
+                  ~base_path:config.base_path
+                  m );
               ("metrics_window", metrics_window_summary);
-              ("metrics_24h_summary", metrics_24h_summary);
               ("recent_input_preview", Json_util.string_opt_to_json (recent_preview_for_role "user"));
               ("recent_output_preview", Json_util.string_opt_to_json (recent_preview_for_role "assistant"));
               ("recent_tool_names", `List (List.map (fun item -> `String item) recent_tool_names));
@@ -961,11 +918,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("k2k_count", `Int k2k_count);
               ("k2k_mentions", k2k_mentions);
               ("last_handoff_event", match last_handoff_event with Some j -> j | None -> `Null);
-              ("last_compaction_event", match last_compaction_event with Some j -> j | None -> `Null);
               ("provider_health", provider_health_json);
               ("trust", trust_json);
-              ("context", context);
-              ("context_source", context_source);
               ("context_budget", context_budget);
               ("runtime_warning_ctx_ratio", `Float runtime_warning_ctx_ratio);
               (* Eval feed: latest verdict snapshot for this keeper (RFC-MASC-005) *)

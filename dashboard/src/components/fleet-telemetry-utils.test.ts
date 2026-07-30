@@ -176,12 +176,7 @@ describe('buildFleetRows runtime labels', () => {
             generation: 1,
             channel: 'turn',
             is_handoff: false,
-            is_compaction: false,
-            compaction_saved_tokens: 0,
-            compaction_trigger: null,
-            model_used: 'anthropic:claude-sonnet',
             cost_usd: 0,
-            handoff_to_model: null,
             handoff_new_generation: null,
             prompt_fingerprint: null,
             prompt_metrics: null,
@@ -192,14 +187,11 @@ describe('buildFleetRows runtime labels', () => {
             wall_tokens_per_second: null,
             inference_telemetry: null,
             runtime_id: 'primary',
-            runtime_selected_model: 'anthropic:claude-sonnet',
             runtime_attempt_count: 2,
             runtime_outcome: 'passed_to_next_model',
             runtime_strategy: 'round_robin',
             fallback_applied: true,
             fallback_hops: 1,
-            fallback_from: 'openai:gpt-5.4',
-            fallback_to: 'anthropic:claude-sonnet',
             fallback_reason: 'turn_timeout',
           },
         ],
@@ -339,6 +331,10 @@ describe('fleetBand', () => {
     expect(fleetBand(makeRow({ context_ratio: PRESSURE_WARN_RATIO }))).toBe('attention')
   })
 
+  it('does not classify unknown context as attention', () => {
+    expect(fleetBand(makeRow({ context_ratio: null }))).toBe('active')
+  })
+
   it('classifies attention for stale activity', () => {
     expect(fleetBand(makeRow({ last_activity_ago_s: STALE_ACTIVITY_SEC }))).toBe('attention')
   })
@@ -377,6 +373,12 @@ describe('rowUrgencyScore', () => {
     const lowCtx = makeRow({ context_ratio: 0.2 })
     expect(rowUrgencyScore(highCtx)).toBeGreaterThan(rowUrgencyScore(lowCtx))
   })
+
+  it('adds no urgency for unknown context', () => {
+    expect(rowUrgencyScore(makeRow({ context_ratio: null }))).toBe(
+      rowUrgencyScore(makeRow({ context_ratio: 0.2 })),
+    )
+  })
 })
 
 describe('compareFleetRows', () => {
@@ -408,6 +410,10 @@ describe('pressureClass', () => {
 
   it('returns ok for low ratio', () => {
     expect(pressureClass(0.1)).toContain('var(--color-status-ok)')
+  })
+
+  it('returns unavailable styling for unknown ratio', () => {
+    expect(pressureClass(null)).toContain('var(--color-fg-disabled)')
   })
 })
 

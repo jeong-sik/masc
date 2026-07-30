@@ -18,6 +18,10 @@
     must accept an already-created directory. *)
 val mkdir_p_memoized : mkdir_p:(string -> unit) -> string -> unit
 
+(** Forget that [path] exists. Call this before removing a directory that a
+    later memoized writer may need to recreate. *)
+val invalidate : string -> unit
+
 (** Reset the cache. Test-only — production code relies on
     process-lifetime persistence. *)
 val reset_for_testing : unit -> unit

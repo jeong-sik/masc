@@ -466,7 +466,7 @@ let ensure_keeper_meta_with_cause config name =
              | None -> target_active_goal_ids)
         }
       in
-      match write_meta config persisted_updated with
+      match write_meta_deferred_runtime_sync config persisted_updated with
       | Ok () -> Ok { effective_updated with meta_version = effective_updated.meta_version + 1 }
       | Error e ->
         Otel_metric_store.inc_counter
@@ -744,7 +744,10 @@ let start_supervisor_sweep ctx =
                             any other reconciled fields) immediately.  Without
                             this the file is updated but the in-memory
                             [registry_entry.meta] stays stale until restart. *)
-                         Keeper_registry.update_meta ~base_path entry.name updated_meta;
+                         Keeper_registry.update_meta_from_persisted
+                           ~base_path
+                           entry.name
+                           updated_meta;
                          Keeper_reconcile_state.record_success ~keeper:entry.name
                      | Error e ->
                          let outcome =

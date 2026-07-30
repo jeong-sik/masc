@@ -201,20 +201,17 @@ describe('Ops surface', () => {
       keepers: [{
         name: 'sojin',
         context_metrics_unavailable: {
-          kind: 'storage_read_failed',
-          reason: 'io_error',
-          path: '/tmp/sojin-metrics.jsonl',
-          detail: 'permission denied',
+          kind: 'invalid_payload',
+          reported_kind: 'retired_storage_read_failed',
+          reported_reason: 'io_error',
         },
       }],
       persistent_agents: [{
         name: 'watcher',
         context_metrics_unavailable: {
-          kind: 'malformed_json',
-          reason: 'malformed_metrics_row',
-          path: '/tmp/watcher-metrics.jsonl',
-          line_number: 7,
-          detail: 'unexpected end of input',
+          kind: 'invalid_payload',
+          reported_kind: 'unknown_context_state',
+          reported_reason: 'unexpected_contract',
         },
       }],
       recent_messages: [],
@@ -228,10 +225,10 @@ describe('Ops surface', () => {
     const panel = container.querySelector('[data-testid="ops-context-metrics-unavailable"]')
     expect(panel?.textContent).toContain('Keeper sojin')
     expect(panel?.textContent).toContain('io_error')
-    expect(panel?.textContent).toContain('/tmp/sojin-metrics.jsonl')
+    expect(panel?.textContent).toContain('retired_storage_read_failed')
     expect(panel?.textContent).toContain('Persistent agent watcher')
-    expect(panel?.textContent).toContain('/tmp/watcher-metrics.jsonl:7')
-    expect(panel?.textContent).toContain('unexpected end of input')
+    expect(panel?.textContent).toContain('unknown_context_state')
+    expect(panel?.textContent).toContain('unexpected_contract')
   }, 60000)
 
   it('marks raw ops banner panels and activity rows with v2-command-* classes', async () => {
@@ -493,19 +490,15 @@ describe('Ops surface', () => {
       keepers: [{
         name: 'autoboot-a',
         context_metrics_unavailable: {
-          kind: 'storage_read_failed',
-          reason: 'io_error',
-          path: '/tmp/autoboot-a-metrics.jsonl',
-          detail: 'permission denied',
+          kind: 'not_observed',
+          reason: 'context_measurement_missing',
         },
       }],
       persistent_agents: [{
         name: 'autoboot-a',
         context_metrics_unavailable: {
-          kind: 'storage_read_failed',
-          reason: 'io_error',
-          path: '/tmp/autoboot-a-metrics.jsonl',
-          detail: 'permission denied',
+          kind: 'not_observed',
+          reason: 'context_measurement_missing',
         },
       }],
       recent_messages: [],
@@ -529,11 +522,9 @@ describe('Ops surface', () => {
       persistent_agents: [{
         name: 'orphan-agent',
         context_metrics_unavailable: {
-          kind: 'malformed_json',
-          reason: 'malformed_metrics_row',
-          path: '/tmp/orphan-metrics.jsonl',
-          line_number: 3,
-          detail: 'unexpected end of input',
+          kind: 'invalid_payload',
+          reported_kind: 'unknown_context_state',
+          reported_reason: 'unexpected_contract',
         },
       }],
       recent_messages: [],
@@ -545,6 +536,40 @@ describe('Ops surface', () => {
     expect(diagnostics).toHaveLength(1)
     expect(diagnostics[0]?.keeper.name).toBe('orphan-agent')
     expect(diagnostics[0]?.source).toBe('persistent_agent')
+  }, 60000)
+
+  it('keeps not-observed context typed while ignoring absent diagnostics', async () => {
+    const { contextMetricsDiagnostics } = await loadOps()
+    const snapshot = {
+      root: { paused: false },
+      sessions: [],
+      keepers: [
+        {
+          name: 'rondo',
+          context_metrics_unavailable: {
+            kind: 'not_observed',
+            reason: 'context_measurement_missing',
+          },
+        },
+        {
+          name: 'kidsnote',
+          context_metrics_unavailable: null,
+        },
+      ],
+      persistent_agents: [],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+
+    const diagnostics = contextMetricsDiagnostics(snapshot)
+
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]?.keeper.name).toBe('rondo')
+    expect(diagnostics[0]?.error).toEqual({
+      kind: 'not_observed',
+      reason: 'context_measurement_missing',
+    })
   }, 60000)
 
   it('filters out entries older than 3 days so stale reviews stop showing', async () => {

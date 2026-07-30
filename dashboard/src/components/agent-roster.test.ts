@@ -808,6 +808,46 @@ describe('AgentRoster live-only cards', () => {
     expect(container.textContent).not.toContain('old blocker that should stay out of the roster')
   })
 
+  it('keeps unobserved context separate from last-turn usage', async () => {
+    keepers.value = [
+      {
+        name: 'rondo',
+        agent_name: 'keeper-rondo-agent',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+        context_ratio: null,
+        context_tokens: null,
+        context_max: null,
+        context_metrics_unavailable: {
+          kind: 'not_observed',
+          reason: 'context_measurement_missing',
+        },
+        last_turn_usage: {
+          input_tokens: 790_360,
+          output_tokens: 17,
+          total_tokens: 790_377,
+          observed_at: null,
+          source: 'keeper_runtime_usage',
+        },
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    expect(container.querySelector('.fl-ctx-val')?.textContent).toBe('—')
+    expect(container.querySelector('[data-testid="fleet-context-not-observed"]')?.textContent)
+      .toContain('현재 점유율 미관측')
+    expect(container.textContent).toContain('최근 턴 usage')
+    expect(container.textContent).toContain('790.4K')
+    expect(container.textContent).not.toContain('컨텍스트 압박')
+    expect(container.textContent).not.toContain('compact 임계 근접')
+  })
+
   it('does not render the internal namespace-separation disclaimer strip', async () => {
     agents.value = [
       makeAgent({

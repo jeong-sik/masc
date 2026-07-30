@@ -3461,7 +3461,7 @@ describe('fetchKeeperCostMetrics', () => {
 })
 
 describe('fetchKeeperDecisions', () => {
-  it('redacts legacy model_used labels from decision rows', async () => {
+  it('decodes current decision rows without a model identity field', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         events: [
@@ -3486,7 +3486,6 @@ describe('fetchKeeperDecisions', () => {
               operation_id: 'op-decision',
               worker_run_id: 'worker-decision',
             },
-            model_used: 'private-provider:claude',
           },
         ],
         limit: 1,
@@ -3500,7 +3499,6 @@ describe('fetchKeeperDecisions', () => {
 
     const result = await fetchKeeperDecisions(1)
 
-    expect(result.events[0]?.model_used).toBeNull()
     expect(result.events[0]?.choice).toBe('use_shell')
     expect(result.events[0]?.reason).toBe('verify touched test target')
     expect(result.events[0]?.context).toEqual({

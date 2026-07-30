@@ -133,6 +133,26 @@ let test_base_tools () =
     [ "keeper_time_now"; "keeper_context_status"; "keeper_memory_search" ]
 ;;
 
+let test_context_status_description_matches_current_output () =
+  let schema =
+    schema_by_name "keeper_context_status" Tool_shard_types.base_tools
+  in
+  List.iter
+    (fun current_field ->
+       Alcotest.(check bool)
+         ("current field documented: " ^ current_field)
+         true
+         (contains schema.description current_field))
+    [ "checkpoint_bytes"; "message_count"; "generation" ];
+  List.iter
+    (fun unobserved_field ->
+       Alcotest.(check bool)
+         ("unobserved field not promised: " ^ unobserved_field)
+         false
+         (contains schema.description unobserved_field))
+    [ "context_ratio"; "context_tokens"; "context_max"; "last_model_used" ]
+;;
+
 let test_board_tools () =
   let names = schema_names Tool_shard.board_tools in
   List.iter
@@ -223,6 +243,10 @@ let () =
             `Quick
             test_user_facing_alias_copy_is_canonical
         ; Alcotest.test_case "base tools" `Quick test_base_tools
+        ; Alcotest.test_case
+            "context status current output"
+            `Quick
+            test_context_status_description_matches_current_output
         ; Alcotest.test_case "board tools" `Quick test_board_tools
         ; Alcotest.test_case
             "board post judgment"

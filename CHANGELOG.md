@@ -153,9 +153,22 @@
 - CI now rejects mangled-module access to the three wrapped OAS libraries linked by MASC and treats scanner errors as failures; the unused advisory `Llm_provider` text scans, retired/test source trees, comment/allow-marker bypasses, and nonblocking `|| true` invocation were removed from the guard.
 - The Ops surface now preserves and displays the operator snapshot's typed context-metrics storage and malformed-row failures per Keeper instead of presenting unavailable context as an unexplained blank value. Invalid diagnostic wire payloads remain explicitly visible as contract failures.
 - The process supervisor now records the real server exit code: `|| true` before `exit_code=$?` reported every exit — including SIGSEGV (139) and SIGTERM (143) — as `code=0`; exits above 128 additionally decode the signal name. Takeover kills now leave a JSON breadcrumb next to the pid lock, the victim's SIGTERM path logs the attribution (or its absence: external sender), and the next boot reports a breadcrumb after a SIGKILL escalation.
-- Keeper context-metrics projection now reads its JSONL ledger through `Dated_jsonl.read_recent_result` and exposes typed storage or malformed-row unavailability instead of silently falling back to metadata. `Operator_control_context_snapshot.latest_keeper_context_snapshot_from_files` now returns a `result`; there is no compatibility wrapper for the former `option` signature.
+- Keeper context projection no longer reads persisted metrics rows. Current
+  snapshots expose typed `not_observed` occupancy and keep provider-reported
+  last-turn usage separate; no legacy decoder or metadata fallback remains.
 
 ### Removed
+- **Breaking (Keeper metrics/context wire)**: current turn and heartbeat rows
+  now require `schema="keeper.metrics.v1"` plus typed `record_kind`; versionless
+  rows are not decoded and no migration path was added. Provider usage presence
+  and its timestamp are tracked as one process-local typed observation,
+  independently from the latest turn attempt; restart returns it to unobserved
+  instead of inferring it from persisted token counters. Removed fabricated
+  context occupancy, producer-less metrics fields/compaction history,
+  tool-name aliases and decision-log guessing, duplicate handoff generation
+  keys, the dormant context-bearing OAS keeper snapshot publisher/decoder, and
+  the `keeper_context_status.last_model_used = null` placeholder. Both current
+  context-status descriptors now state that occupancy is not observed.
 - Removed the zero-consumer Keeper compaction policy authoring record: profile aliases, hardcoded threshold tables, ratio/message/token Runtime params and env knobs, keeper-up/schema/meta fields, status/config projections, and dashboard controls. Retired inputs and persisted fields now fail explicitly; the typed compaction runtime, owner-lane execution, provider-overflow recovery, and durable observations remain unchanged.
 - Removed dead compaction ratio/message/token gates from Keeper status, metrics, TUI, dashboard config, and PATCH surfaces, including the unused `context_within_budget` FSM condition and inferred dashboard threshold marker. Observable compaction transitions now name the typed `Compaction_started` event; no UI fallback manufactures a gate.
 - Removed the superseded `Runtime_agent.media_reroute_candidates` helper (the live reroute path builds candidates inline) and narrowed `Keeper_runtime`'s interface by dropping five internal-only exported vals (`supervisor_sweeps`, `supervisor_sweeps_mu`, `with_sweeps_ro`, `with_sweeps_rw`, `existing_keepalive_bootstrap_done`). No replacement: zero external consumers.

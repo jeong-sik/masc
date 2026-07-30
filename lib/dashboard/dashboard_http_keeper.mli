@@ -1,6 +1,6 @@
 (** Dashboard_http_keeper — keepers_dashboard_json
-    rendering: per-keeper metrics series, 24h buckets,
-    conversation history, memory bank, diagnostic
+    rendering: per-keeper metrics series, conversation
+    history, memory bank, diagnostic
     summaries, and the execution-trust + keeper-config
     surfaces.
 
@@ -19,7 +19,7 @@
     Internal helpers stay private at this boundary
     (everything else — see the 1700-line .ml.  Notably:
     every per-section sub-renderer for metrics series /
-    24h buckets / message history / memory bank /
+    message history / memory bank /
     diagnostic summaries, the rollup sub-counters
     ([succ_*] / [fail_*]), the model / capability /
     backend resolvers, and the

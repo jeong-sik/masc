@@ -1,411 +1,367 @@
-(** Dashboard_http_keeper_detail — metrics window computation for keeper dashboard.
-    Extracts the metrics series iteration loop from keepers_dashboard_json. *)
+(** Dashboard_http_keeper_detail — current keeper metrics projection.
+
+    Only rows carrying [Keeper_metrics_record]'s current discriminator are
+    decoded. The versionless metrics ledger contract is retired. *)
 
 include Dashboard_http_keeper_metrics
 
-type metrics_acc = {
-  ma_handoff_count : int;
-  ma_compaction_events : int;
-  ma_compaction_saved_tokens : int;
-  ma_compaction_before_tokens : int;
-  ma_fallback_count : int;
-  ma_proactive_fallback_count : int;
-  ma_tool_call_count : int;
-  ma_turn_points : int;
-  ma_heartbeat_points : int;
-  ma_proactive_points : int;
-  ma_drift_applied_count : int;
+type metrics_acc =
+  { ma_sample_points : int
+  ; ma_handoff_count : int
+  ; ma_fallback_count : int
+  ; ma_fallback_observed_points : int
+  ; ma_tool_call_count : int
+  ; ma_turn_points : int
+  ; ma_heartbeat_points : int
+  ; ma_proactive_points : int
+  ; ma_last_handoff : Yojson.Safe.t option
+  }
 
-  ma_last_handoff : Yojson.Safe.t option;
-  ma_last_compaction : Yojson.Safe.t option;
-}
+let init_acc =
+  { ma_sample_points = 0
+  ; ma_handoff_count = 0
+  ; ma_fallback_count = 0
+  ; ma_fallback_observed_points = 0
+  ; ma_tool_call_count = 0
+  ; ma_turn_points = 0
+  ; ma_heartbeat_points = 0
+  ; ma_proactive_points = 0
+  ; ma_last_handoff = None
+  }
 
-let init_acc = {
-  ma_handoff_count = 0;
-  ma_compaction_events = 0;
-  ma_compaction_saved_tokens = 0;
-  ma_compaction_before_tokens = 0;
-  ma_fallback_count = 0;
-  ma_proactive_fallback_count = 0;
-  ma_tool_call_count = 0;
-  ma_turn_points = 0;
-  ma_heartbeat_points = 0;
-  ma_proactive_points = 0;
-  ma_drift_applied_count = 0;
+let nonempty_string_opt key json =
+  match Safe_ops.json_string_opt key json with
+  | Some value ->
+      let value = String.trim value in
+      if value = "" then None else Some value
+  | None -> None
 
-  ma_last_handoff = None;
-  ma_last_compaction = None;
-}
+let string_list_member_opt key json =
+  match Json_util.assoc_member_opt key json with
+  | Some (`List values) ->
+      let rec decode acc = function
+        | [] -> Some (List.rev acc)
+        | `String value :: rest ->
+            let value = String.trim value in
+            if value = "" then None else decode (value :: acc) rest
+        | _ -> None
+      in
+      decode [] values
+  | _ -> None
+
+let ratio_json numerator denominator =
+  if denominator = 0
+  then `Null
+  else `Float (float_of_int numerator /. float_of_int denominator)
 
 let compute_metrics_window
     ~(parsed_metrics : Yojson.Safe.t list)
-    ~(generation : int)
     ~(compact : bool)
     ~(series_points : int)
-    ~(metrics_window_max_bytes : int)
-    ~(primary_model_norm : string)
-    ~(primary_model : string)
-  : Yojson.Safe.t list * Yojson.Safe.t * Yojson.Safe.t option * Yojson.Safe.t option =
-  let m key source = Option.value ~default:`Null (Json_util.assoc_member_opt key source) in
+  : Yojson.Safe.t list * Yojson.Safe.t * Yojson.Safe.t option =
+  let member key source =
+    match Json_util.assoc_member_opt key source with
+    | Some value -> value
+    | None -> `Null
+  in
   let work_kind_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
-  let model_counts_window : (string, int) Hashtbl.t = Hashtbl.create 16 in
   let tool_counts_window : (string, int) Hashtbl.t = Hashtbl.create 16 in
-  let drift_reason_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
-  let compaction_trigger_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
-  let generation_stats : (int, keeper_gen_window_stats) Hashtbl.t = Hashtbl.create 8 in
-
+  let generation_stats : (int, keeper_gen_window_stats) Hashtbl.t =
+    Hashtbl.create 8
+  in
   let acc, items_rev =
-    List.fold_left (fun (acc, items) j ->
-      try
-        let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-        let ratio = Safe_ops.json_float ~default:0.0 "context_ratio" j in
-        let tokens = Safe_ops.json_int ~default:0 "context_tokens" j in
-        let context_max = Safe_ops.json_int ~default:0 "context_max" j in
-        let channel = Safe_ops.json_string ~default:"turn" "channel" j in
-        let parsed_channel = Keeper_world_observation.channel_of_string channel in
-        let is_turn =
-          match parsed_channel with
-          | Some Keeper_world_observation.Reactive -> true
-          | _ -> false
-        in
-        let is_heartbeat = String.equal channel "heartbeat" in
-        let is_scheduled_autonomous =
-          match parsed_channel with
-          | Some c -> Keeper_world_observation.is_autonomous c
-          | None -> false
-        in
-        let is_interaction = is_turn || is_scheduled_autonomous in
-        let compacted = Safe_ops.json_bool ~default:false "compacted" j in
-        let gen = Safe_ops.json_int ~default:generation "generation" j in
-        let trace_id = Safe_ops.json_string ~default:"" "trace_id" j in
-        let before_tokens = Safe_ops.json_int ~default:0 "compaction_before_tokens" j in
-        let after_tokens = Safe_ops.json_int ~default:0 "compaction_after_tokens" j in
-        let saved_tokens = max 0 (before_tokens - after_tokens) in
-        let compaction_trigger_now =
-          Safe_ops.json_string_opt "compaction_trigger" j
-          |> Option.map String.trim
-          |> function Some s when s <> "" -> Some s | _ -> None
-        in
-        let handoff_obj = j |> m "handoff" in
-        let handoff_performed = Safe_ops.json_bool ~default:false "performed" handoff_obj in
-        let handoff_prev_trace_id = Safe_ops.json_string_opt "prev_trace_id" handoff_obj in
-        let handoff_new_trace_id = Safe_ops.json_string_opt "new_trace_id" handoff_obj in
-        let handoff_new_generation =
-          match Safe_ops.json_int_opt "new_generation" handoff_obj with
-          | Some value -> Some value
-          | None -> Safe_ops.json_int_opt "to_generation" handoff_obj
-        in
-        let usage_obj = j |> m "usage" in
-        let input_tokens = Safe_ops.json_int_opt "input_tokens" usage_obj in
-        let output_tokens = Safe_ops.json_int_opt "output_tokens" usage_obj in
-        let total_tokens = Safe_ops.json_int_opt "total_tokens" usage_obj in
-        let latency_ms = Safe_ops.json_int ~default:0 "latency_ms" j in
-        let cost_usd = Safe_ops.json_float_opt "cost_usd" j in
-        let model_used = Safe_ops.json_string ~default:"" "model_used" j in
-        let message_count = Safe_ops.json_int ~default:0 "message_count" j in
-        let model_used_norm = normalize_model_name model_used in
-        let model_bucket =
-          if String.trim model_used <> "" || model_used_norm <> "" then "runtime"
-          else ""
-        in
-        let work_kind_raw =
-          Keeper_unified_metrics.work_kind_of_json j
-          |> Option.value ~default:""
-        in
-        let proactive_obj = j |> m "proactive" in
-        let proactive_fallback_applied_now = Safe_ops.json_bool ~default:false "fallback_applied" proactive_obj in
-
-        let drift_obj = j |> m "drift" in
-        let drift_applied_now = Safe_ops.json_bool ~default:false "applied" drift_obj in
-        let drift_reason_now =
-          Safe_ops.json_string_opt "reason" drift_obj
-          |> Option.map String.trim
-          |> function Some s when s <> "" -> Some s | _ -> None
-        in
-        let tools_used =
-          match j |> m "tools_used" with
-          | `List xs -> List.filter_map (function `String s when String.trim s <> "" -> Some s | _ -> None) xs
-          | _ -> []
-        in
-        let tool_call_count_now = Safe_ops.json_int ~default:(List.length tools_used) "tool_call_count" j in
-        let metric_event = Safe_ops.json_string ~default:"" "metric_event" j in
-        let work_kind =
-          if work_kind_raw <> "" then work_kind_raw else "general_chat"
-        in
-
-        let acc =
-          if handoff_performed then
-            let acc = if is_interaction then { acc with ma_handoff_count = acc.ma_handoff_count + 1 } else acc in
-            { acc with ma_last_handoff = Some (`Assoc [
-                ("ts_unix", `Float ts_unix);
-                ("trace_id", `String trace_id);
-                ("generation", `Int gen);
-                ("to_model", `Null);
-                ("prev_trace_id", Json_util.string_opt_to_json (match handoff_prev_trace_id with Some s when s <> "" -> Some s | _ -> None));
-                ("new_trace_id", Json_util.string_opt_to_json (match handoff_new_trace_id with Some s when s <> "" -> Some s | _ -> None));
-                ("new_generation", Json_util.int_opt_to_json handoff_new_generation);
-              ])
-            }
-          else acc
-        in
-        let acc =
-          if compacted then
-            let acc =
-              if is_interaction then begin
-                (match compaction_trigger_now with Some reason -> count_table_incr compaction_trigger_counts reason | None -> ());
-                { acc with
-                  ma_compaction_events = acc.ma_compaction_events + 1;
-                  ma_compaction_saved_tokens = acc.ma_compaction_saved_tokens + saved_tokens;
-                  ma_compaction_before_tokens = acc.ma_compaction_before_tokens + before_tokens;
-                }
-              end else acc
+    List.fold_left
+      (fun (acc, items) json ->
+        match Keeper_metrics_record.kind_of_json json with
+        | None -> acc, items
+        | Some Keeper_metrics_record.Heartbeat ->
+            (match
+               Safe_ops.json_float_opt "ts_unix" json,
+               Safe_ops.json_string_opt "channel" json
+             with
+             | Some _, Some "heartbeat" ->
+                 ( { acc with
+                     ma_sample_points = acc.ma_sample_points + 1
+                   ; ma_heartbeat_points = acc.ma_heartbeat_points + 1
+                   }
+                 , items )
+             | _ -> acc, items)
+        | Some Keeper_metrics_record.Turn ->
+            let parsed_channel =
+              Option.bind
+                (Safe_ops.json_string_opt "channel" json)
+                Keeper_world_observation.channel_of_string
             in
-            { acc with ma_last_compaction = Some (`Assoc [
-                ("ts_unix", `Float ts_unix);
-                ("trace_id", `String trace_id);
-                ("generation", `Int gen);
-                ("before_tokens", `Int before_tokens);
-                ("after_tokens", `Int after_tokens);
-                ("saved_tokens", `Int saved_tokens);
-                ("trigger", Json_util.string_opt_to_json compaction_trigger_now);
-              ])
-            }
-          else acc
-        in
-        let acc =
-          if is_interaction && primary_model_norm <> "" && model_used_norm <> "" && model_used_norm <> primary_model_norm then
-            { acc with ma_fallback_count = acc.ma_fallback_count + 1 }
-          else acc
-        in
-        let acc = if is_turn then { acc with ma_turn_points = acc.ma_turn_points + 1 } else acc in
-        let acc = if is_scheduled_autonomous then { acc with ma_proactive_points = acc.ma_proactive_points + 1 } else acc in
-        let acc =
-          if is_scheduled_autonomous && proactive_fallback_applied_now then
-            { acc with ma_proactive_fallback_count = acc.ma_proactive_fallback_count + 1 }
-          else acc
-        in
-        let acc =
-          if is_interaction then begin
-            let acc =
-              if drift_applied_now then begin
-                (match drift_reason_now with Some reason -> count_table_incr drift_reason_counts reason | None -> ());
-                { acc with ma_drift_applied_count = acc.ma_drift_applied_count + 1 }
-              end else acc
-            in
-            count_table_incr work_kind_counts work_kind;
-            if model_bucket <> "" then count_table_incr model_counts_window model_bucket;
-            List.iter (count_table_incr tool_counts_window) tools_used;
-            let acc = { acc with
-              ma_tool_call_count = acc.ma_tool_call_count + tool_call_count_now;
-            } in
-            let gen_stats =
-              match Hashtbl.find_opt generation_stats gen with
-              | Some gs -> gs
-              | None ->
-                  let gs = create_keeper_gen_window_stats () in
-                  Hashtbl.add generation_stats gen gs;
-                  gs
-            in
-            gen_stats.turns <- gen_stats.turns + 1;
-            gen_stats.input_tokens <- gen_stats.input_tokens + Option.value ~default:0 input_tokens;
-            gen_stats.output_tokens <- gen_stats.output_tokens + Option.value ~default:0 output_tokens;
-            gen_stats.total_tokens <- gen_stats.total_tokens + Option.value ~default:0 total_tokens;
-            if handoff_performed then gen_stats.handoffs <- gen_stats.handoffs + 1;
-            if compacted then gen_stats.compactions <- gen_stats.compactions + 1;
-            if gen_stats.first_ts <= 0.0 || ts_unix < gen_stats.first_ts then gen_stats.first_ts <- ts_unix;
-            if ts_unix > gen_stats.last_ts then gen_stats.last_ts <- ts_unix;
-            if model_bucket <> "" then count_table_incr gen_stats.models model_bucket;
-            List.iter (count_table_incr gen_stats.tools) tools_used;
-
-            acc
-          end else acc
-        in
-        let acc = if is_heartbeat then { acc with ma_heartbeat_points = acc.ma_heartbeat_points + 1 } else acc in
-
-        let output_item =
-          if compact || not (metrics_row_has_context_snapshot j) then None
-          else
-            Some (`Assoc [
-              ("ts_unix", `Float ts_unix);
-              ("trace_id", `String trace_id);
-              ("channel", `String channel);
-              ("context_ratio", `Float ratio);
-              ("context_tokens", `Int tokens);
-              ("context_max", `Int context_max);
-              ("message_count", `Int message_count);
-              ("compacted", `Bool compacted);
-              ("handoff_performed", `Bool handoff_performed);
-              ("handoff",
-                if handoff_performed then
-                  `Assoc [
-                    ("performed", `Bool true);
-                    ("to_model", `Null);
-                    ("prev_trace_id", match handoff_prev_trace_id with Some s when s <> "" -> `String s | _ -> `Null);
-                    ("new_trace_id", match handoff_new_trace_id with Some s when s <> "" -> `String s | _ -> `Null);
-                    ("new_generation", Json_util.int_opt_to_json handoff_new_generation);
-                    ("to_generation", Json_util.int_opt_to_json handoff_new_generation);
-                  ]
-                else `Null);
-              ("handoff_to_model", `Null);
-              ("handoff_prev_trace_id", Json_util.string_opt_to_json (match handoff_prev_trace_id with Some s when s <> "" -> Some s | _ -> None));
-              ("handoff_new_trace_id", Json_util.string_opt_to_json (match handoff_new_trace_id with Some s when s <> "" -> Some s | _ -> None));
-              ("handoff_new_generation", Json_util.int_opt_to_json handoff_new_generation);
-              ("generation", `Int gen);
-              ("input_tokens", Json_util.int_opt_to_json input_tokens);
-              ("output_tokens", Json_util.int_opt_to_json output_tokens);
-              ("total_tokens", Json_util.int_opt_to_json total_tokens);
-              ("latency_ms", `Int latency_ms);
-              ("cost_usd", Json_util.float_opt_to_json cost_usd);
-              ("model_used", `Null);
-              ("prompt_fingerprint", j |> m "prompt_fingerprint");
-              ("prompt", j |> m "prompt");
-              ("compaction_before_tokens", `Int before_tokens);
-              ("compaction_after_tokens", `Int after_tokens);
-              ("compaction_saved_tokens", `Int saved_tokens);
-              ("compaction_trigger", Json_util.string_opt_to_json compaction_trigger_now);
-              ("work_kind", `String work_kind);
-              ("metric_event", `String metric_event);
-              ("tool_call_count", `Int tool_call_count_now);
-              ("tools_used", `List (List.map (fun s -> `String s) tools_used));
-              ("proactive_fallback_applied", `Bool proactive_fallback_applied_now);
-
-              ("drift_applied", `Bool drift_applied_now);
-              ("drift_reason", Json_util.string_opt_to_json drift_reason_now);
-              ( "inference_telemetry",
-                j
-                |> m "inference_telemetry"
-                |> Keeper_hooks_oas.redact_inference_telemetry_json );
-            ])
-        in
-        match output_item with
-        | Some i -> (acc, i :: items)
-        | None -> (acc, items)
-      with
-      | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> (acc, items)
-    ) (init_acc, []) parsed_metrics
+            (match
+               Safe_ops.json_float_opt "ts_unix" json,
+               nonempty_string_opt "trace_id" json,
+               Safe_ops.json_int_opt "generation" json,
+               Safe_ops.json_int_opt "latency_ms" json,
+               Safe_ops.json_int_opt "tool_call_count" json,
+               string_list_member_opt "tools_used" json,
+               Keeper_unified_metrics.work_kind_of_json json,
+               Safe_ops.json_bool_opt "handoff_performed" json,
+               parsed_channel
+             with
+             | ( Some ts_unix
+               , Some trace_id
+               , Some generation
+               , Some latency_ms
+               , Some tool_call_count
+               , Some tools_used
+               , Some work_kind
+               , Some handoff_performed
+               , Some channel ) ->
+                 let is_turn =
+                   match channel with
+                   | Keeper_world_observation.Reactive -> true
+                   | Keeper_world_observation.Scheduled_autonomous -> false
+                 in
+                 let is_scheduled_autonomous =
+                   Keeper_world_observation.is_autonomous channel
+                 in
+                 let channel_wire =
+                   Keeper_world_observation.channel_to_string channel
+                 in
+                 let handoff_obj = member "handoff" json in
+                 let handoff_prev_trace_id =
+                   nonempty_string_opt "prev_trace_id" handoff_obj
+                 in
+                 let handoff_new_trace_id =
+                   nonempty_string_opt "new_trace_id" handoff_obj
+                 in
+                 let handoff_new_generation =
+                   Safe_ops.json_int_opt "to_generation" handoff_obj
+                 in
+                 let usage_obj = member "usage" json in
+                 let input_tokens =
+                   Safe_ops.json_int_opt "input_tokens" usage_obj
+                 in
+                 let output_tokens =
+                   Safe_ops.json_int_opt "output_tokens" usage_obj
+                 in
+                 let total_tokens =
+                   Safe_ops.json_int_opt "total_tokens" usage_obj
+                 in
+                 let usage =
+                   match input_tokens, output_tokens, total_tokens with
+                   | Some input, Some output, Some total ->
+                       Some (input, output, total)
+                   | _ -> None
+                 in
+                 let runtime_obj = member "runtime" json in
+                 let fallback_applied =
+                   match runtime_obj with
+                   | `Assoc _ ->
+                       Safe_ops.json_bool_opt "fallback_applied" runtime_obj
+                   | _ -> None
+                 in
+                 let acc =
+                   { acc with
+                     ma_sample_points = acc.ma_sample_points + 1
+                   ; ma_turn_points =
+                       acc.ma_turn_points + if is_turn then 1 else 0
+                   ; ma_proactive_points =
+                       acc.ma_proactive_points
+                       + if is_scheduled_autonomous then 1 else 0
+                   ; ma_handoff_count =
+                       acc.ma_handoff_count
+                       + if handoff_performed then 1 else 0
+                   ; ma_fallback_count =
+                       acc.ma_fallback_count
+                       +
+                       (match fallback_applied with
+                        | Some true -> 1
+                        | Some false | None -> 0)
+                   ; ma_fallback_observed_points =
+                       acc.ma_fallback_observed_points
+                       + if Option.is_some fallback_applied then 1 else 0
+                   ; ma_tool_call_count =
+                       acc.ma_tool_call_count + tool_call_count
+                   ; ma_last_handoff =
+                       if handoff_performed
+                       then
+                         Some
+                           (`Assoc
+                             [ "ts_unix", `Float ts_unix
+                             ; "trace_id", `String trace_id
+                             ; "generation", `Int generation
+                             ; ( "prev_trace_id"
+                               , Json_util.string_opt_to_json
+                                   handoff_prev_trace_id )
+                             ; ( "new_trace_id"
+                               , Json_util.string_opt_to_json
+                                   handoff_new_trace_id )
+                             ; ( "to_generation"
+                               , Json_util.int_opt_to_json
+                                   handoff_new_generation )
+                             ])
+                       else acc.ma_last_handoff
+                   }
+                 in
+                 count_table_incr work_kind_counts work_kind;
+                 List.iter (count_table_incr tool_counts_window) tools_used;
+                 let generation_stats_row =
+                   match Hashtbl.find_opt generation_stats generation with
+                   | Some stats -> stats
+                   | None ->
+                       let stats = create_keeper_gen_window_stats () in
+                       Hashtbl.add generation_stats generation stats;
+                       stats
+                 in
+                 generation_stats_row.turns <-
+                   generation_stats_row.turns + 1;
+                 (match usage with
+                  | Some (input, output, total) ->
+                      generation_stats_row.usage_points <-
+                        generation_stats_row.usage_points + 1;
+                      generation_stats_row.input_tokens <-
+                        generation_stats_row.input_tokens + input;
+                      generation_stats_row.output_tokens <-
+                        generation_stats_row.output_tokens + output;
+                      generation_stats_row.total_tokens <-
+                        generation_stats_row.total_tokens + total
+                  | None -> ());
+                 if handoff_performed
+                 then
+                   generation_stats_row.handoffs <-
+                     generation_stats_row.handoffs + 1;
+                 if
+                   generation_stats_row.first_ts <= 0.0
+                   || ts_unix < generation_stats_row.first_ts
+                 then generation_stats_row.first_ts <- ts_unix;
+                 if ts_unix > generation_stats_row.last_ts
+                 then generation_stats_row.last_ts <- ts_unix;
+                 List.iter
+                   (count_table_incr generation_stats_row.tools)
+                   tools_used;
+                 let output_item =
+                   if compact
+                   then None
+                   else
+                     Some
+                       (`Assoc
+                         [ "ts_unix", `Float ts_unix
+                         ; "trace_id", `String trace_id
+                         ; "channel", `String channel_wire
+                         ; "context_ratio", `Null
+                         ; "context_tokens", `Null
+                         ; "context_max", `Null
+                         ; ( "message_count"
+                           , Json_util.int_opt_to_json
+                               (Safe_ops.json_int_opt "message_count" json) )
+                         ; "handoff_performed", `Bool handoff_performed
+                         ; ( "handoff"
+                           , if handoff_performed
+                             then
+                               `Assoc
+                                 [ "performed", `Bool true
+                                 ; ( "prev_trace_id"
+                                   , Json_util.string_opt_to_json
+                                       handoff_prev_trace_id )
+                                 ; ( "new_trace_id"
+                                   , Json_util.string_opt_to_json
+                                       handoff_new_trace_id )
+                                 ; ( "to_generation"
+                                   , Json_util.int_opt_to_json
+                                       handoff_new_generation )
+                                 ]
+                             else `Null )
+                         ; "generation", `Int generation
+                         ; "usage", usage_obj
+                         ; "latency_ms", `Int latency_ms
+                         ; ( "cost_usd"
+                           , Json_util.float_opt_to_json
+                               (Safe_ops.json_float_opt "cost_usd" json) )
+                         ; "prompt_fingerprint", member "prompt_fingerprint" json
+                         ; "prompt", member "prompt" json
+                         ; "ctx_composition", member "ctx_composition" json
+                         ; "runtime", runtime_obj
+                         ; "work_kind", `String work_kind
+                         ; "tool_call_count", `Int tool_call_count
+                         ; ( "tools_used"
+                           , `List
+                               (List.map
+                                  (fun tool -> `String tool)
+                                  tools_used) )
+                         ; ( "inference_telemetry"
+                           , json
+                             |> member "inference_telemetry"
+                             |> Keeper_hooks_oas
+                                  .redact_inference_telemetry_json )
+                         ])
+                 in
+                 (match output_item with
+                  | Some item -> acc, item :: items
+                  | None -> acc, items)
+             | _ -> acc, items))
+      (init_acc, [])
+      parsed_metrics
   in
   let items = List.rev items_rev in
-  let sample_points = List.length items in
-  let turn_points_int = acc.ma_turn_points in
-  let proactive_points_int = acc.ma_proactive_points in
-  let interaction_points_int = turn_points_int + proactive_points_int in
-  let fallback_rate =
-    if interaction_points_int = 0 then 0.0 else
-      float_of_int acc.ma_fallback_count /. float_of_int interaction_points_int
-  in
-  let proactive_fallback_rate =
-    if proactive_points_int = 0 then 0.0 else
-      float_of_int acc.ma_proactive_fallback_count /. float_of_int proactive_points_int
-  in
-  let intervention_share =
-    if interaction_points_int = 0 then 0.0
-    else float_of_int proactive_points_int /. float_of_int interaction_points_int
-  in
-  let intervention_per_turn =
-    if turn_points_int = 0 then 0.0
-    else float_of_int proactive_points_int /. float_of_int turn_points_int
-  in
-  let drift_applied_rate =
-    if interaction_points_int = 0 then 0.0
-    else float_of_int acc.ma_drift_applied_count /. float_of_int interaction_points_int
-  in
-
-  let compaction_saved_ratio =
-    if acc.ma_compaction_before_tokens = 0 then 0.0 else
-      float_of_int acc.ma_compaction_saved_tokens /. float_of_int acc.ma_compaction_before_tokens
-  in
-  let avg_compaction_saved_tokens =
-    if acc.ma_compaction_events = 0 then 0.0 else
-      float_of_int acc.ma_compaction_saved_tokens /. float_of_int acc.ma_compaction_events
-  in
+  let interaction_points = acc.ma_turn_points + acc.ma_proactive_points in
   let top_work_kinds =
     top_counts_json ~limit:5 ~name_key:"kind" work_kind_counts
   in
-  let top_models =
-    top_counts_json ~limit:5 ~name_key:"model" model_counts_window
-  in
   let top_tools =
     top_counts_json ~limit:5 ~name_key:"tool" tool_counts_window
-  in
-  let top_drift_reasons =
-    top_counts_json ~limit:5 ~name_key:"reason" drift_reason_counts
-  in
-  let top_compaction_triggers =
-    top_counts_json ~limit:5 ~name_key:"reason" compaction_trigger_counts
   in
   let generation_equipment =
     generation_stats
     |> Hashtbl.to_seq
     |> List.of_seq
-    |> List.sort (fun (ga, _) (gb, _) -> compare ga gb)
-    |> List.map (fun (generation, gs) ->
-         let top_model =
-           match top_count_name_and_count gs.models with
-           | Some (name, count) -> `Assoc [ ("name", `String name); ("count", `Int count) ]
-           | None -> `Null
-         in
+    |> List.sort (fun (left, _) (right, _) -> compare left right)
+    |> List.map (fun (generation, stats) ->
          let top_tool =
-           match top_count_name_and_count gs.tools with
-           | Some (name, count) -> `Assoc [ ("name", `String name); ("count", `Int count) ]
+           match top_count_name_and_count stats.tools with
+           | Some (name, count) ->
+               `Assoc [ "name", `String name; "count", `Int count ]
            | None -> `Null
          in
-         `Assoc [
-           ("generation", `Int generation);
-           ("turns", `Int gs.turns);
-           ("input_tokens", `Int gs.input_tokens);
-           ("output_tokens", `Int gs.output_tokens);
-           ("total_tokens", `Int gs.total_tokens);
-           ("handoffs", `Int gs.handoffs);
-           ("compactions", `Int gs.compactions);
-           ("first_ts_unix", `Float gs.first_ts);
-           ("last_ts_unix", `Float gs.last_ts);
-           ("top_model", top_model);
-           ("top_tool", top_tool);
-         ])
+         let usage_json value =
+           if stats.usage_points = 0 then `Null else `Int value
+         in
+         `Assoc
+           [ "generation", `Int generation
+           ; "turns", `Int stats.turns
+           ; "usage_points", `Int stats.usage_points
+           ; "input_tokens", usage_json stats.input_tokens
+           ; "output_tokens", usage_json stats.output_tokens
+           ; "total_tokens", usage_json stats.total_tokens
+           ; "handoffs", `Int stats.handoffs
+           ; "first_ts_unix", `Float stats.first_ts
+           ; "last_ts_unix", `Float stats.last_ts
+           ; "top_tool", top_tool
+           ])
   in
-  let summary = `Assoc [
-    ("sample_points", `Int sample_points);
-    ("window_sample_points", `Int sample_points);
-    ("turn_points", `Int turn_points_int);
-    ("window_turn_points", `Int turn_points_int);
-    ("heartbeat_points", `Int acc.ma_heartbeat_points);
-    ("window_heartbeat_points", `Int acc.ma_heartbeat_points);
-    ("proactive_points", `Int proactive_points_int);
-    ("window_proactive_points", `Int proactive_points_int);
-    ("window_interactions", `Int interaction_points_int);
-    ("window_turns", `Int turn_points_int);
-    ("window_series_max_lines", `Int series_points);
-    ("window_series_max_bytes", `Int metrics_window_max_bytes);
-    ("primary_model", if primary_model = "" then `Null else `String primary_model);
-    ("handoff_count", `Int acc.ma_handoff_count);
-    ("compaction_events", `Int acc.ma_compaction_events);
-    ("compaction_before_tokens", `Int acc.ma_compaction_before_tokens);
-    ("compaction_saved_tokens", `Int acc.ma_compaction_saved_tokens);
-    ("compaction_saved_ratio", `Float compaction_saved_ratio);
-    ("avg_compaction_saved_tokens", `Float avg_compaction_saved_tokens);
-    ("fallback_count", `Int acc.ma_fallback_count);
-    ("fallback_rate", `Float fallback_rate);
-    ("model_fallback_count", `Int acc.ma_fallback_count);
-    ("model_fallback_rate", `Float fallback_rate);
-    ("model_fallback_numerator", `Int acc.ma_fallback_count);
-    ("model_fallback_denominator", `Int interaction_points_int);
-    ("proactive_fallback_count", `Int acc.ma_proactive_fallback_count);
-    ("proactive_fallback_rate", `Float proactive_fallback_rate);
-    ("proactive_template_fallback_count", `Int acc.ma_proactive_fallback_count);
-    ("proactive_template_fallback_rate", `Float proactive_fallback_rate);
-    ("proactive_template_fallback_numerator", `Int acc.ma_proactive_fallback_count);
-    ("proactive_template_fallback_denominator", `Int proactive_points_int);
-    ("intervention_share", `Float intervention_share);
-    ("intervention_per_turn", `Float intervention_per_turn);
-    ("drift_applied_count", `Int acc.ma_drift_applied_count);
-    ("drift_applied_rate", `Float drift_applied_rate);
-
-    ("tool_call_count", `Int acc.ma_tool_call_count);
-    ("top_work_kinds", `List top_work_kinds);
-    ("top_models", `List top_models);
-    ("top_tools", `List top_tools);
-    ("top_drift_reasons", `List top_drift_reasons);
-    ("top_compaction_triggers", `List top_compaction_triggers);
-    ("generation_equipment", `List generation_equipment);
-  ] in
-  (items, summary, acc.ma_last_handoff, acc.ma_last_compaction)
+  let summary =
+    `Assoc
+      [ "sample_points", `Int acc.ma_sample_points
+      ; "window_sample_points", `Int acc.ma_sample_points
+      ; "turn_points", `Int acc.ma_turn_points
+      ; "window_turn_points", `Int acc.ma_turn_points
+      ; "heartbeat_points", `Int acc.ma_heartbeat_points
+      ; "window_heartbeat_points", `Int acc.ma_heartbeat_points
+      ; "proactive_points", `Int acc.ma_proactive_points
+      ; "window_proactive_points", `Int acc.ma_proactive_points
+      ; "window_interactions", `Int interaction_points
+      ; "window_turns", `Int acc.ma_turn_points
+      ; "window_series_max_lines", `Int series_points
+      ; "handoff_count", `Int acc.ma_handoff_count
+      ; "fallback_count", `Int acc.ma_fallback_count
+      ; ( "fallback_rate"
+        , ratio_json
+            acc.ma_fallback_count
+            acc.ma_fallback_observed_points )
+      ; "fallback_observed_points", `Int acc.ma_fallback_observed_points
+      ; ( "intervention_share"
+        , ratio_json acc.ma_proactive_points interaction_points )
+      ; ( "intervention_per_turn"
+        , ratio_json acc.ma_proactive_points acc.ma_turn_points )
+      ; "tool_call_count", `Int acc.ma_tool_call_count
+      ; "top_work_kinds", `List top_work_kinds
+      ; "top_tools", `List top_tools
+      ; "generation_equipment", `List generation_equipment
+      ]
+  in
+  items, summary, acc.ma_last_handoff

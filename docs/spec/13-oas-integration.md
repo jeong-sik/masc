@@ -343,12 +343,7 @@ MASC 조율 이벤트를 OAS `Event_bus`에 `Custom("masc:<type>", json)` 형식
 
 | Event Type | 발생 시점 |
 |-----------|----------|
-| `masc:broadcast` | agent broadcast 전송 |
-| `masc:heartbeat` | keeper heartbeat |
 | `masc:board_post` | board post 생성 |
-| `masc:task_transition` | task 상태 변경 |
-| `masc:heartbeat_recovered` | timeout 복구 |
-| `masc:keeper:snapshot` | keeper 상태 스냅샷 |
 | `masc:keeper:lifecycle` | keeper 시작/중단/충돌/재시작 |
 
 ### 8.2 SSE Relay (oas_event_bridge.ml)

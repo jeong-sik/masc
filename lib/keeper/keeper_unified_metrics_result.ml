@@ -83,20 +83,25 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     meta with
     updated_at = now_iso ();
     runtime = { rt with
-      usage = {
-        total_turns = rt.usage.total_turns + 1;
-        total_input_tokens = rt.usage.total_input_tokens + observed_input_tokens;
-        total_output_tokens =
-          rt.usage.total_output_tokens + observed_output_tokens;
-        total_tokens =
-          rt.usage.total_tokens + observed_total_tokens;
-        total_cost_usd = rt.usage.total_cost_usd +. turn_cost;
-        last_turn_ts = now_ts;
-        last_input_tokens = observed_input_tokens;
-        last_output_tokens = observed_output_tokens;
-        last_total_tokens = observed_total_tokens;
-        last_latency_ms = latency_ms;
-      };
+      usage =
+        with_last_reported_usage
+          {
+            rt.usage with
+            total_turns = rt.usage.total_turns + 1;
+            total_input_tokens =
+              rt.usage.total_input_tokens + observed_input_tokens;
+            total_output_tokens =
+              rt.usage.total_output_tokens + observed_output_tokens;
+            total_tokens = rt.usage.total_tokens + observed_total_tokens;
+            total_cost_usd = rt.usage.total_cost_usd +. turn_cost;
+            last_turn_ts = now_ts;
+            last_latency_ms = latency_ms;
+          }
+          ~usage_reported:result.usage_reported
+          ~input_tokens:observed_input_tokens
+          ~output_tokens:observed_output_tokens
+          ~total_tokens:observed_total_tokens
+          ~observed_at:now_ts;
       (* Deterministic scheduled autonomous cycle accounting is separated from
          nondeterministic model output visibility. *)
       proactive_rt = {

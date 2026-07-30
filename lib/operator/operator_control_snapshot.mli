@@ -27,16 +27,8 @@
     Internal helpers stay private at this boundary
     (everything else — see body of the .ml.  Notably:
     the operator snapshot cache implementation in
-    {!Operator_control_snapshot_cache}, the keeper-context
-    snapshot helpers,
-    [compute_context_ratio],
-    [keeper_context_snapshot] type +
-    [keeper_context_snapshot_is_empty] /
-    [keeper_context_snapshot_from_metrics_json] /
-    [latest_keeper_context_snapshot_from_files] /
-    [fallback_keeper_context_snapshot] /
-    [keeper_context_snapshot_of_meta] /
-    [keeper_context_snapshot_fields],
+    {!Operator_control_snapshot_cache}, the Keeper context-observation
+    projection,
     [action_result_status] / [confirmation_state] /
     [action_log_entry] types and their stringifiers,
     [action_log_path],
@@ -45,8 +37,7 @@
     [health_state_allows_runtime_status_override],
     [remote_client_type_of_context],
     [operator_server_profile_json],
-    [action_log_entry_to_yojson],
-    [cached_tool_audit_json], the snapshot dispatcher
+    [action_log_entry_to_yojson], the snapshot dispatcher
     family).
 
     Runtime pattern: {!Operator_control_action} does
@@ -131,16 +122,6 @@ val align_keeper_runtime_status :
     does not promote.  Specifically lifts [inactive] /
     [offline] surface labels to the live runtime status. *)
 
-(** {1 Context ratio} *)
-
-val compute_context_ratio :
-  Keeper_meta_contract.keeper_meta -> float option
-(** Returns [used_tokens / context_budget] when the
-    keeper meta has a resolved context budget, [None]
-    otherwise.  Pinned because
-    [test/test_operator_control_snapshot.ml] exercises
-    the ratio calculation across budget edge cases. *)
-
 (** {1 Runtime-include consumer re-exports} *)
 
 val remote_confirm_ttl_seconds : float
@@ -223,17 +204,6 @@ val recent_actions_json : Workspace.config -> Yojson.Safe.t
     as a [`List].  Returns [`List []] when the log file
     is missing.  Pinned for the same runtime-include
     reason as {!snapshot_json}. *)
-
-val cached_tool_audit_json :
-  lightweight:bool ->
-  Workspace.config ->
-  Keeper_meta_contract.keeper_meta ->
-  Yojson.Safe.t
-(** Returns the cached tool-audit JSON for a keeper.
-    [lightweight=true] uses the 120-second stale-fallback
-    seed and a 30-second TTL; [lightweight=false] uses a
-    2-second TTL for fresh dashboard reads.  Pinned for
-    [test/test_operator_control_snapshot.ml]. *)
 
 val get_payload : Yojson.Safe.t -> Yojson.Safe.t
 (** Extracts the [payload] field from a JSON args object,

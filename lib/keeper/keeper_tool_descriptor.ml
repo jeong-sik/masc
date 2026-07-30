@@ -1600,8 +1600,9 @@ let internal_descriptors : t list =
       ~id:"keeper.context.status"
       ~name:"keeper_context_status"
       ~description:
-        "Return current context window usage and recent-message stats for \
-         this keeper turn."
+        "Return persisted checkpoint, recent-message, memory, and sandbox \
+         state for this keeper turn. Context-window occupancy is not \
+         currently observed."
       ~input_schema:empty_object_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_context_status

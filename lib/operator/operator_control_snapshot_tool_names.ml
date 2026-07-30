@@ -18,34 +18,31 @@ let merge_tool_name_lists primary secondary =
 ;;
 
 let tool_names_of_recent_json (json : Yojson.Safe.t) =
-  let tools_used = Json_util.get_string_list json "tools_used" in
-  let single_tool =
-    match Json_util.get_string json "tool" with
-    | Some value when String.trim value <> "" -> [ value ]
-    | _ -> []
-  in
-  merge_tool_name_lists single_tool tools_used
+  match Keeper_metrics_record.kind_of_json json with
+  | Some Keeper_metrics_record.Turn ->
+      Json_util.get_string_list json "tools_used"
+  | Some Keeper_metrics_record.Heartbeat | None -> []
 ;;
 
 let collect_recent_tool_names ?(limit = 8) (lines : string list) =
-  let ordered = List.rev lines in
+  let parsed, _ =
+    Fs_compat.parse_jsonl_lines
+      ~source:"operator_tool_audit_keeper_metrics"
+      lines
+  in
+  let ordered = List.rev parsed in
   let rec loop acc remaining = function
     | _ when remaining <= 0 -> List.rev acc
     | [] -> List.rev acc
-    | line :: rest ->
-      (try
-         let json = Yojson.Safe.from_string line in
-         let tools = tool_names_of_recent_json json in
-         let merged = merge_tool_name_lists (List.rev acc) tools in
-         let capped =
-           if List.length merged <= limit
-           then merged
-           else List.filteri (fun idx _ -> idx < limit) merged
-         in
-         loop (List.rev capped) (limit - List.length capped) rest
-       with
-       | Yojson.Json_error _ -> loop acc remaining rest)
+    | json :: rest ->
+        let tools = tool_names_of_recent_json json in
+        let merged = merge_tool_name_lists (List.rev acc) tools in
+        let capped =
+          if List.length merged <= limit
+          then merged
+          else List.filteri (fun idx _ -> idx < limit) merged
+        in
+        loop (List.rev capped) (limit - List.length capped) rest
   in
   loop [] limit ordered
 ;;
-

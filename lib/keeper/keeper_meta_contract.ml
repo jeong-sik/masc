@@ -334,8 +334,28 @@ type usage_metrics =
   ; last_input_tokens : int
   ; last_output_tokens : int
   ; last_total_tokens : int
+  ; last_usage_reported_at : float option
   ; last_latency_ms : int
   }
+
+let with_last_reported_usage
+      (metrics : usage_metrics)
+      ~(usage_reported : bool)
+      ~(input_tokens : int)
+      ~(output_tokens : int)
+      ~(total_tokens : int)
+      ~(observed_at : float)
+  =
+  if usage_reported then
+    {
+      metrics with
+      last_input_tokens = input_tokens;
+      last_output_tokens = output_tokens;
+      last_total_tokens = total_tokens;
+      last_usage_reported_at = Some observed_at;
+    }
+  else metrics
+;;
 
 type agent_runtime_state =
   { usage : usage_metrics
@@ -663,6 +683,7 @@ let zero_usage : usage_metrics =
   ; last_input_tokens = 0
   ; last_output_tokens = 0
   ; last_total_tokens = 0
+  ; last_usage_reported_at = None
   ; last_latency_ms = 0
   }
 ;;

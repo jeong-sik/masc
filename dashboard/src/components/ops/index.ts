@@ -60,11 +60,11 @@ export function contextMetricsDiagnostics(snapshot: OperatorSnapshot | null): Co
   if (!snapshot) return []
   const keepers = snapshot.keepers
     .filter((keeper): keeper is OperatorKeeperSnapshot & { context_metrics_unavailable: OperatorContextMetricsUnavailable } =>
-      keeper.context_metrics_unavailable !== undefined)
+      keeper.context_metrics_unavailable != null)
     .map(keeper => ({ keeper, source: 'keeper' as const, error: keeper.context_metrics_unavailable }))
   const persistentAgents = (snapshot.persistent_agents ?? [])
     .filter((keeper): keeper is OperatorKeeperSnapshot & { context_metrics_unavailable: OperatorContextMetricsUnavailable } =>
-      keeper.context_metrics_unavailable !== undefined)
+      keeper.context_metrics_unavailable != null)
     .map(keeper => ({ keeper, source: 'persistent_agent' as const, error: keeper.context_metrics_unavailable }))
   const byName = new Map<string, ContextMetricsDiagnostic>()
   for (const diagnostic of [...keepers, ...persistentAgents]) {
@@ -79,7 +79,7 @@ export function contextMetricsDiagnostics(snapshot: OperatorSnapshot | null): Co
 function renderContextMetricsDiagnostic(diagnostic: ContextMetricsDiagnostic) {
   const { keeper, source, error } = diagnostic
   const sourceLabel = source === 'keeper' ? 'Keeper' : 'Persistent agent'
-  if (error.kind === 'invalid_payload') {
+  if (error.kind === 'not_observed') {
     return html`
       <li
         class="grid gap-1 text-sm text-[var(--color-fg-primary)]"
@@ -87,16 +87,10 @@ function renderContextMetricsDiagnostic(diagnostic: ContextMetricsDiagnostic) {
         data-error-kind=${error.kind}
       >
         <strong>${sourceLabel} ${keeper.name}</strong>
-        <span>invalid context metrics diagnostic</span>
-        ${error.reported_kind ? html`<span>kind: ${error.reported_kind}</span>` : null}
-        ${error.reported_reason ? html`<span>reason: ${error.reported_reason}</span>` : null}
+        <span>context measurement not observed</span>
       </li>
     `
   }
-
-  const location = error.kind === 'malformed_json' && error.line_number !== null
-    ? `${error.path}:${error.line_number}`
-    : error.path
   return html`
     <li
       class="grid gap-1 text-sm text-[var(--color-fg-primary)]"
@@ -104,9 +98,9 @@ function renderContextMetricsDiagnostic(diagnostic: ContextMetricsDiagnostic) {
       data-error-kind=${error.kind}
     >
       <strong>${sourceLabel} ${keeper.name}</strong>
-      <span>${error.reason}</span>
-      ${location ? html`<span>${location}</span>` : null}
-      <span>${error.detail}</span>
+      <span>invalid context metrics diagnostic</span>
+      ${error.reported_kind ? html`<span>kind: ${error.reported_kind}</span>` : null}
+      ${error.reported_reason ? html`<span>reason: ${error.reported_reason}</span>` : null}
     </li>
   `
 }

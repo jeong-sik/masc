@@ -614,68 +614,6 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).not.toContain('model=glm-5.1')
   })
 
-  it('collapses interleaved heartbeat + oas snapshot polling across multiple keepers into one group (#13002)', async () => {
-    const { buildTelemetryDisplayItems } = await loadPanel(
-      vi.fn().mockResolvedValue(baseTelemetry),
-      vi.fn().mockResolvedValue(baseSummary),
-    )
-    // Reproduces the screenshot: 14 keepers each emit alternating
-    // [oas_event masc:keeper:snapshot] + [keeper_metric heartbeat] within
-    // the same 60s window, so the 100-entry stream is 100% polling and
-    // real activity is invisible.  Expectation: one collapsed
-    // 'fleet heartbeat' group plus the real entry.
-    type Entry = Parameters<typeof buildTelemetryDisplayItems>[0][number]
-    const keepers = Array.from({ length: 14 }, (_, i) => `keeper-${i}`)
-    const polling: Entry[] = keepers.flatMap((name, i) => {
-      const ts = 1_775_709_400 - i
-      return [
-        {
-          source: 'oas_event' as const,
-          ts,
-          event_type: 'masc:keeper:snapshot',
-          agent_name: name,
-        },
-        {
-          source: 'keeper_metric' as const,
-          ts,
-          name,
-          channel: 'heartbeat',
-          model_used: '',
-          tool_call_count: 0,
-        },
-      ]
-    })
-    const realActivity: Entry = {
-      source: 'tool_call_io',
-      ts: 1_775_709_500,
-      keeper: 'keeper-3',
-      tool: 'board_post',
-    }
-
-    const items = buildTelemetryDisplayItems([realActivity, ...polling])
-
-    // The 28 polling rows must collapse to a single fleet-heartbeat group.
-    const heartbeatGroups = items.filter(
-      i => i.kind === 'group' && i.category === 'heartbeat',
-    )
-    expect(heartbeatGroups).toHaveLength(1)
-    expect(heartbeatGroups[0]).toMatchObject({
-      kind: 'group',
-      category: 'heartbeat',
-      label: 'fleet heartbeat',
-      count: 28,
-    })
-
-    // Real activity entry must still surface.
-    const realRow = items.find(
-      i => i.kind === 'entry' && i.entry.source === 'tool_call_io',
-    )
-    expect(realRow).toBeTruthy()
-
-    // Total visible rows = 1 fleet-heartbeat group + 1 real entry.
-    expect(items).toHaveLength(2)
-  })
-
   it('uses trajectory and execution receipt fields for telemetry previews', async () => {
     const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadPanel(
       vi.fn().mockResolvedValue(baseTelemetry),

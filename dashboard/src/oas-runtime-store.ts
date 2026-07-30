@@ -14,11 +14,9 @@ import {
   recordOasEvidenceRefs,
   recordOasLlmCall,
   resetOasRuntimeSignals,
-  updateOasKeeperSnapshot,
 } from './store'
 import type {
   OasKeeperLifecycleEvent,
-  OasKeeperSnapshot,
 } from './types/oas'
 
 type OasRuntimeEnvelope = Record<string, unknown> & {
@@ -328,15 +326,6 @@ function ingestRuntimeProjection(
   const agentName = agentNameFromEnvelope(event)
   recordEvidenceRefsForEvent(event)
   switch (event.type) {
-    case 'oas:masc:keeper:snapshot':
-      updateOasKeeperSnapshot({
-        keeper_name: asString(payload.keeper_name) ?? '',
-        generation: asNumber(payload.generation, 0),
-        context_ratio: asNumber(payload.context_ratio, 0),
-        message_count: asNumber(payload.message_count, 0),
-        timestamp: asNumber(payload.timestamp) ?? eventUnixSeconds(event),
-      } satisfies OasKeeperSnapshot)
-      return
     case 'oas:masc:keeper:lifecycle':
       {
         const lifecycle = keeperLifecycleEvent(event)

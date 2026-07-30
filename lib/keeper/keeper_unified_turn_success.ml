@@ -123,7 +123,6 @@ let append_metrics_snapshot
       ~turn_cost
       ~turn_generation:lifecycle.KEC.turn_generation
       ~channel
-      ~snapshot_source:"keeper_unified_turn"
       ~checkpoint_bytes:lifecycle.checkpoint_bytes
       ~message_count:lifecycle.message_count
       ~handoff_json:lifecycle.handoff_json

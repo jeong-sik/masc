@@ -37,11 +37,6 @@ interface KeeperActivityDisplayOptions {
   includeCreated?: boolean
 }
 
-interface KeeperModelDisplay {
-  label: string
-  value: string
-}
-
 interface KeeperRuntimeDisplay {
   label: string
   value: string
@@ -53,16 +48,6 @@ export interface KeeperPauseDisplay {
   diagnostic: string | null
   detail: string
   title: string
-}
-
-type KeeperModelDisplaySource = {
-  last_model_used_label?: string | null
-  last_model_used?: string | null
-  active_model_label?: string | null
-  active_model?: string | null
-  model?: string | null
-  primary_model?: string | null
-  metrics_series?: Array<{ model_used?: string | null } | null> | null
 }
 
 type KeeperRuntimeDisplaySource = {
@@ -98,12 +83,6 @@ function trimmed(value: string | null | undefined): string | null {
 
 export function normalizeKeeperBlockerText(value: string | null | undefined): string | null {
   return trimmed(value)
-}
-
-export function keeperDisplayModel(
-  _source: KeeperModelDisplaySource | null | undefined,
-): KeeperModelDisplay | null {
-  return null
 }
 
 export function keeperDisplayRuntime(

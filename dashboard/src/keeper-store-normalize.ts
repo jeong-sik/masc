@@ -1,7 +1,9 @@
 import type {
   CtxCompositionTelemetry,
   Keeper,
+  KeeperContextMetricsUnavailable,
   KeeperLifecycleState,
+  KeeperLastTurnUsage,
   KeeperMetricPoint,
   KeeperPhase,
   KeeperProfileConfigErrorKind,
@@ -20,7 +22,6 @@ import {
   asKeeperRuntimeBlockerState,
 } from './lib/keeper-runtime-state'
 import { normalizeStopCause } from './lib/stop-cause'
-import { contextThresholds } from './config/context-thresholds'
 import { normalizeKeeperDiagnostic } from './keeper-state'
 import type { RuntimeRef } from './types'
 
@@ -31,6 +32,50 @@ function normalizeRuntimeRef(raw: unknown): RuntimeRef | null {
   if (!group) return null
   const item = asString(raw.item) ?? null
   return { group, item }
+}
+
+export function normalizeKeeperContextMetricsUnavailable(
+  raw: unknown,
+): KeeperContextMetricsUnavailable | null {
+  if (raw === null || raw === undefined) return null
+  if (!isRecord(raw)) {
+    return { kind: 'invalid_payload', reported_kind: null, reported_reason: null }
+  }
+
+  const kind = asString(raw.kind) ?? null
+  const reason = asString(raw.reason) ?? null
+  if (kind === 'not_observed' && reason === 'context_measurement_missing') {
+    return { kind, reason }
+  }
+
+  return { kind: 'invalid_payload', reported_kind: kind, reported_reason: reason }
+}
+
+export function normalizeKeeperLastTurnUsage(raw: unknown): KeeperLastTurnUsage | null {
+  if (!isRecord(raw) || raw.source !== 'keeper_runtime_usage') return null
+  const inputTokens = asNumber(raw.input_tokens)
+  const outputTokens = asNumber(raw.output_tokens)
+  const totalTokens = asNumber(raw.total_tokens)
+  if (
+    inputTokens === undefined
+    || outputTokens === undefined
+    || totalTokens === undefined
+    || !Number.isSafeInteger(inputTokens)
+    || !Number.isSafeInteger(outputTokens)
+    || !Number.isSafeInteger(totalTokens)
+    || inputTokens < 0
+    || outputTokens < 0
+    || totalTokens < 0
+  ) {
+    return null
+  }
+  return {
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    total_tokens: totalTokens,
+    observed_at: asString(raw.observed_at) ?? null,
+    source: 'keeper_runtime_usage',
+  }
 }
 
 function normalizeKeeperLiveActivitySource(raw: unknown): Keeper['last_activity_source'] {
@@ -286,12 +331,6 @@ export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
   const latest = series[series.length - 1]
   if (!latest) return 'idle'
   if (latest.is_handoff) return 'handoff-imminent'
-  if (latest.is_compaction) return 'compacting'
-  const ratio = latest.context_ratio
-  const thresholds = contextThresholds.value
-  if (ratio > thresholds.critical) return 'handoff-imminent'
-  if (ratio > thresholds.warn) return 'preparing'
-  if (ratio > thresholds.compacting) return 'compacting'
   return 'active'
 }
 
@@ -424,18 +463,12 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
     .map((item): KeeperMetricPoint | null => {
       if (!isRecord(item)) return null
       const ts = asNumber(item.ts_unix)
-      const contextRatio = asNumber(item.context_ratio)
-      if (ts == null || contextRatio == null) return null
+      if (ts == null) return null
       const handoffObj = isRecord(item.handoff) ? item.handoff : null
       const handoffPerformed =
-        handoffObj != null
-          ? (item.handoff_performed === true || handoffObj.performed === true)
-          : item.handoff === true || item.handoff_performed === true
+        item.handoff_performed === true && handoffObj?.performed === true
       const handoffNewGeneration =
-        handoffObj
-          ? (asNumber(handoffObj.new_generation) ?? asNumber(handoffObj.to_generation) ?? null)
-          : (asNumber(item.handoff_new_generation) ?? null)
-      const handoffToModel = null
+        handoffObj ? (asNumber(handoffObj.to_generation) ?? null) : null
       const rawPrompt = isRecord(item.prompt) ? item.prompt : null
       const rawUsage = isRecord(item.usage) ? item.usage : null
       const promptSegments: NonNullable<PromptTelemetry['segments']> =
@@ -497,19 +530,14 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
       const firstFallback = fallbackEvents.length > 0 && isRecord(fallbackEvents[0]) ? fallbackEvents[0] : null
       return {
         ts,
-        context_ratio: contextRatio,
-        context_tokens: asNumber(item.context_tokens) ?? 0,
-        context_max: asNumber(item.context_max) ?? 0,
+        context_ratio: null,
+        context_tokens: null,
+        context_max: null,
         latency_ms: latencyMs,
         generation: asNumber(item.generation) ?? 0,
         channel: typeof item.channel === 'string' ? item.channel : 'turn',
         is_handoff: handoffPerformed,
-        is_compaction: item.compacted === true,
-        compaction_saved_tokens: asNumber(item.compaction_saved_tokens) ?? 0,
-        compaction_trigger: typeof item.compaction_trigger === 'string' ? item.compaction_trigger : null,
-        model_used: '',
         cost_usd: asNumber(item.cost_usd) ?? Number.NaN,
-        handoff_to_model: handoffToModel,
         handoff_new_generation: handoffNewGeneration,
         prompt_fingerprint: promptFingerprint,
         prompt_metrics,
@@ -521,13 +549,10 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         inference_telemetry,
         runtime_id: runtimeObj ? (asString(runtimeObj.runtime_id) ?? asString(runtimeObj.name) ?? null) : null,
         runtime_outcome: runtimeObj ? (asString(runtimeObj.outcome) ?? null) : null,
-        runtime_selected_model: null,
         runtime_attempt_count: runtimeObj ? (asNumber(runtimeObj.attempt_count) ?? null) : null,
         runtime_strategy: runtimeObj && typeof runtimeObj.strategy === 'string' ? runtimeObj.strategy : null,
         fallback_applied: runtimeObj ? runtimeObj.fallback_applied === true : false,
         fallback_hops: runtimeObj ? (asNumber(runtimeObj.fallback_hops) ?? 0) : 0,
-        fallback_from: null,
-        fallback_to: null,
         fallback_reason: firstFallback && typeof firstFallback.reason === 'string' ? firstFallback.reason : null,
       }
     })
@@ -536,8 +561,7 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
 
 // Top-N list keys that contain arrays of { tool/kind/model/..., count } objects
 const TOP_LIST_KEYS = new Set([
-  'top_tools', 'top_work_kinds', 'top_models',
-  'top_drift_reasons', 'top_compaction_triggers', 'generation_equipment',
+  'top_tools', 'top_work_kinds', 'generation_equipment',
 ])
 
 function normalizeMetricsWindow(raw: unknown): Keeper['metrics_window'] | undefined {
@@ -598,7 +622,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
       const name = asString(row.name)
       if (!name) return null
 
-      const contextRatio = asNumber(row.context_ratio) ?? asNumber(contextRaw?.context_ratio)
+      const contextRatio = null
       const statusRaw = asString(row.status) ?? asString(agentRaw?.status) ?? 'offline'
       const model = undefined
       const metricsSeries = normalizeMetricsSeries(row.metrics_series)
@@ -606,10 +630,10 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
       const normalizedContext =
         contextRaw
           ? {
-              source: asString(contextRaw.source),
-              context_ratio: asNumber(contextRaw.context_ratio),
-              context_tokens: asNumber(contextRaw.context_tokens),
-              context_max: asNumber(contextRaw.context_max),
+              source: null,
+              context_ratio: null,
+              context_tokens: null,
+              context_max: null,
               message_count: asNumber(contextRaw.message_count),
               has_checkpoint: typeof contextRaw.has_checkpoint === 'boolean' ? contextRaw.has_checkpoint : undefined,
             }
@@ -744,9 +768,11 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_blocker: asString(row.last_blocker) ?? null,
         runtime_warning_ctx_ratio: asNumber(row.runtime_warning_ctx_ratio) ?? null,
         context_ratio: contextRatio,
-        context_tokens: asNumber(row.context_tokens) ?? asNumber(contextRaw?.context_tokens),
-        context_max: asNumber(row.context_max) ?? asNumber(contextRaw?.context_max),
-        context_source: asString(row.context_source) ?? asString(contextRaw?.source),
+        context_tokens: null,
+        context_max: null,
+        context_source: null,
+        context_metrics_unavailable: normalizeKeeperContextMetricsUnavailable(row.context_metrics_unavailable),
+        last_turn_usage: normalizeKeeperLastTurnUsage(row.last_turn_usage),
         context: normalizedContext,
         traits: asStringArray(row.traits),
         interests: asStringArray(row.interests),

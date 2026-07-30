@@ -3,7 +3,6 @@ import { KEEPER_RUNTIME_BLOCKER_CLASSES } from '../types'
 import type { Keeper, KeeperRuntimeBlockerClass } from '../types'
 import {
   keeperActivityDisplay,
-  keeperDisplayModel,
   keeperDisplayRuntime,
   keeperDisplayStatus,
   keeperPauseDisplay,
@@ -126,62 +125,6 @@ describe('keeperDisplayStatus', () => {
       })
       expect(keeperDisplayStatus(keeper)).toBe('dead')
     })
-  })
-})
-
-describe('keeperDisplayModel', () => {
-  it('redacts active runtime labels', () => {
-    expect(
-      keeperDisplayModel({
-        active_model_label: 'claude-code:auto',
-        active_model: 'claude',
-        model: 'claude',
-      }),
-    ).toBeNull()
-  })
-
-  it('does not fall back to metrics-series model labels', () => {
-    expect(
-      keeperDisplayModel({
-        active_model: 'claude-code:auto',
-        metrics_series: [
-          { model_used: 'openai:gpt-5.4' },
-          { model_used: 'anthropic:claude-sonnet' },
-        ],
-      }),
-    ).toBeNull()
-  })
-
-  it('redacts even non-placeholder legacy labels', () => {
-    expect(
-      keeperDisplayModel({
-        last_model_used: 'unknown',
-        active_model: 'claude-code:auto',
-        model: 'claude',
-      }),
-    ).toBeNull()
-  })
-
-  it('redacts provider auto labels and primary model labels', () => {
-    expect(
-      keeperDisplayModel({
-        last_model_used_label: 'default',
-        last_model_used: 'auto',
-        active_model_label: 'codex-cli:auto',
-        primary_model: 'openai:gpt-5.4',
-      }),
-    ).toBeNull()
-  })
-
-  it('redacts metrics-only model labels', () => {
-    expect(
-      keeperDisplayModel({
-        metrics_series: [
-          { model_used: 'openai:gpt-5.4' },
-          { model_used: 'anthropic:claude-sonnet' },
-        ],
-      }),
-    ).toBeNull()
   })
 })
 

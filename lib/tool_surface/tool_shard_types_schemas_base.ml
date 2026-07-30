@@ -15,14 +15,14 @@ let base_tools : Masc_domain.tool_schema list =
   ; (* Context status *)
     { name = "keeper_context_status"
     ; description =
-        "Check your own context window usage and session state. Returns: name (your \
-         keeper name), context_ratio (0.0-1.0), context_tokens, context_max, \
-         message_count, generation, last_model_used, and canonical \
-         sandbox paths (sandbox_root, sandbox_mind, sandbox_repos) plus backend/profile \
-         metadata. sandbox paths are tool-ready and can be passed directly as path or \
-         cwd to keeper tools without prefix. Use when deciding whether to compact \
-         context, extend turns, hand off to the next generation, or resolve a path \
-         without string-interpolating your own keeper name."
+        "Check your own persisted checkpoint and session state. Returns: name (your \
+         keeper name), checkpoint_bytes, message_count, generation, memory fact counts, \
+         sandbox health, and canonical sandbox paths (sandbox_root, sandbox_mind, \
+         sandbox_repos) plus backend/profile metadata. Context-window occupancy is not \
+         currently observed and is not returned. sandbox paths are tool-ready and can be \
+         passed directly as path or cwd to keeper tools without prefix. Use when checking \
+         checkpoint/session continuity or resolving a path without string-interpolating \
+         your own keeper name."
     ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
     }
   ; (* Memory *)

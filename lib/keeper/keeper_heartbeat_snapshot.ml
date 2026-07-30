@@ -37,7 +37,8 @@ let write_heartbeat_snapshot
   in
     let snapshot =
       `Assoc
-        [ "ts", `String (now_iso ())
+        (Keeper_metrics_record.fields Keeper_metrics_record.Heartbeat
+        @ [ "ts", `String (now_iso ())
         ; "ts_unix", `Float now_ts
         ; "channel", `String "heartbeat"
         ; "name", `String meta_current.name
@@ -46,13 +47,10 @@ let write_heartbeat_snapshot
         ; "generation", `Int meta_current.runtime.nonce
         ; ( "message_count"
           , Json_util.option_to_yojson (fun count -> `Int count) message_count )
-        ; "compacted", `Bool false
-        ; "work_kind", `String "status_tick"
-        ; "snapshot_source", `String "keeper_context_status"
         ; "memory_check", memory_check_default_json ()
         ; "handoff", `Assoc [ "performed", `Bool false ]
         ; "stage_timing", Keeper_keepalive_signal.stage_timing_to_json ~ring:timing_ring ~count:timing_filled
-        ]
+        ])
     in
     Dated_jsonl.append metrics_store snapshot;
     (try

@@ -130,13 +130,20 @@ export function getSurfaceContext(selectedKeeperId?: string | null): SurfaceCont
   const total = keepers.value.length
   const att = keepers.value.filter(k => k.needs_attention).length
   const traces = keepers.value.reduce((a, k) => a + (typeof k.total_turns === 'number' ? k.total_turns : 0), 0)
-  const avgContextRatio = total > 0
-    ? keepers.value.reduce((a, k) => a + (typeof k.context_ratio === 'number' ? k.context_ratio : 0), 0) / total
-    : 0
+  const observedContextRatios = keepers.value
+    .map(k => k.context_ratio)
+    .filter((ratio): ratio is number => typeof ratio === 'number')
+  const avgContextRatio = observedContextRatios.length > 0
+    ? observedContextRatios.reduce((sum, ratio) => sum + ratio, 0) / observedContextRatios.length
+    : null
   const fleetFields: SurfaceContext['fields'] = [
     { k: '실행', v: `${run}/${total}` },
     { k: '주의', v: String(att), tone: att > 0 ? 'bad' : undefined },
-    { k: 'ctx', v: `${Math.round(avgContextRatio * 100)}%`, tone: avgContextRatio >= 0.85 ? 'warn' : 'volt' },
+    {
+      k: 'ctx',
+      v: avgContextRatio == null ? '미관측' : `${Math.round(avgContextRatio * 100)}%`,
+      tone: avgContextRatio == null ? undefined : avgContextRatio >= 0.85 ? 'warn' : 'volt',
+    },
   ]
 
   switch (tab) {
@@ -148,11 +155,15 @@ export function getSurfaceContext(selectedKeeperId?: string | null): SurfaceCont
       break
     case 'keepers':
       if (selectedKeeper) {
-        const ctx = typeof selectedKeeper.context_ratio === 'number' ? selectedKeeper.context_ratio : 0
+        const ctx = typeof selectedKeeper.context_ratio === 'number' ? selectedKeeper.context_ratio : null
         base.scene = `${selectedKeeper.koreanName ?? selectedKeeper.name}와 1:1 스레드`
         base.fields = [
           { k: 'state', v: selectedKeeper.phase ?? selectedKeeper.status },
-          { k: 'ctx', v: `${Math.round(ctx * 100)}%`, tone: ctx >= 0.85 ? 'warn' : 'volt' },
+          {
+            k: 'ctx',
+            v: ctx == null ? '미관측' : `${Math.round(ctx * 100)}%`,
+            tone: ctx == null ? undefined : ctx >= 0.85 ? 'warn' : 'volt',
+          },
           { k: 'ns', v: selectedKeeper.runtime_canonical ?? selectedKeeper.runtime_id ?? '-' },
         ]
       } else {
@@ -182,11 +193,15 @@ export function getSurfaceContext(selectedKeeperId?: string | null): SurfaceCont
       break
     case 'monitoring': {
       if (selectedKeeper) {
-        const ctx = typeof selectedKeeper.context_ratio === 'number' ? selectedKeeper.context_ratio : 0
+        const ctx = typeof selectedKeeper.context_ratio === 'number' ? selectedKeeper.context_ratio : null
         base.scene = `${selectedKeeper.koreanName ?? selectedKeeper.name}와 1:1 스레드`
         base.fields = [
           { k: 'state', v: selectedKeeper.phase ?? selectedKeeper.status },
-          { k: 'ctx', v: `${Math.round(ctx * 100)}%`, tone: ctx >= 0.85 ? 'warn' : 'volt' },
+          {
+            k: 'ctx',
+            v: ctx == null ? '미관측' : `${Math.round(ctx * 100)}%`,
+            tone: ctx == null ? undefined : ctx >= 0.85 ? 'warn' : 'volt',
+          },
           { k: 'ns', v: selectedKeeper.runtime_canonical ?? selectedKeeper.runtime_id ?? '-' },
         ]
       }

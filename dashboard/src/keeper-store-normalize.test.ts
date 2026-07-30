@@ -174,43 +174,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     })
   })
 
-  it('accepts flat backend handoff fields', () => {
-    const [keeper] = normalizeKeepers([
-      {
-        name: 'alpha',
-        status: 'active',
-        metrics_series: [
-          {
-            ts_unix: 1,
-            context_ratio: 0.92,
-            context_tokens: 920,
-            context_max: 1000,
-            latency_ms: 120,
-            generation: 3,
-            channel: 'turn',
-            model_used: 'glm-5',
-            cost_usd: 0.12,
-            compacted: false,
-            handoff_performed: true,
-            handoff_to_model: 'glm-5',
-            handoff_new_generation: 4,
-          },
-        ],
-      },
-    ])
-
-    expect(keeper?.metrics_series).toHaveLength(1)
-    const metric = keeper!.metrics_series![0]
-    expect(metric).toMatchObject({
-      is_handoff: true,
-      is_compaction: false,
-      handoff_to_model: null,
-      handoff_new_generation: 4,
-    })
-    expect(deriveLifecycleState(keeper!)).toBe('handoff-imminent')
-  })
-
-  it('accepts nested handoff objects with to_generation fallback', () => {
+  it('accepts the current nested handoff contract', () => {
     const [keeper] = normalizeKeepers([
       {
         name: 'beta',
@@ -224,12 +188,10 @@ describe('normalizeKeepers lifecycle metrics', () => {
             latency_ms: 140,
             generation: 5,
             channel: 'turn',
-            model_used: 'llama:test-balanced',
             cost_usd: 0.2,
-            compacted: false,
+            handoff_performed: true,
             handoff: {
               performed: true,
-              to_model: 'llama:test-balanced',
               to_generation: 6,
             },
           },
@@ -241,48 +203,12 @@ describe('normalizeKeepers lifecycle metrics', () => {
     const metric = keeper!.metrics_series![0]
     expect(metric).toMatchObject({
       is_handoff: true,
-      handoff_to_model: null,
       handoff_new_generation: 6,
     })
     expect(deriveLifecycleState(keeper!)).toBe('handoff-imminent')
   })
 
-  it('marks compaction events as compacting', () => {
-    const [keeper] = normalizeKeepers([
-      {
-        name: 'gamma',
-        status: 'active',
-        metrics_series: [
-          {
-            ts_unix: 3,
-            context_ratio: 0.61,
-            context_tokens: 610,
-            context_max: 1000,
-            latency_ms: 90,
-            generation: 1,
-            channel: 'turn',
-            model_used: 'llama:auto',
-            cost_usd: 0.01,
-            compacted: true,
-            compaction_saved_tokens: 240,
-            compaction_trigger: 'ratio(0.9100>=0.8500)',
-          },
-        ],
-      },
-    ])
-
-    expect(keeper?.metrics_series).toHaveLength(1)
-    const metric = keeper!.metrics_series![0]
-    expect(metric).toMatchObject({
-      is_handoff: false,
-      is_compaction: true,
-      compaction_saved_tokens: 240,
-      compaction_trigger: 'ratio(0.9100>=0.8500)',
-    })
-    expect(deriveLifecycleState(keeper!)).toBe('compacting')
-  })
-
-  it('keeps runtime tool audit fields out of shell rows', () => {
+  it('keeps runtime tool audit fields while ignoring retired context source', () => {
     const [keeper] = normalizeKeepers([
       {
         name: 'delta',
@@ -302,7 +228,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
       latest_tool_call_count: 2,
       tool_audit_source: 'heartbeat_result',
       tool_audit_at: '2026-04-02T08:30:00Z',
-      context_source: 'metrics_log',
+      context_source: null,
       recent_input_preview: 'operator asked for a refresh',
       recent_output_preview: 'keeper acknowledged the request',
     })
@@ -324,7 +250,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
             channel: 'turn',
             model_used: 'glm-5',
             cost_usd: 0.03,
-            compacted: false,
             prompt_fingerprint: 'prompt-fp-001',
             prompt: {
               fingerprint: 'prompt-fp-001',
@@ -651,17 +576,13 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(keeper?.last_model_used).toBeUndefined()
     expect(keeper?.metrics_series?.[0]).toMatchObject({
       runtime_id: 'primary',
-      runtime_selected_model: null,
       runtime_attempt_count: 2,
       runtime_outcome: 'passed_to_next_model',
       runtime_strategy: 'round_robin',
       fallback_applied: true,
       fallback_hops: 1,
-      fallback_from: null,
-      fallback_to: null,
       fallback_reason: 'turn_timeout',
     })
-    expect(keeper?.metrics_series?.[0]?.model_used).toBe('')
   })
 
   it('normalizes ctx composition telemetry from keeper metric points', () => {
@@ -680,7 +601,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
             channel: 'turn',
             model_used: 'glm-5',
             cost_usd: 0.04,
-            compacted: false,
             ctx_composition: {
               actual_input_tokens: 1000,
               attributed_bytes: 1160,
@@ -726,7 +646,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
             channel: 'turn',
             model_used: 'glm-5',
             cost_usd: 0.05,
-            compacted: false,
             usage: {
               input_tokens: 120,
               output_tokens: 80,
@@ -753,7 +672,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(metric?.inference_telemetry?.timings?.predicted_per_second).toBe(140)
   })
 
-  it('preserves missing latency as null in keeper runtime metrics', () => {
+  it('preserves non-context telemetry when context is unobserved', () => {
     const [keeper] = normalizeKeepers([
       {
         name: 'missing-latency',
@@ -761,9 +680,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
         metrics_series: [
           {
             ts_unix: 7,
-            context_ratio: 0.3,
-            context_tokens: 300,
-            context_max: 1000,
             generation: 2,
             channel: 'turn',
             model_used: 'glm-5',
@@ -784,6 +700,10 @@ describe('normalizeKeepers lifecycle metrics', () => {
     ])
 
     const metric = keeper?.metrics_series?.[0]
+    expect(keeper?.metrics_series).toHaveLength(1)
+    expect(metric?.context_ratio).toBeNull()
+    expect(metric?.context_tokens).toBeNull()
+    expect(metric?.context_max).toBeNull()
     expect(metric?.latency_ms).toBeNull()
     expect(metric?.wall_tokens_per_second).toBeNull()
     expect(metric?.inference_telemetry?.request_latency_ms).toBeNull()

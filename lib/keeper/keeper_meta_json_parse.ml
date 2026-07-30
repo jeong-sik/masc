@@ -392,6 +392,7 @@ let decode_current_meta fields =
       ; last_input_tokens
       ; last_output_tokens
       ; last_total_tokens
+      ; last_usage_reported_at = None
       ; last_latency_ms
       }
     in

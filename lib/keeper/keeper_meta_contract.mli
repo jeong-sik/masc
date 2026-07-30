@@ -116,8 +116,23 @@ type usage_metrics = {
   last_input_tokens : int;
   last_output_tokens : int;
   last_total_tokens : int;
+  last_usage_reported_at : float option;
+      (** Timestamp of the most recent provider-reported usage observation.
+          [None] means no provider usage has been observed. *)
   last_latency_ms : int;
 }
+
+val with_last_reported_usage :
+  usage_metrics ->
+  usage_reported:bool ->
+  input_tokens:int ->
+  output_tokens:int ->
+  total_tokens:int ->
+  observed_at:float ->
+  usage_metrics
+(** Replace the last provider-usage observation only when the provider
+    reported usage. Missing usage preserves the three token fields and their
+    timestamp as one observation. *)
 
 (** {1 Blocker classification} *)
 

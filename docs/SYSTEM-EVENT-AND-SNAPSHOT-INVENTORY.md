@@ -1,6 +1,6 @@
 # System Event and Snapshot Inventory
 
-Validated against the current code on 2026-04-16.
+Validated against the current code on 2026-07-30.
 
 This document is the operator-facing SSOT for:
 
@@ -23,19 +23,56 @@ This document is the operator-facing SSOT for:
 - `keeper_composite_changed` is signal-only. Consumers re-fetch `/api/v1/keepers/:name/composite`.
 - `operator_snapshot` and `operator_digest` are cached server-push surfaces. Default HTTP reads usually return the cache.
 - OAS bridge events are replayable because `oas_event_bridge` persists them under `.masc/oas-events/`.
+- Keeper context occupancy and last-turn provider usage are separate observations.
+  There is currently no owner-boundary context measurement, so
+  operator/execution snapshots expose typed `not_observed`. They neither
+  synthesize context from `last_input_tokens` nor decode versionless metrics
+  rows. Current metrics rows require `schema="keeper.metrics.v1"` and a typed
+  `record_kind`.
 
 ## Timing and Trigger Semantics
 
 | Surface / event | When it happens | Payload model | Notes |
 | --- | --- | --- | --- |
 | `keeper_composite_changed` | After every successful `Keeper_registry.dispatch_event*` application, including no-phase-change updates | Signal-only: `{name, ts_unix}` | Consumers must re-fetch the full composite payload. |
-| `keeper_heartbeat` | When a heartbeat snapshot is actually written | Lightweight SSE envelope | Not emitted on every keepalive cycle. |
-| `oas:masc:keeper:snapshot` | Same moment as `keeper_heartbeat` | OAS Event_bus custom event relayed to SSE | Durable via `.masc/oas-events/`. |
+| `keeper_heartbeat` | When a heartbeat snapshot is actually written | Lightweight SSE envelope without context numbers | Not emitted on every keepalive cycle. |
 | `operator_snapshot` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Default root/summary HTTP path returns cache. |
 | `operator_digest` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Default root HTTP path returns cache; non-default requests recompute. |
 | `execution_snapshot` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Used by execution dashboard surfaces. |
 | `transport_health_snapshot` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Used for transport diagnostics. |
 | `namespace_truth_snapshot` | After namespace-truth recomposition from cached surfaces | Cached payload wrapped as `{type, payload, ts_unix}` | Namespace truth dashboard snapshot. |
+
+## Keeper Context Observation Contract
+
+The current operator and execution projections always carry:
+
+```json
+{
+  "context_ratio": null,
+  "context_tokens": null,
+  "context_max": null,
+  "context_source": null,
+  "context_metrics_unavailable": {
+    "kind": "not_observed",
+    "reason": "context_measurement_missing"
+  },
+  "last_turn_usage": {
+    "input_tokens": 790360,
+    "output_tokens": 17,
+    "total_tokens": 790377,
+    "observed_at": "2026-07-30T00:00:00Z",
+    "source": "keeper_runtime_usage"
+  }
+}
+```
+
+`last_turn_usage` may be present while context is unobserved. Its input token
+count is not a context-window numerator. The heartbeat producer writes message
+metadata but no context source or numeric occupancy. Historical
+`snapshot_source="keeper_context_status"` rows are not decoded.
+
+Direct `keeper_heartbeat` messages are transport events. They do not override
+the operator projection's missing-measurement fact.
 
 ## `keeper_composite_changed`
 
@@ -97,10 +134,9 @@ By contrast, the nearby `dispatch_keeper_phase_event` calls in the overflow-retr
 - Snapshot write is gated by `now_ts - last_snapshot_ts >= snapshot_interval_sec`.
 - Busy/idle/activity/observer state never skips a cycle. Snapshot distance can
   still exceed the interval while the preceding cycle itself is running.
-- When a snapshot is written, three things happen together:
+- When a snapshot is written, two things happen together:
   - JSONL metrics append
   - `keeper_heartbeat` SSE broadcast
-  - `masc:keeper:snapshot` OAS custom event publish, later relayed as `oas:masc:keeper:snapshot`
 
 ### Practical consequence
 
@@ -176,7 +212,7 @@ Source of accepted event names on the dashboard side: `dashboard/src/types/sse.t
 | Board and notification compatibility | `board_post`, `masc/board_post`, `board_comment`, `masc/board_comment`, `board_delete`, `masc/board_delete`, `post_created`, `comment_added`, `post_voted`, `comment_voted` |
 | Keeper direct SSE | `keeper_heartbeat`, `keeper_handoff`, `masc/keeper_handoff`, `keeper_compaction`, `masc/keeper_compaction`, `keeper_guardrail`, `masc/keeper_guardrail`, `keeper_phase_changed`, `keeper_composite_changed`, `keeper_tool_call`, `masc/keeper_tool_call`, `keeper_tool_skipped`, `keeper_turn_complete`, `masc/keeper_turn_complete` |
 | Gate / HITL | `client_input_approved`, `client_input_rejected`, `client_input_updated`, `approval:pending`, `approval:resolved` |
-| OAS bridge | `oas:masc:keeper:snapshot`, `oas:masc:keeper:lifecycle`, `oas:agent_started`, `oas:agent_completed`, `oas:tool_called`, `oas:tool_completed`, `oas:turn_started`, `oas:turn_completed`, `oas:context_compacted`, `oas:task_state_changed`, `oas:masc:harness:verdict_recorded`, `oas:masc:harness:pre_compact`, `oas:masc:harness:handoff` |
+| OAS bridge | `oas:masc:keeper:lifecycle`, `oas:agent_started`, `oas:agent_completed`, `oas:tool_called`, `oas:tool_completed`, `oas:turn_started`, `oas:turn_completed`, `oas:context_compacted`, `oas:task_state_changed`, `oas:masc:harness:verdict_recorded`, `oas:masc:harness:pre_compact`, `oas:masc:harness:handoff` |
 | Server-push snapshots | `namespace_truth_snapshot`, `execution_snapshot`, `operator_snapshot`, `operator_digest`, `transport_health_snapshot` |
 
 ### 2. OAS custom events published by MASC
@@ -185,19 +221,14 @@ These originate in `lib/oas_events.ml` and are later relayed by `oas_event_bridg
 
 | Event name | Meaning |
 | --- | --- |
-| `masc:broadcast` | workspace broadcast observed via Event_bus |
-| `masc:heartbeat` | generic heartbeat event |
 | `masc:board_post` | board post created |
-| `masc:task_transition` | task state transition |
-| `masc:heartbeat_recovered` | agent recovered from timeout |
-| `masc:keeper:snapshot` | keeper heartbeat snapshot |
 | `masc:keeper:lifecycle` | keeper lifecycle update |
 | `masc:institution_episode` | institution episode recorded |
 | `masc:harness:verdict_recorded` | harness verdict persisted |
 | `masc:harness:pre_compact` | pre-compaction observation |
 | `masc:harness:handoff` | harness handoff observation |
 
-### 3. Legacy / compatibility cases
+### 3. Removed names
 
 | Event name | Status | Notes |
 | --- | --- | --- |
@@ -230,7 +261,6 @@ Meaning:
   "type": "keeper_heartbeat",
   "name": "keeper-a",
   "generation": 3,
-  "context_ratio": 0.42,
   "ts_unix": 1710000000.123
 }
 ```
@@ -240,44 +270,7 @@ Meaning:
 - emitted only when heartbeat snapshot write actually happened
 - lightweight envelope, not the full heartbeat snapshot JSONL row
 
-### 3. OAS custom event publish: `masc:keeper:snapshot`
-
-This is the payload published to the shared Event_bus before the SSE bridge wraps it.
-
-```json
-{
-  "keeper_name": "keeper-a",
-  "generation": 3,
-  "context_ratio": 0.42,
-  "message_count": 128,
-  "timestamp": 1710000000.123
-}
-```
-
-### 4. OAS-relayed SSE: `oas:masc:keeper:snapshot`
-
-```json
-{
-  "type": "oas:masc:keeper:snapshot",
-  "event_type": "masc:keeper:snapshot",
-  "ts_unix": 1710000000.123,
-  "correlation_id": "corr-...",
-  "run_id": "run-...",
-  "agent_name": null,
-  "task_id": null,
-  "turn": null,
-  "tool_name": null,
-  "payload": {
-    "keeper_name": "keeper-a",
-    "generation": 3,
-    "context_ratio": 0.42,
-    "message_count": 128,
-    "timestamp": 1710000000.123
-  }
-}
-```
-
-### 5. Server-push snapshot: `operator_digest`
+### 3. Server-push snapshot: `operator_digest`
 
 ```json
 {
@@ -296,7 +289,7 @@ Meaning:
 - changed-only SSE fanout
 - payload body is large and surface-specific; example above is intentionally minimal
 
-### 6. OAS-relayed SSE: `oas:masc:keeper:lifecycle`
+### 4. OAS-relayed SSE: `oas:masc:keeper:lifecycle`
 
 ```json
 {

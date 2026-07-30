@@ -662,7 +662,6 @@ function decisionTelemetryQuery(decision: KeeperDecision, timestampMs: number): 
     decision.event_type ? `event:${decision.event_type}` : null,
     decision.outcome ? `outcome:${decision.outcome}` : null,
     decision.tool ? `tool:${decision.tool}` : null,
-    decision.model_used ? `model:${decision.model_used}` : null,
     Number.isFinite(timestampMs) ? `ts:${Math.floor(timestampMs / 1000)}` : null,
   ])
 }

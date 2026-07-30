@@ -31,7 +31,7 @@ export interface FleetRow {
   keepalive_running: boolean
   diagnostic_health_state?: string | null
   diagnostic_summary?: string | null
-  context_ratio: number
+  context_ratio: number | null
   turn_count: number
   last_latency_ms: number
   last_activity_ago_s: number | null
@@ -142,7 +142,6 @@ export function uniqueStrings(values: Array<string | null | undefined>): string[
 }
 
 function keeperModel(keeper: Keeper): string {
-  const latest = latestRuntimeMetric(keeper)
   const evidence = [
     keeper.active_model_label,
     keeper.last_model_used_label,
@@ -151,8 +150,6 @@ function keeperModel(keeper: Keeper): string {
     keeper.primary_model,
     keeper.model,
     keeper.trust?.execution_summary?.provider_selected_model,
-    latest?.runtime_selected_model,
-    latest?.model_used,
   ]
   return evidence.some(value => normalizeModelText(value) != null)
     ? REDACTED_RUNTIME_MODEL_LABEL
@@ -166,12 +163,9 @@ function latestRuntimeMetric(keeper: Keeper) {
     if (!point) continue
     if (
       normalizeText(point.runtime_id)
-      || normalizeText(point.runtime_selected_model)
       || normalizeText(point.runtime_outcome)
       || typeof point.runtime_attempt_count === 'number'
       || point.fallback_applied
-      || normalizeText(point.fallback_from)
-      || normalizeText(point.fallback_to)
     ) {
       return point
     }
@@ -338,7 +332,7 @@ export function fleetBand(row: FleetRow): FleetBand {
     || row.runtime_trust_attention === true
     || row.terminal_reason_severity === 'bad'
     || row.terminal_reason_severity === 'warn'
-    || row.context_ratio >= PRESSURE_WARN_RATIO
+    || (row.context_ratio != null && row.context_ratio >= PRESSURE_WARN_RATIO)
     || (row.last_activity_ago_s != null && row.last_activity_ago_s >= STALE_ACTIVITY_SEC)
     || (row.tool_success_pct != null && row.tool_success_pct < TOOL_SUCCESS_WARN_PCT)
   ) {
@@ -361,7 +355,9 @@ export function rowUrgencyScore(row: FleetRow): number {
   if (row.runtime_trust_attention === true) score += 120
   if (row.terminal_reason_severity === 'bad') score += 110
   if (row.terminal_reason_severity === 'warn') score += 60
-  if (row.context_ratio >= PRESSURE_WARN_RATIO) score += row.context_ratio * 100
+  if (row.context_ratio != null && row.context_ratio >= PRESSURE_WARN_RATIO) {
+    score += row.context_ratio * 100
+  }
   if (row.last_activity_ago_s != null && row.last_activity_ago_s >= STALE_ACTIVITY_SEC) {
     score += Math.min(row.last_activity_ago_s / STALE_ACTIVITY_SEC, 5)
   }
@@ -398,7 +394,11 @@ export function compareFleetRows(a: FleetRow, b: FleetRow): number {
   const bAge = activityAge(b)
   if (aAge !== bAge) return aAge - bAge
   if (a.tool_calls !== b.tool_calls) return b.tool_calls - a.tool_calls
-  if (a.context_ratio !== b.context_ratio) return b.context_ratio - a.context_ratio
+  if (a.context_ratio !== b.context_ratio) {
+    if (a.context_ratio == null) return 1
+    if (b.context_ratio == null) return -1
+    return b.context_ratio - a.context_ratio
+  }
   if (a.turn_count !== b.turn_count) return b.turn_count - a.turn_count
   return a.name.localeCompare(b.name)
 }
@@ -431,7 +431,7 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             keepalive_running: keeper.keepalive_running === true,
             diagnostic_health_state: keeper.diagnostic?.health_state ?? null,
             diagnostic_summary: firstNonEmptyString(keeper.diagnostic?.summary) ?? null,
-            context_ratio: keeper.context_ratio ?? 0,
+            context_ratio: keeper.context_ratio ?? null,
             turn_count: keeper.total_turns ?? keeper.turn_count ?? 0,
             last_latency_ms: keeperLastLatencyMs(keeper),
             last_activity_ago_s: activity.ageSeconds,
@@ -491,7 +491,8 @@ export function toneForPressure(hot: number, warn: number): 'neutral' | 'ok' | '
   return 'ok'
 }
 
-export function pressureClass(ratio: number): string {
+export function pressureClass(ratio: number | null): string {
+  if (ratio == null) return 'text-[var(--color-fg-disabled)]'
   if (ratio >= PRESSURE_HOT_RATIO) return 'text-[var(--bad-light)]'
   if (ratio >= PRESSURE_WARN_RATIO) return 'text-[var(--color-status-warn)]'
   return 'text-[var(--color-status-ok)]'
@@ -516,7 +517,9 @@ export function statusClass(row: FleetRow): string {
   ) {
     return 'text-[var(--color-status-warn)]'
   }
-  if (row.context_ratio >= PRESSURE_HOT_RATIO) return 'text-[var(--color-status-warn)]'
+  if (row.context_ratio != null && row.context_ratio >= PRESSURE_HOT_RATIO) {
+    return 'text-[var(--color-status-warn)]'
+  }
   return 'text-[var(--color-status-ok)]'
 }
 
@@ -696,9 +699,14 @@ export function summaryCounts(rows: FleetRow[]): FleetSummaryCounts {
   ).length
   const toolTelemetryCovered = rows.filter(row => row.tool_activity_known).length
   const toolUnknown = Math.max(0, rows.length - toolTelemetryCovered)
-  const hot = rows.filter(row => row.keepalive_running && row.context_ratio >= PRESSURE_HOT_RATIO).length
+  const hot = rows.filter(row =>
+    row.keepalive_running
+    && row.context_ratio != null
+    && row.context_ratio >= PRESSURE_HOT_RATIO,
+  ).length
   const warn = rows.filter(row =>
     row.keepalive_running
+    && row.context_ratio != null
     && row.context_ratio >= PRESSURE_WARN_RATIO
     && row.context_ratio < PRESSURE_HOT_RATIO,
   ).length

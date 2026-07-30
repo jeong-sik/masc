@@ -1117,6 +1117,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const selectedTone: FleetTone = selectedRow ? ROSTER_BAND_TONE[selectedRow.band.key] : 'idle'
   const selectedCtxPct = selectedRow?.contextMeta?.pct ?? null
   const selectedCtxHot = selectedCtxPct != null && selectedCtxPct >= FLEET_CTX_HOT_PCT
+  const selectedContextUnavailable = selectedRow?.keeperRuntime?.context_metrics_unavailable ?? null
+  const selectedLastTurnUsage = selectedRow?.keeperRuntime?.last_turn_usage ?? null
   const selectedVitals = selectedRow
     ? fleetRuntimeVitals(selectedRow.keeperRuntime, selectedRow.contextMeta?.detail ?? null)
     : []
@@ -1490,6 +1492,44 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   </div>
                   <div class="bar"><span class=${selectedCtxHot ? 'hot' : ''} style="width:${selectedCtxPct}%"></span></div>
                   ${selectedRow.contextMeta?.detail ? html`<div class="mt-1.5 font-mono text-2xs text-[var(--color-fg-muted)]">${selectedRow.contextMeta.detail}</div>` : null}
+                </div>
+              </div>
+            ` : null}
+
+            ${selectedCtxPct == null && selectedContextUnavailable?.kind === 'not_observed' ? html`
+              <div class="fl-as-sec" data-testid="fleet-context-not-observed">
+                <h4>컨텍스트</h4>
+                <div class="text-xs text-[var(--color-fg-muted)]">
+                  현재 점유율 미관측 · usage와 분리
+                </div>
+              </div>
+            ` : null}
+
+            ${selectedLastTurnUsage ? html`
+              <div
+                class="fl-as-sec"
+                title="최근 완료된 턴의 usage입니다. 현재 컨텍스트 점유율이 아닙니다."
+              >
+                <h4>최근 턴 usage</h4>
+                <div class="fl-vitals">
+                  <div class="fl-vital">
+                    <div class="k">입력</div>
+                    <div class="v">${formatTokens(selectedLastTurnUsage.input_tokens)}</div>
+                  </div>
+                  <div class="fl-vital">
+                    <div class="k">출력</div>
+                    <div class="v">${formatTokens(selectedLastTurnUsage.output_tokens)}</div>
+                  </div>
+                  <div class="fl-vital">
+                    <div class="k">합계</div>
+                    <div class="v">${formatTokens(selectedLastTurnUsage.total_tokens)}</div>
+                  </div>
+                  ${selectedLastTurnUsage.observed_at ? html`
+                    <div class="fl-vital">
+                      <div class="k">관측</div>
+                      <div class="v"><${TimeAgo} timestamp=${selectedLastTurnUsage.observed_at} /></div>
+                    </div>
+                  ` : null}
                 </div>
               </div>
             ` : null}

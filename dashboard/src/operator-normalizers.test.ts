@@ -267,7 +267,7 @@ describe('normalizeOperatorSnapshot', () => {
     })
   })
 
-  it('preserves keeper context fields from nested context payloads', () => {
+  it('does not revive context fields from retired nested payloads', () => {
     const result = normalizeOperatorSnapshot({
       keepers: [
         {
@@ -282,36 +282,55 @@ describe('normalizeOperatorSnapshot', () => {
       ],
     })
     expect(result.keepers).toHaveLength(1)
-    expect(result.keepers[0]!.context_ratio).toBe(0.1274375)
-    expect(result.keepers[0]!.context_tokens).toBe(16312)
-    expect(result.keepers[0]!.context_max).toBe(128000)
-    expect(result.keepers[0]!.context_source).toBe('keeper_context_status')
+    expect(result.keepers[0]!.context_ratio).toBeNull()
+    expect(result.keepers[0]!.context_tokens).toBeNull()
+    expect(result.keepers[0]!.context_max).toBeNull()
+    expect(result.keepers[0]!.context_source).toBeNull()
   })
 
-  it('preserves typed keeper context metrics storage failures', () => {
+  it('preserves unknown context and separately typed last-turn usage', () => {
     const result = normalizeOperatorSnapshot({
       keepers: [
         {
-          name: 'sojin',
+          name: 'rondo',
+          context_ratio: null,
+          context_tokens: null,
+          context_max: null,
+          context_source: null,
           context_metrics_unavailable: {
-            kind: 'storage_read_failed',
-            reason: 'io_error',
-            path: '/tmp/metrics.jsonl',
-            detail: 'permission denied',
+            kind: 'not_observed',
+            reason: 'context_measurement_missing',
+          },
+          last_turn_usage: {
+            input_tokens: 790360,
+            output_tokens: 17,
+            total_tokens: 790377,
+            observed_at: '2026-07-29T14:15:00Z',
+            source: 'keeper_runtime_usage',
           },
         },
       ],
     })
 
-    expect(result.keepers[0]!.context_metrics_unavailable).toEqual({
-      kind: 'storage_read_failed',
-      reason: 'io_error',
-      path: '/tmp/metrics.jsonl',
-      detail: 'permission denied',
+    expect(result.keepers[0]).toMatchObject({
+      context_ratio: null,
+      context_tokens: null,
+      context_max: null,
+      context_source: null,
+      context_metrics_unavailable: {
+        kind: 'not_observed',
+        reason: 'context_measurement_missing',
+      },
+      last_turn_usage: {
+        input_tokens: 790360,
+        output_tokens: 17,
+        total_tokens: 790377,
+        source: 'keeper_runtime_usage',
+      },
     })
   })
 
-  it('preserves malformed metrics rows and makes invalid diagnostics explicit', () => {
+  it('rejects retired and unknown context diagnostics explicitly', () => {
     const result = normalizeOperatorSnapshot({
       persistent_agents: [
         {
@@ -335,11 +354,9 @@ describe('normalizeOperatorSnapshot', () => {
     })
 
     expect(result.persistent_agents![0]!.context_metrics_unavailable).toEqual({
-      kind: 'malformed_json',
-      reason: 'malformed_metrics_row',
-      path: '/tmp/metrics.jsonl',
-      line_number: 7,
-      detail: 'unexpected end of input',
+      kind: 'invalid_payload',
+      reported_kind: 'malformed_json',
+      reported_reason: 'malformed_metrics_row',
     })
     expect(result.persistent_agents![1]!.context_metrics_unavailable).toEqual({
       kind: 'invalid_payload',

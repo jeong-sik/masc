@@ -29,36 +29,48 @@ let keeper_cost_aggregates_json
         let total_tokens = ref 0 in
         let runtime_costs : (string, float) Hashtbl.t = Hashtbl.create 8 in
         let sample_count = ref 0 in
+        let nullable_nonnegative_int key json =
+          match Json_util.assoc_member_opt key json with
+          | Some (`Int value) when value >= 0 -> Some value
+          | Some `Null -> Some 0
+          | Some _
+          | None -> None
+        in
+        let nullable_nonnegative_float key json =
+          match Json_util.assoc_member_opt key json with
+          | Some (`Float value)
+            when Float.is_finite value && value >= 0.0 ->
+              Some value
+          | Some `Null -> Some 0.0
+          | Some _
+          | None -> None
+        in
         List.iter
           (fun line ->
             try
               let j = Yojson.Safe.from_string line in
-              let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-              if ts_unix >= start_ts
-              then (
-                let cost =
-                  match Safe_ops.json_float_opt "cost_usd" j with
-                  | Some value -> value
-                  | None -> 0.0
-                in
-                let latency_ms = Safe_ops.json_int ~default:0 "latency_ms" j in
-                let input_t =
-                  match int_member_fallback "input_tokens" j with
-                  | Some value -> value
-                  | None -> 0
-                in
-                let output_t =
-                  match int_member_fallback "output_tokens" j with
-                  | Some value -> value
-                  | None -> 0
-                in
-                let total_t =
-                  match int_member_fallback "total_tokens" j with
-                  | Some value -> value
-                  | None -> 0
-                in
-                if keeper_cost_metric_row_is_event j && (cost > 0.0 || latency_ms > 0)
-                then (
+              if keeper_cost_metric_row_is_event j
+              then
+                match
+                  Json_util.assoc_member_opt "ts_unix" j,
+                  Json_util.assoc_member_opt "latency_ms" j,
+                  Json_util.assoc_member_opt "usage" j,
+                  nullable_nonnegative_float "cost_usd" j
+                with
+                | ( Some (`Float ts_unix)
+                  , Some (`Int latency_ms)
+                  , Some (`Assoc _ as usage)
+                  , Some cost )
+                  when Float.is_finite ts_unix
+                       && latency_ms >= 0
+                       && ts_unix >= start_ts ->
+                    (match
+                       nullable_nonnegative_int "input_tokens" usage,
+                       nullable_nonnegative_int "output_tokens" usage,
+                       nullable_nonnegative_int "total_tokens" usage
+                     with
+                     | Some input_t, Some output_t, Some total_t
+                       when cost > 0.0 || latency_ms > 0 ->
                   costs_rev := cost :: !costs_rev;
                   latencies_rev := float_of_int latency_ms :: !latencies_rev;
                   input_tokens := !input_tokens + input_t;
@@ -70,7 +82,10 @@ let keeper_cost_aggregates_json
                       (Hashtbl.find_opt runtime_costs "runtime")
                   in
                   Hashtbl.replace runtime_costs "runtime" (prev +. cost);
-                  incr sample_count))
+                          incr sample_count
+                     | Some _, Some _, Some _
+                     | _ -> ())
+                | _ -> ()
             with
             | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ())
           all_metrics_lines;
@@ -270,7 +285,6 @@ let keeper_decisions_json
                 [ "choice"; "decision"; "selected"; "selected_tool"; "action" ] )
           ; "reason", first_string_or_null [ "reason"; "rationale"; "why" ]
           ; "context", context_json
-          ; "model_used", `Null
           ; "latency_ms", float_or_null "latency_ms"
           ; "cost_usd", float_or_null "cost_usd"
           ; "input_tokens", int_or_null "input_tokens"
@@ -485,4 +499,3 @@ let keeper_decisions_log_json
     ; "generated_at", `Float (Unix.gettimeofday ())
     ]
 ;;
-

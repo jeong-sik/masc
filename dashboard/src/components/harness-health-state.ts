@@ -73,7 +73,6 @@ export interface HandoffEvent {
   next_generation: number | null
   prev_trace_id: string | null
   new_trace_id: string | null
-  to_model: string | null
 }
 
 export interface HarnessSignalSection<T> {
@@ -262,7 +261,6 @@ function processHarnessEvent(evt: unknown): void {
       next_generation: nextGeneration ?? toGeneration ?? null,
       prev_trace_id: asString(handoffPayload.prev_trace_id) ?? null,
       new_trace_id: asString(handoffPayload.new_trace_id) ?? null,
-      to_model: asString(handoffPayload.to_model) ?? null,
     }
     updateHarnessData(data => ({
       ...data,

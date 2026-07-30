@@ -181,9 +181,17 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
              | `Int value -> Some (float_of_int value)
              | _ -> None
            in
+           let context_metrics_unavailable =
+             member_assoc "context_metrics_unavailable" keeper
+           in
            let pressure_rank =
              if Dashboard_utils.is_keeper_offline status then 3
-             else if Option.value ~default:0.0 context_ratio >= lane_pressure_ctx_ratio then 2
+             else if
+               Option.exists
+                 (fun ratio -> ratio >= lane_pressure_ctx_ratio)
+                 context_ratio
+             then
+               2
              else if status = "idle" then 1
              else 0
            in
@@ -205,6 +213,7 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                       ("status", `String status);
                       ("generation", member_assoc "generation" keeper);
                       ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
+                      ("context_metrics_unavailable", context_metrics_unavailable);
                       ("last_turn_ago_s", member_assoc "last_turn_ago_s" keeper);
                       ( "current_work",
                         Json_util.string_opt_to_json

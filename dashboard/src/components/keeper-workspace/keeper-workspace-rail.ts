@@ -16,7 +16,6 @@ import type { KeeperRuntimeLensConfigDriftAxis } from '../../api/keeper-runtime-
 import { navigate } from '../../router'
 import {
   keeperBucket,
-  keeperModelLabel,
   phaseTokenFromKeeper,
   keeperRuntimeLabel,
 } from './keeper-workspace-shared'
@@ -229,7 +228,6 @@ function RuntimeSection({
     loadRuntimeCatalog()
   }, [])
 
-  const model = keeperModelLabel(keeper)
   const runtime = keeperRuntimeLabel(keeper)
   // The card's runtime id is the *live* runtime the keeper is running (from its
   // meta, via the execution snapshot). Saving a new runtime in the config
@@ -286,7 +284,7 @@ function RuntimeSection({
             </div>`
           : null}
         <div class="rtc-model mono">
-          ${entry?.model_api_name ?? model ?? '—'}${ctxK ? html` · ${ctxK}` : null}
+          ${entry?.model_api_name ?? '—'}${ctxK ? html` · ${ctxK}` : null}
         </div>
         ${catalogEntry.status === 'ready'
           ? html`

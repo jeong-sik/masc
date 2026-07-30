@@ -2,8 +2,8 @@
     [Agent_sdk.Event_bus.t] instances masc keeps at server bootstrap.
 
     {b masc slot} — MASC-owned bus, separate from the shared OAS
-    Event_bus.  MASC domain events ([masc.broadcast], [masc.heartbeat],
-    [masc.keeper.lifecycle], ...) are published here, not onto OAS's
+    Event_bus. MASC domain events such as [masc.keeper.lifecycle] are
+    published here, not onto OAS's
     bus.  Enforces the OAS boundary documented in
     [event_bus.mli:103-107] — OAS's Event_bus is not a general-purpose
     telemetry channel.  Process-scoped [Atomic.t] singleton.

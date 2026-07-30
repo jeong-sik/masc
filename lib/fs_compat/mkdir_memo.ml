@@ -19,6 +19,10 @@ let mkdir_p_memoized ~(mkdir_p : string -> unit) (path : string) : unit =
   end
 ;;
 
+let invalidate path =
+  Stdlib.Mutex.protect mu (fun () -> Hashtbl.remove done_ path)
+;;
+
 let reset_for_testing () =
   Stdlib.Mutex.protect mu (fun () -> Hashtbl.reset done_)
 ;;

@@ -77,7 +77,6 @@ function sampleResponse() {
           next_generation: 6,
           prev_trace_id: 'trace-prev',
           new_trace_id: 'trace-new',
-          to_model: null,
         },
       ],
     },
@@ -280,7 +279,6 @@ describe('HarnessHealth', () => {
         trace_id: 'trace-b',
         generation: 8,
         next_generation: 9,
-        to_model: 'glm-5',
       },
     }
     await flushUi()

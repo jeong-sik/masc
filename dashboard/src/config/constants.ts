@@ -93,7 +93,6 @@ import { envInt, envString } from './env'
 
 export const MAX_JOURNAL_ENTRIES = envInt('VITE_MAX_JOURNAL_ENTRIES', 200)
 export const OAS_AGENT_EVENT_BUFFER = envInt('VITE_OAS_AGENT_EVENT_BUFFER', 50)
-export const OAS_KEEPER_SNAPSHOT_MAX = envInt('VITE_OAS_KEEPER_SNAPSHOT_MAX', 20)
 export const OAS_TELEMETRY_REPLAY_LIMIT = envInt('VITE_OAS_TELEMETRY_REPLAY_LIMIT', 500)
 export const OAS_OPENTELEMETRY_UI_URL = envString('VITE_OAS_OPENTELEMETRY_UI_URL', null)
 // Overview telemetry renders a fixed 28-bar sparkline; this bounds raw samples

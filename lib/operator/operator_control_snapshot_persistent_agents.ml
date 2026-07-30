@@ -18,8 +18,6 @@
     Both paths emit the same wire shape — `runtime_class="keeper"`
     plus the standard operator-dashboard keeper fields. *)
 
-include Operator_control_context_snapshot
-
 let persistent_agents_json ?keeper_names ?keeper_rows config =
   let rows_from_keeper_rows names rows =
     let wanted = List.sort_uniq String.compare names in
@@ -37,7 +35,7 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
            in
            Some
              (`Assoc
-                 [ "runtime_class", `String "keeper"
+                ([ "runtime_class", `String "keeper"
                  ; "name", field_or_null "name"
                  ; "agent_name", field_or_null "agent_name"
                  ; "trace_id", field_or_null "trace_id"
@@ -45,12 +43,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                  ; "status", field_or_null "status"
                  ; "generation", field_or_null "generation"
                  ; "turn_count", field_or_null "turn_count"
-                 ; "context_ratio", field_or_null "context_ratio"
-                 ; "context_tokens", field_or_null "context_tokens"
-                 ; "context_max", field_or_null "context_max"
-                 ; "context_source", field_or_null "context_source"
-                 ; ( "context_metrics_unavailable"
-                   , field_or_null "context_metrics_unavailable" )
                  ; "last_model_used", field_or_null "last_model_used"
                  ; "active_model", field_or_null "active_model"
                  ; "active_model_label", field_or_null "active_model_label"
@@ -66,7 +58,9 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                  ; "autonomous_action_count", field_or_null "autonomous_action_count"
                  ; "updated_at", field_or_null "updated_at"
                  ; "created_at", field_or_null "created_at"
-                 ])
+                 ]
+                 @ Keeper_context_observation_projection.missing_context_fields ()
+                 @ [ "last_turn_usage", field_or_null "last_turn_usage" ]))
          | _ -> None)
       | _ -> None)
   in
@@ -102,7 +96,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                  Json_util.get_string agent_json "status" |> Option.value ~default:"unknown"
                | _ -> "unknown"
              in
-             let context_snapshot = keeper_context_snapshot_of_meta config meta in
              Some
                (`Assoc
                    ([ "runtime_class", `String "keeper"
@@ -128,7 +121,13 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                     ; "updated_at", `String meta.updated_at
                     ; "created_at", `String meta.created_at
                     ]
-                    @ keeper_context_snapshot_fields context_snapshot)))
+                    @ Keeper_context_observation_projection.missing_context_fields ()
+                    @ [ ( "last_turn_usage"
+                        , Keeper_context_observation_projection
+                          .last_turn_usage_json
+                            ~base_path:config.base_path
+                            meta )
+                      ])))
         names
   in
   `Assoc [ "count", `Int (List.length rows); "items", `List rows ]

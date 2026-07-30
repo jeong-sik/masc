@@ -5,7 +5,6 @@ import { render, h } from 'preact'
 import { AgentRuntimeStrip } from './runtime-strip'
 
 const mockFindKeeper = vi.hoisted(() => vi.fn())
-const mockKeeperDisplayModel = vi.hoisted(() => vi.fn())
 const mockKeeperDisplayRuntime = vi.hoisted(() => vi.fn())
 const mockKeeperActivityDisplay = vi.hoisted(() => vi.fn())
 const mockFormatDuration = vi.hoisted(() => vi.fn((s: number) => `${s}s`))
@@ -20,7 +19,6 @@ vi.mock('../../lib/keeper-utils', () => ({
 }))
 
 vi.mock('../../lib/keeper-runtime-display', () => ({
-  keeperDisplayModel: (...args: Parameters<typeof mockKeeperDisplayModel>) => mockKeeperDisplayModel(...args),
   keeperDisplayRuntime: (...args: Parameters<typeof mockKeeperDisplayRuntime>) => mockKeeperDisplayRuntime(...args),
   keeperActivityDisplay: (...args: Parameters<typeof mockKeeperActivityDisplay>) => mockKeeperActivityDisplay(...args),
 }))
@@ -51,7 +49,6 @@ vi.mock('../keeper-pipeline-stage', () => ({
 describe('AgentRuntimeStrip', () => {
   beforeEach(() => {
     mockFindKeeper.mockReset()
-    mockKeeperDisplayModel.mockReset()
     mockKeeperDisplayRuntime.mockReset()
     mockKeeperActivityDisplay.mockReset()
     mockFormatDuration.mockReset()
@@ -77,7 +74,6 @@ describe('AgentRuntimeStrip', () => {
       context_ratio: null,
       generation: null,
     })
-    mockKeeperDisplayModel.mockReturnValue(null)
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
     const container = document.createElement('div')
     render(h(AgentRuntimeStrip, { name: 'Alpha' }), container)
@@ -92,7 +88,6 @@ describe('AgentRuntimeStrip', () => {
       context_ratio: 0.65,
       generation: null,
     })
-    mockKeeperDisplayModel.mockReturnValue(null)
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
     const container = document.createElement('div')
     render(h(AgentRuntimeStrip, { name: 'Alpha' }), container)
@@ -109,26 +104,11 @@ describe('AgentRuntimeStrip', () => {
       context_ratio: null,
       generation: 42,
     })
-    mockKeeperDisplayModel.mockReturnValue(null)
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
     const container = document.createElement('div')
     render(h(AgentRuntimeStrip, { name: 'Alpha' }), container)
     expect(container.textContent).toContain('GEN')
     expect(container.textContent).toContain('42')
-  })
-
-  it('renders model info when present', () => {
-    mockFindKeeper.mockReturnValue({
-      pipeline_stage: null,
-      context_ratio: null,
-      generation: null,
-    })
-    mockKeeperDisplayModel.mockReturnValue({ label: 'Model', value: 'claude-4' })
-    mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
-    const container = document.createElement('div')
-    render(h(AgentRuntimeStrip, { name: 'Alpha' }), container)
-    expect(container.textContent).toContain('Model')
-    expect(container.textContent).toContain('claude-4')
   })
 
   it('does not load runtime catalog when no runtime evidence exists', () => {
@@ -137,7 +117,6 @@ describe('AgentRuntimeStrip', () => {
       context_ratio: null,
       generation: null,
     })
-    mockKeeperDisplayModel.mockReturnValue(null)
     mockKeeperDisplayRuntime.mockReturnValue(null)
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
     const container = document.createElement('div')
@@ -154,7 +133,6 @@ describe('AgentRuntimeStrip', () => {
       context_ratio: null,
       generation: null,
     })
-    mockKeeperDisplayModel.mockReturnValue(null)
     mockKeeperDisplayRuntime.mockReturnValue({ label: 'Runtime', value: 'oas.primary' })
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
     const container = document.createElement('div')
@@ -172,7 +150,6 @@ describe('AgentRuntimeStrip', () => {
       generation: null,
     })
     mockRuntimeCatalogState.value = { status: 'loaded', data: [entry] }
-    mockKeeperDisplayModel.mockReturnValue(null)
     mockKeeperDisplayRuntime.mockReturnValue({ label: 'Runtime', value: 'oas.primary' })
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
     mockFindRuntimeCatalogEntry.mockReturnValue(entry)
@@ -199,7 +176,6 @@ describe('AgentRuntimeStrip', () => {
       generation: null,
     })
     mockRuntimeCatalogState.value = { status: 'error', message: 'fetch failed' }
-    mockKeeperDisplayModel.mockReturnValue(null)
     mockKeeperDisplayRuntime.mockReturnValue({ label: 'Runtime', value: 'oas.primary' })
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
     const container = document.createElement('div')
@@ -216,7 +192,6 @@ describe('AgentRuntimeStrip', () => {
       generation: null,
     })
     mockRuntimeCatalogState.value = { status: 'loaded', data: [] }
-    mockKeeperDisplayModel.mockReturnValue(null)
     mockKeeperDisplayRuntime.mockReturnValue({ label: 'Runtime', value: 'oas.primary' })
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
     mockFindRuntimeCatalogEntry.mockReturnValue(null)
@@ -232,7 +207,6 @@ describe('AgentRuntimeStrip', () => {
       context_ratio: null,
       generation: null,
     })
-    mockKeeperDisplayModel.mockReturnValue(null)
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: 120, label: 'idle' })
     const container = document.createElement('div')
     render(h(AgentRuntimeStrip, { name: 'Alpha' }), container)
@@ -247,7 +221,6 @@ describe('AgentRuntimeStrip', () => {
       context_ratio: 0.85,
       generation: null,
     })
-    mockKeeperDisplayModel.mockReturnValue(null)
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
     const container = document.createElement('div')
     render(h(AgentRuntimeStrip, { name: 'Alpha' }), container)
@@ -261,7 +234,6 @@ describe('AgentRuntimeStrip', () => {
       context_ratio: 0.3,
       generation: null,
     })
-    mockKeeperDisplayModel.mockReturnValue(null)
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
     const container = document.createElement('div')
     render(h(AgentRuntimeStrip, { name: 'Alpha' }), container)
@@ -277,7 +249,6 @@ describe('AgentRuntimeStrip', () => {
       context_ratio: null,
       generation: null,
     })
-    mockKeeperDisplayModel.mockReturnValue(null)
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
     const container = document.createElement('div')
     render(h(AgentRuntimeStrip, { name: 'Alpha' }), container)
@@ -291,7 +262,6 @@ describe('AgentRuntimeStrip', () => {
       context_ratio: null,
       generation: null,
     })
-    mockKeeperDisplayModel.mockReturnValue(null)
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
     const container = document.createElement('div')
     render(h(AgentRuntimeStrip, { name: 'Alpha' }), container)

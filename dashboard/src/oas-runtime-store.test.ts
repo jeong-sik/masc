@@ -13,7 +13,6 @@ import {
 import {
   oasAgentEvents,
   oasHealthSummary,
-  oasKeeperSnapshots,
 } from './store'
 import {
   ensureLiveTraceSlot,
@@ -61,20 +60,6 @@ describe('oas-runtime-store', () => {
       },
       {
         source: 'oas_event',
-        type: 'oas:masc:keeper:snapshot',
-        ts_unix: 200,
-        correlation_id: 'corr-2',
-        run_id: 'run-1',
-        payload: {
-          keeper_name: 'keeper-a',
-          generation: 3,
-          context_ratio: 0.42,
-          message_count: 9,
-          timestamp: 200,
-        },
-      },
-      {
-        source: 'oas_event',
         type: 'oas:masc:trust_updated',
         ts_unix: 100,
         correlation_id: 'corr-1',
@@ -90,19 +75,16 @@ describe('oas-runtime-store', () => {
 
     hydrateOasRuntimeFromTelemetryEntries(entries)
 
-    expect(oasHealthSummary.value.totalEvents).toBe(4)
-    expect(oasHealthSummary.value.replayLoadedEvents).toBe(4)
-    expect(oasHealthSummary.value.replayTotalMatchingEvents).toBe(4)
+    expect(oasHealthSummary.value.totalEvents).toBe(3)
+    expect(oasHealthSummary.value.replayLoadedEvents).toBe(3)
+    expect(oasHealthSummary.value.replayTotalMatchingEvents).toBe(3)
     expect(oasHealthSummary.value.replayTruncated).toBe(false)
     expect(oasHealthSummary.value.agentEventsCount).toBe(1)
-    expect(oasHealthSummary.value.keeperSnapshotsCount).toBe(1)
     expect(oasHealthSummary.value.totalLlmCalls).toBe(1)
     expect(oasHealthSummary.value.totalErrors).toBe(1)
-    expect(oasHealthSummary.value.lastKeeperTick).toBe(200_000)
     expect(oasHealthSummary.value.lastLlmCallTs).toBe(300_000)
     expect(oasHealthSummary.value.lastErrorTs).toBe(400_000)
     expect(oasAgentEvents.value[0]?.agent_name).toBe('alpha')
-    expect(oasKeeperSnapshots.value.get('keeper-a')?.generation).toBe(3)
   })
 
   it('preserves cache delta fields on live durable llm_request trace events', () => {

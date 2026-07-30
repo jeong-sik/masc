@@ -188,6 +188,13 @@ val update_entry_if_registered :
 (** Update the meta for a registered keeper. No-op if not found. *)
 val update_meta : base_path:string -> string -> keeper_meta -> unit
 
+(** Install metadata read or reconstructed from persistence. For the same
+    runtime identity, a missing process-local provider-usage observation is
+    retained from the current entry. Unlike {!update_meta}, this function must
+    not be used for an explicit registry reset. No-op if not found. *)
+val update_meta_from_persisted :
+  base_path:string -> string -> keeper_meta -> unit
+
 (* Runtime-attempt persistence + enrichment moved to
    Keeper_registry_runtime_attempt (record / enrich_fiber_unresolved_outcome). *)
 

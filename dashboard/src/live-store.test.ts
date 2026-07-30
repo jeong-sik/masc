@@ -1,6 +1,16 @@
-import { describe, it, expect } from 'vitest'
-import { eventKindColor, journalEventKindLabel, eventKindTone } from './live-store'
-import type { JournalEntry } from './types'
+import { afterEach, describe, it, expect } from 'vitest'
+import {
+  eventKindColor,
+  journalEventKindLabel,
+  eventKindTone,
+  keeperHealthSummary,
+} from './live-store'
+import { keepers } from './store'
+import type { JournalEntry, Keeper } from './types'
+
+afterEach(() => {
+  keepers.value = []
+})
 
 function makeEntry(overrides: Partial<JournalEntry> = {}): JournalEntry {
   return {
@@ -134,7 +144,7 @@ describe('journalEventKindLabel', () => {
   })
 
   it('falls back to "keeper" for keepers kind without matching eventType', () => {
-    expect(journalEventKindLabel(makeEntry({ eventType: 'oas_keeper_snapshot', kind: 'keepers' }))).toBe('keeper')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'unknown', kind: 'keepers' }))).toBe('keeper')
   })
 
   it('returns "system" as final fallback', () => {
@@ -143,5 +153,28 @@ describe('journalEventKindLabel', () => {
 
   it('returns "system" when both kind and eventType are undefined', () => {
     expect(journalEventKindLabel(makeEntry({}))).toBe('system')
+  })
+})
+
+describe('keeperHealthSummary', () => {
+  it('preserves unobserved context instead of reporting zero pressure', () => {
+    keepers.value = [
+      {
+        name: 'rondo',
+        status: 'active',
+        keepalive_running: true,
+        context_ratio: null,
+      } as Keeper,
+    ]
+
+    expect(keeperHealthSummary.value.pressures).toEqual([
+      {
+        name: 'rondo',
+        ratio: null,
+        stage: 'unknown',
+      },
+    ])
+    expect(keeperHealthSummary.value.warningCount).toBe(0)
+    expect(keeperHealthSummary.value.criticalCount).toBe(0)
   })
 })

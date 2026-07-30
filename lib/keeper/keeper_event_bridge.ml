@@ -28,8 +28,8 @@ let drain_interval_s () = Env_config.Oas_sse.drain_interval_sec
 let payload_agent_name payload =
   (* Check [agent_name], [agent], then [keeper_name] for Custom events
      whose publisher stores the per-agent attribution under the
-     keeper-specific key (e.g. [masc:keeper:snapshot],
-     [masc:keeper:lifecycle]).  Without this fallback the top-level
+     keeper-specific key (for example [masc:keeper:lifecycle]).
+     Without this fallback the top-level
      envelope [agent_name] is Null for 9%+ of daily events, breaking
      per-agent filters over the Dated_jsonl store under [.masc/oas-events/].
      See #7827. *)
@@ -327,12 +327,10 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
     Some (wrap ~event_type:"handoff_completed" ~payload ~agent_name:from_agent ())
   | Agent_sdk.Event_bus.ElicitationCompleted _ -> None (* Internal; no SSE relay needed *)
   | Agent_sdk.Event_bus.Custom (name, payload) ->
-    (* Wire compatibility: dashboard consumers historically decoded
-         [masc:broadcast] / [masc:keeper:snapshot] (all colons).
-         Internally MASC now emits dot-separated names per OAS Custom
-         convention ([masc.broadcast], [masc.keeper.snapshot]).
-         Translate EVERY dot to colon for [masc.*] events so existing
-         SSE consumers continue to decode the full multi-segment name. *)
+    (* Custom event names use dots internally.
+         Translate dots to the public SSE separator for [masc.*] events.
+         Internally MASC emits dot-separated names per OAS Custom convention.
+         Translate every dot so multi-segment names remain intact. *)
     let event_type =
       if String.length name > 5 && String.starts_with ~prefix:"masc." name
       then String.map (fun c -> if c = '.' then ':' else c) name
@@ -451,20 +449,8 @@ let relay_event_type json =
      | None -> "unknown")
 ;;
 
-let relay_event_is_presence_class json =
-  match relay_event_type json with
-  | "masc:keeper:snapshot" -> true
-  | _ -> false
-;;
-
 let broadcast_relay_json json =
-  Sse.broadcast_to All json;
-  if relay_event_is_presence_class json
-  then (
-    try Sse.broadcast_presence json with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Misc.warn "oas_event_bridge: presence relay failed: %s" (Printexc.to_string exn))
+  Sse.broadcast_to All json
 ;;
 
 let update_relay_queue_depth pending =

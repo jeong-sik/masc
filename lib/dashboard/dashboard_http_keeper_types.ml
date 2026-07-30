@@ -129,12 +129,6 @@ let sort_by_latest_ts jsons =
 let string_member_nonempty key json =
   Option.bind (Safe_ops.json_string_opt key json) nonempty_string_opt
 
-let int_member_fallback key json =
-  let usage = Option.value ~default:`Null (Json_util.assoc_member_opt "usage" json) in
-  match Safe_ops.json_int_opt key usage with
-  | Some value -> Some value
-  | None -> Safe_ops.json_int_opt key json
-
 let rec take_list n xs =
   if n <= 0 then []
   else
@@ -153,18 +147,10 @@ let percentile_sorted_float (sorted : float array) (p : float) : float =
     sorted.(lo) *. (1.0 -. frac) +. sorted.(hi) *. frac
 
 let keeper_cost_metric_row_is_event (json : Yojson.Safe.t) : bool =
-  let field_equals key expected =
-    match Safe_ops.json_string_opt key json with
-    | Some value ->
-      String.equal
-        (String.lowercase_ascii (String.trim value))
-        expected
-    | None -> false
-  in
-  not
-    (field_equals "channel" "heartbeat"
-     || field_equals "work_kind" "status_tick"
-     || field_equals "snapshot_source" "keeper_context_status")
+  match Keeper_metrics_record.kind_of_json json with
+  | Some Keeper_metrics_record.Turn -> true
+  | Some Keeper_metrics_record.Heartbeat
+  | None -> false
 
 let keeper_decisions_dashboard_surface = "/api/v1/dashboard/keeper-decisions"
 

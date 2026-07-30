@@ -236,7 +236,22 @@ describe('KeeperWorkspaceRoster', () => {
       attention: 1,
       approvalGate: 1,
       highContext: 1,
+      unknownContext: 3,
     })
+  })
+
+  it('sorts observed zero context ahead of unknown context', () => {
+    keepers.value = [
+      mk({ name: 'a-unknown', status: 'running', lifecycle_phase: 'Running' }),
+      mk({ name: 'z-observed-zero', status: 'running', lifecycle_phase: 'Running', context_ratio: 0 }),
+    ]
+    render(html`<${KeeperWorkspaceRoster} activeName="a-unknown" />`, host)
+
+    const rows = Array.from(host.querySelectorAll('.kw-kp-row'))
+    expect(rows.map(row => row.textContent)).toEqual([
+      expect.stringContaining('z-observed-zero'),
+      expect.stringContaining('a-unknown'),
+    ])
   })
 
   it('navigates to the keeper route and reveals the chat pane on row click', () => {

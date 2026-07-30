@@ -8,7 +8,7 @@ author: codex
 supersedes: []
 superseded_by: []
 related: ["0140", "0150", "0349"]
-implementation_prs: []
+implementation_prs: ["26389"]
 ---
 
 # Keeper runtime context observation Phase 0
@@ -89,78 +89,65 @@ Clamping makes the unit error look like a legitimate 100% occupancy.
 
 ## 3. Scope
 
-This RFC authorizes one implementation slice:
+This RFC authorizes one hard-cut implementation slice:
 
-1. Remove `last_input_tokens` and resolved model budget from the fallback
-   context snapshot.
-2. Represent missing context measurement with a closed OCaml reason and a
-   stable JSON tag.
-3. Preserve last-turn usage under a separate name.
-4. Ensure unknown context does not contribute to backend or Dashboard
-   attention, urgency, sorting, pressure watchlists, or compaction copy.
-5. Render unknown context as unavailable, not `0%`.
-6. Correct the Keeper manual and system event/snapshot inventory.
-7. Add a regression fixture using `790360` input tokens and a `256000` model
-   budget.
+1. Delete the fabricated context fallback and its persisted-row reader.
+2. Publish one shared `not_observed` context projection and keep last-turn
+   usage under a separate name.
+3. Ensure unknown context contributes to no attention, urgency, sorting,
+   pressure, or compaction projection.
+4. Add the mandatory `keeper.metrics.v1` + `record_kind` identity to current
+   turn and heartbeat writers; current readers reject versionless rows without
+   a migration path.
+5. Persist current `tools_used`/`tool_call_count` and remove tool-name aliases,
+   decision-log guessing, and zero-call fabrication.
+6. Remove producer-less metrics context, model, drift, compaction, fallback,
+   event, and history surfaces instead of filling them with defaults.
+7. Delete the dormant context-bearing OAS keeper snapshot publisher and its
+   Dashboard decoder/state.
+8. Make the direct `keeper_context_status` tool output and both of its
+   descriptors state checkpoint/session facts without promising unobserved
+   context-window occupancy.
+9. Correct the Dashboard, Keeper manual, inventory, and regression fixtures.
 
-The implementation changes read-side projection only. It does not change
-Keeper turn scheduling, heartbeat cadence, compaction admission, provider
-routing, checkpoints, or OAS.
+The implementation changes observation writers and read models. It does not
+change Keeper turn scheduling, heartbeat cadence, compaction admission,
+provider routing, checkpoints, or the OAS runtime contract.
 
 ## 4. Typed contract
 
-### 4.1 Context observation
+### 4.1 Current context projection
 
-The operator projection owns a closed availability reason:
+Phase 0 has one current wire shape:
 
-```ocaml
-type context_metrics_unavailable_reason =
-  | Context_measurement_missing
-  | Storage_read_failed of Dated_jsonl.read_error
-  | Malformed_metrics_row of {
-      path : string;
-      line_number : int option;
-      detail : string;
-    }
-```
-
-`keeper_context_snapshot` remains the query projection:
-
-```ocaml
-type keeper_context_snapshot = {
-  context_ratio : float option;
-  context_tokens : int option;
-  context_max : int option;
-  context_source : string option;
-  context_metrics_unavailable :
-    context_metrics_unavailable_reason option;
+```json
+{
+  "context_ratio": null,
+  "context_tokens": null,
+  "context_max": null,
+  "context_source": null,
+  "context_metrics_unavailable": {
+    "kind": "not_observed",
+    "reason": "context_measurement_missing"
+  }
 }
 ```
 
-The valid shapes are:
+There is no owner-boundary context-measurement producer in this phase, so there
+is no persisted-row decoder. Metrics JSONL rows cannot create context authority
+from `snapshot_source`, field presence, or any legacy shape.
 
-- observed: ratio, tokens, max, and source are present; unavailable is absent;
-- unavailable: ratio, tokens, max, and source are absent; unavailable is
-  present.
+### 4.2 Producer boundary
 
-A partial numeric shape is not accepted as a trusted observation.
+A future observed context surface must introduce its live producer, typed
+transport, projection, consumers, and tests in the same implementation slice.
+It may then derive ratio from the producer-owned token count and assigned
+Runtime budget with an explicit blast radius.
 
-### 4.2 Trusted persisted measurement
-
-For this Phase 0 cut, a persisted row is a context measurement only when:
-
-- `snapshot_source` is the typed source `keeper_context_status`; and
-- `context_ratio`, `context_tokens`, and `context_max` are all present; and
-- `context_ratio` is finite and in `[0,1]`; and
-- `context_tokens >= 0`; and
-- `context_max > 0`.
-
-Rows lacking the complete shape are not malformed metrics rows. They simply do
-not contain a context measurement. If no valid measurement exists in the read
-window, the result is `Context_measurement_missing`.
-
-This is a read-side trust boundary, not a claim that the current heartbeat
-writer already emits token occupancy. It does not.
+Phase 0 does not pre-install a reader for that future design. In particular it
+does not scan old heartbeat or metrics rows, accept a
+`snapshot_source="keeper_context_status"` string as authority, or keep
+compatibility/migration logic for historical rows.
 
 ### 4.3 Last-turn usage
 
@@ -188,15 +175,28 @@ The roster and selected detail render:
 - `—` or `측정 없음` for unavailable context;
 - last-turn usage as a separately labelled value when present.
 
+### 4.5 Current metrics ledger
+
+Every current metrics row carries:
+
+```json
+{
+  "schema": "keeper.metrics.v1",
+  "record_kind": "turn"
+}
+```
+
+`record_kind` is `turn` or `heartbeat`. Turn rows carry the current typed
+`turn_mode`, `tools_used`, and `tool_call_count`; heartbeat rows do not mimic a
+turn or compaction event. Versionless rows are opaque to current status,
+Dashboard, cost, handoff, and operator-audit readers. No compatibility decoder
+or migration routine exists.
+
 ## 5. Information flow after the change
 
 ```text
-metrics row with complete keeper_context_status measurement
-  -> context observation
-  -> context display and pressure thresholds
-
-missing/incomplete measurement
-  -> Context_measurement_missing
+no owner-boundary context measurement
+  -> context_measurement_missing
   -> null context fields
   -> no context-derived attention
 
@@ -215,7 +215,7 @@ Given:
 
 - `last_input_tokens=790360`;
 - resolved model budget `256000`;
-- no complete persisted context measurement;
+- no owner-boundary context measurement;
 
 the operator snapshot must produce:
 
@@ -230,12 +230,13 @@ the operator snapshot must produce:
 Reintroducing `last_input_tokens` into the fallback context snapshot must make
 this regression test fail.
 
-### 6.2 Trusted-measurement positive case
+### 6.2 Retired-row counterfactual
 
-A complete, valid `keeper_context_status` measurement remains visible and
-retains its ratio, tokens, max, and source.
-
-A partial or invalid measurement is not promoted to trusted context.
+A versionless persisted row containing
+`snapshot_source="keeper_context_status"`, context-looking numbers, old tool
+aliases, or compaction-looking fields contributes to no current projection.
+Reintroducing any versionless metrics decoder must make the regression tests
+fail.
 
 ### 6.3 Dashboard
 
@@ -251,8 +252,7 @@ After merge, build, and restart:
 
 - `/api/v1/dashboard/execution?force=1` has no
   `context_source=fallback_metadata`;
-- Keepers without a trusted measurement have null context fields and the typed
-  missing reason;
+- Keepers have null context fields and the typed missing reason;
 - the screenshot's `790.4K / 256.0K` context meter is absent;
 - the same Keeper is not in an attention band solely because of last-turn
   usage;
@@ -262,20 +262,24 @@ Source, CI, merge, deployment, and live verification are separate gates.
 
 ## 7. Blast radius
 
-Expected implementation files:
+Implementation blast radius:
 
-- `lib/operator/operator_control_context_snapshot.{ml,mli}`
-- `lib/operator/operator_control_snapshot.ml`
-- `lib/operator/operator_control_snapshot_persistent_agents.ml`
-- `test/test_operator_control_snapshot.ml`
-- Dashboard Keeper/operator types and normalizers
-- fleet telemetry and roster consumers plus focused tests
-- `docs/KEEPER-USER-MANUAL.md`
-- `docs/SYSTEM-EVENT-AND-SNAPSHOT-INVENTORY.md`
+- current metrics identity and writers:
+  `keeper_metrics_record`, `keeper_unified_metrics_snapshot`,
+  `keeper_heartbeat_snapshot`;
+- current-only metrics readers: Keeper status/detail, Dashboard series/cost/
+  harness, and operator tool audit;
+- shared missing-context projection and operator/status call sites;
+- direct `keeper_context_status` output, model schema, and internal descriptor;
+- Dashboard Keeper/OAS types, normalizers, telemetry panels, and focused tests;
+- deletion of the private context snapshot decoder, producer-less compaction
+  history options, tool-alias facade, dormant OAS snapshot publisher/decoder,
+  and their tests;
+- `docs/KEEPER-USER-MANUAL.md` and
+  `docs/SYSTEM-EVENT-AND-SNAPSHOT-INVENTORY.md`.
 
-If implementation requires changing a Keeper write owner, compaction policy, or
-OAS response contract, that work is outside this RFC and must stop for a new
-design decision.
+Compaction policy, provider routing, and OAS request/response serialization
+remain outside this RFC.
 
 ## 8. Rejected alternatives
 
@@ -312,5 +316,6 @@ read-side projection and cannot make that usage counter load-bearing.
 - Backend, Dashboard normalization, attention, and documentation are closed in
   one slice rather than leaving an N-of-M compatibility path.
 - It adds no cap, cooldown, deduplication, repair loop, or silent fallback.
-- `Context_measurement_missing` is an explicit domain fact, not a generic
+- `context_measurement_missing` is an explicit domain fact, not a generic
   default.
+- It adds no persisted-row compatibility decoder or migration path.

@@ -28,11 +28,7 @@ val work_kind_of_turn_mode : turn_mode -> string
     [Text_response | Skip_text -> "text_turn"]. *)
 
 val turn_mode_of_json : Yojson.Safe.t -> turn_mode option
-(** Reads [turn_mode] or [selected_mode] string fields from the JSON
-    payload, falling back to a legacy [work_kind] field for backwards
-    compatibility with older keeper turn records. *)
+(** Reads the current [turn_mode] field from a JSON payload. *)
 
 val work_kind_of_json : Yojson.Safe.t -> string option
-(** First tries [turn_mode_of_json] then projects via
-    [work_kind_of_turn_mode]; falls back to a literal [work_kind]
-    string when no typed mode is present. Empty strings are rejected. *)
+(** Reads [turn_mode] and projects it via [work_kind_of_turn_mode]. *)

@@ -168,6 +168,18 @@ let test_projected_disposition_ledger_replays_older_operation () =
     |> require_ok "reload projected disposition ledger"
   in
   (match
+     State.prior_disposition_by_operation_id
+       cancellation.operator_operation_id
+       reloaded
+   with
+   | Some receipt ->
+     Alcotest.(check string)
+       "older operation is directly recoverable by durable operation identity"
+       cancel_receipt.transition_id
+       receipt.transition_id
+   | None ->
+     Alcotest.fail "older operation disappeared from durable disposition lookup");
+  (match
      State.cancel_pending_accepted
        ~current_owner_nonce:7
        ~applied_at:5.0
@@ -250,8 +262,10 @@ let test_durable_peek_ack_restart () =
 let test_durable_reprioritize_is_revision_fenced () =
   with_temp_dir "keeper-event-reprioritize" (fun base_path ->
     let keeper_name = "priority-keeper" in
-    let first = stimulus "first" 1.0 in
-    let second = stimulus "second" 2.0 in
+    let first = stimulus "shared-post" 1.0 in
+    let second =
+      { (stimulus "shared-post" 2.0) with urgency = Queue.Low }
+    in
     Persistence.update_result ~base_path ~keeper_name (fun pending ->
       let pending = Queue.enqueue pending first in
       Queue.enqueue pending second)
@@ -280,9 +294,14 @@ let test_durable_reprioritize_is_revision_fenced () =
       |> require_ok "restart priority load"
     in
     Alcotest.(check (list string))
-      "priority change survives restart"
-      [ "second"; "first" ]
+      "same post id remains independently addressable"
+      [ "shared-post"; "shared-post" ]
       (post_ids restarted);
+    Alcotest.(check (list (float 0.0)))
+      "priority change preserves the distinct same-post source"
+      [ 2.0; 1.0 ]
+      (Queue.to_list restarted
+       |> List.map (fun (item : Queue.stimulus) -> item.arrived_at));
     match
       Persistence.reprioritize_pending_result
         ~base_path

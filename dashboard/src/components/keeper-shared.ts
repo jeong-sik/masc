@@ -800,7 +800,7 @@ function KeeperQueueControlPanel({
       <div class="grid gap-2 border-t border-[var(--color-border-subtle)] pt-3">
         <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">자율 이벤트 대기 ${eventSnapshot?.totalPending ?? 0}</div>
         ${eventRows.map(item => {
-          const key = `event:${item.postId}`
+          const key = `event:${eventSnapshot!.revision}:${item.queueIndex}`
           const busy = pendingAction === key
           return html`
             <div class="grid gap-1 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] p-2" data-operator-event-row>
@@ -816,7 +816,7 @@ function KeeperQueueControlPanel({
                       void mutateEvent(key, () => operateKeeperEventQueue(keeperName, {
                         action: 'reprioritize',
                         expectedRevision: eventSnapshot!.revision,
-                        postId: item.postId,
+                        queueIndex: item.queueIndex,
                         urgency,
                       }))
                     }}
@@ -832,7 +832,7 @@ function KeeperQueueControlPanel({
                     void mutateEvent(key, () => operateKeeperEventQueue(keeperName, {
                       action: 'transfer',
                       expectedRevision: eventSnapshot!.revision,
-                      postId: item.postId,
+                      queueIndex: item.queueIndex,
                       targetKeeper,
                     }))
                   }}
@@ -847,7 +847,7 @@ function KeeperQueueControlPanel({
                     void mutateEvent(key, () => operateKeeperEventQueue(keeperName, {
                       action: 'cancel',
                       expectedRevision: eventSnapshot!.revision,
-                      postId: item.postId,
+                      queueIndex: item.queueIndex,
                       reason,
                     }))
                   }}

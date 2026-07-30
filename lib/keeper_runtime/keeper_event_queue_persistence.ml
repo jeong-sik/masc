@@ -730,14 +730,19 @@ let reprioritize_pending_result
     else if Int64.equal observed_revision Int64.max_int
     then Error "event queue revision exhausted"
     else
-      let removed, remaining =
-        Keeper_event_queue.remove_by_post_id
-          source.Keeper_event_queue.post_id
-          (State.pending state)
+      let matching, retained =
+        Keeper_event_queue.to_list (State.pending state)
+        |> List.partition (fun candidate ->
+          Keeper_event_queue.stimulus_identity_equal candidate source)
       in
-      match removed with
-      | [ observed ]
-        when Keeper_event_queue.stimulus_identity_equal observed source ->
+      match matching with
+      | [ observed ] when observed = source ->
+        let remaining =
+          List.fold_left
+            Keeper_event_queue.enqueue
+            Keeper_event_queue.empty
+            retained
+        in
         let updated = { observed with urgency } in
         let pending =
           Keeper_event_queue.enqueue remaining updated
@@ -745,8 +750,8 @@ let reprioritize_pending_result
         in
         Ok (State.with_pending pending state, Int64.succ observed_revision)
       | [] -> Error "event queue source is no longer pending"
-      | [ _ ] -> Error "event queue source identity changed"
-      | _ -> Error "event queue post id is ambiguous")
+      | [ _ ] -> Error "event queue source snapshot changed"
+      | _ -> Error "event queue source identity is duplicated")
 ;;
 
 type enqueue_stimulus_result =

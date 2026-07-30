@@ -1374,9 +1374,9 @@ export async function moveKeeperChatPendingReceiptToEnd(
 }
 
 export type KeeperEventQueueOperatorAction =
-  | { action: 'cancel'; expectedRevision: string; postId: string; reason: string; operationId?: string }
-  | { action: 'transfer'; expectedRevision: string; postId: string; targetKeeper: string; operationId?: string }
-  | { action: 'reprioritize'; expectedRevision: string; postId: string; urgency: 'immediate' | 'normal' | 'low'; operationId?: string }
+  | { action: 'cancel'; expectedRevision: string; queueIndex: number; reason: string; operationId?: string }
+  | { action: 'transfer'; expectedRevision: string; queueIndex: number; targetKeeper: string; operationId?: string }
+  | { action: 'reprioritize'; expectedRevision: string; queueIndex: number; urgency: 'immediate' | 'normal' | 'low' }
 
 export async function operateKeeperEventQueue(
   keeperName: string,
@@ -1386,13 +1386,20 @@ export async function operateKeeperEventQueue(
     schema: 'keeper_event_queue.operator.request.v1',
     action: operation.action,
     expected_revision: operation.expectedRevision,
-    operator_operation_id: operation.operationId ?? crypto.randomUUID(),
-    post_id: operation.postId,
+    queue_index: operation.queueIndex,
   }
   const request = operation.action === 'cancel'
-    ? { ...common, reason: operation.reason }
+    ? {
+        ...common,
+        operator_operation_id: operation.operationId ?? crypto.randomUUID(),
+        reason: operation.reason,
+      }
     : operation.action === 'transfer'
-      ? { ...common, target_keeper: operation.targetKeeper }
+      ? {
+          ...common,
+          operator_operation_id: operation.operationId ?? crypto.randomUUID(),
+          target_keeper: operation.targetKeeper,
+        }
       : { ...common, urgency: operation.urgency }
   const raw = await post<unknown>(
     `/api/v1/keepers/${encodeURIComponent(keeperName)}/events/operator`,
@@ -1414,7 +1421,7 @@ export async function operateKeeperEventQueue(
     const detail = asString(raw.result.detail, '').trim()
     if (
       !transitionId
-      || !['checkpoint', 'wal_compaction', 'projection'].includes(stage)
+      || !['checkpoint', 'wal_compaction', 'projection', 'target_projection'].includes(stage)
       || !detail
     ) {
       throw new Error('operateKeeperEventQueue: invalid committed failure evidence')

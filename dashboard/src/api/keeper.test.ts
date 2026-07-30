@@ -581,8 +581,7 @@ describe('Keeper chat durable receipt API', () => {
     await operateKeeperEventQueue('sangsu', {
       action: 'reprioritize',
       expectedRevision: '7',
-      operationId: 'operation-7',
-      postId: 'post-1',
+      queueIndex: 0,
       urgency: 'immediate',
     })
 
@@ -593,8 +592,7 @@ describe('Keeper chat durable receipt API', () => {
           schema: 'keeper_event_queue.operator.request.v1',
           action: 'reprioritize',
           expected_revision: '7',
-          operator_operation_id: 'operation-7',
-          post_id: 'post-1',
+          queue_index: 0,
           urgency: 'immediate',
         }),
       }),
@@ -610,8 +608,8 @@ describe('Keeper chat durable receipt API', () => {
         result: {
           status: 'committed_followup_failed',
           transition_id: 'transition-9',
-          stage: 'projection',
-          detail: 'reaction ledger unavailable',
+          stage: 'target_projection',
+          detail: 'target queue unavailable',
         },
         audit: { recorded: true },
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
@@ -622,10 +620,10 @@ describe('Keeper chat durable receipt API', () => {
       action: 'cancel',
       expectedRevision: '8',
       operationId: 'operation-9',
-      postId: 'post-9',
+      queueIndex: 1,
       reason: 'operator cancellation',
     })).rejects.toThrow(
-      'Event queue mutation committed, but projection follow-up failed (transition-9)',
+      'Event queue mutation committed, but target_projection follow-up failed (transition-9)',
     )
   })
 

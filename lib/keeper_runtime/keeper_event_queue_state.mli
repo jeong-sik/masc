@@ -83,6 +83,11 @@ val projected_transition_receipts : t -> transition_receipt list
 (** The latest projected transition plus every older operator disposition
     witness retained for exact operation replay. *)
 
+val prior_disposition_by_operation_id :
+  string -> t -> transition_receipt option
+(** Return the unique durable disposition for an operator operation ID from
+    either the current outbox or projected history. *)
+
 val transition_outbox : t -> outbox_entry list
 val accepted_transfer_projections : t -> accepted_transfer list
 

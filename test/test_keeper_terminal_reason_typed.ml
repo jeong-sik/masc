@@ -906,8 +906,22 @@ let () =
       { meta.runtime.proactive_rt with last_outcome; last_reason }
     in
     let prior = { meta with runtime = { meta.runtime with proactive_rt } } in
-    let observation =
-      Masc.Keeper_deliberation.empty_world_observation ~keeper_name
+    let observation : Masc.Keeper_world_observation.world_observation =
+      { pending_messages = []
+      ; pending_board_events = []
+      ; idle_seconds = 0
+      ; active_goals = []
+      ; unclaimed_task_count = 0
+      ; claimable_task_count = 0
+      ; failed_task_count = 0
+      ; scheduled_automation =
+          Masc.Keeper_world_observation.empty_scheduled_automation_observation
+      ; backlog_updated_since_last_scheduled_autonomous = false
+      ; running_keeper_fiber_count = 0
+      ; connected_surfaces = []
+      ; connected_surface_failures = []
+      ; own_recent_board_posts = []
+      }
     in
     Masc.Keeper_unified_metrics.update_metrics_from_result
       prior

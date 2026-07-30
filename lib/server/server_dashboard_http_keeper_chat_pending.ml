@@ -101,7 +101,7 @@ let pending_receipt_json ~keeper_name ~revision
           { Keeper_chat_queue.receipt_id; state } )
     ; "content", `String message.content
     ; ( "source"
-      , Server_dashboard_http_keeper_api_types.keeper_chat_message_source_json
+      , Keeper_chat_receipt_projection.message_source_json
           message.source )
     ; "user_blocks", Keeper_multimodal_input.user_blocks_to_yojson message.user_blocks
     ; "attachments", `List (List.map pending_attachment_json message.attachments)

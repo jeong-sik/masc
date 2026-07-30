@@ -19,28 +19,6 @@ let keeper_suffix_catchup_judge = "/catchup-judge"
 let keeper_chat_receipt_state_json = Keeper_chat_receipt_projection.state_json
 let keeper_chat_receipt_json = Keeper_chat_receipt_projection.receipt_json
 
-let keeper_chat_message_source_json = function
-  | Keeper_chat_queue.Dashboard { thread_id } ->
-    `Assoc
-      [ "kind", `String "dashboard"
-      ; "thread_id", `String thread_id
-      ]
-  | Keeper_chat_queue.Discord { channel_id; user_id } ->
-    `Assoc
-      [ "kind", `String "discord"
-      ; "channel_id", `String channel_id
-      ; "user_id", `String user_id
-      ]
-  | Keeper_chat_queue.Slack { channel_id; user_id; team_id; thread_ts; _ } ->
-    `Assoc
-      [ "kind", `String "slack"
-      ; "channel_id", `String channel_id
-      ; "user_id", `String user_id
-      ; "team_id", Json_util.string_opt_to_json team_id
-      ; "thread_ts", Json_util.string_opt_to_json thread_ts
-      ]
-;;
-
 let cache_key_string_segment value =
   Printf.sprintf "s%d:%s" (String.length value) value
 ;;

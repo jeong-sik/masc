@@ -1,3 +1,25 @@
+let message_source_json = function
+  | Keeper_chat_queue.Dashboard { thread_id } ->
+    `Assoc
+      [ "kind", `String "dashboard"
+      ; "thread_id", `String thread_id
+      ]
+  | Keeper_chat_queue.Discord { channel_id; user_id } ->
+    `Assoc
+      [ "kind", `String "discord"
+      ; "channel_id", `String channel_id
+      ; "user_id", `String user_id
+      ]
+  | Keeper_chat_queue.Slack { channel_id; user_id; team_id; thread_ts; _ } ->
+    `Assoc
+      [ "kind", `String "slack"
+      ; "channel_id", `String channel_id
+      ; "user_id", `String user_id
+      ; "team_id", Json_util.string_opt_to_json team_id
+      ; "thread_ts", Json_util.string_opt_to_json thread_ts
+      ]
+;;
+
 let state_json = function
   | Keeper_chat_queue.Pending -> `Assoc [ "kind", `String "pending" ]
   | Keeper_chat_queue.Inflight { lease_id; started_at } ->

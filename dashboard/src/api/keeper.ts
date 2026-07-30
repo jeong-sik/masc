@@ -751,10 +751,18 @@ export interface KeeperChatPendingCancelResult {
   audit: { recorded: true } | { recorded: false; error: string }
 }
 
+export interface KeeperChatPendingAttachment {
+  id: string
+  type: KeeperConversationAttachment['type']
+  name: string
+  size: number
+  mimeType: string
+}
+
 export interface KeeperChatPendingInput {
   receipt: KeeperChatReceipt
   content: string
-  attachments: KeeperConversationAttachment[]
+  attachments: KeeperChatPendingAttachment[]
   userBlocks: KeeperUserInputBlock[]
   submittedAt: number
 }
@@ -900,7 +908,7 @@ export async function fetchKeeperChatReceipt(
   return parseKeeperChatReceipt(data)
 }
 
-function parsePendingAttachment(value: unknown): KeeperConversationAttachment {
+function parsePendingAttachment(value: unknown): KeeperChatPendingAttachment {
   if (!isRecord(value)) {
     throw new Error('Keeper pending attachment must be an object')
   }
@@ -909,17 +917,15 @@ function parsePendingAttachment(value: unknown): KeeperConversationAttachment {
   const name = asString(value.name, '').trim()
   const size = asNumber(value.size)
   const mimeType = asString(value.mime_type, '').trim()
-  const data = asString(value.data, '')
   if (
     !id
     || typeof size !== 'number'
     || !Number.isSafeInteger(size)
     || size < 0
-    || !data
   ) {
     throw new Error('Keeper pending attachment is invalid')
   }
-  return { id, type, name, size, mimeType, data }
+  return { id, type, name, size, mimeType }
 }
 
 function parsePendingUserBlock(value: unknown): KeeperUserInputBlock {

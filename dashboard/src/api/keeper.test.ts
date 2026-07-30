@@ -341,7 +341,7 @@ describe('Keeper chat durable receipt API', () => {
     )
   })
 
-  it('fetches the exact durable pending payload and live work projection', async () => {
+  it('fetches pending input metadata without materializing attachment bytes', async () => {
     const receiptId = 'chatq_00000000-0000-4000-8000-000000000004'
     const payload = {
       schema: 'keeper_chat_queue.pending.v1',
@@ -373,7 +373,6 @@ describe('Keeper chat durable receipt API', () => {
           name: 'photo.png',
           size: 3,
           mime_type: 'image/png',
-          data: 'data:image/png;base64,abc',
         }],
         submitted_at: 40,
       }],
@@ -397,6 +396,14 @@ describe('Keeper chat durable receipt API', () => {
       mimeType: 'image/png',
       size: 3,
     }])
+    expect(result.pending[0]?.attachments).toEqual([{
+      id: 'att-1',
+      type: 'image',
+      name: 'photo.png',
+      size: 3,
+      mimeType: 'image/png',
+    }])
+    expect(result.pending[0]?.attachments[0]).not.toHaveProperty('data')
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/keepers/keeper%20sangsu/chat/pending?limit=100',
       expect.objectContaining({ headers: expect.any(Object) }),

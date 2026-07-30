@@ -79,6 +79,16 @@ let current_work_json state keeper_name =
       ]
 ;;
 
+let pending_attachment_json (attachment : Keeper_chat_store.attachment) =
+  `Assoc
+    [ "id", `String attachment.id
+    ; "type", `String attachment.att_type
+    ; "name", `String attachment.name
+    ; "size", `Int attachment.size
+    ; "mime_type", `String attachment.mime_type
+    ]
+;;
+
 let pending_receipt_json ~keeper_name ~revision
       ({ Keeper_chat_queue.receipt_id; message; state } :
         Keeper_chat_queue.active_receipt)
@@ -91,7 +101,7 @@ let pending_receipt_json ~keeper_name ~revision
           { Keeper_chat_queue.receipt_id; state } )
     ; "content", `String message.content
     ; "user_blocks", Keeper_multimodal_input.user_blocks_to_yojson message.user_blocks
-    ; "attachments", Keeper_multimodal_input.attachments_to_yojson message.attachments
+    ; "attachments", `List (List.map pending_attachment_json message.attachments)
     ; "submitted_at", `Float message.timestamp
     ]
 ;;

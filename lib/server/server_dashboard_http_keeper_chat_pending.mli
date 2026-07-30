@@ -1,4 +1,6 @@
-(** Authenticated HTTP boundary for durable pending Keeper chat inputs. *)
+(** Authenticated HTTP boundary for durable pending Keeper chat inputs.
+    Inventory responses expose attachment metadata, never the stored raw
+    attachment payload. *)
 
 module Http = Http_server_eio
 

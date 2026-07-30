@@ -16,6 +16,7 @@ import {
   queuedKeeperMessageToReply,
   streamKeeperMessage,
 } from './api/keeper'
+import type { KeeperChatPendingAttachment } from './api/keeper'
 import { fetchKeeperToolCalls } from './api/dashboard'
 import {
   markToolCallOutputsHydrated,
@@ -861,12 +862,16 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
       const userEntry = thread.find(entry => (
         entry.role === 'user' && entry.details?.queueReceiptId === receiptId
       ))
+      const attachments = pending.attachments.map((attachment: KeeperChatPendingAttachment) => {
+        const local = userEntry?.attachments?.find(candidate => candidate.id === attachment.id)
+        return local ?? { ...attachment, data: '' }
+      })
       if (userEntry) {
         updateThreadEntry(keeperName, userEntry.id, entry => ({
           ...entry,
           text: pending.content,
           timestamp,
-          attachments: pending.attachments.length > 0 ? pending.attachments : undefined,
+          attachments: attachments.length > 0 ? attachments : undefined,
           userBlocks: pending.userBlocks.length > 0 ? pending.userBlocks : undefined,
           details: {
             ...(entry.details ?? {}),
@@ -888,7 +893,7 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
             deliveryReceipt: 'server_durable_receipt',
             reason: `pending receipt ${receiptId}`,
           }),
-          attachments: pending.attachments.length > 0 ? pending.attachments : undefined,
+          attachments: attachments.length > 0 ? attachments : undefined,
           userBlocks: pending.userBlocks.length > 0 ? pending.userBlocks : undefined,
           details: {
             queueReceiptId: receiptId,

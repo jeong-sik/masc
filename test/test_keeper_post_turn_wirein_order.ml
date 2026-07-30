@@ -12,6 +12,7 @@ module WO = Masc.Keeper_world_observation
 module Exact_fixture = Compaction_exact_output_fixture
 module Schema = Masc.Keeper_structured_output_schema
 module Summarizer = Masc.Keeper_compaction_llm_summarizer
+module Keeper_compaction_outcome = Masc.Keeper_compaction_outcome
 
 let ensure_registered_keeper
       ~base_path
@@ -28,7 +29,7 @@ let ensure_registered_keeper
 ;;
 
 let exact_terminal ?(slot_id = "compaction-slot") ?(call_id = "call-compaction") cause =
-  Keeper_event_queue_state.
+  Keeper_compaction_outcome.
     { cause
     ; slot_id
     ; call_id
@@ -124,7 +125,7 @@ let test_compaction_rejection_tag_is_stable () =
     Post_turn.Compaction_rejected
       (Compact_policy.Invalid_structural_evidence
          ( Keeper_compaction_evidence.No_messages_compacted
-         , exact_terminal Keeper_event_queue_state.Invalid_structural_evidence ))
+         , exact_terminal Keeper_compaction_outcome.Invalid_structural_evidence ))
   in
   check string
     "categorical tag excludes evidence detail"
@@ -148,14 +149,34 @@ let test_final_admission_busy_requeues_only_pre_dispatch_no_compaction () =
     bool
     "No_eligible_history remains replayable after final admission Busy"
     false
-    (preserves Keeper_event_queue_state.No_eligible_history);
+    (preserves Keeper_compaction_outcome.No_eligible_history);
   check
     bool
     "post-dispatch exact terminal remains source-bound after final admission Busy"
     true
     (preserves
-       (Keeper_event_queue_state.Exact_execution_terminal
-          (exact_terminal Keeper_event_queue_state.Exact_execution_failed)))
+       (Keeper_compaction_outcome.Exact_execution_terminal
+          (exact_terminal Keeper_compaction_outcome.Exact_execution_failed)))
+;;
+
+let test_exact_no_compaction_acknowledges_without_persistence_facade () =
+  let disposition =
+    Masc.Keeper_unified_turn.source_disposition_after_no_compaction_reason
+  in
+  List.iter
+    (fun reason ->
+       match disposition reason with
+       | Masc.Keeper_unified_turn.Acknowledge_after_in_turn_handling -> ()
+       | _ -> fail "exact terminal no-compaction did not acknowledge its source")
+    [ Keeper_compaction_outcome.Exact_lane_unconfigured
+    ; Keeper_compaction_outcome.Exact_execution_terminal
+        (exact_terminal Keeper_compaction_outcome.Exact_execution_failed)
+    ];
+  match disposition Keeper_compaction_outcome.No_eligible_history with
+  | Masc.Keeper_unified_turn.Follow_failure_route_after_no_compaction
+      { reason = Keeper_compaction_outcome.No_eligible_history } ->
+    ()
+  | _ -> fail "pre-dispatch no-compaction lost its ordinary failure route"
 ;;
 
 let make_meta
@@ -256,7 +277,7 @@ let test_atomic_cycle_and_normalization_cross_evidence_gate () =
         in
         let preparation =
           Compact_policy.compact_for_request_typed
-            ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard
+            ~before_dispatch_authority:(fun _ -> Ok ())
             ~base_path:config.base_path
             ~meta
             ~trigger:Compaction_trigger.Manual
@@ -272,7 +293,7 @@ let test_atomic_cycle_and_normalization_cross_evidence_gate () =
              (match
                 Summarizer.terminalize_post_success
                   terminalizer
-                  Keeper_event_queue_state.Domain_invalid_output
+                  Keeper_compaction_outcome.Domain_invalid_output
               with
               | Summarizer.Terminalized _ -> ()
               | _ -> failf "%s could not close its exact attempt" name))
@@ -432,7 +453,7 @@ let test_missing_exact_lane_is_source_bound_no_compaction () =
        | Error
            (Post_turn.No_compaction
               { source
-              ; reason = Keeper_event_queue_state.Exact_lane_unconfigured
+              ; reason = Keeper_compaction_outcome.Exact_lane_unconfigured
               }) ->
          check string
            "terminal evidence retains checkpoint trace"
@@ -636,22 +657,13 @@ let test_prepare_commit_source_cas () =
   in
   publish_exact_fixture ~source:"post-turn prepared source CAS" exact_server;
   ensure_registered_keeper ~base_path:config.base_path meta;
-  let quarantine_calls = ref 0 in
-  let exact_execution_guard : Summarizer.exact_execution_guard =
-    { Exact_fixture.permissive_exact_execution_guard with
-      quarantine =
-        (fun _cause _observation ->
-           incr quarantine_calls;
-           Ok Summarizer.Fsync_completed)
-    }
-  in
   match
     Post_turn.prepare_compaction
+      ~before_dispatch_authority:(fun _ -> Ok ())
       ~base_path:config.base_path
       ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
       ~meta
       ~trigger:Compaction_trigger.Manual
-      ~exact_execution_guard
       ()
   with
   | Error error ->
@@ -662,11 +674,11 @@ let test_prepare_commit_source_cas () =
     let stale_prepared =
       match
         Post_turn.prepare_compaction
+          ~before_dispatch_authority:(fun _ -> Ok ())
           ~base_path:config.base_path
           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
           ~meta
           ~trigger:Compaction_trigger.Manual
-          ~exact_execution_guard
           ()
       with
       | Ok stale_prepared -> stale_prepared
@@ -731,17 +743,13 @@ let test_prepare_commit_source_cas () =
       (committed_snapshot.phase
        = Masc.Keeper_compaction_llm_summarizer.Phase_committed);
     check int
-      "history cancellation retains one Domain_valid settlement"
+      "history cancellation retains one Domain_valid completion"
       1
       committed_snapshot.domain_valid_attempts;
     check int
-      "history cancellation performs no Domain_rejected settlement"
+      "history cancellation performs no Domain_rejected completion"
       0
       committed_snapshot.domain_rejected_attempts;
-    check int
-      "history cancellation performs no quarantine"
-      0
-      !quarantine_calls;
     (* Both tokens were prepared from the same source. The first commit
        advances it; the second token now proves the source-CAS rejection
        without violating the same-token affine commit contract. *)
@@ -750,8 +758,8 @@ let test_prepare_commit_source_cas () =
      with
      | Post_turn.Already_rejected
          { reason =
-             Keeper_event_queue_state.Exact_execution_terminal
-               { cause = Keeper_event_queue_state.Checkpoint_source_changed
+             Keeper_compaction_outcome.Exact_execution_terminal
+               { cause = Keeper_compaction_outcome.Checkpoint_source_changed
                ; slot_id
                ; call_id
                }
@@ -831,23 +839,14 @@ let run_post_install_failure
        in
        publish_exact_fixture ~source:name exact_server;
        ensure_registered_keeper ~base_path:config.base_path meta;
-       let quarantine_calls = ref 0 in
-       let exact_execution_guard : Summarizer.exact_execution_guard =
-         { Exact_fixture.permissive_exact_execution_guard with
-           quarantine =
-             (fun _cause _observation ->
-                incr quarantine_calls;
-                Ok Summarizer.Fsync_completed)
-         }
-       in
        let prepared =
          match
            Post_turn.prepare_compaction
+             ~before_dispatch_authority:(fun _ -> Ok ())
              ~base_path:config.base_path
              ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
              ~meta
              ~trigger:Compaction_trigger.Manual
-             ~exact_execution_guard
              ()
          with
          | Ok prepared -> prepared
@@ -924,10 +923,6 @@ let run_post_install_failure
          0
          snapshot.domain_rejected_attempts;
        check int
-         "post-install failure never quarantines the installed checkpoint"
-         0
-         !quarantine_calls;
-       check int
          "post-install finalization performs no provider redispatch"
          1
          (Exact_fixture.post_count exact_server);
@@ -1001,19 +996,10 @@ let test_invalid_structural_evidence_after_dispatch_is_terminal () =
       let context =
         make_checkpoint () |> Masc.Keeper_context_core.context_of_oas_checkpoint
       in
-      let quarantine_calls = ref [] in
-      let exact_execution_guard : Summarizer.exact_execution_guard =
-        { Exact_fixture.permissive_exact_execution_guard with
-          quarantine =
-            (fun cause observation ->
-               quarantine_calls := (cause, observation) :: !quarantine_calls;
-               Ok Summarizer.Fsync_completed)
-        }
-      in
       let plan_for_units ~units =
         match
           Summarizer.make
-            ~exact_execution_guard
+            ~before_dispatch_authority:(fun _ -> Ok ())
             ~base_path:config.base_path
             ~keeper_name:meta.name
             ()
@@ -1038,7 +1024,7 @@ let test_invalid_structural_evidence_after_dispatch_is_terminal () =
            , Invalid_structural_evidence
                ( Keeper_compaction_evidence.Invalid_transition
                    (Keeper_compaction_evidence.Messages, 0, observed_after_message_count)
-               , { cause = Keeper_event_queue_state.Invalid_structural_evidence
+               , { cause = Keeper_compaction_outcome.Invalid_structural_evidence
                  ; slot_id
                  ; call_id
                  } ) ) ->
@@ -1048,17 +1034,10 @@ let test_invalid_structural_evidence_after_dispatch_is_terminal () =
            (String.trim slot_id <> "");
          check bool "invalid evidence terminal retains call" true
            (String.trim call_id <> "")
-       | _ -> fail "post-dispatch invalid evidence was not a typed terminal");
-      match !quarantine_calls with
-      | [ Keeper_event_queue_state.Invalid_structural_evidence, observation ] ->
-        check bool "invalid evidence quarantine retains slot" true
-          (String.trim observation.slot_id <> "");
-        check bool "invalid evidence quarantine retains call" true
-          (String.trim observation.call_id <> "")
-      | _ -> fail "invalid evidence terminal was not quarantined exactly once")
+       | _ -> fail "post-dispatch invalid evidence was not a typed terminal"))
 ;;
 
-let test_post_dispatch_non_reducing_output_is_quarantined () =
+let test_post_dispatch_non_reducing_output_is_terminal () =
   Eio_main.run @@ fun env ->
   Masc_test_deps.init_eio_clock env;
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1083,21 +1062,12 @@ let test_post_dispatch_non_reducing_output_is_quarantined () =
             (Exact_fixture.Reply response)
         in
         publish_exact_fixture ~source:name server;
-        let quarantine_calls = ref [] in
-        let exact_execution_guard : Summarizer.exact_execution_guard =
-          { Exact_fixture.permissive_exact_execution_guard with
-            quarantine =
-              (fun cause observation ->
-                 quarantine_calls := (cause, observation) :: !quarantine_calls;
-                 Ok Summarizer.Fsync_completed)
-          }
-        in
         let meta = make_meta ~name () in
         ensure_registered_keeper ~base_path:config.base_path meta;
         let preparation =
           Compact_policy.compact_for_request_typed
             ~base_path:config.base_path
-            ~exact_execution_guard
+            ~before_dispatch_authority:(fun _ -> Ok ())
             ~meta
             ~trigger:Compaction_trigger.Manual
             (make_checkpoint ()
@@ -1114,27 +1084,20 @@ let test_post_dispatch_non_reducing_output_is_quarantined () =
              (String.trim slot_id <> "");
            check bool (name ^ " terminal retains call") true
              (String.trim call_id <> "")
-         | _ -> fail (name ^ " did not report its own non-reduction cause"));
-        match !quarantine_calls with
-        | [ (cause, observation) ] when cause = expected_cause ->
-          check bool (name ^ " quarantine retains slot") true
-            (String.trim observation.slot_id <> "");
-          check bool (name ^ " quarantine retains call") true
-            (String.trim observation.call_id <> "")
-        | _ -> fail (name ^ " was not quarantined exactly once")
+         | _ -> fail (name ^ " did not report its own non-reduction cause"))
       in
       (* The two cases reported the same cause. Only one of them should: a plan the
          domain validator rejects IS invalid output, while a summarizer that returns a
          LARGER context produced valid output that worked against the purpose. Both stay
-         terminal and quarantined and keep slot and call provenance; they no longer read
-         as the same failure. *)
+         terminal and keep slot and call provenance; they no longer read as the
+         same failure. *)
       run_case
         ~name:"invalid-boundary-plan"
-        ~expected_cause:Keeper_event_queue_state.Domain_invalid_output
+        ~expected_cause:Keeper_compaction_outcome.Domain_invalid_output
         invalid_boundary_response;
       run_case
         ~name:"larger-checkpoint"
-        ~expected_cause:Keeper_event_queue_state.Compaction_increased_checkpoint
+        ~expected_cause:Keeper_compaction_outcome.Compaction_increased_checkpoint
         (summarize_response (String.make 20_000 'x')))
 ;;
 
@@ -1299,8 +1262,8 @@ let test_suspended_streak_refuses_reactive_prepare () =
    [test_suspended_streak_refuses_reactive_prepare] above pins the first hop: at
    [Keeper_meta_contract.compaction_retry_escalation_threshold] the reactive
    prepare is refused before any I/O. This test pins the two hops that close the
-   loop — the refusal settles as a compaction failure, and that settlement
-   advances the very counter the gate reads.
+   loop — the refusal was recorded as a compaction failure, and that outcome
+   advanced the very counter the gate reads.
 
    Live evidence for the loop: keeper [kidsnote] reached
    compaction_consecutive_failures=907 against a threshold of 3
@@ -1313,19 +1276,19 @@ let test_suspended_streak_refuses_reactive_prepare () =
    only the self-feeding edge is cut. The second half of this test pins that a
    real compaction failure still advances the streak, so the ceiling that
    #25461 added keeps working. *)
-let test_refusal_does_not_settle_as_compaction_failure () =
+let test_refusal_records_no_compaction_failure () =
   Eio_main.run @@ fun _env ->
   let meta =
     match
       Masc_test_deps.meta_of_json_fixture
         (`Assoc
-          [ "name", `String "suspension-settlement"
-          ; "trace_id", `String "trace-suspension-settlement"
+          [ "name", `String "suspension-outcome"
+          ; "trace_id", `String "trace-suspension-outcome"
           ; "compaction_consecutive_failures", `Int 3
           ])
     with
     | Ok meta -> meta
-    | Error detail -> failf "suspension-settlement meta fixture: %s" detail
+    | Error detail -> failf "suspension-outcome meta fixture: %s" detail
   in
   check
     bool
@@ -1333,7 +1296,7 @@ let test_refusal_does_not_settle_as_compaction_failure () =
     true
     (Masc.Keeper_meta_contract.compaction_retry_suspended
        meta.runtime.compaction_rt);
-  (* A refused prepare attempted no compaction, so it settles as nothing. *)
+  (* A refused prepare attempted no compaction, so it records no outcome. *)
   let turn_failure_with source_disposition : Masc.Keeper_unified_turn.turn_failure =
     { error = Agent_sdk.Error.Internal "suspended reactive prepare"
     ; runtime_id = "suspension-characterization"
@@ -1346,15 +1309,15 @@ let test_refusal_does_not_settle_as_compaction_failure () =
     ; deferred_runtime_lane = None
     }
   in
-  let settle source_disposition =
+  let outcome_of source_disposition =
     Masc.Keeper_heartbeat_loop.compaction_outcome_of_cycle_outcome
       (Some (Cycle.Failed { meta; failure = turn_failure_with source_disposition }))
   in
   check
     bool
-    "a refusal that attempted no compaction settles as nothing"
+    "a refusal that attempted no compaction records no outcome"
     true
-    (settle
+    (outcome_of
        (Masc.Keeper_unified_turn.Requeue_after_context_compaction
           (Masc.Keeper_unified_turn.Compaction_refused_without_attempt
              { consecutive_failures = 3 }))
@@ -1363,18 +1326,18 @@ let test_refusal_does_not_settle_as_compaction_failure () =
      durable progress still advances the streak. *)
   check
     bool
-    "an attempted compaction that made no progress still settles as a failure"
+    "an attempted compaction that made no progress records a failure"
     true
-    (settle
+    (outcome_of
        (Masc.Keeper_unified_turn.Requeue_after_context_compaction
           (Masc.Keeper_unified_turn.Compaction_attempt_failed
              { reason = "checkpoint candidate rejected" }))
      = Some `Failed);
-  (* And that settlement is what advances the counter the gate reads. *)
+  (* Persisting that outcome advances the counter the gate reads. *)
   let base =
     Filename.concat
       (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc-suspension-settlement-%d" (Unix.getpid ()))
+      (Printf.sprintf "masc-suspension-outcome-%d" (Unix.getpid ()))
   in
   let config = Masc.Workspace.default_config base in
   (match Masc.Keeper_meta_store.write_meta config meta with
@@ -1387,23 +1350,23 @@ let test_refusal_does_not_settle_as_compaction_failure () =
        ~outcome:`Failed
    with
    | Ok `Persisted -> ()
-   | Ok `No_durable_meta -> fail "settlement found no durable meta to advance"
-   | Error detail -> failf "settlement persist: %s" detail);
+   | Ok `No_durable_meta -> fail "outcome found no durable meta to update"
+   | Error detail -> failf "outcome persistence: %s" detail);
   match Masc.Keeper_meta_store.read_meta config meta.name with
   | Error detail -> failf "durable meta read-back: %s" detail
-  | Ok None -> fail "durable meta vanished after settlement"
-  | Ok (Some settled) ->
+  | Ok None -> fail "durable meta vanished after outcome persistence"
+  | Ok (Some updated_meta) ->
     check
       int
       "an attempted-and-failed compaction advances the streak"
       4
-      settled.runtime.compaction_rt.consecutive_failures;
+      updated_meta.runtime.compaction_rt.consecutive_failures;
     check
       bool
       "and that is what keeps the keeper suspended"
       true
       (Masc.Keeper_meta_contract.compaction_retry_suspended
-         settled.runtime.compaction_rt)
+         updated_meta.runtime.compaction_rt)
 ;;
 
 let () =
@@ -1414,6 +1377,10 @@ let () =
       test_case
         "final-admission Busy distinguishes pre-dispatch from exact terminal"
         `Quick test_final_admission_busy_requeues_only_pre_dispatch_no_compaction;
+      test_case
+        "exact no-compaction acknowledges without persistence facade"
+        `Quick
+        test_exact_no_compaction_acknowledges_without_persistence_facade;
       test_case "regular post-turn does not auto-compact"
         `Quick test_regular_post_turn_does_not_auto_compact;
       test_case
@@ -1434,12 +1401,12 @@ let () =
         `Quick test_post_install_cancellation_returns_committed_failure;
       test_case "ephemeral plan accounting mismatch is post-dispatch terminal"
         `Quick test_invalid_structural_evidence_after_dispatch_is_terminal;
-      test_case "non-reducing output is quarantined"
-        `Quick test_post_dispatch_non_reducing_output_is_quarantined;
+      test_case "non-reducing output is terminal"
+        `Quick test_post_dispatch_non_reducing_output_is_terminal;
       test_case "suspended streak refuses reactive prepare"
         `Quick test_suspended_streak_refuses_reactive_prepare;
-      test_case "refusal does not settle as a compaction failure"
-        `Quick test_refusal_does_not_settle_as_compaction_failure;
+      test_case "refusal records no compaction failure"
+        `Quick test_refusal_records_no_compaction_failure;
       test_case "missing exact lane is source-bound no-compaction"
         `Quick test_missing_exact_lane_is_source_bound_no_compaction;
     ];

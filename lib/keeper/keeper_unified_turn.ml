@@ -24,33 +24,20 @@ type in_lane_compaction =
   | Compaction_attempt_failed of { reason : string }
   | Compaction_refused_without_attempt of { consecutive_failures : int }
 
-type exact_output_terminal_reason =
-  | Exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
-  | Exact_execution_terminal of
-      { source : Keeper_checkpoint_ref.t
-      ; terminal : Keeper_event_queue_state.exact_execution_terminal
-      }
-
 type source_disposition =
   | Follow_failure_route
   | Follow_failure_route_after_no_compaction of
-      { reason : Keeper_event_queue_state.no_compaction_reason }
-  | Escalate_after_exact_output_terminal of exact_output_terminal_reason
+      { reason : Keeper_compaction_outcome.no_compaction_reason }
   | Requeue_after_context_compaction of in_lane_compaction
   | Pause_after_transcript_corruption of { detail : string }
   | Acknowledge_after_in_turn_handling
 
-let source_disposition_after_no_compaction
-      ({ source; reason } : Keeper_event_queue_state.no_compaction)
-  =
-  match reason with
-  | Keeper_event_queue_state.Exact_lane_unconfigured ->
-    Escalate_after_exact_output_terminal (Exact_lane_unconfigured { source })
-  | Keeper_event_queue_state.Exact_execution_terminal terminal ->
-    Escalate_after_exact_output_terminal
-      (Exact_execution_terminal { source; terminal })
-  | ( Keeper_event_queue_state.No_eligible_history
-    | Keeper_event_queue_state.Invalid_structural_source ) as reason ->
+let source_disposition_after_no_compaction_reason = function
+  | Keeper_compaction_outcome.Exact_lane_unconfigured
+  | Keeper_compaction_outcome.Exact_execution_terminal _ ->
+    Acknowledge_after_in_turn_handling
+  | ( Keeper_compaction_outcome.No_eligible_history
+    | Keeper_compaction_outcome.Invalid_structural_source ) as reason ->
     Follow_failure_route_after_no_compaction { reason }
 ;;
 
@@ -223,7 +210,6 @@ type provider_overflow_recovery =
       }
 
 let recover_provider_context_overflow_in_lane
-      ?exact_execution_guard
       ~before_dispatch_authority
       ~(config : Workspace.config)
       ~base_dir
@@ -357,7 +343,8 @@ let recover_provider_context_overflow_in_lane
                   reason
                   cleanup_error
             ; source_disposition =
-                source_disposition_after_no_compaction no_compaction
+                source_disposition_after_no_compaction_reason
+                  no_compaction.reason
             ; recovery = None
             })
     in
@@ -479,7 +466,6 @@ let recover_provider_context_overflow_in_lane
                   (
                   recover_latest_checkpoint_for_compaction
                     ~before_dispatch_authority:before_compaction_dispatch
-                    ?exact_execution_guard
                     ~base_path:config.base_path
                     ~base_dir
                     ~meta
@@ -563,14 +549,14 @@ let append_provider_overflow_manifest
       (Keeper_id.Trace_id.to_string no_compaction.source.trace_id)
       no_compaction.source.generation
       no_compaction.source.turn_count
-      (Keeper_event_queue_state.no_compaction_reason_label no_compaction.reason);
+      (Keeper_compaction_outcome.no_compaction_reason_label no_compaction.reason);
     (* [No_compaction] is terminal evidence for an explicit manual-compaction
        operation, not successful handling of the product event whose provider
        turn overflowed. Deterministic no-progress reasons preserve the bounded
        failure route. Effect-boundary and domain-invalid reasons instead become
        an immediate typed escalation: replaying the source could issue a second
        exact-output request after dispatch. *)
-    source_disposition_after_no_compaction no_compaction,
+    source_disposition_after_no_compaction_reason no_compaction.reason,
     turn_state
   | Provider_overflow_applied recovery ->
     let turn_state =
@@ -665,7 +651,6 @@ let append_provider_overflow_manifest
 ;;
 
 let run_keeper_cycle
-      ?exact_execution_guard
       ~(before_dispatch_authority : unit -> (unit, string) result)
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
@@ -1457,7 +1442,6 @@ dominant source of the observed CAS race exhaustion after
                          it. *)
                       let overflow_recovery =
                         recover_provider_context_overflow_in_lane
-                          ?exact_execution_guard
                           ~before_dispatch_authority
                           ~config
                           ~base_dir

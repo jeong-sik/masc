@@ -491,10 +491,10 @@ let persist_compaction_decision config ~keeper_name ~decision
     |> Result.map (fun () -> `Persisted)
 ;;
 
-(* RFC-0351 S0 / #25461, #25538: advance the streak that the heartbeat
-   settlement reads to choose requeue-vs-escalate.  Same read/stamp/merge
-   shape as [persist_compaction_decision] so a concurrent CAS re-applies the
-   stamp instead of dropping it.
+(* RFC-0351 S0 / #25461, #25538: advance the streak that reactive compaction
+   admission reads. Same read/stamp/merge shape as
+   [persist_compaction_decision] so a concurrent CAS re-applies the stamp
+   instead of dropping it.
 
    Reset semantics (#25538): the streak counts consecutive provider-overflow
    episodes, and only a turn that completes without overflow — or an
@@ -510,7 +510,7 @@ let persist_compaction_decision config ~keeper_name ~decision
    pipeline was committing normally still reported compaction_count=0 — one
    keeper carried 88 committed [context_compacted] runtime-manifest records
    against a meta reading 0. *)
-(* Rendering, not classification: the settlement variant is the state machine's
+(* Rendering, not classification: the outcome variant is the state machine's
    own outcome, so the label comes from an exhaustive match instead of being
    recovered from a message string.  A new variant fails this match at compile
    time rather than falling into an unlabelled bucket. *)
@@ -548,8 +548,8 @@ let persist_compaction_outcome config ~keeper_name ~outcome
       (stamp disk_meta)
     |> Result.map (fun () ->
       (* Counted here rather than inside [stamp]: a CAS retry re-applies the
-         stamp, so counting there would report one settlement several times.
-         Only a persisted settlement moved the streak, which is what this
+         stamp, so counting there would report one outcome several times.
+         Only a persisted outcome moved the streak, which is what this
          series answers — which outcome advanced it, and which reset it.
 
          The [keeper] label stays: keeper names come from the registry and are
@@ -560,13 +560,13 @@ let persist_compaction_outcome config ~keeper_name ~outcome
          store-level property shared by every keeper-labelled emission; it does
          not get fixed by dropping one dimension here. *)
       Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string CompactionSettlements)
+        Keeper_metrics.(to_string CompactionOutcomes)
         ~labels:
           [ "keeper", keeper_name; "outcome", compaction_outcome_label outcome ]
         ();
       Log.Keeper.info
         ~keeper_name
-        "compaction settlement persisted outcome=%s"
+        "compaction outcome persisted kind=%s"
         (compaction_outcome_label outcome);
       `Persisted)
 ;;

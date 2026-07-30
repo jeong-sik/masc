@@ -112,56 +112,48 @@ let keeper_event_queue_health_json ~execution_snapshot () =
   match current_server_state_opt () with
   | None ->
     `Assoc
-      [ "schema", `String "masc.keeper_event_queue.fleet_summary.v2"
+      [ "schema", `String "masc.keeper_event_queue.fleet_summary.v3"
       ; "status", `String "unavailable"
       ; "operator_action_required", `Bool false
       ; "keeper_count", `Int 0
       ; "keeper_names", `List []
       ; "pending_count", `Int 0
-      ; "inflight_count", `Int 0
       ; "total_count", `Int 0
       ; "transition_outbox_count", `Int 0
       ; "counts_complete", `Bool false
       ; "oldest_arrived_at_unix", `Null
       ; "oldest_age_seconds", `Null
       ; "runnable_pending_count", `Int 0
-      ; "runnable_inflight_count", `Int 0
       ; "runnable_backlog_count", `Int 0
       ; "runnable_oldest_arrived_at_unix", `Null
       ; "runnable_oldest_age_seconds", `Null
       ; "runnable_by_keeper", `List []
       ; "recoverable_pending_count", `Int 0
-      ; "recoverable_inflight_count", `Int 0
       ; "recoverable_backlog_count", `Int 0
       ; "recoverable_oldest_arrived_at_unix", `Null
       ; "recoverable_oldest_age_seconds", `Null
       ; "recoverable_by_keeper", `List []
       ; "retained_disabled_pending_count", `Int 0
-      ; "retained_disabled_inflight_count", `Int 0
       ; "retained_disabled_backlog_count", `Int 0
       ; "retained_disabled_oldest_arrived_at_unix", `Null
       ; "retained_disabled_oldest_age_seconds", `Null
       ; "retained_disabled_by_keeper", `List []
       ; "paused_dead_pending_count", `Int 0
-      ; "paused_dead_inflight_count", `Int 0
       ; "paused_dead_backlog_count", `Int 0
       ; "paused_dead_oldest_arrived_at_unix", `Null
       ; "paused_dead_oldest_age_seconds", `Null
       ; "paused_dead_by_keeper", `List []
       ; "shutdown_fenced_pending_count", `Int 0
-      ; "shutdown_fenced_inflight_count", `Int 0
       ; "shutdown_fenced_backlog_count", `Int 0
       ; "shutdown_fenced_oldest_arrived_at_unix", `Null
       ; "shutdown_fenced_oldest_age_seconds", `Null
       ; "shutdown_fenced_by_keeper", `List []
       ; "unclassified_pending_count", `Int 0
-      ; "unclassified_inflight_count", `Int 0
       ; "unclassified_count", `Int 0
       ; "unclassified_oldest_arrived_at_unix", `Null
       ; "unclassified_oldest_age_seconds", `Null
       ; "unclassified_by_keeper", `List []
       ; "pending_by_keeper", `List []
-      ; "inflight_by_keeper", `List []
       ; "read_error_count", `Int 0
       ; "read_errors", `List []
       ; "keepers", `List []

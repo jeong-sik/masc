@@ -54,7 +54,7 @@ type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
-  pending_selection : Keeper_registry_event_queue.pending_selection option;
+  pending_selection : Keeper_event_queue.stimulus option;
   event_queue_intake_error : Stimulus_intake.event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
@@ -71,7 +71,6 @@ let classify_turn_intake_admission ~lifecycle =
 ;;
 
 let consume_single_heartbeat_stimulus = Stimulus_intake.consume_single_heartbeat_stimulus
-let consume_board_stimulus_batch = Stimulus_intake.consume_board_stimulus_batch
 let heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake
 
 (* Keepalive scheduling decision (record + decide function) extracted to
@@ -353,13 +352,12 @@ let compaction_outcome_of_cycle_outcome = function
      | Keeper_unified_turn.Requeue_after_context_compaction
          (Keeper_unified_turn.Compaction_refused_without_attempt _) ->
        (* The admission gate declined the trigger before reading a checkpoint or
-          calling the summarizer, so there is no compaction outcome to settle.
+          calling the summarizer, so there is no compaction outcome to record.
           Counting it advanced the streak the gate itself reads: live keeper
           kidsnote reached 907 against a threshold of 3. *)
        None
-     | Keeper_unified_turn.Escalate_after_exact_output_terminal _ -> Some `Failed
+     | Keeper_unified_turn.Acknowledge_after_in_turn_handling -> Some `Failed
      | Keeper_unified_turn.Follow_failure_route
-     | Keeper_unified_turn.Acknowledge_after_in_turn_handling
      | Keeper_unified_turn.Pause_after_transcript_corruption _ -> None)
   | Some (Cycle.Completed _) -> Some `Recovered
   | Some
@@ -462,7 +460,7 @@ let run_keepalive_unified_turn
         (fun admission_token ->
     let consumed_stimuli = ref [] in
     let pending_selection
-      : Keeper_registry_event_queue.pending_selection option ref
+      : Keeper_event_queue.stimulus option ref
       =
       ref None
     in
@@ -800,7 +798,6 @@ let run_keepalive_unified_turn
            | Keeper_unified_turn.Follow_failure_route
            | Keeper_unified_turn.Follow_failure_route_after_no_compaction _
            | Keeper_unified_turn.Requeue_after_context_compaction _
-           | Keeper_unified_turn.Escalate_after_exact_output_terminal _
            | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
              None)
         | Some
@@ -852,8 +849,7 @@ let run_keepalive_unified_turn
               | Error message -> record_event_queue_failure message)
            | Some (Cycle.Failed { failure; _ }) ->
              (match failure.Keeper_unified_turn.source_disposition with
-              | Keeper_unified_turn.Acknowledge_after_in_turn_handling
-              | Keeper_unified_turn.Escalate_after_exact_output_terminal _ ->
+              | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
                 (match
                    fail_schedule_due
                      ~ctx

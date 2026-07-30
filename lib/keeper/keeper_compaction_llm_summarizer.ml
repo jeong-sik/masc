@@ -59,19 +59,6 @@ type attempt_observation =
   ; receipt_request_body_sha256 : string
   }
 
-type exact_write_outcome = Keeper_event_queue_persistence.exact_write_outcome =
-  | Fsync_completed
-  | Visible_sync_unconfirmed of string
-
-type exact_execution_guard =
-  { before_dispatch : attempt_observation -> (exact_write_outcome, string) result
-  ; release_before_dispatch : attempt_observation -> (exact_write_outcome, string) result
-  ; quarantine :
-      Keeper_event_queue_state.exact_execution_terminal_cause ->
-      attempt_observation ->
-      (exact_write_outcome, string) result
-  }
-
 type before_dispatch_authority =
   attempt_observation -> (unit, string) result
 
@@ -86,16 +73,12 @@ type post_success_phase =
   | Installed_pending_valid of post_success_completion
   | Committed of (unit, string) result
   | Reject_claimed of
-      Keeper_event_queue_state.exact_execution_terminal
+      Keeper_compaction_outcome.exact_execution_terminal
       * post_success_completion
-  | Rejected of
-      Keeper_event_queue_state.exact_execution_terminal
-      * (unit, string) result
+  | Rejected of Keeper_compaction_outcome.exact_execution_terminal
 
 type post_success_terminalizer =
-  { keeper_name : string
-  ; exact_execution_guard : exact_execution_guard option
-  ; attempt_observation : attempt_observation
+  { attempt_observation : attempt_observation
   ; disposition_mutex : Eio.Mutex.t
   ; mutable phase : post_success_phase
   ; mutable domain_valid_attempts : int
@@ -103,9 +86,7 @@ type post_success_terminalizer =
   }
 
 type post_success_terminalization =
-  | Terminalized of Keeper_event_queue_state.exact_execution_terminal
-  | Terminalization_persistence_failed of
-      Keeper_event_queue_state.exact_execution_terminal * string
+  | Terminalized of Keeper_compaction_outcome.exact_execution_terminal
   | Terminalization_commit_in_progress of unit Eio.Promise.t
   | Terminalization_already_committed
   | Terminalization_invariant_failed of string
@@ -114,17 +95,14 @@ type post_success_commit_claim =
   | Commit_claim_acquired
   | Commit_claim_in_progress of unit Eio.Promise.t
   | Commit_claim_already_committed
-  | Commit_claim_rejected of
-      Keeper_event_queue_state.exact_execution_terminal
-      * (unit, string) result
+  | Commit_claim_rejected of Keeper_compaction_outcome.exact_execution_terminal
 
 type 'a post_success_commit_boundary =
   | Post_success_commit_result of 'a
   | Post_success_commit_in_progress of unit Eio.Promise.t
   | Post_success_commit_already_committed
   | Post_success_commit_rejected of
-      Keeper_event_queue_state.exact_execution_terminal
-      * (unit, string) result
+      Keeper_compaction_outcome.exact_execution_terminal
 
 type post_success_phase_snapshot =
   | Phase_open
@@ -154,9 +132,8 @@ type summarization_failure =
   | Exact_execution_context_unavailable
   | Exact_execution_authority_absent
   | Exact_execution_authority_rejected
-  | Exact_execution_bind_failed
   | Exact_flow_already_started
-  | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
+  | Exact_execution_terminal of Keeper_compaction_outcome.exact_execution_terminal
   | Invalid_plan
 
 type summarizer =
@@ -786,70 +763,13 @@ let observe_flow_attempt_receipt
 ;;
 
 let terminal_of_observation cause (observation : attempt_observation) =
-  Keeper_event_queue_state.
+  Keeper_compaction_outcome.
     { cause
     ; slot_id = observation.slot_id
     ; call_id = observation.call_id
     ; plan_fingerprint = observation.receipt_plan_fingerprint
     ; request_body_sha256 = observation.receipt_request_body_sha256
     }
-;;
-
-let quarantine_exact_execution ~keeper_name ~exact_execution_guard ~cause observation =
-  match exact_execution_guard with
-  | None -> Error "exact execution guard is unavailable"
-  | Some guard ->
-    (match guard.quarantine cause observation with
-     | Ok Fsync_completed -> Ok Fsync_completed
-     | Ok (Visible_sync_unconfirmed detail as outcome) ->
-       Log.Keeper.warn
-         ~keeper_name
-         "compaction exact terminal quarantine is visible but sync is unconfirmed slot=%s call_id=%s: %s"
-         observation.slot_id
-         observation.call_id
-         detail;
-       Ok outcome
-     | Error detail ->
-       Log.Keeper.error
-         ~keeper_name
-         "compaction exact terminal quarantine failed slot=%s call_id=%s: %s"
-         observation.slot_id
-         observation.call_id
-         detail;
-       Error detail)
-;;
-
-let terminal_after_quarantine
-      ~keeper_name
-      ~exact_execution_guard
-      ~cause
-      observation
-  =
-  ignore
-    (quarantine_exact_execution
-       ~keeper_name
-       ~exact_execution_guard
-       ~cause
-       observation
-     : (exact_write_outcome, string) result);
-  terminal_of_observation cause observation
-;;
-
-let log_terminal_quarantine_failure
-      (terminalizer : post_success_terminalizer)
-      (terminal : Keeper_event_queue_state.exact_execution_terminal)
-      detail
-  =
-  try
-    Log.Keeper.warn
-      ~keeper_name:terminalizer.keeper_name
-      "post-success exact-execution quarantine failed; retaining canonical \
-       terminal slot_id=%s call_id=%s: %s"
-      terminal.Keeper_event_queue_state.slot_id
-      terminal.call_id
-      detail
-  with
-  | _ -> ()
 ;;
 
 let make_post_success_completion () =
@@ -865,7 +785,7 @@ let make_post_success_completion () =
 ;;
 
 let terminal_for terminalizer cause =
-  Keeper_event_queue_state.
+  Keeper_compaction_outcome.
     { cause
     ; slot_id = terminalizer.attempt_observation.slot_id
     ; call_id = terminalizer.attempt_observation.call_id
@@ -880,53 +800,17 @@ let with_disposition terminalizer callback =
   Eio.Mutex.use_rw ~protect:true terminalizer.disposition_mutex callback
 ;;
 
-let rejected_terminalization terminal result =
-  match result with
-  | Ok () -> Terminalized terminal
-  | Error detail -> Terminalization_persistence_failed (terminal, detail)
-;;
-
 let finish_rejection
       terminalizer
-      (terminal : Keeper_event_queue_state.exact_execution_terminal)
+      (terminal : Keeper_compaction_outcome.exact_execution_terminal)
       completion
   =
   Eio.Cancel.protect
   @@ fun () ->
-  let result =
-    match terminalizer.exact_execution_guard with
-    | None -> Ok ()
-    | Some _ ->
-      (try
-         match
-           quarantine_exact_execution
-             ~keeper_name:terminalizer.keeper_name
-             ~exact_execution_guard:terminalizer.exact_execution_guard
-             ~cause:terminal.cause
-             terminalizer.attempt_observation
-         with
-         | Ok Fsync_completed -> Ok ()
-         | Ok (Visible_sync_unconfirmed detail) ->
-           Error
-             ("post-success exact-execution quarantine sync is unconfirmed: "
-              ^ detail)
-         | Error detail ->
-           Error
-             ("post-success exact-execution quarantine failed: " ^ detail)
-       with
-       | exn ->
-         Error
-           ("post-success exact-execution quarantine raised: "
-            ^ Printexc.to_string exn))
-  in
-  (match result with
-   | Ok () -> ()
-   | Error detail ->
-     log_terminal_quarantine_failure terminalizer terminal detail);
   with_disposition terminalizer (fun () ->
     match terminalizer.phase with
     | Reject_claimed (claimed, _) when claimed = terminal ->
-      terminalizer.phase <- Rejected (terminal, result)
+      terminalizer.phase <- Rejected terminal
     | Open
     | Commit_claimed _
     | Installed_pending_valid _
@@ -935,7 +819,7 @@ let finish_rejection
     | Rejected _ ->
       ());
   completion.resolve ();
-  rejected_terminalization terminal result
+  Terminalized terminal
 ;;
 
 let claim_post_success_commit_current terminalizer =
@@ -951,8 +835,7 @@ let claim_post_success_commit_current terminalizer =
     | Committed _ -> Commit_claim_already_committed
     | Reject_claimed (_, completion) ->
       Commit_claim_in_progress completion.waiter
-    | Rejected (terminal, result) ->
-      Commit_claim_rejected (terminal, result))
+    | Rejected terminal -> Commit_claim_rejected terminal)
 ;;
 
 let claim_post_success_commit terminalizer =
@@ -967,8 +850,8 @@ let with_post_success_commit terminalizer commit =
     Post_success_commit_in_progress waiter
   | Commit_claim_already_committed ->
     Post_success_commit_already_committed
-  | Commit_claim_rejected (terminal, result) ->
-    Post_success_commit_rejected (terminal, result)
+  | Commit_claim_rejected terminal ->
+    Post_success_commit_rejected terminal
 ;;
 
 let mark_post_success_checkpoint_installed terminalizer =
@@ -1055,7 +938,7 @@ let claim_rejection terminalizer ~from_commit cause =
       `Own (terminal, completion)
     | Reject_claimed (terminal, completion), _ ->
       `Await (terminal, completion)
-    | Rejected (terminal, result), _ -> `Done (terminal, result)
+    | Rejected terminal, _ -> `Done terminal
     | Commit_claimed completion, false
     | Installed_pending_valid completion, _ ->
       `Commit_in_progress completion.waiter
@@ -1073,8 +956,8 @@ let finish_claimed_rejection terminalizer role =
     (match
        with_disposition terminalizer (fun () ->
          match terminalizer.phase with
-         | Rejected (durable, result) when durable = terminal ->
-           Some result
+         | Rejected durable when durable = terminal ->
+           Some ()
          | Open
          | Commit_claimed _
          | Installed_pending_valid _
@@ -1083,11 +966,11 @@ let finish_claimed_rejection terminalizer role =
          | Rejected _ ->
            None)
      with
-     | Some result -> rejected_terminalization terminal result
+     | Some () -> Terminalized terminal
      | None ->
        Terminalization_invariant_failed
          "post-success reject waiter completed without canonical rejection")
-  | `Done (terminal, result) -> rejected_terminalization terminal result
+  | `Done terminal -> Terminalized terminal
   | `Commit_in_progress waiter -> Terminalization_commit_in_progress waiter
   | `Already_committed -> Terminalization_already_committed
   | `Invariant detail -> Terminalization_invariant_failed detail
@@ -1247,104 +1130,30 @@ let prepare_lane
 type exact_flow_callback_failure =
   | Authority_absent
   | Authority_rejected
-  | Bind_failed
-  | Bind_sync_unconfirmed of Keeper_event_queue_state.exact_execution_terminal
-  | Release_failed of Keeper_event_queue_state.exact_execution_terminal
-  | Release_sync_unconfirmed of Keeper_event_queue_state.exact_execution_terminal
 
-let bind_exact_execution
+let authorize_dispatch
       ~keeper_name
       ~before_dispatch_authority
-      ~exact_execution_guard
       observation
   =
-  let authorize () =
-    match before_dispatch_authority, exact_execution_guard with
-    | None, None -> Error Authority_absent
-    | None, Some _ -> Ok ()
-    | Some authorize, _ ->
-      (match authorize observation with
-       | Ok () -> Ok ()
-       | Error detail ->
-         Log.Keeper.error
-           ~keeper_name
-           "compaction lifecycle authority rejected dispatch slot=%s call_id=%s: %s"
-           observation.slot_id
-           observation.call_id
-           detail;
-         Error Authority_rejected)
-  in
-  match authorize () with
-  | Error _ as error -> error
-  | Ok () ->
-    (match exact_execution_guard with
-     | None -> Ok ()
-     | Some guard ->
-    (match guard.before_dispatch observation with
-     | Ok Fsync_completed -> Ok ()
+  match before_dispatch_authority with
+  | None -> Error Authority_absent
+  | Some authorize ->
+    (match authorize observation with
+     | Ok () -> Ok ()
      | Error detail ->
        Log.Keeper.error
          ~keeper_name
-         "compaction exact durable bind failed slot=%s call_id=%s: %s"
+         "compaction lifecycle authority rejected dispatch slot=%s call_id=%s: %s"
          observation.slot_id
          observation.call_id
          detail;
-       Error Bind_failed
-     | Ok (Visible_sync_unconfirmed detail) ->
-       Log.Keeper.error
-         ~keeper_name
-         "compaction exact durable bind is visible but sync is unconfirmed slot=%s call_id=%s: %s"
-         observation.slot_id
-         observation.call_id
-         detail;
-       Error
-         (Bind_sync_unconfirmed
-            (terminal_of_observation
-               Keeper_event_queue_state.Terminal_persistence_failed
-               observation))))
-;;
-
-let release_exact_execution
-      ~keeper_name
-      ~exact_execution_guard
-      observation
-  =
-  let terminal () =
-    terminal_of_observation
-      Keeper_event_queue_state.Terminal_persistence_failed
-      observation
-  in
-  match exact_execution_guard with
-  | None -> Ok ()
-  | Some guard ->
-    (match guard.release_before_dispatch observation with
-     | Ok Fsync_completed -> Ok ()
-     | Error detail ->
-       Log.Keeper.error
-         ~keeper_name
-         "compaction exact durable release failed slot=%s call_id=%s: %s"
-         observation.slot_id
-         observation.call_id
-         detail;
-       Error (Release_failed (terminal ()))
-     | Ok (Visible_sync_unconfirmed detail) ->
-       Log.Keeper.error
-         ~keeper_name
-         "compaction exact durable release is visible but sync is unconfirmed slot=%s call_id=%s: %s"
-         observation.slot_id
-         observation.call_id
-         detail;
-       Error (Release_sync_unconfirmed (terminal ())))
+       Error Authority_rejected)
 ;;
 
 let summarization_failure_of_callback = function
   | Authority_absent -> Exact_execution_authority_absent
   | Authority_rejected -> Exact_execution_authority_rejected
-  | Bind_failed -> Exact_execution_bind_failed
-  | Bind_sync_unconfirmed terminal
-  | Release_failed terminal
-  | Release_sync_unconfirmed terminal ->
-    Exact_execution_terminal terminal
 ;;
 
 let execute_prepared_lane_current
@@ -1352,50 +1161,28 @@ let execute_prepared_lane_current
       ~net
       ?clock
       ?before_dispatch_authority
-      ?exact_execution_guard
       prepared_lane
   =
-  let bound_observation = ref None in
+  (* Process-local derived state only. It identifies the exact OAS candidate
+     whose dispatch callback passed, so cancellation can retain that source.
+     It is not persisted and does not compete with OAS execution ownership. *)
+  let authorized_observation = ref None in
   let before_dispatch candidate =
     let observation = observe_flow_attempt_receipt candidate in
     let* () =
-      match !bound_observation with
-      | None -> Ok ()
-      | Some previous ->
-        let* () =
-          release_exact_execution
-            ~keeper_name
-            ~exact_execution_guard
-            previous
-        in
-        bound_observation := None;
-        Ok ()
-    in
-    let* () =
-      bind_exact_execution
+      authorize_dispatch
         ~keeper_name
         ~before_dispatch_authority
-        ~exact_execution_guard
         observation
     in
-    if
-      Option.is_some exact_execution_guard
-      || Option.is_some before_dispatch_authority
-    then bound_observation := Some observation;
+    authorized_observation := Some observation;
     Ok ()
   in
   let before_advance ~failed ~next:_ =
     match failed with
     | Exact_output.Flow_candidate_rejected _ -> Ok ()
-    | Exact_output.Flow_candidate_execution_failed { candidate; cause = _ } ->
-      let observation = observe_flow_attempt_receipt candidate in
-      let* () =
-        release_exact_execution
-          ~keeper_name
-          ~exact_execution_guard
-          observation
-      in
-      bound_observation := None;
+    | Exact_output.Flow_candidate_execution_failed _ ->
+      authorized_observation := None;
       Ok ()
   in
   let validate flow_success =
@@ -1452,48 +1239,25 @@ let execute_prepared_lane_current
     with
     | Eio.Cancel.Cancelled _ as cancellation ->
       let raw_bt = Printexc.get_raw_backtrace () in
-      (* A durable bind is MASC's only ownership signal. MASC deliberately does
-         not inspect OAS receipt phase/count after cancellation. If OAS had
-         proved safe advancement it would first invoke [before_advance], whose
-         fsynced release clears [bound_observation]. Therefore a still-bound
-         identity is always source-terminal; a pre-bind cancellation is
-         re-raised. *)
-      (match !bound_observation with
-       | None -> Printexc.raise_with_backtrace cancellation raw_bt
-      | Some observation ->
-        `Bound_cancellation observation)
+      (* OAS owns execution state; MASC retains only the source-authority
+         observation. Cancellation is fiber teardown, not a compaction result:
+         returning a typed terminal made the heartbeat record a schedule
+         failure and advance the compaction streak even though
+         [Cycle.Cancelled] records neither. Preserve the authorized source and
+         continue the original cancellation. *)
+      Option.iter
+        (fun observation ->
+           Log.Keeper.warn
+             ~keeper_name
+             "compaction exact cancellation retained the authorized source \
+              slot=%s call_id=%s"
+             observation.slot_id
+             observation.call_id)
+        !authorized_observation;
+      Printexc.raise_with_backtrace cancellation raw_bt
   in
-  let release_retained_semantic_binding fallback =
-    match !bound_observation with
-    | None -> fallback
-    | Some observation ->
-      (match
-         release_exact_execution
-           ~keeper_name
-           ~exact_execution_guard
-           observation
-       with
-       | Ok () ->
-         bound_observation := None;
-         fallback
-       | Error cause ->
-         Error (summarization_failure_of_callback cause))
-  in
-  let settle_execution () =
+  let project_execution () =
   match execution with
-  | `Bound_cancellation observation ->
-    Log.Keeper.warn
-      ~keeper_name
-      "compaction exact cancellation quarantines only the durably bound identity slot=%s call_id=%s"
-      observation.slot_id
-      observation.call_id;
-    Error
-      (Exact_execution_terminal
-         (terminal_after_quarantine
-            ~keeper_name
-            ~exact_execution_guard
-            ~cause:Keeper_event_queue_state.Exact_execution_cancelled
-            observation))
   | `Flow
       (Error
         (Exact_output.Flow_execution_terminal
@@ -1508,8 +1272,7 @@ let execute_prepared_lane_current
               | Exact_output.Flow_candidates_exhausted _ )
           ; _
           })) ->
-    release_retained_semantic_binding
-      (Error Exact_attempt_start_failed)
+    Error Exact_attempt_start_failed
   | `Flow
       (Error
         (Exact_output.Flow_execution_terminal
@@ -1543,10 +1306,8 @@ let execute_prepared_lane_current
     let observation = observe_flow_attempt_receipt candidate in
     Error
       (Exact_execution_terminal
-         (terminal_after_quarantine
-            ~keeper_name
-            ~exact_execution_guard
-            ~cause:Keeper_event_queue_state.Exact_execution_failed
+         (terminal_of_observation
+            Keeper_compaction_outcome.Exact_execution_failed
             observation))
   | `Flow
       (Error
@@ -1572,10 +1333,8 @@ let execute_prepared_lane_current
       rejection.rejection;
     Error
       (Exact_execution_terminal
-         (terminal_after_quarantine
-            ~keeper_name
-            ~exact_execution_guard
-            ~cause:Keeper_event_queue_state.Domain_invalid_output
+         (terminal_of_observation
+            Keeper_compaction_outcome.Domain_invalid_output
             observation))
   | `Flow (Ok validated) ->
     let flow_success = validated.transport_success in
@@ -1588,9 +1347,7 @@ let execute_prepared_lane_current
       { plan = validated.accepted
       ; exact_execution_evidence = exact_execution_evidence flow_success
       ; post_success_terminalizer =
-          { keeper_name
-          ; exact_execution_guard
-          ; attempt_observation = observation
+          { attempt_observation = observation
           ; disposition_mutex = Eio.Mutex.create ()
           ; phase = Open
           ; domain_valid_attempts = 0
@@ -1598,9 +1355,7 @@ let execute_prepared_lane_current
           }
       }
   in
-  match execution with
-  | `Bound_cancellation _ -> Eio.Cancel.protect settle_execution
-  | `Flow _ -> settle_execution ()
+  project_execution ()
 ;;
 
 let execute_prepared_lane
@@ -1608,7 +1363,6 @@ let execute_prepared_lane
       ~net
       ?clock
       ?before_dispatch_authority
-      ?exact_execution_guard
       prepared_lane
   =
   execute_prepared_lane_current
@@ -1616,13 +1370,11 @@ let execute_prepared_lane
     ~net
     ?clock
     ?before_dispatch_authority
-    ?exact_execution_guard
     prepared_lane
 ;;
 
 let run_exact
       ?before_dispatch_authority
-      ?exact_execution_guard
       ~base_path
       ~keeper_name
       ~sw:_
@@ -1650,13 +1402,11 @@ let run_exact
         ~net
         ?clock
         ?before_dispatch_authority
-        ?exact_execution_guard
         prepared_lane
 ;;
 
 let make_resolved
       ?before_dispatch_authority
-      ?exact_execution_guard
       ~base_path
       ~(keeper_name : string)
       ()
@@ -1669,7 +1419,6 @@ let make_resolved
       (fun ~units ->
          run_exact
            ?before_dispatch_authority
-           ?exact_execution_guard
            ~base_path
            ~keeper_name
            ~sw
@@ -1682,14 +1431,12 @@ let make_resolved
 
 let make
       ?before_dispatch_authority
-      ?exact_execution_guard
       ~base_path
       ~keeper_name
       ()
   =
   make_resolved
     ?before_dispatch_authority
-    ?exact_execution_guard
     ~base_path
     ~keeper_name
     ()

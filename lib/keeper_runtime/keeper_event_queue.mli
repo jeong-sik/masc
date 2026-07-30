@@ -8,12 +8,11 @@
 
     This module is data only. The enqueue side is wired:
     [keeper_keepalive_signal.ml] calls [Keeper_registry_event_queue.enqueue]
-    before the wakeup flag flips (RFC-0020 Rule 1). On the dequeue side,
-    [keeper_heartbeat_loop.ml] leases every queued board signal at turn
-    start via [Keeper_registry_event_queue.claim_board_result] (a CAS loop
-    over [drain_board_all], RFC-0334 W2) and falls back to one typed non-board
-    lease when that batch is empty — either path pins the
-    [Conservation] invariant. The per-Keeper wakeup atomic cuts the configured
+    before the wakeup flag flips (RFC-0020 Rule 1). On the intake side,
+    [keeper_heartbeat_stimulus_intake.ml] peeks at the earliest ready stimulus,
+    validates that same immutable source immediately before dispatch, and
+    removes it only through an exact ACK after the turn reaches an
+    acknowledging outcome. The per-Keeper wakeup atomic cuts the configured
     heartbeat sleep, and no policy layer may suppress the following cycle. *)
 
 type urgency =

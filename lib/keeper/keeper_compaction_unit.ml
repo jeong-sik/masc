@@ -300,7 +300,7 @@ let validate_provider_transcript messages =
 
 (* The content of a synthesized closer.  It states what is known (the call was
    issued, no result was recorded) and what is not (whether the call took
-   effect), because masc has no per-tool-call settlement authority: the
+   effect), because masc has no durable per-tool-call effect receipt: the
    decision log's [tool_exec] record is written after execution and is lost
    with the unflushed buffer at exactly the crash this recovers from.  Claiming
    the tool failed would be a fabrication; claiming it succeeded would be

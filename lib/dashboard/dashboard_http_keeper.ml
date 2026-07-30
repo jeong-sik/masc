@@ -911,7 +911,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ( "compaction_consecutive_failures",
                 `Int m.runtime.compaction_rt.consecutive_failures );
               (* RFC-0351 S0 / #25461: operator-visible marker that the
-                 settlement stopped retrying compaction for this keeper. *)
+                 reactive compaction admission is suspended for this keeper. *)
               ( "compaction_retry_suspended",
                 `Bool
                   (Keeper_meta_contract.compaction_retry_suspended

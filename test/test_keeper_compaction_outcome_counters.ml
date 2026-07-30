@@ -1,18 +1,18 @@
-(** Which settlement outcome moved the compaction streak.
+(** Which outcome moved the compaction streak.
 
     [persist_compaction_outcome] is the one place all four outcomes converge on
     [compaction_rt], but the outcome was never recorded: the phase-transition
     log renders a decision string, not the variant, so a live keeper's streak
     could be seen rising without any way to tell whether a reset came from an
     overflow-free turn ([`Recovered]) or an operator commit ([`Committed]).
-    These tests pin that every persisted settlement is counted exactly once and
-    carries its own outcome label. *)
+    These tests pin that every persisted outcome is counted exactly once and
+    carries its own label. *)
 
 open Alcotest
 
 module Meta_store = Masc.Keeper_meta_store
 
-let metric_name = Keeper_metrics.(to_string CompactionSettlements)
+let metric_name = Keeper_metrics.(to_string CompactionOutcomes)
 
 let counted ~keeper_name ~outcome =
   Otel_metric_store_core.metric_value_or_zero
@@ -54,23 +54,23 @@ let register config ~name =
   meta
 ;;
 
-let settle config ~name ~outcome =
+let persist_outcome config ~name ~outcome =
   match Meta_store.persist_compaction_outcome config ~keeper_name:name ~outcome with
   | Ok `Persisted -> ()
-  | Ok `No_durable_meta -> failf "%s has no durable meta to settle against" name
-  | Error msg -> failf "settlement failed for %s: %s" name msg
+  | Ok `No_durable_meta -> failf "%s has no durable meta to update" name
+  | Error msg -> failf "outcome persistence failed for %s: %s" name msg
 ;;
 
 (* Each variant gets its own label, so a dashboard can separate a streak reset
    that came from an overflow-free turn from one an operator forced. *)
 let test_each_outcome_is_labelled () =
   with_workspace (fun config ->
-    let name = "settlement-labels" in
+    let name = "outcome-labels" in
     ignore (register config ~name);
     List.iter
       (fun (outcome, label) ->
          let before = counted ~keeper_name:name ~outcome:label in
-         settle config ~name ~outcome;
+         persist_outcome config ~name ~outcome;
          check
            (float 0.5)
            (Printf.sprintf "%s is counted under its own label" label)
@@ -83,21 +83,21 @@ let test_each_outcome_is_labelled () =
       ])
 ;;
 
-(* The streak arithmetic and the counter must agree: four `Failed` settlements
-   are four counted settlements and a streak of four. A count that drifts from
+(* The streak arithmetic and the counter must agree: four persisted [`Failed]
+   outcomes are four counted outcomes and a streak of four. A count that drifts from
    the durable value would send an operator looking for a bug that is not
    there. *)
 let test_count_tracks_the_durable_streak () =
   with_workspace (fun config ->
-    let name = "settlement-streak" in
+    let name = "outcome-streak" in
     ignore (register config ~name);
     let before = counted ~keeper_name:name ~outcome:"failed" in
     for _ = 1 to 4 do
-      settle config ~name ~outcome:`Failed
+      persist_outcome config ~name ~outcome:`Failed
     done;
     check
       (float 0.5)
-      "four failed settlements are counted four times"
+      "four failed outcomes are counted four times"
       (before +. 4.)
       (counted ~keeper_name:name ~outcome:"failed");
     match Meta_store.read_meta config name with
@@ -112,22 +112,22 @@ let test_count_tracks_the_durable_streak () =
 ;;
 
 (* Per-keeper attribution is the question the series was added for — which
-   keeper's compaction is collapsing. One keeper's settlement must not move
+   keeper's compaction is collapsing. One keeper's outcome must not move
    another's series, and the fleet aggregate a dashboard reads is the sum over
    them, so both readings stay available. *)
-let test_attributes_the_settlement_to_its_keeper () =
+let test_attributes_the_outcome_to_its_keeper () =
   with_workspace (fun config ->
-    let alpha = "settlement-alpha" in
-    let beta = "settlement-beta" in
+    let alpha = "outcome-alpha" in
+    let beta = "outcome-beta" in
     ignore (register config ~name:alpha);
     ignore (register config ~name:beta);
     let alpha_before = counted ~keeper_name:alpha ~outcome:"failed" in
     let beta_before = counted ~keeper_name:beta ~outcome:"failed" in
     let fleet_before = fleet_total () in
-    settle config ~name:alpha ~outcome:`Failed;
+    persist_outcome config ~name:alpha ~outcome:`Failed;
     check
       (float 0.5)
-      "the settling keeper's series advances"
+      "the persisting keeper's series advances"
       (alpha_before +. 1.)
       (counted ~keeper_name:alpha ~outcome:"failed");
     check
@@ -135,7 +135,7 @@ let test_attributes_the_settlement_to_its_keeper () =
       "another keeper's series is untouched"
       beta_before
       (counted ~keeper_name:beta ~outcome:"failed");
-    settle config ~name:beta ~outcome:`Failed;
+    persist_outcome config ~name:beta ~outcome:`Failed;
     check
       (float 0.5)
       "the fleet aggregate is the sum over keepers"
@@ -143,21 +143,21 @@ let test_attributes_the_settlement_to_its_keeper () =
       (fleet_total ()))
 ;;
 
-(* No durable meta means no settlement was persisted and no streak moved, so
+(* No durable meta means no outcome was persisted and no streak moved, so
    counting one would overstate the population the series describes. *)
 let test_unregistered_keeper_is_not_counted () =
   with_workspace (fun config ->
-    let name = "settlement-unregistered" in
+    let name = "outcome-unregistered" in
     let before = counted ~keeper_name:name ~outcome:"failed" in
     (match
        Meta_store.persist_compaction_outcome config ~keeper_name:name ~outcome:`Failed
      with
      | Ok `No_durable_meta -> ()
-     | Ok `Persisted -> fail "an unregistered keeper must not persist a settlement"
-     | Error msg -> failf "unexpected settlement error: %s" msg);
+     | Ok `Persisted -> fail "an unregistered keeper must not persist an outcome"
+     | Error msg -> failf "unexpected outcome persistence error: %s" msg);
     check
       (float 0.5)
-      "an unpersisted settlement is not counted"
+      "an unpersisted outcome is not counted"
       before
       (counted ~keeper_name:name ~outcome:"failed"))
 ;;
@@ -166,23 +166,23 @@ let test_metric_name_is_stable () =
   check
     string
     "dashboards and alerts key off this name"
-    "masc_keeper_compaction_settlements_total"
+    "masc_keeper_compaction_outcomes_total"
     metric_name
 ;;
 
 let () =
   run
-    "keeper compaction settlement counters"
-    [ ( "settlement"
+    "keeper compaction outcome counters"
+    [ ( "outcome"
       , [ test_case "each outcome is labelled" `Quick test_each_outcome_is_labelled
         ; test_case
             "count tracks the durable streak"
             `Quick
             test_count_tracks_the_durable_streak
         ; test_case
-            "attributes the settlement to its keeper"
+            "attributes the outcome to its keeper"
             `Quick
-            test_attributes_the_settlement_to_its_keeper
+            test_attributes_the_outcome_to_its_keeper
         ; test_case
             "an unregistered keeper is not counted"
             `Quick

@@ -13,7 +13,7 @@ type t =
   | Board_events (** Cursor-based board scan (collect_board_events). *)
   | Board_stimulus_intake
       (** Event-queue stimulus intake (consume_single_heartbeat_stimulus /
-          consume_board_stimulus_batch) — distinct from [Board_events] so the
+          consume_single_heartbeat_stimulus) — distinct from [Board_events] so the
           scan path and the queued-stimulus path do not conflate failure
           sources in the same metric. *)
   | Scheduled_automation

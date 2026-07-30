@@ -181,7 +181,7 @@ export function ScheduleSurface() {
             <div class="ov-kpi-k">큐 누락</div>
             <div
               class=${`ov-kpi-v ${queueMisses > 0 ? 'warn' : 'ok'}`}
-              title="dispatch됐으나 큐(pending·inflight)에도 없고 keeper 반응 기록도 없는 예약 실행 수 — 실행 누락"
+              title="dispatch됐으나 pending 큐에도 없고 keeper 반응 기록도 없는 예약 실행 수 — 실행 누락"
             >${countLabel(queueMisses)}</div>
           </div>
         </section>

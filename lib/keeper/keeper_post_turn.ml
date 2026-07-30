@@ -61,9 +61,9 @@ type compaction_recovery = {
   turn_generation : int;
 }
 
-type no_compaction = Keeper_event_queue_state.no_compaction =
+type no_compaction = Keeper_compaction_outcome.no_compaction =
   { source : Keeper_checkpoint_ref.t
-  ; reason : Keeper_event_queue_state.no_compaction_reason
+  ; reason : Keeper_compaction_outcome.no_compaction_reason
   }
 
 type compaction_recovery_error =
@@ -111,7 +111,7 @@ let compaction_recovery_error_to_tag = function
   | Compaction_rejected reason ->
     Keeper_compact_policy.compaction_rejection_to_tag reason
   | No_compaction { reason; _ } ->
-    "no_compaction:" ^ Keeper_event_queue_state.no_compaction_reason_label reason
+    "no_compaction:" ^ Keeper_compaction_outcome.no_compaction_reason_label reason
   | Retry_suspended _ -> "retry_suspended"
 
 let checkpoint_load_error_detail = function
@@ -193,7 +193,7 @@ let compaction_recovery_error_to_string = function
       source.generation
       source.turn_count
       source.sha256
-      (Keeper_event_queue_state.no_compaction_reason_to_string reason)
+      (Keeper_compaction_outcome.no_compaction_reason_to_string reason)
   | Retry_suspended { consecutive_failures } ->
     Printf.sprintf
       "compaction retry suspended after %d consecutive failures; reactive \
@@ -494,22 +494,23 @@ let apply_post_turn_lifecycle_with_resilience_handles
   apply_multimodal_wirein ~now:now_ts body
 
 type rejection_disposition =
-  | Terminal_no_compaction of Keeper_event_queue_state.no_compaction_reason
+  | Terminal_no_compaction of Keeper_compaction_outcome.no_compaction_reason
   | Owner_generation_deferred
   | Nonterminal_rejection
 
 let rejection_disposition = function
   | Keeper_compact_policy.No_eligible_history ->
-    Terminal_no_compaction Keeper_event_queue_state.No_eligible_history
-  | Invalid_structure _ -> Terminal_no_compaction Invalid_structural_source
+    Terminal_no_compaction Keeper_compaction_outcome.No_eligible_history
+  | Invalid_structure _ ->
+    Terminal_no_compaction Keeper_compaction_outcome.Invalid_structural_source
   | Exact_execution_terminal terminal ->
     Terminal_no_compaction
-      (Keeper_event_queue_state.Exact_execution_terminal terminal)
+      (Keeper_compaction_outcome.Exact_execution_terminal terminal)
   | Invalid_structural_evidence (_, terminal) ->
     Terminal_no_compaction
-      (Keeper_event_queue_state.Exact_execution_terminal terminal)
+      (Keeper_compaction_outcome.Exact_execution_terminal terminal)
   | Exact_lane_unconfigured ->
-    Terminal_no_compaction Keeper_event_queue_state.Exact_lane_unconfigured
+    Terminal_no_compaction Keeper_compaction_outcome.Exact_lane_unconfigured
   | Invalid_compaction_plan
   | Exact_target_selection_failed
   | Exact_admission_failed
@@ -517,7 +518,6 @@ let rejection_disposition = function
   | Exact_execution_context_unavailable
   | Exact_execution_authority_absent
   | Exact_execution_authority_rejected
-  | Exact_execution_bind_failed
   | Exact_flow_already_started ->
     Nonterminal_rejection
 ;;
@@ -566,7 +566,7 @@ let observed_commit_completion prepared =
 ;;
 
 let no_compaction_of_uncommitted_prepared
-      ?(cause = Keeper_event_queue_state.Commit_admission_unavailable)
+      ?(cause = Keeper_compaction_outcome.Commit_admission_unavailable)
       prepared
   =
   match
@@ -577,7 +577,7 @@ let no_compaction_of_uncommitted_prepared
   | Keeper_compaction_llm_summarizer.Terminalized terminal ->
     let no_compaction =
       { source = prepared.source_ref
-      ; reason = Exact_execution_terminal terminal
+      ; reason = Keeper_compaction_outcome.Exact_execution_terminal terminal
       }
     in
     publish_prepared_commit_completion
@@ -597,8 +597,6 @@ let no_compaction_of_uncommitted_prepared
        Uncommitted_terminalized no_compaction
      | Committed recovery ->
        Uncommitted_already_committed recovery)
-  | Keeper_compaction_llm_summarizer.Terminalization_persistence_failed
-      (_, detail)
   | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed detail ->
     let error = Checkpoint_candidate_failed detail in
     publish_prepared_commit_completion
@@ -671,7 +669,7 @@ let prepare_compaction_admitted
      | Keeper_compact_policy.Prepared _, _, None ->
        (* Prepared-without-evidence is a planner invariant violation (a bug),
           not a deterministic no-op: it must surface as a visible failure,
-          never settle as a durable terminal no-compaction. *)
+          never produce a durable terminal no-compaction outcome. *)
        Error
          (Checkpoint_candidate_failed
             "compaction preparation completed without structural evidence \
@@ -721,12 +719,10 @@ let prepare_compaction_admitted
 
 (* RFC-0351 S0 / #25461: reactive admission gate in front of the prepare
    phase. Once the persisted failure streak reaches the escalation threshold
-   the settlement already refuses to retry, but each *new* stimulus still paid
-   one full prepare — checkpoint load plus a summarizer LLM call — before its
-   escalation settled. Refusing the reactive trigger here, before any I/O,
-   drops that residual burn to zero. The manual trigger passes through on
-   purpose: an operator-committed compaction is the recovery lever — its
-   commit resets the streak and lifts the suspension. *)
+   reactive preparation is refused before checkpoint load or a summarizer LLM
+   call. The manual trigger passes through on purpose: an operator-committed
+   compaction is the recovery lever — its commit resets the streak and lifts
+   the suspension. *)
 let prepare_compaction_with
       ~compact_for_request
       ~base_dir
@@ -773,7 +769,6 @@ let prepare_compaction_with
 
 let prepare_compaction
       ?before_dispatch_authority
-      ?exact_execution_guard
       ~base_path
       ~base_dir
       ~meta
@@ -784,7 +779,6 @@ let prepare_compaction
     ~compact_for_request:
       (Keeper_compact_policy.compact_for_request_typed
          ?before_dispatch_authority
-         ?exact_execution_guard
          ~base_path)
     ~base_dir
     ~meta
@@ -834,7 +828,7 @@ let commit_prepared_compaction_with
     | Keeper_compaction_llm_summarizer.Terminalized terminal ->
       Already_rejected
         { source = source_ref
-        ; reason = Exact_execution_terminal terminal
+        ; reason = Keeper_compaction_outcome.Exact_execution_terminal terminal
         }
     | Keeper_compaction_llm_summarizer.Terminalization_commit_in_progress _ ->
       commit_failure
@@ -844,8 +838,6 @@ let commit_prepared_compaction_with
       commit_failure
         (Checkpoint_candidate_failed
            "commit owner observed an already-committed terminalization")
-    | Keeper_compaction_llm_summarizer.Terminalization_persistence_failed
-        (_, detail)
     | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed detail ->
       commit_failure (Checkpoint_candidate_failed detail)
   in
@@ -932,7 +924,7 @@ let commit_prepared_compaction_with
        Log.Keeper.warn
          "compaction checkpoint source changed: %s"
          (checkpoint_ref_detail actual);
-       terminalize_claimed Keeper_event_queue_state.Checkpoint_source_changed
+       terminalize_claimed Keeper_compaction_outcome.Checkpoint_source_changed
      | Ok
          (_, Keeper_checkpoint_store.Not_installed { cause = cas_error; _ })
      | Error (Persistence_error cas_error) ->
@@ -946,10 +938,10 @@ let commit_prepared_compaction_with
              , Keeper_checkpoint_failure_operation.(to_label Compaction_save) )
          ]
          ();
-       terminalize_claimed Keeper_event_queue_state.Checkpoint_persistence_failed
+       terminalize_claimed Keeper_compaction_outcome.Checkpoint_persistence_failed
      | Error (Tool_history_invalid _) ->
        terminalize_claimed
-         Keeper_event_queue_state.Invalid_structural_source_after_dispatch
+         Keeper_compaction_outcome.Invalid_structural_source_after_dispatch
     with
     | Eio.Cancel.Cancelled _ as exn ->
       let raw_bt = Printexc.get_raw_backtrace () in
@@ -958,7 +950,7 @@ let commit_prepared_compaction_with
          Eio.Cancel.protect (fun () ->
           ignore
             (terminalize_claimed
-               Keeper_event_queue_state.Exact_execution_cancelled));
+               Keeper_compaction_outcome.Exact_execution_cancelled));
          Printexc.raise_with_backtrace exn raw_bt
        | Some recovery ->
          Eio.Cancel.protect (fun () ->
@@ -1005,7 +997,7 @@ let commit_prepared_compaction_with
            "compaction checkpoint save exception became terminal: %s"
            detail;
          terminalize_claimed
-           Keeper_event_queue_state.Checkpoint_persistence_failed)
+           Keeper_compaction_outcome.Checkpoint_persistence_failed)
   in
   match
     Keeper_compaction_llm_summarizer.with_post_success_commit
@@ -1057,7 +1049,6 @@ end
 
 let recover_latest_checkpoint_for_compaction
     ?before_dispatch_authority
-    ?exact_execution_guard
     ~(base_path : string)
     ~(base_dir : string)
     ~(meta : keeper_meta)
@@ -1067,7 +1058,6 @@ let recover_latest_checkpoint_for_compaction
   match
     prepare_compaction
       ?before_dispatch_authority
-      ?exact_execution_guard
       ~base_path
       ~base_dir
       ~meta

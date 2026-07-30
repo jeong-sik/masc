@@ -227,7 +227,6 @@ let terminal_rejection terminalizer cause =
     Exact_execution_terminal terminal
   | Keeper_compaction_llm_summarizer.Terminalization_commit_in_progress _
   | Keeper_compaction_llm_summarizer.Terminalization_already_committed
-  | Keeper_compaction_llm_summarizer.Terminalization_persistence_failed _
   | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed _ ->
     summarization_rejection
       Keeper_compaction_llm_summarizer.Exact_flow_already_started
@@ -265,14 +264,14 @@ let requested_messages_with_plan
        - Late: [commit_prepared_compaction] returns a typed [Commit_failed],
          which [Keeper_manual_compaction.run_commit] folds into
          [Manual_compaction_failed] -> [Requeue Context_compaction_retry].
-         That settlement is not an ack
-         (keeper_heartbeat_loop.ml), so the same doomed request is re-driven
-         every cycle — one summarizer call each time. This is the live
-         livelock: 102 failures and 104 compaction LLM calls in the 74 minutes
-         after the #25413 build went live.
+         The owner loop leaves the selected source pending, so the same doomed
+         request is re-driven every cycle — one summarizer call each time. This
+         is the live livelock: 102 failures and 104 compaction LLM calls in the
+         74 minutes after the #25413 build went live.
        - Early: the typed [No_compaction] arm of
-         [Keeper_manual_compaction.finish_preparation] acks and settles
-         terminally, with a ledger row and a [compaction_rejected] log line.
+         [Keeper_manual_compaction.finish_preparation] becomes
+         [Manual_compaction_not_applied], so the owner loop ACKs the selected
+         source after recording a ledger row and [compaction_rejected] log.
 
        Terminating is correct here because [validate] rejection is monotone
        under append: appending messages never repairs an existing structural
@@ -325,7 +324,7 @@ let requested_messages_with_plan
               Error
                 (terminal_rejection
                    post_success_terminalizer
-                   Keeper_event_queue_state.Domain_invalid_output)
+                   Keeper_compaction_outcome.Domain_invalid_output)
             else
               Ok
                 { messages
@@ -349,7 +348,6 @@ let requested_messages_with_plan
 
 let requested_messages
       ?before_dispatch_authority
-      ?exact_execution_guard
       ~base_path
       (meta : keeper_meta)
       messages
@@ -359,7 +357,6 @@ let requested_messages
       match
         Keeper_compaction_llm_summarizer.make
           ?before_dispatch_authority
-          ?exact_execution_guard
           ~base_path
           ~keeper_name:meta.name
           ()
@@ -455,9 +452,9 @@ let compact_for_request_typed_with
       reject (terminal_rejection requested.post_success_terminalizer cause)
     in
     if after_bytes = before_bytes
-    then reject_terminal Keeper_event_queue_state.Compaction_produced_no_reduction
+    then reject_terminal Keeper_compaction_outcome.Compaction_produced_no_reduction
     else if after_bytes > before_bytes
-    then reject_terminal Keeper_event_queue_state.Compaction_increased_checkpoint
+    then reject_terminal Keeper_compaction_outcome.Compaction_increased_checkpoint
     else (
       let after_messages = message_count compacted_ctx in
       let before_tool_use_count, before_tool_result_count =
@@ -522,13 +519,12 @@ let compact_for_request_typed_with
         (match
            Keeper_compaction_llm_summarizer.terminalize_post_success
              requested.post_success_terminalizer
-             Keeper_event_queue_state.Invalid_structural_evidence
+             Keeper_compaction_outcome.Invalid_structural_evidence
          with
          | Keeper_compaction_llm_summarizer.Terminalized terminal ->
            reject (Invalid_structural_evidence (error, terminal))
          | Keeper_compaction_llm_summarizer.Terminalization_commit_in_progress _
          | Keeper_compaction_llm_summarizer.Terminalization_already_committed
-         | Keeper_compaction_llm_summarizer.Terminalization_persistence_failed _
          | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed _ ->
            reject
              (summarization_rejection
@@ -561,7 +557,6 @@ let compact_for_request_typed_with
 
 let compact_for_request_typed
       ?before_dispatch_authority
-      ?exact_execution_guard
       ~base_path
       ~meta
       ~trigger
@@ -571,7 +566,6 @@ let compact_for_request_typed
     ~requested_messages:
       (requested_messages
          ?before_dispatch_authority
-         ?exact_execution_guard
          ~base_path
          meta)
     ~meta

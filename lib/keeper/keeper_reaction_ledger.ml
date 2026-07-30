@@ -20,19 +20,15 @@ type stimulus_kind =
 type reaction_kind =
   | Turn_started
   | Event_queue_ack
-  | Event_queue_no_compaction
   | Event_queue_cancelled
-  | Event_queue_requeued
-  | Event_queue_escalated
   | Cursor_ack
 
 type reaction_decode_error = Unknown_reaction_kind of string
 
 module Event_id_set = Set.Make (String)
 
-(* The storage namespace and row schema advance together.  A generation hard
-   cut never scans or writes an older namespace, so retired data cannot remain
-   on the exact-evidence hot path or become a second authority. *)
+(* The storage namespace and row schema advance together. Readers inspect
+   exactly this namespace, keeping exact evidence under one authority. *)
 let storage_generation = "v5"
 let schema = "keeper.reaction_ledger." ^ storage_generation
 
@@ -70,10 +66,7 @@ let stimulus_kind_of_string = function
 let reaction_kind_to_string = function
   | Turn_started -> "turn_started"
   | Event_queue_ack -> "event_queue_ack"
-  | Event_queue_no_compaction -> "event_queue_no_compaction"
   | Event_queue_cancelled -> "event_queue_cancelled"
-  | Event_queue_requeued -> "event_queue_requeued"
-  | Event_queue_escalated -> "event_queue_escalated"
   | Cursor_ack -> "cursor_ack"
 ;;
 
@@ -82,10 +75,7 @@ let reaction_kind_to_string = function
 let reaction_kind_of_string = function
   | "turn_started" -> Ok Turn_started
   | "event_queue_ack" -> Ok Event_queue_ack
-  | "event_queue_no_compaction" -> Ok Event_queue_no_compaction
   | "event_queue_cancelled" -> Ok Event_queue_cancelled
-  | "event_queue_requeued" -> Ok Event_queue_requeued
-  | "event_queue_escalated" -> Ok Event_queue_escalated
   | "cursor_ack" -> Ok Cursor_ack
   | other -> Error (Unknown_reaction_kind other)
 ;;
@@ -295,16 +285,9 @@ let record_event_queue_turn_started ~base_path ~keeper_name stimulus =
 ;;
 
 let reaction_kind_of_transition = function
-  | Keeper_event_queue_state.Ack -> Event_queue_ack
-  | Keeper_event_queue_state.Manual_compaction_committed
-      { followup = Keeper_event_queue_state.Compaction_commit_ack; _ } ->
-    Event_queue_ack
-  | Keeper_event_queue_state.No_compaction _ -> Event_queue_no_compaction
   | Keeper_event_queue_state.Cancel_accepted _ -> Event_queue_cancelled
   | Keeper_event_queue_state.Transfer_accepted _ -> Event_queue_ack
   | Keeper_event_queue_state.Ack_source_terminal _ -> Event_queue_ack
-  | Keeper_event_queue_state.Requeue _ -> Event_queue_requeued
-  | Keeper_event_queue_state.Escalate _ -> Event_queue_escalated
 ;;
 
 let event_queue_transition_event_id
@@ -675,56 +658,16 @@ let require_finite_float ~missing ~non_finite field json =
 
 let reaction_kind_matches_transition reaction_kind transition =
   match reaction_kind, transition with
-  | Event_queue_ack, Keeper_event_queue_state.Ack -> true
-  | Event_queue_ack,
-    Keeper_event_queue_state.Manual_compaction_committed
-      { followup = Keeper_event_queue_state.Compaction_commit_ack; _ } ->
-    true
   | Event_queue_ack, Keeper_event_queue_state.Transfer_accepted _ -> true
   | Event_queue_ack, Keeper_event_queue_state.Ack_source_terminal _ -> true
-  | Event_queue_no_compaction, Keeper_event_queue_state.No_compaction _ -> true
   | Event_queue_cancelled, Keeper_event_queue_state.Cancel_accepted _ -> true
-  | Event_queue_requeued, Keeper_event_queue_state.Requeue _ -> true
-  | Event_queue_escalated, Keeper_event_queue_state.Escalate _ -> true
   | Turn_started, _
   | Cursor_ack, _
-  | Event_queue_ack,
-    ( Keeper_event_queue_state.No_compaction _
-    | Keeper_event_queue_state.Cancel_accepted _
-    | Keeper_event_queue_state.Requeue _
-    | Keeper_event_queue_state.Escalate _ )
-  | Event_queue_no_compaction,
-    ( Keeper_event_queue_state.Ack
-    | Keeper_event_queue_state.Manual_compaction_committed _
-    | Keeper_event_queue_state.Cancel_accepted _
-    | Keeper_event_queue_state.Transfer_accepted _
-    | Keeper_event_queue_state.Ack_source_terminal _
-    | Keeper_event_queue_state.Requeue _
-    | Keeper_event_queue_state.Escalate _ )
+  | Event_queue_ack, Keeper_event_queue_state.Cancel_accepted _
   | Event_queue_cancelled,
-    ( Keeper_event_queue_state.Ack
-    | Keeper_event_queue_state.Manual_compaction_committed _
-    | Keeper_event_queue_state.No_compaction _
-    | Keeper_event_queue_state.Transfer_accepted _
-    | Keeper_event_queue_state.Ack_source_terminal _
-    | Keeper_event_queue_state.Requeue _
-    | Keeper_event_queue_state.Escalate _ )
-  | Event_queue_requeued,
-    ( Keeper_event_queue_state.Ack
-    | Keeper_event_queue_state.Manual_compaction_committed _
-    | Keeper_event_queue_state.No_compaction _
-    | Keeper_event_queue_state.Cancel_accepted _
-    | Keeper_event_queue_state.Transfer_accepted _
-    | Keeper_event_queue_state.Ack_source_terminal _
-    | Keeper_event_queue_state.Escalate _ )
-  | Event_queue_escalated,
-    ( Keeper_event_queue_state.Ack
-    | Keeper_event_queue_state.Manual_compaction_committed _
-    | Keeper_event_queue_state.No_compaction _
-    | Keeper_event_queue_state.Cancel_accepted _
-    | Keeper_event_queue_state.Transfer_accepted _
-    | Keeper_event_queue_state.Ack_source_terminal _
-    | Keeper_event_queue_state.Requeue _ ) -> false
+    ( Keeper_event_queue_state.Transfer_accepted _
+    | Keeper_event_queue_state.Ack_source_terminal _ )
+    -> false
 ;;
 
 let decode_reaction_stimulus_reference reaction =
@@ -842,8 +785,7 @@ let decode_reaction_row ~event_id metadata reaction =
     if String.equal event_id expected_event_id
     then Ok (Current_reaction { metadata; reaction_kind; transition_receipt = None })
     else Error Event_identity_mismatch
-  | ( Event_queue_ack | Event_queue_no_compaction | Event_queue_cancelled
-    | Event_queue_requeued | Event_queue_escalated ),
+  | (Event_queue_ack | Event_queue_cancelled),
     "keeper_event_queue_transition" ->
     let* transition_receipt =
       decode_transition_reaction
@@ -860,15 +802,12 @@ let decode_reaction_row ~event_id metadata reaction =
   | Cursor_ack, "keeper_world_observation.board_cursor" ->
     Error Reaction_source_mismatch
   | Turn_started, "keeper_event_queue_transition"
-  | ( Event_queue_ack | Event_queue_no_compaction | Event_queue_cancelled
-    | Event_queue_requeued | Event_queue_escalated ),
+  | (Event_queue_ack | Event_queue_cancelled),
     "keeper_event_queue"
   | Cursor_ack,
     ("keeper_event_queue" | "keeper_event_queue_transition") ->
     Error Reaction_source_mismatch
-  | ( Turn_started | Event_queue_ack | Event_queue_no_compaction
-    | Event_queue_cancelled | Event_queue_requeued | Event_queue_escalated
-    | Cursor_ack ),
+  | (Turn_started | Event_queue_ack | Event_queue_cancelled | Cursor_ack),
     _ -> Error Unknown_reaction_source
 ;;
 
@@ -1115,12 +1054,7 @@ let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
            event_queue_cancelled_seen := true;
            event_queue_cancelled_recorded_at
              := max_recorded_at !event_queue_cancelled_recorded_at recorded_at
-         | Current_reaction
-             { reaction_kind =
-                 ( Event_queue_no_compaction | Event_queue_requeued
-                 | Event_queue_escalated | Cursor_ack )
-             ; _
-             }
+         | Current_reaction { reaction_kind = Cursor_ack; _ }
          | Current_cursor_ack _ -> ())
   in
   let note_parsed_row row =
@@ -1251,7 +1185,6 @@ type durable_event_queue_health =
   { keeper_name : string
   ; durable_event_queue_count : int
   ; durable_event_queue_pending_count : int
-  ; durable_event_queue_inflight_count : int
   ; immediate_count : int
   ; oldest_arrived_at : float option
   ; newest_arrived_at : float option
@@ -1281,14 +1214,9 @@ let payload_kind_count_pairs stimuli =
 
 let durable_event_queue_health ~base_path ~keeper_name =
   let snapshot =
-    Keeper_event_queue_persistence.load_snapshot_pair_with_errors ~base_path ~keeper_name
+    Keeper_event_queue_persistence.load_snapshot_with_errors ~base_path ~keeper_name
   in
-  let queue =
-    Keeper_event_queue.prepend_list
-      (Keeper_event_queue.to_list snapshot.inflight)
-      snapshot.pending
-    |> Keeper_event_queue.dedup_by_identity
-  in
+  let queue = snapshot.pending in
   let stimuli = Keeper_event_queue.to_list queue in
   let oldest_arrived_at, newest_arrived_at =
     List.fold_left
@@ -1315,7 +1243,6 @@ let durable_event_queue_health ~base_path ~keeper_name =
   { keeper_name
   ; durable_event_queue_count = Keeper_event_queue.length queue
   ; durable_event_queue_pending_count = Keeper_event_queue.length snapshot.pending
-  ; durable_event_queue_inflight_count = Keeper_event_queue.length snapshot.inflight
   ; immediate_count
   ; oldest_arrived_at
   ; newest_arrived_at
@@ -1355,8 +1282,6 @@ let durable_event_queue_health_json ~now ~stale_after_sec health =
     ; "durable_event_queue_count", `Int health.durable_event_queue_count
     ; ( "durable_event_queue_pending_count"
       , `Int health.durable_event_queue_pending_count )
-    ; ( "durable_event_queue_inflight_count"
-      , `Int health.durable_event_queue_inflight_count )
     ; "immediate_count", `Int health.immediate_count
     ; "oldest_arrived_at_unix", float_opt_to_json health.oldest_arrived_at
     ; "oldest_age_sec", age_opt_to_json health.oldest_arrived_at
@@ -1401,10 +1326,7 @@ let summarize_rows ~keeper_name ~limit rows =
   let reaction_count = ref 0 in
   let turn_started_count = ref 0 in
   let event_queue_ack_count = ref 0 in
-  let event_queue_no_compaction_count = ref 0 in
   let event_queue_cancelled_count = ref 0 in
-  let event_queue_requeue_count = ref 0 in
-  let event_queue_escalation_count = ref 0 in
   let cursor_ack_count = ref 0 in
   let quarantined_row_count = ref 0 in
   let quarantine_reason_counts = Hashtbl.create 8 in
@@ -1465,14 +1387,10 @@ let summarize_rows ~keeper_name ~limit rows =
     match reaction_kind, transition_receipt with
     | Turn_started, None -> incr turn_started_count
     | Event_queue_ack, Some _ -> incr event_queue_ack_count
-    | Event_queue_no_compaction, Some _ -> incr event_queue_no_compaction_count
     | Event_queue_cancelled, Some _ -> incr event_queue_cancelled_count
-    | Event_queue_requeued, Some _ -> incr event_queue_requeue_count
-    | Event_queue_escalated, Some _ -> incr event_queue_escalation_count
     | Cursor_ack, None -> incr cursor_ack_count
     | Turn_started, Some _
-    | ( Event_queue_ack | Event_queue_no_compaction | Event_queue_cancelled
-      | Event_queue_requeued | Event_queue_escalated ), None
+    | (Event_queue_ack | Event_queue_cancelled), None
     | Cursor_ack, Some _ -> ()
   in
   let note_current_row current_row =
@@ -1539,10 +1457,7 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "reaction_count", `Int !reaction_count
     ; "turn_started_count", `Int !turn_started_count
     ; "event_queue_ack_count", `Int !event_queue_ack_count
-    ; "event_queue_no_compaction_count", `Int !event_queue_no_compaction_count
     ; "event_queue_cancelled_count", `Int !event_queue_cancelled_count
-    ; "event_queue_requeue_count", `Int !event_queue_requeue_count
-    ; "event_queue_escalation_count", `Int !event_queue_escalation_count
     ; "cursor_ack_count", `Int !cursor_ack_count
     ; "quarantined_row_count", `Int !quarantined_row_count
     ; ( "quarantine_reason_counts"
@@ -1573,10 +1488,7 @@ let error_summary ~keeper_name ~limit error =
     ; "reaction_count", `Int 0
     ; "turn_started_count", `Int 0
     ; "event_queue_ack_count", `Int 0
-    ; "event_queue_no_compaction_count", `Int 0
     ; "event_queue_cancelled_count", `Int 0
-    ; "event_queue_requeue_count", `Int 0
-    ; "event_queue_escalation_count", `Int 0
     ; "cursor_ack_count", `Int 0
     ; "quarantined_row_count", `Int 0
     ; "quarantine_reason_counts", `List []
@@ -1634,10 +1546,7 @@ let unavailable_fleet_summary_json () =
     ; "reaction_count", `Int 0
     ; "turn_started_count", `Int 0
     ; "event_queue_ack_count", `Int 0
-    ; "event_queue_no_compaction_count", `Int 0
     ; "event_queue_cancelled_count", `Int 0
-    ; "event_queue_requeue_count", `Int 0
-    ; "event_queue_escalation_count", `Int 0
     ; "cursor_ack_count", `Int 0
     ; "quarantined_row_count", `Int 0
     ; "quarantine_reason_counts", `List []
@@ -1646,7 +1555,6 @@ let unavailable_fleet_summary_json () =
     ; "pending_stimulus_count", `Int 0
     ; "durable_event_queue_count", `Int 0
     ; "durable_event_queue_pending_count", `Int 0
-    ; "durable_event_queue_inflight_count", `Int 0
     ; "durable_event_queue_discovered_keeper_count", `Int 0
     ; "durable_event_queue_discovered_keeper_names", `List []
     ; "durable_event_queue_discovery_error", `Null
@@ -1701,12 +1609,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
   let durable_event_queue_pending_count =
     List.fold_left
       (fun acc summary -> acc + summary.durable_event_queue_pending_count)
-      0
-      durable_event_queue_summaries
-  in
-  let durable_event_queue_inflight_count =
-    List.fold_left
-      (fun acc summary -> acc + summary.durable_event_queue_inflight_count)
       0
       durable_event_queue_summaries
   in
@@ -1897,13 +1799,8 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "reaction_count", `Int (total_int "reaction_count")
     ; "turn_started_count", `Int (total_int "turn_started_count")
     ; "event_queue_ack_count", `Int (total_int "event_queue_ack_count")
-    ; ( "event_queue_no_compaction_count"
-      , `Int (total_int "event_queue_no_compaction_count") )
     ; ( "event_queue_cancelled_count"
       , `Int (total_int "event_queue_cancelled_count") )
-    ; "event_queue_requeue_count", `Int (total_int "event_queue_requeue_count")
-    ; ( "event_queue_escalation_count"
-      , `Int (total_int "event_queue_escalation_count") )
     ; "cursor_ack_count", `Int (total_int "cursor_ack_count")
     ; "quarantined_row_count", `Int quarantined_row_count
     ; "quarantine_reason_counts", quarantine_reason_counts
@@ -1912,7 +1809,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "pending_stimulus_count", `Int pending_count
     ; "durable_event_queue_count", `Int durable_event_queue_count
     ; "durable_event_queue_pending_count", `Int durable_event_queue_pending_count
-    ; "durable_event_queue_inflight_count", `Int durable_event_queue_inflight_count
     ; ( "durable_event_queue_discovered_keeper_count"
       , `Int (List.length durable_event_queue_discovery.keeper_names) )
     ; ( "durable_event_queue_discovered_keeper_names"

@@ -2565,17 +2565,13 @@ let schedule_keeper_queue_evidence_dashboard_json
           let due_at = execution.Schedule_domain.due_at in
           let payload_digest = execution.Schedule_domain.payload_digest in
           let snapshot =
-            Keeper_event_queue_persistence.load_snapshot_pair_with_errors
+            Keeper_event_queue_persistence.load_snapshot_with_errors
               ~base_path:config.Workspace_utils.base_path
               ~keeper_name
           in
           let pending_match =
             schedule_queue_match ~schedule_id ~due_at ~payload_digest ~post_id
               ~stimulus_label:stimulus snapshot.pending
-          in
-          let inflight_match =
-            schedule_queue_match ~schedule_id ~due_at ~payload_digest ~post_id
-              ~stimulus_label:stimulus snapshot.inflight
           in
           let read_errors =
             List.map schedule_queue_read_error_dashboard_json snapshot.read_errors
@@ -2591,24 +2587,18 @@ let schedule_keeper_queue_evidence_dashboard_json
             ; "execution_due_at_iso", unix_iso_json due_at
             ; "execution_payload_digest", `String payload_digest
             ; "pending_count", `Int (Keeper_event_queue.length snapshot.pending)
-            ; "inflight_count", `Int (Keeper_event_queue.length snapshot.inflight)
             ; "read_errors", `List read_errors
             ]
           in
-          (match pending_match, inflight_match, snapshot.read_errors with
-           | Some match_, _, _ ->
+          (match pending_match, snapshot.read_errors with
+           | Some match_, _ ->
              `Assoc
                (("projection_status", `String "matched_pending")
                 :: base_fields
                 @ schedule_queue_match_fields ~now "pending" match_)
-           | None, Some match_, _ ->
-             `Assoc
-               (("projection_status", `String "matched_inflight")
-                :: base_fields
-                @ schedule_queue_match_fields ~now "inflight" match_)
-           | None, None, _ :: _ ->
+           | None, _ :: _ ->
              `Assoc (("projection_status", `String "read_error") :: base_fields)
-           | None, None, [] ->
+           | None, [] ->
              `Assoc (("projection_status", `String "not_found") :: base_fields))))
 ;;
 

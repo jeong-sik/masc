@@ -39,8 +39,12 @@ let oas_checkpoint_summary_json
     ]
 ;;
 
-let checkpoint_load_error_json
+(* The fields, not the object: callers that splice this into a larger row need
+   the association list, and taking it back apart from a [Yojson.Safe.t] forced
+   them to handle a shape this function cannot produce. *)
+let checkpoint_load_error_fields
       (error : Keeper_checkpoint_store.checkpoint_load_error)
+  : (string * Yojson.Safe.t) list
   =
   let status, kind, detail =
     match error with
@@ -51,11 +55,16 @@ let checkpoint_load_error_json
     | Sdk_other_error detail ->
       "unavailable", "sdk_other_error", `String detail
   in
-  `Assoc
-    [ "status", `String status
-    ; "error_kind", `String kind
-    ; "error_detail", detail
-    ]
+  [ "status", `String status
+  ; "error_kind", `String kind
+  ; "error_detail", detail
+  ]
+;;
+
+let checkpoint_load_error_json
+      (error : Keeper_checkpoint_store.checkpoint_load_error)
+  =
+  `Assoc (checkpoint_load_error_fields error)
 ;;
 
 let current_checkpoint_error_json
@@ -88,9 +97,7 @@ let checkpoint_load_failure_json
     ; "file_stat", stat_json_of_path path
     ]
   in
-  match checkpoint_load_error_json error with
-  | `Assoc error_fields -> `Assoc (identity_fields @ error_fields)
-  | _ -> assert false
+  `Assoc (identity_fields @ checkpoint_load_error_fields error)
 ;;
 
 let inventory_json (config : Workspace.config) (name : string)

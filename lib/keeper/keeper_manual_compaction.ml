@@ -147,66 +147,6 @@ let post_install_lifecycle_requires_operator_action = function
     true
 ;;
 
-let queue_auxiliary_of_checkpoint_auxiliary = function
-  | Keeper_checkpoint_store.Commit_durability_unknown error ->
-    Keeper_event_queue_state.Compaction_commit_durability_unknown
-      { detail = Keeper_fs.durable_write_error_to_string error }
-  | Keeper_checkpoint_store.Commit_observer_failed (exn, backtrace) ->
-    Keeper_event_queue_state.Compaction_commit_observer_failed
-      { detail = Printexc.to_string exn
-      ; backtrace_present = Printexc.raw_backtrace_length backtrace > 0
-      }
-  | Keeper_checkpoint_store.Release_process_lock_failed error ->
-    Keeper_event_queue_state.Compaction_release_process_lock_failed
-      { detail = File_lock_eio.durable_lock_error_to_string error }
-  | Keeper_checkpoint_store.Post_commit_unwind_interrupted (exn, backtrace) ->
-    Keeper_event_queue_state.Compaction_post_commit_unwind_interrupted
-      { detail = Printexc.to_string exn
-      ; backtrace_present = Printexc.raw_backtrace_length backtrace > 0
-      }
-  | Keeper_checkpoint_store.History_write_failed (exn, backtrace) ->
-    Keeper_event_queue_state.Compaction_history_write_failed
-      { detail = Printexc.to_string exn
-      ; backtrace_present = Printexc.raw_backtrace_length backtrace > 0
-      }
-;;
-
-let queue_lifecycle_of_post_install_lifecycle = function
-  | Completion_applied ->
-    Keeper_event_queue_state.Compaction_completion_applied
-  | Completion_rejected_failure_dispatched { completion_error } ->
-    Keeper_event_queue_state.Compaction_completion_rejected_failure_dispatched
-      { completion_error =
-          Keeper_context_runtime.lifecycle_dispatch_error_to_string
-            completion_error
-      }
-  | Completion_rejected_failure_dispatch_failed
-      { completion_error; failure_dispatch_error } ->
-    Keeper_event_queue_state.
-      Compaction_completion_rejected_failure_dispatch_failed
-        { completion_error =
-            Keeper_context_runtime.lifecycle_dispatch_error_to_string
-              completion_error
-        ; failure_dispatch_error =
-            Keeper_context_runtime.lifecycle_dispatch_error_to_string
-              failure_dispatch_error
-        }
-;;
-
-let queue_commit_of_applied_receipt (receipt : applied_receipt) =
-  { Keeper_event_queue_state.installed_ref = receipt.installation.installed_ref
-  ; auxiliary =
-      List.map
-        queue_auxiliary_of_checkpoint_auxiliary
-        receipt.installation.auxiliary
-  ; lifecycle = queue_lifecycle_of_post_install_lifecycle receipt.lifecycle
-  ; manifest_error =
-      (match receipt.manifest with
-       | Ok () -> None
-       | Error detail -> Some detail)
-  }
-;;
-
 let append_manifest
     ~config
     ~base_dir
@@ -454,10 +394,10 @@ let observe_manifest ~keeper_name = function
 ;;
 
 let preserve_no_compaction_after_final_admission_busy = function
-  | Keeper_event_queue_state.Exact_execution_terminal _ -> true
-  | Keeper_event_queue_state.Exact_lane_unconfigured
-  | Keeper_event_queue_state.No_eligible_history
-  | Keeper_event_queue_state.Invalid_structural_source -> false
+  | Keeper_compaction_outcome.Exact_execution_terminal _ -> true
+  | Keeper_compaction_outcome.Exact_lane_unconfigured
+  | Keeper_compaction_outcome.No_eligible_history
+  | Keeper_compaction_outcome.Invalid_structural_source -> false
 ;;
 
 let resolve_uncommitted = function
@@ -588,7 +528,7 @@ let run_admitted_with
           (match
              Keeper_post_turn.no_compaction_of_uncommitted_prepared
                ~cause:
-                 Keeper_event_queue_state.Lifecycle_transition_failed_after_dispatch
+                 Keeper_compaction_outcome.Lifecycle_transition_failed_after_dispatch
                prepared
              |> resolve_uncommitted
            with
@@ -647,7 +587,6 @@ let run_admitted_with
 ;;
 
 let run_admitted
-    ?exact_execution_guard
     ?before_dispatch_authority
     ~config
     ~meta
@@ -657,7 +596,6 @@ let run_admitted
     ~prepare_compaction:(fun ~base_path ~base_dir ~meta ~trigger ->
       Keeper_context_runtime.prepare_compaction
         ?before_dispatch_authority
-        ?exact_execution_guard
         ~base_path
         ~base_dir
         ~meta
@@ -669,7 +607,6 @@ let run_admitted
 ;;
 
 let run_under_admission
-    ?exact_execution_guard
     ?before_dispatch_authority
     ~config
     ~meta
@@ -679,7 +616,6 @@ let run_under_admission
     ~prepare_compaction:(fun ~base_path ~base_dir ~meta ~trigger ->
       Keeper_context_runtime.prepare_compaction
         ?before_dispatch_authority
-        ?exact_execution_guard
         ~base_path
         ~base_dir
         ~meta

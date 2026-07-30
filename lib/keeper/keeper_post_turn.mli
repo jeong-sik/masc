@@ -36,9 +36,9 @@ type compaction_recovery =
   ; turn_generation : int
   } [@@warning "-69"]
 
-type no_compaction = Keeper_event_queue_state.no_compaction =
+type no_compaction = Keeper_compaction_outcome.no_compaction =
   { source : Keeper_checkpoint_ref.t
-  ; reason : Keeper_event_queue_state.no_compaction_reason
+  ; reason : Keeper_compaction_outcome.no_compaction_reason
   }
 
 type compaction_recovery_error =
@@ -51,9 +51,9 @@ type compaction_recovery_error =
       (** RFC-0351 S0 / #25461: the keeper's compaction failure streak reached
           [Keeper_meta_contract.compaction_retry_escalation_threshold], so a
           reactive ([Provider_overflow]) prepare is refused before the
-          checkpoint load and the summarizer LLM call — the settlement's
-          per-stimulus escalation already stops the retries, and this gate
-          stops the one bounded LLM attempt each new stimulus still paid.
+          checkpoint load and the summarizer LLM call. The pending source
+          remains on the ordinary failure route without a fabricated durable
+          escalation.
           [Manual] prepares bypass the gate: an operator-committed compaction
           resets the streak and lifts the suspension. *)
 
@@ -134,7 +134,6 @@ type uncommitted_prepared_outcome =
 val prepare_compaction :
   ?before_dispatch_authority:
     Keeper_compaction_llm_summarizer.before_dispatch_authority ->
-  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard ->
   base_path:string ->
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
@@ -172,7 +171,7 @@ end
     receives the canonical completion waiter/evidence and must not redispatch
     the provider. *)
 val no_compaction_of_uncommitted_prepared :
-  ?cause:Keeper_event_queue_state.exact_execution_terminal_cause ->
+  ?cause:Keeper_compaction_outcome.exact_execution_terminal_cause ->
   prepared_compaction -> uncommitted_prepared_outcome
 
 (** Reload the canonical OAS checkpoint and apply an explicit typed
@@ -182,7 +181,6 @@ val no_compaction_of_uncommitted_prepared :
 val recover_latest_checkpoint_for_compaction :
   ?before_dispatch_authority:
     Keeper_compaction_llm_summarizer.before_dispatch_authority ->
-  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard ->
   base_path:string ->
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->

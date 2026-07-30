@@ -53,7 +53,6 @@ val pending_board_events_of_stimulus_result
 
 type event_queue_intake_error =
   | Pending_selection_failed of string
-  | Invalid_single_selection of { selected_count : int }
   | Transient_board_read of
       Keeper_world_observation_board_signal.board_unavailable
 
@@ -82,7 +81,7 @@ type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
-  pending_selection : Keeper_registry_event_queue.pending_selection option;
+  pending_selection : Keeper_event_queue.stimulus option;
   event_queue_intake_error : event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
@@ -97,14 +96,6 @@ val consume_single_heartbeat_stimulus
   -> Keeper_event_queue.stimulus
   -> stimulus_intake_result
 
-(** [consume_board_stimulus_batch ~meta_after_triage batch] consumes the whole
-    exact batch only when every Board read is available or permanently
-    unavailable. Any transient read retains the full batch for retry. *)
-val consume_board_stimulus_batch
-  :  meta_after_triage:keeper_meta
-  -> Keeper_event_queue.stimulus list
-  -> stimulus_intake_result
-
 type spent_selection_reconciliation =
   | Selection_actionable
   | Spent_schedule_acknowledged
@@ -113,7 +104,7 @@ type spent_selection_reconciliation =
 val reconcile_spent_selection
   :  config:Workspace_utils.config
   -> keeper_name:string
-  -> Keeper_registry_event_queue.pending_selection
+  -> Keeper_event_queue.stimulus
   -> (spent_selection_reconciliation, string) result
 (** Acknowledges a selection whose work has already settled elsewhere, so no
     turn is spent re-observing it. Two kinds settle that way.
@@ -130,11 +121,11 @@ val reconcile_spent_selection
 
 (** [heartbeat_event_intake ~ctx ~meta_after_triage
      ~pending_board_events]
-    drains the Event-Layer queue (per RFC-0020 §3 Rule 4) and merges
-    newly-consumed board events with the [pending_board_events] already
+    peeks at most one ready Event-Layer stimulus (per RFC-0020 §3 Rule 4)
+    and merges its observation with the [pending_board_events] already
     accumulated by the caller, deduplicating by [post_id]. A
     [Hitl_resolved] stimulus remains queued until its exact approval id has
-    left the pending map, while later ready stimuli can still be leased.
+    left the pending map, while later ready stimuli can still be selected.
     A transient Board read returns no consumed stimuli, keeps the exact
     [pending_selection], and sets [event_queue_intake_error]; the heartbeat
     loop must not dispatch or acknowledge that selection. *)

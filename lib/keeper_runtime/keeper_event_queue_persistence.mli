@@ -1,12 +1,11 @@
 (** Durable per-Keeper Event Layer state.
 
-    Current writes use the [keeper.event_queue.state.v12]
-    [event-queue-v12.json] envelope: revision, pending stimuli, the latest
+    Current writes use the [keeper.event_queue.state.v13]
+    [event-queue-v13.json] envelope: revision, pending stimuli, the latest
     projected transition, an operation-indexed ledger of older projected
     dispositions, at most one unprojected transition, and durable
     accepted-transfer target projections. Only this schema and the
-    [event-queue-transitions-v2.jsonl] WAL are accepted. Retired snapshot, WAL,
-    receipt, and sidecar paths are not inspected or treated as queue authority. *)
+    [event-queue-transitions-v3.jsonl] WAL are queue authority. *)
 
 type owner_identity
 type owner_identity_error
@@ -25,49 +24,6 @@ val owner_identity_hash : owner_identity -> int
 val owner_identity_base_path : owner_identity -> string
 val owner_identity_keeper_name : owner_identity -> string
 
-type selection_kind = Keeper_event_queue_state.selection_kind =
-  | Single
-  | Board_batch
-
-type pending_selection = Keeper_event_queue_state.pending_selection =
-  { source_revision : int64
-  ; kind : selection_kind
-  ; stimuli : Keeper_event_queue.stimulus list
-  }
-
-
-type requeue_reason = Keeper_event_queue_state.requeue_reason =
-  | Cycle_busy
-  | Turn_not_scheduled
-  | Rotate_now
-  | Cancelled
-  | Cycle_crashed
-  | Registration_recovery
-  | Retry_after_observed
-  | Context_compaction_retry
-
-type exact_execution_terminal_cause = Keeper_event_queue_state.exact_execution_terminal_cause =
-  | Exact_execution_failed
-  | Exact_execution_cancelled
-  | Domain_invalid_output
-  | Compaction_produced_no_reduction
-  | Compaction_increased_checkpoint
-  | Invalid_structural_evidence
-  | Invalid_structural_source_after_dispatch
-  | Commit_admission_unavailable
-  | Lifecycle_transition_failed_after_dispatch
-  | Checkpoint_source_changed
-  | Checkpoint_persistence_failed
-  | Terminal_persistence_failed
-
-type exact_execution_terminal = Keeper_event_queue_state.exact_execution_terminal =
-  { cause : exact_execution_terminal_cause
-  ; slot_id : string
-  ; call_id : string
-  ; plan_fingerprint : string
-  ; request_body_sha256 : string
-  }
-
 type exact_write_outcome =
   | Fsync_completed
   | Visible_sync_unconfirmed of string
@@ -76,33 +32,6 @@ type exact_write_outcome =
     fence, not a hardware/power-loss persistence or Darwin [F_FULLFSYNC]
     guarantee. [Visible_sync_unconfirmed _] means rename is visible but the
     parent sync did not complete. *)
-
-type escalation_reason = Keeper_event_queue_state.escalation_reason =
-  | Compaction_exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
-  | Compaction_exact_output_terminal of
-      { source : Keeper_checkpoint_ref.t
-      ; terminal : exact_execution_terminal
-      }
-  | Compaction_retry_exhausted of
-      { attempts : int
-      ; detail : string
-      }
-  | Compaction_floor_exceeded of
-      { attempts : int
-      ; detail : string
-      }
-  | Transcript_corruption_requires_reset of { detail : string }
-
-type no_compaction_reason = Keeper_event_queue_state.no_compaction_reason =
-  | No_eligible_history
-  | Invalid_structural_source
-  | Exact_lane_unconfigured
-  | Exact_execution_terminal of exact_execution_terminal
-
-type no_compaction = Keeper_event_queue_state.no_compaction =
-  { source : Keeper_checkpoint_ref.t
-  ; reason : no_compaction_reason
-  }
 
 type accepted_cancellation = Keeper_event_queue_state.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
@@ -135,20 +64,9 @@ type accepted_source_terminal = Keeper_event_queue_state.accepted_source_termina
   }
 
 type transition = Keeper_event_queue_state.transition =
-  | Ack
-  | Manual_compaction_committed of
-      { commit : Keeper_event_queue_state.manual_compaction_commit
-      ; followup : Keeper_event_queue_state.manual_compaction_followup
-      }
-  | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
   | Ack_source_terminal of accepted_source_terminal
-  | Requeue of requeue_reason
-  | Escalate of
-      { reason : escalation_reason
-      ; successor : Keeper_event_queue.stimulus option
-      }
 
 type transition_receipt = Keeper_event_queue_state.transition_receipt
 type outbox_entry = Keeper_event_queue_state.outbox_entry
@@ -179,19 +97,19 @@ val peek_when_result :
   base_path:string ->
   keeper_name:string ->
   ready:(Keeper_event_queue.stimulus -> bool) ->
-  (pending_selection option, string) result
+  (Keeper_event_queue.stimulus option, string) result
 
 val validate_pending_selection_result :
   base_path:string ->
   keeper_name:string ->
-  selection:pending_selection ->
+  selection:Keeper_event_queue.stimulus ->
   (unit, string) result
 
 val ack_pending_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  selection:pending_selection ->
+  selection:Keeper_event_queue.stimulus ->
   unit ->
   (unit, string) result
 
@@ -206,9 +124,8 @@ type snapshot_read_error =
   ; message : string
   }
 
-type snapshot_pair_with_errors =
+type snapshot_with_errors =
   { pending : Keeper_event_queue.t
-  ; inflight : Keeper_event_queue.t
   ; read_errors : snapshot_read_error list
   }
 
@@ -219,13 +136,13 @@ type snapshot_discovery =
 
 val snapshot_read_error_kind_to_string : snapshot_read_error_kind -> string
 val discover_keeper_names_with_snapshots : base_path:string -> snapshot_discovery
-val load_snapshot_pair_with_errors :
-  base_path:string -> keeper_name:string -> snapshot_pair_with_errors
+val load_snapshot_with_errors :
+  base_path:string -> keeper_name:string -> snapshot_with_errors
 
 val load_state_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
 (** Strict state read used by tests and operator projection. A malformed
-    current envelope or stale/unknown schema is an [Error], never an empty
+    current envelope or unknown schema is an [Error], never an empty
     queue. Committed current-schema WAL rows are replayed idempotently. A row
     already represented by the durable projected witness is compacted; an
     unprojected source-bearing row remains authoritative until the reaction

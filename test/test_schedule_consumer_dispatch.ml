@@ -538,8 +538,6 @@ let test_keeper_wake_consumer_records_dispatch_without_work_success () =
       (queue_evidence |> member "matched_payload_digest" |> to_string);
     check int "queue evidence pending count" 1
       (queue_evidence |> member "pending_count" |> to_int);
-    check int "queue evidence inflight count" 0
-      (queue_evidence |> member "inflight_count" |> to_int);
     check int "queue evidence read errors" 0
       (queue_evidence |> member "read_errors" |> to_list |> List.length)
 ;;
@@ -576,7 +574,7 @@ let test_keeper_wake_durable_enqueue_failure_retries_same_occurrence () =
       "schedule-keeper"
   in
   mkdir_p keeper_owner_path;
-  let queue_path = Filename.concat keeper_owner_path "event-queue-v12.json" in
+  let queue_path = Filename.concat keeper_owner_path "event-queue-v13.json" in
   mkdir_p queue_path;
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
@@ -686,7 +684,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
           (Filename.concat
              (Common.keepers_runtime_dir_of_base ~base_path)
              keeper_name)
-          "event-queue-transitions-v2.jsonl"
+          "event-queue-transitions-v3.jsonl"
       in
       check bool "cancellation WAL survives until projection" true
         (Sys.file_exists transition_wal_path
@@ -985,9 +983,7 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
       (Schedule_domain.payload_digest request.payload)
       (queue_evidence |> member "execution_payload_digest" |> to_string);
     check int "stale occurrence still visible as pending" 1
-      (queue_evidence |> member "pending_count" |> to_int);
-    check int "queue evidence inflight count" 0
-      (queue_evidence |> member "inflight_count" |> to_int)
+      (queue_evidence |> member "pending_count" |> to_int)
 ;;
 
 let test_dashboard_live_supported_non_terminal_evidence_matches_supported_request () =

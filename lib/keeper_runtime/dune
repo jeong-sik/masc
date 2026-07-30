@@ -28,10 +28,8 @@
   agent_sdk.llm_provider
   eio
   masc_eio_context
-  masc_compaction_trigger
   masc.config
   masc.keeper_registry
-  masc.keeper_checkpoint_ref
   masc.keeper_toml
   masc.tool_types
   masc.config_dir_resolver

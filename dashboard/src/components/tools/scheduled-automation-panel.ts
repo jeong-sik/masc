@@ -435,7 +435,7 @@ function queueEvidenceTone(
   evidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined,
 ): StatusChipTone {
   if (!evidence) return 'neutral'
-  if (evidence.projection_status === 'matched_pending' || evidence.projection_status === 'matched_inflight') return 'ok'
+  if (evidence.projection_status === 'matched_pending') return 'ok'
   if (evidence.projection_status === 'not_found' || evidence.projection_status === 'read_error') return 'warn'
   return 'bad'
 }
@@ -456,7 +456,6 @@ function queueEvidenceRows(
     { label: 'schedule', value: evidence.schedule_id },
     { label: 'post_id', value: evidence.post_id },
     { label: 'pending_count', value: evidence.pending_count },
-    { label: 'inflight_count', value: evidence.inflight_count },
     { label: 'matched_bucket', value: evidence.matched_bucket },
     { label: 'matched_payload_kind', value: evidence.matched_payload_kind },
     { label: 'matched_post_id', value: evidence.matched_post_id },

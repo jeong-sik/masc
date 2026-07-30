@@ -39,12 +39,6 @@ describe('queueDrainStatusOf', () => {
     expect(status?.tone).toBe('info')
   })
 
-  it('maps an inflight queue match to 드레인 중 (info)', () => {
-    const status = queueDrainStatusOf(req('matched_inflight'))
-    expect(status?.state).toBe('inflight')
-    expect(status?.label).toBe('드레인 중')
-  })
-
   it('treats not_found + a recorded keeper reaction as a healthy 완료 (drained), never a miss', () => {
     for (const reaction of ['matched_consumed_ack', 'matched_turn_started', 'matched_stimulus'] as const) {
       const status = queueDrainStatusOf(req('not_found', reaction))
@@ -82,13 +76,12 @@ describe('queueDrainStatusOf', () => {
 })
 
 describe('isCalendarVisible', () => {
-  it('renders the actionable/in-flight states and hides healthy-completion + legacy noise', () => {
+  it('renders actionable states and hides healthy completion noise', () => {
     const visible = (queue: QueueStatus, reaction?: ReactionStatus): boolean => {
       const status = queueDrainStatusOf(req(queue, reaction))
       return status !== null && isCalendarVisible(status)
     }
     expect(visible('matched_pending')).toBe(true)
-    expect(visible('matched_inflight')).toBe(true)
     expect(visible('not_found', 'not_found')).toBe(true) // missed
     expect(visible('read_error')).toBe(true)
     expect(visible('not_found', 'quarantined')).toBe(true)

@@ -251,14 +251,11 @@ val persist_compaction_outcome :
     failing compaction instead of retrying it without bound (RFC-0351 S0,
     #25461); [count] had no writer before this despite being serialized and
     rendered. The metric carries [keeper] and [outcome]: outcome is the closed
-    settlement variant, and keeper names come from the registry and survive
+    outcome variant, and keeper names come from the registry and survive
     replacement, so the series count is bounded by fleet size. The successful
     persistence log carries the same typed outcome, which is where a single
-    settlement is resolvable by timestamp; the durable per-Keeper counters stay
-    in [compaction_rt]. Before #25969 the same ceiling was applied one layer
-    lower, by
-    [Keeper_heartbeat_loop.settlement_of_cycle_outcome] escalating the lease
-    settlement; that function went with the claim/settle model. *)
+    outcome is resolvable by timestamp; the durable per-Keeper counters stay in
+    [compaction_rt]. *)
 
 val persist_transcript_corruption_pause :
   Workspace.config ->

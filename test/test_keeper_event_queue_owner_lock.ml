@@ -318,14 +318,13 @@ let test_fleet_summary_serializes_with_owner_commit () =
   with_temp_dir "event-queue-owner-summary" (fun base_path ->
     let keeper_name = "summary_owner" in
     let pending = stimulus ~post_id:"pending" ~arrived_at:9.0 in
-    let inflight = stimulus ~post_id:"inflight" ~arrived_at:10.0 in
+    let second_pending = stimulus ~post_id:"second-pending" ~arrived_at:10.0 in
     Persistence.persist
       ~base_path
       ~keeper_name
-      (Queue.empty |> fun queue -> Queue.enqueue queue inflight |> fun queue -> Queue.enqueue queue pending);
-    (* A claim over [inflight] used to stage an in-flight row here. No caller
-       can claim since #25969; the owner-lock serialization under test is
-       unaffected. *)
+      (Queue.empty
+       |> fun queue -> Queue.enqueue queue second_pending
+       |> fun queue -> Queue.enqueue queue pending);
     let transform_entered = Atomic.make false in
     let release = Atomic.make false in
     let writer_result = ref None in
@@ -370,26 +369,12 @@ let test_fleet_summary_serializes_with_owner_commit () =
              true
              (bool_field "counts_complete" keeper);
            Alcotest.(check int)
-             "summary pending count comes from completed pair"
+             "summary pending count comes from completed snapshot"
              0
-             (int_field "pending_count" keeper);
-           (* This asserted 1, proving the summary preserved independently
-              leased work across the concurrent write. Leases cannot exist since
-              #25969 moved production to peek/ack, so the count is structurally
-              0; the pending assertion above still carries the serialization
-              property this case exists for. *)
-           Alcotest.(check int)
-             "summary reports no in-flight work"
-             0
-             (int_field "inflight_count" keeper)));
+             (int_field "pending_count" keeper)));
     require_some "split writer join" !writer_result
     |> require_ok "split writer update")
 ;;
-
-(* [test_cancel_after_claim_commit_resumes_stable_lease] proved a cancelled
-   claim commit still resumed a stable lease and settled exactly once. It drove
-   claim_when_result / settle_result / active_lease_result, none of which
-   survive the peek/ack migration in #25969. *)
 
 let () =
   Eio_main.run (fun _env ->

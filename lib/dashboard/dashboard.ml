@@ -489,7 +489,9 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string WorkspaceHeartbeatFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnMetricsSnapshotFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string OasExecutionErrors) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string MemoryOsLibrarianFailures) |> int_of_float)
+        (* MemoryOsLibrarianFailures is intentionally excluded: librarian
+           failures are not tool errors and are surfaced separately in the
+           LIBRARIAN header segment (LIBRARIAN-FAILURES-TOTAL). *)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string MemoryActivityEmitFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string SupervisorSweepFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TomlReconcileSweepFailures) |> int_of_float)

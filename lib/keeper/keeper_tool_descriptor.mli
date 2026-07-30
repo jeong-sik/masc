@@ -119,6 +119,7 @@ type runtime_handler =
 type policy =
   { readonly_of_input : readonly_of_input
   ; readonly_hint : bool option
+  ; execution_mode : Agent_sdk.Tool_contract.execution_mode
   ; retryable : bool
   ; cwd_scope : string option
   ; inline_safe : bool

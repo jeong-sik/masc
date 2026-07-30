@@ -1124,6 +1124,29 @@ describe('streamKeeperMessage', () => {
     expect(events).toEqual(['RUN_FINISHED'])
   })
 
+  it('requests durable enqueue without waiting for turn completion', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('data: {"type":"RUN_FINISHED"}\n\n', {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await streamKeeperMessage('sangsu', 'queued draft', {
+      enqueueOnly: true,
+      onEvent: () => {},
+    })
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({
+      name: 'sangsu',
+      message: 'queued draft',
+      direct_reply: true,
+      enqueue_only: true,
+    })
+  })
+
   it('forwards copilot context fields to the stream endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('data: {"type":"RUN_FINISHED"}\n\n', {

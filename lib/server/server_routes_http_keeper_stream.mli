@@ -73,6 +73,7 @@ type user_input_block = Keeper_multimodal_input.user_input_block =
 type keeper_chat_stream_request = {
   name : string;
   message : string;
+  enqueue_only : bool;
   user_blocks : user_input_block list;
   turn_instructions : string option;
   surface_context : Yojson.Safe.t option;
@@ -84,8 +85,9 @@ type keeper_chat_stream_request = {
 }
 (** Parsed payload of a keeper chat-stream HTTP request.
     [message] is the text fallback used by the existing direct keeper
-    path; [user_blocks] preserves semantic text/media input for the
-    block-aware runtime path. [turn_instructions] and [surface_context]
+    path; [enqueue_only] requests durable admission without waiting for
+    the keeper turn to run; [user_blocks] preserves semantic text/media
+    input for the block-aware runtime path. [turn_instructions] and [surface_context]
     are optional copilot context fields; when
     [turn_instructions] is absent but [surface_context]
     is present, the surface context is formatted and
@@ -298,6 +300,12 @@ module For_testing : sig
     | `Queued of Yojson.Safe.t * string
     | `Queue_error of string
     ]
+  val enqueue_dashboard_payload_now :
+    base_path:string ->
+    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    thread_id:string ->
+    keeper_chat_stream_request ->
+    [ `Queued of int | `Queue_error of string ]
   val canonical_reply_payload_of_body :
     redact_text:(string -> string) ->
     string ->

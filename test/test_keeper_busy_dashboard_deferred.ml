@@ -24,6 +24,7 @@ let payload ?(name = keeper_name) ?(content = "are you there?") ()
     : Server_routes_http_keeper_stream.keeper_chat_stream_request =
   { name
   ; message = content
+  ; enqueue_only = false
   ; user_blocks = []
   ; turn_instructions = None
   ; surface_context = None
@@ -163,6 +164,32 @@ let test_free_dashboard_not_enqueued () =
    | `Queued _ | `Queue_error _ -> check "free keeper must not enqueue" false);
   let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
   check "queue remains empty" (snapshot.pending = [] && snapshot.inflight = [])
+;;
+
+let test_enqueue_only_dashboard_is_durable_while_free () =
+  Printf.printf
+    "Test: enqueue-only dashboard dispatch persists without waiting for a turn\n%!";
+  with_env
+  @@ fun ~base ~clock ->
+  let queued_payload = { (payload ~content:"queue now" ()) with enqueue_only = true } in
+  (match
+     Server_routes_http_keeper_stream.For_testing.enqueue_dashboard_payload_now
+       ~base_path:base
+       ~clock
+       ~thread_id
+       queued_payload
+   with
+   | `Queued len ->
+     check "free keeper accepts enqueue-only receipt" (len = 1)
+   | `Queue_error _ ->
+     check "enqueue-only persistence succeeds" false);
+  let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+  check "enqueue-only message remains Pending for the consumer"
+    (List.map
+       (fun (receipt : Keeper_chat_queue.active_receipt) ->
+          receipt.message.content)
+       snapshot.pending
+     = [ "queue now" ])
 ;;
 
 let test_existing_backlog_defers_new_dashboard_message () =
@@ -473,6 +500,7 @@ let test_delegate_resource_error_uses_typed_tool_name () =
 let () =
   test_busy_dashboard_enqueues ();
   test_free_dashboard_not_enqueued ();
+  test_enqueue_only_dashboard_is_durable_while_free ();
   test_existing_backlog_defers_new_dashboard_message ();
   test_concurrent_busy_dashboard_enqueues_are_per_keeper ();
   test_busy_dashboard_persist_failure_is_explicit ();

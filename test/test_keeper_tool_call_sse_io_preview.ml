@@ -112,9 +112,9 @@ let test_oas_invocation_fields_preserve_exact_occurrence () =
       ~completion:Agent_sdk.Tool_contract.Continue_after_success
       ~schedule:
         { planned_index = 3
-        ; batch_index = 0
-        ; batch_size = 1
-        ; execution_mode = Agent_sdk.Tool_contract.Serial
+        ; batch_index = 2
+        ; batch_size = 4
+        ; execution_mode = Agent_sdk.Tool_contract.Concurrent
         }
   in
   let json =
@@ -130,7 +130,19 @@ let test_oas_invocation_fields_preserve_exact_occurrence () =
   Alcotest.(check int)
     "planned index preserved"
     3
-    Yojson.Safe.Util.(member "planned_index" json |> to_int)
+    Yojson.Safe.Util.(member "planned_index" json |> to_int);
+  Alcotest.(check int)
+    "batch index preserved"
+    2
+    Yojson.Safe.Util.(member "batch_index" json |> to_int);
+  Alcotest.(check int)
+    "batch size preserved"
+    4
+    Yojson.Safe.Util.(member "batch_size" json |> to_int);
+  Alcotest.(check string)
+    "execution mode preserved"
+    "concurrent"
+    Yojson.Safe.Util.(member "execution_mode" json |> to_string)
 ;;
 
 let () =

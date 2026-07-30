@@ -60,6 +60,23 @@ let test_copilot_parse_accepts_operator_workspace () =
   check bool "external speaker" false
     (Stream.For_testing.has_external_speaker payload)
 
+let test_dashboard_enqueue_only_is_typed () =
+  let payload =
+    parse_ok
+      {|{"name":"luna","message":"hello","enqueue_only":true}|}
+  in
+  check bool "enqueue only" true payload.enqueue_only;
+  match
+    Stream.For_testing.parse_request
+      {|{"name":"luna","message":"hello","enqueue_only":"true"}|}
+  with
+  | Error error ->
+    check string
+      "invalid enqueue_only is rejected"
+      "enqueue_only must be a boolean"
+      error
+  | Ok _ -> fail "string enqueue_only must not be coerced"
+
 let test_copilot_surface_is_gate_label () =
   let payload =
     parse_ok
@@ -179,6 +196,8 @@ let () =
         [
           test_case "copilot context parses without user id" `Quick
             test_copilot_parse_accepts_operator_workspace;
+          test_case "dashboard enqueue-only flag is typed" `Quick
+            test_dashboard_enqueue_only_is_typed;
         ] );
       ( "surface",
         [

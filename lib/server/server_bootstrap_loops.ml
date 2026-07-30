@@ -209,6 +209,7 @@ let payload_of_queued_message ~keeper_name
   let projection = queued_chat_projection queued_message in
   { Server_routes_http_keeper_stream.name = keeper_name
   ; message = queued_message.content
+  ; enqueue_only = false
   ; turn_instructions = None
   ; surface_context = None
   ; channel = projection.payload_channel

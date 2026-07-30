@@ -794,10 +794,12 @@ describe('KeeperConversationPanel', () => {
     expect(vi.mocked(sendKeeperThreadMessage).mock.calls[1]?.[1]).toBe('queued one')
     expect(vi.mocked(sendKeeperThreadMessage).mock.calls[1]?.[2]).toEqual(expect.objectContaining({
       clientActionId: 'queued-click-1',
+      enqueueOnly: true,
     }))
     expect(vi.mocked(sendKeeperThreadMessage).mock.calls[2]?.[1]).toBe('queued two')
     expect(vi.mocked(sendKeeperThreadMessage).mock.calls[2]?.[2]).toEqual(expect.objectContaining({
       clientActionId: 'queued-click-2',
+      enqueueOnly: true,
     }))
   })
 
@@ -827,6 +829,7 @@ describe('KeeperConversationPanel', () => {
     expect(vi.mocked(sendKeeperThreadMessage).mock.calls[2]?.[1]).toBe('queued during drain')
     expect(vi.mocked(sendKeeperThreadMessage).mock.calls[2]?.[2]).toEqual(expect.objectContaining({
       clientActionId: 'queued-click-3',
+      enqueueOnly: true,
     }))
     expect(getQueueLength('sangsu')).toBe(0)
   })

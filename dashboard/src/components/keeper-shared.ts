@@ -1474,6 +1474,7 @@ export function KeeperConversationPanel({
             attachments,
             blocks: queued.blocks,
             clientActionId: queued.clientActionId,
+            enqueueOnly: true,
             userBlocks: queued.userBlocks,
           })
           markInputSent(keeperName)

@@ -62,9 +62,14 @@ let tool_io_preview_fields ~tool_name ~input ?output () =
 let oas_invocation_fields = function
   | None -> []
   | Some invocation ->
+    let schedule = Agent_sdk.Tool_contract.Invocation.schedule invocation in
     [ "tool_use_id", `String (Agent_sdk.Tool_contract.Invocation.tool_use_id invocation)
     ; "turn", `Int (Agent_sdk.Tool_contract.Invocation.turn invocation)
-    ; "planned_index", `Int (Agent_sdk.Tool_contract.Invocation.planned_index invocation)
+    ; "planned_index", `Int schedule.planned_index
+    ; "batch_index", `Int schedule.batch_index
+    ; "batch_size", `Int schedule.batch_size
+    ; ( "execution_mode"
+      , Agent_sdk.Tool_contract.execution_mode_to_yojson schedule.execution_mode )
     ]
 ;;
 

@@ -1838,7 +1838,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       'chatq_00000000-0000-4000-8000-000000000001',
     )
     expect(reply?.delivery).toBe('queued')
-    expect(reply?.text).toContain('메시지는 대기열에 추가했습니다')
+    expect(reply?.text).toContain('메시지를 대기열에 추가했습니다')
     expect(reply?.details).toMatchObject({
       queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000001',
       queueRevision: '4',

@@ -34,6 +34,7 @@ type user_input_block = Keeper_multimodal_input.user_input_block =
 type keeper_chat_stream_request = {
   name : string;
   message : string;
+  enqueue_only : bool;
   user_blocks : user_input_block list;
   turn_instructions : string option;
   surface_context : Yojson.Safe.t option;
@@ -217,7 +218,7 @@ let dashboard_deferred_ack_text ~keeper_name deferred =
         keeper_name
     | None ->
       Printf.sprintf
-        "%s가 다른 작업을 처리 중이에요. 메시지는 대기열에 추가했습니다."
+        "%s 메시지를 대기열에 추가했습니다."
         keeper_name
 
 let dashboard_deferred_chat_to_json ~keeper_name
@@ -327,6 +328,25 @@ let defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id payload =
        with
        | Ok queued -> `Queued queued
        | Error message -> `Queue_error message)
+
+let enqueue_dashboard_payload_now ~base_path ~clock ~thread_id payload =
+  let admission =
+    Keeper_turn_admission.snapshot_for
+      ~base_path
+      ~keeper_name:payload.name
+  in
+  match
+    enqueue_dashboard_payload
+      ~clock
+      ~thread_id
+      ~user_row_origin:Keeper_chat_store.Needs_append
+      payload
+      ~in_flight:admission.snapshot_in_flight
+      ~chat_waiting:(admission.snapshot_waiting > 0)
+      ~shutdown_operation_id:admission.snapshot_shutdown_operation_id
+  with
+  | Ok queued -> `Queued queued
+  | Error message -> `Queue_error message
 
 let keeper_chat_request_prefixes =
   [
@@ -565,6 +585,12 @@ let parse_keeper_chat_stream_request body_str =
             let s = String.trim s in
             if s = "" then None else Some s
       in
+      let enqueue_only_result =
+        match Json_util.assoc_member_opt "enqueue_only" json with
+        | None | Some `Null -> Ok false
+        | Some (`Bool enqueue_only) -> Ok enqueue_only
+        | Some _ -> Error "enqueue_only must be a boolean"
+      in
       let surface_context : Yojson.Safe.t option =
         match Json_util.assoc_member_opt "surface_context" json with
         | Some (`Assoc _ as obj) -> Some obj
@@ -591,6 +617,9 @@ let parse_keeper_chat_stream_request body_str =
         Error
           "channel and channel_workspace_id are required when connector context is supplied"
       else
+        match enqueue_only_result with
+        | Error err -> Error err
+        | Ok enqueue_only ->
         match
           Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg" json
         with
@@ -614,6 +643,7 @@ let parse_keeper_chat_stream_request body_str =
                 {
                   name;
                   message;
+                  enqueue_only;
                   user_blocks;
                   turn_instructions;
                   surface_context;
@@ -3209,44 +3239,57 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                 : queued_turn_outcome option);
              wait_for_adapter_finished ()
            in
+           let publish_queued queued =
+             Log.Keeper.info
+               "keeper_stream: queued dashboard message keeper=%s pending_count=%d inflight_count=%d enqueue_only=%b"
+               payload.name
+               queued.pending_count
+               queued.inflight_count
+               payload.enqueue_only;
+             Keeper_chat_events.publish events
+               (Run_started { run_id; thread_id });
+             Keeper_chat_events.publish events
+               (Text_message_start
+                  { message_id; role = Keeper_chat_events.Assistant });
+             Keeper_chat_events.publish events
+               (Text_delta
+                  (dashboard_deferred_ack_text
+                     ~keeper_name:payload.name
+                     queued));
+             Keeper_chat_events.publish events
+               (Custom
+                  { name = "KEEPER_CHAT_QUEUED";
+                    value =
+                      dashboard_deferred_chat_to_json
+                        ~keeper_name:payload.name queued
+             });
+             Keeper_chat_events.publish events Text_message_end;
+             Keeper_chat_events.publish events (Run_finished { run_id });
+             wait_for_adapter_finished ()
+           in
            if has_external_speaker payload then run_now ()
            else
              match
                try
-                 defer_dashboard_payload_if_busy
-                   ~base_path
-                   ~clock
-                   ~thread_id
-                   payload
+                 if payload.enqueue_only
+                 then
+                   enqueue_dashboard_payload_now
+                     ~base_path
+                     ~clock
+                     ~thread_id
+                     payload
+                 else
+                   defer_dashboard_payload_if_busy
+                     ~base_path
+                     ~clock
+                     ~thread_id
+                     payload
                with
                | Eio.Cancel.Cancelled _ as exn -> raise exn
                | exn -> `Queue_error (Printexc.to_string exn)
              with
              | `Not_busy -> run_now ()
-             | `Queued queued ->
-                 Log.Keeper.info
-                   "keeper_stream: deferred busy dashboard message keeper=%s pending_count=%d inflight_count=%d"
-                   payload.name queued.pending_count queued.inflight_count;
-                 Keeper_chat_events.publish events
-                   (Run_started { run_id; thread_id });
-                 Keeper_chat_events.publish events
-                   (Text_message_start
-                      { message_id; role = Keeper_chat_events.Assistant });
-                 Keeper_chat_events.publish events
-                   (Text_delta
-                      (dashboard_deferred_ack_text
-                         ~keeper_name:payload.name
-                         queued));
-                 Keeper_chat_events.publish events
-                   (Custom
-                      { name = "KEEPER_CHAT_QUEUED";
-                        value =
-                          dashboard_deferred_chat_to_json
-                            ~keeper_name:payload.name queued
-                 });
-                 Keeper_chat_events.publish events Text_message_end;
-                 Keeper_chat_events.publish events (Run_finished { run_id });
-                 wait_for_adapter_finished ()
+             | `Queued queued -> publish_queued queued
              | `Queue_error message ->
                  Log.Keeper.error
                    "keeper_stream: failed to defer busy dashboard message keeper=%s: %s"
@@ -3296,6 +3339,13 @@ module For_testing = struct
       defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id payload
     with
     | `Not_busy -> `Not_busy
+    | `Queued queued -> `Queued queued.pending_count
+    | `Queue_error message -> `Queue_error message
+
+  let enqueue_dashboard_payload_now ~base_path ~clock ~thread_id payload =
+    match
+      enqueue_dashboard_payload_now ~base_path ~clock ~thread_id payload
+    with
     | `Queued queued -> `Queued queued.pending_count
     | `Queue_error message -> `Queue_error message
 

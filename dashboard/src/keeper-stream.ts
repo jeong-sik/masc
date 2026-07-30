@@ -724,7 +724,7 @@ export function applyKeeperStreamEvent(
             ? `${keeperName}의 이전 메시지 상태를 확인해야 해요. 새 메시지는 안전하게 대기 중입니다.`
             : shutdownOperationId
               ? `${keeperName}가 종료 중이에요. 다시 활동을 시작하면 이 메시지를 처리합니다.`
-              : `${keeperName}가 다른 작업을 처리 중이에요. 메시지는 대기열에 추가했습니다.`,
+              : `${keeperName} 메시지를 대기열에 추가했습니다.`,
           delivery: 'queued',
           streamState: null,
           details: {

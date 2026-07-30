@@ -64,16 +64,23 @@ let mk_event ?caused_by payload : Agent_sdk.Event_bus.event =
   ; payload
   }
 
-let invocation ?(turn = 0) ?(planned_index = 0) tool_use_id =
+let invocation
+      ?(turn = 0)
+      ?(planned_index = 0)
+      ?(batch_index = 0)
+      ?(batch_size = 1)
+      ?(execution_mode = Agent_sdk.Tool_contract.Serial)
+      tool_use_id
+  =
   Agent_sdk.Tool_contract.Invocation.create
     ~tool_use_id
     ~turn
     ~completion:Agent_sdk.Tool_contract.Continue_after_success
     ~schedule:
       { planned_index
-      ; batch_index = 0
-      ; batch_size = 1
-      ; execution_mode = Agent_sdk.Tool_contract.Serial
+      ; batch_index
+      ; batch_size
+      ; execution_mode
       }
 
 let test_tool_called_carries_tool_use_id () =
@@ -82,7 +89,12 @@ let test_tool_called_carries_tool_use_id () =
     Bridge.native_event_to_json
       (mk_event
          (Agent_sdk.Event_bus.ToolCalled
-            { invocation = invocation "tu-3"
+            { invocation =
+                invocation
+                  ~batch_index:1
+                  ~batch_size:3
+                  ~execution_mode:Agent_sdk.Tool_contract.Concurrent
+                  "tu-3"
             ; agent_name = "oas-r1"
             ; tool_name = "Read"
             ; input = `Null
@@ -95,6 +107,12 @@ let test_tool_called_carries_tool_use_id () =
     (int_of_field (payload_member "turn" json));
   check (option int) "payload planned_index" (Some 0)
     (int_of_field (payload_member "planned_index" json));
+  check (option int) "payload batch_index" (Some 1)
+    (int_of_field (payload_member "batch_index" json));
+  check (option int) "payload batch_size" (Some 3)
+    (int_of_field (payload_member "batch_size" json));
+  check (option string) "payload execution_mode" (Some "concurrent")
+    (string_of_field (payload_member "execution_mode" json));
   check bool "tool_called has no execution_id (mint happens after publish)"
     true
     (payload_member "execution_id" json = None)

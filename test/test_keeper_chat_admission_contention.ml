@@ -295,6 +295,7 @@ let test_queued_server_turn_has_no_second_durable_request () =
              Server_routes_http_keeper_stream.keeper_chat_stream_request =
            { name = keeper_name
            ; message = "queued inline boundary"
+           ; enqueue_only = false
            ; user_blocks = []
            ; turn_instructions = None
            ; surface_context = None

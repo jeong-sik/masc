@@ -927,7 +927,7 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
           role: 'assistant',
           source: 'direct_assistant',
           label: keeperName,
-          text: `${keeperName}가 다른 작업을 처리 중이에요. 메시지는 대기열에 추가했습니다.`,
+          text: `${keeperName} 메시지를 대기열에 추가했습니다.`,
           timestamp,
           delivery: 'queued',
           streamState: null,
@@ -1502,6 +1502,7 @@ export async function sendKeeperThreadMessage(
     attachments?: KeeperConversationAttachment[]
     clientActionId?: string
     clientActionIds?: readonly string[]
+    enqueueOnly?: boolean
     blocks?: ChatBlock[]
     userBlocks?: KeeperUserInputBlock[]
   } = {},
@@ -1582,6 +1583,7 @@ export async function sendKeeperThreadMessage(
 
     const outcome = await streamKeeperMessage(keeperName, message, {
       signal: controller.signal,
+      enqueueOnly: options.enqueueOnly,
       attachments,
       userBlocks,
       onEvent: event => {

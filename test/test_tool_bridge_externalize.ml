@@ -202,6 +202,22 @@ let test_execution_env_preserves_exact_invocation () =
       2
       (Agent_sdk.Tool_contract.Invocation.planned_index seen)
 
+let test_execution_mode_preserves_explicit_descriptor () =
+  let tool =
+    B.oas_tool_of_masc_with_execution_env
+      ~descriptor:
+        (Agent_sdk.Tool.ordinary_descriptor Agent_sdk.Tool_contract.Concurrent)
+      ~name:"concurrent_probe"
+      ~description:"preserve explicit execution mode"
+      ~input_schema:(`Assoc [ "type", `String "object" ])
+      (fun _execution_env _input ->
+         tool_ok ~tool_name:"concurrent_probe" "ok")
+  in
+  Alcotest.(check bool)
+    "bridge preserves explicit concurrent descriptor"
+    true
+    (Agent_sdk.Tool.execution_mode tool = Agent_sdk.Tool_contract.Concurrent)
+
 (* --- Marker encoding round-trip via the bridge --- *)
 
 let test_externalize_with_temp_base_path () =
@@ -329,6 +345,8 @@ let () =
             test_round_trip_through_oas;
           Alcotest.test_case "execution env preserves exact invocation" `Quick
             test_execution_env_preserves_exact_invocation;
+          Alcotest.test_case "explicit execution mode is preserved" `Quick
+            test_execution_mode_preserves_explicit_descriptor;
         ] );
       ( "externalize",
         [

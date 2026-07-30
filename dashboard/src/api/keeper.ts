@@ -559,6 +559,7 @@ async function refreshLoopbackDevTokenAfterMismatch(): Promise<boolean> {
 export interface StreamKeeperMessageOptions {
   signal?: AbortSignal
   onEvent: (event: KeeperChatStreamEvent) => void
+  enqueueOnly?: boolean
   attachments?: StreamAttachment[]
   userBlocks?: KeeperUserInputBlock[]
   channel?: string
@@ -589,6 +590,7 @@ export async function streamKeeperMessage(
   {
     signal,
     onEvent,
+    enqueueOnly,
     attachments,
     userBlocks,
     channel,
@@ -601,6 +603,9 @@ export async function streamKeeperMessage(
     name,
     message,
     direct_reply: true,
+  }
+  if (enqueueOnly) {
+    body.enqueue_only = true
   }
   if (channel && channel.trim() !== '') {
     body.channel = channel.trim()

@@ -12,6 +12,7 @@ const {
   editKeeperChatPendingReceipt,
   moveKeeperChatPendingReceiptToEnd,
   operateKeeperEventQueue,
+  KeeperEventQueueOperationError,
 } = vi.hoisted(() => ({
   bootKeeper: vi.fn(),
   shutdownKeeper: vi.fn(),
@@ -21,6 +22,34 @@ const {
   editKeeperChatPendingReceipt: vi.fn(),
   moveKeeperChatPendingReceiptToEnd: vi.fn(),
   operateKeeperEventQueue: vi.fn(),
+  KeeperEventQueueOperationError: class KeeperEventQueueOperationError extends Error {
+    readonly operation: {
+      action: 'cancel' | 'transfer'
+      expectedRevision: string
+      queueIndex: number
+      operationId: string
+      reason?: string
+      targetKeeper?: string
+    }
+    readonly commitState: 'committed' | 'unknown'
+
+    constructor(
+      message: string,
+      operation: {
+        action: 'cancel' | 'transfer'
+        expectedRevision: string
+        queueIndex: number
+        operationId: string
+        reason?: string
+        targetKeeper?: string
+      },
+      commitState: 'committed' | 'unknown',
+    ) {
+      super(message)
+      this.operation = operation
+      this.commitState = commitState
+    }
+  },
 }))
 
 const { invalidateDashboardCache, refreshDashboard } = vi.hoisted(() => ({
@@ -101,6 +130,7 @@ vi.mock('../api/keeper', () => ({
   editKeeperChatPendingReceipt,
   moveKeeperChatPendingReceiptToEnd,
   operateKeeperEventQueue,
+  KeeperEventQueueOperationError,
 }))
 
 vi.mock('../store', async (importOriginal) => {
@@ -1038,6 +1068,100 @@ describe('KeeperConversationPanel', () => {
       expect(panel?.textContent).toContain('맨 뒤로')
       expect(panel?.textContent).toContain('이관')
       expect(panel?.textContent).toContain('취소')
+    })
+  })
+
+  it('replays an ambiguous event mutation with the exact preserved operation identity', async () => {
+    fetchKeeperChatPending.mockResolvedValue({
+      keeperName: 'sangsu',
+      revision: '22',
+      currentWork: null,
+      totalPending: 0,
+      nextAfter: null,
+      pending: [],
+    })
+    fetchKeeperEventQueuePending.mockResolvedValue({
+      keeperName: 'sangsu',
+      revision: '9',
+      totalPending: 1,
+      nextAfter: null,
+      pending: [{
+        queueIndex: 0,
+        postId: 'board-post-9',
+        urgency: 'normal',
+        arrivedAt: 41,
+        payloadKind: 'board_signal',
+      }],
+    })
+    mockedToolsData.value = {
+      keeper_waiting_inventory: {
+        keepers: [{
+          keeper_name: 'sangsu',
+          state: 'busy',
+          waiting_count: 1,
+          sources: { event_queue_pending: 1 },
+          waiting_on: [],
+        }],
+      },
+    }
+    const recoveryOperation = {
+      action: 'transfer' as const,
+      expectedRevision: '9',
+      queueIndex: 0,
+      operationId: 'operation-replay-9',
+      targetKeeper: 'rondo',
+    }
+    operateKeeperEventQueue
+      .mockRejectedValueOnce(new KeeperEventQueueOperationError(
+        'connection reset after possible commit',
+        recoveryOperation,
+        'unknown',
+      ))
+      .mockResolvedValueOnce(undefined)
+    vi.stubGlobal('prompt', vi.fn(() => 'rondo'))
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
+      container,
+    )
+    fireEvent.click(await waitFor(() => {
+      const button = container.querySelector('[data-open-keeper-queue-control]')
+      expect(button).not.toBeNull()
+      return button as HTMLElement
+    }))
+    const transfer = await waitFor(() => {
+      const row = container.querySelector('[data-operator-event-row]')
+      const button = [...(row?.querySelectorAll('button') ?? [])]
+        .find(node => node.textContent === '이관')
+      expect(button).not.toBeUndefined()
+      return button as HTMLElement
+    })
+
+    fireEvent.click(transfer)
+
+    const recovery = await waitFor(() => {
+      const node = container.querySelector(
+        '[data-event-operation-recovery="operation-replay-9"]',
+      )
+      expect(node).not.toBeNull()
+      expect(node?.textContent).toContain('commit 결과 확인 필요')
+      return node as HTMLElement
+    })
+    const retry = [...recovery.querySelectorAll('button')]
+      .find(node => node.textContent === '동일 작업 결과 확인·복구')
+    expect(retry).not.toBeUndefined()
+
+    fireEvent.click(retry as HTMLElement)
+
+    await waitFor(() => {
+      expect(operateKeeperEventQueue).toHaveBeenNthCalledWith(
+        2,
+        'sangsu',
+        recoveryOperation,
+      )
+      expect(container.querySelector(
+        '[data-event-operation-recovery="operation-replay-9"]',
+      )).toBeNull()
     })
   })
 

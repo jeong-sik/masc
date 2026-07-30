@@ -30,6 +30,7 @@ import {
   fetchQueuedKeeperMessageResult,
   fetchKeeperRuntimeTrace,
   isTerminalQueuedKeeperMessage,
+  KeeperEventQueueOperationError,
   moveKeeperChatPendingReceiptToEnd,
   operateKeeperEventQueue,
   pauseKeeper,
@@ -690,14 +691,79 @@ describe('Keeper chat durable receipt API', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(operateKeeperEventQueue('sangsu', {
-      action: 'cancel',
-      expectedRevision: '8',
-      operationId: 'operation-9',
-      queueIndex: 1,
-      reason: 'operator cancellation',
-    })).rejects.toThrow(
+    let observed: unknown
+    try {
+      await operateKeeperEventQueue('sangsu', {
+        action: 'cancel',
+        expectedRevision: '8',
+        operationId: 'operation-9',
+        queueIndex: 1,
+        reason: 'operator cancellation',
+      })
+    } catch (cause) {
+      observed = cause
+    }
+
+    expect(observed).toBeInstanceOf(KeeperEventQueueOperationError)
+    expect(observed).toMatchObject({
+      commitState: 'committed',
+      operation: {
+        action: 'cancel',
+        expectedRevision: '8',
+        operationId: 'operation-9',
+        queueIndex: 1,
+        reason: 'operator cancellation',
+      },
+    })
+    expect((observed as Error).message).toContain(
       'Event queue mutation committed, but target_projection follow-up failed (transition-9)',
+    )
+  })
+
+  it('retains the generated event operation identity when the POST result is unknown', async () => {
+    vi.stubGlobal('crypto', {
+      randomUUID: vi.fn(() => '00000000-0000-4000-8000-000000000099'),
+    })
+    const fetchMock = vi.fn().mockRejectedValue(
+      new TypeError('connection reset after possible commit'),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    let observed: unknown
+    try {
+      await operateKeeperEventQueue('sangsu', {
+        action: 'transfer',
+        expectedRevision: '9',
+        queueIndex: 2,
+        targetKeeper: 'rondo',
+      })
+    } catch (cause) {
+      observed = cause
+    }
+
+    expect(observed).toBeInstanceOf(KeeperEventQueueOperationError)
+    expect(observed).toMatchObject({
+      commitState: 'unknown',
+      operation: {
+        action: 'transfer',
+        expectedRevision: '9',
+        operationId: '00000000-0000-4000-8000-000000000099',
+        queueIndex: 2,
+        targetKeeper: 'rondo',
+      },
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/keepers/sangsu/events/operator',
+      expect.objectContaining({
+        body: JSON.stringify({
+          schema: 'keeper_event_queue.operator.request.v1',
+          action: 'transfer',
+          expected_revision: '9',
+          queue_index: 2,
+          operator_operation_id: '00000000-0000-4000-8000-000000000099',
+          target_keeper: 'rondo',
+        }),
+      }),
     )
   })
 

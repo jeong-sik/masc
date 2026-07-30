@@ -93,11 +93,14 @@ import {
   editKeeperChatPendingReceipt,
   fetchKeeperEventQueuePending,
   fetchKeeperChatPending,
+  KeeperEventQueueOperationError,
   moveKeeperChatPendingReceiptToEnd,
   operateKeeperEventQueue,
   type DashboardKeeperWaitingKeeper,
   type KeeperChatPendingSnapshot,
+  type KeeperEventQueueOperatorAction,
   type KeeperEventQueuePendingSnapshot,
+  type KeeperEventQueueReplayableAction,
 } from '../api'
 
 // Mirrors `LANE_REFRESH_MS` in keeper-workspace/keeper-lane-strip.ts. That
@@ -678,6 +681,11 @@ function KeeperQueueControlPanel({
   const [eventSnapshot, setEventSnapshot] = useState<KeeperEventQueuePendingSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<string | null>(null)
+  const [eventRecoveries, setEventRecoveries] = useState<readonly {
+    operation: KeeperEventQueueReplayableAction
+    commitState: 'committed' | 'unknown'
+    message: string
+  }[]>([])
   const load = async (clearError = true) => {
     try {
       if (clearError) setError(null)
@@ -715,13 +723,34 @@ function KeeperQueueControlPanel({
       setPendingAction(null)
     }
   }
-  const mutateEvent = async (key: string, operation: () => Promise<void>) => {
+  const mutateEvent = async (
+    key: string,
+    operation: KeeperEventQueueOperatorAction,
+  ) => {
     setPendingAction(key)
     try {
-      await operation()
+      await operateKeeperEventQueue(keeperName, operation)
+      if (operation.action !== 'reprioritize' && operation.operationId) {
+        setEventRecoveries(recoveries => recoveries.filter(
+          recovery => recovery.operation.operationId !== operation.operationId,
+        ))
+      }
       await Promise.all([load(), loadTools()])
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
+      if (cause instanceof KeeperEventQueueOperationError) {
+        const recovery = {
+          operation: cause.operation,
+          commitState: cause.commitState,
+          message,
+        }
+        setEventRecoveries(recoveries => [
+          ...recoveries.filter(
+            item => item.operation.operationId !== cause.operation.operationId,
+          ),
+          recovery,
+        ])
+      }
       await Promise.allSettled([load(false), loadTools()])
       setError(message)
       showToast(message, 'error')
@@ -799,6 +828,29 @@ function KeeperQueueControlPanel({
       </div>
       <div class="grid gap-2 border-t border-[var(--color-border-subtle)] pt-3">
         <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">자율 이벤트 대기 ${eventSnapshot?.totalPending ?? 0}</div>
+        ${eventRecoveries.map(recovery => {
+          const operationId = recovery.operation.operationId
+          const key = `event-recovery:${operationId}`
+          return html`
+            <div
+              class="grid gap-1 rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] p-2"
+              data-event-operation-recovery=${operationId}
+            >
+              <div class="text-2xs text-[var(--color-status-err)]">
+                ${recovery.commitState === 'committed' ? 'source commit 완료 · 후속 복구 필요' : 'commit 결과 확인 필요'}
+                · ${recovery.operation.action}
+              </div>
+              <div class="break-words text-3xs text-[var(--color-fg-secondary)]">${recovery.message}</div>
+              <div class="break-all font-mono text-3xs text-[var(--color-fg-muted)]">${operationId}</div>
+              <button
+                type="button"
+                disabled=${pendingAction === key}
+                class="w-fit rounded-[var(--r-0)] border border-[var(--danger-20)] px-2 py-1 text-2xs text-[var(--color-status-err)] disabled:opacity-50"
+                onClick=${() => void mutateEvent(key, recovery.operation)}
+              >동일 작업 결과 확인·복구</button>
+            </div>
+          `
+        })}
         ${eventRows.map(item => {
           const key = `event:${eventSnapshot!.revision}:${item.queueIndex}`
           const busy = pendingAction === key
@@ -813,12 +865,12 @@ function KeeperQueueControlPanel({
                     disabled=${busy}
                     class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1 text-2xs disabled:opacity-50"
                     onClick=${() => {
-                      void mutateEvent(key, () => operateKeeperEventQueue(keeperName, {
+                      void mutateEvent(key, {
                         action: 'reprioritize',
                         expectedRevision: eventSnapshot!.revision,
                         queueIndex: item.queueIndex,
                         urgency,
-                      }))
+                      })
                     }}
                   >${urgency}</button>
                 `)}
@@ -829,12 +881,12 @@ function KeeperQueueControlPanel({
                   onClick=${() => {
                     const targetKeeper = window.prompt('이 이벤트를 넘길 Keeper 이름을 입력하세요.')
                     if (targetKeeper === null) return
-                    void mutateEvent(key, () => operateKeeperEventQueue(keeperName, {
+                    void mutateEvent(key, {
                       action: 'transfer',
                       expectedRevision: eventSnapshot!.revision,
                       queueIndex: item.queueIndex,
                       targetKeeper,
-                    }))
+                    })
                   }}
                 >이관</button>
                 <button
@@ -844,12 +896,12 @@ function KeeperQueueControlPanel({
                   onClick=${() => {
                     const reason = window.prompt('이벤트 취소 이유를 입력하세요.')
                     if (reason === null) return
-                    void mutateEvent(key, () => operateKeeperEventQueue(keeperName, {
+                    void mutateEvent(key, {
                       action: 'cancel',
                       expectedRevision: eventSnapshot!.revision,
                       queueIndex: item.queueIndex,
                       reason,
-                    }))
+                    })
                   }}
                 >취소</button>
               </div>

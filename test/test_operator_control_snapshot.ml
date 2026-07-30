@@ -963,6 +963,17 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
             ("tool_call_count", `Int 0);
             ("tools_used", `List []);
           ]));
+      for index = 1 to 129 do
+        Dated_jsonl.append metrics_store
+          (`Assoc
+            (Keeper_metrics_record.fields Keeper_metrics_record.Heartbeat
+            @ [
+              ("ts", `String (Masc_domain.now_iso ()));
+              ("ts_unix", `Float (Time_compat.now ()));
+              ("channel", `String "heartbeat");
+              ("sequence", `Int index);
+            ]))
+      done;
       let meta =
         match Keeper_meta_store.read_meta config keeper_name with
         | Ok (Some meta) -> meta

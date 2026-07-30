@@ -219,17 +219,12 @@ let string_list_member_opt key json =
       decode [] values
   | _ -> None
 
-let read_recent_metrics_lines config keeper_name =
+let metrics_scan_batch_size = 128
+
+let latest_tool_audit_snapshot_from_metrics config keeper_name =
   let store =
     Keeper_types_support.keeper_metrics_store config keeper_name
   in
-  Dated_jsonl.read_recent_lines store 120
-
-let latest_snapshot_of_lines lines ~parse_snapshot =
-  lines |> List.rev |> List.find_map parse_snapshot
-
-let latest_tool_audit_snapshot_from_metrics config keeper_name =
-  let lines = read_recent_metrics_lines config keeper_name in
   let metrics_path =
     Keeper_types_support.keeper_metrics_dir config keeper_name
   in
@@ -240,45 +235,61 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
       ~path:metrics_path
       ~detail
   in
-  let parse_snapshot line =
-    try
-      let json =
-        match Yojson.Safe.from_string line with
-        | `Assoc _ as json -> json
-        | _ ->
-            report_drop
-              ~reason:
-                Safe_ops.persistence_read_drop_reason_invalid_payload
-              ~detail:"keeper metrics row is not a JSON object";
-            raise Exit
-      in
-      match Keeper_metrics_record.kind_of_json json with
-      | Some Keeper_metrics_record.Turn ->
-          (match
-             string_list_member_opt "tools_used" json,
-             Safe_ops.json_int_opt "tool_call_count" json,
-             nonempty_string_opt "ts" json
-           with
-           | Some tools, Some tool_call_count, Some timestamp ->
-               Some
-                 { latest_tool_names = tools
-                 ; latest_tool_call_count = Some tool_call_count
-                 ; latest_action_source =
-                     nonempty_string_opt "action_source" json
-                 ; tool_audit_source = Some "keeper_metrics"
-                 ; tool_audit_at = Some timestamp
-                 }
-           | _ -> None)
-      | Some Keeper_metrics_record.Heartbeat | None -> None
-    with
-    | Exit -> None
-    | Yojson.Json_error detail ->
+  let parse_snapshot = function
+    | Dated_jsonl.Malformed_json { path; line_number; detail } ->
+        let location =
+          match line_number with
+          | Some line_number -> Printf.sprintf "%s:%d" path line_number
+          | None -> path
+        in
         report_drop
           ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
-          ~detail;
+          ~detail:(Printf.sprintf "%s: %s" location detail);
+        None
+    | Dated_jsonl.Parsed (`Assoc _ as json) ->
+        (match Keeper_metrics_record.kind_of_json json with
+         | Some Keeper_metrics_record.Turn ->
+             (match
+                string_list_member_opt "tools_used" json,
+                Safe_ops.json_int_opt "tool_call_count" json,
+                nonempty_string_opt "ts" json
+              with
+              | Some tools, Some tool_call_count, Some timestamp ->
+                  Some
+                    { latest_tool_names = tools
+                    ; latest_tool_call_count = Some tool_call_count
+                    ; latest_action_source =
+                        nonempty_string_opt "action_source" json
+                    ; tool_audit_source = Some "keeper_metrics"
+                    ; tool_audit_at = Some timestamp
+                    }
+              | _ -> None)
+         | Some Keeper_metrics_record.Heartbeat | None -> None)
+    | Dated_jsonl.Parsed _ ->
+        report_drop
+          ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+          ~detail:"keeper metrics row is not a JSON object";
         None
   in
-  latest_snapshot_of_lines lines ~parse_snapshot
+  let rec scan offset =
+    match
+      Dated_jsonl.read_recent_result
+        ~offset
+        store
+        metrics_scan_batch_size
+    with
+    | Error error ->
+        report_drop
+          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~detail:(Dated_jsonl.read_error_to_string error);
+        None
+    | Ok entries ->
+        (match entries |> List.rev |> List.find_map parse_snapshot with
+         | Some _ as snapshot -> snapshot
+         | None when List.length entries < metrics_scan_batch_size -> None
+         | None -> scan (offset + List.length entries))
+  in
+  scan 0
 
 let latest_tool_audit_snapshot_from_files config ~keeper_name =
   latest_tool_audit_snapshot_from_metrics config keeper_name

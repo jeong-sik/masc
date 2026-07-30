@@ -215,6 +215,9 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     | `Int value -> Some (float_of_int value)
     | _ -> None
   in
+  let context_metrics_unavailable =
+    member_assoc "context_metrics_unavailable" keeper
+  in
   let last_action_at =
     String_util.trim_to_option (string_field "last_autonomous_action_at" keeper)
   in
@@ -279,12 +282,16 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   let lifecycle =
     if liveness = Cl_paused then Lc_idle
     else if continuity_offline then Lc_offline
-    else if Option.value ~default:0.0 context_ratio >= ctx_handoff_imminent then Lc_handoff_imminent
-    else if Option.value ~default:0.0 context_ratio >= ctx_preparing then Lc_preparing
-    else if Option.value ~default:0.0 context_ratio >= ctx_compacting then Lc_compacting
-    else if last_action_ts > 0.0 then Lc_active
-    else if last_signal_ts > 0.0 then Lc_idle
-    else Lc_idle
+    else
+      match context_ratio with
+      | Some ratio when ratio >= ctx_handoff_imminent ->
+          Lc_handoff_imminent
+      | Some ratio when ratio >= ctx_preparing -> Lc_preparing
+      | Some ratio when ratio >= ctx_compacting -> Lc_compacting
+      | Some _ | None ->
+          if last_action_ts > 0.0 then Lc_active
+          else if last_signal_ts > 0.0 then Lc_idle
+          else Lc_idle
   in
   let (state, tone, note) =
     match liveness with
@@ -352,6 +359,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
            ("generation", member_assoc "generation" keeper);
            ("turn_count", member_assoc "turn_count" keeper);
            ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
+           ("context_metrics_unavailable", context_metrics_unavailable);
            ("continuity", `String continuity);
            ("lifecycle", `String (keeper_lifecycle_to_string lifecycle));
            ("related_session_id", Json_util.string_opt_to_json related_session_id);

@@ -75,6 +75,8 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
       usage = { meta.runtime.usage with
         total_turns = meta.runtime.usage.total_turns + 1;
         last_turn_ts = now_ts;
+        (* A failed turn has no provider usage observation. Preserve the
+           previous typed observation and its own timestamp. *)
         last_latency_ms = latency_ms;
       };
       proactive_rt = { meta.runtime.proactive_rt with

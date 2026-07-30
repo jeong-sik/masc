@@ -35,6 +35,7 @@ type field =
   | Last_input_tokens
   | Last_output_tokens
   | Last_total_tokens
+  | Last_usage_reported_at
   | Last_latency_ms
   | Compaction_count
   | Last_compaction_ts
@@ -91,6 +92,7 @@ let all_fields =
   ; Last_input_tokens
   ; Last_output_tokens
   ; Last_total_tokens
+  ; Last_usage_reported_at
   ; Last_latency_ms
   ; Compaction_count
   ; Last_compaction_ts
@@ -148,6 +150,7 @@ let field_name = function
   | Last_input_tokens -> "last_input_tokens"
   | Last_output_tokens -> "last_output_tokens"
   | Last_total_tokens -> "last_total_tokens"
+  | Last_usage_reported_at -> "last_usage_reported_at"
   | Last_latency_ms -> "last_latency_ms"
   | Compaction_count -> "compaction_count"
   | Last_compaction_ts -> "last_compaction_ts"

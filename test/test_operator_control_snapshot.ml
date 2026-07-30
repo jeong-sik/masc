@@ -184,6 +184,7 @@ let test_usage_does_not_create_context_snapshot () =
               last_input_tokens = 790_360;
               last_output_tokens = 17;
               last_total_tokens = 790_377;
+              last_usage_reported_at = Some 1_700_000_000.0;
             };
         };
     }
@@ -234,7 +235,10 @@ let test_usage_does_not_create_context_snapshot () =
     Yojson.Safe.Util.(usage_json |> member "total_tokens" |> to_int);
   Alcotest.(check string) "usage JSON source is explicit"
     "keeper_runtime_usage"
-    Yojson.Safe.Util.(usage_json |> member "source" |> to_string)
+    Yojson.Safe.Util.(usage_json |> member "source" |> to_string);
+  Alcotest.(check string) "usage JSON keeps its own observation timestamp"
+    "2023-11-14T22:13:20Z"
+    Yojson.Safe.Util.(usage_json |> member "observed_at" |> to_string)
 
 let init_runtime_default_for_snapshot base_dir =
   let path = Filename.concat base_dir "runtime.toml" in
@@ -327,6 +331,7 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
                   meta.runtime.usage with
                   last_input_tokens = 6_637_033;
                   last_total_tokens = 6_670_646;
+                  last_usage_reported_at = Some 1_700_000_000.0;
                 };
             };
         }

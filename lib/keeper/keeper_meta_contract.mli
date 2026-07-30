@@ -116,6 +116,9 @@ type usage_metrics = {
   last_input_tokens : int;
   last_output_tokens : int;
   last_total_tokens : int;
+  last_usage_reported_at : float option;
+      (** Timestamp of the most recent provider-reported usage observation.
+          [None] means no provider usage has been observed. *)
   last_latency_ms : int;
 }
 

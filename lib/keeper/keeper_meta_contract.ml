@@ -334,6 +334,7 @@ type usage_metrics =
   ; last_input_tokens : int
   ; last_output_tokens : int
   ; last_total_tokens : int
+  ; last_usage_reported_at : float option
   ; last_latency_ms : int
   }
 
@@ -663,6 +664,7 @@ let zero_usage : usage_metrics =
   ; last_input_tokens = 0
   ; last_output_tokens = 0
   ; last_total_tokens = 0
+  ; last_usage_reported_at = None
   ; last_latency_ms = 0
   }
 ;;

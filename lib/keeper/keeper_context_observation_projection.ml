@@ -35,21 +35,15 @@ let last_turn_usage_json_of_meta
       (meta : Keeper_meta_contract.keeper_meta)
   =
   let usage = meta.runtime.usage in
-  if usage.last_input_tokens <= 0
-     && usage.last_output_tokens <= 0
-     && usage.last_total_tokens <= 0
-  then `Null
-  else
+  match usage.last_usage_reported_at with
+  | None -> `Null
+  | Some observed_at ->
     `Assoc
       [ "input_tokens", `Int usage.last_input_tokens
       ; "output_tokens", `Int usage.last_output_tokens
       ; "total_tokens", `Int usage.last_total_tokens
       ; ( "observed_at"
-        , if usage.last_turn_ts > 0.0
-          then
-            `String
-              (Masc_domain.iso8601_of_unix_seconds usage.last_turn_ts)
-          else `Null )
+        , `String (Masc_domain.iso8601_of_unix_seconds observed_at) )
       ; "source", `String "keeper_runtime_usage"
       ]
 ;;

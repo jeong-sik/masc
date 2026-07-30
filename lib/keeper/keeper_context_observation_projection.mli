@@ -12,6 +12,9 @@ val missing_context_fields :
 
 val last_turn_usage_json_of_meta :
   Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
+(** Provider-reported usage from the latest successful usage observation.
+    Its timestamp is independent from [last_turn_ts], which also advances on
+    failed turns. *)
 (** Provider-reported usage for the latest completed turn. This is not
     context occupancy and must never feed context pressure or compaction
     decisions. *)

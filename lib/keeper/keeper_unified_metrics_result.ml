@@ -95,6 +95,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
         last_input_tokens = observed_input_tokens;
         last_output_tokens = observed_output_tokens;
         last_total_tokens = observed_total_tokens;
+        last_usage_reported_at = Some now_ts;
         last_latency_ms = latency_ms;
       };
       (* Deterministic scheduled autonomous cycle accounting is separated from

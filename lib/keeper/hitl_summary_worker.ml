@@ -523,11 +523,8 @@ let candidate_rejection_detail (rejection : Exact_output.candidate_rejection_rec
 
 (* [Flow_exact_execution_failed] is the branch that carries the provider's own
    verdict, and it was the only flow error settled with no log line at all. *)
-let capacity_refusal_detail : Exact_output.input_capacity_refusal -> string = function
-  | Context_window_refused _ ->
-    "context window refused"
-  | Serialized_request_refused _ ->
-    "serialized request refused"
+let capacity_refusal_detail (refusal : Exact_output.input_capacity_disposition) : string =
+  capacity_disposition_detail refusal
 ;;
 
 let execution_cause_detail : Exact_output.execution_error_cause -> string = function

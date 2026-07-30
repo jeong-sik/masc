@@ -830,7 +830,7 @@ and retry_auto_judge_entry
            ()
        with
        | Error reason -> Error (reblock reason)
-       | Ok outcome ->
+       | Ok (outcome : auto_judge_drain_outcome) ->
          (match
             List.assoc_opt entry.id outcome.failures,
             outcome.started_id,
@@ -1038,7 +1038,8 @@ and drain_auto_judges ~base_path =
             ~drain_owner:(fun ~base_path ~keeper_name ->
               drain_auto_judge_owner_queue ~base_path ~keeper_name ()
               |> Result.map
-                   (fun outcome -> outcome.started_id, outcome.failures)
+                   (fun (outcome : auto_judge_drain_outcome) ->
+                      outcome.started_id, outcome.failures)
               |> Result.map_error
                    Keeper_approval_queue.storage_error_to_string)
             (Auto_judge_owner_set.elements owners)))
@@ -1403,7 +1404,7 @@ let defer request reason =
         in
         (match drained with
          | Error detail -> Auto_judge_unavailable detail
-         | Ok outcome ->
+         | Ok (outcome : auto_judge_drain_outcome) ->
            (match List.assoc_opt approval_id outcome.failures with
             | Some detail -> Auto_judge_unavailable detail
             | None -> Judge_requested))
@@ -1636,7 +1637,7 @@ module For_testing = struct
     drain_auto_judge_owners_with
       ~drain_owner:(fun ~base_path ~keeper_name ->
         drain_owner ~base_path ~keeper_name
-        |> Result.map (fun outcome ->
+        |> Result.map (fun (outcome : owner_drain_outcome) ->
           outcome.started_id, outcome.failures))
       owners
   ;;

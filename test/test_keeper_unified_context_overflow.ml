@@ -188,7 +188,7 @@ let test_byte_axis_forwards_exact_request_wire_observation () =
     (Agent_sdk.Error.Api
        (ContextOverflow { message = "exceeded"; limit = Some 32768 }));
   check
-    (option (pair string int))
+    (option (triple string int int))
     "token-axis refusal does not fabricate request wire bytes"
     None
     !observed

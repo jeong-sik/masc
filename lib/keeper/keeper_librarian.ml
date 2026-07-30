@@ -122,7 +122,7 @@ let current_fact_json fact =
     ]
 ;;
 
-let current_selection_json current =
+let current_selection_json (current : current_selection) =
   `Assoc
     [ wire_field_summary, `String current.summary
     ; "facts", `List (List.map current_fact_json current.facts)
@@ -133,7 +133,10 @@ let current_selection_json current =
     ]
 ;;
 
-let format_current_selection_for_prompt = function
+let format_current_selection_for_prompt
+      (current : current_selection option)
+  =
+  match current with
   | None -> Yojson.Safe.pretty_to_string `Null
   | Some current ->
     current_selection_json current |> Yojson.Safe.pretty_to_string

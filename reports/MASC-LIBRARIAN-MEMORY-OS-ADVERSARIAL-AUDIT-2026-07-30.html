@@ -318,16 +318,14 @@ projection contract를 만든다.</li>
 <ul>
 <li>집중 정적 감사 SHA:
 <code>8c4dae264e6b1d03708029718f868efbb3c2613b</code></li>
-<li>2026-07-30 15:20 KST current <code>origin/main</code>:
-<code>3b6b901b05e88fe1668116d959cf7ac10c628911</code></li>
-<li>후속 구현 worktree base:
-<code>3b6b901b05e88fe1668116d959cf7ac10c628911</code></li>
+<li>2026-07-30 16:17 KST current <code>origin/main</code> 및 rebase
+base: <code>407ae5bb92509f06bfb6fc5614e8539e230b2902</code></li>
 <li>후속 구현 branch:
 <code>report/memory-os-adversarial-audit-20260730</code></li>
 <li>current-only 1차 source slice:
-<code>1c4692b806dd34e948afa99ea34d627092e880cc</code></li>
+<code>6f8bf76a816d822ca0165b6a8c42986b3d466e5c</code></li>
 <li>TTL authority 제거 2차 source slice:
-<code>1e71d90f43b52c4fe0cd9e21e502abd0ad3ce4e4</code></li>
+<code>b9c338da4d4230ae05783090d5c32727312b5d99</code></li>
 <li>닫힌 PR #26436의 remote head는 1차 slice 뒤 deterministic fix
 <code>6a5d575629a12bac12bc9c6758ba2dc3a561e14c</code>로 갈라져 있다.
 같은 fix는 2차 slice에도 이미 포함되어 있으므로 닫힌 branch를
@@ -466,9 +464,9 @@ authority도 추가 삭제했다.</td>
 <td><a href="https://github.com/jeong-sik/masc/pull/26389">#26389</a>
 <code>separate Keeper context from turn usage</code></td>
 <td>원칙상 인접</td>
-<td>head <code>bc4ab6d0fde691a4c43e588d549b4a3389e5d31e</code>,
-<code>MERGEABLE/BLOCKED</code>, <code>status:do-not-merge</code>,
-<code>reviewed:adversarial-non-pass</code></td>
+<td><strong>Merged</strong>, head
+<code>bc4ab6d0fde691a4c43e588d549b4a3389e5d31e</code>, merge commit
+<code>407ae5bb92509f06bfb6fc5614e8539e230b2902</code></td>
 <td>producer 없는 context 추정과 legacy metric surface를 제거한다.</td>
 <td>Memory OS persistence/context flow의 직접 수정은 아님</td>
 </tr>
@@ -1761,8 +1759,7 @@ cryptographic deployment identity라고 단정할 수 없음</p></li>
 <li><p><code>추가 확인 필요</code>: build artifact에 commit SHA를
 embed하고 health가 그 값을 직접 반환</p></li>
 <li><p><code>미확인 항목</code>: 후속 audit worktree의 새 Draft PR
-exact-head CI, #26428 current-head fresh CI, #26389의 최종 exact-head
-CI</p></li>
+exact-head CI와 #26428 current-head fresh CI</p></li>
 <li><p><code>영향</code>: 후속 source finding coverage는 정적 검증됐지만
 merge/deployment readiness는 아직 증명되지 않음</p></li>
 <li><p><code>추가 확인 필요</code>: draft PR push 후 head SHA, required

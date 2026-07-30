@@ -18,6 +18,10 @@ type projection_error =
   | Owner_unavailable of Persistence.owner_identity_error
   | Executor_unavailable of Executor_pool_ref.strict_submit_error
   | Outbox_unavailable of string
+  | Target_transfer_projection_failed of
+      { target_keeper : string
+      ; detail : string
+      }
   | Ledger_projection_failed of string
   | Unexpected_projection_failure of Eio.Exn.with_bt
 
@@ -65,6 +69,11 @@ let projection_error_to_string = function
     ^ Executor_pool_ref.strict_submit_error_to_string error
   | Outbox_unavailable detail ->
     "event queue transition outbox unavailable: " ^ detail
+  | Target_transfer_projection_failed { target_keeper; detail } ->
+    Printf.sprintf
+      "event queue transfer target projection failed target_keeper=%s: %s"
+      target_keeper
+      detail
   | Ledger_projection_failed detail ->
     "event queue transition ledger projection failed: " ^ detail
   | Unexpected_projection_failure (exn, backtrace) ->
@@ -135,6 +144,33 @@ let with_owner_claim owner f =
       (fun () -> Owner_claim_acquired (f ()))
 ;;
 
+let project_transfer_target_result ~base_path (entry : Persistence.outbox_entry) =
+  match entry.receipt.transition with
+  | Persistence.Cancel_accepted _
+  | Persistence.Ack_source_terminal _ ->
+    Ok ()
+  | Persistence.Transfer_accepted transfer ->
+    (match
+       Keeper_registry_event_queue.project_accepted_transfer_durable_result
+         ~base_path
+         transfer.to_keeper
+         ~transfer
+     with
+     | Keeper_registry_event_queue.Stimulus_enqueued
+     | Keeper_registry_event_queue.Stimulus_already_present ->
+       ignore
+         (Keeper_registry.wakeup_running
+            ~intent:Keeper_registry.Broadcast_signal
+            ~base_path
+            transfer.to_keeper :
+            Keeper_registry.wakeup_outcome);
+       Ok ()
+     | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+       Error
+         (Target_transfer_projection_failed
+            { target_keeper = transfer.to_keeper; detail }))
+;;
+
 let project_claimed_owner owner =
   let base_path = Persistence.owner_identity_base_path owner in
   let keeper_name = Persistence.owner_identity_keeper_name owner in
@@ -147,14 +183,17 @@ let project_claimed_owner owner =
   | Ok state ->
     (match Keeper_event_queue_state.transition_outbox state with
      | [] -> Ok No_pending_transition
-     | _ :: _ ->
-       (match
-          Keeper_reaction_ledger.project_event_queue_transition_outbox_result
-            ~base_path
-            ~keeper_name
-        with
-        | Ok () -> Ok Transition_converged
-        | Error detail -> Error (Ledger_projection_failed detail)))
+     | entry :: _ ->
+       (match project_transfer_target_result ~base_path entry with
+        | Error _ as error -> error
+        | Ok () ->
+          (match
+             Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+               ~base_path
+               ~keeper_name
+           with
+           | Ok () -> Ok Transition_converged
+           | Error detail -> Error (Ledger_projection_failed detail))))
 ;;
 
 let project_resolved_owner owner =

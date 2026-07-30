@@ -189,7 +189,7 @@ let test_app_mention_always_emits () =
   let (t, _) = S.step t ~now_mono:0.0 (S.Envelope_received hello) in
   let ev =
     S.App_mention
-      { channel_id = "C1"; thread_ts = None; user_id = "U1"; text = "hey"; ts = "1" }
+      { channel_id = "C1"; thread_ts = None; user_id = "U1"; user_name = None; text = "hey"; ts = "1" }
   in
   let env = env_events_api ~envelope_id:"E3" ev in
   let effects = effects_of t (S.Envelope_received env) in

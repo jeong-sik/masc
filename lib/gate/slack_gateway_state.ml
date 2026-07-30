@@ -38,6 +38,7 @@ type slack_event =
       { channel_id : string
       ; thread_ts : string option
       ; user_id : string
+      ; user_name : string option
       ; text : string
       ; ts : string
       }
@@ -353,7 +354,7 @@ let decode_event ~bot_user_id ~event_type ~payload =
     let user_name = user_name_from_payload payload in
     if String.equal channel_id "" || String.equal ts "" then
       Error "app_mention event missing channel/ts"
-    else Ok (App_mention { channel_id; thread_ts; user_id; text; ts })
+    else Ok (App_mention { channel_id; thread_ts; user_id; user_name; text; ts })
   | "reaction_added" ->
     let user_id = string_field "user" payload in
     let reaction = string_field "reaction" payload in

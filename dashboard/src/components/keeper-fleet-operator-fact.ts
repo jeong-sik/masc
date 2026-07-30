@@ -129,7 +129,7 @@ const ACTION_PRESENTATION = {
     label: 'Keeper compacting',
     tone: 'warn',
     Icon: LoaderCircle,
-    action: 'wait for the current compaction operation to settle.',
+    action: 'wait for the current compaction operation to finish.',
   },
   wait_for_handoff: {
     label: 'Keeper handing off',

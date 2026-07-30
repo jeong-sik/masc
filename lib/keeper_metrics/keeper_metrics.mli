@@ -30,7 +30,7 @@ type t =
   | Compactions
   | CompactionRatioChange
   | CompactionSavedTokens
-  | CompactionSettlements
+  | CompactionOutcomes
   | EmergencyCompactRatioThreshold
   | OperatorCompact
   | OperatorClear

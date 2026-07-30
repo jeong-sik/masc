@@ -352,7 +352,7 @@ let compaction_outcome_of_cycle_outcome = function
      | Keeper_unified_turn.Requeue_after_context_compaction
          (Keeper_unified_turn.Compaction_refused_without_attempt _) ->
        (* The admission gate declined the trigger before reading a checkpoint or
-          calling the summarizer, so there is no compaction outcome to settle.
+          calling the summarizer, so there is no compaction outcome to record.
           Counting it advanced the streak the gate itself reads: live keeper
           kidsnote reached 907 against a threshold of 3. *)
        None

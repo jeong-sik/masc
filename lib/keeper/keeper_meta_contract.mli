@@ -82,7 +82,7 @@ val compaction_retry_escalation_threshold : int
     without attempting anything, so settling it as one made the threshold
     self-fulfilling (live keeper [kidsnote] reached 907 against a threshold of
     3). It is reported as [Keeper_unified_turn.Compaction_refused_without_attempt]
-    and settles to no compaction outcome. *)
+    and produces no persisted compaction outcome. *)
 
 val compaction_retry_suspended : compaction_runtime -> bool
 (** [true] once the persisted streak has reached

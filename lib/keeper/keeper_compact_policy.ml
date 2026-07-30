@@ -264,14 +264,14 @@ let requested_messages_with_plan
        - Late: [commit_prepared_compaction] returns a typed [Commit_failed],
          which [Keeper_manual_compaction.run_commit] folds into
          [Manual_compaction_failed] -> [Requeue Context_compaction_retry].
-         That settlement is not an ack
-         (keeper_heartbeat_loop.ml), so the same doomed request is re-driven
-         every cycle — one summarizer call each time. This is the live
-         livelock: 102 failures and 104 compaction LLM calls in the 74 minutes
-         after the #25413 build went live.
+         The owner loop leaves the selected source pending, so the same doomed
+         request is re-driven every cycle — one summarizer call each time. This
+         is the live livelock: 102 failures and 104 compaction LLM calls in the
+         74 minutes after the #25413 build went live.
        - Early: the typed [No_compaction] arm of
-         [Keeper_manual_compaction.finish_preparation] acks and settles
-         terminally, with a ledger row and a [compaction_rejected] log line.
+         [Keeper_manual_compaction.finish_preparation] becomes
+         [Manual_compaction_not_applied], so the owner loop ACKs the selected
+         source after recording a ledger row and [compaction_rejected] log.
 
        Terminating is correct here because [validate] rejection is monotone
        under append: appending messages never repairs an existing structural

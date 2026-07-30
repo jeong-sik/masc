@@ -256,7 +256,7 @@ let test_compact_failure_releases_lane () =
   let tr2 =
     apply_ok SM.Overflowed tr1.updated_conditions SM.Compaction_started
   in
-  (* Compaction fails — durable queue settlement owns the exact retry. *)
+  (* Compaction fails — the pending source remains available for exact retry. *)
   let tr3 =
     apply_ok SM.Compacting tr2.updated_conditions
       (SM.Compaction_failed { reason = "oas_error" })

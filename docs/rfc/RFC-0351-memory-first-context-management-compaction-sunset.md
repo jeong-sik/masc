@@ -75,7 +75,7 @@ Provider별 replay 정책이 `Preserve_always`로 선언된 모델(예: mimo 계
 
 | 단계 | 내용 | 게이트 (experiment-log 지표) |
 |---|---|---|
-| S0 | 안전 수리만: #25461 무한 retry의 typed terminal settlement(연속 실패 시 재시도 중단 + Board/attention 표면화), 구조 거부 근본원인 수정. 파이프라인 기능 투자 동결 | 재시도 폭풍 0건/24h |
+| S0 | 안전 수리만: #25461 무한 retry의 typed reactive-admission ceiling(연속 provider-overflow episode가 threshold에 도달하면 I/O 전에 준비 거절 + Board/attention 표면화), 구조 거부 근본원인 수정. 파이프라인 기능 투자 동결 | 재시도 폭풍 0건/24h |
 | S1 | #25462 persistence 정책 + provider replay 교정(문서 검증분) + 플릿 1회 청소(결정론 dedup purge, 백업 필수) | 대상 keeper input −25%+ (E3 재현), wake-marker 신규 유입 0 |
 | S2 | L1/L2 건강화(consolidation fail-loud, valid_until, delivery accounting) + L3 Select + L4 Flush | recall 주입 bytes −80%+, dup family 감소 추세, RFC-0247 P-1 eval 통과 |
 | S3 | L5 조립 예산 배선 — transcript는 조립의 입력 소스 중 하나로 강등 | typed overflow 발생률 ~0, 조립 재시도로 전량 흡수 |

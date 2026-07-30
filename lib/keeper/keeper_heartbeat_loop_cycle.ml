@@ -284,8 +284,8 @@ let run_keeper_cycle_with
        commits. The follow-up turn then re-enters the standard lane below,
        where a chat backlog wins — the remedy may cut the line, an arbitrary
        LLM turn may not. [Manual_compaction_applied { followup = Busy _; _ }]
-       settles the
-       stimulus as Ack, so a yielded follow-up does not replay compaction. *)
+       causes the owner loop to ACK the selected stimulus, so a yielded
+       follow-up does not replay compaction. *)
     (match
        run_manual_compaction
          ~before_dispatch_authority:

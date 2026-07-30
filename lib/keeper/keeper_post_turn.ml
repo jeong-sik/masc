@@ -669,7 +669,7 @@ let prepare_compaction_admitted
      | Keeper_compact_policy.Prepared _, _, None ->
        (* Prepared-without-evidence is a planner invariant violation (a bug),
           not a deterministic no-op: it must surface as a visible failure,
-          never settle as a durable terminal no-compaction. *)
+          never produce a durable terminal no-compaction outcome. *)
        Error
          (Checkpoint_candidate_failed
             "compaction preparation completed without structural evidence \
@@ -719,12 +719,10 @@ let prepare_compaction_admitted
 
 (* RFC-0351 S0 / #25461: reactive admission gate in front of the prepare
    phase. Once the persisted failure streak reaches the escalation threshold
-   the settlement already refuses to retry, but each *new* stimulus still paid
-   one full prepare — checkpoint load plus a summarizer LLM call — before its
-   escalation settled. Refusing the reactive trigger here, before any I/O,
-   drops that residual burn to zero. The manual trigger passes through on
-   purpose: an operator-committed compaction is the recovery lever — its
-   commit resets the streak and lifts the suspension. *)
+   reactive preparation is refused before checkpoint load or a summarizer LLM
+   call. The manual trigger passes through on purpose: an operator-committed
+   compaction is the recovery lever — its commit resets the streak and lifts
+   the suspension. *)
 let prepare_compaction_with
       ~compact_for_request
       ~base_dir

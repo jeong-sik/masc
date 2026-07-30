@@ -63,10 +63,6 @@ let persisted_checkpoint_source_exn trace_id =
      | Error _ -> Alcotest.fail "persisted checkpoint source ref failed")
 ;;
 
-(* [settle_terminal_disposition_result] drove prepare/finalize of an exact
-   source disposition through a lease. Both entry points went with the lease
-   model, and this helper already had no callers here. *)
-
 let execute_prepared_lane
       ~keeper_name
       ~net

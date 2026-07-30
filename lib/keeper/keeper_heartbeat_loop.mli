@@ -127,8 +127,8 @@ val keepalive_cycle_accounting :
 (** Outcome of one keepalive cycle evaluation.
 
     [Turn_cycle_crashed] means the cycle's catch-all swallowed an exception to
-    keep the keeper fiber alive (T6 audit), or a durable event-queue
-    claim/settlement did not commit. The failure has already been recorded via
+    keep the keeper fiber alive (T6 audit), or a durable event-queue transition
+    did not commit. The failure has already been recorded via
     [Keeper_registry.increment_turn_failures], so the caller dispatches
     [Turn_failed]. [Turn_cycle_busy] preserves its typed admission reason and
     must not dispatch either turn status or refresh the work-as-heartbeat
@@ -148,7 +148,7 @@ val record_crashed_cycle_failure :
 val compaction_outcome_of_cycle_outcome :
   Keeper_heartbeat_loop_cycle.cycle_outcome option ->
   [ `Committed | `Overflow_episode_committed | `Failed | `Recovered ] option
-(** Pure mapping from a settled cycle outcome to the compaction-streak stamp
+(** Pure mapping from a cycle outcome to the compaction-streak stamp
     ([Keeper_meta_store.persist_compaction_outcome]). Manual-lane
     applied/failed outcomes and in-lane provider-overflow dispositions join
     the same per-keeper streak. The streak counts consecutive

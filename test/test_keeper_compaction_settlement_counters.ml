@@ -14,11 +14,16 @@ module Meta_store = Masc.Keeper_meta_store
 
 let metric_name = Keeper_metrics.(to_string CompactionSettlements)
 
-let counted ~outcome =
+let counted ~keeper_name ~outcome =
   Otel_metric_store_core.metric_value_or_zero
     metric_name
-    ~labels:[ "outcome", outcome ]
+    ~labels:[ "keeper", keeper_name; "outcome", outcome ]
     ()
+;;
+
+(* Fleet total across every keeper series, so the aggregate a dashboard reads
+   stays pinned even though the series are split per keeper. *)
+let fleet_total () = Otel_metric_store_core.metric_total metric_name
 ;;
 
 let make_meta ~name : Masc.Keeper_meta_contract.keeper_meta =
@@ -64,13 +69,13 @@ let test_each_outcome_is_labelled () =
     ignore (register config ~name);
     List.iter
       (fun (outcome, label) ->
-         let before = counted ~outcome:label in
+         let before = counted ~keeper_name:name ~outcome:label in
          settle config ~name ~outcome;
          check
            (float 0.5)
            (Printf.sprintf "%s is counted under its own label" label)
            (before +. 1.)
-           (counted ~outcome:label))
+           (counted ~keeper_name:name ~outcome:label))
       [ `Committed, "committed"
       ; `Overflow_episode_committed, "overflow_episode_committed"
       ; `Failed, "failed"
@@ -86,7 +91,7 @@ let test_count_tracks_the_durable_streak () =
   with_workspace (fun config ->
     let name = "settlement-streak" in
     ignore (register config ~name);
-    let before = counted ~outcome:"failed" in
+    let before = counted ~keeper_name:name ~outcome:"failed" in
     for _ = 1 to 4 do
       settle config ~name ~outcome:`Failed
     done;
@@ -94,7 +99,7 @@ let test_count_tracks_the_durable_streak () =
       (float 0.5)
       "four failed settlements are counted four times"
       (before +. 4.)
-      (counted ~outcome:"failed");
+      (counted ~keeper_name:name ~outcome:"failed");
     match Meta_store.read_meta config name with
     | Ok (Some meta) ->
       check
@@ -106,30 +111,36 @@ let test_count_tracks_the_durable_streak () =
     | Error msg -> failf "meta read failed: %s" msg)
 ;;
 
-let test_keeper_names_share_one_bounded_series () =
+(* Per-keeper attribution is the question the series was added for — which
+   keeper's compaction is collapsing. One keeper's settlement must not move
+   another's series, and the fleet aggregate a dashboard reads is the sum over
+   them, so both readings stay available. *)
+let test_attributes_the_settlement_to_its_keeper () =
   with_workspace (fun config ->
     let alpha = "settlement-alpha" in
     let beta = "settlement-beta" in
     ignore (register config ~name:alpha);
     ignore (register config ~name:beta);
-    let before = counted ~outcome:"failed" in
+    let alpha_before = counted ~keeper_name:alpha ~outcome:"failed" in
+    let beta_before = counted ~keeper_name:beta ~outcome:"failed" in
+    let fleet_before = fleet_total () in
     settle config ~name:alpha ~outcome:`Failed;
+    check
+      (float 0.5)
+      "the settling keeper's series advances"
+      (alpha_before +. 1.)
+      (counted ~keeper_name:alpha ~outcome:"failed");
+    check
+      (float 0.5)
+      "another keeper's series is untouched"
+      beta_before
+      (counted ~keeper_name:beta ~outcome:"failed");
     settle config ~name:beta ~outcome:`Failed;
     check
       (float 0.5)
-      "both keepers increment the same outcome series"
-      (before +. 2.)
-      (counted ~outcome:"failed");
-    let settlement_metrics =
-      Otel_metric_store_core.snapshot ()
-      |> List.filter (fun (metric : Otel_metric_store_core.metric) ->
-        String.equal metric.name metric_name)
-    in
-    check bool "settlement series never carry Keeper identity" true
-      (List.for_all
-         (fun (metric : Otel_metric_store_core.metric) ->
-            not (List.mem_assoc "keeper" metric.labels))
-         settlement_metrics))
+      "the fleet aggregate is the sum over keepers"
+      (fleet_before +. 2.)
+      (fleet_total ()))
 ;;
 
 (* No durable meta means no settlement was persisted and no streak moved, so
@@ -137,7 +148,7 @@ let test_keeper_names_share_one_bounded_series () =
 let test_unregistered_keeper_is_not_counted () =
   with_workspace (fun config ->
     let name = "settlement-unregistered" in
-    let before = counted ~outcome:"failed" in
+    let before = counted ~keeper_name:name ~outcome:"failed" in
     (match
        Meta_store.persist_compaction_outcome config ~keeper_name:name ~outcome:`Failed
      with
@@ -148,7 +159,7 @@ let test_unregistered_keeper_is_not_counted () =
       (float 0.5)
       "an unpersisted settlement is not counted"
       before
-      (counted ~outcome:"failed"))
+      (counted ~keeper_name:name ~outcome:"failed"))
 ;;
 
 let test_metric_name_is_stable () =
@@ -169,9 +180,9 @@ let () =
             `Quick
             test_count_tracks_the_durable_streak
         ; test_case
-            "keeper names share one bounded series"
+            "attributes the settlement to its keeper"
             `Quick
-            test_keeper_names_share_one_bounded_series
+            test_attributes_the_settlement_to_its_keeper
         ; test_case
             "an unregistered keeper is not counted"
             `Quick

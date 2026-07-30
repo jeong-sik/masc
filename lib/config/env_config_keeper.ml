@@ -162,6 +162,11 @@ end
     then the boot override store, then the hardcoded defaults below. *)
 
 module KeeperMemoryOs = struct
+  type librarian_config_state =
+    | Enabled
+    | Disabled
+    | Invalid
+
   let get_int_logged = Env_config_memory.get_int_logged
   let get_float_positive_logged = Env_config_memory.get_float_positive_logged
 
@@ -186,6 +191,17 @@ module KeeperMemoryOs = struct
       ~default
   ;;
 
+  let librarian_config_state () =
+    match Env_config_memory.env_opt librarian_env_key with
+    | None ->
+      if librarian_enabled_default then Enabled else Disabled
+    | Some raw ->
+      (match Env_config_memory.parse_bool_token raw with
+       | Some true -> Enabled
+       | Some false -> Disabled
+       | None -> Invalid)
+  ;;
+
   (** Memory OS recall prompt injection kill switch. Default: true; invalid
       values fail closed to false so malformed operator input cannot leave the
       kill switch accidentally enabled.
@@ -204,10 +220,14 @@ module KeeperMemoryOs = struct
       @category Policies
       @ops_class operator *)
   let librarian_enabled () =
-    get_bool_logged
-      ~invalid:Env_config_memory.Fail_closed
-      librarian_env_key
-      ~default:librarian_enabled_default
+    match librarian_config_state () with
+    | Enabled -> true
+    | Disabled -> false
+    | Invalid ->
+      get_bool_logged
+        ~invalid:Env_config_memory.Fail_closed
+        librarian_env_key
+        ~default:librarian_enabled_default
   ;;
 
   (** Turns between librarian extraction attempts per keeper. Default: 3,

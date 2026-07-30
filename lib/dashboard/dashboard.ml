@@ -112,11 +112,19 @@ let format_section (s : section) : string =
 let parse_iso_timestamp = Dashboard_labels.parse_iso_timestamp
 let format_elapsed = Dashboard_labels.format_elapsed
 
-let format_librarian_status ~enabled ~failures_total =
+let format_librarian_status ~config_state ~failures_since_start =
+  let config_label =
+    match
+      (config_state : Env_config.KeeperMemoryOs.librarian_config_state)
+    with
+    | Enabled -> "ON"
+    | Disabled -> "OFF"
+    | Invalid -> "INVALID"
+  in
   Printf.sprintf
-    "%s | LIBRARIAN-FAILURES-TOTAL: %d"
-    (if enabled then "ON" else "OFF")
-    failures_total
+    "%s | LIBRARIAN-FAILURES-SINCE-START: %d"
+    config_label
+    failures_since_start
 ;;
 
 let truncate_path (path : string) : string =
@@ -491,7 +499,7 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string OasExecutionErrors) |> int_of_float)
         (* MemoryOsLibrarianFailures is intentionally excluded: librarian
            failures are not tool errors and are surfaced separately in the
-           LIBRARIAN header segment (LIBRARIAN-FAILURES-TOTAL). *)
+           LIBRARIAN header segment (LIBRARIAN-FAILURES-SINCE-START). *)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string MemoryActivityEmitFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string SupervisorSweepFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TomlReconcileSweepFailures) |> int_of_float)
@@ -534,14 +542,16 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         then Printf.sprintf " | TOOL-ERR: %d" tool_failures
         else ""
       in
-      let librarian_enabled = Env_config.KeeperMemoryOs.librarian_enabled () in
-      let librarian_failures =
+      let librarian_config_state =
+        Env_config.KeeperMemoryOs.librarian_config_state ()
+      in
+      let librarian_failures_since_start =
         Otel_metric_store.metric_total Keeper_metrics.(to_string MemoryOsLibrarianFailures) |> int_of_float
       in
       let librarian_status =
         format_librarian_status
-          ~enabled:librarian_enabled
-          ~failures_total:librarian_failures
+          ~config_state:librarian_config_state
+          ~failures_since_start:librarian_failures_since_start
       in
       Printf.sprintf
         "KEEPERS: %d running / %d dead / %d other | LIBRARIAN: %s | GUARD: %d | \

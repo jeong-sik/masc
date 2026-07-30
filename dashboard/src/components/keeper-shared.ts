@@ -789,12 +789,12 @@ function KeeperQueueControlPanel({
       <div class="grid gap-2 border-t border-[var(--color-border-subtle)] pt-3">
         <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">자율 이벤트 대기 ${eventSnapshot?.totalPending ?? 0}</div>
         ${eventRows.map(item => {
-          const key = `event:${item.queueIndex}`
+          const key = `event:${item.postId}`
           const busy = pendingAction === key
           return html`
             <div class="grid gap-1 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] p-2" data-operator-event-row>
-              <div class="font-mono text-2xs text-[var(--color-fg-muted)]">#${item.queueIndex + 1}</div>
-              <pre class="max-h-48 overflow-auto whitespace-pre-wrap break-all text-2xs text-[var(--color-fg-secondary)]">${JSON.stringify(item.source, null, 2)}</pre>
+              <div class="font-mono text-2xs text-[var(--color-fg-muted)]">#${item.queueIndex + 1} · ${item.postId}</div>
+              <div class="text-2xs text-[var(--color-fg-secondary)]">${item.payloadKind} · ${item.urgency} · ${new Date(item.arrivedAt * 1000).toLocaleString()}</div>
               <div class="flex flex-wrap gap-1.5">
                 ${(['immediate', 'normal', 'low'] as const).map(urgency => html`
                   <button
@@ -805,7 +805,7 @@ function KeeperQueueControlPanel({
                       void mutateEvent(key, () => operateKeeperEventQueue(keeperName, {
                         action: 'reprioritize',
                         expectedRevision: eventSnapshot!.revision,
-                        source: item.source,
+                        postId: item.postId,
                         urgency,
                       }))
                     }}
@@ -821,7 +821,7 @@ function KeeperQueueControlPanel({
                     void mutateEvent(key, () => operateKeeperEventQueue(keeperName, {
                       action: 'transfer',
                       expectedRevision: eventSnapshot!.revision,
-                      source: item.source,
+                      postId: item.postId,
                       targetKeeper,
                     }))
                   }}
@@ -836,7 +836,7 @@ function KeeperQueueControlPanel({
                     void mutateEvent(key, () => operateKeeperEventQueue(keeperName, {
                       action: 'cancel',
                       expectedRevision: eventSnapshot!.revision,
-                      source: item.source,
+                      postId: item.postId,
                       reason,
                     }))
                   }}

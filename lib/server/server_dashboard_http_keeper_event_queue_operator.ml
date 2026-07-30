@@ -70,13 +70,24 @@ let pending_page ~after ~limit pending =
       let item =
         `Assoc
           [ "queue_index", `Int index
-          ; "source", Keeper_event_queue.stimulus_to_yojson stimulus
+          ; "post_id", `String stimulus.Keeper_event_queue.post_id
+          ; ( "urgency"
+            , `String
+                (Keeper_event_queue.urgency_to_string stimulus.urgency) )
+          ; "arrived_at_unix", `Float stimulus.arrived_at
+          ; ( "payload_kind"
+            , `String
+                (Keeper_event_queue.payload_kind_label stimulus.payload) )
           ]
       in
       loop (index + 1) (remaining - 1) (item :: page_rev) rest
   in
   loop 0 limit [] pending
 ;;
+
+module For_testing = struct
+  let pending_page = pending_page
+end
 
 let handle_get state request reqd ~keeper_name =
   let respond ?(status = `OK) json =
@@ -133,19 +144,19 @@ let handle_get state request reqd ~keeper_name =
 type request =
   | Cancel of
       { expected_revision : int64
-      ; source : Keeper_event_queue.stimulus
+      ; post_id : string
       ; operator_operation_id : string
       ; reason : string
       }
   | Transfer of
       { expected_revision : int64
-      ; source : Keeper_event_queue.stimulus
+      ; post_id : string
       ; operator_operation_id : string
       ; target_keeper : string
       }
   | Reprioritize of
       { expected_revision : int64
-      ; source : Keeper_event_queue.stimulus
+      ; post_id : string
       ; operator_operation_id : string
       ; urgency : Keeper_event_queue.urgency
       }
@@ -168,11 +179,6 @@ let expected_revision fields =
   match Int64.of_string_opt value with
   | Some revision when Int64.compare revision 0L >= 0 -> Ok revision
   | Some _ | None -> Error "expected_revision must be a non-negative int64 string"
-;;
-
-let source fields =
-  let* value = field "source" fields in
-  Keeper_event_queue.stimulus_of_yojson value
 ;;
 
 let require_exact_fields expected fields =
@@ -208,7 +214,12 @@ let parse body =
     else
       let* action = string_field "action" fields in
       let* expected_revision = expected_revision fields in
-      let* source = source fields in
+      let* post_id = string_field "post_id" fields in
+      let* () =
+        if post_id = "" || not (String.equal post_id (String.trim post_id))
+        then Error "post_id must be non-empty and trimmed"
+        else Ok ()
+      in
       let* operator_operation_id = string_field "operator_operation_id" fields in
       let* () =
         if operator_operation_id = ""
@@ -220,8 +231,8 @@ let parse body =
         [ "action"
         ; "expected_revision"
         ; "operator_operation_id"
+        ; "post_id"
         ; "schema"
-        ; "source"
         ]
       in
       match action with
@@ -233,7 +244,7 @@ let parse body =
         else
           Ok
             (Cancel
-               { expected_revision; source; operator_operation_id; reason })
+               { expected_revision; post_id; operator_operation_id; reason })
       | "transfer" ->
         let* () = require_exact_fields ("target_keeper" :: common) fields in
         let* target_keeper = string_field "target_keeper" fields in
@@ -243,7 +254,7 @@ let parse body =
           Ok
             (Transfer
                { expected_revision
-               ; source
+               ; post_id
                ; operator_operation_id
                ; target_keeper
                })
@@ -253,7 +264,7 @@ let parse body =
         let* urgency = Keeper_event_queue.urgency_of_string urgency_value in
         Ok
           (Reprioritize
-             { expected_revision; source; operator_operation_id; urgency })
+             { expected_revision; post_id; operator_operation_id; urgency })
       | value -> Error ("unknown event queue operator action: " ^ value)
 ;;
 
@@ -283,6 +294,38 @@ let transition_result_json = function
       ]
 ;;
 
+let resolve_pending_source
+      ~base_path
+      ~keeper_name
+      ~expected_revision
+      ~post_id
+  =
+  let* queue_state =
+    Keeper_event_queue_persistence.load_state_result
+      ~base_path
+      ~keeper_name
+  in
+  let observed_revision = Keeper_event_queue_state.revision queue_state in
+  if not (Int64.equal expected_revision observed_revision)
+  then
+    Error
+      (Printf.sprintf
+         "event queue revision mismatch (expected=%Ld observed=%Ld)"
+         expected_revision
+         observed_revision)
+  else
+    let matches =
+      Keeper_event_queue_state.pending queue_state
+      |> Keeper_event_queue.to_list
+      |> List.filter (fun stimulus ->
+        String.equal stimulus.Keeper_event_queue.post_id post_id)
+    in
+    match matches with
+    | [ source ] -> Ok source
+    | [] -> Error "event queue source is no longer pending"
+    | _ -> Error "event queue post id is ambiguous"
+;;
+
 let run_request ~base_path ~keeper_name request =
   match Keeper_registry.get ~base_path keeper_name with
   | None -> Error "keeper is not registered"
@@ -296,9 +339,23 @@ let run_request ~base_path ~keeper_name request =
            Error "keeper owner nonce changed"
          | Some _ ->
            let applied_at = Time_compat.now () in
+           let expected_revision, post_id =
+             match request with
+             | Cancel { expected_revision; post_id; _ }
+             | Transfer { expected_revision; post_id; _ }
+             | Reprioritize { expected_revision; post_id; _ } ->
+               expected_revision, post_id
+           in
+           let* source =
+             resolve_pending_source
+               ~base_path
+               ~keeper_name
+               ~expected_revision
+               ~post_id
+           in
            match request with
            | Cancel
-               { expected_revision; source; operator_operation_id; reason } ->
+               { expected_revision; post_id = _; operator_operation_id; reason } ->
              Keeper_registry_event_queue.cancel_pending_accepted_result
                ~base_path
                keeper_name
@@ -314,7 +371,7 @@ let run_request ~base_path ~keeper_name request =
              |> Result.map transition_result_json
            | Transfer
                { expected_revision
-               ; source
+               ; post_id = _
                ; operator_operation_id
                ; target_keeper
                } ->
@@ -359,7 +416,7 @@ let run_request ~base_path ~keeper_name request =
                     Keeper_registry.wakeup_outcome);
                Ok (transition_result_json source_result)
            | Reprioritize
-               { expected_revision; source; operator_operation_id = _; urgency } ->
+               { expected_revision; post_id = _; operator_operation_id = _; urgency } ->
              let* revision =
                Keeper_registry_event_queue.reprioritize_pending_result
                  ~base_path
@@ -412,14 +469,14 @@ let handle_post state ~actor request reqd ~keeper_name body =
           ])
     | Ok operation ->
       let config = Mcp_server.workspace_config state in
-      let source, action, operator_operation_id =
+      let post_id, action, operator_operation_id =
         match operation with
-        | Cancel { source; operator_operation_id; _ } ->
-          source, "cancel", operator_operation_id
-        | Transfer { source; operator_operation_id; _ } ->
-          source, "transfer", operator_operation_id
-        | Reprioritize { source; operator_operation_id; _ } ->
-          source, "reprioritize", operator_operation_id
+        | Cancel { post_id; operator_operation_id; _ } ->
+          post_id, "cancel", operator_operation_id
+        | Transfer { post_id; operator_operation_id; _ } ->
+          post_id, "transfer", operator_operation_id
+        | Reprioritize { post_id; operator_operation_id; _ } ->
+          post_id, "reprioritize", operator_operation_id
       in
       let result =
         run_request
@@ -449,9 +506,7 @@ let handle_post state ~actor request reqd ~keeper_name body =
                 [ "keeper_name", `String keeper_name
                 ; "action", `String action
                 ; "operator_operation_id", `String operator_operation_id
-                ; "post_id", `String source.post_id
-                ; "payload_kind",
-                  `String (Keeper_event_queue.payload_kind_label source.payload)
+                ; "post_id", `String post_id
                 ])
             ~outcome:
               (match result with

@@ -986,12 +986,10 @@ describe('KeeperConversationPanel', () => {
       nextAfter: null,
       pending: [{
         queueIndex: 0,
-        source: {
-          post_id: 'board-post-9',
-          urgency: 'normal',
-          arrived_at_unix: 41,
-          payload: { kind: 'board_signal', post_id: 'board-post-9' },
-        },
+        postId: 'board-post-9',
+        urgency: 'normal',
+        arrivedAt: 41,
+        payloadKind: 'board_signal',
       }],
     })
     mockedToolsData.value = {

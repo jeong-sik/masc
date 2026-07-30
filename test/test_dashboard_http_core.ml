@@ -287,14 +287,51 @@ let test_keeper_chat_recovery_route_is_exact () =
   check (option string) "event pending inventory rejects extra segments" None
     (Server_dashboard_http_keeper_event_queue_operator.pending_get_route
        (event_pending_path ^ "/extra"));
-  check bool "Worker cannot enumerate exact pending event payloads" false
+  check bool "Worker cannot enumerate pending event metadata" false
     (Masc_domain.has_permission
        Masc_domain.Worker
        Server_dashboard_http_keeper_event_queue_operator.operator_permission);
-  check bool "Admin can enumerate and mutate exact pending events" true
+  check bool "Admin can enumerate and mutate pending events" true
     (Masc_domain.has_permission
        Masc_domain.Admin
        Server_dashboard_http_keeper_event_queue_operator.operator_permission);
+  let sensitive_content = "private-board-content-must-not-cross-inventory" in
+  let source : Keeper_event_queue.stimulus =
+    { post_id = "board-post-sensitive"
+    ; urgency = Normal
+    ; arrived_at = 42.0
+    ; payload =
+        Board_signal
+          { kind = Post_created
+          ; author = "operator"
+          ; title = "private title"
+          ; content = sensitive_content
+          ; hearth = None
+          ; updated_at = None
+          }
+    }
+  in
+  let pending_json =
+    match
+      Server_dashboard_http_keeper_event_queue_operator.For_testing.pending_page
+        ~after:0
+        ~limit:100
+        [ source ]
+    with
+    | [ json ] -> json
+    | _ -> fail "event pending projection must return one metadata row"
+  in
+  let open Yojson.Safe.Util in
+  check string "event pending projection retains post identity"
+    source.post_id
+    (pending_json |> member "post_id" |> to_string);
+  check string "event pending projection retains typed payload kind"
+    "board_signal"
+    (pending_json |> member "payload_kind" |> to_string);
+  check bool "event pending projection omits raw payload content" false
+    (contains_substring (Yojson.Safe.to_string pending_json) sensitive_content);
+  check bool "event pending projection has no raw source object" true
+    (pending_json |> member "source" = `Null);
   let quarantine_path =
     "/api/v1/keepers/idealist/board-attention/quarantines/ba-root-123/recovery"
   in

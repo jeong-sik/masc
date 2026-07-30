@@ -459,12 +459,13 @@ describe('Keeper chat durable receipt API', () => {
     )
   })
 
-  it('combines exact event sources only across one stable Admin inventory revision', async () => {
-    const source = (postId: string) => ({
+  it('combines metadata-only event refs across one stable Admin inventory revision', async () => {
+    const item = (queueIndex: number, postId: string) => ({
+      queue_index: queueIndex,
       post_id: postId,
       urgency: 'normal',
       arrived_at_unix: 42,
-      payload: { kind: 'bootstrap' },
+      payload_kind: 'bootstrap',
     })
     const envelope = (
       queueIndex: number,
@@ -477,7 +478,7 @@ describe('Keeper chat durable receipt API', () => {
       revision: '31',
       total_pending: 2,
       next_after: nextAfter,
-      pending: [{ queue_index: queueIndex, source: source(postId) }],
+      pending: [item(queueIndex, postId)],
     })
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify(envelope(0, 'post-1', '1')), {
@@ -500,8 +501,8 @@ describe('Keeper chat durable receipt API', () => {
       total_pending: 2,
       next_after: null,
       pending: [
-        { queue_index: 0, source: source('post-1') },
-        { queue_index: 1, source: source('post-2') },
+        item(0, 'post-1'),
+        item(1, 'post-2'),
       ],
     }))
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -565,13 +566,7 @@ describe('Keeper chat durable receipt API', () => {
     )
   })
 
-  it('sends an exact typed event source with its durable revision', async () => {
-    const source = {
-      post_id: 'post-1',
-      urgency: 'normal',
-      arrived_at_unix: 42,
-      payload: { kind: 'bootstrap' },
-    }
+  it('sends a metadata-only event ref with its durable revision', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         schema: 'keeper_event_queue.operator.result.v1',
@@ -587,7 +582,7 @@ describe('Keeper chat durable receipt API', () => {
       action: 'reprioritize',
       expectedRevision: '7',
       operationId: 'operation-7',
-      source,
+      postId: 'post-1',
       urgency: 'immediate',
     })
 
@@ -599,7 +594,7 @@ describe('Keeper chat durable receipt API', () => {
           action: 'reprioritize',
           expected_revision: '7',
           operator_operation_id: 'operation-7',
-          source,
+          post_id: 'post-1',
           urgency: 'immediate',
         }),
       }),
@@ -627,12 +622,7 @@ describe('Keeper chat durable receipt API', () => {
       action: 'cancel',
       expectedRevision: '8',
       operationId: 'operation-9',
-      source: {
-        post_id: 'post-9',
-        urgency: 'normal',
-        arrived_at_unix: 42,
-        payload: { kind: 'bootstrap' },
-      },
+      postId: 'post-9',
       reason: 'operator cancellation',
     })).rejects.toThrow(
       'Event queue mutation committed, but projection follow-up failed (transition-9)',

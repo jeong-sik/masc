@@ -7,6 +7,14 @@ val operator_permission : Masc_domain.permission
 val route : string -> string option
 val pending_get_route : string -> string option
 
+module For_testing : sig
+  val pending_page :
+    after:int ->
+    limit:int ->
+    Keeper_event_queue.stimulus list ->
+    Yojson.Safe.t list
+end
+
 val handle_get :
   Mcp_server.server_state ->
   Httpun.Request.t ->

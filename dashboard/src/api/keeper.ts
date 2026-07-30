@@ -786,7 +786,10 @@ export interface KeeperChatPendingMutationResult {
 
 export interface KeeperEventQueuePendingItem {
   queueIndex: number
-  source: Record<string, unknown>
+  postId: string
+  urgency: 'immediate' | 'normal' | 'low'
+  arrivedAt: number
+  payloadKind: string
 }
 
 export interface KeeperEventQueuePendingSnapshot {
@@ -1138,15 +1141,14 @@ export function parseKeeperEventQueuePendingSnapshot(
     throw new Error('Keeper event pending response is missing identity or entries')
   }
   const pending = value.pending.map((raw): KeeperEventQueuePendingItem => {
-    if (!isRecord(raw) || !isRecord(raw.source)) {
-      throw new Error('Keeper event pending entry must contain an exact source')
+    if (!isRecord(raw)) {
+      throw new Error('Keeper event pending entry must be an object')
     }
     const queueIndex = asNumber(raw.queue_index)
-    const postId = asString(raw.source.post_id, '').trim()
-    const urgency = asString(raw.source.urgency, '').trim()
-    const arrivedAt = asNumber(raw.source.arrived_at_unix)
-    const payload = raw.source.payload
-    const payloadKind = isRecord(payload) ? asString(payload.kind, '').trim() : ''
+    const postId = asString(raw.post_id, '').trim()
+    const urgency = asString(raw.urgency, '').trim()
+    const arrivedAt = asNumber(raw.arrived_at_unix)
+    const payloadKind = asString(raw.payload_kind, '').trim()
     if (
       typeof queueIndex !== 'number'
       || !Number.isSafeInteger(queueIndex)
@@ -1160,7 +1162,13 @@ export function parseKeeperEventQueuePendingSnapshot(
     ) {
       throw new Error('Keeper event pending entry has invalid source identity')
     }
-    return { queueIndex, source: raw.source }
+    return {
+      queueIndex,
+      postId,
+      urgency: urgency as KeeperEventQueuePendingItem['urgency'],
+      arrivedAt,
+      payloadKind,
+    }
   })
   if (pending.length > totalPending) {
     throw new Error('Keeper event pending page exceeds its total count')
@@ -1366,9 +1374,9 @@ export async function moveKeeperChatPendingReceiptToEnd(
 }
 
 export type KeeperEventQueueOperatorAction =
-  | { action: 'cancel'; expectedRevision: string; source: Record<string, unknown>; reason: string; operationId?: string }
-  | { action: 'transfer'; expectedRevision: string; source: Record<string, unknown>; targetKeeper: string; operationId?: string }
-  | { action: 'reprioritize'; expectedRevision: string; source: Record<string, unknown>; urgency: 'immediate' | 'normal' | 'low'; operationId?: string }
+  | { action: 'cancel'; expectedRevision: string; postId: string; reason: string; operationId?: string }
+  | { action: 'transfer'; expectedRevision: string; postId: string; targetKeeper: string; operationId?: string }
+  | { action: 'reprioritize'; expectedRevision: string; postId: string; urgency: 'immediate' | 'normal' | 'low'; operationId?: string }
 
 export async function operateKeeperEventQueue(
   keeperName: string,
@@ -1379,7 +1387,7 @@ export async function operateKeeperEventQueue(
     action: operation.action,
     expected_revision: operation.expectedRevision,
     operator_operation_id: operation.operationId ?? crypto.randomUUID(),
-    source: operation.source,
+    post_id: operation.postId,
   }
   const request = operation.action === 'cancel'
     ? { ...common, reason: operation.reason }

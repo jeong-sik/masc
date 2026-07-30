@@ -65,7 +65,7 @@ echo/dedupe 휴리스틱·비원자 publication이 남으므로 최종 판정은
 - 2026-07-30 16:17 KST current `origin/main` 및 rebase base:
   `407ae5bb92509f06bfb6fc5614e8539e230b2902`
 - 후속 구현 branch:
-  `report/memory-os-adversarial-audit-20260730`
+  `refactor/memory-current-only-hard-cut-20260730`
 - current-only 1차 source slice:
   `6f8bf76a816d822ca0165b6a8c42986b3d466e5c`
 - TTL authority 제거 2차 source slice:
@@ -120,6 +120,7 @@ binary SHA는 미증명으로 남긴다.
 | [#26410](https://github.com/jeong-sik/masc/pull/26410) `park chat before claiming receipt` | 직접 재검토 필요 | **Merged**, head `bde47167ea442db9e91b91a61c27832d66485e10`, 2026-07-30 16:03 KST merge | lease-before-admission을 줄이고 pending receipt를 admission 뒤 claim하는 ordering은 개선한다. 그러나 `park`를 공식 흐름으로 만들고 별도 `lease_id` lifecycle을 유지한다. | **merge됐어도 숙청 기준과 충돌. TurnRef/AttemptId 단일 FSM으로 재구성 필요** |
 | [#26428](https://github.com/jeong-sik/masc/pull/26428) `make current memory and provider input observable` | 직접 충돌 | **Draft**, head `508d77896e12f26652950d68c040830e0cb34691`, `MERGEABLE/BLOCKED`, `status:do-not-merge`, `reviewed:adversarial-non-pass` | immutable current snapshot/CAS와 provider-input observability 방향은 유효하다. 그러나 current head에도 TTL/`claim_kind`/dead episode fields/latest-wins/cadence/prompt-local provenance가 그대로다. | **전체 채택 금지. atomic snapshot/관측성만 분리 재구성** |
 | [#26435](https://github.com/jeong-sik/masc/pull/26435) `collapse compaction commit onto source CAS` | 직접 인접 | **Merged**, head `5866b26c14b91088349d21033a884ab6f1c65136`, merge commit `07a3d4f19d1f0c9563be01b8b6f8b4c90da14841`; exact-head `Build and Test`/`CI Gate`는 merge 뒤 취소 | compaction terminal projection을 source CAS에 접어 settlement 중복 authority를 줄인다. | **exact-head full CI green 없이 admin merge. Memory facts→episode→event publication/TurnRef/FIFO는 해결하지 않음** |
+| [#26440](https://github.com/jeong-sik/masc/pull/26440) `hard-cut retired Memory OS authority` | 본 감사 후속 구현 | **Draft**, branch `refactor/memory-current-only-hard-cut-20260730`, current `origin/main` rebase 뒤 `MERGEABLE/BLOCKED`; CI 생성 대기 | 1·2차 hard-cut과 본 보고서, wire v2/dead facade 보완을 함께 검증한다. | **cold cutover·CI·runtime 증명 전 do-not-merge** |
 | [#26436](https://github.com/jeong-sik/masc/pull/26436) `enforce current-only Memory OS contracts` | 본 감사 1차 구현 | **Closed**, head `1c4692b806dd34e948afa99ea34d627092e880cc`, `status:do-not-merge`, `reviewed:adversarial-non-pass` | 1차 hard-cut의 CI Meta Guard 문제는 local 2차 slice에서 수정됐고 TTL authority도 추가 삭제했다. | **reopen 금지. 새 exact-head Draft PR로 다시 증명** |
 | [#26389](https://github.com/jeong-sik/masc/pull/26389) `separate Keeper context from turn usage` | 원칙상 인접 | **Merged**, head `bc4ab6d0fde691a4c43e588d549b4a3389e5d31e`, merge commit `407ae5bb92509f06bfb6fc5614e8539e230b2902` | producer 없는 context 추정과 legacy metric surface를 제거한다. | Memory OS persistence/context flow의 직접 수정은 아님 |
 | [#26392](https://github.com/jeong-sik/masc/pull/26392) `cost ledger exact runtime identity` | 원칙상 인접 | **Merged**, head `a332706ec04f49d8ac03e5de684dcf0e11003e3d`, merge commit `e19a05f6ca926eed0de054bd1371ae6f34a075e2` | timestamp/token heuristic 대신 exact identity를 사용한다. | 좋은 선례지만 Memory Turn identity는 수정하지 않음 |
@@ -1074,8 +1075,7 @@ fresh-state hard cut을 적용한 좁고 독립적인 PR들로 진행해야 한�
   identity라고 단정할 수 없음
 - `추가 확인 필요`: build artifact에 commit SHA를 embed하고 health가 그 값을 직접 반환
 
-- `미확인 항목`: 후속 audit worktree의 새 Draft PR exact-head CI와 #26428
-  current-head fresh CI
+- `미확인 항목`: Draft PR #26440 exact-head CI와 #26428 current-head fresh CI
 - `영향`: 후속 source finding coverage는 정적 검증됐지만 merge/deployment readiness는
   아직 증명되지 않음
 - `추가 확인 필요`: draft PR push 후 head SHA, required checks, unresolved review

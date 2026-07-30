@@ -321,7 +321,7 @@ projection contract를 만든다.</li>
 <li>2026-07-30 16:17 KST current <code>origin/main</code> 및 rebase
 base: <code>407ae5bb92509f06bfb6fc5614e8539e230b2902</code></li>
 <li>후속 구현 branch:
-<code>report/memory-os-adversarial-audit-20260730</code></li>
+<code>refactor/memory-current-only-hard-cut-20260730</code></li>
 <li>current-only 1차 source slice:
 <code>6f8bf76a816d822ca0165b6a8c42986b3d466e5c</code></li>
 <li>TTL authority 제거 2차 source slice:
@@ -446,6 +446,18 @@ authority를 줄인다.</td>
 <td><strong>exact-head full CI green 없이 admin merge. Memory
 facts→episode→event publication/TurnRef/FIFO는 해결하지
 않음</strong></td>
+</tr>
+<tr>
+<td><a href="https://github.com/jeong-sik/masc/pull/26440">#26440</a>
+<code>hard-cut retired Memory OS authority</code></td>
+<td>본 감사 후속 구현</td>
+<td><strong>Draft</strong>, branch
+<code>refactor/memory-current-only-hard-cut-20260730</code>, current
+<code>origin/main</code> rebase 뒤 <code>MERGEABLE/BLOCKED</code>; CI
+생성 대기</td>
+<td>1·2차 hard-cut과 본 보고서, wire v2/dead facade 보완을 함께
+검증한다.</td>
+<td><strong>cold cutover·CI·runtime 증명 전 do-not-merge</strong></td>
 </tr>
 <tr>
 <td><a href="https://github.com/jeong-sik/masc/pull/26436">#26436</a>
@@ -1758,8 +1770,8 @@ SHA</p></li>
 cryptographic deployment identity라고 단정할 수 없음</p></li>
 <li><p><code>추가 확인 필요</code>: build artifact에 commit SHA를
 embed하고 health가 그 값을 직접 반환</p></li>
-<li><p><code>미확인 항목</code>: 후속 audit worktree의 새 Draft PR
-exact-head CI와 #26428 current-head fresh CI</p></li>
+<li><p><code>미확인 항목</code>: Draft PR #26440 exact-head CI와 #26428
+current-head fresh CI</p></li>
 <li><p><code>영향</code>: 후속 source finding coverage는 정적 검증됐지만
 merge/deployment readiness는 아직 증명되지 않음</p></li>
 <li><p><code>추가 확인 필요</code>: draft PR push 후 head SHA, required

@@ -49,3 +49,11 @@ val terminal_reason_requires_attention : Yojson.Safe.t -> bool
 (** Strict typed projection for a runtime-trust [latest_terminal_reason].
     Missing reason is non-attention; malformed or non-success dispositions are
     attention. Exposed for wire-contract regression tests. *)
+
+module For_test : sig
+  val agents_json :
+    keepers:Yojson.Safe.t list ->
+    agents:Masc_domain.agent list ->
+    Yojson.Safe.t
+  (** Exact production projection for the ["agents"] execution-dashboard field. *)
+end

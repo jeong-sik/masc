@@ -124,6 +124,7 @@ val record_streaming_cancelled_observation
 type in_lane_compaction =
   | Compaction_committed
   | Compaction_attempt_failed of { reason : string }
+  | Compaction_refused_without_attempt of { consecutive_failures : int }
 (** Typed outcome of the in-lane provider-overflow compaction behind a
     [Requeue_after_context_compaction] disposition. [Compaction_committed]
     proves the checkpoint durably shrank before the requeue, so the transition
@@ -133,7 +134,17 @@ type in_lane_compaction =
     [Keeper_meta_contract.compaction_retry_escalation_threshold] (RFC-0351 S0,
     #25461 — without the ceiling this lane requeued forever: 284 of 285
     rejections in the 2026-07-21 storm carried trigger=provider_overflow and
-    only the operator's keeper_down ended it). *)
+    only the operator's keeper_down ended it).
+
+    [Compaction_refused_without_attempt] is the admission gate declining the
+    trigger at that same threshold ([Keeper_post_turn.Retry_suspended]): no
+    checkpoint was read, no summarizer ran, and no compaction was attempted, so
+    the transition leaves the streak alone. Settling it as a failure made the
+    gate's own output advance the counter the gate reads — live keeper
+    [kidsnote] reached 907 against a threshold of 3, roughly 99.7% of it from
+    refusals, which left no statistic able to say what drove it there. The
+    ceiling, the threshold, and the LLM-call bound the gate exists for are all
+    unchanged; only this self-feeding edge is cut. *)
 
 type exact_output_terminal_reason = private
   | Exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
@@ -156,9 +167,14 @@ type source_disposition =
     [Follow_failure_route_after_no_compaction] follows the same route but
     records that the in-lane provider-overflow compaction terminally declined
     to act ([no_compaction_reason]); the terminal transition advances the
-    compaction-failure streak and replaces the route with
-    [Escalate Compaction_retry_exhausted] at the threshold, because a turn
-    whose context cannot shrink re-overflows deterministically on every retry.
+    compaction-failure streak, because a turn whose context cannot shrink
+    re-overflows deterministically on every retry. It does not replace the
+    route: [Keeper_event_queue_state.Compaction_retry_exhausted] is constructed
+    nowhere outside that module's [of_json], so nothing ever serializes one to
+    decode. What the threshold actually does is make
+    [Keeper_post_turn.prepare_compaction] refuse reactive triggers
+    ([Compaction_refused_without_attempt]); only an operator-committed manual
+    compaction or an overflow-free completed turn lifts it.
     [Escalate_after_exact_output_terminal] consumes the selected source into a
     typed escalation with no successor, so neither the ordinary retry route nor
     another compaction dispatch can run when the exact lane is unconfigured,

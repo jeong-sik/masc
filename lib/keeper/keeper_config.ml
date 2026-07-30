@@ -94,6 +94,26 @@ let keeper_memory_os_recall_max_bytes_rp =
     ~description:"Rendered recall block byte budget; oldest episodes are dropped to fit (0 = unbounded)" ()
 let keeper_memory_os_recall_max_bytes () : int =
   Runtime_params.get keeper_memory_os_recall_max_bytes_rp
+
+(* Own-recent-board-posts self-awareness layer. The board-event collector is
+   cursor-based and filters out self-authored posts, so without this layer a
+   keeper never observes its own published posts in-prompt and can repeat the
+   same content every cycle (observed in production: 23 of 26 posts in one
+   hour were near-duplicates). The layer restores raw observation data only —
+   relevance and novelty remain model decisions; there is no dedup gate.
+
+   [max] bounds how many of the keeper's own newest posts the world
+   observation carries per turn. The Board query applies canonical ownership
+   before this result limit, so unrelated traffic cannot hide the keeper's
+   latest post. *)
+let keeper_board_own_recent_max_rp =
+  _rp_int ~key:"keeper.board.own_recent.max"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOARD_OWN_RECENT_MAX"
+                          ~default:5 ~min_v:0 ~max_v:1000)
+    ~min_v:0 ~max_v:1000
+    ~description:"Own recent board posts injected into the world observation per turn (0 = disable)" ()
+let keeper_board_own_recent_max () : int =
+  Runtime_params.get keeper_board_own_recent_max_rp
 let keeper_bootstrap_proactive_warmup_sec_rp =
   _rp_int ~key:"keeper.proactive.warmup_sec"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_PROACTIVE_WARMUP_SEC"

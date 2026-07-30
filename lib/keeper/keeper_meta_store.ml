@@ -510,6 +510,17 @@ let persist_compaction_decision config ~keeper_name ~decision
    pipeline was committing normally still reported compaction_count=0 — one
    keeper carried 88 committed [context_compacted] runtime-manifest records
    against a meta reading 0. *)
+(* Rendering, not classification: the settlement variant is the state machine's
+   own outcome, so the label comes from an exhaustive match instead of being
+   recovered from a message string.  A new variant fails this match at compile
+   time rather than falling into an unlabelled bucket. *)
+let compaction_outcome_label = function
+  | `Committed -> "committed"
+  | `Overflow_episode_committed -> "overflow_episode_committed"
+  | `Failed -> "failed"
+  | `Recovered -> "recovered"
+;;
+
 let persist_compaction_outcome config ~keeper_name ~outcome
   : ([ `Persisted | `No_durable_meta ], string) result
   =
@@ -535,7 +546,17 @@ let persist_compaction_outcome config ~keeper_name ~outcome
       ~merge:(fun ~latest ~caller:_ -> stamp latest)
       config
       (stamp disk_meta)
-    |> Result.map (fun () -> `Persisted)
+    |> Result.map (fun () ->
+      (* Counted here rather than inside [stamp]: a CAS retry re-applies the
+         stamp, so counting there would report one settlement several times.
+         Only a persisted settlement moved the streak, which is what this
+         series answers — which outcome advanced it, and which reset it. *)
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string CompactionSettlements)
+        ~labels:
+          [ "keeper", keeper_name; "outcome", compaction_outcome_label outcome ]
+        ();
+      `Persisted)
 ;;
 
 (* Structural transcript corruption is deterministic current-state damage, not

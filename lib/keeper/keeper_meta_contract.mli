@@ -72,10 +72,16 @@ type compaction_runtime = {
 }
 
 val compaction_retry_escalation_threshold : int
-(** RFC-0351 S0 / #25461: consecutive compaction failures tolerated before the
-    settlement escalates ([Compaction_retry_exhausted]) instead of retrying.
+(** RFC-0351 S0 / #25461: consecutive compaction failures tolerated before
+    [Keeper_post_turn.prepare_compaction] stops admitting reactive triggers.
     Single definition shared by the heartbeat settlement and the
-    status/dashboard projections. *)
+    status/dashboard projections.
+
+    The refusal is not itself a compaction failure — it reads this counter
+    without attempting anything, so settling it as one made the threshold
+    self-fulfilling (live keeper [kidsnote] reached 907 against a threshold of
+    3). It is reported as [Keeper_unified_turn.Compaction_refused_without_attempt]
+    and settles to no compaction outcome. *)
 
 val compaction_retry_suspended : compaction_runtime -> bool
 (** [true] once the persisted failure streak has reached

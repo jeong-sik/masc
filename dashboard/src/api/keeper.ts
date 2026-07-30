@@ -1069,48 +1069,44 @@ async function fetchKeeperChatPendingPage(
 export async function fetchKeeperChatPending(
   keeperName: string,
 ): Promise<KeeperChatPendingSnapshot> {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const pending: KeeperChatPendingInput[] = []
-    const seenCursors = new Set<string>()
-    let expectedRevision: string | null = null
-    let currentWork: KeeperChatPendingSnapshot['currentWork'] = null
-    let totalPending = 0
-    let after: string | null = null
-    let revisionChanged = false
-    do {
-      const page = await fetchKeeperChatPendingPage(keeperName, after)
-      if (expectedRevision === null) {
-        expectedRevision = page.revision
-        currentWork = page.currentWork
-        totalPending = page.totalPending
-      } else if (
-        page.revision !== expectedRevision
-        || page.totalPending !== totalPending
-      ) {
-        revisionChanged = true
-        break
-      }
-      pending.push(...page.pending)
-      after = page.nextAfter
-      if (after !== null) {
-        if (seenCursors.has(after)) {
-          throw new Error('fetchKeeperChatPending: repeated page cursor')
-        }
-        seenCursors.add(after)
-      }
-    } while (after !== null)
-    if (!revisionChanged && pending.length === totalPending) {
-      return {
-        keeperName,
-        revision: expectedRevision ?? '0',
-        currentWork,
-        totalPending,
-        nextAfter: null,
-        pending,
-      }
+  const pending: KeeperChatPendingInput[] = []
+  const seenCursors = new Set<string>()
+  let expectedRevision: string | null = null
+  let currentWork: KeeperChatPendingSnapshot['currentWork'] = null
+  let totalPending = 0
+  let after: string | null = null
+  do {
+    const page = await fetchKeeperChatPendingPage(keeperName, after)
+    if (expectedRevision === null) {
+      expectedRevision = page.revision
+      currentWork = page.currentWork
+      totalPending = page.totalPending
+    } else if (
+      page.revision !== expectedRevision
+      || page.totalPending !== totalPending
+    ) {
+      throw new Error('fetchKeeperChatPending: queue changed during pagination')
     }
+    pending.push(...page.pending)
+    after = page.nextAfter
+    if (after !== null) {
+      if (seenCursors.has(after)) {
+        throw new Error('fetchKeeperChatPending: repeated page cursor')
+      }
+      seenCursors.add(after)
+    }
+  } while (after !== null)
+  if (expectedRevision === null || pending.length !== totalPending) {
+    throw new Error('fetchKeeperChatPending: incomplete queue snapshot')
   }
-  throw new Error('fetchKeeperChatPending: queue changed during pagination')
+  return {
+    keeperName,
+    revision: expectedRevision,
+    currentWork,
+    totalPending,
+    nextAfter: null,
+    pending,
+  }
 }
 
 export function parseKeeperEventQueuePendingSnapshot(
@@ -1206,45 +1202,41 @@ async function fetchKeeperEventQueuePendingPage(
 export async function fetchKeeperEventQueuePending(
   keeperName: string,
 ): Promise<KeeperEventQueuePendingSnapshot> {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const pending: KeeperEventQueuePendingItem[] = []
-    const seenCursors = new Set<string>()
-    let expectedRevision: string | null = null
-    let totalPending = 0
-    let after: string | null = null
-    let revisionChanged = false
-    do {
-      const page = await fetchKeeperEventQueuePendingPage(keeperName, after)
-      if (expectedRevision === null) {
-        expectedRevision = page.revision
-        totalPending = page.totalPending
-      } else if (
-        page.revision !== expectedRevision
-        || page.totalPending !== totalPending
-      ) {
-        revisionChanged = true
-        break
-      }
-      pending.push(...page.pending)
-      after = page.nextAfter
-      if (after !== null) {
-        if (seenCursors.has(after)) {
-          throw new Error('fetchKeeperEventQueuePending: repeated page cursor')
-        }
-        seenCursors.add(after)
-      }
-    } while (after !== null)
-    if (!revisionChanged && pending.length === totalPending) {
-      return {
-        keeperName,
-        revision: expectedRevision ?? '0',
-        totalPending,
-        nextAfter: null,
-        pending,
-      }
+  const pending: KeeperEventQueuePendingItem[] = []
+  const seenCursors = new Set<string>()
+  let expectedRevision: string | null = null
+  let totalPending = 0
+  let after: string | null = null
+  do {
+    const page = await fetchKeeperEventQueuePendingPage(keeperName, after)
+    if (expectedRevision === null) {
+      expectedRevision = page.revision
+      totalPending = page.totalPending
+    } else if (
+      page.revision !== expectedRevision
+      || page.totalPending !== totalPending
+    ) {
+      throw new Error('fetchKeeperEventQueuePending: queue changed during pagination')
     }
+    pending.push(...page.pending)
+    after = page.nextAfter
+    if (after !== null) {
+      if (seenCursors.has(after)) {
+        throw new Error('fetchKeeperEventQueuePending: repeated page cursor')
+      }
+      seenCursors.add(after)
+    }
+  } while (after !== null)
+  if (expectedRevision === null || pending.length !== totalPending) {
+    throw new Error('fetchKeeperEventQueuePending: incomplete queue snapshot')
   }
-  throw new Error('fetchKeeperEventQueuePending: queue changed during pagination')
+  return {
+    keeperName,
+    revision: expectedRevision,
+    totalPending,
+    nextAfter: null,
+    pending,
+  }
 }
 
 export async function cancelKeeperChatPendingReceipt(
@@ -1378,33 +1370,89 @@ export type KeeperEventQueueOperatorAction =
   | { action: 'transfer'; expectedRevision: string; queueIndex: number; targetKeeper: string; operationId?: string }
   | { action: 'reprioritize'; expectedRevision: string; queueIndex: number; urgency: 'immediate' | 'normal' | 'low' }
 
+export type KeeperEventQueueReplayableAction =
+  | { action: 'cancel'; expectedRevision: string; queueIndex: number; reason: string; operationId: string }
+  | { action: 'transfer'; expectedRevision: string; queueIndex: number; targetKeeper: string; operationId: string }
+
+type PreparedKeeperEventQueueOperatorAction =
+  | KeeperEventQueueReplayableAction
+  | Extract<KeeperEventQueueOperatorAction, { action: 'reprioritize' }>
+
+export class KeeperEventQueueOperationError extends Error {
+  readonly operation: KeeperEventQueueReplayableAction
+  readonly commitState: 'committed' | 'unknown'
+
+  constructor(
+    message: string,
+    operation: KeeperEventQueueReplayableAction,
+    commitState: 'committed' | 'unknown',
+  ) {
+    super(message)
+    this.name = 'KeeperEventQueueOperationError'
+    this.operation = operation
+    this.commitState = commitState
+  }
+}
+
+function prepareKeeperEventQueueOperatorAction(
+  operation: KeeperEventQueueOperatorAction,
+): PreparedKeeperEventQueueOperatorAction {
+  switch (operation.action) {
+    case 'cancel':
+    case 'transfer':
+      return {
+        ...operation,
+        operationId: operation.operationId ?? crypto.randomUUID(),
+      }
+    case 'reprioritize':
+      return operation
+  }
+}
+
+function keeperEventQueueOperationError(
+  message: string,
+  operation: PreparedKeeperEventQueueOperatorAction,
+  commitState: 'committed' | 'unknown',
+): Error {
+  return operation.action === 'reprioritize'
+    ? new Error(message)
+    : new KeeperEventQueueOperationError(message, operation, commitState)
+}
+
 export async function operateKeeperEventQueue(
   keeperName: string,
   operation: KeeperEventQueueOperatorAction,
 ): Promise<void> {
+  const prepared = prepareKeeperEventQueueOperatorAction(operation)
   const common = {
     schema: 'keeper_event_queue.operator.request.v1',
-    action: operation.action,
-    expected_revision: operation.expectedRevision,
-    queue_index: operation.queueIndex,
+    action: prepared.action,
+    expected_revision: prepared.expectedRevision,
+    queue_index: prepared.queueIndex,
   }
-  const request = operation.action === 'cancel'
+  const request = prepared.action === 'cancel'
     ? {
         ...common,
-        operator_operation_id: operation.operationId ?? crypto.randomUUID(),
-        reason: operation.reason,
+        operator_operation_id: prepared.operationId,
+        reason: prepared.reason,
       }
-    : operation.action === 'transfer'
+    : prepared.action === 'transfer'
       ? {
           ...common,
-          operator_operation_id: operation.operationId ?? crypto.randomUUID(),
-          target_keeper: operation.targetKeeper,
+          operator_operation_id: prepared.operationId,
+          target_keeper: prepared.targetKeeper,
         }
-      : { ...common, urgency: operation.urgency }
-  const raw = await post<unknown>(
-    `/api/v1/keepers/${encodeURIComponent(keeperName)}/events/operator`,
-    request,
-  )
+      : { ...common, urgency: prepared.urgency }
+  let raw: unknown
+  try {
+    raw = await post<unknown>(
+      `/api/v1/keepers/${encodeURIComponent(keeperName)}/events/operator`,
+      request,
+    )
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause)
+    throw keeperEventQueueOperationError(message, prepared, 'unknown')
+  }
   if (
     !isRecord(raw)
     || raw.schema !== 'keeper_event_queue.operator.result.v1'
@@ -1412,7 +1460,11 @@ export async function operateKeeperEventQueue(
     || asString(raw.keeper_name, '').trim() !== keeperName
     || !isRecord(raw.result)
   ) {
-    throw new Error('operateKeeperEventQueue: invalid response envelope')
+    throw keeperEventQueueOperationError(
+      'operateKeeperEventQueue: invalid response envelope',
+      prepared,
+      'unknown',
+    )
   }
   const status = asString(raw.result.status, '').trim()
   if (status === 'committed_followup_failed') {
@@ -1424,21 +1476,35 @@ export async function operateKeeperEventQueue(
       || !['checkpoint', 'wal_compaction', 'projection', 'target_projection'].includes(stage)
       || !detail
     ) {
-      throw new Error('operateKeeperEventQueue: invalid committed failure evidence')
+      throw keeperEventQueueOperationError(
+        'operateKeeperEventQueue: invalid committed failure evidence',
+        prepared,
+        'unknown',
+      )
     }
-    throw new Error(
+    throw keeperEventQueueOperationError(
       `Event queue mutation committed, but ${stage} follow-up failed (${transitionId}): ${detail}`,
+      prepared,
+      'committed',
     )
   }
   if (status === 'applied' || status === 'already_applied') {
     const transitionId = asString(raw.result.transition_id, '').trim()
     const revision = parseKeeperQueueRevision(raw.result.revision)
     if (!transitionId && revision === undefined) {
-      throw new Error('operateKeeperEventQueue: applied result lacks durable identity')
+      throw keeperEventQueueOperationError(
+        'operateKeeperEventQueue: applied result lacks durable identity',
+        prepared,
+        'unknown',
+      )
     }
     return
   }
-  throw new Error('operateKeeperEventQueue: unknown result status')
+  throw keeperEventQueueOperationError(
+    'operateKeeperEventQueue: unknown result status',
+    prepared,
+    'unknown',
+  )
 }
 
 export async function resolveKeeperChatRecovery(

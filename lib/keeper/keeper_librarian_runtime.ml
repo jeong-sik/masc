@@ -174,7 +174,6 @@ type exact_execution_failure =
   | Exact_callback_persistence_failed of string
   | Oas_execution_failed
   | Exact_flow_progress_failed of string
-  | Exact_domain_settlement_failed
 
 type outward_effect =
   | No_outward_effect
@@ -262,8 +261,6 @@ let extraction_error_to_string = function
       | Oas_execution_failed -> "oas_execution_failed"
       | Exact_flow_progress_failed detail ->
         "flow_progress_failed: " ^ detail
-      | Exact_domain_settlement_failed ->
-        "domain_settlement_failed"
     in
     Printf.sprintf
       "librarian exact execution failed outward_effect=%s cause=%s"

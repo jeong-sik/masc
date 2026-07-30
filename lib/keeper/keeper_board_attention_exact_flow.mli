@@ -63,7 +63,6 @@ type 'callback_error execution_error =
   | Exact_execution_failed of attempt_provenance list
   | Provenance_mismatch of string
   | Domain_output_invalid of string
-  | Domain_settlement_failed
 
 type prepared
 

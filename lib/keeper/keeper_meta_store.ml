@@ -566,7 +566,7 @@ let persist_compaction_outcome config ~keeper_name ~outcome
         ();
       Log.Keeper.info
         ~keeper_name
-        "compaction settlement persisted outcome=%s"
+        "compaction outcome persisted kind=%s"
         (compaction_outcome_label outcome);
       `Persisted)
 ;;

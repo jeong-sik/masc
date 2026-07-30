@@ -122,6 +122,18 @@ type usage_metrics = {
   last_latency_ms : int;
 }
 
+val with_last_reported_usage :
+  usage_metrics ->
+  usage_reported:bool ->
+  input_tokens:int ->
+  output_tokens:int ->
+  total_tokens:int ->
+  observed_at:float ->
+  usage_metrics
+(** Replace the last provider-usage observation only when the provider
+    reported usage. Missing usage preserves the three token fields and their
+    timestamp as one observation. *)
+
 (** {1 Blocker classification} *)
 
 type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason =

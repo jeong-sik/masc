@@ -11,6 +11,7 @@
 module UM = Masc.Keeper_unified_metrics
 module UT = Keeper_usage_trust
 module Metrics = Masc.Otel_metric_store
+module KMC = Masc.Keeper_meta_contract
 
 let outcome_for ~keeper ~outcome =
   Metrics.metric_value_or_zero
@@ -126,6 +127,67 @@ let test_negative_usage_warns_operator () =
     true
     (UT.warns_operator (UT.Usage_untrusted [ "negative_input_tokens" ]))
 
+let prior_usage : KMC.usage_metrics =
+  {
+    total_turns = 7;
+    total_input_tokens = 700;
+    total_output_tokens = 70;
+    total_tokens = 770;
+    total_cost_usd = 1.25;
+    last_turn_ts = 50.0;
+    last_input_tokens = 101;
+    last_output_tokens = 11;
+    last_total_tokens = 112;
+    last_usage_reported_at = Some 40.0;
+    last_latency_ms = 250;
+  }
+;;
+
+let test_missing_usage_preserves_last_provider_observation () =
+  let actual =
+    KMC.with_last_reported_usage prior_usage
+      ~usage_reported:false
+      ~input_tokens:0
+      ~output_tokens:0
+      ~total_tokens:0
+      ~observed_at:60.0
+  in
+  Alcotest.(check int)
+    "input preserved"
+    prior_usage.last_input_tokens
+    actual.last_input_tokens;
+  Alcotest.(check int)
+    "output preserved"
+    prior_usage.last_output_tokens
+    actual.last_output_tokens;
+  Alcotest.(check int)
+    "total preserved"
+    prior_usage.last_total_tokens
+    actual.last_total_tokens;
+  Alcotest.(check (option (float 0.0001)))
+    "timestamp preserved"
+    prior_usage.last_usage_reported_at
+    actual.last_usage_reported_at
+;;
+
+let test_reported_usage_replaces_whole_provider_observation () =
+  let actual =
+    KMC.with_last_reported_usage prior_usage
+      ~usage_reported:true
+      ~input_tokens:202
+      ~output_tokens:22
+      ~total_tokens:224
+      ~observed_at:60.0
+  in
+  Alcotest.(check int) "input replaced" 202 actual.last_input_tokens;
+  Alcotest.(check int) "output replaced" 22 actual.last_output_tokens;
+  Alcotest.(check int) "total replaced" 224 actual.last_total_tokens;
+  Alcotest.(check (option (float 0.0001)))
+    "timestamp replaced"
+    (Some 60.0)
+    actual.last_usage_reported_at
+;;
+
 let () =
   Alcotest.run "keeper_usage_trust_counter_9959"
     [
@@ -154,5 +216,12 @@ let () =
             test_zero_and_large_usage_are_reported;
           Alcotest.test_case "negative usage warns" `Quick
             test_negative_usage_warns_operator;
+        ] );
+      ( "last_provider_observation",
+        [
+          Alcotest.test_case "missing usage preserves observation" `Quick
+            test_missing_usage_preserves_last_provider_observation;
+          Alcotest.test_case "reported usage replaces observation" `Quick
+            test_reported_usage_replaces_whole_provider_observation;
         ] );
     ]

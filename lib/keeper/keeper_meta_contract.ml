@@ -338,6 +338,25 @@ type usage_metrics =
   ; last_latency_ms : int
   }
 
+let with_last_reported_usage
+      (metrics : usage_metrics)
+      ~(usage_reported : bool)
+      ~(input_tokens : int)
+      ~(output_tokens : int)
+      ~(total_tokens : int)
+      ~(observed_at : float)
+  =
+  if usage_reported then
+    {
+      metrics with
+      last_input_tokens = input_tokens;
+      last_output_tokens = output_tokens;
+      last_total_tokens = total_tokens;
+      last_usage_reported_at = Some observed_at;
+    }
+  else metrics
+;;
+
 type agent_runtime_state =
   { usage : usage_metrics
   ; compaction_rt : compaction_runtime

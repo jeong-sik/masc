@@ -1467,7 +1467,7 @@ let defer request reason =
      | Human_requested | Judge_requested -> Deferred { approval_id; reason })
 ;;
 
-let observe_exact_rule_store_degraded request error =
+let observe_exact_rule_store_degraded (request : request) error =
   let detail = Keeper_approval_queue.rule_store_error_to_string error in
   Log.Keeper.error
     ~keeper_name:request.keeper_name
@@ -1490,7 +1490,10 @@ let observe_exact_rule_store_degraded request error =
     ()
 ;;
 
-let observe_exact_rule_expired request (rule_match : Keeper_approval_queue.rule_match) =
+let observe_exact_rule_expired
+      (request : request)
+      (rule_match : Keeper_approval_queue.rule_match)
+  =
   Log.Keeper.warn
     ~keeper_name:request.keeper_name
     "exact Always Allowed rule %s expired operation=%s; continuing configured Gate mode"

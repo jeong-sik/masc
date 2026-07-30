@@ -303,15 +303,13 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
       ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
       ~detail:(Dated_jsonl.read_error_to_string error)
   in
-  let cache_if_stable ~physical_row_count snapshot =
-    let stable =
-      Dated_jsonl.count_entries store = physical_row_count
-    in
-    if stable then
-      Tool_audit_cache.replace
-        metrics_path
-        { physical_row_count; snapshot };
-    stable
+  let rows_stable ~physical_row_count =
+    Dated_jsonl.count_entries store = physical_row_count
+  in
+  let cache_snapshot ~physical_row_count snapshot =
+    Tool_audit_cache.replace
+      metrics_path
+      { physical_row_count; snapshot }
   in
   let scan_full physical_row_count =
     match Dated_jsonl.find_latest_entry_result store parse_snapshot with
@@ -319,7 +317,8 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
         report_read_error error;
         None
     | Ok snapshot ->
-        ignore (cache_if_stable ~physical_row_count snapshot : bool);
+        if rows_stable ~physical_row_count
+        then cache_snapshot ~physical_row_count snapshot;
         snapshot
   in
   let physical_row_count = Dated_jsonl.count_entries store in
@@ -349,8 +348,11 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
              | Some _ as snapshot -> snapshot
              | None -> cached.snapshot
            in
-           if cache_if_stable ~physical_row_count snapshot
-           then snapshot
+           if rows_stable ~physical_row_count
+           then begin
+             cache_snapshot ~physical_row_count snapshot;
+             snapshot
+           end
            else scan_full (Dated_jsonl.count_entries store))
   | Some _ | None -> scan_full physical_row_count
 

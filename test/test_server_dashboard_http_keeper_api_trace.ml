@@ -449,6 +449,32 @@ let test_checkpoint_load_error_projection_is_total () =
     ~detail:(Some "sdk failure")
 ;;
 
+(* The caller that spliced this projection into a larger row used to take the
+   JSON back apart, with the non-object case as `assert false`. That branch was
+   unreachable because the object form is exactly the fields form; pinning that
+   identity for every constructor is what keeps it unreachable, so no caller has
+   to name a shape this cannot produce. *)
+let test_checkpoint_load_error_object_is_exactly_its_fields () =
+  let module Store = Keeper_checkpoint_store in
+  List.iter
+    (fun error ->
+      let fields = Checkpoints.checkpoint_load_error_fields error in
+      check
+        (of_pp Yojson.Safe.pp)
+        "the object form is the fields form"
+        (`Assoc fields)
+        (Checkpoints.checkpoint_load_error_json error);
+      check bool "the projection is never empty" true (fields <> []);
+      check bool "error_kind is always present" true
+        (List.mem_assoc "error_kind" fields))
+    [ Store.Not_found;
+      Store.Store_error "store unavailable";
+      Store.Parse_error "invalid checkpoint";
+      Store.Io_error "permission denied";
+      Store.Sdk_other_error "sdk failure";
+    ]
+;;
+
 let test_checkpoint_inventory_preserves_partial_load_failures () =
   with_temp_dir @@ fun dir ->
   let config = Workspace.default_config dir in
@@ -574,6 +600,10 @@ let () =
             "projects every typed checkpoint load error"
             `Quick
             test_checkpoint_load_error_projection_is_total
+        ; test_case
+            "the error object is exactly its fields"
+            `Quick
+            test_checkpoint_load_error_object_is_exactly_its_fields
         ; test_case
             "preserves partial history failures with HTTP 200"
             `Quick

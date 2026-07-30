@@ -21,6 +21,11 @@ let counted ~keeper_name ~outcome =
     ()
 ;;
 
+(* Fleet total across every keeper series, so the aggregate a dashboard reads
+   stays pinned even though the series are split per keeper. *)
+let fleet_total () = Otel_metric_store_core.metric_total metric_name
+;;
+
 let make_meta ~name : Masc.Keeper_meta_contract.keeper_meta =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -106,19 +111,36 @@ let test_count_tracks_the_durable_streak () =
     | Error msg -> failf "meta read failed: %s" msg)
 ;;
 
+(* Per-keeper attribution is the question the series was added for — which
+   keeper's compaction is collapsing. One keeper's settlement must not move
+   another's series, and the fleet aggregate a dashboard reads is the sum over
+   them, so both readings stay available. *)
 let test_attributes_the_settlement_to_its_keeper () =
   with_workspace (fun config ->
     let alpha = "settlement-alpha" in
     let beta = "settlement-beta" in
     ignore (register config ~name:alpha);
     ignore (register config ~name:beta);
+    let alpha_before = counted ~keeper_name:alpha ~outcome:"failed" in
     let beta_before = counted ~keeper_name:beta ~outcome:"failed" in
+    let fleet_before = fleet_total () in
     settle config ~name:alpha ~outcome:`Failed;
+    check
+      (float 0.5)
+      "the settling keeper's series advances"
+      (alpha_before +. 1.)
+      (counted ~keeper_name:alpha ~outcome:"failed");
     check
       (float 0.5)
       "another keeper's series is untouched"
       beta_before
-      (counted ~keeper_name:beta ~outcome:"failed"))
+      (counted ~keeper_name:beta ~outcome:"failed");
+    settle config ~name:beta ~outcome:`Failed;
+    check
+      (float 0.5)
+      "the fleet aggregate is the sum over keepers"
+      (fleet_before +. 2.)
+      (fleet_total ()))
 ;;
 
 (* No durable meta means no settlement was persisted and no streak moved, so

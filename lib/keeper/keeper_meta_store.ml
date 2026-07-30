@@ -550,12 +550,24 @@ let persist_compaction_outcome config ~keeper_name ~outcome
       (* Counted here rather than inside [stamp]: a CAS retry re-applies the
          stamp, so counting there would report one settlement several times.
          Only a persisted settlement moved the streak, which is what this
-         series answers — which outcome advanced it, and which reset it. *)
+         series answers — which outcome advanced it, and which reset it.
+
+         The [keeper] label stays: keeper names come from the registry and are
+         stable across replacement (a replaced keeper keeps its name and bumps
+         [generation]), so the series count is bounded by fleet size, and
+         "which keeper's compaction is collapsing" is the question this was
+         added to answer. Unbounded accumulation in the metric store is a
+         store-level property shared by every keeper-labelled emission; it does
+         not get fixed by dropping one dimension here. *)
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CompactionSettlements)
         ~labels:
           [ "keeper", keeper_name; "outcome", compaction_outcome_label outcome ]
         ();
+      Log.Keeper.info
+        ~keeper_name
+        "compaction settlement persisted outcome=%s"
+        (compaction_outcome_label outcome);
       `Persisted)
 ;;
 

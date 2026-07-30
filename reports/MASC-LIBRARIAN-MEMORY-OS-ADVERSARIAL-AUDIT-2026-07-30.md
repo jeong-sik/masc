@@ -410,8 +410,10 @@ commit/receipt가 아니므로 G0 완료는 아니다.
 허용 field가 다른 closed typed shape로 바꿨다. journal의 trace/generation 불일치,
 unknown/duplicate field, malformed candidate evidence는 provider dispatch 전에 typed
 setup failure로 거부한다. 과거 journal을 읽거나 옮기는 compatibility/migration 경로는
-없다. 다만 live root가 모두 retired schema이므로 fresh-state cold reset/reseed와
-새 schema write→restart→recall 증거 전에는 배포할 수 없다.
+없다. #26500 이후 production reader는 retired fact/episode/event 파일을 읽지 않으므로
+기존 Keeper 디렉터리 reset이나 migration은 필요하지 않다. 배포 승인은 old runtime을
+정지한 뒤 새 binary가 exact `*.memory-current.json`만 write→restart→recall하는지
+확인하는 current-path runtime proof로 제한한다.
 
 ### P0-3. Turn identity SSOT가 실제 데이터에서 깨진다
 
@@ -566,8 +568,8 @@ decoder가 거부하는 회귀를 추가했다. `open_items`, episode `constrain
 `valid_for_days`, fact/episode `valid_until`, `Ephemeral`, expiry GC, dry-run,
 sanity sweep, maintenance fiber와 TTL dashboard를 삭제했다. retired TTL field와
 category는 current decoder에서 거부된다. 따라서 **source finding은 해결**됐지만,
-fresh-state cutover와 새 exact-head CI/runtime 증거가 없어 release finding은 아직
-해결되지 않았다.
+새 exact-head CI와 current snapshot write→restart→recall runtime 증거가 없어 release
+finding은 아직 해결되지 않았다.
 
 ### P0-8. `park`와 `lease`가 Keeper 진행을 제약하는 별도 lifecycle이 됐다
 
@@ -1099,23 +1101,21 @@ Focused verification:
   22:10 KST `gh pr view 26491` 확인). 로컬 Dune 미실행
 - MASC #26500(`hard-cut minimal current contract`)은 2026-07-30 22:01 KST
   merge(merge commit `101d9efa1623e62b16b90f4011ff877e5eb49e65`). current
-  Memory contract를 `*.memory-current.json`으로 hard cut. 본 보고서의 잔여
-  pin/caller/heuristic 증거 목록은 #26500 이전 main 기준(2026-07-30 22:10 KST
-  `gh pr view 26500` 확인, 신뢰도 High)
+  Memory contract를 `*.memory-current.json`으로 hard cut. 잔여 source
+  pin/caller/heuristic은 2026-07-30 22:59 KST post-merge 재감사 결과를 사용한다.
 
-Fresh-state cutover blocker:
+Current-snapshot deployment proof:
 
-- 2026-07-30 16:05 KST live `*.facts.jsonl`은 10 files/174 rows이며 **174 rows
-  전부** `schema_version`, 68 rows가 `valid_until`을 갖는다.
-- live episode JSON은 1,957 files이며 전부 `schema_version`과
-  `open_items|constraints|preserved_tool_refs` 중 적어도 하나를 갖는다.
-- 새 closed decoder는 10/10 fact store와 1,957/1,957 episode files를 거부한다.
-  호환 reader나 migration을 추가하지 않는다.
-- old runtime이 계속 retired row를 쓰므로 reset-before-stop은 race다. 배포 승인은
-  `old runtime stop → exact <base_path>/.masc/config/keepers cold archive/reset →
-  new binary start → health/recall/write/restart proof`의 한 cold-cut 절차가 필요하다.
-- 이 operational proof/runbook은 아직 diff에 없다. 따라서 source hard-cut과 별개로
-  release는 **P0 BLOCK**이다.
+- 2026-07-30 16:05 KST에 관측한 `*.facts.jsonl`과 episode/event 파일은 merge 전
+  runtime의 역사 증거다. #26500 이후 current source에는 해당 reader가 없으므로
+  이 파일들의 존재는 decoder failure나 Keeper 디렉터리 reset 조건이 아니다.
+- 호환 reader, migration, repairer는 추가하지 않는다. retired 파일을 current
+  authority로 복구하거나 변환하는 운영 단계도 두지 않는다.
+- 배포 승인은 `old runtime stop → new binary start → exact
+  <base_path>/.masc/config/keepers/*.memory-current.json write → restart → health/recall
+  proof`로 확인한다. unrelated Keeper state 삭제는 금지한다.
+- 이 current-path runtime proof는 아직 없다. 따라서 source hard-cut과 별개로
+  release는 **P0 BLOCK**이지만, blocker는 cold reset이 아니라 미검증 deployment다.
 
 ## 13. 권장 실행 순서
 
@@ -1172,8 +1172,8 @@ fresh-state hard cut을 적용한 좁고 독립적인 PR들로 진행해야 한�
 
 ### 15.1 공통 헤더
 
-- `날짜(ISO8601)`: `2026-07-30T22:10:00+09:00`(OAS CI chain·#26491/#26500
-  merge 반영 갱신)
+- `날짜(ISO8601)`: `2026-07-30T23:28:01+09:00`(#26500 post-merge source 재감사와
+  current-snapshot deployment 판정 반영)
 - `작성자`: `Codex`
 - `결정 ID`: `masc-memory-os-adversarial-audit-20260730`
 - `적용 대상`: `/Users/dancer/me/workspace/yousleepwhen/masc`,

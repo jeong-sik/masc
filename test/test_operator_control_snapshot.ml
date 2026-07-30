@@ -314,13 +314,13 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
         | None -> Alcotest.fail "expected keeper in snapshot"
       in
       Alcotest.(check bool) "unowned ratio is ignored" true
-        Yojson.Safe.Util.(keeper |> member "context_ratio" |> equal `Null);
+        Yojson.Safe.Util.(keeper |> member "context_ratio" = `Null);
       Alcotest.(check bool) "unowned tokens are ignored" true
-        Yojson.Safe.Util.(keeper |> member "context_tokens" |> equal `Null);
+        Yojson.Safe.Util.(keeper |> member "context_tokens" = `Null);
       Alcotest.(check bool) "unowned max is ignored" true
-        Yojson.Safe.Util.(keeper |> member "context_max" |> equal `Null);
+        Yojson.Safe.Util.(keeper |> member "context_max" = `Null);
       Alcotest.(check bool) "unowned source is ignored" true
-        Yojson.Safe.Util.(keeper |> member "context_source" |> equal `Null);
+        Yojson.Safe.Util.(keeper |> member "context_source" = `Null);
       Alcotest.(check string) "missing owner remains explicit" "not_observed"
         Yojson.Safe.Util.(
           keeper

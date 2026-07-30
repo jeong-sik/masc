@@ -149,6 +149,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           request_runtime_profile: 'local',
           request_body_bytes: 4096,
           blocks: [{ block: 'system', bytes: 1200, digest: '1111222233334444' }],
+          input_components: [],
           execution_ids: [],
         },
         diff_vs_prev: null,
@@ -175,6 +176,10 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           blocks: [
             { block: 'system', bytes: 1200, digest: '1111222233334444' },
             { block: 'memory_os_recall', bytes: 3392, digest: 'aabbccddeeff00112233' },
+          ],
+          input_components: [
+            { component: 'prompt.memory_os_recall', bytes: 3392 },
+            { component: 'tool_schemas', bytes: 4096 },
           ],
           execution_ids: ['exec-42'],
         },

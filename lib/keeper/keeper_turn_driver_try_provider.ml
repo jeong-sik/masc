@@ -187,6 +187,28 @@ let observe_checkpoint_stage observed (_ : Agent_sdk.Agent.checkpoint_stage) =
 
 let same_run_retry_allowed observed = not (Atomic.get observed)
 
+let observe_request_wire_error
+      ~runtime_id
+      ~on_request_wire_observation
+      (error : Agent_sdk.Error.sdk_error)
+  =
+  match
+    Keeper_turn_runtime_budget.capacity_refusal_of_error error,
+    on_request_wire_observation
+  with
+  | Some (Serialized_request_body { actual_bytes; _ }), Some observe ->
+    (* OAS measures this body before rejecting it at serialized-body admission,
+       so its normal post-admission observer is intentionally not invoked. The
+       typed refusal carries the same exact byte count; forwarding it here
+       keeps the failed turn observable without parsing an error string or
+       guessing which runtime attempted the request. *)
+    observe ~runtime_id ~body_bytes:actual_bytes
+  | Some (Provider_context_window _ | Provider_request_body_refusal _), _
+  | None, _
+  | Some (Serialized_request_body _), None ->
+    ()
+;;
+
 let run_try_provider
       (ctx : try_provider_ctx)
       ?enable_thinking_override
@@ -250,9 +272,9 @@ let run_try_provider
           ; initial_messages = ctx.initial_messages
           ; model_input_projection = ctx.model_input_projection
             (* The serialized request body is the quantity the provider admits
-               against [max_request_body_bytes], and today only a refused
-               request reports it: a request that fits is never sized, so the
-               admitted population is unmeasured.
+               against [max_request_body_bytes]. OAS's provider-specific
+               serialization boundary reports every admitted request; a typed
+               [Request_body_too_large] below carries the exact rejected size.
                [Keeper_context_core_accessors.serialize_context] cannot stand in
                for it — that covers [{system_prompt, messages}] and excludes
                tool schemas and every provider-specific stream field. OAS runs
@@ -329,6 +351,13 @@ let run_try_provider
           run_result
       | Error _ as err -> err
     in
+    (match result with
+     | Error error ->
+       observe_request_wire_error
+         ~runtime_id:ctx.runtime_id
+         ~on_request_wire_observation:ctx.on_request_wire_observation
+         error
+     | Ok _ -> ());
     (match ctx.on_runtime_observation, result with
      | Some emit, Ok run_result ->
        Option.iter emit run_result.Runtime_agent.runtime_observation
@@ -355,4 +384,5 @@ let run_try_provider
 
 module For_testing = struct
   let apply_accept = apply_accept
+  let observe_request_wire_error = observe_request_wire_error
 end

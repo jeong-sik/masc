@@ -160,6 +160,38 @@ let test_byte_axis_is_a_capacity_refusal () =
   | Some _ | None -> fail "the context window axis regressed"
 ;;
 
+let test_byte_axis_forwards_exact_request_wire_observation () =
+  let observed = ref None in
+  Masc.Keeper_turn_driver_try_provider.For_testing.observe_request_wire_error
+    ~runtime_id:"anthropic.fallback"
+    ~on_request_wire_observation:
+      (Some
+         (fun ~runtime_id ~body_bytes ->
+           observed := Some (runtime_id, body_bytes)))
+    (request_body_too_large
+       ~actual_bytes:1_671_330
+       ~limit_bytes:1_048_576);
+  check
+    (option (pair string int))
+    "typed byte refusal preserves the attempting runtime and exact body bytes"
+    (Some ("anthropic.fallback", 1_671_330))
+    !observed;
+  observed := None;
+  Masc.Keeper_turn_driver_try_provider.For_testing.observe_request_wire_error
+    ~runtime_id:"anthropic.fallback"
+    ~on_request_wire_observation:
+      (Some
+         (fun ~runtime_id ~body_bytes ->
+           observed := Some (runtime_id, body_bytes)))
+    (Agent_sdk.Error.Api
+       (ContextOverflow { message = "exceeded"; limit = Some 32768 }));
+  check
+    (option (pair string int))
+    "token-axis refusal does not fabricate request wire bytes"
+    None
+    !observed
+;;
+
 let test_typed_capacity_transition_preserves_axes () =
   let constraint_ = serving_constraint () in
   let boundary =
@@ -269,6 +301,10 @@ let () =
             "declared-byte refusal is a capacity refusal"
             `Quick
             test_byte_axis_is_a_capacity_refusal
+        ; test_case
+            "declared-byte refusal forwards exact request wire observation"
+            `Quick
+            test_byte_axis_forwards_exact_request_wire_observation
         ; test_case
             "typed capacity transition preserves axes"
             `Quick

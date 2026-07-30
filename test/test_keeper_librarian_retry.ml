@@ -203,7 +203,10 @@ let message text =
 
 let expect_unexpected_field field json =
   let inp =
-    { Lib.trace_id = "unexpected-field-t"
+    { Lib.turn_ref =
+        Ids.Turn_ref.make
+          ~trace_id:"unexpected-field-t"
+          ~absolute_turn:0
     ; messages = [ message "current JSON boundary" ]
     }
   in

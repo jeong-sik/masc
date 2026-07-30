@@ -194,8 +194,8 @@ export type TurnRecordsResponse = {
   latest_ts_unix: number | null
   latest_ts_iso: string | null
   latest_age_s: number | null
-  health: 'empty' | 'stale' | 'ok'
-  stale_reason: 'no_entries' | 'freshness_slo_exceeded' | null
+  health: 'empty' | 'incompatible' | 'stale' | 'ok'
+  stale_reason: 'no_entries' | 'incompatible_rows' | 'freshness_slo_exceeded' | null
   keeper: string
   count: number
   // malformed JSONL rows the server refused to decode (never repaired)
@@ -888,12 +888,16 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
   const latest_ts_iso = decodeNullableString(raw.latest_ts_iso)
   const latest_age_s = decodeNullableNumber(raw.latest_age_s)
   const health =
-    raw.health === 'empty' || raw.health === 'stale' || raw.health === 'ok'
+    raw.health === 'empty'
+    || raw.health === 'incompatible'
+    || raw.health === 'stale'
+    || raw.health === 'ok'
       ? raw.health
       : null
   const stale_reason =
     raw.stale_reason === null
     || raw.stale_reason === 'no_entries'
+    || raw.stale_reason === 'incompatible_rows'
     || raw.stale_reason === 'freshness_slo_exceeded'
       ? raw.stale_reason
       : undefined
@@ -929,14 +933,21 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
     || health === null
     || stale_reason === undefined
     || entries.some(row => row.record.keeper !== keeper)
-    || (entries.length === 0) !== (health === 'empty')
+    || (entries.length === 0) !== (health === 'empty' || health === 'incompatible')
     || latest_ts_unix !== latestRecordTs
     || latest_ts_iso !== expectedLatestTsIso
     || (health === 'empty'
       && (latest_ts_unix !== null
         || latest_ts_iso !== null
         || latest_age_s !== null
+        || skipped_rows !== 0
         || stale_reason !== 'no_entries'))
+    || (health === 'incompatible'
+      && (latest_ts_unix !== null
+        || latest_ts_iso !== null
+        || latest_age_s !== null
+        || skipped_rows === 0
+        || stale_reason !== 'incompatible_rows'))
     || (health === 'stale'
       && (latest_ts_unix === null
         || latest_ts_iso === null

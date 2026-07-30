@@ -24,6 +24,11 @@ val metric : Keeper_metrics.t
     exact runtime and body cap whose provider configuration admitted the
     request. *)
 
+val rejected_body_bytes : Agent_sdk.Error.sdk_error -> int option
+(** Return the exact serialized bytes carried by a typed local
+    [Request_body_too_large] refusal. Other token-, provider-, and transport-axis
+    failures return [None]; no error text is parsed. *)
+
 val observer :
   ?on_observation:(runtime_id:string -> body_bytes:int -> unit) ->
   keeper_name:string ->

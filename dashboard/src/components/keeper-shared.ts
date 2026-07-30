@@ -869,6 +869,7 @@ function KeeperQueueControlPanel({
                         action: 'reprioritize',
                         expectedRevision: eventSnapshot!.revision,
                         queueIndex: item.queueIndex,
+                        sourceIncarnation: item.sourceIncarnation,
                         urgency,
                       })
                     }}
@@ -883,8 +884,9 @@ function KeeperQueueControlPanel({
                     if (targetKeeper === null) return
                     void mutateEvent(key, {
                       action: 'transfer',
-                      expectedRevision: eventSnapshot!.revision,
                       queueIndex: item.queueIndex,
+                      sourceIncarnation: item.sourceIncarnation,
+                      sourceSnapshotSha256: item.sourceSnapshotSha256,
                       targetKeeper,
                     })
                   }}
@@ -898,8 +900,9 @@ function KeeperQueueControlPanel({
                     if (reason === null) return
                     void mutateEvent(key, {
                       action: 'cancel',
-                      expectedRevision: eventSnapshot!.revision,
                       queueIndex: item.queueIndex,
+                      sourceIncarnation: item.sourceIncarnation,
+                      sourceSnapshotSha256: item.sourceSnapshotSha256,
                       reason,
                     })
                   }}

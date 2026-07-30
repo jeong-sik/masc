@@ -71,8 +71,9 @@ type pending_selection =
   { source : Keeper_event_queue.stimulus
   ; admitted_revision : int64
   }
-(** One exact durable queue entry. [admitted_revision] identifies the source
-    incarnation without making later unrelated queue changes invalidate it. *)
+(** One exact durable queue entry. [admitted_revision] records the durable
+    transform that admitted the snapshot; every source added by one transform
+    can share it, so it is not a unique row identifier. *)
 
 type transition_result =
   | Transition_applied of transition_receipt

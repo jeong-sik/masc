@@ -11,13 +11,8 @@ module For_testing : sig
   val pending_page :
     after:int ->
     limit:int ->
-    Keeper_event_queue.stimulus list ->
+    Keeper_event_queue_state.pending_selection list ->
     Yojson.Safe.t list
-
-  val pending_source_at :
-    queue_index:int ->
-    Keeper_event_queue.t ->
-    Keeper_event_queue.stimulus option
 end
 
 val handle_get :

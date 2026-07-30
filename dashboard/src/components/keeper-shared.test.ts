@@ -25,8 +25,9 @@ const {
   KeeperEventQueueOperationError: class KeeperEventQueueOperationError extends Error {
     readonly operation: {
       action: 'cancel' | 'transfer'
-      expectedRevision: string
       queueIndex: number
+      sourceIncarnation: string
+      sourceSnapshotSha256: string
       operationId: string
       reason?: string
       targetKeeper?: string
@@ -37,8 +38,9 @@ const {
       message: string,
       operation: {
         action: 'cancel' | 'transfer'
-        expectedRevision: string
         queueIndex: number
+        sourceIncarnation: string
+        sourceSnapshotSha256: string
         operationId: string
         reason?: string
         targetKeeper?: string
@@ -1016,6 +1018,8 @@ describe('KeeperConversationPanel', () => {
       nextAfter: null,
       pending: [{
         queueIndex: 0,
+        sourceIncarnation: '8',
+        sourceSnapshotSha256: 'b'.repeat(64),
         postId: 'board-post-9',
         urgency: 'normal',
         arrivedAt: 41,
@@ -1087,6 +1091,8 @@ describe('KeeperConversationPanel', () => {
       nextAfter: null,
       pending: [{
         queueIndex: 0,
+        sourceIncarnation: '8',
+        sourceSnapshotSha256: 'b'.repeat(64),
         postId: 'board-post-9',
         urgency: 'normal',
         arrivedAt: 41,
@@ -1106,8 +1112,9 @@ describe('KeeperConversationPanel', () => {
     }
     const recoveryOperation = {
       action: 'transfer' as const,
-      expectedRevision: '9',
       queueIndex: 0,
+      sourceIncarnation: '8',
+      sourceSnapshotSha256: 'b'.repeat(64),
       operationId: 'operation-replay-9',
       targetKeeper: 'rondo',
     }

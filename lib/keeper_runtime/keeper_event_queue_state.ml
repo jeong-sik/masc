@@ -625,10 +625,7 @@ let turn_attempt_terminal_operation_id
       source
   =
   let source_fingerprint =
-    Keeper_event_queue.stimulus_to_yojson source
-    |> Yojson.Safe.to_string
-    |> Digestif.SHA256.digest_string
-    |> Digestif.SHA256.to_hex
+    Keeper_event_queue.stimulus_snapshot_sha256 source
   in
   Printf.sprintf
     "turn-attempt-terminal:%d:%Ld:%s"

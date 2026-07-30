@@ -68,6 +68,9 @@ import {
 import { resetDevTokenBootstrap } from './dev-token'
 import { DEFAULT_GET_TIMEOUT_MS } from '../config/constants'
 
+const EVENT_SOURCE_INCARNATION = '6'
+const EVENT_SOURCE_SNAPSHOT_SHA256 = 'a'.repeat(64)
+
 afterEach(() => {
   vi.useRealTimers()
   vi.clearAllMocks()
@@ -504,6 +507,8 @@ describe('Keeper chat durable receipt API', () => {
   it('combines metadata-only event refs across one stable Admin inventory revision', async () => {
     const item = (queueIndex: number, postId: string) => ({
       queue_index: queueIndex,
+      source_incarnation: EVENT_SOURCE_INCARNATION,
+      source_snapshot_sha256: EVENT_SOURCE_SNAPSHOT_SHA256,
       post_id: postId,
       urgency: 'normal',
       arrived_at_unix: 42,
@@ -569,6 +574,8 @@ describe('Keeper chat durable receipt API', () => {
       next_after: nextAfter,
       pending: [{
         queue_index: queueIndex,
+        source_incarnation: EVENT_SOURCE_INCARNATION,
+        source_snapshot_sha256: EVENT_SOURCE_SNAPSHOT_SHA256,
         post_id: `post-${revision}`,
         urgency: 'normal',
         arrived_at_unix: 42,
@@ -657,6 +664,7 @@ describe('Keeper chat durable receipt API', () => {
       action: 'reprioritize',
       expectedRevision: '7',
       queueIndex: 0,
+      sourceIncarnation: EVENT_SOURCE_INCARNATION,
       urgency: 'immediate',
     })
 
@@ -666,8 +674,9 @@ describe('Keeper chat durable receipt API', () => {
         body: JSON.stringify({
           schema: 'keeper_event_queue.operator.request.v1',
           action: 'reprioritize',
-          expected_revision: '7',
           queue_index: 0,
+          source_incarnation: EVENT_SOURCE_INCARNATION,
+          expected_revision: '7',
           urgency: 'immediate',
         }),
       }),
@@ -695,9 +704,10 @@ describe('Keeper chat durable receipt API', () => {
     try {
       await operateKeeperEventQueue('sangsu', {
         action: 'cancel',
-        expectedRevision: '8',
         operationId: 'operation-9',
         queueIndex: 1,
+        sourceIncarnation: EVENT_SOURCE_INCARNATION,
+        sourceSnapshotSha256: EVENT_SOURCE_SNAPSHOT_SHA256,
         reason: 'operator cancellation',
       })
     } catch (cause) {
@@ -709,9 +719,10 @@ describe('Keeper chat durable receipt API', () => {
       commitState: 'committed',
       operation: {
         action: 'cancel',
-        expectedRevision: '8',
         operationId: 'operation-9',
         queueIndex: 1,
+        sourceIncarnation: EVENT_SOURCE_INCARNATION,
+        sourceSnapshotSha256: EVENT_SOURCE_SNAPSHOT_SHA256,
         reason: 'operator cancellation',
       },
     })
@@ -733,8 +744,9 @@ describe('Keeper chat durable receipt API', () => {
     try {
       await operateKeeperEventQueue('sangsu', {
         action: 'transfer',
-        expectedRevision: '9',
         queueIndex: 2,
+        sourceIncarnation: EVENT_SOURCE_INCARNATION,
+        sourceSnapshotSha256: EVENT_SOURCE_SNAPSHOT_SHA256,
         targetKeeper: 'rondo',
       })
     } catch (cause) {
@@ -746,9 +758,10 @@ describe('Keeper chat durable receipt API', () => {
       commitState: 'unknown',
       operation: {
         action: 'transfer',
-        expectedRevision: '9',
         operationId: '00000000-0000-4000-8000-000000000099',
         queueIndex: 2,
+        sourceIncarnation: EVENT_SOURCE_INCARNATION,
+        sourceSnapshotSha256: EVENT_SOURCE_SNAPSHOT_SHA256,
         targetKeeper: 'rondo',
       },
     })
@@ -758,8 +771,9 @@ describe('Keeper chat durable receipt API', () => {
         body: JSON.stringify({
           schema: 'keeper_event_queue.operator.request.v1',
           action: 'transfer',
-          expected_revision: '9',
           queue_index: 2,
+          source_incarnation: EVENT_SOURCE_INCARNATION,
+          source_snapshot_sha256: EVENT_SOURCE_SNAPSHOT_SHA256,
           operator_operation_id: '00000000-0000-4000-8000-000000000099',
           target_keeper: 'rondo',
         }),

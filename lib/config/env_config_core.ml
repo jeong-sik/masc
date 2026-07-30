@@ -328,25 +328,11 @@ let get_port ~default name =
 (** {1 Host pressure integration} *)
 
 let host_fd_pressure_state_file_env_key = "MASC_HOST_FD_PRESSURE_STATE_FILE"
-let legacy_host_fd_pressure_state_file_env_key = "MASC_SYSMON_PRESSURE_STATE"
 let host_fd_pressure_poller_disabled_env_key = "MASC_HOST_FD_PRESSURE_POLLER_DISABLED"
 let host_fd_pressure_poll_interval_sec_env_key = "MASC_HOST_FD_PRESSURE_POLL_INTERVAL_SEC"
-let default_host_fd_pressure_state_file_path = Filename.get_temp_dir_name () ^ "/masc-host-pressure.state"
 
 let host_fd_pressure_state_file_path_opt () =
   raw_value_opt host_fd_pressure_state_file_env_key |> trim_opt
-
-let legacy_host_fd_pressure_state_file_path_opt () =
-  raw_value_opt legacy_host_fd_pressure_state_file_env_key |> trim_opt
-
-let host_fd_pressure_state_file_path () =
-  match host_fd_pressure_state_file_path_opt () with
-  | Some path -> path
-  | None ->
-    (match legacy_host_fd_pressure_state_file_path_opt () with
-     | Some path -> path
-     | None -> default_host_fd_pressure_state_file_path)
-;;
 
 (** Operator policy toggle for disabling host fd pressure polling.
     @category Policies

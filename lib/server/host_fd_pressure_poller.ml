@@ -11,7 +11,6 @@
 
 type state_file_source =
   | Canonical_env
-  | Legacy_env
   | Default
 
 type state_file_resolution =
@@ -21,7 +20,6 @@ type state_file_resolution =
 
 let state_file_source_to_string = function
   | Canonical_env -> Env_config_core.host_fd_pressure_state_file_env_key
-  | Legacy_env -> Env_config_core.legacy_host_fd_pressure_state_file_env_key
   | Default -> "default"
 
 let default_state_file_path ~base_path =
@@ -31,23 +29,9 @@ let default_state_file_path ~base_path =
 ;;
 
 let resolve_state_file_path ~base_path () =
-  match
-    ( Env_config_core.host_fd_pressure_state_file_path_opt ()
-    , Env_config_core.legacy_host_fd_pressure_state_file_path_opt () )
-  with
-  | Some path, _ -> { path; source = Canonical_env }
-  | None, Some path -> { path; source = Legacy_env }
-  | None, None -> { path = default_state_file_path ~base_path; source = Default }
-;;
-
-let state_file_env_conflict () =
-  match
-    ( Env_config_core.host_fd_pressure_state_file_path_opt ()
-    , Env_config_core.legacy_host_fd_pressure_state_file_path_opt () )
-  with
-  | Some canonical, Some legacy when not (String.equal canonical legacy) ->
-    Some (canonical, legacy)
-  | _ -> None
+  match Env_config_core.host_fd_pressure_state_file_path_opt () with
+  | Some path -> { path; source = Canonical_env }
+  | None -> { path = default_state_file_path ~base_path; source = Default }
 ;;
 
 let poll_interval_sec = Env_config_core.host_fd_pressure_poll_interval_sec
@@ -153,17 +137,27 @@ let parse_state_line line =
   | exception Yojson.Json_error _ -> None
 ;;
 
-let read_state_file_opt path =
+let read_state_file path =
   try
-    let ic = open_in path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-        match input_line ic with
-        | line -> Some line
-        | exception End_of_file -> None)
+    let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+    let ic = Unix.in_channel_of_descr fd in
+    Ok
+      (Fun.protect
+         ~finally:(fun () -> close_in_noerr ic)
+         (fun () ->
+            match input_line ic with
+            | line -> Some line
+            | exception End_of_file -> None))
   with
-  | Sys_error _ -> None
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | Unix.Unix_error (error, operation, argument) ->
+    Error
+      (Printf.sprintf
+         "%s(%s): %s"
+         operation
+         argument
+         (Unix.error_message error))
+  | Sys_error detail -> Error detail
 ;;
 
 let last_warn_log_at = Atomic.make 0.0
@@ -178,9 +172,15 @@ let log_throttled_warn (mk_msg : unit -> string) =
 ;;
 
 let one_tick path =
-  match read_state_file_opt path with
-  | None -> ()
-  | Some line ->
+  match read_state_file path with
+  | Ok None -> ()
+  | Error detail ->
+    log_throttled_warn (fun () ->
+      Printf.sprintf
+        "host_fd_pressure_poller: state read failed path=%s detail=%s"
+        path
+        detail)
+  | Ok (Some line) ->
     (match parse_state_line line with
      | Some p ->
        Keeper_fd_pressure.engage_external
@@ -203,16 +203,6 @@ let start ~sw ~clock ~base_path =
     let resolution = resolve_state_file_path ~base_path () in
     let path = resolution.path in
     let interval = poll_interval_sec () in
-    (match state_file_env_conflict () with
-     | Some (canonical, legacy) ->
-       Log.Server.warn
-         "host_fd_pressure_poller: %s=%s overrides legacy %s=%s; set the sysmon \
-          producer to the canonical env to avoid split-brain state files"
-         Env_config_core.host_fd_pressure_state_file_env_key
-         canonical
-         Env_config_core.legacy_host_fd_pressure_state_file_env_key
-         legacy
-     | None -> ());
     Log.Server.info
       "host_fd_pressure_poller: started path=%s source=%s interval=%.1fs"
       path

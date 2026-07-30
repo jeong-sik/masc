@@ -5,7 +5,7 @@
     - large payloads (> threshold) are stored and replaced with
       [Tool_output.Stored] blob marker
     - boundary cases (exactly == threshold) follow [<=] semantics
-    - externalization is skipped when [MASC_BASE_PATH] is unset
+    - externalization is skipped when no explicit [base_path] is supplied
     - a blob-store failure returns a typed projection error
     - tool identity and free-form error JSON never change bridge behavior
 
@@ -37,18 +37,6 @@ let with_temp_base_path f =
   let dir = Filename.temp_file "masc_bridge_test" "" in
   Sys.remove dir;
   Unix.mkdir dir 0o755;
-  let prev_base = Sys.getenv_opt "MASC_BASE_PATH" in
-  let prev_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
-  Unix.putenv "MASC_BASE_PATH" dir;
-  Unix.putenv "MASC_BASE_PATH_INPUT" dir;
-  let restore () =
-    (match prev_base with
-     | Some v -> Unix.putenv "MASC_BASE_PATH" v
-     | None -> Unix.putenv "MASC_BASE_PATH" "");
-    match prev_base_input with
-     | Some v -> Unix.putenv "MASC_BASE_PATH_INPUT" v
-     | None -> Unix.putenv "MASC_BASE_PATH_INPUT" ""
-  in
   let cleanup () =
     let rec rm path =
       if Sys.file_exists path then
@@ -61,13 +49,10 @@ let with_temp_base_path f =
     try rm dir with _ -> ()
   in
   let r = try Ok (f dir) with e -> Error e in
-  restore ();
   cleanup ();
   match r with Ok v -> v | Error e -> raise e
 
 let test_threshold_default_under () =
-  Unix.putenv "MASC_BASE_PATH" "";
-  Unix.putenv "MASC_BASE_PATH_INPUT" "";
   let small = "short payload" in
   let result = externalize_exn small in
   Alcotest.(check string) "small unchanged" small result;
@@ -86,10 +71,14 @@ let test_to_oas_typed_small_inlined () =
   | Error _ -> Alcotest.fail "expected Ok"
 
 let test_tool_identity_does_not_bypass_externalization () =
-  with_temp_base_path (fun _dir ->
+  with_temp_base_path (fun dir ->
     let payload = String.make 5_000 'b' in
     let check_tool tool_name =
-      match B.to_oas_typed_result (tool_ok ~tool_name payload) with
+      match
+        B.to_oas_typed_result
+          ~base_path:dir
+          (tool_ok ~tool_name payload)
+      with
       | Ok { content; _ } ->
         Alcotest.(check bool) "externalized" true (O.is_marker content)
       | Error _ -> Alcotest.fail "expected Ok"
@@ -216,9 +205,9 @@ let test_execution_env_preserves_exact_invocation () =
 (* --- Marker encoding round-trip via the bridge --- *)
 
 let test_externalize_with_temp_base_path () =
-  with_temp_base_path (fun _dir ->
+  with_temp_base_path (fun dir ->
       let payload = String.make 4096 'z' in
-      let result = externalize_exn payload in
+      let result = externalize_exn ~base_path:dir payload in
       Alcotest.(check bool) "encoded as marker" true (O.is_marker result);
       match O.decode_from_oas result with
       | O.Decoded { sha256; bytes; _ } ->
@@ -263,24 +252,12 @@ let test_bounded_read_page_is_not_nested () =
 
 let test_blob_store_failure_is_typed () =
   let path = Filename.temp_file "masc_bridge_not_a_directory" "" in
-  let prev_base = Sys.getenv_opt "MASC_BASE_PATH" in
-  let prev_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
-  let restore () =
-    (match prev_base with
-     | Some value -> Unix.putenv "MASC_BASE_PATH" value
-     | None -> Unix.putenv "MASC_BASE_PATH" "");
-    (match prev_base_input with
-     | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
-     | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
-    Sys.remove path
-  in
+  let restore () = Sys.remove path in
   Fun.protect
     ~finally:restore
     (fun () ->
-      Unix.putenv "MASC_BASE_PATH" path;
-      Unix.putenv "MASC_BASE_PATH_INPUT" path;
       let payload = String.make 4_096 '\000' in
-      (match B.maybe_externalize payload with
+      (match B.maybe_externalize ~base_path:path payload with
        | Ok _ -> Alcotest.fail "failed store returned provider content"
        | Error { message } ->
          Alcotest.(check bool)

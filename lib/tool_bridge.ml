@@ -39,20 +39,15 @@ module Float = Stdlib.Float
     provider boundaries. Their exact bytes remain available from the artifact
     store and HTTP artifact route without expanding every later model request.
 
-    Disabled when [MASC_BASE_PATH] is unset (no store root resolvable),
-    which keeps unit tests free from filesystem side effects unless they
-    explicitly opt in. *)
+    Disabled unless the caller supplies [base_path]. This keeps output
+    projection capability-aware: runtimes that do not also expose an artifact
+    reader cannot accidentally replace exact output with an unreadable marker. *)
 
 let default_externalize_threshold_bytes = 2048
 
 type externalization_error = { message : string }
 
 let resolve_blob_store ?base_path () =
-  let base_path =
-    match base_path with
-    | Some _ as explicit -> explicit
-    | None -> (Host_config.from_env ()).base_path
-  in
   match base_path with
   | None -> None
   | Some base_path -> Some (Tool_blob_store.create ~base_path)

@@ -21,8 +21,8 @@
     Blob bytes and their parent directory are synced before the marker is
     returned, so a later durable checkpoint cannot get ahead of its artifact.
 
-    Disabled when no base path is available. The storage threshold is a single
-    compile-time producer contract; there is no environment-specific
+    Disabled unless the caller supplies [base_path]. The storage threshold is
+    a single compile-time producer contract; there is no ambient environment
     projection policy. *)
 
 val default_externalize_threshold_bytes : int

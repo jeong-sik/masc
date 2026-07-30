@@ -253,15 +253,16 @@ let source_is_in_input ~messages ~turn ~tool_call_id =
      | None -> true)
 ;;
 
-let optional_string_field_strict key fields =
+let required_nullable_string_field_strict key fields =
   match List.assoc_opt key fields with
-  | None | Some `Null -> Some None
+  | None -> None
+  | Some `Null -> Some None
   | Some (`String value) -> Some (Some value)
   | Some _ -> None
 ;;
 
 let claim_id_field fields =
-  match optional_string_field_strict wire_field_claim_id fields with
+  match required_nullable_string_field_strict wire_field_claim_id fields with
   | Some (Some id) when String.equal (String.trim id) "" -> None
   | value -> value
 ;;
@@ -276,7 +277,9 @@ let fact_of_json ~trace_id ~messages ~now (json : Yojson.Safe.t) : fact option =
           | Some _ | None -> None)
        , int_field wire_field_source_turn fields
        , claim_id_field fields
-       , optional_string_field_strict wire_field_source_tool_call_id fields
+       , required_nullable_string_field_strict
+           wire_field_source_tool_call_id
+           fields
      with
      | Some claim, Some category, Some turn, Some claim_id, Some tool_call_id
        when turn >= 0 && source_is_in_input ~messages ~turn ~tool_call_id ->

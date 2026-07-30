@@ -189,6 +189,50 @@ let test_current_snapshot_object_order_is_irrelevant_but_fields_are_exact () =
    | Ok _ -> fail "current snapshot accepted an unknown field")
 ;;
 
+let test_duplicate_snapshot_fact_identity_rejects () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let written =
+    replace ~keepers_dir ~facts:[ fact ~claim_id:"duplicate" () ] ()
+    |> require_ok
+  in
+  let duplicated =
+    match Current.to_json written with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              if String.equal name "facts"
+              then (
+                match value with
+                | `List [ fact ] -> name, `List [ fact; fact ]
+                | _ -> fail "snapshot facts did not contain one fact")
+              else name, value)
+           fields)
+    | _ -> fail "current snapshot encoder did not return an object"
+  in
+  let snapshot_path =
+    Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+  in
+  Fs_compat.save_file snapshot_path (Yojson.Safe.to_string duplicated);
+  match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" with
+  | Error _ -> ()
+  | Ok _ -> fail "duplicate snapshot fact identity was accepted"
+;;
+
+let test_snapshot_read_io_error_is_returned () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let snapshot_path =
+    Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+  in
+  Fs_compat.mkdir_p (Filename.dirname snapshot_path);
+  Unix.mkdir snapshot_path 0o700;
+  match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" with
+  | Error message ->
+    check bool "read error contains path" true
+      (String_util.contains_substring message snapshot_path)
+  | Ok _ -> fail "snapshot read I/O error escaped the Result boundary"
+;;
+
 let test_recall_preserves_selected_facts_without_local_ranking () =
   with_temp_keepers @@ fun keepers_dir ->
   let prompt_dir = Filename.concat repo_root "config/prompts" in
@@ -330,6 +374,14 @@ let () =
             "object order irrelevant and fields exact"
             `Quick
             test_current_snapshot_object_order_is_irrelevant_but_fields_are_exact
+        ; test_case
+            "duplicate snapshot fact identity rejects"
+            `Quick
+            test_duplicate_snapshot_fact_identity_rejects
+        ; test_case
+            "snapshot read I/O error is returned"
+            `Quick
+            test_snapshot_read_io_error_is_returned
         ; test_case
             "recall preserves selected facts and order"
             `Quick

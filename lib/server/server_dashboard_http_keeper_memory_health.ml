@@ -12,10 +12,8 @@ type keeper_health =
   }
 
 let librarian_lane_busy_metric =
-  Keeper_metrics.(to_string MemoryLaneExecutionSlotBusy)
+  Keeper_metrics.(to_string MemoryLaneCoalesced)
 ;;
-
-let librarian_lane_busy_site = "memory_os_librarian_execution_slot"
 
 let file_size_bytes path =
   if Sys.file_exists path then (Unix.stat path).Unix.st_size else 0
@@ -24,7 +22,7 @@ let file_size_bytes path =
 let librarian_lane_busy_for_keeper keeper_id =
   Otel_metric_store.metric_value_or_zero
     librarian_lane_busy_metric
-    ~labels:[ "keeper", keeper_id; "site", librarian_lane_busy_site ]
+    ~labels:[ "keeper", keeper_id; "lane", "librarian" ]
     ()
   |> int_of_float
 ;;

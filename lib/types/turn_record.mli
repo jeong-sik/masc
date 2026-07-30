@@ -17,6 +17,25 @@ type prompt_block =
   ; digest : string (* sha256 hex of the raw block text *)
   }
 
+type input_component_id =
+  | Prompt_block of Prompt_block_id.t
+  | Tool_schemas
+  | Message_user
+  | Message_system
+  | Message_assistant_text
+  | Message_thinking
+  | Message_redacted_thinking
+  | Message_tool_use
+  | Message_tool_result
+  | Message_image
+  | Message_document
+  | Message_audio
+
+type input_component =
+  { component : input_component_id
+  ; bytes : int
+  }
+
 type sampling =
   { temperature : float option
   ; top_p : float option
@@ -39,6 +58,11 @@ type usage =
        [None] on legacy rows and on turns where the provider reported no usage. *)
   }
 
+type request_wire_observation =
+  { runtime_profile : string
+  ; body_bytes : int
+  }
+
 type t =
   { execution_ids : Ids.Execution_id.t list (* tool calls in this turn *)
   ; keeper : string
@@ -48,6 +72,11 @@ type t =
     (* RFC-0233 §7 — "<trace_id>#<absolute_turn>" join key for chat/board.
        [option] so pre-§7 rows decode as [None]. *)
   ; blocks : prompt_block list (* assembly order *)
+  ; input_components : input_component list
+    (* Exact UTF-8/JSON payload bytes attributed to the concrete prompt blocks,
+       tool schemas, and content blocks that formed the dispatched input.
+       This excludes provider envelope metadata and is therefore shown beside,
+       never substituted for, [request_wire_observation]. *)
   ; runtime_profile : string
   ; model : string option
     (* RFC-0233 §2.2/§2.3 — boundary-redacted runtime model label, the
@@ -103,12 +132,22 @@ type t =
        request_latency_ms - ttfrc_ms: that would fabricate a number
        indistinguishable from a measurement (§9.6), so decode stays
        not_recorded until a provider reports it natively. *)
+  ; request_wire_observation : request_wire_observation option
+    (* Runtime id and exact serialized body size for the latest request OAS
+       serialized. Admitted requests arrive through OAS's pre-dispatch
+       observer; a locally rejected [Request_body_too_large] arrives through
+       that typed error's measured [actual_bytes]. This is not derived from
+       prompt blocks or provider token usage. [None] means this turn ended
+       before OAS exposed either exact measurement; both JSON fields are then
+       required explicit nulls. *)
   ; sampling : sampling
   ; usage : usage
   ; ts : float
   }
 
 val prompt_block_to_json : prompt_block -> Yojson.Safe.t
+val input_component_id_to_string : input_component_id -> string
+val input_component_to_json : input_component -> Yojson.Safe.t
 
 val to_json : t -> Yojson.Safe.t
 

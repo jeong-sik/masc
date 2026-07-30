@@ -62,6 +62,12 @@ type try_provider_ctx =
   ; agent_ref : Agent_sdk.Agent.t option ref option
   ; on_runtime_observation :
       (Runtime_observation.runtime_observation -> unit) option
+  ; on_request_wire_observation :
+      (runtime_id:string ->
+       max_request_body_bytes:int ->
+       body_bytes:int ->
+       unit)
+        option
   ; (* Event bus *)
     event_bus : Agent_sdk.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
@@ -185,6 +191,59 @@ let observe_checkpoint_stage observed (_ : Agent_sdk.Agent.checkpoint_stage) =
 
 let same_run_retry_allowed observed = not (Atomic.get observed)
 
+let rejected_body_bytes = function
+  | Agent_sdk.Error.Api
+      (InvalidRequest
+         { reason = Request_body_too_large { actual_bytes; _ }; _ }) ->
+    Some actual_bytes
+  | Agent_sdk.Error.Api
+      ( InvalidRequest
+          { reason =
+              ( Json_parse_error
+              | Request_body_refused_by_provider _
+              | Unknown_invalid_request )
+          ; _
+          }
+      | ContextOverflow _
+      | InputCapacity _
+      | RateLimited _
+      | Overloaded _
+      | ServerError _
+      | AuthError _
+      | AuthorizationError _
+      | PaymentRequired _
+      | NotFound _
+      | NetworkError _
+      | Timeout _ )
+  | Agent_sdk.Error.Provider _
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.Internal _ ->
+    None
+;;
+
+let observe_request_wire_error
+      ~runtime_id
+      ~max_request_body_bytes
+      ~on_request_wire_observation
+      (error : Agent_sdk.Error.sdk_error)
+  =
+  match rejected_body_bytes error, on_request_wire_observation with
+  | Some actual_bytes, Some observe ->
+    (* OAS measures this body before rejecting it at serialized-body admission,
+       so its normal post-admission observer is intentionally not invoked. The
+       typed refusal carries the same exact byte count; forwarding it here
+       keeps the failed turn observable without parsing an error string or
+       guessing which runtime attempted the request. *)
+    observe ~runtime_id ~max_request_body_bytes ~body_bytes:actual_bytes
+  | None, _ | Some _, None ->
+    ()
+;;
+
 let run_try_provider
       (ctx : try_provider_ctx)
       ?enable_thinking_override
@@ -248,9 +307,9 @@ let run_try_provider
           ; initial_messages = ctx.initial_messages
           ; model_input_projection = ctx.model_input_projection
             (* The serialized request body is the quantity the provider admits
-               against [max_request_body_bytes], and today only a refused
-               request reports it: a request that fits is never sized, so the
-               admitted population is unmeasured.
+               against [max_request_body_bytes]. OAS's provider-specific
+               serialization boundary reports every admitted request; a typed
+               [Request_body_too_large] below carries the exact rejected size.
                [Keeper_context_core_accessors.serialize_context] cannot stand in
                for it — that covers [{system_prompt, messages}] and excludes
                tool schemas and every provider-specific stream field. OAS runs
@@ -261,10 +320,17 @@ let run_try_provider
                result. *)
           ; pre_dispatch_serialization_observer =
               Some
-                (Keeper_request_wire_observation.observer
-                   ~keeper_name:ctx.keeper_name
-                   ~runtime_id:ctx.runtime_id
-                   ~max_request_body_bytes:ctx.max_request_body_bytes)
+                (fun observation ->
+                   Option.iter
+                     (fun observe ->
+                        observe
+                          ~runtime_id:ctx.runtime_id
+                          ~max_request_body_bytes:ctx.max_request_body_bytes
+                          ~body_bytes:
+                            observation
+                              .Llm_provider.Request_wire_observer.body_bytes)
+                     ctx.on_request_wire_observation;
+                   Ok ())
           ; raw_trace = ctx.raw_trace
           ; trace_link = ctx.trace_link
           ; yield_on_tool = ctx.yield_on_tool
@@ -326,6 +392,14 @@ let run_try_provider
           run_result
       | Error _ as err -> err
     in
+    (match result with
+     | Error error ->
+       observe_request_wire_error
+         ~runtime_id:ctx.runtime_id
+         ~max_request_body_bytes:ctx.max_request_body_bytes
+         ~on_request_wire_observation:ctx.on_request_wire_observation
+         error
+     | Ok _ -> ());
     (match ctx.on_runtime_observation, result with
      | Some emit, Ok run_result ->
        Option.iter emit run_result.Runtime_agent.runtime_observation
@@ -352,4 +426,5 @@ let run_try_provider
 
 module For_testing = struct
   let apply_accept = apply_accept
+  let observe_request_wire_error = observe_request_wire_error
 end

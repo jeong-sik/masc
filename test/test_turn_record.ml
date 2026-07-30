@@ -44,6 +44,13 @@ let sample_record () : Turn_record.t =
       ; sample_block Prompt_block_id.Dynamic_context "bbbb"
       ; sample_block Prompt_block_id.Memory_os_recall "cccc"
       ]
+  ; input_components =
+      [ { component = Turn_record.Prompt_block Prompt_block_id.Persona
+        ; bytes = 4
+        }
+      ; { component = Turn_record.Tool_schemas; bytes = 8192 }
+      ; { component = Turn_record.Message_user; bytes = 256 }
+      ]
   ; runtime_profile = "ollama_cloud.deepseek-v4-flash"
   ; model = Some "deepseek-v4-flash"
   ; finish_reason = Some "completed"
@@ -52,6 +59,11 @@ let sample_record () : Turn_record.t =
   ; price_output_per_million = Some 0.6
   ; request_latency_ms = Some 1234
   ; ttfrc_ms = Some 567.8
+  ; request_wire_observation =
+      Some
+        { runtime_profile = "ollama_cloud.deepseek-v4-flash"
+        ; body_bytes = 560_513
+        }
   ; sampling =
       { temperature = Some 0.3
       ; top_p = Some 0.9
@@ -130,6 +142,22 @@ let test_codec_roundtrip () =
            && a.bytes = b.bytes
            && String.equal a.digest b.digest)
          record.blocks decoded.blocks);
+    check (list string) "input component ids preserved"
+      (List.map
+         (fun (component : Turn_record.input_component) ->
+            Turn_record.input_component_id_to_string component.component)
+         record.input_components)
+      (List.map
+         (fun (component : Turn_record.input_component) ->
+            Turn_record.input_component_id_to_string component.component)
+         decoded.input_components);
+    check (list int) "input component bytes preserved"
+      (List.map
+         (fun (component : Turn_record.input_component) -> component.bytes)
+         record.input_components)
+      (List.map
+         (fun (component : Turn_record.input_component) -> component.bytes)
+         decoded.input_components);
     check string "runtime_profile" record.runtime_profile decoded.runtime_profile;
     check (option string) "model" record.model decoded.model;
     check (option string) "finish_reason" record.finish_reason decoded.finish_reason;
@@ -142,6 +170,24 @@ let test_codec_roundtrip () =
       decoded.request_latency_ms;
     check (option (float 0.0001)) "ttfrc_ms round-trip" record.ttfrc_ms
       decoded.ttfrc_ms;
+    check (option string) "request runtime profile round-trip"
+      (Option.map
+         (fun (observation : Turn_record.request_wire_observation) ->
+           observation.runtime_profile)
+         record.request_wire_observation)
+      (Option.map
+         (fun (observation : Turn_record.request_wire_observation) ->
+           observation.runtime_profile)
+         decoded.request_wire_observation);
+    check (option int) "request body bytes round-trip"
+      (Option.map
+         (fun (observation : Turn_record.request_wire_observation) ->
+           observation.body_bytes)
+         record.request_wire_observation)
+      (Option.map
+         (fun (observation : Turn_record.request_wire_observation) ->
+           observation.body_bytes)
+         decoded.request_wire_observation);
     check (option (float 0.0001)) "temperature" record.sampling.temperature
       decoded.sampling.temperature;
     check (option (float 0.0001)) "top_p" record.sampling.top_p
@@ -166,8 +212,9 @@ let test_codec_optional_fields_absent () =
     ; context_window = None
     ; price_input_per_million = None
     ; price_output_per_million = None
-  ; request_latency_ms = None
-  ; ttfrc_ms = None
+    ; request_latency_ms = None
+    ; ttfrc_ms = None
+    ; request_wire_observation = None
     ; sampling =
         { temperature = None
         ; top_p = None
@@ -205,7 +252,15 @@ let test_codec_optional_fields_absent () =
      check bool "request_latency_ms key omitted when None" false
        (List.mem_assoc "request_latency_ms" fields);
      check bool "ttfrc_ms key omitted when None" false
-       (List.mem_assoc "ttfrc_ms" fields)
+       (List.mem_assoc "ttfrc_ms" fields);
+     check bool "request runtime key required" true
+       (List.mem_assoc "request_runtime_profile" fields);
+     check bool "request runtime None is explicit null" true
+       (List.assoc_opt "request_runtime_profile" fields = Some `Null);
+     check bool "request bytes key required" true
+       (List.mem_assoc "request_body_bytes" fields);
+     check bool "request bytes None is explicit null" true
+       (List.assoc_opt "request_body_bytes" fields = Some `Null)
    | _ -> fail "to_json did not produce an object");
   match Turn_record.of_json json with
   | Error e -> failf "decode failed: %s" e
@@ -222,6 +277,16 @@ let test_codec_optional_fields_absent () =
       decoded.request_latency_ms;
     check (option (float 0.0001)) "ttfrc_ms absent" None
       decoded.ttfrc_ms;
+    check (option string) "request runtime absent" None
+      (Option.map
+         (fun (observation : Turn_record.request_wire_observation) ->
+           observation.runtime_profile)
+         decoded.request_wire_observation);
+    check (option int) "request bytes absent" None
+      (Option.map
+         (fun (observation : Turn_record.request_wire_observation) ->
+           observation.body_bytes)
+         decoded.request_wire_observation);
     check (option (float 0.0001)) "temperature absent" None
       decoded.sampling.temperature;
     check (option (float 0.0001)) "top_p absent" None decoded.sampling.top_p;
@@ -238,6 +303,87 @@ let test_codec_rejects_malformed () =
   | Error msg ->
     check bool "error names the missing field" true
       (Astring.String.is_infix ~affix:"execution_ids" msg)
+
+let test_codec_requires_current_observation_fields () =
+  let remove field =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields -> `Assoc (List.remove_assoc field fields)
+    | other -> other
+  in
+  List.iter
+    (fun field ->
+      match Turn_record.of_json (remove field) with
+      | Ok _ -> failf "decoded a row without %s" field
+      | Error message ->
+        check bool "missing current field is explicit" true
+          (Astring.String.is_infix ~affix:field message))
+    [ "input_components"; "request_runtime_profile"; "request_body_bytes" ]
+
+let test_codec_rejects_partial_or_invalid_request_wire_observation () =
+  let replace fields =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc current ->
+      `Assoc
+        (List.fold_left
+           (fun acc (name, value) ->
+             (name, value) :: List.remove_assoc name acc)
+           current
+           fields)
+    | other -> other
+  in
+  List.iter
+    (fun fields ->
+      match Turn_record.of_json (replace fields) with
+      | Ok _ -> fail "decoded an invalid request wire observation"
+      | Error _ -> ())
+    [ [ "request_runtime_profile", `Null ]
+    ; [ "request_body_bytes", `Null ]
+    ; [ "request_runtime_profile", `String "" ]
+    ; [ "request_body_bytes", `Int (-1) ]
+    ]
+
+let test_codec_rejects_unknown_input_component () =
+  let json =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        (( "input_components"
+         , `List
+             [ `Assoc
+                 [ "component", `String "history_guess"
+                 ; "bytes", `Int 1
+                 ]
+             ] )
+         :: List.remove_assoc "input_components" fields)
+    | other -> other
+  in
+  match Turn_record.of_json json with
+  | Ok _ -> fail "decoded an unknown input component"
+  | Error message ->
+    check bool "unknown component is explicit" true
+      (Astring.String.is_infix ~affix:"unknown input component" message)
+
+let test_codec_rejects_input_component_extra_field () =
+  let json =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        (( "input_components"
+         , `List
+             [ `Assoc
+                 [ "component", `String "tool_schemas"
+                 ; "bytes", `Int 1
+                 ; "estimated", `Bool true
+                 ]
+             ] )
+         :: List.remove_assoc "input_components" fields)
+    | other -> other
+  in
+  match Turn_record.of_json json with
+  | Ok _ -> fail "decoded an input component with an extra field"
+  | Error message ->
+    check bool "extra field is explicit" true
+      (Astring.String.is_infix ~affix:"fields are not exact" message)
 
 let test_codec_unknown_block_decodes_as_other () =
   let json =
@@ -371,6 +517,15 @@ let () =
             test_cache_counts_round_trip_and_stay_optional
         ; test_case "optional fields absent" `Quick test_codec_optional_fields_absent
         ; test_case "rejects malformed rows" `Quick test_codec_rejects_malformed
+        ; test_case "current observation fields required" `Quick
+            test_codec_requires_current_observation_fields
+        ; test_case "partial or invalid request wire observation rejected"
+            `Quick
+            test_codec_rejects_partial_or_invalid_request_wire_observation
+        ; test_case "unknown input component rejected" `Quick
+            test_codec_rejects_unknown_input_component
+        ; test_case "input component extra field rejected" `Quick
+            test_codec_rejects_input_component_extra_field
         ; test_case "unknown block decodes as Other" `Quick
             test_codec_unknown_block_decodes_as_other
         ] )

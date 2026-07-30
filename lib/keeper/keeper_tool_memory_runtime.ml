@@ -49,6 +49,15 @@ type fact_match =
   ; score : float
   }
 
+let read_current_facts ~keepers_dir ~keeper_id =
+  match
+    Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
+  with
+  | Ok None -> []
+  | Ok (Some snapshot) -> snapshot.facts
+  | Error detail -> failwith detail
+;;
+
 (* Match + rank over the keeper's Memory OS durable facts. Ranking is the
    matched-token ratio against the claim text, tie-broken by recency
    ([first_seen] desc). *)
@@ -59,20 +68,7 @@ let search_durable_facts
       ~(limit : int)
   : fact_match list * int
   =
-  let facts =
-    Keeper_memory_os_io.with_episode_bundle_lock_for_keepers_dir
-      ~keepers_dir
-      ~keeper_id:meta.name
-      (fun () ->
-         File_lock_eio.with_lock
-           (Keeper_memory_os_io.facts_path_for_keepers_dir
-              ~keepers_dir
-              ~keeper_id:meta.name)
-           (fun () ->
-              Keeper_memory_os_io.read_facts_all_for_keepers_dir
-                ~keepers_dir
-                ~keeper_id:meta.name))
-  in
+  let facts = read_current_facts ~keepers_dir ~keeper_id:meta.name in
   let total_candidates = List.length facts in
   let matched =
     if query = ""
@@ -342,19 +338,7 @@ let keeper_context_status_json
       ~base_path:config.Workspace.base_path
   in
   let memory_facts_total =
-    Keeper_memory_os_io.with_episode_bundle_lock_for_keepers_dir
-      ~keepers_dir
-      ~keeper_id:meta.name
-      (fun () ->
-         File_lock_eio.with_lock
-           (Keeper_memory_os_io.facts_path_for_keepers_dir
-              ~keepers_dir
-              ~keeper_id:meta.name)
-           (fun () ->
-              Keeper_memory_os_io.read_facts_all_for_keepers_dir
-                ~keepers_dir
-                ~keeper_id:meta.name))
-    |> List.length
+    read_current_facts ~keepers_dir ~keeper_id:meta.name |> List.length
   in
   (* Give the keeper sandbox-relative paths from the SSOT so it never needs
      to interpolate host storage paths such as ".masc/playground/<name>/". *)
@@ -447,22 +431,21 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
     else Memory_write_ok { body }
 ;;
 
-(* An explicit write is a durable claim a later turn reads back; the Memory OS
-   fact store is the only store it reaches.
+(* An explicit write is a claim a later turn reads back; the current Memory OS
+   snapshot is the only store it reaches.
 
    Provenance is this turn and [tool_call_id] is [None]: the claim is the
    model's own assertion, not an observation carried out of some other tool's
    result, and that field records where an observation came from.
 
-   The fold is the librarian's (RFC-0285 §8), unchanged: a claim whose identity
-   was just recall-injected is the model restating what it read, and must not
-   advance the truth anchor recall's recency ranking reads. Writing through the
-   same rule is the point — an explicit write is not a way around it. *)
-let append_durable_fact
+   No local importance, recency, or echo heuristic participates. The explicit
+   write upserts one exact identity; the Librarian remains responsible for
+   deciding the complete current selection on its next pass. *)
+let upsert_explicit_fact
       ~(keepers_dir : string)
       ~(meta : keeper_meta)
       ~(body : string)
-  : Keeper_memory_os_io.fact_merge_stats
+  : (Keeper_memory_os_current.t, string) result
   =
   let keeper_id = meta.name in
   let now = Time_compat.now () in
@@ -479,39 +462,26 @@ let append_durable_fact
     ; claim_id = None
     }
   in
-  let merge ~existing ~incoming =
-    let provenance =
-      let key = Keeper_memory_os_types.claim_identity incoming in
-      if Keeper_recall_injection_window.recently_injected ~keeper_id ~key
-      then (
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string MemoryOsReobserveEchoSuppressed)
-          ~labels:[ "keeper", keeper_id ]
-          ();
-        Keeper_memory_os_policy.Recalled_echo)
-      else Keeper_memory_os_policy.Independent_observation
-    in
-    Keeper_memory_os_policy.reobserve_fact ~now ~provenance ~existing ~incoming
-  in
-  let stats =
-    Keeper_memory_os_io.with_episode_bundle_lock_for_keepers_dir
+  let result =
+    Keeper_memory_os_current.upsert_fact
       ~keepers_dir
       ~keeper_id
-      (fun () ->
-         File_lock_eio.with_lock
-           (Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
-           (fun () ->
-              Keeper_memory_os_io.merge_facts_for_keepers_dir
-                ~keepers_dir
-                ~keeper_id
-                ~merge
-                ~incoming:[ fact ]))
+      ~now
+      ~source:
+        { kind = Keeper_memory_os_current.Explicit_write
+        ; trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
+        ; generation = meta.runtime.nonce
+        }
+      fact
   in
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string MemoryOsExplicitFactWrite)
-    ~labels:[ "keeper", keeper_id ]
-    ();
-  stats
+  (match result with
+   | Ok _ ->
+     Otel_metric_store.inc_counter
+       Keeper_metrics.(to_string MemoryOsExplicitFactWrite)
+       ~labels:[ "keeper", keeper_id ]
+       ()
+   | Error _ -> ());
+  result
 ;;
 
 let keeper_memory_write_with_outcome
@@ -538,18 +508,22 @@ let keeper_memory_write_with_outcome
       Config_dir_resolver.keepers_dir_for_base_path
         ~base_path:config.Workspace.base_path
     in
-    (match append_durable_fact ~keepers_dir ~meta ~body with
-     | stats ->
-       let merged = stats.Keeper_memory_os_io.merged in
+    (match upsert_explicit_fact ~keepers_dir ~meta ~body with
+     | Ok snapshot ->
        respond
          ~ok:true
          ~error_kind:No_memory_write_error
          [ "rows_written", `Int 1
-         ; ( "outcome"
-           , `String (if merged > 0 then "merged_into_existing_claim" else "persisted")
-           )
-         ; "store", `String "durable_fact_store"
+         ; "revision", `Int snapshot.revision
+         ; "outcome", `String "persisted_current_snapshot"
+         ; "store", `String "current_memory_snapshot"
          ]
+     | Error detail ->
+       Log.Keeper.warn
+         "explicit current Memory write failed keeper=%s: %s"
+         meta.name
+         detail;
+       respond ~ok:false ~error_kind:Persistence_failed [ "detail", `String detail ]
      | exception (Eio.Cancel.Cancelled _ as e) -> raise e
      | exception exn ->
        (* The store is the only place a long-term claim survives, so a
@@ -557,7 +531,7 @@ let keeper_memory_write_with_outcome
           lose the claim silently. *)
        let detail = Printexc.to_string exn in
        Log.Keeper.warn
-         "explicit durable fact write failed keeper=%s: %s"
+         "explicit current Memory write failed keeper=%s: %s"
          meta.name
          detail;
        respond ~ok:false ~error_kind:Persistence_failed [ "detail", `String detail ])

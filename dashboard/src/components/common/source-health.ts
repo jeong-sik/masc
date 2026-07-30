@@ -5,7 +5,7 @@
 //   tool-quality-panel.
 //
 // The mapping is stable across the dashboard: ok → success tone,
-// stale/coverage_gap/empty → warning tone, missing → bad tone,
+// stale/coverage_gap/empty/incompatible → warning tone, missing → bad tone,
 // everything else → disabled neutral tone.
 
 import { formatElapsedCompact } from '../../lib/format-time'
@@ -19,6 +19,7 @@ export function sourceHealthClass(health?: string | null): string {
     case 'stale':
     case 'coverage_gap':
     case 'empty':
+    case 'incompatible':
       return 'text-[var(--color-status-warn)]'
     case 'missing':
       return 'text-[var(--bad-light)]'
@@ -98,6 +99,8 @@ export function humanizeCoverageReason(reason: string): string {
       return 'store missing'
     case 'no_entries':
       return 'no entries'
+    case 'incompatible_rows':
+      return 'current decoder rejected every recent row'
     default:
       return reason.replace(/_/g, ' ')
   }

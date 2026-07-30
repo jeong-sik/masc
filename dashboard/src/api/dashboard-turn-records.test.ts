@@ -19,6 +19,9 @@ function entry(overrides: Record<string, unknown> = {}) {
       ts: 1_700_000_000,
       execution_ids: ['exec-1'],
       blocks: [],
+      input_components: [],
+      request_runtime_profile: null,
+      request_body_bytes: null,
       input_tokens: 1200,
       output_tokens: 340,
       ...overrides,
@@ -43,23 +46,21 @@ function payload(...entries: ReturnType<typeof entry>[]) {
     health: 'ok',
     stale_reason: null,
     memory_os: {
+      schema: 'keeper.memory_os.current_observability.v1',
       keeper: 'sangsu',
-      source: 'memory_os_files',
-      producer: 'keeper_librarian|keeper_memory_os_recall',
-      selection_policy: {
-        keeper_scope: 'sangsu',
-        facts_source: 'Keeper_memory_os_io.read_facts_all_for_keepers_dir',
-        episodes_source: 'Keeper_memory_os_io.read_episodes_all_for_keepers_dir',
-        category_source: 'Keeper_memory_os_types.category_to_string',
-        recall_block: 'Keeper_memory_os_recall.render_if_enabled',
-        prompt_record: 'Keeper_run_tools_hooks.record_block Prompt_block_id.Memory_os_recall',
-      },
-      facts_store: '.masc/config/keepers/sangsu.facts.jsonl',
-      episodes_store: '.masc/config/keepers/sangsu/episodes',
+      source: 'current_memory_snapshot',
+      producer: 'keeper_librarian',
+      snapshot_store: '.masc/keepers/sangsu.memory.json',
       recall_enabled: true,
+      revision: 0,
+      updated_at: null,
+      summary: null,
+      update_source: null,
+      now: 1_700_000_000,
+      now_iso: '2023-11-14T22:13:20Z',
       read_errors: [],
-      episodes: { shown: 0, items: [] },
-      facts: { shown: 0, items: [] },
+      facts: { shown: 0, current: 0, items: [] },
+      change: { added: [], removed: [], retained: 0 },
     },
     entries,
   }
@@ -71,9 +72,31 @@ afterEach(() => {
 
 // #25779 made the provider cache token counts durable on the turn record, but
 // the decoder rebuilt each entry without them, so they were discarded before
-// reaching the inspector. Absent stays absent — a legacy row must not decode to
-// a fabricated 0.
+// reaching the inspector. Absent stays absent — a provider that reports no
+// cache count must not decode to a fabricated 0.
 describe('keeper turn record cache token counts', () => {
+  it('surfaces a current-only window containing only incompatible rows', async () => {
+    getMock.mockResolvedValue({
+      ...payload(),
+      skipped_rows: 12,
+      latest_ts_unix: null,
+      latest_ts_iso: null,
+      latest_age_s: null,
+      health: 'incompatible',
+      stale_reason: 'incompatible_rows',
+    })
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response).toMatchObject({
+      count: 0,
+      skipped_rows: 12,
+      health: 'incompatible',
+      stale_reason: 'incompatible_rows',
+      entries: [],
+    })
+  })
+
   it('carries the durable cache counts through the decoder', async () => {
     getMock.mockResolvedValue(
       payload(entry({ cache_creation_input_tokens: 900, cache_read_input_tokens: 15_400 })),
@@ -201,6 +224,78 @@ describe('keeper turn record cache token counts', () => {
 
   it('rejects a turn_ref that disagrees with trace_id and absolute_turn', async () => {
     getMock.mockResolvedValue(payload(entry({ turn_ref: 'trace-1#8' })))
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+})
+
+describe('keeper turn record final input composition', () => {
+  it('carries exact serialized request body bytes with the observing runtime', async () => {
+    getMock.mockResolvedValue(payload(entry({
+      request_runtime_profile: 'anthropic.fallback',
+      request_body_bytes: 560_513,
+    })))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response.entries[0]?.record).toMatchObject({
+      request_runtime_profile: 'anthropic.fallback',
+      request_body_bytes: 560_513,
+    })
+  })
+
+  it('rejects rows without the current request-wire observation contract', async () => {
+    getMock.mockResolvedValue(payload(entry({ request_body_bytes: undefined })))
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it.each([
+    { request_runtime_profile: 'anthropic.fallback', request_body_bytes: null },
+    { request_runtime_profile: null, request_body_bytes: 560_513 },
+    { request_runtime_profile: 'anthropic.fallback', request_body_bytes: -1 },
+  ])('rejects a partial or invalid request-wire pair', async (observation) => {
+    getMock.mockResolvedValue(payload(entry(observation)))
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('carries typed content components through the decoder', async () => {
+    getMock.mockResolvedValue(payload(entry({
+      input_components: [
+        { component: 'prompt.persona', bytes: 1200 },
+        { component: 'tool_schemas', bytes: 64000 },
+        { component: 'message_tool_result', bytes: 2800 },
+      ],
+    })))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response.entries[0]?.record.input_components).toEqual([
+      { component: 'prompt.persona', bytes: 1200 },
+      { component: 'tool_schemas', bytes: 64000 },
+      { component: 'message_tool_result', bytes: 2800 },
+    ])
+  })
+
+  it('rejects rows without the current composition contract', async () => {
+    getMock.mockResolvedValue(payload(entry({ input_components: undefined })))
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects unknown component ids instead of inventing a bucket', async () => {
+    getMock.mockResolvedValue(payload(entry({
+      input_components: [{ component: 'history_guess', bytes: 1 }],
+    })))
 
     await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
       '유효하지 않은 keeper turn record payload',

@@ -1,8 +1,7 @@
-(** Keeper_memory_os_types — typed schema for the tiered Memory OS.
+(** Keeper Memory OS current fact schema.
 
-    This module defines the canonical fact and episode records used by
-    the librarian, the I/O layer, and Memory projections. The persisted shape
-    is current-only and closed; version or compatibility fields reject. *)
+    The persisted shape is current-only and closed; version or compatibility
+    fields reject. *)
 
 (** Canonical JSON wire field names for Memory OS persistence and librarian
     ingestion. The schema module owns these strings so parser, retry prompt,
@@ -17,19 +16,11 @@ val wire_field_first_seen : string
 val wire_field_last_verified_at : string
 val wire_field_claim_id : string
 
-val wire_field_generation : string
-val wire_field_episode_summary : string
-val wire_field_claims : string
 val wire_field_source_turn : string
 val wire_field_source_tool_call_id : string
-val wire_field_source_turn_range : string
-val wire_field_lo : string
-val wire_field_hi : string
-val wire_field_created_at : string
-
-(** Episode-object fields accepted from the librarian and rendered in retry
-    prompts. *)
-val wire_librarian_episode_fields : string list
+val wire_field_open_items : string
+val wire_field_constraints : string
+val wire_field_preserved_tool_refs : string
 
 (** Claim-object fields accepted from the librarian and rendered in retry
     prompts. *)
@@ -87,21 +78,6 @@ type fact =
     boundary. *)
 val reference_time : fact -> float
 
-(** Exact inclusive source-turn span of [facts], or [None] iff [facts] is empty.
-    Episode producers and persisted decoders share this derivation; a caller
-    cannot supply an independent range authority. *)
-val source_turn_range_of_facts : fact list -> (int * int) option
-
-(** A librarian extraction result: a summary plus structured claims. *)
-type episode =
-  { trace_id : string
-  ; generation : int
-  ; episode_summary : string
-  ; claims : fact list
-  ; source_turn_range : (int * int) option
-  ; created_at : float
-  }
-
 (** Producer identity SSOT. A non-empty [claim_id] is preserved exactly. When it
     is absent, identity uses the exact source event plus exact claim payload, so
     code never semantically normalizes or classifies prose. *)
@@ -114,6 +90,3 @@ val provenance_event_of_json : Yojson.Safe.t -> provenance_event option
 
 val fact_to_json : fact -> Yojson.Safe.t
 val fact_of_json : Yojson.Safe.t -> fact option
-
-val episode_to_json : episode -> Yojson.Safe.t
-val episode_of_json : Yojson.Safe.t -> episode option

@@ -59,6 +59,11 @@ let json_float_opt = function
   | None -> `Null
 ;;
 
+let json_time_iso_opt = function
+  | Some value -> `String (Masc_domain.iso8601_of_unix_seconds value)
+  | None -> `Null
+;;
+
 type state_diagram_runtime_projection =
   { runtime_models : string list
   ; last_provider_result : string option
@@ -158,139 +163,109 @@ let keeper_chat_allowed_trace_ids (m : Keeper_meta_contract.keeper_meta) =
   |> Json_util.dedupe_keep_order
 ;;
 
-let memory_os_read_episodes ~keepers_dir ~keeper_id =
-  try
-    ( Keeper_memory_os_io.read_episodes_all_for_keepers_dir
-        ~keepers_dir
-        ~keeper_id
-    , None )
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> [], Some (Printexc.to_string exn)
-;;
-
-let memory_os_read_facts ~keepers_dir ~keeper_id =
-  try
-    ( Keeper_memory_os_io.read_facts_all_for_keepers_dir
-        ~keepers_dir
-        ~keeper_id
-    , None )
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> [], Some (Printexc.to_string exn)
-;;
-
-let memory_os_episode_json (episode : Keeper_memory_os_types.episode) =
-  `Assoc
-    [ "trace_id", `String episode.trace_id
-    ; "generation", `Int episode.generation
-    ; "created_at", `Float episode.created_at
-    ; "claim_count", `Int (List.length episode.claims)
-    ; ( "source_turn_range"
-      , match episode.source_turn_range with
-        | Some (lo, hi) -> `Assoc [ "lo", `Int lo; "hi", `Int hi ]
-        | None -> `Null )
-    ; "summary", `String episode.episode_summary
-    ]
-;;
-
-(* RFC-keeper-memory-panel-real-data §4a: surface the fact rows the panel renders, mirroring
-   [memory_os_episode_json]. Serializes ONLY the existing [fact] structure —
-   claim, typed category, provenance, and verification timestamps —
+(* RFC-keeper-memory-panel-real-data §4a: surface the fact rows the panel renders.
+   Serializes ONLY the current [fact] structure —
+   claim, typed category, provenance, the three timestamps, and current-ness —
    never the deleted score fields (confidence / access_count / last_accessed,
    RFC-0247): they are absent from the [fact] record, so the type system makes
    re-emitting them unrepresentable. [reference_time] is the shared staleness
    anchor (last_verified_at else first_seen), reused rather than re-inlined.
-   Product-specific references remain connector/tool context rather than Memory
-   schema fields. *)
-let memory_os_fact_json (fact : Keeper_memory_os_types.fact) =
+   Product-specific references remain connector/tool context rather than
+   Memory schema fields. [current] is derived solely from membership in this
+   current snapshot and is never persisted as another authority. *)
+let memory_os_fact_json ~current (fact : Keeper_memory_os_types.fact) =
   `Assoc
-    [ "claim", `String fact.claim
-    ; "category", `String (Keeper_memory_os_types.category_to_string fact.category)
-    ; "source", Keeper_memory_os_types.provenance_event_to_json fact.source
-    ; "first_seen", `Float fact.first_seen
-    ; "first_seen_iso", `String (Masc_domain.iso8601_of_unix_seconds fact.first_seen)
-    ; "reference_time", `Float (Keeper_memory_os_types.reference_time fact)
-    ; "last_verified_at", json_float_opt fact.last_verified_at
+    [ "memory_id", `String (Keeper_memory_os_types.claim_identity fact)
+     ; "claim", `String fact.claim
+     ; "category", `String (Keeper_memory_os_types.category_to_string fact.category)
+     ; "source", Keeper_memory_os_types.provenance_event_to_json fact.source
+     ; "first_seen", `Float fact.first_seen
+     ; "first_seen_iso", `String (Masc_domain.iso8601_of_unix_seconds fact.first_seen)
+     ; "reference_time", `Float (Keeper_memory_os_types.reference_time fact)
+     ; "last_verified_at", json_float_opt fact.last_verified_at
+     ; "current", `Bool current
+     ]
+;;
+
+let memory_os_change_json (change : Keeper_memory_os_current.change) =
+  `Assoc
+    [ "added", `List (List.map (memory_os_fact_json ~current:true) change.added)
+    ; "removed", `List (List.map (memory_os_fact_json ~current:false) change.removed)
+    ; "retained", `Int change.retained
     ]
 ;;
 
-type memory_os_selection_policy =
-  { keeper_scope : string
-  ; facts_source : string
-  ; episodes_source : string
-  ; category_source : string
-  ; recall_block : string
-  ; prompt_record : string
-  }
-
-let memory_os_selection_policy_json (policy : memory_os_selection_policy) =
-  `Assoc
-    [ "keeper_scope", `String policy.keeper_scope
-    ; "facts_source", `String policy.facts_source
-    ; "episodes_source", `String policy.episodes_source
-    ; "category_source", `String policy.category_source
-    ; "recall_block", `String policy.recall_block
-    ; "prompt_record", `String policy.prompt_record
-    ]
-;;
-
-let memory_os_selection_policy ~keeper_id =
-  { keeper_scope = keeper_id
-  ; facts_source = "Keeper_memory_os_io.read_facts_all_for_keepers_dir"
-  ; episodes_source = "Keeper_memory_os_io.read_episodes_all_for_keepers_dir"
-  ; category_source = "Keeper_memory_os_types.category_to_string"
-  ; recall_block = "Keeper_memory_os_recall.render_if_enabled"
-  ; prompt_record = "Keeper_run_tools_hooks.record_block Prompt_block_id.Memory_os_recall"
-  }
-;;
-
-let memory_os_dashboard_json_unlocked ~keepers_dir ~keeper_id =
-  let episodes, episode_error =
-    memory_os_read_episodes ~keepers_dir ~keeper_id
+let memory_os_dashboard_json ~(config : Workspace.config) ~keeper_id =
+  let now = Time_compat.now () in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path
   in
-  let facts, fact_error = memory_os_read_facts ~keepers_dir ~keeper_id in
-  let facts_path =
-    Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id
+  let snapshot, read_error =
+    match
+      Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
+    with
+    | Ok snapshot -> snapshot, None
+    | Error message -> None, Some message
   in
-  let episodes_store = Filename.concat (Filename.concat keepers_dir keeper_id) "episodes" in
-  `Assoc
-    [ "keeper", `String keeper_id
-    ; "source", `String "memory_os_files"
-    ; "producer", `String "keeper_librarian|keeper_memory_os_recall"
-    ; ( "selection_policy"
-      , memory_os_selection_policy ~keeper_id |> memory_os_selection_policy_json )
-    ; "facts_store", `String facts_path
-    ; "episodes_store", `String episodes_store
-    ; "recall_enabled", `Bool (Keeper_memory_os_recall.enabled ())
-    ; ( "read_errors"
-      , `List
-          (List.filter_map
-             (fun (scope, err) ->
-                Option.map (fun message -> `Assoc [ "scope", `String scope; "error", `String message ]) err)
-             [ "episodes", episode_error; "facts", fact_error ]) )
-    ; ( "episodes"
+  let facts, change, revision, updated_at, summary, source =
+    match snapshot with
+    | None ->
+      ( []
+      , `Assoc [ "added", `List []; "removed", `List []; "retained", `Int 0 ]
+      , 0
+      , None
+      , None
+      , `Null )
+    | Some snapshot ->
+      let source = snapshot.Keeper_memory_os_current.source in
+      ( snapshot.facts
+      , memory_os_change_json snapshot.change
+      , snapshot.revision
+      , Some snapshot.updated_at
+      , Some snapshot.summary
       , `Assoc
-          [ "shown", `Int (List.length episodes)
-          ; "items", `List (List.map memory_os_episode_json episodes)
+          [ ( "kind"
+            , `String
+                (match source.kind with
+                 | Keeper_memory_os_current.Librarian -> "librarian"
+                 | Explicit_write -> "explicit_write") )
+          ; "trace_id", `String source.trace_id
+          ; "generation", `Int source.generation
           ] )
+  in
+  let current_facts = List.length facts in
+  `Assoc
+    [ "schema", `String "keeper.memory_os.current_observability.v1"
+    ; "keeper", `String keeper_id
+    ; "source", `String "current_memory_snapshot"
+    ; "producer", `String "keeper_librarian"
+    ; ( "snapshot_store"
+      , `String
+          (Keeper_memory_os_current.path_for_keepers_dir
+             ~keepers_dir
+             ~keeper_id) )
+    ; "recall_enabled", `Bool (Keeper_memory_os_recall.enabled ())
+    ; "revision", `Int revision
+    ; "updated_at", (match updated_at with Some value -> `Float value | None -> `Null)
+    ; "summary", (match summary with Some value -> `String value | None -> `Null)
+    ; "update_source", source
+    ; "now", `Float now
+    ; "now_iso", `String (Masc_domain.iso8601_of_unix_seconds now)
+    ; ( "read_errors"
+      , match read_error with
+        | None -> `List []
+        | Some error ->
+          `List [ `Assoc [ "scope", `String "snapshot"; "error", `String error ] ] )
     ; ( "facts"
       , `Assoc
           [ "shown", `Int (List.length facts)
-          ; "items", `List (List.map memory_os_fact_json facts)
+          ; "current", `Int current_facts
+          ; ( "items"
+            , `List (List.map (memory_os_fact_json ~current:true) facts) )
           ] )
+    ; "change", change
     ]
-;;
-
-let memory_os_dashboard_json ~keepers_dir ~keeper_id =
-  Keeper_memory_os_io.with_episode_bundle_lock_for_keepers_dir
-    ~keepers_dir
-    ~keeper_id
-    (fun () ->
-       File_lock_eio.with_lock
-         (Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
-         (fun () ->
-            memory_os_dashboard_json_unlocked ~keepers_dir ~keeper_id))
 ;;
 
 let compaction_snapshot_take n xs =
@@ -1740,6 +1715,8 @@ let handle_keeper_get_subroutes state req request reqd =
       in
       let health, stale_reason =
         match latest_age_s with
+        | None when skipped_rows > 0 ->
+            ("incompatible", "incompatible_rows")
         | None -> ("empty", "no_entries")
         | Some age when age > freshness_slo_s ->
             ("stale", "freshness_slo_exceeded")
@@ -1769,9 +1746,7 @@ let handle_keeper_get_subroutes state req request reqd =
           if stale_reason = "" then `Null else `String stale_reason );
         ( "memory_os"
         , memory_os_dashboard_json
-            ~keepers_dir:
-              (Config_dir_resolver.keepers_dir_for_base_path
-                 ~base_path:config.Workspace.base_path)
+            ~config:(Mcp_server.workspace_config state)
             ~keeper_id:name );
         ("entries", `List entries);
       ] in

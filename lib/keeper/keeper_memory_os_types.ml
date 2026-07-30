@@ -1,7 +1,4 @@
-(** Keeper_memory_os_types — typed schema for the tiered Memory OS.
-
-    Facts are immutable claims extracted by the librarian. Episodes group
-    related facts with a short summary and metadata. *)
+(** Keeper_memory_os_types — current Memory OS fact schema. *)
 
 (* Canonical JSON wire keys for Memory OS persistence and librarian ingestion.
    The schema module owns these strings so the parser, retry prompt, persistence
@@ -15,15 +12,11 @@ let wire_field_source = "source"
 let wire_field_first_seen = "first_seen"
 let wire_field_last_verified_at = "last_verified_at"
 let wire_field_claim_id = "claim_id"
-let wire_field_generation = "generation"
-let wire_field_episode_summary = "episode_summary"
-let wire_field_claims = "claims"
 let wire_field_source_turn = "source_turn"
 let wire_field_source_tool_call_id = "source_tool_call_id"
-let wire_field_source_turn_range = "source_turn_range"
-let wire_field_lo = "lo"
-let wire_field_hi = "hi"
-let wire_field_created_at = "created_at"
+let wire_field_open_items = "open_items"
+let wire_field_constraints = "constraints"
+let wire_field_preserved_tool_refs = "preserved_tool_refs"
 
 module Wire_field_set = Set.Make (String)
 
@@ -58,21 +51,6 @@ let fact_wire_fields =
     ; wire_field_claim_id
     ]
 ;;
-
-let source_turn_range_wire_fields = wire_field_set [ wire_field_lo; wire_field_hi ]
-
-let episode_wire_fields =
-  wire_field_set
-    [ wire_field_trace_id
-    ; wire_field_generation
-    ; wire_field_episode_summary
-    ; wire_field_claims
-    ; wire_field_source_turn_range
-    ; wire_field_created_at
-    ]
-;;
-
-let wire_librarian_episode_fields = [ wire_field_episode_summary; wire_field_claims ]
 
 let wire_librarian_claim_fields =
   [ wire_field_claim
@@ -160,34 +138,6 @@ let reference_time (f : fact) =
   | None -> f.first_seen
 ;;
 
-let source_turn_range_of_facts = function
-  | [] -> None
-  | first :: rest ->
-    let initial = first.source.turn in
-    let lo =
-      List.fold_left
-        (fun current fact -> min current fact.source.turn)
-        initial
-        rest
-    in
-    let hi =
-      List.fold_left
-        (fun current fact -> max current fact.source.turn)
-        initial
-        rest
-    in
-    Some (lo, hi)
-;;
-
-type episode =
-  { trace_id : string
-  ; generation : int
-  ; episode_summary : string
-  ; claims : fact list
-  ; source_turn_range : (int * int) option
-  ; created_at : float
-  }
-
 (* ---------- JSON codecs ---------- *)
 
 let json_string_field key (fields : (string * Yojson.Safe.t) list) =
@@ -209,13 +159,6 @@ let json_float_field key (fields : (string * Yojson.Safe.t) list) =
   | Some (`Float f) -> Some f
   | Some (`Int i) -> Some (float_of_int i)
   | Some (`Assoc _ | `Bool _ | `Intlit _ | `List _ | `Null | `String _) | None -> None
-;;
-
-let json_bool_field key (fields : (string * Yojson.Safe.t) list) =
-  match List.assoc_opt key fields with
-  | Some (`Bool b) -> Some b
-  | Some (`Assoc _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _)
-  | None -> None
 ;;
 
 let non_empty_string value = not (String.equal (String.trim value) "")
@@ -383,115 +326,6 @@ let fact_of_json (json : Yojson.Safe.t) =
                }
            | Some _ -> None)
         | None -> None)
-     | _ -> None)
-  | `Assoc _
-  | `Bool _
-  | `Float _
-  | `Int _
-  | `Intlit _
-  | `List _
-  | `Null
-  | `String _ -> None
-;;
-
-let episode_to_json (e : episode) =
-  if not (non_empty_string e.trace_id)
-  then invalid_arg "memory episode trace_id must be non-empty";
-  if e.generation < 0
-  then invalid_arg "memory episode generation must be non-negative";
-  if not (non_empty_string e.episode_summary)
-  then invalid_arg "memory episode summary must be non-empty";
-  if not (Float.is_finite e.created_at)
-  then invalid_arg "memory episode created_at must be finite";
-  if
-    not
-      (List.for_all
-         (fun fact -> String.equal fact.source.trace_id e.trace_id)
-         e.claims)
-  then invalid_arg "memory episode claim trace_id does not match the episode";
-  if e.source_turn_range <> source_turn_range_of_facts e.claims
-  then invalid_arg "memory episode source_turn_range does not match its claims";
-  let range_json =
-    match e.source_turn_range with
-    | Some (lo, hi) when lo >= 0 && hi >= lo ->
-      [ wire_field_source_turn_range
-      , `Assoc [ wire_field_lo, `Int lo; wire_field_hi, `Int hi ]
-      ]
-    | Some _ -> invalid_arg "memory episode source_turn_range is invalid"
-    | None -> []
-  in
-  `Assoc
-    ([ wire_field_trace_id, `String e.trace_id
-     ; wire_field_generation, `Int e.generation
-     ; wire_field_episode_summary, `String e.episode_summary
-     ; ( wire_field_claims
-       , `List (List.rev (List.rev_map fact_to_json e.claims)) )
-     ; wire_field_created_at, `Float e.created_at
-     ]
-    @ range_json)
-;;
-
-let facts_of_json values =
-  let rec loop facts = function
-    | [] -> Some (List.rev facts)
-    | json :: rest ->
-      (match fact_of_json json with
-       | Some fact -> loop (fact :: facts) rest
-       | None -> None)
-  in
-  loop [] values
-;;
-
-let source_turn_range_field fields =
-  match List.assoc_opt wire_field_source_turn_range fields with
-  | None -> Some None
-  | Some (`Assoc range_fields)
-    when closed_fields source_turn_range_wire_fields range_fields ->
-    (match json_int_field wire_field_lo range_fields, json_int_field wire_field_hi range_fields with
-     | Some lo, Some hi when lo >= 0 && hi >= lo -> Some (Some (lo, hi))
-     | Some _, Some _ -> None
-     | (Some _, None) | (None, Some _) | (None, None) -> None)
-  | Some _ -> None
-;;
-
-let episode_of_json (json : Yojson.Safe.t) =
-  match json with
-  | `Assoc fields when closed_fields episode_wire_fields fields ->
-    (match
-       ( json_string_field wire_field_trace_id fields
-       , json_int_field wire_field_generation fields
-       , json_string_field wire_field_episode_summary fields
-       , (match List.assoc_opt wire_field_claims fields with
-          | Some (`List claim_items) -> facts_of_json claim_items
-          | Some _ | None -> None)
-       , source_turn_range_field fields
-       , json_float_field wire_field_created_at fields )
-     with
-     | ( Some trace_id
-       , Some generation
-       , Some episode_summary
-       , Some claims
-       , Some source_turn_range
-       , Some created_at ) ->
-       if
-         non_empty_string trace_id
-         && generation >= 0
-         && non_empty_string episode_summary
-         && Float.is_finite created_at
-         && List.for_all
-              (fun fact -> String.equal fact.source.trace_id trace_id)
-              claims
-         && source_turn_range = source_turn_range_of_facts claims
-       then
-         Some
-           { trace_id
-           ; generation
-           ; episode_summary
-           ; claims
-           ; source_turn_range
-           ; created_at
-           }
-       else None
      | _ -> None)
   | `Assoc _
   | `Bool _

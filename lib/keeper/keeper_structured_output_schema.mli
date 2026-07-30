@@ -3,8 +3,8 @@
     They describe the expected value for prompt instructions and local parsing;
     MASC does not send them through provider-native response formats. *)
 
-val librarian_episode_output_schema : Yojson.Safe.t
-(** JSON object the librarian extraction provider must return. *)
+val librarian_current_output_schema : Yojson.Safe.t
+(** JSON object the current-memory Librarian must return. *)
 
 (** Wire field names for {!compaction_plan_output_schema}; shared with the
     compaction-plan codec as the single source of truth. *)

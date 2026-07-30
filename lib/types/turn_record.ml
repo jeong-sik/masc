@@ -4,6 +4,25 @@ type prompt_block =
   ; digest : string
   }
 
+type input_component_id =
+  | Prompt_block of Prompt_block_id.t
+  | Tool_schemas
+  | Message_user
+  | Message_system
+  | Message_assistant_text
+  | Message_thinking
+  | Message_redacted_thinking
+  | Message_tool_use
+  | Message_tool_result
+  | Message_image
+  | Message_document
+  | Message_audio
+
+type input_component =
+  { component : input_component_id
+  ; bytes : int
+  }
+
 type sampling =
   { temperature : float option
   ; top_p : float option
@@ -19,6 +38,11 @@ type usage =
   ; cache_read_input_tokens : int option
   }
 
+type request_wire_observation =
+  { runtime_profile : string
+  ; body_bytes : int
+  }
+
 type t =
   { execution_ids : Ids.Execution_id.t list
   ; keeper : string
@@ -26,6 +50,7 @@ type t =
   ; absolute_turn : int
   ; turn_ref : Ids.Turn_ref.t option
   ; blocks : prompt_block list
+  ; input_components : input_component list
   ; runtime_profile : string
   ; model : string option
   ; finish_reason : string option
@@ -34,6 +59,7 @@ type t =
   ; price_output_per_million : float option
   ; request_latency_ms : int option
   ; ttfrc_ms : float option
+  ; request_wire_observation : request_wire_observation option
   ; sampling : sampling
   ; usage : usage
   ; ts : float
@@ -52,7 +78,33 @@ let prompt_block_to_json (b : prompt_block) : Yojson.Safe.t =
     ; ("digest", `String b.digest)
     ]
 
+let input_component_id_to_string = function
+  | Prompt_block block -> "prompt." ^ Prompt_block_id.to_string block
+  | Tool_schemas -> "tool_schemas"
+  | Message_user -> "message_user"
+  | Message_system -> "message_system"
+  | Message_assistant_text -> "message_assistant_text"
+  | Message_thinking -> "message_thinking"
+  | Message_redacted_thinking -> "message_redacted_thinking"
+  | Message_tool_use -> "message_tool_use"
+  | Message_tool_result -> "message_tool_result"
+  | Message_image -> "message_image"
+  | Message_document -> "message_document"
+  | Message_audio -> "message_audio"
+
+let input_component_to_json (component : input_component) : Yojson.Safe.t =
+  `Assoc
+    [ "component", `String (input_component_id_to_string component.component)
+    ; "bytes", `Int component.bytes
+    ]
+
 let to_json (r : t) : Yojson.Safe.t =
+  let request_runtime_profile, request_body_bytes =
+    match r.request_wire_observation with
+    | Some observation ->
+      `String observation.runtime_profile, `Int observation.body_bytes
+    | None -> `Null, `Null
+  in
   `Assoc
     ([ ( "execution_ids"
        , `List (List.map Ids.Execution_id.to_yojson r.execution_ids) )
@@ -60,7 +112,11 @@ let to_json (r : t) : Yojson.Safe.t =
      ; ("trace_id", `String r.trace_id)
      ; ("absolute_turn", `Int r.absolute_turn)
      ; ("blocks", `List (List.map prompt_block_to_json r.blocks))
+     ; ( "input_components"
+       , `List (List.map input_component_to_json r.input_components) )
      ; ("runtime_profile", `String r.runtime_profile)
+     ; "request_runtime_profile", request_runtime_profile
+     ; "request_body_bytes", request_body_bytes
      ]
     @ opt_field "turn_ref" Ids.Turn_ref.to_yojson r.turn_ref
     @ opt_field "model" (fun v -> `String v) r.model
@@ -96,9 +152,21 @@ let as_string name = function
   | `String s -> Ok s
   | _ -> Error (Printf.sprintf "turn_record: field %S is not a string" name)
 
+let as_nonempty_string name json =
+  let* value = as_string name json in
+  if String.equal (String.trim value) ""
+  then Error (Printf.sprintf "turn_record: field %S is empty" name)
+  else Ok value
+
 let as_int name = function
   | `Int i -> Ok i
   | _ -> Error (Printf.sprintf "turn_record: field %S is not an int" name)
+
+let as_nonnegative_int name json =
+  let* value = as_int name json in
+  if value < 0
+  then Error (Printf.sprintf "turn_record: field %S is negative" name)
+  else Ok value
 
 let as_float name = function
   | `Float f -> Ok f
@@ -109,6 +177,14 @@ let opt_member name fields decode =
   match member name fields with
   | None -> Ok None
   | Some value ->
+      let* decoded = decode name value in
+      Ok (Some decoded)
+
+let nullable name fields decode =
+  let* value = require name fields in
+  match value with
+  | `Null -> Ok None
+  | value ->
       let* decoded = decode name value in
       Ok (Some decoded)
 
@@ -132,6 +208,69 @@ let prompt_block_of_json (json : Yojson.Safe.t) : (prompt_block, string) result 
       let* digest = as_string "digest" digest_json in
       Ok { block = Prompt_block_id.of_string block_name; bytes; digest }
   | _ -> Error "turn_record: block entry is not an object"
+
+let input_component_id_of_string token =
+  match token with
+  | "tool_schemas" -> Ok Tool_schemas
+  | "message_user" -> Ok Message_user
+  | "message_system" -> Ok Message_system
+  | "message_assistant_text" -> Ok Message_assistant_text
+  | "message_thinking" -> Ok Message_thinking
+  | "message_redacted_thinking" -> Ok Message_redacted_thinking
+  | "message_tool_use" -> Ok Message_tool_use
+  | "message_tool_result" -> Ok Message_tool_result
+  | "message_image" -> Ok Message_image
+  | "message_document" -> Ok Message_document
+  | "message_audio" -> Ok Message_audio
+  | token ->
+    let prefix = "prompt." in
+    if String.starts_with ~prefix token
+    then
+      let name =
+        String.sub
+          token
+          (String.length prefix)
+          (String.length token - String.length prefix)
+      in
+      (match
+         List.find_opt
+           (fun known ->
+              Prompt_block_id.equal known (Prompt_block_id.of_string name))
+           Prompt_block_id.all_known
+       with
+       | Some block -> Ok (Prompt_block block)
+       | None ->
+         Error
+           (Printf.sprintf
+              "turn_record: unknown input component %S"
+              token))
+    else
+      Error
+        (Printf.sprintf "turn_record: unknown input component %S" token)
+
+let input_component_of_json
+    (json : Yojson.Safe.t) : (input_component, string) result =
+  match json with
+  | `Assoc fields ->
+      let expected_fields = [ "component"; "bytes" ] in
+      let exact_fields =
+        List.length fields = List.length expected_fields
+        && List.for_all
+             (fun (name, _) -> List.mem name expected_fields)
+             fields
+      in
+      let* () =
+        if exact_fields
+        then Ok ()
+        else Error "turn_record: input component fields are not exact"
+      in
+      let* component_json = require "component" fields in
+      let* component_name = as_string "component" component_json in
+      let* component = input_component_id_of_string component_name in
+      let* bytes_json = require "bytes" fields in
+      let* bytes = as_nonnegative_int "bytes" bytes_json in
+      Ok { component; bytes }
+  | _ -> Error "turn_record: input component entry is not an object"
 
 let rec collect_results acc = function
   | [] -> Ok (List.rev acc)
@@ -162,8 +301,31 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         | `List items -> collect_results [] (List.map prompt_block_of_json items)
         | _ -> Error "turn_record: blocks is not a list"
       in
+      let* input_components_json = require "input_components" fields in
+      let* input_components =
+        match input_components_json with
+        | `List items ->
+          collect_results [] (List.map input_component_of_json items)
+        | _ -> Error "turn_record: input_components is not a list"
+      in
       let* profile_json = require "runtime_profile" fields in
       let* runtime_profile = as_string "runtime_profile" profile_json in
+      let* request_runtime_profile =
+        nullable "request_runtime_profile" fields as_nonempty_string
+      in
+      let* request_body_bytes =
+        nullable "request_body_bytes" fields as_nonnegative_int
+      in
+      let* request_wire_observation =
+        match request_runtime_profile, request_body_bytes with
+        | Some runtime_profile, Some body_bytes ->
+          Ok (Some { runtime_profile; body_bytes })
+        | None, None -> Ok None
+        | Some _, None | None, Some _ ->
+          Error
+            "turn_record: request_runtime_profile and request_body_bytes must \
+             both be present or both be null"
+      in
       let* turn_ref = opt_member "turn_ref" fields as_turn_ref in
       let* model = opt_member "model" fields as_string in
       let* finish_reason = opt_member "finish_reason" fields as_string in
@@ -194,6 +356,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; absolute_turn
         ; turn_ref
         ; blocks
+        ; input_components
         ; runtime_profile
         ; model
         ; finish_reason
@@ -202,6 +365,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; price_output_per_million
         ; request_latency_ms
         ; ttfrc_ms
+        ; request_wire_observation
         ; sampling = { temperature; top_p; max_tokens; thinking_budget; enable_thinking }
         ; usage =
             { input_tokens

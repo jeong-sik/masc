@@ -481,23 +481,21 @@ describe('keeper tool telemetry fetchers', () => {
         health: 'ok',
         stale_reason: null,
         memory_os: {
+          schema: 'keeper.memory_os.current_observability.v1',
           keeper: 'keeper-alpha',
-          source: 'memory_os_files',
-          producer: 'keeper_librarian|keeper_memory_os_recall',
-          selection_policy: {
-            keeper_scope: 'keeper-alpha',
-            facts_source: 'Keeper_memory_os_io.read_facts_all_for_keepers_dir',
-            episodes_source: 'Keeper_memory_os_io.read_episodes_all_for_keepers_dir',
-            category_source: 'Keeper_memory_os_types.category_to_string',
-            recall_block: 'Keeper_memory_os_recall.render_if_enabled',
-            prompt_record: 'Keeper_run_tools_hooks.record_block Prompt_block_id.Memory_os_recall',
-          },
-          facts_store: '.masc/config/keepers/keeper-alpha.facts.jsonl',
-          episodes_store: '.masc/config/keepers/keeper-alpha/episodes',
+          source: 'current_memory_snapshot',
+          producer: 'keeper_librarian',
+          snapshot_store: '.masc/keepers/keeper-alpha.memory.json',
           recall_enabled: true,
+          revision: 0,
+          updated_at: null,
+          summary: null,
+          update_source: null,
+          now: 11,
+          now_iso: '1970-01-01T00:00:11Z',
           read_errors: [],
-          episodes: { shown: 0, items: [] },
-          facts: { shown: 0, items: [] },
+          facts: { shown: 0, current: 0, items: [] },
+          change: { added: [], removed: [], retained: 0 },
         },
         entries: [
           {
@@ -511,6 +509,9 @@ describe('keeper tool telemetry fetchers', () => {
               model: 'deepseek-v4-flash',
               finish_reason: 'completed',
               blocks: [],
+              input_components: [],
+              request_runtime_profile: null,
+              request_body_bytes: null,
               execution_ids: [],
             },
             diff_vs_prev: null,
@@ -526,6 +527,9 @@ describe('keeper tool telemetry fetchers', () => {
               ts: 11,
               runtime_profile: 'local',
               blocks: [],
+              input_components: [],
+              request_runtime_profile: null,
+              request_body_bytes: null,
               execution_ids: [],
             },
             diff_vs_prev: null,
@@ -735,6 +739,28 @@ describe('parseMemoryOsFactCategory (SSOT mirror of category_of_string)', () => 
 
 describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel-real-data §4a)', () => {
   function turnRecordsPayload() {
+    const first = {
+      memory_id: 'id:retention-d0',
+      claim: 'retention D0 = signup day',
+      category: 'constraint',
+      source: { trace_id: 't-1', turn: 4, tool_call_id: 'call_9' },
+      first_seen: 1_789_000_000,
+      first_seen_iso: '2026-09-10T00:26:40Z',
+      reference_time: 1_789_500_000,
+      last_verified_at: 1_789_500_000,
+      current: true,
+    }
+    const second = {
+      memory_id: 'id:provider-observation',
+      claim: 'provider observation',
+      category: 'fact',
+      source: { trace_id: 't-2', turn: 5 },
+      first_seen: 1_789_100_000,
+      first_seen_iso: '2026-09-11T04:13:20Z',
+      reference_time: 1_789_100_000,
+      last_verified_at: null,
+      current: true,
+    }
     return {
       keeper: 'keeper-alpha',
       count: 0,
@@ -751,45 +777,29 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
       stale_reason: 'no_entries',
       entries: [],
       memory_os: {
+        schema: 'keeper.memory_os.current_observability.v1',
         keeper: 'keeper-alpha',
-        source: 'memory_os_files',
-        producer: 'keeper_librarian|keeper_memory_os_recall',
-        selection_policy: {
-          keeper_scope: 'keeper-alpha',
-          facts_source: 'Keeper_memory_os_io.read_facts_all_for_keepers_dir',
-          episodes_source: 'Keeper_memory_os_io.read_episodes_all_for_keepers_dir',
-          category_source: 'Keeper_memory_os_types.category_to_string',
-          recall_block: 'Keeper_memory_os_recall.render_if_enabled',
-          prompt_record: 'Keeper_run_tools_hooks.record_block Prompt_block_id.Memory_os_recall',
-        },
-        facts_store: '.masc/config/keepers/keeper-alpha.facts.jsonl',
-        episodes_store: '.masc/config/keepers/keeper-alpha/episodes',
+        source: 'current_memory_snapshot',
+        producer: 'keeper_librarian',
+        snapshot_store: '.masc/keepers/keeper-alpha.memory.json',
         recall_enabled: true,
+        revision: 1,
+        updated_at: 1_789_000_000,
+        summary: 'current selection',
+        update_source: {
+          kind: 'librarian',
+          trace_id: 't-1',
+          generation: 1,
+        },
+        now: 1_789_000_000,
+        now_iso: '2026-09-10T00:26:40Z',
         read_errors: [],
-        episodes: { shown: 0, items: [] },
         facts: {
           shown: 2,
-          items: [
-            {
-              claim: 'retention D0 = signup day',
-              category: 'constraint',
-              source: { trace_id: 't-1', turn: 4, tool_call_id: 'call_9' },
-              first_seen: 1_789_000_000,
-              first_seen_iso: '2026-09-10T00:26:40Z',
-              reference_time: 1_789_500_000,
-              last_verified_at: 1_789_500_000,
-            },
-            {
-              claim: 'provider observation',
-              category: 'fact',
-              source: { trace_id: 't-2', turn: 5 },
-              first_seen: 1_789_100_000,
-              first_seen_iso: '2026-09-11T04:13:20Z',
-              reference_time: 1_789_100_000,
-              last_verified_at: null,
-            },
-          ],
+          current: 2,
+          items: [first, second],
         },
+        change: { added: [first, second], removed: [], retained: 0 },
       },
     }
   }
@@ -828,11 +838,9 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
     expect(result.memory_os.facts.items[0]?.claim).toBe('  exact claim bytes  ')
   })
 
-  it('rejects the retired Memory OS schema field', async () => {
+  it('rejects a non-current Memory OS schema token', async () => {
     const payload = turnRecordsPayload()
-    Object.assign(payload.memory_os, {
-      schema: 'keeper.memory_os.recall_observability.v2',
-    })
+    payload.memory_os.schema = 'keeper.memory_os.recall_observability.v0'
     stubTurnRecords(payload)
 
     await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
@@ -840,9 +848,9 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
     )
   })
 
-  it('rejects keeper scope drift across the response and Memory OS projection', async () => {
+  it('rejects keeper identity drift across the response and Memory OS projection', async () => {
     const payload = turnRecordsPayload()
-    payload.memory_os.selection_policy.keeper_scope = 'other-keeper'
+    payload.memory_os.keeper = 'other-keeper'
     stubTurnRecords(payload)
 
     await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
@@ -863,8 +871,7 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
   it('rejects dead observability fields outside the current closed projection', async () => {
     const payload = turnRecordsPayload()
     Object.assign(payload.memory_os, {
-      now: 1_790_000_000,
-      now_iso: '2026-09-21T00:00:00Z',
+      selection_policy: { retired: true },
     })
     stubTurnRecords(payload)
 
@@ -891,7 +898,7 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
 
   it('rejects retired selection-policy fields', async () => {
     const payload = turnRecordsPayload()
-    Object.assign(payload.memory_os.selection_policy, {
+    Object.assign(payload.memory_os, {
       claim_kind_source: 'Keeper_memory_os_types.claim_kind_to_string',
     })
     stubTurnRecords(payload)
@@ -992,19 +999,23 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
 
   it('rejects an unsafe source turn range', async () => {
     const payload = turnRecordsPayload()
-    Object.assign(payload.memory_os.episodes, {
-      shown: 1,
-      items: [{
-        trace_id: 'episode-trace',
-        generation: 1,
-        created_at: 1_789_000_000,
-        claim_count: 0,
-        source_turn_range: {
-          lo: Number.MAX_SAFE_INTEGER + 1,
-          hi: Number.MAX_SAFE_INTEGER + 1,
-        },
-        summary: 'unsafe range',
-      }],
+    Object.assign(payload.memory_os, {
+      episodes: {
+        shown: 1,
+        terminal_markers: 0,
+        items: [{
+          trace_id: 'episode-trace',
+          generation: 1,
+          created_at: 1_789_000_000,
+          terminal_marker: null,
+          claim_count: 0,
+          source_turn_range: {
+            lo: Number.MAX_SAFE_INTEGER + 1,
+            hi: Number.MAX_SAFE_INTEGER + 1,
+          },
+          summary: 'unsafe range',
+        }],
+      },
     })
     stubTurnRecords(payload)
 

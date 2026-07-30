@@ -253,23 +253,19 @@ val keeper_chat_receipt_route : string -> (string * string) option
 
 (** {1 Memory-OS dashboard JSON} *)
 
-val memory_os_fact_json : Keeper_memory_os_types.fact -> Yojson.Safe.t
-(** RFC-keeper-memory-panel-real-data §4a: one fact's read-only dashboard projection — claim, typed
-    category, provenance, first-seen, verification, and derived reference timestamps. Serializes
-    only fields present on [fact]; it
-    cannot emit the score fields RFC-0247 deleted (they are not on the record).
-    Exported so the test suite can assert the JSON shape (and that drift guard)
-    in isolation, per the module's "JSON shapes exported for testing" convention. *)
+val memory_os_fact_json :
+  current:bool -> Keeper_memory_os_types.fact -> Yojson.Safe.t
+(** One current fact's read-only dashboard projection. [current] is derived
+    from snapshot membership; no retention, score, or legacy kind field is
+    serialized. *)
 
-val memory_os_dashboard_json :
-  keepers_dir:string -> keeper_id:string -> Yojson.Safe.t
-(** RFC-keeper-memory-panel-real-data §4a: the full recall-observability payload
-    for one keeper — episode/fact counts plus the per-row [items] arrays read
-    from the keeper's on-disk stores. Exported so the test suite can assert the
-    facts [items] are wired (one row per persisted fact); [memory_os_fact_json],
-    being a pure per-fact projection, cannot guard that wiring on its own.
-    Facts and episodes are read under the same per-Keeper episode-bundle lock,
-    so one payload cannot mix revisions across a concurrent publication. *)
+val memory_os_dashboard_json
+  :  config:Workspace.config
+  -> keeper_id:string
+  -> Yojson.Safe.t
+(** Current-memory observability payload for one keeper. Recall and this
+    projection read the same snapshot; [change] exposes exact added/removed
+    facts from the latest atomic Librarian or explicit-write update. *)
 
 val compaction_snapshots_json :
   config:Workspace.config -> keeper_id:string -> limit:int -> Yojson.Safe.t

@@ -1,11 +1,10 @@
 (** Keeper_request_wire_observation — the serialized request body size OAS
     admitted for one keeper turn.
 
-    Only a refused request reports its size today
-    ([Agent_sdk.Retry.Request_body_too_large] carries [actual_bytes]), so the
-    admitted population is unmeasured and nothing can compare a keeper's real
-    wire size against its runtime's [max_request_body_bytes]. Nothing MASC
-    already computes substitutes:
+    OAS's provider-specific serialization observer measures admitted requests;
+    a refused request instead carries the same exact size in
+    [Agent_sdk.Retry.Request_body_too_large.actual_bytes]. Nothing MASC already
+    computes substitutes:
     [Keeper_context_core_accessors.serialize_context] covers
     [{system_prompt, messages}] and excludes tool schemas and every
     provider-specific stream field, and [last_input_tokens] is a different unit
@@ -16,21 +15,35 @@
     stream-field injection, and after its own serialized-body admission check,
     so [body_bytes] is the exact admitted count. The observation is diagnostic:
     OAS reports a rejecting or raising callback as typed failure evidence and
-    does not rewrite the provider result. *)
+    does not rewrite the provider result. The rejected-request projection is
+    handled at the typed provider-attempt result boundary, not by this metric
+    observer. *)
 
 val metric : Keeper_metrics.t
 (** Histogram the admitted byte count lands in, labelled by keeper and the
     exact runtime and body cap whose provider configuration admitted the
     request. *)
 
+val record :
+  keeper_name:string ->
+  runtime_id:string ->
+  max_request_body_bytes:int ->
+  body_bytes:int ->
+  unit
+(** Record one exact wire observation at the upper Keeper consumer. Provider
+    dispatch only forwards the typed boundary value and does not depend on the
+    metric store. *)
+
 val observer :
+  ?on_observation:(runtime_id:string -> body_bytes:int -> unit) ->
   keeper_name:string ->
   runtime_id:string ->
   max_request_body_bytes:int ->
   Agent_sdk.Agent.pre_dispatch_serialization_observer
-(** [observer ~keeper_name ~runtime_id ~max_request_body_bytes] records
-    [body_bytes] under {!metric} and admits the observation. The cap is the
-    value already validated on the final provider config, so a hot-reload that
-    changes a runtime's cap starts a distinct metric series. It never rejects:
-    this path exists only to measure, and a rejection would manufacture typed
-    failure evidence out of measurement. *)
+(** [observer ?on_observation ~keeper_name ~runtime_id
+    ~max_request_body_bytes] records [body_bytes] under {!metric}, forwards the
+    same exact boundary value to [on_observation], and admits the observation.
+    The cap is the value already validated on the final provider config, so a
+    hot-reload that changes a runtime's cap starts a distinct metric series. It
+    never rejects: this path exists only to measure, and a rejection would
+    manufacture typed failure evidence out of measurement. *)

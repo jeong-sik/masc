@@ -164,8 +164,8 @@ let test_compaction_plan_schema_uses_codec_ssot () =
 
 let test_librarian_claim_schema_requires_current_nullable_metadata () =
   let claim_schema =
-    Keeper_structured_output_schema.librarian_episode_output_schema
-    |> schema_property Keeper_librarian.wire_field_claims
+    Keeper_structured_output_schema.librarian_current_output_schema
+    |> schema_property Keeper_librarian.wire_field_new_claims
     |> schema_items
   in
   check

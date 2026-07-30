@@ -110,7 +110,7 @@ type t =
   | WorkspaceHeartbeatFailures
   | TurnMetricsSnapshotFailures
   | OasExecutionErrors
-  | EpisodeCreateFailures
+  | MemoryOsLibrarianFailures
   | MemoryActivityEmitFailures
   | SupervisorSweepFailures
   | TomlReconcileSweepFailures
@@ -134,6 +134,7 @@ type t =
   | MemoryLanePending
   | MemoryLaneInFlight
   | MemoryLaneLatestPending
+  | MemoryLaneExecutionSlotBusy
   | WriteMetaCycleFailures
   | MetricsSseFailures
   | ChatStoreFailures
@@ -176,12 +177,8 @@ type t =
   | MemoryRecallHistorySwallowedExceptions
   | MemoryRecallReadErrors
   | MemoryOsRecallUnavailable
-  | MemoryOsReobserveEchoSuppressed
   | MemoryOsExplicitFactWrite
   | MemoryOsInertTurnExtractionSkipped
-  | MemoryOsRecallFactsTruncated
-  | MemoryOsRecallEpisodesTruncated
-  | MemoryOsRecallBytesOverBudget
   | RuntimeRequestWireBytes
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze

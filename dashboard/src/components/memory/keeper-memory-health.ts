@@ -1,8 +1,8 @@
-// KeeperMemoryHealth — per-keeper fact-store observability panel.
+// KeeperMemoryHealth — per-keeper current-memory snapshot observability.
 //
 // Read-only diagnostic surface for Lab > 키퍼 메모리 상태.
-// Shows fact-store sizes, duplicate claim-identity diagnostics, and the
-// fleet-wide librarian cadence counter.
+// Shows the single current snapshot revision, exact latest delta, read failures,
+// and Librarian lane pressure. There is no legacy event/fact-store or GC view.
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
@@ -15,8 +15,8 @@ import {
 } from '../../api/dashboard'
 import { DEFAULT_PANEL_REFRESH_MS, formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 
-const DUPLICATE_CLAIM_IDENTITY_ROWS_ALERT_TARGET: KeeperMemoryHealthAlertTarget =
-  'duplicate_claim_identity_rows'
+const SNAPSHOT_READ_ERROR_TARGET: KeeperMemoryHealthAlertTarget = 'snapshot_read_error'
+const LIBRARIAN_LANE_BUSY_TARGET: KeeperMemoryHealthAlertTarget = 'librarian_lane_busy'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -37,24 +37,28 @@ function isRowWarning(entry: KeeperMemoryHealthKeeperEntry): boolean {
 }
 
 function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
-  const ratioStr = entry.events_bytes_to_facts_bytes_ratio.toFixed(2)
   const alerts = entryAlerts(entry)
   const warn = isRowWarning(entry)
-  const duplicateClaimIdentityRowsWarn =
-    hasTargetAlert(alerts, DUPLICATE_CLAIM_IDENTITY_ROWS_ALERT_TARGET)
+  const readErrorWarn = hasTargetAlert(alerts, SNAPSHOT_READ_ERROR_TARGET)
+  const laneBusyWarn = hasTargetAlert(alerts, LIBRARIAN_LANE_BUSY_TARGET)
 
   return html`
     <tr class=${warn ? 'kmh-row--warn' : ''}>
       <td>${entry.keeper_id}</td>
+      <td>${entry.revision}</td>
       <td>${entry.facts.toLocaleString()}</td>
-      <td>${formatBytes(entry.facts_bytes)}</td>
+      <td>${formatBytes(entry.snapshot_bytes)}</td>
+      <td><span class="kmh-badge kmh-badge--ok">+${entry.added}</span></td>
+      <td><span class="kmh-badge kmh-badge--ok">−${entry.removed}</span></td>
       <td>
-        <span>${ratioStr}</span>
+        ${laneBusyWarn
+          ? html`<span class="kmh-badge kmh-badge--warn">${entry.librarian_lane_busy}</span>`
+          : html`<span class="kmh-badge kmh-badge--ok">${entry.librarian_lane_busy}</span>`}
       </td>
       <td>
-        ${duplicateClaimIdentityRowsWarn
-          ? html`<span class="kmh-badge kmh-badge--warn">${entry.duplicate_claim_identity_rows}</span>`
-          : html`<span class="kmh-badge kmh-badge--ok">${entry.duplicate_claim_identity_rows}</span>`}
+        ${readErrorWarn
+          ? html`<span class="kmh-badge kmh-badge--warn" title=${entry.read_error ?? ''}>오류</span>`
+          : html`<span class="kmh-badge kmh-badge--ok">정상</span>`}
       </td>
       <td>
         ${alerts.length > 0
@@ -127,8 +131,8 @@ export function KeeperMemoryHealth() {
 
   const generatedAt = new Date(data.generated_at * 1000).toLocaleTimeString()
   const totalAlerts = data.alert_summary.total_alerts
-  const duplicateClaimIdentityRowsWarn =
-    data.alert_summary.duplicate_claim_identity_rows_keepers > 0
+  const readErrorWarn = data.alert_summary.snapshot_read_error_keepers > 0
+  const laneBusyWarn = data.alert_summary.librarian_lane_busy_keepers > 0
 
   return html`
     <div class="kmh-panel">
@@ -139,18 +143,28 @@ export function KeeperMemoryHealth() {
             <span class="kmh-stat-label">전체 사실</span>
             <span class="kmh-stat-value">${data.totals.facts.toLocaleString()}</span>
           </div>
-          <div class="kmh-stat" data-stat-key="facts-bytes">
-            <span class="kmh-stat-label">사실 크기</span>
-            <span class="kmh-stat-value">${formatBytes(data.totals.facts_bytes)}</span>
+          <div class="kmh-stat" data-stat-key="snapshot-bytes">
+            <span class="kmh-stat-label">스냅샷 크기</span>
+            <span class="kmh-stat-value">${formatBytes(data.totals.snapshot_bytes)}</span>
           </div>
-          <div class="kmh-stat" data-stat-key="events-bytes">
-            <span class="kmh-stat-label">이벤트 크기</span>
-            <span class="kmh-stat-value">${formatBytes(data.totals.events_bytes)}</span>
+          <div class="kmh-stat" data-stat-key="added">
+            <span class="kmh-stat-label">최근 추가</span>
+            <span class="kmh-stat-value">+${data.totals.added}</span>
           </div>
-          <div class="kmh-stat" data-stat-key="duplicate-claim-identity-rows">
-            <span class="kmh-stat-label">동일 claim identity 행</span>
-            <span class=${`kmh-stat-value${duplicateClaimIdentityRowsWarn ? ' kmh-stat-value--warn' : ''}`}>
-              ${data.totals.duplicate_claim_identity_rows}
+          <div class="kmh-stat" data-stat-key="removed">
+            <span class="kmh-stat-label">최근 제거</span>
+            <span class="kmh-stat-value">−${data.totals.removed}</span>
+          </div>
+          <div class="kmh-stat" data-stat-key="read-errors">
+            <span class="kmh-stat-label">읽기 오류</span>
+            <span class=${`kmh-stat-value${readErrorWarn ? ' kmh-stat-value--warn' : ''}`}>
+              ${data.totals.read_errors}
+            </span>
+          </div>
+          <div class="kmh-stat" data-stat-key="librarian-lane-busy">
+            <span class="kmh-stat-label">Librarian lane busy</span>
+            <span class=${`kmh-stat-value${laneBusyWarn ? ' kmh-stat-value--warn' : ''}`}>
+              ${data.totals.librarian_lane_busy}
             </span>
           </div>
           <div class="kmh-stat" data-stat-key="alerts">
@@ -167,46 +181,27 @@ export function KeeperMemoryHealth() {
             <span class="kmh-stat-label">키퍼 수</span>
             <span class="kmh-stat-value">${data.keepers.length}</span>
           </div>
-          <div class="kmh-stat" data-stat-key="read-errors">
-            <span class="kmh-stat-label">읽기 오류</span>
-            <span class=${`kmh-stat-value${data.read_error_count > 0 ? ' kmh-stat-value--warn' : ''}`}>
-              ${data.read_error_count}
-            </span>
-          </div>
         </div>
         <div class="kmh-refresh-label">
           ${formatAutoRefreshLabel(DEFAULT_PANEL_REFRESH_MS)} — 기준 ${generatedAt}
         </div>
       </div>
 
-      ${data.read_errors.length > 0
-        ? html`
-          <div class="kmh-read-errors" role="alert">
-            <strong>Memory OS 저장소 읽기 오류 ${data.read_error_count}건</strong>
-            <ul>
-              ${data.read_errors.map(readError => html`
-                <li key=${readError.keeper_id}>
-                  <code>${readError.keeper_id}</code>
-                  <span>${readError.error}</span>
-                </li>
-              `)}
-            </ul>
-          </div>
-        `
-        : null}
-
       ${data.keepers.length === 0
-        ? html`<p class="kmh-empty">등록된 키퍼 팩트 스토어 없음.</p>`
+        ? html`<p class="kmh-empty">등록된 current-memory snapshot 없음.</p>`
         : html`
           <div class="kmh-table-wrap">
             <table class="kmh-table">
               <thead>
                 <tr>
                   <th>키퍼</th>
+                  <th>revision</th>
                   <th>사실</th>
                   <th>bytes</th>
-                  <th>event bytes:fact bytes 비율</th>
-                  <th>동일 claim identity 행</th>
+                  <th>추가</th>
+                  <th>제거</th>
+                  <th>lane busy</th>
+                  <th>snapshot</th>
                   <th>경보</th>
                 </tr>
               </thead>

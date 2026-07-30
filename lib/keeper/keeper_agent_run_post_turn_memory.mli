@@ -1,6 +1,6 @@
 (** Post-turn memory write series for [Keeper_agent_run.run_turn].
 
-    Extracts deterministic writes, LLM librarian records, and quality metrics
+    Extracts deterministic writes, LLM current-memory selection, and quality metrics
     from Step 8 behind [run ~config ~meta ...]. It does not rewrite or delete
     durable Memory OS records: semantic supersession requires a separate,
     explicit typed Memory operation, never a storage-pressure survival rule.
@@ -35,7 +35,7 @@ val run :
     delegation request artifacts on this post-turn memory lane rather than on
     the decision-record append path.
 
-    [turn_effect_record] gates only the librarian sub-stage. On
+    [turn_effect_record] gates only the current-memory Librarian sub-stage. On
     [Inert_autonomous_turn] the librarian unit is never submitted, so its
     cadence counter does not advance and an idle stretch spends no extraction
     budget.

@@ -11,7 +11,6 @@ type recall_record =
   ; turn : int
   ; injected_fact_keys : string list
   ; injected_fact_key_count : int
-  ; injected_episode_key_count : int
   ; failure_reason : string option
   ; ts : float option
   }
@@ -221,10 +220,7 @@ let parse_json_line ~path ~line_no line =
    because the scan is unbounded (unlike the dashboard's bounded recent-lines
    sample).
 
-   The previous "injected_fact_key_count" / "injected_episode_key_count"
-   override fields are retired: no writer ever produced them (only hand-built
-   test fixtures did), and every real row's injected count is the length of
-   its own key list. *)
+   The injected count is the length of the materialized current fact-key set. *)
 let parse_recall_ledger_json json = Result.to_option (Ledger.record_of_json_result json)
 
 let recall_record_of_materialized (m : Ledger.materialized) : recall_record =
@@ -233,7 +229,6 @@ let recall_record_of_materialized (m : Ledger.materialized) : recall_record =
   ; turn = m.record.turn
   ; injected_fact_keys = m.fact_keys
   ; injected_fact_key_count = List.length m.fact_keys
-  ; injected_episode_key_count = List.length m.episode_keys
   ; failure_reason = m.record.failure_reason
   ; ts = m.record.ts
   }

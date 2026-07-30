@@ -286,15 +286,15 @@ export { fetchKeeperToolCalls } from './dashboard-keeper-tool-calls'
 
 export type {
   TurnBlock,
+  TurnInputComponent,
   TurnRecordEntry,
   TurnBlockDiff,
   TurnRecordRow,
-  MemoryOsEpisodeSummary,
   MemoryOsFactCategoryTag,
   MemoryOsFactCategory,
   MemoryOsFactProvenance,
   MemoryOsFact,
-  MemoryOsSelectionPolicy,
+  MemoryOsUpdateSource,
   MemoryOsTurnRecordSnapshot,
   TurnRecordsResponse,
   KeeperCompactionSnapshotLinks,

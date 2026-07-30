@@ -33,7 +33,7 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
     fetchRuntimeProviders: vi.fn().mockResolvedValue({ providers: [] }),
     fetchKeeperTurnRecords: vi.fn().mockResolvedValue({
       keeper: 'masc-improver',
-      count: 2,
+      count: 1,
       skipped_rows: 0,
       source: 'turn_record',
       producer: 'keeper_agent_run.run_turn|keeper_turn_record_writer',
@@ -47,23 +47,21 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
       stale_reason: null,
       coverage_gaps: [],
       memory_os: {
+        schema: 'keeper.memory_os.current_observability.v1',
         keeper: 'masc-improver',
-        source: 'memory_os_files',
-        producer: 'keeper_librarian|keeper_memory_os_recall',
-        selection_policy: {
-          keeper_scope: 'masc-improver',
-          facts_source: 'Keeper_memory_os_io.read_facts_all_for_keepers_dir',
-          episodes_source: 'Keeper_memory_os_io.read_episodes_all_for_keepers_dir',
-          category_source: 'Keeper_memory_os_types.category_to_string',
-          recall_block: 'Keeper_memory_os_recall.render_if_enabled',
-          prompt_record: 'Keeper_run_tools_hooks.record_block Prompt_block_id.Memory_os_recall',
-        },
-        facts_store: '.masc/config/keepers/masc-improver.facts.jsonl',
-        episodes_store: '.masc/config/keepers/masc-improver/episodes',
+        source: 'current_memory_snapshot',
+        producer: 'keeper_librarian',
+        snapshot_store: '.masc/keepers/masc-improver.memory.json',
         recall_enabled: true,
+        revision: 0,
+        updated_at: null,
+        summary: null,
+        update_source: null,
+        now: 1_782_444_590,
+        now_iso: '2026-06-26T03:03:10Z',
         read_errors: [],
-        episodes: { shown: 0, current: 0, expired: 0, items: [] },
-        facts: { shown: 0, current: 0, expired: 0, items: [] },
+        facts: { shown: 0, current: 0, items: [] },
+        change: { added: [], removed: [], retained: 0 },
       },
       entries: [
         {
@@ -72,11 +70,15 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
             keeper: 'masc-improver',
             trace_id: 'trace-cmp',
             absolute_turn: 12,
+            turn_ref: 'trace-cmp#12',
             blocks: [
               { block: 'persona', bytes: 2048, digest: 'persona-digest-aaaaaaaa' },
               { block: 'dynamic_context', bytes: 1024, digest: 'dynamic-digest-bbbbbbbb' },
               { block: 'memory_os_recall', bytes: 512, digest: 'memory-digest-cccccccc' },
             ],
+            input_components: [],
+            request_runtime_profile: null,
+            request_body_bytes: null,
             runtime_profile: 'oas-seoul-1',
             model: 'runtime',
             finish_reason: 'completed',
@@ -1051,7 +1053,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('trace-live')
     expect(container.textContent).toContain('before/after token count는 기록하지 않았습니다')
     expect(container.textContent).toContain('latest turn-record')
-    expect(container.textContent).toContain('선택한 snapshot trace가 최근 2개 turn-records 안에 없어')
+    expect(container.textContent).toContain('선택한 snapshot trace가 최근 1개 turn-records 안에 없어')
     expect(container.textContent).not.toContain('아직 이 keeper에서 durable compaction snapshot이 없습니다.')
   })
 

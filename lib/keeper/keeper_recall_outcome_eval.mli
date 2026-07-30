@@ -11,7 +11,6 @@ type recall_record =
   ; turn : int
   ; injected_fact_keys : string list
   ; injected_fact_key_count : int
-  ; injected_episode_key_count : int
   ; failure_reason : string option
   ; ts : float option
   }

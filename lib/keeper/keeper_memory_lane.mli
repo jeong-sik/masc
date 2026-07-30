@@ -37,9 +37,9 @@ type lane =
       (** Local append to the keeper memory bank. One-shot: a drop here is
           permanent, so it must not queue behind provider-backed work. *)
   | Librarian
-      (** Provider-backed episode extraction. Holds its lane across the round
-          trip. Saturated submissions replace the queued latest snapshot, so
-          cleanup remains reliably eventual without blocking the Keeper turn. *)
+      (** Provider-backed current-memory selection. Holds its lane across the
+          round trip. Saturated submissions replace the queued latest snapshot,
+          so cleanup remains reliably eventual without blocking the Keeper turn. *)
 
 type outcome =
   | Submitted

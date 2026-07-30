@@ -643,9 +643,6 @@ let run_turn
     @@ fun () ->
     let tools = s.Keeper_run_tools.tools in
     let hooks = s.Keeper_run_tools.hooks in
-    let model_input_projection =
-      s.Keeper_run_tools.model_input_projection
-    in
     let acc = s.Keeper_run_tools.acc in
     let agent_ref : Agent_sdk.Agent.t option ref = ref None in
     let final_oas_turn_ordinal_ref =
@@ -659,6 +656,34 @@ let run_turn
     in
     let receipt_response_text_present_ref =
       s.Keeper_run_tools.receipt_response_text_present_ref
+    in
+    let request_wire_observation_ref = ref None in
+    let request_input_messages_ref = ref None in
+    let source_model_input_projection =
+      s.Keeper_run_tools.model_input_projection
+    in
+    let model_input_projection messages =
+      match source_model_input_projection messages with
+      | Error _ as error -> error
+      | Ok projected_messages as result ->
+        let prompt_context_present =
+          Option.is_some acc.Keeper_run_tools.extra_system_context_size
+        in
+        (match
+           Keeper_agent_prompt_metrics.provider_content_messages
+             ~prompt_context_present
+             ~projection_input:messages
+             ~projected_messages
+         with
+         | Some provider_content ->
+           request_input_messages_ref := Some provider_content
+         | None ->
+           request_input_messages_ref := None;
+           Log.Keeper.warn
+             "turn input composition unavailable: keeper=%s trace=%s \
+              reason=model_input_projection_rewrote_prefix"
+             meta.name trace_id);
+        result
     in
     (* 8. Run Agent *)
     let record_turn_progress, yield_on_tool, on_yield, on_resume, on_event =
@@ -836,6 +861,22 @@ let run_turn
                       ~on_runtime_observation:
                         (fun observation ->
                            receipt_runtime_observation_ref := Some observation)
+                      ~on_request_wire_observation:
+                        (fun
+                          ~runtime_id
+                          ~max_request_body_bytes
+                          ~body_bytes
+                        ->
+                           Keeper_request_wire_observation.record
+                             ~keeper_name:meta.name
+                             ~runtime_id
+                             ~max_request_body_bytes
+                             ~body_bytes;
+                           request_wire_observation_ref :=
+                             Some
+                               { Turn_record.runtime_profile = runtime_id
+                               ; body_bytes
+                               })
                       ())
          in
          (* Trace-store failure isolation: [raw_trace_for_dispatch]
@@ -879,14 +920,21 @@ let run_turn
                  in
                  let usage = Keeper_context_runtime.usage_of_response result.response in
                  let ctx_composition =
-                   build_ctx_composition_metrics
-                     ~system_prompt:turn_system_prompt
-                     ~dynamic_context
-                     ~memory_context
-                     ~temporal_context
-                     ~user_message
-                     ~history_messages
-                     ~actual_input_tokens:(Some usage.input_tokens)
+                   match !request_input_messages_ref with
+                   | Some input_messages ->
+                     Keeper_agent_prompt_metrics.build_ctx_composition_metrics
+                       ~prompt_blocks:acc.prompt_blocks
+                       ~tools
+                       ~input_messages
+                       ~actual_input_tokens:(Some usage.input_tokens)
+                   | None ->
+                     { Keeper_agent_prompt_metrics.actual_input_tokens =
+                         (if usage.input_tokens > 0
+                          then Some usage.input_tokens
+                          else None)
+                     ; attributed_bytes = 0
+                     ; segments = []
+                     }
                  in
                  let completion_observation ()
                      : Keeper_execution_receipt.completion_contract_result =
@@ -1099,6 +1147,28 @@ let run_turn
         let (price_input_per_million, price_output_per_million) =
           Runtime.pricing_of_runtime_id runtime_id_string
         in
+        let input_components =
+          let segments =
+            match turn_result, !request_input_messages_ref with
+            | Ok result, _ ->
+              result.Keeper_agent_result.ctx_composition.segments
+            | Error _, Some input_messages ->
+              (Keeper_agent_prompt_metrics.build_ctx_composition_metrics
+                 ~prompt_blocks:acc.prompt_blocks
+                 ~tools
+                 ~input_messages
+                 ~actual_input_tokens:None)
+                .segments
+            | Error _, None -> []
+          in
+          List.map
+            (fun
+              (component,
+               (segment :
+                 Keeper_agent_prompt_metrics.prompt_segment_metrics)) ->
+               { Turn_record.component = component; bytes = segment.bytes })
+            segments
+        in
         Keeper_turn_record_writer.write
           ~config
           ~keeper_name:meta.name
@@ -1115,6 +1185,7 @@ let run_turn
           ~price_output_per_million
           ~request_latency_ms
           ~ttfrc_ms
+          ~request_wire_observation:!request_wire_observation_ref
           ~sampling:
             { temperature = Some temperature
             ; top_p = Runtime.top_p_of_runtime_id runtime_id_string
@@ -1125,6 +1196,7 @@ let run_turn
           ~usage
           ~execution_ids
           ~blocks:acc.prompt_blocks
+          ~input_components
           ();
         (* RFC-0233 §2.3 PR-4: project the same record onto the ambient
            turn span. Both turn drivers (unified "invoke_agent <keeper>"

@@ -48,11 +48,9 @@ val wire_claim_fields : string list
 val prompt_variables : input -> (string * string) list
 
 type parse_error =
-  | Empty_output
-  | Invalid_json of string
-  | Json_string_invalid_json of string
   | Top_level_not_object
   | Unexpected_field of string
+  | Duplicate_field of string
   | Missing_required_fields
   | Claim_schema_mismatch
   | Unknown_retained_claim_id of string
@@ -65,10 +63,4 @@ val selection_of_json_result
   :  ?now:float
   -> input
   -> Yojson.Safe.t
-  -> (selection, parse_error) result
-
-val selection_of_output_result
-  :  ?now:float
-  -> input
-  -> string
   -> (selection, parse_error) result

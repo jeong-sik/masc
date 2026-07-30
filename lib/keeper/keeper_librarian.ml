@@ -3,6 +3,12 @@
 open Keeper_memory_os_types
 
 module Canonical_tool = Agent_sdk.Canonical_tool
+module String_map = Map.Make (String)
+module String_set = Set.Make (String)
+
+type object_field_error =
+  | Unexpected_object_field of string
+  | Duplicate_object_field of string
 
 type current_selection =
   { summary : string
@@ -173,19 +179,23 @@ let field_allowed ~allowed field =
   List.exists (String.equal field) allowed
 ;;
 
-let first_unexpected_field ~allowed fields =
-  List.find_map
-    (fun (field, _) ->
-       if field_allowed ~allowed field then None else Some field)
-    fields
+let first_object_field_error ~allowed fields =
+  let rec loop seen = function
+    | [] -> None
+    | (field, _) :: rest ->
+      if String_set.mem field seen
+      then Some (Duplicate_object_field field)
+      else if not (field_allowed ~allowed field)
+      then Some (Unexpected_object_field field)
+      else loop (String_set.add field seen) rest
+  in
+  loop String_set.empty fields
 ;;
 
 type parse_error =
-  | Empty_output
-  | Invalid_json of string
-  | Json_string_invalid_json of string
   | Top_level_not_object
   | Unexpected_field of string
+  | Duplicate_field of string
   | Missing_required_fields
   | Claim_schema_mismatch
   | Unknown_retained_claim_id of string
@@ -193,11 +203,9 @@ type parse_error =
   | Duplicate_selected_claim_id of string
 
 let parse_error_to_string = function
-  | Empty_output -> "empty_output"
-  | Invalid_json msg -> "invalid_json: " ^ msg
-  | Json_string_invalid_json msg -> "json_string_invalid_json: " ^ msg
   | Top_level_not_object -> "top_level_not_object"
   | Unexpected_field field -> "unexpected_field: " ^ field
+  | Duplicate_field field -> "duplicate_field: " ^ field
   | Missing_required_fields -> "missing_required_fields"
   | Claim_schema_mismatch -> "claim_schema_mismatch"
   | Unknown_retained_claim_id identity ->
@@ -206,24 +214,6 @@ let parse_error_to_string = function
     "duplicate_retained_claim_id: " ^ identity
   | Duplicate_selected_claim_id identity ->
     "duplicate_selected_claim_id: " ^ identity
-;;
-
-let json_of_output raw =
-  let raw = String.trim raw in
-  if String.equal raw ""
-  then Error Empty_output
-  else
-    let try_parse ~on_error s =
-      try Ok (Yojson.Safe.from_string (String.trim s)) with
-      | Yojson.Json_error msg -> Error (on_error msg)
-    in
-    match try_parse raw ~on_error:(fun msg -> Invalid_json msg) with
-    | Error _ as error -> error
-    | Ok (`String inner) ->
-      if String.equal (String.trim inner) ""
-      then Error (Json_string_invalid_json "empty JSON string")
-      else try_parse inner ~on_error:(fun msg -> Json_string_invalid_json msg)
-    | Ok json -> Ok json
 ;;
 
 let claim_source ~trace_id turn tool_call_id =
@@ -305,13 +295,10 @@ let fact_of_json ~trace_id ~messages ~now (json : Yojson.Safe.t) : fact option =
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
-let unexpected_claim_field = function
-  | `Assoc fields -> first_unexpected_field ~allowed:wire_claim_fields fields
+let claim_field_error = function
+  | `Assoc fields -> first_object_field_error ~allowed:wire_claim_fields fields
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
-
-module String_map = Map.Make (String)
-module String_set = Set.Make (String)
 
 let current_facts_by_id facts =
   List.fold_left
@@ -376,8 +363,9 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
   in
   match json with
   | `Assoc fields ->
-    (match first_unexpected_field ~allowed:wire_current_fields fields with
-     | Some field -> Error (Unexpected_field field)
+    (match first_object_field_error ~allowed:wire_current_fields fields with
+     | Some (Unexpected_object_field field) -> Error (Unexpected_field field)
+     | Some (Duplicate_object_field field) -> Error (Duplicate_field field)
      | None ->
        (match
           string_field wire_field_summary fields
@@ -393,8 +381,9 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
           , Some open_items
           , Some constraints
           , Some preserved_tool_refs ) ->
-          (match List.find_map unexpected_claim_field claim_items with
-           | Some field -> Error (Unexpected_field field)
+          (match List.find_map claim_field_error claim_items with
+           | Some (Unexpected_object_field field) -> Error (Unexpected_field field)
+           | Some (Duplicate_object_field field) -> Error (Duplicate_field field)
            | None ->
              (match
                 traverse
@@ -426,12 +415,4 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
         | _ -> Error Missing_required_fields))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Error Top_level_not_object
-;;
-
-let selection_of_output_result ?now (inp : input) (raw : string) :
-  (selection, parse_error) result
-  =
-  match json_of_output raw with
-  | Error _ as error -> error
-  | Ok json -> selection_of_json_result ?now inp json
 ;;

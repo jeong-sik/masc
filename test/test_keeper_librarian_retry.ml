@@ -128,27 +128,43 @@ let test_new_claim_cannot_recreate_omitted_current_identity () =
   | Ok _ -> fail "omitted current identity was recreated as a new claim"
 ;;
 
-let test_strict_output_boundary () =
-  let exact = Yojson.Safe.to_string (selection_json ()) in
-  (match Librarian.selection_of_output_result ~now:2_000_000. (input ()) exact with
+let test_strict_json_boundary () =
+  (match parse (selection_json ()) with
    | Ok _ -> ()
    | Error error ->
      failf "exact JSON rejected: %s" (Librarian.parse_error_to_string error));
-  let wrapped = Yojson.Safe.to_string (`String exact) in
-  (match Librarian.selection_of_output_result ~now:2_000_000. (input ()) wrapped with
-   | Ok _ -> ()
-   | Error error ->
-     failf "exact JSON string rejected: %s" (Librarian.parse_error_to_string error));
-  match
-    Librarian.selection_of_output_result
-      ~now:2_000_000.
-      (input ())
-      ("```json\n" ^ exact ^ "\n```")
-  with
-  | Error (Librarian.Invalid_json _) -> ()
+  match parse (`String (Yojson.Safe.to_string (selection_json ()))) with
+  | Error Librarian.Top_level_not_object -> ()
   | Error error ->
-    failf "wrong fenced-output error: %s" (Librarian.parse_error_to_string error)
-  | Ok _ -> fail "markdown-fenced output accepted"
+    failf "wrong string-wrapper error: %s" (Librarian.parse_error_to_string error)
+  | Ok _ -> fail "string-wrapped JSON accepted"
+;;
+
+let test_duplicate_object_fields_reject () =
+  let duplicate_top =
+    match selection_json () with
+    | `Assoc fields ->
+      `Assoc ((Librarian.wire_field_summary, `String "duplicate") :: fields)
+    | _ -> assert false
+  in
+  (match parse duplicate_top with
+   | Error (Librarian.Duplicate_field field)
+     when String.equal field Librarian.wire_field_summary -> ()
+   | Error error ->
+     failf "wrong duplicate top-level error: %s" (Librarian.parse_error_to_string error)
+   | Ok _ -> fail "duplicate top-level field accepted");
+  let duplicate_claim =
+    match new_claim () with
+    | `Assoc fields ->
+      `Assoc ((Librarian.wire_field_claim, `String "duplicate") :: fields)
+    | _ -> assert false
+  in
+  match parse (selection_json ~new_claims:[ duplicate_claim ] ()) with
+  | Error (Librarian.Duplicate_field field)
+    when String.equal field Librarian.wire_field_claim -> ()
+  | Error error ->
+    failf "wrong duplicate claim error: %s" (Librarian.parse_error_to_string error)
+  | Ok _ -> fail "duplicate claim field accepted"
 ;;
 
 let test_required_current_metadata_fields_reject_when_missing_or_null () =
@@ -248,7 +264,9 @@ let () =
             test_new_claim_cannot_collide_with_retained_identity
         ; test_case "omitted/new recreation rejects" `Quick
             test_new_claim_cannot_recreate_omitted_current_identity
-        ; test_case "strict output boundary" `Quick test_strict_output_boundary
+        ; test_case "strict JSON boundary" `Quick test_strict_json_boundary
+        ; test_case "duplicate object fields reject" `Quick
+            test_duplicate_object_fields_reject
         ; test_case "required current metadata fields reject" `Quick
             test_required_current_metadata_fields_reject_when_missing_or_null
         ; test_case "prompt carries exact current selection" `Quick

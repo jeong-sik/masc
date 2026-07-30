@@ -505,7 +505,7 @@ type lifecycle_display =
   { ld_keepalive_running : bool
   ; ld_phase : string
   ; ld_pipeline_stage : string
-  ; ld_paused : bool
+  ; ld_paused : bool option
   }
 
 type lifecycle_legacy_wire_event =
@@ -523,15 +523,15 @@ let display_of_custom_event (verb : Keeper_lifecycle_events.t) : lifecycle_displ
   let open Keeper_lifecycle_events in
   match verb with
   | Started | Restarted | Reconciled ->
-    { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = false }
+    { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = Some false }
   | Purged ->
-    { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = false }
+    { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = Some false }
   | Admission_denied ->
     (* admission guard refused to launch a fiber *)
-    { ld_keepalive_running = false; ld_phase = "offline"; ld_pipeline_stage = "offline"; ld_paused = false }
+    { ld_keepalive_running = false; ld_phase = "offline"; ld_pipeline_stage = "offline"; ld_paused = Some false }
   | Dead_cleaned ->
     (* cleanup == no longer alive *)
-    { ld_keepalive_running = false; ld_phase = "dead"; ld_pipeline_stage = "offline"; ld_paused = false }
+    { ld_keepalive_running = false; ld_phase = "dead"; ld_pipeline_stage = "offline"; ld_paused = Some false }
 ;;
 
 (* Phase-derived + legacy operator strings (not custom-event verbs). Raw-string
@@ -548,31 +548,19 @@ let lifecycle_legacy_wire_event_of_string = function
 
 let display_of_phase_or_legacy_event = function
   | Legacy_running ->
-    Some { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = false }
+    Some { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = Some false }
   | Legacy_stopped ->
     Some
-      { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = false }
+      { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = None }
   | Legacy_crashed ->
     Some
-      { ld_keepalive_running = false; ld_phase = "crashed"; ld_pipeline_stage = "crashed"; ld_paused = false }
+      { ld_keepalive_running = false; ld_phase = "crashed"; ld_pipeline_stage = "crashed"; ld_paused = Some false }
   | Legacy_dead ->
-    Some { ld_keepalive_running = false; ld_phase = "dead"; ld_pipeline_stage = "offline"; ld_paused = false }
+    Some { ld_keepalive_running = false; ld_phase = "dead"; ld_pipeline_stage = "offline"; ld_paused = Some false }
   | Legacy_paused ->
-    Some { ld_keepalive_running = true; ld_phase = "paused"; ld_pipeline_stage = "paused"; ld_paused = true }
+    Some { ld_keepalive_running = true; ld_phase = "paused"; ld_pipeline_stage = "paused"; ld_paused = Some true }
   | Legacy_resumed ->
-    Some { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = false }
-
-let control_status_override_of_lifecycle_event event =
-  match lifecycle_legacy_wire_event_of_string event with
-  | Some Legacy_paused ->
-    Some Keeper_status_runtime.Cp_paused
-  | Some Legacy_resumed ->
-    Some
-      (Keeper_status_runtime.Cp_surface
-         Keeper_status_runtime.Surface_idle)
-  | Some (Legacy_running | Legacy_stopped | Legacy_crashed | Legacy_dead)
-  | None ->
-    None
+    Some { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = Some false }
 
 let display_of_phase_or_legacy_string s =
   match lifecycle_legacy_wire_event_of_string s with
@@ -599,7 +587,8 @@ let pipeline_stage_of_lifecycle_event event =
 ;;
 
 let paused_of_lifecycle_event event =
-  Option.map (fun (d : lifecycle_display) -> d.ld_paused) (lifecycle_display_of_event event)
+  Option.bind (lifecycle_display_of_event event)
+    (fun (d : lifecycle_display) -> d.ld_paused)
 ;;
 
 let keeper_agent_status_opt row =
@@ -616,8 +605,27 @@ let keeper_agent_status_opt row =
   | None | Some _ -> top_level_status ()
 ;;
 
+let control_status_override_of_lifecycle_event row event =
+  match lifecycle_legacy_wire_event_of_string event with
+  | Some Legacy_paused ->
+    Some Keeper_status_runtime.Cp_paused
+  | Some Legacy_resumed ->
+    Some
+      (Keeper_status_runtime.Cp_surface
+         Keeper_status_runtime.Surface_idle)
+  | Some Legacy_stopped ->
+    (match
+       Option.bind (keeper_agent_status_opt row)
+         Keeper_status_runtime.control_plane_status_of_string_opt
+     with
+     | Some Keeper_status_runtime.Cp_paused ->
+       Some Keeper_status_runtime.Cp_paused
+     | Some (Keeper_status_runtime.Cp_surface _) | None -> None)
+  | Some (Legacy_running | Legacy_crashed | Legacy_dead) | None -> None
+;;
+
 let patched_keeper_status row ~event ~keepalive_running =
-  match control_status_override_of_lifecycle_event event with
+  match control_status_override_of_lifecycle_event row event with
   | Some status ->
     `String (Keeper_status_runtime.control_plane_status_to_string status)
   | None when not keepalive_running -> `String "offline"

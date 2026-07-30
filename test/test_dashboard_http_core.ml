@@ -1978,18 +1978,18 @@ let test_lifecycle_event_display_values () =
      here instead of silently changing a dashboard row (the coverage test above
      only asserts [Some], not the value). *)
   let cases =
-    [ ("started", true, "running", "idle", false);
-      ("restarted", true, "running", "idle", false);
-      ("reconciled", true, "running", "idle", false);
-      ("running", true, "running", "idle", false);
-      ("resumed", true, "running", "idle", false);
-      ("paused", true, "paused", "paused", true);
-      ("purged", false, "stopped", "offline", false);
-      ("admission_denied", false, "offline", "offline", false);
-      ("dead_cleaned", false, "dead", "offline", false);
-      ("stopped", false, "stopped", "offline", false);
-      ("crashed", false, "crashed", "crashed", false);
-      ("dead", false, "dead", "offline", false);
+    [ ("started", true, "running", "idle", Some false);
+      ("restarted", true, "running", "idle", Some false);
+      ("reconciled", true, "running", "idle", Some false);
+      ("running", true, "running", "idle", Some false);
+      ("resumed", true, "running", "idle", Some false);
+      ("paused", true, "paused", "paused", Some true);
+      ("purged", false, "stopped", "offline", Some false);
+      ("admission_denied", false, "offline", "offline", Some false);
+      ("dead_cleaned", false, "dead", "offline", Some false);
+      ("stopped", false, "stopped", "offline", None);
+      ("crashed", false, "crashed", "crashed", Some false);
+      ("dead", false, "dead", "offline", Some false);
     ]
   in
   List.iter
@@ -2065,6 +2065,23 @@ let test_stopped_lifecycle_event_stays_offline () =
   check string "stopped status is offline" "offline"
     Yojson.Safe.Util.(patched |> member "status" |> to_string);
   check bool "stopped event does not manufacture a pause" false
+    Yojson.Safe.Util.(patched |> member "paused" |> to_bool)
+
+let test_stopped_lifecycle_event_preserves_durable_pause () =
+  let patched =
+    Server_dashboard_http_execution_surfaces.patch_keeper_row
+      ~keeper_name:"paused-stop-target"
+      ~event:"stopped"
+      ~keepalive_running:false
+      (`Assoc
+        [ ("name", `String "paused-stop-target")
+        ; ("status", `String "paused")
+        ; ("paused", `Bool true)
+        ])
+  in
+  check string "terminal stop preserves paused status" "paused"
+    Yojson.Safe.Util.(patched |> member "status" |> to_string);
+  check bool "terminal stop preserves durable pause flag" true
     Yojson.Safe.Util.(patched |> member "paused" |> to_bool)
 
 let test_lifecycle_cache_patch_rejects_missing_or_unknown_status () =
@@ -2572,8 +2589,10 @@ let () =
             test_paused_lifecycle_event_keeps_paused_status;
           test_case "resumed lifecycle event clears the paused status" `Quick
             test_resumed_lifecycle_event_clears_paused_status;
-          test_case "stopped lifecycle event keeps the operator pause" `Quick
+          test_case "stopped lifecycle event stays offline" `Quick
             test_stopped_lifecycle_event_stays_offline;
+          test_case "stopped lifecycle event preserves durable pause" `Quick
+            test_stopped_lifecycle_event_preserves_durable_pause;
           test_case "cache patch rejects missing or unknown status" `Quick
             test_lifecycle_cache_patch_rejects_missing_or_unknown_status;
           test_case "running keeper reconciliation rebuilds continuity brief" `Quick

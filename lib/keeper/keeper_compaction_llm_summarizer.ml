@@ -304,15 +304,16 @@ let cycle_has_tool_protocol messages =
   in
   has_tool_use && has_tool_result
 
-let eligible_source source_index = function
+let eligible_source ~first_user_seen source_index = function
   | Keeper_compaction_unit.Ordinary_message
-      { role = (Agent_sdk.Types.User | Agent_sdk.Types.Assistant) as role
-      ; content
-      ; name = None
-      ; tool_call_id = None
-      ; metadata = []
-      } ->
-    (match message_text_source role content with
+      ({ role = (Agent_sdk.Types.User | Agent_sdk.Types.Assistant)
+       ; content
+       ; name = None
+       ; tool_call_id = None
+       ; metadata = []
+       } as message)
+    when message.role <> Agent_sdk.Types.User || first_user_seen ->
+    (match message_text_source message.role content with
      | Some source -> Some { source_index; payload = Message_text source }
      | None -> None)
   | Keeper_compaction_unit.Closed_tool_cycle messages
@@ -328,23 +329,33 @@ let eligible_source source_index = function
   | Keeper_compaction_unit.Closed_tool_cycle _ ->
     None
 
-(* Every text-bearing unit is eligible; position carries no meaning here.
-
-   The first User message used to be excluded as "the goal anchor". The goal is
-   not in the message list: it is assembled into [system_prompt] every turn, and
-   [Keeper_context_core.serialize_context] keeps that field outside the
-   compacted messages, so nothing in the transcript had to be pinned to preserve
-   it. Across 130 live checkpoints the excluded message was the wake marker
-   "(autonomous wake - the current observation frame is provided per-turn in
-   system context)" 117 times and an ordinary chat line the remaining 13 -- a
-   goal statement zero times.
-
-   The exclusion was not free: [oldest_contiguous_run] stops at the first index
-   gap, so an excluded unit anywhere but index 0 truncated the window to
-   whatever preceded it. Live keeper checkpoints reached 2 selectable units out
-   of 1,156. *)
 let eligible_sources units =
-  List.mapi eligible_source units |> List.filter_map Fun.id
+  (* The first User message is the exact goal anchor. Later plain User messages
+     are part of the typed conversation state: protecting every one would split
+     a real Keeper history into one tiny window per turn and defeat boundary
+     compaction. *)
+  let rec loop source_index first_user_seen sources_rev = function
+    | [] -> List.rev sources_rev
+    | unit_ :: rest ->
+      let source = eligible_source ~first_user_seen source_index unit_ in
+      let first_user_seen =
+        first_user_seen
+        ||
+        match unit_ with
+        | Keeper_compaction_unit.Ordinary_message
+            { role = Agent_sdk.Types.User; _ } -> true
+        | Keeper_compaction_unit.Ordinary_message _
+        | Keeper_compaction_unit.Closed_tool_cycle _ ->
+          false
+      in
+      let sources_rev =
+        match source with
+        | None -> sources_rev
+        | Some source -> source :: sources_rev
+      in
+      loop (source_index + 1) first_user_seen sources_rev rest
+  in
+  loop 0 false [] units
 
 let has_eligible_units units = eligible_sources units <> []
 

@@ -51,11 +51,8 @@ let summarize_response summary =
   exact_response ~summary ~keep_from_unit_index:2
 ;;
 
-(* Below the window's first source. [make_checkpoint] opens with a User message,
-   which is selectable now, so the window starts at unit 0 and the smallest
-   valid keep boundary is 1. *)
 let invalid_boundary_response =
-  exact_response ~summary:"invalid boundary" ~keep_from_unit_index:0
+  exact_response ~summary:"invalid boundary" ~keep_from_unit_index:1
 ;;
 
 let init_runtime_fixture () =

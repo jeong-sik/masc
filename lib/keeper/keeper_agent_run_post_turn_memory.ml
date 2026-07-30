@@ -71,12 +71,12 @@ let run
   let librarian_series () =
     let librarian_input : Keeper_librarian.input =
       { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
-      ; generation
       ; messages = librarian_messages
       }
     in
     Keeper_librarian_runtime.run_best_effort
       ~base_path:config.Workspace.base_path
+      ~generation_floor:generation
       ~keeper_id:meta.name
       librarian_input
   in

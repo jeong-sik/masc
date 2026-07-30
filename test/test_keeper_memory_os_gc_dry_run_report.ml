@@ -6,12 +6,10 @@ module Report = Masc.Keeper_memory_os_gc_dry_run_report
 let fact_fixture ~now ~claim =
   { Types.claim
   ; category = Types.Fact
-  ; claim_kind = None
   ; source = { Types.trace_id = "trace-gc-dry-run"; turn = 1; tool_call_id = None }
   ; first_seen = now -. 60.0
   ; valid_until = None
   ; last_verified_at = Some now
-  ; schema_version = Types.schema_version
   ; claim_id = None
   }
 ;;
@@ -21,14 +19,10 @@ let episode_fixture ~now ~trace_id ~summary =
   ; generation = 0
   ; episode_summary = summary
   ; claims = []
-  ; open_items = []
-  ; constraints = []
-  ; preserved_tool_refs = []
   ; source_turn_range = None
   ; created_at = now
   ; valid_until = None
   ; terminal_marker = None
-  ; schema_version = Types.schema_version
   }
 ;;
 
@@ -327,7 +321,7 @@ let test_mixed_results_keep_ok_totals_and_errors () =
 (* The two expiry corners the External_state coverage in test_keeper_memory_os
    does not pin: the boundary equality ([ts >= now] is current, so [now > ts] is
    expired — explicit [valid_until] behavior is unchanged by the SSOT switch in
-   #23426), and claim kind/first_seen never creating an implicit horizon. *)
+   #23426), and category/first_seen never creating an implicit horizon. *)
 let test_ttl_expired_matches_explicit_horizon_boundary () =
   let now = 1_000_000.0 in
   let base = fact_fixture ~now ~claim:"horizon boundary fixture" in
@@ -344,8 +338,7 @@ let test_ttl_expired_matches_explicit_horizon_boundary () =
     false
     (GC.ttl_expired
        ~now
-       { base with Types.claim_kind = Some Types.External_state
-       ; first_seen = now -. 1_000_000.0
+       { base with first_seen = now -. 1_000_000.0
        ; valid_until = Some (now +. 60.0)
        })
 ;;

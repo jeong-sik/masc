@@ -242,10 +242,10 @@ export function KeeperMemoryOsRecallPanel({ keeperName }: { keeperName: string }
     return html`<div class="text-xs text-[var(--color-status-err)] p-3 v2-monitoring-panel" role="alert">${resource.state.value.error}</div>`
   }
 
-  if (!response?.memory_os) {
+  if (!response) {
     return html`
-      <div class="p-3 text-xs text-[var(--color-fg-muted)] v2-monitoring-panel">
-        Memory OS recall source 없음
+      <div class="p-3 text-xs text-[var(--color-status-err)] v2-monitoring-panel" role="alert">
+        Memory OS 응답 상태 없음
       </div>
     `
   }
@@ -1286,7 +1286,7 @@ export function KeeperTurnInspector({
     return html`<div class="text-xs text-[var(--color-status-err)] p-4 v2-monitoring-panel" role="alert">${resource.state.value.error}</div>`
   }
 
-  const memoryOsPanel = response?.memory_os
+  const memoryOsPanel = response
     ? html`<${MemoryOsRecallSourcePanel} snapshot=${response.memory_os} rows=${rows} />`
     : null
 

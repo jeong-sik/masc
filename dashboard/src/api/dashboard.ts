@@ -292,7 +292,6 @@ export type {
   MemoryOsEpisodeSummary,
   MemoryOsFactCategoryTag,
   MemoryOsFactCategory,
-  MemoryOsClaimKind,
   MemoryOsFactProvenance,
   MemoryOsFact,
   MemoryOsSelectionPolicy,
@@ -309,7 +308,6 @@ export {
   fetchKeeperCompactionSnapshots,
   fetchKeeperTurnTranscript,
   parseMemoryOsFactCategory,
-  parseMemoryOsClaimKind,
 } from './dashboard-turn-records'
 
 export type {

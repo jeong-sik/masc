@@ -155,6 +155,10 @@ let assemble_hooks
   let compute_tool_surface = ctx.compute_tool_surface in
   let record_tool_assignment = ctx.record_tool_assignment in
   let config = ctx.config in
+  let memory_os_keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path
+  in
   let keeper_tools_cleanup = ctx.keeper_tools_cleanup in
   let terminal_effect_state = ctx.terminal_effect_state in
   let keeper_turn_id = ctx.keeper_turn_id in
@@ -375,6 +379,7 @@ let assemble_hooks
                       state, so it is domain-safe on the shared pool. *)
                    Domain_pool_ref.submit_io_or_inline (fun () ->
                      Keeper_memory_os_recall.render_if_enabled
+                       ~keepers_dir:memory_os_keepers_dir
                        ~keeper_id:meta.name
                        ~now:(Time_compat.now ())
                        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)

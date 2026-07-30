@@ -134,7 +134,6 @@ type t =
   | MemoryLanePending
   | MemoryLaneInFlight
   | MemoryLaneLatestPending
-  | MemoryLaneExecutionSlotBusy
   | WriteMetaCycleFailures
   | MetricsSseFailures
   | ChatStoreFailures

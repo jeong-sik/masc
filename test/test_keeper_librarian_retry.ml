@@ -19,15 +19,17 @@ let deprecated_field_confidence = "confidence"
 let field_category = Lib.wire_field_category
 let field_source_turn = Lib.wire_field_source_turn
 let field_source_tool_call_id = Lib.wire_field_source_tool_call_id
-let field_open_items = Lib.wire_field_open_items
-let field_constraints = Lib.wire_field_constraints
-let field_preserved_tool_refs = Lib.wire_field_preserved_tool_refs
+let field_claim_id = Lib.wire_field_claim_id
+let field_valid_for_days = Lib.wire_field_valid_for_days
 
 let claim_json ?confidence ?(claim = "c") ?(source_turn = `Int 0) () =
   let fields =
     [ field_claim, `String claim
     ; field_category, `String "fact"
     ; field_source_turn, source_turn
+    ; field_source_tool_call_id, `Null
+    ; field_claim_id, `Null
+    ; field_valid_for_days, `Null
     ]
   in
   let fields =
@@ -38,43 +40,12 @@ let claim_json ?confidence ?(claim = "c") ?(source_turn = `Int 0) () =
   `Assoc fields
 ;;
 
-let string_list_json values = `List (List.map (fun value -> `String value) values)
-
-let episode_json
-      ?(episode_summary = "s")
-      ?(claims = [ claim_json () ])
-      ?(open_items = [])
-      ?(constraints = [])
-      ?(preserved_tool_refs = [])
-      ()
-  =
+let episode_json ?(episode_summary = "s") ?(claims = [ claim_json () ]) () =
   `Assoc
     [ field_episode_summary, `String episode_summary
     ; field_claims, `List claims
-    ; field_open_items, string_list_json open_items
-    ; field_constraints, string_list_json constraints
-    ; field_preserved_tool_refs, string_list_json preserved_tool_refs
     ]
 ;;
-
-let episode_json_string ?episode_summary ?claims ?open_items ?constraints
-      ?preserved_tool_refs () =
-  episode_json ?episode_summary ?claims ?open_items ?constraints ?preserved_tool_refs ()
-  |> Yojson.Safe.to_string
-;;
-
-let minimal_episode_json ?(claim = "c") () =
-  episode_json_string ~claims:[ claim_json ~claim () ] ()
-;;
-
-(* A minimal valid episode, parsed from known-good JSON, reused as the [Parsed]
-   payload so the stub does not have to fabricate the record by hand. *)
-let sample_episode () =
-  let raw = episode_json_string ~claims:[ claim_json () ] () in
-  let inp = { Lib.trace_id = "t"; generation = 0; messages = [] } in
-  match Lib.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw with
-  | Some ep -> ep
-  | None -> Alcotest.fail "fixture episode failed to parse"
 
 (* Drive [cadence_step] sequentially from a fresh keeper (counter -1) for
    [turns] turns, collecting the [due] decision each turn. When a turn is due
@@ -226,56 +197,19 @@ let test_cadence_step_keyed () =
     (("t2", 3), true)
     (R.cadence_step_keyed ~cadence:3 ~current_trace:"t2" ~prior:(Some ("t1", 2)))
 
-(* Strict parsing with bounded compatibility for real-world librarian provider
-   drift. We accept exact JSON and exact JSON-string wrapping only. Markdown
-   fences, prose-wrapped JSON, and embedded JSON must fall into the diagnostic
-   fallback path instead of being accepted as a structured episode. *)
-
-let parse_ep raw =
-  let inp = { Lib.trace_id = "tolerant-t"; generation = 0; messages = [] } in
-  Lib.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw
+let message text =
+  Agent_sdk.Types.make_message
+    ~role:Agent_sdk.Types.User
+    [ Agent_sdk.Types.Text text ]
 ;;
 
-let test_rejects_markdown_wrapped () =
-  let raw = "```json\n" ^ episode_json_string ~claims:[] () ^ "\n```" in
-  check bool "markdown-wrapped JSON rejected" true (Option.is_none (parse_ep raw))
-;;
-
-let test_rejects_prose_wrapped_json () =
-  let raw = "Here is the episode you requested:\n" ^ minimal_episode_json () in
-  check bool "prose before JSON rejected" true (Option.is_none (parse_ep raw));
-  let raw = minimal_episode_json () ^ "\nDone." in
-  check bool "prose after JSON rejected" true (Option.is_none (parse_ep raw));
-  let raw =
-    "Here is the episode you requested:\n\
-     ```json\n"
-    ^ minimal_episode_json ()
-    ^ "\n```\nDone."
+let expect_unexpected_field field json =
+  let inp =
+    { Lib.trace_id = "unexpected-field-t"
+    ; messages = [ message "current JSON boundary" ]
+    }
   in
-  check bool "prose around fenced JSON rejected" true (Option.is_none (parse_ep raw))
-;;
-
-let test_parses_json_string_wrapping () =
-  let raw =
-    `String (episode_json_string ~claims:[] ()) |> Yojson.Safe.to_string
-  in
-  match parse_ep raw with
-  | Some ep ->
-    check string "episode_summary" "s" ep.episode_summary;
-    check int "claims count" 0 (List.length ep.claims)
-  | None -> Alcotest.fail "JSON-string-wrapped object should parse"
-;;
-
-let test_rejects_string_source_turn () =
-  let raw =
-    episode_json_string ~claims:[ claim_json ~source_turn:(`String "3") () ] ()
-  in
-  check bool "string source_turn rejected" true (Option.is_none (parse_ep raw))
-;;
-
-let expect_unexpected_field field raw =
-  let inp = { Lib.trace_id = "unexpected-field-t"; generation = 0; messages = [] } in
-  match Lib.episode_of_output_result ~now:1_000_000.0 ~generation:0 inp raw with
+  match Lib.episode_of_json_result ~now:1_000_000.0 ~generation:0 inp json with
   | Error (Lib.Unexpected_field got) -> check string "unexpected field" field got
   | Error error ->
     Alcotest.failf
@@ -286,91 +220,25 @@ let expect_unexpected_field field raw =
 ;;
 
 let test_rejects_unexpected_episode_field () =
-  let raw =
-    `Assoc
-      [ field_episode_summary, `String "s"
-      ; field_claims, `List [ claim_json () ]
-      ; field_open_items, `List []
-      ; field_constraints, `List []
-      ; field_preserved_tool_refs, `List []
-      ; "extra_episode_field", `String "drift"
-      ]
-    |> Yojson.Safe.to_string
-  in
-  expect_unexpected_field "extra_episode_field" raw
+  List.iter
+    (fun field ->
+       let raw =
+         `Assoc
+           [ field_episode_summary, `String "s"
+           ; field_claims, `List [ claim_json () ]
+           ; field, `List []
+           ]
+       in
+       expect_unexpected_field field raw)
+    [ "open_items"; "constraints"; "preserved_tool_refs" ]
 ;;
 
 let test_rejects_unexpected_claim_field () =
-  let raw =
-    episode_json_string
-      ~claims:[ claim_json ~confidence:(`Float 0.9) () ]
-      ()
-  in
-  expect_unexpected_field deprecated_field_confidence raw
-;;
-
-let test_parse_result_reports_error () =
-  let inp = { Lib.trace_id = "typed-error-t"; generation = 0; messages = [] } in
-  match Lib.episode_of_output_result ~now:1_000_000.0 ~generation:0 inp "not json" with
-  | Error (Lib.Invalid_json _) -> ()
-  | Error error ->
-    Alcotest.failf "expected Invalid_json, got %s" (Lib.parse_error_to_string error)
-  | Ok _ -> Alcotest.fail "expected typed parse error"
-;;
-
-let test_rejects_multiple_json_objects () =
-  let raw = minimal_episode_json () ^ "\n" ^ minimal_episode_json ~claim:"d" () in
-  check bool "multiple JSON objects rejected" true (Option.is_none (parse_ep raw))
-;;
-
-let test_rejects_model_thinking_leak () =
-  let raw =
-    "<thinking>I should output JSON now.</thinking>\n" ^ minimal_episode_json ()
-  in
-  check bool "thinking leak before JSON rejected" true (Option.is_none (parse_ep raw))
-;;
-
-let test_rejects_malformed_json () =
-  let raw =
-    {|{"episode_summary":"s","claims":[{"claim":"c","category":"fact","source_turn":0}],|}
-  in
-  check bool "malformed JSON rejected" true (Option.is_none (parse_ep raw))
-;;
-
-let test_parses_nested_braces_inside_string () =
-  let raw = minimal_episode_json ~claim:"Keep literal { braces } in memory" () in
-  match parse_ep raw with
-  | Some ep ->
-    (match ep.claims with
-     | [ claim ] ->
-       check string "claim with braces parsed" "Keep literal { braces } in memory" claim.claim
-     | claims -> Alcotest.failf "expected one claim, got %d" (List.length claims))
-  | None -> Alcotest.fail "valid JSON with braces in a string should parse"
-;;
-
-let test_missing_lists_default_to_empty () =
-  let raw =
-    `Assoc
-      [ field_episode_summary, `String "s"
-      ; field_claims, `List [ claim_json () ]
-      ]
-    |> Yojson.Safe.to_string
-  in
-  match parse_ep raw with
-  | Some ep ->
-    check int "open_items empty" 0 (List.length ep.open_items);
-    check int "constraints empty" 0 (List.length ep.constraints);
-    check int "preserved_tool_refs empty" 0 (List.length ep.preserved_tool_refs)
-  | None -> Alcotest.fail "missing optional lists should default to empty"
-;;
-
-let test_invalid_source_turn_string_rejected () =
-  let raw =
-    episode_json_string
-      ~claims:[ claim_json ~source_turn:(`String "not-a-number") () ]
-      ()
-  in
-  check bool "invalid source_turn rejected" true (Option.is_none (parse_ep raw))
+  expect_unexpected_field
+    deprecated_field_confidence
+    (episode_json
+       ~claims:[ claim_json ~confidence:(`Float 0.9) () ]
+       ())
 ;;
 
 let () =
@@ -392,22 +260,12 @@ let () =
             test_cadence_table_bounded_under_trace_rotation;
           test_case "cadence_step_keyed rollover decision" `Quick test_cadence_step_keyed;
         ] );
-      ( "strict_parsing",
-        [
-          test_case "rejects markdown-wrapped JSON" `Quick test_rejects_markdown_wrapped;
-          test_case "rejects prose-wrapped JSON" `Quick test_rejects_prose_wrapped_json;
-          test_case "rejects unexpected episode field" `Quick
-            test_rejects_unexpected_episode_field;
-          test_case "rejects unexpected claim field" `Quick test_rejects_unexpected_claim_field;
-          test_case "parses JSON-string-wrapped object" `Quick test_parses_json_string_wrapping;
-          test_case "rejects string source_turn" `Quick test_rejects_string_source_turn;
-          test_case "parse result reports typed error" `Quick test_parse_result_reports_error;
-          test_case "rejects multiple JSON objects" `Quick test_rejects_multiple_json_objects;
-          test_case "rejects model thinking leak" `Quick test_rejects_model_thinking_leak;
-          test_case "rejects malformed JSON" `Quick test_rejects_malformed_json;
-          test_case "parses nested braces inside string" `Quick
-            test_parses_nested_braces_inside_string;
-          test_case "missing lists default to empty" `Quick test_missing_lists_default_to_empty;
-          test_case "rejects invalid source_turn string" `Quick test_invalid_source_turn_string_rejected;
+      ( "current_json_boundary",
+        [ test_case "rejects unexpected episode field" `Quick
+            test_rejects_unexpected_episode_field
+        ; test_case
+            "rejects unexpected claim field"
+            `Quick
+            test_rejects_unexpected_claim_field
         ] );
     ]

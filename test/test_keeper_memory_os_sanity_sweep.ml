@@ -10,17 +10,14 @@ let fact
       ?valid_until
       ?last_verified_at
       ?claim_id
-      ?(claim_kind = None)
       claim
   =
   { Types.claim
   ; category
-  ; claim_kind
   ; source = { Types.trace_id = "trace-sanity"; turn = 1; tool_call_id = None }
   ; first_seen
   ; valid_until
   ; last_verified_at
-  ; schema_version = Types.schema_version
   ; claim_id
   }
 ;;
@@ -48,10 +45,9 @@ let test_sweep_projects_typed_memory_state_without_rewrite () =
         [ fact ~claim_id:"same-conclusion" "first wording"
         ; fact ~claim_id:"same-conclusion" "second wording"
         ; fact
-            ~claim_kind:(Some Types.External_state)
             ~first_seen:(now -. 1_000_000.0)
             "external state claim"
-        ; fact ~claim_kind:(Some Types.Diagnostic) "diagnostic evidence"
+        ; fact "diagnostic evidence"
         ]
       in
       List.iter (Memory_io.append_fact ~keeper_id:"alpha") rows;

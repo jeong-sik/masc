@@ -366,10 +366,6 @@ let memory_entries =
       Memory_os_defaults.librarian_max_messages_env_key
       "Recent-message window for librarian extraction (floor 1)";
     entry
-      ~default:(string_of_int Memory_os_defaults.librarian_global_slot_default)
-      Memory_os_defaults.librarian_global_slot_env_key
-      "Fleet-wide concurrency gate for librarian provider calls; 0 disables";
-    entry
       ~default:(string_of_bool Memory_os_defaults.gc_enabled_default)
       Memory_os_defaults.gc_env_key
       "Per-keeper Memory OS GC maintenance fiber kill switch; invalid values fail closed";

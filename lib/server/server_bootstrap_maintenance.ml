@@ -307,6 +307,10 @@ end
 
 let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_state) =
   let config = Mcp_server.workspace_config state in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path
+  in
   let recovery_ctx : _ Keeper_types_profile.context =
     { config
     ; agent_name = "keeper-maintenance-recovery"
@@ -458,7 +462,11 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       let gc_one keeper_id () =
         try
           let report =
-            Keeper_memory_os_gc.run_gc ~keeper_id ~now:(Time_compat.now ()) ()
+            Keeper_memory_os_gc.run_gc_for_keepers_dir
+              ~keepers_dir
+              ~keeper_id
+              ~now:(Time_compat.now ())
+              ()
           in
           if report.Keeper_memory_os_gc.ttl_expired > 0
           then
@@ -481,7 +489,11 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       let gc_episodes_one keeper_id () =
         try
           let report =
-            Keeper_memory_os_gc.run_episode_gc ~keeper_id ~now:(Time_compat.now ()) ()
+            Keeper_memory_os_gc.run_episode_gc_for_keepers_dir
+              ~keepers_dir
+              ~keeper_id
+              ~now:(Time_compat.now ())
+              ()
           in
           if report.Keeper_memory_os_gc.episodes_expired > 0
           then
@@ -505,8 +517,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         let keeper_ids =
           List.sort_uniq
             String.compare
-            (Keeper_memory_os_io.list_fact_store_keeper_ids ()
-             @ Keeper_memory_os_io.list_episode_store_keeper_ids ())
+            (Keeper_memory_os_io.list_fact_store_keeper_ids_for_keepers_dir
+               ~keepers_dir
+             @ Keeper_memory_os_io.list_episode_store_keeper_ids_for_keepers_dir
+                 ~keepers_dir)
         in
         Eio.Fiber.all
           (List.map

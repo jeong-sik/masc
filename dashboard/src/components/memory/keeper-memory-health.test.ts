@@ -31,10 +31,9 @@ function makeEntry(
     facts_bytes: 512,
     events: 20,
     events_bytes: 1024,
-    events_to_facts_ratio: 0,
+    events_bytes_to_facts_bytes_ratio: 0,
     ttl_expired_on_disk: 0,
-    near_duplicate: 0,
-    provider_slot_busy: 0,
+    duplicate_claim_identity_rows: 0,
     alerts: [],
     ...overrides,
   }
@@ -48,14 +47,15 @@ function makeResponse(
   return {
     generated_at: 1_700_000_000,
     cadence_counter_entries: 3,
+    read_error_count: 0,
+    read_errors: [],
     keepers,
     totals: {
       facts: 0,
       facts_bytes: 0,
       events_bytes: 0,
       ttl_expired_on_disk: 0,
-      near_duplicate: 0,
-      provider_slot_busy: 0,
+      duplicate_claim_identity_rows: 0,
       ...totalsOverrides,
     },
     alert_summary: alertSummary ?? makeAlertSummary(),
@@ -70,12 +70,10 @@ function makeAlertSummary(
     warn_alerts: 0,
     keepers_with_alerts: 0,
     ttl_expired_keepers: 0,
-    near_duplicate_keepers: 0,
-    provider_slot_busy_keepers: 0,
+    duplicate_claim_identity_rows_keepers: 0,
     thresholds: {
       ttl_expired_on_disk: 0,
-      near_duplicate: 0,
-      provider_slot_busy: 0,
+      duplicate_claim_identity_rows: 0,
     },
     ...overrides,
   }
@@ -125,7 +123,7 @@ describe('KeeperMemoryHealth', () => {
         makeResponse([
           makeEntry({
             keeper_id: 'raw-high-ratio',
-            events_to_facts_ratio: 3,
+            events_bytes_to_facts_bytes_ratio: 3,
             ttl_expired_on_disk: 0,
           }),
         ]),
@@ -143,7 +141,7 @@ describe('KeeperMemoryHealth', () => {
         makeResponse([
           makeEntry({
             keeper_id: 'ttl-expired',
-            events_to_facts_ratio: 0,
+            events_bytes_to_facts_bytes_ratio: 0,
             ttl_expired_on_disk: 4,
             alerts: [{
               code: 'ttl_expired_on_disk',
@@ -164,16 +162,15 @@ describe('KeeperMemoryHealth', () => {
       expect(screen.getByText('TTL')).not.toBeNull()
     })
 
-    it('does not style raw ttl or provider-slot counts as warnings without backend alerts', async () => {
+    it('does not style a raw ttl count as a warning without a backend alert', async () => {
       mockFetch.mockResolvedValue(
         makeResponse([
           makeEntry({
             keeper_id: 'raw-counts',
             ttl_expired_on_disk: 4,
-            provider_slot_busy: 3,
             alerts: [],
           }),
-        ], { ttl_expired_on_disk: 4, provider_slot_busy: 3 }),
+        ], { ttl_expired_on_disk: 4 }),
       )
       const { container } = render(html`<${KeeperMemoryHealth} />`)
       await waitFor(() => expect(screen.getByText('raw-counts')).not.toBeNull())
@@ -181,9 +178,44 @@ describe('KeeperMemoryHealth', () => {
       expect(container.querySelector('.kmh-row--warn')).toBeNull()
       expect(container.querySelector('.kmh-badge--warn')).toBeNull()
       expect(container.querySelector('[data-stat-key="ttl-expired"] .kmh-stat-value--warn')).toBeNull()
-      expect(container.querySelector('[data-stat-key="provider-slot-busy"] .kmh-stat-value--warn')).toBeNull()
       expect(statValue(container, 'ttl-expired')).toContain('4')
-      expect(statValue(container, 'provider-slot-busy')).toContain('3')
+    })
+
+    it('renders exact duplicate claim identity rows from the backend alert', async () => {
+      mockFetch.mockResolvedValue({
+        ...makeResponse([
+          makeEntry({
+            keeper_id: 'duplicate-identity',
+            duplicate_claim_identity_rows: 2,
+            alerts: [{
+              code: 'duplicate_claim_identity_rows',
+              severity: 'warn',
+              target: 'duplicate_claim_identity_rows',
+              label: '동일 claim identity 행',
+              message: 'Duplicate Memory OS claim identities remain on disk',
+              value: 2,
+              threshold: 0,
+            }],
+          }),
+        ], { duplicate_claim_identity_rows: 2 }),
+        alert_summary: makeAlertSummary({
+          total_alerts: 1,
+          warn_alerts: 1,
+          keepers_with_alerts: 1,
+          duplicate_claim_identity_rows_keepers: 1,
+        }),
+      })
+      const { container } = render(html`<${KeeperMemoryHealth} />`)
+      await waitFor(() => expect(screen.getByText('duplicate-identity')).not.toBeNull())
+
+      expect(container.querySelector('.kmh-row--warn')).not.toBeNull()
+      expect(statValue(container, 'duplicate-claim-identity-rows')).toContain('2')
+      expect(
+        container.querySelector(
+          '[data-stat-key="duplicate-claim-identity-rows"] .kmh-stat-value--warn',
+        ),
+      ).not.toBeNull()
+      expect(screen.getAllByText('동일 claim identity 행').length).toBeGreaterThan(1)
     })
   })
 
@@ -218,37 +250,27 @@ describe('KeeperMemoryHealth', () => {
       expect(statValue(container, 'alerts')).toBe('1')
     })
 
-    it('surfaces provider slot busy alerts per keeper', async () => {
+  })
+
+  describe('store read errors', () => {
+    it('renders every failed keeper and the backend error instead of hiding the row', async () => {
       mockFetch.mockResolvedValue({
-        ...makeResponse([
-          makeEntry({
-            keeper_id: 'slot-busy',
-            provider_slot_busy: 3,
-            alerts: [{
-              code: 'provider_slot_busy',
-              severity: 'warn',
-              target: 'provider_slot_busy',
-              label: '슬롯',
-              message: 'Memory OS librarian provider slot was busy',
-              value: 3,
-              threshold: 0,
-            }],
-          }),
-        ], { provider_slot_busy: 3 }),
-        alert_summary: makeAlertSummary({
-          total_alerts: 1,
-          warn_alerts: 1,
-          keepers_with_alerts: 1,
-          provider_slot_busy_keepers: 1,
-        }),
+        ...makeResponse([makeEntry({ keeper_id: 'healthy' })]),
+        read_error_count: 1,
+        read_errors: [{
+          keeper_id: 'retired-store',
+          error: 'Fact_store_decode_error: retired-store.facts.jsonl:1',
+        }],
       })
       const { container } = render(html`<${KeeperMemoryHealth} />`)
-      await waitFor(() => expect(screen.getByText('slot-busy')).not.toBeNull())
 
-      expect(screen.getByText('슬롯')).not.toBeNull()
-      expect(statValue(container, 'provider-slot-busy')).toBe('3')
+      await waitFor(() => expect(screen.getByText('Memory OS 저장소 읽기 오류 1건')).not.toBeNull())
+      const alert = container.querySelector('.kmh-read-errors[role="alert"]')
+      expect(alert?.textContent).toContain('retired-store')
+      expect(alert?.textContent).toContain('Fact_store_decode_error')
+      expect(screen.getByText('healthy')).not.toBeNull()
+      expect(statValue(container, 'read-errors')).toBe('1')
     })
-
   })
 
   // ── render states ─────────────────────────────────────

@@ -76,7 +76,6 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_MEMORY_OS_GC` | typed:bool | Storage | operator | 261 | Per-keeper Memory OS GC maintenance fiber kill switch. Default: true; invalid values fail closed to false. Env var ac... |
 | `MASC_KEEPER_MEMORY_OS_LIBRARIAN` | typed:bool | Policies | operator | 213 | Memory OS librarian post-turn extraction kill switch. Default: true; invalid values fail closed to false so malformed... |
 | `MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS` | typed:int | Runtime | operator | 225 | Turns between librarian extraction attempts per keeper. Default: 3, floored to 1. @category Runtime @ops_class operator |
-| `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT` | typed:int | Concurrency | operator | 249 | Fleet-wide concurrency gate for librarian provider calls. Default: 1; 0 disables the gate. @category Concurrency @ops... |
 | `MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES` | typed:int | Runtime | operator | 237 | Base recent-message window for librarian extraction. Default: 24, floored to 1. @category Runtime @ops_class operator |
 | `MASC_KEEPER_MEMORY_OS_RECALL` | typed:bool | Policies | operator | 201 | Memory OS recall prompt injection kill switch. Default: true; invalid values fail closed to false so malformed operat... |
 | `MASC_KEEPER_METRICS_MAX_BYTES` | typed:int | unclassified | unclassified | 73 | Maximum metrics file size in bytes before rotation (default: 10MB) |

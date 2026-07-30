@@ -487,6 +487,9 @@ let keeper_board_search_schema =
 let keeper_board_post_get_schema =
   find_schema_exn "keeper_board_post_get" Config.raw_all_tool_schemas
 
+let keeper_memory_search_schema =
+  find_schema_exn "keeper_memory_search" Config.raw_all_tool_schemas
+
 let keeper_task_done_schema =
   find_schema_exn "keeper_task_done" Config.raw_all_tool_schemas
 
@@ -640,6 +643,21 @@ let test_validate_args_keeper_board_list_rejects_unknown_field () =
       "expected unknown field to be rejected, but it passed: %s"
       (Yojson.Safe.to_string forwarded)
   | Error _ -> ()
+
+let test_validate_args_keeper_memory_search_rejects_removed_kind () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_memory_search_schema
+      ~name:"keeper_memory_search"
+      ~args:(`Assoc [ "query", `String "memory"; "kind", `String "durable_knowledge" ])
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.failf
+      "expected removed kind field to be rejected, but it passed: %s"
+      (Yojson.Safe.to_string forwarded)
+  | Error result ->
+    assert_policy_validation_payload ~label:"removed memory kind" result
 
 (* The op enum (derived from Keeper_workspace_op.valid_strings) must accept
    EVERY op the runtime dispatch handles. Guards the regression where the
@@ -2034,6 +2052,8 @@ let () =
         test_validate_args_keeper_board_search_accepts_compact;
       Alcotest.test_case "keeper_board_list still rejects unknown field" `Quick
         test_validate_args_keeper_board_list_rejects_unknown_field;
+      Alcotest.test_case "keeper_memory_search rejects removed kind" `Quick
+        test_validate_args_keeper_memory_search_rejects_removed_kind;
       Alcotest.test_case "tool_execute exposes typed boundary" `Quick
         test_tool_execute_schema_exposes_typed_boundary;
       Alcotest.test_case "tool_execute rejects empty args with class" `Quick

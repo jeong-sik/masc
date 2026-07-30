@@ -48,6 +48,15 @@ val next_generation : keeper_id:string -> trace_id:string -> int
     bound while still advancing the counter past it. *)
 val next_generation_with_floor : floor:int -> keeper_id:string -> trace_id:string -> int
 
+(** Explicit keeper-directory form used by a BasePath boundary after resolving
+    the workspace once. It never consults ambient config state. *)
+val next_generation_with_floor_for_keepers_dir :
+  keepers_dir:string
+  -> floor:int
+  -> keeper_id:string
+  -> trace_id:string
+  -> int
+
 (** BasePath-scoped variant of {!next_generation_with_floor}. *)
 val next_generation_with_floor_for_base_path :
   base_path:string -> floor:int -> keeper_id:string -> trace_id:string -> int
@@ -76,6 +85,12 @@ val episode_bundle_lock_path_for_keepers_dir :
     lock, then publish [events_path] last as the reader-visible commit marker. *)
 val with_episode_bundle_lock :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t -> keeper_id:string -> (unit -> 'a) -> 'a
+val with_episode_bundle_lock_for_keepers_dir :
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> keepers_dir:string
+  -> keeper_id:string
+  -> (unit -> 'a)
+  -> 'a
 
 val append_episode_bundle : keeper_id:string -> episode -> unit
 val rewrite_facts_atomically : keeper_id:string -> fact list -> unit
@@ -101,6 +116,17 @@ val load_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t 
 
 (** {1 Bounded tail reads} *)
 
+(** Raised by list-returning fact readers when any selected JSONL row is
+    malformed or does not match the current fact schema. A corrupt or
+    unsupported store is never represented as an empty or partial store. *)
+exception Fact_store_decode_error of string
+
+(** Raised by list-returning episode readers when any selected event row or
+    episode file is malformed or outside the current closed schema. *)
+exception Episode_store_decode_error of string
+
+(** Read every fact in source order. Raises {!Fact_store_decode_error} on the
+    first invalid row. A missing or zero-row store returns [[]]. *)
 val read_facts_all : keeper_id:string -> fact list
 val read_facts_all_for_keepers_dir : keepers_dir:string -> keeper_id:string -> fact list
 (** Read every fact in the store, failing if any JSONL row is malformed or does
@@ -109,11 +135,21 @@ val read_facts_all_for_keepers_dir : keepers_dir:string -> keeper_id:string -> f
 val read_facts_all_strict : keeper_id:string -> (fact list, string) result
 val read_facts_all_strict_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> (fact list, string) result
+(** Read the last [n] facts in source order. Raises
+    {!Fact_store_decode_error} if any selected row is invalid. *)
 val read_facts_tail : keeper_id:string -> n:int -> fact list
 val read_facts_tail_for_base_path : base_path:string -> keeper_id:string -> n:int -> fact list
+(** Episode tail readers raise {!Episode_store_decode_error} instead of
+    returning a partial list. *)
 val read_events_tail : keeper_id:string -> n:int -> episode list
+val read_events_tail_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> n:int -> episode list
 val read_episodes_tail : keeper_id:string -> n:int -> episode list
+val read_episodes_tail_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> n:int -> episode list
 val read_episodes_all : keeper_id:string -> episode list
+val read_episodes_all_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> episode list
 (** Read every persisted episode in source order. Any malformed row/file raises;
     no child episode is silently dropped. *)
 
@@ -125,9 +161,6 @@ val read_episode_files_all_strict :
   keeper_id:string -> ((string * episode) list, string) result
 val read_episode_files_all_strict_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> ((string * episode) list, string) result
-
-(** Read and parse every fact in the store. *)
-val read_all_facts : keeper_id:string -> fact list
 
 (** Outcome of a [merge_facts] write: how many incoming claims were folded into
     an existing fact and persisted as new facts. *)
@@ -143,6 +176,17 @@ val merge_facts :
   -> merge:(existing:fact -> incoming:fact -> fact)
   -> incoming:fact list
   -> fact_merge_stats
+val merge_facts_for_keepers_dir :
+  keepers_dir:string
+  -> keeper_id:string
+  -> merge:(existing:fact -> incoming:fact -> fact)
+  -> incoming:fact list
+  -> fact_merge_stats
+
+val append_event_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> episode -> unit
+val append_episode_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> episode -> unit
 
 module For_testing : sig
   val with_keepers_dir : string -> (unit -> 'a) -> 'a

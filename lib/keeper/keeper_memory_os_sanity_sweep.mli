@@ -22,7 +22,6 @@ type fact_row =
   ; claim : string
   ; claim_identity : string
   ; category : string
-  ; claim_kind : string option
   ; first_seen : float
   ; valid_until : float option
   ; effective_valid_until : float option

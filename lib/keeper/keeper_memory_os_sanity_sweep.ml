@@ -20,7 +20,6 @@ type fact_row =
   ; claim : string
   ; claim_identity : string
   ; category : string
-  ; claim_kind : string option
   ; first_seen : float
   ; valid_until : float option
   ; effective_valid_until : float option
@@ -109,11 +108,6 @@ let keeper_error_code = function
   | Fact_store_locked _ -> "fact_store_locked"
 ;;
 
-let string_opt_to_json = function
-  | None -> `Null
-  | Some value -> `String value
-;;
-
 let float_opt_to_json = function
   | None -> `Null
   | Some value -> `Float value
@@ -129,7 +123,6 @@ let row_of_fact ~now ~index (fact : Types.fact) =
   ; claim = fact.claim
   ; claim_identity = Types.claim_identity fact
   ; category = Types.category_to_string fact.category
-  ; claim_kind = Option.map Types.claim_kind_to_string fact.claim_kind
   ; first_seen = fact.first_seen
   ; valid_until = fact.valid_until
   ; effective_valid_until = Types.fact_effective_valid_until fact
@@ -285,7 +278,6 @@ let fact_row_to_json row =
     ; "claim", `String row.claim
     ; "claim_identity", `String row.claim_identity
     ; "category", `String row.category
-    ; "claim_kind", string_opt_to_json row.claim_kind
     ; "first_seen", `Float row.first_seen
     ; "valid_until", float_opt_to_json row.valid_until
     ; "effective_valid_until", float_opt_to_json row.effective_valid_until

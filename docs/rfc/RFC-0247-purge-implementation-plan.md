@@ -113,7 +113,9 @@ The compiler then forces edits at every exhaustive match — exactly the no-sile
 3. A `lesson` claim MUST contain the corrective action (do Y / fix is Z), not just "X failed."
 4. Update the JSON schema `category` enum to include the two tokens.
 
-`terminal_marker` is a distractor — do NOT repurpose it (episode-level, untyped `string`, producer-hardcoded `None` at `keeper_librarian.ml:261`). Success/failure is claim-level and belongs on `category`.
+`terminal_marker` was removed rather than repurposed: it was episode-level,
+untyped, and the producer only emitted `None`. Success/failure remains
+claim-level and belongs on `category`.
 
 ---
 

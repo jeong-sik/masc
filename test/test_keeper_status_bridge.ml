@@ -8,7 +8,6 @@ let make_meta () =
           ("name", `String "verifier");
           ("agent_name", `String "keeper-verifier-agent");
           ("trace_id", `String "trace-verifier");
-          ("runtime_id", `String "ollama_cloud.deepseek-v4-flash");
         ])
   with
   | Ok meta -> meta

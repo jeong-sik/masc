@@ -656,17 +656,19 @@ let test_consumer_cancellation_while_parked_keeps_pending () =
            | Error _ -> false);
         Eio.Promise.resolve resolve_release_holder ()))
 
-let test_pending_cancellation_while_parked_releases_empty_slot () =
+let test_stale_parked_observation_rearms_next_pending_receipt () =
   Printf.printf
-    "Test: cancelling the pending head while parked releases an empty slot\n%!";
+    "Test: a stale parked observation rearms the next pending receipt\n%!";
   with_env (fun ~base ~clock ->
     let holder_started, resolve_holder_started = Eio.Promise.create () in
     let release_holder, resolve_release_holder = Eio.Promise.create () in
     let calls = ref 0 in
-    let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
+    let handled_content = ref None in
+    let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message =
       incr calls;
+      handled_content := Some queued_message.content;
       Keeper_chat_consumer.Delivered
-        { outcome_ref = "must-not-run-after-pending-cancel" }
+        { outcome_ref = "trace-stale-rearm#1" }
     in
     with_consumer_switch (fun sw ->
       Eio.Fiber.fork ~sw (fun () ->
@@ -694,6 +696,12 @@ let test_pending_cancellation_while_parked_releases_empty_slot () =
              Keeper_turn_admission.chat_waiting
                ~base_path:base
                ~keeper_name));
+        (* Isolate the consumer's stale-observation recovery edge: both
+           production observers are deliberately silent after the consumer
+           has parked, so only [run_observed_turn]'s typed [Claim_stale]
+           transition can schedule the replacement receipt. *)
+        Keeper_chat_queue.set_transition_observer None;
+        Keeper_turn_admission.set_slot_transition_observer None;
         (match
            Keeper_chat_queue.cancel_pending
              ~keeper_name
@@ -707,28 +715,27 @@ let test_pending_cancellation_while_parked_releases_empty_slot () =
            check "pending cancellation commits a terminal receipt" true
          | Ok _ | Error _ ->
            check "pending cancellation commits a terminal receipt" false);
-        Eio.Promise.resolve resolve_release_holder ();
-        check "stale parked observation releases the turn slot"
-          (await_condition ~clock ~seconds:5.0 (fun () ->
-             let snapshot =
-               Keeper_turn_admission.snapshot_for
-                 ~base_path:base
-                 ~keeper_name
-             in
-             Option.is_none snapshot.snapshot_in_flight
-             && not
-                  (Keeper_turn_admission.chat_waiting
-                     ~base_path:base
-                     ~keeper_name)));
-        check "cancelled pending head never reaches the turn handler" (!calls = 0);
         (match
-           Keeper_turn_admission.run_if_free
-             ~base_path:base
-             ~keeper_name
-             (fun () -> ())
+           enqueue_checked ~label:"stale replacement enqueue" ~keeper_name
+             (discord_msg ~content:"run after stale head"
+                ~channel_id:"channel-stale-replacement"
+                ~user_id:"user-stale-replacement" ~timestamp:6.6)
          with
-         | `Ran () -> check "empty lane admits autonomous work again" true
-         | `Busy _ -> check "empty lane admits autonomous work again" false)))
+         | None -> Eio.Promise.resolve resolve_release_holder ()
+         | Some replacement ->
+           Eio.Promise.resolve resolve_release_holder ();
+           check "stale observation rearms the replacement receipt"
+             (match
+                await_receipt ~clock ~seconds:5.0 ~keeper_name
+                  ~receipt_id:replacement.receipt_id ~accept:is_delivered
+              with
+              | Some _ -> true
+              | None -> false);
+           check "cancelled head never reaches the turn handler" (!calls = 1);
+           check "only the replacement content is handled"
+             (!handled_content = Some "run after stale head");
+           check_terminal_snapshot ~label:"stale replacement" ~keeper_name
+             ~receipt_id:replacement.receipt_id)))
 
 let test_invalid_delivered_turn_ref_fails_closed () =
   Printf.printf
@@ -911,7 +918,7 @@ let () =
   test_finalization_persistence_retry_does_not_redeliver ();
   test_busy_turn_release_wakes_pending_receipt ();
   test_consumer_cancellation_while_parked_keeps_pending ();
-  test_pending_cancellation_while_parked_releases_empty_slot ();
+  test_stale_parked_observation_rearms_next_pending_receipt ();
   test_invalid_delivered_turn_ref_fails_closed ();
   test_invalid_delivery_diagnostic_does_not_block_lane ();
   test_shutdown_fence_keeps_receipt_pending_until_rollback ();

@@ -243,13 +243,15 @@ let create_executing_goal ctx ~goal_id =
   | Ok goal -> goal
   | Error message -> failwith message
 
-let add_goal_linked_task ctx ~goal_id ~title =
+let add_goal_linked_task ?(strict = false) ctx ~goal_id ~title =
   let result =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
       ~start_time:0.0
       ctx
-      (`Assoc [ "title", `String title; "goal_id", `String goal_id ])
+      (`Assoc
+        ([ "title", `String title; "goal_id", `String goal_id ]
+         @ if strict then [ "contract", `Assoc [ "strict", `Bool true ] ] else []))
   in
   if not (Tool_result.is_success result) then
     failwith (Tool_result.message result)
@@ -984,7 +986,8 @@ let () = test "handle_transition_submit_does_not_have_a_disable_bypass"
   let ctx = make_test_ctx_with_agent "owner-agent" in
   let _ =
     Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc [ ("title", `String "Verification disabled gate") ])
+      (`Assoc
+        [ ("title", `String "Verification disabled gate"); ("contract", `Assoc [ ("strict", `Bool true) ]); ])
   in
   start_task_001 ctx;
   let result =
@@ -1026,7 +1029,8 @@ let () = test "handle_transition_submit_rejects_registered_keeper_alias"
         ~tool_name:"test_tool"
         ~start_time:0.0
         ctx
-        (`Assoc [ ("title", `String "Canonical submit identity") ])
+        (`Assoc
+          [ ("title", `String "Canonical submit identity"); ("contract", `Assoc [ ("strict", `Bool true) ]); ])
     in
     (match
        Workspace.claim_task_r ctx.config ~agent_name:"keeper-executor-agent"
@@ -1471,7 +1475,10 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
 let () = test "agent verdict verbs remain refused after terminal completion" (fun () ->
   let ctx = make_test_ctx_with_agent "worker" in
   let verifier_ctx = { ctx with Task.Tool.agent_name = "verifier" } in
-  let _ = Workspace.add_task ctx.config ~title:"Already done" ~priority:1 ~description:"" in
+  let _ =
+    Workspace.add_task ctx.config ~contract:(make_task_contract ~strict:true ())
+      ~title:"Already done" ~priority:1 ~description:""
+  in
   let _ = Workspace.claim_task ctx.config ~agent_name:"worker" ~task_id:"task-001" in
   let _ =
     Workspace.transition_task_r
@@ -1524,7 +1531,8 @@ let () = test "operator verdict path replaces verifier agent actions" (fun () ->
     let verifier_ctx = { worker_ctx with Task.Tool.agent_name = "verifier" } in
     let _ =
       Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 worker_ctx
-        (`Assoc [ ("title", `String "Verifier may approve") ])
+        (`Assoc
+          [ ("title", `String "Verifier may approve"); ("contract", `Assoc [ ("strict", `Bool true) ]); ])
     in
     let _ =
       Workspace.claim_task worker_ctx.config ~agent_name:"worker" ~task_id:"task-001"
@@ -1584,6 +1592,7 @@ let () =
        let goal_id = "goal-approved-verification" in
        ignore (create_executing_goal worker_ctx ~goal_id);
        add_goal_linked_task
+         ~strict:true
          worker_ctx
          ~goal_id
          ~title:"Complete through verification";
@@ -2384,7 +2393,13 @@ let () = test "handle_done_todo_rejection_is_tool-neutral" (fun () ->
 (* Test handle_done reports already-done guidance instead of generic not-claimed *)
 let () = test "handle_done_already_done_guidance" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Done test")]) in
+  let _ =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [ ("title", `String "Done test")
+        ; ("contract", `Assoc [ ("strict", `Bool true) ])
+        ])
+  in
   let _ = Workspace.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
   let _ =
     Workspace.transition_task_r ctx.config ~agent_name:"other-agent"

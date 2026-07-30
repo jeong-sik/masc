@@ -44,7 +44,37 @@ let set_current_task_ok config ~task_id =
   | Error msg -> failwith msg
 ;;
 
+(* Only a strict contract routes completion through an authority, so a test that
+   needs [AwaitingVerification] must opt in the way production does: an advisory
+   task's [Submit_for_verification] is refused. *)
+let strict_contract : Masc_domain.task_contract =
+  { strict = true
+  ; completion_contract = [ "authority verdict required" ]
+  ; required_evidence = []
+  ; inspect_gate_evidence = []
+  ; verify_gate_evidence = []
+  ; links = { operation_id = None; session_id = None }
+  }
+;;
+
 let complete_task config ~agent_name ~task_id ~notes =
+  let advisory =
+    Workspace.get_tasks_raw config
+    |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+    |> Option.map (fun task -> not (Masc_domain.task_requires_verification task))
+    |> Option.value ~default:false
+  in
+  (* Mirror production: only a strict contract routes through the completion
+     authority. An advisory task's [Submit_for_verification] is refused. *)
+  if advisory
+  then (
+    match
+      Workspace.transition_task_r config ~agent_name ~task_id
+        ~action:Masc_domain.Done_action ~notes ()
+    with
+    | Ok _ -> ()
+    | Error error -> failwith (Masc_domain.masc_error_to_string error))
+  else
   match
     Workspace.transition_task_r config ~agent_name ~task_id
       ~action:Masc_domain.Submit_for_verification ~notes ()
@@ -358,7 +388,8 @@ let () =
       let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
       let actual_name = Workspace.resolve_agent_name ctx.config "test-agent" in
       ignore
-        (Workspace.add_task ctx.config ~title:"Awaiting verifier" ~priority:2 ~description:"");
+        (Workspace.add_task ctx.config ~contract:strict_contract ~title:"Awaiting verifier"
+           ~priority:2 ~description:"");
       ignore (Workspace.claim_task ctx.config ~agent_name:actual_name ~task_id:"task-001");
       (match
          Workspace.transition_task_r

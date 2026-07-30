@@ -5,6 +5,7 @@
 
 type invalid =
   | Verification_submission_required
+  | Verification_not_required
   | Verification_pending_verdict
       (** An [AwaitingVerification] obligation is not claimable by any agent. *)
   | Verdict_authority_identity_required
@@ -129,12 +130,22 @@ let decide
     Error Invalid_transition
   | ( Masc_domain.Submit_for_verification
     , (Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _}) ) ->
-    if same_agent assignee
-    then
+    (* [requires_verification] governs both completion arms or neither. It
+       already decides whether [Done_action] is legal above; leaving this arm
+       unconditional made [AwaitingVerification] reachable from any task,
+       including the advisory majority whose contract nobody opted into strict
+       verification for. That state has no agent-side exit but [Cancel] and no
+       in-process authority, so an advisory task that submitted waited for a
+       verdict no authority owed it while its own [Done_action] stayed legal
+       and unused. *)
+    if not (same_agent assignee)
+    then Error Invalid_transition
+    else if not requires_verification
+    then Error Verification_not_required
+    else
       ok
         (Masc_domain.AwaitingVerification
            { assignee; submitted_at = now; verification_id = new_verification_id () })
-    else Error Invalid_transition
   | ( Masc_domain.Submit_for_verification
     , ( Masc_domain.Todo
       | Masc_domain.AwaitingVerification _

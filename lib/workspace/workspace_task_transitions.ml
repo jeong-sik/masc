@@ -114,6 +114,15 @@ let transition_task_outcome_r
                  (Masc_domain.Task_error.InvalidState
                     "Task completion must be submitted for verification; use \
                      submit_for_verification with evidence"))
+          | Error Workspace_task_lifecycle.Verification_not_required ->
+            Error
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    (Printf.sprintf
+                       "Task %s did not opt into strict verification, so no completion \
+                        authority is obligated to judge it and submitting would leave \
+                        it awaiting a verdict indefinitely; complete it with done"
+                       task_id)))
           | Error Workspace_task_lifecycle.Verification_pending_verdict ->
             Error
               (Masc_domain.Task
@@ -590,6 +599,7 @@ let commit_verdict_r
                         authority identity"))
              | Error Workspace_task_lifecycle.Verification_pending_verdict
              | Error Workspace_task_lifecycle.Verification_submission_required
+             | Error Workspace_task_lifecycle.Verification_not_required
              | Error Workspace_task_lifecycle.Invalid_transition ->
                Error
                  (Masc_domain.Task

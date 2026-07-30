@@ -16,7 +16,7 @@ import {
   fetchKeeperTurnTranscript,
 } from '../api/dashboard'
 import type {
-  MemoryOsEpisodeSummary,
+  MemoryOsFact,
   MemoryOsTurnRecordSnapshot,
   ToolCallEntry,
   ToolCallOutputBlob,
@@ -122,17 +122,32 @@ function latestMemoryOsBlock(rows: TurnRecordRow[]): TurnBlock | null {
   return latestBlockByName(rows, 'memory_os_recall')
 }
 
-function MemoryOsEpisodeRow({ episode }: { episode: MemoryOsEpisodeSummary }) {
+function MemoryOsChangeRow({
+  fact,
+  kind,
+}: {
+  fact: MemoryOsFact
+  kind: 'added' | 'removed'
+}) {
+  const marker = kind === 'added' ? '+' : '−'
+  const stateClass = kind === 'added'
+    ? 'text-[var(--color-status-ok)]'
+    : 'text-[var(--color-status-err)]'
   return html`
     <div class="min-w-0 border-t border-[var(--color-border-muted)] py-2 first:border-t-0 v2-monitoring-row">
       <div class="mb-1 flex min-w-0 flex-wrap items-center gap-2">
-        <span class="font-mono text-2xs text-[var(--color-fg-default)]">
-          ${episode.trace_id} g${episode.generation.toString().padStart(4, '0')}
+        <span class=${`font-mono text-2xs ${stateClass}`}>
+          ${marker} ${kind}
         </span>
-        <span class="text-3xs text-[var(--color-fg-disabled)]">${episode.claim_count} claims</span>
+        <span class="text-3xs font-mono text-[var(--color-fg-muted)]">
+          ${fact.memory_id}
+        </span>
+        <span class="text-3xs text-[var(--color-fg-disabled)]">
+          ${fact.source.trace_id}#${fact.source.turn}
+        </span>
       </div>
       <div class="line-clamp-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
-        ${episode.summary}
+        ${fact.claim}
       </div>
     </div>
   `
@@ -146,8 +161,17 @@ function MemoryOsRecallSourcePanel({
   rows: TurnRecordRow[]
 }) {
   const latestBlock = latestMemoryOsBlock(rows)
-  const episodes = [...snapshot.episodes.items].reverse().slice(0, 5)
+  const changes = [
+    ...snapshot.change.added.map(fact => ({ fact, kind: 'added' as const })),
+    ...snapshot.change.removed.map(fact => ({ fact, kind: 'removed' as const })),
+  ]
   const readErrorText = snapshot.read_errors.map(item => `${item.scope}: ${item.error}`).join(' · ')
+  const updatedAt = snapshot.updated_at == null
+    ? 'fresh state'
+    : new Date(snapshot.updated_at * 1000).toISOString()
+  const updateSource = snapshot.update_source
+    ? `${snapshot.update_source.kind} · ${snapshot.update_source.trace_id} · g${snapshot.update_source.generation}`
+    : 'none'
 
   return html`
     <section
@@ -167,10 +191,16 @@ function MemoryOsRecallSourcePanel({
         </div>
         <div class="flex flex-wrap gap-2 text-3xs">
           <span class="font-mono text-[var(--color-fg-muted)]">
-            ep ${snapshot.episodes.shown}
+            revision ${snapshot.revision}
           </span>
           <span class="font-mono text-[var(--color-fg-muted)]">
-            facts ${snapshot.facts.shown}
+            facts ${snapshot.facts.current}/${snapshot.facts.shown}
+          </span>
+          <span class="font-mono text-[var(--color-fg-muted)]">
+            +${snapshot.change.added.length} / −${snapshot.change.removed.length}
+          </span>
+          <span class="font-mono text-[var(--color-fg-muted)]">
+            retained ${snapshot.change.retained}
           </span>
         </div>
       </div>
@@ -180,15 +210,23 @@ function MemoryOsRecallSourcePanel({
         : null}
 
       <div class="mt-2 divide-y divide-[var(--color-border-muted)] v2-monitoring-row">
-        ${episodes.length === 0
-          ? html`<div class="py-2 text-2xs text-[var(--color-fg-disabled)] v2-monitoring-row">recent episodes 없음</div>`
-          : episodes.map(episode => html`<${MemoryOsEpisodeRow} key=${`${episode.trace_id}-${episode.generation}-${episode.created_at}`} episode=${episode} />`)}
+        ${changes.length === 0
+          ? html`<div class="py-2 text-2xs text-[var(--color-fg-disabled)] v2-monitoring-row">latest revision memory change 없음</div>`
+          : changes.map(change => html`<${MemoryOsChangeRow}
+              key=${`${change.kind}-${change.fact.memory_id}`}
+              fact=${change.fact}
+              kind=${change.kind}
+            />`)}
       </div>
 
       <details class="mt-2 text-3xs text-[var(--color-fg-disabled)] v2-monitoring-detail">
-        <summary class="cursor-pointer">stores</summary>
-        <div class="mt-1 break-all font-mono">facts: ${snapshot.facts_store}</div>
-        <div class="mt-1 break-all font-mono">episodes: ${snapshot.episodes_store}</div>
+        <summary class="cursor-pointer">current snapshot</summary>
+        <div class="mt-1 break-all font-mono">store: ${snapshot.snapshot_store}</div>
+        <div class="mt-1 break-all font-mono">updated: ${updatedAt}</div>
+        <div class="mt-1 break-all font-mono">source: ${updateSource}</div>
+        ${snapshot.summary
+          ? html`<div class="mt-1 break-all">summary: ${snapshot.summary}</div>`
+          : null}
       </details>
     </section>
   `
@@ -216,10 +254,10 @@ export function KeeperMemoryOsRecallPanel({ keeperName }: { keeperName: string }
     return html`<div class="text-xs text-[var(--color-status-err)] p-3 v2-monitoring-panel" role="alert">${resource.state.value.error}</div>`
   }
 
-  if (!response) {
+  if (!response?.memory_os) {
     return html`
-      <div class="p-3 text-xs text-[var(--color-status-err)] v2-monitoring-panel" role="alert">
-        Memory OS 응답 상태 없음
+      <div class="p-3 text-xs text-[var(--color-fg-muted)] v2-monitoring-panel">
+        Memory OS recall source 없음
       </div>
     `
   }
@@ -1260,7 +1298,7 @@ export function KeeperTurnInspector({
     return html`<div class="text-xs text-[var(--color-status-err)] p-4 v2-monitoring-panel" role="alert">${resource.state.value.error}</div>`
   }
 
-  const memoryOsPanel = response
+  const memoryOsPanel = response?.memory_os
     ? html`<${MemoryOsRecallSourcePanel} snapshot=${response.memory_os} rows=${rows} />`
     : null
 

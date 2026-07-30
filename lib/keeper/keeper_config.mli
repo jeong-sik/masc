@@ -104,13 +104,6 @@ val normalize_prompt_text : max_bytes:int -> string -> string
     Each parameter is registered with [Runtime_params] and can be
     adjusted via the dashboard at runtime. *)
 
-(** Memory OS recall selection budget (masc#25052 P1). See the .ml for the
-    growth problem this bounds and the default-sizing rationale. *)
-val keeper_memory_os_recall_max_facts : unit -> int
-val keeper_memory_os_recall_max_episodes : unit -> int
-val keeper_memory_os_recall_max_bytes : unit -> int
-(** Observability-only threshold (see .ml); not itself an enforced drop. *)
-
 (** Own-recent-board-posts self-awareness layer (see .ml): how many of the
     keeper's own latest posts the world observation carries per turn. *)
 val keeper_board_own_recent_max : unit -> int

@@ -1,6 +1,7 @@
 (** Explicit Keeper memory writes: every write is a durable Memory OS fact. *)
 
 module Runtime = Masc.Keeper_tool_memory_runtime
+module Current = Masc.Keeper_memory_os_current
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
@@ -108,6 +109,31 @@ let fact claim : Masc.Keeper_memory_os_types.fact =
   }
 ;;
 
+let current_facts ~keepers_dir ~keeper_id =
+  match Current.read_for_keepers_dir ~keepers_dir ~keeper_id with
+  | Ok None -> []
+  | Ok (Some snapshot) -> snapshot.facts
+  | Error detail -> Alcotest.fail detail
+;;
+
+let replace_current_facts ~keepers_dir ~keeper_id facts =
+  Current.replace
+    ~keepers_dir
+    ~keeper_id
+    ~expected_revision:None
+    ~now:(Time_compat.now ())
+    ~source:{ Current.kind = Current.Librarian; trace_id = "seed"; generation = 1 }
+    ~summary:"seed"
+    ~facts
+    ~open_items:[]
+    ~constraints:[]
+    ~preserved_tool_refs:[]
+    ()
+  |> function
+  | Ok _ -> ()
+  | Error detail -> Alcotest.fail detail
+;;
+
 let test_validation_taxonomy () =
   Runtime.validate_memory_write_args (make_args ~title:"" ~content:"")
   |> assert_invalid ~expected:"content_empty";
@@ -157,14 +183,10 @@ let test_write_comes_back_through_recall () =
      | `Bool value -> value
      | _ -> false);
   Alcotest.(check string)
-    "routed to the durable store"
-    "durable_fact_store"
+    "routed to the current snapshot"
+    "current_memory_snapshot"
     (string_field "store" response);
-  let facts =
-    Masc.Keeper_memory_os_io.read_facts_all_for_keepers_dir
-      ~keepers_dir
-      ~keeper_id:meta.name
-  in
+  let facts = current_facts ~keepers_dir ~keeper_id:meta.name in
   Alcotest.(check int) "one durable claim" 1 (List.length facts);
   let fact = List.hd facts in
   Alcotest.(check string)
@@ -198,11 +220,11 @@ let test_tools_isolate_workspace_base_path_from_ambient_decoy () =
   let target_keepers = keepers_dir target_base in
   let other_keepers = keepers_dir other_base in
   let decoy_keepers = keepers_dir decoy_base in
-  Masc.Keeper_memory_os_io.rewrite_facts_atomically_for_keepers_dir
+  replace_current_facts
     ~keepers_dir:other_keepers
     ~keeper_id:meta.name
     [ fact "workspace B only" ];
-  Masc.Keeper_memory_os_io.rewrite_facts_atomically_for_keepers_dir
+  replace_current_facts
     ~keepers_dir:decoy_keepers
     ~keeper_id:meta.name
     [ fact "ambient decoy workspace only" ];
@@ -222,9 +244,7 @@ let test_tools_isolate_workspace_base_path_from_ambient_decoy () =
        | `Bool value -> value
        | _ -> false);
     let claims_at keepers_dir =
-      Masc.Keeper_memory_os_io.read_facts_all_for_keepers_dir
-        ~keepers_dir
-        ~keeper_id:meta.name
+      current_facts ~keepers_dir ~keeper_id:meta.name
       |> List.map (fun fact -> fact.Masc.Keeper_memory_os_types.claim)
     in
     Alcotest.(check (list string))

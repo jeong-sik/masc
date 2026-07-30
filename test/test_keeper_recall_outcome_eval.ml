@@ -6,8 +6,6 @@ let recall_row
       ?(reset = false)
       ?(added_fact_keys = [])
       ?(removed_fact_keys = [])
-      ?(added_episode_keys = [])
-      ?(removed_episode_keys = [])
       ?(n_facts_in_store = 0)
       ?(ts = 1.0)
       ~keeper_id
@@ -17,18 +15,18 @@ let recall_row
   =
   let strings values = `List (List.map (fun value -> `String value) values) in
   let fields =
-    [ "schema_version", `Int 3
+    [ "schema_version", `Int 4
     ; "reset", `Bool reset
     ; "keeper_id", `String keeper_id
     ; "trace_id", `String trace_id
     ; "turn", `Int turn
     ; "added_fact_keys", strings added_fact_keys
     ; "removed_fact_keys", strings removed_fact_keys
-    ; "added_episode_keys", strings added_episode_keys
-    ; "removed_episode_keys", strings removed_episode_keys
-    ; "content_hash", `String "fixture-hash"
+    ; ( "content_hash"
+      , `String
+          (Masc.Keeper_recall_injection_ledger.content_hash_of
+             ~fact_keys:added_fact_keys) )
     ; "n_facts_in_store", `Int n_facts_in_store
-    ; "n_episodes_in_store", `Int (List.length added_episode_keys)
     ; "ts", `Float ts
     ]
   in
@@ -96,7 +94,6 @@ let test_joins_recall_to_receipts () =
           ~trace_id:"trace-1"
           ~turn:2
           ~removed_fact_keys:[ "b" ]
-          ~added_episode_keys:[ "trace-1:g0" ]
           ~n_facts_in_store:1
           ~ts:2.0
           ()
@@ -156,17 +153,18 @@ let test_surfaces_bad_rows_and_uses_typed_outcome () =
   with_temp_masc_root (fun masc_root ->
     write_lines
       (Filename.concat masc_root "recall_injections/2026-06/27.jsonl")
-      [ (* "injected_fact_key_count" here is deliberately unrelated to the
-           actual list length: this schema field is dead (masc#25052 —
-           no writer ever produced it) and is no longer read, so the
-           divergence below asserts it is now IGNORED rather than trusted. *)
-        recall_row
-          ~extra_fields:[ "injected_fact_key_count", `Int 7 ]
+      [ recall_row
           ~keeper_id:"alpha"
           ~trace_id:"trace-1"
           ~turn:1
           ~added_fact_keys:[ "a" ]
           ~n_facts_in_store:1
+          ()
+      ; recall_row
+          ~extra_fields:[ "added_episode_keys", `List [] ]
+          ~keeper_id:"alpha"
+          ~trace_id:"trace-episode-field"
+          ~turn:2
           ()
       ; {|{"schema_version":2,"keeper_id":"alpha","turn":2,"added_fact_keys":[],"removed_fact_keys":[],"added_episode_keys":[],"removed_episode_keys":[],"content_hash":"fixture-hash"}|}
       ; {|{"schema_version":1,"keeper_id":"legacy","trace_id":"trace-old","turn":1,"injected_fact_keys":["old"],"injected_episode_keys":[]}|}
@@ -185,10 +183,10 @@ let test_surfaces_bad_rows_and_uses_typed_outcome () =
     let report = Eval.evaluate ~masc_root in
     Alcotest.(check int) "recall records" 1 report.recall_records;
     Alcotest.(check int) "typed cancelled outcome" 1 report.outcome_cancelled;
-    Alcotest.(check int) "count derived from actual list, not the dead override field" 1
+    Alcotest.(check int) "count derived from the materialized fact list" 1
       report.injected_fact_keys;
     Alcotest.(check int) "malformed rows" 1 report.malformed_jsonl_rows;
-    Alcotest.(check int) "invalid recall rows include retired v1" 2
+    Alcotest.(check int) "invalid recall rows include episode fields and retired schemas" 3
       report.invalid_recall_rows;
     Alcotest.(check int) "invalid receipt rows" 1 report.invalid_receipt_rows;
     Alcotest.(check int) "receipt metrics rows ignored" 0 report.outcome_error;

@@ -1,34 +1,25 @@
 (** Keeper_recall_injection_ledger — RFC-0264 P2: per-turn recall injection trace.
 
     On each turn where Memory OS recall renders a non-empty advisory block, this
-    appends a deterministic record of which fact/episode keys reached the
+    appends a deterministic record of which current fact keys reached the
     prompt. It is the join key between "what recall showed this trace" and the
     turn outcome (execution_receipt carries trace_id + current_task_id; the
     forge carries PR/CI merge state), consumed offline by recall_outcome_eval
     (RFC-0264 P3) to compute recall_relevance / recall_harm.
 
-    Schema v3 (2026-07-29, masc#26314): rows keep the bounded delta shape from
-    v2 and add a required typed [reset] marker. A keeper's first append in each
+    Schema v4 is the only accepted wire. It removes every episode-era field and
+    records only current fact-key deltas. A keeper's first append in each
     process is a reset row, so replay replaces any durable pre-restart state
     instead of incorrectly retaining keys deleted while the process was down.
+    There is no reader or migration path for earlier schemas.
 
-    Schema v2 (2026-07-17, masc#25052) replaced the pre-existing FULL
-    injected fact/episode key list on every turn. Because {!Keeper_memory_os_recall}
-    injects the store's *entire* current fact/episode set every turn (no
-    selection budget existed before this change), every append cost was
-    proportional to store size, not to what actually changed. With no
-    compaction of this ledger, per-keeper turns accumulated O(turns * store_size)
-    bytes — the same "append without compaction" class of bug diagnosed in the
-    2026-07-17 board_attention_candidate boot-hang incident.
-
-    Delta rows instead carry only the fact/episode keys that changed since the
-    keeper's immediately preceding row ({!delta}), plus a
+    Delta rows carry only fact keys that changed since the keeper's immediately
+    preceding row ({!delta}), plus a
     [content_hash] of the full injected set so a reader can detect "did the
-    injected set change" without materializing it, and plus store-size
-    counters ([n_facts_in_store] / [n_episodes_in_store]) that were already
-    (or are now) O(1) scalars — unrelated to the growth bug and kept as-is.
+    injected set change" without materializing it, and the O(1)
+    [n_facts_in_store] counter.
 
-    Current rows require exact [schema_version = 3] and carry a [delta].
+    Current rows require exact [schema_version = 4] and carry a [delta].
     {!materialize} applies each row to the keeper's running state. A fresh
     process's first row for a keeper is diffed against the empty set, so it is
     automatically a full accounting while retaining one current wire shape.
@@ -45,8 +36,8 @@
       on the hot path; startup/periodic JSONL maintenance prunes this store via
       [MASC_JSONL_RETENTION_DAYS] by calling [prune_older_than].
     - Deterministic: keys are [claim_identity] outputs (producer [claim_id] when
-      present, else exact source event plus claim payload) and [trace_id:gN]
-      episode keys, so the same trace renders a byte-identical record.
+      present, else exact source event plus claim payload), so the same trace
+      renders a byte-identical record.
     - Failure-visible: when recall returns an unavailable advisory, the optional
       [failure_reason] records the bounded reason label instead of making the
       side-effect record look like an empty successful injection. *)
@@ -58,12 +49,10 @@ type delta =
   { reset : bool
   ; added_fact_keys : string list
   ; removed_fact_keys : string list
-  ; added_episode_keys : string list
-  ; removed_episode_keys : string list
   ; content_hash : string
   }
   (** [reset = true] clears the keeper's replay state before applying this row.
-      The remaining fields carry only the fact/episode keys that changed relative to the keeper's
+      The remaining fields carry only fact keys that changed relative to the keeper's
       previous row. [content_hash] is {!content_hash_of} over the full
       injected set at this turn, so a reconstructed set can be checked for
       internal consistency without re-deriving it from application state. *)
@@ -75,7 +64,6 @@ type record =
   ; ts : float option
   ; failure_reason : string option
   ; n_facts_in_store : int option
-  ; n_episodes_in_store : int option
   ; delta : delta
   }
 (** Typed subset of the append schema consumed by the read-only outcome
@@ -86,6 +74,7 @@ type decode_error =
   [ `Expected_object
   | `Missing_field of string
   | `Invalid_field of string
+  | `Unexpected_field of string
   | `Unsupported_schema_version of int
   ]
 (** Bounded decode failure for read-only consumers that must surface schema
@@ -110,16 +99,15 @@ val apply_delta : previous:string list -> added:string list -> removed:string li
     [previous]/[current], applying the delta {!diff_keys} computed reproduces
     [current] exactly (as a set). Pure. *)
 
-val content_hash_of : fact_keys:string list -> episode_keys:string list -> string
+val content_hash_of : fact_keys:string list -> string
 (** Stable digest over the full injected set (order/duplicate independent). Not
     a security digest — a cheap change-detection / self-consistency signal. *)
 
 type materialized =
   { record : record
   ; fact_keys : string list
-  ; episode_keys : string list
   }
-(** [record] paired with the full fact/episode key set actually in effect at
+(** [record] paired with the full fact-key set actually in effect at
     that row, after replaying {!delta} against the keeper's prior rows. *)
 
 val materialize : record list -> materialized list
@@ -140,18 +128,13 @@ val append
   -> trace_id:string
   -> turn:int
   -> injected_fact_keys:string list
-  -> injected_episode_keys:string list
   -> n_facts_in_store:int
   -> now:float
   -> unit
   -> unit
 (** Append one injection record. Computes the delta against [keeper_id]'s
-    previous [injected_fact_keys]/[injected_episode_keys] (in-memory,
-    process-local, scoped by [(masc_root, keeper_id)]) and writes a v3
-    delta row: this is the fix for the O(store_size) per-turn growth
-    ([injected_fact_keys]/[injected_episode_keys] here are still the caller's
-    full current sets — computing that live snapshot is not itself the growth
-    bug; persisting a full copy of it every turn was). A keeper's first
+    previous [injected_fact_keys] (in-memory, process-local, scoped by
+    [(masc_root, keeper_id)]) and writes a v4 delta row. A keeper's first
     append in a fresh process (no prior in-memory state) writes [reset = true]
     and diffs against the empty set, so its row is a full current baseline.
     Replay clears the durable pre-restart state at that row before applying the

@@ -84,57 +84,44 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
   return {
     source: 'turn_record',
     producer: 'keeper_agent_run.run_turn|keeper_turn_record_writer',
-    durable_store: '.masc/config/keepers/albini.turn-records.jsonl',
+    durable_store: '.masc/keepers/albini/turn-records',
     dashboard_surface: '/api/v1/keepers/:name/turn-records',
     freshness_slo_s: 300,
     latest_ts_unix: 1_781_587_560,
     latest_ts_iso: '2026-06-16T05:26:00Z',
-    latest_age_s: 0,
+    latest_age_s: 40,
     health: 'ok',
     stale_reason: null,
     keeper: 'albini',
     count: 2,
     skipped_rows: 0,
     memory_os: {
+      schema: 'keeper.memory_os.current_observability.v1',
       keeper: 'albini',
-      source: 'memory_os_files',
-      producer: 'keeper_librarian|keeper_memory_os_recall',
-      selection_policy: {
-        keeper_scope: 'albini',
-        facts_source: 'Keeper_memory_os_io.read_facts_all_for_keepers_dir',
-        episodes_source: 'Keeper_memory_os_io.read_episodes_all_for_keepers_dir',
-        category_source: 'Keeper_memory_os_types.category_to_string',
-        recall_block: 'Keeper_memory_os_recall.render_if_enabled',
-        prompt_record: 'Keeper_run_tools_hooks.record_block Prompt_block_id.Memory_os_recall',
-      },
-      facts_store: '.masc/config/keepers/albini.facts.jsonl',
-      episodes_store: '.masc/config/keepers/albini/episodes',
+      source: 'current_memory_snapshot',
+      producer: 'keeper_librarian',
+      snapshot_store: '.masc/config/keepers/albini.memory.json',
       recall_enabled: true,
-      read_errors: [],
-      episodes: {
-        shown: 2,
-        items: [
-          {
-            trace_id: 'trace-active',
-            generation: 7,
-            created_at: 1_781_583_000,
-            claim_count: 2,
-            source_turn_range: [1, 6],
-            summary: 'Active recall source used by the prompt.',
-          },
-          {
-            trace_id: 'trace-done',
-            generation: 3,
-            created_at: 1_781_580_000,
-            claim_count: 1,
-            source_turn_range: null,
-            summary: 'Terminal memory remains visible as source evidence.',
-          },
-        ],
+      revision: 7,
+      updated_at: 1_781_587_590,
+      summary: 'Current memory selected by the Librarian.',
+      update_source: {
+        kind: 'librarian',
+        trace_id: 'trace-active',
+        generation: 7,
       },
+      now: 1_781_587_600,
+      now_iso: '2026-06-16T02:00:00Z',
+      read_errors: [],
       facts: {
-        shown: 0,
+        shown: 1,
+        current: 1,
         items: [],
+      },
+      change: {
+        added: [],
+        removed: [],
+        retained: 1,
       },
     },
     entries: [
@@ -146,10 +133,10 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           turn_ref: 'trace-active#41',
           ts: 1_781_587_500,
           runtime_profile: 'local',
-          request_runtime_profile: 'local',
-          request_body_bytes: 4096,
           blocks: [{ block: 'system', bytes: 1200, digest: '1111222233334444' }],
           input_components: [],
+          request_runtime_profile: null,
+          request_body_bytes: null,
           execution_ids: [],
         },
         diff_vs_prev: null,
@@ -162,8 +149,6 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           turn_ref: 'trace-active#42',
           ts: 1_781_587_560,
           runtime_profile: 'local',
-          request_runtime_profile: 'local',
-          request_body_bytes: 8192,
           model: 'deepseek-v4-flash',
           finish_reason: 'completed',
           input_tokens: 2400,
@@ -178,9 +163,11 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
             { block: 'memory_os_recall', bytes: 3392, digest: 'aabbccddeeff00112233' },
           ],
           input_components: [
+            { component: 'prompt.persona', bytes: 1200 },
             { component: 'prompt.memory_os_recall', bytes: 3392 },
-            { component: 'tool_schemas', bytes: 4096 },
           ],
+          request_runtime_profile: 'local',
+          request_body_bytes: 560_513,
           execution_ids: ['exec-42'],
         },
         diff_vs_prev: {
@@ -216,7 +203,7 @@ afterEach(() => {
 })
 
 describe('KeeperMemoryOsRecallPanel', () => {
-  it('surfaces Memory OS recall blocks and episode evidence', async () => {
+  it('surfaces Memory OS recall blocks and the current snapshot revision', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 
     const { container } = render(html`<${KeeperMemoryOsRecallPanel} keeperName="albini" />`)
@@ -235,23 +222,31 @@ describe('KeeperMemoryOsRecallPanel', () => {
     expect(text).toContain('enabled')
     expect(text).toContain('latest block')
     expect(text).toContain('3392B')
-    expect(text).toContain('ep 2')
-    expect(text).toContain('facts 0')
-    expect(text).toContain('Terminal memory remains visible as source evidence.')
-    expect(text).toContain('facts: .masc/config/keepers/albini.facts.jsonl')
-    expect(text).toContain('episodes: .masc/config/keepers/albini/episodes')
+    expect(text).toContain('revision 7')
+    expect(text).toContain('facts 1/1')
+    expect(text).toContain('+0 / −0')
+    expect(text).toContain('retained 1')
+    expect(text).toContain('latest revision memory change 없음')
+    expect(text).toContain('store: .masc/config/keepers/albini.memory.json')
+    expect(text).toContain('source: librarian · trace-active · g7')
   })
 
-  it('surfaces a contract error when the required Memory OS snapshot is unavailable', async () => {
-    fetchKeeperTurnRecordsMock.mockRejectedValue(
-      new Error('유효하지 않은 keeper turn record payload'),
-    )
+  it('shows the current fresh-state snapshot without a retired fallback', async () => {
+    const response = turnRecordsWithMemoryOs()
+    response.memory_os.revision = 0
+    response.memory_os.updated_at = null
+    response.memory_os.summary = null
+    response.memory_os.update_source = null
+    response.memory_os.facts = { shown: 0, current: 0, items: [] }
+    response.memory_os.change = { added: [], removed: [], retained: 0 }
+    fetchKeeperTurnRecordsMock.mockResolvedValue(response)
 
     const { container } = render(html`<${KeeperMemoryOsRecallPanel} keeperName="albini" />`)
 
     await waitFor(() => {
-      expect(container.textContent).toContain('유효하지 않은 keeper turn record payload')
+      expect(container.textContent).toContain('revision 0')
     })
+    expect(container.textContent).toContain('facts 0/0')
   })
 })
 

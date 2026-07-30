@@ -249,28 +249,21 @@ let report_churn records =
 ;;
 
 let load_facts ~keepers_dir =
-  if not (Sys.file_exists keepers_dir && (try Sys.is_directory keepers_dir with _ -> false))
-  then []
-  else
-    Sys.readdir keepers_dir
-    |> Array.to_list
-    |> List.sort String.compare
-    |> List.filter_map (fun name ->
-      match Filename.chop_suffix_opt ~suffix:".facts.jsonl" name with
-      | None -> None
-      | Some keeper ->
-        let facts =
-          Masc.Keeper_memory_os_io.read_facts_all_for_keepers_dir
-            ~keepers_dir
-            ~keeper_id:keeper
-        in
-        Some (keeper, facts))
+  Masc.Keeper_memory_os_current.list_keeper_ids_for_keepers_dir ~keepers_dir
+  |> List.filter_map (fun keeper ->
+    match
+      Masc.Keeper_memory_os_current.read_for_keepers_dir
+        ~keepers_dir
+        ~keeper_id:keeper
+    with
+    | Ok (Some snapshot) -> Some (keeper, snapshot.facts)
+    | Ok None | Error _ -> None)
 ;;
 
 let report_composition facts =
-  section "FACT COMPOSITION (fact store)";
+  section "FACT COMPOSITION (current snapshot)";
   if facts = []
-  then note "no fact store found (keepers/*.facts.jsonl) — composition skipped"
+  then note "no current snapshot found (keepers/*.memory.json) — composition skipped"
   else (
     let all = List.concat_map snd facts in
     let total = List.length all in

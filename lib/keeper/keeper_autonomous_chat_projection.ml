@@ -136,6 +136,7 @@ let intent_path ~base_dir intent =
 
 let ensure_projection_dir ~base_dir keeper_name =
   try
+    (* fire-and-forget: only the durable directory side effect is needed. *)
     ignore (Keeper_fs.ensure_dir (keeper_dir ~base_dir keeper_name) : string);
     Ok ()
   with

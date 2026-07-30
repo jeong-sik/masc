@@ -1971,6 +1971,8 @@
 
 (include stanzas/test_keeper_compaction_settlement_counters.inc)
 
+(include stanzas/test_otel_histogram_bucket_labels.inc)
+
 (include stanzas/test_keeper_receipt_authoritative.inc)
 
 (include stanzas/test_keeper_receipt_authoritative_matrix.inc)

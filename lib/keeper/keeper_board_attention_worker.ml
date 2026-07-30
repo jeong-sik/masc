@@ -846,9 +846,6 @@ let execution_disposition partition = function
       (preserve_durable_progress
          partition
          (Partition.Domain_output_invalid detail))
-  | Exact_flow.Domain_settlement_failed ->
-    Execution_blocked
-      (preserve_durable_progress partition Partition.Exact_execution_terminal)
 ;;
 
 let confirm_exact_transition latest_partition operation = function

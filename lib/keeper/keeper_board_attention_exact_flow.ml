@@ -53,7 +53,6 @@ type 'callback_error execution_error =
   | Exact_execution_failed of attempt_provenance list
   | Provenance_mismatch of string
   | Domain_output_invalid of string
-  | Domain_settlement_failed
 
 type prepared =
   { candidate : Keeper_board_attention_candidate.candidate
@@ -347,7 +346,6 @@ let terminal_outcome = function
   | Error (Exact_execution_failed _) -> Exact_execution_failure
   | Error (Provenance_mismatch _) -> Execution_provenance_mismatch
   | Error (Domain_output_invalid _) -> Invalid_domain_output
-  | Error Domain_settlement_failed -> Exact_execution_failure
 ;;
 
 let observe_terminal prepared result =

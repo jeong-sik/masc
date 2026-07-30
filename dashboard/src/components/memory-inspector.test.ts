@@ -126,6 +126,8 @@ function turnRecordsPayload() {
             { block: 'dynamic_context', bytes: 400, digest: 'eeee3333ffff' },
             { block: 'zero_block', bytes: 0, digest: '000000000000' },
           ],
+          request_runtime_profile: 'anthropic.fallback',
+          request_body_bytes: 3412,
           execution_ids: [],
           input_tokens: 3500,
           context_window: 200000,
@@ -190,8 +192,11 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(bar.querySelectorAll('span').length).toBe(3)
     expect(container.querySelectorAll('.mem-leg').length).toBe(3)
     // total bytes = 1200+800+400 = 2400, shown as KB; token readout from input_tokens.
-    expect(container.querySelector('.mem-compo-tot')?.textContent).toBe('2.3KB')
+    expect(container.querySelector('.mem-compo-tot')?.textContent).toBe('2.3KB prompt blocks')
     expect(container.querySelector('.mem-compo-sub')?.textContent).toContain('3.5k tok')
+    expect(container.querySelector('.mem-compo-sub')?.textContent).toContain(
+      'wire 3.3KB · anthropic.fallback',
+    )
     // block labels come from the Prompt_block_id mirror, not raw tokens.
     expect(container.textContent).toContain('메모리 회상')
     expect(container.textContent).toContain('동적 컨텍스트')
@@ -547,6 +552,8 @@ describe('memory view-model helpers', () => {
       record: {
         keeper: 'k', trace_id: 't', absolute_turn: turn, ts: turn, runtime_profile: 'local',
         turn_ref: `t#${turn}`,
+        request_runtime_profile: null,
+        request_body_bytes: null,
         blocks, execution_ids: [],
       },
       diff_vs_prev: null,
@@ -569,6 +576,8 @@ describe('memory view-model helpers', () => {
         turn_ref: `trace-${turn}#${turn}`,
         ts: turn,
         runtime_profile: 'local',
+        request_runtime_profile: null,
+        request_body_bytes: null,
         blocks: [{ block, bytes, digest: `digest-${turn}` }],
         execution_ids: [],
       },

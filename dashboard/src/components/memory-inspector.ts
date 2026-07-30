@@ -243,11 +243,14 @@ function MemCompoReal({ row }: { row: TurnRecordRow | null }) {
   return html`
     <div class="mem-compo">
       <div class="mem-compo-head">
-        <span class="mono mem-compo-tot">${memFmtBytes(totalBytes)}</span>
+        <span class="mono mem-compo-tot">${memFmtBytes(totalBytes)} prompt blocks</span>
         <span class="mem-compo-sub">
           ${inputTok != null
             ? html`${memFmtTok(inputTok)} tok${ctxWin != null ? html` / ${memFmtTok(ctxWin)} 윈도우` : null}${pct != null ? html` · ${pct}%` : null}`
             : html`${parts.length}개 블록`}
+          ${row.record.request_body_bytes != null
+            ? html` · wire ${memFmtBytes(row.record.request_body_bytes)} · ${row.record.request_runtime_profile}`
+            : html` · wire 미관측`}
         </span>
       </div>
       <${MemBar} parts=${parts} total=${totalBytes} />

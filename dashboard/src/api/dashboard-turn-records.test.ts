@@ -19,6 +19,8 @@ function entry(overrides: Record<string, unknown> = {}) {
       ts: 1_700_000_000,
       execution_ids: ['exec-1'],
       blocks: [],
+      request_runtime_profile: null,
+      request_body_bytes: null,
       input_tokens: 1200,
       output_tokens: 340,
       ...overrides,
@@ -201,6 +203,35 @@ describe('keeper turn record cache token counts', () => {
 
   it('rejects a turn_ref that disagrees with trace_id and absolute_turn', async () => {
     getMock.mockResolvedValue(payload(entry({ turn_ref: 'trace-1#8' })))
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+})
+
+describe('keeper turn record request-wire observation', () => {
+  it('keeps exact wire bytes and the runtime that serialized them', async () => {
+    getMock.mockResolvedValue(payload(entry({
+      request_runtime_profile: 'anthropic.fallback',
+      request_body_bytes: 560_513,
+    })))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response.entries[0]?.record).toMatchObject({
+      request_runtime_profile: 'anthropic.fallback',
+      request_body_bytes: 560_513,
+    })
+  })
+
+  it.each([
+    { request_runtime_profile: undefined },
+    { request_body_bytes: undefined },
+    { request_runtime_profile: '' },
+    { request_body_bytes: -1 },
+  ])('rejects malformed current request-wire fields: %j', async (override) => {
+    getMock.mockResolvedValue(payload(entry(override)))
 
     await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
       '유효하지 않은 keeper turn record payload',

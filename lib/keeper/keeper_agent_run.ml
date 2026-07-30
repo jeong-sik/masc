@@ -660,6 +660,7 @@ let run_turn
     let receipt_response_text_present_ref =
       s.Keeper_run_tools.receipt_response_text_present_ref
     in
+    let request_wire_observation_ref = ref None in
     (* 8. Run Agent *)
     let record_turn_progress, yield_on_tool, on_yield, on_resume, on_event =
       Turn_helpers.turn_progress_callbacks
@@ -836,6 +837,13 @@ let run_turn
                       ~on_runtime_observation:
                         (fun observation ->
                            receipt_runtime_observation_ref := Some observation)
+                      ~on_request_wire_observation:
+                        (fun ~runtime_id ~body_bytes ->
+                           request_wire_observation_ref :=
+                             Some
+                               { Turn_record.runtime_profile = runtime_id
+                               ; body_bytes
+                               })
                       ())
          in
          (* Trace-store failure isolation: [raw_trace_for_dispatch]
@@ -1115,6 +1123,7 @@ let run_turn
           ~price_output_per_million
           ~request_latency_ms
           ~ttfrc_ms
+          ~request_wire_observation:!request_wire_observation_ref
           ~sampling:
             { temperature = Some temperature
             ; top_p = Runtime.top_p_of_runtime_id runtime_id_string

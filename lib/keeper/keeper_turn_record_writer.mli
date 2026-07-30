@@ -18,6 +18,7 @@ val write :
   price_output_per_million:float option ->
   request_latency_ms:int option ->
   ttfrc_ms:float option ->
+  request_wire_observation:Turn_record.request_wire_observation option ->
   sampling:Turn_record.sampling ->
   usage:Turn_record.usage ->
   execution_ids:Ids.Execution_id.t list ->

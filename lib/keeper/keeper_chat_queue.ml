@@ -132,6 +132,14 @@ type persistence_publication =
       { revision : int64
       ; receipt_id : Receipt_id.t
       }
+  | Pending_edit_indeterminate of
+      { revision : int64
+      ; receipt_id : Receipt_id.t
+      }
+  | Pending_move_to_end_indeterminate of
+      { revision : int64
+      ; receipt_id : Receipt_id.t
+      }
 
 type persistence_failure =
   { publication : persistence_publication
@@ -153,6 +161,11 @@ type mutation_error =
   | Receipt_not_pending of
       { receipt_id : Receipt_id.t
       ; observed_state : receipt_state option
+      }
+  | Pending_revision_mismatch of
+      { receipt_id : Receipt_id.t
+      ; expected_revision : int64
+      ; observed_revision : int64
       }
   | Recovery_revision_mismatch of
       { receipt_id : Receipt_id.t
@@ -193,6 +206,8 @@ type persistence_transition =
       ; lease_id : string
       }
   | Pending_cancel_transition of { receipt_id : Receipt_id.t }
+  | Pending_edit_transition of { receipt_id : Receipt_id.t }
+  | Pending_move_to_end_transition of { receipt_id : Receipt_id.t }
 
 let persistence_transition_to_string = function
   | Enqueue_transition _ -> "enqueue"
@@ -202,6 +217,8 @@ let persistence_transition_to_string = function
   | Recovery_requeue_transition _ -> "recovery_requeue"
   | Recovery_cancel_transition _ -> "recovery_cancel"
   | Pending_cancel_transition _ -> "pending_cancel"
+  | Pending_edit_transition _ -> "pending_edit"
+  | Pending_move_to_end_transition _ -> "pending_move_to_end"
 
 let transition_receipt_id = function
   | Enqueue_transition { receipt_id }
@@ -211,6 +228,8 @@ let transition_receipt_id = function
   | Recovery_requeue_transition { receipt_id; _ }
   | Recovery_cancel_transition { receipt_id; _ }
   | Pending_cancel_transition { receipt_id } -> receipt_id
+  | Pending_edit_transition { receipt_id } -> receipt_id
+  | Pending_move_to_end_transition { receipt_id } -> receipt_id
 
 let publication_transition = function
   | Not_published -> None
@@ -221,6 +240,8 @@ let publication_transition = function
   | Recovery_requeue_indeterminate _ -> Some "recovery_requeue"
   | Recovery_cancel_indeterminate _ -> Some "recovery_cancel"
   | Pending_cancel_indeterminate _ -> Some "pending_cancel"
+  | Pending_edit_indeterminate _ -> Some "pending_edit"
+  | Pending_move_to_end_indeterminate _ -> Some "pending_move_to_end"
 
 let publication_evidence = function
   | Not_published -> None
@@ -232,6 +253,9 @@ let publication_evidence = function
   | Recovery_cancel_indeterminate { revision; receipt_id; _ }
   | Pending_cancel_indeterminate { revision; receipt_id } ->
     Some (revision, receipt_id)
+  | Pending_edit_indeterminate { revision; receipt_id }
+  | Pending_move_to_end_indeterminate { revision; receipt_id } ->
+    Some (revision, receipt_id)
 
 let publication_lease_id = function
   | Lease_indeterminate { lease_id; _ }
@@ -242,6 +266,8 @@ let publication_lease_id = function
   | Not_published
   | Enqueue_indeterminate _
   | Pending_cancel_indeterminate _ -> None
+  | Pending_edit_indeterminate _
+  | Pending_move_to_end_indeterminate _ -> None
 
 let receipt_state_kind_to_string = function
   | Pending -> "pending"
@@ -288,6 +314,13 @@ let mutation_error_to_string = function
       (match observed_state with
        | None -> "absent"
        | Some state -> receipt_state_kind_to_string state)
+  | Pending_revision_mismatch
+      { receipt_id; expected_revision; observed_revision } ->
+    Printf.sprintf
+      "chat queue pending revision mismatch for receipt %s (expected=%Ld observed=%Ld)"
+      (Receipt_id.to_string receipt_id)
+      expected_revision
+      observed_revision
   | Recovery_revision_mismatch
       { receipt_id; expected_revision; observed_revision } ->
     Printf.sprintf
@@ -348,6 +381,15 @@ let mutation_error_to_json = function
           | None -> `Null
           | Some state -> `String (receipt_state_kind_to_string state) )
       ; "message", `String "chat queue receipt is not pending"
+      ]
+  | Pending_revision_mismatch
+      { receipt_id; expected_revision; observed_revision } ->
+    `Assoc
+      [ "error", `String "chat_queue_pending_revision_mismatch"
+      ; "receipt_id", `String (Receipt_id.to_string receipt_id)
+      ; "expected_revision", `String (Int64.to_string expected_revision)
+      ; "observed_revision", `String (Int64.to_string observed_revision)
+      ; "message", `String "chat queue pending mutation revision mismatch"
       ]
   | Recovery_revision_mismatch
       { receipt_id; expected_revision; observed_revision } ->
@@ -434,6 +476,20 @@ type receipt_lookup = {
   revision : int64;
   receipt : receipt_view option;
 }
+
+type pending_snapshot = {
+  revision : int64;
+  receipts : active_receipt list;
+}
+
+type pending_page = {
+  revision : int64;
+  receipts : active_receipt list;
+  total_pending : int;
+  next_after : int64 option;
+}
+
+let pending_page_limit = 100
 
 type diagnostic_snapshot = {
   revision : int64;
@@ -2042,6 +2098,10 @@ let indeterminate_publication revision = function
     Recovery_cancel_indeterminate { revision; receipt_id; lease_id }
   | Pending_cancel_transition { receipt_id } ->
     Pending_cancel_indeterminate { revision; receipt_id }
+  | Pending_edit_transition { receipt_id } ->
+    Pending_edit_indeterminate { revision; receipt_id }
+  | Pending_move_to_end_transition { receipt_id } ->
+    Pending_move_to_end_indeterminate { revision; receipt_id }
 
 let published_indeterminate_failure plan detail =
   { publication =
@@ -2945,6 +3005,151 @@ let observation_allowed entry =
   | { kind = Durability_uncertain; _ } :: _ -> Ok ()
   | error :: _ -> Error (Snapshot_unavailable error)
 
+let pending_receipts ~keeper_name =
+  if not (valid_keeper_name keeper_name)
+  then Error (Invalid_input (Printf.sprintf "invalid keeper name: %s" keeper_name))
+  else
+    let* base_path = configured_base_path () in
+    let* path =
+      snapshot_path ~base_path ~keeper_name
+      |> Result.map_error (fun detail ->
+        Snapshot_unavailable (load_error Invalid_path detail))
+    in
+    match find_entry keeper_name with
+    | None ->
+      (match observe_lane_store ~ownership_root:base_path ~path with
+       | Error error -> Error (Snapshot_unavailable error)
+       | Ok Store_absent -> Ok { revision = 0L; receipts = [] }
+       | Ok Store_present ->
+         Error
+           (Snapshot_unavailable
+              (load_error Reconciliation_failed ~path
+                 "chat queue database exists without a configured in-memory lane")))
+    | Some entry ->
+      with_entry_lock keeper_name entry (fun () ->
+          let* () =
+            match entry.load_errors with
+            | [] -> Ok ()
+            | error :: _ -> Error (Snapshot_unavailable error)
+          in
+          match check_entry_store ~base_path ~path entry ~allow_absent:false with
+          | Error _ as error -> error
+          | Ok Store_absent ->
+            Error
+              (Snapshot_unavailable
+                 (load_error Read_failed ~path
+                    "chat queue database is absent during pending receipt lookup"))
+          | Ok Store_present ->
+            let rec project receipts = function
+              | [] -> Ok { revision = entry.revision; receipts = List.rev receipts }
+              | (_, row) :: rest ->
+                (match active_receipt_of_row row with
+                 | Ok ({ state = Pending; _ } as receipt) ->
+                   project (receipt :: receipts) rest
+                 | Ok _ | Error _ ->
+                   Error
+                     (Snapshot_unavailable
+                        (load_error Parse_failed ~path
+                           "pending receipt index contains a non-pending row")))
+            in
+            project [] (Sequence_map.bindings entry.pending))
+
+let pending_receipts_page ~keeper_name ~after ~limit =
+  if limit <= 0
+  then Error (Invalid_input "pending receipt page limit must be positive")
+  else if limit > pending_page_limit
+  then
+    Error
+      (Invalid_input
+         (Printf.sprintf
+            "pending receipt page limit must not exceed %d"
+            pending_page_limit))
+  else if not (valid_keeper_name keeper_name)
+  then Error (Invalid_input (Printf.sprintf "invalid keeper name: %s" keeper_name))
+  else
+    let* base_path = configured_base_path () in
+    let* path =
+      snapshot_path ~base_path ~keeper_name
+      |> Result.map_error (fun detail ->
+        Snapshot_unavailable (load_error Invalid_path detail))
+    in
+    match find_entry keeper_name with
+    | None ->
+      (match observe_lane_store ~ownership_root:base_path ~path with
+       | Error error -> Error (Snapshot_unavailable error)
+       | Ok Store_absent ->
+         Ok
+           { revision = 0L
+           ; receipts = []
+           ; total_pending = 0
+           ; next_after = None
+           }
+       | Ok Store_present ->
+         Error
+           (Snapshot_unavailable
+              (load_error Reconciliation_failed ~path
+                 "chat queue database exists without a configured in-memory lane")))
+    | Some entry ->
+      with_entry_lock keeper_name entry (fun () ->
+          let* () =
+            match entry.load_errors with
+            | [] -> Ok ()
+            | error :: _ -> Error (Snapshot_unavailable error)
+          in
+          match check_entry_store ~base_path ~path entry ~allow_absent:false with
+          | Error _ as error -> error
+          | Ok Store_absent ->
+            Error
+              (Snapshot_unavailable
+                 (load_error Read_failed ~path
+                    "chat queue database is absent during pending receipt page lookup"))
+          | Ok Store_present ->
+            let sequence =
+              match after with
+              | None -> Sequence_map.to_seq entry.pending
+              | Some value when Int64.equal value Int64.max_int -> Seq.empty
+              | Some value ->
+                Sequence_map.to_seq_from (Int64.succ value) entry.pending
+            in
+            let rec project remaining receipts last_sequence sequence =
+              if remaining = 0
+              then
+                let next_after =
+                  match sequence () with
+                  | Seq.Nil -> None
+                  | Seq.Cons _ -> last_sequence
+                in
+                Ok
+                  { revision = entry.revision
+                  ; receipts = List.rev receipts
+                  ; total_pending = Sequence_map.cardinal entry.pending
+                  ; next_after
+                  }
+              else
+                match sequence () with
+                | Seq.Nil ->
+                  Ok
+                    { revision = entry.revision
+                    ; receipts = List.rev receipts
+                    ; total_pending = Sequence_map.cardinal entry.pending
+                    ; next_after = None
+                    }
+                | Seq.Cons ((fifo_sequence, row), rest) ->
+                  (match active_receipt_of_row row with
+                   | Ok ({ state = Pending; _ } as receipt) ->
+                     project
+                       (remaining - 1)
+                       (receipt :: receipts)
+                       (Some fifo_sequence)
+                       rest
+                   | Ok _ | Error _ ->
+                     Error
+                       (Snapshot_unavailable
+                          (load_error Parse_failed ~path
+                             "pending receipt index contains a non-pending row")))
+            in
+            project limit [] None sequence)
+
 let receipt_lookup_of_row revision = function
   | None -> { revision; receipt = None }
   | Some row ->
@@ -3116,6 +3321,197 @@ let cancel_pending
           | Error _ as error ->
             notify_indeterminate ~keeper_name error;
             error))
+
+type pending_mutation_report =
+  { receipt_id : Receipt_id.t
+  ; revision : int64
+  ; pending_index : int
+  }
+
+let pending_index entry receipt_id =
+  entry.pending
+  |> Sequence_map.bindings
+  |> List.find_mapi (fun index (_, row) ->
+    if Receipt_id.equal row.receipt.receipt_id receipt_id
+    then Some index
+    else None)
+
+let mutate_pending
+    ~keeper_name
+    ~receipt_id
+    ~expected_revision
+    ~target_of_row =
+  match mutation_context ~keeper_name ~create:false with
+  | Error _ as error -> error
+  | Ok (_, _, None) ->
+    Error (Receipt_not_pending { receipt_id; observed_state = None })
+  | Ok (base_path, path, Some entry) ->
+    let result =
+      with_entry_lock keeper_name entry (fun () ->
+          let* presence =
+            check_entry_store ~base_path ~path entry ~allow_absent:false
+          in
+          match presence with
+          | Store_absent ->
+            quarantine_entry entry
+              (load_error Read_failed ~path
+                 "chat queue database is absent during pending mutation")
+          | Store_present ->
+            if not (Int64.equal entry.revision expected_revision)
+            then
+              Error
+                (Pending_revision_mismatch
+                   { receipt_id
+                   ; expected_revision
+                   ; observed_revision = entry.revision
+                   })
+            else
+              (match find_pending_row entry receipt_id with
+               | None -> receipt_not_pending ~base_path ~path entry ~receipt_id
+               | Some row ->
+                 let* target_row, target_next_sequence, transition =
+                   target_of_row entry row
+                 in
+                 let* plan =
+                   make_plan entry
+                     ~before_row:(Some row)
+                     ~target_row:(Some target_row)
+                     ~target_next_sequence
+                     ~target_terminal_count:entry.terminal_count
+                     ~transition
+                 in
+                 let execution =
+                   run_transaction
+                     ~ownership_root:base_path
+                     ~path
+                     ~create_if_missing:false
+                     plan
+                 in
+                 Result.map
+                   (fun revision ->
+                      { receipt_id
+                      ; revision
+                      ; pending_index =
+                          Option.value
+                            (pending_index entry receipt_id)
+                            ~default:0
+                      })
+                   (apply_transaction_result ~path entry plan execution)))
+    in
+    (match result with
+     | Ok ({ revision; _ } as report) ->
+       notify_transition ~keeper_name ~revision;
+       Ok report
+     | Error _ as error ->
+       notify_indeterminate ~keeper_name error;
+       error)
+
+let edit_pending
+    ~keeper_name
+    ~receipt_id
+    ~expected_revision
+    ~content =
+  let edit_user_blocks blocks =
+    let text_block_count =
+      List.fold_left
+        (fun count -> function
+           | Keeper_multimodal_input.User_text _ -> count + 1
+           | Keeper_multimodal_input.User_image _
+           | Keeper_multimodal_input.User_document _
+           | Keeper_multimodal_input.User_audio _ ->
+             count)
+        0
+        blocks
+    in
+    if text_block_count > 1
+    then
+      Error
+        (Invalid_input
+           "pending chat edit requires at most one structured text block")
+    else
+      let trimmed_content = String.trim content in
+      let rec replace = function
+        | [] ->
+          if (match blocks with
+              | [] -> true
+              | _ :: _ -> false)
+             || String.equal trimmed_content ""
+          then []
+          else [ Keeper_multimodal_input.User_text content ]
+        | Keeper_multimodal_input.User_text _ :: rest ->
+          if String.equal trimmed_content ""
+          then rest
+          else Keeper_multimodal_input.User_text content :: rest
+        | block :: rest -> block :: replace rest
+      in
+      Ok (replace blocks)
+  in
+  mutate_pending
+    ~keeper_name
+    ~receipt_id
+    ~expected_revision
+    ~target_of_row:(fun entry row ->
+      match row.receipt.state with
+      | Stored_pending message ->
+        if String.equal content message.content
+        then Error (Invalid_input "pending chat edit content is unchanged")
+        else if
+          String.equal (String.trim content) ""
+          &&
+          match message.attachments with
+          | [] -> true
+          | _ :: _ -> false
+        then
+          Error
+            (Invalid_input
+               "pending chat edit requires content or an existing attachment")
+        else
+          let* user_blocks = edit_user_blocks message.user_blocks in
+          let* message =
+            canonical_queued_message { message with content; user_blocks }
+            |> Result.map_error (fun detail -> Invalid_input detail)
+          in
+          Ok
+            ( { row with
+                receipt =
+                  { receipt_id = row.receipt.receipt_id
+                  ; state = Stored_pending message
+                  }
+              }
+            , entry.next_sequence
+            , Pending_edit_transition { receipt_id } )
+      | Stored_inflight _
+      | Stored_recovery_required _
+      | Stored_delivered _
+      | Stored_failed _ ->
+        Error
+          (Receipt_not_pending
+             { receipt_id
+             ; observed_state = Some (receipt_state_of_stored row.receipt.state)
+             }))
+
+let move_pending_to_end
+    ~keeper_name
+    ~receipt_id
+    ~expected_revision =
+  mutate_pending
+    ~keeper_name
+    ~receipt_id
+    ~expected_revision
+    ~target_of_row:(fun entry row ->
+      match Sequence_map.max_binding_opt entry.pending with
+      | Some (_, last)
+        when Receipt_id.equal last.receipt.receipt_id receipt_id ->
+        Error (Invalid_input "chat queue receipt is already last")
+      | None -> Error (Receipt_not_pending { receipt_id; observed_state = None })
+      | Some _ ->
+        if Int64.equal entry.next_sequence Int64.max_int
+        then Error Revision_exhausted
+        else
+          Ok
+            ( { row with fifo_sequence = entry.next_sequence }
+            , Int64.succ entry.next_sequence
+            , Pending_move_to_end_transition { receipt_id } ))
 
 type reconciliation_outcome =
   | Already_consistent
@@ -3307,7 +3703,9 @@ let reconcile_persistence ~keeper_name =
                        | Startup_recovery_transition _
                        | Recovery_requeue_transition _
                        | Recovery_cancel_transition _
-                       | Pending_cancel_transition _ ), false, true ->
+                       | Pending_cancel_transition _
+                       | Pending_edit_transition _
+                       | Pending_move_to_end_transition _ ), false, true ->
                        set_entry_to_plan_target entry plan;
                        entry.load_errors <- [];
                        entry.reconciliation_plan <- None;
@@ -3317,7 +3715,9 @@ let reconcile_persistence ~keeper_name =
                        | Startup_recovery_transition _
                        | Recovery_requeue_transition _
                        | Recovery_cancel_transition _
-                       | Pending_cancel_transition _ ), true, false ->
+                       | Pending_cancel_transition _
+                       | Pending_edit_transition _
+                       | Pending_move_to_end_transition _ ), true, false ->
                        let execution =
                          run_transaction
                            ~ownership_root:base_path

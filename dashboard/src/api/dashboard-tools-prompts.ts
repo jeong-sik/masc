@@ -369,6 +369,32 @@ export interface DashboardKeeperWaitingKeeper {
   since_iso?: string | null
   due_at?: number | null
   due_at_iso?: string | null
+  source_next_actions?: Record<string, string[]>
+  current_execution?: {
+    turn_phase?: string
+    decision?: { stage?: string }
+    runtime?: { state?: string }
+    latest_tool?: {
+      name?: string
+      used_at?: number
+      used_at_iso?: string
+    } | null
+    run_state?: {
+      kind?: string
+      wake_kind?: string
+      stimulus_kinds?: string[]
+      active_tool_count?: number
+    }
+    live_turn?: {
+      turn_id?: number
+      started_at?: number
+      last_progress_at?: number
+      last_progress_kind?: string | null
+      selected_model?: string | null
+      active_tool_count?: number
+    } | null
+  } | null
+  /** @deprecated Use source_next_actions; retained while older consumers migrate. */
   next_action?: string | null
 }
 

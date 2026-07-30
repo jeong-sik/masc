@@ -126,6 +126,39 @@ export function getQueuedMessages(keeperName: string): QueuedMessage[] {
   return q ? q.items.slice() : []
 }
 
+function editedUserBlocks(
+  blocks: KeeperUserInputBlock[] | undefined,
+  previousContent: string,
+  content: string,
+  attachments: KeeperConversationAttachment[] | undefined,
+): KeeperUserInputBlock[] | undefined {
+  if (!blocks) return undefined
+  const attachmentIds = new Set((attachments ?? []).map(attachment => attachment.id))
+  const retained = blocks.filter(block => (
+    block.type === 'text' || attachmentIds.has(block.attachmentId)
+  ))
+  const nextText = content
+  if (previousContent === nextText) {
+    return retained.length > 0 ? retained : undefined
+  }
+  const textBlockCount = retained.filter(block => block.type === 'text').length
+  if (textBlockCount > 1) {
+    throw new Error('여러 구조화 text block이 있는 메시지는 추측해서 수정하지 않습니다.')
+  }
+  let replacedText = false
+  const edited: KeeperUserInputBlock[] = []
+  for (const block of retained) {
+    if (block.type !== 'text') {
+      edited.push(block)
+    } else if (!replacedText) {
+      replacedText = true
+      if (nextText.trim()) edited.push({ type: 'text', text: nextText })
+    }
+  }
+  if (!replacedText && nextText.trim()) edited.push({ type: 'text', text: nextText })
+  return edited.length > 0 ? edited : undefined
+}
+
 /** Update the editable fields or editor presentation of a queued message. */
 export function updateQueuedMessage(
   keeperName: string,
@@ -138,21 +171,31 @@ export function updateQueuedMessage(
   if (!q) return null
   const item = q.items.find(i => i.id === id)
   if (!item) return null
+  const previousContent = item.content
+  const previousUserBlocks = item.userBlocks
+  const contentChanged =
+    typeof updates.content === 'string' && updates.content !== item.content
+  const attachmentsChanged = 'attachments' in updates
+  const changed = contentChanged || attachmentsChanged
+  const nextContent = typeof updates.content === 'string' ? updates.content : item.content
+  const nextAttachments = 'attachments' in updates ? updates.attachments : item.attachments
+  const nextUserBlocks = changed
+    ? ('userBlocks' in updates
+        ? updates.userBlocks
+        : editedUserBlocks(
+            previousUserBlocks,
+            previousContent,
+            nextContent,
+            nextAttachments,
+          ))
+    : previousUserBlocks
   if ('editOnOpen' in updates) {
     if (updates.editOnOpen) item.editOnOpen = true
     else delete item.editOnOpen
   }
-  let changed = false
-  if (typeof updates.content === 'string') item.content = updates.content
-  if (typeof updates.content === 'string') changed = true
-  if ('attachments' in updates) {
-    if (updates.attachments && updates.attachments.length > 0) {
-      item.attachments = updates.attachments
-    } else {
-      delete item.attachments
-    }
-    changed = true
-  }
+  item.content = nextContent
+  if (nextAttachments && nextAttachments.length > 0) item.attachments = nextAttachments
+  else delete item.attachments
   if (changed) delete item.clientActionId
   if (changed) {
     if ('blocks' in updates && updates.blocks && updates.blocks.length > 0) {
@@ -160,11 +203,8 @@ export function updateQueuedMessage(
     } else {
       delete item.blocks
     }
-    if ('userBlocks' in updates && updates.userBlocks && updates.userBlocks.length > 0) {
-      item.userBlocks = updates.userBlocks
-    } else {
-      delete item.userBlocks
-    }
+    if (nextUserBlocks && nextUserBlocks.length > 0) item.userBlocks = nextUserBlocks
+    else delete item.userBlocks
   }
   return item
 }

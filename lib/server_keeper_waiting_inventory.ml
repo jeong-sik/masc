@@ -168,7 +168,17 @@ let take_with_truncation limit rows =
 
 let rows_for_queue_snapshot ~keeper_name ~source ~next_action queue =
   Keeper_event_queue.to_list queue
-  |> List.map (fun (stimulus : Keeper_event_queue.stimulus) ->
+  |> List.mapi (fun queue_index (stimulus : Keeper_event_queue.stimulus) ->
+    let detail =
+      `Assoc
+        [ "queue_index", `Int queue_index
+        ; "post_id", `String stimulus.post_id
+        ; "urgency", `String (Keeper_event_queue.urgency_to_string stimulus.urgency)
+        ; "arrived_at_unix", `Float stimulus.arrived_at
+        ; "payload_kind",
+          `String (Keeper_event_queue.payload_kind_label stimulus.payload)
+        ]
+    in
     { keeper_name = Some keeper_name
     ; source
     ; waiting_on = Keeper_event_queue.payload_kind_label stimulus.payload
@@ -176,7 +186,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action queue =
     ; since = Some stimulus.arrived_at
     ; due_at = None
     ; next_action
-    ; detail = Keeper_event_queue.stimulus_to_yojson stimulus
+    ; detail
     })
 ;;
 
@@ -841,7 +851,60 @@ let record_metrics ~now ~per_keeper ~global_rows =
   record_keeper_state_metrics per_keeper
 ;;
 
-let keeper_json keeper_name ~busy ~external_attention_truncated rows =
+let current_execution_json ~base_path keeper_name =
+  match Keeper_registry.get ~base_path keeper_name with
+  | Some ({ current_turn_observation = Some _; _ } as entry) ->
+    let latest_tool =
+      Keeper_registry.StringMap.bindings entry.tool_usage
+      |> List.fold_left
+           (fun latest (tool_name, usage) ->
+              match latest with
+              | None -> Some (tool_name, usage.Keeper_types.last_used_at)
+              | Some (_, latest_at) when usage.last_used_at > latest_at ->
+                Some (tool_name, usage.last_used_at)
+              | Some _ -> latest)
+           None
+    in
+    (match
+       Keeper_composite_observer.observe entry
+       |> Keeper_composite_observer.snapshot_to_json
+     with
+     | `Assoc fields ->
+       `Assoc
+         (("latest_tool",
+           match latest_tool with
+           | None -> `Null
+           | Some (tool_name, used_at) ->
+             `Assoc
+               [ "name", `String tool_name
+               ; "used_at", `Float used_at
+               ; "used_at_iso", `String (Masc_domain.iso8601_of_unix_seconds used_at)
+               ])
+          :: fields)
+     | value -> value)
+  | None | Some { current_turn_observation = None; _ } -> `Null
+;;
+
+let source_next_actions rows =
+  rows
+  |> List.fold_left
+       (fun actions row ->
+          let source = source_to_string row.source in
+          let current =
+            match List.assoc_opt source actions with
+            | None -> []
+            | Some values -> values
+          in
+          if List.mem row.next_action current
+          then actions
+          else (source, current @ [ row.next_action ]) :: List.remove_assoc source actions)
+       []
+  |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+  |> List.map (fun (source, actions) ->
+    source, `List (List.map (fun action -> `String action) actions))
+;;
+
+let keeper_json ~base_path keeper_name ~busy ~external_attention_truncated rows =
   let state = keeper_state ~busy rows in
   let since =
     rows
@@ -869,10 +932,8 @@ let keeper_json keeper_name ~busy ~external_attention_truncated rows =
     ; "since_iso", unix_iso_json since
     ; "due_at", float_json due_at
     ; "due_at_iso", unix_iso_json due_at
-    ; ( "next_action"
-      , match rows with
-        | [] -> `Null
-        | row :: _ -> `String row.next_action )
+    ; "source_next_actions", `Assoc (source_next_actions rows)
+    ; "current_execution", current_execution_json ~base_path keeper_name
     ]
 ;;
 
@@ -961,7 +1022,12 @@ let dashboard_json_with_pending_reader ~read_pending config =
   let keeper_json_rows =
     per_keeper
     |> List.map (fun (keeper_name, busy, rows, external_attention_truncated) ->
-      keeper_json keeper_name ~busy ~external_attention_truncated rows)
+      keeper_json
+        ~base_path:config.Workspace.base_path
+        keeper_name
+        ~busy
+        ~external_attention_truncated
+        rows)
   in
   let all_keeper_rows =
     List.flatten

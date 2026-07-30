@@ -238,7 +238,12 @@ let test_event_queue_pending_is_visible () =
     (match U.(keeper |> member "waiting_on" |> to_list) with
      | pending_row :: _ ->
        check string "pending wake producer" "keeper_supervisor"
-         (json_string_member "wake_producer" pending_row)
+         (json_string_member "wake_producer" pending_row);
+       let detail = U.member "detail" pending_row in
+       check string "public row retains typed payload label" "bootstrap"
+         (json_string_member "payload_kind" detail);
+       check bool "public row does not enumerate the exact event payload" true
+         (U.member "payload" detail = `Null)
      | rows -> failf "expected one queue row, got %d" (List.length rows))
 ;;
 

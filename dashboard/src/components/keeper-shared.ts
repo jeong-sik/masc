@@ -24,6 +24,8 @@ import {
   probeKeeperRuntime,
   reconcileKeeperChatReceipts,
   cancelKeeperChatPendingEntry,
+  editKeeperChatPendingEntry,
+  moveKeeperChatPendingEntryToEnd,
   requeueKeeperChatRecoveryEntry,
   cancelKeeperChatRecoveryEntry,
   recoverKeeperRuntime,
@@ -79,12 +81,24 @@ import {
 } from '../tool-call-output-store'
 import {
   KEEPER_WAITING_INVENTORY_REFRESH_MS,
+  loadTools,
   subscribeToolsAutoRefresh,
   toolsData,
   toolsError,
 } from './tools/tool-state'
 import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { chatShowInternal, chatShowMetadata } from '../lib/chat-view-prefs'
+import {
+  cancelKeeperChatPendingReceipt,
+  editKeeperChatPendingReceipt,
+  fetchKeeperEventQueuePending,
+  fetchKeeperChatPending,
+  moveKeeperChatPendingReceiptToEnd,
+  operateKeeperEventQueue,
+  type DashboardKeeperWaitingKeeper,
+  type KeeperChatPendingSnapshot,
+  type KeeperEventQueuePendingSnapshot,
+} from '../api'
 
 // Mirrors `LANE_REFRESH_MS` in keeper-workspace/keeper-lane-strip.ts. That
 // const is module-local there, so we keep the same 15 s cadence here rather
@@ -430,21 +444,29 @@ function QueueItemCard({ keeperName, msg, onMutate, onSave }: QueueItemCardProps
   const [editing, setEditing] = useState(msg.editOnOpen === true)
   const [text, setText] = useState(msg.content)
   const [attachments, setAttachments] = useState(msg.attachments ?? [])
+  const [editError, setEditError] = useState<string | null>(null)
 
   const save = () => {
-    updateQueuedMessage(keeperName, msg.id, {
-      content: text.trim(),
-      attachments: attachments.length > 0 ? attachments : undefined,
-      editOnOpen: false,
-    })
-    setEditing(false)
-    onMutate()
-    onSave()
+    try {
+      const updated = updateQueuedMessage(keeperName, msg.id, {
+        content: text.trim(),
+        attachments: attachments.length > 0 ? attachments : undefined,
+        editOnOpen: false,
+      })
+      if (!updated) throw new Error('수정할 대기 메시지를 찾지 못했습니다.')
+      setEditError(null)
+      setEditing(false)
+      onMutate()
+      onSave()
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : String(error))
+    }
   }
 
   const cancel = () => {
     setText(msg.content)
     setAttachments(msg.attachments ?? [])
+    setEditError(null)
     updateQueuedMessage(keeperName, msg.id, { editOnOpen: false })
     setEditing(false)
   }
@@ -479,6 +501,9 @@ function QueueItemCard({ keeperName, msg, onMutate, onSave }: QueueItemCardProps
                     `)}
                   </div>
                 `
+              : null}
+            ${editError
+              ? html`<div class="mt-2 text-2xs text-[var(--color-status-err)]">${editError}</div>`
               : null}
             <div class="mt-2 flex items-center justify-end gap-2">
               <button type="button" class="text-2xs text-[var(--color-fg-secondary)] hover:text-[var(--color-fg-primary)]" onClick=${cancel}>취소</button>
@@ -543,7 +568,9 @@ function ServerQueueStatus({
   projectionError,
   projectionReady,
   projectionPresent,
-  nextAction,
+  currentExecution,
+  readErrorAction,
+  onInspect,
 }: {
   busy: boolean
   pendingCount: number
@@ -554,7 +581,9 @@ function ServerQueueStatus({
   projectionError?: string | null
   projectionReady: boolean
   projectionPresent: boolean
-  nextAction?: string | null
+  currentExecution?: DashboardKeeperWaitingKeeper['current_execution']
+  readErrorAction?: string | null
+  onInspect: () => void
 }) {
   const projectionUnavailable = Boolean(projectionError) || !projectionReady || !projectionPresent
   if (
@@ -584,7 +613,12 @@ function ServerQueueStatus({
             : 'ready'}
     >
       <div class="flex flex-wrap items-center gap-2 v2-monitoring-row">
-        <span class="font-semibold text-[var(--color-fg-primary)]">Keeper 서버 대기열</span>
+        <button
+          type="button"
+          class="font-semibold text-[var(--color-accent-fg)] underline decoration-dotted underline-offset-2"
+          onClick=${onInspect}
+          data-open-keeper-queue-control
+        >Keeper 서버 대기열 상세/제어</button>
         ${inflightCount > 0
           ? html`<span class="rounded-[var(--r-0)] border border-[var(--info-20)] bg-[var(--info-10)] px-2 py-0.5" data-server-chat-queue-state="inflight">처리 중 ${inflightCount}</span>`
           : null}
@@ -614,9 +648,219 @@ function ServerQueueStatus({
       <div class="mt-1.5 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
         이 값은 브라우저 초안이 아니라 서버의 durable receipt 투영입니다.
         ${projectionError ? html` 최근 갱신 오류: <code>${projectionError}</code>. 표시 수치는 이전 snapshot일 수 있습니다.` : null}
-        ${nextAction ? html` 다음 서버 동작: <code>${nextAction}</code>` : null}
+        ${readErrorAction ? html` 복구 조치: <code>${readErrorAction}</code>.` : null}
+        ${currentExecution?.live_turn
+          ? html`
+              현재 실행: turn <code>${currentExecution.live_turn.turn_id ?? '-'}</code>
+              · phase <code>${currentExecution.turn_phase ?? '-'}</code>
+              · model <code>${currentExecution.live_turn.selected_model ?? '선택 전'}</code>
+              · wake <code>${currentExecution.run_state?.wake_kind ?? 'unknown'}${currentExecution.run_state?.stimulus_kinds?.length ? `:${currentExecution.run_state.stimulus_kinds.join(',')}` : ''}</code>
+              · active tools <code>${currentExecution.live_turn.active_tool_count ?? 0}</code>
+              · latest tool <code>${currentExecution.latest_tool?.name ?? 'none'}</code>
+              · last progress <code>${currentExecution.live_turn.last_progress_kind ?? 'unknown'}</code>
+            `
+          : null}
       </div>
     </div>
+  `
+}
+
+function KeeperQueueControlPanel({
+  keeperName,
+  keeper,
+  onClose,
+}: {
+  keeperName: string
+  keeper: DashboardKeeperWaitingKeeper | null
+  onClose: () => void
+}) {
+  const [snapshot, setSnapshot] = useState<KeeperChatPendingSnapshot | null>(null)
+  const [eventSnapshot, setEventSnapshot] = useState<KeeperEventQueuePendingSnapshot | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [pendingAction, setPendingAction] = useState<string | null>(null)
+  const load = async (clearError = true) => {
+    try {
+      if (clearError) setError(null)
+      const [chat, events] = await Promise.all([
+        fetchKeeperChatPending(keeperName),
+        fetchKeeperEventQueuePending(keeperName),
+      ])
+      setSnapshot(chat)
+      setEventSnapshot(events)
+    } catch (cause) {
+      setSnapshot(null)
+      setEventSnapshot(null)
+      if (clearError) setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+  useEffect(() => {
+    void load()
+  }, [keeperName])
+  const eventRows = eventSnapshot?.pending ?? []
+  const mutate = async (key: string, operation: () => Promise<unknown>) => {
+    setPendingAction(key)
+    try {
+      await operation()
+      await reconcileKeeperChatReceipts(keeperName)
+      await load()
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      await Promise.allSettled([
+        reconcileKeeperChatReceipts(keeperName),
+        load(false),
+      ])
+      setError(message)
+      showToast(message, 'error')
+    } finally {
+      setPendingAction(null)
+    }
+  }
+  const mutateEvent = async (key: string, operation: () => Promise<void>) => {
+    setPendingAction(key)
+    try {
+      await operation()
+      await Promise.all([load(), loadTools()])
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      await Promise.allSettled([load(false), loadTools()])
+      setError(message)
+      showToast(message, 'error')
+    } finally {
+      setPendingAction(null)
+    }
+  }
+  return html`
+    <section
+      class="fixed inset-y-0 right-0 z-[120] grid h-dvh w-[min(48rem,100vw)] content-start gap-3 overflow-y-auto border-l border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-2xl"
+      data-keeper-queue-control-panel
+      role="dialog"
+      aria-label="${keeperName} 운영자 대기열 제어"
+    >
+      <div class="flex items-center justify-between gap-2">
+        <div>
+          <div class="text-sm font-semibold text-[var(--color-fg-primary)]">운영자 대기열 제어</div>
+          <div class="text-2xs text-[var(--color-fg-muted)]">durable SSOT · pending만 변경 · revision 충돌 시 거부</div>
+        </div>
+        <${GhostButton} onClick=${onClose}>닫기<//>
+      </div>
+      ${error
+        ? html`<div class="rounded-[var(--r-0)] bg-[var(--danger-10)] p-2 text-2xs text-[var(--color-status-err)]">${error}</div>`
+        : null}
+      <div class="grid gap-2">
+        <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">
+          채팅 대기 ${snapshot?.pending.length ?? keeper?.sources?.chat_queue_pending ?? 0}
+        </div>
+        ${(snapshot?.pending ?? []).map((item, index) => {
+          const key = item.receipt.receiptId
+          const busy = pendingAction === key
+          return html`
+            <div class="grid gap-1 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] p-2" data-operator-chat-receipt=${key}>
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <span class="font-mono text-2xs text-[var(--color-fg-muted)]">#${index + 1} · ${key}</span>
+                <span class="text-2xs text-[var(--color-fg-muted)]">${new Date(item.submittedAt * 1000).toLocaleString()}</span>
+              </div>
+              <div class="whitespace-pre-wrap break-words text-xs text-[var(--color-fg-primary)]">${item.content}</div>
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  disabled=${busy}
+                  class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1 text-2xs disabled:opacity-50"
+                  onClick=${() => {
+                    const content = window.prompt('서버 대기 메시지를 수정합니다.', item.content)
+                    if (content === null) return
+                    void mutate(key, () => editKeeperChatPendingReceipt(
+                      keeperName,
+                      key,
+                      snapshot!.revision,
+                      content,
+                    ))
+                  }}
+                >수정</button>
+                <button
+                  type="button"
+                  disabled=${busy || index === (snapshot?.pending.length ?? 0) - 1}
+                  class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1 text-2xs disabled:opacity-50"
+                  onClick=${() => void mutate(key, () => moveKeeperChatPendingReceiptToEnd(
+                    keeperName,
+                    key,
+                    snapshot!.revision,
+                  ))}
+                >맨 뒤로</button>
+                <button
+                  type="button"
+                  disabled=${busy}
+                  class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-1 text-2xs text-[var(--color-status-err)] disabled:opacity-50"
+                  onClick=${() => void mutate(key, () => cancelKeeperChatPendingReceipt(keeperName, key))}
+                >취소</button>
+              </div>
+            </div>
+          `
+        })}
+      </div>
+      <div class="grid gap-2 border-t border-[var(--color-border-subtle)] pt-3">
+        <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">자율 이벤트 대기 ${eventSnapshot?.totalPending ?? 0}</div>
+        ${eventRows.map(item => {
+          const key = `event:${item.postId}`
+          const busy = pendingAction === key
+          return html`
+            <div class="grid gap-1 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] p-2" data-operator-event-row>
+              <div class="font-mono text-2xs text-[var(--color-fg-muted)]">#${item.queueIndex + 1} · ${item.postId}</div>
+              <div class="text-2xs text-[var(--color-fg-secondary)]">${item.payloadKind} · ${item.urgency} · ${new Date(item.arrivedAt * 1000).toLocaleString()}</div>
+              <div class="flex flex-wrap gap-1.5">
+                ${(['immediate', 'normal', 'low'] as const).map(urgency => html`
+                  <button
+                    type="button"
+                    disabled=${busy}
+                    class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1 text-2xs disabled:opacity-50"
+                    onClick=${() => {
+                      void mutateEvent(key, () => operateKeeperEventQueue(keeperName, {
+                        action: 'reprioritize',
+                        expectedRevision: eventSnapshot!.revision,
+                        postId: item.postId,
+                        urgency,
+                      }))
+                    }}
+                  >${urgency}</button>
+                `)}
+                <button
+                  type="button"
+                  disabled=${busy}
+                  class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1 text-2xs disabled:opacity-50"
+                  onClick=${() => {
+                    const targetKeeper = window.prompt('이 이벤트를 넘길 Keeper 이름을 입력하세요.')
+                    if (targetKeeper === null) return
+                    void mutateEvent(key, () => operateKeeperEventQueue(keeperName, {
+                      action: 'transfer',
+                      expectedRevision: eventSnapshot!.revision,
+                      postId: item.postId,
+                      targetKeeper,
+                    }))
+                  }}
+                >이관</button>
+                <button
+                  type="button"
+                  disabled=${busy}
+                  class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-1 text-2xs text-[var(--color-status-err)] disabled:opacity-50"
+                  onClick=${() => {
+                    const reason = window.prompt('이벤트 취소 이유를 입력하세요.')
+                    if (reason === null) return
+                    void mutateEvent(key, () => operateKeeperEventQueue(keeperName, {
+                      action: 'cancel',
+                      expectedRevision: eventSnapshot!.revision,
+                      postId: item.postId,
+                      reason,
+                    }))
+                  }}
+                >취소</button>
+              </div>
+            </div>
+          `
+        })}
+        ${eventRows.length === 0
+          ? html`<div class="text-2xs text-[var(--color-fg-muted)]">대기 중인 자율 이벤트가 없습니다.</div>`
+          : null}
+      </div>
+    </section>
   `
 }
 
@@ -644,6 +888,7 @@ export function KeeperConversationPanel({
 
   const [historyExpanded, setHistoryExpanded] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [queueControlOpen, setQueueControlOpen] = useState(false)
   // Bumped whenever the input queue mutates — the queue lives outside
   // the signal graph (keeper-chat-store), so re-renders must be forced.
   const [queueVersion, setQueueVersion] = useState(0)
@@ -766,6 +1011,7 @@ export function KeeperConversationPanel({
   const markTranscriptSeen = () => {
     if (newestEntryTsUnix !== null) advanceKeeperLastSeen(keeperName, newestEntryTsUnix)
   }
+  const chatAccess = keeperDirectChatAccess(shellAuthSummary.value)
   // Stable action object so the memoized ChatMessageBubble's shallow prop
   // compare can skip unchanged messages — an inline `{ ...onClick }` literal
   // would be a new reference each render and defeat the memo.
@@ -774,37 +1020,38 @@ export function KeeperConversationPanel({
       ...(onInspectTurn
         ? { label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick: onInspectTurn }
         : {}),
-      onPendingCancel: async (entry: KeeperConversationEntry) => {
-        await cancelKeeperChatPendingEntry(keeperName, entry)
-        showToast('대기 메시지를 취소했습니다.', 'success')
-      },
-      onPendingEdit: async (entry: KeeperConversationEntry) => {
-        const original = await cancelKeeperChatPendingEntry(
-          keeperName,
-          entry,
-          { requireUserInput: true },
-        )
-        if (!original) {
-          throw new Error('수정할 원문을 찾지 못했습니다.')
-        }
-        enqueueInput(
-          keeperName,
-          original.text,
-          original.attachments,
-          undefined,
-          original.blocks,
-          undefined,
-          true,
-        )
-        setQueueVersion(value => value + 1)
-        showToast('서버 대기를 취소하고 편집 화면으로 옮겼습니다.', 'success')
-      },
+      ...(!chatAccess.blocked
+        ? {
+            onPendingCancel: async (entry: KeeperConversationEntry) => {
+              await cancelKeeperChatPendingEntry(keeperName, entry)
+              showToast('대기 메시지를 취소했습니다.', 'success')
+            },
+            onPendingEdit: async (entry: KeeperConversationEntry) => {
+              const receiptId = entry.details?.queueReceiptId
+              const original = (keeperThreads.value[keeperName] ?? []).find(candidate => (
+                candidate.role === 'user'
+                && candidate.details?.queueReceiptId === receiptId
+              ))
+              if (!original) {
+                throw new Error('수정할 원문을 찾지 못했습니다.')
+              }
+              const content = window.prompt('서버 대기 메시지를 수정합니다.', original.text)
+              if (content === null) return
+              await editKeeperChatPendingEntry(keeperName, entry, content)
+              showToast('서버 대기 메시지를 원자적으로 수정했습니다.', 'success')
+            },
+            onPendingMoveToEnd: async (entry: KeeperConversationEntry) => {
+              await moveKeeperChatPendingEntryToEnd(keeperName, entry)
+              showToast('대기 메시지를 맨 뒤로 옮겼습니다.', 'success')
+            },
+          }
+        : {}),
       onRecoveryRequeue: (entry: KeeperConversationEntry) =>
         requeueKeeperChatRecoveryEntry(keeperName, entry),
       onRecoveryCancel: (entry: KeeperConversationEntry, detail: string) =>
         cancelKeeperChatRecoveryEntry(keeperName, entry, detail),
     }),
-    [keeperName, onInspectTurn],
+    [chatAccess.blocked, keeperName, onInspectTurn],
   )
   const transcriptEmptyText =
     hasQuery && visibleThreadWithQueue.length > 0
@@ -829,7 +1076,6 @@ export function KeeperConversationPanel({
       </div>
     `
   }
-  const chatAccess = keeperDirectChatAccess(shellAuthSummary.value)
   const composerDisabled = !keeperName || chatAccess.blocked
   const composerPlaceholder = chatAccess.blocked
     ? '현재 actor는 direct keeper chat 권한이 없습니다'
@@ -992,9 +1238,22 @@ export function KeeperConversationPanel({
       projectionError=${toolsProjectionError}
       projectionReady=${toolsProjectionReady}
       projectionPresent=${toolsProjectionPresent}
-      nextAction=${inventoryEntry?.next_action}
+      currentExecution=${inventoryEntry?.current_execution}
+      readErrorAction=${serverQueueReadErrorCount > 0
+        ? inventoryEntry?.source_next_actions?.read_error?.[0] ?? inventoryEntry?.next_action
+        : null}
+      onInspect=${() => setQueueControlOpen(true)}
     />
   `
+  const queueControlPanel = queueControlOpen
+    ? html`
+        <${KeeperQueueControlPanel}
+          keeperName=${keeperName}
+          keeper=${inventoryEntry}
+          onClose=${() => setQueueControlOpen(false)}
+        />
+      `
+    : null
 
   const browserDraftQueue = queueCount > 0
     ? html`
@@ -1109,6 +1368,7 @@ export function KeeperConversationPanel({
         <div class="kw-composer-wrap v2-monitoring-panel">
           <div class="kw-composer-inner v2-monitoring-panel">
             ${serverQueueStatus}
+            ${queueControlPanel}
             ${browserDraftQueue}
             ${isKeeperBusy ? renderBusyToolbar() : null}
             <${ChatComposer}
@@ -1220,6 +1480,7 @@ export function KeeperConversationPanel({
 
         <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4 shadow-none v2-monitoring-panel">
         ${serverQueueStatus}
+        ${queueControlPanel}
         ${browserDraftQueue}
           ${isKeeperBusy ? renderBusyToolbar() : null}
           <${ChatComposer}
@@ -1327,6 +1588,7 @@ export function KeeperConversationPanel({
 
         <div class="border-t border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4 v2-monitoring-panel">
         ${serverQueueStatus}
+        ${queueControlPanel}
         ${browserDraftQueue}
           ${isKeeperBusy ? renderBusyToolbar() : null}
           <${ChatComposer}

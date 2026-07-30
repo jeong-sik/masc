@@ -215,6 +215,19 @@ val update_checked_result :
   (Keeper_event_queue.t -> (Keeper_event_queue.t, string) result) ->
   (unit, string) result
 
+val reprioritize_pending_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  expected_revision:int64 ->
+  source:Keeper_event_queue.stimulus ->
+  urgency:Keeper_event_queue.urgency ->
+  unit ->
+  (int64, string) result
+(** Revision-fenced priority change for one exact pending stimulus. The
+    immutable source must still be present exactly once; the durable state is
+    rewritten and published atomically. *)
+
 type enqueue_stimulus_result =
   | Enqueued
   | Already_present

@@ -258,6 +258,21 @@ let test_pending_cancellation_is_state_guarded () =
   ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
   let first = enqueue_exn ~keeper_name (message "first") in
   let second = enqueue_exn ~keeper_name (message "second") in
+  (match Keeper_chat_queue.pending_receipts ~keeper_name with
+   | Ok { revision = 2L; receipts = [ first_pending; second_pending ] } ->
+     check "pending projection preserves FIFO receipt identity"
+       (Keeper_chat_queue.Receipt_id.equal
+          first.receipt_id
+          first_pending.receipt_id
+        && Keeper_chat_queue.Receipt_id.equal
+             second.receipt_id
+             second_pending.receipt_id);
+     check "pending projection preserves exact payload"
+       (String.equal first_pending.message.content "first"
+        && String.equal second_pending.message.content "second")
+   | Ok _ | Error _ ->
+     check "pending projection preserves FIFO receipt identity" false;
+     check "pending projection preserves exact payload" false);
   (match
      Keeper_chat_queue.cancel_pending
        ~keeper_name
@@ -398,6 +413,223 @@ let test_observed_pending_claim_is_exact () =
       (Int64.compare expected_revision observed_revision < 0)
   | `Leased _ | `Error _ ->
     check "cancelled observation cannot lease another receipt" false
+
+let test_uncertain_pending_cancellation_converges () =
+  Printf.printf "Test: uncertain pending cancellation converges by receipt\n%!";
+  with_base "keeper-chat-pending-cancel-uncertain" @@ fun base_path ->
+  let keeper_name = "pending-cancel-uncertain" in
+  ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
+  let receipt = enqueue_exn ~keeper_name (message "cancel once") in
+  Keeper_chat_queue.For_testing.fail_transaction_at_stages [ Commit_returned ];
+  (match
+     Keeper_chat_queue.cancel_pending
+       ~keeper_name
+       ~receipt_id:receipt.receipt_id
+       ~cancellation:{ cancelled_at = 3.0; detail = "cancelled once" }
+   with
+   | Error
+       (Keeper_chat_queue.Persist_failed
+          { publication =
+              Keeper_chat_queue.Pending_cancel_indeterminate
+                { receipt_id = observed; revision = 2L }
+          ; _
+          }) ->
+     check "uncertain pending cancellation exposes exact receipt"
+       (Keeper_chat_queue.Receipt_id.equal receipt.receipt_id observed)
+   | Ok _ | Error _ ->
+     check "uncertain pending cancellation exposes exact receipt" false);
+  (match Keeper_chat_queue.pending_receipts ~keeper_name with
+   | Error
+       (Keeper_chat_queue.Snapshot_unavailable
+          { kind = Durability_uncertain; _ }) ->
+     check "pending projection never guesses across uncertain durability" true
+   | Ok _ | Error _ ->
+     check "pending projection never guesses across uncertain durability" false);
+  (match Keeper_chat_queue.reconcile_persistence ~keeper_name with
+   | Ok { outcome = Reconciled; revision = 2L } ->
+     (match
+        Keeper_chat_queue.lookup_receipt
+          ~keeper_name
+          ~receipt_id:receipt.receipt_id
+      with
+      | Ok { receipt = Some { state = Failed { kind = Cancelled; _ }; _ }; _ } ->
+        check "uncertain pending cancellation reconciles to cancelled" true
+      | Ok _ | Error _ ->
+        check "uncertain pending cancellation reconciles to cancelled" false)
+   | Ok _ | Error _ ->
+     check "uncertain pending cancellation reconciles to cancelled" false)
+
+let test_pending_edit_and_move_are_revision_fenced () =
+  Printf.printf "Test: pending edit and move-to-end are revision-fenced\n%!";
+  with_base "keeper-chat-pending-operator" @@ fun base_path ->
+  let keeper_name = "pending-operator" in
+  ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
+  let first = enqueue_exn ~keeper_name (message "first") in
+  let attachment : Keeper_chat_store.attachment =
+    { id = "pending-image"
+    ; att_type = "image"
+    ; name = "pending.png"
+    ; size = 8
+    ; mime_type = "image/png"
+    ; data = "cGF5bG9hZA=="
+    }
+  in
+  let media : Keeper_multimodal_input.user_media_block =
+    { attachment_id = attachment.id
+    ; name = attachment.name
+    ; mime_type = attachment.mime_type
+    ; size = Some attachment.size
+    }
+  in
+  let second =
+    enqueue_exn
+      ~keeper_name
+      (message
+         ~timestamp:2.0
+         ~user_blocks:
+           [ Keeper_multimodal_input.User_image media
+           ; Keeper_multimodal_input.User_text "second"
+           ]
+         ~attachments:[ attachment ]
+         "second")
+  in
+  let third =
+    enqueue_exn
+      ~keeper_name
+      (message
+         ~user_blocks:
+           [ Keeper_multimodal_input.User_text "third-a"
+           ; Keeper_multimodal_input.User_text "third-b"
+           ]
+         "third")
+  in
+  let next_after =
+    match
+      Keeper_chat_queue.pending_receipts_page
+        ~keeper_name
+        ~after:None
+        ~limit:2
+    with
+    | Ok
+        { revision = 3L
+        ; receipts = [ first_page; second_page ]
+        ; total_pending = 3
+        ; next_after = Some cursor
+        }
+      when Keeper_chat_queue.Receipt_id.equal
+             first.receipt_id
+             first_page.receipt_id
+           && Keeper_chat_queue.Receipt_id.equal
+                second.receipt_id
+                second_page.receipt_id ->
+      check "pending projection page is bounded and FIFO" true;
+      Some cursor
+    | Ok _ | Error _ ->
+      check "pending projection page is bounded and FIFO" false;
+      None
+  in
+  (match next_after with
+   | None -> check "pending projection cursor resumes exactly" false
+   | Some after ->
+     (match
+        Keeper_chat_queue.pending_receipts_page
+          ~keeper_name
+          ~after:(Some after)
+          ~limit:2
+      with
+      | Ok
+          { revision = 3L
+          ; receipts = [ third_page ]
+          ; total_pending = 3
+          ; next_after = None
+          }
+        when Keeper_chat_queue.Receipt_id.equal
+               third.receipt_id
+               third_page.receipt_id ->
+        check "pending projection cursor resumes exactly" true
+      | Ok _ | Error _ ->
+        check "pending projection cursor resumes exactly" false));
+  (match
+     Keeper_chat_queue.edit_pending
+       ~keeper_name
+       ~receipt_id:second.receipt_id
+       ~expected_revision:3L
+       ~content:"second edited"
+   with
+   | Ok { revision = 4L; pending_index = 1; _ } ->
+     check "pending edit preserves the FIFO position" true
+   | Ok _ | Error _ ->
+     check "pending edit preserves the FIFO position" false);
+  (match
+     Keeper_chat_queue.move_pending_to_end
+       ~keeper_name
+       ~receipt_id:first.receipt_id
+       ~expected_revision:3L
+   with
+   | Error
+       (Keeper_chat_queue.Pending_revision_mismatch
+          { observed_revision = 4L; _ }) ->
+     check "stale move revision is rejected without mutation" true
+   | Ok _ | Error _ ->
+     check "stale move revision is rejected without mutation" false);
+  (match
+     Keeper_chat_queue.move_pending_to_end
+       ~keeper_name
+       ~receipt_id:first.receipt_id
+       ~expected_revision:4L
+   with
+   | Ok { revision = 5L; pending_index = 2; _ } ->
+     check "exact pending receipt moves behind every pending peer" true
+   | Ok _ | Error _ ->
+     check "exact pending receipt moves behind every pending peer" false);
+  (match Keeper_chat_queue.pending_receipts ~keeper_name with
+   | Ok { revision = 5L; receipts = [ second_pending; third_pending; first_pending ] } ->
+     check "edit keeps receipt identity and payload atomic"
+        (Keeper_chat_queue.Receipt_id.equal
+           second.receipt_id
+           second_pending.receipt_id
+         && String.equal second_pending.message.content "second edited"
+         && Float.equal second_pending.message.timestamp 2.0
+         && second_pending.message.attachments = [ attachment ]
+         && second_pending.message.user_blocks
+            = [ Keeper_multimodal_input.User_image media
+              ; Keeper_multimodal_input.User_text "second edited"
+              ]);
+     check "move-to-end preserves the other FIFO order"
+       (Keeper_chat_queue.Receipt_id.equal third.receipt_id third_pending.receipt_id
+        && Keeper_chat_queue.Receipt_id.equal first.receipt_id first_pending.receipt_id)
+   | Ok _ | Error _ ->
+     check "edit keeps receipt identity and payload atomic" false;
+     check "move-to-end preserves the other FIFO order" false);
+  (match
+     Keeper_chat_queue.edit_pending
+       ~keeper_name
+       ~receipt_id:third.receipt_id
+       ~expected_revision:5L
+       ~content:"ambiguous edit"
+   with
+   | Error (Keeper_chat_queue.Invalid_input _) ->
+     (match Keeper_chat_queue.pending_receipts ~keeper_name with
+      | Ok { revision = 5L; _ } ->
+        check "ambiguous structured edit is rejected without mutation" true
+      | Ok _ | Error _ ->
+        check "ambiguous structured edit is rejected without mutation" false)
+   | Ok _ | Error _ ->
+     check "ambiguous structured edit is rejected without mutation" false);
+  let lease = lease_exn ~keeper_name in
+  (match
+     Keeper_chat_queue.edit_pending
+       ~keeper_name
+       ~receipt_id:lease.item.receipt_id
+       ~expected_revision:6L
+       ~content:"too late"
+   with
+   | Error
+       (Keeper_chat_queue.Receipt_not_pending
+          { observed_state = Some (Inflight _); _ }) ->
+     check "inflight receipt cannot be edited" true
+   | Ok _ | Error _ ->
+     check "inflight receipt cannot be edited" false)
 
 let expect_enqueue_indeterminate label expected_receipt_id = function
   | Error
@@ -1050,6 +1282,8 @@ let () =
   test_preallocated_receipt_convergence ();
   test_pending_cancellation_is_state_guarded ();
   test_observed_pending_claim_is_exact ();
+  test_uncertain_pending_cancellation_converges ();
+  test_pending_edit_and_move_are_revision_fenced ();
   test_transaction_publication_boundaries ();
   test_commit_observer_exception_and_cancellation ();
   test_transition_observer_outside_lock_exactly_once ();

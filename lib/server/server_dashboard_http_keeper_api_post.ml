@@ -443,6 +443,7 @@ let keeper_chat_recovery_error_status = function
   | Keeper_chat_queue.Receipt_already_terminal _
   | Keeper_chat_queue.Receipt_not_recovery_required _
   | Keeper_chat_queue.Receipt_not_pending _
+  | Keeper_chat_queue.Pending_revision_mismatch _
   | Keeper_chat_queue.Recovery_revision_mismatch _
   | Keeper_chat_queue.Recovery_lease_mismatch _ ->
       `Conflict
@@ -451,141 +452,6 @@ let keeper_chat_recovery_error_status = function
   | Keeper_chat_queue.Revision_exhausted
   | Keeper_chat_queue.Persist_failed _ ->
       `Service_unavailable
-
-let keeper_chat_pending_cancel_request_schema =
-  "keeper_chat_queue.pending_cancel.request.v1"
-
-let keeper_chat_pending_cancel_result_schema =
-  "keeper_chat_queue.pending_cancel.result.v1"
-
-let parse_keeper_chat_pending_cancel_request body_str =
-  let ( let* ) = Result.bind in
-  let* fields =
-    match Yojson.Safe.from_string body_str with
-    | `Assoc fields -> Ok fields
-    | value ->
-      Error
-        (Printf.sprintf
-           "request body must be an object, received %s"
-           (Json_util.kind_name value))
-    | exception Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
-  in
-  let* () =
-    match duplicate_assoc_keys fields with
-    | [] -> Ok ()
-    | keys -> Error ("duplicate field(s): " ^ String.concat ", " keys)
-  in
-  let observed_keys = List.map fst fields |> List.sort String.compare in
-  let expected_keys = [ "schema" ] in
-  let* () =
-    if observed_keys = expected_keys
-    then Ok ()
-    else
-      Error
-        "request must contain exactly schema"
-  in
-  let* schema =
-    match List.assoc "schema" fields with
-    | `String value -> Ok value
-    | _ -> Error "schema must be a string"
-  in
-  if String.equal schema keeper_chat_pending_cancel_request_schema
-  then Ok ()
-  else Error ("unsupported schema: " ^ schema)
-
-let keeper_chat_pending_cancel_audit config ~actor ~keeper_name ~receipt_id
-    ~outcome =
-  try
-    Audit_log.log_action
-      config
-      ~agent_id:actor
-      ~action:(Audit_log.Custom "keeper_chat_queue_pending_cancel")
-      ~details:
-        (`Assoc
-          [ "keeper_name", `String keeper_name
-          ; "receipt_id", `String (Keeper_chat_queue.Receipt_id.to_string receipt_id)
-          ])
-      ~outcome
-      ();
-    `Assoc [ "recorded", `Bool true ]
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    `Assoc
-      [ "recorded", `Bool false
-      ; "error", `String (Observability_redact.redact_text (Printexc.to_string exn))
-      ]
-
-let handle_keeper_chat_pending_cancel_post state agent_name req reqd ~keeper_name
-    ~raw_receipt_id body_str =
-  let respond ?(status = `OK) json =
-    Http.Response.json_value ~status ~request:req json reqd
-  in
-  let bad_request message =
-    respond
-      ~status:`Bad_request
-      (`Assoc
-        [ "schema", `String keeper_chat_pending_cancel_result_schema
-        ; "ok", `Bool false
-        ; "error", `Assoc [ "message", `String message ]
-        ])
-  in
-  if not (Keeper_config.validate_name keeper_name)
-  then bad_request (Printf.sprintf "invalid keeper name: %s" keeper_name)
-  else
-    match Keeper_chat_queue.Receipt_id.of_string raw_receipt_id with
-    | Error message -> bad_request message
-    | Ok receipt_id ->
-      (match parse_keeper_chat_pending_cancel_request body_str with
-       | Error message -> bad_request message
-       | Ok () ->
-         let result =
-           Keeper_chat_queue.cancel_pending
-             ~keeper_name
-             ~receipt_id
-             ~cancellation:
-               { cancelled_at = Time_compat.now ()
-               ; detail = "cancelled by dashboard user before delivery"
-               }
-         in
-         let audit =
-           keeper_chat_pending_cancel_audit
-             (Mcp_server.workspace_config state)
-             ~actor:agent_name
-             ~keeper_name
-             ~receipt_id
-             ~outcome:
-               (match result with
-                | Ok _ -> Audit_log.Success
-                | Error error ->
-                  Audit_log.Failure
-                    (Keeper_chat_queue.mutation_error_to_string error))
-         in
-         match result with
-         | Ok report ->
-           let receipt : Keeper_chat_queue.receipt_view =
-             { receipt_id = report.receipt_id; state = report.state }
-           in
-           respond
-             (`Assoc
-               [ "schema", `String keeper_chat_pending_cancel_result_schema
-               ; "ok", `Bool true
-               ; ( "receipt"
-                 , keeper_chat_receipt_json
-                     ~keeper_name
-                     ~revision:report.revision
-                     receipt )
-               ; "audit", audit
-               ])
-         | Error error ->
-           respond
-             ~status:(keeper_chat_recovery_error_status error)
-             (`Assoc
-               [ "schema", `String keeper_chat_pending_cancel_result_schema
-               ; "ok", `Bool false
-               ; "error", Keeper_chat_queue.mutation_error_to_json error
-               ; "audit", audit
-               ]))
 
 let handle_keeper_chat_recovery_post state agent_name req reqd ~keeper_name
     ~raw_receipt_id body_str =

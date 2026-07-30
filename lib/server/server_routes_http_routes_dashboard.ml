@@ -11,6 +11,10 @@ open Server_routes_http_keeper_stream
 
 include Server_routes_http_routes_dashboard_setup
 
+module Keeper_chat_pending = Server_dashboard_http_keeper_chat_pending
+module Keeper_event_queue_operator =
+  Server_dashboard_http_keeper_event_queue_operator
+
 let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
 let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 let live_cache_ttl_s = Server_dashboard_http_core_cache.live_cache_ttl_s
@@ -1631,18 +1635,41 @@ let add_routes ~sw ~clock router =
 
   (* Keeper GET sub-routes: /config, /chat/history, /trajectory *)
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
-       if
-         Keeper_api.is_keeper_checkpoints_get_path (Http.Request.path request)
-         || Keeper_api.is_keeper_paused_work_get_path (Http.Request.path request)
-       then
-         with_token_permission_auth ~permission:Masc_domain.CanAdmin
-           (fun state _agent_name req reqd ->
+       match
+         Keeper_event_queue_operator.pending_get_route
+           (Http.Request.path request)
+       with
+       | Some keeper_name ->
+         with_token_permission_auth
+           ~permission:Keeper_event_queue_operator.operator_permission
+           (fun state _agent_name _req reqd ->
+             Keeper_event_queue_operator.handle_get
+               state
+               request
+               reqd
+               ~keeper_name)
+           request reqd
+       | None ->
+       match Keeper_chat_pending.pending_get_route (Http.Request.path request) with
+       | Some keeper_name ->
+         with_token_permission_auth
+           ~permission:Keeper_chat_pending.operator_permission
+           (fun state _agent_name _req reqd ->
+             Keeper_chat_pending.handle_get state request reqd ~keeper_name)
+           request reqd
+       | None ->
+         if
+           Keeper_api.is_keeper_checkpoints_get_path (Http.Request.path request)
+           || Keeper_api.is_keeper_paused_work_get_path (Http.Request.path request)
+         then
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+             (fun state _agent_name req reqd ->
+               Keeper_api.handle_keeper_get_subroutes state req request reqd
+             ) request reqd
+         else
+           with_public_read (fun state req reqd ->
              Keeper_api.handle_keeper_get_subroutes state req request reqd
-           ) request reqd
-       else
-         with_public_read (fun state req reqd ->
-           Keeper_api.handle_keeper_get_subroutes state req request reqd
-         ) request reqd)
+           ) request reqd)
 
   |> Http.Router.post "/api/v1/keepers/turn/interrupt" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
@@ -1650,25 +1677,44 @@ let add_routes ~sw ~clock router =
 
   (* Keeper POST sub-routes. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
+       match Keeper_event_queue_operator.route (Http.Request.path request) with
+       | Some keeper_name ->
+         with_token_permission_auth
+           ~permission:Keeper_event_queue_operator.operator_permission
+           (fun state agent_name req reqd ->
+             Http.Request.read_body_async reqd (fun body_str ->
+               Keeper_event_queue_operator.handle_post
+                 state
+                 ~actor:agent_name
+                 req
+                 reqd
+                 ~keeper_name
+                 body_str))
+           request reqd
+       | None ->
+       match Keeper_chat_pending.pending_mutation_route (Http.Request.path request) with
+       | Some (keeper_name, receipt_id, mutation) ->
+         with_token_permission_auth
+           ~permission:Keeper_chat_pending.operator_permission
+           (fun state agent_name req reqd ->
+             Http.Request.read_body_async reqd (fun body_str ->
+               Keeper_chat_pending.handle_mutation_post
+                 state
+                 ~actor:agent_name
+                 req
+                 reqd
+                 ~keeper_name
+                 ~raw_receipt_id:receipt_id
+                 ~mutation
+                 body_str))
+           request reqd
+       | None ->
        match Keeper_api.classify_keeper_post_route (Http.Request.path request) with
        | Keeper_api.Keeper_post_chat_recovery { keeper_name; receipt_id } ->
-           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+            with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->
                Http.Request.read_body_async reqd (fun body_str ->
                  Keeper_api.handle_keeper_chat_recovery_post
-                   state
-                   agent_name
-                   req
-                   reqd
-                   ~keeper_name
-                   ~raw_receipt_id:receipt_id
-                   body_str))
-             request reqd
-       | Keeper_api.Keeper_post_chat_pending_cancel { keeper_name; receipt_id } ->
-           with_token_permission_auth ~permission:Masc_domain.CanAdmin
-             (fun state agent_name req reqd ->
-               Http.Request.read_body_async reqd (fun body_str ->
-                 Keeper_api.handle_keeper_chat_pending_cancel_post
                    state
                    agent_name
                    req

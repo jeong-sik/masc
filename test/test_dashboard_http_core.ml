@@ -235,17 +235,103 @@ let test_keeper_chat_recovery_route_is_exact () =
     "/api/v1/keepers/idealist/chat/receipts/" ^ receipt_id ^ "/cancel"
   in
   (match
-     Server_dashboard_http_keeper_api.classify_keeper_post_route cancel_path
+     Server_dashboard_http_keeper_chat_pending.pending_mutation_route cancel_path
    with
-   | Server_dashboard_http_keeper_api.Keeper_post_chat_pending_cancel route ->
-     check string "pending cancel route keeper" "idealist" route.keeper_name;
-     check string "pending cancel route receipt" receipt_id route.receipt_id
+   | Some
+       ( keeper_name
+       , observed_receipt_id
+       , Server_dashboard_http_keeper_chat_pending.Cancel ) ->
+     check string "pending cancel route keeper" "idealist" keeper_name;
+     check string "pending cancel route receipt" receipt_id observed_receipt_id
    | _ -> fail "exact pending cancel route was not classified");
   check bool "pending cancel route rejects extra segments" true
-    (Server_dashboard_http_keeper_api.classify_keeper_post_route
+    (Server_dashboard_http_keeper_chat_pending.pending_mutation_route
        (cancel_path ^ "/bulk")
-     = Server_dashboard_http_keeper_api.Keeper_post_unknown)
-  ;
+     = None);
+  let pending_path = "/api/v1/keepers/idealist/chat/pending" in
+  check (option string) "pending inventory route is exact" (Some "idealist")
+    (Server_dashboard_http_keeper_chat_pending.pending_get_route pending_path);
+  check (option string) "pending inventory route rejects extra segments" None
+    (Server_dashboard_http_keeper_chat_pending.pending_get_route
+       (pending_path ^ "/extra"));
+  check bool "Worker cannot enumerate or mutate another worker's pending payload" false
+    (Masc_domain.has_permission
+       Masc_domain.Worker
+       Server_dashboard_http_keeper_chat_pending.operator_permission);
+  check bool "Admin can inspect and mutate the durable pending queue" true
+    (Masc_domain.has_permission
+       Masc_domain.Admin
+       Server_dashboard_http_keeper_chat_pending.operator_permission);
+  (match
+     Server_dashboard_http_keeper_chat_pending.pending_mutation_route
+       ("/api/v1/keepers/idealist/chat/receipts/" ^ receipt_id ^ "/edit")
+   with
+   | Some (_, _, Server_dashboard_http_keeper_chat_pending.Edit) -> ()
+   | _ -> fail "exact pending edit route was not classified");
+  (match
+     Server_dashboard_http_keeper_chat_pending.pending_mutation_route
+       ("/api/v1/keepers/idealist/chat/receipts/" ^ receipt_id ^ "/move-to-end")
+   with
+   | Some (_, _, Server_dashboard_http_keeper_chat_pending.Move_to_end) -> ()
+   | _ -> fail "exact pending move route was not classified");
+  check (option string) "event operator route is exact" (Some "idealist")
+    (Server_dashboard_http_keeper_event_queue_operator.route
+       "/api/v1/keepers/idealist/events/operator");
+  check (option string) "event operator route rejects extra segments" None
+    (Server_dashboard_http_keeper_event_queue_operator.route
+       "/api/v1/keepers/idealist/events/operator/extra");
+  let event_pending_path = "/api/v1/keepers/idealist/events/pending" in
+  check (option string) "event pending inventory route is exact" (Some "idealist")
+    (Server_dashboard_http_keeper_event_queue_operator.pending_get_route
+       event_pending_path);
+  check (option string) "event pending inventory rejects extra segments" None
+    (Server_dashboard_http_keeper_event_queue_operator.pending_get_route
+       (event_pending_path ^ "/extra"));
+  check bool "Worker cannot enumerate pending event metadata" false
+    (Masc_domain.has_permission
+       Masc_domain.Worker
+       Server_dashboard_http_keeper_event_queue_operator.operator_permission);
+  check bool "Admin can enumerate and mutate pending events" true
+    (Masc_domain.has_permission
+       Masc_domain.Admin
+       Server_dashboard_http_keeper_event_queue_operator.operator_permission);
+  let sensitive_content = "private-board-content-must-not-cross-inventory" in
+  let source : Keeper_event_queue.stimulus =
+    { post_id = "board-post-sensitive"
+    ; urgency = Normal
+    ; arrived_at = 42.0
+    ; payload =
+        Board_signal
+          { kind = Post_created
+          ; author = "operator"
+          ; title = "private title"
+          ; content = sensitive_content
+          ; hearth = None
+          ; updated_at = None
+          }
+    }
+  in
+  let pending_json =
+    match
+      Server_dashboard_http_keeper_event_queue_operator.For_testing.pending_page
+        ~after:0
+        ~limit:100
+        [ source ]
+    with
+    | [ json ] -> json
+    | _ -> fail "event pending projection must return one metadata row"
+  in
+  let open Yojson.Safe.Util in
+  check string "event pending projection retains post identity"
+    source.post_id
+    (pending_json |> member "post_id" |> to_string);
+  check string "event pending projection retains typed payload kind"
+    "board_signal"
+    (pending_json |> member "payload_kind" |> to_string);
+  check bool "event pending projection omits raw payload content" false
+    (contains_substring (Yojson.Safe.to_string pending_json) sensitive_content);
+  check bool "event pending projection has no raw source object" true
+    (pending_json |> member "source" = `Null);
   let quarantine_path =
     "/api/v1/keepers/idealist/board-attention/quarantines/ba-root-123/recovery"
   in

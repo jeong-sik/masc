@@ -190,6 +190,14 @@ val enqueue_hitl_resolution_durable_result :
 val snapshot_result :
   base_path:string -> string -> (Keeper_event_queue.t, string) result
 
+val reprioritize_pending_result :
+  base_path:string ->
+  string ->
+  expected_revision:int64 ->
+  source:Keeper_event_queue.stimulus ->
+  urgency:Keeper_event_queue.urgency ->
+  (int64, string) result
+
 val drop_by_post_id :
   base_path:string
   -> string

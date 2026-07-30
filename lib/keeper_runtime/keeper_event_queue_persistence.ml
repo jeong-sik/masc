@@ -709,6 +709,46 @@ let update_checked_result ?(after_commit = fun () -> ()) ~base_path ~keeper_name
        | Ok pending -> Ok (State.with_pending pending state, ()))
 ;;
 
+let reprioritize_pending_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~expected_revision
+      ~source
+      ~urgency
+      ()
+  =
+  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+    let observed_revision = State.revision state in
+    if not (Int64.equal expected_revision observed_revision)
+    then
+      Error
+        (Printf.sprintf
+           "event queue revision mismatch (expected=%Ld observed=%Ld)"
+           expected_revision
+           observed_revision)
+    else if Int64.equal observed_revision Int64.max_int
+    then Error "event queue revision exhausted"
+    else
+      let removed, remaining =
+        Keeper_event_queue.remove_by_post_id
+          source.Keeper_event_queue.post_id
+          (State.pending state)
+      in
+      match removed with
+      | [ observed ]
+        when Keeper_event_queue.stimulus_identity_equal observed source ->
+        let updated = { observed with urgency } in
+        let pending =
+          Keeper_event_queue.enqueue remaining updated
+          |> Keeper_event_queue.sort_by_urgency
+        in
+        Ok (State.with_pending pending state, Int64.succ observed_revision)
+      | [] -> Error "event queue source is no longer pending"
+      | [ _ ] -> Error "event queue source identity changed"
+      | _ -> Error "event queue post id is ambiguous")
+;;
+
 type enqueue_stimulus_result =
   | Enqueued
   | Already_present

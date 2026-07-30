@@ -319,6 +319,23 @@ let snapshot_result ~base_path name =
   | Some entry -> Ok (Atomic.get entry.event_queue)
 ;;
 
+let reprioritize_pending_result
+      ~base_path
+      name
+      ~expected_revision
+      ~source
+      ~urgency
+  =
+  Keeper_event_queue_persistence.reprioritize_pending_result
+    ~base_path
+    ~keeper_name:name
+    ~expected_revision
+    ~source
+    ~urgency
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;
+
 let peek_when_result ~base_path name ~ready =
   match Keeper_registry.get ~base_path name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" name)

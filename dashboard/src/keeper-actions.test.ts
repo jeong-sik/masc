@@ -10,6 +10,7 @@ const {
   cancelKeeperChatPendingReceipt,
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
+  fetchKeeperChatPending,
   fetchKeeperChatReceipt,
   resolveKeeperChatRecovery,
   fetchQueuedKeeperMessageResult,
@@ -29,6 +30,7 @@ const {
     }),
   ),
   fetchKeeperChatHistory: vi.fn(),
+  fetchKeeperChatPending: vi.fn(),
   fetchKeeperChatReceipt: vi.fn(),
   resolveKeeperChatRecovery: vi.fn(),
   fetchQueuedKeeperMessageResult: vi.fn(),
@@ -56,6 +58,7 @@ vi.mock('./api/keeper', () => ({
   cancelKeeperChatPendingReceipt,
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
+  fetchKeeperChatPending,
   fetchKeeperChatReceipt,
   resolveKeeperChatRecovery,
   fetchQueuedKeeperMessageResult,
@@ -125,6 +128,13 @@ import type { ToolCallEntry } from './api/dashboard'
 import type { ChatBlock, KeeperConversationAttachment, KeeperStatusDetail } from './types'
 
 beforeEach(() => {
+  fetchKeeperChatPending.mockReset()
+  fetchKeeperChatPending.mockImplementation(async (keeperName: string) => ({
+    keeperName,
+    revision: '0',
+    currentWork: null,
+    pending: [],
+  }))
   fetchKeeperToolCalls.mockReset()
   fetchKeeperToolCalls.mockResolvedValue({ entries: [] })
   resetToolCallOutputs()
@@ -247,7 +257,99 @@ describe('reconcileKeeperChatReceipts', () => {
     resolveKeeperChatRecovery.mockReset()
   })
 
+  it('restores pending payload and controls source from the durable queue after reload', async () => {
+    const receiptId = 'chatq_00000000-0000-4000-8000-000000000009'
+    keeperThreads.value = {}
+    fetchKeeperChatPending.mockResolvedValue({
+      keeperName: 'echo',
+      revision: '7',
+      currentWork: { lane: 'autonomous', startedAt: 42 },
+      pending: [
+        {
+          receipt: {
+            keeperName: 'echo',
+            receiptId,
+            revision: '7',
+            state: { kind: 'pending' },
+          },
+          content: '[첨부 1개: screen.png]',
+          attachments: [
+            {
+              id: 'att-image',
+              type: 'image',
+              name: 'screen.png',
+              size: 10,
+              mimeType: 'image/png',
+              data: 'data:image/png;base64,AA==',
+            },
+          ],
+          userBlocks: [
+            {
+              type: 'image',
+              attachmentId: 'att-image',
+              name: 'screen.png',
+              size: 10,
+              mimeType: 'image/png',
+            },
+          ],
+          submittedAt: 42,
+        },
+      ],
+    })
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'echo',
+      receiptId,
+      revision: '7',
+      state: { kind: 'pending' },
+    })
+
+    await reconcileKeeperChatReceipts('echo')
+
+    const thread = keeperThreads.value.echo ?? []
+    const user = thread.find(entry => entry.role === 'user')
+    const assistant = thread.find(entry => entry.role === 'assistant')
+    expect(user?.details?.queueReceiptId).toBe(receiptId)
+    expect(user?.userBlocks).toEqual([
+      expect.objectContaining({ type: 'image', attachmentId: 'att-image' }),
+    ])
+    expect(assistant?.details).toMatchObject({
+      queueReceiptId: receiptId,
+      queueState: 'pending',
+      queueInFlightLane: 'autonomous',
+      queueInFlightStartedAt: 42,
+    })
+  })
+
+  it('refreshes live work while the exact receipt advances to inflight', async () => {
+    fetchKeeperChatPending.mockResolvedValue({
+      keeperName: 'echo',
+      revision: '2',
+      currentWork: { lane: 'direct_user', startedAt: 43 },
+      pending: [],
+    })
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: '2',
+      state: {
+        kind: 'inflight',
+        leaseId: 'lease_00000000-0000-4000-8000-000000000002',
+        startedAt: 43,
+      },
+    })
+
+    await reconcileKeeperChatReceipts('echo')
+
+    expect(keeperThreads.value.echo?.[0]?.details).toMatchObject({
+      queueState: 'inflight',
+      queueInFlightLane: 'direct_user',
+      queueInFlightStartedAt: 43,
+    })
+  })
+
   it('retains the queued message while exact delivery recovery is required', async () => {
+    keeperThreads.value.echo![0]!.details!.queueInFlightLane = 'autonomous'
+    keeperThreads.value.echo![0]!.details!.queueInFlightStartedAt = 40
     fetchKeeperChatReceipt.mockResolvedValue({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
@@ -267,6 +369,8 @@ describe('reconcileKeeperChatReceipts', () => {
     ))
     expect(entry?.delivery).toBe('queued')
     expect(entry?.details?.queueState).toBe('recovery_required')
+    expect(entry?.details?.queueInFlightLane).toBeNull()
+    expect(entry?.details?.queueInFlightStartedAt).toBeNull()
     expect(entry?.error).toBeFalsy()
   })
 
@@ -623,7 +727,9 @@ describe('reconcileKeeperChatReceipts', () => {
       .mockReturnValueOnce(newer)
 
     const olderReconciliation = reconcileKeeperChatReceipts('echo')
+    await vi.waitFor(() => expect(fetchKeeperChatReceipt).toHaveBeenCalledTimes(1))
     const newerReconciliation = reconcileKeeperChatReceipts('echo')
+    await vi.waitFor(() => expect(fetchKeeperChatReceipt).toHaveBeenCalledTimes(2))
     resolveNewer({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
@@ -688,7 +794,9 @@ describe('reconcileKeeperChatReceipts', () => {
       .mockReturnValueOnce(newer)
 
     const olderReconciliation = reconcileKeeperChatReceipts('echo')
+    await vi.waitFor(() => expect(fetchKeeperChatReceipt).toHaveBeenCalledTimes(1))
     const newerReconciliation = reconcileKeeperChatReceipts('echo')
+    await vi.waitFor(() => expect(fetchKeeperChatReceipt).toHaveBeenCalledTimes(2))
     resolveNewer({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',

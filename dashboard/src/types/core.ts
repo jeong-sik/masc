@@ -964,6 +964,9 @@ export interface KeeperConversationEntry {
   queueSeq?: number | null
   queueClientActionId?: string | null
   attachments?: KeeperConversationAttachment[]
+  /** Exact ordered multimodal input sent to the Keeper. Kept on optimistic and
+   * pending rows so editing never reconstructs model input from display text. */
+  userBlocks?: KeeperUserInputBlock[]
   blocks?: ChatBlock[]
   traceSteps?: ChatTraceStep[]
   details?: KeeperConversationDetails | null

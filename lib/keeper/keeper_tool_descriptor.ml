@@ -101,6 +101,7 @@ type runtime_handler =
 type policy =
   { readonly_of_input : readonly_of_input
   ; readonly_hint : bool option
+  ; execution_mode : Agent_sdk.Tool_contract.execution_mode
   ; retryable : bool
   ; cwd_scope : string option
   ; inline_safe : bool
@@ -218,6 +219,11 @@ let runtime_handler_to_string = function
   | Tool_analyze_image -> "tool_analyze_image"
 ;;
 
+let execution_mode_to_string = function
+  | Agent_sdk.Tool_contract.Concurrent -> "concurrent"
+  | Agent_sdk.Tool_contract.Serial -> "serial"
+;;
+
 let keeper_tool_group_of_runtime_handler = function
   | Tool_execute -> Execute_group
   | Tool_search_files -> Search_files_group
@@ -266,8 +272,10 @@ let discovery_example ~label ?cwd ~argv () =
   `Assoc [ "label", `String label; "input", input ]
 ;;
 
-let policy ?readonly ?readonly_of_input ?cwd_scope ?(retryable = false)
-      ?(inline_safe = false) ?(polling_read = false) ()
+let policy ?readonly ?readonly_of_input
+      ?(execution_mode = Agent_sdk.Tool_contract.Serial)
+      ?cwd_scope ?(retryable = false) ?(inline_safe = false)
+      ?(polling_read = false) ()
   =
   let readonly_of_input =
     match readonly_of_input with
@@ -276,6 +284,7 @@ let policy ?readonly ?readonly_of_input ?cwd_scope ?(retryable = false)
   in
   { readonly_of_input
   ; readonly_hint = readonly
+  ; execution_mode
   ; retryable
   ; cwd_scope
   ; inline_safe
@@ -588,6 +597,7 @@ let descriptor_with_public_aliases
     ; "backend", backend_to_string backend
     ; "sandbox", sandbox_to_string sandbox
     ; "runtime_handler", runtime_handler_to_string runtime_handler
+    ; "execution_mode", execution_mode_to_string policy.execution_mode
     ; ( "keeper_tool_group"
       , keeper_tool_group_to_string
           (keeper_tool_group_of_runtime_handler runtime_handler) )
@@ -1186,6 +1196,20 @@ let read_only_in_process_policy ?(inline_safe = false) ?(polling_read = false) (
     ()
 ;;
 
+let concurrent_read_only_in_process_policy
+      ?(inline_safe = false)
+      ?(polling_read = false)
+      ()
+  =
+  policy
+    ~readonly:true
+    ~execution_mode:Agent_sdk.Tool_contract.Concurrent
+    ~retryable:true
+    ~inline_safe
+    ~polling_read
+    ()
+;;
+
 let write_in_process_policy ?(retryable = false) ?(inline_safe = false) ()
   =
   policy
@@ -1570,7 +1594,7 @@ let internal_descriptors : t list =
         "Return the current wall-clock time as ISO 8601 and Unix epoch \
          seconds. No arguments."
       ~input_schema:empty_object_schema
-      ~policy:(read_only_in_process_policy ())
+      ~policy:(concurrent_read_only_in_process_policy ())
       ~handler:Tool_time_now
   ; (in_process_descriptor
        ~keeper_model_projection:Internal_name
@@ -1582,7 +1606,7 @@ let internal_descriptors : t list =
           keeper_surface_read only for current connected-surface lane context. \
           No arguments."
        ~input_schema:empty_object_schema
-       ~policy:(read_only_in_process_policy ())
+       ~policy:(concurrent_read_only_in_process_policy ())
        ~handler:Tool_tools_list
      |> with_eval_tags [ "capability_introspection" ])
   ; (in_process_descriptor
@@ -1593,7 +1617,7 @@ let internal_descriptors : t list =
          "Search keeper tool schemas by free-text query. Returns ranked tool \
           descriptions and input schemas."
        ~input_schema:tool_search_schema
-       ~policy:(read_only_in_process_policy ())
+       ~policy:(concurrent_read_only_in_process_policy ())
        ~handler:Tool_tool_search
      |> with_eval_tags [ "capability_introspection" ])
     (* ── memory / context (RFC-0179 PR-3) ─────────────────────── *)
@@ -1606,7 +1630,7 @@ let internal_descriptors : t list =
          state for this keeper turn. Context-window occupancy is not \
          currently observed."
       ~input_schema:empty_object_schema
-      ~policy:(read_only_in_process_policy ())
+      ~policy:(concurrent_read_only_in_process_policy ())
       ~handler:Tool_context_status
   ; in_process_descriptor
       ~keeper_model_projection:Internal_name
@@ -1618,7 +1642,7 @@ let internal_descriptors : t list =
          Text pages use UTF-8; arbitrary bytes use base64. The full artifact \
          is never restored into model history."
       ~input_schema:artifact_read_schema
-      ~policy:(read_only_in_process_policy ())
+      ~policy:(concurrent_read_only_in_process_policy ())
       ~handler:Tool_artifact_read
   ; in_process_descriptor_with_schema_source
       ~keeper_model_projection:Internal_name
@@ -1628,7 +1652,7 @@ let internal_descriptors : t list =
       ~description:
         "Search keeper memory or history; current facts use explicit substring filtering and snapshot order."
       ~input_schema:memory_search_schema
-      ~policy:(read_only_in_process_policy ())
+      ~policy:(concurrent_read_only_in_process_policy ())
       ~handler:Tool_memory_search
   ; in_process_descriptor_with_schema_source
       ~keeper_model_projection:Internal_name
@@ -1646,7 +1670,7 @@ let internal_descriptors : t list =
       ~name:"keeper_library_search"
       ~description:"Search the keeper library catalog."
       ~input_schema:library_search_schema
-      ~policy:(read_only_in_process_policy ())
+      ~policy:(concurrent_read_only_in_process_policy ())
       ~handler:Tool_library_search
   ; in_process_descriptor
       ~keeper_model_projection:Internal_name
@@ -1654,7 +1678,7 @@ let internal_descriptors : t list =
       ~name:"keeper_library_read"
       ~description:"Read a library entry by id."
       ~input_schema:library_read_schema
-      ~policy:(read_only_in_process_policy ())
+      ~policy:(concurrent_read_only_in_process_policy ())
       ~handler:Tool_library_read
     (* ── connector surfaces (RFC-0223 P3) ─────────────────────── *)
   ; (in_process_descriptor
@@ -1670,7 +1694,7 @@ let internal_descriptors : t list =
           channels outside Connected Surfaces, read only visible lane evidence \
           and state that the wider registry is unavailable."
        ~input_schema:surface_read_schema
-       ~policy:(read_only_in_process_policy ())
+       ~policy:(concurrent_read_only_in_process_policy ())
        ~handler:Tool_surface_read
      |> with_eval_tags [ "surface_context_read" ])
   ; in_process_descriptor
@@ -2143,6 +2167,7 @@ let eval_tags_json d =
 
 let common_policy_json_fields ~readonly_key policy =
   [ readonly_key, Json_util.bool_opt_to_json policy.readonly_hint
+  ; "execution_mode", `String (execution_mode_to_string policy.execution_mode)
   ; "retryable", `Bool policy.retryable
   ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope
   ; "inline_safe", `Bool policy.inline_safe

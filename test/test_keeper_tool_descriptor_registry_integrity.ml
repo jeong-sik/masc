@@ -1223,6 +1223,42 @@ let test_readonly_policy_projection_is_descriptor_owned () =
     false
     (List.mem "tool_write_file" projected)
 
+let test_concurrent_execution_is_bounded_to_in_process_reads () =
+  let concurrent_names =
+    all_descriptors ()
+    |> List.filter_map (fun descriptor ->
+      match descriptor.Descriptor.policy.execution_mode with
+      | Agent_sdk.Tool_contract.Serial -> None
+      | Agent_sdk.Tool_contract.Concurrent ->
+        Alcotest.(check (option bool))
+          (descriptor.internal_name ^ " concurrent tool is statically read-only")
+          (Some true)
+          descriptor.policy.readonly_hint;
+        Alcotest.(check bool)
+          (descriptor.internal_name ^ " concurrent tool is in-process")
+          true
+          (descriptor.executor = Descriptor.In_process);
+        Alcotest.(check bool)
+          (descriptor.internal_name ^ " concurrent tool has no sandbox runtime")
+          true
+          (descriptor.sandbox = Descriptor.No_sandbox);
+        Some descriptor.internal_name)
+    |> List.sort String.compare
+  in
+  Alcotest.(check (list string))
+    "concurrent admission is an explicit, reviewable allowlist"
+    [ "keeper_artifact_read"
+    ; "keeper_context_status"
+    ; "keeper_library_read"
+    ; "keeper_library_search"
+    ; "keeper_memory_search"
+    ; "keeper_surface_read"
+    ; "keeper_time_now"
+    ; "keeper_tool_search"
+    ; "keeper_tools_list"
+    ]
+    concurrent_names
+
 let test_readonly_policy_is_descriptor_input_aware () =
   let public_input =
     `Assoc [ "pattern", `String "Keeper_tool_descriptor"; "op", `String "rm" ]
@@ -1676,6 +1712,10 @@ let () =
             "descriptor read-only policy evaluates tool input"
             `Quick
             test_readonly_policy_is_descriptor_input_aware
+        ; test_case
+            "concurrent execution stays bounded to in-process reads"
+            `Quick
+            test_concurrent_execution_is_bounded_to_in_process_reads
         ; test_case
             "MCP context policy uses descriptor resolution"
             `Quick

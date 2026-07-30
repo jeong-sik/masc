@@ -266,7 +266,12 @@ let make_tool_bundle
                      ~input)
                  ()
              in
+             let oas_descriptor =
+               Agent_sdk.Tool.ordinary_descriptor
+                 descriptor.policy.execution_mode
+             in
              Tool_bridge.oas_tool_of_masc_with_execution_env
+               ~descriptor:oas_descriptor
                ~base_path:config.base_path
                ?on_externalization_error
                ~externalization_error_recoverable:descriptor.policy.retryable

@@ -2,6 +2,34 @@ open Alcotest
 
 module Under_test = Masc.Keeper_hooks_oas.For_testing
 
+let test_result_bytes_uses_typed_externalized_reference () =
+  let reference =
+    match
+      Masc.Tool_output.make_artifact_ref
+        ~sha256:(String.make 64 'a')
+        ~bytes:8192
+        ~preview:"preview"
+        ~mime:"text/plain"
+    with
+    | Ok reference -> reference
+    | Error error ->
+      fail (Masc.Tool_output.make_error_to_string error)
+  in
+  let marker =
+    Masc.Tool_output.encode_for_oas (Masc.Tool_output.Stored reference)
+  in
+  check (result int string)
+    "externalized output reports original bytes"
+    (Ok 8192)
+    (Under_test.original_result_bytes
+       ~oas_result_bytes:(String.length marker)
+       marker);
+  check (result int string)
+    "inline output keeps OAS bytes"
+    (Ok 5)
+    (Under_test.original_result_bytes ~oas_result_bytes:5 "hello")
+;;
+
 let test_empty_tool_args_are_explicit_object_shape () =
   check string "empty object shape" "object:0"
     (Under_test.tool_input_shape_for_log (`Assoc []));
@@ -135,7 +163,13 @@ let test_thinking_summary_mixed_sums () =
 
 let () =
   run "keeper_hooks_oas_log_shape"
-    [ ( "tool-input-log-shape"
+    [ ( "result-bytes"
+      , [ test_case
+            "typed externalized reference preserves original size"
+            `Quick
+            test_result_bytes_uses_typed_externalized_reference
+        ] )
+    ; ( "tool-input-log-shape"
       , [ test_case "empty args are object:0" `Quick
             test_empty_tool_args_are_explicit_object_shape
         ; test_case "field shapes are explicit" `Quick

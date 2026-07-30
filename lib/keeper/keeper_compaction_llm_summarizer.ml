@@ -955,10 +955,9 @@ let execute_prepared_lane_current
       let raw_bt = Printexc.get_raw_backtrace () in
       (* OAS owns execution state; MASC retains only the source-authority
          observation. Cancellation is fiber teardown, not a compaction result:
-         returning a typed terminal made the heartbeat record a schedule
-         failure and advance the compaction streak even though
-         [Cycle.Cancelled] records neither. Preserve the authorized source and
-         continue the original cancellation. *)
+         returning a typed terminal made the heartbeat record a schedule failure
+         even though [Cycle.Cancelled] records none. Preserve the authorized
+         source and continue the original cancellation. *)
       Option.iter
         (fun observation ->
            Log.Keeper.warn

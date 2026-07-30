@@ -13,6 +13,7 @@ type applied_receipt =
   { installation : Keeper_checkpoint_store.installed_checkpoint
   ; lifecycle : post_install_lifecycle
   ; manifest : (unit, string) result
+  ; commit_count : int
   }
 
 type success =
@@ -442,10 +443,11 @@ let run_admitted_with
        `Applied
          { recovery = committed.recovery
          ; receipt =
-             { installation = committed.installation
-             ; lifecycle = committed.lifecycle
-             ; manifest
-             }
+           { installation = committed.installation
+           ; lifecycle = committed.lifecycle
+           ; manifest
+           ; commit_count = committed.recovery.commit_count
+           }
          }
      | `Ran (Ok (No_compaction no_compaction)) -> `No_compaction no_compaction)
 ;;

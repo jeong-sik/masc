@@ -29,7 +29,7 @@ let rec rm_rf path =
 let snapshot_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-    "event-queue-v13.json"
+    "event-queue-v14.json"
 
 let json_field name = function
   | `Assoc fields -> List.assoc_opt name fields
@@ -831,12 +831,12 @@ let () =
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
   (* --- current-only hard cut: the retired v12 filename is not a read,
-         migration, or overwrite source for the v13 queue. --- *)
-  let base_path = temp_dir "keeper-event-queue-v13-hard-cut" in
+         migration, or overwrite source for the v14 queue. --- *)
+  let base_path = temp_dir "keeper-event-queue-v14-hard-cut" in
   Fun.protect
     ~finally:(fun () -> rm_rf base_path)
     (fun () ->
-      let keeper_name = "keeper-event-queue-v13-hard-cut-test" in
+      let keeper_name = "keeper-event-queue-v14-hard-cut-test" in
       let keeper_dir =
         Filename.concat
           (Common.keepers_runtime_dir_of_base ~base_path)
@@ -1025,7 +1025,7 @@ let () =
 
   (* --- A-fix (RFC: keeper-orphan-stimulus-persistence): a consumed stimulus
          is drained from the current queue state on the genuine-ack path. Here
-         the stimulus lives in event-queue-v13.json, mirroring a bootstrap enqueued
+         the stimulus lives in event-queue-v14.json, mirroring a bootstrap enqueued
          by supervisor launch; after ack, [load] must be empty. Without the
          A-fix this returns length 1 and accumulates across restarts. --- *)
   let base_path = temp_dir "keeper-event-queue-ack-drains-pending" in

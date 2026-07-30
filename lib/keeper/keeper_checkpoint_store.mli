@@ -31,6 +31,13 @@ val oas_history_path :
     reader (context core, tests) must reference this value so the key
     cannot drift between sites. *)
 val keeper_generation_context_key : string
+val compaction_commit_count_context_key : string
+
+val compaction_commit_count_of_context :
+  Agent_sdk.Context.t -> (int, string) result
+(** Read the checkpoint-authoritative compaction commit count. Absence means
+    zero for a checkpoint that has not yet been compacted; malformed or
+    negative values fail closed. *)
 
 (** Compose an OAS history archive snapshot id from a checkpoint
     (created_at_ms + keeper_generation suffix). *)

@@ -80,6 +80,24 @@ let encode_checkpoint_string_off_scheduler (ckpt : Agent_sdk.Checkpoint.t) :
   offload_checkpoint_cpu (fun () -> Agent_sdk.Checkpoint.to_string ckpt)
 
 let keeper_generation_context_key = "keeper_generation"
+let compaction_commit_count_context_key = "masc_compaction_commit_count"
+
+let compaction_commit_count_of_context context =
+  match
+    Agent_sdk.Context.get_scoped
+      context
+      Agent_sdk.Context.Session
+      compaction_commit_count_context_key
+  with
+  | None -> Ok 0
+  | Some (`Int count) when count >= 0 -> Ok count
+  | Some (`Intlit raw) ->
+    (match int_of_string_opt raw with
+     | Some count when count >= 0 -> Ok count
+     | Some _ -> Error "checkpoint compaction commit count is negative"
+     | None -> Error "checkpoint compaction commit count is not an integer")
+  | Some _ -> Error "checkpoint compaction commit count is not an integer"
+;;
 
 let keeper_generation_of_context (context : Agent_sdk.Context.t) : int =
   match

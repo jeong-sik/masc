@@ -75,7 +75,6 @@ type status =
 
 type compaction_outcome =
   | Checkpoint_committed
-  | Retry_without_checkpoint
   | Lifecycle_cleanup_failed_without_checkpoint
 
 (** {1 Own-module vals} *)

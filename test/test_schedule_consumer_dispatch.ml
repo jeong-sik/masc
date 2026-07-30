@@ -354,7 +354,7 @@ let single_occurrence_id (result : Schedule_runner.tick_result) =
 
 let pending_selection_exn ~base_path ~keeper_name =
   match
-    Keeper_event_queue_persistence.peek_when_result
+    Keeper_event_queue_persistence.select_when_result
       ~base_path
       ~keeper_name
       ~ready:(fun _ -> true)
@@ -574,7 +574,7 @@ let test_keeper_wake_durable_enqueue_failure_retries_same_occurrence () =
       "schedule-keeper"
   in
   mkdir_p keeper_owner_path;
-  let queue_path = Filename.concat keeper_owner_path "event-queue-v13.json" in
+  let queue_path = Filename.concat keeper_owner_path "event-queue-v14.json" in
   mkdir_p queue_path;
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
@@ -651,15 +651,17 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
         | Error detail -> fail detail
       in
       let generation = entry.meta.runtime.nonce in
+      let selection =
+        Keeper_event_queue_state.select_when
+          ~ready:(fun _ -> true)
+          pending_state
+        |> function
+        | Some selection -> selection
+        | None -> fail "schedule cancellation source was not selectable"
+      in
       let cancellation : Keeper_event_queue_state.accepted_cancellation =
-        { source =
-            (match
-               Keeper_event_queue.to_list
-                 (Keeper_event_queue_state.pending pending_state)
-             with
-             | [ source ] -> source
-             | _ -> fail "schedule cancellation pending lane did not retain one source")
-        ; source_revision = Keeper_event_queue_state.revision pending_state
+        { source = selection.source
+        ; source_incarnation = selection.admitted_revision
         ; owner_nonce = generation
         ; operator_operation_id = "cancel-schedule-occurrence"
         ; reason = "operator cancelled retained schedule work"
@@ -684,7 +686,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
           (Filename.concat
              (Common.keepers_runtime_dir_of_base ~base_path)
              keeper_name)
-          "event-queue-transitions-v3.jsonl"
+          "event-queue-transitions-v4.jsonl"
       in
       check bool "cancellation WAL survives until projection" true
         (Sys.file_exists transition_wal_path
@@ -692,7 +694,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
       (* #26074: projection is driven only by the janitor, so ordinary queue
          traffic races it. An enqueue between the transition and the projection
          bumps the snapshot revision; if the transition WAL is still on disk at
-         that point, every later load replays a row whose [source_revision] no
+         that point, every later load replays a row whose [source_incarnation] no
          longer matches and the owner latches into "reset required" with no
          runtime exit - the projector itself cannot recover because it begins
          with [load_state_unlocked]. Drive that exact interleaving here. *)

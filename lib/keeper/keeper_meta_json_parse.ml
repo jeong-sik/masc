@@ -330,7 +330,6 @@ let decode_current_meta fields =
   let* last_compaction_ts = float_field fields "last_compaction_ts" in
   let* last_compaction_before_tokens = int_field fields "last_compaction_before_tokens" in
   let* last_compaction_after_tokens = int_field fields "last_compaction_after_tokens" in
-  let* compaction_consecutive_failures = int_field fields "compaction_consecutive_failures" in
   let* proactive_count_total = int_field fields "proactive_count_total" in
   let* last_proactive_ts = float_field fields "last_proactive_ts" in
   let* proactive_visible_count_total = int_field fields "proactive_visible_count_total" in
@@ -403,7 +402,6 @@ let decode_current_meta fields =
       ; last_after_tokens = last_compaction_after_tokens
       ; last_check_ts = last_compaction_check_ts
       ; last_decision = compaction_runtime_decision_of_string last_compaction_decision_raw
-      ; consecutive_failures = compaction_consecutive_failures
       }
     in
     let proactive_rt : proactive_runtime =

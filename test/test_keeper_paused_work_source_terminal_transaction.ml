@@ -53,7 +53,7 @@ let receipt_path config ~keeper_name ~operator_operation_id =
     (Filename.concat
        (Filename.concat
           (Workspace.masc_root_dir config)
-          "paused-work-dispositions-v5")
+          "paused-work-dispositions-v6")
        ("keeper-" ^ sha256 keeper_name))
     ("operation-" ^ sha256 operator_operation_id ^ ".json")
 ;;
@@ -111,14 +111,17 @@ let with_source_terminal_lane f =
        Persistence.update_result ~base_path ~keeper_name (fun pending ->
          Queue.enqueue pending source)
        |> require_ok "seed source-terminal event";
-       let source_revision =
+       let source_incarnation =
          Persistence.load_state_result ~base_path ~keeper_name
-         |> require_ok "load source-terminal revision"
-         |> State.revision
+         |> require_ok "load source-terminal incarnation"
+         |> State.select_when
+              ~ready:(Queue.stimulus_identity_equal source)
+         |> require_some "select source-terminal event"
+         |> fun selection -> selection.admitted_revision
        in
        let request : Transaction.request =
          { source
-         ; source_revision
+         ; source_incarnation
          ; owner_nonce = meta.runtime.nonce
          ; source_receipt = State.Hitl_terminal resolution
          ; operator_operation_id = "operator-source-terminal-1"
@@ -164,7 +167,7 @@ let source_ack_transition_state (request : Transaction.request) state =
   let source_terminal : State.accepted_source_terminal =
     State.
       { source = request.source
-    ; source_revision = request.source_revision
+    ; source_incarnation = request.source_incarnation
     ; owner_nonce = request.owner_nonce
     ; operator_operation_id = request.operator_operation_id
     ; source_receipt = request.source_receipt
@@ -250,7 +253,7 @@ let test_source_ack_identity_survives_checkpoint_reload () =
   with_source_terminal_lane (fun _config _keeper_name _meta request ->
     let initial =
       State.empty
-      |> State.with_revision request.source_revision
+      |> State.with_revision request.source_incarnation
       |> State.with_pending (Queue.enqueue Queue.empty request.source)
     in
     let first, first_result = source_ack_transition_state request initial in
@@ -268,7 +271,9 @@ let test_source_ack_identity_survives_checkpoint_reload () =
       match request.source_receipt with
       | State.Hitl_terminal resolution ->
         { resolution with approval_id = "approval-terminal-2" }
-      | State.Fusion_terminal _ | State.Background_job_terminal _ ->
+      | State.Fusion_terminal _
+      | State.Background_job_terminal _
+      | State.Turn_attempt_terminal _ ->
         Alcotest.fail "fixture must carry a HITL terminal receipt"
     in
     let second_source : Queue.stimulus =
@@ -278,15 +283,21 @@ let test_source_ack_identity_survives_checkpoint_reload () =
       ; payload = Queue.Hitl_resolved second_resolution
       }
     in
+    let second_state = State.with_pending (Queue.enqueue Queue.empty second_source) reloaded in
+    let second_selection =
+      State.select_when
+        ~ready:(Queue.stimulus_identity_equal second_source)
+        second_state
+      |> require_some "select second source-terminal event"
+    in
     let second_request : Transaction.request =
       { source = second_source
-      ; source_revision = State.revision reloaded
+      ; source_incarnation = second_selection.admitted_revision
       ; owner_nonce = request.owner_nonce
       ; source_receipt = State.Hitl_terminal second_resolution
       ; operator_operation_id = "operator-source-terminal-2"
       }
     in
-    let second_state = State.with_pending (Queue.enqueue Queue.empty second_source) reloaded in
     let _, second_result = source_ack_transition_state second_request second_state in
     let second_receipt =
       match second_result with
@@ -379,6 +390,86 @@ let test_exact_terminal_receipt_acks_pending () =
       (Queue.length (State.pending replayed_state)))
 ;;
 
+let test_unrelated_enqueue_preserves_source_terminal_incarnation () =
+  with_source_terminal_lane (fun config keeper_name _meta request ->
+    let unrelated : Queue.stimulus =
+      { post_id = "unrelated-source-terminal"
+      ; urgency = Queue.Low
+      ; arrived_at = 2.0
+      ; payload = Queue.Bootstrap
+      }
+    in
+    Persistence.update_result
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+      (fun pending -> Queue.enqueue pending unrelated)
+    |> require_ok "enqueue unrelated source-terminal event";
+    let result =
+      Transaction.ack_pending config ~keeper_name request
+      |> Result.map_error Transaction.error_to_string
+      |> require_ok "ACK source terminal after unrelated enqueue"
+    in
+    check_applied result.projection;
+    let state =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "load source-terminal result after unrelated enqueue"
+    in
+    Alcotest.(check int)
+      "only unrelated source-terminal event remains"
+      1
+      (Queue.length (State.pending state));
+    Alcotest.(check bool)
+      "unrelated source-terminal event is preserved"
+      true
+      (State.pending state
+       |> Queue.to_list
+       |> List.exists (Queue.stimulus_identity_equal unrelated)))
+;;
+
+let test_reinserted_source_rejects_old_terminal_incarnation () =
+  with_source_terminal_lane (fun config keeper_name _meta request ->
+    let base_path = config.Workspace.base_path in
+    let old_selection : State.pending_selection =
+      { source = request.source
+      ; admitted_revision = request.source_incarnation
+      }
+    in
+    Persistence.ack_pending_result
+      ~base_path
+      ~keeper_name
+      ~selection:old_selection
+      ()
+    |> require_ok "remove old source-terminal incarnation";
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending request.source)
+    |> require_ok "reinsert source-terminal event";
+    (match Transaction.ack_pending config ~keeper_name request with
+     | Error { cause = Transaction.Source_queue_validation_failed _; _ } -> ()
+     | Error error -> Alcotest.fail (Transaction.error_to_string error)
+     | Ok _ ->
+       Alcotest.fail "old source-terminal incarnation ACKed the reinserted source");
+    (match
+       Receipt.load
+         config
+         ~keeper_name
+         ~operator_operation_id:request.operator_operation_id
+     with
+     | Ok None -> ()
+     | Ok (Some _) ->
+       Alcotest.fail "old source-terminal incarnation persisted a receipt"
+     | Error detail -> Alcotest.fail detail);
+    let state =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load reinserted source-terminal event"
+    in
+    Alcotest.(check int)
+      "reinserted source-terminal event remains"
+      1
+      (Queue.length (State.pending state)))
+;;
+
 let test_terminal_ack_replays_after_projection_and_snapshot_reload () =
   with_source_terminal_lane (fun config keeper_name _meta request ->
     let first =
@@ -418,11 +509,11 @@ let test_terminal_ack_replays_after_projection_and_snapshot_reload () =
         (Filename.concat
            (Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path)
            keeper_name)
-        "event-queue-transitions-v3.jsonl"
+        "event-queue-transitions-v4.jsonl"
     in
     let residual_wal_row =
       `Assoc
-        [ "schema", `String "masc.keeper_event_queue.transition.v3"
+        [ "schema", `String "masc.keeper_event_queue.transition.v4"
         ; "base_path", `String config.Workspace.base_path
         ; "keeper_name", `String keeper_name
         ; "outbox_entry", State.outbox_entry_to_yojson outbox_entry
@@ -471,7 +562,9 @@ let test_projected_wal_recovery_allows_next_source_ack () =
       match request.source_receipt with
       | State.Hitl_terminal resolution ->
         { resolution with approval_id = "approval-terminal-after-projection" }
-      | State.Fusion_terminal _ | State.Background_job_terminal _ ->
+      | State.Fusion_terminal _
+      | State.Background_job_terminal _
+      | State.Turn_attempt_terminal _ ->
         Alcotest.fail "fixture must carry a HITL terminal receipt"
     in
     let second_source : Queue.stimulus =
@@ -486,16 +579,7 @@ let test_projected_wal_recovery_allows_next_source_ack () =
       ~keeper_name
       (fun pending -> Queue.enqueue pending second_source)
     |> require_ok "seed second source-terminal event";
-    let first_request =
-      { request with
-        source_revision =
-          (Persistence.load_state_result
-             ~base_path:config.Workspace.base_path
-             ~keeper_name
-           |> require_ok "load first source-terminal revision"
-           |> State.revision)
-      }
-    in
+    let first_request = request in
     let first =
       Transaction.ack_pending config ~keeper_name first_request
       |> Result.map_error Transaction.error_to_string
@@ -523,11 +607,11 @@ let test_projected_wal_recovery_allows_next_source_ack () =
         (Filename.concat
            (Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path)
            keeper_name)
-        "event-queue-transitions-v3.jsonl"
+        "event-queue-transitions-v4.jsonl"
     in
     let residual_wal_row =
       `Assoc
-        [ "schema", `String "masc.keeper_event_queue.transition.v3"
+        [ "schema", `String "masc.keeper_event_queue.transition.v4"
         ; "base_path", `String config.Workspace.base_path
         ; "keeper_name", `String keeper_name
         ; "outbox_entry", State.outbox_entry_to_yojson first_outbox
@@ -544,7 +628,12 @@ let test_projected_wal_recovery_allows_next_source_ack () =
     Alcotest.(check string) "projected WAL is retired during recovery" "" residual_wal;
     let second_request : Transaction.request =
       { source = second_source
-      ; source_revision = State.revision recovered
+      ; source_incarnation =
+          (State.select_when
+             ~ready:(Queue.stimulus_identity_equal second_source)
+             recovered
+           |> require_some "select second recovered source")
+            .admitted_revision
       ; owner_nonce = first_request.owner_nonce
       ; source_receipt = State.Hitl_terminal second_resolution
       ; operator_operation_id = "operator-source-terminal-after-projection"
@@ -630,7 +719,7 @@ let test_retired_v3_receipt_file_is_rejected () =
   with_source_terminal_lane (fun config keeper_name meta request ->
     let operation : Receipt.source_terminal_operation =
       { source = request.source
-      ; source_revision = request.source_revision
+      ; source_incarnation = request.source_incarnation
       ; source_receipt = request.source_receipt
       }
     in
@@ -768,6 +857,14 @@ let () =
             "exact receipt ACKs pending"
             `Quick
             test_exact_terminal_receipt_acks_pending
+        ; Alcotest.test_case
+            "unrelated enqueue preserves source-terminal incarnation"
+            `Quick
+            test_unrelated_enqueue_preserves_source_terminal_incarnation
+        ; Alcotest.test_case
+            "reinserted source rejects old terminal incarnation"
+            `Quick
+            test_reinserted_source_rejects_old_terminal_incarnation
         ; Alcotest.test_case
             "replays after outbox projection and snapshot reload"
             `Quick

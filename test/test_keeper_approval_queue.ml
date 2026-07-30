@@ -3191,7 +3191,7 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
        in
        let selection =
          match
-           Event_queue_persistence.peek_when_result
+           Event_queue_persistence.select_when_result
              ~base_path
              ~keeper_name
              ~ready:(fun _ -> true)
@@ -3203,7 +3203,7 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
        Reaction_ledger.record_event_queue_turn_started
          ~base_path
          ~keeper_name
-         selection;
+         selection.source;
        (match
           Event_queue_persistence.ack_pending_result
             ~base_path

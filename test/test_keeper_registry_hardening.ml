@@ -725,7 +725,7 @@ let test_goal_reconciliation_restart_scan_retries_missed_delivery () =
            (Filename.concat
               (Common.keepers_runtime_dir_of_base ~base_path:config.base_path)
               meta.name)
-           "event-queue-v13.json"
+           "event-queue-v14.json"
        in
        Fs_compat.mkdir_p queue_path;
        let failed =
@@ -902,7 +902,13 @@ let test_goal_reconciliation_outbox_identity_rewakes_without_duplicate () =
        in
        let cancellation : Keeper_event_queue_persistence.accepted_cancellation =
          { source = stimulus
-         ; source_revision = Keeper_event_queue_state.revision state
+         ; source_incarnation =
+             (Keeper_event_queue_state.select_when
+                ~ready:(Keeper_event_queue.stimulus_identity_equal stimulus)
+                state
+              |> function
+              | Some selection -> selection.admitted_revision
+              | None -> fail "durable reconciliation source was not selectable")
          ; owner_nonce = 17
          ; operator_operation_id = "goal-reconciliation-outbox-fixture"
          ; reason = "stage source in genuine transition outbox"

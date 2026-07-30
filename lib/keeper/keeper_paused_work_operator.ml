@@ -347,7 +347,10 @@ let error_class = function
     `Unavailable
 ;;
 
-let pending_item_to_yojson source =
+let pending_item_to_yojson
+      (selection : Queue_state.pending_selection)
+  =
+  let source = selection.source in
   let source_terminal_receipt_kind =
     match Queue_state.source_terminal_receipt_of_stimulus source with
     | Ok receipt -> `String (Disposition.source_terminal_receipt_kind receipt)
@@ -355,6 +358,7 @@ let pending_item_to_yojson source =
   in
   `Assoc
     [ "source", Queue.stimulus_to_yojson source
+    ; "source_incarnation", `Intlit (Int64.to_string selection.admitted_revision)
     ; ( "continuation_binding"
       , Disposition.continuation_binding_of_source source
         |> Disposition.continuation_binding_to_yojson )
@@ -378,11 +382,11 @@ let inventory_json config ~keeper_name =
       ~keeper_name
     |> Result.map_error (fun detail -> Inventory_queue_read_failed detail)
   in
-  let pending = Queue_state.pending state |> Queue.to_list in
+  let pending = Queue_state.pending_selections state in
   let pause_kind = Keeper_activation_readiness.pause_kind meta in
   Ok
     (`Assoc
-      [ "schema", `String "masc.keeper.paused-work.inventory.v1"
+      [ "schema", `String "masc.keeper.paused-work.inventory.v2"
       ; "operator_request_schema", `String Request.schema
       ; "keeper_name", `String keeper_name
       ; ( "owner"

@@ -1,4 +1,4 @@
-; Compaction outcome counters — which outcome moved the streak.
+; Compaction outcome counters and checkpoint-authoritative count projection.
 
 (test
  (name test_keeper_compaction_outcome_counters)

@@ -2,7 +2,7 @@
 
 type request =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; target_generation : int
   ; continuation_binding : Keeper_paused_work_disposition_receipt.continuation_binding

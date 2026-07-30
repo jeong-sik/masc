@@ -59,6 +59,7 @@ type compaction_recovery = {
   trigger : Compaction_trigger.t;
   evidence : Keeper_compaction_evidence.t;
   turn_generation : int;
+  commit_count : int;
 }
 
 type no_compaction = Keeper_compaction_outcome.no_compaction =
@@ -71,7 +72,6 @@ type compaction_recovery_error =
   | Checkpoint_candidate_failed of string
   | Compaction_rejected of Keeper_compact_policy.compaction_rejection
   | No_compaction of no_compaction
-  | Retry_suspended of { consecutive_failures : int }
 
 type prepared_commit_failure =
   { error : compaction_recovery_error
@@ -92,7 +92,6 @@ let compaction_recovery_error_to_tag = function
     Keeper_compact_policy.compaction_rejection_to_tag reason
   | No_compaction { reason; _ } ->
     "no_compaction:" ^ Keeper_compaction_outcome.no_compaction_reason_label reason
-  | Retry_suspended _ -> "retry_suspended"
 
 let checkpoint_load_error_detail = function
   | Keeper_checkpoint_store.Not_found -> "checkpoint not found"
@@ -173,12 +172,6 @@ let compaction_recovery_error_to_string = function
       source.turn_count
       source.sha256
       (Keeper_compaction_outcome.no_compaction_reason_to_string reason)
-  | Retry_suspended { consecutive_failures } ->
-    Printf.sprintf
-      "compaction retry suspended after %d consecutive failures; reactive \
-       prepare refused before the summarizer call — an operator-committed \
-       manual compaction resets the streak and lifts the suspension"
-      consecutive_failures
 
 (* ── Tier A6: resilience post-turn wire-in (Cycle 23) ──────────────
    Feature-flag-gated layer that runs before tool emission and
@@ -626,54 +619,17 @@ let prepare_compaction_admitted
                (Keeper_compact_policy.compaction_decision_to_string decision))))
 ;;
 
-(* RFC-0351 S0 / #25461: reactive admission gate in front of the prepare
-   phase. Once the persisted failure streak reaches the escalation threshold
-   reactive preparation is refused before checkpoint load or a summarizer LLM
-   call. The manual trigger passes through on purpose: an operator-committed
-   compaction is the recovery lever — its commit resets the streak and lifts
-   the suspension. *)
 let prepare_compaction_with
       ~compact_for_request
       ~base_dir
       ~(meta : keeper_meta)
       ~(trigger : Compaction_trigger.t)
   : (prepared_compaction, compaction_recovery_error) result =
-  let suspended =
-    Keeper_meta_contract.compaction_retry_suspended meta.runtime.compaction_rt
-  in
-  match trigger with
-  (* The suspension guard follows the trigger's origin, not its axis. The
-     provider token window, serialized byte limit, and serving-admission token
-     evidence are all raised by the turn path itself, so a suspended retry must
-     refuse them or a keeper whose compactions keep failing would keep
-     re-entering compaction on every turn. [Manual] stays exempt: an operator
-     asked for this one, and refusing it would leave no way to intervene. *)
-  | Compaction_trigger.Provider_overflow _
-  | Compaction_trigger.Request_body_over_capacity _
-  | Compaction_trigger.Request_body_refused_by_provider _
-  | Compaction_trigger.Serving_input_capacity
-      (Compaction_trigger.Boundary_unknown _)
-  | Compaction_trigger.Serving_input_capacity
-      (Compaction_trigger.Input_rejected _)
-    when suspended ->
-    Error
-      (Retry_suspended
-         { consecutive_failures =
-             meta.runtime.compaction_rt.consecutive_failures
-         })
-  | Compaction_trigger.Provider_overflow _
-  | Compaction_trigger.Request_body_over_capacity _
-  | Compaction_trigger.Request_body_refused_by_provider _
-  | Compaction_trigger.Serving_input_capacity
-      (Compaction_trigger.Boundary_unknown _)
-  | Compaction_trigger.Serving_input_capacity
-      (Compaction_trigger.Input_rejected _)
-  | Compaction_trigger.Manual ->
-    prepare_compaction_admitted
-      ~compact_for_request
-      ~base_dir
-      ~meta
-      ~trigger
+  prepare_compaction_admitted
+    ~compact_for_request
+    ~base_dir
+    ~meta
+    ~trigger
 ;;
 
 let prepare_compaction
@@ -719,83 +675,119 @@ let commit_prepared_compaction_with
     Not_committed (no_compaction_of_prepared ~cause prepared)
   in
   try
+    let candidate_context = oas_context_of_context context in
     match
-      save_oas_checkpoint_if_source
-        ~multimodal_policy:retry_meta.multimodal_policy
-        ~keeper_name:retry_meta.name
-        ~session
-        ~agent_name:retry_meta.agent_name
-        ~ctx:context
-        ~generation:turn_generation
-        ~expected_source_ref:source_ref
+      Keeper_checkpoint_store.compaction_commit_count_of_context
+        candidate_context
     with
-    | Ok
-        ( saved_checkpoint
-        , Keeper_checkpoint_store.Installed installed ) ->
-      let recovery =
-        { checkpoint = saved_checkpoint
-        ; checkpoint_installation = installed
-        ; trigger = prepared_trigger
-        ; evidence
-        ; turn_generation
+    | Error detail ->
+      Log.Keeper.error
+        ~keeper_name:retry_meta.name
+        "compaction checkpoint has invalid commit count: %s"
+        detail;
+      not_committed Keeper_compaction_outcome.Domain_invalid_output
+    | Ok source_commit_count when source_commit_count = max_int ->
+      Log.Keeper.error
+        ~keeper_name:retry_meta.name
+        "compaction checkpoint commit count is exhausted";
+      not_committed Keeper_compaction_outcome.Domain_invalid_output
+    | Ok source_commit_count ->
+      let commit_count = source_commit_count + 1 in
+      let stamped_context =
+        Agent_sdk.Context.copy ~eio:true candidate_context
+      in
+      Agent_sdk.Context.set_scoped
+        stamped_context
+        Agent_sdk.Context.Session
+        Keeper_checkpoint_store.compaction_commit_count_context_key
+        (`Int commit_count);
+      let commit_context =
+        { checkpoint =
+            { context.checkpoint with context = stamped_context }
         }
       in
-      (try
-         Eio.Cancel.protect
-         @@ fun () ->
-         after_checkpoint_installed ();
-         (try
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string Compactions)
-              ~labels:[ "keeper", retry_meta.name ]
-              ()
-          with
-          | exn ->
-            log_keeper_exn
-              ~label:"compaction committed metric emission"
-              exn);
-         Committed recovery
+      (match
+         save_oas_checkpoint_if_source
+           ~multimodal_policy:retry_meta.multimodal_policy
+           ~keeper_name:retry_meta.name
+           ~session
+           ~agent_name:retry_meta.agent_name
+           ~ctx:commit_context
+           ~generation:turn_generation
+           ~expected_source_ref:source_ref
        with
-       | Eio.Cancel.Cancelled _ as exn ->
-         commit_failure
-           ~committed:recovery
-           (Checkpoint_candidate_failed
-              ("post-install compaction callback was cancelled: "
-               ^ Printexc.to_string exn))
-       | exn ->
-         let detail = Printexc.to_string exn in
-         log_keeper_exn
-           ~label:"post-install compaction callback"
-           exn;
-         commit_failure
-           ~committed:recovery
-           (Checkpoint_candidate_failed
-              ("post-install compaction callback raised: " ^ detail)))
-    | Ok
-        ( _
-        , Keeper_checkpoint_store.Not_installed
-            { cause = Keeper_checkpoint_store.Source_changed actual; _ } ) ->
-      Log.Keeper.warn
-        "compaction checkpoint source changed: %s"
-        (checkpoint_ref_detail actual);
-      not_committed Keeper_compaction_outcome.Checkpoint_source_changed
-    | Ok
-        (_, Keeper_checkpoint_store.Not_installed { cause = cas_error; _ })
-    | Error (Persistence_error cas_error) ->
-      let detail = checkpoint_cas_error_detail cas_error in
-      Log.Keeper.error "compaction checkpoint save failed: %s" detail;
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string CheckpointFailures)
-        ~labels:
-          [ "keeper", retry_meta.agent_name
-          ; ( "operation"
-            , Keeper_checkpoint_failure_operation.(to_label Compaction_save) )
-          ]
-        ();
-      not_committed Keeper_compaction_outcome.Checkpoint_persistence_failed
-    | Error (Tool_history_invalid _) ->
-      not_committed
-        Keeper_compaction_outcome.Invalid_structural_source_after_dispatch
+       | Ok
+           ( saved_checkpoint
+           , Keeper_checkpoint_store.Installed installed ) ->
+         let recovery =
+           { checkpoint = saved_checkpoint
+           ; checkpoint_installation = installed
+           ; trigger = prepared_trigger
+           ; evidence
+           ; turn_generation
+           ; commit_count
+           }
+         in
+         (try
+            Eio.Cancel.protect
+            @@ fun () ->
+            after_checkpoint_installed ();
+            (try
+               Otel_metric_store.inc_counter
+                 Keeper_metrics.(to_string Compactions)
+                 ~labels:[ "keeper", retry_meta.name ]
+                 ()
+             with
+             | exn ->
+               log_keeper_exn
+                 ~label:"compaction committed metric emission"
+                 exn);
+            Committed recovery
+          with
+          | Eio.Cancel.Cancelled _ as exn ->
+            commit_failure
+              ~committed:recovery
+              (Checkpoint_candidate_failed
+                 ("post-install compaction callback was cancelled: "
+                  ^ Printexc.to_string exn))
+          | exn ->
+            let detail = Printexc.to_string exn in
+            log_keeper_exn
+              ~label:"post-install compaction callback"
+              exn;
+            commit_failure
+              ~committed:recovery
+              (Checkpoint_candidate_failed
+                 ("post-install compaction callback raised: "
+                  ^ detail)))
+       | Ok
+           ( _
+           , Keeper_checkpoint_store.Not_installed
+               { cause = Keeper_checkpoint_store.Source_changed actual; _ } ) ->
+         Log.Keeper.warn
+           "compaction checkpoint source changed: %s"
+           (checkpoint_ref_detail actual);
+         not_committed Keeper_compaction_outcome.Checkpoint_source_changed
+       | Ok
+           (_, Keeper_checkpoint_store.Not_installed { cause = cas_error; _ })
+       | Error (Persistence_error cas_error) ->
+         let detail = checkpoint_cas_error_detail cas_error in
+         Log.Keeper.error
+           "compaction checkpoint save failed: %s"
+           detail;
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string CheckpointFailures)
+           ~labels:
+             [ "keeper", retry_meta.agent_name
+             ; ( "operation"
+               , Keeper_checkpoint_failure_operation.(to_label Compaction_save) )
+             ]
+           ();
+         not_committed
+           Keeper_compaction_outcome.Checkpoint_persistence_failed
+       | Error (Tool_history_invalid _) ->
+         not_committed
+           Keeper_compaction_outcome.Invalid_structural_source_after_dispatch)
   with
   | Eio.Cancel.Cancelled _ as exn ->
     let raw_bt = Printexc.get_raw_backtrace () in

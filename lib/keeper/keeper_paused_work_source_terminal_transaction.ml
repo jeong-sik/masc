@@ -1,6 +1,6 @@
 type request =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; source_receipt : Keeper_event_queue_state.source_terminal_receipt
   ; operator_operation_id : string
@@ -108,8 +108,8 @@ let error_to_string error =
 let validate_request request =
   if request.owner_nonce < 0
   then Error "owner generation must not be negative"
-  else if Int64.compare request.source_revision 0L < 0
-  then Error "source revision must not be negative"
+  else if Int64.compare request.source_incarnation 0L < 0
+  then Error "source incarnation must not be negative"
   else if String.equal (String.trim request.source.post_id) ""
   then Error "source post id must not be empty"
   else if String.equal (String.trim request.operator_operation_id) ""
@@ -155,22 +155,17 @@ let validate_source_queue config ~keeper_name request =
       ~keeper_name
     |> Result.map_error (fun detail -> Source_queue_validation_failed detail)
   in
-  if not (Int64.equal (Keeper_event_queue_state.revision state) request.source_revision)
-  then Error (Source_queue_validation_failed "source revision changed")
-  else if Keeper_event_queue_state.transition_outbox state <> []
+  if Keeper_event_queue_state.transition_outbox state <> []
   then Error (Source_queue_validation_failed "source lane has a pending transition outbox")
   else
-    let matching =
-      Keeper_event_queue.to_list (Keeper_event_queue_state.pending state)
-      |> List.filter (fun source ->
-        Keeper_event_queue.stimulus_identity_equal request.source source)
-    in
-    match matching with
-    | [ source ] when source = request.source -> Ok ()
-    | [ _ ] -> Error (Source_queue_validation_failed "source snapshot changed")
-    | [] -> Error (Source_queue_validation_failed "source is not pending")
-    | _ :: _ :: _ ->
-      Error (Source_queue_validation_failed "source identity is duplicated")
+    Keeper_event_queue_state.validate_pending_selection
+      ~selection:
+        { source = request.source
+        ; admitted_revision = request.source_incarnation
+        }
+      state
+    |> Result.map_error (fun detail ->
+      Source_queue_validation_failed detail)
 ;;
 
 let operation_of_receipt receipt =
@@ -190,7 +185,7 @@ let receipt_matches_request ~keeper_name request receipt =
     && Int.equal receipt.expected_generation request.owner_nonce
     && String.equal receipt.operator_operation_id request.operator_operation_id
     && operation.source = request.source
-    && Int64.equal operation.source_revision request.source_revision
+    && Int64.equal operation.source_incarnation request.source_incarnation
     && operation.source_receipt = request.source_receipt
 ;;
 
@@ -200,7 +195,7 @@ let create_receipt config ~keeper_name request =
   let* () = validate_source_queue config ~keeper_name request in
   let operation : Keeper_paused_work_disposition_receipt.source_terminal_operation =
     { source = request.source
-    ; source_revision = request.source_revision
+    ; source_incarnation = request.source_incarnation
     ; source_receipt = request.source_receipt
     }
   in
@@ -221,7 +216,7 @@ let project_receipt config receipt =
   let* operation = operation_of_receipt receipt in
   let source_terminal : Keeper_registry_event_queue.accepted_source_terminal =
     { source = operation.source
-    ; source_revision = operation.source_revision
+    ; source_incarnation = operation.source_incarnation
     ; owner_nonce = receipt.Keeper_paused_work_disposition_receipt.expected_generation
     ; operator_operation_id = receipt.operator_operation_id
     ; source_receipt = operation.source_receipt

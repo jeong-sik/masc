@@ -505,51 +505,15 @@ let persist_compaction_decision config ~keeper_name ~decision
     |> Result.map (fun () -> `Persisted)
 ;;
 
-(* RFC-0351 S0 / #25461, #25538: advance the streak that reactive compaction
-   admission reads. Same read/stamp/merge shape as
-   [persist_compaction_decision] so a concurrent CAS re-applies the stamp
-   instead of dropping it.
-
-   Reset semantics (#25538): the streak counts consecutive provider-overflow
-   episodes, and only a turn that completes without overflow — or an
-   operator-committed manual compaction — resets it.  An in-lane (reactive)
-   commit advances the streak instead of resetting it: a committed plan that
-   saves 920B of a checkpoint (0.07%, live measurement) used to reset the
-   counter on every loop iteration, so an incompressible floor never reached
-   the ceiling.
-
-   [`Committed]/[`Overflow_episode_committed] also advance [count].  That
-   field had no writer: it was serialized to meta and rendered by the
-   dashboard while nothing incremented it, so a keeper whose compaction
-   pipeline was committing normally still reported compaction_count=0 — one
-   keeper carried 88 committed [context_compacted] runtime-manifest records
-   against a meta reading 0. *)
-(* Rendering, not classification: the outcome variant is the state machine's
-   own outcome, so the label comes from an exhaustive match instead of being
-   recovered from a message string.  A new variant fails this match at compile
-   time rather than falling into an unlabelled bucket. *)
-let compaction_outcome_label = function
-  | `Committed -> "committed"
-  | `Overflow_episode_committed -> "overflow_episode_committed"
-  | `Failed -> "failed"
-  | `Recovered -> "recovered"
-;;
-
-let persist_compaction_outcome config ~keeper_name ~outcome
+let persist_compaction_commit_projection config ~keeper_name ~commit_count
   : ([ `Persisted | `No_durable_meta ], string) result
   =
+  if commit_count < 0
+  then Error "checkpoint compaction commit count is negative"
+  else
   let stamp (m : Keeper_meta_contract.keeper_meta) =
     Keeper_meta_contract.map_compaction_rt
-      (fun rt ->
-        match outcome with
-        | `Committed -> { rt with count = rt.count + 1; consecutive_failures = 0 }
-        | `Overflow_episode_committed ->
-          { rt with
-            count = rt.count + 1
-          ; consecutive_failures = rt.consecutive_failures + 1
-          }
-        | `Failed -> { rt with consecutive_failures = rt.consecutive_failures + 1 }
-        | `Recovered -> { rt with consecutive_failures = 0 })
+      (fun rt -> { rt with count = max rt.count commit_count })
       m
   in
   match read_meta config keeper_name with
@@ -561,57 +525,11 @@ let persist_compaction_outcome config ~keeper_name ~outcome
       config
       (stamp disk_meta)
     |> Result.map (fun () ->
-      (* Counted here rather than inside [stamp]: a CAS retry re-applies the
-         stamp, so counting there would report one outcome several times.
-         Only a persisted outcome moved the streak, which is what this
-         series answers — which outcome advanced it, and which reset it.
-
-         The [keeper] label stays: keeper names come from the registry and are
-         stable across replacement (a replaced keeper keeps its name and bumps
-         [generation]), so the series count is bounded by fleet size, and
-         "which keeper's compaction is collapsing" is the question this was
-         added to answer. Unbounded accumulation in the metric store is a
-         store-level property shared by every keeper-labelled emission; it does
-         not get fixed by dropping one dimension here. *)
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string CompactionOutcomes)
-        ~labels:
-          [ "keeper", keeper_name; "outcome", compaction_outcome_label outcome ]
-        ();
       Log.Keeper.info
         ~keeper_name
-        "compaction outcome persisted kind=%s"
-        (compaction_outcome_label outcome);
+        "compaction commit projection persisted count=%d"
+        commit_count;
       `Persisted)
-;;
-
-(* Structural transcript corruption is deterministic current-state damage, not
-   a retry class. Persist the typed reset-required latch before the owning
-   lease is terminally settled. A concurrent dead tombstone remains stronger;
-   an ordinary operator/unclassified pause is upgraded to reset-required. *)
-let persist_transcript_corruption_pause config ~keeper_name
-  : ([ `Persisted | `No_durable_meta ], string) result
-  =
-  let stamp (m : Keeper_meta_contract.keeper_meta) =
-    match
-      Keeper_lifecycle_admission.state
-        ~paused:m.paused
-        ~latched_reason:m.latched_reason
-    with
-    | Keeper_lifecycle_admission.Dead_tombstone -> m
-    | Keeper_lifecycle_admission.Active
-    | Keeper_lifecycle_admission.Paused _ ->
-      Keeper_meta_contract.mark_transcript_corruption_reset_required m
-  in
-  match read_meta config keeper_name with
-  | Error msg -> Error msg
-  | Ok None -> Ok `No_durable_meta
-  | Ok (Some disk_meta) ->
-    write_meta_with_merge
-      ~merge:(fun ~latest ~caller:_ -> stamp latest)
-      config
-      (stamp disk_meta)
-    |> Result.map (fun () -> `Persisted)
 ;;
 
 type identity_update_error =
@@ -667,6 +585,42 @@ let update_meta_if_identity
                (match persist_meta config path persisted with
                 | Ok () -> Ok persisted
                 | Error detail -> Error (Identity_write_failed detail))))
+;;
+
+(* Structural transcript corruption is deterministic current-state damage, not
+   a retry class. Persist the typed reset-required latch before the owning
+   event source receives its terminal receipt. A concurrent dead tombstone
+   remains stronger; an ordinary operator/unclassified pause is upgraded to
+   reset-required. *)
+let persist_transcript_corruption_pause
+      config
+      ~keeper_name
+      ~trace_id
+      ~generation
+  : ([ `Persisted | `No_durable_meta ], string) result
+  =
+  let stamp (m : Keeper_meta_contract.keeper_meta) =
+    match
+      Keeper_lifecycle_admission.state
+        ~paused:m.paused
+        ~latched_reason:m.latched_reason
+    with
+    | Keeper_lifecycle_admission.Dead_tombstone -> m
+    | Keeper_lifecycle_admission.Active
+    | Keeper_lifecycle_admission.Paused _ ->
+      Keeper_meta_contract.mark_transcript_corruption_reset_required m
+  in
+  match
+    update_meta_if_identity
+      config
+      ~name:keeper_name
+      ~trace_id
+      ~generation
+      stamp
+  with
+  | Ok _ -> Ok `Persisted
+  | Error Identity_missing -> Ok `No_durable_meta
+  | Error error -> Error (identity_update_error_to_string error)
 ;;
 
 type identity_remove_error =

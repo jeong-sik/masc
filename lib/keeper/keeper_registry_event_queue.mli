@@ -8,7 +8,7 @@
 
 type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
@@ -16,7 +16,7 @@ type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellatio
 
 type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
@@ -27,10 +27,11 @@ type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_re
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Background_job_terminal of Keeper_event_queue.bg_job_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
+  | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
@@ -69,16 +70,22 @@ val peek_when_result :
   ready:(Keeper_event_queue.stimulus -> bool) ->
   (Keeper_event_queue.stimulus option, string) result
 
+val select_when_result :
+  base_path:string ->
+  string ->
+  ready:(Keeper_event_queue.stimulus -> bool) ->
+  (Keeper_event_queue_state.pending_selection option, string) result
+
 val validate_pending_selection_result :
   base_path:string ->
   string ->
-  selection:Keeper_event_queue.stimulus ->
+  selection:Keeper_event_queue_state.pending_selection ->
   (unit, string) result
 
 val ack_pending_result :
   base_path:string ->
   string ->
-  selection:Keeper_event_queue.stimulus ->
+  selection:Keeper_event_queue_state.pending_selection ->
   (unit, string) result
 
 val cancel_pending_accepted_result :
@@ -110,6 +117,17 @@ val ack_pending_source_terminal_result :
   (source_ack_result, string) result
 (** Commit one exact terminal source ACK and publish the post-commit pending
     projection when the owner is registered. *)
+
+val terminalize_pending_turn_attempt_result :
+  base_path:string ->
+  string ->
+  current_owner_nonce:int ->
+  applied_at:float ->
+  selection:Keeper_event_queue_state.pending_selection ->
+  detail:string ->
+  (source_ack_result, string) result
+(** Commit a source-bearing terminal receipt for one failed admitted turn and
+    publish the post-commit pending projection. *)
 
 (** Enqueue a stimulus on the keeper's event queue. When the keeper is not
     registered yet, persist the stimulus to the durable snapshot so later

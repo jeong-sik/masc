@@ -1,6 +1,6 @@
 type source =
   | Event_queue_pending of
-      { revision : int64
+      { source_incarnation : int64
       ; stimulus : Keeper_event_queue.stimulus
       }
   | Event_queue_outbox of
@@ -54,11 +54,14 @@ type snapshot =
 let project_event_queue_state ~keeper_name state =
   let revision = Keeper_event_queue_state.revision state in
   let pending =
-    Keeper_event_queue_state.pending state
-    |> Keeper_event_queue.to_list
-    |> List.map (fun stimulus ->
+    Keeper_event_queue_state.pending_selections state
+    |> List.map (fun (selection : Keeper_event_queue_state.pending_selection) ->
       { keeper_name
-      ; source = Event_queue_pending { revision; stimulus }
+      ; source =
+          Event_queue_pending
+            { source_incarnation = selection.admitted_revision
+            ; stimulus = selection.source
+            }
       })
   in
   let outbox =
@@ -159,9 +162,9 @@ let outbox_to_yojson (entry : Keeper_event_queue_state.outbox_entry) =
 ;;
 
 let source_to_yojson = function
-  | Event_queue_pending { revision; stimulus } ->
+  | Event_queue_pending { source_incarnation; stimulus } ->
     `Assoc [ "kind", `String "event_queue_pending"
-           ; "revision", `String (Int64.to_string revision)
+           ; "source_incarnation", `String (Int64.to_string source_incarnation)
            ; "value", Keeper_event_queue.stimulus_to_yojson stimulus ]
   | Event_queue_outbox { revision; entry } ->
     `Assoc [ "kind", `String "event_queue_outbox"
@@ -224,7 +227,7 @@ let availability_to_yojson = function
 
 let snapshot_to_yojson snapshot =
   `Assoc
-    [ "schema", `String "keeper.current_operations.v1"
+    [ "schema", `String "keeper.current_operations.v2"
     ; "keeper_name", `String snapshot.keeper_name
     ; "event_queue", availability_to_yojson snapshot.event_queue
     ; "async_requests", availability_to_yojson snapshot.async_requests

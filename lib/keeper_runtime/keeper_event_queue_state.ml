@@ -1,6 +1,6 @@
 type accepted_cancellation =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
@@ -8,7 +8,7 @@ type accepted_cancellation =
 
 type accepted_transfer =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
@@ -19,10 +19,11 @@ type source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Background_job_terminal of Keeper_event_queue.bg_job_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
+  | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
@@ -45,9 +46,14 @@ type outbox_entry =
   ; stimuli : Keeper_event_queue.stimulus list
   }
 
+type pending_selection =
+  { source : Keeper_event_queue.stimulus
+  ; admitted_revision : int64
+  }
+
 type t =
   { revision : int64
-  ; pending : Keeper_event_queue.t
+  ; pending_entries : pending_selection list
   ; last_transition : transition_receipt option
   ; projected_dispositions : transition_receipt list
   ; transition_outbox : outbox_entry list
@@ -62,11 +68,11 @@ type transfer_projection_result =
   | Transfer_projected
   | Transfer_already_projected
 
-let schema = "keeper.event_queue.state.v13"
+let schema = "keeper.event_queue.state.v14"
 
 let empty =
   { revision = 0L
-  ; pending = Keeper_event_queue.empty
+  ; pending_entries = []
   ; last_transition = None
   ; projected_dispositions = []
   ; transition_outbox = []
@@ -75,7 +81,16 @@ let empty =
 ;;
 
 let revision state = state.revision
-let pending state = state.pending
+let pending_selections state = state.pending_entries
+
+let pending state =
+  List.fold_left
+    (fun queue entry ->
+       Keeper_event_queue.enqueue queue entry.source)
+    Keeper_event_queue.empty
+    state.pending_entries
+;;
+
 let last_transition state = state.last_transition
 
 let disposition_operation_id = function
@@ -95,7 +110,7 @@ let transition_outbox state = state.transition_outbox
 let accepted_transfer_projections state = state.accepted_transfer_projections
 
 let accounted_stimuli state =
-  Keeper_event_queue.to_list state.pending
+  Keeper_event_queue.to_list (pending state)
   @ List.concat_map
       (fun (entry : outbox_entry) -> entry.stimuli)
       state.transition_outbox
@@ -109,39 +124,36 @@ let project_accepted_transfer (transfer : accepted_transfer) state =
   | Some existing when existing = transfer -> Ok (state, Transfer_already_projected)
   | Some _ -> Error "target transfer operation ID conflicts with its durable projection"
   | None ->
-    let same_source (candidate : accepted_transfer) =
-      Keeper_event_queue.stimulus_identity_equal candidate.source transfer.source
+    let matching =
+      accounted_stimuli state
+      |> List.filter (fun candidate ->
+        Keeper_event_queue.stimulus_identity_equal candidate transfer.source)
     in
-    (match List.find_opt same_source state.accepted_transfer_projections with
-     | Some _ ->
-       Error "target transfer source identity was already projected by another operation"
-     | None ->
-       let matching =
-         accounted_stimuli state
-         |> List.filter (fun candidate ->
-           Keeper_event_queue.stimulus_identity_equal candidate transfer.source)
-       in
-       (match matching with
-        | [] ->
-          let pending = Keeper_event_queue.enqueue state.pending transfer.source in
-          Ok
-            ( { state with
-                pending
-              ; accepted_transfer_projections =
-                  state.accepted_transfer_projections @ [ transfer ]
-              }
-            , Transfer_projected )
-        | [ existing ] when existing = transfer.source ->
-          Ok
-            ( { state with
-                accepted_transfer_projections =
-                  state.accepted_transfer_projections @ [ transfer ]
-              }
-            , Transfer_already_projected )
-        | [ _ ] ->
-          Error "target transfer source identity has a different durable snapshot"
-        | _ :: _ :: _ ->
-          Error "target transfer source identity is duplicated in durable state"))
+    (match matching with
+     | [] ->
+       Ok
+         ( { state with
+             pending_entries =
+               state.pending_entries
+               @ [ { source = transfer.source
+                   ; admitted_revision = state.revision
+                   }
+                 ]
+           ; accepted_transfer_projections =
+               state.accepted_transfer_projections @ [ transfer ]
+           }
+         , Transfer_projected )
+     | [ existing ] when existing = transfer.source ->
+       Ok
+         ( { state with
+             accepted_transfer_projections =
+               state.accepted_transfer_projections @ [ transfer ]
+           }
+         , Transfer_already_projected )
+     | [ _ ] ->
+       Error "target transfer source identity has a different durable snapshot"
+     | _ :: _ :: _ ->
+       Error "target transfer source identity is duplicated in durable state")
 ;;
 
 let mark_transition_projected ~transition_id state =
@@ -172,7 +184,33 @@ let mark_transition_projected ~transition_id state =
     Error (Printf.sprintf "event queue transition not found: %s" transition_id)
   | _ :: _ :: _ -> Error "event queue state has multiple unprojected transitions"
 ;;
-let with_pending pending state = { state with pending }
+let with_pending pending state =
+  let rec take_matching source skipped = function
+    | [] -> None, List.rev skipped
+    | entry :: rest
+      when Keeper_event_queue.stimulus_identity_equal entry.source source
+           && entry.source = source ->
+      Some entry, List.rev_append skipped rest
+    | entry :: rest -> take_matching source (entry :: skipped) rest
+  in
+  let rec reconcile available acc = function
+    | [] -> List.rev acc
+    | source :: rest ->
+      let existing, available = take_matching source [] available in
+      let entry =
+        match existing with
+        | Some entry -> entry
+        | None -> { source; admitted_revision = state.revision }
+      in
+      reconcile available (entry :: acc) rest
+  in
+  let pending_entries =
+    Keeper_event_queue.to_list pending
+    |> reconcile state.pending_entries []
+  in
+  { state with pending_entries }
+;;
+
 let with_revision revision state = { state with revision }
 
 let rec queue_contains queue stimulus =
@@ -191,54 +229,49 @@ let enqueue_if_missing queue stimulus =
 
 let transition_outbox_blocked state = state.transition_outbox <> []
 
-let rec dequeue_first_ready ~ready skipped pending =
-  match Keeper_event_queue.dequeue pending with
-  | None -> None
-  | Some (stimulus, rest) when ready stimulus ->
-    Some (stimulus, Keeper_event_queue.prepend_list (List.rev skipped) rest)
-  | Some (stimulus, rest) ->
-    dequeue_first_ready ~ready (stimulus :: skipped) rest
+let rec first_ready_entry ~ready = function
+  | [] -> None
+  | entry :: _ when ready entry.source -> Some entry
+  | _ :: rest -> first_ready_entry ~ready rest
 ;;
 
 let peek_when ~ready state =
-  match dequeue_first_ready ~ready [] state.pending with
-  | None -> None
-  | Some (stimulus, _) -> Some stimulus
+  Option.map
+    (fun entry -> entry.source)
+    (first_ready_entry ~ready state.pending_entries)
 ;;
 
+let select_when ~ready state = first_ready_entry ~ready state.pending_entries
+
 let validate_pending_selection
-      ~(selection : Keeper_event_queue.stimulus)
+      ~(selection : pending_selection)
       state
   =
   let matching =
-    Keeper_event_queue.to_list state.pending
-    |> List.filter (Keeper_event_queue.stimulus_identity_equal selection)
+    state.pending_entries
+    |> List.filter (fun entry ->
+      Keeper_event_queue.stimulus_identity_equal
+        selection.source
+        entry.source)
   in
   match matching with
   | [ actual ] when actual = selection -> Ok ()
-  | [ _ ] -> Error "event queue pending selection typed snapshot changed"
+  | [ { source; _ } ] when source <> selection.source ->
+    Error "event queue pending selection typed snapshot changed"
+  | [ _ ] -> Error "event queue pending selection incarnation changed"
   | [] -> Error "event queue pending selection is no longer present"
   | _ :: _ :: _ ->
     Error "event queue pending selection is present more than once"
 ;;
 
-let ack_pending ~(selection : Keeper_event_queue.stimulus) state =
+let ack_pending ~(selection : pending_selection) state =
   match validate_pending_selection ~selection state with
   | Error _ as error -> error
   | Ok () ->
-    let retained =
-      Keeper_event_queue.to_list state.pending
-      |> List.filter
-           (Fun.negate
-              (Keeper_event_queue.stimulus_identity_equal selection))
+    let pending_entries =
+      List.filter (Fun.negate (( = ) selection)) state.pending_entries
     in
-    let pending =
-      List.fold_left
-        Keeper_event_queue.enqueue
-        Keeper_event_queue.empty
-        retained
-    in
-    Ok { state with pending }
+    Ok { state with pending_entries }
 ;;
 
 let ( let* ) = Result.bind
@@ -275,8 +308,8 @@ let transition_receipt_equal left right =
 let validate_accepted_cancellation (cancellation : accepted_cancellation) =
   if String.equal (String.trim cancellation.source.post_id) ""
   then Error "accepted cancellation source post id must not be empty"
-  else if Int64.compare cancellation.source_revision 0L < 0
-  then Error "accepted cancellation source revision must not be negative"
+  else if Int64.compare cancellation.source_incarnation 0L < 0
+  then Error "accepted cancellation source incarnation must not be negative"
   else if cancellation.owner_nonce < 0
   then Error "accepted cancellation owner generation must not be negative"
   else if String.equal (String.trim cancellation.operator_operation_id) ""
@@ -289,8 +322,8 @@ let validate_accepted_cancellation (cancellation : accepted_cancellation) =
 let validate_accepted_transfer (transfer : accepted_transfer) =
   if String.equal (String.trim transfer.source.post_id) ""
   then Error "accepted transfer source post id must not be empty"
-  else if Int64.compare transfer.source_revision 0L < 0
-  then Error "accepted transfer source revision must not be negative"
+  else if Int64.compare transfer.source_incarnation 0L < 0
+  then Error "accepted transfer source incarnation must not be negative"
   else if transfer.owner_nonce < 0
   then Error "accepted transfer owner generation must not be negative"
   else if String.equal (String.trim transfer.operator_operation_id) ""
@@ -322,20 +355,25 @@ let source_terminal_receipt_of_stimulus source =
     Error "source event does not carry a typed terminal receipt"
 ;;
 
-let validate_accepted_source_terminal source_terminal =
+let validate_accepted_source_terminal
+      (source_terminal : accepted_source_terminal)
+  =
   if String.equal (String.trim source_terminal.source.post_id) ""
   then Error "source-terminal ACK source post id must not be empty"
-  else if Int64.compare source_terminal.source_revision 0L < 0
-  then Error "source-terminal ACK source revision must not be negative"
+  else if Int64.compare source_terminal.source_incarnation 0L < 0
+  then Error "source-terminal ACK source incarnation must not be negative"
   else if source_terminal.owner_nonce < 0
   then Error "source-terminal ACK owner generation must not be negative"
   else if String.equal (String.trim source_terminal.operator_operation_id) ""
   then Error "source-terminal ACK operation id must not be empty"
-  else
-    let* receipt = source_terminal_receipt_of_stimulus source_terminal.source in
-    if receipt = source_terminal.source_receipt
-    then Ok ()
-    else Error "source-terminal ACK receipt does not match source payload"
+  else (
+    match source_terminal.source_receipt with
+    | Turn_attempt_terminal _ -> Ok ()
+    | (Fusion_terminal _ | Background_job_terminal _ | Hitl_terminal _) as expected ->
+      let* receipt = source_terminal_receipt_of_stimulus source_terminal.source in
+      if receipt = expected
+      then Ok ()
+      else Error "source-terminal ACK receipt does not match source payload")
 ;;
 
 let validate_transition = function
@@ -384,10 +422,10 @@ let apply_pending_transition ~applied_at ~transition ~source ~pending state =
     let* () = validate_transition transition in
     let* () = validate_transition_for_stimuli transition [ source ] in
     let receipt = receipt_for_pending_transition ~applied_at ~transition in
+    let state = with_pending pending state in
     Ok
       ( { state with
-          pending
-        ; transition_outbox = [ { receipt; stimuli = [ source ] } ]
+          transition_outbox = [ { receipt; stimuli = [ source ] } ]
         }
       , Transition_applied receipt )
 ;;
@@ -454,14 +492,12 @@ let cancel_pending_accepted
              current_owner_nonce)
     in
     let* () =
-      if Int64.equal state.revision cancellation.source_revision
-      then Ok ()
-      else
-        Error
-          (Printf.sprintf
-             "accepted cancellation source revision changed: expected %Ld, current %Ld"
-             cancellation.source_revision
-             state.revision)
+      validate_pending_selection
+        ~selection:
+          { source = cancellation.source
+          ; admitted_revision = cancellation.source_incarnation
+          }
+        state
     in
     let* () =
       if transition_outbox_blocked state
@@ -469,7 +505,7 @@ let cancel_pending_accepted
       else Ok ()
     in
     let matching, retained =
-      Keeper_event_queue.to_list state.pending
+      Keeper_event_queue.to_list (pending state)
       |> List.partition (fun source ->
         Keeper_event_queue.stimulus_identity_equal cancellation.source source)
     in
@@ -529,14 +565,12 @@ let transfer_pending_accepted
              current_owner_nonce)
     in
     let* () =
-      if Int64.equal state.revision transfer.source_revision
-      then Ok ()
-      else
-        Error
-          (Printf.sprintf
-             "accepted transfer source revision changed: expected %Ld, current %Ld"
-             transfer.source_revision
-             state.revision)
+      validate_pending_selection
+        ~selection:
+          { source = transfer.source
+          ; admitted_revision = transfer.source_incarnation
+          }
+        state
     in
     let* () =
       if transition_outbox_blocked state
@@ -544,7 +578,7 @@ let transfer_pending_accepted
       else Ok ()
     in
     let matching, retained =
-      Keeper_event_queue.to_list state.pending
+      Keeper_event_queue.to_list (pending state)
       |> List.partition (fun source ->
         Keeper_event_queue.stimulus_identity_equal transfer.source source)
     in
@@ -585,6 +619,24 @@ let accepted_pending_source_terminal_ack_replay source_terminal state =
          source_terminal.operator_operation_id)
 ;;
 
+let turn_attempt_terminal_operation_id
+      ~owner_nonce
+      ~admitted_revision
+      source
+  =
+  let source_fingerprint =
+    Keeper_event_queue.stimulus_to_yojson source
+    |> Yojson.Safe.to_string
+    |> Digestif.SHA256.digest_string
+    |> Digestif.SHA256.to_hex
+  in
+  Printf.sprintf
+    "turn-attempt-terminal:%d:%Ld:%s"
+    owner_nonce
+    admitted_revision
+    source_fingerprint
+;;
+
 let ack_pending_source_terminal
       ~current_owner_nonce
       ~applied_at
@@ -608,14 +660,12 @@ let ack_pending_source_terminal
              current_owner_nonce)
     in
     let* () =
-      if Int64.equal state.revision source_terminal.source_revision
-      then Ok ()
-      else
-        Error
-          (Printf.sprintf
-             "source-terminal ACK source revision changed: expected %Ld, current %Ld"
-             source_terminal.source_revision
-             state.revision)
+      validate_pending_selection
+        ~selection:
+          { source = source_terminal.source
+          ; admitted_revision = source_terminal.source_incarnation
+          }
+        state
     in
     let* () =
       if transition_outbox_blocked state
@@ -623,7 +673,7 @@ let ack_pending_source_terminal
       else Ok ()
     in
     let matching, retained =
-      Keeper_event_queue.to_list state.pending
+      Keeper_event_queue.to_list (pending state)
       |> List.partition (fun source ->
         Keeper_event_queue.stimulus_identity_equal source_terminal.source source)
     in
@@ -645,7 +695,57 @@ let ack_pending_source_terminal
          ~transition:ack
          ~source
          ~pending
-         state)
+       state)
+;;
+
+let terminalize_pending_turn_attempt
+      ~current_owner_nonce
+      ~applied_at
+      ~selection
+      ~detail
+      state
+  =
+  let { source; admitted_revision } = selection in
+  let operator_operation_id =
+    turn_attempt_terminal_operation_id
+      ~owner_nonce:current_owner_nonce
+      ~admitted_revision
+      source
+  in
+  match prior_disposition_by_operation_id operator_operation_id state with
+  | Some
+      ({ transition =
+           Ack_source_terminal
+             { source = prior_source
+             ; owner_nonce
+             ; source_receipt = Turn_attempt_terminal _
+             ; _
+             }
+       ; _
+       } as receipt)
+    when Int.equal owner_nonce current_owner_nonce
+         && prior_source = source ->
+    Ok (state, Transition_already_applied receipt)
+  | Some _ ->
+    Error
+      (Printf.sprintf
+         "turn-attempt terminal operation conflict: %s"
+         operator_operation_id)
+  | None ->
+    let* () = validate_pending_selection ~selection state in
+    let source_terminal =
+      { source
+      ; source_incarnation = admitted_revision
+      ; owner_nonce = current_owner_nonce
+      ; operator_operation_id
+      ; source_receipt = Turn_attempt_terminal { detail }
+      }
+    in
+    ack_pending_source_terminal
+      ~current_owner_nonce
+      ~applied_at
+      ~source_terminal
+      state
 ;;
 
 let restore_pending_transition entry state apply =
@@ -723,9 +823,9 @@ let replay_transition_outbox_entry entry state =
 
 let remove_by_post_id post_id state =
   let removed, pending =
-    Keeper_event_queue.remove_by_post_id post_id state.pending
+    Keeper_event_queue.remove_by_post_id post_id (pending state)
   in
-  Keeper_event_queue.uniq_stimuli removed, { state with pending }
+  Keeper_event_queue.uniq_stimuli removed, with_pending pending state
 ;;
 
 let assoc_fields ~context = function
@@ -806,7 +906,7 @@ let transition_to_yojson = function
     `Assoc
       [ "kind", `String "cancel_accepted"
       ; "source", Keeper_event_queue.stimulus_to_yojson cancellation.source
-      ; "source_revision", int64_json cancellation.source_revision
+      ; "source_incarnation", int64_json cancellation.source_incarnation
       ; "owner_nonce", `Int cancellation.owner_nonce
       ; "operator_operation_id", `String cancellation.operator_operation_id
       ; "reason", `String cancellation.reason
@@ -815,27 +915,35 @@ let transition_to_yojson = function
     `Assoc
       [ "kind", `String "transfer_accepted"
       ; "source", Keeper_event_queue.stimulus_to_yojson transfer.source
-      ; "source_revision", int64_json transfer.source_revision
+      ; "source_incarnation", int64_json transfer.source_incarnation
       ; "owner_nonce", `Int transfer.owner_nonce
       ; "operator_operation_id", `String transfer.operator_operation_id
       ; "from_keeper", `String transfer.from_keeper
       ; "to_keeper", `String transfer.to_keeper
       ]
   | Ack_source_terminal source_terminal ->
-    let receipt_kind =
-      match source_terminal.source_receipt with
-      | Fusion_terminal _ -> "fusion_terminal"
-      | Background_job_terminal _ -> "background_job_terminal"
-      | Hitl_terminal _ -> "hitl_terminal"
-    in
-    `Assoc
+    let fields =
       [ "kind", `String "ack_source_terminal"
       ; "source", Keeper_event_queue.stimulus_to_yojson source_terminal.source
-      ; "source_revision", int64_json source_terminal.source_revision
+      ; "source_incarnation", int64_json source_terminal.source_incarnation
       ; "owner_nonce", `Int source_terminal.owner_nonce
       ; "operator_operation_id", `String source_terminal.operator_operation_id
-       ; "source_receipt_kind", `String receipt_kind
-       ]
+      ]
+    in
+    let receipt_fields =
+      match source_terminal.source_receipt with
+      | Fusion_terminal _ ->
+        [ "source_receipt_kind", `String "fusion_terminal" ]
+      | Background_job_terminal _ ->
+        [ "source_receipt_kind", `String "background_job_terminal" ]
+      | Hitl_terminal _ ->
+        [ "source_receipt_kind", `String "hitl_terminal" ]
+      | Turn_attempt_terminal { detail } ->
+        [ "source_receipt_kind", `String "turn_attempt_terminal"
+        ; "detail", `String detail
+        ]
+    in
+    `Assoc (fields @ receipt_fields)
 ;;
 
 let transition_of_yojson json =
@@ -850,7 +958,7 @@ let transition_of_yojson json =
         ~expected:
           [ "kind"
           ; "source"
-          ; "source_revision"
+          ; "source_incarnation"
           ; "owner_nonce"
           ; "operator_operation_id"
           ; "reason"
@@ -859,14 +967,14 @@ let transition_of_yojson json =
     in
     let* source_json = required_field ~context "source" fields in
     let* source = Keeper_event_queue.stimulus_of_yojson source_json in
-    let* source_revision = int64_field ~context "source_revision" fields in
+    let* source_incarnation = int64_field ~context "source_incarnation" fields in
     let* owner_nonce = int_field ~context "owner_nonce" fields in
     let* operator_operation_id =
       string_field ~context "operator_operation_id" fields
     in
     let* reason = string_field ~context "reason" fields in
     let cancellation =
-      { source; source_revision; owner_nonce; operator_operation_id; reason }
+      { source; source_incarnation; owner_nonce; operator_operation_id; reason }
     in
     let* () = validate_accepted_cancellation cancellation in
     Ok (Cancel_accepted cancellation)
@@ -877,7 +985,7 @@ let transition_of_yojson json =
         ~expected:
           [ "kind"
           ; "source"
-          ; "source_revision"
+          ; "source_incarnation"
           ; "owner_nonce"
           ; "operator_operation_id"
           ; "from_keeper"
@@ -887,7 +995,7 @@ let transition_of_yojson json =
     in
     let* source_json = required_field ~context "source" fields in
     let* source = Keeper_event_queue.stimulus_of_yojson source_json in
-    let* source_revision = int64_field ~context "source_revision" fields in
+    let* source_incarnation = int64_field ~context "source_incarnation" fields in
     let* owner_nonce = int_field ~context "owner_nonce" fields in
     let* operator_operation_id =
       string_field ~context "operator_operation_id" fields
@@ -896,7 +1004,7 @@ let transition_of_yojson json =
     let* to_keeper = string_field ~context "to_keeper" fields in
     let transfer =
       { source
-      ; source_revision
+      ; source_incarnation
       ; owner_nonce
       ; operator_operation_id
       ; from_keeper
@@ -906,22 +1014,9 @@ let transition_of_yojson json =
     let* () = validate_accepted_transfer transfer in
     Ok (Transfer_accepted transfer)
   | "ack_source_terminal" ->
-    let* () =
-      exact_fields
-        ~context
-        ~expected:
-          [ "kind"
-          ; "source"
-          ; "source_revision"
-          ; "owner_nonce"
-          ; "operator_operation_id"
-          ; "source_receipt_kind"
-          ]
-        fields
-    in
     let* source_json = required_field ~context "source" fields in
     let* source = Keeper_event_queue.stimulus_of_yojson source_json in
-    let* source_revision = int64_field ~context "source_revision" fields in
+    let* source_incarnation = int64_field ~context "source_incarnation" fields in
     let* owner_nonce = int_field ~context "owner_nonce" fields in
     let* operator_operation_id =
       string_field ~context "operator_operation_id" fields
@@ -929,21 +1024,48 @@ let transition_of_yojson json =
     let* source_receipt_kind =
       string_field ~context "source_receipt_kind" fields
     in
-    let* source_receipt = source_terminal_receipt_of_stimulus source in
-    let expected_kind =
-      match source_receipt with
-      | Fusion_terminal _ -> "fusion_terminal"
-      | Background_job_terminal _ -> "background_job_terminal"
-      | Hitl_terminal _ -> "hitl_terminal"
+    let common_fields =
+      [ "kind"
+      ; "source"
+      ; "source_incarnation"
+      ; "owner_nonce"
+      ; "operator_operation_id"
+      ; "source_receipt_kind"
+      ]
     in
-    let* () =
-      if String.equal source_receipt_kind expected_kind
-      then Ok ()
-      else Error "source-terminal receipt kind does not match source payload"
+    let* source_receipt =
+      match source_receipt_kind with
+      | "turn_attempt_terminal" ->
+        let* () =
+          exact_fields
+            ~context
+            ~expected:("detail" :: common_fields)
+            fields
+        in
+        let* detail = string_field ~context "detail" fields in
+        Ok (Turn_attempt_terminal { detail })
+      | ( "fusion_terminal"
+        | "background_job_terminal"
+        | "hitl_terminal" ) as expected_kind ->
+        let* () = exact_fields ~context ~expected:common_fields fields in
+        let* source_receipt = source_terminal_receipt_of_stimulus source in
+        let* actual_kind =
+          match source_receipt with
+          | Fusion_terminal _ -> Ok "fusion_terminal"
+          | Background_job_terminal _ -> Ok "background_job_terminal"
+          | Hitl_terminal _ -> Ok "hitl_terminal"
+          | Turn_attempt_terminal _ ->
+            Error "source payload produced a non-intrinsic terminal receipt"
+        in
+        if String.equal expected_kind actual_kind
+        then Ok source_receipt
+        else Error "source-terminal receipt kind does not match source payload"
+      | other ->
+        Error (Printf.sprintf "unknown source-terminal receipt kind: %s" other)
     in
     let source_terminal =
       { source
-      ; source_revision
+      ; source_incarnation
       ; owner_nonce
       ; operator_operation_id
       ; source_receipt
@@ -1035,11 +1157,38 @@ let outbox_entry_of_yojson json =
   Ok { receipt; stimuli }
 ;;
 
+let pending_entry_to_yojson entry =
+  `Assoc
+    [ "source", Keeper_event_queue.stimulus_to_yojson entry.source
+    ; "admitted_revision", int64_json entry.admitted_revision
+    ]
+;;
+
+let pending_entry_of_yojson json =
+  let context = "event queue pending entry" in
+  let* fields = assoc_fields ~context json in
+  let* () =
+    exact_fields
+      ~context
+      ~expected:[ "source"; "admitted_revision" ]
+      fields
+  in
+  let* source_json = required_field ~context "source" fields in
+  let* source = Keeper_event_queue.stimulus_of_yojson source_json in
+  let* admitted_revision =
+    int64_field ~context "admitted_revision" fields
+  in
+  if Int64.compare admitted_revision 0L < 0
+  then Error "event queue pending admission revision must not be negative"
+  else Ok { source; admitted_revision }
+;;
+
 let to_yojson state =
   `Assoc
     [ "schema", `String schema
     ; "revision", int64_json state.revision
-    ; "pending", Keeper_event_queue.queue_to_yojson state.pending
+    ; ( "pending"
+      , `List (List.map pending_entry_to_yojson state.pending_entries) )
     ; ( "last_transition"
       , match state.last_transition with
         | None -> `Null
@@ -1071,28 +1220,35 @@ let duplicate_by key values =
   loop [] values
 ;;
 
-let duplicate_transfer_source (transfers : accepted_transfer list) =
-  let rec loop seen (l : accepted_transfer list) =
-    match l with
-    | [] -> None
-    | transfer :: rest ->
-      (match
-         List.find_opt
-           (fun (prior : accepted_transfer) ->
-              Keeper_event_queue.stimulus_identity_equal
-                prior.source
-                transfer.source)
-           seen
-       with
-       | Some prior -> Some (prior, transfer)
-       | None -> loop (transfer :: seen) rest)
+let pending_identity_is_duplicated (entries : pending_selection list) =
+  let rec loop seen = function
+    | [] -> false
+    | entry :: rest ->
+      if
+        List.exists
+          (fun prior ->
+             Keeper_event_queue.stimulus_identity_equal
+               prior.source
+               entry.source)
+          seen
+      then true
+      else loop (entry :: seen) rest
   in
-  loop [] transfers
+  loop [] entries
 ;;
 
 let validate_state state =
   if Int64.compare state.revision 0L < 0
   then Error "event queue revision must not be negative"
+  else if
+    List.exists
+      (fun entry ->
+         Int64.compare entry.admitted_revision 0L < 0
+         || Int64.compare entry.admitted_revision state.revision > 0)
+      state.pending_entries
+  then Error "event queue pending admission revision is outside the durable state"
+  else if pending_identity_is_duplicated state.pending_entries
+  then Error "event queue pending source identity is duplicated"
   else if List.length state.transition_outbox > 1
   then Error "event queue state must contain at most one unprojected transition"
   else if
@@ -1160,9 +1316,7 @@ let validate_state state =
              operation_id)
       | None -> Ok ()
     in
-    (match duplicate_transfer_source state.accepted_transfer_projections with
-     | Some _ -> Error "duplicate target transfer projection source identity"
-     | None -> Ok state)
+    Ok state
 ;;
 
 let of_yojson json =
@@ -1191,8 +1345,9 @@ let of_yojson json =
       fields
   in
   let* revision = int64_field ~context "revision" fields in
-  let* pending_json = required_field ~context "pending" fields in
-  let* pending = Keeper_event_queue.queue_of_yojson pending_json in
+  let* pending_entries =
+    list_field ~context "pending" pending_entry_of_yojson fields
+  in
   let* transition_outbox =
     list_field ~context "transition_outbox" outbox_entry_of_yojson fields
   in
@@ -1218,7 +1373,7 @@ let of_yojson json =
   in
   validate_state
     { revision
-    ; pending
+    ; pending_entries
     ; last_transition
     ; projected_dispositions
     ; transition_outbox

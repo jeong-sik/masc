@@ -48,7 +48,7 @@ let receipt_path config ~keeper_name ~operator_operation_id =
     (Filename.concat
        (Filename.concat
           (Workspace.masc_root_dir config)
-          "paused-work-dispositions-v5")
+          "paused-work-dispositions-v6")
        ("keeper-" ^ sha256 keeper_name))
     ("operation-" ^ sha256 operator_operation_id ^ ".json")
 ;;
@@ -134,14 +134,17 @@ let with_transfer_lane f =
        Persistence.update_result ~base_path ~keeper_name:from_keeper (fun pending ->
          Queue.enqueue pending source)
        |> require_ok "seed transfer source";
-       let source_revision =
+       let source_incarnation =
          Persistence.load_state_result ~base_path ~keeper_name:from_keeper
-         |> require_ok "load transfer source revision"
-         |> State.revision
+         |> require_ok "load transfer source incarnation"
+         |> State.select_when
+              ~ready:(Queue.stimulus_identity_equal source)
+         |> require_some "select transfer source"
+         |> fun selection -> selection.admitted_revision
        in
        let request : Transaction.request =
          { source
-         ; source_revision
+         ; source_incarnation
          ; owner_nonce = source_meta.runtime.nonce
          ; target_generation = target_meta.runtime.nonce
          ; continuation_binding = Receipt.Routed channel
@@ -168,7 +171,7 @@ let assert_converged config ~from_keeper ~to_keeper source =
     Persistence.load_state_result
       ~base_path:config.Workspace.base_path
       ~keeper_name:from_keeper
-    |> require_ok "load settled source lane"
+    |> require_ok "load transferred source lane"
   in
   Alcotest.(check int)
     "source pending removed"
@@ -230,7 +233,7 @@ let test_retired_v2_receipt_file_is_rejected () =
     ; target_trace_id = target_meta.runtime.trace_id
     ; target_generation = request.target_generation
     ; source = request.source
-    ; source_revision = request.source_revision
+    ; source_incarnation = request.source_incarnation
     ; continuation_binding = request.continuation_binding
     }
   in
@@ -365,7 +368,7 @@ let test_replay_after_target_consumption_has_no_second_effect () =
        has consumed the source, replaying the transfer must not enqueue it
        again. *)
     let selection =
-      Persistence.peek_when_result
+      Persistence.select_when_result
         ~base_path
         ~keeper_name:to_keeper
         ~ready:(fun _ -> true)
@@ -404,6 +407,88 @@ let test_replay_after_target_consumption_has_no_second_effect () =
       (List.length (State.accepted_transfer_projections target)))
 ;;
 
+let test_later_identical_source_transfers_as_new_incarnation () =
+  with_transfer_lane
+  @@ fun config from_keeper to_keeper _source_meta _target_meta request ->
+  let base_path = config.Workspace.base_path in
+  let first =
+    Transaction.transfer_pending config ~from_keeper ~to_keeper request
+    |> Result.map_error Transaction.error_to_string
+    |> require_ok "commit first identical-source transfer"
+  in
+  check_applied ~expected_target:Transaction.Enqueued first.projection;
+  Persistence.project_transition_outbox_result
+    ~append_before_retire:(fun _entry -> Ok ())
+    ~base_path
+    ~keeper_name:from_keeper
+  |> require_ok "project first source transfer";
+  let target_selection =
+    Persistence.select_when_result
+      ~base_path
+      ~keeper_name:to_keeper
+      ~ready:(Queue.stimulus_identity_equal request.source)
+    |> require_ok "select first target incarnation"
+    |> require_some "first target incarnation"
+  in
+  Persistence.ack_pending_result
+    ~base_path
+    ~keeper_name:to_keeper
+    ~selection:target_selection
+    ()
+  |> require_ok "consume first target incarnation";
+  Persistence.update_result ~base_path ~keeper_name:from_keeper (fun pending ->
+    Queue.enqueue pending request.source)
+  |> require_ok "reinsert identical source";
+  let source_selection =
+    Persistence.select_when_result
+      ~base_path
+      ~keeper_name:from_keeper
+      ~ready:(Queue.stimulus_identity_equal request.source)
+    |> require_ok "select later source incarnation"
+    |> require_some "later source incarnation"
+  in
+  let later_request =
+    { request with
+      source_incarnation = source_selection.admitted_revision
+    ; operator_operation_id = "operator-transfer-later-incarnation"
+    }
+  in
+  let later =
+    Transaction.transfer_pending
+      config
+      ~from_keeper
+      ~to_keeper
+      later_request
+    |> Result.map_error Transaction.error_to_string
+    |> require_ok "commit later identical-source transfer"
+  in
+  (match later.commit_status with
+   | Transaction.Committed -> ()
+   | Transaction.Already_committed ->
+     Alcotest.fail "later source incarnation replayed the first transfer");
+  check_applied ~expected_target:Transaction.Enqueued later.projection;
+  let source =
+    Persistence.load_state_result ~base_path ~keeper_name:from_keeper
+    |> require_ok "load source after later transfer"
+  in
+  let target =
+    Persistence.load_state_result ~base_path ~keeper_name:to_keeper
+    |> require_ok "load target after later transfer"
+  in
+  Alcotest.(check int)
+    "later transfer removes its source incarnation"
+    0
+    (Queue.length (State.pending source));
+  Alcotest.(check int)
+    "later transfer enqueues the new target incarnation"
+    1
+    (Queue.length (State.pending target));
+  Alcotest.(check int)
+    "both transfer operations remain replayable"
+    2
+    (List.length (State.accepted_transfer_projections target))
+;;
+
 let test_replay_after_source_ack_projects_target () =
   with_transfer_lane (fun config from_keeper to_keeper source_meta target_meta request ->
     let transfer : Receipt.transfer_owner =
@@ -412,7 +497,7 @@ let test_replay_after_source_ack_projects_target () =
       ; target_trace_id = target_meta.runtime.trace_id
       ; target_generation = request.target_generation
       ; source = request.source
-      ; source_revision = request.source_revision
+      ; source_incarnation = request.source_incarnation
       ; continuation_binding = request.continuation_binding
       }
     in
@@ -434,7 +519,7 @@ let test_replay_after_source_ack_projects_target () =
      | Ok (Error detail) | Error detail -> Alcotest.fail detail);
     let causal : Keeper_registry_event_queue.accepted_transfer =
       { source = request.source
-      ; source_revision = request.source_revision
+      ; source_incarnation = request.source_incarnation
       ; owner_nonce = request.owner_nonce
       ; operator_operation_id = request.operator_operation_id
       ; from_keeper
@@ -462,7 +547,7 @@ let test_replay_after_source_ack_projects_target () =
     assert_converged config ~from_keeper ~to_keeper request.source)
 ;;
 
-let test_stale_source_revision_has_no_receipt_or_target_effect () =
+let test_unrelated_enqueue_preserves_source_incarnation () =
   with_transfer_lane (fun config from_keeper to_keeper _source_meta _target_meta request ->
     let unrelated : Queue.stimulus =
       { post_id = "unrelated"
@@ -475,11 +560,52 @@ let test_stale_source_revision_has_no_receipt_or_target_effect () =
       ~base_path:config.Workspace.base_path
       ~keeper_name:from_keeper
       (fun pending -> Queue.enqueue pending unrelated)
-    |> require_ok "advance source revision";
+    |> require_ok "enqueue unrelated source";
+    let result =
+      Transaction.transfer_pending config ~from_keeper ~to_keeper request
+      |> Result.map_error Transaction.error_to_string
+      |> require_ok "transfer after unrelated enqueue"
+    in
+    check_applied ~expected_target:Transaction.Enqueued result.projection;
+    let source =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name:from_keeper
+      |> require_ok "load source after unrelated enqueue transfer"
+    in
+    Alcotest.(check int)
+      "unrelated source remains pending"
+      1
+      (Queue.length (State.pending source));
+    Alcotest.(check bool)
+      "unrelated source is preserved"
+      true
+      (State.pending source
+       |> Queue.to_list
+       |> List.exists (Queue.stimulus_identity_equal unrelated)))
+;;
+
+let test_stale_source_incarnation_has_no_receipt_or_target_effect () =
+  with_transfer_lane (fun config from_keeper to_keeper _source_meta _target_meta request ->
+    let base_path = config.Workspace.base_path in
+    let old_selection : State.pending_selection =
+      { source = request.source
+      ; admitted_revision = request.source_incarnation
+      }
+    in
+    Persistence.ack_pending_result
+      ~base_path
+      ~keeper_name:from_keeper
+      ~selection:old_selection
+      ()
+    |> require_ok "remove old source incarnation";
+    Persistence.update_result ~base_path ~keeper_name:from_keeper (fun pending ->
+      Queue.enqueue pending request.source)
+    |> require_ok "reinsert exact source as a new incarnation";
     (match Transaction.transfer_pending config ~from_keeper ~to_keeper request with
      | Error { cause = Transaction.Source_queue_validation_failed _; _ } -> ()
      | Error error -> Alcotest.fail (Transaction.error_to_string error)
-     | Ok _ -> Alcotest.fail "stale source revision committed transfer");
+     | Ok _ -> Alcotest.fail "stale source incarnation committed transfer");
     (match
        Receipt.load
          config
@@ -491,7 +617,7 @@ let test_stale_source_revision_has_no_receipt_or_target_effect () =
      | Error detail -> Alcotest.fail detail);
     let target =
       Persistence.load_state_result
-        ~base_path:config.Workspace.base_path
+        ~base_path
         ~keeper_name:to_keeper
       |> require_ok "load untouched transfer target"
     in
@@ -519,9 +645,21 @@ let () =
             `Quick
             test_transfer_busy_has_zero_mutation
         ; Alcotest.test_case
-            "stale source revision has no effect"
+            "unrelated enqueue preserves source incarnation"
             `Quick
-            test_stale_source_revision_has_no_receipt_or_target_effect
+            test_unrelated_enqueue_preserves_source_incarnation
+        ; Alcotest.test_case
+            "stale source incarnation has no effect"
+            `Quick
+            test_stale_source_incarnation_has_no_receipt_or_target_effect
+        ; Alcotest.test_case
+            "same transfer replay after target consumption has no effect"
+            `Quick
+            test_replay_after_target_consumption_has_no_second_effect
+        ; Alcotest.test_case
+            "later identical source transfers as a new incarnation"
+            `Quick
+            test_later_identical_source_transfers_as_new_incarnation
         ; Alcotest.test_case
             "replay after source ACK projects target"
             `Quick

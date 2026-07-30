@@ -15,7 +15,7 @@ let publish_pending ~base_path name pending =
 
 type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
@@ -23,7 +23,7 @@ type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellatio
 
 type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
@@ -34,10 +34,11 @@ type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_re
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Background_job_terminal of Keeper_event_queue.bg_job_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
+  | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
@@ -346,6 +347,16 @@ let peek_when_result ~base_path name ~ready =
       ~ready
 ;;
 
+let select_when_result ~base_path name ~ready =
+  match Keeper_registry.get ~base_path name with
+  | None -> Error (Printf.sprintf "keeper not registered: %s" name)
+  | Some _ ->
+    Keeper_event_queue_persistence.select_when_result
+      ~base_path
+      ~keeper_name:name
+      ~ready
+;;
+
 let validate_pending_selection_result ~base_path name ~selection =
   Keeper_event_queue_persistence.validate_pending_selection_result
     ~base_path
@@ -409,6 +420,30 @@ let ack_pending_source_terminal_result
     ~current_owner_nonce
     ~acked_at
     ~source_terminal
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+  |> Result.map (function
+    | Transition_applied receipt -> Acked receipt
+    | Transition_already_applied receipt -> Already_acked receipt
+    | Transition_committed_followup_failed { receipt; stage; detail } ->
+      Ack_committed_followup_failed { receipt; stage; detail })
+;;
+
+let terminalize_pending_turn_attempt_result
+      ~base_path
+      name
+      ~current_owner_nonce
+      ~applied_at
+      ~selection
+      ~detail
+  =
+  Keeper_event_queue_persistence.terminalize_pending_turn_attempt_result
+    ~base_path
+    ~keeper_name:name
+    ~current_owner_nonce
+    ~applied_at
+    ~selection
+    ~detail
     ~after_commit:(publish_pending ~base_path name)
     ()
   |> Result.map (function

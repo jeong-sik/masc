@@ -26,7 +26,7 @@ type exact_write_outcome =
 
 type accepted_cancellation = State.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
@@ -34,7 +34,7 @@ type accepted_cancellation = State.accepted_cancellation =
 
 type accepted_transfer = State.accepted_transfer =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
@@ -45,10 +45,11 @@ type source_terminal_receipt = State.source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Background_job_terminal of Keeper_event_queue.bg_job_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
+  | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = State.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
@@ -76,8 +77,8 @@ type transfer_projection_result = State.transfer_projection_result =
   | Transfer_already_projected
 
 
-let snapshot_filename = "event-queue-v13.json"
-let transition_wal_filename = "event-queue-transitions-v3.jsonl"
+let snapshot_filename = "event-queue-v14.json"
+let transition_wal_filename = "event-queue-transitions-v4.jsonl"
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
 
@@ -299,7 +300,7 @@ let bump_revision state =
   else Ok (State.with_revision (Int64.succ (State.revision state)) state)
 ;;
 
-let transition_wal_schema = "masc.keeper_event_queue.transition.v3"
+let transition_wal_schema = "masc.keeper_event_queue.transition.v4"
 
 let transition_wal_entry_to_line owner entry =
   `Assoc
@@ -612,7 +613,7 @@ let commit_transform_unlocked
                 bump that absorbed it. Leaving it behind is what latches the
                 owner: the next load replays an already-absorbed row against
                 the advanced revision, [commit_transition] rejects it on
-                [source_revision], and no runtime path can clear it because the
+                [source_incarnation], and no runtime path can clear it because the
                 projector itself starts with [load_state_unlocked] (#26074). *)
              (match compact_transition_wals_unlocked owner with
               | Error _ as error -> error
@@ -817,6 +818,12 @@ let peek_when_result ~base_path ~keeper_name ~ready =
   match load_state_result ~base_path ~keeper_name with
   | Error _ as error -> error
   | Ok state -> Ok (State.peek_when ~ready state)
+;;
+
+let select_when_result ~base_path ~keeper_name ~ready =
+  match load_state_result ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok state -> Ok (State.select_when ~ready state)
 ;;
 
 let validate_pending_selection_result ~base_path ~keeper_name ~selection =
@@ -1041,6 +1048,44 @@ let ack_pending_source_terminal_result
        Error
          (Printf.sprintf
             "event queue pending source-terminal ACK raised keeper=%s: %s"
+            (keeper_name_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+let terminalize_pending_turn_attempt_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~current_owner_nonce
+      ~applied_at
+      ~selection
+      ~detail
+      ()
+  =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match load_state_unlocked owner with
+         | Error _ as error -> error
+         | Ok state ->
+           commit_transition_unlocked
+             owner
+             ~after_commit
+             (State.terminalize_pending_turn_attempt
+                ~current_owner_nonce
+                ~applied_at
+                ~selection
+                ~detail)
+             state
+           |> Result.map fst)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue pending turn-attempt terminalization raised keeper=%s: %s"
             (keeper_name_of_owner owner)
             (Printexc.to_string exn)))
 ;;

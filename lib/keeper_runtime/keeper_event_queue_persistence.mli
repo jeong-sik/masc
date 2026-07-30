@@ -1,11 +1,11 @@
 (** Durable per-Keeper Event Layer state.
 
-    Current writes use the [keeper.event_queue.state.v13]
-    [event-queue-v13.json] envelope: revision, pending stimuli, the latest
+    Current writes use the [keeper.event_queue.state.v14]
+    [event-queue-v14.json] envelope: revision, pending stimuli, the latest
     projected transition, an operation-indexed ledger of older projected
     dispositions, at most one unprojected transition, and durable
     accepted-transfer target projections. Only this schema and the
-    [event-queue-transitions-v3.jsonl] WAL are queue authority. *)
+    [event-queue-transitions-v4.jsonl] WAL are queue authority. *)
 
 type owner_identity
 type owner_identity_error
@@ -35,7 +35,7 @@ type exact_write_outcome =
 
 type accepted_cancellation = Keeper_event_queue_state.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
@@ -43,7 +43,7 @@ type accepted_cancellation = Keeper_event_queue_state.accepted_cancellation =
 
 type accepted_transfer = Keeper_event_queue_state.accepted_transfer =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
@@ -54,10 +54,11 @@ type source_terminal_receipt = Keeper_event_queue_state.source_terminal_receipt 
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Background_job_terminal of Keeper_event_queue.bg_job_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
+  | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = Keeper_event_queue_state.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
@@ -99,17 +100,23 @@ val peek_when_result :
   ready:(Keeper_event_queue.stimulus -> bool) ->
   (Keeper_event_queue.stimulus option, string) result
 
+val select_when_result :
+  base_path:string ->
+  keeper_name:string ->
+  ready:(Keeper_event_queue.stimulus -> bool) ->
+  (Keeper_event_queue_state.pending_selection option, string) result
+
 val validate_pending_selection_result :
   base_path:string ->
   keeper_name:string ->
-  selection:Keeper_event_queue.stimulus ->
+  selection:Keeper_event_queue_state.pending_selection ->
   (unit, string) result
 
 val ack_pending_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  selection:Keeper_event_queue.stimulus ->
+  selection:Keeper_event_queue_state.pending_selection ->
   unit ->
   (unit, string) result
 
@@ -184,6 +191,20 @@ val ack_pending_source_terminal_result :
   (transition_result, string) result
 (** Append and fsync the canonical source-bearing ACK transition before
     checkpointing removal of the exact pending source. *)
+
+val terminalize_pending_turn_attempt_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  current_owner_nonce:int ->
+  applied_at:float ->
+  selection:Keeper_event_queue_state.pending_selection ->
+  detail:string ->
+  unit ->
+  (transition_result, string) result
+(** Atomically construct and commit a source-bearing terminal receipt for one
+    failed admitted turn. The selection carries the exact source incarnation;
+    no caller-provided prose or counter controls admission. *)
 
 val project_transition_outbox_result :
   append_before_retire:(outbox_entry -> (unit, string) result) ->

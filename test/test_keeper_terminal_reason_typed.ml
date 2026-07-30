@@ -335,7 +335,7 @@ let () =
       meta_fixture_exn
         (`Assoc
           [ "name", `String "corrupted-transcript"
-          ; "agent_name", `String "agent-corrupted-transcript"
+          ; "agent_name", `String (Keeper_identity.keeper_agent_name "corrupted-transcript")
           ; "trace_id", `String "trace-corrupted-transcript"
           ])
     in
@@ -344,6 +344,8 @@ let () =
        KMS.persist_transcript_corruption_pause
          config
          ~keeper_name:meta.name
+         ~trace_id:meta.runtime.trace_id
+         ~generation:meta.runtime.nonce
      with
      | Ok `Persisted -> ()
      | Ok `No_durable_meta ->
@@ -366,6 +368,63 @@ let () =
       "generic resume cannot clear transcript reset-required latch"
       (generic_resume.paused
        && generic_resume.latched_reason = paused.latched_reason))
+;;
+
+let () =
+  with_temp_dir "transcript-corruption-pause-identity" (fun base_path ->
+    let config = Masc.Workspace.default_config base_path in
+    ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+    let original =
+      meta_fixture_exn
+        (`Assoc
+          [ "name", `String "replaced-transcript-owner"
+          ; ( "agent_name"
+            , `String
+                (Keeper_identity.keeper_agent_name
+                   "replaced-transcript-owner") )
+          ; "trace_id", `String "trace-replaced-transcript-owner-old"
+          ])
+    in
+    write_meta_exn config original;
+    let current = read_meta_exn config original.name in
+    let replacement_trace =
+      match
+        Keeper_id.Trace_id.of_string
+          "trace-replaced-transcript-owner-new"
+      with
+      | Ok trace_id -> trace_id
+      | Error detail -> failwith detail
+    in
+    let replacement =
+      { current with
+        runtime =
+          { current.runtime with
+            trace_id = replacement_trace
+          ; nonce = current.runtime.nonce + 1
+          }
+      }
+    in
+    write_meta_exn config replacement;
+    (match
+       KMS.persist_transcript_corruption_pause
+         config
+         ~keeper_name:original.name
+         ~trace_id:original.runtime.trace_id
+         ~generation:original.runtime.nonce
+     with
+     | Error _ -> ()
+     | Ok _ ->
+       check
+         "replaced Keeper identity rejects old transcript pause"
+         false);
+    let retained = read_meta_exn config original.name in
+    check
+      "old transcript lane cannot pause replacement"
+      (not retained.paused
+       && Keeper_id.Trace_id.equal
+            retained.runtime.trace_id
+            replacement_trace
+       && retained.runtime.nonce = replacement.runtime.nonce))
 ;;
 
 let () =

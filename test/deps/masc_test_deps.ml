@@ -97,7 +97,6 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         | Schema.Compaction_count
         | Schema.Last_compaction_before_tokens
         | Schema.Last_compaction_after_tokens
-        | Schema.Compaction_consecutive_failures
         | Schema.Proactive_count_total
         | Schema.Proactive_visible_count_total
         | Schema.Consecutive_noop_count

@@ -11,8 +11,9 @@
     capability: no per-clip ACL table, no agent identity in the URL (the
     legacy [<ts>_<agent>.mp3] name was enumerable).
 
-    Auth is [with_public_read] — the same gate as [artifacts/<sha256>]: the
-    unguessable token is the capability, exactly as a sha256 is for blobs.
+    Auth is [with_public_read]. The unguessable token is a capability, so this
+    route remains on the strict-auth public-read allowlist. Artifact digests
+    are content identifiers, not authorization capabilities.
 
     Response (200): raw bytes, Content-Type audio/mpeg. NOT a JSON envelope:
     the dashboard fetches this URL directly from an [<audio>]/[Audio]

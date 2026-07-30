@@ -66,6 +66,7 @@ type runtime_handler =
   | Tool_tools_list
   | Tool_tool_search
   | Tool_context_status
+  | Tool_artifact_read
   | Tool_memory_search
   | Tool_memory_write
   | Tool_library_search
@@ -183,6 +184,7 @@ let runtime_handler_to_string = function
   | Tool_tools_list -> "tool_tools_list"
   | Tool_tool_search -> "tool_tool_search"
   | Tool_context_status -> "tool_context_status"
+  | Tool_artifact_read -> "tool_artifact_read"
   | Tool_memory_search -> "tool_memory_search"
   | Tool_memory_write -> "tool_memory_write"
   | Tool_library_search -> "tool_library_search"
@@ -235,6 +237,7 @@ let keeper_tool_group_of_runtime_handler = function
   | Tool_web_search
   | Tool_web_fetch
   | Tool_masc_local_runtime_dispatch
+  | Tool_artifact_read
   | Tool_analyze_image -> Core_group
   | Tool_surface_read | Tool_surface_post | Tool_person_note_set -> Surface_group
   | Tool_memory_search
@@ -977,6 +980,41 @@ let tool_search_schema =
   Keeper_tool_registry.keeper_tool_search_schema.input_schema
 ;;
 
+let artifact_read_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ ( "sha256"
+            , `Assoc
+                [ "type", `String "string"
+                ; ( "description"
+                  , `String "Exact sha256 from a [masc:blob ...] ToolResult." )
+                ] )
+          ; ( "offset"
+            , `Assoc
+                [ "type", `String "integer"
+                ; "minimum", `Int 0
+                ; "default", `Int 0
+                ; "description", `String "Byte offset to read from."
+                ] )
+          ; ( "max_bytes"
+            , `Assoc
+                [ "type", `String "integer"
+                ; "minimum", `Int Keeper_artifact_read.minimum_max_bytes
+                ; "maximum", `Int Keeper_artifact_read.maximum_max_bytes
+                ; "default", `Int Keeper_artifact_read.default_max_bytes
+                ; ( "description"
+                  , `String
+                      "Maximum source bytes to expose in this model-visible \
+                       page." )
+                ] )
+          ] )
+    ; "required", `List [ `String "sha256" ]
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
 let library_search_schema =
   object_schema
     [ property
@@ -1567,6 +1605,18 @@ let internal_descriptors : t list =
       ~input_schema:empty_object_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_context_status
+  ; in_process_descriptor
+      ~keeper_model_projection:Internal_name
+      ~id:"keeper.artifact.read"
+      ~name:"keeper_artifact_read"
+      ~description:
+        "Read an explicit byte range from a [masc:blob ...] ToolResult. Use \
+         the marker's sha256, then continue with the returned next_offset. \
+         Text pages use UTF-8; arbitrary bytes use base64. The full artifact \
+         is never restored into model history."
+      ~input_schema:artifact_read_schema
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_artifact_read
   ; in_process_descriptor_with_schema_source
       ~keeper_model_projection:Internal_name
       ~input_schema_source:memory_search_schema_source

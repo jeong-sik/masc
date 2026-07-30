@@ -192,6 +192,80 @@ let test_put_then_fetch () =
               Alcotest.failf "fetch failed: %s" (B.fetch_error_to_string error))
       | O.Inline _ -> Alcotest.fail "put returned Inline")
 
+let test_put_then_fetch_bounded_ranges () =
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let payload =
+        String.init 8_192 (fun index -> Char.chr (index mod 251))
+      in
+      match B.put store ~bytes:payload ~mime:"application/octet-stream" with
+      | O.Inline _ -> Alcotest.fail "put returned Inline"
+      | O.Stored { sha256; _ } ->
+        let fetch_range store ~offset ~max_bytes =
+          match B.fetch_range store ~sha256 ~offset ~max_bytes with
+          | Ok (Some range) -> range
+          | Ok None -> Alcotest.fail "fetch_range returned None"
+          | Error error ->
+            Alcotest.failf
+              "fetch_range failed: %s"
+              (B.fetch_error_to_string error)
+        in
+        let first = fetch_range store ~offset:123 ~max_bytes:257 in
+        Alcotest.(check int) "range reports total bytes"
+          (String.length payload)
+          first.total_bytes;
+        Alcotest.(check string) "range returns exact bounded bytes"
+          (String.sub payload 123 257)
+          first.content;
+        let reopened_store = B.create ~base_path:dir in
+        let tail =
+          fetch_range reopened_store ~offset:8_150 ~max_bytes:256
+        in
+        Alcotest.(check string) "range stops exactly at EOF"
+          (String.sub payload 8_150 42)
+          tail.content;
+        let past_eof =
+          fetch_range reopened_store ~offset:9_000 ~max_bytes:256
+        in
+        Alcotest.(check string) "range beyond EOF is empty"
+          ""
+          past_eof.content)
+
+let test_fetch_range_revalidates_changed_snapshot () =
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let payload = String.make 8_192 'x' in
+      match B.put store ~bytes:payload ~mime:"text/plain" with
+      | O.Inline _ -> Alcotest.fail "put returned Inline"
+      | O.Stored { sha256; _ } ->
+        (match B.fetch_range store ~sha256 ~offset:0 ~max_bytes:64 with
+         | Ok (Some _) -> ()
+         | Ok None -> Alcotest.fail "initial fetch_range returned None"
+         | Error error ->
+           Alcotest.failf
+             "initial fetch_range failed: %s"
+             (B.fetch_error_to_string error));
+        let path =
+          Filename.concat
+            (Filename.concat (B.root_dir store) (String.sub sha256 0 2))
+            sha256
+        in
+        (match
+           Fs_compat.save_file_atomic path (String.make 8_192 'y')
+         with
+         | Ok () -> ()
+         | Error error ->
+           Alcotest.failf "failed to corrupt fixture: %s" error);
+        match B.fetch_range store ~sha256 ~offset:64 ~max_bytes:64 with
+        | Error (B.Integrity_mismatch _) -> ()
+        | Error error ->
+          Alcotest.failf
+            "changed snapshot returned wrong error: %s"
+            (B.fetch_error_to_string error)
+        | Ok _ ->
+          Alcotest.fail
+            "changed snapshot bypassed content-address validation")
+
 let test_fetch_miss () =
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
@@ -910,6 +984,10 @@ let () =
           Alcotest.test_case "put returns Stored" `Quick
             test_put_returns_stored;
           Alcotest.test_case "put then fetch" `Quick test_put_then_fetch;
+          Alcotest.test_case "put then fetch bounded ranges" `Quick
+            test_put_then_fetch_bounded_ranges;
+          Alcotest.test_case "changed range snapshot revalidates digest" `Quick
+            test_fetch_range_revalidates_changed_snapshot;
           Alcotest.test_case "fetch miss = None" `Quick test_fetch_miss;
           Alcotest.test_case "idempotent put" `Quick test_idempotent_put;
           Alcotest.test_case "sharding layout" `Quick test_sharding_layout;

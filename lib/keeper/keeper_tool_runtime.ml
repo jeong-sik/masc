@@ -84,6 +84,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_tools_list
   | Tool_tool_search
   | Tool_context_status
+  | Tool_artifact_read
   | Tool_memory_search
   | Tool_memory_write
   | Tool_library_search
@@ -145,6 +146,7 @@ let handle_shell_ir ctx descriptor args =
   | Tool_tools_list
   | Tool_tool_search
   | Tool_context_status
+  | Tool_artifact_read
   | Tool_memory_search
   | Tool_memory_write
   | Tool_library_search
@@ -208,6 +210,11 @@ let handle_in_process ctx descriptor args =
             ~meta:ctx.meta
             ~ctx_work:ctx.ctx_work
             ~args))
+  | Tool_artifact_read ->
+    Some
+      (Keeper_artifact_read.handle
+         ~base_path:ctx.config.base_path
+         ~args)
   | Tool_memory_search ->
     Some
       (Keeper_tool_memory_runtime.keeper_memory_search_with_outcome

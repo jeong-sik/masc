@@ -5,9 +5,8 @@
     - large payloads (> threshold) are stored and replaced with
       [Tool_output.Stored] blob marker
     - boundary cases (exactly == threshold) follow [<=] semantics
-    - externalization is skipped when [MASC_BASE_PATH] is unset or when
-      [MASC_TOOL_EXTERNALIZE=0] is set
-    - a blob-store failure preserves the original bytes
+    - externalization is skipped when no explicit [base_path] is supplied
+    - a blob-store failure returns a typed projection error
     - tool identity and free-form error JSON never change bridge behavior
 
     The actual blob store is exercised in [test_tool_blob_store]; here we
@@ -15,6 +14,11 @@
 
 module B = Masc.Tool_bridge
 module O = Tool_output
+
+let externalize_exn ?base_path value =
+  match B.maybe_externalize ?base_path value with
+  | Ok output -> output
+  | Error { message } -> Alcotest.fail message
 
 let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
@@ -33,27 +37,6 @@ let with_temp_base_path f =
   let dir = Filename.temp_file "masc_bridge_test" "" in
   Sys.remove dir;
   Unix.mkdir dir 0o755;
-  let prev_base = Sys.getenv_opt "MASC_BASE_PATH" in
-  let prev_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
-  let prev_disable = Sys.getenv_opt "MASC_TOOL_EXTERNALIZE" in
-  let prev_threshold = Sys.getenv_opt "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" in
-  Unix.putenv "MASC_BASE_PATH" dir;
-  Unix.putenv "MASC_BASE_PATH_INPUT" dir;
-  Unix.putenv "MASC_TOOL_EXTERNALIZE" "1";
-  let restore () =
-    (match prev_base with
-     | Some v -> Unix.putenv "MASC_BASE_PATH" v
-     | None -> Unix.putenv "MASC_BASE_PATH" "");
-    (match prev_base_input with
-     | Some v -> Unix.putenv "MASC_BASE_PATH_INPUT" v
-     | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
-    (match prev_disable with
-     | Some v -> Unix.putenv "MASC_TOOL_EXTERNALIZE" v
-     | None -> Unix.putenv "MASC_TOOL_EXTERNALIZE" "");
-    match prev_threshold with
-    | Some v -> Unix.putenv "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" v
-    | None -> Unix.putenv "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" ""
-  in
   let cleanup () =
     let rec rm path =
       if Sys.file_exists path then
@@ -66,42 +49,20 @@ let with_temp_base_path f =
     try rm dir with _ -> ()
   in
   let r = try Ok (f dir) with e -> Error e in
-  restore ();
   cleanup ();
   match r with Ok v -> v | Error e -> raise e
 
 let test_threshold_default_under () =
-  Unix.putenv "MASC_BASE_PATH" "";
-  Unix.putenv "MASC_BASE_PATH_INPUT" "";
-  Unix.putenv "MASC_TOOL_EXTERNALIZE" "1";
   let small = "short payload" in
-  let result = B.maybe_externalize small in
+  let result = externalize_exn small in
   Alcotest.(check string) "small unchanged" small result;
   let large = String.make 8192 'x' in
-  let result_large = B.maybe_externalize large in
+  let result_large = externalize_exn large in
   Alcotest.(check string) "large unchanged when no base path" large result_large
-
-let test_disabled_passthrough () =
-  Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
-  let large = String.make 8192 'y' in
-  let result = B.maybe_externalize large in
-  Alcotest.(check string) "disabled = passthrough" large result;
-  Unix.putenv "MASC_TOOL_EXTERNALIZE" ""
-
-let test_threshold_env_override () =
-  Unix.putenv "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" "100";
-  Unix.putenv "MASC_TOOL_EXTERNALIZE" "1";
-  Alcotest.(check int) "threshold 100" 100 (B.externalize_threshold_bytes ());
-  Unix.putenv "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" "garbage";
-  Alcotest.(check int) "garbage falls back to default"
-    B.default_externalize_threshold_bytes
-    (B.externalize_threshold_bytes ());
-  Unix.putenv "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" ""
 
 (* --- Round-trip via to_oas_typed_result on small payloads --- *)
 
 let test_to_oas_typed_small_inlined () =
-  Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
   let small = "small ok" in
   match B.to_oas_typed_result (tool_ok ~tool_name:"test" small) with
   | Ok { content; _ } ->
@@ -110,21 +71,22 @@ let test_to_oas_typed_small_inlined () =
   | Error _ -> Alcotest.fail "expected Ok"
 
 let test_tool_identity_does_not_bypass_externalization () =
-  with_temp_base_path (fun _dir ->
-    Unix.putenv "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" "100";
+  with_temp_base_path (fun dir ->
     let payload = String.make 5_000 'b' in
     let check_tool tool_name =
-      match B.to_oas_typed_result (tool_ok ~tool_name payload) with
+      match
+        B.to_oas_typed_result
+          ~base_path:dir
+          (tool_ok ~tool_name payload)
+      with
       | Ok { content; _ } ->
         Alcotest.(check bool) "externalized" true (O.is_marker content)
       | Error _ -> Alcotest.fail "expected Ok"
     in
     check_tool "opaque_tool_a";
-    check_tool "opaque_tool_b";
-    Unix.putenv "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" "")
+    check_tool "opaque_tool_b")
 
 let test_to_oas_typed_error_inlined () =
-  Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
   match B.to_oas_typed_result (tool_error ~tool_name:"test" "fail") with
   | Ok _ -> Alcotest.fail "expected Error"
   | Error { message; recoverable; _ } ->
@@ -132,7 +94,6 @@ let test_to_oas_typed_error_inlined () =
       Alcotest.(check bool) "default recoverable=false" false recoverable
 
 let test_to_oas_typed_error_ignores_json_metadata () =
-  Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
   let msg =
     {|{"ok":false,"error":"try again","recoverable":true,"error_class":"transient_mutex_contention"}|}
   in
@@ -155,7 +116,6 @@ let test_to_oas_typed_error_ignores_json_metadata () =
        | _ -> Alcotest.fail "expected typed runtime failure mapping")
 
 let test_to_oas_typed_result_preserves_workflow_rejection () =
-  Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
   let tr =
     Tool_result.error
       ~failure_class:(Some Tool_result.Workflow_rejection)
@@ -172,7 +132,6 @@ let test_to_oas_typed_result_preserves_workflow_rejection () =
      | _ -> Alcotest.fail "expected deterministic error_class")
 
 let test_to_oas_typed_result_preserves_transient_failure_class () =
-  Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
   let tr =
     Tool_result.error
       ~failure_class:(Some Tool_result.Transient_error)
@@ -189,8 +148,7 @@ let test_to_oas_typed_result_preserves_transient_failure_class () =
      | _ -> Alcotest.fail "expected transient error_class")
 
 let test_round_trip_through_oas () =
-  Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
-  let payload = String.make 5000 'p' in
+  let payload = "inline payload" in
   match B.to_oas_typed_result (tool_ok ~tool_name:"test" payload) with
   | Ok { content; _ } ->
       let decoded = O.decode_from_oas content in
@@ -206,7 +164,6 @@ let test_round_trip_through_oas () =
   | Error _ -> Alcotest.fail "expected Ok"
 
 let test_execution_env_preserves_exact_invocation () =
-  Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
   let seen_invocation = ref None in
   let tool =
     B.oas_tool_of_masc_with_execution_env
@@ -248,10 +205,9 @@ let test_execution_env_preserves_exact_invocation () =
 (* --- Marker encoding round-trip via the bridge --- *)
 
 let test_externalize_with_temp_base_path () =
-  with_temp_base_path (fun _dir ->
-      Unix.putenv "MASC_TOOL_EXTERNALIZE" "1";
+  with_temp_base_path (fun dir ->
       let payload = String.make 4096 'z' in
-      let result = B.maybe_externalize payload in
+      let result = externalize_exn ~base_path:dir payload in
       Alcotest.(check bool) "encoded as marker" true (O.is_marker result);
       match O.decode_from_oas result with
       | O.Decoded { sha256; bytes; _ } ->
@@ -263,39 +219,91 @@ let test_externalize_with_temp_base_path () =
             "expected Decoded after externalize, got Invalid_marker: %s"
             detail)
 
-let test_blob_store_failure_preserves_original_bytes () =
+let test_bounded_read_page_is_not_nested () =
+  with_temp_base_path (fun _dir ->
+    let request : Masc.Keeper_artifact_read.request =
+      { sha256 = String.make 64 'a'
+      ; offset = 0
+      ; max_bytes = Masc.Keeper_artifact_read.maximum_max_bytes
+      }
+    in
+    let page =
+      match
+        Masc.Keeper_artifact_read.For_testing.page
+          request
+          (String.make 4_096 '\000')
+      with
+      | Ok page -> page
+      | Error error -> Alcotest.fail error
+    in
+    let output =
+      page
+      |> Masc.Keeper_artifact_read.For_testing.page_to_json
+      |> Yojson.Safe.to_string
+    in
+    Alcotest.(check bool)
+      "worst-case bounded page fits inline contract"
+      true
+      (String.length output <= B.default_externalize_threshold_bytes);
+    Alcotest.(check string)
+      "bounded page remains provider-visible"
+      output
+      (externalize_exn output))
+
+let test_blob_store_failure_is_typed () =
   let path = Filename.temp_file "masc_bridge_not_a_directory" "" in
-  let prev_base = Sys.getenv_opt "MASC_BASE_PATH" in
-  let prev_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
-  let prev_disable = Sys.getenv_opt "MASC_TOOL_EXTERNALIZE" in
-  let prev_threshold = Sys.getenv_opt "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" in
-  let restore () =
-    (match prev_base with
-     | Some value -> Unix.putenv "MASC_BASE_PATH" value
-     | None -> Unix.putenv "MASC_BASE_PATH" "");
-    (match prev_base_input with
-     | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
-     | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
-    (match prev_disable with
-     | Some value -> Unix.putenv "MASC_TOOL_EXTERNALIZE" value
-     | None -> Unix.putenv "MASC_TOOL_EXTERNALIZE" "");
-    (match prev_threshold with
-     | Some value -> Unix.putenv "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" value
-     | None -> Unix.putenv "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" "");
-    Sys.remove path
-  in
+  let restore () = Sys.remove path in
   Fun.protect
     ~finally:restore
     (fun () ->
-      Unix.putenv "MASC_BASE_PATH" path;
-      Unix.putenv "MASC_BASE_PATH_INPUT" path;
-      Unix.putenv "MASC_TOOL_EXTERNALIZE" "1";
-      Unix.putenv "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" "1";
-      let payload = "\000exact\nbytes\255" in
-      Alcotest.(check string)
-        "failed store returns original bytes"
-        payload
-        (B.maybe_externalize payload))
+      let payload = String.make 4_096 '\000' in
+      (match B.maybe_externalize ~base_path:path payload with
+       | Ok _ -> Alcotest.fail "failed store returned provider content"
+       | Error { message } ->
+         Alcotest.(check bool)
+           "storage failure is visible"
+           true
+           (String.length message > 0));
+      let observed = ref None in
+      (match
+         B.to_oas_typed_result
+           ~base_path:path
+           ~on_externalization_error:(fun { message } ->
+             observed := Some message)
+           (tool_ok ~tool_name:"test" payload)
+       with
+       | Ok _ -> Alcotest.fail "projection failure became OAS success"
+       | Error { message; recoverable; error_class } ->
+         Alcotest.(check string)
+           "provider error hides storage internals"
+           "tool output artifact storage failed"
+           message;
+         Alcotest.(check bool) "provider may retry" true recoverable;
+         (match error_class with
+          | Some Agent_sdk.Types.Transient -> ()
+          | _ -> Alcotest.fail "expected transient storage failure"));
+      (match !observed with
+       | Some diagnostic ->
+         Alcotest.(check bool)
+           "owning runtime observes exact failure"
+           true
+           (String.length diagnostic > 0)
+       | None -> Alcotest.fail "projection failure observer was not called");
+      (match
+         B.to_oas_typed_result
+           ~base_path:path
+           ~externalization_error_recoverable:false
+           (tool_ok ~tool_name:"effectful-test" payload)
+       with
+       | Ok _ -> Alcotest.fail "non-retryable projection failure became success"
+       | Error { recoverable; error_class; _ } ->
+         Alcotest.(check bool)
+           "owning tool retry policy is preserved"
+           false
+           recoverable;
+         (match error_class with
+          | Some Agent_sdk.Types.Unknown -> ()
+          | _ -> Alcotest.fail "expected unknown post-effect failure class")))
 
 let () =
   Alcotest.run "tool_bridge_externalize"
@@ -304,10 +312,6 @@ let () =
         [
           Alcotest.test_case "no base path = passthrough" `Quick
             test_threshold_default_under;
-          Alcotest.test_case "disabled = passthrough" `Quick
-            test_disabled_passthrough;
-          Alcotest.test_case "threshold env override" `Quick
-            test_threshold_env_override;
         ] );
       ( "to_oas_typed_result",
         [
@@ -330,7 +334,9 @@ let () =
         [
           Alcotest.test_case "with temp base_path" `Quick
             test_externalize_with_temp_base_path;
-          Alcotest.test_case "store failure preserves original bytes" `Quick
-            test_blob_store_failure_preserves_original_bytes;
+          Alcotest.test_case "bounded read page is not nested" `Quick
+            test_bounded_read_page_is_not_nested;
+          Alcotest.test_case "store failure is typed" `Quick
+            test_blob_store_failure_is_typed;
         ] );
     ]

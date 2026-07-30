@@ -21,6 +21,24 @@ let completion_boundary_of_runtime_handler = function
   | _ -> Continue_after_success
 ;;
 
+let terminal_externalization_failure
+      state
+      ({ message } : Tool_bridge.externalization_error)
+  =
+  match state with
+  | Keeper_tools_oas.Terminal_effect_completed ->
+    Some
+      { Keeper_tools_oas.failure_class = Tool_result.Runtime_failure
+      ; effect_disposition = Tool_result.Proven_post_effect
+      ; diagnostic = "tool output artifact storage failed: " ^ message
+      }
+  | ( Keeper_tools_oas.Terminal_effect_open
+    | Keeper_tools_oas.Deferred_tool_result
+    | Keeper_tools_oas.External_effect_deferred
+    | Keeper_tools_oas.Terminal_effect_failed _ ) ->
+    None
+;;
+
 let make_tool_bundle
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -195,6 +213,14 @@ let make_tool_bundle
     in
     transition ()
   in
+  let mark_completed_terminal_externalization_failed
+      error
+    =
+    terminal_externalization_failure
+      (Atomic.get terminal_effect_state)
+      error
+    |> Option.iter mark_terminal_effect_failed
+  in
   (* The handler dispatches with
      [~name:descriptor.internal_name] so all telemetry SSOT remains internal;
      exactly one projected Tool.schema.name is model-visible.
@@ -204,11 +230,13 @@ let make_tool_bundle
     List.concat_map
       (fun (descriptor : Keeper_tool_descriptor.t) ->
          let internal = descriptor.internal_name in
-         let on_completed, on_failed =
+         let on_completed, on_failed, on_externalization_error =
            match completion_boundary_of_runtime_handler descriptor.runtime_handler with
            | Terminal_effect ->
-             Some mark_terminal_effect_completed, Some mark_terminal_effect_failed
-           | Continue_after_success -> None, None
+             ( Some mark_terminal_effect_completed
+             , Some mark_terminal_effect_failed
+             , Some mark_completed_terminal_externalization_failed )
+           | Continue_after_success -> None, None, None
          in
          Keeper_tool_descriptor.keeper_model_names descriptor
          |> List.map (fun model_name ->
@@ -239,6 +267,9 @@ let make_tool_bundle
                  ()
              in
              Tool_bridge.oas_tool_of_masc_with_execution_env
+               ~base_path:config.base_path
+               ?on_externalization_error
+               ~externalization_error_recoverable:descriptor.policy.retryable
                ~name:model_name
                ~description:descriptor.description
                ~input_schema:descriptor.input_schema
@@ -285,5 +316,9 @@ module For_testing = struct
     match completion_boundary_of_runtime_handler handler with
     | Terminal_effect -> true
     | Continue_after_success -> false
+  ;;
+
+  let terminal_externalization_failure =
+    terminal_externalization_failure
   ;;
 end

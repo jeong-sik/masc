@@ -14,8 +14,8 @@
       The integer is the bytes-so-far counter at the moment of
       capture; consumers should treat it as a hint, not authoritative.
 
-    Tier B9 (Multimodal_hydrator) will wrap these with the existing
-    [keeper_artifact_hydrator] so its consumers see a uniform surface.
+    Tier B9 (Multimodal_hydrator) resolves these through a caller-supplied
+    artifact fetch function so its consumers see a uniform surface.
 
     @stability Evolving
     @since 0.18.10 *)

@@ -26,6 +26,7 @@ type t =
   | Board_vote
   | Broadcast
   | Context_status
+  | Artifact_read
   | Fs_edit
   | Fs_write
   | Fs_read
@@ -77,6 +78,7 @@ let all : t list =
   ; Board_vote
   ; Broadcast
   ; Context_status
+  ; Artifact_read
   ; Fs_edit
   ; Fs_write
   ; Fs_read
@@ -130,6 +132,7 @@ let to_string = function
   | Board_vote -> "keeper_board_vote"
   | Broadcast -> "keeper_broadcast"
   | Context_status -> "keeper_context_status"
+  | Artifact_read -> "keeper_artifact_read"
   | Fs_edit -> "tool_edit_file"
   | Fs_write -> "tool_write_file"
   | Fs_read -> "tool_read_file"
@@ -182,6 +185,7 @@ let of_string = function
   | "keeper_board_sub_board_update" -> Some Board_sub_board_update
   | "keeper_broadcast" -> Some Broadcast
   | "keeper_context_status" -> Some Context_status
+  | "keeper_artifact_read" -> Some Artifact_read
   | "tool_edit_file" -> Some Fs_edit
   | "tool_write_file" -> Some Fs_write
   | "tool_read_file" -> Some Fs_read

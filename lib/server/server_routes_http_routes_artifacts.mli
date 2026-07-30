@@ -2,7 +2,7 @@
     tool blob store.
 
     Tool outputs externalised by [Tool_bridge.maybe_externalize]
-    live in [${MASC_BASE_PATH}/.masc/tool_blobs/<sha[0..1]>/<sha>];
+    live in [<workspace-base-path>/.masc/tool_blobs/<sha[0..1]>/<sha>];
     the dashboard UI displays the marker preview by
     default and lazy-fetches the full bytes via:
 
@@ -17,22 +17,21 @@
     Errors:
     - 400 — malformed sha256 (not 64 lowercase hex chars)
     - 404 — sha256 not in store
-    - 503 — base path unresolvable (store unavailable) *)
+    - 503 — stored artifact unreadable *)
 
 val is_valid_sha256 : string -> bool
 (** Shared exact lowercase SHA-256 validation used by the route guard. *)
 
-val blob_response : sha256:string -> Yojson.Safe.t * Httpun.Status.t
+val blob_response :
+  base_path:string -> sha256:string -> Yojson.Safe.t * Httpun.Status.t
 (** Look up [sha256] in the on-disk blob store
-    ([${MASC_BASE_PATH}/.masc/tool_blobs/]) and return the
+    ([<base_path>/.masc/tool_blobs/]) and return the
     JSON envelope plus the HTTP status code:
 
     - [`OK] when the blob is present (envelope contains the
       [content] bytes verbatim);
     - [`Not_found] when the sha is well-formed but absent
-      from the store;
-    - [`Service_unavailable] when [Env_config_core.base_path_opt]
-      returns [None] (no [MASC_BASE_PATH], no store root).
+      from the store.
 
     Store inspection, read, and integrity failures return
     [`Service_unavailable]. Cancellation propagates. *)
@@ -41,8 +40,7 @@ val add_routes :
   Http_server_eio.Router.t ->
   Http_server_eio.Router.t
 (** Register the [GET /api/v1/artifacts/<sha256>] route on
-    [router] using {!Server_auth.with_public_read} (the
-    artifacts endpoint is public-read by design — marker
-    sha256 values do not leak in the dashboard's preview, so
-    full-byte fetch needs no auth). Returns the augmented
-    router. *)
+    [router] using {!Server_auth.with_public_read}. Non-strict deployments keep
+    the dashboard read surface public; strict HTTP auth routes it through the
+    ordinary read authorization boundary because a content digest is not an
+    authorization capability. Returns the augmented router. *)

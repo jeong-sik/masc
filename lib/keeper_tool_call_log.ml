@@ -349,8 +349,8 @@ let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
   (* Per-leaf marker-aware truncation. Previously
      [String.sub (Yojson.Safe.to_string input) 0 (max - suffix)] chopped
      through a [masc:blob ...] marker embedded in a nested JSON string
-     value and stranded sha256/bytes/mime halfway, breaking the keeper
-     artifact hydrator on replay. *)
+     value and stranded sha256/bytes/mime halfway, corrupting the
+     content-addressed reference. *)
   let input = Observability_redact.preview_json_strings ~max_len:max_output_len input in
   let s = Yojson.Safe.to_string input in
   if String.length s > max_output_len

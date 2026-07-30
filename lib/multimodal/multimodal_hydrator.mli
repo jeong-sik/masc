@@ -11,21 +11,13 @@
       and a list of artifact ids, produces a list of fully-loaded
       {!Artifact.any} values along with their provenance neighbours.
 
-    {1 Why a callback (and not a direct keeper_artifact_hydrator wrap)}
+    {1 Why a callback}
 
-    INTEGRATED §A3.2 forbids any modification of
-    [lib/keeper/keeper_artifact_hydrator.\{mli,ml\}] — the existing
-    consumers of that hydrator must continue working unchanged.
-    A direct wrapper inside [lib/multimodal/] would require the
-    multimodal sub-library to import the keeper sub-library, which
-    in turn pulls in [autonomous] / [resilience] / the entire main
-    library, producing a circular dependency.
-
-    Instead this module accepts a [fetch_artifact] callback and
-    leaves wiring to the caller. Tier A7 (which already lives at
-    a level above both [keeper] and [multimodal]) supplies a
-    [fetch_artifact] that delegates to [keeper_artifact_hydrator]
-    on the keeper side, leaving the existing hydrator untouched.
+    Importing a concrete Keeper storage implementation would pull
+    [autonomous] / [resilience] / the entire main library into the
+    multimodal sub-library and create a circular dependency. This module
+    therefore accepts a [fetch_artifact] callback and leaves storage wiring
+    to the caller above both libraries.
 
     {1 Provenance DAG}
 

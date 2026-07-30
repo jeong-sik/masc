@@ -45,8 +45,9 @@ val put : t -> bytes:string -> mime:string -> Tool_output.t
     address, repairing any corrupt prior bytes without a duplicate read/hash.
 
     @raises Sys_error if the blob write fails (disk full, EACCES, ...). Callers
-    that must not lose bytes should catch this and fall back to the inline
-    payload rather than emitting a marker for bytes that were never persisted. *)
+    must handle this at their typed boundary and must not emit a marker for
+    bytes that were never persisted. A provider projection must not put an
+    oversized payload back inline because that defeats externalization. *)
 
 val put_durable : t -> bytes:string -> mime:string -> Tool_output.artifact_ref
 (** Strict variant of {!put}. The payload and its parent directory must both
@@ -63,6 +64,25 @@ val fetch : t -> sha256:string -> (string option, fetch_error) result
     validated path is absent. The owned-file read validates the no-follow
     parent chain and [lstat]/[fstat] identity before and after descriptor I/O.
     Read and content-integrity failures remain typed. Cancellation propagates. *)
+
+type range =
+  { content : string
+  ; total_bytes : int
+  }
+
+val fetch_range :
+  t ->
+  sha256:string ->
+  offset:int ->
+  max_bytes:int ->
+  (range option, fetch_error) result
+(** Read at most [max_bytes] from [offset]. The first uncached read performs a
+    whole-file sha256 validation; later pages whose owned descriptor snapshot
+    is unchanged use bounded range I/O. The validation cache is bounded, so an
+    evicted or changed snapshot is revalidated before any bytes are returned,
+    preserving {!fetch}'s content-address integrity without hashing the whole
+    artifact on every page. Bounds and filesystem failures remain typed.
+    Cancellation propagates. *)
 
 val list_all : t -> string list
 (** List all sha256 hashes currently in the store. O(n) in store size.

@@ -16,18 +16,16 @@
     Tier B9 ({!Multimodal_hydrator}) provides a callback-based
     DAG builder. This module provides the {b other half}: an
     actual conversion from raw JSON to typed artifact. Together
-    they form the keeper integration seam — the keeper's
-    [keeper_artifact_hydrator] yields raw JSON via callback,
-    [hydrate_one] converts each entry, and the caller stitches
-    them into a [Workspace] via [hydrate_with_workspace].
+    they form the keeper integration seam — a caller fetches raw
+    artifact JSON, [hydrate_one] converts each entry, and the caller
+    stitches them into a [Workspace] via [hydrate_with_workspace].
 
     {1 RFC-0002 compliance}
 
     This module does NOT import [lib/keeper] — keeping the
     multimodal sub-library independent of the keeper. The
-    keeper-side adapter (which calls [keeper_artifact_hydrator]
-    and feeds [raw_artifact] values into [hydrate_batch]) lives
-    in [lib/keeper] in a follow-up PR.
+    keeper-side adapter that supplies [raw_artifact] values to
+    [hydrate_batch] lives above this sub-library.
 
     {1 Scope of this PR}
 

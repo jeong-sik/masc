@@ -205,7 +205,7 @@ let expect_unexpected_field field json =
   let inp =
     { Lib.turn_ref =
         Ids.Turn_ref.make ~trace_id:"unexpected-field-t" ~absolute_turn:1
-    ; messages = [ message "current JSON boundary" ]
+     ; messages = [ message "current JSON boundary" ]
     }
   in
   match Lib.episode_of_json_result ~now:1_000_000.0 ~generation:0 inp json with

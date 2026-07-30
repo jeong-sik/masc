@@ -77,6 +77,28 @@ afterEach(() => {
 // reaching the inspector. Absent stays absent — a legacy row must not decode to
 // a fabricated 0.
 describe('keeper turn record cache token counts', () => {
+  it('surfaces a current-only window containing only incompatible rows', async () => {
+    getMock.mockResolvedValue({
+      ...payload(),
+      skipped_rows: 12,
+      latest_ts_unix: null,
+      latest_ts_iso: null,
+      latest_age_s: null,
+      health: 'incompatible',
+      stale_reason: 'incompatible_rows',
+    })
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response).toMatchObject({
+      count: 0,
+      skipped_rows: 12,
+      health: 'incompatible',
+      stale_reason: 'incompatible_rows',
+      entries: [],
+    })
+  })
+
   it('carries the durable cache counts through the decoder', async () => {
     getMock.mockResolvedValue(
       payload(entry({ cache_creation_input_tokens: 900, cache_read_input_tokens: 15_400 })),

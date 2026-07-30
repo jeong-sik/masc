@@ -1740,6 +1740,8 @@ let handle_keeper_get_subroutes state req request reqd =
       in
       let health, stale_reason =
         match latest_age_s with
+        | None when skipped_rows > 0 ->
+            ("incompatible", "incompatible_rows")
         | None -> ("empty", "no_entries")
         | Some age when age > freshness_slo_s ->
             ("stale", "freshness_slo_exceeded")

@@ -1268,7 +1268,11 @@ export function KeeperTurnInspector({
     return html`
       <div class="p-4 space-y-1 v2-monitoring-panel">
         ${memoryOsPanel}
-        <div class="text-xs text-[var(--color-fg-muted)]">턴 레코드 없음 (서버 재시작 이후 keeper 턴까지 기록됩니다)</div>
+        ${response?.health === 'incompatible'
+          ? html`<div class="text-xs text-[var(--color-status-warn)]">
+              current decoder가 최근 ${response.skipped_rows}행을 모두 거부했습니다
+            </div>`
+          : html`<div class="text-xs text-[var(--color-fg-muted)]">턴 레코드 없음 (서버 재시작 이후 keeper 턴까지 기록됩니다)</div>`}
         <${FreshnessLine} data=${response ?? { source: 'turn_record' }} />
       </div>
     `

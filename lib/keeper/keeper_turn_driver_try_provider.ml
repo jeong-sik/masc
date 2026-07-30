@@ -193,19 +193,17 @@ let observe_request_wire_error
       (error : Agent_sdk.Error.sdk_error)
   =
   match
-    Keeper_turn_runtime_budget.capacity_refusal_of_error error,
+    Keeper_request_wire_observation.rejected_body_bytes error,
     on_request_wire_observation
   with
-  | Some (Serialized_request_body { actual_bytes; _ }), Some observe ->
+  | Some actual_bytes, Some observe ->
     (* OAS measures this body before rejecting it at serialized-body admission,
        so its normal post-admission observer is intentionally not invoked. The
        typed refusal carries the same exact byte count; forwarding it here
        keeps the failed turn observable without parsing an error string or
        guessing which runtime attempted the request. *)
     observe ~runtime_id ~body_bytes:actual_bytes
-  | Some (Provider_context_window _ | Provider_request_body_refusal _), _
-  | None, _
-  | Some (Serialized_request_body _), None ->
+  | None, _ | Some _, None ->
     ()
 ;;
 

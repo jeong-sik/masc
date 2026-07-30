@@ -413,7 +413,7 @@ let test_provider_content_messages_separates_prompt_carrier_and_projection_suffi
   let gate_evidence = message "typed gate replay payload" in
   let message_texts =
     Option.map
-      (List.map (fun message ->
+      (List.map (fun (message : Agent_sdk.Types.message) ->
          Agent_sdk.Types.text_of_content message.Agent_sdk.Types.content))
   in
   check

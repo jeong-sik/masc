@@ -528,7 +528,7 @@ let heartbeat_event_intake
     match pending_selection with
     | Error message ->
       Log.Keeper.error
-        "turn entry: event queue claim failed keeper=%s: %s"
+        "turn entry: event queue selection failed keeper=%s: %s"
         keeper_name
         message;
       [], [], None, Some (Pending_selection_failed message)

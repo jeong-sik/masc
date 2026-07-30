@@ -37,8 +37,9 @@ val manual_compaction_followup_failure
   :  cycle_outcome
   -> Keeper_unified_turn.turn_failure option
 (** The following-turn failure only when manual compaction already committed.
-    Queue settlement uses this projection to preserve an LLM judgment
-    successor without replaying the completed compaction transaction. *)
+    The owner-loop ACK decision uses this projection to preserve an LLM
+    judgment successor without replaying the completed compaction
+    transaction. *)
 
 val deferred_runtime_lane :
   cycle_outcome -> Keeper_turn_driver.deferred_runtime_lane option

@@ -121,11 +121,11 @@ val reconcile_spent_selection
 
 (** [heartbeat_event_intake ~ctx ~meta_after_triage
      ~pending_board_events]
-    drains the Event-Layer queue (per RFC-0020 §3 Rule 4) and merges
-    newly-consumed board events with the [pending_board_events] already
+    peeks at most one ready Event-Layer stimulus (per RFC-0020 §3 Rule 4)
+    and merges its observation with the [pending_board_events] already
     accumulated by the caller, deduplicating by [post_id]. A
     [Hitl_resolved] stimulus remains queued until its exact approval id has
-    left the pending map, while later ready stimuli can still be leased.
+    left the pending map, while later ready stimuli can still be selected.
     A transient Board read returns no consumed stimuli, keeps the exact
     [pending_selection], and sets [event_queue_intake_error]; the heartbeat
     loop must not dispatch or acknowledge that selection. *)

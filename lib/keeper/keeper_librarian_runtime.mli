@@ -4,7 +4,6 @@
     validation, one atomic current-snapshot replacement is the only MASC-side
     effect. There is no secondary journal or episode/facts fan-out. *)
 
-val enabled : unit -> bool
 val cadence_turns : unit -> int
 
 val cadence_step : cadence:int -> counter:int -> int * bool

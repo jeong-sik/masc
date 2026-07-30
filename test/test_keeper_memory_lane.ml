@@ -5,11 +5,59 @@
     leak-safe on a raising unit. *)
 
 module Lane = Masc.Keeper_memory_lane
+module Librarian_runtime = Masc.Keeper_librarian_runtime
+module Memory_current = Masc.Keeper_memory_os_current
+module Post_turn_memory = Masc.Keeper_agent_run_post_turn_memory
 
 exception Test_boom
 exception Cancel_lane_test
 
 let base_path = Filename.concat (Filename.get_temp_dir_name ()) "test-memory-lane"
+
+let temp_dir prefix =
+  let path = Filename.temp_file prefix "" in
+  Sys.remove path;
+  Unix.mkdir path 0o755;
+  path
+;;
+
+let rec remove_tree path =
+  if Sys.file_exists path
+  then if Sys.is_directory path
+    then (
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+;;
+
+let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+         [ "name", `String name
+         ; "agent_name", `String name
+         ; "trace_id", `String ("trace-" ^ name)
+         ])
+  with
+  | Ok meta -> meta
+  | Error detail -> Alcotest.failf "keeper meta fixture failed: %s" detail
+;;
+
+let run_post_turn ~config ~meta ~turn =
+  Post_turn_memory.run
+    ~config
+    ~meta
+    ~generation:turn
+    ~turn
+    ~oas_turn_count:1
+    ~actual_tools:[]
+    ~librarian_messages:[]
+    ~turn_effect_record:Masc.Keeper_run_prompt.Meaningful_turn
+    ~post_turn_t0:(Time_compat.now ())
+    ~inference_telemetry:None
+    ()
+;;
 
 (* No executor switch set -> submit runs inline so no work is lost. *)
 let test_inline_when_uninitialized () =
@@ -343,6 +391,137 @@ let test_finished_switch_drops_without_leak () =
   | None -> Alcotest.fail "keeper entry missing after finished switch submit"
 ;;
 
+(* The Librarian setting is live while lane work is asynchronous. The
+   post-turn entrypoint must reject OFF/INVALID before submission, then fence
+   an already queued ON unit again before snapshot I/O when the setting changes
+   while it waits behind an in-flight unit. *)
+let test_post_turn_librarian_live_config_boundaries () =
+  Lane.For_testing.reset ();
+  let root = temp_dir "test-post-turn-librarian-gate-" in
+  let env_key = Env_config.KeeperMemoryOs.librarian_env_key in
+  let previous_env = Sys.getenv_opt env_key in
+  Fun.protect
+    ~finally:(fun () ->
+      (match previous_env with
+       | Some value -> Unix.putenv env_key value
+       | None -> Unix.putenv env_key "");
+      Config_dir_resolver.reset ();
+      Lane.For_testing.reset ();
+      remove_tree root)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Eio.Switch.run @@ fun sw ->
+      Masc_test_deps.init_eio_clock ~sw env;
+      Lane.init ~sw;
+      let config = Masc.Workspace.default_config root in
+      ignore (Masc.Workspace.init config ~agent_name:None);
+      Config_dir_resolver.reset ();
+      let failure_metric =
+        Keeper_metrics.(to_string MemoryOsLibrarianFailures)
+      in
+      let failures_before =
+        Masc.Otel_metric_store.metric_total failure_metric |> int_of_float
+      in
+      let cadence_entries_before =
+        Librarian_runtime.cadence_counter_entries ()
+      in
+      let expect_no_admission ~value ~keeper_name ~turn =
+        Unix.putenv env_key value;
+        let meta = make_meta keeper_name in
+        run_post_turn ~config ~meta ~turn;
+        match
+          Lane.For_testing.pending
+            ~base_path:config.Workspace.base_path
+            ~keeper_name
+            ~lane:Lane.Librarian
+        with
+        | None -> ()
+        | Some pending ->
+          Alcotest.failf
+            "config=%s created Librarian lane pending=%d"
+            value
+            pending
+      in
+      expect_no_admission ~value:"false" ~keeper_name:"gateoff" ~turn:1;
+      expect_no_admission ~value:"invalid" ~keeper_name:"gateinvalid" ~turn:2;
+      let rec await_librarian_idle ~keeper_name remaining =
+        match
+          Lane.For_testing.pending
+            ~base_path:config.Workspace.base_path
+            ~keeper_name
+            ~lane:Lane.Librarian
+        with
+        | Some 0 -> ()
+        | _ when remaining > 0 ->
+          Eio.Fiber.yield ();
+          await_librarian_idle ~keeper_name (remaining - 1)
+        | Some pending ->
+          Alcotest.failf
+            "queued Librarian unit did not drain, pending=%d"
+            pending
+        | None -> Alcotest.fail "queued Librarian lane disappeared"
+      in
+      let expect_queued_fence ~poison_snapshot ~terminal_value ~keeper_name ~turn =
+        let meta = make_meta keeper_name in
+        let keepers_dir =
+          Config_dir_resolver.keepers_dir_for_base_path
+            ~base_path:config.Workspace.base_path
+        in
+        if poison_snapshot
+        then
+          Unix.mkdir
+            (Memory_current.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name)
+            0o755;
+        Unix.putenv env_key "true";
+        let started, set_started = Eio.Promise.create () in
+        let release, set_release = Eio.Promise.create () in
+        let blocker =
+          Lane.submit
+            ~base_path:config.Workspace.base_path
+            ~keeper_name
+            ~lane:Lane.Librarian
+            (fun () ->
+               Eio.Promise.resolve set_started ();
+               Eio.Promise.await release)
+        in
+        (match blocker with
+         | Lane.Submitted -> ()
+         | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped ->
+           Alcotest.fail "Librarian blocker was not submitted");
+        Eio.Promise.await started;
+        run_post_turn ~config ~meta ~turn;
+        Alcotest.(check (option int))
+          "one running plus one queued Librarian unit"
+          (Some 2)
+          (Lane.For_testing.pending
+             ~base_path:config.Workspace.base_path
+             ~keeper_name
+             ~lane:Lane.Librarian);
+        Unix.putenv env_key terminal_value;
+        Eio.Promise.resolve set_release ();
+        await_librarian_idle ~keeper_name 100
+      in
+      expect_queued_fence
+        ~poison_snapshot:true
+        ~terminal_value:"false"
+        ~keeper_name:"queuedoff"
+        ~turn:3;
+      expect_queued_fence
+        ~poison_snapshot:false
+        ~terminal_value:"invalid"
+        ~keeper_name:"queuedinvalid"
+        ~turn:4;
+      Alcotest.(check int)
+        "fenced work did not read invalid snapshots or emit failures"
+        failures_before
+        (Masc.Otel_metric_store.metric_total failure_metric |> int_of_float);
+      Alcotest.(check int)
+        "fenced work did not advance Librarian cadence"
+        cadence_entries_before
+        (Librarian_runtime.cadence_counter_entries ()))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_lane"
@@ -381,6 +560,10 @@ let () =
             "finished switch drops without leak"
             `Quick
             test_finished_switch_drops_without_leak
+        ; Alcotest.test_case
+            "post-turn Librarian live config boundaries"
+            `Quick
+            test_post_turn_librarian_live_config_boundaries
         ] )
     ]
 ;;

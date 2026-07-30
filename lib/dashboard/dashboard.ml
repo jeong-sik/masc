@@ -525,12 +525,22 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         then Printf.sprintf " | TOOL-ERR: %d" tool_failures
         else ""
       in
+      let librarian_enabled = Env_config.KeeperMemoryOs.librarian_enabled () in
+      let librarian_failures =
+        Otel_metric_store.metric_total Keeper_metrics.(to_string MemoryOsLibrarianFailures) |> int_of_float
+      in
+      let librarian_status =
+        if not librarian_enabled then "OFF"
+        else if librarian_failures > 0 then Printf.sprintf "ON (ERR: %d)" librarian_failures
+        else "ON"
+      in
       Printf.sprintf
-        "KEEPERS: %d running / %d dead / %d other | GUARD: %d | \
+        "KEEPERS: %d running / %d dead / %d other | LIBRARIAN: %s | GUARD: %d | \
          META-WRITE-ERR: %d%s"
         k_running
         k_dead
         k_other
+        librarian_status
         guard_violations
         write_meta_failures
         tool_suffix;

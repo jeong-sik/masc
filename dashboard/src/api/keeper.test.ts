@@ -26,6 +26,7 @@ import {
   fetchKeeperChatHistory,
   fetchKeeperChatPending,
   fetchKeeperChatReceipt,
+  lookupKeeperChatReceipt,
   fetchKeeperCheckpoints,
   fetchQueuedKeeperMessageResult,
   fetchKeeperRuntimeTrace,
@@ -261,6 +262,29 @@ describe('Keeper chat durable receipt API', () => {
     )
   })
 
+  it('classifies a missing exact receipt separately from lookup unavailability', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response('{}', { status: 404, statusText: 'Not Found' }),
+      )
+      .mockResolvedValueOnce(
+        new Response('{}', { status: 503, statusText: 'Unavailable' }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      lookupKeeperChatReceipt(
+        'keeper sangsu',
+        'chatq_00000000-0000-4000-8000-000000000001',
+      ),
+    ).resolves.toEqual({ kind: 'absent' })
+    const unavailable = await lookupKeeperChatReceipt(
+      'keeper sangsu',
+      'chatq_00000000-0000-4000-8000-000000000001',
+    )
+    expect(unavailable.kind).toBe('unavailable')
+  })
+
   it('resolves one exact recovery receipt with string revision and lease evidence', async () => {
     const receiptId = 'chatq_00000000-0000-4000-8000-000000000001'
     const leaseId = 'lease_00000000-0000-4000-8000-000000000002'
@@ -435,7 +459,11 @@ describe('Keeper chat durable receipt API', () => {
         state: { kind: 'pending' },
       },
       content,
-      source: { kind: 'dashboard', thread_id: 'thread-1' },
+      source: {
+        kind: 'dashboard',
+        thread_id: 'thread-1',
+        actor: 'operator-1',
+      },
       user_blocks: [],
       attachments: [],
       submitted_at: 42,
@@ -473,6 +501,32 @@ describe('Keeper chat durable receipt API', () => {
       '/api/v1/keepers/sangsu/chat/pending?limit=100&after=41',
       expect.objectContaining({ headers: expect.any(Object) }),
     )
+  })
+
+  it('rejects dashboard pending provenance without an actor', () => {
+    expect(() => parseKeeperChatPendingSnapshot({
+      schema: 'keeper_chat_queue.pending.v2',
+      ok: true,
+      keeper_name: 'sangsu',
+      revision: '1',
+      current_work: null,
+      total_pending: 1,
+      next_after: null,
+      pending: [{
+        receipt: {
+          schema: 'keeper_chat_queue.receipt.v2',
+          keeper_name: 'sangsu',
+          receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+          revision: '1',
+          state: { kind: 'pending' },
+        },
+        content: 'hello',
+        source: { kind: 'dashboard', thread_id: 'thread-1' },
+        user_blocks: [],
+        attachments: [],
+        submitted_at: 42,
+      }],
+    })).toThrow('Keeper pending source actor is missing')
   })
 
   it('rejects chat pagination revision drift without a fixed retry loop', async () => {
@@ -1122,6 +1176,59 @@ describe('streamKeeperMessage', () => {
     expect(actorHeader).toBe('dashboard-eager-manta')
     expect(actorHeader).not.toContain('%')
     expect(events).toEqual(['RUN_FINISHED'])
+  })
+
+  it('requests durable enqueue without waiting for turn completion', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('data: {"type":"RUN_FINISHED"}\n\n', {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await streamKeeperMessage('sangsu', 'queued draft', {
+      enqueueOnly: true,
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000042',
+      onEvent: () => {},
+    })
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({
+      name: 'sangsu',
+      message: 'queued draft',
+      direct_reply: true,
+      enqueue_only: true,
+      receipt_id: 'chatq_00000000-0000-4000-8000-000000000042',
+    })
+  })
+
+  it('rejects durable enqueue without a receipt before issuing HTTP', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const invalidOptions = {
+      enqueueOnly: true,
+      onEvent: () => {},
+    } as unknown as Parameters<typeof streamKeeperMessage>[2]
+
+    await expect(
+      streamKeeperMessage('sangsu', 'queued draft', invalidOptions),
+    ).rejects.toThrow('enqueueOnly requires receiptId')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a receipt on direct admission before issuing HTTP', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const invalidOptions = {
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000042',
+      onEvent: () => {},
+    } as unknown as Parameters<typeof streamKeeperMessage>[2]
+
+    await expect(
+      streamKeeperMessage('sangsu', 'direct draft', invalidOptions),
+    ).rejects.toThrow('receiptId requires enqueueOnly')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('forwards copilot context fields to the stream endpoint', async () => {

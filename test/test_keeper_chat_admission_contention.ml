@@ -295,13 +295,16 @@ let test_queued_server_turn_has_no_second_durable_request () =
              Server_routes_http_keeper_stream.keeper_chat_stream_request =
            { name = keeper_name
            ; message = "queued inline boundary"
+           ; admission =
+               Direct
+                 { turn_instructions = None
+                 ; surface_context = None
+                 ; channel = ""
+                 ; channel_user_id = ""
+                 ; channel_user_name = ""
+                 ; channel_workspace_id = ""
+                 }
            ; user_blocks = []
-           ; turn_instructions = None
-           ; surface_context = None
-           ; channel = ""
-           ; channel_user_id = ""
-           ; channel_user_name = ""
-           ; channel_workspace_id = ""
            ; attachments = []
            }
          in

@@ -11,6 +11,7 @@ import {
   getQueueLength,
   getQueueTotal,
   updateQueuedMessage,
+  removeQueuedMessage,
   readKeeperDraft,
   writeKeeperDraft,
   clearKeeperDraft,
@@ -105,6 +106,42 @@ describe('keeper-chat-store input queue', () => {
     expect(next!.content).toBe('second')
   })
 
+  it('locks a receipt whose server acceptance is unknown', () => {
+    const first = enqueueInput('keeper-q', 'first')
+    enqueueInput('keeper-q', 'second')
+    const sending = dequeueInput('keeper-q')
+
+    requeueInputFront(
+      'keeper-q',
+      sending!,
+      { serverAcceptanceUnknown: true },
+    )
+
+    expect(() => updateQueuedMessage('keeper-q', first.id, { content: 'edited' }))
+      .toThrow('서버 접수 여부')
+    expect(removeQueuedMessage('keeper-q', first.id)).toBe(false)
+    clearInputQueue('keeper-q')
+    expect(getQueuedMessages('keeper-q').map(message => message.content)).toEqual(['first'])
+  })
+
+  it('unlocks a receipt after an authoritative absent lookup', () => {
+    const queued = enqueueInput('keeper-q', 'first')
+    const sending = dequeueInput('keeper-q')
+    requeueInputFront(
+      'keeper-q',
+      sending!,
+      { serverAcceptanceUnknown: true },
+    )
+
+    const retried = dequeueInput('keeper-q')
+    requeueInputFront('keeper-q', retried!)
+
+    expect(getQueuedMessages('keeper-q')[0]?.serverAcceptanceUnknown).toBeUndefined()
+    expect(updateQueuedMessage('keeper-q', queued.id, { content: 'edited' })?.content)
+      .toBe('edited')
+    expect(removeQueuedMessage('keeper-q', queued.id)).toBe(true)
+  })
+
   it('clearInputQueue removes all items', () => {
     enqueueInput('keeper-q', 'x')
     enqueueInput('keeper-q', 'y')
@@ -175,10 +212,13 @@ describe('keeper-chat-store input queue', () => {
 
   it('clears the client action id when a queued message is edited', () => {
     const msg = enqueueInput('keeper-q', 'original', undefined, 'click-1')
+    const originalReceiptId = msg.receiptId
 
     updateQueuedMessage('keeper-q', msg.id, { content: 'edited' })
 
     expect(hasQueuedInputClientAction('keeper-q', 'click-1')).toBe(false)
+    expect(msg.receiptId).toMatch(/^chatq_[0-9a-f-]{36}$/i)
+    expect(msg.receiptId).not.toBe(originalReceiptId)
     enqueueInput('keeper-q', 'original', undefined, 'click-1')
     expect(getQueueLength('keeper-q')).toBe(2)
   })

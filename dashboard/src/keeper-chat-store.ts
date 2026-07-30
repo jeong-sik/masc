@@ -12,6 +12,7 @@ import type { ChatBlock, KeeperConversationAttachment, KeeperUserInputBlock } fr
 
 export interface QueuedMessage {
   id: string
+  receiptId: string
   content: string
   timestamp: number
   sequence: number
@@ -20,6 +21,7 @@ export interface QueuedMessage {
   blocks?: ChatBlock[]
   userBlocks?: KeeperUserInputBlock[]
   clientActionId?: string
+  serverAcceptanceUnknown?: true
   editOnOpen?: boolean
 }
 
@@ -30,6 +32,10 @@ export interface InputQueue {
 
 const _queues = new Map<string, InputQueue>()
 let _nextQueueSequence = 0
+
+function nextQueueReceiptId(): string {
+  return `chatq_${crypto.randomUUID()}`
+}
 
 function _ensureQueue(keeperName: string): InputQueue {
   let q = _queues.get(keeperName)
@@ -96,6 +102,7 @@ export function enqueueInput(
   }
   const msg: QueuedMessage = {
     id: `${keeperName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    receiptId: nextQueueReceiptId(),
     content,
     timestamp: Date.now(),
     sequence: ++_nextQueueSequence,
@@ -177,6 +184,9 @@ export function updateQueuedMessage(
     typeof updates.content === 'string' && updates.content !== item.content
   const attachmentsChanged = 'attachments' in updates
   const changed = contentChanged || attachmentsChanged
+  if (changed && item.serverAcceptanceUnknown) {
+    throw new Error('서버 접수 여부를 확인하기 전에는 메시지를 수정할 수 없습니다.')
+  }
   const nextContent = typeof updates.content === 'string' ? updates.content : item.content
   const nextAttachments = 'attachments' in updates ? updates.attachments : item.attachments
   const nextUserBlocks = changed
@@ -198,6 +208,7 @@ export function updateQueuedMessage(
   else delete item.attachments
   if (changed) delete item.clientActionId
   if (changed) {
+    item.receiptId = nextQueueReceiptId()
     if ('blocks' in updates && updates.blocks && updates.blocks.length > 0) {
       item.blocks = updates.blocks
     } else {
@@ -213,6 +224,9 @@ export function updateQueuedMessage(
 export function removeQueuedMessage(keeperName: string, id: string): boolean {
   const q = _queues.get(keeperName)
   if (!q) return false
+  if (q.items.some(item => item.id === id && item.serverAcceptanceUnknown)) {
+    return false
+  }
   const before = q.items.length
   q.items = q.items.filter(i => i.id !== id)
   return q.items.length < before
@@ -228,11 +242,18 @@ export function dequeueInput(keeperName: string): QueuedMessage | null {
 }
 
 /** Put an unsent/deferred message back at the front of the queue. */
-export function requeueInputFront(keeperName: string, msg: QueuedMessage): void {
+export function requeueInputFront(
+  keeperName: string,
+  msg: QueuedMessage,
+  options: { serverAcceptanceUnknown?: boolean } = {},
+): void {
   const q = _ensureQueue(keeperName)
   q.sending = false
   if (q.items.some(item => item.id === msg.id)) return
-  q.items.unshift({ ...msg, sent: false })
+  const requeued = { ...msg, sent: false }
+  delete requeued.serverAcceptanceUnknown
+  if (options.serverAcceptanceUnknown) requeued.serverAcceptanceUnknown = true
+  q.items.unshift(requeued)
 }
 
 /** Mark the current sending item as done and clear the sending flag. */
@@ -243,7 +264,14 @@ export function markInputSent(keeperName: string): void {
 
 /** Clear all queued items for a keeper. */
 export function clearInputQueue(keeperName: string): void {
-  _queues.delete(keeperName)
+  const q = _queues.get(keeperName)
+  if (!q) return
+  const uncertain = q.items.filter(item => item.serverAcceptanceUnknown)
+  if (uncertain.length === 0) {
+    _queues.delete(keeperName)
+  } else {
+    q.items = uncertain
+  }
 }
 
 /** Number of items waiting (excluding the one currently being sent). */

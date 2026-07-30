@@ -927,7 +927,7 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
           role: 'assistant',
           source: 'direct_assistant',
           label: keeperName,
-          text: `${keeperName}가 다른 작업을 처리 중이에요. 메시지는 대기열에 추가했습니다.`,
+          text: `${keeperName} 메시지를 대기열에 추가했습니다.`,
           timestamp,
           delivery: 'queued',
           streamState: null,
@@ -1495,16 +1495,34 @@ function fallbackMessageForUserBlocks(blocks: KeeperUserInputBlock[]): string {
     : `[첨부 ${media.length}개]`
 }
 
+type SendKeeperThreadMessageOptions = {
+  attachments?: KeeperConversationAttachment[]
+  clientActionId?: string
+  clientActionIds?: readonly string[]
+  blocks?: ChatBlock[]
+  userBlocks?: KeeperUserInputBlock[]
+} & (
+  | { enqueueOnly: true; receiptId: string }
+  | { enqueueOnly?: false; receiptId?: never }
+)
+
+export class KeeperThreadServerRejectedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'KeeperThreadServerRejectedError'
+  }
+}
+
+export function isKeeperThreadServerRejectedError(
+  error: unknown,
+): error is KeeperThreadServerRejectedError {
+  return error instanceof KeeperThreadServerRejectedError
+}
+
 export async function sendKeeperThreadMessage(
   name: string,
   prompt: string,
-  options: {
-    attachments?: KeeperConversationAttachment[]
-    clientActionId?: string
-    clientActionIds?: readonly string[]
-    blocks?: ChatBlock[]
-    userBlocks?: KeeperUserInputBlock[]
-  } = {},
+  options: SendKeeperThreadMessageOptions = {},
 ): Promise<void> {
   const keeperName = name.trim()
   const attachments =
@@ -1580,8 +1598,12 @@ export async function sendKeeperThreadMessage(
   try {
     finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered' })
 
+    const admissionOptions = options.enqueueOnly
+      ? { enqueueOnly: true as const, receiptId: options.receiptId }
+      : {}
     const outcome = await streamKeeperMessage(keeperName, message, {
       signal: controller.signal,
+      ...admissionOptions,
       attachments,
       userBlocks,
       onEvent: event => {
@@ -1641,7 +1663,7 @@ export async function sendKeeperThreadMessage(
         }
         const error = applyKeeperStreamEvent(keeperName, assistantId, event)
         if (error) {
-          throw new Error(error)
+          throw new KeeperThreadServerRejectedError(error)
         }
         if (event.type === 'CUSTOM' && event.name === 'KEEPER_CHAT_QUEUED' && isRecord(event.value)) {
           const queueReceiptId = asString(event.value.receipt_id, '').trim()
@@ -1753,6 +1775,10 @@ export async function sendKeeperThreadMessage(
   } catch (err) {
     flushPendingKeeperStreamDeltas(keeperName, assistantId)
     if (isAbortError(err)) {
+      if (options.enqueueOnly) {
+        removeThreadEntries(keeperName, [localId, assistantId])
+        throw err
+      }
       const durablePendingRequest = requestId
         ? pendingKeeperChatRequestsForKeeper(keeperName)
           .find(candidate => candidate.requestId === requestId) ?? null

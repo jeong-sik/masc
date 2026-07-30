@@ -4,6 +4,25 @@ open Masc
 module K = Keeper_chat_store
 module KT = Keeper_turn
 
+let direct ?turn_instructions ?surface_context ?(channel = "")
+    ?(channel_user_id = "") ?(channel_user_name = "")
+    ?(channel_workspace_id = "") () =
+  Server_routes_http_keeper_stream.Direct
+    { turn_instructions
+    ; surface_context
+    ; channel
+    ; channel_user_id
+    ; channel_user_name
+    ; channel_workspace_id
+    }
+;;
+
+let direct_context payload =
+  match payload.Server_routes_http_keeper_stream.admission with
+  | Direct context -> context
+  | Durable_enqueue _ -> fail "expected direct admission"
+;;
+
 let rec remove_tree path =
   if Sys.file_exists path then
     if Sys.is_directory path then begin
@@ -267,11 +286,122 @@ let test_parse_keeper_chat_stream_request_accepts_connector_context () =
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok payload ->
-      check string "channel" "discord" payload.channel;
-      check string "user id" "user-42" payload.channel_user_id;
-      check string "user name" "Alice" payload.channel_user_name;
-      check string "workspace id" "workspace-9" payload.channel_workspace_id
+      let context = direct_context payload in
+      check string "channel" "discord" context.channel;
+      check string "user id" "user-42" context.channel_user_id;
+      check string "user name" "Alice" context.channel_user_name;
+      check string "workspace id" "workspace-9" context.channel_workspace_id
   | Error err -> fail ("expected connector context to parse: " ^ err)
+
+let test_parse_keeper_chat_stream_request_accepts_enqueue_receipt () =
+  let body =
+    {|{"name":"luna","message":"hello","enqueue_only":true,"receipt_id":"chatq_00000000-0000-4000-8000-000000000042"}|}
+  in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Error err -> fail ("expected enqueue receipt to parse: " ^ err)
+  | Ok payload ->
+    (match payload.admission with
+     | Direct _ -> fail "expected durable enqueue admission"
+     | Durable_enqueue receipt_id ->
+       check string
+         "producer receipt preserved"
+         "chatq_00000000-0000-4000-8000-000000000042"
+         (Keeper_chat_queue.Receipt_id.to_string receipt_id))
+;;
+
+let test_parse_keeper_chat_stream_request_rejects_enqueue_without_receipt () =
+  let body =
+    {|{"name":"luna","message":"hello","enqueue_only":true}|}
+  in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok _ -> fail "expected enqueue_only without receipt_id to be rejected"
+  | Error err ->
+    check string
+      "durable enqueue requires its idempotency identity"
+      "enqueue_only=true requires receipt_id"
+      err
+;;
+
+let test_parse_keeper_chat_stream_request_rejects_receipt_without_enqueue () =
+  let body =
+    {|{"name":"luna","message":"hello","receipt_id":"chatq_00000000-0000-4000-8000-000000000042"}|}
+  in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok _ -> fail "expected receipt_id without enqueue_only to be rejected"
+  | Error err ->
+    check string
+      "receipt is scoped to durable enqueue"
+      "receipt_id requires enqueue_only=true"
+      err
+;;
+
+let test_parse_keeper_chat_stream_request_rejects_receipt_for_external_speaker () =
+  let body =
+    {|{"name":"luna","message":"hello","enqueue_only":true,"receipt_id":"chatq_00000000-0000-4000-8000-000000000042","channel":"discord","channel_user_id":"user-42","channel_workspace_id":"workspace-9"}|}
+  in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok _ -> fail "expected external speaker receipt_id to be rejected"
+  | Error err ->
+    check string
+      "receipt cannot be ignored by the connector direct path"
+      "enqueue_only does not support connector, turn-instruction, or surface context"
+      err
+;;
+
+let test_parse_keeper_chat_stream_request_rejects_copilot_enqueue_context () =
+  let body =
+    {|{"name":"luna","message":"hello","enqueue_only":true,"receipt_id":"chatq_00000000-0000-4000-8000-000000000042","channel":"copilot","channel_workspace_id":"session-7"}|}
+  in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok _ -> fail "expected copilot context on durable enqueue to be rejected"
+  | Error err ->
+    check string
+      "queue cannot silently discard copilot context"
+      "enqueue_only does not support connector, turn-instruction, or surface context"
+      err
+;;
+
+let test_parse_keeper_chat_stream_request_rejects_malformed_enqueue_context () =
+  let body =
+    {|{"name":"luna","message":"hello","enqueue_only":true,"receipt_id":"chatq_00000000-0000-4000-8000-000000000042","surface_context":42}|}
+  in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok _ -> fail "expected malformed durable context to be rejected"
+  | Error err ->
+    check string
+      "malformed context cannot be collapsed to absence"
+      "surface_context must be a JSON object"
+      err
+;;
+
+let test_parse_keeper_chat_stream_request_rejects_malformed_attachment () =
+  let body =
+    {|{"name":"luna","message":"hello","enqueue_only":true,"receipt_id":"chatq_00000000-0000-4000-8000-000000000042","attachments":[{"id":"att-1","data":42}]}|}
+  in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok _ -> fail "expected malformed durable attachment to be rejected"
+  | Error err ->
+    check string
+      "malformed attachment is not silently dropped"
+      "attachments entry data must be a string"
+      err
+;;
+
+let test_dashboard_queue_source_requires_actor () =
+  let source =
+    `Assoc
+      [ "kind", `String "dashboard"
+      ; "thread_id", `String "thread-1"
+      ]
+  in
+  match Keeper_chat_queue.For_testing.decode_message_source source with
+  | Ok _ -> fail "expected dashboard source without actor to be rejected"
+  | Error err ->
+    check bool
+      "missing actor is a hard decode failure"
+      true
+      (String.length err > 0)
+;;
 
 let test_parse_keeper_chat_stream_request_rejects_removed_timeout () =
   let body = {|{"name":"luna","message":"hello","timeout_sec":1200.5}|} in
@@ -303,11 +433,18 @@ let test_parse_keeper_chat_stream_request_accepts_copilot_context () =
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok payload ->
-      check string "channel" "copilot" payload.channel;
-      check string "workspace id" "session-7" payload.channel_workspace_id;
-      check string "user id optional" "" payload.channel_user_id;
-      check (option string) "turn instructions" (Some "focus on overview") payload.turn_instructions;
-      check bool "surface context absent" true (Option.is_none payload.surface_context)
+      let context = direct_context payload in
+      check string "channel" "copilot" context.channel;
+      check string "workspace id" "session-7" context.channel_workspace_id;
+      check string "user id optional" "" context.channel_user_id;
+      check (option string)
+        "turn instructions"
+        (Some "focus on overview")
+        context.turn_instructions;
+      check bool
+        "surface context absent"
+        true
+        (Option.is_none context.surface_context)
   | Error err -> fail ("expected copilot context to parse: " ^ err)
 
 let test_parse_keeper_chat_stream_request_formats_surface_context () =
@@ -316,9 +453,13 @@ let test_parse_keeper_chat_stream_request_formats_surface_context () =
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok payload ->
-      check string "channel" "copilot" payload.channel;
-      check (option string) "turn instructions" None payload.turn_instructions;
-      check bool "surface context present" true (Option.is_some payload.surface_context)
+      let context = direct_context payload in
+      check string "channel" "copilot" context.channel;
+      check (option string) "turn instructions" None context.turn_instructions;
+      check bool
+        "surface context present"
+        true
+        (Option.is_some context.surface_context)
   | Error err -> fail ("expected surface context to parse: " ^ err)
 
 let test_parse_keeper_chat_stream_request_accepts_attachment_only_user_blocks () =
@@ -639,17 +780,12 @@ let test_keeper_stream_args_preserve_user_blocks () =
   let payload =
     { Server_routes_http_keeper_stream.name = "luna";
       message = "describe this";
+      admission = direct ();
       user_blocks =
         [
           Keeper_multimodal_input.User_text "describe this";
           Keeper_multimodal_input.User_image media;
         ];
-      turn_instructions = None;
-      surface_context = None;
-      channel = "";
-      channel_user_id = "";
-      channel_user_name = "";
-      channel_workspace_id = "";
       attachments =
         [
           {
@@ -2518,13 +2654,9 @@ let test_chat_surface_of_request_labels_copilot_gate () =
   let payload =
     { Server_routes_http_keeper_stream.name = "luna";
       message = "hello";
-      turn_instructions = None;
-      surface_context = None;
+      admission =
+        direct ~channel:"copilot" ~channel_workspace_id:"session-7" ();
       user_blocks = [];
-      channel = "copilot";
-      channel_user_id = "";
-      channel_user_name = "";
-      channel_workspace_id = "session-7";
       attachments = [] }
   in
   let surface = Server_routes_http_keeper_stream.For_testing.chat_surface_of_request payload in
@@ -2541,13 +2673,9 @@ let test_chat_speaker_of_request_copilot_is_owner () =
   let payload =
     { Server_routes_http_keeper_stream.name = "luna";
       message = "hello";
-      turn_instructions = None;
-      surface_context = None;
+      admission =
+        direct ~channel:"copilot" ~channel_workspace_id:"session-7" ();
       user_blocks = [];
-      channel = "copilot";
-      channel_user_id = "";
-      channel_user_name = "";
-      channel_workspace_id = "session-7";
       attachments = [] }
   in
   let speaker = Server_routes_http_keeper_stream.For_testing.chat_speaker_of_request payload in
@@ -2560,13 +2688,14 @@ let test_chat_speaker_of_request_connector_is_external () =
   let payload =
     { Server_routes_http_keeper_stream.name = "luna";
       message = "hello";
-      turn_instructions = None;
-      surface_context = None;
+      admission =
+        direct
+          ~channel:"discord"
+          ~channel_user_id:"user-42"
+          ~channel_user_name:"Alice"
+          ~channel_workspace_id:"workspace-9"
+          ();
       user_blocks = [];
-      channel = "discord";
-      channel_user_id = "user-42";
-      channel_user_name = "Alice";
-      channel_workspace_id = "workspace-9";
       attachments = [] }
   in
   let speaker = Server_routes_http_keeper_stream.For_testing.chat_speaker_of_request payload in
@@ -2833,6 +2962,22 @@ let () =
             test_contextualize_message_includes_channel_metadata;
           test_case "stream request accepts connector context" `Quick
             test_parse_keeper_chat_stream_request_accepts_connector_context;
+          test_case "stream request accepts enqueue receipt" `Quick
+            test_parse_keeper_chat_stream_request_accepts_enqueue_receipt;
+          test_case "stream request rejects enqueue without receipt" `Quick
+            test_parse_keeper_chat_stream_request_rejects_enqueue_without_receipt;
+          test_case "stream request rejects receipt without enqueue" `Quick
+            test_parse_keeper_chat_stream_request_rejects_receipt_without_enqueue;
+          test_case "stream request rejects external speaker receipt" `Quick
+            test_parse_keeper_chat_stream_request_rejects_receipt_for_external_speaker;
+          test_case "stream request rejects copilot enqueue context" `Quick
+            test_parse_keeper_chat_stream_request_rejects_copilot_enqueue_context;
+          test_case "stream request rejects malformed enqueue context" `Quick
+            test_parse_keeper_chat_stream_request_rejects_malformed_enqueue_context;
+          test_case "stream request rejects malformed attachment" `Quick
+            test_parse_keeper_chat_stream_request_rejects_malformed_attachment;
+          test_case "dashboard queue source requires actor" `Quick
+            test_dashboard_queue_source_requires_actor;
           test_case "stream request rejects removed request timeout" `Quick
             test_parse_keeper_chat_stream_request_rejects_removed_timeout;
           test_case "stream request rejects partial connector context" `Quick

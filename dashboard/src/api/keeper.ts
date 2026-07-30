@@ -556,16 +556,34 @@ async function refreshLoopbackDevTokenAfterMismatch(): Promise<boolean> {
   return getStoredToken() !== null
 }
 
-export interface StreamKeeperMessageOptions {
+interface StreamKeeperMessageBaseOptions {
   signal?: AbortSignal
   onEvent: (event: KeeperChatStreamEvent) => void
   attachments?: StreamAttachment[]
   userBlocks?: KeeperUserInputBlock[]
+}
+
+interface StreamKeeperDirectMessageOptions {
   channel?: string
   channelWorkspaceId?: string
   turnInstructions?: string
   surfaceContext?: KeeperStreamSurfaceContext
 }
+
+export type StreamKeeperMessageOptions = StreamKeeperMessageBaseOptions & (
+  | {
+      enqueueOnly: true
+      receiptId: string
+      channel?: never
+      channelWorkspaceId?: never
+      turnInstructions?: never
+      surfaceContext?: never
+    }
+  | (StreamKeeperDirectMessageOptions & {
+      enqueueOnly?: false
+      receiptId?: never
+    })
+)
 
 function streamUserBlockToWire(block: KeeperUserInputBlock): Record<string, unknown> {
   if (block.type === 'text') {
@@ -589,6 +607,8 @@ export async function streamKeeperMessage(
   {
     signal,
     onEvent,
+    enqueueOnly,
+    receiptId,
     attachments,
     userBlocks,
     channel,
@@ -601,6 +621,24 @@ export async function streamKeeperMessage(
     name,
     message,
     direct_reply: true,
+  }
+  if (enqueueOnly) {
+    const normalizedReceiptId = receiptId?.trim() ?? ''
+    if (!normalizedReceiptId) {
+      throw new Error('enqueueOnly requires receiptId')
+    }
+    if (
+      channel !== undefined
+      || channelWorkspaceId !== undefined
+      || turnInstructions !== undefined
+      || surfaceContext !== undefined
+    ) {
+      throw new Error('enqueueOnly does not support connector or turn context')
+    }
+    body.enqueue_only = true
+    body.receipt_id = normalizedReceiptId
+  } else if (receiptId !== undefined) {
+    throw new Error('receiptId requires enqueueOnly')
   }
   if (channel && channel.trim() !== '') {
     body.channel = channel.trim()
@@ -732,6 +770,11 @@ export interface KeeperChatReceipt {
   state: KeeperChatReceiptState
 }
 
+export type KeeperChatReceiptLookup =
+  | { kind: 'present'; receipt: KeeperChatReceipt }
+  | { kind: 'absent' }
+  | { kind: 'unavailable'; error: unknown }
+
 export type KeeperChatRecoveryDecision =
   | { kind: 'requeue_unconfirmed' }
   | {
@@ -760,7 +803,7 @@ export interface KeeperChatPendingAttachment {
 }
 
 export type KeeperChatPendingSource =
-  | { kind: 'dashboard'; threadId: string }
+  | { kind: 'dashboard'; threadId: string; actor: string }
   | { kind: 'discord'; channelId: string; userId: string }
   | {
       kind: 'slack'
@@ -910,19 +953,47 @@ export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
   return { keeperName, receiptId, revision, state }
 }
 
-export async function fetchKeeperChatReceipt(
+async function requestKeeperChatReceipt(
   keeperName: string,
   receiptId: string,
-): Promise<KeeperChatReceipt> {
-  const { response: resp, data } = await fetchJsonWithTimeout(
+): Promise<{ response: Response; data: unknown }> {
+  return fetchJsonWithTimeout(
     `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/receipts/${encodeURIComponent(receiptId)}`,
     { headers: jsonHeaders() },
     DEFAULT_GET_TIMEOUT_MS,
   )
+}
+
+export async function fetchKeeperChatReceipt(
+  keeperName: string,
+  receiptId: string,
+): Promise<KeeperChatReceipt> {
+  const { response: resp, data } = await requestKeeperChatReceipt(keeperName, receiptId)
   if (!resp.ok) {
     throw new Error(`fetchKeeperChatReceipt: HTTP ${resp.status} ${resp.statusText}`)
   }
   return parseKeeperChatReceipt(data)
+}
+
+export async function lookupKeeperChatReceipt(
+  keeperName: string,
+  receiptId: string,
+): Promise<KeeperChatReceiptLookup> {
+  try {
+    const { response, data } = await requestKeeperChatReceipt(keeperName, receiptId)
+    if (response.status === 404) return { kind: 'absent' }
+    if (!response.ok) {
+      return {
+        kind: 'unavailable',
+        error: new Error(
+          `lookupKeeperChatReceipt: HTTP ${response.status} ${response.statusText}`,
+        ),
+      }
+    }
+    return { kind: 'present', receipt: parseKeeperChatReceipt(data) }
+  } catch (error) {
+    return { kind: 'unavailable', error }
+  }
 }
 
 function parsePendingAttachment(value: unknown): KeeperChatPendingAttachment {
@@ -991,7 +1062,11 @@ function parsePendingSource(value: unknown): KeeperChatPendingSource {
   }
   switch (kind) {
     case 'dashboard':
-      return { kind, threadId: requiredString('thread_id') }
+      return {
+        kind,
+        threadId: requiredString('thread_id'),
+        actor: requiredString('actor'),
+      }
     case 'discord':
       return {
         kind,

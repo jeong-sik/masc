@@ -23,42 +23,51 @@ let attachment_to_yojson (att : Keeper_chat_store.attachment) =
 let attachments_to_yojson attachments =
   `List (List.map attachment_to_yojson attachments)
 
+let attachment_string ?(required = false) json key =
+  match Json_util.assoc_member_opt key json with
+  | None | Some `Null ->
+    if required
+    then Error (Printf.sprintf "attachments entry requires %s" key)
+    else Ok ""
+  | Some (`String value) ->
+    let value = if String.equal key "data" then value else String.trim value in
+    if required && String.equal value ""
+    then Error (Printf.sprintf "attachments entry requires non-empty %s" key)
+    else Ok value
+  | Some _ -> Error (Printf.sprintf "attachments entry %s must be a string" key)
+
 let parse_attachment json =
   match json with
   | `Assoc _ ->
-      let id =
-        Json_util.get_string_with_default json ~key:"id" ~default:""
-        |> String.trim
-      in
-      let att_type =
-        Json_util.get_string_with_default json ~key:"type" ~default:""
-        |> String.trim
-      in
-      let name =
-        Json_util.get_string_with_default json ~key:"name" ~default:""
-        |> String.trim
-      in
-      let size =
+    let open Result.Syntax in
+    let* id = attachment_string ~required:true json "id" in
+    let* att_type = attachment_string json "type" in
+    let* name = attachment_string json "name" in
+    let* size =
         match Json_util.assoc_member_opt "size" json with
-        | Some (`Int n) when n >= 0 -> n
-        | _ -> 0
-      in
-      let mime_type =
-        Json_util.get_string_with_default json ~key:"mime_type" ~default:""
-        |> String.trim
-      in
-      let data =
-        Json_util.get_string_with_default json ~key:"data" ~default:""
-      in
-      if id = "" || data = "" then None
-      else
-        Some { Keeper_chat_store.id; att_type; name; size; mime_type; data }
-  | _ -> None
+        | None | Some `Null -> Ok 0
+        | Some (`Int n) when n >= 0 -> Ok n
+        | Some (`Int _) -> Error "attachments entry size must be non-negative"
+        | Some _ -> Error "attachments entry size must be an integer"
+    in
+    let* mime_type = attachment_string json "mime_type" in
+    let* data = attachment_string ~required:true json "data" in
+    Ok { Keeper_chat_store.id; att_type; name; size; mime_type; data }
+  | _ -> Error "attachments entries must be JSON objects"
 
 let parse_attachments json =
   match Json_util.assoc_member_opt "attachments" json with
-  | Some (`List attachments) -> List.filter_map parse_attachment attachments
-  | _ -> []
+  | None | Some `Null -> Ok []
+  | Some (`List attachments) ->
+    let rec loop parsed = function
+      | [] -> Ok (List.rev parsed)
+      | attachment :: rest ->
+        (match parse_attachment attachment with
+         | Ok attachment -> loop (attachment :: parsed) rest
+         | Error _ as error -> error)
+    in
+    loop [] attachments
+  | Some _ -> Error "attachments must be an array"
 
 let user_media_block_to_yojson kind (media : user_media_block) =
   let fields =

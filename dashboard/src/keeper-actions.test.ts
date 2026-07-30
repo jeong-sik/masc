@@ -1068,6 +1068,23 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     return err
   }
 
+  it('removes optimistic transcript rows when durable enqueue acknowledgement is cut', async () => {
+    streamKeeperMessage.mockRejectedValue(abortError())
+
+    const error = await sendKeeperThreadMessage(
+      'echo',
+      'durable draft',
+      {
+        enqueueOnly: true,
+        receiptId: 'chatq_00000000-0000-4000-8000-000000000042',
+      },
+    ).catch(caught => caught)
+
+    expect(error).toBeInstanceOf(Error)
+    expect(error.name).toBe('AbortError')
+    expect(keeperThreads.value.echo ?? []).toEqual([])
+  })
+
   it('does not content-deduplicate repeated same-text sends', async () => {
     streamKeeperMessage
       .mockImplementationOnce(async (
@@ -1838,7 +1855,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       'chatq_00000000-0000-4000-8000-000000000001',
     )
     expect(reply?.delivery).toBe('queued')
-    expect(reply?.text).toContain('메시지는 대기열에 추가했습니다')
+    expect(reply?.text).toContain('메시지를 대기열에 추가했습니다')
     expect(reply?.details).toMatchObject({
       queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000001',
       queueRevision: '4',

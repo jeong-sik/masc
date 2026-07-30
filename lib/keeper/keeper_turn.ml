@@ -251,11 +251,13 @@ let user_oas_blocks_of_args args =
   | Error err -> Error err
   | Ok [] -> Ok None
   | Ok user_blocks ->
-      let attachments = Keeper_multimodal_input.parse_attachments args in
-      match Keeper_multimodal_input.to_oas_blocks ~attachments user_blocks with
-      | Error err -> Error err
-      | Ok [] -> Ok None
-      | Ok blocks -> Ok (Some blocks)
+    (match Keeper_multimodal_input.parse_attachments args with
+     | Error err -> Error err
+     | Ok attachments ->
+       match Keeper_multimodal_input.to_oas_blocks ~attachments user_blocks with
+       | Error err -> Error err
+       | Ok [] -> Ok None
+       | Ok blocks -> Ok (Some blocks))
 
 type invocation_surface =
   | Direct_message

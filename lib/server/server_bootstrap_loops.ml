@@ -202,13 +202,19 @@ let queued_chat_projection (queued_message : Keeper_chat_queue.queued_message) =
    [Server_routes_http_keeper_stream.keeper_chat_stream_request] built from
    an observed Pending [Keeper_chat_queue.queued_message], and a duplicated
    copy would silently drift out of sync with [queued_chat_projection] the
-   next time either changes. *)
+   next time either changes.  [request_id] stays [None]: it is the
+   client-requested identity for a fresh direct submission (threaded to
+   [Keeper_msg_async.submit ?requested_request_id] only on the
+   [Direct_request] branch), while a queued turn's durable identity is its
+   [Queued_receipt] receipt ids — [queued_message] carries no request id to
+   retain. *)
 let payload_of_queued_message ~keeper_name
     (queued_message : Keeper_chat_queue.queued_message) :
     Server_routes_http_keeper_stream.keeper_chat_stream_request =
   let projection = queued_chat_projection queued_message in
   { Server_routes_http_keeper_stream.name = keeper_name
   ; message = queued_message.content
+  ; request_id = None
   ; turn_instructions = None
   ; surface_context = None
   ; channel = projection.payload_channel

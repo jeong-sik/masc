@@ -901,6 +901,40 @@ let () =
     ; tool_surface
     }
   in
+  let reactive_success ~last_outcome ~last_reason =
+    let proactive_rt =
+      { meta.runtime.proactive_rt with last_outcome; last_reason }
+    in
+    let prior = { meta with runtime = { meta.runtime with proactive_rt } } in
+    let observation =
+      Masc.Keeper_deliberation.empty_world_observation ~keeper_name
+    in
+    Masc.Keeper_unified_metrics.update_metrics_from_result
+      prior
+      ~latency_ms:1
+      ~observation
+      ~is_autonomous_turn:false
+      (run_result ())
+  in
+  let updated =
+    reactive_success
+      ~last_outcome:KMC.Proactive_error
+      ~last_reason:"provider failure detail without a classifier prefix"
+  in
+  check
+    "reactive success clears typed proactive error"
+    (String.equal
+       updated.runtime.proactive_rt.last_reason
+       "unified:reactive_success");
+  let error_like_reason = "unified:error:display text is not state" in
+  let updated =
+    reactive_success
+      ~last_outcome:KMC.Proactive_text_response
+      ~last_reason:error_like_reason
+  in
+  check
+    "reactive success ignores error-like reason text"
+    (String.equal updated.runtime.proactive_rt.last_reason error_like_reason);
   let stale_provider_failure =
     Masc.Keeper_registry.Provider_runtime_error
       { code = "api_error_invalid_request"

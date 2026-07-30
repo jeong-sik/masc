@@ -714,45 +714,12 @@ let reprioritize_pending_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
-      ~expected_revision
-      ~source
+      ~selection
       ~urgency
       ()
   =
   commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
-    let observed_revision = State.revision state in
-    if not (Int64.equal expected_revision observed_revision)
-    then
-      Error
-        (Printf.sprintf
-           "event queue revision mismatch (expected=%Ld observed=%Ld)"
-           expected_revision
-           observed_revision)
-    else if Int64.equal observed_revision Int64.max_int
-    then Error "event queue revision exhausted"
-    else
-      let matching, retained =
-        Keeper_event_queue.to_list (State.pending state)
-        |> List.partition (fun candidate ->
-          Keeper_event_queue.stimulus_identity_equal candidate source)
-      in
-      match matching with
-      | [ observed ] when observed = source ->
-        let remaining =
-          List.fold_left
-            Keeper_event_queue.enqueue
-            Keeper_event_queue.empty
-            retained
-        in
-        let updated = { observed with urgency } in
-        let pending =
-          Keeper_event_queue.enqueue remaining updated
-          |> Keeper_event_queue.sort_by_urgency
-        in
-        Ok (State.with_pending pending state, Int64.succ observed_revision)
-      | [] -> Error "event queue source is no longer pending"
-      | [ _ ] -> Error "event queue source snapshot changed"
-      | _ -> Error "event queue source identity is duplicated")
+    State.reprioritize_pending ~selection ~urgency state)
 ;;
 
 type enqueue_stimulus_result =

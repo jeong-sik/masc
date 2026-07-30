@@ -145,9 +145,6 @@ let with_strict_executor f =
     (Domain_pool.executor_pool pool)
     f
 
-(* [claim_single] and [settle_and_project] built and settled leases for the
-   blocks removed above. *)
-
 let project_transition_canonically ~base_path ~keeper_name ~transition_id:_ =
   with_strict_executor
   @@ fun () ->
@@ -159,6 +156,56 @@ let project_transition_canonically ~base_path ~keeper_name ~transition_id:_ =
   | Ok Masc.Keeper_event_queue_recovery.Transition_converged -> Ok ()
   | Ok _ -> Error "canonical transition projection did not converge"
   | Error _ -> Error "canonical transition projection failed"
+
+let load_queue_state ~base_path ~keeper_name =
+  match
+    Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+  with
+  | Ok state -> state
+  | Error detail -> Alcotest.fail detail
+
+let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~owner_nonce ~operation_id =
+  (match
+     Masc.Keeper_registry_event_queue.enqueue_stimulus_durable_result
+       ~base_path
+       from_keeper
+       source
+   with
+   | Masc.Keeper_registry_event_queue.Stimulus_enqueued -> ()
+   | _ -> Alcotest.fail "failed to seed transfer recovery source");
+  let selection =
+    load_queue_state ~base_path ~keeper_name:from_keeper
+    |> Keeper_event_queue_state.select_when
+         ~ready:(Keeper_event_queue.stimulus_identity_equal source)
+    |> function
+    | Some selection -> selection
+    | None -> Alcotest.fail "transfer recovery source was not selectable"
+  in
+  let transfer : Keeper_event_queue_persistence.accepted_transfer =
+    { source = selection.source
+    ; source_incarnation = selection.admitted_revision
+    ; owner_nonce
+    ; operator_operation_id = operation_id
+    ; from_keeper
+    ; to_keeper
+    }
+  in
+  (match
+     Masc.Keeper_registry_event_queue.transfer_pending_accepted_result
+       ~base_path
+       from_keeper
+       ~current_owner_nonce:owner_nonce
+       ~applied_at:101.0
+       ~transfer
+   with
+   | Ok (Masc.Keeper_registry_event_queue.Transition_applied _) -> ()
+   | Ok (Masc.Keeper_registry_event_queue.Transition_already_applied _) ->
+     Alcotest.fail "first transfer recovery transition was already applied"
+   | Ok
+       (Masc.Keeper_registry_event_queue.Transition_committed_followup_failed
+          { detail; _ }) ->
+     Alcotest.fail detail
+   | Error detail -> Alcotest.fail detail)
 
 let () =
   let open Keeper_event_queue in
@@ -829,6 +876,176 @@ let () =
       assert (String.equal second.post_id "bootstrap");
       Keeper_event_queue_persistence.persist ~base_path ~keeper_name rest;
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
+
+  (* --- transfer recovery: the source outbox is not retired until the exact
+         target projection is durable, so a lost HTTP recovery operation is
+         repaired by the canonical maintenance sweep. --- *)
+  let base_path = temp_dir "keeper-event-queue-transfer-recovery" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let from_keeper = "keeper-transfer-recovery-source" in
+      let to_keeper = "keeper-transfer-recovery-target" in
+      stage_transfer
+        ~base_path
+        ~from_keeper
+        ~to_keeper
+        ~source:board_stim
+        ~owner_nonce:23
+        ~operation_id:"recover-transfer-target";
+      Alcotest.(check int)
+        "source outbox awaits target projection"
+        1
+        (load_queue_state ~base_path ~keeper_name:from_keeper
+         |> Keeper_event_queue_state.transition_outbox
+         |> List.length);
+      Alcotest.(check int)
+        "target is empty before recovery"
+        0
+        (registry_snapshot ~base_path to_keeper |> Keeper_event_queue.length);
+      (match
+         project_transition_canonically
+           ~base_path
+           ~keeper_name:from_keeper
+           ~transition_id:"unused"
+       with
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail);
+      let recovered_target = load_queue_state ~base_path ~keeper_name:to_keeper in
+      Alcotest.(check int)
+        "source outbox retires after target projection"
+        0
+        (load_queue_state ~base_path ~keeper_name:from_keeper
+         |> Keeper_event_queue_state.transition_outbox
+         |> List.length);
+      Alcotest.(check int)
+        "target receives the exact transferred source"
+        1
+        (Keeper_event_queue_state.pending recovered_target |> Keeper_event_queue.length);
+      Alcotest.(check int)
+        "target accounts the transfer operation durably"
+        1
+        (Keeper_event_queue_state.accepted_transfer_projections recovered_target
+         |> List.length));
+
+  (* --- transfer recovery failure: target storage failure is typed and keeps
+         the source outbox authoritative for a later retry. --- *)
+  let base_path = temp_dir "keeper-event-queue-transfer-recovery-failure" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let from_keeper = "keeper-transfer-recovery-failure-source" in
+      let to_keeper = "keeper-transfer-recovery-failure-target" in
+      stage_transfer
+        ~base_path
+        ~from_keeper
+        ~to_keeper
+        ~source:board_stim
+        ~owner_nonce:29
+        ~operation_id:"recover-transfer-target-failure";
+      let target_path =
+        Filename.concat
+          (Common.keepers_runtime_dir_of_base ~base_path)
+          to_keeper
+      in
+      write_file target_path "directory blocker";
+      (match
+         with_strict_executor
+         @@ fun () ->
+         Masc.Keeper_event_queue_recovery.project_owner_result
+           ~base_path
+           ~keeper_name:from_keeper
+       with
+       | Error
+           (Masc.Keeper_event_queue_recovery.Target_transfer_projection_failed
+              { target_keeper; detail }) ->
+         Alcotest.(check string)
+           "typed target keeper"
+           to_keeper
+           target_keeper;
+         Alcotest.(check bool)
+           "typed storage detail"
+           true
+           (String.length detail > 0)
+       | Error error ->
+         Alcotest.fail
+           (Masc.Keeper_event_queue_recovery.projection_error_to_string error)
+       | Ok _ -> Alcotest.fail "target storage failure retired the source outbox");
+      Alcotest.(check int)
+        "failed target projection retains source outbox"
+        1
+        (load_queue_state ~base_path ~keeper_name:from_keeper
+         |> Keeper_event_queue_state.transition_outbox
+         |> List.length));
+
+  (* --- a stale recovery worker cannot retire a newer transfer after it
+         projected the target for an earlier transition. --- *)
+  let base_path = temp_dir "keeper-event-queue-transfer-recovery-stale-worker" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let from_keeper = "keeper-transfer-recovery-stale-source" in
+      let to_keeper = "keeper-transfer-recovery-stale-target" in
+      stage_transfer
+        ~base_path
+        ~from_keeper
+        ~to_keeper
+        ~source:board_stim
+        ~owner_nonce:31
+        ~operation_id:"recover-transfer-first";
+      let first_transition_id =
+        match
+          load_queue_state ~base_path ~keeper_name:from_keeper
+          |> Keeper_event_queue_state.transition_outbox
+        with
+        | [ entry ] -> entry.receipt.transition_id
+        | _ -> Alcotest.fail "first transfer did not stage one outbox entry"
+      in
+      (match
+         Masc.Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+           ~base_path
+           ~keeper_name:from_keeper
+           ~expected_transition_id:first_transition_id
+       with
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail);
+      stage_transfer
+        ~base_path
+        ~from_keeper
+        ~to_keeper
+        ~source:bootstrap_stim
+        ~owner_nonce:31
+        ~operation_id:"recover-transfer-second";
+      let second_transition_id =
+        match
+          load_queue_state ~base_path ~keeper_name:from_keeper
+          |> Keeper_event_queue_state.transition_outbox
+        with
+        | [ entry ] -> entry.receipt.transition_id
+        | _ -> Alcotest.fail "second transfer did not stage one outbox entry"
+      in
+      (match
+         Masc.Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+           ~base_path
+           ~keeper_name:from_keeper
+           ~expected_transition_id:first_transition_id
+       with
+       | Error _ -> ()
+       | Ok () -> Alcotest.fail "stale recovery retired the newer transfer");
+      let retained_transition_id =
+        match
+          load_queue_state ~base_path ~keeper_name:from_keeper
+          |> Keeper_event_queue_state.transition_outbox
+        with
+        | [ entry ] -> entry.receipt.transition_id
+        | _ -> Alcotest.fail "stale recovery did not preserve one outbox entry"
+      in
+      Alcotest.(check string)
+        "newer transfer remains authoritative"
+        second_transition_id
+        retained_transition_id);
 
   (* --- current-only hard cut: the retired v12 filename is not a read,
          migration, or overwrite source for the v14 queue. --- *)

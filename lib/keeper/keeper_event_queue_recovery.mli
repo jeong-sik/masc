@@ -2,8 +2,9 @@
 
     The process-local owner claim only suppresses overlapping work in this
     process. It is not a durable lease or a physical exactly-once guarantee.
-    Cross-process and crash retries converge through the reaction ledger's
-    stable per-source event ids, then retire the matching durable outbox. *)
+    Cross-process and crash retries converge accepted-transfer target
+    projections and the reaction ledger's stable per-source event ids before
+    retiring the matching durable outbox. *)
 
 type projection_outcome =
   | No_pending_transition
@@ -14,6 +15,10 @@ type projection_error =
   | Owner_unavailable of Keeper_event_queue_persistence.owner_identity_error
   | Executor_unavailable of Executor_pool_ref.strict_submit_error
   | Outbox_unavailable of string
+  | Target_transfer_projection_failed of
+      { target_keeper : string
+      ; detail : string
+      }
   | Ledger_projection_failed of string
   | Unexpected_projection_failure of Eio.Exn.with_bt
 
@@ -63,8 +68,9 @@ val project_owner_result :
   base_path:string ->
   keeper_name:string ->
   (projection_outcome, projection_error) result
-(** Acquire the process-local owner claim, inspect the durable outbox, and
-    invoke the canonical reaction-ledger projector when work is present.
+(** Acquire the process-local owner claim and inspect the durable outbox.
+    Accepted transfers first converge the exact target projection; only then
+    does the canonical reaction-ledger projector retire the source outbox.
     Durable I/O runs outside the claim-table mutex and without cancellation
     masking, and requires the startup executor pool; it is never run inline.
     [Transition_converged] does not identify which process performed the

@@ -88,6 +88,19 @@ val pending : t -> Keeper_event_queue.t
 val pending_selections : t -> pending_selection list
 (** FIFO pending entries with their exact source incarnation authority. *)
 
+val source_snapshot_ref : Keeper_event_queue.stimulus -> string
+(** Stable SHA-256 reference derived from the exact typed source snapshot. It
+    exposes no raw payload bytes; [source_incarnation] separately identifies a
+    later reinsertion of the same snapshot. *)
+
+val resolve_pending_selection :
+  source_ref:string ->
+  source_incarnation:int64 ->
+  t ->
+  (pending_selection, string) result
+(** Resolve one exact pending source without consulting the global queue
+    revision or queue position. *)
+
 val last_transition : t -> transition_receipt option
 val projected_dispositions : t -> transition_receipt list
 (** Newest-first projected operator dispositions, including
@@ -130,6 +143,14 @@ val ack_pending :
 (** Compare-and-remove the exact immutable selected stimulus snapshot.
     Unrelated queue revisions and enqueues are allowed; a missing, duplicated,
     or changed selected identity fails closed. *)
+
+val reprioritize_pending :
+  selection:pending_selection ->
+  urgency:Keeper_event_queue.urgency ->
+  t ->
+  (t * int64, string) result
+(** Change only the exact selected source priority. A real change receives the
+    next source incarnation; unrelated pending entries retain theirs. *)
 
 val cancel_pending_accepted :
   current_owner_nonce:int ->

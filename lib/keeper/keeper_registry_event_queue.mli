@@ -211,8 +211,7 @@ val snapshot_result :
 val reprioritize_pending_result :
   base_path:string ->
   string ->
-  expected_revision:int64 ->
-  source:Keeper_event_queue.stimulus ->
+  selection:Keeper_event_queue_state.pending_selection ->
   urgency:Keeper_event_queue.urgency ->
   (int64, string) result
 

@@ -362,12 +362,27 @@ let after_ledger_append_hook :
 
 let after_ledger_append_hook_mutex = Stdlib.Mutex.create ()
 
-let project_event_queue_transition_outbox_result ~base_path ~keeper_name =
+let project_event_queue_transition_outbox_result
+      ~base_path
+      ~keeper_name
+      ~expected_transition_id
+  =
   let ( let* ) = Result.bind in
   Keeper_event_queue_persistence.project_transition_outbox_result
     ~append_before_retire:(fun
         (entry : Keeper_event_queue_state.outbox_entry)
       ->
+      let* () =
+        if String.equal expected_transition_id entry.receipt.transition_id
+        then Ok ()
+        else
+          Error
+            (Printf.sprintf
+               "event queue transition changed before ledger projection keeper=%s expected_transition_id=%s current_transition_id=%s"
+               keeper_name
+               expected_transition_id
+               entry.receipt.transition_id)
+      in
       match entry.stimuli with
       | [] ->
         Error

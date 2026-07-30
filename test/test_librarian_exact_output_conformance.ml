@@ -995,7 +995,10 @@ let test_prompt_slice_and_provenance_share_one_input () =
           (fun index -> text_message (Printf.sprintf "retained-%d" index))
       in
       let input : Librarian.input =
-        { trace_id = "trace-prompt-provenance-snapshot"
+        { Librarian.turn_ref =
+            Ids.Turn_ref.make
+              ~trace_id:"trace-prompt-provenance-snapshot"
+              ~absolute_turn:1
         ; messages =
             text_message "dropped-before-prompt"
             :: tool_result_message
@@ -1110,8 +1113,16 @@ let test_episode_publication_failure_is_typed () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun keepers_dir ->
       run_eio (fun ~sw ~net ~clock ->
+        let keeper_id = "librarian-episode-write-failure-keeper" in
+        let keeper_dir =
+          Filename.concat keepers_dir keeper_id
+          |> Keeper_fs.ensure_dir
+        in
+        let episodes_path = Filename.concat keeper_dir "episodes" in
         let server =
           Fixture.start_server
+            ~on_request_before_reply:(fun () ->
+              Unix.chmod episodes_path 0o500)
             ~sw
             ~net
             ~clock
@@ -1122,28 +1133,27 @@ let test_episode_publication_failure_is_typed () =
             ; base_url = server.base_url
             }
           ];
-        let keeper_id = "librarian-episode-write-failure-keeper" in
-        let keeper_dir =
-          Filename.concat keepers_dir keeper_id
-          |> Keeper_fs.ensure_dir
+        let result =
+          Fun.protect
+            ~finally:(fun () ->
+              if Sys.file_exists episodes_path
+              then Unix.chmod episodes_path 0o700)
+            (fun () ->
+               extract_and_append_with_exact_output
+                 ~clock
+                 ~net
+                 ~keeper_id
+                 (librarian_input "trace-episode-write-failure"))
         in
-        Out_channel.with_open_bin
-          (Filename.concat keeper_dir "episodes")
-          (fun channel -> output_string channel "not-a-directory");
-        match
-          extract_and_append_with_exact_output
-            ~clock
-            ~net
-            ~keeper_id
-            (librarian_input "trace-episode-write-failure")
+        match result
         with
         | Error error ->
-          Alcotest.(check bool)
-            "episode failure keeps its publication phase"
-            true
-            (String.starts_with
-               ~prefix:"memory os publication failed phase=episode:"
-               error);
+          if
+            not
+              (String.starts_with
+                 ~prefix:"memory os publication failed phase=episode:"
+                 error)
+          then Alcotest.failf "unexpected episode publication failure: %s" error;
           Alcotest.(check int)
             "facts were already written before the episode failure"
             1

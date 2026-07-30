@@ -25,10 +25,10 @@ const {
   KeeperEventQueueOperationError: class KeeperEventQueueOperationError extends Error {
     readonly operation: {
       action: 'cancel' | 'transfer'
-      expectedRevision: string
-      queueIndex: number
       operationId: string
       reason?: string
+      sourceIncarnation: string
+      sourceRef: string
       targetKeeper?: string
     }
     readonly commitState: 'committed' | 'unknown'
@@ -37,10 +37,10 @@ const {
       message: string,
       operation: {
         action: 'cancel' | 'transfer'
-        expectedRevision: string
-        queueIndex: number
         operationId: string
         reason?: string
+        sourceIncarnation: string
+        sourceRef: string
         targetKeeper?: string
       },
       commitState: 'committed' | 'unknown',
@@ -1017,6 +1017,8 @@ describe('KeeperConversationPanel', () => {
       pending: [{
         queueIndex: 0,
         postId: 'board-post-9',
+        sourceIncarnation: '9',
+        sourceRef: 'a'.repeat(64),
         urgency: 'normal',
         arrivedAt: 41,
         payloadKind: 'board_signal',
@@ -1088,6 +1090,8 @@ describe('KeeperConversationPanel', () => {
       pending: [{
         queueIndex: 0,
         postId: 'board-post-9',
+        sourceIncarnation: '9',
+        sourceRef: 'a'.repeat(64),
         urgency: 'normal',
         arrivedAt: 41,
         payloadKind: 'board_signal',
@@ -1106,9 +1110,9 @@ describe('KeeperConversationPanel', () => {
     }
     const recoveryOperation = {
       action: 'transfer' as const,
-      expectedRevision: '9',
-      queueIndex: 0,
       operationId: 'operation-replay-9',
+      sourceIncarnation: '9',
+      sourceRef: 'a'.repeat(64),
       targetKeeper: 'rondo',
     }
     operateKeeperEventQueue

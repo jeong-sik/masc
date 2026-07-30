@@ -240,14 +240,12 @@ val reprioritize_pending_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  expected_revision:int64 ->
-  source:Keeper_event_queue.stimulus ->
+  selection:Keeper_event_queue_state.pending_selection ->
   urgency:Keeper_event_queue.urgency ->
   unit ->
   (int64, string) result
-(** Revision-fenced priority change for one exact pending stimulus. The
-    immutable source must still be present exactly once; the durable state is
-    rewritten and published atomically. *)
+(** Source-incarnation-fenced priority change. Unrelated queue mutations do
+    not invalidate the selected source. *)
 
 type enqueue_stimulus_result =
   | Enqueued

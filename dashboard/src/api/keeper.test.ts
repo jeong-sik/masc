@@ -505,6 +505,8 @@ describe('Keeper chat durable receipt API', () => {
     const item = (queueIndex: number, postId: string) => ({
       queue_index: queueIndex,
       post_id: postId,
+      source_ref: (queueIndex === 0 ? 'a' : 'b').repeat(64),
+      source_incarnation: String(queueIndex + 17),
       urgency: 'normal',
       arrived_at_unix: 42,
       payload_kind: 'bootstrap',
@@ -514,7 +516,7 @@ describe('Keeper chat durable receipt API', () => {
       postId: string,
       nextAfter: string | null,
     ) => ({
-      schema: 'keeper_event_queue.pending.v1',
+      schema: 'keeper_event_queue.pending.v2',
       ok: true,
       keeper_name: 'sangsu',
       revision: '31',
@@ -536,7 +538,7 @@ describe('Keeper chat durable receipt API', () => {
     const result = await fetchKeeperEventQueuePending('sangsu')
 
     expect(result).toEqual(parseKeeperEventQueuePendingSnapshot({
-      schema: 'keeper_event_queue.pending.v1',
+      schema: 'keeper_event_queue.pending.v2',
       ok: true,
       keeper_name: 'sangsu',
       revision: '31',
@@ -561,7 +563,7 @@ describe('Keeper chat durable receipt API', () => {
 
   it('rejects event pagination revision drift without a fixed retry loop', async () => {
     const envelope = (revision: string, queueIndex: number, nextAfter: string | null) => ({
-      schema: 'keeper_event_queue.pending.v1',
+      schema: 'keeper_event_queue.pending.v2',
       ok: true,
       keeper_name: 'sangsu',
       revision,
@@ -570,6 +572,8 @@ describe('Keeper chat durable receipt API', () => {
       pending: [{
         queue_index: queueIndex,
         post_id: `post-${revision}`,
+        source_ref: 'c'.repeat(64),
+        source_incarnation: revision,
         urgency: 'normal',
         arrived_at_unix: 42,
         payload_kind: 'bootstrap',
@@ -655,8 +659,8 @@ describe('Keeper chat durable receipt API', () => {
 
     await operateKeeperEventQueue('sangsu', {
       action: 'reprioritize',
-      expectedRevision: '7',
-      queueIndex: 0,
+      sourceIncarnation: '7',
+      sourceRef: 'd'.repeat(64),
       urgency: 'immediate',
     })
 
@@ -664,10 +668,10 @@ describe('Keeper chat durable receipt API', () => {
       '/api/v1/keepers/sangsu/events/operator',
       expect.objectContaining({
         body: JSON.stringify({
-          schema: 'keeper_event_queue.operator.request.v1',
+          schema: 'keeper_event_queue.operator.request.v2',
           action: 'reprioritize',
-          expected_revision: '7',
-          queue_index: 0,
+          source_incarnation: '7',
+          source_ref: 'd'.repeat(64),
           urgency: 'immediate',
         }),
       }),
@@ -695,10 +699,10 @@ describe('Keeper chat durable receipt API', () => {
     try {
       await operateKeeperEventQueue('sangsu', {
         action: 'cancel',
-        expectedRevision: '8',
         operationId: 'operation-9',
-        queueIndex: 1,
         reason: 'operator cancellation',
+        sourceIncarnation: '8',
+        sourceRef: 'e'.repeat(64),
       })
     } catch (cause) {
       observed = cause
@@ -709,10 +713,10 @@ describe('Keeper chat durable receipt API', () => {
       commitState: 'committed',
       operation: {
         action: 'cancel',
-        expectedRevision: '8',
         operationId: 'operation-9',
-        queueIndex: 1,
         reason: 'operator cancellation',
+        sourceIncarnation: '8',
+        sourceRef: 'e'.repeat(64),
       },
     })
     expect((observed as Error).message).toContain(
@@ -733,8 +737,8 @@ describe('Keeper chat durable receipt API', () => {
     try {
       await operateKeeperEventQueue('sangsu', {
         action: 'transfer',
-        expectedRevision: '9',
-        queueIndex: 2,
+        sourceIncarnation: '9',
+        sourceRef: 'f'.repeat(64),
         targetKeeper: 'rondo',
       })
     } catch (cause) {
@@ -746,9 +750,9 @@ describe('Keeper chat durable receipt API', () => {
       commitState: 'unknown',
       operation: {
         action: 'transfer',
-        expectedRevision: '9',
         operationId: '00000000-0000-4000-8000-000000000099',
-        queueIndex: 2,
+        sourceIncarnation: '9',
+        sourceRef: 'f'.repeat(64),
         targetKeeper: 'rondo',
       },
     })
@@ -756,10 +760,10 @@ describe('Keeper chat durable receipt API', () => {
       '/api/v1/keepers/sangsu/events/operator',
       expect.objectContaining({
         body: JSON.stringify({
-          schema: 'keeper_event_queue.operator.request.v1',
+          schema: 'keeper_event_queue.operator.request.v2',
           action: 'transfer',
-          expected_revision: '9',
-          queue_index: 2,
+          source_incarnation: '9',
+          source_ref: 'f'.repeat(64),
           operator_operation_id: '00000000-0000-4000-8000-000000000099',
           target_keeper: 'rondo',
         }),

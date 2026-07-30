@@ -1704,7 +1704,18 @@ export async function sendKeeperThreadMessage(
       finalEntry?.delivery === 'queued'
         ? 'queued' as KeeperConversationDelivery
         : 'delivered' as KeeperConversationDelivery
-    if (!finalText && finalDelivery !== 'queued' && !toolCallEnded) {
+    const hasContinuationStatus = (
+      finalEntry?.details?.turnOutcome === 'continuation_checkpoint'
+      && finalEntry.blocks?.some(block => (
+        block.t === 'status' && block.kind === 'continuation_checkpoint'
+      )) === true
+    )
+    if (
+      !finalText
+      && finalDelivery !== 'queued'
+      && !toolCallEnded
+      && !hasContinuationStatus
+    ) {
       finalizeAssistantEntry(keeperName, assistantId, {
         text: EMPTY_VISIBLE_REPLY_TEXT,
         rawText: finalEntry?.rawText || EMPTY_VISIBLE_REPLY_TEXT,

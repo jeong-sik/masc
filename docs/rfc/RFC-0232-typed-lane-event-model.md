@@ -244,6 +244,11 @@ are deleted. New outcome variants (e.g. a future `Deferred`) break the
 persistence site at compile time instead of silently persisting or
 silently vanishing.
 
+The projected checkpoint status is the terminal reply for the current direct
+request. A later autonomous turn is a separate delivery; routing that later
+result back to the originating connector requires the durable channel
+provenance contract in RFC-0320 and is not inferred from this receipt.
+
 This also closes §1.2 structurally: turn completion returns a value the
 persistence layer must consume — "completed a turn but never appended the
 assistant line" stops being expressible as an accidental omission on the

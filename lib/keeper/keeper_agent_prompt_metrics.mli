@@ -32,14 +32,12 @@ type ctx_composition_metrics =
   ; segments : (Turn_record.input_component_id * prompt_segment_metrics) list
   }
 
-(** Return the concrete provider content messages without double-counting
-    OAS's generated [extra_system_context] carrier. [projection_input] is the
-    list OAS passes to the model-input projection; when prompt context exists,
-    its final message carries the same prompt blocks counted separately.
-    Projection-only messages appended after that input (for example typed Gate
-    replay evidence) remain included. If the projection rewrites or reorders
-    its input instead of preserving the exact prefix, return [None] rather than
-    guess an attribution. *)
+(** Return concrete provider content messages only when their provenance is
+    unambiguous. OAS currently gives its generated [extra_system_context]
+    carrier no typed identity, so any turn with prompt context returns [None]
+    instead of removing a message by position. Without prompt context,
+    projection-only messages remain included when the projection preserves the
+    exact input prefix; a rewrite or reorder also returns [None]. *)
 val provider_content_messages :
   prompt_context_present:bool ->
   projection_input:Agent_sdk.Types.message list ->
@@ -66,10 +64,9 @@ val prompt_metrics_to_json : prompt_metrics -> Yojson.Safe.t
 (** [actual_input_tokens] is provider-reported and only known after a response.
     It is not attributed to byte segments. [prompt_blocks] are the final SDK
     turn's exact injected prompt components, [tools] are the canonical schemas,
-    and [input_messages] are the actual model-input projection messages after
-    removing only OAS's prompt-context carrier (whose raw blocks are already in
-    [prompt_blocks]). [attributed_bytes] sums only these concrete content
-    values; provider serialization metadata is not estimated. *)
+    and [input_messages] are the actual model-input projection messages on
+    turns whose provenance is unambiguous. [attributed_bytes] sums only these
+    concrete content values; provider serialization metadata is not estimated. *)
 val build_ctx_composition_metrics :
   prompt_blocks:Turn_record.prompt_block list ->
   tools:Agent_sdk.Tool.t list ->

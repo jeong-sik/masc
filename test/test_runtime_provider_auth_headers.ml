@@ -586,7 +586,6 @@ supports-tool-choice = true
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-response-format-json = true
 supports-structured-output = true
 
@@ -644,7 +643,6 @@ streaming = true
 max-output-tokens = 128000
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-native-streaming = true
 supports-response-format-json = true
 supports-structured-output = false
 

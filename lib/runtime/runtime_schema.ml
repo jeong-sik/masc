@@ -105,7 +105,6 @@ type model_capabilities =
   ; supports_multimodal_inputs : bool
   ; supports_response_format_json : bool
   ; supports_structured_output : bool
-  ; supports_native_streaming : bool
   ; supports_system_prompt : bool
   ; supports_caching : bool
   ; supports_prompt_caching : bool
@@ -135,7 +134,6 @@ let model_capabilities_default =
   ; supports_multimodal_inputs = false
   ; supports_response_format_json = false
   ; supports_structured_output = false
-  ; supports_native_streaming = false
   ; supports_system_prompt = false
   ; supports_caching = false
   ; supports_prompt_caching = false

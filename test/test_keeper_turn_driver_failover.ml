@@ -172,7 +172,6 @@ max_output_tokens = 200000
 supports_tools = true
 supports_reasoning = true
 supports_extended_thinking = true
-supports_native_streaming = true
 |}
 
 let runtime_toml_media_lane_with_global_outside =

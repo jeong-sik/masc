@@ -188,7 +188,6 @@ supports-response-format-json = true
 supports-structured-output = true
 supports-audio-input = true
 supports-video-input = true
-supports-native-streaming = true
 supports-system-prompt = true
 supports-prompt-caching = true
 prompt-cache-alignment = 1024
@@ -300,7 +299,6 @@ id_prefix = "openai_compat/qwen"
 base = "openai_chat"
 max_context_tokens = 128000
 supports_tools = true
-supports_native_streaming = true
 
 [[models]]
 id_prefix = "openai_compat/gpt"
@@ -309,14 +307,12 @@ max_context_tokens = 64000
 supports_tools = true
 supports_response_format_json = true
 supports_structured_output = true
-supports_native_streaming = true
 
 [[models]]
 id_prefix = "openai_compat/small"
 base = "openai_chat"
 max_context_tokens = 32000
 supports_tools = true
-supports_native_streaming = true
 
 [[providers]]
 id = "kimi"
@@ -533,9 +529,9 @@ let test_runtime_inventory_surfaces_declared_model_capabilities () =
       true
       (gpt |> J.member "supports_structured_output" |> J.to_bool);
     Alcotest.(check bool)
-      "top-level native streaming"
+      "top-level streaming"
       true
-      (gpt |> J.member "supports_native_streaming" |> J.to_bool);
+      (gpt |> J.member "streaming" |> J.to_bool);
     Alcotest.(check bool)
       "top-level system prompt"
       true
@@ -1132,7 +1128,6 @@ modality_priority = "visual_first"
 task = "transcription"
 supports_audio_input = true
 supports_video_input = true
-supports_native_streaming = true
 supports_system_prompt = true
 supports_caching = true
 supports_prompt_caching = true
@@ -1152,7 +1147,6 @@ max_output_tokens = 4096
 supports_tools = true
 supports_reasoning = true
 supports_extended_thinking = true
-supports_native_streaming = true
 
 [[models]]
 id_prefix = "reasoning-big-out"
@@ -1163,7 +1157,6 @@ max_output_tokens = 200000
 supports_tools = true
 supports_reasoning = true
 supports_extended_thinking = true
-supports_native_streaming = true
 |}
 ;;
 

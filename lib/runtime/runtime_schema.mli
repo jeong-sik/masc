@@ -88,7 +88,6 @@ type model_capabilities =
   ; supports_multimodal_inputs : bool
   ; supports_response_format_json : bool
   ; supports_structured_output : bool
-  ; supports_native_streaming : bool
   ; supports_system_prompt : bool
   ; supports_caching : bool
   ; supports_prompt_caching : bool

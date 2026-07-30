@@ -367,7 +367,6 @@ supports_tools = true
 supports_tool_choice = true
 supports_response_format_json = false
 supports_structured_output = false
-supports_native_streaming = true
 
 [[targets]]
 id = "deepseek.smoke"

@@ -1597,7 +1597,6 @@ let runtime_declared_model_capabilities_json
       ; "supports_multimodal_inputs", `Bool caps.supports_multimodal_inputs
       ; "supports_response_format_json", `Bool caps.supports_response_format_json
       ; "supports_structured_output", `Bool caps.supports_structured_output
-      ; "supports_native_streaming", `Bool caps.supports_native_streaming
       ; "supports_system_prompt", `Bool caps.supports_system_prompt
       ; "supports_caching", `Bool caps.supports_caching
       ; "supports_prompt_caching", `Bool caps.supports_prompt_caching
@@ -1822,7 +1821,6 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
     ; "supports_response_format_json", `Bool caps.supports_response_format_json
     ; "supports_structured_output", `Bool caps.supports_structured_output
-    ; "supports_native_streaming", `Bool caps.supports_native_streaming
     ; "supports_system_prompt", `Bool caps.supports_system_prompt
     ; "supports_caching", `Bool caps.supports_caching
     ; "supports_prompt_caching", `Bool caps.supports_prompt_caching

@@ -421,6 +421,240 @@ let with_test_env f =
           Server_request_authority.with_current request_authority (fun () ->
             f ~env ~sw ~config)))
 
+let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let require_ok label = function
+    | Ok value -> value
+    | Error detail -> failf "%s: %s" label detail
+  in
+  let require_some label = function
+    | Some value -> value
+    | None -> fail (label ^ ": missing value")
+  in
+  let make_meta ~name ~trace_id ~nonce =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String name
+          ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
+          ; "trace_id", `String trace_id
+          ])
+    with
+    | Error detail -> failf "meta fixture %s: %s" name detail
+    | Ok meta ->
+      { meta with
+        runtime = { meta.runtime with nonce }
+      }
+  in
+  let base_path = config.Workspace.base_path in
+  let source_keeper = "event-operator-source" in
+  let target_keeper = "event-operator-target" in
+  let source_meta =
+    make_meta
+      ~name:source_keeper
+      ~trace_id:"event-operator-source-trace"
+      ~nonce:41
+  in
+  let target_meta =
+    make_meta
+      ~name:target_keeper
+      ~trace_id:"event-operator-target-trace"
+      ~nonce:42
+  in
+  let stimulus post_id arrived_at : Keeper_event_queue.stimulus =
+    { post_id
+    ; urgency = Normal
+    ; arrived_at
+    ; payload = Bootstrap
+    }
+  in
+  let cancelled_source = stimulus "event-operator-cancel" 1.0 in
+  let transferred_source = stimulus "event-operator-transfer" 2.0 in
+  let load_state keeper_name =
+    Keeper_event_queue_persistence.load_state_result
+      ~base_path
+      ~keeper_name
+    |> require_ok ("load event queue state for " ^ keeper_name)
+  in
+  let enqueue source =
+    Keeper_event_queue_persistence.update_result
+      ~base_path
+      ~keeper_name:source_keeper
+      (fun pending -> Keeper_event_queue.enqueue pending source)
+    |> require_ok ("enqueue " ^ source.post_id)
+  in
+  let result_status json =
+    match Yojson.Safe.Util.member "status" json with
+    | `String status -> status
+    | _ -> fail "event operator result omitted status"
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister
+        ~base_path
+        source_keeper;
+      Masc.Keeper_registry.For_testing.unregister
+        ~base_path
+        target_keeper)
+    (fun () ->
+       Keeper_meta_store.write_meta config source_meta
+       |> require_ok "persist source keeper metadata";
+       Keeper_meta_store.write_meta config target_meta
+       |> require_ok "persist target keeper metadata";
+       ignore
+         (Masc.Keeper_registry.For_testing.register
+            ~base_path
+            source_keeper
+            source_meta);
+       enqueue cancelled_source;
+       enqueue transferred_source;
+       let before_cancel = load_state source_keeper in
+       let cancel_selection =
+         Keeper_event_queue_state.pending_selections before_cancel
+         |> List.nth_opt 0
+         |> require_some "select cancellation source"
+       in
+       let cancel_request :
+           Server_dashboard_http_keeper_event_queue_operator_execute.request =
+         Cancel
+           { expected_revision =
+               Keeper_event_queue_state.revision before_cancel
+           ; queue_index = 0
+           ; operator_operation_id = "event-operator-cancel-operation"
+           ; reason = "operator cancelled exact source"
+           }
+       in
+       let cancelled, cancel_result =
+         Server_dashboard_http_keeper_event_queue_operator_execute.run
+           ~config
+           ~keeper_name:source_keeper
+           cancel_request
+         |> require_ok "cancel exact pending source"
+       in
+       check bool
+         "cancellation returns the exact selected source"
+         true
+         (Keeper_event_queue.stimulus_identity_equal
+            cancel_selection.source
+            cancelled);
+       check string "cancellation applies once" "applied"
+         (result_status cancel_result);
+       let after_cancel = load_state source_keeper in
+       (match
+          Keeper_event_queue_state.prior_disposition_by_operation_id
+            "event-operator-cancel-operation"
+            after_cancel
+        with
+        | Some
+            { transition =
+                Keeper_event_queue_state.Cancel_accepted cancellation
+            ; _
+            } ->
+          check int64
+            "cancellation persists the selected source incarnation"
+            cancel_selection.admitted_revision
+            cancellation.source_incarnation
+        | Some _ -> fail "cancellation operation stored the wrong transition"
+        | None -> fail "cancellation operation receipt was not durable");
+       let replayed_cancelled, cancel_replay_result =
+         Server_dashboard_http_keeper_event_queue_operator_execute.run
+           ~config
+           ~keeper_name:source_keeper
+           cancel_request
+         |> require_ok "replay committed cancellation"
+       in
+       check bool
+         "cancellation replay returns its original source"
+         true
+         (Keeper_event_queue.stimulus_identity_equal
+            cancelled_source
+            replayed_cancelled);
+       check string
+         "cancellation replay uses the durable receipt"
+         "already_applied"
+         (result_status cancel_replay_result);
+       let before_transfer = load_state source_keeper in
+       let transfer_selection =
+         Keeper_event_queue_state.pending_selections before_transfer
+         |> List.nth_opt 0
+         |> require_some "select transfer source"
+       in
+       let transfer_request :
+           Server_dashboard_http_keeper_event_queue_operator_execute.request =
+         Transfer
+           { expected_revision =
+               Keeper_event_queue_state.revision before_transfer
+           ; queue_index = 0
+           ; operator_operation_id = "event-operator-transfer-operation"
+           ; target_keeper
+           }
+       in
+       let transferred, transfer_result =
+         Server_dashboard_http_keeper_event_queue_operator_execute.run
+           ~config
+           ~keeper_name:source_keeper
+           transfer_request
+         |> require_ok "transfer exact pending source"
+       in
+       check bool
+         "transfer returns the exact selected source"
+         true
+         (Keeper_event_queue.stimulus_identity_equal
+            transfer_selection.source
+            transferred);
+       check string "transfer applies once" "applied"
+         (result_status transfer_result);
+       let after_transfer = load_state source_keeper in
+       (match
+          Keeper_event_queue_state.prior_disposition_by_operation_id
+            "event-operator-transfer-operation"
+            after_transfer
+        with
+        | Some
+            { transition =
+                Keeper_event_queue_state.Transfer_accepted transfer
+            ; _
+            } ->
+          check int64
+            "transfer persists the selected source incarnation"
+            transfer_selection.admitted_revision
+            transfer.source_incarnation
+        | Some _ -> fail "transfer operation stored the wrong transition"
+        | None -> fail "transfer operation receipt was not durable");
+       let replayed_transferred, transfer_replay_result =
+         Server_dashboard_http_keeper_event_queue_operator_execute.run
+           ~config
+           ~keeper_name:source_keeper
+           transfer_request
+         |> require_ok "replay committed transfer"
+       in
+       check bool
+         "transfer replay returns its original source"
+         true
+         (Keeper_event_queue.stimulus_identity_equal
+            transferred_source
+            replayed_transferred);
+       check string
+         "transfer replay uses the durable receipt"
+         "already_applied"
+         (result_status transfer_replay_result);
+       let target_pending =
+         load_state target_keeper
+         |> Keeper_event_queue_state.pending
+         |> Keeper_event_queue.to_list
+       in
+       check int "transfer replay projects one target source" 1
+         (List.length target_pending);
+       check bool
+         "target projection contains the exact transferred source"
+         true
+         (match target_pending with
+          | [ source ] ->
+            Keeper_event_queue.stimulus_identity_equal
+              transferred_source
+              source
+          | [] | _ :: _ :: _ -> false))
+
 let test_run_dashboard_compute_without_pool_stays_in_current_domain () =
   with_test_env @@ fun ~env ~sw ~config ->
   let caller_domain = Domain.self () in
@@ -2747,6 +2981,8 @@ let () =
             test_keeper_chat_receipt_route_and_json;
           test_case "keeper chat recovery route is exact" `Quick
             test_keeper_chat_recovery_route_is_exact;
+          test_case "event operator keeps v14 source fences across replay" `Quick
+            test_event_operator_uses_v14_source_incarnation_and_receipt_replay;
           test_case "observation metadata does not override terminal contract" `Quick
             test_composite_blocked_uses_terminal_contract_not_observational_metadata;
         ] );

@@ -1,9 +1,9 @@
 (** Explicit, bounded model read for content-addressed Tool results.
 
-    A sha256 is the existing public-read artifact capability used by the HTTP
-    endpoint. The handler introduces no second ownership or run-scope Gate.
-    It returns one typed JSON page and never restores the full artifact into
-    model history. *)
+    A sha256 is the content identifier used by the HTTP endpoint. The handler
+    introduces no second ownership or run-scope Gate; HTTP authorization
+    remains the server boundary. It returns one typed JSON page and never
+    restores the full artifact into model history. *)
 
 val default_max_bytes : int
 val maximum_max_bytes : int

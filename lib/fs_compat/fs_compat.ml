@@ -752,6 +752,31 @@ let same_file_snapshot (left : Unix.stats) (right : Unix.stats) =
   && left.st_ctime = right.st_ctime
 ;;
 
+type owned_regular_file_snapshot =
+  { device : int
+  ; inode : int
+  ; file_size : int
+  ; modified_at : float
+  ; changed_at : float
+  }
+
+let owned_regular_file_snapshot_of_stats (stats : Unix.stats) =
+  { device = stats.st_dev
+  ; inode = stats.st_ino
+  ; file_size = stats.st_size
+  ; modified_at = stats.st_mtime
+  ; changed_at = stats.st_ctime
+  }
+;;
+
+let equal_owned_regular_file_snapshot left right =
+  Int.equal left.device right.device
+  && Int.equal left.inode right.inode
+  && Int.equal left.file_size right.file_size
+  && Float.equal left.modified_at right.modified_at
+  && Float.equal left.changed_at right.changed_at
+;;
+
 let owned_file_error failure = Error { failure; close_failure = None }
 
 let owned_file_operation_error ~path operation cause =
@@ -888,25 +913,44 @@ let load_owned_regular_file_blocking_with
              Error { error with close_failure = Some cause })))
 ;;
 
-let load_owned_regular_file_blocking ~ownership_root path =
+type owned_regular_file_contents =
+  { content : string
+  ; snapshot : owned_regular_file_snapshot
+  }
+
+let load_owned_regular_file_with_snapshot_blocking ~ownership_root path =
   load_owned_regular_file_blocking_with
     ~ownership_root
     ~read_descriptor:(fun ~path fd descriptor ->
-      read_exact_file_descriptor ~path fd descriptor.Unix.st_size)
+      match read_exact_file_descriptor ~path fd descriptor.Unix.st_size with
+      | Error _ as error -> error
+      | Ok content ->
+        Ok
+          { content
+          ; snapshot = owned_regular_file_snapshot_of_stats descriptor
+          })
     path
 ;;
 
-let load_owned_regular_file ~ownership_root path =
+let load_owned_regular_file_with_snapshot ~ownership_root path =
   with_fs_or_fallback
     ~path
-    ~fallback:(fun () -> load_owned_regular_file_blocking ~ownership_root path)
+    ~fallback:(fun () ->
+      load_owned_regular_file_with_snapshot_blocking ~ownership_root path)
     (fun _fs ->
        let result =
          Eio_unix.run_in_systhread (fun () ->
-           load_owned_regular_file_blocking ~ownership_root path)
+           load_owned_regular_file_with_snapshot_blocking
+             ~ownership_root
+             path)
        in
        Eio.Fiber.check ();
        result)
+;;
+
+let load_owned_regular_file ~ownership_root path =
+  load_owned_regular_file_with_snapshot ~ownership_root path
+  |> Result.map (Option.map (fun contents -> contents.content))
 ;;
 
 type owned_regular_file_prefix =
@@ -950,6 +994,62 @@ let load_owned_regular_file_prefix ~ownership_root ~max_bytes path =
          Eio_unix.run_in_systhread (fun () ->
            load_owned_regular_file_prefix_blocking
              ~ownership_root ~max_bytes path)
+       in
+       Eio.Fiber.check ();
+       result)
+;;
+
+type owned_regular_file_range =
+  { content : string
+  ; snapshot : owned_regular_file_snapshot
+  }
+
+let load_owned_regular_file_range_blocking
+    ~ownership_root ~offset ~max_bytes path =
+  if offset < 0 || max_bytes < 0
+  then
+    owned_file_operation_error
+      ~path
+      Read_contents
+      (Invalid_argument "offset and max_bytes must be non-negative")
+  else
+    load_owned_regular_file_blocking_with
+      ~ownership_root
+      ~read_descriptor:(fun ~path fd descriptor ->
+        let available = max 0 (descriptor.Unix.st_size - offset) in
+        let length = min max_bytes available in
+        try
+          let positioned = Unix.lseek fd offset Unix.SEEK_SET in
+          if positioned <> offset
+          then owned_file_error (Filesystem_identity_changed { path })
+          else
+            match read_exact_file_descriptor ~path fd length with
+            | Error _ as error -> error
+            | Ok content ->
+              Ok
+                { content
+                ; snapshot =
+                    owned_regular_file_snapshot_of_stats descriptor
+                }
+        with
+        | Eio.Cancel.Cancelled _ as cancellation ->
+          reraise_current cancellation
+        | cause -> owned_file_operation_error ~path Read_contents cause)
+      path
+;;
+
+let load_owned_regular_file_range
+    ~ownership_root ~offset ~max_bytes path =
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () ->
+      load_owned_regular_file_range_blocking
+        ~ownership_root ~offset ~max_bytes path)
+    (fun _fs ->
+       let result =
+         Eio_unix.run_in_systhread (fun () ->
+           load_owned_regular_file_range_blocking
+             ~ownership_root ~offset ~max_bytes path)
        in
        Eio.Fiber.check ();
        result)

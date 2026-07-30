@@ -3,6 +3,70 @@ type t =
   ; ownership_root : string
   }
 
+module Validated_file_map = Map.Make (String)
+
+type validated_file =
+  { snapshot : Fs_compat.owned_regular_file_snapshot
+  ; validated_at : int
+  }
+
+let validated_file_snapshots
+    : validated_file Validated_file_map.t Atomic.t
+  =
+  Atomic.make Validated_file_map.empty
+;;
+
+let validated_file_sequence = Atomic.make 0
+(* This is only a digest-validation accelerator. Eviction never weakens
+   integrity: the next range read performs a whole-file validation again. *)
+let validated_file_cache_capacity = 1_024
+
+let evict_oldest_validated_file map =
+  if Validated_file_map.cardinal map <= validated_file_cache_capacity
+  then map
+  else
+    let oldest =
+      Validated_file_map.fold
+        (fun path entry oldest ->
+           match oldest with
+           | None -> Some (path, entry.validated_at)
+           | Some (_, oldest_at) when entry.validated_at < oldest_at ->
+             Some (path, entry.validated_at)
+           | Some _ -> oldest)
+        map
+        None
+    in
+    match oldest with
+    | None -> map
+    | Some (path, _) -> Validated_file_map.remove path map
+;;
+
+let cache_validated_snapshot path snapshot =
+  let validated_at = Atomic.fetch_and_add validated_file_sequence 1 in
+  let rec loop () =
+    let current = Atomic.get validated_file_snapshots in
+    let updated =
+      Validated_file_map.add path { snapshot; validated_at } current
+      |> evict_oldest_validated_file
+    in
+    if not (Atomic.compare_and_set validated_file_snapshots current updated)
+    then loop ()
+  in
+  loop ()
+;;
+
+let remove_validated_snapshot path =
+  let rec loop () =
+    let current = Atomic.get validated_file_snapshots in
+    let updated = Validated_file_map.remove path current in
+    if updated == current
+    then ()
+    else if not (Atomic.compare_and_set validated_file_snapshots current updated)
+    then loop ()
+  in
+  loop ()
+;;
+
 (* sha256 validation SSOT lives in {!Tool_output} (the artifact-ref owner);
    re-exported here so the store boundary keeps its historical surface. *)
 type invalid_sha256 = Tool_output.invalid_sha256 =
@@ -77,17 +141,90 @@ let fetch t ~sha256 =
   | Ok () ->
       let path = shard_path t sha256 in
       (match
-         Fs_compat.load_owned_regular_file
+         Fs_compat.load_owned_regular_file_with_snapshot
            ~ownership_root:t.ownership_root
            path
        with
        | Error error -> Error (Owned_read_failed error)
-       | Ok None -> Ok None
-       | Ok (Some bytes) ->
+       | Ok None ->
+         remove_validated_snapshot path;
+         Ok None
+       | Ok (Some { content = bytes; snapshot }) ->
          let actual = Digestif.SHA256.(digest_string bytes |> to_hex) in
          if String.equal sha256 actual
-         then Ok (Some bytes)
-         else Error (Integrity_mismatch { path; expected = sha256; actual }))
+         then (
+           cache_validated_snapshot path snapshot;
+           Ok (Some bytes))
+         else (
+           remove_validated_snapshot path;
+           Error (Integrity_mismatch { path; expected = sha256; actual })))
+
+type range =
+  { content : string
+  ; total_bytes : int
+  }
+
+let range_of_bytes ~offset ~max_bytes bytes =
+  let total_bytes = String.length bytes in
+  let available = max 0 (total_bytes - offset) in
+  let length = min max_bytes available in
+  let content =
+    if offset > total_bytes
+    then ""
+    else String.sub bytes offset length
+  in
+  { content; total_bytes }
+;;
+
+let fetch_range t ~sha256 ~offset ~max_bytes =
+  match validate_sha256 sha256 with
+  | Error invalid -> Error (Invalid_sha256 invalid)
+  | Ok () when offset < 0 || max_bytes < 0 ->
+    Error
+      (Owned_read_failed
+         { failure =
+             Fs_compat.Owned_file_operation_failed
+               { path = shard_path t sha256
+               ; operation = Fs_compat.Read_contents
+               ; cause =
+                   Invalid_argument
+                     "offset and max_bytes must be non-negative"
+               }
+         ; close_failure = None
+         })
+  | Ok () ->
+    let path = shard_path t sha256 in
+    let cached =
+      Validated_file_map.find_opt path (Atomic.get validated_file_snapshots)
+    in
+    let validate_whole_snapshot () =
+      match fetch t ~sha256 with
+      | Error _ as error -> error
+      | Ok None -> Ok None
+      | Ok (Some bytes) ->
+        Ok (Some (range_of_bytes ~offset ~max_bytes bytes))
+    in
+    (match cached with
+     | None -> validate_whole_snapshot ()
+     | Some { snapshot = validated_snapshot; _ } ->
+       (match
+          Fs_compat.load_owned_regular_file_range
+            ~ownership_root:t.ownership_root
+            ~offset
+            ~max_bytes
+            path
+        with
+        | Error error -> Error (Owned_read_failed error)
+        | Ok None ->
+          remove_validated_snapshot path;
+          Ok None
+        | Ok (Some { content; snapshot })
+          when Fs_compat.equal_owned_regular_file_snapshot
+                 validated_snapshot
+                 snapshot ->
+          Ok (Some { content; total_bytes = snapshot.file_size })
+        | Ok (Some _) -> validate_whole_snapshot ()))
+;;
 
 let put_with_atomic_replace ~atomic_replace ~operation t ~bytes ~mime =
   let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
@@ -100,6 +237,7 @@ let put_with_atomic_replace ~atomic_replace ~operation t ~bytes ~mime =
    | Ok () -> ()
    | Error msg ->
        raise (Sys_error (Printf.sprintf "tool_blob_store.%s: %s" operation msg)));
+  remove_validated_snapshot path;
   (* A digestif-produced sha256 and a byte length are always valid; an empty
      [mime] is the only reachable rejection and is a caller bug, raised
      visibly rather than stored. *)
@@ -255,6 +393,7 @@ let delete t ~sha256 =
       }
   | Ok () ->
     let path = shard_path t sha256 in
+    remove_validated_snapshot path;
     let parent = Filename.dirname path in
     (match
        Fs_compat.inspect_owned_directory_chain

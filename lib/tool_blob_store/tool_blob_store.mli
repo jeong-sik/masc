@@ -65,6 +65,25 @@ val fetch : t -> sha256:string -> (string option, fetch_error) result
     parent chain and [lstat]/[fstat] identity before and after descriptor I/O.
     Read and content-integrity failures remain typed. Cancellation propagates. *)
 
+type range =
+  { content : string
+  ; total_bytes : int
+  }
+
+val fetch_range :
+  t ->
+  sha256:string ->
+  offset:int ->
+  max_bytes:int ->
+  (range option, fetch_error) result
+(** Read at most [max_bytes] from [offset]. The first uncached read performs a
+    whole-file sha256 validation; later pages whose owned descriptor snapshot
+    is unchanged use bounded range I/O. The validation cache is bounded, so an
+    evicted or changed snapshot is revalidated before any bytes are returned,
+    preserving {!fetch}'s content-address integrity without hashing the whole
+    artifact on every page. Bounds and filesystem failures remain typed.
+    Cancellation propagates. *)
+
 val list_all : t -> string list
 (** List all sha256 hashes currently in the store. O(n) in store size.
     Mainly used by tests. Production retention is owned exclusively by

@@ -219,6 +219,32 @@ val load_owned_regular_file
   -> string
   -> (string option, owned_regular_file_read_error) result
 
+type owned_regular_file_snapshot =
+  { device : int
+  ; inode : int
+  ; file_size : int
+  ; modified_at : float
+  ; changed_at : float
+  }
+
+val equal_owned_regular_file_snapshot
+  :  owned_regular_file_snapshot
+  -> owned_regular_file_snapshot
+  -> bool
+
+type owned_regular_file_contents =
+  { content : string
+  ; snapshot : owned_regular_file_snapshot
+  }
+
+val load_owned_regular_file_with_snapshot
+  :  ownership_root:string
+  -> string
+  -> (owned_regular_file_contents option, owned_regular_file_read_error) result
+(** Whole-file owned read plus the exact descriptor snapshot validated before
+    and after I/O. Consumers may cache a content digest against [snapshot] and
+    reuse it only while a later owned read reports an equal snapshot. *)
+
 type owned_regular_file_prefix =
   { content : string
   ; file_size : int
@@ -234,6 +260,23 @@ val load_owned_regular_file_prefix
     same no-follow parent-chain, descriptor identity, regular-file, and
     changed-during-read checks, but reads at most [max_bytes]. The existing
     whole-file API and its callers are unchanged. *)
+
+type owned_regular_file_range =
+  { content : string
+  ; snapshot : owned_regular_file_snapshot
+  }
+
+val load_owned_regular_file_range
+  :  ownership_root:string
+  -> offset:int
+  -> max_bytes:int
+  -> string
+  -> (owned_regular_file_range option, owned_regular_file_read_error) result
+(** Bounded random-access sibling of {!load_owned_regular_file}. It preserves
+    the same owned path and stable-descriptor checks while reading at most
+    [max_bytes] from [offset]. The returned snapshot is the descriptor
+    snapshot validated across that exact read. Negative bounds return a typed
+    read error; an offset at or beyond EOF returns empty [content]. *)
 
 val owned_regular_file_read_error_to_string
   :  owned_regular_file_read_error

@@ -91,8 +91,7 @@ let valid_utf8_prefix_length source =
   loop 0
 ;;
 
-let page (request : request) bytes =
-  let total_bytes = String.length bytes in
+let page_of_slice (request : request) ~total_bytes requested_bytes =
   if request.offset > total_bytes
   then
     Error
@@ -101,9 +100,7 @@ let page (request : request) bytes =
          request.offset
          total_bytes)
   else
-    let available = total_bytes - request.offset in
-    let requested_length = min request.max_bytes available in
-    let requested_bytes = String.sub bytes request.offset requested_length in
+    let requested_length = String.length requested_bytes in
     let utf8_prefix_length = valid_utf8_prefix_length requested_bytes in
     let consumed_bytes, encoding, content =
       if requested_length = 0
@@ -125,6 +122,18 @@ let page (request : request) bytes =
       ; encoding
       ; content
       }
+;;
+
+let page (request : request) bytes =
+  let total_bytes = String.length bytes in
+  let available = max 0 (total_bytes - request.offset) in
+  let requested_length = min request.max_bytes available in
+  let requested_bytes =
+    if request.offset > total_bytes
+    then ""
+    else String.sub bytes request.offset requested_length
+  in
+  page_of_slice request ~total_bytes requested_bytes
 ;;
 
 let page_to_json page =
@@ -149,12 +158,18 @@ let handle ~base_path ~args =
   | Error message -> invalid_input message
   | Ok request ->
     let store = Tool_blob_store.create ~base_path in
-    (match Tool_blob_store.fetch store ~sha256:request.sha256 with
+    (match
+       Tool_blob_store.fetch_range
+         store
+         ~sha256:request.sha256
+         ~offset:request.offset
+         ~max_bytes:request.max_bytes
+     with
      | Error error ->
        storage_failure (Tool_blob_store.fetch_error_to_string error)
      | Ok None -> invalid_input "artifact does not exist"
-     | Ok (Some bytes) ->
-       (match page request bytes with
+     | Ok (Some { content; total_bytes }) ->
+       (match page_of_slice request ~total_bytes content with
         | Error message -> invalid_input message
         | Ok page -> Keeper_tool_execution.success_data (page_to_json page)))
 ;;

@@ -230,9 +230,35 @@ let test_full_flow_externalize_reference_serve () =
       Alcotest.(check string) "page content"
         (String.make 128 'x')
         Yojson.Safe.Util.(read_json |> member "content" |> to_string);
+      let tail_offset = String.length payload - 64 in
+      let tail_result =
+        R.handle
+          ~base_path:dir
+          ~args:
+            (`Assoc
+               [ "sha256", `String sha256
+               ; "offset", `Int tail_offset
+               ; "max_bytes", `Int 128
+               ])
+      in
+      let tail_json = Yojson.Safe.from_string tail_result.raw_output in
+      Alcotest.(check int) "tail page starts at requested offset"
+        tail_offset
+        Yojson.Safe.Util.(tail_json |> member "offset" |> to_int);
+      Alcotest.(check int) "tail page stops at total bytes"
+        (String.length payload)
+        Yojson.Safe.Util.(tail_json |> member "next_offset" |> to_int);
+      Alcotest.(check bool) "tail page reaches EOF"
+        true
+        Yojson.Safe.Util.(tail_json |> member "eof" |> to_bool);
+      Alcotest.(check string) "tail page returns only remaining bytes"
+        (String.make 64 'x')
+        Yojson.Safe.Util.(tail_json |> member "content" |> to_string);
 
-      (* A sha256 is the same public-read capability used by the HTTP route;
-         the model tool deliberately adds no run-local claim or Gate. *)
+      (* A sha256 is the same content address used by the HTTP route; the model
+         tool deliberately adds no run-local claim or Gate because it is
+         already scoped to the Keeper's explicit Workspace base path. HTTP
+         strict mode independently retains its read-auth boundary. *)
       let second_marker =
         project_completed_exn
           ~base_path:dir

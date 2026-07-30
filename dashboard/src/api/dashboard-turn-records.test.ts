@@ -18,6 +18,7 @@ function entry(overrides: Record<string, unknown> = {}) {
       ts: 1_700_000_000,
       execution_ids: ['exec-1'],
       blocks: [],
+      input_components: [],
       input_tokens: 1200,
       output_tokens: 340,
       ...overrides,
@@ -74,5 +75,43 @@ describe('keeper turn record cache token counts', () => {
 
     expect(record?.cache_read_input_tokens).toBeUndefined()
     expect(record?.cache_creation_input_tokens).toBeUndefined()
+  })
+})
+
+describe('keeper turn record final input composition', () => {
+  it('carries typed content components through the decoder', async () => {
+    getMock.mockResolvedValue(payload(entry({
+      input_components: [
+        { component: 'prompt.persona', bytes: 1200 },
+        { component: 'tool_schemas', bytes: 64000 },
+        { component: 'message_tool_result', bytes: 2800 },
+      ],
+    })))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response.entries[0]?.record.input_components).toEqual([
+      { component: 'prompt.persona', bytes: 1200 },
+      { component: 'tool_schemas', bytes: 64000 },
+      { component: 'message_tool_result', bytes: 2800 },
+    ])
+  })
+
+  it('rejects rows without the current composition contract', async () => {
+    getMock.mockResolvedValue(payload(entry({ input_components: undefined })))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response.entries).toHaveLength(0)
+  })
+
+  it('rejects unknown component ids instead of inventing a bucket', async () => {
+    getMock.mockResolvedValue(payload(entry({
+      input_components: [{ component: 'history_guess', bytes: 1 }],
+    })))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response.entries).toHaveLength(0)
   })
 })

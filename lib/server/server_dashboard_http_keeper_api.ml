@@ -164,54 +164,13 @@ let memory_os_fact_is_current ~now (fact : Keeper_memory_os_types.fact) =
   | Some ts -> ts >= now
 ;;
 
-let memory_os_episode_is_current ~now (episode : Keeper_memory_os_types.episode) =
-  match episode.valid_until with
-  | None -> true
-  | Some ts -> ts >= now
-;;
-
-let memory_os_count pred xs =
-  List.fold_left (fun count value -> if pred value then count + 1 else count) 0 xs
-;;
-
 let keeper_chat_allowed_trace_ids (m : Keeper_meta_contract.keeper_meta) =
   Keeper_id.Trace_id.to_string m.runtime.trace_id :: m.runtime.trace_history
   |> Json_util.dedupe_keep_order
 ;;
 
-let memory_os_read_episodes ~keeper_id =
-  try Keeper_memory_os_io.read_episodes_all ~keeper_id, None with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> [], Some (Printexc.to_string exn)
-;;
-
-let memory_os_read_facts ~keeper_id =
-  try Keeper_memory_os_io.read_facts_all ~keeper_id, None with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> [], Some (Printexc.to_string exn)
-;;
-
-let memory_os_episode_json ~now (episode : Keeper_memory_os_types.episode) =
-  `Assoc
-    [ "trace_id", `String episode.trace_id
-    ; "generation", `Int episode.generation
-    ; "created_at", `Float episode.created_at
-    ; "created_at_iso", `String (Masc_domain.iso8601_of_unix_seconds episode.created_at)
-    ; "valid_until", json_float_opt episode.valid_until
-    ; "valid_until_iso", json_time_iso_opt episode.valid_until
-    ; "current", `Bool (memory_os_episode_is_current ~now episode)
-    ; "terminal_marker", json_string_opt episode.terminal_marker
-    ; "claim_count", `Int (List.length episode.claims)
-    ; ( "source_turn_range"
-      , match episode.source_turn_range with
-        | Some (lo, hi) -> `Assoc [ "lo", `Int lo; "hi", `Int hi ]
-        | None -> `Null )
-    ; "summary", `String episode.episode_summary
-    ]
-;;
-
-(* RFC-keeper-memory-panel-real-data §4a: surface the fact rows the panel renders, mirroring
-   [memory_os_episode_json]. Serializes ONLY the existing [fact] structure —
+(* RFC-keeper-memory-panel-real-data §4a: surface the fact rows the panel renders.
+   Serializes ONLY the current [fact] structure —
    claim, typed category, provenance, the three timestamps, and current-ness —
    never the deleted score fields (confidence / access_count / last_accessed,
    RFC-0247): they are absent from the [fact] record, so the type system makes
@@ -222,7 +181,8 @@ let memory_os_episode_json ~now (episode : Keeper_memory_os_types.episode) =
    than Memory schema fields. *)
 let memory_os_fact_json ~now (fact : Keeper_memory_os_types.fact) =
   `Assoc
-    ([ "claim", `String fact.claim
+    ([ "memory_id", `String (Keeper_memory_os_types.claim_identity fact)
+     ; "claim", `String fact.claim
      ; "category", `String (Keeper_memory_os_types.category_to_string fact.category)
      ; "source", Keeper_memory_os_types.provenance_event_to_json fact.source
      ; "first_seen", `Float fact.first_seen
@@ -238,80 +198,68 @@ let memory_os_fact_json ~now (fact : Keeper_memory_os_types.fact) =
         | None -> []))
 ;;
 
-type memory_os_selection_policy =
-  { keeper_scope : string
-  ; facts_source : string
-  ; episodes_source : string
-  ; category_source : string
-  ; claim_kind_source : string
-  ; recall_block : string
-  ; prompt_record : string
-  }
-
-let memory_os_selection_policy_json (policy : memory_os_selection_policy) =
+let memory_os_change_json ~now (change : Keeper_memory_os_current.change) =
   `Assoc
-    [ "keeper_scope", `String policy.keeper_scope
-    ; "facts_source", `String policy.facts_source
-    ; "episodes_source", `String policy.episodes_source
-    ; "category_source", `String policy.category_source
-    ; "claim_kind_source", `String policy.claim_kind_source
-    ; "recall_block", `String policy.recall_block
-    ; "prompt_record", `String policy.prompt_record
+    [ "added", `List (List.map (memory_os_fact_json ~now) change.added)
+    ; "removed", `List (List.map (memory_os_fact_json ~now) change.removed)
+    ; "retained", `Int change.retained
     ]
-;;
-
-let memory_os_selection_policy ~keeper_id =
-  { keeper_scope = keeper_id
-  ; facts_source = "Keeper_memory_os_io.read_facts_all"
-  ; episodes_source = "Keeper_memory_os_io.read_episodes_all"
-  ; category_source = "Keeper_memory_os_types.category_to_string"
-  ; claim_kind_source = "Keeper_memory_os_types.claim_kind_to_string"
-  ; recall_block = "Keeper_memory_os_recall.render_if_enabled"
-  ; prompt_record = "Keeper_run_tools_hooks.record_block Prompt_block_id.Memory_os_recall"
-  }
 ;;
 
 let memory_os_dashboard_json ~keeper_id =
   let now = Time_compat.now () in
-  let episodes, episode_error = memory_os_read_episodes ~keeper_id in
-  let facts, fact_error = memory_os_read_facts ~keeper_id in
-  let facts_path = Keeper_memory_os_io.facts_path ~keeper_id in
-  let keepers_dir = Filename.dirname facts_path in
-  let episodes_store = Filename.concat (Filename.concat keepers_dir keeper_id) "episodes" in
-  let current_episodes = memory_os_count (memory_os_episode_is_current ~now) episodes in
-  let current_facts = memory_os_count (memory_os_fact_is_current ~now) facts in
-  let terminal_marker_count =
-    memory_os_count
-      (fun (episode : Keeper_memory_os_types.episode) ->
-         Option.is_some episode.terminal_marker)
-      episodes
+  let snapshot, read_error =
+    match Keeper_memory_os_current.read ~keeper_id with
+    | Ok snapshot -> snapshot, None
+    | Error message -> None, Some message
+  in
+  let facts, change, revision, updated_at, summary, source =
+    match snapshot with
+    | None ->
+      ( []
+      , `Assoc [ "added", `List []; "removed", `List []; "retained", `Int 0 ]
+      , 0
+      , None
+      , None
+      , `Null )
+    | Some snapshot ->
+      let source = snapshot.Keeper_memory_os_current.source in
+      ( snapshot.facts
+      , memory_os_change_json ~now snapshot.change
+      , snapshot.revision
+      , Some snapshot.updated_at
+      , Some snapshot.summary
+      , `Assoc
+          [ ( "kind"
+            , `String
+                (match source.kind with
+                 | Keeper_memory_os_current.Librarian -> "librarian"
+                 | Explicit_write -> "explicit_write") )
+          ; "trace_id", `String source.trace_id
+          ; "generation", `Int source.generation
+          ] )
+  in
+  let current_facts =
+    List.length (List.filter (memory_os_fact_is_current ~now) facts)
   in
   `Assoc
-    [ "schema", `String "keeper.memory_os.recall_observability.v1"
+    [ "schema", `String "keeper.memory_os.current_observability.v1"
     ; "keeper", `String keeper_id
-    ; "source", `String "memory_os_files"
-    ; "producer", `String "keeper_librarian|keeper_memory_os_recall"
-    ; ( "selection_policy"
-      , memory_os_selection_policy ~keeper_id |> memory_os_selection_policy_json )
-    ; "facts_store", `String facts_path
-    ; "episodes_store", `String episodes_store
+    ; "source", `String "current_memory_snapshot"
+    ; "producer", `String "keeper_librarian"
+    ; "snapshot_store", `String (Keeper_memory_os_current.path ~keeper_id)
     ; "recall_enabled", `Bool (Keeper_memory_os_recall.enabled ())
+    ; "revision", `Int revision
+    ; "updated_at", (match updated_at with Some value -> `Float value | None -> `Null)
+    ; "summary", (match summary with Some value -> `String value | None -> `Null)
+    ; "update_source", source
     ; "now", `Float now
     ; "now_iso", `String (Masc_domain.iso8601_of_unix_seconds now)
     ; ( "read_errors"
-      , `List
-          (List.filter_map
-             (fun (scope, err) ->
-                Option.map (fun message -> `Assoc [ "scope", `String scope; "error", `String message ]) err)
-             [ "episodes", episode_error; "facts", fact_error ]) )
-    ; ( "episodes"
-      , `Assoc
-          [ "shown", `Int (List.length episodes)
-          ; "current", `Int current_episodes
-          ; "expired", `Int (List.length episodes - current_episodes)
-          ; "terminal_markers", `Int terminal_marker_count
-          ; "items", `List (List.map (memory_os_episode_json ~now) episodes)
-          ] )
+      , match read_error with
+        | None -> `List []
+        | Some error ->
+          `List [ `Assoc [ "scope", `String "snapshot"; "error", `String error ] ] )
     ; ( "facts"
       , `Assoc
           [ "shown", `Int (List.length facts)
@@ -320,6 +268,7 @@ let memory_os_dashboard_json ~keeper_id =
             (* RFC-keeper-memory-panel-real-data §4a: every individual fact row. *)
           ; "items", `List (List.map (memory_os_fact_json ~now) facts)
           ] )
+    ; "change", change
     ]
 ;;
 

@@ -30,9 +30,7 @@
   test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
-  test_keeper_memory_os_io_fd
   test_keeper_memory_os_external_state_decay
-  test_keeper_memory_os_recall_echo
   test_keeper_memory_lane
   test_keeper_connector_attention_wake
   test_keeper_raw_task_signal_wake
@@ -104,9 +102,7 @@
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
-  test_keeper_memory_os
-  test_keeper_memory_os_gc_dry_run_report
-  test_keeper_memory_os_sanity_sweep
+  test_keeper_memory_os_current
   test_keeper_recall_outcome_eval
   test_server_dashboard_http_keeper_api_trace
   test_keeper_paused_work_resume_surface
@@ -330,9 +326,7 @@
   test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
-  test_keeper_memory_os_io_fd
   test_keeper_memory_os_external_state_decay
-  test_keeper_memory_os_recall_echo
   test_keeper_memory_lane
   test_env_keeper_scrub
   test_keeper_connector_attention_wake
@@ -407,9 +401,7 @@
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
-  test_keeper_memory_os
-  test_keeper_memory_os_gc_dry_run_report
-  test_keeper_memory_os_sanity_sweep
+  test_keeper_memory_os_current
   test_keeper_recall_outcome_eval
   test_server_dashboard_http_keeper_api_trace
   test_keeper_paused_work_resume_surface
@@ -710,12 +702,6 @@
  (name test_keeper_keepalive_launch_order_ast)
  (modules test_keeper_keepalive_launch_order_ast)
  (libraries alcotest ast_grep))
-
-(test
- (name test_keeper_memory_os_generation_base_path)
- (modules test_keeper_memory_os_generation_base_path)
- (libraries masc_test_deps)
- (action (setenv MASC_CONFIG_DIR "" (run %{test}))))
 
 (test
  (name test_oas_canonical_delegation)
@@ -1273,18 +1259,6 @@
   masc.keeper_checkpoint_ref
   eio_main
   unix))
-
-; Fresh-state canonical Memory OS authority and strict HEAD publication proof.
-(test
- (name test_keeper_memory_os_store)
- (modules test_keeper_memory_os_store)
- (libraries alcotest fs_compat masc_test_deps eio_main unix yojson))
-
-; Provider-neutral Memory OS Librarian exact-output composition proof.
-(test
- (name test_librarian_exact_output_conformance)
- (modules test_librarian_exact_output_conformance)
- (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
 
 ; Production Board-attention adapter proof over the provider-neutral OAS lane.
 (test

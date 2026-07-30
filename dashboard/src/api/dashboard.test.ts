@@ -482,6 +482,7 @@ describe('keeper tool telemetry fetchers', () => {
               model: 'deepseek-v4-flash',
               finish_reason: 'completed',
               blocks: [],
+              input_components: [],
               execution_ids: [],
             },
             diff_vs_prev: null,
@@ -496,6 +497,7 @@ describe('keeper tool telemetry fetchers', () => {
               ts: 11,
               runtime_profile: 'local',
               blocks: [],
+              input_components: [],
               execution_ids: [],
             },
             diff_vs_prev: null,
@@ -725,23 +727,30 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
         source: 'turn_record',
         entries: [],
         memory_os: {
-          schema: 'keeper.memory_os.recall_observability.v1',
+          schema: 'keeper.memory_os.current_observability.v1',
           keeper: 'keeper-alpha',
-          source: 'memory_os_files',
-          producer: 'keeper_librarian|keeper_memory_os_recall',
-          facts_store: '.masc/config/keepers/keeper-alpha.facts.jsonl',
-          episodes_store: '.masc/config/keepers/keeper-alpha/episodes',
+          source: 'current_memory_snapshot',
+          producer: 'keeper_librarian',
+          snapshot_store: '.masc/config/keepers/keeper-alpha.memory.json',
           recall_enabled: true,
+          revision: 9,
+          updated_at: 1_790_000_000,
+          summary: 'Current durable memory.',
+          update_source: {
+            kind: 'librarian',
+            trace_id: 't-2',
+            generation: 9,
+          },
           now: 1_790_000_000,
           now_iso: '2026-09-21T00:00:00Z',
           read_errors: [],
-          episodes: { shown: 0, current: 0, expired: 0, terminal_markers: 0, items: [] },
           facts: {
             shown: 3,
             current: 2,
             expired: 1,
             items: [
               {
+                memory_id: 'm-retention-d0',
                 claim: 'retention D0 = signup day',
                 category: 'constraint',
                 source: { trace_id: 't-1', turn: 4, tool_call_id: 'call_9' },
@@ -760,6 +769,7 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
                 confidence: 0.8,
               },
               {
+                memory_id: 'm-speculation',
                 claim: 'librarian emitted a category outside the taxonomy',
                 category: 'Speculation', // out-of-vocabulary → Unknown drift absorber
                 source: { trace_id: 't-2', turn: 5 }, // tool_call_id omitted → null
@@ -774,6 +784,7 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
               },
               {
                 // malformed: missing required `claim` → dropped, never fabricated
+                memory_id: 'm-malformed',
                 category: 'fact',
                 source: { trace_id: 't-3', turn: 6 },
                 first_seen: 1,
@@ -781,6 +792,11 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
                 current: true,
               },
             ],
+          },
+          change: {
+            added: [],
+            removed: [],
+            retained: 2,
           },
         },
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),

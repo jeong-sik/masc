@@ -17,6 +17,25 @@ type prompt_block =
   ; digest : string (* sha256 hex of the raw block text *)
   }
 
+type input_component_id =
+  | Prompt_block of Prompt_block_id.t
+  | Tool_schemas
+  | Message_user
+  | Message_system
+  | Message_assistant_text
+  | Message_thinking
+  | Message_redacted_thinking
+  | Message_tool_use
+  | Message_tool_result
+  | Message_image
+  | Message_document
+  | Message_audio
+
+type input_component =
+  { component : input_component_id
+  ; bytes : int
+  }
+
 type sampling =
   { temperature : float option
   ; top_p : float option
@@ -48,6 +67,11 @@ type t =
     (* RFC-0233 §7 — "<trace_id>#<absolute_turn>" join key for chat/board.
        [option] so pre-§7 rows decode as [None]. *)
   ; blocks : prompt_block list (* assembly order *)
+  ; input_components : input_component list
+    (* Exact attributed content bytes for the final provider request of this
+       keeper turn. Prompt blocks, canonical tool schemas, and message content
+       are disjoint buckets. Provider-reported [usage.input_tokens] remains a
+       separate unit; serialization metadata is not invented as content. *)
   ; runtime_profile : string
   ; model : string option
     (* RFC-0233 §2.2/§2.3 — boundary-redacted runtime model label, the
@@ -109,6 +133,9 @@ type t =
   }
 
 val prompt_block_to_json : prompt_block -> Yojson.Safe.t
+
+val input_component_id_to_string : input_component_id -> string
+val input_component_to_json : input_component -> Yojson.Safe.t
 
 val to_json : t -> Yojson.Safe.t
 

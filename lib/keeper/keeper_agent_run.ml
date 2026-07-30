@@ -851,9 +851,9 @@ let run_turn
                | Ok result ->
                  let post_turn_t0 = Time_compat.now () in
                  (* Section 4: Result processing — parse response, handle tool calls, validate contracts. *)
-                (* RFC-MASC-004: AfterTurn hooks flush incrementally during
-          Agent.run. Post-run episode creation requires an explicit
-          flush_incremental call since AfterTurn already fired. *)
+                 (* RFC-MASC-004: AfterTurn hooks flush incrementally during
+                    Agent.run. Current-memory selection runs separately after
+                    the completed result is available. *)
                  let text = Agent_sdk.Types.text_of_content result.response.content in
                  (* RFC-0132 PR-2: receipt model surface = external boundary; redact via SSOT. *)
                  let model =
@@ -878,15 +878,43 @@ let run_turn
                      ~tool_calls:acc.tool_calls
                  in
                  let usage = Keeper_context_runtime.usage_of_response result.response in
+                 let input_messages =
+                   match result.checkpoint with
+                   | Some checkpoint ->
+                     (match List.rev checkpoint.Agent_sdk.Checkpoint.messages with
+                      | ({ Agent_sdk.Types.role = Agent_sdk.Types.Assistant; _ }
+                         : Agent_sdk.Types.message)
+                        :: prior_rev ->
+                        Some (List.rev prior_rev)
+                      | _ ->
+                        Log.Keeper.warn
+                          "turn input composition unavailable: keeper=%s trace=%s \
+                           reason=terminal_assistant_message_missing"
+                          meta.name trace_id;
+                        None)
+                   | None ->
+                     Log.Keeper.warn
+                       "turn input composition unavailable: keeper=%s trace=%s \
+                        reason=checkpoint_missing"
+                       meta.name trace_id;
+                     None
+                 in
                  let ctx_composition =
-                   build_ctx_composition_metrics
-                     ~system_prompt:turn_system_prompt
-                     ~dynamic_context
-                     ~memory_context
-                     ~temporal_context
-                     ~user_message
-                     ~history_messages
-                     ~actual_input_tokens:(Some usage.input_tokens)
+                   match input_messages with
+                   | Some input_messages ->
+                     Keeper_agent_prompt_metrics.build_ctx_composition_metrics
+                       ~prompt_blocks:acc.prompt_blocks
+                       ~tools
+                       ~input_messages
+                       ~actual_input_tokens:(Some usage.input_tokens)
+                   | None ->
+                     { Keeper_agent_prompt_metrics.actual_input_tokens =
+                         (if usage.input_tokens > 0
+                          then Some usage.input_tokens
+                          else None)
+                     ; attributed_bytes = 0
+                     ; segments = []
+                     }
                  in
                  let completion_observation ()
                      : Keeper_execution_receipt.completion_contract_result =
@@ -1099,6 +1127,18 @@ let run_turn
         let (price_input_per_million, price_output_per_million) =
           Runtime.pricing_of_runtime_id runtime_id_string
         in
+        let input_components =
+          match turn_result with
+          | Ok result ->
+            List.map
+              (fun
+                (component,
+                 (segment :
+                   Keeper_agent_prompt_metrics.prompt_segment_metrics)) ->
+                 { Turn_record.component = component; bytes = segment.bytes })
+              result.Keeper_agent_result.ctx_composition.segments
+          | Error _ -> []
+        in
         Keeper_turn_record_writer.write
           ~config
           ~keeper_name:meta.name
@@ -1125,6 +1165,7 @@ let run_turn
           ~usage
           ~execution_ids
           ~blocks:acc.prompt_blocks
+          ~input_components
           ();
         (* RFC-0233 §2.3 PR-4: project the same record onto the ambient
            turn span. Both turn drivers (unified "invoke_agent <keeper>"

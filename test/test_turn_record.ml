@@ -29,6 +29,9 @@ let test_block_id_unknown_maps_to_other () =
 let sample_block block digest =
   { Turn_record.block; bytes = String.length digest; digest }
 
+let sample_component component bytes =
+  { Turn_record.component = component; bytes }
+
 let sample_record () : Turn_record.t =
   { execution_ids =
       [ Ids.Execution_id.of_string "exec-1781200000000-0001"
@@ -43,6 +46,13 @@ let sample_record () : Turn_record.t =
       [ sample_block Prompt_block_id.Persona "aaaa"
       ; sample_block Prompt_block_id.Dynamic_context "bbbb"
       ; sample_block Prompt_block_id.Memory_os_recall "cccc"
+      ]
+  ; input_components =
+      [ sample_component
+          (Turn_record.Prompt_block Prompt_block_id.Persona)
+          4
+      ; sample_component Turn_record.Tool_schemas 2048
+      ; sample_component Turn_record.Message_tool_result 512
       ]
   ; runtime_profile = "ollama_cloud.deepseek-v4-flash"
   ; model = Some "deepseek-v4-flash"
@@ -130,6 +140,22 @@ let test_codec_roundtrip () =
            && a.bytes = b.bytes
            && String.equal a.digest b.digest)
          record.blocks decoded.blocks);
+    check (list string) "input component ids preserved in order"
+      (List.map
+         (fun (component : Turn_record.input_component) ->
+           Turn_record.input_component_id_to_string component.component)
+         record.input_components)
+      (List.map
+         (fun (component : Turn_record.input_component) ->
+           Turn_record.input_component_id_to_string component.component)
+         decoded.input_components);
+    check (list int) "input component bytes preserved"
+      (List.map
+         (fun (component : Turn_record.input_component) -> component.bytes)
+         record.input_components)
+      (List.map
+         (fun (component : Turn_record.input_component) -> component.bytes)
+         decoded.input_components);
     check string "runtime_profile" record.runtime_profile decoded.runtime_profile;
     check (option string) "model" record.model decoded.model;
     check (option string) "finish_reason" record.finish_reason decoded.finish_reason;
@@ -238,6 +264,43 @@ let test_codec_rejects_malformed () =
   | Error msg ->
     check bool "error names the missing field" true
       (Astring.String.is_infix ~affix:"execution_ids" msg)
+
+let test_codec_requires_current_input_composition () =
+  let without_components =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        (List.filter
+           (fun (name, _) -> not (String.equal name "input_components"))
+           fields)
+    | other -> other
+  in
+  match Turn_record.of_json without_components with
+  | Ok _ -> fail "decoded a row without current input composition"
+  | Error msg ->
+    check bool "missing current field is explicit" true
+      (Astring.String.is_infix ~affix:"input_components" msg)
+
+let test_codec_rejects_unknown_input_component () =
+  let json =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        (("input_components",
+          `List
+            [ `Assoc
+                [ "component", `String "history_guess"
+                ; "bytes", `Int 1
+                ]
+            ])
+         :: List.remove_assoc "input_components" fields)
+    | other -> other
+  in
+  match Turn_record.of_json json with
+  | Ok _ -> fail "decoded an unknown input component"
+  | Error msg ->
+    check bool "unknown component is explicit" true
+      (Astring.String.is_infix ~affix:"history_guess" msg)
 
 let test_codec_unknown_block_decodes_as_other () =
   let json =
@@ -371,6 +434,10 @@ let () =
             test_cache_counts_round_trip_and_stay_optional
         ; test_case "optional fields absent" `Quick test_codec_optional_fields_absent
         ; test_case "rejects malformed rows" `Quick test_codec_rejects_malformed
+        ; test_case "current input composition required" `Quick
+            test_codec_requires_current_input_composition
+        ; test_case "unknown input component rejected" `Quick
+            test_codec_rejects_unknown_input_component
         ; test_case "unknown block decodes as Other" `Quick
             test_codec_unknown_block_decodes_as_other
         ] )

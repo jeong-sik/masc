@@ -35,8 +35,8 @@ val keeper_context_status_json
 
 (** RFC-0035 P4 surface: explicit memory write.
 
-    Writes a durable claim into the Memory OS fact store, the only store
-    an explicit write reaches.
+    Atomically adds a durable claim to the current Memory OS snapshot, the only
+    store an explicit write reaches.
     Body is stored as [**title** content] when [title] is non-empty.
 
     Args (JSON object):

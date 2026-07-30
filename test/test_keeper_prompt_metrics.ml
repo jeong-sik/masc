@@ -9,6 +9,7 @@
 open Alcotest
 
 module KAR = Masc.Keeper_agent_run
+module KAPM = Masc.Keeper_agent_prompt_metrics
 module KP = Masc.Keeper_prompt
 module KRP = Masc.Keeper_run_prompt
 
@@ -302,15 +303,15 @@ let test_user_message_sanitizer_preserves_semantic_content () =
   check bool "preserves useful user request" true
     (has_in sanitized "Please inspect the current board status.")
 
-let test_ctx_composition_splits_history_bytes () =
-  let history_messages =
+let test_ctx_composition_splits_final_provider_input_bytes () =
+  let input_messages =
     [
       {
         Agent_sdk.Types.role = Agent_sdk.Types.User;
         content = [Agent_sdk.Types.Text "Earlier user request"];
         name = None;
         tool_call_id = None;
-      metadata = [];
+        metadata = [];
       };
       {
         Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
@@ -326,7 +327,7 @@ let test_ctx_composition_splits_history_bytes () =
           ];
         name = None;
         tool_call_id = None;
-      metadata = [];
+        metadata = [];
       };
       {
         Agent_sdk.Types.role = Agent_sdk.Types.Tool;
@@ -343,40 +344,64 @@ let test_ctx_composition_splits_history_bytes () =
           ];
         name = None;
         tool_call_id = None;
-      metadata = [];
+        metadata = [];
+      };
+      {
+        Agent_sdk.Types.role = Agent_sdk.Types.User;
+        content = [Agent_sdk.Types.Text "Current user message"];
+        name = None;
+        tool_call_id = None;
+        metadata = [];
       };
     ]
   in
+  let prompt_block block text =
+    { Turn_record.block
+    ; bytes = String.length text
+    ; digest = Digestif.SHA256.(digest_string text |> to_hex)
+    }
+  in
+  let tool =
+    Agent_sdk.Tool.create
+      ~name:"probe_tool"
+      ~description:"probe tool"
+      ~parameters:[]
+      (fun _input -> Ok { content = "ok"; _meta = None })
+  in
   let metrics =
-    KAR.build_ctx_composition_metrics
-      ~system_prompt:"System prompt"
-      ~dynamic_context:"Dynamic context"
-      ~memory_context:"Memory context"
-      ~temporal_context:"Temporal context"
-      ~user_message:"Current user message"
-      ~history_messages
+    KAPM.build_ctx_composition_metrics
+      ~prompt_blocks:
+        [ prompt_block Prompt_block_id.Persona "System prompt"
+        ; prompt_block Prompt_block_id.Dynamic_context "Dynamic context"
+        ; prompt_block Prompt_block_id.Memory_os_recall "Memory context"
+        ; prompt_block Prompt_block_id.Temporal_summary "Temporal context"
+        ]
+      ~tools:[ tool ]
+      ~input_messages
       ~actual_input_tokens:(Some 1000)
   in
   let segment_bytes key =
     metrics.segments
     |> List.assoc_opt key
-    |> Option.map (fun segment -> segment.KAR.bytes)
+    |> Option.map (fun segment -> segment.KAPM.bytes)
     |> Option.value ~default:0
   in
   check bool "system prompt bucket present" true
-    (segment_bytes "system_prompt" > 0);
+    (segment_bytes (Turn_record.Prompt_block Prompt_block_id.Persona) > 0);
+  check bool "tool schema bucket present" true
+    (segment_bytes Turn_record.Tool_schemas > 0);
   check bool "history user bucket present" true
-    (segment_bytes "history_user" > 0);
+    (segment_bytes Turn_record.Message_user > 0);
   check bool "history assistant text bucket present" true
-    (segment_bytes "history_assistant_text" > 0);
+    (segment_bytes Turn_record.Message_assistant_text > 0);
   check bool "history tool use bucket present" true
-    (segment_bytes "history_tool_use" > 0);
+    (segment_bytes Turn_record.Message_tool_use > 0);
   check bool "history tool result bucket present" true
-    (segment_bytes "history_tool_result" > 0);
+    (segment_bytes Turn_record.Message_tool_result > 0);
   check (option int) "provider token observation remains separate" (Some 1000)
     metrics.actual_input_tokens;
   check int "total bytes equal segment sum"
-    (List.fold_left (fun total (_, segment) -> total + segment.KAR.bytes) 0
+    (List.fold_left (fun total (_, segment) -> total + segment.KAPM.bytes) 0
        metrics.segments)
     metrics.attributed_bytes
 
@@ -424,7 +449,7 @@ let () =
         ] );
       ( "ctx_composition",
         [
-          test_case "splits history byte buckets" `Quick
-            test_ctx_composition_splits_history_bytes;
+          test_case "attributes final provider input content" `Quick
+            test_ctx_composition_splits_final_provider_input_bytes;
         ] );
     ]

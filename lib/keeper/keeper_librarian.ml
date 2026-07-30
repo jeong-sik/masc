@@ -1,4 +1,4 @@
-(** Keeper_librarian — structured claim extraction for the Memory OS. *)
+(** Keeper_librarian — LLM-owned current Memory OS selection. *)
 
 open Keeper_memory_os_types
 
@@ -7,11 +7,23 @@ module Canonical_tool = Agent_sdk.Canonical_tool
 type input =
   { trace_id : string
   ; generation : int
+  ; current_facts : fact list
   ; messages : Agent_sdk.Types.message list
   }
 
-let wire_field_episode_summary = Keeper_memory_os_types.wire_field_episode_summary
-let wire_field_claims = Keeper_memory_os_types.wire_field_claims
+type selection =
+  { summary : string
+  ; retained_claim_ids : string list
+  ; new_claims : fact list
+  ; facts : fact list
+  ; open_items : string list
+  ; constraints : string list
+  ; preserved_tool_refs : string list
+  }
+
+let wire_field_summary = "summary"
+let wire_field_retained_claim_ids = "retained_claim_ids"
+let wire_field_new_claims = "new_claims"
 let wire_field_open_items = Keeper_memory_os_types.wire_field_open_items
 let wire_field_constraints = Keeper_memory_os_types.wire_field_constraints
 let wire_field_preserved_tool_refs = Keeper_memory_os_types.wire_field_preserved_tool_refs
@@ -22,8 +34,15 @@ let wire_field_source_tool_call_id = Keeper_memory_os_types.wire_field_source_to
 let wire_field_claim_id = Keeper_memory_os_types.wire_field_claim_id
 let wire_field_claim_kind = Keeper_memory_os_types.wire_field_claim_kind
 let wire_field_valid_for_days = Keeper_memory_os_types.wire_field_valid_for_days
-let wire_episode_fields = Keeper_memory_os_types.wire_librarian_episode_fields
 let wire_claim_fields = Keeper_memory_os_types.wire_librarian_claim_fields
+let wire_current_fields =
+  [ wire_field_summary
+  ; wire_field_retained_claim_ids
+  ; wire_field_new_claims
+  ; wire_field_open_items
+  ; wire_field_constraints
+  ; wire_field_preserved_tool_refs
+  ]
 
 let trim_nonempty s =
   let s = String.trim s in
@@ -75,10 +94,6 @@ let message_to_text ~turn (m : Agent_sdk.Types.message) : string =
   else Printf.sprintf "[%s] %s" header body
 ;;
 
-let truncate_for_log max_len s =
-  if String.length s <= max_len then s else String.sub s 0 max_len ^ "..."
-;;
-
 let format_messages_for_prompt messages =
   match messages with
   | [] -> "[no messages]"
@@ -88,9 +103,22 @@ let format_messages_for_prompt messages =
     |> String.concat "\n\n---\n\n"
 ;;
 
+let current_fact_json fact =
+  `Assoc
+    [ "memory_id", `String (claim_identity fact)
+    ; "fact", fact_to_json fact
+    ]
+;;
+
+let format_current_facts_for_prompt facts =
+  `List (List.map current_fact_json facts)
+  |> Yojson.Safe.pretty_to_string
+;;
+
 let prompt_variables (inp : input) : (string * string) list =
-  [ ( "conversation_history"
-    , inp.messages |> format_messages_for_prompt )
+  [ "current_memory", format_current_facts_for_prompt inp.current_facts
+  ; ( "conversation_history"
+    , format_messages_for_prompt inp.messages )
   ]
 ;;
 
@@ -99,13 +127,6 @@ let string_field key fields =
   | Some (`String s) -> trim_nonempty s
   | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null)
   | None -> None
-;;
-
-let optional_string_field key fields =
-  match List.assoc_opt key fields with
-  | Some (`String s) -> trim_nonempty s
-  | Some `Null | None -> None
-  | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _) -> None
 ;;
 
 let int_field key fields =
@@ -155,6 +176,9 @@ type parse_error =
   | Unexpected_field of string
   | Missing_required_fields
   | Claim_schema_mismatch
+  | Unknown_retained_claim_id of string
+  | Duplicate_retained_claim_id of string
+  | Duplicate_selected_claim_id of string
 
 let parse_error_to_string = function
   | Empty_output -> "empty_output"
@@ -164,6 +188,12 @@ let parse_error_to_string = function
   | Unexpected_field field -> "unexpected_field: " ^ field
   | Missing_required_fields -> "missing_required_fields"
   | Claim_schema_mismatch -> "claim_schema_mismatch"
+  | Unknown_retained_claim_id identity ->
+    "unknown_retained_claim_id: " ^ identity
+  | Duplicate_retained_claim_id identity ->
+    "duplicate_retained_claim_id: " ^ identity
+  | Duplicate_selected_claim_id identity ->
+    "duplicate_selected_claim_id: " ^ identity
 ;;
 
 let json_of_output raw =
@@ -271,23 +301,59 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
-let source_turn_range claims =
-  match claims with
-  | [] -> None
-  | first :: rest ->
-    let init = first.source.turn in
-    let lo = List.fold_left (fun acc claim -> min acc claim.source.turn) init rest in
-    let hi = List.fold_left (fun acc claim -> max acc claim.source.turn) init rest in
-    Some (lo, hi)
-;;
-
 let unexpected_claim_field = function
   | `Assoc fields -> first_unexpected_field ~allowed:wire_claim_fields fields
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
-let episode_of_json_result ?now ~generation (inp : input) (json : Yojson.Safe.t) :
-  (episode, parse_error) result
+module String_map = Map.Make (String)
+module String_set = Set.Make (String)
+
+let current_facts_by_id facts =
+  List.fold_left
+    (fun by_id fact ->
+       String_map.add (claim_identity fact) fact by_id)
+    String_map.empty
+    facts
+;;
+
+let materialize_facts ~current_facts ~retained_claim_ids ~new_claims =
+  let open Result.Syntax in
+  let current_by_id = current_facts_by_id current_facts in
+  let rec retain seen retained_rev = function
+    | [] -> Ok (List.rev retained_rev, seen)
+    | identity :: rest ->
+      if String_set.mem identity seen
+      then Error (Duplicate_retained_claim_id identity)
+      else
+        (match String_map.find_opt identity current_by_id with
+         | None -> Error (Unknown_retained_claim_id identity)
+         | Some fact ->
+           retain
+             (String_set.add identity seen)
+             (fact :: retained_rev)
+             rest)
+  in
+  let* retained, selected_ids =
+    retain String_set.empty [] retained_claim_ids
+  in
+  let rec append_new selected_ids new_rev = function
+    | [] -> Ok (retained @ List.rev new_rev)
+    | fact :: rest ->
+      let identity = claim_identity fact in
+      if String_set.mem identity selected_ids
+      then Error (Duplicate_selected_claim_id identity)
+      else
+        append_new
+          (String_set.add identity selected_ids)
+          (fact :: new_rev)
+          rest
+  in
+  append_new selected_ids [] new_claims
+;;
+
+let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
+  (selection, parse_error) result
   =
   let now =
     match now with
@@ -298,17 +364,19 @@ let episode_of_json_result ?now ~generation (inp : input) (json : Yojson.Safe.t)
   in
   match json with
   | `Assoc fields ->
-    (match first_unexpected_field ~allowed:wire_episode_fields fields with
+    (match first_unexpected_field ~allowed:wire_current_fields fields with
      | Some field -> Error (Unexpected_field field)
      | None ->
        (match
-          string_field wire_field_episode_summary fields
-          , List.assoc_opt wire_field_claims fields
+          string_field wire_field_summary fields
+          , string_list_field wire_field_retained_claim_ids fields
+          , List.assoc_opt wire_field_new_claims fields
           , string_list_field_or_empty wire_field_open_items fields
           , string_list_field_or_empty wire_field_constraints fields
           , string_list_field_or_empty wire_field_preserved_tool_refs fields
         with
-        | ( Some episode_summary
+        | ( Some summary
+          , Some retained_claim_ids
           , Some (`List claim_items)
           , Some open_items
           , Some constraints
@@ -317,42 +385,34 @@ let episode_of_json_result ?now ~generation (inp : input) (json : Yojson.Safe.t)
            | Some field -> Error (Unexpected_field field)
            | None ->
              (match traverse (fact_of_json ~trace_id:inp.trace_id ~now) claim_items with
-              | Some claims ->
-                Ok
-                  { trace_id = inp.trace_id
-                  ; generation
-                  ; episode_summary
-                  ; claims
-                  ; open_items
-                  ; constraints
-                  ; preserved_tool_refs
-                  ; source_turn_range = source_turn_range claims
-                  ; created_at = now
-                  ; valid_until = None
-                  ; terminal_marker = None
-                  ; schema_version
-                  }
+              | Some new_claims ->
+                (match
+                   materialize_facts
+                     ~current_facts:inp.current_facts
+                     ~retained_claim_ids
+                     ~new_claims
+                 with
+                 | Ok facts ->
+                   Ok
+                     { summary
+                     ; retained_claim_ids
+                     ; new_claims
+                     ; facts
+                     ; open_items
+                     ; constraints
+                     ; preserved_tool_refs
+                     }
+                 | Error _ as error -> error)
               | None -> Error Claim_schema_mismatch))
         | _ -> Error Missing_required_fields))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Error Top_level_not_object
 ;;
 
-let episode_of_output_result ?now ~generation (inp : input) (raw : string) :
-  (episode, parse_error) result
+let selection_of_output_result ?now (inp : input) (raw : string) :
+  (selection, parse_error) result
   =
   match json_of_output raw with
   | Error _ as error -> error
-  | Ok json -> episode_of_json_result ?now ~generation inp json
-;;
-
-let episode_of_output ?now ~generation inp raw : episode option =
-  match episode_of_output_result ?now ~generation inp raw with
-  | Ok episode -> Some episode
-  | Error error ->
-    Log.Keeper.debug
-      "librarian episode parse failed: %s (raw: %s)"
-      (parse_error_to_string error)
-      (truncate_for_log 800 raw);
-    None
+  | Ok json -> selection_of_json_result ?now inp json
 ;;

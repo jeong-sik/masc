@@ -169,8 +169,6 @@ module KeeperMemoryOs = struct
   let librarian_enabled_default = true
   let librarian_cadence_turns_default = 3
   let librarian_max_messages_default = 24
-  let librarian_global_slot_default = 1
-  let gc_enabled_default = true
 
   (* Env-key SSOT: the config-introspection registry
      (env_config_snapshot.ml memory_entries) and the tests reference these
@@ -180,8 +178,6 @@ module KeeperMemoryOs = struct
   let librarian_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
   let librarian_cadence_turns_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
   let librarian_max_messages_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
-  let librarian_global_slot_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
-  let gc_env_key = "MASC_KEEPER_MEMORY_OS_GC"
 
   let get_bool_logged ?(invalid = Env_config_memory.Default) name ~default =
     Env_config_memory.get_bool_logged
@@ -236,30 +232,6 @@ module KeeperMemoryOs = struct
       (get_int_logged
          librarian_max_messages_env_key
          ~default:librarian_max_messages_default)
-  ;;
-
-  (** Fleet-wide concurrency gate for librarian provider calls. Default: 1; 0
-      disables the gate.
-      @category Concurrency
-      @ops_class operator *)
-  let librarian_global_slot () =
-    max
-      0
-      (get_int_logged
-         librarian_global_slot_env_key
-         ~default:librarian_global_slot_default)
-  ;;
-
-  (** Per-keeper Memory OS GC maintenance fiber kill switch. Default: true;
-      invalid values fail closed to false. Env var acts as a kill switch to
-      disable GC if a live dry-run shows it would prune the wrong rows.
-      @category Storage
-      @ops_class operator *)
-  let gc_enabled () =
-    get_bool_logged
-      ~invalid:Env_config_memory.Fail_closed
-      gc_env_key
-      ~default:gc_enabled_default
   ;;
 
 end

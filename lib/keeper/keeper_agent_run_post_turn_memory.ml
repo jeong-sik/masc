@@ -69,16 +69,36 @@ let run
   (* Memory OS librarian extraction: opt-in, provider-backed, best-effort. Its
      own lane unit, separate from [det_write_series] above. *)
   let librarian_series () =
-    let librarian_input : Keeper_librarian.input =
-      { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
-      ; generation
-      ; messages = librarian_messages
-      }
-    in
-    Keeper_librarian_runtime.run_best_effort
-      ~base_path:config.Workspace.base_path
-      ~keeper_id:meta.name
-      librarian_input
+    let now = Time_compat.now () in
+    match Keeper_memory_os_current.read ~keeper_id:meta.name with
+    | Error detail ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string MemoryOsLibrarianFailures)
+        ~labels:[ "keeper", meta.name; "site", "memory_os_current_read" ]
+        ();
+      Log.Keeper.warn
+        ~keeper_name:meta.name
+        "memory os librarian skipped: current snapshot unavailable: %s"
+        detail
+    | Ok current ->
+      let current_facts =
+        match current with
+        | None -> []
+        | Some snapshot ->
+          List.filter
+            (Keeper_memory_os_types.fact_is_current ~now)
+            snapshot.Keeper_memory_os_current.facts
+      in
+      let librarian_input : Keeper_librarian.input =
+        { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
+        ; generation
+        ; current_facts
+        ; messages = librarian_messages
+        }
+      in
+      Keeper_librarian_runtime.run_best_effort
+        ~keeper_id:meta.name
+        librarian_input
   in
   (* RFC-0257: detach onto the per-keeper memory lane. When the executor
      switch is not initialized (tests, early startup) the lane runs units

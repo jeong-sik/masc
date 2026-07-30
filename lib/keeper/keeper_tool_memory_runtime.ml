@@ -63,7 +63,10 @@ let search_durable_facts
   =
   let now = Time_compat.now () in
   let current =
-    Keeper_memory_os_io.read_facts_all ~keeper_id:meta.name
+    (match Keeper_memory_os_current.read ~keeper_id:meta.name with
+     | Ok None -> []
+     | Ok (Some snapshot) -> snapshot.facts
+     | Error message -> invalid_arg message)
     |> List.filter (Keeper_memory_os_types.fact_is_current ~now)
   in
   let total_candidates = List.length current in
@@ -340,7 +343,12 @@ let keeper_context_status_json
   let checkpoint_bytes = Keeper_context_runtime.serialized_bytes ctx_work in
   let memory_facts_total, memory_facts_current =
     let now = Time_compat.now () in
-    let facts = Keeper_memory_os_io.read_facts_all ~keeper_id:meta.name in
+    let facts =
+      match Keeper_memory_os_current.read ~keeper_id:meta.name with
+      | Ok None -> []
+      | Ok (Some snapshot) -> snapshot.facts
+      | Error message -> invalid_arg message
+    in
     ( List.length facts
     , List.length
         (List.filter (Keeper_memory_os_types.fact_is_current ~now) facts) )
@@ -520,22 +528,21 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
       else Memory_write_ok { body; valid_for_days })
 ;;
 
-(* An explicit write is a durable claim a later turn reads back; the Memory OS
-   fact store is the only store it reaches.
+(* An explicit write is a durable claim a later turn reads back; the current
+   Memory OS snapshot is the only store it reaches.
 
    Provenance is this turn and [tool_call_id] is [None]: the claim is the
    model's own assertion, not an observation carried out of some other tool's
    result, and that field records where an observation came from.
 
-   The fold is the librarian's (RFC-0285 §8), unchanged: a claim whose identity
-   was just recall-injected is the model restating what it read, and must not
-   advance the truth anchor recall's recency ranking reads. Writing through the
-   same rule is the point — an explicit write is not a way around it. *)
+   A matching identity is replaced exactly by this explicit incoming claim.
+   Importance and later retention remain the librarian model's decision; no
+   local echo window or recency rule rewrites the write. *)
 let append_durable_fact
       ~(meta : keeper_meta)
       ~(body : string)
       ~(valid_for_days : int option)
-  : Keeper_memory_os_io.fact_merge_stats
+  : (Keeper_memory_os_current.t, string) result
   =
   let keeper_id = meta.name in
   let now = Time_compat.now () in
@@ -562,29 +569,25 @@ let append_durable_fact
     ; claim_id = None
     }
   in
-  let merge ~existing ~incoming =
-    let provenance =
-      let key = Keeper_memory_os_types.claim_identity incoming in
-      if Keeper_recall_injection_window.recently_injected ~keeper_id ~key
-      then (
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string MemoryOsReobserveEchoSuppressed)
-          ~labels:[ "keeper", keeper_id ]
-          ();
-        Keeper_memory_os_policy.Recalled_echo)
-      else Keeper_memory_os_policy.Independent_observation
-    in
-    Keeper_memory_os_policy.reobserve_fact ~now ~provenance ~existing ~incoming
+  let result =
+    Keeper_memory_os_current.upsert_fact
+      ~keeper_id
+      ~now
+      ~source:
+        { kind = Keeper_memory_os_current.Explicit_write
+        ; trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
+        ; generation = meta.runtime.nonce
+        }
+      fact
   in
-  let stats =
-    File_lock_eio.with_lock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
-      Keeper_memory_os_io.merge_facts ~keeper_id ~merge ~incoming:[ fact ])
-  in
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string MemoryOsExplicitFactWrite)
-    ~labels:[ "keeper", keeper_id ]
-    ();
-  stats
+  (match result with
+   | Ok _ ->
+     Otel_metric_store.inc_counter
+       Keeper_metrics.(to_string MemoryOsExplicitFactWrite)
+       ~labels:[ "keeper", keeper_id ]
+       ()
+   | Error _ -> ());
+  result
 ;;
 
 let keeper_memory_write_with_outcome
@@ -608,17 +611,27 @@ let keeper_memory_write_with_outcome
     respond ~ok:false ~error_kind extras
   | Memory_write_ok { body; valid_for_days } ->
     (match append_durable_fact ~meta ~body ~valid_for_days with
-     | stats ->
-       let merged = stats.Keeper_memory_os_io.merged in
+     | Ok snapshot ->
+       let merged =
+         List.length snapshot.change.added = 1
+         && List.length snapshot.change.removed = 1
+       in
        respond
          ~ok:true
          ~error_kind:No_memory_write_error
          [ "rows_written", `Int 1
          ; ( "outcome"
-           , `String (if merged > 0 then "merged_into_existing_claim" else "persisted")
+           , `String (if merged then "merged_into_existing_claim" else "persisted")
            )
-         ; "store", `String "durable_fact_store"
+         ; "revision", `Int snapshot.revision
+         ; "store", `String "current_memory_snapshot"
          ]
+     | Error detail ->
+       Log.Keeper.warn
+         "explicit durable fact write failed keeper=%s: %s"
+         meta.name
+         detail;
+       respond ~ok:false ~error_kind:Persistence_failed [ "detail", `String detail ]
      | exception (Eio.Cancel.Cancelled _ as e) -> raise e
      | exception exn ->
        (* The store is the only place a long-term claim survives, so a

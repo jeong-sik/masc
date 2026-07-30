@@ -3,7 +3,6 @@
 open Alcotest
 
 module Types = Masc.Keeper_memory_os_types
-module Policy = Masc.Keeper_memory_os_policy
 
 let now = 1_000_000.0
 
@@ -53,23 +52,6 @@ let test_only_explicit_valid_until_controls_current () =
   check bool "exact boundary is current" true (Types.fact_is_current ~now current)
 ;;
 
-let test_reobservation_preserves_explicit_validity () =
-  let valid_until = Some (now +. 123.0) in
-  let existing =
-    fact ~claim_kind:(Some Types.External_state) ~category:Types.Blocker ~valid_until ()
-  in
-  let incoming = fact ~claim_kind:(Some Types.External_state) ~category:Types.Blocker () in
-  let merged =
-    Policy.reobserve_fact
-      ~now
-      ~provenance:Policy.Independent_observation
-      ~existing
-      ~incoming
-  in
-  check (option (float 0.001)) "exact bound preserved" valid_until merged.Types.valid_until;
-  check (option (float 0.001)) "observation recorded" (Some now) merged.Types.last_verified_at
-;;
-
 let () =
   run
     "keeper_memory_os_explicit_validity"
@@ -79,10 +61,6 @@ let () =
             "only explicit valid_until controls current"
             `Quick
             test_only_explicit_valid_until_controls_current
-        ; test_case
-            "reobservation preserves explicit validity"
-            `Quick
-            test_reobservation_preserves_explicit_validity
         ] )
     ]
 ;;

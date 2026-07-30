@@ -9,7 +9,9 @@ import {
   factSelectionReason,
   factTtlLabel,
   latestEntryWithBlocks,
+  latestEntryWithInputComponents,
   memCompositionFromBlocks,
+  memCompositionFromInputComponents,
   memFmtBytes,
   memFmtTok,
   promptBlockMeta,
@@ -24,73 +26,38 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-// A turn-records payload exercising the two real-data sections (composition,
-// facts), the episode-backed 압축 section, recall-block timeline, and read_errors.
-// The unbacked pin section renders a disclosure regardless of payload.
+// A turn-records payload exercising composition, current facts, exact latest
+// delta, recall-block timeline, and read_errors.
 function turnRecordsPayload() {
   return {
     keeper: 'masc-improver',
     count: 1,
     source: 'turn_record',
     memory_os: {
-      schema: 'keeper.memory_os.recall_observability.v1',
+      schema: 'keeper.memory_os.current_observability.v1',
       keeper: 'masc-improver',
-      source: 'memory_os_files',
+      source: 'current_memory_snapshot',
       producer: 'keeper_librarian',
-      selection_policy: {
-        keeper_scope: 'masc-improver',
-        facts_source: 'Keeper_memory_os_io.read_facts_all',
-        episodes_source: 'Keeper_memory_os_io.read_episodes_all',
-        category_source: 'Keeper_memory_os_types.category_to_string',
-        claim_kind_source: 'Keeper_memory_os_types.claim_kind_to_string',
-        recall_block: 'Keeper_memory_os_recall.render_if_enabled',
-        prompt_record: 'Keeper_run_tools_hooks.record_block Prompt_block_id.Memory_os_recall',
-      },
-      facts_store: '.masc/config/keepers/masc-improver.facts.jsonl',
-      episodes_store: '.masc/config/keepers/masc-improver/episodes',
+      snapshot_store: '.masc/config/keepers/masc-improver.memory.json',
       recall_enabled: true,
+      revision: 12,
+      updated_at: 1_790_000_000,
+      summary: '현재 작업에 필요한 최소 기억.',
+      update_source: {
+        kind: 'librarian',
+        trace_id: 'trace-a',
+        generation: 12,
+      },
       now: 1_790_000_000,
       now_iso: '2026-09-21T00:00:00Z',
-      read_errors: [{ scope: 'facts', error: 'one malformed row skipped' }],
-      episodes: {
-        shown: 2,
-        current: 2,
-        expired: 0,
-        terminal_markers: 2,
-        items: [
-          {
-            trace_id: 'trace-ep1',
-            generation: 3,
-            created_at: 1_789_900_000,
-            created_at_iso: '2026-09-20T...Z',
-            valid_until: null,
-            valid_until_iso: null,
-            current: true,
-            terminal_marker: 'handoff_complete',
-            claim_count: 4,
-            source_turn_range: { lo: 1, hi: 28 },
-            summary: '리텐션 코호트 정의를 정리하고 amplitude 쿼리를 표로 캐시함.',
-          },
-          {
-            trace_id: 'trace-diagnostic',
-            generation: 4,
-            created_at: 1_789_950_000,
-            created_at_iso: '2026-09-20T...Z',
-            valid_until: null,
-            valid_until_iso: null,
-            current: true,
-            terminal_marker: 'diagnostic',
-            claim_count: 1,
-            summary: 'provider response diagnostic',
-          },
-        ],
-      },
+      read_errors: [{ scope: 'snapshot', error: 'one malformed row skipped' }],
       facts: {
         shown: 3,
         current: 2,
         expired: 1,
         items: [
           {
+            memory_id: 'm-retention-d0',
             claim: 'retention D0 = 가입일, 첫 세션 기준',
             category: 'constraint',
             source: { trace_id: 'trace-a', turn: 4, tool_call_id: null },
@@ -104,6 +71,7 @@ function turnRecordsPayload() {
             claim_kind: 'durable_knowledge',
           },
           {
+            memory_id: 'm-diagnostic',
             claim: 'diagnostic row: operator pin backend source absent',
             category: 'fact',
             source: { trace_id: 'trace-diagnostic', turn: 6, tool_call_id: null },
@@ -117,6 +85,7 @@ function turnRecordsPayload() {
             claim_kind: 'diagnostic',
           },
           {
+            memory_id: 'm-expired-cache',
             claim: 'amplitude 캐시는 만료됨',
             category: 'Speculation', // out-of-vocabulary → Unknown chip
             source: { trace_id: 'trace-b', turn: 5 },
@@ -129,6 +98,41 @@ function turnRecordsPayload() {
             current: false,
           },
         ],
+      },
+      change: {
+        added: [
+          {
+            memory_id: 'm-diagnostic',
+            claim: 'diagnostic row: operator pin backend source absent',
+            category: 'fact',
+            source: { trace_id: 'trace-diagnostic', turn: 6, tool_call_id: null },
+            first_seen: 1_789_700_000,
+            first_seen_iso: '2026-09-10T...Z',
+            reference_time: 1_789_700_000,
+            valid_until: null,
+            valid_until_iso: null,
+            last_verified_at: null,
+            current: true,
+            claim_kind: 'diagnostic',
+          },
+        ],
+        removed: [
+          {
+            memory_id: 'm-old-query',
+            claim: 'old amplitude query should disappear',
+            category: 'fact',
+            source: { trace_id: 'trace-old', turn: 2, tool_call_id: null },
+            first_seen: 1_788_000_000,
+            first_seen_iso: '2026-09-01T...Z',
+            reference_time: 1_788_000_000,
+            valid_until: null,
+            valid_until_iso: null,
+            last_verified_at: null,
+            current: true,
+            claim_kind: 'durable_knowledge',
+          },
+        ],
+        retained: 2,
       },
     },
     entries: [
@@ -144,6 +148,14 @@ function turnRecordsPayload() {
             { block: 'memory_os_recall', bytes: 800, digest: 'cccc2222dddd' },
             { block: 'dynamic_context', bytes: 400, digest: 'eeee3333ffff' },
             { block: 'zero_block', bytes: 0, digest: '000000000000' },
+          ],
+          input_components: [
+            { component: 'prompt.persona', bytes: 1200 },
+            { component: 'prompt.memory_os_recall', bytes: 800 },
+            { component: 'prompt.dynamic_context', bytes: 400 },
+            { component: 'tool_schemas', bytes: 1600 },
+            { component: 'message_user', bytes: 100 },
+            { component: 'message_tool_result', bytes: 500 },
           ],
           execution_ids: [],
           input_tokens: 3500,
@@ -197,7 +209,7 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/masc-improver/turn-records?limit=24')
   })
 
-  it('builds the composition bar from real prompt-block bytes (zero blocks dropped)', async () => {
+  it('separates final provider input content bytes from provider tokens', async () => {
     stubFetch()
     const { container } = renderInspector()
     const bar = await waitFor(() => {
@@ -205,15 +217,14 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
       expect(b).toBeTruthy()
       return b!
     })
-    // 4 blocks in payload, 1 has 0 bytes → 3 segments + 3 legend rows.
-    expect(bar.querySelectorAll('span').length).toBe(3)
-    expect(container.querySelectorAll('.mem-leg').length).toBe(3)
-    // total bytes = 1200+800+400 = 2400, shown as KB; token readout from input_tokens.
-    expect(container.querySelector('.mem-compo-tot')?.textContent).toBe('2.3KB')
-    expect(container.querySelector('.mem-compo-sub')?.textContent).toContain('3.5k tok')
-    // block labels come from the Prompt_block_id mirror, not raw tokens.
+    expect(bar.querySelectorAll('span').length).toBe(6)
+    expect(container.querySelectorAll('.mem-leg').length).toBe(6)
+    expect(container.querySelector('.mem-compo-tot')?.textContent).toBe('4.5KB content')
+    expect(container.querySelector('.mem-compo-sub')?.textContent).toContain('3.5k provider tok')
     expect(container.textContent).toContain('메모리 회상')
     expect(container.textContent).toContain('동적 컨텍스트')
+    expect(container.textContent).toContain('도구 스키마')
+    expect(container.textContent).toContain('도구 결과')
   })
 
   it('renders all facts in persisted source order with stored time and validity', async () => {
@@ -225,10 +236,9 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(container.textContent).toContain('저장')
     expect(container.textContent).toContain('검증')
     expect(container.textContent).toContain('current row')
-    expect(container.textContent).toContain('2/3 current')
+    expect(container.textContent).toContain('revision 12')
     expect(container.textContent).not.toContain('핵심 회상 후보')
     expect(container.textContent).toContain('diagnostic row: operator pin backend source absent')
-    expect(container.textContent).toContain('provider response diagnostic')
     expect(container.textContent).toContain('amplitude 캐시는 만료됨')
   })
 
@@ -249,20 +259,19 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
     expect(container.textContent).toContain('diagnostic row: operator pin backend source absent')
     expect(container.textContent).toContain('amplitude 캐시는 만료됨')
-    expect(container.textContent).toContain('provider response diagnostic')
+    expect(container.textContent).toContain('current row · 사실 · diagnostic')
   })
 
-  it('surfaces selection policy and prompt digest lineage without claiming raw full-prompt storage', async () => {
+  it('surfaces the single-snapshot contract and prompt digest lineage', async () => {
     stubFetch()
     const { container } = renderInspector()
     await waitFor(() => expect(container.querySelector('.mem-trust')).toBeTruthy())
     expect(container.textContent).toContain('masc-improver')
-    expect(container.textContent).toContain('keeper-local persisted source order')
     expect(container.textContent).toContain('800B memory_os_recall')
-    expect(container.textContent).toContain('Keeper_memory_os_io.read_facts_all')
-    expect(container.textContent).toContain('Keeper_memory_os_io.read_episodes_all')
-    expect(container.textContent).toContain('all rows · source order')
-    expect(container.textContent).toContain('Keeper_memory_os_recall.render_if_enabled')
+    expect(container.textContent).toContain('.masc/config/keepers/masc-improver.memory.json')
+    expect(container.textContent).toContain('LLM current-memory choice')
+    expect(container.textContent).toContain('single atomic snapshot')
+    expect(container.textContent).toContain('exact current facts · no ranking/truncation')
     expect(container.textContent).toContain('Full Prompt')
     expect(container.textContent).toContain('raw text not persisted here')
     expect(container.textContent).toContain('cccc2222dddd')
@@ -294,37 +303,40 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(container.querySelector('.mem-pin')).toBeFalsy()
   })
 
-  it('renders the compaction section from real episodes (summary + terminal marker)', async () => {
+  it('renders exact added and removed memory from the latest revision', async () => {
     stubFetch()
     const { container } = renderInspector()
-    await waitFor(() => expect(container.textContent).toContain('리텐션 코호트 정의'))
-    expect(container.textContent).toContain('terminal=handoff_complete')
-    expect(container.textContent).toContain('4 claims')
-    // source_turn_range projected → episode subtitle shows the compacted turn span.
-    expect(container.querySelector('.mem-tl-range')?.textContent).toBe('turn 1–28')
-    expect(container.textContent).toContain('turn 1–28')
+    await waitFor(() => expect(container.textContent).toContain('최근 기억 변화 · revision 12'))
+    expect(container.textContent).toContain('+1')
+    expect(container.textContent).toContain('−1')
+    expect(container.textContent).toContain('새 기억')
+    expect(container.textContent).toContain('사라진 기억')
+    expect(container.textContent).toContain('m-diagnostic')
+    expect(container.textContent).toContain('m-old-query')
+    expect(container.textContent).toContain('old amplitude query should disappear')
   })
 
-  it('omits the turn-range subtitle for an episode without source_turn_range (no fabrication)', async () => {
+  it('renders a zero delta honestly instead of fabricating memory changes', async () => {
+    const payload = turnRecordsPayload()
+    payload.memory_os.change.added = []
+    payload.memory_os.change.removed = []
+    payload.memory_os.change.retained = 3
+    stubFetch(payload)
+    const { container } = renderInspector()
+    await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
+    expect(container.textContent).toContain('새 기억 없음.')
+    expect(container.textContent).toContain('사라진 기억 없음.')
+    expect(container.textContent).toContain('retained')
+    expect(container.textContent).toContain('3')
+  })
+
+  it('does not expose any episode/GC compatibility surface', async () => {
     stubFetch()
     const { container } = renderInspector()
     await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
-    const diagnosticRow = [...container.querySelectorAll('.mem-store-row')].find(r =>
-      (r.textContent ?? '').includes('provider response diagnostic'))
-    expect(diagnosticRow).toBeTruthy()
-    expect(diagnosticRow?.querySelector('.mem-tl-range')).toBeFalsy()
-  })
-
-  it('fails closed on an impossible turn range (hi < lo) rather than rendering a fabricated span', async () => {
-    const payload = turnRecordsPayload()
-    // hi < lo cannot be an inclusive absolute-turn span → decode drops it to null.
-    payload.memory_os.episodes.items[0]!.source_turn_range = { lo: 5, hi: 2 }
-    stubFetch(payload)
-    const { container } = renderInspector()
-    await waitFor(() => expect(container.textContent).toContain('리텐션 코호트 정의'))
-    // the episode still renders; only the impossible range subtitle is omitted.
-    expect(container.querySelector('.mem-tl-range')).toBeFalsy()
-    expect(container.textContent).not.toContain('turn 5')
+    expect(container.textContent).not.toContain('episodes_store')
+    expect(container.textContent).not.toContain('압축 유지 · 요약')
+    expect(container.textContent).not.toContain('GC')
   })
 
   it('re-binds the one-scope target when the keeper prop changes (no stale keeper identity)', async () => {
@@ -574,11 +586,27 @@ describe('memory view-model helpers', () => {
     expect(comp.parts[0]?.lbl).toBe('페르소나')
   })
 
+  it('memCompositionFromInputComponents sums full final-input content buckets', () => {
+    const comp = memCompositionFromInputComponents([
+      { component: 'prompt.persona', bytes: 1200 },
+      { component: 'tool_schemas', bytes: 64000 },
+      { component: 'message_tool_result', bytes: 2800 },
+      { component: 'message_audio', bytes: 0 },
+    ])
+    expect(comp.totalBytes).toBe(68000)
+    expect(comp.parts.map(part => part.key)).toEqual([
+      'prompt.persona',
+      'tool_schemas',
+      'message_tool_result',
+    ])
+    expect(comp.parts.map(part => part.lbl)).toEqual(['페르소나', '도구 스키마', '도구 결과'])
+  })
+
   it('latestEntryWithBlocks skips an empty-block tail turn and returns the last assembled prompt', () => {
     const mkRow = (turn: number, blocks: { block: string; bytes: number; digest: string }[]): TurnRecordRow => ({
       record: {
         keeper: 'k', trace_id: 't', absolute_turn: turn, ts: turn, runtime_profile: 'local',
-        blocks, execution_ids: [],
+        blocks, input_components: [], execution_ids: [],
       },
       diff_vs_prev: null,
     })
@@ -591,6 +619,20 @@ describe('memory view-model helpers', () => {
     expect(latestEntryWithBlocks([errorTail])).toBeNull()
   })
 
+  it('latestEntryWithInputComponents skips unobserved tail turns', () => {
+    const mkRow = (turn: number, input_components: { component: string; bytes: number }[]): TurnRecordRow => ({
+      record: {
+        keeper: 'k', trace_id: 't', absolute_turn: turn, ts: turn, runtime_profile: 'local',
+        blocks: [], input_components, execution_ids: [],
+      },
+      diff_vs_prev: null,
+    })
+    const observed = mkRow(1, [{ component: 'tool_schemas', bytes: 10 }])
+    const unavailable = mkRow(2, [])
+    expect(latestEntryWithInputComponents([observed, unavailable])?.record.absolute_turn).toBe(1)
+    expect(latestEntryWithInputComponents([unavailable])).toBeNull()
+  })
+
   it('recentMemoryRecallInjections returns newest real memory_os_recall blocks only', () => {
     const mkRow = (turn: number, block: string, bytes: number): TurnRecordRow => ({
       record: {
@@ -600,6 +642,7 @@ describe('memory view-model helpers', () => {
         ts: turn,
         runtime_profile: 'local',
         blocks: [{ block, bytes, digest: `digest-${turn}` }],
+        input_components: [],
         execution_ids: [],
       },
       diff_vs_prev: null,
@@ -635,6 +678,7 @@ describe('memory view-model helpers', () => {
 
   it('factTtlLabel renders a future expiry as remaining TTL ("…후"), never "지금"', () => {
     const makeFact = (over: Partial<MemoryOsFact>): MemoryOsFact => ({
+      memory_id: 'm-test',
       claim: 'x',
       category: { tag: 'fact' },
       source: { trace_id: 't', turn: 0, tool_call_id: null },
@@ -663,6 +707,7 @@ describe('memory view-model helpers', () => {
 
   it('sortMemoryFactsForReview preserves persisted source order', () => {
     const mkFact = (claim: string, current: boolean, reference_time: number): MemoryOsFact => ({
+      memory_id: `m-${claim}`,
       claim,
       category: { tag: 'fact' },
       source: { trace_id: 't', turn: 1, tool_call_id: null },
@@ -684,6 +729,7 @@ describe('memory view-model helpers', () => {
 
   it('factSelectionReason explains currentness, category, and claim kind', () => {
     const fact: MemoryOsFact = {
+      memory_id: 'm-x',
       claim: 'x',
       category: { tag: 'constraint' },
       source: { trace_id: 't', turn: 1, tool_call_id: null },

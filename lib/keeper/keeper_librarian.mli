@@ -1,19 +1,30 @@
-(** Keeper_librarian — structured claim extraction for the Memory OS.
+(** Pure prompt and output contract for LLM-owned current Memory OS selection.
 
-    This module stays on the MASC side of the OAS boundary. It does not call
-    providers or persist files; callers choose the message slice, render the
-    external prompt, call the LLM, and store accepted episodes via
-    [Keeper_memory_os_io]. *)
+    The Librarian receives the exact current facts plus a bounded slice of new
+    conversation. It returns existing fact identities to retain and new facts
+    to add. Omitting an existing identity removes that memory. No deterministic
+    ranking, recency rule, byte budget, or migration path participates. *)
 
-(** Input bundle for one librarian extraction. *)
 type input =
   { trace_id : string
   ; generation : int
+  ; current_facts : Keeper_memory_os_types.fact list
   ; messages : Agent_sdk.Types.message list
   }
 
-val wire_field_episode_summary : string
-val wire_field_claims : string
+type selection =
+  { summary : string
+  ; retained_claim_ids : string list
+  ; new_claims : Keeper_memory_os_types.fact list
+  ; facts : Keeper_memory_os_types.fact list
+  ; open_items : string list
+  ; constraints : string list
+  ; preserved_tool_refs : string list
+  }
+
+val wire_field_summary : string
+val wire_field_retained_claim_ids : string
+val wire_field_new_claims : string
 val wire_field_open_items : string
 val wire_field_constraints : string
 val wire_field_preserved_tool_refs : string
@@ -23,25 +34,12 @@ val wire_field_source_turn : string
 val wire_field_source_tool_call_id : string
 val wire_field_claim_id : string
 val wire_field_claim_kind : string
-
 val wire_field_valid_for_days : string
-(** Producer-declared lifetime in whole days (1..
-    {!Keeper_memory_os_types.max_valid_for_days}); absent = durable. The
-    extracting model's own judgment — categories never infer a validity
-    horizon (RFC-0351 S2). *)
-
-val wire_episode_fields : string list
-(** Canonical episode-object wire field names accepted by the parser and used by
-    retry prompt rendering. *)
-
+val wire_current_fields : string list
 val wire_claim_fields : string list
-(** Canonical claim-object wire field names accepted by the parser and used by
-    retry prompt rendering. *)
 
-(** Prompt variables for [keeper.librarian.episode_extraction]. *)
 val prompt_variables : input -> (string * string) list
 
-(** Structured parse failure for raw librarian output. *)
 type parse_error =
   | Empty_output
   | Invalid_json of string
@@ -50,43 +48,20 @@ type parse_error =
   | Unexpected_field of string
   | Missing_required_fields
   | Claim_schema_mismatch
+  | Unknown_retained_claim_id of string
+  | Duplicate_retained_claim_id of string
+  | Duplicate_selected_claim_id of string
 
 val parse_error_to_string : parse_error -> string
 
-(** Parse a raw strict-JSON LLM response into an episode.
-
-    Accepted wire forms are deliberately narrow:
-    - exact JSON object;
-    - exact JSON string whose contents are a JSON object.
-
-    Markdown fences, prose before/after JSON, multiple JSON objects, and schema
-    drift return a structured [parse_error]. A provider-supplied
-    [schema_version] field is ignored if present; persisted episodes always use
-    {!Keeper_memory_os_types.schema_version}. [now] is optional so tests can
-    keep timestamps deterministic. *)
-val episode_of_output_result
+val selection_of_json_result
   :  ?now:float
-  -> generation:int
-  -> input
-  -> string
-  -> (Keeper_memory_os_types.episode, parse_error) result
-
-val episode_of_json_result
-  :  ?now:float
-  -> generation:int
   -> input
   -> Yojson.Safe.t
-  -> (Keeper_memory_os_types.episode, parse_error) result
-(** Parse an already extracted provider-native JSON response into an episode.
-    This is the runtime path used after OAS structured response extraction. *)
+  -> (selection, parse_error) result
 
-(** Parse a raw strict-JSON LLM response into an episode.
-
-    Compatibility wrapper over {!episode_of_output_result}; [None] means the
-    response was not JSON or violated the extraction schema. *)
-val episode_of_output
+val selection_of_output_result
   :  ?now:float
-  -> generation:int
   -> input
   -> string
-  -> Keeper_memory_os_types.episode option
+  -> (selection, parse_error) result

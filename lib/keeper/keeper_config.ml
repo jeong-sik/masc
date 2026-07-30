@@ -34,67 +34,6 @@ include Keeper_config_text
 let keeper_status_fast_default () : bool =
   bool_of_env_default "MASC_KEEPER_STATUS_FAST_DEFAULT" ~default:false
 
-(* masc#25052 P1: Memory OS recall selection budget. Before this,
-   Keeper_memory_os_recall.render_context_exn injected the keeper's ENTIRE
-   current fact/episode store into every turn's prompt -- no selection
-   contract existed, so a keeper that accumulated facts/episodes without
-   bound grew its per-turn prompt injection without limit. (Retention for
-   both stores lives in Keeper_memory_os_gc: run_gc deletes facts and
-   run_episode_gc deletes episode files, each only past the exact
-   producer-declared valid_until, default-on from the maintenance fiber.)
-   These three knobs are the boundary: how many facts, how many episodes,
-   and how many rendered bytes recall may inject per turn.
-
-   Defaults are set at/above the largest volume observed in the 2026-07-17
-   lane analysis that diagnosed this (~300 facts, ~380 episode summaries,
-   ~1.5MB rendered per keeper turn), so a typical keeper today is truncated
-   by NONE of these -- this establishes a ceiling, not a retroactive
-   downsizing. Operators tune live via Runtime_params (no restart) as real
-   volumes grow. Truncation, when it does trigger, is always logged and
-   counted (Keeper_metrics.MemoryOsRecallFactsTruncated /
-   RecallEpisodesTruncated / RecallBytesOverBudget) -- never silent. *)
-let keeper_memory_os_recall_max_facts_rp =
-  _rp_int ~key:"keeper.memory_os.recall.max_facts"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_MEMORY_OS_RECALL_MAX_FACTS"
-                          ~default:500 ~min_v:0 ~max_v:100_000)
-    ~min_v:0 ~max_v:100_000
-    ~description:"Max facts Memory OS recall injects per turn (0 = inject none)" ()
-let keeper_memory_os_recall_max_facts () : int =
-  Runtime_params.get keeper_memory_os_recall_max_facts_rp
-
-let keeper_memory_os_recall_max_episodes_rp =
-  _rp_int ~key:"keeper.memory_os.recall.max_episodes"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_MEMORY_OS_RECALL_MAX_EPISODES"
-                          ~default:500 ~min_v:0 ~max_v:100_000)
-    ~min_v:0 ~max_v:100_000
-    ~description:"Max episodes Memory OS recall injects per turn (0 = inject none)" ()
-let keeper_memory_os_recall_max_episodes () : int =
-  Runtime_params.get keeper_memory_os_recall_max_episodes_rp
-
-(* RFC-0351 L3: enforced, no longer observability-only. This was a threshold
-   that logged "not truncated" and let the block go out in full, deferring a
-   byte-accurate trim until real overage data existed. That data exists: one
-   keeper rendered 222,499 bytes of recall -- 98.5% of its entire
-   extra_system_context for the turn -- while sitting under both count budgets
-   (62 facts / 432 episodes against 500/500), so neither count budget fired.
-
-   Enforcement drops the oldest episodes until the rendered block fits, keeping
-   survivors in their original order (see [select_pairs_within_byte_budget]).
-   Facts are never dropped by this budget; they render an order of magnitude
-   smaller than episodes.
-
-   The 64 KiB default is roughly a tenth of a 200k-token context window once
-   rendered, and takes the measured keeper from 222,499 B to under 65,536 B.
-   0 disables enforcement (unbounded), matching the previous behaviour. *)
-let keeper_memory_os_recall_max_bytes_rp =
-  _rp_int ~key:"keeper.memory_os.recall.max_bytes"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_MEMORY_OS_RECALL_MAX_BYTES"
-                          ~default:65_536 ~min_v:0 ~max_v:50_000_000)
-    ~min_v:0 ~max_v:50_000_000
-    ~description:"Rendered recall block byte budget; oldest episodes are dropped to fit (0 = unbounded)" ()
-let keeper_memory_os_recall_max_bytes () : int =
-  Runtime_params.get keeper_memory_os_recall_max_bytes_rp
-
 (* Own-recent-board-posts self-awareness layer. The board-event collector is
    cursor-based and filters out self-authored posts, so without this layer a
    keeper never observes its own published posts in-prompt and can repeat the

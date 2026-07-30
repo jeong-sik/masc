@@ -60,10 +60,11 @@ let librarian_claim_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
-let librarian_episode_output_schema =
+let librarian_current_output_schema =
   let fields =
-    [ Keeper_librarian.wire_field_episode_summary, string_schema
-    ; ( Keeper_librarian.wire_field_claims
+    [ Keeper_librarian.wire_field_summary, string_schema
+    ; Keeper_librarian.wire_field_retained_claim_ids, string_array_schema
+    ; ( Keeper_librarian.wire_field_new_claims
       , `Assoc [ "type", `String "array"; "items", librarian_claim_schema ] )
     ; Keeper_librarian.wire_field_open_items, string_array_schema
     ; Keeper_librarian.wire_field_constraints, string_array_schema
@@ -213,10 +214,9 @@ let fusion_judge_output_schema =
 
    Two failure modes traced to that branch are closed by not taking it. The
    librarian schema marks every claim field [required] with nullable types, so
-   a schema-conforming provider emits ["claim_id": null] — which
-   [Keeper_librarian.optional_string_field_strict] rejects, dropping the whole
-   episode, while the prompt tells the model to omit the key instead. And the
-   json_object tier only 400s because a response_format was set at all.
+   a schema-conforming provider emits optional values in a different shape from
+   prompt-only candidates. The json_object tier also 400s solely because a
+   response_format was set at all.
 
    Note the parse path never read a provider-side structured field:
    [Agent_sdk.Structured.response_json_extractor] extracts JSON from the

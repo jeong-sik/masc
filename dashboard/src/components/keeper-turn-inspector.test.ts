@@ -88,56 +88,33 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
     count: 2,
     skipped_rows: 0,
     memory_os: {
-      schema: 'masc.memory_os.dashboard.v1',
+      schema: 'keeper.memory_os.current_observability.v1',
       keeper: 'albini',
-      source: 'memory_os',
-      producer: 'keeper_memory_os.recall',
-      selection_policy: null,
-      facts_store: '.masc/config/keepers/albini.facts.jsonl',
-      episodes_store: '.masc/config/keepers/albini/episodes',
+      source: 'current_memory_snapshot',
+      producer: 'keeper_librarian',
+      snapshot_store: '.masc/config/keepers/albini.memory.json',
       recall_enabled: true,
+      revision: 7,
+      updated_at: 1_781_587_590,
+      summary: 'Current memory selected by the Librarian.',
+      update_source: {
+        kind: 'librarian',
+        trace_id: 'trace-active',
+        generation: 7,
+      },
       now: 1_781_587_600,
       now_iso: '2026-06-16T02:00:00Z',
       read_errors: [],
-      episodes: {
-        shown: 2,
-        current: 1,
-        expired: 1,
-        terminal_markers: 1,
-        items: [
-          {
-            trace_id: 'trace-active',
-            generation: 7,
-            created_at: 1_781_583_000,
-            created_at_iso: '2026-06-16T00:43:20Z',
-            valid_until: 1_781_590_000,
-            valid_until_iso: '2026-06-16T02:40:00Z',
-            current: true,
-            terminal_marker: null,
-            claim_count: 2,
-            source_turn_range: [1, 6],
-            summary: 'Active recall source used by the prompt.',
-          },
-          {
-            trace_id: 'trace-done',
-            generation: 3,
-            created_at: 1_781_580_000,
-            created_at_iso: '2026-06-15T23:53:20Z',
-            valid_until: 1_781_585_400,
-            valid_until_iso: '2026-06-16T01:23:20Z',
-            current: false,
-            terminal_marker: 'handoff_complete',
-            claim_count: 1,
-            source_turn_range: null,
-            summary: 'Terminal memory should stay visible as expired source evidence.',
-          },
-        ],
-      },
       facts: {
-        shown: 9,
-        current: 8,
-        expired: 1,
+        shown: 1,
+        current: 1,
+        expired: 0,
         items: [],
+      },
+      change: {
+        added: [],
+        removed: [],
+        retained: 1,
       },
     },
     entries: [
@@ -149,6 +126,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           ts: 1_781_587_500,
           runtime_profile: 'local',
           blocks: [{ block: 'system', bytes: 1200, digest: '1111222233334444' }],
+          input_components: [],
           execution_ids: [],
         },
         diff_vs_prev: null,
@@ -172,6 +150,10 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           blocks: [
             { block: 'system', bytes: 1200, digest: '1111222233334444' },
             { block: 'memory_os_recall', bytes: 3392, digest: 'aabbccddeeff00112233' },
+          ],
+          input_components: [
+            { component: 'prompt.persona', bytes: 1200 },
+            { component: 'prompt.memory_os_recall', bytes: 3392 },
           ],
           execution_ids: ['exec-42'],
         },
@@ -208,7 +190,7 @@ afterEach(() => {
 })
 
 describe('KeeperMemoryOsRecallPanel', () => {
-  it('surfaces Memory OS recall blocks and episode TTL evidence', async () => {
+  it('surfaces Memory OS recall blocks and the current snapshot revision', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 
     const { container } = render(html`<${KeeperMemoryOsRecallPanel} keeperName="albini" />`)
@@ -227,14 +209,13 @@ describe('KeeperMemoryOsRecallPanel', () => {
     expect(text).toContain('enabled')
     expect(text).toContain('latest block')
     expect(text).toContain('3392B')
-    expect(text).toContain('ep 1/2')
-    expect(text).toContain('expired 1')
-    expect(text).toContain('terminal 1')
-    expect(text).toContain('facts 8/9')
-    expect(text).toContain('terminal=handoff_complete')
-    expect(text).toContain('expired 2026-06-16 01:23:20Z')
-    expect(text).toContain('facts: .masc/config/keepers/albini.facts.jsonl')
-    expect(text).toContain('episodes: .masc/config/keepers/albini/episodes')
+    expect(text).toContain('revision 7')
+    expect(text).toContain('facts 1/1')
+    expect(text).toContain('+0 / −0')
+    expect(text).toContain('retained 1')
+    expect(text).toContain('latest revision memory change 없음')
+    expect(text).toContain('store: .masc/config/keepers/albini.memory.json')
+    expect(text).toContain('source: librarian · trace-active · g7')
   })
 
   it('shows a source-missing state when the API has no Memory OS snapshot', async () => {

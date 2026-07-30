@@ -1,7 +1,4 @@
-(** Keeper_memory_os_types — typed schema for the tiered Memory OS.
-
-    Facts are immutable, versioned claims extracted by the librarian.
-    Episodes group related facts with a short summary and metadata. *)
+(** Keeper_memory_os_types — typed schema for current Memory OS facts. *)
 
 (* Kept at the current on-disk schema label. Product-specific reference fields
    are not part of the generic Memory fact type. *)
@@ -22,19 +19,12 @@ let wire_field_last_verified_at = "last_verified_at"
 let wire_field_claim_id = "claim_id"
 let wire_field_claim_kind = "claim_kind"
 let wire_field_schema_version = "schema_version"
-let wire_field_generation = "generation"
-let wire_field_episode_summary = "episode_summary"
 let wire_field_claims = "claims"
 let wire_field_open_items = "open_items"
 let wire_field_constraints = "constraints"
 let wire_field_preserved_tool_refs = "preserved_tool_refs"
 let wire_field_source_turn = "source_turn"
 let wire_field_source_tool_call_id = "source_tool_call_id"
-let wire_field_source_turn_range = "source_turn_range"
-let wire_field_lo = "lo"
-let wire_field_hi = "hi"
-let wire_field_created_at = "created_at"
-let wire_field_terminal_marker = "terminal_marker"
 
 module Wire_field_set = Set.Make (String)
 
@@ -71,34 +61,6 @@ let fact_wire_fields =
     ; wire_field_claim_kind
     ; wire_field_schema_version
     ]
-;;
-
-let source_turn_range_wire_fields = wire_field_set [ wire_field_lo; wire_field_hi ]
-
-let episode_wire_fields =
-  wire_field_set
-    [ wire_field_trace_id
-    ; wire_field_generation
-    ; wire_field_episode_summary
-    ; wire_field_claims
-    ; wire_field_open_items
-    ; wire_field_constraints
-    ; wire_field_preserved_tool_refs
-    ; wire_field_source_turn_range
-    ; wire_field_created_at
-    ; wire_field_valid_until
-    ; wire_field_terminal_marker
-    ; wire_field_schema_version
-    ]
-;;
-
-let wire_librarian_episode_fields =
-  [ wire_field_episode_summary
-  ; wire_field_claims
-  ; wire_field_open_items
-  ; wire_field_constraints
-  ; wire_field_preserved_tool_refs
-  ]
 ;;
 
 let wire_field_valid_for_days = "valid_for_days"
@@ -280,21 +242,6 @@ let reference_time (f : fact) =
   | None -> f.first_seen
 ;;
 
-type episode =
-  { trace_id : string
-  ; generation : int
-  ; episode_summary : string
-  ; claims : fact list
-  ; open_items : string list
-  ; constraints : string list
-  ; preserved_tool_refs : string list
-  ; source_turn_range : (int * int) option
-  ; created_at : float
-  ; valid_until : float option
-  ; terminal_marker : string option
-  ; schema_version : string
-  }
-
 (* ---------- JSON codecs ---------- *)
 
 let json_string_field key (fields : (string * Yojson.Safe.t) list) =
@@ -316,28 +263,6 @@ let json_float_field key (fields : (string * Yojson.Safe.t) list) =
   | Some (`Float f) -> Some f
   | Some (`Int i) -> Some (float_of_int i)
   | Some (`Assoc _ | `Bool _ | `Intlit _ | `List _ | `Null | `String _) | None -> None
-;;
-
-let json_bool_field key (fields : (string * Yojson.Safe.t) list) =
-  match List.assoc_opt key fields with
-  | Some (`Bool b) -> Some b
-  | Some (`Assoc _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _)
-  | None -> None
-;;
-
-let json_string_list_field key (fields : (string * Yojson.Safe.t) list) =
-  match List.assoc_opt key fields with
-  | Some (`List items) ->
-    let strings =
-      List.filter_map
-        (function
-          | `String s -> Some s
-          | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null -> None)
-        items
-    in
-    if List.length strings = List.length items then Some strings else None
-  | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _)
-  | None -> None
 ;;
 
 let provenance_event_to_json (e : provenance_event) =
@@ -489,123 +414,6 @@ let fact_of_json (json : Yojson.Safe.t) =
                ; claim_id
                })
         | None -> None)
-     | _ -> None)
-  | `Assoc _
-  | `Bool _
-  | `Float _
-  | `Int _
-  | `Intlit _
-  | `List _
-  | `Null
-  | `String _ -> None
-;;
-
-let episode_to_json (e : episode) =
-  if not (String.equal e.schema_version schema_version)
-  then invalid_arg "memory episode schema_version is unsupported";
-  let range_json =
-    match e.source_turn_range with
-    | Some (lo, hi) ->
-      [ wire_field_source_turn_range
-      , `Assoc [ wire_field_lo, `Int lo; wire_field_hi, `Int hi ]
-      ]
-    | None -> []
-  in
-  `Assoc
-    ([ wire_field_trace_id, `String e.trace_id
-     ; wire_field_generation, `Int e.generation
-     ; wire_field_episode_summary, `String e.episode_summary
-     ; ( wire_field_claims
-       , `List (List.rev (List.rev_map fact_to_json e.claims)) )
-     ; wire_field_open_items, `List (List.map (fun s -> `String s) e.open_items)
-     ; wire_field_constraints, `List (List.map (fun s -> `String s) e.constraints)
-     ; ( wire_field_preserved_tool_refs
-       , `List (List.map (fun s -> `String s) e.preserved_tool_refs) )
-     ; wire_field_created_at, `Float e.created_at
-     ; wire_field_schema_version, `String e.schema_version
-     ]
-     @ range_json
-     @ optional_float_field wire_field_valid_until e.valid_until
-     @ (match e.terminal_marker with
-        | Some marker -> [ wire_field_terminal_marker, `String marker ]
-        | None -> []))
-;;
-
-let facts_of_json values =
-  let rec loop facts = function
-    | [] -> Some (List.rev facts)
-    | json :: rest ->
-      (match fact_of_json json with
-       | Some fact -> loop (fact :: facts) rest
-       | None -> None)
-  in
-  loop [] values
-;;
-
-let optional_string_json_field key fields =
-  match List.assoc_opt key fields with
-  | None -> Some None
-  | Some (`String value) -> Some (Some value)
-  | Some _ -> None
-;;
-
-let source_turn_range_field fields =
-  match List.assoc_opt wire_field_source_turn_range fields with
-  | None -> Some None
-  | Some (`Assoc range_fields)
-    when closed_fields source_turn_range_wire_fields range_fields ->
-    (match json_int_field wire_field_lo range_fields, json_int_field wire_field_hi range_fields with
-     | Some lo, Some hi -> Some (Some (lo, hi))
-     | (Some _, None) | (None, Some _) | (None, None) -> None)
-  | Some _ -> None
-;;
-
-let episode_of_json (json : Yojson.Safe.t) =
-  match json with
-  | `Assoc fields when closed_fields episode_wire_fields fields ->
-    (match
-       ( json_string_field wire_field_trace_id fields
-       , json_int_field wire_field_generation fields
-       , json_string_field wire_field_episode_summary fields
-       , (match List.assoc_opt wire_field_claims fields with
-          | Some (`List claim_items) -> facts_of_json claim_items
-          | Some _ | None -> None)
-       , json_string_list_field wire_field_open_items fields
-       , json_string_list_field wire_field_constraints fields
-       , json_string_list_field wire_field_preserved_tool_refs fields
-       , source_turn_range_field fields
-       , json_float_field wire_field_created_at fields
-       , optional_float_json_field wire_field_valid_until fields
-       , optional_string_json_field wire_field_terminal_marker fields
-       , json_string_field wire_field_schema_version fields )
-     with
-     | ( Some trace_id
-       , Some generation
-       , Some episode_summary
-       , Some claims
-       , Some open_items
-       , Some constraints
-       , Some preserved_tool_refs
-       , Some source_turn_range
-       , Some created_at
-       , Some valid_until
-       , Some terminal_marker
-       , Some row_version )
-       when String.equal row_version schema_version ->
-       Some
-         { trace_id
-         ; generation
-         ; episode_summary
-         ; claims
-         ; open_items
-         ; constraints
-         ; preserved_tool_refs
-         ; source_turn_range
-         ; created_at
-         ; valid_until
-         ; terminal_marker
-         ; schema_version = row_version
-         }
      | _ -> None)
   | `Assoc _
   | `Bool _

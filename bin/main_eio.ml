@@ -1136,99 +1136,6 @@ let runtime_wizard_catalog_cmd =
   let info = Cmd.info "runtime-wizard-catalog" ~doc in
   Cmd.v info Term.(const runtime_wizard_catalog_cmd_exit $ base_path)
 
-let memory_os_keeper =
-  let doc =
-    "Only scan the given keeper id. Repeatable. When omitted, all existing \
-     non-shared keeper fact stores are scanned."
-  in
-  Arg.(value & opt_all string [] & info ["keeper"] ~docv:"KEEPER" ~doc)
-
-let memory_os_gc_json =
-  let doc = "Emit machine-readable JSON instead of text output" in
-  Arg.(value & flag & info ["json"] ~doc)
-
-let memory_os_gc_dry_run_cmd_exit base_path keeper_ids as_json =
-  let base_path = Env_config.normalize_masc_base_path_input base_path in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let report =
-    Eio_main.run
-    @@ fun env ->
-    let now = Eio.Time.now (Eio.Stdenv.clock env) in
-    match keeper_ids with
-    | [] ->
-      Masc.Keeper_memory_os_gc_dry_run_report.run_for_keepers_dir
-        ~keepers_dir
-        ~now
-        ()
-    | ids ->
-      Masc.Keeper_memory_os_gc_dry_run_report.run_for_keepers_dir
-        ~keepers_dir
-        ~keeper_ids:ids
-        ~now
-        ()
-  in
-  if as_json
-  then
-    print_endline
-      (Yojson.Safe.pretty_to_string
-         (Masc.Keeper_memory_os_gc_dry_run_report.to_json report))
-  else
-    print_string (Masc.Keeper_memory_os_gc_dry_run_report.render_text report);
-  if report.error_count > 0 then 1 else 0
-
-let memory_os_gc_dry_run_cmd =
-  let doc =
-    "Run the Memory OS GC (fact store and episode store) in dry-run mode and \
-     print the TTL report without rewriting or deleting anything. The scan \
-     still takes each keeper store lock; contended stores are reported as \
-     per-keeper errors."
-  in
-  let info = Cmd.info "memory-os-gc-dry-run" ~doc in
-  Cmd.v info
-    Term.(
-      const memory_os_gc_dry_run_cmd_exit $ base_path $ memory_os_keeper
-      $ memory_os_gc_json)
-
-let memory_os_sanity_sweep_cmd_exit base_path keeper_ids as_json =
-  let base_path = Env_config.normalize_masc_base_path_input base_path in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let report =
-    Eio_main.run
-    @@ fun env ->
-    let now = Eio.Time.now (Eio.Stdenv.clock env) in
-    match keeper_ids with
-    | [] ->
-      Masc.Keeper_memory_os_sanity_sweep.run_for_keepers_dir
-        ~keepers_dir
-        ~now
-        ()
-    | ids ->
-      Masc.Keeper_memory_os_sanity_sweep.run_for_keepers_dir
-        ~keepers_dir
-        ~keeper_ids:ids
-        ~now
-        ()
-  in
-  if as_json
-  then
-    print_endline
-      (Yojson.Safe.pretty_to_string
-         (Masc.Keeper_memory_os_sanity_sweep.to_json report))
-  else print_string (Masc.Keeper_memory_os_sanity_sweep.render_text report);
-  if report.error_count > 0 then 1 else 0
-
-let memory_os_sanity_sweep_cmd =
-  let doc =
-    "Build a read-only Memory OS sanity review packet: typed current/expired \
-     fact rows, duplicate claim identities, and deterministic GC preview. It \
-     never rewrites stores and never infers obsolete facts from claim prose."
-  in
-  let info = Cmd.info "memory-os-sanity-sweep" ~doc in
-  Cmd.v info
-    Term.(
-      const memory_os_sanity_sweep_cmd_exit $ base_path $ memory_os_keeper
-      $ memory_os_gc_json)
-
 let schedule_prune_cmd_exit base_path =
   let config = Workspace_utils.default_config base_path in
   match Schedule_service.prune config with
@@ -1272,8 +1179,6 @@ let cmd =
     ; login_cmd
     ; runtime_default_set_cmd
     ; runtime_wizard_catalog_cmd
-    ; memory_os_gc_dry_run_cmd
-    ; memory_os_sanity_sweep_cmd
     ; schedule_prune_cmd
     ]
 

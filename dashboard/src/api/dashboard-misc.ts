@@ -50,16 +50,14 @@ export function fetchMemorySubsystems(
 // --- Keeper Memory Health ---
 
 export type KeeperMemoryHealthAlertCode =
-  | 'ttl_expired_on_disk'
-  | 'near_duplicate'
-  | 'provider_slot_busy'
+  | 'snapshot_read_error'
+  | 'librarian_lane_busy'
 
 export type KeeperMemoryHealthAlertSeverity = 'warn'
 
 export type KeeperMemoryHealthAlertTarget =
-  | 'ttl_expired_on_disk'
-  | 'near_duplicate'
-  | 'provider_slot_busy'
+  | 'snapshot_read_error'
+  | 'librarian_lane_busy'
 
 export interface KeeperMemoryHealthAlert {
   code: KeeperMemoryHealthAlertCode
@@ -73,41 +71,35 @@ export interface KeeperMemoryHealthAlert {
 
 export interface KeeperMemoryHealthKeeperEntry {
   keeper_id: string
+  revision: number
   facts: number
-  facts_bytes: number
-  events: number
-  events_bytes: number
-  events_to_facts_ratio: number
-  ttl_expired_on_disk: number
-  near_duplicate: number
-  provider_slot_busy: number
+  snapshot_bytes: number
+  added: number
+  removed: number
+  librarian_lane_busy: number
+  read_error: string | null
   alerts: KeeperMemoryHealthAlert[]
 }
 
 export interface KeeperMemoryHealthResponse {
+  schema: string
   generated_at: number
   cadence_counter_entries: number
   keepers: KeeperMemoryHealthKeeperEntry[]
   totals: {
     facts: number
-    facts_bytes: number
-    events_bytes: number
-    ttl_expired_on_disk: number
-    near_duplicate: number
-    provider_slot_busy: number
+    snapshot_bytes: number
+    added: number
+    removed: number
+    librarian_lane_busy: number
+    read_errors: number
   }
   alert_summary: {
     total_alerts: number
     warn_alerts: number
     keepers_with_alerts: number
-    ttl_expired_keepers: number
-    near_duplicate_keepers: number
-    provider_slot_busy_keepers: number
-    thresholds: {
-      ttl_expired_on_disk: number
-      near_duplicate: number
-      provider_slot_busy: number
-    }
+    snapshot_read_error_keepers: number
+    librarian_lane_busy_keepers: number
   }
 }
 

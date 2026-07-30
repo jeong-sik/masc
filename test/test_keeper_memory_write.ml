@@ -1,6 +1,7 @@
 (** Explicit Keeper memory writes: every write is a durable Memory OS fact. *)
 
 module Runtime = Masc.Keeper_tool_memory_runtime
+module Current = Masc.Keeper_memory_os_current
 
 let make_args ~title ~content =
   `Assoc [ "title", `String title; "content", `String content ]
@@ -124,17 +125,22 @@ let test_valid_body_composition () =
   |> assert_ok ~body:"**hook** body text"
 ;;
 
-(* The loop the model actually depends on: a write must reach the store
-   recall reads back. The assertion goes through [read_facts_all] — the same
-   reader [Keeper_memory_os_recall] calls — because routing is what this test
-   is about and rendering is covered in test_keeper_memory_os. *)
+let current_facts keeper_id =
+  match Current.read ~keeper_id with
+  | Ok (Some snapshot) -> snapshot.facts
+  | Ok None -> Alcotest.fail "current snapshot missing after successful write"
+  | Error detail -> Alcotest.fail ("current snapshot unreadable: " ^ detail)
+;;
+
+(* The loop the model actually depends on: an explicit write must reach the
+   same current snapshot that recall reads. *)
 let test_write_comes_back_through_recall () =
   with_temp_dir
   @@ fun base_path ->
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "durable-write" in
   let keepers_dir = Filename.concat base_path "keepers" in
-  Masc.Keeper_memory_os_io.For_testing.with_keepers_dir keepers_dir (fun () ->
+  Current.For_testing.with_keepers_dir keepers_dir (fun () ->
     let response =
       Runtime.keeper_memory_write_json
         ~config
@@ -153,9 +159,9 @@ let test_write_comes_back_through_recall () =
        | _ -> false);
     Alcotest.(check string)
       "routed to the durable store"
-      "durable_fact_store"
+      "current_memory_snapshot"
       (string_field "store" response);
-    let facts = Masc.Keeper_memory_os_io.read_facts_all ~keeper_id:meta.name in
+    let facts = current_facts meta.name in
     Alcotest.(check int) "one durable claim" 1 (List.length facts);
     let fact = List.hd facts in
     Alcotest.(check string)
@@ -178,15 +184,14 @@ let test_write_comes_back_through_recall () =
       (fact.Masc.Keeper_memory_os_types.valid_until = None))
 ;;
 
-(* RFC-0351 S2. The declared lifetime reaches the store, and the reader
-   recall uses actually drops the claim past it. *)
+(* RFC-0351 S2. The declared lifetime reaches the current snapshot. *)
 let test_declared_lifetime_expires () =
   with_temp_dir
   @@ fun base_path ->
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "expiring-write" in
   let keepers_dir = Filename.concat base_path "keepers" in
-  Masc.Keeper_memory_os_io.For_testing.with_keepers_dir keepers_dir (fun () ->
+  Current.For_testing.with_keepers_dir keepers_dir (fun () ->
     let response =
       Runtime.keeper_memory_write_json
         ~config
@@ -203,7 +208,7 @@ let test_declared_lifetime_expires () =
       (match json_field "ok" response with
        | `Bool value -> value
        | _ -> false);
-    let fact = List.hd (Masc.Keeper_memory_os_io.read_facts_all ~keeper_id:meta.name) in
+    let fact = List.hd (current_facts meta.name) in
     let valid_until =
       match fact.Masc.Keeper_memory_os_types.valid_until with
       | Some ts -> ts

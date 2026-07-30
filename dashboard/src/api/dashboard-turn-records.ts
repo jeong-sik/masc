@@ -12,12 +12,18 @@ export type TurnBlock = {
   digest: string
 }
 
+export type TurnInputComponent = {
+  component: string
+  bytes: number
+}
+
 export type TurnRecordEntry = {
   execution_ids: string[]
   keeper: string
   trace_id: string
   absolute_turn: number
   blocks: TurnBlock[]
+  input_components: TurnInputComponent[]
   runtime_profile: string
   // RFC-0233 §2.3 — grounded from the backend turn record (boundary-redacted
   // model label + keeper stop reason). Absent (undefined) on error turns and
@@ -72,22 +78,6 @@ export type TurnRecordRow = {
   record: TurnRecordEntry
   // null on the first record of a trace (no same-trace predecessor)
   diff_vs_prev: TurnBlockDiff | null
-}
-
-export type MemoryOsEpisodeSummary = {
-  trace_id: string
-  generation: number
-  created_at: number
-  created_at_iso: string | null
-  valid_until: number | null
-  valid_until_iso: string | null
-  current: boolean
-  terminal_marker: string | null
-  claim_count: number
-  // Inclusive [lo, hi] absolute-turn span the episode compacted, or null when the
-  // record carries none (memory_os_episode_json → Keeper_memory_os_types.episode.source_turn_range).
-  source_turn_range: readonly [number, number] | null
-  summary: string
 }
 
 // RFC-keeper-memory-panel-real-data §4a: the librarian taxonomy as a closed TS union mirroring the OCaml
@@ -162,6 +152,7 @@ export type MemoryOsFactProvenance = {
 // Carries only the structure RFC-0247 left on the record — there is no salience /
 // uses / confidence field to decode because the backend has none to emit.
 export type MemoryOsFact = {
+  readonly memory_id: string
   readonly claim: string
   readonly category: MemoryOsFactCategory
   readonly source: MemoryOsFactProvenance
@@ -176,14 +167,10 @@ export type MemoryOsFact = {
   readonly claim_kind: MemoryOsClaimKind | null
 }
 
-export type MemoryOsSelectionPolicy = {
-  readonly keeper_scope: string
-  readonly facts_source: string
-  readonly episodes_source: string
-  readonly category_source: string
-  readonly claim_kind_source: string
-  readonly recall_block: string
-  readonly prompt_record: string
+export type MemoryOsUpdateSource = {
+  readonly kind: 'librarian' | 'explicit_write'
+  readonly trace_id: string
+  readonly generation: number
 }
 
 export type MemoryOsTurnRecordSnapshot = {
@@ -191,26 +178,26 @@ export type MemoryOsTurnRecordSnapshot = {
   keeper: string
   source: string
   producer: string
-  selection_policy: MemoryOsSelectionPolicy | null
-  facts_store: string
-  episodes_store: string
+  snapshot_store: string
   recall_enabled: boolean
+  revision: number
+  updated_at: number | null
+  summary: string | null
+  update_source: MemoryOsUpdateSource | null
   now: number | null
   now_iso: string | null
   read_errors: { scope: string; error: string }[]
-  episodes: {
-    shown: number
-    current: number
-    expired: number
-    terminal_markers: number
-    items: MemoryOsEpisodeSummary[]
-  }
   facts: {
     shown: number
     current: number
     expired: number
     // RFC-keeper-memory-panel-real-data §4a: every persisted fact row.
     items: MemoryOsFact[]
+  }
+  change: {
+    added: MemoryOsFact[]
+    removed: MemoryOsFact[]
+    retained: number
   }
 }
 
@@ -316,6 +303,43 @@ function decodeTurnBlockList(raw: unknown): TurnBlock[] {
     .filter((block): block is TurnBlock => block !== null)
 }
 
+const TURN_INPUT_COMPONENTS = new Set([
+  'prompt.persona',
+  'prompt.continuity',
+  'prompt.dynamic_context',
+  'prompt.temporal_summary',
+  'prompt.claimed_task_nudge',
+  'prompt.retry_nudge',
+  'prompt.memory_os_recall',
+  'prompt.connected_surface',
+  'tool_schemas',
+  'message_user',
+  'message_system',
+  'message_assistant_text',
+  'message_thinking',
+  'message_redacted_thinking',
+  'message_tool_use',
+  'message_tool_result',
+  'message_image',
+  'message_document',
+  'message_audio',
+])
+
+function decodeTurnInputComponents(raw: unknown): TurnInputComponent[] | null {
+  if (!Array.isArray(raw)) return null
+  const components: TurnInputComponent[] = []
+  for (const item of raw) {
+    if (!isRecord(item)) return null
+    const component = asString(item.component)
+    const bytes = asNumber(item.bytes)
+    if (!component || !TURN_INPUT_COMPONENTS.has(component) || bytes == null || bytes < 0) {
+      return null
+    }
+    components.push({ component, bytes })
+  }
+  return components
+}
+
 function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   if (!isRecord(raw)) return null
   const keeper = asString(raw.keeper)
@@ -323,7 +347,8 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   const absolute_turn = asNumber(raw.absolute_turn)
   const runtime_profile = asString(raw.runtime_profile)
   const ts = asNumber(raw.ts)
-  if (!keeper || !trace_id || absolute_turn == null || !runtime_profile || ts == null) {
+  const input_components = decodeTurnInputComponents(raw.input_components)
+  if (!keeper || !trace_id || absolute_turn == null || !runtime_profile || ts == null || input_components == null) {
     return null
   }
   const execution_ids = Array.isArray(raw.execution_ids)
@@ -335,6 +360,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     trace_id,
     absolute_turn,
     blocks: decodeTurnBlockList(raw.blocks),
+    input_components,
     runtime_profile,
     model: asString(raw.model),
     finish_reason: asString(raw.finish_reason),
@@ -382,43 +408,6 @@ function decodeTurnRecordRow(raw: unknown): TurnRecordRow | null {
   }
 }
 
-// Decode the { lo, hi } object memory_os_episode_json emits for a present range,
-// or null (server sends `Null`, or the field is malformed/absent). The UI renders
-// this as an inclusive absolute-turn span, so a range that cannot exist — a
-// non-integer bound, a negative turn, or hi < lo — fails closed to null rather
-// than displaying an impossible span. An incomplete pair also collapses to null.
-function decodeSourceTurnRange(raw: unknown): readonly [number, number] | null {
-  if (!isRecord(raw)) return null
-  const lo = asNumber(raw.lo)
-  const hi = asNumber(raw.hi)
-  if (lo == null || hi == null) return null
-  if (!Number.isInteger(lo) || !Number.isInteger(hi)) return null
-  if (lo < 0 || hi < lo) return null
-  return [lo, hi]
-}
-
-function decodeMemoryOsEpisode(raw: unknown): MemoryOsEpisodeSummary | null {
-  if (!isRecord(raw)) return null
-  const trace_id = asString(raw.trace_id)
-  const generation = asNumber(raw.generation)
-  const created_at = asNumber(raw.created_at)
-  const summary = asString(raw.summary)
-  if (!trace_id || generation == null || created_at == null || !summary) return null
-  return {
-    trace_id,
-    generation,
-    created_at,
-    created_at_iso: asNullableString(raw.created_at_iso),
-    valid_until: asNumber(raw.valid_until) ?? null,
-    valid_until_iso: asNullableString(raw.valid_until_iso),
-    current: asBoolean(raw.current, true) ?? true,
-    terminal_marker: asNullableString(raw.terminal_marker),
-    claim_count: asNumber(raw.claim_count, 0) ?? 0,
-    source_turn_range: decodeSourceTurnRange(raw.source_turn_range),
-    summary,
-  }
-}
-
 function decodeMemoryOsFactProvenance(raw: unknown): MemoryOsFactProvenance | null {
   if (!isRecord(raw)) return null
   const trace_id = asString(raw.trace_id)
@@ -429,6 +418,7 @@ function decodeMemoryOsFactProvenance(raw: unknown): MemoryOsFactProvenance | nu
 
 function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
   if (!isRecord(raw)) return null
+  const memory_id = asString(raw.memory_id)
   const claim = asString(raw.claim)
   const categoryToken = asString(raw.category)
   const source = decodeMemoryOsFactProvenance(raw.source)
@@ -439,7 +429,8 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
   // A row missing any of them is a contract violation — dropped here rather
   // than rendered with a guessed default (no silent fabrication).
   if (
-    !claim
+    !memory_id
+    || !claim
     || !categoryToken
     || !source
     || first_seen == null
@@ -451,6 +442,7 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
   // claim_kind is omitted by the server when None.
   const claimKindToken = asString(raw.claim_kind)
   return {
+    memory_id,
     claim,
     category: parseMemoryOsFactCategory(categoryToken),
     source,
@@ -465,35 +457,17 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
   }
 }
 
-function decodeMemoryOsSelectionPolicy(raw: unknown): MemoryOsSelectionPolicy | null {
+function decodeMemoryOsUpdateSource(raw: unknown): MemoryOsUpdateSource | null {
   if (!isRecord(raw)) return null
-  const keeper_scope = asString(raw.keeper_scope)
-  const facts_source = asString(raw.facts_source)
-  const episodes_source = asString(raw.episodes_source)
-  const category_source = asString(raw.category_source)
-  const claim_kind_source = asString(raw.claim_kind_source)
-  const recall_block = asString(raw.recall_block)
-  const prompt_record = asString(raw.prompt_record)
+  const kind = asString(raw.kind)
+  const trace_id = asString(raw.trace_id)
+  const generation = asNumber(raw.generation)
   if (
-    !keeper_scope
-    || !facts_source
-    || !episodes_source
-    || !category_source
-    || !claim_kind_source
-    || !recall_block
-    || !prompt_record
-  ) {
-    return null
-  }
-  return {
-    keeper_scope,
-    facts_source,
-    episodes_source,
-    category_source,
-    claim_kind_source,
-    recall_block,
-    prompt_record,
-  }
+    (kind !== 'librarian' && kind !== 'explicit_write')
+    || !trace_id
+    || generation == null
+  ) return null
+  return { kind, trace_id, generation }
 }
 
 function decodeMemoryOsCounts(raw: unknown): {
@@ -515,25 +489,37 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
   const keeper = asString(raw.keeper)
   const source = asString(raw.source)
   const producer = asString(raw.producer)
-  const facts_store = asString(raw.facts_store)
-  const episodes_store = asString(raw.episodes_store)
-  const episodesRaw = isRecord(raw.episodes) ? raw.episodes : null
+  const snapshot_store = asString(raw.snapshot_store)
   const factsRaw = isRecord(raw.facts) ? raw.facts : null
+  const changeRaw = isRecord(raw.change) ? raw.change : null
   const facts = decodeMemoryOsCounts(raw.facts)
-  if (!schema || !keeper || !source || !producer || !facts_store || !episodes_store || !episodesRaw || !factsRaw || !facts) {
+  if (
+    !schema
+    || !keeper
+    || !source
+    || !producer
+    || !snapshot_store
+    || !factsRaw
+    || !changeRaw
+    || !facts
+  ) {
     return null
   }
-  const episodesCounts = decodeMemoryOsCounts(episodesRaw)
-  if (!episodesCounts) return null
+  const decodeFacts = (value: unknown): MemoryOsFact[] =>
+    asRecordArray(value)
+      .map(decodeMemoryOsFact)
+      .filter((item): item is MemoryOsFact => item !== null)
   return {
     schema,
     keeper,
     source,
     producer,
-    selection_policy: decodeMemoryOsSelectionPolicy(raw.selection_policy),
-    facts_store,
-    episodes_store,
+    snapshot_store,
     recall_enabled: asBoolean(raw.recall_enabled, true) ?? true,
+    revision: asNumber(raw.revision, 0) ?? 0,
+    updated_at: asNumber(raw.updated_at) ?? null,
+    summary: asNullableString(raw.summary),
+    update_source: decodeMemoryOsUpdateSource(raw.update_source),
     now: asNumber(raw.now) ?? null,
     now_iso: asNullableString(raw.now_iso),
     read_errors: asRecordArray(raw.read_errors)
@@ -543,18 +529,14 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
         return scope && error ? { scope, error } : null
       })
       .filter((item): item is { scope: string; error: string } => item !== null),
-    episodes: {
-      ...episodesCounts,
-      terminal_markers: asNumber(episodesRaw.terminal_markers, 0) ?? 0,
-      items: asRecordArray(episodesRaw.items)
-        .map(decodeMemoryOsEpisode)
-        .filter((item): item is MemoryOsEpisodeSummary => item !== null),
-    },
     facts: {
       ...facts,
-      items: asRecordArray(factsRaw.items)
-        .map(decodeMemoryOsFact)
-        .filter((item): item is MemoryOsFact => item !== null),
+      items: decodeFacts(factsRaw.items),
+    },
+    change: {
+      added: decodeFacts(changeRaw.added),
+      removed: decodeFacts(changeRaw.removed),
+      retained: asNumber(changeRaw.retained, 0) ?? 0,
     },
   }
 }

@@ -366,10 +366,10 @@ let assemble_hooks
                 in
                 (match
                    (* Memory OS recall — advisory block rendered from every
-                      persisted facts/episodes (read side; the write side is
-                      the librarian wired in #20897), in persisted source order.
+                      persisted current fact in stored order (read side; the
+                      write side is the librarian current-selection pass).
                       Opt-in via MASC_KEEPER_MEMORY_OS_RECALL. *)
-                   (* Off-main: recall reads persisted facts/episodes via synchronous
+                   (* Off-main: recall reads the current snapshot via synchronous
                       file I/O, which would starve the main Eio domain and HOL
                       sibling keepers. Read-side only, no module-level mutable
                       state, so it is domain-safe on the shared pool. *)

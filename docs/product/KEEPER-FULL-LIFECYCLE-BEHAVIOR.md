@@ -205,15 +205,20 @@ content dominates many turns.
 **Missing:** relevant-memory selection that changes with the Task and does not
 reinsert the same fixed block every turn.
 
-### B08. Consolidation
+### B08. Periodic consolidation (removed)
 
-**Middle-school explanation:** Merge overlapping memories into a better memory instead of endlessly stacking copies.
+**Middle-school explanation:** Do not let a background LLM rewrite the entire memory store.
 
-**Expected behavior:** LLM-authored merge, deterministic schema and provenance validation, source preservation on failure.
+**Expected behavior:** Retention removes only facts whose producer-declared
+`valid_until` has passed. Every other fact is preserved.
 
-**Current verdict:** `NOT_PROVEN_FRESH`
+**Current verdict:** `REMOVED`
 
-**Missing:** measurable semantic merge followed by successful recall.
+**Observed:** the periodic full-store consolidation route, prompt, schema,
+runtime toggle, metrics, and maintenance fiber are absent.
+
+**Missing:** typed supersession/tombstone support is separate future work; it
+must not revive periodic full-store consolidation.
 
 ### B09. Capacity backstop
 

@@ -7,10 +7,6 @@ import {
 
 function validModelRouting(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    memory_os_consolidation_runtime_id: 'anthropic.sonnet',
-    memory_os_consolidation_effective_runtime_id: 'anthropic.sonnet',
-    memory_os_consolidation_status: 'resolved',
-    memory_os_consolidation_error: null,
     cross_verifier_runtime_id: null,
     media_failover: ['openai.gpt-4o'],
     ...overrides,
@@ -42,9 +38,6 @@ describe('parseRuntimeDefaultsResponse', () => {
     expect(out.default_model).toBe('gpt-4o')
     expect(out.runtimes).toHaveLength(2)
     expect(out.runtimes[0]!.is_default).toBe(true)
-    expect(out.model_routing.memory_os_consolidation_status).toBe('resolved')
-    expect(out.model_routing.memory_os_consolidation_runtime_id).toBe('anthropic.sonnet')
-    expect(out.model_routing.memory_os_consolidation_effective_runtime_id).toBe('anthropic.sonnet')
     expect(out.model_routing.cross_verifier_runtime_id).toBeNull()
   })
 
@@ -57,10 +50,6 @@ describe('parseRuntimeDefaultsResponse', () => {
         default_max_context: null,
         runtimes: [],
         model_routing: {
-          memory_os_consolidation_runtime_id: null,
-          memory_os_consolidation_effective_runtime_id: null,
-          memory_os_consolidation_status: 'error',
-          memory_os_consolidation_error: 'runtime state is not initialized',
           cross_verifier_runtime_id: null,
           media_failover: [],
         },
@@ -69,68 +58,6 @@ describe('parseRuntimeDefaultsResponse', () => {
     expect(out.default_runtime_id).toBeNull()
     expect(out.default_model).toBeNull()
     expect(out.runtimes).toHaveLength(0)
-    expect(out.model_routing.memory_os_consolidation_status).toBe('error')
-    expect(out.model_routing.memory_os_consolidation_runtime_id).toBeNull()
-    expect(out.model_routing.memory_os_consolidation_effective_runtime_id).toBeNull()
-  })
-
-  it('preserves inherited consolidation routing without rewriting the configured selector', () => {
-    const out = parseRuntimeDefaultsResponse(
-      validResponse({
-        model_routing: {
-          memory_os_consolidation_runtime_id: null,
-          memory_os_consolidation_effective_runtime_id: 'openai.gpt-4o',
-          memory_os_consolidation_status: 'inherited',
-          memory_os_consolidation_error: null,
-          cross_verifier_runtime_id: null,
-          media_failover: ['openai.gpt-4o'],
-        },
-      }),
-    )
-    expect(out.model_routing.memory_os_consolidation_status).toBe('inherited')
-    expect(out.model_routing.memory_os_consolidation_runtime_id).toBeNull()
-    expect(out.model_routing.memory_os_consolidation_effective_runtime_id).toBe('openai.gpt-4o')
-  })
-
-  it('rejects resolved status without an effective runtime', () => {
-    expect(() =>
-      parseRuntimeDefaultsResponse(
-        validResponse({
-          model_routing: validModelRouting({
-            memory_os_consolidation_effective_runtime_id: null,
-          }),
-        }),
-      ),
-    ).toThrow(RuntimeDefaultsSchemaDriftError)
-  })
-
-  it('rejects error status without an error string', () => {
-    expect(() =>
-      parseRuntimeDefaultsResponse(
-        validResponse({
-          model_routing: validModelRouting({
-            memory_os_consolidation_status: 'error',
-            memory_os_consolidation_effective_runtime_id: null,
-            memory_os_consolidation_error: null,
-          }),
-        }),
-      ),
-    ).toThrow(RuntimeDefaultsSchemaDriftError)
-  })
-
-  it('rejects inherited status with a non-null error', () => {
-    expect(() =>
-      parseRuntimeDefaultsResponse(
-        validResponse({
-          model_routing: validModelRouting({
-            memory_os_consolidation_runtime_id: null,
-            memory_os_consolidation_effective_runtime_id: 'openai.gpt-4o',
-            memory_os_consolidation_status: 'inherited',
-            memory_os_consolidation_error: 'contradictory inherited error',
-          }),
-        }),
-      ),
-    ).toThrow(RuntimeDefaultsSchemaDriftError)
   })
 
   it('throws schema drift when a runtime entry is missing a required field', () => {

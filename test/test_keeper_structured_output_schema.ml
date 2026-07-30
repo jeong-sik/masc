@@ -150,32 +150,6 @@ let test_compaction_plan_schema_uses_codec_ssot () =
   check bool "compaction boundary schema exposes codec fields" true true
 ;;
 
-let test_consolidation_group_schema_keeps_claim_kind_optional () =
-  let group_schema =
-    Keeper_structured_output_schema.consolidation_plan_output_schema
-    |> schema_property Keeper_memory_os_consolidation.wire_field_groups
-    |> schema_items
-  in
-  check
-    (list string)
-    "consolidation group required fields"
-    (List.sort
-       String.compare
-       [ Keeper_memory_os_consolidation.wire_field_member_indices
-       ; Keeper_memory_os_consolidation.wire_field_consolidated_claim
-       ; Keeper_memory_os_consolidation.wire_field_category
-       ])
-    (required_strings group_schema);
-  let _claim_kind_schema =
-    schema_property
-      Keeper_memory_os_consolidation.wire_field_claim_kind
-      group_schema
-  in
-  check bool "consolidation group remains closed" false
-    (allows_additional_properties group_schema)
-;;
-
-
 (* The reviewer config must reach json_object-only providers. Counterfactual
    first: a native schema request on a Glm-kind config is rejected by the OAS
    contract — that rejection is exactly what left every task nonterminal
@@ -338,10 +312,6 @@ let () =
             "compaction plan schema uses codec SSOT"
             `Quick
             test_compaction_plan_schema_uses_codec_ssot
-        ; test_case
-            "consolidation claim_kind remains optional"
-            `Quick
-            test_consolidation_group_schema_keeps_claim_kind_optional
         ] )
     ; ( "verdict schemas"
       , [ test_case

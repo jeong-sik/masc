@@ -22,11 +22,8 @@ let wire_field_source_tool_call_id = Keeper_memory_os_types.wire_field_source_to
 let wire_field_claim_id = Keeper_memory_os_types.wire_field_claim_id
 let wire_field_claim_kind = Keeper_memory_os_types.wire_field_claim_kind
 let wire_field_valid_for_days = Keeper_memory_os_types.wire_field_valid_for_days
-let wire_field_schema_version = Keeper_memory_os_types.wire_field_schema_version
 let wire_episode_fields = Keeper_memory_os_types.wire_librarian_episode_fields
 let wire_claim_fields = Keeper_memory_os_types.wire_librarian_claim_fields
-
-let accepted_episode_fields = wire_field_schema_version :: wire_episode_fields
 
 let trim_nonempty s =
   let s = String.trim s in
@@ -231,7 +228,9 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
   | `Assoc fields ->
     (match
        string_field wire_field_claim fields
-       , string_field wire_field_category fields
+       , (match List.assoc_opt wire_field_category fields with
+          | Some (`String raw) -> category_of_string raw
+          | Some _ | None -> None)
        , int_field wire_field_source_turn fields
        , claim_kind_field fields
        , claim_id_field fields
@@ -239,16 +238,13 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
        , valid_for_days_field fields
      with
      | ( Some claim
-       , Some category_str
+       , Some category
        , Some turn
        , Some claim_kind
        , Some claim_id
        , Some tool_call_id
        , Some valid_for_days )
        when turn >= 0 ->
-      (* Parse the provider's category once at the producer boundary. It remains
-         context and never creates a validity horizon. *)
-      let category = category_of_string category_str in
       Some
         { claim
         ; category
@@ -302,7 +298,7 @@ let episode_of_json_result ?now ~generation (inp : input) (json : Yojson.Safe.t)
   in
   match json with
   | `Assoc fields ->
-    (match first_unexpected_field ~allowed:accepted_episode_fields fields with
+    (match first_unexpected_field ~allowed:wire_episode_fields fields with
      | Some field -> Error (Unexpected_field field)
      | None ->
        (match

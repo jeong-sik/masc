@@ -373,10 +373,6 @@ let memory_entries =
       ~default:(string_of_bool Memory_os_defaults.gc_enabled_default)
       Memory_os_defaults.gc_env_key
       "Per-keeper Memory OS GC maintenance fiber kill switch; invalid values fail closed";
-    entry
-      ~default:(string_of_bool Memory_os_defaults.consolidation_enabled_default)
-      Memory_os_defaults.consolidation_env_key
-      "Per-keeper Memory OS consolidation maintenance fiber kill switch; invalid values fail closed";
   ]
 
 let message_gc_entries =

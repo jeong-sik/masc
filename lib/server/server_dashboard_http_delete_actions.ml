@@ -369,8 +369,6 @@ let keeper_artifact_path config keeper_name artifact =
   match artifact with
   | Keeper_metrics_store_artifact ->
     Some (Keeper_types_support.keeper_metrics_dir config keeper_name)
-  | Keeper_memory_bank_artifact ->
-    Some (Keeper_types_support.keeper_memory_bank_path config keeper_name)
   | Keeper_generation_index_artifact ->
     Some (Keeper_types_support.keeper_generation_index_path config keeper_name)
   | Keeper_decision_log_artifact ->
@@ -415,7 +413,6 @@ let purge_dashboard_keeper_artifacts config operation =
                | Keeper_runtime_directory_artifact ->
                  Keeper_fs.invalidate_dir path
                | Keeper_metrics_store_artifact
-               | Keeper_memory_bank_artifact
                | Keeper_generation_index_artifact
                | Keeper_decision_log_artifact
                | Keeper_feedback_log_artifact

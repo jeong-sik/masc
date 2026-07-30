@@ -25,18 +25,11 @@ type runtime_entry =
   ; is_default : bool
   }
 
-type memory_os_consolidation_resolution =
-  | Consolidation_resolved of string
-  | Consolidation_inherited of string
-  | Consolidation_error of string
-
 type resolved =
   { default_runtime_id : string option
   ; default_model : string option
   ; default_max_context : int option
   ; runtimes : runtime_entry list
-  ; memory_os_consolidation_runtime_id : string option
-  ; memory_os_consolidation : memory_os_consolidation_resolution
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; config_path : string option
@@ -62,30 +55,6 @@ let runtime_entry_json (e : runtime_entry) : Yojson.Safe.t =
     ]
 ;;
 
-let memory_os_consolidation_fields ~configured_runtime_id = function
-  | Consolidation_resolved runtime_id ->
-    [ "memory_os_consolidation_status", `String "resolved"
-    ; ( "memory_os_consolidation_runtime_id"
-      , string_opt_json configured_runtime_id )
-    ; "memory_os_consolidation_effective_runtime_id", `String runtime_id
-    ; "memory_os_consolidation_error", `Null
-    ]
-  | Consolidation_inherited runtime_id ->
-    [ "memory_os_consolidation_status", `String "inherited"
-    ; ( "memory_os_consolidation_runtime_id"
-      , string_opt_json configured_runtime_id )
-    ; "memory_os_consolidation_effective_runtime_id", `String runtime_id
-    ; "memory_os_consolidation_error", `Null
-    ]
-  | Consolidation_error error ->
-    [ "memory_os_consolidation_status", `String "error"
-    ; ( "memory_os_consolidation_runtime_id"
-      , string_opt_json configured_runtime_id )
-    ; "memory_os_consolidation_effective_runtime_id", `Null
-    ; "memory_os_consolidation_error", `String error
-    ]
-;;
-
 let build ~generated_at_iso (r : resolved) : Yojson.Safe.t =
   `Assoc
     [ "generated_at_iso", `String generated_at_iso
@@ -98,12 +67,9 @@ let build ~generated_at_iso (r : resolved) : Yojson.Safe.t =
     ; "runtimes", `List (List.map runtime_entry_json r.runtimes)
     ; ( "model_routing"
       , `Assoc
-          (memory_os_consolidation_fields
-             ~configured_runtime_id:r.memory_os_consolidation_runtime_id
-             r.memory_os_consolidation
-           @ [ "cross_verifier_runtime_id", string_opt_json r.cross_verifier_runtime_id
-             ; "media_failover", `List (List.map (fun s -> `String s) r.media_failover)
-             ]) )
+          [ "cross_verifier_runtime_id", string_opt_json r.cross_verifier_runtime_id
+          ; "media_failover", `List (List.map (fun s -> `String s) r.media_failover)
+          ] )
     ]
 ;;
 
@@ -118,28 +84,11 @@ let resolved_of_snapshot
     ; is_default = rt.binding.is_default
     }
   in
-  let memory_os_consolidation =
-    match snapshot.memory_os_consolidation with
-    | Error error -> Consolidation_error error
-    | Ok
-        { Runtime.effective_runtime
-        ; resolution_source = Runtime.Consolidation_configured
-        } ->
-      Consolidation_resolved effective_runtime.id
-    | Ok
-        { Runtime.effective_runtime
-        ; resolution_source = Runtime.Consolidation_inherited_default
-        } ->
-      Consolidation_inherited effective_runtime.id
-  in
   { default_runtime_id = Option.map (fun (rt : Runtime.t) -> rt.id) default
   ; default_model = Option.map (fun (rt : Runtime.t) -> rt.model.api_name) default
   ; default_max_context =
       Option.map Runtime.max_context_of_runtime default
   ; runtimes = List.map entry snapshot.runtimes
-  ; memory_os_consolidation_runtime_id =
-      snapshot.memory_os_consolidation_runtime_id
-  ; memory_os_consolidation
   ; cross_verifier_runtime_id = snapshot.cross_verifier_runtime_id
   ; media_failover = snapshot.media_failover
   ; config_path = snapshot.config_path

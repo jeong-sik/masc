@@ -184,17 +184,6 @@ let prune_keeper_raw_trace_turn_files config name =
     !removed
   end
 
-(* Legacy artifact path. The memory bank was removed
-   (RFC keeper-memory-consolidation Stage 4); no producer or reader remains.
-   The path stays only so keeper purge can delete a pre-removal
-   [.memory.jsonl] left on disk. *)
-let keeper_memory_bank_path config name =
-  Filename.concat
-    (keeper_dir_ config)
-    (Keeper_runtime_root_entry.keeper_basename
-       ~keeper_name:name
-       Keeper_runtime_root_entry.Memory_log)
-
 let keeper_generation_index_path config name =
   Filename.concat
     (keeper_dir_ config)

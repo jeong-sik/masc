@@ -1,6 +1,5 @@
 type keeper_artifact =
   | Metadata
-  | Memory_log
   | Generation_index_log
   | Decision_log
   | Feedback_log
@@ -15,7 +14,6 @@ type t =
 
 let keeper_suffix = function
   | Metadata -> ".json"
-  | Memory_log -> ".memory.jsonl"
   | Generation_index_log -> ".generation_index.jsonl"
   | Decision_log -> ".decisions.jsonl"
   | Feedback_log -> ".feedback.jsonl"
@@ -42,7 +40,6 @@ let descriptors =
   [ Keeper_descriptor { artifact = Generation_index_log; rotatable = true }
   ; Keeper_descriptor { artifact = Decision_log; rotatable = true }
   ; Keeper_descriptor { artifact = Feedback_log; rotatable = true }
-  ; Keeper_descriptor { artifact = Memory_log; rotatable = true }
   ; Keeper_descriptor { artifact = Tla_trace_log; rotatable = true }
   ; Keeper_descriptor { artifact = Metadata; rotatable = false }
   ]

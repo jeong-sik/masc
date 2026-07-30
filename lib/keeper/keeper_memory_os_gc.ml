@@ -47,8 +47,7 @@ let expired_category_counts expired =
            | Validated_approach
            | Lesson
            | Blocker
-           | Goal
-           | Unknown _ -> ephemeral, non_ephemeral + 1
+           | Goal -> ephemeral, non_ephemeral + 1
          in
          ephemeral, non_ephemeral, bump_count category_key by_category)
       (0, 0, String_map.empty)
@@ -58,8 +57,8 @@ let expired_category_counts expired =
 ;;
 
 (* GC performs one authorized deletion only: an explicit [valid_until] in the
-   past. It does not deduplicate or rank rows; semantic forgetting belongs to the
-   configured Memory/LLM consolidation plan. *)
+   past. It does not deduplicate, rank, supersede, or otherwise decide semantic
+   forgetting. A row without producer-declared expiry is retained. *)
 let run_gc_with_store
       ~facts_path
       ~read_facts_all_strict
@@ -71,14 +70,12 @@ let run_gc_with_store
   =
   (* Serialize the whole read-modify-rewrite on the same per-keeper facts lock the
      librarian write path (Keeper_librarian_runtime, wrapping [merge_facts])
-     and the consolidation runtime already hold on facts_path. Without it, a
+     already holds on facts_path. Without it, a
      librarian merge that commits between GC's read and GC's rewrite is silently
      overwritten — a lost update that permanently drops a freshly persisted fact.
      The lock spans both the read and the rewrite, so no concurrent writer can
      interleave; because the read-modify-rewrite is entirely inside the lock there
-     is no unlocked gap to guard with a snapshot CAS (unlike
-     Keeper_memory_os_consolidation_runtime, whose LLM call runs between its read
-     and rewrite and so re-validates the snapshot under the lock). No clock is
+     is no unlocked gap to guard with a snapshot CAS. No clock is
      threaded: lock-retry sleeps run on a systhread (off the keeper hot path, GC
      is a 600s maintenance sweep, so cooperative yielding buys nothing), and
      File_lock_eio already offloads the blocking flock so the Eio domain is not
@@ -88,12 +85,11 @@ let run_gc_with_store
     (* Read strictly: a malformed JSONL row aborts the sweep rather than being
        silently dropped by the lenient decoder and then erased by the rewrite
        below. Every other destructive rewrite path already refuses to overwrite a
-       store it cannot fully parse — [merge_facts] via
-       read_facts_for_rewrite, the consolidator and consolidation runtime via
-       read_facts_all_strict. GC was the lone path that turned one corrupt line
-       into permanent deletion of the surrounding facts (it read via the lenient
-       read_facts_all). Preserve over delete: leave a corrupt store untouched and
-       let the raised error surface so an operator can repair it. *)
+       store it cannot fully parse — [merge_facts] uses
+       [read_facts_for_rewrite]. GC was the lone path that turned one corrupt
+       line into permanent deletion of the surrounding facts (it read via the
+       lenient [read_facts_all]). Preserve over delete: leave a corrupt store
+       untouched and let the raised error surface so an operator can repair it. *)
     match read_facts_all_strict () with
     | Error message ->
       raise (Fact_store_corrupt ("memory os gc fact store read failed: " ^ message))

@@ -73,43 +73,10 @@ let librarian_episode_output_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
-(* [claim_kind] is optional for the judge, so it is described but not required:
-   omitting it means "inherit the members' tag". The token set is
-   [librarian_claim_kind_tokens], the same provider-facing vocabulary the
-   extraction schema uses and the same one [merge_group_of_json] admits. *)
-let consolidation_group_schema =
-  let fields =
-    [ ( Keeper_memory_os_consolidation.wire_field_member_indices
-      , `Assoc [ "type", `String "array"; "items", integer_schema ] )
-    ; Keeper_memory_os_consolidation.wire_field_consolidated_claim, string_schema
-    ; Keeper_memory_os_consolidation.wire_field_category, enum_schema category_tokens
-    ; ( Keeper_memory_os_consolidation.wire_field_claim_kind
-      , nullable_enum_schema librarian_claim_kind_tokens )
-    ]
-  in
-  object_schema
-    ~required:
-      [ Keeper_memory_os_consolidation.wire_field_member_indices
-      ; Keeper_memory_os_consolidation.wire_field_consolidated_claim
-      ; Keeper_memory_os_consolidation.wire_field_category
-      ]
-    fields
-;;
-
-let consolidation_plan_output_schema =
-  let fields =
-    [ ( Keeper_memory_os_consolidation.wire_field_groups
-      , `Assoc [ "type", `String "array"; "items", consolidation_group_schema ] )
-    ; ( Keeper_memory_os_consolidation.wire_field_drop_indices
-      , `Assoc [ "type", `String "array"; "items", integer_schema ] )
-    ]
-  in
-  object_schema ~required:(List.map fst fields) fields
-;;
-
 (* Constant-size compaction boundary. The provider sees one contiguous run of
    typed eligible units and returns one faithful summary plus the first unit
    that remains exact. *)
+let compaction_plan_field_decisions = "decisions"
 let compaction_plan_field_unit_index = "unit_index"
 let compaction_plan_field_summary = "summary"
 let compaction_plan_field_keep_from_unit_index = "keep_from_unit_index"

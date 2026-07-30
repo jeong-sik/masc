@@ -1,9 +1,4 @@
-(** Explicit keeper memory writes: every write is a durable Memory OS fact.
-
-    The turn-scoped memory bank and its kind/horizon vocabulary are gone
-    (RFC keeper-memory-consolidation Stage 4); the [kind] argument gets a
-    typed rejection so a caller still sending it learns the contract
-    changed instead of having the argument silently ignored. *)
+(** Explicit Keeper memory writes: every write is a durable Memory OS fact. *)
 
 module Runtime = Masc.Keeper_tool_memory_runtime
 
@@ -78,25 +73,6 @@ let string_field key json =
   match json_field key json with
   | `String value -> value
   | _ -> Alcotest.failf "expected string field: %s" key
-;;
-
-(* The kind/horizon vocabulary was retired with the memory bank. Any
-   provided [kind] — including the formerly-valid ones — is a typed
-   rejection, not a silently ignored argument. *)
-let test_kind_argument_is_rejected () =
-  List.iter
-    (fun kind ->
-      Runtime.validate_memory_write_args
-        (with_field (make_args ~title:"" ~content:"body") "kind" (`String kind))
-      |> assert_invalid ~expected:"kind_argument_removed")
-    [ "long_term"; "goal"; "progress"; "decision"; "open_question"; "bogus" ];
-  Runtime.validate_memory_write_args
-    (with_field (make_args ~title:"" ~content:"body") "kind" (`Int 3))
-  |> assert_invalid ~expected:"kind_argument_removed";
-  (* An explicit JSON null reads as absent, matching the schema. *)
-  Runtime.validate_memory_write_args
-    (with_field (make_args ~title:"" ~content:"body") "kind" `Null)
-  |> assert_ok ~body:"body"
 ;;
 
 let test_validation_taxonomy () =
@@ -257,11 +233,7 @@ let () =
   Alcotest.run
     "keeper_memory_write"
     [ ( "validation"
-      , [ Alcotest.test_case
-            "kind argument gets a typed rejection"
-            `Quick
-            test_kind_argument_is_rejected
-        ; Alcotest.test_case "typed validation failures" `Quick test_validation_taxonomy
+      , [ Alcotest.test_case "typed validation failures" `Quick test_validation_taxonomy
         ; Alcotest.test_case
             "valid input composes the stored body"
             `Quick

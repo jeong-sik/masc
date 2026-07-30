@@ -171,15 +171,6 @@ module KeeperMemoryOs = struct
   let librarian_max_messages_default = 24
   let librarian_global_slot_default = 1
   let gc_enabled_default = true
-  (* On by default (RFC keeper-memory-bank-write-reduction §4b, operator decision
-     2026-07-20): the LLM-judged per-keeper consolidation is the only sanctioned
-     decider of which facts survive (RFC-0247; spec/12 §Compaction) — deterministic
-     TTL/cap retention was removed (RFC-0259 supersession), so with this pass off
-     the Tier-1 fact store only grows (idealist: 449 rows, 0 with valid_until).
-     Failures are graceful no-ops (transport/parse errors never mutate the store).
-     Runtime selection belongs to [runtime.toml]; set the env false to disable
-     the pass. *)
-  let consolidation_enabled_default = true
 
   (* Env-key SSOT: the config-introspection registry
      (env_config_snapshot.ml memory_entries) and the tests reference these
@@ -191,7 +182,6 @@ module KeeperMemoryOs = struct
   let librarian_max_messages_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
   let librarian_global_slot_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
   let gc_env_key = "MASC_KEEPER_MEMORY_OS_GC"
-  let consolidation_env_key = "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
 
   let get_bool_logged ?(invalid = Env_config_memory.Default) name ~default =
     Env_config_memory.get_bool_logged
@@ -272,16 +262,6 @@ module KeeperMemoryOs = struct
       ~default:gc_enabled_default
   ;;
 
-  (** Per-keeper Memory OS consolidation maintenance fiber kill switch.
-      Default: true; invalid values fail closed to false.
-      @category Policies
-      @ops_class operator *)
-  let consolidation_enabled () =
-    get_bool_logged
-      ~invalid:Env_config_memory.Fail_closed
-      consolidation_env_key
-      ~default:consolidation_enabled_default
-  ;;
 end
 
 (** {1 Keeper dashboard compaction snapshots}

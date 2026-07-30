@@ -743,14 +743,10 @@ let test_runtime_files_are_not_queue_lane_directories () =
   let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
   Fs_compat.mkdir_p keepers_dir;
   save_text (Filename.concat keepers_dir "executor.json") "{}";
-  save_text (Filename.concat keepers_dir "executor.memory.jsonl") "";
   save_text (Filename.concat keepers_dir "executor.decisions.jsonl") "";
   save_text (Filename.concat keepers_dir "executor.decisions.jsonl.1") "";
   save_text (Filename.concat keepers_dir "_alerts.deadletter.jsonl") "";
   save_text (Filename.concat keepers_dir "executor.json.bak-20260715") "{}";
-  save_text
-    (Filename.concat keepers_dir "executor.memory.jsonl.bak-20260715")
-    "";
   let report = configure base_path in
   check "runtime files produce no queue recovery failures"
     (report.load_errors = []);

@@ -2,30 +2,6 @@ val fork_logged_fiber :
   sw:Eio.Switch.t -> on_error:(exn -> unit) -> (unit -> unit) -> unit
 val log_server_fiber_crash : string -> exn -> unit
 
-val run_memory_os_consolidation_tick :
-  ?complete:Keeper_memory_os_consolidation_runtime.complete_fn ->
-  sw:Eio.Switch.t ->
-  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  runtime_id:string ->
-  provider_cfg:Llm_provider.Provider_config.t ->
-  now:float ->
-  unit ->
-  unit
-
-val run_memory_os_consolidation_tick_with_candidates :
-  ?complete:Keeper_memory_os_consolidation_runtime.complete_fn ->
-  sw:Eio.Switch.t ->
-  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  runtime_candidates:(string * Llm_provider.Provider_config.t) list ->
-  now:float ->
-  unit ->
-  unit
-(** Run a consolidation tick across ordered runtime candidates. Only a provider
-    transport failure advances to the next candidate; parser, policy, and
-    config failures remain terminal for that keeper's tick. *)
-
 val wake_enqueue_counts_of_dispatches :
   Schedule_runner.dispatch_result list -> Schedule_runner_status.wake_enqueue_counts
 (** Derive keeper-wake delivery counts from typed production consumer receipts. *)

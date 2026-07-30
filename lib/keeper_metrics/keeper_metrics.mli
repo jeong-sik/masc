@@ -127,7 +127,6 @@ type t =
   | HitlSummaryOutcomes
   | OasEnvKeyRejections
   | MemoryLaneUnitFailures
-  | MemoryConsolidations
   | MemoryLaneSubmitted
   | MemoryLaneRanInline
   | MemoryLaneDropped

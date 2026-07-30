@@ -7,7 +7,6 @@ module GC = Masc.Keeper_memory_os_gc
 module Librarian = Masc.Keeper_librarian
 module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Keeper_registry = Masc.Keeper_registry
-module Consolidation_runtime = Masc.Keeper_memory_os_consolidation_runtime
 (* Domain_pool_ref lives in the unwrapped masc_core sublibrary (re_export'd by
    masc_test_deps), so it is referenced bare — there is no Masc.Domain_pool_ref. *)
 module Domain_pool_ref = Domain_pool_ref
@@ -390,6 +389,35 @@ let test_fact_decoder_rejects_wrong_schema_version () =
     "unsupported fact schema is rejected"
     true
     (Option.is_none (Types.fact_of_json wrong_version))
+;;
+
+let test_persisted_memory_decoders_reject_unknown_fields () =
+  let fact = fact_fixture ~now:1_000_000.0 () in
+  let fact_with_unknown =
+    match Types.fact_to_json fact with
+    | `Assoc fields -> `Assoc (("retired_field", `String "value") :: fields)
+    | _ -> Alcotest.fail "fact_to_json must produce an object"
+  in
+  Alcotest.(check bool)
+    "fact wire is closed"
+    true
+    (Option.is_none (Types.fact_of_json fact_with_unknown));
+  let episode =
+    episode_fixture
+      ~summary:"closed wire"
+      ~now:1_000_000.0
+      ~trace_id:"trace-closed-wire"
+      ~generation:0
+  in
+  let episode_with_unknown =
+    match Types.episode_to_json episode with
+    | `Assoc fields -> `Assoc (("retired_field", `String "value") :: fields)
+    | _ -> Alcotest.fail "episode_to_json must produce an object"
+  in
+  Alcotest.(check bool)
+    "episode wire is closed"
+    true
+    (Option.is_none (Types.episode_of_json episode_with_unknown))
 ;;
 
 let test_librarian_prompt_renders () =
@@ -878,54 +906,6 @@ let test_librarian_defaults_missing_optional_lists () =
   | None -> Alcotest.fail "expected missing optional list fields to parse"
 ;;
 
-let memory_runtime_resolution_toml =
-  {|
-[runtime]
-default = "p0.default"
-
-[providers.p0]
-protocol = "openai-compatible-http"
-endpoint = "https://p0.example/v1"
-
-[models.default]
-api-name = "default"
-max-context = 4096
-temperature = 1.0
-
-[p0.default]
-|}
-;;
-
-let with_runtime_config_toml content f =
-  let snapshot = Runtime.For_testing.snapshot () in
-  let path = Filename.temp_file "keeper-memory-runtime-" ".toml" in
-  write_text_file path content;
-  Fun.protect
-    ~finally:(fun () ->
-      Runtime.For_testing.restore snapshot;
-      try Sys.remove path with
-      | _ -> ())
-    (fun () ->
-       match Runtime.init_default ~config_path:path with
-       | Error msg -> Alcotest.failf "Runtime.init_default failed: %s" msg
-       | Ok () -> f ())
-;;
-
-let test_memory_provider_configs_use_runtime_temperature () =
-  with_runtime_config_toml memory_runtime_resolution_toml (fun () ->
-    match Runtime.get_default_runtime () with
-    | None -> Alcotest.fail "default memory runtime should resolve"
-    | Some runtime ->
-      let consolidation =
-        Consolidation_runtime.For_testing.provider_for_consolidation
-          runtime.Runtime.provider_config
-      in
-      Alcotest.(check (option (float 0.0001)))
-        "memory consolidation keeps runtime.toml temperature"
-        (Some 1.0)
-        consolidation.temperature)
-;;
-
 let with_memory_os_env name value f =
   let old = Sys.getenv_opt name in
   Unix.putenv name value;
@@ -964,12 +944,7 @@ let test_memory_os_bool_env_accepts_enabled_disabled () =
     Alcotest.(check bool)
       "enabled enables GC"
       true
-      (Env_config.KeeperMemoryOs.gc_enabled ()));
-  with_memory_os_env Env_config.KeeperMemoryOs.consolidation_env_key "enabled" (fun () ->
-    Alcotest.(check bool)
-      "enabled enables consolidation"
-      true
-      (Env_config.KeeperMemoryOs.consolidation_enabled ()))
+      (Env_config.KeeperMemoryOs.gc_enabled ()))
 ;;
 
 let test_memory_os_env_invalid_values_fail_closed_or_default () =
@@ -1002,14 +977,6 @@ let test_memory_os_env_invalid_values_fail_closed_or_default () =
         false
         (Env_config.KeeperMemoryOs.gc_enabled ()));
     check_log_contains lines Env_config.KeeperMemoryOs.gc_env_key;
-    check_log_contains lines "fail-closed false");
-  with_captured_console_lines (fun lines ->
-    with_memory_os_env Env_config.KeeperMemoryOs.consolidation_env_key "maybe" (fun () ->
-      Alcotest.(check bool)
-        "invalid consolidation flag fail-closes"
-        false
-        (Env_config.KeeperMemoryOs.consolidation_enabled ()));
-    check_log_contains lines Env_config.KeeperMemoryOs.consolidation_env_key;
     check_log_contains lines "fail-closed false");
   with_captured_console_lines (fun lines ->
     with_memory_os_env Env_config.KeeperMemoryOs.librarian_max_messages_env_key "bogus" (fun () ->
@@ -1079,8 +1046,6 @@ let memory_os_knob_readers : (string * (unit -> unit)) list =
     , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_global_slot () : int) )
   ; ( Env_config.KeeperMemoryOs.gc_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.gc_enabled () : bool) )
-  ; ( Env_config.KeeperMemoryOs.consolidation_env_key
-    , fun () -> ignore (Env_config.KeeperMemoryOs.consolidation_enabled () : bool) )
   ]
 ;;
 
@@ -1632,10 +1597,9 @@ let test_with_facts_lock_timeout_uses_on_timeout () =
       Alcotest.(check string) "lock reacquired after timeout" "reacquired" reacquired))
 ;;
 
-(* RFC-0247 (purge): GC is two structural passes — hard-expire past-TTL facts and
-   dedup duplicate claims keeping the most-recently-verified. There is no
-   score-threshold discard, so this asserts only the structural outcomes. The
-   duplicate winner is chosen by [last_verified_at] recency, not by confidence. *)
+(* RFC-0247 (purge): GC hard-expires past-TTL facts and preserves every other
+   row. It does not deduplicate claims or apply a score threshold; semantic
+   supersession remains outside this retention pass. *)
 let test_gc_dry_run_and_rewrite () =
   with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
   with_temp_keepers_dir (fun _keepers_dir ->
@@ -2554,7 +2518,7 @@ let test_gc_uses_only_explicit_valid_until () =
   let base = fact_fixture ~now () in
   let old_external =
     { base with
-      Types.claim = "legacy external state expired"
+      Types.claim = "old external state"
     ; Types.claim_kind = Some Types.External_state
     ; Types.first_seen = now -. 1_000_000.0
     ; Types.valid_until = None
@@ -2565,7 +2529,7 @@ let test_gc_uses_only_explicit_valid_until () =
   in
   let durable =
     { old_external with
-      Types.claim = "durable legacy row"
+      Types.claim = "durable row without claim kind"
     ; Types.claim_kind = None
     }
   in
@@ -2590,7 +2554,7 @@ let test_gc_uses_only_explicit_valid_until () =
     (List.map (fun f -> f.Types.claim) gone);
   Alcotest.(check (list string))
     "live keeps unbounded external + durable"
-    [ "legacy external state expired"; "durable legacy row" ]
+    [ "old external state"; "durable row without claim kind" ]
     (List.map (fun f -> f.Types.claim) live)
 ;;
 
@@ -2986,20 +2950,20 @@ let test_category_codec_roundtrip () =
        Alcotest.(check bool)
          (Printf.sprintf "of_string %s" label)
          true
-         (Types.category_of_string label = expected);
+         (Types.category_of_string label = Some expected);
        Alcotest.(check string)
          (Printf.sprintf "to_string round-trip %s" label)
          label
-         (Types.category_to_string (Types.category_of_string label)))
+         (Types.category_to_string expected))
     known;
   Alcotest.(check bool)
-    "unknown label parses to Unknown"
+    "unknown label is rejected"
     true
-    (Types.category_of_string "checkpoint_saved" = Types.Unknown "checkpoint_saved");
-  Alcotest.(check string)
-    "unknown round-trips losslessly"
-    "checkpoint_saved"
-    (Types.category_to_string (Types.category_of_string "checkpoint_saved"))
+    (Option.is_none (Types.category_of_string "checkpoint_saved"));
+  Alcotest.(check bool)
+    "non-canonical label is rejected"
+    true
+    (Option.is_none (Types.category_of_string " Fact "))
 ;;
 
 let test_all_categories_are_validity_context () =
@@ -3011,7 +2975,7 @@ let test_all_categories_are_validity_context () =
          (Types.category_to_string category)
          true
          (Types.fact_is_current ~now fact))
-    (Types.Unknown "novel" :: Types.all_categories)
+    Types.all_categories
 ;;
 
 let test_claim_kinds_are_validity_context () =
@@ -3037,7 +3001,7 @@ let test_no_category_infers_validity () =
          (Types.category_to_string category ^ " does not infer validity")
          None
          (Types.fact_effective_valid_until fact))
-    (Types.Unknown "novel" :: Types.all_categories)
+    Types.all_categories
 ;;
 
 let with_env name value f =
@@ -3217,73 +3181,24 @@ let test_self_observation_uses_only_explicit_validity () =
     (Types.fact_is_current ~now:past durable)
 ;;
 
-let test_fact_of_json_preserves_unknown_category () =
+let test_fact_of_json_rejects_unknown_category () =
   let first_seen = 1_000_000.0 in
-  let json =
-    `Assoc
-      [ "claim", `String "connector state observation"
-      ; "category", `String "connector_state"
-      ; "source", `Assoc [ "trace_id", `String "t"; "turn", `Int 1 ]
-      ; "first_seen", `Float first_seen
-      ; "schema_version", `String Types.schema_version
-      ]
-  in
-  match Types.fact_of_json json with
-  | None -> Alcotest.fail "current unknown-category row failed to decode"
-  | Some f ->
-    Alcotest.(check string)
-      "unknown category remains exact context"
-      "connector_state"
-      (Types.category_to_string f.Types.category);
-    Alcotest.(check (option string))
-      "unknown category does not invent claim_kind"
-      None
-      (Option.map Types.claim_kind_to_string f.Types.claim_kind);
-    let json = Types.fact_to_json f in
-    let string_field key =
-      match json with
-      | `Assoc fields ->
-        (match List.assoc_opt key fields with
-         | Some (`String value) -> Some value
-         | Some _ | None -> None)
-      | _ -> None
-    in
-    Alcotest.(check (option string))
-      "rewritten row preserves category"
-      (Some "connector_state")
-      (string_field "category");
-    Alcotest.(check (option string))
-      "rewritten row does not invent claim_kind"
-      None
-      (string_field "claim_kind")
-;;
-
-let test_fact_of_json_preserves_non_exact_unknown_category () =
-  let first_seen = 1_000_000.0 in
-  let category = " Connector_State " in
-  let json =
-    `Assoc
-      [ "claim", `String "connector state observation"
-      ; "category", `String category
-      ; "source", `Assoc [ "trace_id", `String "t"; "turn", `Int 1 ]
-      ; "first_seen", `Float first_seen
-      ; "schema_version", `String Types.schema_version
-      ]
-  in
-  match Types.fact_of_json json with
-  | None -> Alcotest.fail "current row with non-exact unknown category failed"
-  | Some f ->
-    (match f.Types.category with
-     | Types.Unknown raw ->
-       Alcotest.(check string)
-         "non-exact label stays unknown"
-         category
-         raw
-     | _ -> Alcotest.fail "non-exact unknown category normalized");
-    Alcotest.(check (option string))
-      "non-exact unknown category does not set claim_kind"
-      None
-      (Option.map Types.claim_kind_to_string f.Types.claim_kind)
+  List.iter
+    (fun category ->
+       let json =
+         `Assoc
+           [ "claim", `String "connector state observation"
+           ; "category", `String category
+           ; "source", `Assoc [ "trace_id", `String "t"; "turn", `Int 1 ]
+           ; "first_seen", `Float first_seen
+           ; "schema_version", `String Types.schema_version
+           ]
+       in
+       Alcotest.(check bool)
+         ("category rejects: " ^ category)
+         true
+         (Option.is_none (Types.fact_of_json json)))
+    [ "connector_state"; " Fact " ]
 ;;
 
 let test_fact_of_json_rejects_invalid_claim_kind () =
@@ -4411,6 +4326,10 @@ let () =
             "fact decoder rejects unsupported schema version"
             `Quick
             test_fact_decoder_rejects_wrong_schema_version
+        ; Alcotest.test_case
+            "persisted memory decoders reject unknown fields"
+            `Quick
+            test_persisted_memory_decoders_reject_unknown_fields
         ; Alcotest.test_case "librarian prompt renders" `Quick test_librarian_prompt_renders
         ; Alcotest.test_case
             "librarian prompt omits private blocks"
@@ -4456,10 +4375,6 @@ let () =
             "librarian defaults missing optional lists"
             `Quick
             test_librarian_defaults_missing_optional_lists
-        ; Alcotest.test_case
-            "memory provider configs use runtime temperature"
-            `Quick
-            test_memory_provider_configs_use_runtime_temperature
         ; Alcotest.test_case
             "memory os bool env accepts enabled disabled"
             `Quick
@@ -4757,13 +4672,9 @@ let () =
             `Quick
             test_claim_kinds_remain_recall_context_in_source_order
         ; Alcotest.test_case
-            "fact_of_json preserves unknown category"
+            "fact_of_json rejects unknown category"
             `Quick
-            test_fact_of_json_preserves_unknown_category
-        ; Alcotest.test_case
-            "fact_of_json preserves non-exact unknown category"
-            `Quick
-            test_fact_of_json_preserves_non_exact_unknown_category
+            test_fact_of_json_rejects_unknown_category
         ; Alcotest.test_case
             "fact_of_json rejects invalid claim_kind"
             `Quick

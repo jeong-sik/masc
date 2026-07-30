@@ -240,10 +240,6 @@ type config =
   ; models : model_spec list
   ; bindings : binding list
   ; default_runtime_id : string option
-  ; memory_os_consolidation_runtime_id : string option
-    (** [\[runtime\].memory_os_consolidation] — runtime id for the periodic
-        Memory OS fact-survival consolidation pass. [None] inherits
-        [\[runtime\].default]. Unknown ids are rejected at load. *)
   ; cross_verifier_runtime_id : string option
     (** [\[runtime\].cross_verifier] — runtime id for the anti-rationalization
         evaluator. [None] inherits [\[runtime\].default]. Unknown ids are

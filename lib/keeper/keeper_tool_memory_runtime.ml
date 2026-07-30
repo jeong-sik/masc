@@ -426,7 +426,6 @@ let parse_valid_for_days (args : Yojson.Safe.t) : valid_for_days_arg =
     this from the persistence step lets tests pin the error_kind
     taxonomy without constructing a [Workspace.config]. *)
 type memory_write_error_kind =
-  | Kind_argument_removed
   | Title_too_long
   | Content_empty
   | Content_too_long
@@ -435,7 +434,6 @@ type memory_write_error_kind =
   | No_memory_write_error
 
 let memory_write_error_kind_to_string = function
-  | Kind_argument_removed -> "kind_argument_removed"
   | Title_too_long -> "title_too_long"
   | Content_empty -> "content_empty"
   | Content_too_long -> "content_too_long"
@@ -490,33 +488,9 @@ let check_lifetime lifetime : (int option, memory_write_validation) result =
 ;;
 
 let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation =
-  let provided_kind =
-    match args with
-    | `Assoc fields ->
-      (match List.assoc_opt "kind" fields with
-       | None | Some `Null -> None
-       | Some value -> Some value)
-    | _ -> None
-  in
   let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in
   let content = Safe_ops.json_string ~default:"" "content" args |> String.trim in
   let lifetime = parse_valid_for_days args in
-  match provided_kind with
-  | Some value ->
-    (* The kind/horizon vocabulary was retired with the memory bank
-       (RFC keeper-memory-consolidation Stage 4): every write is a durable
-       fact. A caller still sending [kind] gets a typed rejection, not a
-       silently ignored argument. *)
-    Memory_write_invalid
-      { error_kind = Kind_argument_removed
-      ; extras =
-          [ ( "provided_kind"
-            , match value with
-              | `String s -> `String s
-              | other -> `String (json_type_name other) )
-          ]
-      }
-  | None ->
   if String.length title > keeper_memory_write_max_title_chars
   then
     Memory_write_invalid
@@ -548,8 +522,7 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
 ;;
 
 (* An explicit write is a durable claim a later turn reads back; the Memory OS
-   fact store is the only store it reaches (the turn-scoped bank and its
-   kind/horizon vocabulary are gone — RFC keeper-memory-consolidation Stage 4).
+   fact store is the only store it reaches.
 
    Provenance is this turn and [tool_call_id] is [None]: the claim is the
    model's own assertion, not an observation carried out of some other tool's

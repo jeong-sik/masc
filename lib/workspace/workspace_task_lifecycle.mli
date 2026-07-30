@@ -5,6 +5,12 @@
 
 type invalid =
   | Verification_submission_required
+  | Verification_not_required
+      (** The task's contract did not opt into strict verification, so no
+          completion authority is obligated to judge it. Submitting would move
+          it into [AwaitingVerification], whose only agent-side exit is
+          [Cancel] — an advisory task that submits abandons its own terminal
+          [Done_action] for a verdict nobody owes it. *)
   | Verification_pending_verdict
       (** An [AwaitingVerification] obligation is not claimable by any agent. *)
   | Verdict_authority_identity_required

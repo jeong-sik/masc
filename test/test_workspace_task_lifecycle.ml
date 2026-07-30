@@ -60,6 +60,53 @@ let test_claimed_done_requires_verification_submission () =
   |> expect_error L.Verification_submission_required
 ;;
 
+(* The completion action is decided by [requires_verification] alone, so the two
+   completion arms are exclusive. An advisory task that submits would enter
+   [AwaitingVerification] — a state no agent action can leave and no completion
+   authority is obligated to resolve — while its own terminal [Done_action]
+   stayed legal and unused. Six live obligations reached that state this way. *)
+let test_advisory_task_cannot_submit_for_verification () =
+  List.iter
+    (fun task_status ->
+       decide
+         ~requires_verification:false
+         ~same_agent:true
+         ~task_status
+         ~action:D.Submit_for_verification
+         ()
+       |> expect_error L.Verification_not_required)
+    [ in_progress; D.Claimed { assignee = owner; claimed_at = now } ]
+;;
+
+let test_strict_task_still_submits () =
+  match
+    decide ~same_agent:true ~task_status:in_progress ~action:D.Submit_for_verification ()
+  with
+  | Ok { new_status = D.AwaitingVerification { assignee; verification_id; _ }; _ }
+    when String.equal assignee owner && String.equal verification_id "vrf-1" -> ()
+  | Ok _ | Error _ -> failwith "a strict task must still reach AwaitingVerification"
+;;
+
+(* The hint the agent reads must name the one completion action the FSM accepts.
+   Offering both let a keeper pick the arm that traps it. *)
+let test_hint_offers_exactly_one_completion_action () =
+  List.iter
+    (fun (requires_verification, expected) ->
+       List.iter
+         (fun task_status ->
+            let actions =
+              L.valid_next_actions ~same_agent:true ~task_status ~requires_verification
+            in
+            let has action = List.exists (fun a -> a = action) actions in
+            if not (has expected)
+            then failwith "the accepted completion action must be offered";
+            if has (if expected = D.Done_action then D.Submit_for_verification
+                    else D.Done_action)
+            then failwith "the refused completion action must not be offered")
+         [ in_progress; D.Claimed { assignee = owner; claimed_at = now } ])
+    [ false, D.Done_action; true, D.Submit_for_verification ]
+;;
+
 let test_default_done_is_terminal () =
   match
     decide
@@ -184,6 +231,9 @@ let test_awaiting_is_claimable_by_nobody () =
 let () =
   test_done_requires_verification_submission ();
   test_claimed_done_requires_verification_submission ();
+  test_advisory_task_cannot_submit_for_verification ();
+  test_strict_task_still_submits ();
+  test_hint_offers_exactly_one_completion_action ();
   test_default_done_is_terminal ();
   test_verdict_is_not_an_agent_action ();
   test_verdict_requires_authority_and_reason ();

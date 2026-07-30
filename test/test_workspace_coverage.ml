@@ -192,19 +192,38 @@ let find_agent_name_by_prefix config prefix =
   | None -> Alcotest.failf "agent with prefix %s not found" prefix
 ;;
 
+(* Only a strict contract routes completion through an authority, so a test that
+   needs [AwaitingVerification] must opt in the way production does: an advisory
+   task's [Submit_for_verification] is refused. *)
+let strict_contract : Masc_domain.task_contract =
+  { strict = true
+  ; completion_contract = [ "authority verdict required" ]
+  ; required_evidence = []
+  ; inspect_gate_evidence = []
+  ; verify_gate_evidence = []
+  ; links = { operation_id = None; session_id = None }
+  }
+;;
+
 let transition_done_r config ~agent_name ~task_id ~notes =
   let evidence_notes =
     if String.equal (String.trim notes) ""
     then "test completion evidence"
     else notes
   in
+  let direct_done () =
+    Workspace.transition_task_r config ~agent_name ~task_id
+      ~action:Masc_domain.Done_action ~notes:evidence_notes ()
+  in
   match
     Workspace.get_tasks_raw config
     |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
   with
-  | Some { task_status = Masc_domain.Done _; _ } ->
-    Workspace.transition_task_r config ~agent_name ~task_id
-      ~action:Masc_domain.Done_action ~notes:evidence_notes ()
+  | Some { task_status = Masc_domain.Done _; _ } -> direct_done ()
+  | Some task when not (Masc_domain.task_requires_verification task) ->
+    (* Mirror production: only a strict contract routes through the completion
+       authority. An advisory task's [Submit_for_verification] is refused. *)
+    direct_done ()
   | Some _ | None ->
     (match
        Workspace.transition_task_r config ~agent_name ~task_id
@@ -480,7 +499,8 @@ let test_status_hides_stale_agent_current_task_without_writing () =
         | _ -> Alcotest.fail "expected exactly one bound agent"
       in
       let _ =
-        Workspace.add_task config ~title:"Awaiting verifier" ~priority:1 ~description:""
+        Workspace.add_task config ~contract:strict_contract ~title:"Awaiting verifier"
+          ~priority:1 ~description:""
       in
       let _ = Workspace.claim_task config ~agent_name ~task_id:"task-001" in
       (match
@@ -1333,7 +1353,10 @@ let test_transition_invalid () =
 let test_transition_submit_for_verification_requires_notes () =
   (
     with_test_env (fun config ->
-      let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
+      let _ =
+        Workspace.add_task config ~contract:strict_contract ~title:"Test" ~priority:1
+          ~description:""
+      in
       let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
       let result =
         Workspace.transition_task_r

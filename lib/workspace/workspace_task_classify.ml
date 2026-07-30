@@ -265,21 +265,31 @@ let task_assignee_of_status = Masc_domain.task_assignee_of_status
     will fail to compile. Each branch lists actions that
     [transition_task_r]'s match-arms accept for that status — keep this
     in sync if you add new transitions there. *)
+(* The completion action a working task may take is decided by
+   [requires_verification] alone, so the two are exclusive by construction
+   rather than by two independent conditionals that could both be true. A
+   strict task submits and waits for a completion authority; an advisory task
+   completes directly. Offering [Submit_for_verification] unconditionally let
+   an advisory task enter [AwaitingVerification], which no authority is
+   obligated to resolve and no agent action can leave. *)
+let completion_action ~requires_verification =
+  if requires_verification
+  then Masc_domain.Submit_for_verification
+  else Masc_domain.Done_action
+;;
+
 let valid_next_actions_for_status ~requires_verification
   : Masc_domain.task_status -> Masc_domain.task_action list
   = function
   | Masc_domain.Todo -> [ Masc_domain.Claim; Masc_domain.Release; Masc_domain.Cancel ]
   | Masc_domain.Claimed _ ->
     [ Masc_domain.Start
-    ]
-    @ (if requires_verification then [] else [ Masc_domain.Done_action ])
-    @ [ Masc_domain.Submit_for_verification
+    ; completion_action ~requires_verification
     ; Masc_domain.Release
     ; Masc_domain.Cancel
     ]
   | Masc_domain.InProgress _ ->
-    (if requires_verification then [] else [ Masc_domain.Done_action ])
-    @ [ Masc_domain.Submit_for_verification
+    [ completion_action ~requires_verification
     ; Masc_domain.Release
     ; Masc_domain.Cancel
     ]

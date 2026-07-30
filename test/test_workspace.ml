@@ -69,20 +69,44 @@ let contains_warning result =
 
 let contains_error = contains_problem_result
 
+(* Only a strict contract routes completion through an authority, so every test
+   that exercises the verdict boundary must opt in the way production does: an
+   advisory task's [Submit_for_verification] is refused. *)
+let strict_contract : Masc_domain.task_contract =
+  { strict = true
+  ; completion_contract = [ "deliverable verified by a second agent" ]
+  ; (* Declared up front so the strict evidence precheck is satisfied by the
+       contract itself and direct done reaches the verification-lane guard. *)
+    required_evidence = [ "artifact:deliverable" ]
+  ; inspect_gate_evidence = []
+  ; verify_gate_evidence = []
+  ; links = { operation_id = None; session_id = None }
+  }
+
 let transition_done_r config ~agent_name ~task_id ~notes =
   let evidence_notes =
     if String.equal (String.trim notes) ""
     then "test completion evidence"
     else notes
   in
-  match
+  let task_opt =
     Workspace.get_tasks_raw config
     |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
-  with
-  | Some { task_status = Masc_domain.Done _; _ } ->
+  in
+  let direct_done () =
     Workspace.transition_task_r config ~agent_name ~task_id
       ~action:Masc_domain.Done_action
       ~notes:evidence_notes ()
+  in
+  match task_opt with
+  | Some { task_status = Masc_domain.Done _; _ } -> direct_done ()
+  | Some task when not (Masc_domain.task_requires_verification task) ->
+    (* Mirror production: only a strict contract routes through the completion
+       authority. Submitting an advisory task moved it into
+       [AwaitingVerification], a state no agent action leaves and no authority
+       is obligated to resolve — the FSM refuses that now, so a helper that
+       submitted unconditionally was exercising a path production never takes. *)
+    direct_done ()
   | Some _ | None ->
     (match
        Workspace.transition_task_r config ~agent_name ~task_id
@@ -1129,7 +1153,10 @@ let test_approve_completion_credits_assignee () =
   with_test_env (fun config ->
     with_done_hook_recorder (fun recorded ->
       with_verdict_projection_recorders (fun terminal notifications ->
-      let _ = Workspace.add_task config ~title:"Parity Task" ~priority:1 ~description:"" in
+      let _ =
+        Workspace.add_task config ~contract:strict_contract ~title:"Parity Task"
+          ~priority:1 ~description:""
+      in
       let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
       let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
       let submitted =
@@ -1169,6 +1196,7 @@ let test_operator_rejection_rebinds_producer () =
     let _ =
       Workspace.add_task
         config
+        ~contract:strict_contract
         ~title:"Rejected Task"
         ~priority:1
         ~description:""
@@ -1230,6 +1258,7 @@ let test_operator_verdict_boundary_is_reachable () =
     let _ =
       Workspace.add_task
         config
+        ~contract:strict_contract
         ~title:"Operator Boundary Task"
         ~priority:1
         ~description:""
@@ -1327,7 +1356,10 @@ let test_operator_verdict_parser_rejects_reasonless_rejection () =
    the producer has to know what to fix. *)
 let test_verdict_rejects_blank_rejection_reason () =
   with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Justification Task" ~priority:1 ~description:"" in
+    let _ =
+      Workspace.add_task config ~contract:strict_contract ~title:"Justification Task"
+        ~priority:1 ~description:""
+    in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
     let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
     let _ =
@@ -1352,17 +1384,6 @@ let test_verdict_rejects_blank_rejection_reason () =
     | _ -> Alcotest.fail "refused verdict mutated the verification state")
 
 (* === RFC-0323 G-1 (implements RFC-0308): verification-required done guard === *)
-
-let strict_contract : Masc_domain.task_contract =
-  { strict = true
-  ; completion_contract = [ "deliverable verified by a second agent" ]
-  ; (* Declared up front so the strict evidence precheck is satisfied by the
-       contract itself and direct done reaches the verification-lane guard. *)
-    required_evidence = [ "artifact:deliverable" ]
-  ; inspect_gate_evidence = []
-  ; verify_gate_evidence = []
-  ; links = { operation_id = None; session_id = None }
-  }
 
 let test_strict_task_done_requires_verification_submission () =
   with_test_env (fun config ->
@@ -1431,8 +1452,8 @@ let test_audit_orphan_awaiting_verification_tasks () =
   with_test_env (fun config ->
     (
         let _ =
-          Workspace.add_task config ~title:"Verification Orphan Candidate"
-            ~priority:1 ~description:""
+          Workspace.add_task config ~contract:strict_contract
+            ~title:"Verification Orphan Candidate" ~priority:1 ~description:""
         in
         let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
         let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in

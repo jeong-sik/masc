@@ -219,8 +219,6 @@ let string_list_member_opt key json =
       decode [] values
   | _ -> None
 
-let metrics_scan_batch_size = 128
-
 let latest_tool_audit_snapshot_from_metrics config keeper_name =
   let store =
     Keeper_types_support.keeper_metrics_store config keeper_name
@@ -271,25 +269,13 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
           ~detail:"keeper metrics row is not a JSON object";
         None
   in
-  let rec scan offset =
-    match
-      Dated_jsonl.read_recent_result
-        ~offset
-        store
-        metrics_scan_batch_size
-    with
+  match Dated_jsonl.find_latest_entry_result store parse_snapshot with
     | Error error ->
         report_drop
           ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
           ~detail:(Dated_jsonl.read_error_to_string error);
         None
-    | Ok entries ->
-        (match entries |> List.rev |> List.find_map parse_snapshot with
-         | Some _ as snapshot -> snapshot
-         | None when List.length entries < metrics_scan_batch_size -> None
-         | None -> scan (offset + List.length entries))
-  in
-  scan 0
+    | Ok snapshot -> snapshot
 
 let latest_tool_audit_snapshot_from_files config ~keeper_name =
   latest_tool_audit_snapshot_from_metrics config keeper_name

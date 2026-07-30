@@ -107,6 +107,14 @@ val read_recent_result :
     regular day files; symbolic links, other file kinds, and I/O failures are
     returned explicitly. Results are chronological (oldest first). *)
 
+val find_latest_entry_result :
+  t -> (recent_entry -> 'a option) -> ('a option, read_error) result
+(** Scan physical rows from newest to oldest and return the first value
+    selected by the callback. The scan reads each visited byte at most once,
+    keeps only one reverse-I/O chunk in memory, and stops immediately after a
+    match. Malformed rows are delivered to the callback. Missing stores return
+    [Ok None]; layout and I/O failures remain explicit. *)
+
 val read_recent_lines : ?offset:int -> t -> int -> string list
 (** Like {!read_recent} but returns raw JSONL strings (no parse).
     Useful for tail-readers that do their own parsing. *)

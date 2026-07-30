@@ -339,6 +339,33 @@ let test_read_recent_result_keeps_unterminated_tail_row () =
   | entries -> failf "unexpected unterminated tail: %d entries" (List.length entries)
 ;;
 
+let test_find_latest_entry_result_scans_backwards_across_chunks () =
+  let dir = tmpdir "dated_jsonl_find_latest" in
+  let padding = String.make 9000 'x' in
+  write_dated_file
+    dir
+    "2026-01"
+    "01"
+    [ {|{"kind":"turn","value":1}|}
+    ; Printf.sprintf {|{"kind":"heartbeat","padding":"%s"}|} padding
+    ; {|{"kind":"heartbeat","value":2}|}
+    ];
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  match
+    Dated_jsonl.find_latest_entry_result store (function
+      | Dated_jsonl.Parsed json
+        when Yojson.Safe.Util.(json |> member "kind" |> to_string) = "turn" ->
+        Some Yojson.Safe.Util.(json |> member "value" |> to_int)
+      | Dated_jsonl.Parsed _ | Dated_jsonl.Malformed_json _ -> None)
+  with
+  | Ok (Some value) -> check int "finds earlier typed row" 1 value
+  | Ok None -> fail "latest typed row was not found"
+  | Error error ->
+    failf
+      "latest typed row scan failed: %s"
+      (Dated_jsonl.read_error_to_string error)
+;;
+
 let test_load_tail_lines_drops_partial_chunk_prefix () =
   let dir = tmpdir "dated_jsonl_partial_tail" in
   let path = Filename.concat dir "tail.jsonl" in
@@ -778,6 +805,8 @@ let () =
             test_read_recent_result_spans_months_and_physical_offset;
           test_case "strict read keeps unterminated tail row" `Quick
             test_read_recent_result_keeps_unterminated_tail_row;
+          test_case "strict latest scan crosses chunks" `Quick
+            test_find_latest_entry_result_scans_backwards_across_chunks;
           test_case "drops partial chunk prefix" `Quick test_load_tail_lines_drops_partial_chunk_prefix;
           test_case "missing tail is empty" `Quick
             test_load_tail_lines_missing_file_is_empty;

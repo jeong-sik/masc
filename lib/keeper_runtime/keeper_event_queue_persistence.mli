@@ -1,11 +1,11 @@
 (** Durable per-Keeper Event Layer state.
 
-    Current writes use the [keeper.event_queue.state.v12]
-    [event-queue-v12.json] envelope: revision, pending stimuli, the latest
+    Current writes use the [keeper.event_queue.state.v13]
+    [event-queue-v13.json] envelope: revision, pending stimuli, the latest
     projected transition, an operation-indexed ledger of older projected
     dispositions, at most one unprojected transition, and durable
     accepted-transfer target projections. Only this schema and the
-    [event-queue-transitions-v2.jsonl] WAL are queue authority. *)
+    [event-queue-transitions-v3.jsonl] WAL are queue authority. *)
 
 type owner_identity
 type owner_identity_error

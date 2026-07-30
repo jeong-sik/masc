@@ -76,8 +76,8 @@ type transfer_projection_result = State.transfer_projection_result =
   | Transfer_already_projected
 
 
-let snapshot_filename = "event-queue-v12.json"
-let transition_wal_filename = "event-queue-transitions-v2.jsonl"
+let snapshot_filename = "event-queue-v13.json"
+let transition_wal_filename = "event-queue-transitions-v3.jsonl"
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
 
@@ -299,7 +299,7 @@ let bump_revision state =
   else Ok (State.with_revision (Int64.succ (State.revision state)) state)
 ;;
 
-let transition_wal_schema = "masc.keeper_event_queue.transition.v2"
+let transition_wal_schema = "masc.keeper_event_queue.transition.v3"
 
 let transition_wal_entry_to_line owner entry =
   `Assoc

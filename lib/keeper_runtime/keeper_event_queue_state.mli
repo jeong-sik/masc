@@ -1,6 +1,6 @@
 (** Pure durable state machine for one Keeper event queue owner.
 
-    [event-queue-v12.json] is the sole authority for pending stimuli and
+    [event-queue-v13.json] is the sole authority for pending stimuli and
     source-bearing transition projection work. This module performs no I/O;
     persistence supplies the atomic file boundary and publishes [pending] into
     the live registry only after a durable commit. *)
@@ -190,4 +190,4 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v12"] is the only accepted schema. *)
+(** ["keeper.event_queue.state.v13"] is the only accepted schema. *)

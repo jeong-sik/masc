@@ -2282,7 +2282,6 @@ let test_gc_preserves_awaiting_verification () =
              { assignee = "claude"
              ; submitted_at = gc_ancient_ts
              ; verification_id = "verif-900"
-             ; phase = Masc_domain.Awaiting_verifier
              })
     in
     write_tasks config [ task ];
@@ -2310,7 +2309,6 @@ let test_gc_restores_orphaned_nonterminal_from_archive () =
              { assignee = "claude"
              ; submitted_at = gc_ancient_ts
              ; verification_id = "verif-901"
-             ; phase = Masc_domain.Awaiting_verifier
              })
     in
     (* Simulate the orphaning a buggy GC pass produced: obligation lives in the
@@ -2345,7 +2343,6 @@ let test_gc_restored_task_preserves_old_messages_same_pass () =
              { assignee = "claude"
              ; submitted_at = gc_ancient_ts
              ; verification_id = "verif-904"
-             ; phase = Masc_domain.Awaiting_verifier
              })
     in
     Workspace.append_archive_tasks config [ orphan ];

@@ -86,11 +86,7 @@ let synthesize_summary_from_siblings args =
    permissive default. *)
 let transition_action_requires_summary : Masc_domain.task_action -> bool =
   function
-  | Masc_domain.Cancel
-  | Masc_domain.Release
-  | Masc_domain.Submit_for_verification
-  | Masc_domain.Approve_verification
-  | Masc_domain.Reject_verification ->
+  | Masc_domain.Cancel | Masc_domain.Release | Masc_domain.Submit_for_verification ->
     true
   | Masc_domain.Done_action | Masc_domain.Claim | Masc_domain.Start ->
     false

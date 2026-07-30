@@ -55,6 +55,8 @@ val iso8601_of_unix_seconds : float -> string
 val normalize_agent_last_seen : session_bound_at:Yojson.Safe.t option -> Yojson.Safe.t -> Yojson.Safe.t option
 val short_json_repr : Yojson.Safe.t -> string
 
+(** Actions an *agent* may drive. A completion verdict is not among them: it
+    requires a [completion_authority], which no agent can construct. *)
 type task_action =
   | Claim
   | Start
@@ -62,21 +64,30 @@ type task_action =
   | Cancel
   | Release
   | Submit_for_verification
-  | Approve_verification
-  | Reject_verification
 [@@deriving show]
 
+(** Rejects ["approve"] / ["reject"] with an explanation naming
+    [completion_authority], rather than reporting them as unknown actions. *)
 val task_action_of_string : string -> (task_action, string) result
+
 val task_action_to_string : task_action -> string
 val all_task_actions : task_action list
 val valid_task_action_strings : string list
 
-(* Verifier assignment and outcome live only in [task_status]. Verification
-   requests are immutable submit-time criteria and evidence envelopes. *)
-type verification_phase =
-  | Awaiting_verifier
-  | Verifier_assigned of { verifier : string }
+(** Who may issue a completion verdict. Closed sum with no agent or keeper
+    constructor, so a verdict cannot be built from an [agent_name]. *)
+type completion_authority =
+  | Human_operator of { operator_id : string }
+  | Auto_judge of { judge_run_id : string }
 [@@deriving show]
+
+type completion_verdict =
+  | Verdict_approved
+  | Verdict_rejected of { reason : string }
+[@@deriving show]
+
+val completion_authority_actor : completion_authority -> string
+val completion_authority_kind : completion_authority -> string
 
 type task_status =
   | Todo
@@ -86,23 +97,13 @@ type task_status =
       { assignee : string
       ; submitted_at : string
       ; verification_id : string
-      ; phase : verification_phase
       }
+      (** No verifier binding: the removed [phase] field made whichever agent won
+          the claim race the approver. [verification_id] joins to the evidence
+          record the authority reads. *)
   | Done of { assignee : string; completed_at : string; notes : string option }
   | Cancelled of { cancelled_by : string; cancelled_at : string; reason : string option }
 [@@deriving show]
-
-(** RFC-0220 §3.5: [task_status] of an [AwaitingVerification] obligation once
-    [verifier] has claimed it as its satisfier — status preserved, verifier
-    recorded in [phase]. Single construction authority shared by [decide] and
-    both claim writers. Authoritative binding: only the recorded verifier may
-    inspect submitted evidence and approve or reject through the Task FSM. *)
-val bind_verifier
-  :  verifier:string
-  -> assignee:string
-  -> submitted_at:string
-  -> verification_id:string
-  -> task_status
 
 val task_status_to_string : task_status -> string
 val string_of_task_status : task_status -> string

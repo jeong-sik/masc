@@ -33,7 +33,6 @@ let awaiting =
     { assignee = owner
     ; submitted_at = now
     ; verification_id = "vrf-1"
-    ; phase = D.Awaiting_verifier
     }
 ;;
 

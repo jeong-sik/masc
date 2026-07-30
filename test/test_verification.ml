@@ -896,7 +896,6 @@ let test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier () =
                  { assignee = "keeper-executor-agent"
                  ; submitted_at = "2026-07-28T00:00:00Z"
                  ; verification_id = request_id
-                 ; phase = Masc_domain.Awaiting_verifier
                  }
            })
         backlog.tasks

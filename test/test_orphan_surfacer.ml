@@ -43,7 +43,6 @@ let test_emits_for_awaiting_verification () =
            { assignee = "dead-keeper"
            ; submitted_at = "2024-01-01T00:00:00Z"
            ; verification_id = "v-1"
-           ; phase = MD.Awaiting_verifier
            })
   in
   let counts = WQ.orphan_counts_by_status_class [ (awaiting, "dead-keeper") ] in
@@ -102,7 +101,6 @@ let test_class_labels_match_task_status_to_string () =
            { assignee = "x"
            ; submitted_at = "t"
            ; verification_id = "v"
-           ; phase = MD.Awaiting_verifier
            })
     ]
   in
@@ -128,7 +126,7 @@ let test_classifier_is_membership_ssot () =
     (some "awaiting_verification")
     (WQ.orphan_status_class_of_status
        (MD.AwaitingVerification
-          { assignee = "x"; submitted_at = "t"; verification_id = "v"; phase = MD.Awaiting_verifier }));
+          { assignee = "x"; submitted_at = "t"; verification_id = "v" }));
   Alcotest.(check (option string)) "todo -> None" None
     (WQ.orphan_status_class_of_status MD.Todo);
   Alcotest.(check (option string)) "done -> None" None
@@ -142,7 +140,7 @@ let test_classifier_is_membership_ssot () =
       ; MD.Claimed { assignee = "x"; claimed_at = "t" }
       ; MD.InProgress { assignee = "x"; started_at = "t" }
       ; MD.AwaitingVerification
-          { assignee = "x"; submitted_at = "t"; verification_id = "v"; phase = MD.Awaiting_verifier }
+          { assignee = "x"; submitted_at = "t"; verification_id = "v" }
       ; MD.Done { assignee = "x"; completed_at = "t"; notes = None }
       ; MD.Cancelled { cancelled_at = "t"; cancelled_by = "x"; reason = None }
       ]

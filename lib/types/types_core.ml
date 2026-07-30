@@ -223,7 +223,8 @@ let agent_of_yojson json =
           | None -> Error (annotated_error ()))
       | _ -> Error original_error)
 
-(** Task status - state transitions enforced by types *)
+(** Actions an *agent* may drive on a task. A completion verdict is deliberately
+    absent: it is not an agent action. See [completion_authority]. *)
 type task_action =
   | Claim
   | Start
@@ -231,8 +232,6 @@ type task_action =
   | Cancel
   | Release
   | Submit_for_verification
-  | Approve_verification
-  | Reject_verification
 [@@deriving show]
 
 let task_action_of_string s =
@@ -243,8 +242,16 @@ let task_action_of_string s =
   | "cancel" -> Ok Cancel
   | "release" -> Ok Release
   | "submit_for_verification" -> Ok Submit_for_verification
-  | "approve" -> Ok Approve_verification
-  | "reject" -> Ok Reject_verification
+  | ("approve" | "reject") as verdict ->
+    (* Explicit rejection rather than "unknown action": the caller asked for a
+       real operation that is no longer reachable from the agent action surface.
+       A verdict requires a [completion_authority], which no agent can build. *)
+    Error
+      (Printf.sprintf
+         "Task action %S is not an agent action: a completion verdict is issued \
+          by the completion authority (human operator or auto judge), not \
+          through the task action surface. A Keeper is not a verifier."
+         verdict)
   | other -> Error (Printf.sprintf "Unknown task action: %s" other)
 
 let task_action_to_string = function
@@ -254,24 +261,41 @@ let task_action_to_string = function
   | Cancel -> "cancel"
   | Release -> "release"
   | Submit_for_verification -> "submit_for_verification"
-  | Approve_verification -> "approve"
-  | Reject_verification -> "reject"
 
 (** All valid task actions, derived from the ADT (single source of truth). *)
 let all_task_actions =
-  [ Claim; Start; Done_action; Cancel; Release;
-    Submit_for_verification; Approve_verification; Reject_verification ]
+  [ Claim; Start; Done_action; Cancel; Release; Submit_for_verification ]
 let valid_task_action_strings = List.map task_action_to_string all_task_actions
 
-(* RFC-0220: verifier assignment lives only in [task_status]. The verification
-   request stores submitted evidence while Pending and a terminal verdict once
-   Completed; it does not duplicate assignment state. *)
-type verification_phase =
-  | Awaiting_verifier
-      (** No verifier assigned yet. *)
-  | Verifier_assigned of { verifier: string }
-      (** The sole verifier-assignment authority. *)
+(** Who may issue a completion verdict. Closed sum with NO agent or keeper
+    constructor: every constructor requires an identity a Keeper cannot produce
+    (an operator confirmation, or a fusion judge run). Code that tries to build
+    a verdict from [agent_name] does not typecheck, which is the whole point —
+    RFC-0220 §140 assumed "a pending verification must be claimable by some
+    verifier keeper", and RFC-0308 withdrew verifier-required routing precisely
+    because that turns one unavailable participant into a Keeper-wide stop.
+    Shape follows the existing precedent in
+    {!Keeper_approval_queue_rules_types.decision_source}. *)
+type completion_authority =
+  | Human_operator of { operator_id: string }
+  | Auto_judge of { judge_run_id: string }
 [@@deriving show]
+
+(** A verdict cannot exist without an authority: both terminal outcomes are
+    carried here and consumed only by the verdict decider, which takes an
+    [completion_authority] argument. *)
+type completion_verdict =
+  | Verdict_approved
+  | Verdict_rejected of { reason: string }
+[@@deriving show]
+
+let completion_authority_actor = function
+  | Human_operator { operator_id } -> operator_id
+  | Auto_judge { judge_run_id } -> judge_run_id
+
+let completion_authority_kind = function
+  | Human_operator _ -> "human_operator"
+  | Auto_judge _ -> "auto_judge"
 
 type task_status =
   | Todo
@@ -281,26 +305,16 @@ type task_status =
       assignee: string;
       submitted_at: string;
       verification_id: string;
-      phase: verification_phase;
-        (** RFC-0220: replaces [deadline : string option]. The deadline is
-            dropped per I2 (no per-obligation wall-clock deadline); the
-            verification sub-state lives here so it cannot drift from a
-            separate store. *)
+        (** An obligation with no assignable satisfier. There is deliberately no
+            [phase]/verifier binding: the previous [Verifier_assigned] field made
+            whichever agent won the claim race the approver, so the obligation
+            was owned by a Keeper. The verdict comes from a
+            [completion_authority] instead, and [verification_id] is the join to
+            the evidence record it reads. *)
     }
   | Done of { assignee: string; completed_at: string; notes: string option }
   | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
 [@@deriving show]
-
-(** RFC-0220 §3.5: the [task_status] of an [AwaitingVerification] obligation
-    once [verifier] has claimed it as its satisfier. The obligation is preserved
-    and the verifier is recorded in [phase]. Single construction site shared by
-    the FSM decider and both claim writers ([claim_task_r], [claim_next_r]) so
-    the bound-verifier shape never drifts across surfaces. The binding is
-    authoritative: only this verifier receives evidence and may issue the
-    terminal verdict. *)
-let bind_verifier ~verifier ~assignee ~submitted_at ~verification_id =
-  AwaitingVerification
-    { assignee; submitted_at; verification_id; phase = Verifier_assigned { verifier } }
 
 (* Simple string representation for dashboard *)
 let task_status_to_string = function
@@ -389,7 +403,6 @@ let task_status_schema_witnesses : task_status list =
       { assignee = placeholder
       ; submitted_at = placeholder
       ; verification_id = placeholder
-      ; phase = Awaiting_verifier
       }
   ; Done { assignee = placeholder; completed_at = placeholder; notes = None }
   ; Cancelled
@@ -423,20 +436,13 @@ let task_status_to_yojson = function
         ("completed_at", `String completed_at);
         ("notes", Json_util.string_opt_to_json notes);
       ]
-  | AwaitingVerification { assignee; submitted_at; verification_id; phase } ->
-      let phase_fields =
-        match phase with
-        | Awaiting_verifier -> [ ("phase", `String "awaiting_verifier") ]
-        | Verifier_assigned { verifier } ->
-            [ ("phase", `String "verifier_assigned");
-              ("verifier", `String verifier) ]
-      in
-      `Assoc ([
+  | AwaitingVerification { assignee; submitted_at; verification_id } ->
+      `Assoc [
         ("status", `String "awaiting_verification");
         ("assignee", `String assignee);
         ("submitted_at", `String submitted_at);
         ("verification_id", `String verification_id);
-      ] @ phase_fields)
+      ]
   | Cancelled { cancelled_by; cancelled_at; reason } ->
       `Assoc [
         ("status", `String "cancelled");
@@ -458,20 +464,10 @@ let task_status_of_yojson json =
     | "done" ->
         Ok (Done { assignee = req "assignee"; completed_at = req "completed_at"; notes = opt "notes" })
     | "awaiting_verification" ->
-        (* RFC-0220 migration tolerance: legacy backlogs carry [deadline]
-           (now dropped) and no [phase]; a missing/legacy phase defaults to
-           [Awaiting_verifier]. *)
-        let phase =
-          match opt "phase" with
-          | Some "verifier_assigned" ->
-              Verifier_assigned { verifier = req "verifier" }
-          | Some "awaiting_verifier" | None | Some _ -> Awaiting_verifier
-        in
         Ok (AwaitingVerification
               { assignee = req "assignee"
               ; submitted_at = req "submitted_at"
               ; verification_id = req "verification_id"
-              ; phase
               })
     | "cancelled" ->
         Ok (Cancelled

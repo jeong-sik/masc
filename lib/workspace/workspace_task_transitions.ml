@@ -87,9 +87,7 @@ let transition_task_outcome_r
             | Masc_domain.Done_action
             | Masc_domain.Cancel
             | Masc_domain.Release
-            | Masc_domain.Submit_for_verification
-            | Masc_domain.Approve_verification
-            | Masc_domain.Reject_verification ), _ -> Ok ())
+            | Masc_domain.Submit_for_verification ), _ -> Ok ())
           [@warning "-4"]
         in
         let now = now_iso () in
@@ -116,37 +114,22 @@ let transition_task_outcome_r
                  (Masc_domain.Task_error.InvalidState
                     "Task completion must be submitted for verification; use \
                      submit_for_verification with evidence"))
-          | Error Workspace_task_lifecycle.Verification_claim_required ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    "Verification must be claimed before approve/reject; call \
-                     keeper_task_claim with this task_id"))
-          | Error (Workspace_task_lifecycle.Verification_assigned_to verifier) ->
+          | Error Workspace_task_lifecycle.Verification_pending_verdict ->
             Error
               (Masc_domain.Task
                  (Masc_domain.Task_error.InvalidState
                     (Printf.sprintf
-                       "Verification is assigned to %s; %s cannot issue its verdict"
-                       verifier
+                       "Task %s awaits a completion authority's verdict and is not \
+                        claimable by any agent (%s included). A Keeper is not a \
+                        verifier."
+                       task_id
                        agent_name)))
-          | Error Workspace_task_lifecycle.Verification_self_claim ->
+          | Error Workspace_task_lifecycle.Verdict_rejection_reason_required ->
             Error
               (Masc_domain.Task
                  (Masc_domain.Task_error.InvalidState
-                    "Submitting worker cannot claim its own verification request"))
-          | Error Workspace_task_lifecycle.Verification_approval_notes_required ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    "approve requires non-empty notes explaining the verification \
-                     decision"))
-          | Error Workspace_task_lifecycle.Verification_rejection_reason_required ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    "reject requires a non-empty reason or notes explaining what \
-                     must be fixed"))
+                    "a rejection verdict requires a non-empty reason explaining \
+                     what must be fixed"))
           | Error Workspace_task_lifecycle.Invalid_transition ->
             let assignee_hint =
               match task_assignee_of_status task.task_status with
@@ -191,9 +174,7 @@ let transition_task_outcome_r
           | Masc_domain.Done_action
           | Masc_domain.Cancel
           | Masc_domain.Release
-          | Masc_domain.Submit_for_verification
-          | Masc_domain.Approve_verification
-          | Masc_domain.Reject_verification -> Ok ()
+          | Masc_domain.Submit_for_verification -> Ok ()
         in
         (* WORKAROUND: action (9) × task_status (6) × new_status (6) × option (2) = 648 combos. *)
         let* () =
@@ -238,9 +219,7 @@ let transition_task_outcome_r
               | Masc_domain.Start
               | Masc_domain.Done_action
               | Masc_domain.Cancel
-              | Masc_domain.Release
-              | Masc_domain.Approve_verification
-              | Masc_domain.Reject_verification )
+              | Masc_domain.Release )
             , _
             , _
             , Some _ ) -> Ok ()
@@ -249,8 +228,6 @@ let transition_task_outcome_r
               | Masc_domain.Done_action
               | Masc_domain.Cancel
               | Masc_domain.Release
-              | Masc_domain.Approve_verification
-              | Masc_domain.Reject_verification
               | Masc_domain.Submit_for_verification )
             , _
             , _
@@ -265,8 +242,6 @@ let transition_task_outcome_r
         | Masc_domain.Done_action, _
         | Masc_domain.Cancel, _
         | Masc_domain.Submit_for_verification, _
-        | Masc_domain.Approve_verification, _
-         | Masc_domain.Reject_verification, _
          | Masc_domain.Release, Masc_domain.Claimed _
          | Masc_domain.Release, Masc_domain.InProgress _
          | Masc_domain.Release, Masc_domain.AwaitingVerification _
@@ -322,9 +297,7 @@ let transition_task_outcome_r
                  | Masc_domain.Start
                  | Masc_domain.Done_action
                  | Masc_domain.Cancel
-                 | Masc_domain.Release
-                 | Masc_domain.Approve_verification
-                 | Masc_domain.Reject_verification -> ()));
+                 | Masc_domain.Release -> ()));
              raise exn);
           (* RFC-0221 §3.3: clear stale agent task-cache entries AFTER the
              commit so agents that cache the task don't emit stale broadcasts
@@ -410,39 +383,12 @@ let transition_task_outcome_r
                ~agent_name
                ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Submit_for_verification)
-               ~payload
-           | Masc_domain.Approve_verification ->
-             (* RFC-0323 G-3: the event actor is the verifier; carry the
-                assignee so graph reducers can close the assignee's
-                works_on edge. *)
-             let payload =
-               match new_status with
-               | Masc_domain.Done { assignee; _ } ->
-                 `Assoc
-                   [ "task_id", `String task_id; "assignee", `String assignee ]
-               | Masc_domain.Todo
-               | Masc_domain.Claimed _
-               | Masc_domain.InProgress _
-               | Masc_domain.AwaitingVerification _
-               | Masc_domain.Cancelled _ -> `Assoc [ "task_id", `String task_id ]
-             in
-             emit_task_activity
-               config
-               ~agent_name
-               ~task_id
-               ~kind:(Event_kind.Task.to_string Event_kind.Task.Approved)
-               ~payload
-           | Masc_domain.Reject_verification ->
-             emit_task_activity
-               config
-               ~agent_name
-               ~task_id
-               ~kind:(Event_kind.Task.to_string Event_kind.Task.Rejected)
-               ~payload:(`Assoc [ "task_id", `String task_id ]));
-          (* RFC-0323 G-3: completion side effects key off the RESULT (Done),
-             not the action — otherwise Approve_verification completions
-             record no duration. The value measures the last status phase
-             (started_at for in_progress, submitted_at for
+               ~payload);
+          (* RFC-0323 G-3: completion side effects key off the RESULT (Done), not
+             the action — a verdict-produced completion arrives through
+             [decide_verdict] and never as an agent action, so keying off the
+             action would record no duration for it. The value measures the last
+             status phase (started_at for in_progress, submitted_at for
              awaiting_verification). *)
           let completes_task =
             Masc_domain.task_status_is_done new_status
@@ -490,9 +436,7 @@ let transition_task_outcome_r
               | Masc_domain.Claim
               | Masc_domain.Start
               | Masc_domain.Release
-              | Masc_domain.Submit_for_verification
-              | Masc_domain.Approve_verification
-              | Masc_domain.Reject_verification -> None)
+              | Masc_domain.Submit_for_verification -> None)
           in
           observe_task_transition
             config
@@ -507,10 +451,10 @@ let transition_task_outcome_r
                  ?reason:(if reason = "" then None else Some reason)
                  ?duration_ms
                  ());
-          (* RFC-0323 G-3: done hooks (relation/hebbian) fire for
-             every transition that PRODUCES Done — Done via
-             Approve_verification included. The completer is the Done record's
-             assignee: on approve the acting [agent_name] is the verifier. *)
+          (* RFC-0323 G-3: done hooks (relation/hebbian) fire for every transition
+             that PRODUCES Done, including a Done produced by an approval verdict.
+             The completer is the Done record's assignee — never the actor, which
+             for a verdict is a completion authority rather than an agent. *)
           (match new_status with
            | Masc_domain.Done { assignee; _ } ->
              if completes_task
@@ -528,9 +472,7 @@ let transition_task_outcome_r
            | Masc_domain.Release
            | Masc_domain.Claim
            | Masc_domain.Start
-           | Masc_domain.Submit_for_verification
-           | Masc_domain.Approve_verification
-           | Masc_domain.Reject_verification -> ());
+           | Masc_domain.Submit_for_verification -> ());
           Ok
             { message =
                 Printf.sprintf

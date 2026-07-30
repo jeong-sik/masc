@@ -1,13 +1,13 @@
 (** Pure Task lifecycle transition helper. Producers submit completion evidence
-    for verification; the phase-assigned verifier owns the terminal verdict. *)
+    for verification; the terminal verdict is issued by a
+    [Masc_domain.completion_authority] through {!decide_verdict}, never by an
+    agent action. *)
 
 type invalid =
   | Verification_submission_required
-  | Verification_claim_required
-  | Verification_assigned_to of string
-  | Verification_self_claim
-  | Verification_approval_notes_required
-  | Verification_rejection_reason_required
+  | Verification_pending_verdict
+      (** An [AwaitingVerification] obligation is not claimable by any agent. *)
+  | Verdict_rejection_reason_required
   | Invalid_transition
 
 type decision =
@@ -30,30 +30,22 @@ let cancelled_status ~agent_name ~now ~reason =
 
 type claim_resolution =
   | Worker_claim of Masc_domain.task_status
-  | Verifier_claim of Masc_domain.task_status
   | Self_owned
-  | Self_verification
   | Held_by_other of string
   | Held_terminal of Masc_domain.task_status
+  | Held_pending_verdict of { verification_id : string }
 
 let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
   match task.task_status with
   | Masc_domain.Todo ->
     Worker_claim (Masc_domain.Claimed { assignee = agent_name; claimed_at = now })
-  | Masc_domain.AwaitingVerification
-      { assignee; submitted_at; verification_id; phase = Masc_domain.Awaiting_verifier } ->
-    if same_actor assignee
-    then Self_verification
-    else
-      Verifier_claim
-        (Masc_domain.bind_verifier
-           ~verifier:agent_name
-           ~assignee
-           ~submitted_at
-           ~verification_id)
-  | Masc_domain.AwaitingVerification
-      { phase = Masc_domain.Verifier_assigned { verifier }; _ } ->
-    if same_actor verifier then Self_owned else Held_by_other verifier
+  | Masc_domain.AwaitingVerification { verification_id; _ } ->
+    (* No agent claims a pending obligation. The previous behaviour bound the
+       claiming agent as its verifier, which is exactly how a Keeper acquired
+       approval authority: claim was the authority-granting operation. The
+       verdict now comes from a [completion_authority] out of band, so the
+       obligation has no assignable satisfier and no keeper is offered it. *)
+    Held_pending_verdict { verification_id }
   | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ } ->
     if same_actor assignee then Self_owned else Held_by_other assignee
   | Masc_domain.Done _ -> Held_terminal task.task_status
@@ -81,25 +73,11 @@ let decide
     , (Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _}) ) ->
     if same_agent assignee then ok task_status else Error Invalid_transition
   | Masc_domain.Claim, Masc_domain.Done _ -> ok task_status
-  | ( Masc_domain.Claim
-    , Masc_domain.AwaitingVerification
-        { assignee; submitted_at; verification_id; phase = Masc_domain.Awaiting_verifier } ) ->
-    if same_agent assignee
-    then Error Verification_self_claim
-    else
-      ok
-        ~set_current:task_id
-        (Masc_domain.bind_verifier
-           ~verifier:agent_name
-           ~assignee
-           ~submitted_at
-           ~verification_id)
-  | ( Masc_domain.Claim
-    , Masc_domain.AwaitingVerification
-        { phase = Masc_domain.Verifier_assigned { verifier }; _ } ) ->
-    if same_agent verifier
-    then ok ~set_current:task_id task_status
-    else Error (Verification_assigned_to verifier)
+  | Masc_domain.Claim, Masc_domain.AwaitingVerification _ ->
+    (* Claiming an obligation used to bind the claimant as its verifier, so the
+       claim race decided who held approval authority. There is no such binding
+       now: the verdict comes from a [completion_authority] out of band. *)
+    Error Verification_pending_verdict
   | Masc_domain.Claim, Masc_domain.Cancelled _ -> Error Invalid_transition
   | Masc_domain.Start, Masc_domain.Claimed { assignee; _ } ->
     if same_agent assignee
@@ -154,11 +132,7 @@ let decide
     then
       ok
         (Masc_domain.AwaitingVerification
-           { assignee
-           ; submitted_at = now
-           ; verification_id = new_verification_id ()
-           ; phase = Masc_domain.Awaiting_verifier
-           })
+           { assignee; submitted_at = now; verification_id = new_verification_id () })
     else Error Invalid_transition
   | ( Masc_domain.Submit_for_verification
     , ( Masc_domain.Todo
@@ -166,60 +140,60 @@ let decide
       | Masc_domain.Done _
       | Masc_domain.Cancelled _ ) ) ->
     Error Invalid_transition
-  | ( Masc_domain.Approve_verification
-    , Masc_domain.AwaitingVerification
-        { phase = Masc_domain.Awaiting_verifier; _ } ) ->
-    Error Verification_claim_required
-  | ( Masc_domain.Approve_verification
-    , Masc_domain.AwaitingVerification
-        { assignee
-        ; verification_id
-        ; phase = Masc_domain.Verifier_assigned { verifier }
-        ; _
-        } ) ->
-    if not (same_agent verifier)
-    then Error (Verification_assigned_to verifier)
-    else if String.equal (String.trim notes) ""
-    then Error Verification_approval_notes_required
-    else
-      ok
-        (Masc_domain.Done
-           { assignee
-           ; completed_at = now
-           ; notes =
-               Some
-                 (Printf.sprintf
-                    "Verified by %s (vrf:%s)%s"
-                    verifier
-                    verification_id
-                    (if String.equal notes "" then "" else " — " ^ notes))
+;;
+
+(** A verdict decision plus the authority provenance its caller must record.
+    Returning the provenance keeps it out of [Done.notes]: the previous code
+    wrote ["Verified by <keeper> (vrf:<id>)"] into the notes string, which made a
+    human-readable field the only record of who approved — and nothing parsed
+    it. *)
+type verdict_decision =
+  { decision : decision
+  ; authority_kind : string
+  ; authority_actor : string
+  }
+
+(** Terminal verdict on an [AwaitingVerification] obligation.
+
+    Deliberately not an arm of {!decide}: a verdict is not an agent action. The
+    [authority] parameter is a proof obligation — every constructor of
+    [Masc_domain.completion_authority] requires an identity no agent can mint, so
+    a call site holding only an [agent_name] cannot construct one and does not
+    typecheck. This is the compile-time replacement for the old
+    [same_agent verifier] string comparison. *)
+let decide_verdict
+      ~(authority : Masc_domain.completion_authority)
+      ~(verdict : Masc_domain.completion_verdict)
+      ~task_id
+      ~(task_status : Masc_domain.task_status)
+      ~now
+      ~notes
+  =
+  let provenance decision =
+    Ok
+      { decision
+      ; authority_kind = Masc_domain.completion_authority_kind authority
+      ; authority_actor = Masc_domain.completion_authority_actor authority
+      }
+  in
+  match task_status with
+  | Masc_domain.AwaitingVerification { assignee; _ } ->
+    (match verdict with
+     | Masc_domain.Verdict_approved ->
+       provenance { new_status = done_status ~assignee ~now ~notes; set_current = None }
+     | Masc_domain.Verdict_rejected { reason } ->
+       if String.equal (String.trim reason) ""
+       then Error Verdict_rejection_reason_required
+       else
+         provenance
+           { new_status = Masc_domain.InProgress { assignee; started_at = now }
+           ; set_current = Some task_id
            })
-  | ( Masc_domain.Approve_verification
-    , ( Masc_domain.Todo
-      | Masc_domain.Claimed _
-      | Masc_domain.InProgress _
-      | Masc_domain.Done _
-      | Masc_domain.Cancelled _ ) ) ->
-    Error Invalid_transition
-  | ( Masc_domain.Reject_verification
-    , Masc_domain.AwaitingVerification
-        { phase = Masc_domain.Awaiting_verifier; _ } ) ->
-    Error Verification_claim_required
-  | ( Masc_domain.Reject_verification
-    , Masc_domain.AwaitingVerification
-        { assignee; phase = Masc_domain.Verifier_assigned { verifier }; _ } ) ->
-    if not (same_agent verifier)
-    then Error (Verification_assigned_to verifier)
-    else if String.equal (String.trim notes) "" && String.equal (String.trim reason) ""
-    then Error Verification_rejection_reason_required
-    else ok (Masc_domain.InProgress { assignee; started_at = now })
-  | ( Masc_domain.Reject_verification
-    , ( Masc_domain.Todo
-      | Masc_domain.Claimed _
-      | Masc_domain.InProgress _
-      | Masc_domain.Done _
-      | Masc_domain.Cancelled _ ) ) ->
-    Error Invalid_transition
+  | Masc_domain.Todo
+  | Masc_domain.Claimed _
+  | Masc_domain.InProgress _
+  | Masc_domain.Done _
+  | Masc_domain.Cancelled _ -> Error Invalid_transition
 ;;
 
 let valid_next_actions ~same_agent ~task_status ~requires_verification =

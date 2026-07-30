@@ -94,7 +94,6 @@ let test_self_authored_verification_remains_eligible () =
       { assignee = "executor"
       ; submitted_at = "2026-07-20T01:00:00Z"
       ; verification_id = "verification-1"
-      ; phase = Masc_domain.Awaiting_verifier
       }
   in
   Alcotest.(check bool)

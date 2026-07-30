@@ -427,33 +427,24 @@ let add_verification_evidence_projection
 
 let verification_evidence_projection config ~viewer ~(task : task) =
   match task.task_status with
-  | Masc_domain.AwaitingVerification
-      { assignee = task_worker; verification_id; phase; _ } ->
+  | Masc_domain.AwaitingVerification { assignee = task_worker; verification_id; _ } ->
     let buf = Buffer.create 256 in
-    let task_verifier =
-      match phase with
-      | Masc_domain.Awaiting_verifier -> None
-      | Masc_domain.Verifier_assigned { verifier } -> Some verifier
-    in
+    (* Keeper-facing projection: metadata only, never evidence bytes. Submitted
+       evidence is input to the completion authority's verdict, and the previous
+       gate released it on [String.equal task_verifier viewer] — a keeper agent
+       name — which is what made evidence access a keeper privilege. Passing
+       [task_verifier:None] keeps the store on its metadata-only branch; the
+       authority-side reader takes a [Masc_domain.completion_authority] and is
+       wired separately. *)
     add_verification_evidence_projection
       buf
       config
       ~viewer
       ~task_id:task.id
       ~task_worker
-      ~task_verifier
+      ~task_verifier:None
       verification_id;
-    (match phase with
-     | Masc_domain.Awaiting_verifier ->
-       Printf.bprintf buf
-         "   └─ awaiting_verifier task_id=%s\n"
-         task.id
-     | Masc_domain.Verifier_assigned { verifier }
-       when not (Workspace_task_classify.same_task_actor config verifier viewer) ->
-       Printf.bprintf buf
-         "   └─ assigned_verifier=%s\n"
-         verifier
-     | Masc_domain.Verifier_assigned _ -> ());
+    Printf.bprintf buf "   └─ awaiting_completion_authority task_id=%s\n" task.id;
     Some (Buffer.contents buf)
   | Masc_domain.Todo
   | Masc_domain.Claimed _
@@ -505,8 +496,7 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status
       Printf.bprintf buf "%s [%d] %s: %s\n" status_icon task.priority task.id task.title;
       Printf.bprintf buf "   └─ %s | %s\n" status_str assignee;
       match task.task_status with
-      | Masc_domain.AwaitingVerification
-          { assignee = task_worker; verification_id; phase; _ } ->
+      | Masc_domain.AwaitingVerification { verification_id; _ } ->
         (match verification_viewer with
          | None ->
            Printf.bprintf buf

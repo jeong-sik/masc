@@ -288,12 +288,14 @@ let claim_next_r
             Workspace_task_lifecycle.resolve_claim
               ~same_actor ~agent_name ~now:(now_iso ()) t
           with
-          | Workspace_task_lifecycle.Worker_claim _
-          | Workspace_task_lifecycle.Verifier_claim _ -> true
+          | Workspace_task_lifecycle.Worker_claim _ -> true
           | Workspace_task_lifecycle.Self_owned
-          | Workspace_task_lifecycle.Self_verification
           | Workspace_task_lifecycle.Held_by_other _
-          | Workspace_task_lifecycle.Held_terminal _ -> false
+          | Workspace_task_lifecycle.Held_terminal _
+          (* An obligation awaiting a completion authority's verdict is not
+             claimable work for any keeper — this arm is what previously put
+             AwaitingVerification tasks into the keeper claim pool. *)
+          | Workspace_task_lifecycle.Held_pending_verdict _ -> false
         in
         let unclaimed =
           sorted
@@ -369,12 +371,11 @@ let claim_next_r
                Workspace_task_lifecycle.resolve_claim
                  ~same_actor ~agent_name ~now:(now_iso ()) task
              with
-             | Workspace_task_lifecycle.Worker_claim s
-             | Workspace_task_lifecycle.Verifier_claim s -> s
+             | Workspace_task_lifecycle.Worker_claim s -> s
              | Workspace_task_lifecycle.Self_owned
-             | Workspace_task_lifecycle.Self_verification
              | Workspace_task_lifecycle.Held_by_other _
-             | Workspace_task_lifecycle.Held_terminal _ ->
+             | Workspace_task_lifecycle.Held_terminal _
+             | Workspace_task_lifecycle.Held_pending_verdict _ ->
                Masc_domain.Claimed { assignee = agent_name; claimed_at = now_iso () }
            in
            let new_tasks =

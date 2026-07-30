@@ -1,10 +1,5 @@
 (** Pure payload builders and task-policy helpers. *)
 
-val is_verdict_transition_action : Masc_domain.task_action -> bool
-
-val terminal_verdict_noop_message :
-  task_id:string -> action:string -> status:string -> string
-
 val build_claim_observation_payload :
   now:float ->
   agent_name:string ->

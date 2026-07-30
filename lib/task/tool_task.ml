@@ -230,29 +230,13 @@ and handle_transition ~tool_name ~start_time ctx args =
       | Masc_domain.Start
       | Masc_domain.Done_action
       | Masc_domain.Cancel
-      | Masc_domain.Submit_for_verification
-      | Masc_domain.Approve_verification
-      | Masc_domain.Reject_verification ), _ -> None
+      | Masc_domain.Submit_for_verification ), _ -> None
   in
+  (* The terminal-verdict no-op branch is gone with the verdict actions: an agent
+     can no longer request approve/reject here, so there is no verdict-on-terminal
+     case to absorb. *)
   match release_owner_mismatch_rejection with
   | Some result -> result
-  | None ->
-  let terminal_verdict_noop =
-    if is_verdict_transition_action action
-    then
-      match task_opt with
-      | Some task when Masc_domain.task_status_is_terminal task.task_status ->
-        Some
-          (terminal_verdict_noop_message
-             ~task_id
-             ~action:action_s
-             ~status:(Masc_domain.task_status_to_string task.task_status))
-      | _ -> None
-    else
-      None
-  in
-  match terminal_verdict_noop with
-  | Some message -> Tool_result.ok ~tool_name ~start_time message
   | None ->
   let completion_state_error =
     if (=) action Masc_domain.Done_action then
@@ -346,11 +330,10 @@ and handle_transition ~tool_name ~start_time ctx args =
     | None -> ctx.agent_name
   in
   let completion_collaborators =
-    if
-      (=) action Masc_domain.Approve_verification
-      && not (String.equal completion_owner ctx.agent_name)
-    then [ ctx.agent_name ]
-    else collaborators_from_task
+    (* The approve branch is gone: it added the approving agent to the task's
+       collaborator set, which only made sense while a keeper could be the
+       verifier. A completion authority is not an agent and never joins it. *)
+    collaborators_from_task
   in
   let prepare_verification_request =
     match action with
@@ -367,9 +350,7 @@ and handle_transition ~tool_name ~start_time ctx args =
     | Masc_domain.Start
     | Masc_domain.Done_action
     | Masc_domain.Cancel
-    | Masc_domain.Release
-    | Masc_domain.Approve_verification
-    | Masc_domain.Reject_verification ->
+    | Masc_domain.Release ->
       None
   in
   (* RFC-0221 §3.1: compensation for [Submit_for_verification]. If the status
@@ -398,9 +379,7 @@ and handle_transition ~tool_name ~start_time ctx args =
     | Masc_domain.Start
     | Masc_domain.Done_action
     | Masc_domain.Cancel
-    | Masc_domain.Release
-    | Masc_domain.Approve_verification
-    | Masc_domain.Reject_verification ->
+    | Masc_domain.Release ->
       None
   in
   (* Capture verification_id from AwaitingVerification state BEFORE transition.

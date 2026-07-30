@@ -240,7 +240,7 @@ let test_open_count_only_non_terminal () =
     ; make_task ~id:"t3" ~status:cancelled_status
     ; make_task ~id:"t4" ~status:(Claimed { assignee = "a"; claimed_at = "" })
     ; make_task ~id:"t5" ~status:(InProgress { assignee = "a"; started_at = "" })
-    ; make_task ~id:"t6" ~status:(AwaitingVerification { assignee = "a"; submitted_at = ""; verification_id = ""; phase = Awaiting_verifier })
+    ; make_task ~id:"t6" ~status:(AwaitingVerification { assignee = "a"; submitted_at = ""; verification_id = "" })
     ]
   in
   let index = Workspace_goal_index.build_goal_task_index tasks

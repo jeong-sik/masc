@@ -129,11 +129,9 @@ let claim_task_r config ~agent_name ~task_id ()
                   | Workspace_task_lifecycle.Worker_claim status ->
                     let t = clear_reclaim_decision t in
                     `Claimed_ok, { t with task_status = status } :: acc
-                  | Workspace_task_lifecycle.Verifier_claim status ->
-                    `Claimed_verification, { t with task_status = status } :: acc
+                  | Workspace_task_lifecycle.Held_pending_verdict { verification_id } ->
+                    `Pending_verdict verification_id, t :: acc
                   | Workspace_task_lifecycle.Self_owned -> `Already_mine, t :: acc
-                  | Workspace_task_lifecycle.Self_verification ->
-                    `Self_verification, t :: acc
                   | Workspace_task_lifecycle.Held_by_other holder ->
                     `Claimed_by holder, t :: acc
                   | Workspace_task_lifecycle.Held_terminal status ->
@@ -159,90 +157,23 @@ let claim_task_r config ~agent_name ~task_id ()
                       (Masc_domain.task_status_to_string status)
                       task_id)))
          | `Claimed_by other -> Error (Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed { task_id; by = other }))
-         | `Self_verification ->
+         | `Pending_verdict verification_id ->
+           (* Previously this arm only blocked the *submitting* worker, and any
+              other agent that claimed became the verifier. No agent claims an
+              obligation now: the verdict is issued by a completion authority. *)
            Error
              (Masc_domain.Task
                 (Masc_domain.Task_error.InvalidState
-                   "Submitting worker cannot claim its own verification request"))
+                   (Printf.sprintf
+                      "Task %s awaits a completion authority's verdict \
+                       (verification_id=%s) and is not claimable by any agent. A \
+                       Keeper is not a verifier."
+                      task_id
+                      verification_id)))
          | `Already_mine ->
            Ok
              (`Existing_claim
                (Printf.sprintf "Task %s is already claimed by you" task_id))
-         | `Claimed_verification ->
-           (* Issue #19314 / RFC-0220 §3.5: cross-agent verification dispatch.
-              The task stays [AwaitingVerification]; [resolve_claim] has bound
-              this agent as the verifier in [phase] (Verifier_assigned). Persist
-              that status and point the agent at the task. The verifier binding
-              and outcome live only in the Task FSM; the verification request
-              remains an immutable submit-time evidence envelope. *)
-           let claimed_task =
-             List.find (fun (t : Masc_domain.task) -> String.equal t.id task_id) new_tasks
-           in
-           let new_backlog =
-             { tasks = new_tasks
-             ; last_updated = now_iso ()
-             ; version = backlog.version + 1
-             }
-           in
-           write_backlog
-             ~after_commit:(fun () ->
-               Task_cache_invariant.clear_stale_agent_task config
-                 ~agent_name ~task_id ~status:claimed_task.task_status
-                 ~module_name:"claim_task_r.verification")
-             config new_backlog;
-           Workspace_task_classify.update_local_agent_state config ~agent_name (fun agent ->
-             { agent with status = Busy; current_task = Some task_id });
-           let _ =
-             broadcast
-               config
-               ~from_agent:agent_name
-               ~content:(Printf.sprintf "Assigned as verifier for %s" task_id)
-           in
-           Workspace_task_classify.emit_task_activity
-             config
-             ~agent_name
-             ~task_id
-             ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
-             ~payload:(`Assoc
-               [ "task_id", `String task_id
-               ; "verification_dispatch", `Bool true
-               ]);
-           log_event
-             config
-             (`Assoc
-               [ "type", `String "task_claim_verification"
-               ; "agent", `String agent_name
-               ; ( "actor_kind"
-                 , `String
-                     (Workspace_task_classify.task_actor_kind_to_string
-                        Workspace_task_classify.Agent) )
-               ; "task", `String task_id
-               ; "ts", `String (now_iso ())
-               ]);
-           let evidence_projection =
-             match
-               Workspace_query.verification_evidence_projection
-                 config
-                 ~viewer:agent_name
-                 ~task:claimed_task
-             with
-             | Some projection -> projection
-             | None ->
-               Log.Task.error
-                 ~keeper_name:agent_name
-                 "verification claim committed without an evidence projection (task=%s)"
-                 task_id;
-               Printf.sprintf
-                 "verification_request projection unavailable after assignment for %s"
-                 task_id
-           in
-           Ok
-             (`New_claim
-               (Printf.sprintf
-                  "%s assigned as verifier for %s\n%s"
-                  agent_name
-                  task_id
-                  evidence_projection))
          | `Claimed_ok ->
            let claimed_task =
              List.find (fun (t : Masc_domain.task) -> String.equal t.id task_id) new_tasks

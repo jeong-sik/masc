@@ -59,24 +59,48 @@ validated-flow evidence와 direct `Agent_sdk.Exact_output` adapter를 추가했�
 optional measurement receipt가 살아 있는 증거임을 확인해 과도한 숙청을
 되돌렸다. [#2899](https://github.com/jeong-sik/oas/pull/2899)는 canonical JSON을
 `Yojson.Safe.t`로 닫았고, [#2903](https://github.com/jeong-sik/oas/pull/2903)은
-godfile 증가를 private one-way leaf DAG로 제거했다. 그러나 #2903과
-`v0.231.9`는 `Option.exists`의 OCaml 5.4 비호환 및 shared record label 추론
-오류로 full CI가 실패했다. 후속
-[#2904](https://github.com/jeong-sik/oas/pull/2904),
-[#2906](https://github.com/jeong-sik/oas/pull/2906),
+godfile 증가를 private one-way leaf DAG로 제거했다. 그러나 #2903 merge commit
+`a923fc3889ba62a89cd42d91956d62dc0b674311`의 exact-main CI run
+[`30535040210`](https://github.com/jeong-sik/oas/actions/runs/30535040210)은
+`rejected.measurement`/`visit.ordinal` shared record label 추론 오류로
+Build(OCaml 5.4.1/5.5.0)·Lint·Eio 1.3/1.4가 실패했다. 후속
+[#2904](https://github.com/jeong-sik/oas/pull/2904)(exact-head PR run
+[`30535494954`](https://github.com/jeong-sik/oas/actions/runs/30535494954))와
+[#2906](https://github.com/jeong-sik/oas/pull/2906)(run
+[`30535658586`](https://github.com/jeong-sik/oas/actions/runs/30535658586))도
+exact-head Build/Lint/Eio가 실패했고, #2901 head
+`5597da1ba3b1667779f70d6323b0fa886c0bb15d`의 PR run
+[`30534846121`](https://github.com/jeong-sik/oas/actions/runs/30534846121)은
+OCaml 5.4.1에 없는 `Option.exists` unbound와 `flow_visit_ordinal` 타입 오류로
+실패한 채 merge됐다. `v0.231.9` 태그
+`b70b35bb117af1c0597c28f619c187c7fb387bfb`의 exact-main CI run
+[`30534931823`](https://github.com/jeong-sik/oas/actions/runs/30534931823)은
+취소됐고 Code Smell Ratchet run
+[`30534931829`](https://github.com/jeong-sik/oas/actions/runs/30534931829)이
+실패해 green release 증거가 없었다.
 [#2907](https://github.com/jeong-sik/oas/pull/2907),
 [#2908](https://github.com/jeong-sik/oas/pull/2908)이 실제 domain boundary에
 record 타입을 명시하고 5.4-compatible option match로 교체했다. 이를 모두 포함한
 `v0.231.10` exact release SHA
 `1fa61251936758d37c3a33eac07b8d95c5f26d35`는 CI run
 [`30536256908`](https://github.com/jeong-sik/oas/actions/runs/30536256908)에서
-OCaml 5.4.1/5.5.0, Eio 1.3/1.4, Lint, Format을 모두 통과했다. OAS release는
-증명됐다. MASC
+OCaml 5.4.1/5.5.0 Build & Test, Eio 1.3/1.4, Lint, Format을 포함한 13개 job을
+모두 통과했다(2026-07-30 22:10 KST `gh run view`/`gh release list` 재확인,
+신뢰도 High). 이것이 최종 green release SHA다. MASC
 [#26489](https://github.com/jeong-sik/masc/pull/26489)는 exact pin을 main에
-반영했고, Draft [#26491](https://github.com/jeong-sik/masc/pull/26491)은 그 pin
-위에서 typed advance consumer와 serialized-request evidence를 구현했다. 다만
-#26489 exact-head Build/CI Gate는 merge 뒤 취소됐고 #26491 exact-head CI가 진행
-중이며 durable evidence production caller/runtime 증거는 여전히 별도 차단 상태다.
+반영했고(merge 시점 exact-head Build/CI Gate는 merge 뒤 취소),
+[#26491](https://github.com/jeong-sik/masc/pull/26491)은 그 pin 위에서 typed
+advance consumer와 serialized-request evidence를 구현해 2026-07-30 21:53 KST에
+merge됐다. #26491 exact-head
+`41561bd0220fc6afdd1a732ed217f9616ee61a26`의 CI(Build and Test/Dashboard/
+CI Gate 포함)는 전부 green이다. 또한
+[#26500](https://github.com/jeong-sik/masc/pull/26500)(`hard-cut minimal
+current contract`, merge commit
+`101d9efa1623e62b16b90f4011ff877e5eb49e65`)이 2026-07-30 22:01 KST에 merge돼
+main의 current Memory contract를 `*.memory-current.json`으로 hard cut했다.
+따라서 본 보고서의 잔여 heuristic/pin/caller 증거 목록은 #26500 이전 main
+기준이며, durable evidence production caller/runtime 증거는 여전히 별도 차단
+상태다(2026-07-30 22:10 KST `gh pr view` 확인, 신뢰도 High).
 
 가장 중요한 차단 사유는 다음과 같다.
 
@@ -157,7 +181,7 @@ binary SHA는 미증명으로 남긴다.
 
 ## 3. 현재 Open PR과의 관계
 
-확인 시각: 2026-07-30 20:11 KST
+확인 시각: 2026-07-30 22:10 KST(#26491/#26500 merge와 OAS CI chain을 `gh`로 재확인)
 
 | PR | 관련도 | 현재 상태 | 보고서 findings에 대한 효과 | 판정 |
 |---|---|---|---|---|
@@ -168,13 +192,14 @@ binary SHA는 미증명으로 남긴다.
 | [#26440](https://github.com/jeong-sik/masc/pull/26440) `hard-cut retired Memory OS authority` | 본 감사 후속 구현 | **Merged**, head `120dcc8fbc905aa3ea0c4651dc1f0a19fcfb7767`, squash merge `8701b4a9e4cec823c535912374ae11759125f596` | 1·2차 hard-cut과 본 보고서를 main에 반영했다. 그러나 merge 시점에 exact-head `Build and Test`, Dashboard, ocamlformat, CI Gate가 아직 실행 중이었고 merge 뒤 취소됐다. | **source hard cut은 병합됐으나 exact-head full CI green 증거 없음. cold cutover·runtime 증명 전 NO-GO** |
 | [#26450](https://github.com/jeong-sik/masc/pull/26450) `prepare current-only atomic publication` | 본 감사 후속 구현 | **Merged**, head `3cf500c78b16e80c17ee1867ac6c4eb3512d27ba`, merge commit `1910149d9e42c7e91b79915157506d695be72f18`; `Build and Test`/Dashboard 등 full CI skipped, 다수 check cancelled | `terminal_marker`/versioned dashboard schema를 숙청하고 Librarian input을 `TurnRef`로 key했다. atomic revision은 구현하지 않았다. | **사망 필드 제거는 유효. CI·atomic commit·production caller 증거 없음** |
 | [#26489](https://github.com/jeong-sik/masc/pull/26489) `pin agent sdk v0.231.10` | OAS release pin | **Merged**, head `c146ee46773f1813257dfad18060a679017bc31e`, merge commit `163f375010311b1798faeb42718439adfc1e4a41`; exact-head Build/CI Gate 취소 | OAS v0.231.10 SHA `1fa61251936758d37c3a33eac07b8d95c5f26d35`를 manifest/API-surface SSOT에 반영한다. | **source pin은 main 반영. exact-head MASC CI와 runtime proof 전 NO-GO** |
-| [#26491](https://github.com/jeong-sik/masc/pull/26491) `bind turn evidence to serialized requests` | typed consumer/observability 후속 | **Draft**, head `254b5ec30d81bfa9310f666f951d9a58e0c5d0bf`, `status:do-not-merge`; exact-head CI 진행 중 | #26489 pin 위에서 HITL summary가 typed advance를 직접 소비한다. request wire/prompt blocks/messages를 같은 serialized-request snapshot으로 묶고 unavailable composition을 `null`로 보존한다. | **source 후보 구현. exact-head CI와 durable evidence production caller/runtime proof 전 NO-GO** |
+| [#26491](https://github.com/jeong-sik/masc/pull/26491) `bind turn evidence to serialized requests` | typed consumer/observability 후속 | **Merged**, head `41561bd0220fc6afdd1a732ed217f9616ee61a26`, merge commit `8c84975577338aa2a78f21161c0c121b1038b531`, 2026-07-30 21:53 KST merge; exact-head Build and Test/Dashboard/CI Gate 등 전부 green(2026-07-30 22:10 KST 확인) | #26489 pin 위에서 HITL summary가 typed advance를 직접 소비한다. request wire/prompt blocks/messages를 같은 serialized-request snapshot으로 묶고 unavailable composition을 `null`로 보존한다. | **source 병합 + exact-head CI green. durable evidence production caller/runtime proof 전 NO-GO** |
+| [#26500](https://github.com/jeong-sik/masc/pull/26500) `hard-cut minimal current contract` | 본 감사 후속 구현 | **Merged**, head `ae2f017ed462024f8fe07928d33bbf07af5f6724`, merge commit `101d9efa1623e62b16b90f4011ff877e5eb49e65`, 2026-07-30 22:01 KST merge | current Memory contract를 exact `claim`/`category`/`first_seen`의 `*.memory-current.json`으로 hard cut하고 model-authored identity/TTL/recency ranking/`score`를 제거한다. migration/compat reader 없음 | **main 반영. 본 보고서의 잔여 증거 목록은 #26500 이전 main 기준이므로 post-merge 재감사 필요** |
 | [OAS #2892](https://github.com/jeong-sik/oas/pull/2892) `preserve typed advance evidence` | G5 선행 경계 | **Merged**, head `d2a56f315fc452d00a5ed55ea729746c800adfb2`, merge commit `7ce45ee3aa218b49dc13aaaebba1e2698aa22e2c`; exact-head CI 완료 전 merge | 성공한 `before_advance`를 동일 atomic flow progress에 기록하고 HTTP 400 오류 문구 기반 context-overflow 승격과 dead variant를 제거한다. | **source P0 없음. MASC/masc-mcp의 제거된 variant 소비자 hard cut 전 pin 금지** |
 | [OAS #2896](https://github.com/jeong-sik/oas/pull/2896) `persist validated flow evidence` | G5 durable evidence | **Merged**, head `e89c5d9e57b5e8cd2077468cc2e04fa21d0b09f6`, merge commit `f6cc38056`; 최초 CI는 `Yojson.Safe.t` 추론 오류와 godfile `+1`로 실패 | actual mixed flow의 admission rejection → invalid JSON advance → semantic rejection → acceptance를 current-only canonical snapshot으로 보존한다. projector exactly-once, strict decode, integrity 및 re-hashed structural tamper test를 추가한다. | **기능 경계 유효. 최초 head는 compile/ratchet 불합격; #2899/#2903 후속 필수** |
 | [OAS #2899](https://github.com/jeong-sik/oas/pull/2899) `constrain canonical JSON to Safe.t` | #2896 compile repair | **Merged**, merge commit `b1fe0ec06`; OAS main `0.231.8` release 전 포함 | canonicalizer 입력/출력을 명시적 `Yojson.Safe.t`로 닫아 `Floatlit`/`Tuple`/`Variant` polymorphic variant 추론 오류를 제거한다. | **정확한 compiler root fix. full downstream proof는 #2903 CI와 pin 이후** |
-| [OAS #2903](https://github.com/jeong-sik/oas/pull/2903) `split durable evidence codec leaves` | #2896 godfile root fix | **Merged**, head `22b9f0a07d5d28be81ad73d6899f225b0c9ee0c2`, merge commit `a923fc3889ba62a89cd42d91956d62dc0b674311`; ratchet PASS, CI run `30535040210` FAIL | root가 create/decode/integrity orchestration을 직접 소유하고 types → canonical → validation → codec private DAG로 분리한다. pure alias facade와 godfile `+1`을 제거했지만 shared record label 추론이 닫히지 않았다. | **구조 방향은 유효하나 exact head는 compile 불합격. 단독 pin 금지** |
-| [OAS #2904/#2906/#2907/#2908](https://github.com/jeong-sik/oas/pull/2908) `evidence type repairs` | #2903 compile repair chain | **Merged**, final merge `8d5d30b6a0f1a5175232533a7f5be5f18110ff44`; 중간 #2904/#2906 exact-head CI는 실패 | canonical/codec/validation/consumer의 실제 domain 타입을 명시하고 OCaml 5.4에 없는 `Option.exists`를 typed match로 교체한다. | **중간 merge는 불합격. 네 repair와 #2903을 포함한 v0.231.10 exact release CI만 green proof** |
-| [OAS v0.231.10](https://github.com/jeong-sik/oas/releases/tag/v0.231.10) | release/pin 후보 | SHA `1fa61251936758d37c3a33eac07b8d95c5f26d35`; CI run `30536256908` SUCCESS | #2903/#2904/#2906/#2907/#2908 전체를 포함하며 public `.mli` surface 변화 없이 codec leaf와 compile repair를 묶는다. | **OAS release PASS. MASC #26489/#26491 exact-head CI와 production caller/runtime proof 전 NO-GO 유지** |
+| [OAS #2903](https://github.com/jeong-sik/oas/pull/2903) `split durable evidence codec leaves` | #2896 godfile root fix | **Merged**, head `22b9f0a07d5d28be81ad73d6899f225b0c9ee0c2`, merge commit `a923fc3889ba62a89cd42d91956d62dc0b674311`; ratchet PASS, exact-main CI run [`30535040210`](https://github.com/jeong-sik/oas/actions/runs/30535040210) FAIL | root가 create/decode/integrity orchestration을 직접 소유하고 types → canonical → validation → codec private DAG로 분리한다. pure alias facade와 godfile `+1`을 제거했지만 shared record label 추론(`rejected.measurement`, `visit.ordinal`)이 닫히지 않았다. | **구조 방향은 유효하나 exact head는 compile 불합격. 단독 pin 금지** |
+| [OAS #2904/#2906/#2907/#2908](https://github.com/jeong-sik/oas/pull/2908) `evidence type repairs` | #2903 compile repair chain | **Merged**, final merge `8d5d30b6a0f1a5175232533a7f5be5f18110ff44`; 중간 #2904/#2906 exact-head PR CI(run [`30535494954`](https://github.com/jeong-sik/oas/actions/runs/30535494954)/[`30535658586`](https://github.com/jeong-sik/oas/actions/runs/30535658586))는 실패. 선행 #2901 head `5597da1b…`의 PR run [`30534846121`](https://github.com/jeong-sik/oas/actions/runs/30534846121)도 `Option.exists`(OCaml 5.4.1 unbound)·`flow_visit_ordinal` 오류로 실패한 채 merge됐고, `v0.231.9` 태그 `b70b35bb…`의 exact-main CI run [`30534931823`](https://github.com/jeong-sik/oas/actions/runs/30534931823)은 취소·ratchet run [`30534931829`](https://github.com/jeong-sik/oas/actions/runs/30534931829) 실패로 green 없음 | canonical/codec/validation/consumer의 실제 domain 타입을 명시하고 OCaml 5.4에 없는 `Option.exists`를 typed match로 교체한다. | **중간 merge는 불합격. 네 repair와 #2903을 포함한 v0.231.10 exact release CI만 green proof** |
+| [OAS v0.231.10](https://github.com/jeong-sik/oas/releases/tag/v0.231.10) | release/pin 후보 | SHA `1fa61251936758d37c3a33eac07b8d95c5f26d35`; CI run [`30536256908`](https://github.com/jeong-sik/oas/actions/runs/30536256908) SUCCESS(13/13 jobs, 2026-07-30 22:10 KST 재확인) | #2903/#2904/#2906/#2907/#2908 전체를 포함하며 public `.mli` surface 변화 없이 codec leaf와 compile repair를 묶는다. | **OAS release PASS — 최종 green release SHA. MASC #26489 pin과 #26491 exact-head CI는 green, production caller/runtime proof 전 NO-GO 유지** |
 | [#26436](https://github.com/jeong-sik/masc/pull/26436) `enforce current-only Memory OS contracts` | 본 감사 1차 구현 | **Closed**, head `1c4692b806dd34e948afa99ea34d627092e880cc`, `status:do-not-merge`, `reviewed:adversarial-non-pass` | 1차 hard-cut의 CI Meta Guard 문제는 local 2차 slice에서 수정됐고 TTL authority도 추가 삭제했다. | **reopen 금지. 새 exact-head Draft PR로 다시 증명** |
 | [#26389](https://github.com/jeong-sik/masc/pull/26389) `separate Keeper context from turn usage` | 원칙상 인접 | **Merged**, head `bc4ab6d0fde691a4c43e588d549b4a3389e5d31e`, merge commit `407ae5bb92509f06bfb6fc5614e8539e230b2902` | producer 없는 context 추정과 legacy metric surface를 제거한다. | Memory OS persistence/context flow의 직접 수정은 아님 |
 | [#26392](https://github.com/jeong-sik/masc/pull/26392) `cost ledger exact runtime identity` | 원칙상 인접 | **Merged**, head `a332706ec04f49d8ac03e5de684dcf0e11003e3d`, merge commit `e19a05f6ca926eed0de054bd1371ae6f34a075e2` | timestamp/token heuristic 대신 exact identity를 사용한다. | 좋은 선례지만 Memory Turn identity는 수정하지 않음 |
@@ -223,6 +248,12 @@ phase/version/visit-count처럼 valid successful transcript에서 항상 파생�
 따라서 본 보고서의 **P0-6 destructive consolidation**은 #26324 merge로 제거됐다.
 
 ### 3.2 PR #26324가 해결하지 않는 부분
+
+> 2026-07-30 22:10 KST 갱신: 아래 잔여 목록은 #26500 merge 이전 main 기준이다.
+> #26500(merge commit `101d9efa…`)이 current Memory contract를
+> `*.memory-current.json`으로 hard cut하고 model-authored identity/TTL/recency
+> ranking/`score`를 제거했으므로, main 기준 잔여 항목은 post-merge 재감사가
+> 필요하다(출처: `gh pr view 26500 -R jeong-sik/masc`, 신뢰도 High).
 
 merge된 main에 그대로 남는 항목:
 
@@ -996,8 +1027,8 @@ Acceptance:
 | G1 | duplicate/null TurnRef 원인과 admission-time durable binding 위치 추적 완료; dashboard TurnRecord는 canonical `${trace_id}#${absolute_turn}`을 강제 | **미완료** — Librarian source provenance는 prompt-local turn/current trace라 canonical TurnRef가 아님 |
 | G2 | 목표 수식과 N→N+3 acceptance 정의, 구현 없음 | **미완료** |
 | G3 | latest-wins와 park/lease/settlement를 서로 다른 SSOT로 분해; Librarian exact journal은 current-only closed state/trace/generation, trace-scoped restart fence, canonical path identity로 강화 | **부분 완료** — lossless per-Keeper FIFO/outbox 미구현 |
-| G4 | Memory `claim_kind`, `open_items`, episode `constraints`, `preserved_tool_refs`, `valid_for_days`/`valid_until`/`Ephemeral`와 expiry authority 제거 | **부분 완료** — echo window, recency/byte cap, substring score, first-100-byte dedupe 잔존 |
-| G5 | public fact/episode reader partial-drop 제거, recall unavailable/dashboard read error 노출, publication phase failure typed result 분류, OAS 성공 transport advance evidence/prose heuristic hard cut(#2892), current-only validated-flow snapshot/direct adapter(#2896), Safe.t compiler fix(#2899), private leaf split(#2903), typed compile repair(#2904/#2906/#2907/#2908) | **부분 완료** — OAS v0.231.10 exact release CI green; MASC #26489 exact pin은 main 반영, #26491 typed advance consumer는 CI 진행 중이며 atomic revision/CURRENT CAS/durable evidence production caller/runtime proof 미구현 |
+| G4 | Memory `claim_kind`, `open_items`, episode `constraints`, `preserved_tool_refs`, `valid_for_days`/`valid_until`/`Ephemeral`와 expiry authority 제거 | **부분 완료** — echo window, recency/byte cap, substring score, first-100-byte dedupe 잔존(단, 이 잔존 목록은 #26500 merge 이전 main 기준. #26500이 recency ranking/`score`를 제거했으므로 post-merge 재확인 필요, 2026-07-30 22:10 KST) |
+| G5 | public fact/episode reader partial-drop 제거, recall unavailable/dashboard read error 노출, publication phase failure typed result 분류, OAS 성공 transport advance evidence/prose heuristic hard cut(#2892), current-only validated-flow snapshot/direct adapter(#2896), Safe.t compiler fix(#2899), private leaf split(#2903), typed compile repair(#2904/#2906/#2907/#2908) | **부분 완료** — OAS v0.231.10 exact release CI green(최종 green SHA `1fa61251…`); MASC #26489 exact pin과 #26491 typed advance consumer는 각각 main 반영·exact-head CI green(2026-07-30 22:10 KST 확인). atomic revision/CURRENT CAS/durable evidence production caller/runtime proof 미구현 |
 | G6 | stale claim-kind projection 제거, versioned `schema`와 사망 `terminal_marker`/`terminal_markers`를 제거한 unversioned closed dashboard contract, per-Keeper read error 추가 | **부분 완료** — receipt/age/stale generation 미구현 |
 
 Focused verification:
@@ -1032,20 +1063,39 @@ Focused verification:
 - OAS #2899: canonical JSON을 명시적 `Yojson.Safe.t`로 닫는 compiler root fix
 - OAS #2903 local: root 125L, types 217L, canonical 243L, validation primitives
   284L, validation 192L, codec 403L; parser/format/diff/boundary gate와
-  code-smell ratchet `godfile 11 → 11` 통과. exact-head CI `30535040210`은
-  record-label 추론 오류로 실패
-- OAS #2904/#2906 중간 exact-head Build/Lint/Eio 실패를 확인한 뒤
-  #2907/#2908에서 consumer·codec·validation leaf의 typed boundary와 OCaml 5.4
-  option match를 닫음
+  code-smell ratchet `godfile 11 → 11` 통과. exact-main CI
+  [`30535040210`](https://github.com/jeong-sik/oas/actions/runs/30535040210)은
+  `rejected.measurement`/`visit.ordinal` record-label 추론 오류로
+  Build(5.4.1/5.5.0)·Lint·Eio 1.3/1.4 실패
+- OAS #2904/#2906 중간 exact-head Build/Lint/Eio 실패(PR run
+  [`30535494954`](https://github.com/jeong-sik/oas/actions/runs/30535494954),
+  [`30535658586`](https://github.com/jeong-sik/oas/actions/runs/30535658586))와
+  선행 #2901 head `5597da1b…`의 PR run
+  [`30534846121`](https://github.com/jeong-sik/oas/actions/runs/30534846121)
+  실패(`Option.exists` OCaml 5.4.1 unbound, `flow_visit_ordinal` 타입 오류)를
+  확인한 뒤 #2907/#2908에서 consumer·codec·validation leaf의 typed boundary와
+  OCaml 5.4 option match를 닫음. `v0.231.9` 태그 `b70b35bb…`의 exact-main CI
+  run [`30534931823`](https://github.com/jeong-sik/oas/actions/runs/30534931823)은
+  취소, Code Smell Ratchet run
+  [`30534931829`](https://github.com/jeong-sik/oas/actions/runs/30534931829)
+  실패로 green release 증거 없음
 - OAS v0.231.10 SHA `1fa61251936758d37c3a33eac07b8d95c5f26d35`:
-  CI `30536256908`에서 OCaml 5.4.1/5.5.0 Build & Test, Eio 1.3/1.4,
-  Lint, Format 전부 성공
-- MASC #26489가 OAS v0.231.10 exact pin을 main에 반영했으나 exact-head
-  Build/CI Gate는 merge 뒤 취소
-- MASC #26491 head `254b5ec30d81bfa9310f666f951d9a58e0c5d0bf`:
-  changed OCaml format/parser, dashboard typecheck와 focused 2 files/37 tests,
-  OAS pin manifest/API-surface drift check, shell/JSON/diff check 통과. 로컬 Dune
-  미실행; exact-head PR CI 진행 중
+  CI [`30536256908`](https://github.com/jeong-sik/oas/actions/runs/30536256908)에서
+  OCaml 5.4.1/5.5.0 Build & Test, Eio 1.3/1.4, Lint, Format 포함 13/13 jobs
+  성공 — 최종 green release SHA(2026-07-30 22:10 KST `gh run view`/
+  `gh release list` 재확인, 신뢰도 High)
+- MASC #26489가 OAS v0.231.10 exact pin을 main에 반영했으나 merge 시점
+  exact-head Build/CI Gate는 merge 뒤 취소. 이후 #26491 exact-head green CI가
+  동일 pin 포함 tree의 Build/Dashboard를 증명
+- MASC #26491은 2026-07-30 21:53 KST merge(head
+  `41561bd0220fc6afdd1a732ed217f9616ee61a26`, merge commit `8c849755…`).
+  exact-head CI(Build and Test/Dashboard/CI Gate 등) 전부 green(2026-07-30
+  22:10 KST `gh pr view 26491` 확인). 로컬 Dune 미실행
+- MASC #26500(`hard-cut minimal current contract`)은 2026-07-30 22:01 KST
+  merge(merge commit `101d9efa1623e62b16b90f4011ff877e5eb49e65`). current
+  Memory contract를 `*.memory-current.json`으로 hard cut. 본 보고서의 잔여
+  pin/caller/heuristic 증거 목록은 #26500 이전 main 기준(2026-07-30 22:10 KST
+  `gh pr view 26500` 확인, 신뢰도 High)
 
 Fresh-state cutover blocker:
 
@@ -1116,7 +1166,8 @@ fresh-state hard cut을 적용한 좁고 독립적인 PR들로 진행해야 한�
 
 ### 15.1 공통 헤더
 
-- `날짜(ISO8601)`: `2026-07-30T20:11:00+09:00`
+- `날짜(ISO8601)`: `2026-07-30T22:10:00+09:00`(OAS CI chain·#26491/#26500
+  merge 반영 갱신)
 - `작성자`: `Codex`
 - `결정 ID`: `masc-memory-os-adversarial-audit-20260730`
 - `적용 대상`: `/Users/dancer/me/workspace/yousleepwhen/masc`,
@@ -1146,10 +1197,11 @@ fresh-state hard cut을 적용한 좁고 독립적인 PR들로 진행해야 한�
 
 - `항목`: 현재 open PR의 finding coverage
 - `출처`: `gh pr list`, `gh pr view`, GitHub changed-file 및 exact file patch;
-  MASC #26428/#26440/#26450/#26489/#26491,
-  OAS #2892/#2896/#2899/#2903/#2904/#2906/#2907/#2908,
-  OAS CI `30536256908`
-- `확인일시`: `2026-07-30T20:11:00+09:00`
+  MASC #26428/#26440/#26450/#26489/#26491/#26500,
+  OAS #2892/#2896/#2899/#2901/#2903/#2904/#2906/#2907/#2908,
+  OAS CI `30535040210`/`30535494954`/`30535658586`/`30534846121`/
+  `30534931823`/`30534931829`/`30536256908`
+- `확인일시`: `2026-07-30T22:10:00+09:00`
 - `신뢰도`: `High`
 - `제한조건`: PR head/check 상태는 이후 push에 따라 변경 가능
 
@@ -1183,10 +1235,16 @@ fresh-state hard cut을 적용한 좁고 독립적인 PR들로 진행해야 한�
   24 tests와 static check를 통과했다. TTL/expiry authority production reference도
   제거됐다. OAS #2892/#2896/#2899/#2903과 #2904/#2906/#2907/#2908은 advance
   evidence, provider prose hard cut, validated-flow durable snapshot, Safe.t compiler
-  root fix, private leaf split, typed compile repair까지 진행했다. v0.231.10 exact
-  release CI는 전부 green이다. MASC #26489는 exact pin을 main에 반영했고
-  #26491은 typed advance consumer를 구현했지만, 두 MASC exact-head CI와 durable
-  evidence production caller/runtime cutover는 미검증이다.
+  root fix, private leaf split, typed compile repair까지 진행했다. 중간 exact CI
+  chain(#2903 main run `30535040210`, #2904/#2906 PR run `30535494954`/
+  `30535658586`, #2901 PR run `30534846121`, `v0.231.9` main run `30534931823`
+  취소 + ratchet `30534931829` 실패)은 모두 불합격이었고, v0.231.10 exact
+  release CI `30536256908`만 13/13 jobs green이다(2026-07-30 22:10 KST 재확인).
+  MASC #26489는 exact pin을 main에 반영했고 #26491은 typed advance consumer를
+  green exact-head CI로 merge했다(2026-07-30 21:53 KST). #26500 minimal
+  current contract도 merge됐다(2026-07-30 22:01 KST). 다만 durable evidence
+  production caller/runtime cutover와 #26500 post-merge 잔여 증거 재감사는
+  미검증이다.
 
 ### 15.4 불확실성 (Uncertainty)
 
@@ -1196,12 +1254,14 @@ fresh-state hard cut을 적용한 좁고 독립적인 PR들로 진행해야 한�
 - `추가 확인 필요`: build artifact에 commit SHA를 embed하고 health가 그 값을 직접 반환
 
 - `미확인 항목`: merge된 MASC #26440/#26450/#26489의 exact-head full CI,
-  MASC #26491 exact-head CI와 durable evidence production caller/runtime proof
-- `영향`: MASC source hard cut은 병합됐지만 Build/Dashboard가 취소 또는
-  skipped됐고, failover evidence와 exact pin은 source에 들어왔지만 MASC
-  runtime의 durable production caller로 연결됐다는 증거는 없음
-- `추가 확인 필요`: MASC #26489 포함 current-main 및 #26491 exact-head CI,
-  production caller/N→N+3 restart proof
+  durable evidence production caller/runtime proof, #26500 post-merge 잔여 증거
+- `영향`: MASC source hard cut은 병합됐지만 #26440/#26450/#26489의
+  Build/Dashboard가 취소 또는 skipped됐고(#26491 exact-head CI는 2026-07-30
+  22:10 KST 기준 green), failover evidence와 exact pin은 source에 들어왔지만
+  MASC runtime의 durable production caller로 연결됐다는 증거는 없음. #26500
+  merge로 본 보고서의 잔여 heuristic 목록도 pre-merge main 기준이 됨
+- `추가 확인 필요`: production caller/N→N+3 restart proof, #26500 이후 main의
+  잔여 pin/caller/heuristic 증거 재감사
 
 ### 15.5 적용범위 (Scope)
 

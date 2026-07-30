@@ -94,9 +94,9 @@ val prepare_lane
     whether an execution failure can advance and supplies the predetermined
     successor. MASC validates only the caller-owned source immediately before
     dispatch and never reconstructs execution state from a second durable
-    claim. Cancellation before authorization is re-raised; cancellation after
-    authorization is projected as a source-bound terminal for that exact
-    candidate.
+    claim. Cancellation is always re-raised rather than projected as a
+    compaction outcome; an authorized source observation is retained only for
+    the cancellation log.
     Domain-invalid output is rejected by the validator and OAS advances to the
     next caller-declared candidate. The same validator applies the proposed
     rolling summary, selects the next oldest raw source, and projects that next

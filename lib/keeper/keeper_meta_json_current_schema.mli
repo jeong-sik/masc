@@ -25,7 +25,6 @@ type field =
   | Last_input_tokens
   | Last_output_tokens
   | Last_total_tokens
-  | Last_usage_reported_at
   | Last_latency_ms
   | Compaction_count
   | Last_compaction_ts

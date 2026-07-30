@@ -160,9 +160,10 @@
 ### Removed
 - **Breaking (Keeper metrics/context wire)**: current turn and heartbeat rows
   now require `schema="keeper.metrics.v1"` plus typed `record_kind`; versionless
-  rows are not decoded and no migration path was added. Current Keeper meta also
-  requires nullable `last_usage_reported_at`, so provider usage presence and its
-  timestamp are typed independently from the latest turn attempt. Removed fabricated
+  rows are not decoded and no migration path was added. Provider usage presence
+  and its timestamp are tracked as one process-local typed observation,
+  independently from the latest turn attempt; restart returns it to unobserved
+  instead of inferring it from persisted token counters. Removed fabricated
   context occupancy, producer-less metrics fields/compaction history,
   tool-name aliases and decision-log guessing, duplicate handoff generation
   keys, the dormant context-bearing OAS keeper snapshot publisher/decoder, and

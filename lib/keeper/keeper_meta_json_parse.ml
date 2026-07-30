@@ -66,20 +66,6 @@ let nullable_string_field fields name =
     invalidf "field %s must be a string or null, got %s" name (Json_util.kind_name other)
 ;;
 
-let nullable_float_field fields name =
-  let* value = required_field fields name in
-  match value with
-  | `Null -> Ok None
-  | (`Float _ | `Int _) as value ->
-    let* value = float_field [ name, value ] name in
-    Ok (Some value)
-  | other ->
-    invalidf
-      "field %s must be a number or null, got %s"
-      name
-      (Json_util.kind_name other)
-;;
-
 let string_list_field fields name =
   let* value = required_field fields name in
   match value with
@@ -339,9 +325,6 @@ let decode_current_meta fields =
   let* last_input_tokens = int_field fields "last_input_tokens" in
   let* last_output_tokens = int_field fields "last_output_tokens" in
   let* last_total_tokens = int_field fields "last_total_tokens" in
-  let* last_usage_reported_at =
-    nullable_float_field fields "last_usage_reported_at"
-  in
   let* last_latency_ms = int_field fields "last_latency_ms" in
   let* compaction_count = int_field fields "compaction_count" in
   let* last_compaction_ts = float_field fields "last_compaction_ts" in
@@ -409,7 +392,7 @@ let decode_current_meta fields =
       ; last_input_tokens
       ; last_output_tokens
       ; last_total_tokens
-      ; last_usage_reported_at
+      ; last_usage_reported_at = None
       ; last_latency_ms
       }
     in

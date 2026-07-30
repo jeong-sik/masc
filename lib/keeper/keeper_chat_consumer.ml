@@ -59,14 +59,9 @@ type turn_outcome =
       }
   | Deferred of { rejection : Keeper_turn_admission.rejection }
 
-type lease_finalization =
-  | Finalize of Keeper_chat_queue.finalization
-  | Nack
-
 type persistence_blocked_operation =
   | Pending_claim_blocked
   | Finalize_blocked
-  | Nack_blocked
 
 type persistence_blocked_status =
   { operation : persistence_blocked_operation
@@ -78,7 +73,7 @@ type blocked_retry =
   | Retry_pending_claim
   | Retry_finalization of
       { lease_id : string
-      ; action : lease_finalization
+      ; outcome : Keeper_chat_queue.finalization
       }
 
 module Persistence_blocked = struct
@@ -186,8 +181,8 @@ let pending_finalization state keeper_name =
       ~base_path:state.base_path
       ~keeper_name
   with
-  | Some { retry = Retry_finalization { lease_id; action }; _ } ->
-    Some (lease_id, action)
+  | Some { retry = Retry_finalization { lease_id; outcome }; _ } ->
+    Some (lease_id, outcome)
   | Some { retry = Retry_pending_claim; _ } | None -> None
 
 let clear_pending_finalization state ~keeper_name ~lease_id =
@@ -196,20 +191,16 @@ let clear_pending_finalization state ~keeper_name ~lease_id =
     ~keeper_name
     ~lease_id
 
-let operation_of_finalization = function
-  | Finalize _ -> Finalize_blocked
-  | Nack -> Nack_blocked
-
-let remember_pending_finalization state ~keeper_name ~lease_id ~action ~error =
+let remember_pending_finalization state ~keeper_name ~lease_id ~outcome ~error =
   Persistence_blocked.remember
     ~base_path:state.base_path
     ~keeper_name
     { status =
-        { operation = operation_of_finalization action
+        { operation = Finalize_blocked
         ; lease_id = Some lease_id
         ; error
         }
-    ; retry = Retry_finalization { lease_id; action }
+    ; retry = Retry_finalization { lease_id; outcome }
     }
 
 let remember_blocked_pending_claim state ~keeper_name ~error =
@@ -291,122 +282,81 @@ let reconcile_published_transition ~keeper_name error =
       (Keeper_chat_queue.mutation_error_to_string error)
       (Keeper_chat_queue.mutation_error_to_string reconciliation_error)
 
-let settle_lease state ~keeper_name ~lease_id action =
-  let result =
-    match action with
-    | Finalize outcome ->
-      let rec finalize ~allow_invalid_fallback outcome =
-        match Keeper_chat_queue.finalize ~keeper_name ~lease_id ~outcome with
-        | `Finalized _ ->
-          clear_pending_finalization state ~keeper_name ~lease_id;
-          `Settled
-        | `Unknown_lease ->
-          clear_pending_finalization state ~keeper_name ~lease_id;
-          Log.Keeper.warn
-            "keeper_chat_consumer: finalize found no matching lease=%s for \
-             keeper=%s (already finalized/nacked?)"
-            lease_id
-            keeper_name;
-          `Settled
-        | `Error (Keeper_chat_queue.Invalid_input message)
-          when allow_invalid_fallback ->
-          (match invalid_finalization_fallback message with
-           | Ok fallback ->
-             Log.Keeper.error
-               "keeper_chat_consumer: rejected invalid terminal outcome for \
-                keeper=%s lease=%s: %s; replacing it with a typed internal_error"
-               keeper_name lease_id message;
-             finalize ~allow_invalid_fallback:false fallback
-           | Error error ->
-             let retry_action = Finalize outcome in
-             remember_pending_finalization state ~keeper_name ~lease_id
-               ~action:retry_action ~error;
-             Log.Keeper.error
-               "keeper_chat_consumer: rejected invalid terminal outcome for \
-                keeper=%s lease=%s: %s; typed replacement is unavailable: %s"
-               keeper_name lease_id message
-               (Keeper_chat_queue.mutation_error_to_string error);
-             `Pending)
-        | `Error
-            (Keeper_chat_queue.Persist_failed
-               { publication = Finalize_indeterminate _; _ } as error) ->
-          clear_pending_finalization state ~keeper_name ~lease_id;
-          reconcile_published_transition ~keeper_name error;
-          `Settled
-        | `Error error ->
-          let retry_action = Finalize outcome in
-          remember_pending_finalization state ~keeper_name ~lease_id
-            ~action:retry_action ~error;
-          Log.Keeper.error
-            "keeper_chat_consumer: finalize persist failed for keeper=%s \
-             lease=%s: %s; finalization will retry after the next durable \
-             transition or explicit operator reconciliation"
-            keeper_name
-            lease_id
-            (Keeper_chat_queue.mutation_error_to_string error);
-          `Pending
-      in
-      finalize ~allow_invalid_fallback:true outcome
-    | Nack ->
-      (match Keeper_chat_queue.nack ~keeper_name ~lease_id with
-       | `Requeued _ ->
-         clear_pending_finalization state ~keeper_name ~lease_id;
-         `Settled
-       | `Unknown_lease ->
-         clear_pending_finalization state ~keeper_name ~lease_id;
-         Log.Keeper.warn
-           "keeper_chat_consumer: nack found no matching lease=%s for keeper=%s \
-            (already acked/nacked?)"
-           lease_id
-           keeper_name;
-         `Settled
-       | `Error
-           (Keeper_chat_queue.Persist_failed
-              { publication = Nack_indeterminate _; _ } as error) ->
-         clear_pending_finalization state ~keeper_name ~lease_id;
-         reconcile_published_transition ~keeper_name error;
-         `Settled
-       | `Error error ->
-         remember_pending_finalization state ~keeper_name ~lease_id ~action
-           ~error;
+let settle_lease state ~keeper_name ~lease_id outcome =
+  let rec finalize ~allow_invalid_fallback outcome =
+    match Keeper_chat_queue.finalize ~keeper_name ~lease_id ~outcome with
+    | `Finalized _ ->
+      clear_pending_finalization state ~keeper_name ~lease_id;
+      `Settled
+    | `Unknown_lease ->
+      clear_pending_finalization state ~keeper_name ~lease_id;
+      Log.Keeper.warn
+        "keeper_chat_consumer: finalize found no matching lease=%s for \
+         keeper=%s (already finalized?)"
+        lease_id
+        keeper_name;
+      `Settled
+    | `Error (Keeper_chat_queue.Invalid_input message)
+      when allow_invalid_fallback ->
+      (match invalid_finalization_fallback message with
+       | Ok fallback ->
          Log.Keeper.error
-           "keeper_chat_consumer: nack persist failed for keeper=%s lease=%s: %s; \
-            finalization will retry after the next durable transition or \
-            explicit operator reconciliation"
-           keeper_name
-           lease_id
+           "keeper_chat_consumer: rejected invalid terminal outcome for \
+            keeper=%s lease=%s: %s; replacing it with a typed internal_error"
+           keeper_name lease_id message;
+         finalize ~allow_invalid_fallback:false fallback
+       | Error error ->
+         remember_pending_finalization state ~keeper_name ~lease_id
+           ~outcome ~error;
+         Log.Keeper.error
+           "keeper_chat_consumer: rejected invalid terminal outcome for \
+            keeper=%s lease=%s: %s; typed replacement is unavailable: %s"
+           keeper_name lease_id message
            (Keeper_chat_queue.mutation_error_to_string error);
          `Pending)
+    | `Error
+        (Keeper_chat_queue.Persist_failed
+           { publication = Finalize_indeterminate _; _ } as error) ->
+      clear_pending_finalization state ~keeper_name ~lease_id;
+      reconcile_published_transition ~keeper_name error;
+      `Settled
+    | `Error error ->
+      remember_pending_finalization state ~keeper_name ~lease_id
+        ~outcome ~error;
+      Log.Keeper.error
+        "keeper_chat_consumer: finalize persist failed for keeper=%s \
+         lease=%s: %s; finalization will retry after the next durable \
+         transition or explicit operator reconciliation"
+        keeper_name
+        lease_id
+        (Keeper_chat_queue.mutation_error_to_string error);
+      `Pending
   in
-  result
+  finalize ~allow_invalid_fallback:true outcome
 
 (* Keep these names at the call sites readable: they now retain the decision
    when persistence is temporarily unavailable instead of silently giving up. *)
 let finalize_or_warn state ~keeper_name ~lease_id outcome =
-  match settle_lease state ~keeper_name ~lease_id (Finalize outcome) with
+  match settle_lease state ~keeper_name ~lease_id outcome with
   | `Settled | `Pending -> ()
 
-let nack_or_warn state ~keeper_name ~lease_id =
-  match settle_lease state ~keeper_name ~lease_id Nack with
-  | `Settled | `Pending -> ()
-
-let interrupt_or_warn state ~clock ~keeper_name ~lease_id =
+let cancel_claimed_or_warn state ~clock ~keeper_name ~lease_id =
   finalize_or_warn state ~keeper_name ~lease_id
     (Keeper_chat_queue.Mark_failed
        { completed_at = Eio.Time.now clock
-       ; kind = Keeper_chat_queue.Interrupted
+       ; kind = Keeper_chat_queue.Cancelled
        ; detail =
            "Keeper stopped before this claimed turn completed; its external effect is unknown."
        ; outcome_ref = None
        })
 
 (* Kept as a separate helper so a later wake cannot start a new turn while an
-   earlier turn's durable ack/nack is still unresolved. *)
+   earlier turn's durable finalization is still unresolved. *)
 let retry_pending_finalization state ~keeper_name =
   match pending_finalization state keeper_name with
   | None -> false
-  | Some (lease_id, action) ->
-    (match settle_lease state ~keeper_name ~lease_id action with
+  | Some (lease_id, outcome) ->
+    (match settle_lease state ~keeper_name ~lease_id outcome with
     | `Settled | `Pending -> ());
     true
 
@@ -559,7 +509,7 @@ let run_observed_turn state ~sw ~clock ~handle_turn ~keeper_name observation =
       (match !claim with
        | Claim_leased { lease_id; _ } ->
          Eio.Cancel.protect (fun () ->
-             interrupt_or_warn state ~clock ~keeper_name ~lease_id)
+             cancel_claimed_or_warn state ~clock ~keeper_name ~lease_id)
        | Claim_not_attempted | Claim_stale _ | Claim_failed _ -> ());
       raise exn
     | exception exn -> `Raised exn

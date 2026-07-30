@@ -353,7 +353,7 @@ let test_structured_cancellation_terminalizes_claimed_receipt () =
                Some
                  { state =
                      Keeper_chat_queue.Failed
-                       { kind = Keeper_chat_queue.Interrupted; detail; _ }
+                       { kind = Keeper_chat_queue.Cancelled; detail; _ }
                  ; receipt_id
                  }
            ; _

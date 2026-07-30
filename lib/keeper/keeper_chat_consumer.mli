@@ -18,7 +18,6 @@ val notify_transition : keeper_name:string -> unit
 type persistence_blocked_operation =
   | Pending_claim_blocked
   | Finalize_blocked
-  | Nack_blocked
 
 type persistence_blocked_status =
   { operation : persistence_blocked_operation
@@ -75,16 +74,18 @@ type turn_outcome =
 
     [handle_turn]'s typed terminal outcome is durably finalized as [Delivered]
     or [Failed]. [Deferred] before the exact claim leaves the receipt unchanged
-    [Pending]; cancellation before the claim does the same, while cancellation
-    after a committed claim nacks that lease back to [Pending]. [Deferred] is
-    reserved for a typed admission rejection such as an active shutdown fence,
-    so the same accepted receipt is retried after the lane reopens. A lease
-    found after process restart is [Recovery_required] and is never
-    automatically dispatched: an operator must explicitly requeue or cancel
-    its exact receipt/revision/lease evidence. An unexpected handler exception
-    becomes a durable [Internal_error] failure instead of a poison-message
-    retry loop. There is deliberately no second wall-clock watchdog: the turn
-    runtime owns timeout/cancellation and must return the typed outcome.
+    [Pending]; cancellation before the claim does the same. Cancellation after
+    a committed claim terminalizes the receipt as [Cancelled], because a
+    provider or tool effect may already have occurred and automatic redelivery
+    could duplicate it. [Deferred] is reserved for a typed admission rejection
+    such as an active shutdown fence, so the same accepted receipt is retried
+    after the lane reopens. A lease found after process restart is
+    [Recovery_required] and is never automatically dispatched: an operator
+    must explicitly requeue or cancel its exact receipt/revision/lease
+    evidence. An unexpected handler exception becomes a durable
+    [Internal_error] failure instead of a poison-message retry loop. There is
+    deliberately no second wall-clock watchdog: the turn runtime owns
+    timeout/cancellation and must return the typed outcome.
 
     If finalization persistence fails before publication, the exact decision is
     retained and retried before another turn starts after the next durable

@@ -38,27 +38,22 @@ let with_workspace ?(agent_name = "keeper-repkeeper-agent") f =
       ignore (Workspace.init config ~agent_name:(Some agent_name));
       f config)
 
+(* Completion runs through the producer's own [Done_action]. The previous
+   submit-then-peer-approve route no longer exists: a peer keeper cannot claim an
+   obligation, and a verdict is issued by a completion authority rather than by an
+   agent transition. What this test asserts — reputation resolves a short handle
+   to work completed under a full actor id — is unchanged by that. *)
 let claim_and_complete config ~agent_name ~task_id =
   ignore (Workspace.claim_task config ~agent_name ~task_id);
   match
     Workspace.transition_task_r config ~agent_name ~task_id
-      ~action:Masc_domain.Submit_for_verification
+      ~action:Masc_domain.Done_action
       ~notes:"reputation task completion evidence"
       ()
   with
-  | Ok _ ->
-      let verifier = "admin-board-keeper" in
-      ignore (Workspace.claim_task_r config ~agent_name:verifier ~task_id ());
-      (match
-         Workspace.transition_task_r config ~agent_name:verifier ~task_id
-           ~action:Masc_domain.Approve_verification ()
-       with
-       | Ok _ -> ()
-       | Error err ->
-           Alcotest.failf "approve transition failed: %s"
-             (Masc_domain.masc_error_to_string err))
+  | Ok _ -> ()
   | Error err ->
-      Alcotest.failf "verification submission failed: %s"
+      Alcotest.failf "producer completion failed: %s"
         (Masc_domain.masc_error_to_string err)
 
 (* The keeper claims under the full actor id; reputation queried by the short

@@ -212,14 +212,15 @@ let transition_done_r config ~agent_name ~task_id ~notes =
      with
      | Error _ as error -> error
      | Ok _ ->
-       let verifier = "admin-board-keeper" in
-       (match Workspace.claim_task_r config ~agent_name:verifier ~task_id () with
-        | Error _ as error -> error
-        | Ok _ ->
-          Workspace.transition_task_r config ~agent_name:verifier ~task_id
-            ~action:Masc_domain.Approve_verification
-            ~notes:("verified: " ^ evidence_notes)
-            ()))
+       (* No peer-keeper claim: the verdict comes from a completion authority. *)
+       Workspace.commit_verdict_r
+         config
+         ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+         ~verdict:Masc_domain.Verdict_approved
+         ~task_id
+         ~notes:("verified: " ^ evidence_notes)
+         ()
+       |> Result.map (fun (o : Workspace.transition_outcome) -> o.Workspace.message))
 ;;
 
 let transition_done config ~agent_name ~task_id ~notes =
@@ -2282,7 +2283,6 @@ let test_gc_preserves_awaiting_verification () =
              { assignee = "claude"
              ; submitted_at = gc_ancient_ts
              ; verification_id = "verif-900"
-             ; phase = Masc_domain.Awaiting_verifier
              })
     in
     write_tasks config [ task ];
@@ -2310,7 +2310,6 @@ let test_gc_restores_orphaned_nonterminal_from_archive () =
              { assignee = "claude"
              ; submitted_at = gc_ancient_ts
              ; verification_id = "verif-901"
-             ; phase = Masc_domain.Awaiting_verifier
              })
     in
     (* Simulate the orphaning a buggy GC pass produced: obligation lives in the
@@ -2345,7 +2344,6 @@ let test_gc_restored_task_preserves_old_messages_same_pass () =
              { assignee = "claude"
              ; submitted_at = gc_ancient_ts
              ; verification_id = "verif-904"
-             ; phase = Masc_domain.Awaiting_verifier
              })
     in
     Workspace.append_archive_tasks config [ orphan ];

@@ -51,16 +51,18 @@ let complete_task config ~agent_name ~task_id ~notes =
   with
   | Error error -> failwith (Masc_domain.masc_error_to_string error)
   | Ok _ ->
-    let verifier = "admin-board-keeper" in
-    (match Workspace.claim_task_r config ~agent_name:verifier ~task_id () with
-     | Error error -> failwith (Masc_domain.masc_error_to_string error)
-     | Ok _ ->
-       match
-         Workspace.transition_task_r config ~agent_name:verifier ~task_id
-           ~action:Masc_domain.Approve_verification ~notes:("verified: " ^ notes) ()
-       with
-       | Ok _ -> ()
-       | Error error -> failwith (Masc_domain.masc_error_to_string error))
+    (* No peer-keeper claim: the verdict comes from a completion authority. *)
+    (match
+       Workspace.commit_verdict_r
+         config
+         ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+         ~verdict:Masc_domain.Verdict_approved
+         ~task_id
+         ~notes:("verified: " ^ notes)
+         ()
+     with
+     | Ok _ -> ()
+     | Error error -> failwith (Masc_domain.masc_error_to_string error))
 ;;
 
 let with_env name value_opt f =
@@ -939,14 +941,13 @@ let () =
 ;;
 
 let () =
-  test "next_hint_awaiting_verification lists approve and reject" (fun () ->
+  test "next_hint_awaiting_verification has no agent action" (fun () ->
     let h =
       next_hint
         (Masc_domain.AwaitingVerification
-           { assignee = "a"; submitted_at = "t"; verification_id = "v"; phase = Masc_domain.Awaiting_verifier })
+           { assignee = "a"; submitted_at = "t"; verification_id = "v" })
     in
-    assert (str_contains h "approve");
-    assert (str_contains h "reject"))
+    assert (String.equal h ""))
 ;;
 
 let () =

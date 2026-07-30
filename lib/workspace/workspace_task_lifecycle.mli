@@ -1,13 +1,14 @@
 (** Pure Task lifecycle transition helper. Producers submit completion evidence
-    for verification; the phase-assigned verifier owns the terminal verdict. *)
+    for verification; the terminal verdict is issued by a
+    [Masc_domain.completion_authority] through {!decide_verdict}, never by an
+    agent action. *)
 
 type invalid =
   | Verification_submission_required
-  | Verification_claim_required
-  | Verification_assigned_to of string
-  | Verification_self_claim
-  | Verification_approval_notes_required
-  | Verification_rejection_reason_required
+  | Verification_pending_verdict
+      (** An [AwaitingVerification] obligation is not claimable by any agent. *)
+  | Verdict_authority_identity_required
+  | Verdict_rejection_reason_required
   | Invalid_transition
 
 type decision =
@@ -17,11 +18,13 @@ type decision =
 
 type claim_resolution =
   | Worker_claim of Masc_domain.task_status
-  | Verifier_claim of Masc_domain.task_status
   | Self_owned
-  | Self_verification
   | Held_by_other of string
   | Held_terminal of Masc_domain.task_status
+  | Held_pending_verdict of { verification_id : string }
+      (** Awaiting a completion authority's verdict. No agent may claim it: the
+          removed [Verifier_claim] made claiming the authority-granting
+          operation, so a keeper became the approver by winning a race. *)
 
 val resolve_claim
   :  same_actor:(string -> bool)
@@ -42,6 +45,29 @@ val decide
   -> notes:string
   -> reason:string
   -> (decision, invalid) result
+
+(** A verdict decision plus the authority provenance the caller records. The
+    provenance is returned rather than embedded in [Done.notes], which is a
+    human-readable field no code parses. *)
+type verdict_decision =
+  { decision : decision
+  ; authority_kind : string
+  ; authority_actor : string
+  }
+
+(** Terminal verdict on an [AwaitingVerification] obligation.
+
+    [authority] carries provenance from a caller that authenticated an operator
+    or accepted a typed judge result. The type separates verdicts from agent
+    actions; it does not perform authentication itself. *)
+val decide_verdict
+  :  authority:Masc_domain.completion_authority
+  -> verdict:Masc_domain.completion_verdict
+  -> task_id:string
+  -> task_status:Masc_domain.task_status
+  -> now:string
+  -> notes:string
+  -> (verdict_decision, invalid) result
 
 val valid_next_actions
   :  same_agent:bool

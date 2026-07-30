@@ -1468,7 +1468,7 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
     assert (str_contains (Tool_result.message result) "pending verification workflow");
     assert (str_contains (Tool_result.message result) "resolve it")))
 
-let () = test "handle_transition_verifier_noops_terminal_verdicts" (fun () ->
+let () = test "agent verdict verbs remain refused after terminal completion" (fun () ->
   let ctx = make_test_ctx_with_agent "worker" in
   let verifier_ctx = { ctx with Task.Tool.agent_name = "verifier" } in
   let _ = Workspace.add_task ctx.config ~title:"Already done" ~priority:1 ~description:"" in
@@ -1488,12 +1488,13 @@ let () = test "handle_transition_verifier_noops_terminal_verdicts" (fun () ->
   (match submitted with
    | Ok _ -> ()
    | Error err -> failwith (Masc_domain.masc_error_to_string err));
-  (match Workspace.claim_task_r ctx.config ~agent_name:"verifier" ~task_id:"task-001" () with
-   | Ok _ -> ()
-   | Error err -> failwith (Masc_domain.masc_error_to_string err));
   let done_result =
-    Workspace.transition_task_r ctx.config ~agent_name:"verifier"
-      ~task_id:"task-001" ~action:Masc_domain.Approve_verification ~notes:"complete" ()
+    Workspace.commit_verdict_r ctx.config
+      ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+      ~verdict:Masc_domain.Verdict_approved
+      ~task_id:"task-001"
+      ~notes:"complete"
+      ()
   in
   (match done_result with
    | Ok _ -> ()
@@ -1510,15 +1511,14 @@ let () = test "handle_transition_verifier_noops_terminal_verdicts" (fun () ->
               ("notes", `String "stale verifier verdict");
             ])
       in
-      if not (Tool_result.is_success result) then failwith (Tool_result.message result);
-      assert (str_contains (Tool_result.message result) "Stale verification verdict ignored");
-      assert (str_contains (Tool_result.message result) "no-op"))
+      assert (not (Tool_result.is_success result));
+      assert (str_contains (Tool_result.message result) "completion authority"))
     [ "approve"; "reject" ];
   match (only_task ctx).Masc_domain.task_status with
   | Masc_domain.Done _ -> ()
   | _ -> failwith "expected terminal task to stay done")
 
-let () = test "handle_transition_verifier_allows_verdict_actions" (fun () ->
+let () = test "operator verdict path replaces verifier agent actions" (fun () ->
   (
     let worker_ctx = make_test_ctx_with_agent "worker" in
     let verifier_ctx = { worker_ctx with Task.Tool.agent_name = "verifier" } in
@@ -1548,8 +1548,7 @@ let () = test "handle_transition_verifier_allows_verdict_actions" (fun () ->
         verifier_ctx
         (`Assoc [ "task_id", `String "task-001" ])
     in
-    if not (Tool_result.is_success claim_result) then
-      failwith (Tool_result.message claim_result);
+    assert (not (Tool_result.is_success claim_result));
     let result =
       Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0
         verifier_ctx
@@ -1560,18 +1559,28 @@ let () = test "handle_transition_verifier_allows_verdict_actions" (fun () ->
             ("notes", `String "evidence verified");
           ])
     in
-    if not (Tool_result.is_success result) then failwith (Tool_result.message result);
+    assert (not (Tool_result.is_success result));
+    assert (str_contains (Tool_result.message result) "completion authority");
+    let approved =
+      Workspace.commit_verdict_r
+        worker_ctx.config
+        ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+        ~verdict:Masc_domain.Verdict_approved
+        ~task_id:"task-001"
+        ~notes:"evidence verified"
+        ()
+    in
+    (match approved with
+     | Ok _ -> ()
+     | Error error -> failwith (Masc_domain.masc_error_to_string error));
     match (only_task worker_ctx).Masc_domain.task_status with
     | Masc_domain.Done _ -> ()
     | _ -> failwith "expected verifier approval to complete task"))
 
 let () =
-  test "keeper approved verification leaves Goal action to durable reconciler"
+  test "operator-approved verification leaves Goal action to durable reconciler"
     (fun () ->
        let worker_ctx = make_test_ctx_with_agent "worker" in
-       let verifier_ctx =
-         { worker_ctx with Task.Tool.agent_name = "verifier" }
-       in
        let goal_id = "goal-approved-verification" in
        ignore (create_executing_goal worker_ctx ~goal_id);
        add_goal_linked_task
@@ -1600,31 +1609,19 @@ let () =
        in
        if not (Tool_result.is_success submit_result) then
          failwith (Tool_result.message submit_result);
-       let claim_result =
-         Task.Tool.handle_claim
-           ~tool_name:"keeper_task_claim"
-           ~start_time:0.0
-           verifier_ctx
-           (`Assoc [ "task_id", `String "task-001" ])
-       in
-       if not (Tool_result.is_success claim_result) then
-         failwith (Tool_result.message claim_result);
        let result =
-         keeper_transition
-           verifier_ctx
-           (`Assoc
-              [ "task_id", `String "task-001"
-              ; "action", `String "approve"
-              ; "notes", `String "evidence verified"
-              ])
+         Workspace.commit_verdict_r
+           worker_ctx.config
+           ~authority:
+             (Masc_domain.Human_operator { operator_id = "operator-test" })
+           ~verdict:Masc_domain.Verdict_approved
+           ~task_id:"task-001"
+           ~notes:"evidence verified"
+           ()
        in
-       if not (Tool_result.is_success result) then
-         failwith (Tool_result.message result);
-       assert (
-         match Tool_result.data result with
-         | `Assoc fields -> not (List.mem_assoc "next_action" fields)
-         | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
-         | `List _ -> true);
+       (match result with
+        | Ok _ -> ()
+        | Error error -> failwith (Masc_domain.masc_error_to_string error));
        assert_goal_still_executing worker_ctx ~goal_id)
 
 let () = test "handle_claim_sets_planning_current_task" (fun () ->
@@ -2398,12 +2395,12 @@ let () = test "handle_done_already_done_guidance" (fun () ->
       ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification ~notes:"done" ()
   in
   let _ =
-    Workspace.claim_task_r ctx.config ~agent_name:"admin-board-keeper"
-      ~task_id:"task-001" ()
-  in
-  let _ =
-    Workspace.transition_task_r ctx.config ~agent_name:"admin-board-keeper"
-      ~task_id:"task-001" ~action:Masc_domain.Approve_verification ~notes:"done" ()
+    Workspace.commit_verdict_r ctx.config
+      ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+      ~verdict:Masc_domain.Verdict_approved
+      ~task_id:"task-001"
+      ~notes:"done"
+      ()
   in
   let result =
     Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
@@ -2609,50 +2606,28 @@ let () =
     in
     if not (Tool_result.is_success submitted)
     then failwith (Tool_result.message submitted);
-    (match
-       Workspace.claim_task_r
-         ctx.config
-         ~agent_name:"verifier"
-         ~task_id:"task-001"
-         ()
-     with
-     | Ok _ -> ()
-     | Error error -> failwith (Masc_domain.masc_error_to_string error));
-    let expect_assigned () =
+    let expect_still_awaiting () =
       match (only_task ctx).Masc_domain.task_status with
-      | Masc_domain.AwaitingVerification
-          { phase = Masc_domain.Verifier_assigned { verifier }; _ }
-        when String.equal verifier "verifier" -> ()
-      | _ -> failwith "failed verdict must not mutate the assigned verification"
+      | Masc_domain.AwaitingVerification _ -> ()
+      | _ -> failwith "a refused verdict request must not mutate the obligation"
     in
-    let blank_approve =
-      Task.Tool.handle_transition
-        ~tool_name:"test_tool"
-        ~start_time:0.0
-        verifier_ctx
-        (`Assoc
-          [ "task_id", `String "task-001"
-          ; "action", `String "approve"
-          ; "notes", `String " "
-          ])
-    in
-    assert (not (Tool_result.is_success blank_approve));
-    assert (str_contains (Tool_result.message blank_approve) "non-empty notes");
-    expect_assigned ();
-    let blank_reject =
-      Task.Tool.handle_transition
-        ~tool_name:"test_tool"
-        ~start_time:0.0
-        verifier_ctx
-        (`Assoc
-          [ "task_id", `String "task-001"
-          ; "action", `String "reject"
-          ; "reason", `String " "
-          ])
-    in
-    assert (not (Tool_result.is_success blank_reject));
-    assert (str_contains (Tool_result.message blank_reject) "non-empty reason");
-    expect_assigned ();
+    (* No peer-keeper claim step: an obligation is not claimable. And the agent
+       tool surface refuses the verdict verbs outright — the message must name the
+       completion authority rather than report an unknown action, so an agent that
+       asks learns why it cannot. *)
+    List.iter
+      (fun verb ->
+         let refused =
+           Task.Tool.handle_transition
+             ~tool_name:"test_tool"
+             ~start_time:0.0
+             verifier_ctx
+             (`Assoc [ "task_id", `String "task-001"; "action", `String verb ])
+         in
+         assert (not (Tool_result.is_success refused));
+         assert (str_contains (Tool_result.message refused) "completion authority");
+         expect_still_awaiting ())
+      [ "approve"; "reject" ];
     let previous_metric = Atomic.get Workspace_hooks.record_task_metric_fn in
     let previous_thompson = Atomic.get Workspace_hooks.record_thompson_result_fn in
     let metric_events = ref [] in
@@ -2678,20 +2653,20 @@ let () =
           (fun ~agent_name ~success ~reason:_ ->
              thompson_events := (agent_name, success) :: !thompson_events);
         let approved =
-          Task.Tool.handle_transition
-            ~tool_name:"test_tool"
-            ~start_time:0.0
-            verifier_ctx
-            (`Assoc
-              [ "task_id", `String "task-001"
-              ; "action", `String "approve"
-              ; "notes", `String "tests and evidence verified"
-              ])
+          Workspace.commit_verdict_r
+            ctx.config
+            ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+            ~verdict:Masc_domain.Verdict_approved
+            ~task_id:"task-001"
+            ~notes:"tests and evidence verified"
+            ()
         in
-        if not (Tool_result.is_success approved)
-        then failwith (Tool_result.message approved));
-    assert
-      (List.mem ("producer", true, [ "verifier" ]) !metric_events);
+        match approved with
+        | Ok _ -> ()
+        | Error error -> failwith (Masc_domain.masc_error_to_string error));
+    (* Credited to the producer with no collaborators: the authority is not an
+       agent, so it never enters the collaborator set. *)
+    assert (List.mem ("producer", true, []) !metric_events);
     assert (List.mem ("producer", true) !thompson_events))
 ;;
 

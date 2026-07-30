@@ -1,7 +1,7 @@
-(** Verification_protocol -- Cross-agent verification workflow orchestration.
+(** Verification_protocol -- out-of-band completion verification orchestration.
 
     Bridges task FSM transitions (AwaitingVerification state) with:
-    - Board system (Direct visibility posts to verifiers)
+    - Board system (visibility posts for completion authorities)
     - SSE events (masc:verification:requested, :verdict, :rejected)
     - Verification storage (.masc/verifications/)
 
@@ -15,7 +15,7 @@
    types_core.ml):
    - [criteria]: the operator-facing "must be true" statements →
      [task.contract.completion_contract] wrapped in [Verification.Custom].
-   - [evidence_refs]: the artefact list the verifier expects to see →
+   - [evidence_refs]: the artefact list the completion authority expects to see →
      [task.contract.verify_gate_evidence] plus required evidence refs,
      passed in by the caller at task-state lifecycle so this function does
      not reach into task.contract twice for different fields. *)
@@ -316,10 +316,11 @@ let awaiting_verification_deadline
 
 (* RFC-0220 §5: the destructive 24h verification deadline rescue is removed.
    With the verification sub-state folded into [task_status] (RFC-0220 §3.1),
-   the illegal Todo+Pending drift is unrepresentable, an AwaitingVerification
-   obligation stays claimable by a verifier, and a keeper never idles on an
-   empty pool. Long-waiting obligations are surfaced from the activity-event
-   stream, not a poll-timer. PR-1 neutered [check_timeouts] to a no-op;
+   the illegal Todo+Pending drift is unrepresentable. An
+   AwaitingVerification obligation remains in the live backlog until an
+   authenticated operator or typed judge commits a verdict. Long-waiting
+   obligations are surfaced from the activity-event stream, not a poll-timer.
+   PR-1 neutered [check_timeouts] to a no-op;
    RFC-0220 §11 PR-3 (this change) deleted the no-op, the
    [verification_timeout] server fork that spun on it, its interval knob,
    and the caller-less [Workspace.force_cancel_task_r]. *)

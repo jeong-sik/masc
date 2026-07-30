@@ -8,22 +8,6 @@
 
     @since God file decomposition — extracted from tool_task.ml *)
 
-let is_verdict_transition_action = function
-  | Masc_domain.Approve_verification
-  | Masc_domain.Reject_verification ->
-    true
-  | Masc_domain.Claim
-  | Masc_domain.Start
-  | Masc_domain.Done_action
-  | Masc_domain.Cancel
-  | Masc_domain.Release
-  | Masc_domain.Submit_for_verification ->
-    false
-
-let terminal_verdict_noop_message ~task_id ~action ~status =
-  Printf.sprintf
-    "Stale verification verdict ignored: task %s is already %s, so masc_transition(action=%s) was treated as a no-op."
-    task_id status action
 
 let build_claim_observation_payload ~(now : float) ~(agent_name : string)
     ~(task_id : string) ~(scope_widened : bool) : Yojson.Safe.t =

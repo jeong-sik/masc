@@ -45,6 +45,21 @@ val transition_task_outcome_r :
   ?handoff_context:Masc_domain.task_handoff_context ->
   unit -> transition_outcome Masc_domain.masc_result
 
+(** Commit a completion verdict issued by a [Masc_domain.completion_authority].
+
+    Separate from {!transition_task_outcome_r} because a verdict is not an agent
+    action. The caller must authenticate or otherwise validate the authority
+    before constructing its provenance value. This is the only path that
+    resolves an [AwaitingVerification] obligation. *)
+val commit_verdict_r :
+  config ->
+  authority:Masc_domain.completion_authority ->
+  verdict:Masc_domain.completion_verdict ->
+  task_id:string ->
+  ?notes:string ->
+  unit ->
+  transition_outcome Masc_domain.masc_result
+
 val transition_task_r :
   config -> agent_name:string -> task_id:string -> action:Masc_domain.task_action ->
   ?prepare_verification_request:

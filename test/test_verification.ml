@@ -303,16 +303,15 @@ let create_protocol_evidence_request ~base_path ~request_id ~evidence_refs =
 
 let inspect_evidence ?(task_id = "task-001")
     ?(task_worker = "keeper-executor-agent") ~base_path ~request_id
-    ~task_verifier ~viewer () =
-  VS.inspect_submitted_evidence
+    () =
+  VS.inspect_submitted_evidence_for_authority
     ~base_path
     ~request_id
     ~task_id
     ~task_worker
-    ~task_verifier
-    ~viewer
+    ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
 
-let test_submitted_evidence_inspection_is_assigned_and_contained () =
+let test_submitted_evidence_inspection_is_authority_scoped_and_contained () =
   with_eio_temp_dir (fun base_path ->
     let artifact_dir =
       Filename.concat
@@ -328,8 +327,6 @@ let test_submitted_evidence_inspection_is_assigned_and_contained () =
        inspect_evidence
          ~base_path
          ~request_id
-         ~task_verifier:(Some "keeper-verifier-agent")
-         ~viewer:"keeper-verifier-agent"
          ()
      with
      | VS.Evidence_available
@@ -340,20 +337,20 @@ let test_submitted_evidence_inspection_is_assigned_and_contained () =
          ; _
          } ->
        Alcotest.(check string)
-         "assigned verifier reads producer artifact"
+         "completion authority reads producer artifact"
          "verified artifact\nsecond line"
          content
-     | _ -> Alcotest.fail "expected assigned verifier evidence projection");
+     | _ -> Alcotest.fail "expected completion-authority evidence projection");
     match
-      inspect_evidence
+      VS.inspect_submitted_evidence_for_authority
         ~base_path
         ~request_id
-        ~task_verifier:(Some "keeper-verifier-agent")
-        ~viewer:"keeper-sangsu-agent"
-        ()
+        ~task_id:"task-001"
+        ~task_worker:"keeper-executor-agent"
+        ~authority:(Masc_domain.Human_operator { operator_id = "" })
     with
-    | VS.Evidence_metadata_only _ -> ()
-    | _ -> Alcotest.fail "non-assigned keeper must receive metadata only")
+    | VS.Evidence_unavailable _ -> ()
+    | _ -> Alcotest.fail "empty completion-authority identity must expose no evidence")
 
 let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () =
   with_eio_temp_dir (fun base_path ->
@@ -385,8 +382,6 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
         ~task_id:task.id
         ~base_path
         ~request_id
-        ~task_verifier:(Some "keeper-verifier-agent")
-        ~viewer:"keeper-verifier-agent"
         ()
     with
     | VS.Evidence_available
@@ -411,8 +406,6 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
            ~task_id:task.id
            ~base_path
            ~request_id
-           ~task_verifier:(Some "keeper-verifier-agent")
-           ~viewer:"keeper-verifier-agent"
            ()
        with
        | VS.Evidence_available
@@ -427,12 +420,10 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
          Alcotest.failf
            "expected explicit artifact and note snapshot, got %d items"
            (List.length items)
-       | VS.Evidence_metadata_only _ ->
-         Alcotest.fail "assigned verifier unexpectedly received metadata only"
        | VS.Evidence_unavailable { reason; _ } ->
          Alcotest.failf "persisted evidence snapshot unavailable: %s" reason))
 
-let test_submit_snapshot_survives_mutation_deletion_and_verifier_cwd () =
+let test_submit_snapshot_survives_mutation_deletion_and_authority_cwd () =
   with_eio_temp_dir (fun base_path ->
     write_keeper_profile
       ~base_path
@@ -469,8 +460,6 @@ let test_submit_snapshot_survives_mutation_deletion_and_verifier_cwd () =
             ~task_id:task.id
             ~base_path
             ~request_id
-            ~task_verifier:(Some "keeper-verifier-agent")
-            ~viewer:"keeper-verifier-agent"
             ()
         with
         | VS.Evidence_available
@@ -487,8 +476,6 @@ let test_submit_snapshot_survives_mutation_deletion_and_verifier_cwd () =
                ~task_id:task.id
                ~base_path
                ~request_id
-               ~task_verifier:(Some "keeper-verifier-agent")
-               ~viewer:"keeper-verifier-agent"
                ()
            with
            | VS.Evidence_available
@@ -503,8 +490,6 @@ let test_submit_snapshot_survives_mutation_deletion_and_verifier_cwd () =
              Alcotest.failf
                "expected one immutable artifact snapshot, got %d items"
                (List.length items)
-           | VS.Evidence_metadata_only _ ->
-             Alcotest.fail "assigned verifier unexpectedly received metadata only"
            | VS.Evidence_unavailable { reason; _ } ->
              Alcotest.failf "persisted evidence snapshot unavailable: %s" reason)))
 
@@ -545,8 +530,6 @@ let test_submit_snapshot_rejects_relative_traversal_and_symlink_escape () =
             ~task_id:task.id
             ~base_path
             ~request_id
-            ~task_verifier:(Some "keeper-verifier-agent")
-            ~viewer:"keeper-verifier-agent"
             ()
         with
         | VS.Evidence_available
@@ -601,8 +584,6 @@ let test_submit_snapshot_rejects_bare_and_absolute_references () =
       inspect_evidence
         ~base_path
         ~request_id
-        ~task_verifier:(Some "keeper-verifier-agent")
-        ~viewer:"keeper-verifier-agent"
         ()
     with
     | VS.Evidence_available
@@ -635,8 +616,6 @@ let test_submitted_evidence_inspection_rejects_cross_playground_path () =
       inspect_evidence
         ~base_path
         ~request_id
-        ~task_verifier:(Some "keeper-verifier-agent")
-        ~viewer:"keeper-verifier-agent"
         ()
     with
     | VS.Evidence_available
@@ -667,8 +646,6 @@ let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
       inspect_evidence
         ~base_path
         ~request_id
-        ~task_verifier:(Some "keeper-verifier-agent")
-        ~viewer:"keeper-verifier-agent"
         ()
     with
     | VS.Evidence_available
@@ -702,8 +679,6 @@ let test_submitted_evidence_rejects_malformed_utf8 () =
       inspect_evidence
         ~base_path
         ~request_id
-        ~task_verifier:(Some "keeper-verifier-agent")
-        ~viewer:"keeper-verifier-agent"
         ()
     with
     | VS.Evidence_available
@@ -738,8 +713,6 @@ let test_submitted_evidence_rejects_symlink_escape_and_fifo () =
        inspect_evidence
          ~base_path
          ~request_id:symlink_request_id
-         ~task_verifier:(Some "keeper-verifier-agent")
-         ~viewer:"keeper-verifier-agent"
          ()
      with
      | VS.Evidence_available
@@ -763,8 +736,6 @@ let test_submitted_evidence_rejects_symlink_escape_and_fifo () =
       inspect_evidence
         ~base_path
         ~request_id:fifo_request_id
-        ~task_verifier:(Some "keeper-verifier-agent")
-        ~viewer:"keeper-verifier-agent"
         ()
     with
     | VS.Evidence_available
@@ -817,56 +788,34 @@ let test_submitted_evidence_requires_exact_task_assignment_identity () =
       | Ok request -> request
       | Error detail -> Alcotest.fail detail
     in
-    let check_metadata_only label = function
-      | VS.Evidence_metadata_only _ -> ()
+    let check_unavailable label = function
+      | VS.Evidence_unavailable _ -> ()
       | _ -> Alcotest.fail label
     in
     (match
        inspect_evidence
          ~base_path
          ~request_id:pending.id
-         ~task_verifier:(Some "keeper-verifier-agent")
-         ~viewer:"keeper-verifier-agent"
          ()
      with
      | VS.Evidence_available _ -> ()
-     | _ -> Alcotest.fail "Pending evidence must be available to the Task phase winner");
-    check_metadata_only
+     | _ -> Alcotest.fail "pending evidence must be available to the completion authority");
+    check_unavailable
       "task id mismatch must not expose bytes"
       (inspect_evidence
          ~task_id:"task-other"
          ~base_path
          ~request_id:pending.id
-         ~task_verifier:(Some "keeper-verifier-agent")
-         ~viewer:"keeper-verifier-agent"
          ());
-    check_metadata_only
+    check_unavailable
       "producer mismatch must not expose bytes"
       (inspect_evidence
          ~task_worker:"keeper-other-agent"
          ~base_path
          ~request_id:pending.id
-         ~task_verifier:(Some "keeper-verifier-agent")
-         ~viewer:"keeper-verifier-agent"
-         ());
-    check_metadata_only
-      "task phase verifier mismatch must not expose bytes"
-      (inspect_evidence
-         ~base_path
-         ~request_id:pending.id
-         ~task_verifier:(Some "keeper-sangsu-agent")
-         ~viewer:"keeper-verifier-agent"
-         ());
-    check_metadata_only
-      "unassigned task phase must not expose bytes"
-      (inspect_evidence
-         ~base_path
-         ~request_id:pending.id
-         ~task_verifier:None
-         ~viewer:"keeper-verifier-agent"
          ()))
 
-let test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier () =
+let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
   with_eio_temp_dir (fun base_path ->
     let config = W.default_config base_path in
     ignore (W.init config ~agent_name:None);
@@ -896,7 +845,6 @@ let test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier () =
                  { assignee = "keeper-executor-agent"
                  ; submitted_at = "2026-07-28T00:00:00Z"
                  ; verification_id = request_id
-                 ; phase = Masc_domain.Awaiting_verifier
                  }
            })
         backlog.tasks
@@ -904,75 +852,47 @@ let test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier () =
     W.write_backlog
       config
       { backlog with tasks; version = backlog.version + 1 };
-    let unassigned =
-      W.list_tasks config ~verification_viewer:"keeper-verifier-agent"
-    in
+    let projection = W.list_tasks config in
     Alcotest.(check bool)
-      "unassigned row identifies the typed verification phase"
+      "row identifies the completion-authority wait"
       true
-      (contains_substring unassigned
-         "awaiting_verifier task_id=task-001");
+      (contains_substring projection
+         "awaiting_completion_authority task_id=task-001");
     Alcotest.(check bool)
-      "unassigned row does not choose the verifier's next action"
+      "keeper row does not choose a verdict action"
       false
-      (contains_substring unassigned "ACTION:");
+      (contains_substring projection "ACTION:");
     (match
        W.claim_task_r config ~agent_name:"keeper-executor-agent" ~task_id:"task-001" ()
      with
      | Error _ -> ()
-     | Ok _ -> Alcotest.fail "producer must not claim its own verification");
+     | Ok _ -> Alcotest.fail "producer must not claim its pending obligation");
     (match
        W.claim_task_r config ~agent_name:"keeper-verifier-agent" ~task_id:"task-001" ()
      with
-     | Ok message ->
-       Alcotest.(check bool)
-         "claim response carries persisted snapshot"
-         true
-         (contains_substring message "full-cycle-evidence")
-     | Error err ->
-       Alcotest.fail
-         ("verifier claim failed: " ^ Masc_domain.masc_error_to_string err));
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "no Keeper may claim a pending obligation");
     (match
        W.claim_task_r config ~agent_name:"keeper-sangsu-agent" ~task_id:"task-001" ()
      with
      | Error _ -> ()
-     | Ok _ -> Alcotest.fail "second verifier stole the assignment");
-    let assigned =
-      W.list_tasks
-        config
-        ~verification_viewer:"keeper-verifier-agent"
-    in
+     | Ok _ -> Alcotest.fail "another Keeper claimed the pending obligation");
     Alcotest.(check bool)
-      "assigned verifier receives content"
-      true
-      (contains_substring assigned "full-cycle-evidence");
-    let other =
-      W.list_tasks
-        config
-        ~verification_viewer:"keeper-sangsu-agent"
-    in
-    Alcotest.(check bool)
-      "other keeper receives no content"
+      "task projection contains no evidence bytes"
       false
-      (contains_substring other "full-cycle-evidence");
+      (contains_substring projection "full-cycle-evidence");
     Alcotest.(check bool)
-      "other keeper keeps request metadata"
+      "task projection keeps request metadata"
       true
-      (contains_substring other request_id);
+      (contains_substring projection request_id);
     Alcotest.(check bool)
-      "other keeper sees the assigned verifier"
-      true
-      (contains_substring other
-         "assigned_verifier=keeper-verifier-agent");
-    Alcotest.(check bool)
-      "other keeper is not told which action to take"
+      "task projection has no assigned verifier"
       false
-      (contains_substring other "ACTION:");
-    let external_projection = W.list_tasks config in
+      (contains_substring projection "assigned_verifier=");
     Alcotest.(check bool)
-      "external task list receives no content"
+      "task projection has no verdict action"
       false
-      (contains_substring external_projection "full-cycle-evidence"))
+      (contains_substring projection "ACTION:"))
 
 (* --- ID generation property test (#7544) --- *)
 
@@ -1020,12 +940,12 @@ let () =
         test_list_requests_ignores_legacy_only_stale_entries;
       Alcotest.test_case "list requests ignores legacy root entries" `Quick
         test_list_requests_ignores_legacy_root_entries;
-      Alcotest.test_case "submitted evidence assigned and contained" `Quick
-        test_submitted_evidence_inspection_is_assigned_and_contained;
+      Alcotest.test_case "submitted evidence authority-scoped and contained" `Quick
+        test_submitted_evidence_inspection_is_authority_scoped_and_contained;
       Alcotest.test_case "submit snapshot resolves Docker relative refs" `Quick
         test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note;
       Alcotest.test_case "submit snapshot is immutable and cwd-independent" `Quick
-        test_submit_snapshot_survives_mutation_deletion_and_verifier_cwd;
+        test_submit_snapshot_survives_mutation_deletion_and_authority_cwd;
       Alcotest.test_case "submit snapshot rejects traversal and symlink escape" `Quick
         test_submit_snapshot_rejects_relative_traversal_and_symlink_escape;
       Alcotest.test_case "submit snapshot rejects bare and absolute refs" `Quick
@@ -1042,7 +962,7 @@ let () =
         test_changed_during_read_maps_to_typed_unreadable_reason;
       Alcotest.test_case "submitted evidence requires exact assignment identity" `Quick
         test_submitted_evidence_requires_exact_task_assignment_identity;
-      Alcotest.test_case "keeper task projection assigned verifier only" `Quick
-        test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier;
+      Alcotest.test_case "keeper task projection has no evidence or verdict action" `Quick
+        test_keeper_task_projection_never_exposes_snapshot_or_verdict_action;
     ];
   ]

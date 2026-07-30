@@ -124,13 +124,11 @@ let test_masc_transition_claim_done_emits_task_lifecycle () =
       match transition with
       | Masc_domain.Claim | Masc_domain.Start ->
         Telemetry_eio.track_task_started config ~task_id ~agent_id:agent_name
-      | Masc_domain.Done_action | Masc_domain.Approve_verification ->
+      | Masc_domain.Done_action ->
         Telemetry_eio.track_task_completed config ~task_id ~duration_ms:0 ~success:true
       | Masc_domain.Cancel ->
         Telemetry_eio.track_task_completed config ~task_id ~duration_ms:0 ~success:false
-      | Masc_domain.Release
-      | Masc_domain.Submit_for_verification
-      | Masc_domain.Reject_verification -> ());
+      | Masc_domain.Release | Masc_domain.Submit_for_verification -> ());
   Fun.protect
     ~finally:(fun () ->
       Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_default_runtime;

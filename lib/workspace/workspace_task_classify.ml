@@ -116,7 +116,7 @@ let empty_task_contract =
    pasting those two literal tokens into the completion notes. That mechanism
    simultaneously over-blocked unaware keepers and let a completion be faked by
    copying labels. [required_evidence] now serves only as a fact supplied to the
-   LLM reviewer and human verifier; the workspace FSM does not interpret it. *)
+   completion authority; the workspace FSM does not interpret it. *)
 let default_verification_evidence_refs = []
 
 let first_line text =
@@ -284,7 +284,11 @@ let valid_next_actions_for_status ~requires_verification
     ; Masc_domain.Cancel
     ]
   | Masc_domain.AwaitingVerification _ ->
-    [ Masc_domain.Approve_verification; Masc_domain.Reject_verification ]
+    (* No agent action applies. The verdict is issued by a completion authority
+       through [Workspace_task_lifecycle.decide_verdict], which is not part of
+       the agent action surface. Distinct from the terminal case below: this
+       obligation is still live, it just is not an agent's to advance. *)
+    []
   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> [] (* terminal *)
 ;;
 

@@ -230,29 +230,13 @@ and handle_transition ~tool_name ~start_time ctx args =
       | Masc_domain.Start
       | Masc_domain.Done_action
       | Masc_domain.Cancel
-      | Masc_domain.Submit_for_verification
-      | Masc_domain.Approve_verification
-      | Masc_domain.Reject_verification ), _ -> None
+      | Masc_domain.Submit_for_verification ), _ -> None
   in
+  (* The terminal-verdict no-op branch is gone with the verdict actions: an agent
+     can no longer request approve/reject here, so there is no verdict-on-terminal
+     case to absorb. *)
   match release_owner_mismatch_rejection with
   | Some result -> result
-  | None ->
-  let terminal_verdict_noop =
-    if is_verdict_transition_action action
-    then
-      match task_opt with
-      | Some task when Masc_domain.task_status_is_terminal task.task_status ->
-        Some
-          (terminal_verdict_noop_message
-             ~task_id
-             ~action:action_s
-             ~status:(Masc_domain.task_status_to_string task.task_status))
-      | _ -> None
-    else
-      None
-  in
-  match terminal_verdict_noop with
-  | Some message -> Tool_result.ok ~tool_name ~start_time message
   | None ->
   let completion_state_error =
     if (=) action Masc_domain.Done_action then
@@ -346,11 +330,10 @@ and handle_transition ~tool_name ~start_time ctx args =
     | None -> ctx.agent_name
   in
   let completion_collaborators =
-    if
-      (=) action Masc_domain.Approve_verification
-      && not (String.equal completion_owner ctx.agent_name)
-    then [ ctx.agent_name ]
-    else collaborators_from_task
+    (* The approve branch is gone: it added the approving agent to the task's
+       collaborator set, which only made sense while a keeper could be the
+       verifier. A completion authority is not an agent and never joins it. *)
+    collaborators_from_task
   in
   let prepare_verification_request =
     match action with
@@ -367,9 +350,7 @@ and handle_transition ~tool_name ~start_time ctx args =
     | Masc_domain.Start
     | Masc_domain.Done_action
     | Masc_domain.Cancel
-    | Masc_domain.Release
-    | Masc_domain.Approve_verification
-    | Masc_domain.Reject_verification ->
+    | Masc_domain.Release ->
       None
   in
   (* RFC-0221 §3.1: compensation for [Submit_for_verification]. If the status
@@ -398,21 +379,12 @@ and handle_transition ~tool_name ~start_time ctx args =
     | Masc_domain.Start
     | Masc_domain.Done_action
     | Masc_domain.Cancel
-    | Masc_domain.Release
-    | Masc_domain.Approve_verification
-    | Masc_domain.Reject_verification ->
+    | Masc_domain.Release ->
       None
   in
-  (* Capture verification_id from AwaitingVerification state BEFORE transition.
-     approve/reject transitions change state, destroying the verification_id.
-     Issue #7543. *)
-  let verification_id_before =
-    match task_opt with
-    | Some t -> (match t.task_status with
-        | Masc_domain.AwaitingVerification { verification_id; _ } -> Some verification_id
-        | _ -> None)
-    | None -> None
-  in
+  (* The pre-transition verification_id capture (issue #7543) is gone with the
+     approve/reject actions: no agent transition consumes an AwaitingVerification
+     state any more, so there is nothing to snapshot before it changes. *)
   let result =
     Workspace.transition_task_r
       ctx.config
@@ -456,33 +428,15 @@ and handle_transition ~tool_name ~start_time ctx args =
               | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
               | Masc_domain.Done _ | Masc_domain.Cancelled _ -> ())
            | None -> ())
-        | Masc_domain.Approve_verification ->
-          (match verification_id_before with
-           | None ->
-             task_log_warn ~task_id
-               "approve_verification action for task %s without verification_id_before (skipping notify)"
-               task_id
-           | Some verification_id ->
-             (Atomic.get Workspace_hooks.verification_notify_verdict_fn)
-               ~task_id ~verifier:ctx.agent_name ~verification_id
-               ~decision:(`Approve notes))
-        | Masc_domain.Reject_verification ->
-          let reason = if not (String.equal notes "") then notes else reason in
-          (match verification_id_before with
-           | None ->
-             task_log_warn ~task_id
-               "reject_verification action for task %s without verification_id_before (skipping notify)"
-               task_id
-           | Some verification_id ->
-             (Atomic.get Workspace_hooks.verification_notify_verdict_fn)
-               ~task_id ~verifier:ctx.agent_name ~verification_id
-               ~decision:(`Reject reason))
+        (* No verdict notification from this path: a verdict is not an agent
+           action, so the agent transition surface has no approve/reject to
+           report. The authority-side verdict notifier is wired separately. *)
         | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel | Masc_domain.Release -> ())
    | Error err ->
        log_task_transition_failed ~agent_name:ctx.agent_name err);
   (* Record metrics *)
   (match result, action with
-   | Ok _, (Masc_domain.Done_action | Masc_domain.Approve_verification) ->
+   | Ok _, Masc_domain.Done_action ->
        (Atomic.get Workspace_hooks.record_task_metric_fn)
          ctx.config
          ~agent_id:completion_owner
@@ -517,7 +471,7 @@ and handle_transition ~tool_name ~start_time ctx args =
           ~reason:(Some "task_cancelled");
         ()
   | Ok _, (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Submit_for_verification
-            | Masc_domain.Reject_verification | Masc_domain.Release)
+            | Masc_domain.Release)
   | Error _, _ -> ());
   let transition_result_to_response = function
     | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState message)) ->
@@ -541,7 +495,7 @@ let handle_update_priority ~tool_name ~start_time ctx args =
   let priority = get_int args "priority" 3 in
   Tool_result.ok ~tool_name ~start_time (Workspace.update_priority ctx.config ~task_id ~priority)
 
-let handle_tasks_with_projection ~task_list_projection ~tool_name ~start_time ctx args =
+let handle_tasks ~tool_name ~start_time ctx args =
   let include_done = get_bool args "include_done" false in
   let include_cancelled = get_bool args "include_cancelled" false in
   let status =
@@ -549,26 +503,12 @@ let handle_tasks_with_projection ~task_list_projection ~tool_name ~start_time ct
     | `String s when not (String.equal s "") -> Some s
     | _ -> None
   in
-  let verification_viewer =
-    match task_list_projection with
-    | Tool_capability_projection.Keeper_tasks_list -> Some ctx.agent_name
-    | Tool_capability_projection.External_masc_tasks -> None
-  in
   Tool_result.ok ~tool_name ~start_time
     (Workspace.list_tasks
        ctx.config
        ~include_done
        ~include_cancelled
-       ?status
-       ?verification_viewer)
-
-let handle_tasks ~tool_name ~start_time ctx args =
-  handle_tasks_with_projection
-    ~task_list_projection:Tool_capability_projection.External_masc_tasks
-    ~tool_name
-    ~start_time
-    ctx
-    args
+       ?status)
 
 let read_event_lines config ~limit =
   let events_dir = Filename.concat (Workspace.masc_dir config) "events" in
@@ -652,7 +592,7 @@ let handle_task_history ~tool_name ~start_time ctx args =
 
 include Tool_task_schemas
 (* Dispatch function *)
-let dispatch_with_task_list_projection ?created_by task_list_projection ctx ~name ~args =
+let dispatch_internal ?created_by ctx ~name ~args =
   let start = Time_compat.now () in
   match name with
   | "masc_add_task" ->
@@ -675,28 +615,14 @@ let dispatch_with_task_list_projection ?created_by task_list_projection ctx ~nam
   | "masc_task_set_goal" -> Some (handle_set_goal ~tool_name:name ~start_time:start ctx args)
   | "masc_tasks" ->
     Some
-      (handle_tasks_with_projection
-         ~task_list_projection
-         ~tool_name:name
-         ~start_time:start
-         ctx
-         args)
+      (handle_tasks ~tool_name:name ~start_time:start ctx args)
   | "masc_task_history" -> Some (handle_task_history ~tool_name:name ~start_time:start ctx args)
   | _ -> None
 
 let dispatch ctx ~name ~args =
-  dispatch_with_task_list_projection
-    Tool_capability_projection.External_masc_tasks
-    ctx
-    ~name
-    ~args
+  dispatch_internal ctx ~name ~args
 ;;
 
 let dispatch_for_keeper ~created_by ctx ~name ~args =
-  dispatch_with_task_list_projection
-    ~created_by
-    Tool_capability_projection.Keeper_tasks_list
-    ctx
-    ~name
-    ~args
+  dispatch_internal ~created_by ctx ~name ~args
 ;;

@@ -254,7 +254,6 @@ let write_rich_fixture base =
              { assignee = keeper
              ; submitted_at = "2026-07-02T00:10:00Z"
              ; verification_id = "vrf-task-1"
-             ; phase = Masc_domain.Awaiting_verifier
              })
         ~handoff_context:
           (handoff_context

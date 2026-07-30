@@ -22,8 +22,6 @@ type task_snapshot =
   { title : string
   ; status : string
   ; assignee : string option
-  ; phase : string option
-  ; verifier : string option
   ; submitted_at : string option
   ; verification_id : string option
   ; handoff_summary : string option

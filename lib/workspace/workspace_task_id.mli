@@ -24,8 +24,8 @@ val append_archive_tasks :
   Workspace_utils_backend_setup.config -> task list -> unit
 
 (** Non-terminal tasks currently sitting in [tasks-archive.json] — obligations a
-    buggy GC pass stranded (RFC-0220: an [AwaitingVerification] obligation must
-    stay claimable by a verifier).  Read-only; pair with {!drop_archive_tasks}
+    buggy GC pass stranded. An [AwaitingVerification] obligation must remain in
+    the live backlog for an authority verdict. Read-only; pair with {!drop_archive_tasks}
     after the live backlog has been rewritten so a crash between the two cannot
     lose the task.  Unparseable entries are skipped. *)
 val read_orphaned_nonterminal_tasks :

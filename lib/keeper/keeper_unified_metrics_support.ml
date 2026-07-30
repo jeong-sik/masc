@@ -405,9 +405,6 @@ let observed_triggers_of_observation
       singleton_when actionable_backlog "claimable_task";
       singleton_when (observation.failed_task_count > 0) "failed_task";
       singleton_when
-        (observation.pending_verification_count > 0)
-        "pending_verification";
-      singleton_when
         (observation.scheduled_automation.due_ready_count > 0)
         "scheduled_automation_due_ready";
       singleton_when
@@ -430,8 +427,8 @@ let observed_affordances_of_observation
   then add "message_sweep";
   if claim_backlog_actionable observation then add "task_claim";
   if observation.failed_task_count > 0 then add "task_audit";
-  if observation.pending_verification_count > 0 then
-    add "task_verify";
+  (* No "task_verify" affordance: a verifier is not a Keeper. Completion
+     approval belongs to the HITL/fusion authority, not to keeper tool surface. *)
   if observation.scheduled_automation.due_ready_count > 0 then
     add "schedule_dispatch_monitor";
   List.rev !affordances

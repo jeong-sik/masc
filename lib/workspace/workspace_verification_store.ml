@@ -34,10 +34,6 @@ type submitted_evidence_access =
       { request : request_header
       ; items : submitted_evidence_item list
       }
-  | Evidence_metadata_only of
-      { request : request_header
-      ; viewer : string
-      }
   | Evidence_unavailable of
       { request_id : string
       ; reason : string
@@ -89,6 +85,30 @@ let submitted_evidence_item_to_yojson = function
       ; "reference", `String reference
       ; "reason", `String (evidence_read_failure_to_string reason)
       ]
+
+let request_header_to_yojson request =
+  `Assoc
+    [ "id", `String request.id
+    ; "task_id", `String request.task_id
+    ; "worker", `String request.worker
+    ; "created_at", `Float request.created_at
+    ]
+;;
+
+let submitted_evidence_access_to_yojson = function
+  | Evidence_available { request; items } ->
+    `Assoc
+      [ "access", `String "available"
+      ; "request", request_header_to_yojson request
+      ; "items", `List (List.map submitted_evidence_item_to_yojson items)
+      ]
+  | Evidence_unavailable { request_id; reason } ->
+    `Assoc
+      [ "access", `String "unavailable"
+      ; "request_id", `String request_id
+      ; "reason", `String reason
+      ]
+;;
 
 let submitted_evidence_item_of_yojson = function
   | `Assoc fields ->
@@ -453,18 +473,27 @@ let snapshot_submitted_evidence_json ~base_path ~worker references =
          |> submitted_evidence_item_to_yojson)
        references)
 
-let inspect_submitted_evidence ~base_path ~request_id ~task_id ~task_worker
-    ~task_verifier ~viewer =
-  match load_request_for_evidence base_path request_id with
-  | Error reason -> Evidence_unavailable { request_id; reason }
-  | Ok (request, snapshot) ->
-    (match task_verifier with
-     | Some task_verifier
-       when String.equal request.task_id task_id
-            && String.equal request.worker task_worker
-            && String.equal task_verifier viewer ->
-       Evidence_available { request; items = snapshot }
-     | Some _ | None -> Evidence_metadata_only { request; viewer })
+let inspect_submitted_evidence_for_authority ~base_path ~request_id ~task_id
+    ~task_worker ~(authority : Masc_domain.completion_authority) =
+  if not (Masc_domain.completion_authority_has_identity authority)
+  then
+    Evidence_unavailable
+      { request_id; reason = "completion authority identity is empty" }
+  else
+    match load_request_for_evidence base_path request_id with
+    | Error reason -> Evidence_unavailable { request_id; reason }
+    | Ok (request, snapshot) ->
+      if
+        String.equal request.task_id task_id
+        && String.equal request.worker task_worker
+      then Evidence_available { request; items = snapshot }
+      else
+        Evidence_unavailable
+          { request_id
+          ; reason =
+              "verification request does not match the awaiting task and producer"
+          }
+;;
 
 let list_request_headers base_path =
   let surface = "verification" in

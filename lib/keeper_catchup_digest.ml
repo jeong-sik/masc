@@ -60,8 +60,6 @@ type task_snapshot =
   { title : string
   ; status : string
   ; assignee : string option
-  ; phase : string option
-  ; verifier : string option
   ; submitted_at : string option
   ; verification_id : string option
   ; handoff_summary : string option
@@ -202,23 +200,17 @@ let non_empty_opt = function
 
 let task_status_snapshot_fields (status : Masc_domain.task_status) =
   match status with
-  | Masc_domain.Todo -> None, None, None, None, None
-  | Masc_domain.Claimed { assignee; _ }
-  | Masc_domain.InProgress { assignee; _ } ->
-    Some assignee, None, None, None, None
-  | Masc_domain.AwaitingVerification { assignee; submitted_at; verification_id; phase } ->
-    let phase, verifier =
-      match phase with
-      | Masc_domain.Awaiting_verifier -> Some "awaiting_verifier", None
-      | Masc_domain.Verifier_assigned { verifier } -> Some "verifier_assigned", Some verifier
-    in
-    Some assignee, phase, verifier, Some submitted_at, Some verification_id
-  | Masc_domain.Done { assignee; _ } -> Some assignee, None, None, None, None
-  | Masc_domain.Cancelled { cancelled_by; _ } -> Some cancelled_by, None, None, None, None
+  | Masc_domain.Todo -> None, None, None
+  | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ } ->
+    Some assignee, None, None
+  | Masc_domain.AwaitingVerification { assignee; submitted_at; verification_id } ->
+    Some assignee, Some submitted_at, Some verification_id
+  | Masc_domain.Done { assignee; _ } -> Some assignee, None, None
+  | Masc_domain.Cancelled { cancelled_by; _ } -> Some cancelled_by, None, None
 ;;
 
 let task_snapshot_of_task (task : Masc_domain.task) =
-  let assignee, phase, verifier, submitted_at, verification_id =
+  let assignee, submitted_at, verification_id =
     task_status_snapshot_fields task.task_status
   in
   let handoff_summary, handoff_next_step, handoff_evidence_refs =
@@ -230,8 +222,6 @@ let task_snapshot_of_task (task : Masc_domain.task) =
   { title = task.title
   ; status = Masc_domain.task_status_to_string task.task_status
   ; assignee
-  ; phase
-  ; verifier
   ; submitted_at
   ; verification_id
   ; handoff_summary
@@ -669,8 +659,6 @@ let task_snapshot_to_json (s : task_snapshot) =
     [ "title", `String s.title
     ; "status", `String s.status
     ; "assignee", string_opt_to_json s.assignee
-    ; "phase", string_opt_to_json s.phase
-    ; "verifier", string_opt_to_json s.verifier
     ; "submitted_at", string_opt_to_json s.submitted_at
     ; "verification_id", string_opt_to_json s.verification_id
     ; "handoff_summary", string_opt_to_json s.handoff_summary

@@ -90,14 +90,15 @@ let transition_done_r config ~agent_name ~task_id ~notes =
      with
      | Error _ as error -> error
      | Ok _ ->
-       let verifier = "admin-board-keeper" in
-       (match Workspace.claim_task_r config ~agent_name:verifier ~task_id () with
-        | Error _ as error -> error
-        | Ok _ ->
-          Workspace.transition_task_r config ~agent_name:verifier ~task_id
-            ~action:Masc_domain.Approve_verification
-            ~notes:("verified: " ^ evidence_notes)
-            ()))
+       (* No peer-keeper claim: the verdict comes from a completion authority. *)
+       Workspace.commit_verdict_r
+         config
+         ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+         ~verdict:Masc_domain.Verdict_approved
+         ~task_id
+         ~notes:("verified: " ^ evidence_notes)
+         ()
+       |> Result.map (fun (o : Workspace.transition_outcome) -> o.Workspace.message))
 
 let backlog_recovery_path config =
   Workspace.backlog_path config ^ ".last-good"
@@ -1101,9 +1102,33 @@ let with_done_hook_recorder f =
     ~finally:(fun () -> Atomic.set Workspace_hooks.relation_on_task_done_fn prev)
     (fun () -> f recorded)
 
+let with_verdict_projection_recorders f =
+  let terminal = ref [] in
+  let notifications = ref [] in
+  let previous_terminal =
+    Atomic.exchange Workspace_hooks.task_terminal_committed_fn
+      (fun _config ~agent_name ~task_id ->
+        terminal := (agent_name, task_id) :: !terminal;
+        Workspace_hooks.Task_terminal_delivered)
+  in
+  let previous_notification =
+    Atomic.exchange Workspace_hooks.verification_notify_verdict_fn
+      (fun ~task_id ~verifier ~verification_id ~decision ->
+        notifications :=
+          (task_id, verifier, verification_id, decision) :: !notifications)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.task_terminal_committed_fn previous_terminal;
+      Atomic.set Workspace_hooks.verification_notify_verdict_fn
+        previous_notification)
+    (fun () -> f terminal notifications)
+;;
+
 let test_approve_completion_credits_assignee () =
   with_test_env (fun config ->
     with_done_hook_recorder (fun recorded ->
+      with_verdict_projection_recorders (fun terminal notifications ->
       let _ = Workspace.add_task config ~title:"Parity Task" ~priority:1 ~description:"" in
       let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
       let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
@@ -1114,23 +1139,193 @@ let test_approve_completion_credits_assignee () =
       Alcotest.(check bool) "submit ok" true
         (match submitted with Ok _ -> true | Error _ -> false);
       Alcotest.(check (list string)) "no done hook before approve" [] !recorded;
-      let _ =
-        Workspace.claim_task_r config ~agent_name:admin_keeper_agent
-          ~task_id:"task-001" ()
-      in
       let approved =
-        Workspace.transition_task_r config ~agent_name:admin_keeper_agent
-          ~task_id:"task-001" ~action:Masc_domain.Approve_verification
-          ~notes:"verified submitted evidence" ()
+        Workspace.commit_verdict_r
+          config
+          ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+          ~verdict:Masc_domain.Verdict_approved
+          ~task_id:"task-001"
+          ~notes:"verified submitted evidence"
+          ()
       in
       Alcotest.(check bool) "approve ok" true
         (match approved with Ok _ -> true | Error _ -> false);
-      (* The acting agent is the verifier; the done hook must fire for the
-         assignee. *)
+      (* The verdict actor is an authority, not an agent, so the done hook must
+         still credit the producer. *)
       Alcotest.(check (list string))
-        "approve completion credits assignee" [ test_agent_a ] !recorded))
+        "approve completion credits assignee" [ test_agent_a ] !recorded;
+      Alcotest.(check (list (pair string string)))
+        "terminal reconciliation credits producer"
+        [ test_agent_a, "task-001" ]
+        !terminal;
+      Alcotest.(check int)
+        "authority verdict notification emitted once"
+        1
+        (List.length !notifications)))
+    )
 
-let test_submit_and_approve_rejects_empty_justification () =
+let test_operator_rejection_rebinds_producer () =
+  with_test_env (fun config ->
+    let _ =
+      Workspace.add_task
+        config
+        ~title:"Rejected Task"
+        ~priority:1
+        ~description:""
+    in
+    let _ =
+      Workspace.bind_session
+        config
+        ~agent_name:test_agent_a
+        ~capabilities:[]
+        ()
+    in
+    let _ =
+      Workspace.claim_task
+        config
+        ~agent_name:test_agent_a
+        ~task_id:"task-001"
+    in
+    let _ =
+      Workspace.transition_task_r
+        config
+        ~agent_name:test_agent_a
+        ~task_id:"task-001"
+        ~action:Masc_domain.Submit_for_verification
+        ~notes:"evidence"
+        ()
+    in
+    let rejected =
+      Workspace.commit_verdict_r
+        config
+        ~authority:
+          (Masc_domain.Human_operator { operator_id = "operator-test" })
+        ~verdict:
+          (Masc_domain.Verdict_rejected { reason = "missing focused test" })
+        ~task_id:"task-001"
+        ()
+    in
+    Alcotest.(check bool)
+      "reject committed"
+      true
+      (Result.is_ok rejected);
+    (match find_task config "task-001" with
+     | Some
+         { task_status =
+             Masc_domain.InProgress { assignee; _ }
+         ; _
+         }
+       when String.equal assignee test_agent_a -> ()
+     | _ -> Alcotest.fail "rejection did not return task to producer");
+    match
+      Workspace.get_agents_raw config
+      |> List.find_opt (fun (agent : Masc_domain.agent) ->
+             String.equal agent.name test_agent_a)
+    with
+    | Some { status = Masc_domain.Busy; current_task = Some "task-001"; _ } -> ()
+    | _ -> Alcotest.fail "rejection did not restore producer task binding")
+
+let test_operator_verdict_boundary_is_reachable () =
+  with_test_env (fun config ->
+    let _ =
+      Workspace.add_task
+        config
+        ~title:"Operator Boundary Task"
+        ~priority:1
+        ~description:""
+    in
+    let _ =
+      Workspace.bind_session
+        config
+        ~agent_name:test_agent_a
+        ~capabilities:[]
+        ()
+    in
+    let _ =
+      Workspace.claim_task
+        config
+        ~agent_name:test_agent_a
+        ~task_id:"task-001"
+    in
+    let submitted =
+      Workspace.transition_task_r
+        config
+        ~agent_name:test_agent_a
+        ~task_id:"task-001"
+        ~action:Masc_domain.Submit_for_verification
+        ~notes:"evidence"
+        ~prepare_verification_request:
+          (fun ~task ~assignee ~verification_id ~evidence_refs ->
+             Verification_protocol.create_submit_request
+               ~config
+               ~task
+               ~assignee
+               ~verification_id
+               ~evidence_refs)
+        ()
+    in
+    Alcotest.(check bool) "submit with evidence snapshot" true
+      (Result.is_ok submitted);
+    let evidence =
+      Server_routes_http_routes_verification.For_testing.operator_evidence_json
+        ~config
+        ~operator_id:"operator-test"
+        ~task_id:"task-001"
+    in
+    (match evidence with
+     | Ok json ->
+       Alcotest.(check string)
+         "authority evidence available"
+         "available"
+         Yojson.Safe.Util.(
+           json
+           |> member "evidence"
+           |> member "access"
+           |> to_string)
+     | Error message -> Alcotest.fail message);
+    let parsed =
+      Server_routes_http_routes_verification.For_testing
+      .parse_operator_verdict_json
+        (`Assoc
+          [ "task_id", `String "task-001"
+          ; "verdict", `String "approve"
+          ; "notes", `String "evidence checked"
+          ])
+    in
+    let request =
+      match parsed with
+      | Ok request -> request
+      | Error message -> Alcotest.fail message
+    in
+    let committed =
+      Server_routes_http_routes_verification.For_testing.commit_operator_verdict
+        ~config
+        ~operator_id:"operator-test"
+        request
+    in
+    Alcotest.(check bool) "operator boundary commits verdict" true
+      (Result.is_ok committed);
+    match find_task config "task-001" with
+    | Some { task_status = Masc_domain.Done _; _ } -> ()
+    | _ -> Alcotest.fail "operator boundary did not complete the task")
+
+let test_operator_verdict_parser_rejects_reasonless_rejection () =
+  match
+    Server_routes_http_routes_verification.For_testing
+    .parse_operator_verdict_json
+      (`Assoc
+        [ "task_id", `String "task-001"
+        ; "verdict", `String "reject"
+        ])
+  with
+  | Error message when str_contains message "reason" -> ()
+  | Ok _ | Error _ -> Alcotest.fail "reasonless rejection must fail parsing"
+
+(* Replaces the approve-notes guard. An approval no longer needs a justification
+   string because the caller authenticates the completion authority before this
+   provenance value reaches the workspace. A *rejection* still needs a reason:
+   the producer has to know what to fix. *)
+let test_verdict_rejects_blank_rejection_reason () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Justification Task" ~priority:1 ~description:"" in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
@@ -1139,26 +1334,22 @@ let test_submit_and_approve_rejects_empty_justification () =
       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
         ~action:Masc_domain.Submit_for_verification ~notes:"evidence" ()
     in
-    let _ =
-      Workspace.claim_task_r config ~agent_name:admin_keeper_agent
-        ~task_id:"task-001" ()
+    let rejected =
+      Workspace.commit_verdict_r
+        config
+        ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+        ~verdict:(Masc_domain.Verdict_rejected { reason = "   " })
+        ~task_id:"task-001"
+        ()
     in
-    let approved =
-      Workspace.transition_task_r config ~agent_name:admin_keeper_agent
-        ~task_id:"task-001" ~action:Masc_domain.Approve_verification
-        ~notes:"   " ()
-    in
-    Alcotest.(check bool) "empty approval rejected before transition" false
-      (match approved with Ok _ -> true | Error _ -> false);
+    Alcotest.(check bool) "blank rejection reason refused before commit" false
+      (match rejected with Ok _ -> true | Error _ -> false);
+    (* A refused verdict leaves the obligation untouched, and the obligation
+       carries no verifier binding to mutate in the first place. *)
     match find_task config "task-001" with
-    | Some
-        { task_status =
-            Masc_domain.AwaitingVerification
-              { phase = Masc_domain.Verifier_assigned { verifier }; _ }
-        ; _
-        }
-      when String.equal verifier admin_keeper_agent -> ()
-    | _ -> Alcotest.fail "empty approval mutated the verification state")
+    | Some { task_status = Masc_domain.AwaitingVerification { assignee; _ }; _ }
+      when String.equal assignee test_agent_a -> ()
+    | _ -> Alcotest.fail "refused verdict mutated the verification state")
 
 (* === RFC-0323 G-1 (implements RFC-0308): verification-required done guard === *)
 
@@ -1365,7 +1556,7 @@ let test_read_backlog_counts_excludes_self_owned_orphan () =
     (* Remove the agent file to simulate a keeper with no active registry record. *)
     let _ = Workspace.end_session config ~agent_name:keeper in
     let meta = keeper_meta_for_self_filter keeper in
-    let _, _, failed, _, _ =
+    let _, _, failed, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int) "keeper's own orphan excluded from failed count" 0 failed
@@ -1379,7 +1570,7 @@ let test_read_backlog_counts_falls_back_to_unscoped_claimable_task () =
         ~priority:1 ~description:""
     in
     let meta = keeper_meta_for_goal_filter keeper [ "goal-a" ] in
-    let _, claimable, _, _, _ =
+    let _, claimable, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -1400,7 +1591,7 @@ let test_self_authored_scoped_task_does_not_hide_peer_work () =
       Workspace.add_task config ~goal_id:"goal-b" ~created_by:"peer-keeper"
         ~title:"Peer work outside active goal" ~priority:1 ~description:""
     in
-    let _, claimable, _, _, _ =
+    let _, claimable, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -1416,14 +1607,14 @@ let test_self_authored_scoped_task_does_not_hide_peer_work () =
 let test_read_backlog_counts_excludes_self_authored_task () =
   with_test_env (fun config ->
     let meta = keeper_meta_for_self_filter "keeper-self-filter-agent" in
-    let _, claimable_before, _, _, _ =
+    let _, claimable_before, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     let _ =
       Workspace.add_task config ~created_by:meta.name
         ~title:"self-authored routing task" ~priority:3 ~description:""
     in
-    let unclaimed_after_self, claimable_after_self, _, _, _ =
+    let unclaimed_after_self, claimable_after_self, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -1433,7 +1624,7 @@ let test_read_backlog_counts_excludes_self_authored_task () =
       Workspace.add_task config ~created_by:"peer-keeper"
         ~title:"peer authored task" ~priority:3 ~description:""
     in
-    let unclaimed_after_peer, claimable_after_peer, _, _, _ =
+    let unclaimed_after_peer, claimable_after_peer, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -1826,8 +2017,14 @@ let () =
     "done_side_effects", [
       Alcotest.test_case "approve completion credits assignee" `Quick
         test_approve_completion_credits_assignee;
-      Alcotest.test_case "submit and approve rejects empty justification" `Quick
-        test_submit_and_approve_rejects_empty_justification;
+      Alcotest.test_case "operator rejection rebinds producer" `Quick
+        test_operator_rejection_rebinds_producer;
+      Alcotest.test_case "operator verdict boundary is reachable" `Quick
+        test_operator_verdict_boundary_is_reachable;
+      Alcotest.test_case "operator rejection parser requires reason" `Quick
+        test_operator_verdict_parser_rejects_reasonless_rejection;
+      Alcotest.test_case "operator rejection requires non-empty reason" `Quick
+        test_verdict_rejects_blank_rejection_reason;
     ];
 
     (* === RFC-0323 G-1: verification-required done guard === *)

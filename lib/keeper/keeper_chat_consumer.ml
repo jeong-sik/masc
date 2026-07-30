@@ -50,6 +50,57 @@ end
 
 let notify_transition ~keeper_name = Wake_inbox.notify keeper_name
 
+module Preclaim_retry = struct
+  let mutex = Stdlib.Mutex.create ()
+  let by_base_path : (string, (string, unit) Hashtbl.t) Hashtbl.t =
+    Hashtbl.create 4
+
+  let with_lock f =
+    Stdlib.Mutex.lock mutex;
+    Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock mutex) f
+
+  let mark ~base_path ~keeper_name =
+    with_lock (fun () ->
+      let keepers =
+        match Hashtbl.find_opt by_base_path base_path with
+        | Some keepers -> keepers
+        | None ->
+          let keepers = Hashtbl.create 16 in
+          Hashtbl.add by_base_path base_path keepers;
+          keepers
+      in
+      Hashtbl.replace keepers keeper_name ())
+
+  let clear ~base_path ~keeper_name =
+    with_lock (fun () ->
+      match Hashtbl.find_opt by_base_path base_path with
+      | None -> ()
+      | Some keepers ->
+        Hashtbl.remove keepers keeper_name;
+        if Hashtbl.length keepers = 0
+        then Hashtbl.remove by_base_path base_path)
+
+  let take ~base_path ~keeper_name =
+    with_lock (fun () ->
+      match Hashtbl.find_opt by_base_path base_path with
+      | None -> false
+      | Some keepers ->
+        let waiting = Hashtbl.mem keepers keeper_name in
+        Hashtbl.remove keepers keeper_name;
+        if Hashtbl.length keepers = 0
+        then Hashtbl.remove by_base_path base_path;
+        waiting)
+
+  let clear_base_path base_path =
+    with_lock (fun () -> Hashtbl.remove by_base_path base_path)
+
+  let reset () = with_lock (fun () -> Hashtbl.clear by_base_path)
+end
+
+let notify_slot_transition ~base_path ~keeper_name =
+  if Preclaim_retry.take ~base_path ~keeper_name
+  then notify_transition ~keeper_name
+
 type turn_outcome =
   | Delivered of { outcome_ref : string }
   | Failed of
@@ -200,7 +251,10 @@ module For_testing = struct
   let finish_dispatching_and_reschedule = finish_dispatching_and_reschedule
   let notify_transition = notify_transition
   let take_wake_nonblocking = Wake_inbox.take_nonblocking
-  let reset_wake_inbox = Wake_inbox.reset
+  let reset_wake_inbox () =
+    Wake_inbox.reset ();
+    Preclaim_retry.reset ()
+
   let reset_persistence_blocked = Persistence_blocked.reset
 end
 
@@ -462,6 +516,7 @@ let run_observed_turn state ~sw ~clock ~handle_turn ~keeper_name observation =
     Keeper_chat_delivery_identity.Receipt_ids.singleton item.receipt_id
   in
   let claim = ref Claim_not_attempted in
+  Preclaim_retry.mark ~base_path:state.base_path ~keeper_name;
   let rec claim_observation ~may_retry observation =
     match Keeper_chat_queue.lease_observed observation with
     | `Leased lease -> Ok lease
@@ -493,6 +548,7 @@ let run_observed_turn state ~sw ~clock ~handle_turn ~keeper_name observation =
       Error (`Failed error)
   in
   let on_admitted () =
+    Preclaim_retry.clear ~base_path:state.base_path ~keeper_name;
     match !claim with
     | Claim_not_attempted ->
       (match claim_observation ~may_retry:true observation with
@@ -651,8 +707,10 @@ let run ~sw ~clock ~base_path ~handle_turn =
           (Keeper_chat_queue.mutation_error_to_string error);
         release keeper_name
       | Ok _ when retry_pending_finalization dispatch_state ~keeper_name ->
+        Preclaim_retry.clear ~base_path:dispatch_state.base_path ~keeper_name;
         release keeper_name
       | Ok (Awaiting_delivery_recovery evidence) ->
+        Preclaim_retry.clear ~base_path:dispatch_state.base_path ~keeper_name;
         Log.Keeper.warn
           "keeper_chat_consumer: lane awaits explicit delivery recovery keeper=%s receipt_id=%s lease_id=%s started_at=%.06f"
           keeper_name
@@ -661,6 +719,7 @@ let run ~sw ~clock ~base_path ~handle_turn =
           evidence.started_at;
         release keeper_name
       | Ok (Dispatchable { has_active = false; _ }) ->
+        Preclaim_retry.clear ~base_path:dispatch_state.base_path ~keeper_name;
         release keeper_name
       | Ok (Dispatchable { has_active = true }) ->
         (match Keeper_chat_queue.observe_pending ~keeper_name with
@@ -670,7 +729,9 @@ let run ~sw ~clock ~base_path ~handle_turn =
              keeper_name
              (Keeper_chat_queue.mutation_error_to_string error);
            release keeper_name
-         | Ok None -> release keeper_name
+         | Ok None ->
+           Preclaim_retry.clear ~base_path:dispatch_state.base_path ~keeper_name;
+           release keeper_name
          | Ok (Some observation) ->
            run_observed_turn
              dispatch_state
@@ -713,4 +774,8 @@ let run ~sw ~clock ~base_path ~handle_turn =
     Eio.Fiber.yield ();
     wake_loop ()
   in
-  wake_loop ()
+  Preclaim_retry.clear_base_path dispatch_state.base_path;
+  Fun.protect
+    ~finally:(fun () ->
+      Preclaim_retry.clear_base_path dispatch_state.base_path)
+    wake_loop

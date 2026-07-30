@@ -173,12 +173,7 @@ let check_terminal_snapshot ~label ~keeper_name ~receipt_id =
   check (label ^ " retains terminal receipt")
     (receipt_id_is_terminal ~keeper_name receipt_id)
 
-(* Tests own the transition-driven fiber explicitly and install the same queue
-   and admission wake fan-in as the production bootstrap. Production runs the
-   blocking loop inside its supervised subsystem boundary. Raising
-   from the switch body gives each test a structured teardown and, when a turn
-   is active, exercises the same cancellation path as server shutdown. *)
-let start_consumer ~sw ~clock ~base_path ~handle_turn =
+let install_transition_observers ~base_path =
   let canonical_base_path =
     Keeper_registry_types.canonical_base_path_exn base_path
   in
@@ -192,10 +187,19 @@ let start_consumer ~sw ~clock ~base_path ~handle_turn =
           if String.equal transition_base_path canonical_base_path
           then
             match transition with
-            | Keeper_turn_admission.Shutdown_rolled_back ->
-              Keeper_chat_consumer.notify_transition ~keeper_name
+            | Keeper_turn_admission.Shutdown_rolled_back
             | Keeper_turn_admission.Turn_released ->
-              Keeper_chat_consumer.notify_transition ~keeper_name));
+              Keeper_chat_consumer.notify_slot_transition
+                ~base_path:transition_base_path
+                ~keeper_name))
+
+(* Tests own the transition-driven fiber explicitly and install the same queue
+   and admission wake fan-in as the production bootstrap. Production runs the
+   blocking loop inside its supervised subsystem boundary. Raising
+   from the switch body gives each test a structured teardown and, when a turn
+   is active, exercises the same cancellation path as server shutdown. *)
+let start_consumer ~sw ~clock ~base_path ~handle_turn =
+  install_transition_observers ~base_path;
   let handle_admitted_turn
       ~sw
       ~keeper_name
@@ -656,6 +660,89 @@ let test_repeated_claim_failure_waits_for_explicit_wake () =
                | None -> false));
           check "the explicitly woken receipt runs exactly once" (!turns = 1)))
 
+let test_preclaim_failure_rearms_on_active_turn_release () =
+  Printf.printf
+    "Test: active turn release re-arms only a pre-claim failure\n%!";
+  with_env (fun ~base ~clock ->
+    match
+      enqueue_checked ~label:"pre-claim release enqueue" ~keeper_name
+        (discord_msg ~content:"retry after active turn release"
+           ~channel_id:"channel-preclaim-release"
+           ~user_id:"user-preclaim-release" ~timestamp:6.22)
+    with
+    | None -> ()
+    | Some accepted ->
+      let holder_started, resolve_holder_started = Eio.Promise.create () in
+      let release_holder, resolve_release_holder = Eio.Promise.create () in
+      let attempts = ref 0 in
+      let handle_turn
+          ~sw:_
+          ~keeper_name
+          ~receipt_ids:_
+          ~queued_message:_
+          ~on_admitted =
+        incr attempts;
+        if !attempts = 1
+        then
+          Keeper_chat_consumer.Failed
+            { kind = Keeper_chat_queue.Internal_error
+            ; detail = "synthetic pre-claim setup failure"
+            ; outcome_ref = None
+            }
+        else
+          match
+            Keeper_turn_admission.run_serialized
+              ~base_path:base
+              ~keeper_name
+              (fun () ->
+                 match on_admitted () with
+                 | Ok () ->
+                   Keeper_chat_consumer.Delivered
+                     { outcome_ref = "trace-preclaim-release#1" }
+                 | Error detail ->
+                   Keeper_chat_consumer.Failed
+                     { kind = Keeper_chat_queue.Internal_error
+                     ; detail
+                     ; outcome_ref = None
+                     })
+          with
+          | `Ran outcome -> outcome
+          | `Rejected rejection -> Keeper_chat_consumer.Deferred { rejection }
+      in
+      with_consumer_switch (fun sw ->
+        Eio.Fiber.fork ~sw (fun () ->
+          ignore
+            (Keeper_turn_admission.run_serialized
+               ~base_path:base
+               ~keeper_name
+               (fun () ->
+                  Eio.Promise.resolve resolve_holder_started ();
+                  Eio.Promise.await release_holder)
+             : [ `Ran of unit | `Rejected of Keeper_turn_admission.rejection ]));
+        check "active turn owns the slot before consumer preflight"
+          (await_promise ~clock ~seconds:5.0 holder_started);
+        install_transition_observers ~base_path:base;
+        Eio.Fiber.fork ~sw (fun () ->
+          Keeper_chat_consumer.run
+            ~sw
+            ~clock
+            ~base_path:base
+            ~handle_turn);
+        check "pre-claim setup failed exactly once before release"
+          (await_condition ~clock ~seconds:5.0 (fun () -> !attempts = 1));
+        Eio.Time.sleep clock 0.2;
+        check "pre-claim failure does not spin while the turn stays active"
+          (!attempts = 1);
+        Eio.Promise.resolve resolve_release_holder ();
+        check "the exact Pending receipt retries after the active turn releases"
+          (match
+             await_receipt ~clock ~seconds:5.0 ~keeper_name
+               ~receipt_id:accepted.receipt_id ~accept:is_delivered
+           with
+           | Some _ -> true
+           | None -> false));
+      check "the release produces exactly one follow-up attempt" (!attempts = 2))
+
 let test_busy_turn_hands_mutex_to_pending_receipt () =
   Printf.printf
     "Test: a busy turn hands its mutex to the exact pending Keeper lane\n%!";
@@ -1060,6 +1147,7 @@ let () =
   test_finalization_persistence_retry_does_not_redeliver ();
   test_claim_commit_uncertainty_retries_lone_receipt ();
   test_repeated_claim_failure_waits_for_explicit_wake ();
+  test_preclaim_failure_rearms_on_active_turn_release ();
   test_busy_turn_hands_mutex_to_pending_receipt ();
   test_consumer_cancellation_while_parked_keeps_pending ();
   test_stale_parked_observation_rearms_next_pending_receipt ();

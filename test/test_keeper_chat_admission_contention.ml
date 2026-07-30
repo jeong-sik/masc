@@ -84,8 +84,8 @@ let message content =
   }
 
 (* Wire the same transition observers the runtime installs. Durable queue
-   mutations wake the consumer; release and shutdown rollback also re-arm a
-   Pending receipt whose preflight ended before it parked on the mutex. *)
+   mutations wake the consumer; release and shutdown rollback re-arm only a
+   Pending receipt whose current attempt has not reached its exact claim. *)
 let install_observers ~base =
   let canonical = Keeper_registry_types.canonical_base_path_exn base in
   Keeper_chat_queue.set_transition_observer
@@ -100,7 +100,9 @@ let install_observers ~base =
             match transition with
             | Keeper_turn_admission.Shutdown_rolled_back
             | Keeper_turn_admission.Turn_released ->
-              Keeper_chat_consumer.notify_transition ~keeper_name
+              Keeper_chat_consumer.notify_slot_transition
+                ~base_path
+                ~keeper_name
           ))
 
 exception Budget_reached

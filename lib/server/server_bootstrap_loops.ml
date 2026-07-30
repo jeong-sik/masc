@@ -1649,16 +1649,17 @@ let start_keeper_loops_owned
                 Keeper_chat_broadcast.queue_changed ~keeper_name ~revision ();
                 Keeper_chat_consumer.notify_transition ~keeper_name));
         (* A queued turn can fail preflight before it parks on the admission
-           mutex. Both release and shutdown rollback therefore re-arm the
-           still-Pending receipt. [notify_transition] coalesces duplicate
-           wakes for turns that were already handed the mutex directly. *)
+           mutex. Release and shutdown rollback re-arm only a consumer attempt
+           that has not reached its exact claim callback. *)
         Keeper_turn_admission.set_slot_transition_observer
           (Some
-             (fun ~base_path:_ ~keeper_name ~transition ->
+             (fun ~base_path ~keeper_name ~transition ->
                 match transition with
                 | Keeper_turn_admission.Shutdown_rolled_back
                 | Keeper_turn_admission.Turn_released ->
-                  Keeper_chat_consumer.notify_transition ~keeper_name
+                  Keeper_chat_consumer.notify_slot_transition
+                    ~base_path
+                    ~keeper_name
                 ));
         Ok ()
       with

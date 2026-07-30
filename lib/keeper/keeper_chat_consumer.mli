@@ -15,6 +15,13 @@
     running schedules exactly one follow-up inspection. *)
 val notify_transition : keeper_name:string -> unit
 
+(** Wake a Pending receipt after a turn-slot release or shutdown rollback only
+    when its current consumer attempt ended before invoking the exact claim
+    callback. The registration is one-shot and is cleared before every claim,
+    so a claim persistence failure cannot re-arm itself through its own slot
+    release. *)
+val notify_slot_transition : base_path:string -> keeper_name:string -> unit
+
 type persistence_blocked_status =
   { lease_id : string
   ; error : Keeper_chat_queue.mutation_error

@@ -62,8 +62,7 @@ end
     [Autonomous_activity] is a Keeper-initiated work result projected for
     operator visibility. It renders in chat but is not a reply to a pending
     user row and is not quoted back into direct-conversation context.
-    Persisted as ["kind"]; the field is absent for utterances, so rows
-    written before it existed read unchanged. *)
+    Persisted as a required ["kind"] field. *)
 module Row_kind : sig
   type t =
     | Utterance
@@ -188,11 +187,8 @@ type chat_message = {
           those).  Malformed persisted entries are reported as
           persistence read drops and skipped; the row stays valid. *)
   kind : Row_kind.t;
-      (** Declared by the writer at append.  Absent persisted field
-          (every row written before it existed) reads as [Utterance];
-          an unknown label is reported as a persistence read drop and
-          reads as [Utterance] — the conservative arm: the row renders
-          and advances the watermark like any reply. *)
+      (** Declared by the writer at append. A missing or unknown persisted
+          label is reported as an invalid payload and the row is rejected. *)
   turn_ref : Ids.Turn_ref.t option;
       (** RFC-0233 §7: ["<trace_id>#<absolute_turn>"] join key for the turn
           that produced this row.  Stamped by {!append_turn} /

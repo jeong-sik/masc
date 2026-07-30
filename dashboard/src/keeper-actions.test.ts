@@ -2201,6 +2201,47 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(keeperActionErrors.value.echo).toContain('network error')
   })
 
+  it('does not reconcile a transport failure as a successful assistant reply', async () => {
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: { onEvent: (event: KeeperChatStreamEvent) => void },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_QUEUE_REQUEST',
+        value: { request_id: 'kmsg_echo_1', status: 'queued' },
+      })
+      throw new TypeError('network error')
+    })
+    fetchKeeperChatHistory.mockResolvedValue([
+      {
+        role: 'user',
+        content: '진행 상황?',
+        ts: 1_781_528_918,
+        kind: 'utterance',
+        delivery_key: { kind: 'direct_request', request_id: 'kmsg_echo_1' },
+      },
+      {
+        role: 'assistant',
+        content: 'Keeper request failed: provider unavailable',
+        ts: 1_781_528_920,
+        kind: 'transport_failure',
+        delivery_key: { kind: 'direct_request', request_id: 'kmsg_echo_1' },
+      },
+    ])
+
+    await expect(sendKeeperThreadMessage('echo', '진행 상황?'))
+      .rejects.toThrow('network error')
+
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.some(entry => (
+      entry.role === 'assistant'
+      && entry.delivery === 'transport_failure'
+    ))).toBe(false)
+    expect(keeperActionErrors.value.echo).toContain('network error')
+  })
+
   it('resumes a pending request from storage and finalizes the transcript', async () => {
     upsertPendingKeeperChatRequest({
       requestId: 'kmsg_echo_1',

@@ -104,15 +104,21 @@ let test_load_records_malformed_row_drops () =
                (`Assoc
                   [ ("id", `String "valid-user")
                   ; ("role", `String "user");
+                    ("kind", `String "utterance");
                     ("content", `String "hello");
                     ("ts", `Float 1.0);
                   ]);
              "{not-json";
-             Yojson.Safe.to_string (`Assoc [("role", `String "assistant")]);
+             Yojson.Safe.to_string
+               (`Assoc
+                  [ ("role", `String "assistant")
+                  ; ("kind", `String "utterance")
+                  ]);
              Yojson.Safe.to_string
                (`Assoc
                   [ ("id", `String "valid-assistant")
                   ; ("role", `String "assistant");
+                    ("kind", `String "utterance");
                     ("content", `String "world");
                     ("ts", `Float 2.0);
                   ]);
@@ -232,8 +238,8 @@ let test_missing_id_rows_are_rejected () =
       let keeper_name = "keeper-chat-missing-id" in
       let path = chat_path ~base_dir ~keeper_name in
       write_file path
-        ({|{"role":"user","content":"hello","ts":1.0}|} ^ "\n"
-        ^ {|{"role":"assistant","content":"world","ts":1.0}|} ^ "\n");
+        ({|{"role":"user","kind":"utterance","content":"hello","ts":1.0}|} ^ "\n"
+        ^ {|{"role":"assistant","kind":"utterance","content":"world","ts":1.0}|} ^ "\n");
       Alcotest.(check int) "rows without current id are dropped" 0
         (K.load ~base_dir ~keeper_name |> List.length))
 
@@ -530,6 +536,7 @@ let test_load_redacts_raw_persisted_secret_rows () =
            (`Assoc
               [ ("id", `String "raw-secret-row")
               ; ("role", `String "assistant");
+                ("kind", `String "utterance");
                 ("content", `String ("old row " ^ secret));
                 ("ts", `Float 1.0) ])
          ^ "\n");
@@ -708,7 +715,7 @@ let test_unknown_speaker_authority_reported_not_guessed () =
       let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
-        ({|{"id":"unknown-authority","role":"user","content":"hi","ts":1.0,"speaker_id":"x","speaker_authority":"admin"}|}
+        ({|{"id":"unknown-authority","role":"user","kind":"utterance","content":"hi","ts":1.0,"speaker_id":"x","speaker_authority":"admin"}|}
         ^ "\n");
       (match K.load ~base_dir ~keeper_name with
        | [ user ] ->
@@ -733,9 +740,9 @@ let test_unknown_role_row_dropped () =
       let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
-        ({|{"id":"role-user","role":"user","content":"hi","ts":1.0}|} ^ "\n"
-        ^ {|{"id":"role-system","role":"system","content":"injected","ts":2.0}|} ^ "\n"
-        ^ {|{"id":"role-assistant","role":"assistant","content":"done","ts":3.0}|} ^ "\n");
+        ({|{"id":"role-user","role":"user","kind":"utterance","content":"hi","ts":1.0}|} ^ "\n"
+        ^ {|{"id":"role-system","role":"system","kind":"utterance","content":"injected","ts":2.0}|} ^ "\n"
+        ^ {|{"id":"role-assistant","role":"assistant","kind":"utterance","content":"done","ts":3.0}|} ^ "\n");
       let messages = K.load ~base_dir ~keeper_name in
       Alcotest.(check (list string)) "unknown role row dropped"
         [ "user"; "assistant" ] (roles messages);
@@ -753,9 +760,9 @@ let test_tool_row_missing_name_dropped () =
       let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
-        ({|{"id":"tool-name-user","role":"user","content":"hi","ts":1.0}|} ^ "\n"
-        ^ {|{"id":"tool-name-missing","role":"tool","content":"{}","ts":1.0,"tool_call_id":"toolu_9"}|} ^ "\n"
-        ^ {|{"id":"tool-name-assistant","role":"assistant","content":"done","ts":1.0}|} ^ "\n");
+        ({|{"id":"tool-name-user","role":"user","kind":"utterance","content":"hi","ts":1.0}|} ^ "\n"
+        ^ {|{"id":"tool-name-missing","role":"tool","kind":"utterance","content":"{}","ts":1.0,"tool_call_id":"toolu_9"}|} ^ "\n"
+        ^ {|{"id":"tool-name-assistant","role":"assistant","kind":"utterance","content":"done","ts":1.0}|} ^ "\n");
       let messages = K.load ~base_dir ~keeper_name in
       Alcotest.(check (list string)) "nameless tool row dropped"
         [ "user"; "assistant" ] (roles messages);
@@ -802,10 +809,10 @@ let test_orphan_leading_tool_lines_trimmed () =
       let keeper_name = "keeper-chat-orphan" in
       let path = chat_path ~base_dir ~keeper_name in
       write_file path
-        ({|{"id":"orphan-tool","role":"tool","content":"{}","ts":1.0,"tool_call_id":"t0","tool_call_name":"Read"}|}
+        ({|{"id":"orphan-tool","role":"tool","kind":"utterance","content":"{}","ts":1.0,"tool_call_id":"t0","tool_call_name":"Read"}|}
         ^ "\n"
-        ^ {|{"id":"orphan-user","role":"user","content":"hi","ts":2.0}|} ^ "\n"
-        ^ {|{"id":"orphan-assistant","role":"assistant","content":"yo","ts":2.0}|} ^ "\n");
+        ^ {|{"id":"orphan-user","role":"user","kind":"utterance","content":"hi","ts":2.0}|} ^ "\n"
+        ^ {|{"id":"orphan-assistant","role":"assistant","kind":"utterance","content":"yo","ts":2.0}|} ^ "\n");
       let messages = K.load ~base_dir ~keeper_name in
       Alcotest.(check (list string)) "leading orphan tool trimmed"
         [ "user"; "assistant" ] (roles messages))
@@ -902,6 +909,7 @@ let test_tail_bounded_load_matches_full_scan_window () =
             (`Assoc
                [ ("id", `String (Printf.sprintf "tail-%04d" i))
                ; ("role", `String role);
+                 ("kind", `String "utterance");
                  ("content", `String (Printf.sprintf "msg-%04d %s" i padding));
                  ("ts", `Float (float_of_int i));
                ])
@@ -938,6 +946,7 @@ let write_numbered_lane ~path ~total ~pad_bytes =
          (`Assoc
             [ ("id", `String (Printf.sprintf "page-%04d" i))
             ; ("role", `String (if i mod 2 = 1 then "user" else "assistant"));
+              ("kind", `String "utterance");
               ("content", `String (Printf.sprintf "msg-%04d %s" i padding));
               ("ts", `Float (float_of_int i));
             ]));
@@ -1075,10 +1084,7 @@ let test_autonomous_activity_is_idempotent_and_not_direct_reply () =
       | messages ->
         Alcotest.failf "expected 1 row, got %d" (List.length messages))
 
-let test_kind_absent_reads_utterance () =
-  (* Every row written before the [kind] field existed is an utterance;
-     the writer also omits the field for utterances, so ordinary rows
-     stay byte-identical to the pre-[kind] format. *)
+let test_utterance_kind_is_explicit () =
   let base_dir = temp_base_path "keeper-chat-store-kind-absent" in
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
@@ -1088,8 +1094,8 @@ let test_kind_absent_reads_utterance () =
         ~user_content:"hello" ~user_attachments:[]
         ~assistant_content:"world" ();
       let raw = read_file (chat_path ~base_dir ~keeper_name) in
-      Alcotest.(check bool) "utterance rows carry no kind field" false
-        (contains_substring raw {|"kind"|});
+      Alcotest.(check bool) "utterance rows carry explicit kind" true
+        (contains_substring raw {|"kind":"utterance"|});
       match K.load ~base_dir ~keeper_name with
       | [ user; asst ] ->
           Alcotest.(check bool) "user reads as utterance" true
@@ -1099,7 +1105,24 @@ let test_kind_absent_reads_utterance () =
       | messages ->
           Alcotest.failf "expected 2 rows, got %d" (List.length messages))
 
-let test_unknown_kind_reported_reads_utterance () =
+let test_missing_kind_is_reported_and_rejected () =
+  let base_dir = temp_base_path "keeper-chat-store-kind-missing" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-kind-missing" in
+      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let before = drop_value invalid_payload in
+      let path = chat_path ~base_dir ~keeper_name in
+      write_file path
+        ({|{"id":"missing-kind","role":"assistant","content":"hi","ts":1.0}|}
+        ^ "\n");
+      Alcotest.(check int) "missing kind row rejected" 0
+        (K.load ~base_dir ~keeper_name |> List.length);
+      Alcotest.(check (float 0.001)) "missing kind reported" 1.0
+        (drop_value invalid_payload -. before))
+
+let test_unknown_kind_is_reported_and_rejected () =
   let base_dir = temp_base_path "keeper-chat-store-kind-unknown" in
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
@@ -1111,15 +1134,10 @@ let test_unknown_kind_reported_reads_utterance () =
       write_file path
         ({|{"id":"unknown-kind","role":"assistant","content":"hi","ts":1.0,"kind":"weird"}|}
         ^ "\n");
-      match K.load ~base_dir ~keeper_name with
-      | [ asst ] ->
-          Alcotest.(check bool)
-            "unknown kind reads as utterance (conservative arm)" true
-            (K.Row_kind.equal asst.kind K.Row_kind.Utterance);
-          Alcotest.(check (float 0.001)) "unknown kind reported" 1.0
-            (drop_value invalid_payload -. before)
-      | messages ->
-          Alcotest.failf "expected 1 row, got %d" (List.length messages))
+      Alcotest.(check int) "unknown kind row rejected" 0
+        (K.load ~base_dir ~keeper_name |> List.length);
+      Alcotest.(check (float 0.001)) "unknown kind reported" 1.0
+        (drop_value invalid_payload -. before))
 
 let audio_path ~base_dir token =
   Filename.concat
@@ -1180,7 +1198,7 @@ let test_audio_clip_expired_persists_roundtrip () =
       let keeper_name = "keeper-chat-audio-expired-rt" in
       let path = chat_path ~base_dir ~keeper_name in
       write_file path
-        ({|{"id":"audio-redact","role":"assistant","content":"hello","ts":1.0,"audio":{|}
+        ({|{"id":"audio-redact","role":"assistant","kind":"utterance","content":"hello","ts":1.0,"audio":{|}
         ^ {|"token":"voice-token-rt","mime":"audio/mpeg","message_text":"hello","expired":true}|}
         ^ "}\n");
       match K.load ~base_dir ~keeper_name with
@@ -1319,7 +1337,7 @@ let test_blocks_roundtrip_and_drop_malformed () =
       let keeper_name = "keeper-chat-blocks-rt" in
       let path = chat_path ~base_dir ~keeper_name in
       write_file path
-        ({|{"id":"block-redact","role":"assistant","content":"hello","ts":1.0,"blocks":[{|}
+        ({|{"id":"block-redact","role":"assistant","kind":"utterance","content":"hello","ts":1.0,"blocks":[{|}
         ^ {|"t":"p","html":"hello"},{"t":"image","src":"https://x.com/a.png","cap":"a"},{|}
         ^ {|"t":"link","url":"https://x.com","title":"x.com","meta":"x.com"},{|}
         ^ {|"t":"unknown","x":1}]}|}
@@ -1542,6 +1560,7 @@ let test_load_redacts_raw_persisted_blocks_and_audio () =
         `Assoc
           [ ("id", `String "raw-rich-secret-row")
           ; ("role", `String "assistant")
+          ; ("kind", `String "utterance")
           ; ("content", `String ("content " ^ secret))
           ; ("ts", `Float 1.0)
           ; ("audio", audio_json)
@@ -1942,7 +1961,7 @@ let test_malformed_stream_lifecycle_reads_none () =
       let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
-        ({|{"id":"bad-lifecycle","role":"assistant","content":"x","ts":1.0,"turn_ref":"trace-life#7","stream_lifecycle":["RUN_STARTED","NOT_A_REAL_EVENT"]}|}
+        ({|{"id":"bad-lifecycle","role":"assistant","kind":"utterance","content":"x","ts":1.0,"turn_ref":"trace-life#7","stream_lifecycle":["RUN_STARTED","NOT_A_REAL_EVENT"]}|}
         ^ "\n");
       (match K.load ~base_dir ~keeper_name with
        | [ m ] ->
@@ -1966,7 +1985,7 @@ let test_turn_ref_malformed_reads_none () =
       let keeper_name = "keeper-chat-turnref-bad" in
       let path = chat_path ~base_dir ~keeper_name in
       write_file path
-        ({|{"id":"bad-turn-ref","role":"assistant","content":"x","ts":1.0,"turn_ref":"no-separator"}|}
+        ({|{"id":"bad-turn-ref","role":"assistant","kind":"utterance","content":"x","ts":1.0,"turn_ref":"no-separator"}|}
         ^ "\n");
       match K.load ~base_dir ~keeper_name with
       | [ m ] ->
@@ -2080,7 +2099,7 @@ let test_delivery_key_malformed_reads_none () =
       in
       let before = drop_value invalid_payload in
       write_file path
-        ({|{"id":"bad-delivery-key","role":"user","content":"x","ts":1.0,"delivery_key":{"kind":"not_a_kind","request_id":"kmsg-1"}}|}
+        ({|{"id":"bad-delivery-key","role":"user","kind":"utterance","content":"x","ts":1.0,"delivery_key":{"kind":"not_a_kind","request_id":"kmsg-1"}}|}
         ^ "\n");
       (match K.load ~base_dir ~keeper_name with
        | [ m ] ->
@@ -2225,10 +2244,12 @@ let () =
             "autonomous activity is idempotent and not a direct reply"
             `Quick
             test_autonomous_activity_is_idempotent_and_not_direct_reply;
-          Alcotest.test_case "absent kind reads utterance" `Quick
-            test_kind_absent_reads_utterance;
-          Alcotest.test_case "unknown kind reported, reads utterance" `Quick
-            test_unknown_kind_reported_reads_utterance;
+          Alcotest.test_case "utterance kind is explicit" `Quick
+            test_utterance_kind_is_explicit;
+          Alcotest.test_case "missing kind is reported and rejected" `Quick
+            test_missing_kind_is_reported_and_rejected;
+          Alcotest.test_case "unknown kind is reported and rejected" `Quick
+            test_unknown_kind_is_reported_and_rejected;
         ] );
       ( "speaker_identity",
         [

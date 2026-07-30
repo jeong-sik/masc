@@ -104,12 +104,14 @@ let successful_surface_post (detail : Keeper_agent_run.tool_call_detail) =
 
 let should_project_autonomous_chat
       ~response_text
-      ~has_tool_calls
+      ~turn_effect_record
       ~surface_already_persisted
   =
-  String.trim response_text <> ""
-  && has_tool_calls
-  && not surface_already_persisted
+  match turn_effect_record with
+  | Keeper_run_prompt.Inert_autonomous_turn -> false
+  | Keeper_run_prompt.Meaningful_turn ->
+      String.trim response_text <> ""
+      && not surface_already_persisted
 ;;
 
 let project_autonomous_chat
@@ -118,13 +120,30 @@ let project_autonomous_chat
       ~keeper_turn_id
       (result : Keeper_agent_run.run_result)
   =
+  let io =
+    Keeper_autonomous_chat_projection.production_io
+      ~base_dir:config.Workspace.base_path
+      ~keeper_name:meta.name
+  in
+  let report_projection_issues issues =
+    List.iter
+      (fun issue ->
+         Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
+           ~config
+           ~keeper_name:meta.name
+           ~side_effect:"autonomous chat projection"
+           (Keeper_autonomous_chat_projection.issue_to_string issue))
+      issues
+  in
+  Keeper_autonomous_chat_projection.retry_pending io
+  |> report_projection_issues;
   let surface_already_persisted =
     List.exists successful_surface_post result.tool_calls
   in
   if
     should_project_autonomous_chat
       ~response_text:result.response_text
-      ~has_tool_calls:(result.tool_calls <> [])
+      ~turn_effect_record:result.turn_effect_record
       ~surface_already_persisted
   then (
     let redaction =
@@ -140,34 +159,10 @@ let project_autonomous_chat
         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
         ~absolute_turn:keeper_turn_id
     in
-    let delivery_key =
-      Keeper_chat_delivery_identity.Autonomous_turn turn_ref
-    in
-    match
-      Keeper_chat_store.append_assistant_message_once
-        ~base_dir:config.Workspace.base_path
-        ~keeper_name:meta.name
-        ~delivery_key
-        ~content:response_text
-        ~surface:Surface_ref.Agent
-        ~assistant_kind:Keeper_chat_store.Row_kind.Autonomous_activity
-        ~blocks:(Keeper_chat_blocks.parse_text_to_blocks response_text)
-        ~turn_ref
-        ()
-    with
-    | Ok (Keeper_chat_store.Appended _) ->
-      Keeper_chat_broadcast.chat_appended
-        ~keeper_name:meta.name
-        ~source:(Surface_ref.lane_label Surface_ref.Agent)
-        ~content:response_text
-        ()
-    | Ok (Keeper_chat_store.Already_present _) -> ()
-    | Error detail ->
-      Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
-        ~config
-        ~keeper_name:meta.name
-        ~side_effect:"autonomous chat projection"
-        detail)
+    Keeper_autonomous_chat_projection.record_and_project
+      io
+      { keeper_name = meta.name; turn_ref; content = response_text }
+    |> report_projection_issues)
 ;;
 
 let append_metrics_snapshot

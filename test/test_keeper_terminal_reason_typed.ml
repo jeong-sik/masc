@@ -891,6 +891,7 @@ let () =
     ; usage = Masc.Inference_utils.zero_usage
     ; usage_reported = true
     ; tool_calls = []
+    ; turn_effect_record = Masc.Keeper_run_prompt.Meaningful_turn
     ; completion_contract_result = R.Completion_tool_execution_observed
     ; operator_disposition = None
     ; checkpoint = None

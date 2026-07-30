@@ -31,7 +31,7 @@ module For_testing : sig
 
   val should_project_autonomous_chat
     :  response_text:string
-    -> has_tool_calls:bool
+    -> turn_effect_record:Keeper_run_prompt.turn_effect_record
     -> surface_already_persisted:bool
     -> bool
 

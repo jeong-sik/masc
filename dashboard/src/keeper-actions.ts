@@ -444,6 +444,7 @@ function hasServerAssistantForRequest(
   const expectedRequestId = requestId.trim()
   return expectedRequestId !== '' && entries.some(entry => (
     entry.role === 'assistant'
+    && entry.delivery === 'history'
     && entry.requestId?.trim() === expectedRequestId
   ))
 }

@@ -4,11 +4,13 @@
     Lines are append-only with timestamps.
 
     Line format:
-    {v {"id":"msg-...","role":"user","content":"hello","ts":1774000000.0} v}
+    {v {"id":"msg-...","role":"user","kind":"utterance",
+        "content":"hello","ts":1774000000.0} v}
 
     Tool-call lines (persisted between the user and assistant lines of a
     turn) carry the executed tool name and accumulated arguments:
-    {v {"id":"msg-...","role":"tool","content":"{\"path\":\"x\"}","ts":...,
+    {v {"id":"msg-...","role":"tool","kind":"utterance",
+        "content":"{\"path\":\"x\"}","ts":...,
         "tool_call_id":"toolu_1","tool_call_name":"Read",
         "surface":{"kind":"dashboard"}} v}
 
@@ -95,8 +97,7 @@ end
    [Autonomous_activity] is a Keeper-initiated work result shown to the
    operator, not a reply to any pending user row. Readers branch on the type:
    only utterances advance the lane watermark or enter direct-conversation
-   context. On disk the field is ["kind"], absent for utterances so
-   pre-existing rows read unchanged. *)
+   context. On disk the field is the required ["kind"]. *)
 module Row_kind = struct
   type t =
     | Utterance
@@ -216,11 +217,8 @@ type chat_message = {
          written before P4 lack the field and read as []; the offline
          backfill tool stamps them. *)
   kind : Row_kind.t;
-      (* Declared by the writer at append.  Absent field (every row
-         written before this field existed) reads as [Utterance]; an
-         unknown label is reported as a persistence read drop and the
-         row reads as [Utterance] (the conservative arm: it renders and
-         advances the watermark like any reply). *)
+      (* Declared by the writer at append. Missing and unknown labels are
+         reported as invalid payloads and the row is rejected. *)
   turn_ref : Ids.Turn_ref.t option;
       (* RFC-0233 §7: "<trace_id>#<absolute_turn>" join key for the turn
          that produced this row.  Stamped by [append_turn] /
@@ -572,14 +570,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
         ) atts in
         [("attachments", `List att_json)]
   in
-  (* Utterance is the absent-field default so rows written before the
-     [kind] field existed and ordinary rows stay byte-identical. *)
-  let kind_field =
-    match kind with
-    | Row_kind.Utterance -> []
-    | Row_kind.Transport_failure | Row_kind.Autonomous_activity ->
-        [ ("kind", `String (Row_kind.to_label kind)) ]
-  in
+  let kind_field = [ ("kind", `String (Row_kind.to_label kind)) ] in
   let all_fields =
     base_fields
     @ attachment_fields
@@ -1490,22 +1481,22 @@ let parse_line ~file_path (line : string) : chat_message option =
               None)
     in
     let kind =
-      (* Absent field = every row written before [kind] existed; all of
-         those are utterances. Unknown labels are surfaced and read as
-         [Utterance] — the conservative arm (renders and advances the
-         watermark like any reply) rather than silently resurrecting a
-         pending user line. *)
       match opt_string "kind" with
-      | None -> Row_kind.Utterance
+      | None ->
+          report_persistence_read_drop
+            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~path:file_path
+            ~detail:"chat row missing kind";
+          None
       | Some label -> (
           match Row_kind.of_label label with
-          | Some kind -> kind
+          | Some kind -> Some kind
           | None ->
               report_persistence_read_drop
                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
                 ~path:file_path
                 ~detail:(Printf.sprintf "unknown chat row kind %S" label);
-              Row_kind.Utterance)
+              None)
     in
     let turn_ref =
       (* RFC-0233 §7: parse the join key; a malformed value is surfaced as
@@ -1558,8 +1549,9 @@ let parse_line ~file_path (line : string) : chat_message option =
         ~detail:"chat row missing role and readable text/structured payload";
       None)
     else
-      match Role.of_label role_label with
-      | None ->
+      match kind, Role.of_label role_label with
+      | None, _ -> None
+      | Some _, None ->
           (* RFC-0232 P1: an unknown role cannot participate in any lane
              semantics (watermark, pending, rendering); surface it
              instead of carrying an untyped row. *)
@@ -1568,13 +1560,13 @@ let parse_line ~file_path (line : string) : chat_message option =
             ~path:file_path
             ~detail:(Printf.sprintf "unknown chat row role %S" role_label);
           None
-      | Some Role.Tool when tool_call_name = None ->
+      | Some _, Some Role.Tool when tool_call_name = None ->
           report_persistence_read_drop
             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
             ~path:file_path
             ~detail:"tool chat row missing non-empty tool_call_name";
           None
-      | Some role ->
+      | Some kind, Some role ->
           (match opt_string "id" with
            | None ->
                report_persistence_read_drop
@@ -1917,13 +1909,7 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
             ] @ (match m.ts with
                  | Some t -> [("ts", `Float t)]
                  | None -> [])
-              (* Dashboard history: surface the writer-declared kind for
-                 non-utterance rows so a reload can tell a transport
-                 failure apart from keeper speech. *)
-              @ (match m.kind with
-                 | Row_kind.Utterance -> []
-                 | Row_kind.Transport_failure | Row_kind.Autonomous_activity ->
-                     [ ("kind", `String (Row_kind.to_label m.kind)) ])
+              @ [ ("kind", `String (Row_kind.to_label m.kind)) ]
               @ opt_string_field "tool_call_id" m.tool_call_id
               @ opt_string_field "tool_call_name" m.tool_call_name
               @ (match m.surface with
@@ -2008,14 +1994,7 @@ let transcript_line_to_json (m : chat_message) : Yojson.Safe.t =
        ("content", `String m.content);
      ]
     @ (match m.ts with Some t -> [ ("ts", `Float t) ] | None -> [])
-      (* Surface the writer-declared kind so the inspector can tell a
-         transport failure apart from a real keeper utterance, exactly as
-         the chat history endpoint does — a failure marker is never quoted
-         back as the keeper's own words. *)
-    @ (match m.kind with
-       | Row_kind.Utterance -> []
-       | Row_kind.Transport_failure | Row_kind.Autonomous_activity ->
-           [ ("kind", `String (Row_kind.to_label m.kind)) ]))
+    @ [ ("kind", `String (Row_kind.to_label m.kind)) ])
 
 let turn_transcript_to_json ~keeper ~turn_ref (t : turn_transcript) :
     Yojson.Safe.t =

@@ -80,6 +80,7 @@ type run_result =
   ; usage : Agent_sdk.Types.api_usage
   ; usage_reported : bool
   ; tool_calls : tool_call_detail list
+  ; turn_effect_record : Keeper_run_prompt.turn_effect_record
   ; completion_contract_result : Keeper_execution_receipt.completion_contract_result
   ; operator_disposition : operator_disposition option
   ; checkpoint : Agent_sdk.Checkpoint.t option

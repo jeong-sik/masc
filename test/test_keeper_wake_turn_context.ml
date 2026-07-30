@@ -15,6 +15,7 @@ open Alcotest
 module WO = Masc.Keeper_world_observation
 module Prompt = Masc.Keeper_unified_prompt
 module Turn = Masc.Keeper_turn
+module ACP = Masc.Keeper_autonomous_chat_projection
 
 let has_repo_prompts root =
   Sys.file_exists (Filename.concat root "config/prompts/keeper.unified.system.md")
@@ -391,30 +392,84 @@ let test_bootstrap_stimulus_keeps_reactive_post_action () =
     Alcotest.fail
       "bootstrap stimulus must not be reclassified from reactive to scheduled"
 
-let test_autonomous_chat_projection_requires_work_evidence () =
+let test_autonomous_chat_projection_uses_typed_turn_effect () =
   let should_project =
     Masc.Keeper_unified_turn_success.For_testing.should_project_autonomous_chat
   in
-  check bool "tool-backed result projects" true
+  check bool "meaningful result projects" true
     (should_project
        ~response_text:"Implemented task-119."
-       ~has_tool_calls:true
+       ~turn_effect_record:Masc.Keeper_run_prompt.Meaningful_turn
        ~surface_already_persisted:false);
-  check bool "idle prose does not project" false
+  check bool "typed inert turn does not project" false
     (should_project
        ~response_text:"No actionable work."
-       ~has_tool_calls:false
+       ~turn_effect_record:Masc.Keeper_run_prompt.Inert_autonomous_turn
        ~surface_already_persisted:false);
   check bool "surface post is not duplicated" false
     (should_project
        ~response_text:"Already posted."
-       ~has_tool_calls:true
+       ~turn_effect_record:Masc.Keeper_run_prompt.Meaningful_turn
        ~surface_already_persisted:true);
-  check bool "blank tool result does not invent speech" false
+  check bool "blank meaningful result does not invent speech" false
     (should_project
        ~response_text:" "
-       ~has_tool_calls:true
+       ~turn_effect_record:Masc.Keeper_run_prompt.Meaningful_turn
        ~surface_already_persisted:false)
+
+let test_autonomous_chat_projection_retries_durable_intent () =
+  let intent : ACP.intent =
+    { keeper_name = "echo"
+    ; turn_ref =
+        Ids.Turn_ref.make ~trace_id:"projection-retry" ~absolute_turn:17
+    ; content = "Implemented task-119."
+    }
+  in
+  let pending = ref [] in
+  let fail_append = ref true in
+  let events = ref [] in
+  let record event = events := event :: !events in
+  let io : ACP.io =
+    { load_pending =
+        (fun () ->
+           record "load";
+           Ok !pending)
+    ; persist =
+        (fun stored ->
+           record "persist";
+           pending := [ stored ];
+           Ok ())
+    ; append =
+        (fun _ ->
+           if !fail_append
+           then (
+             record "append_failed";
+             Error "chat unavailable")
+           else (
+             record "append";
+             Ok ACP.Appended))
+    ; retire =
+        (fun _ ->
+           record "retire";
+           pending := [];
+           Ok ())
+    ; broadcast = (fun _ -> record "broadcast")
+    }
+  in
+  (match ACP.record_and_project io intent with
+   | [ { stage = ACP.Append_chat; _ } ] -> ()
+   | issues ->
+     failf "expected one append issue, got %d" (List.length issues));
+  check int "failed append keeps one durable intent" 1 (List.length !pending);
+  check (list string) "intent is durable before first append"
+    [ "persist"; "append_failed" ]
+    (List.rev !events);
+  fail_append := false;
+  check (list string) "retry succeeds" [] (ACP.retry_pending io |> List.map ACP.issue_to_string);
+  check int "successful retry retires intent" 0 (List.length !pending);
+  check (list string) "retry appends once before retirement"
+    [ "persist"; "append_failed"; "load"; "append"; "broadcast"; "retire" ]
+    (List.rev !events)
 
 let test_preview_does_not_invent_wake_reason () =
   let preview_meta =
@@ -556,8 +611,10 @@ let () =
             test_threaded_stimulus_decision_renders_wake_reason;
           test_case "bootstrap keeps reactive post-action" `Quick
             test_bootstrap_stimulus_keeps_reactive_post_action;
-          test_case "chat projection requires work evidence" `Quick
-            test_autonomous_chat_projection_requires_work_evidence;
+          test_case "chat projection uses typed turn effect" `Quick
+            test_autonomous_chat_projection_uses_typed_turn_effect;
+          test_case "chat projection retries durable intent" `Quick
+            test_autonomous_chat_projection_retries_durable_intent;
           test_case "preview invents no wake reason" `Quick
             test_preview_does_not_invent_wake_reason;
         ] );

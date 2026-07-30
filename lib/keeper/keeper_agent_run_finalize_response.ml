@@ -483,6 +483,7 @@ let finalize
       ; usage
       ; usage_reported = Option.is_some result.response.usage
       ; tool_calls = List.rev acc.tool_calls
+      ; turn_effect_record
       ; completion_contract_result
       ; operator_disposition = None
       ; checkpoint = saved_checkpoint

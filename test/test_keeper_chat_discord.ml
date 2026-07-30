@@ -236,7 +236,8 @@ let test_error_reply_callback_once () =
   check_single_network_error "error POST failure" "error post failed" outcomes
 
 let test_external_effect_status_replaces_assistant_preface () =
-  let sends = ref [] in
+  let posts = ref [] in
+  let edits = ref [] in
   let outcomes =
     run_adapter
       [ Masc.Keeper_chat_events.Run_started
@@ -246,18 +247,22 @@ let test_external_effect_status_replaces_assistant_preface () =
           { kind = Masc.Keeper_chat_blocks.External_effect_pending }
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-status" }
       ]
-      ~post_message:(fun ~content:_ ->
-        fail "unstable preface must not be posted")
-      ~edit_message:(fun ~message_id:_ ~content:_ ->
-        fail "no streaming message exists")
-      ~send_message:(fun ~content ->
-        sends := content :: !sends;
+      ~post_message:(fun ~content ->
+        posts := content :: !posts;
+        Ok "status-message")
+      ~edit_message:(fun ~message_id ~content ->
+        check string "typed status edits the streaming message"
+          "status-message" message_id;
+        edits := content :: !edits;
         Ok ())
+      ~send_message:(fun ~content:_ ->
+        fail "typed status must replace the existing streaming message")
   in
   check_single_ok "typed status terminal result" outcomes;
-  check (list string) "only typed status is delivered"
+  check int "streaming preface is posted once" 1 (List.length !posts);
+  check (list string) "typed status is the terminal message"
     [ "승인 대기: 외부 작업을 실행하기 전에 확인이 필요합니다." ]
-    (List.rev !sends)
+    (List.rev !edits)
 
 let () =
   run "keeper_chat_discord"

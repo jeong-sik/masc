@@ -488,6 +488,7 @@ let run_observed_turn state ~sw ~clock ~handle_turn ~keeper_name observation =
          the lane quarantined when that retry also has uncertain durability.
          Reconcile the persistence state once more, but do not lease a third
          time in this turn. A later explicit wake owns the next attempt. *)
+      (* See [reconcile_claim_failure]: it logs errors before this returns the original. *)
       ignore (reconcile_claim_failure ~keeper_name error : (unit, _) result);
       Error (`Failed error)
   in

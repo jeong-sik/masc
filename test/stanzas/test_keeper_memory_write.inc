@@ -1,4 +1,4 @@
-; Per-file dune stanza for the [Agent_tool_memory_runtime.keeper_memory_write_json]
+; Per-file dune stanza for the keeper Memory write runtime
 ; validation suite (RFC-0035 P4). Lives here per
 ; test/stanzas/README.md to avoid the conflict-runtime hotspot
 ; in the legacy grouped (tests ...) stanza.

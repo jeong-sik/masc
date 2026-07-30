@@ -30,9 +30,12 @@ slice의 `source_turn=0`을 원본 전체 메시지 0번과 잘못 대조하던 
 불일치는 수정했지만, 저장되는 provenance는 여전히 prompt-local turn과 current
 trace를 사용하므로 canonical TurnRef가 아니다. 파일 I/O는 production entrypoint마다
 `config.base_path`에서 한 번 해석한 `keepers_dir`로 통일하고
-`episode-bundle → facts` 락 순서를 적용했다. 이 개선은 아직 PR CI·배포·fresh-state
-cutover가 증명되지 않았고, canonical TurnRef·TTL·recency selection·latest-wins·
-비원자 publication이 남으므로 최종 판정은 계속 NO-GO다.
+`episode-bundle → facts` 락 순서를 적용했다. 두 번째 hard-cut은
+`valid_for_days`/`valid_until`/`Ephemeral`, expiry GC·sanity sweep·maintenance
+fiber와 dashboard TTL projection까지 삭제했다. retired TTL 입력과 persisted field는
+closed decoder가 명시적으로 거부한다. 이 개선은 아직 새 PR CI·배포·fresh-state
+cutover가 증명되지 않았고, canonical TurnRef·recency selection·latest-wins·
+echo/dedupe 휴리스틱·비원자 publication이 남으므로 최종 판정은 계속 NO-GO다.
 
 가장 중요한 차단 사유는 다음과 같다.
 
@@ -65,8 +68,14 @@ cutover가 증명되지 않았고, canonical TurnRef·TTL·recency selection·la
   `3b6b901b05e88fe1668116d959cf7ac10c628911`
 - 후속 구현 branch:
   `report/memory-os-adversarial-audit-20260730`
-- worktree는 current `origin/main` 위 1 commit이며 이 snapshot에서는 아직 push/PR CI 전이다.
-  main/CI/runtime 상태로 간주하지 않는다.
+- current-only 1차 source slice:
+  `1c4692b806dd34e948afa99ea34d627092e880cc`
+- TTL authority 제거 2차 source slice:
+  `1e71d90f43b52c4fe0cd9e21e502abd0ad3ce4e4`
+- 닫힌 PR #26436의 remote head는 1차 slice 뒤 deterministic fix
+  `6a5d575629a12bac12bc9c6758ba2dc3a561e14c`로 갈라져 있다. 같은 fix는 2차
+  slice에도 이미 포함되어 있으므로 닫힌 branch를 merge/reopen하지 않고 새 branch와
+  Draft PR로 증명한다. 어느 slice도 main/CI/runtime 상태로 간주하지 않는다.
 
 ### 2.2 Runtime
 
@@ -89,21 +98,32 @@ binary SHA는 미증명으로 남긴다.
 - 후속 구현 worktree에서는 dead Store, Memory `claim_kind`, persisted
   `schema_version`, serialization-only episode fields를 제거했다. strict reader,
   current-only exact journal, explicit BasePath I/O, current-only dashboard/health
-  decoder도 추가했다. prompt/validator는 동일 immutable snapshot을 보지만 canonical
-  TurnRef provenance는 아직 구현하지 않았다. live runtime은 수정하지 않았다.
+  decoder도 추가했다. 2차 slice는 61 files, +372/-4,077로 TTL producer/schema/
+  persistence/recall/GC/maintenance/dashboard를 함께 제거했다. prompt/validator는 동일
+  immutable snapshot을 보지만 canonical TurnRef provenance는 아직 구현하지 않았다.
+  live runtime은 수정하지 않았다.
 - 로컬 Dune build는 실행하지 않았다. OCaml type/build 권위는 PR CI로 남아 있다.
-- dashboard `tsc --noEmit`과 focused Vitest 7 files / 257 tests는 통과했다.
+- 변경 후 현존 OCaml 전체 `ocamlformat --check`와 parse-only 검증,
+  `scripts/ci/check-determinism-contract.sh`, `git diff --check`,
+  `scripts/check-doc-code-refs.sh`는 통과했다.
+- dashboard `tsc --noEmit`과 focused Vitest 7 files / 255 tests,
+  Python judge eval 24 tests, Ruff, Pyright는 통과했다.
+- `scripts/ci_verify_linked_modules.sh`는 worktree에 CI build artifact가 없어 실행할 수
+  없었다. 이를 위해 로컬 Dune build를 하지 않으며 새 PR CI에서 증명한다.
 - source, CI, merge, deployment, runtime 증거를 서로 분리했다.
 
 ## 3. 현재 Open PR과의 관계
 
-확인 시각: 2026-07-30 15:20 KST
+확인 시각: 2026-07-30 16:05 KST
 
 | PR | 관련도 | 현재 상태 | 보고서 findings에 대한 효과 | 판정 |
 |---|---|---|---|---|
 | [#26324](https://github.com/jeong-sik/masc/pull/26324) `remove periodic full-store consolidation` | 직접 관련 | **Merged**, head `5adc5e7759f83143d12c3170db1835800f3601eb`, merge commit `a8683ea2ccc26c168664e114dbc0b01b8e1ed770` | periodic destructive consolidation 전체를 삭제했다. Librarian input의 ignored `schema_version`, unknown category, retired `kind` decoder 일부도 제거했다. | **P0-6 직접 해결. 나머지 P0/P1은 미해결** |
-| [#26410](https://github.com/jeong-sik/masc/pull/26410) `park chat before claiming receipt` | 직접 재검토 필요 | Open, head `bde47167ea442db9e91b91a61c27832d66485e10`, `MERGEABLE/BLOCKED`; 15 checks pass, `Build and Test` pending | lease-before-admission을 줄이고 pending receipt를 admission 뒤 claim하는 ordering은 개선한다. 그러나 `park`를 공식 흐름으로 만들고 별도 `lease_id` lifecycle을 유지한다. | **현재 방향 그대로는 숙청 기준과 충돌. TurnRef/AttemptId 단일 FSM으로 재구성 필요** |
-| [#26389](https://github.com/jeong-sik/masc/pull/26389) `separate Keeper context from turn usage` | 원칙상 인접 | **Draft**, head `29835791f23db2f33dcbeca27f473c4e53e54cbe`, `MERGEABLE/BLOCKED`; 16 checks pass, `Build and Test`/`Dashboard` pending | producer 없는 context 추정과 legacy metric surface를 제거한다. | Memory OS persistence/context flow의 직접 수정은 아님 |
+| [#26410](https://github.com/jeong-sik/masc/pull/26410) `park chat before claiming receipt` | 직접 재검토 필요 | **Merged**, head `bde47167ea442db9e91b91a61c27832d66485e10`, 2026-07-30 16:03 KST merge | lease-before-admission을 줄이고 pending receipt를 admission 뒤 claim하는 ordering은 개선한다. 그러나 `park`를 공식 흐름으로 만들고 별도 `lease_id` lifecycle을 유지한다. | **merge됐어도 숙청 기준과 충돌. TurnRef/AttemptId 단일 FSM으로 재구성 필요** |
+| [#26428](https://github.com/jeong-sik/masc/pull/26428) `make current memory and provider input observable` | 직접 충돌 | **Draft**, head `508d77896e12f26652950d68c040830e0cb34691`, `MERGEABLE/BLOCKED`, `status:do-not-merge`, `reviewed:adversarial-non-pass` | immutable current snapshot/CAS와 provider-input observability 방향은 유효하다. 그러나 current head에도 TTL/`claim_kind`/dead episode fields/latest-wins/cadence/prompt-local provenance가 그대로다. | **전체 채택 금지. atomic snapshot/관측성만 분리 재구성** |
+| [#26435](https://github.com/jeong-sik/masc/pull/26435) `collapse compaction commit onto source CAS` | 직접 인접 | **Merged**, head `5866b26c14b91088349d21033a884ab6f1c65136`, merge commit `07a3d4f19d1f0c9563be01b8b6f8b4c90da14841`; exact-head `Build and Test`/`CI Gate`는 merge 뒤 취소 | compaction terminal projection을 source CAS에 접어 settlement 중복 authority를 줄인다. | **exact-head full CI green 없이 admin merge. Memory facts→episode→event publication/TurnRef/FIFO는 해결하지 않음** |
+| [#26436](https://github.com/jeong-sik/masc/pull/26436) `enforce current-only Memory OS contracts` | 본 감사 1차 구현 | **Closed**, head `1c4692b806dd34e948afa99ea34d627092e880cc`, `status:do-not-merge`, `reviewed:adversarial-non-pass` | 1차 hard-cut의 CI Meta Guard 문제는 local 2차 slice에서 수정됐고 TTL authority도 추가 삭제했다. | **reopen 금지. 새 exact-head Draft PR로 다시 증명** |
+| [#26389](https://github.com/jeong-sik/masc/pull/26389) `separate Keeper context from turn usage` | 원칙상 인접 | head `bc4ab6d0fde691a4c43e588d549b4a3389e5d31e`, `MERGEABLE/BLOCKED`, `status:do-not-merge`, `reviewed:adversarial-non-pass` | producer 없는 context 추정과 legacy metric surface를 제거한다. | Memory OS persistence/context flow의 직접 수정은 아님 |
 | [#26392](https://github.com/jeong-sik/masc/pull/26392) `cost ledger exact runtime identity` | 원칙상 인접 | **Merged**, head `a332706ec04f49d8ac03e5de684dcf0e11003e3d`, merge commit `e19a05f6ca926eed0de054bd1371ae6f34a075e2` | timestamp/token heuristic 대신 exact identity를 사용한다. | 좋은 선례지만 Memory Turn identity는 수정하지 않음 |
 
 ### 3.1 PR #26324가 해결하는 부분
@@ -142,15 +162,11 @@ merge된 main에 그대로 남는 항목:
 
 후속 audit worktree는 이 목록 중 dead `Keeper_memory_os_store`, Memory
 `claim_kind`, persisted Memory `schema_version`, serialization-only episode fields,
-global slot facade, lenient reader를 삭제했다. retired row/field는 current decoder가
-명시적으로 거부한다. 이는 아직 main/CI/runtime 증거가 아니며, recall budget/recency,
-latest-wins, production Memory authority·atomic receipt·Turn identity 문제는 그대로
-남는다.
-
-또한 #26324는 fact retention을 `valid_until` expiry GC에 남긴다. 이는 current schema의
-명시적 producer field이기는 하지만, 사용자 요구상 horizon/TTL 의미 자체가 제거 대상이다.
-단순히 periodic consolidation을 삭제하고 expiry만 남기면 semantic forget decision을
-typed LLM operation으로 만들었다고 볼 수 없다.
+global slot facade, lenient reader뿐 아니라 `valid_for_days`/`valid_until`/`Ephemeral`,
+expiry GC·sanity sweep·maintenance·TTL dashboard를 삭제했다. retired row/field는
+current decoder가 명시적으로 거부한다. 이는 아직 main/CI/runtime 증거가 아니며,
+recall budget/recency, echo/dedupe, latest-wins, production Memory authority·atomic
+receipt·Turn identity 문제는 그대로 남는다.
 
 ### 3.3 PR #26410의 정확한 경계
 
@@ -260,7 +276,7 @@ commit/receipt가 아니므로 G0 완료는 아니다.
 - Librarian provider-supplied `schema_version`을 받아 무시
 - `librarian-exact-state-v2` journal
 - retired fleet gate인 `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT`
-- 2026-07-30 15:20 KST live 127 facts 중 13개가 `claim_kind` 없음
+- 2026-07-30 16:05 KST live 174 facts 전부가 retired `schema_version`을 보유
 
 **Required resolution**
 
@@ -427,8 +443,12 @@ state를 다시 판단하여 `Keep|Supersede|Forget`을 명시하도록 해야 �
 **구현 진행:** 후속 worktree는 `claim_kind`를 prompt/schema/parser/fact codec/search
 API/dashboard에서 제거하고, 과거 유효값 `durable_knowledge`의 재등장을 current
 decoder가 거부하는 회귀를 추가했다. `open_items`, episode `constraints`,
-`preserved_tool_refs`도 producer/codec/test에서 삭제했다. `valid_for_days`,
-`valid_until`, expiry GC는 아직 남아 있어 이 finding은 부분 해결 상태다.
+`preserved_tool_refs`도 producer/codec/test에서 삭제했다. 두 번째 hard-cut은
+`valid_for_days`, fact/episode `valid_until`, `Ephemeral`, expiry GC, dry-run,
+sanity sweep, maintenance fiber와 TTL dashboard를 삭제했다. retired TTL field와
+category는 current decoder에서 거부된다. 따라서 **source finding은 해결**됐지만,
+fresh-state cutover와 새 exact-head CI/runtime 증거가 없어 release finding은 아직
+해결되지 않았다.
 
 ### P0-8. `park`와 `lease`가 Keeper 진행을 제약하는 별도 lifecycle이 됐다
 
@@ -894,32 +914,43 @@ Acceptance:
 | G1 | duplicate/null TurnRef 원인과 admission-time durable binding 위치 추적 완료; dashboard TurnRecord는 canonical `${trace_id}#${absolute_turn}`을 강제 | **미완료** — Librarian source provenance는 prompt-local turn/current trace라 canonical TurnRef가 아님 |
 | G2 | 목표 수식과 N→N+3 acceptance 정의, 구현 없음 | **미완료** |
 | G3 | latest-wins와 park/lease/settlement를 서로 다른 SSOT로 분해; Librarian exact journal은 current-only closed state/trace/generation, trace-scoped restart fence, canonical path identity로 강화 | **부분 완료** — lossless per-Keeper FIFO/outbox 미구현 |
-| G4 | Memory `claim_kind`, `open_items`, episode `constraints`, `preserved_tool_refs` 제거 | **부분 완료** — TTL, echo window, substring score, first-100-byte dedupe 잔존 |
+| G4 | Memory `claim_kind`, `open_items`, episode `constraints`, `preserved_tool_refs`, `valid_for_days`/`valid_until`/`Ephemeral`와 expiry authority 제거 | **부분 완료** — echo window, recency/byte cap, substring score, first-100-byte dedupe 잔존 |
 | G5 | public fact/episode reader partial-drop 제거, recall unavailable 및 dashboard read error 노출, publication phase failure를 typed result로 분류 | **부분 완료** — journal terminal이 publication보다 앞서고 facts→episode→event partial commit/rollback이 없어 atomic revision/failover receipt 미구현 |
-| G6 | stale claim-kind projection 제거, dashboard closed wire와 per-Keeper read error 추가 | **부분 완료** — receipt/age/stale generation 미구현 |
+| G6 | stale claim-kind projection 제거, 축소된 dashboard wire를 새 `keeper.memory_os.recall_observability.v2` closed contract로 고정, per-Keeper read error 추가 | **부분 완료** — receipt/age/stale generation 미구현 |
 
 Focused verification:
 
-- 변경 OCaml `.ml/.mli` 42개 중 현존 39개:
+- 2차 slice 61 files, +372/-4,077
+- 2차 slice의 변경 후 현존 OCaml `.ml/.mli` 전체:
   `ocamlformat --check`, `ocamlc -stop-after parsing` 통과
 - dashboard: `tsc --noEmit` 통과
-- dashboard focused Vitest: 7 files, 257 tests 통과
+- dashboard focused Vitest: 7 files, 255 tests 통과
+- Python judge eval: 24 tests, Ruff, Pyright 통과
 - `git diff --check` 통과
 - `scripts/check-doc-code-refs.sh` 통과
-- removed Memory `claim_kind`/dead episode field/Store production symbol scan 0
+- `scripts/ci/check-determinism-contract.sh` 통과
+- removed Memory `claim_kind`/TTL/dead episode field/Store production symbol scan 0
+- retention sweep 전용 episode enumeration/strict-file-reader와 dead
+  `keeper_memory_write_json → handle_memory_write` facade production symbol scan 0
+- 실제 descriptor admission이 retired `valid_for_days`를 거부하는 회귀 추가
 - retired `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT` config/snapshot/docs/test
   symbol scan 0
-- 로컬 Dune 미실행; OCaml type/build/test는 **CI 미증명**
+- `scripts/ci_verify_linked_modules.sh`는 worktree에 CI build artifact가 없어 미실행
+- 로컬 Dune 미실행; OCaml type/link/build/test는 **CI 미증명**
 
 Fresh-state cutover blocker:
 
-- 2026-07-30 15:20 KST live `*.facts.jsonl`에는 127 fact rows가 있고, 114 rows가
-  `claim_kind`를, 127 rows 모두가 `schema_version`을 갖는다.
-- live `/Users/dancer/me/.masc/config/keepers` 전체에는 과거 `claim_kind`가 1,368개
-  JSON/JSONL 파일, 5,704회 남아 있다. 런타임이 계속 움직이므로 이 수치는 snapshot이다.
-- 새 closed decoder는 이를 거부한다. 호환 reader나 migration을 추가하지 않는다.
-- 배포 전에 해당 Memory root를 명시적으로 cold reset/reseed하고, 새 current-only
-  schema로 write→restart→recall을 검증해야 한다.
+- 2026-07-30 16:05 KST live `*.facts.jsonl`은 10 files/174 rows이며 **174 rows
+  전부** `schema_version`, 68 rows가 `valid_until`을 갖는다.
+- live episode JSON은 1,957 files이며 전부 `schema_version`과
+  `open_items|constraints|preserved_tool_refs` 중 적어도 하나를 갖는다.
+- 새 closed decoder는 10/10 fact store와 1,957/1,957 episode files를 거부한다.
+  호환 reader나 migration을 추가하지 않는다.
+- old runtime이 계속 retired row를 쓰므로 reset-before-stop은 race다. 배포 승인은
+  `old runtime stop → exact <base_path>/.masc/config/keepers cold archive/reset →
+  new binary start → health/recall/write/restart proof`의 한 cold-cut 절차가 필요하다.
+- 이 operational proof/runbook은 아직 diff에 없다. 따라서 source hard-cut과 별개로
+  release는 **P0 BLOCK**이다.
 
 ## 13. 권장 실행 순서
 
@@ -936,7 +967,8 @@ G0/G1 이전에 새로운 retrieval, dedupe, Gate, TTL을 추가하면 잘못된
 
 ## 14. 최종 결론
 
-현재 MASC Librarian/Memory OS는 “실제로 호출되는 prototype” 단계를 넘었지만,
+현재 MASC Librarian/Memory OS는 “실제로 호출되는 prototype” 단계를 넘었고,
+후속 source slice에서 TTL/horizon authority까지 제거했지만,
 다음 조건을 충족하지 못한다.
 
 - fresh-state-only
@@ -954,10 +986,19 @@ G0/G1 이전에 새로운 retrieval, dedupe, Gate, TTL을 추가하면 잘못된
 `a8683ea2ccc26c168664e114dbc0b01b8e1ed770`으로 merge됐다. 그러나 본 보고서의
 나머지 P0/P1을 해결하지 않는다.
 
-#26410은 lease-before-admission ordering을 개선하지만 `park`와 별도 lease lifecycle을
-공식화한다. 현재 형태는 Memory Turn identity와 Librarian FIFO의 직접 해결책도 아니며,
-추가 숙청 기준상 단순 후속 보완이 아니라 `Receipt/Turn/Attempt` 단일 FSM으로 방향을
-재검토해야 한다.
+#26410은 lease-before-admission ordering을 개선한 채 merge됐지만 `park`와 별도 lease
+lifecycle을 공식화한다. Memory Turn identity와 Librarian FIFO의 직접 해결책이 아니며,
+추가 숙청 기준상 `Receipt/Turn/Attempt` 단일 FSM으로 후속 재구성이 필요하다.
+
+#26428 current head는 atomic current snapshot/CAS와 provider-input 관측성이라는 좋은
+재사용 후보가 있으나, 감사로 제거한 TTL/legacy/dead fields/latest-wins/cadence를
+다시 포함한다. 120 PR files 중 감사 worktree와 60 files가 겹치므로 전체 stack이나
+cherry-pick이 아니라 snapshot/observability만 좁은 slice로 다시 구현해야 한다.
+
+#26435는 checkpoint compaction source CAS의 중복 terminal projection을 줄였지만
+Memory OS publication domain과 무관하고, exact-head `Build and Test`/`CI Gate`가
+merge 뒤 취소되어 full green 증거가 없다. 이를 Memory atomicity 증거로 사용하지
+않는다.
 
 따라서 Memory OS 개선은 하나의 거대한 호환 PR이 아니라, 위 Goal 순서대로
 fresh-state hard cut을 적용한 좁고 독립적인 PR들로 진행해야 한다.
@@ -966,7 +1007,7 @@ fresh-state hard cut을 적용한 좁고 독립적인 PR들로 진행해야 한�
 
 ### 15.1 공통 헤더
 
-- `날짜(ISO8601)`: `2026-07-30T15:25:41+09:00`
+- `날짜(ISO8601)`: `2026-07-30T16:05:00+09:00`
 - `작성자`: `Codex`
 - `결정 ID`: `masc-memory-os-adversarial-audit-20260730`
 - `적용 대상`: `/Users/dancer/me/workspace/yousleepwhen/masc`,
@@ -979,9 +1020,9 @@ fresh-state hard cut을 적용한 좁고 독립적인 PR들로 진행해야 한�
 
 - `항목`: Librarian/Memory OS current source contract
 - `출처`: `git rev-parse origin/main`, `git diff HEAD`, production caller scan
-- `확인일시`: `2026-07-30T15:25:41+09:00`
+- `확인일시`: `2026-07-30T16:14:00+09:00`
 - `신뢰도`: `High`
-- `제한조건`: 후속 worktree는 current origin/main 위 1 commit이며 아직 push/PR CI 전
+- `제한조건`: 후속 2개 source slice와 report update는 아직 새 Draft PR CI 전
 
 #### Runtime
 
@@ -996,7 +1037,7 @@ fresh-state hard cut을 적용한 좁고 독립적인 PR들로 진행해야 한�
 
 - `항목`: 현재 open PR의 finding coverage
 - `출처`: `gh pr list`, `gh pr view`, GitHub changed-file 및 exact file patch
-- `확인일시`: `2026-07-30T15:20:17+09:00`
+- `확인일시`: `2026-07-30T16:05:00+09:00`
 - `신뢰도`: `High`
 - `제한조건`: PR head/check 상태는 이후 push에 따라 변경 가능
 
@@ -1024,8 +1065,9 @@ fresh-state hard cut을 적용한 좁고 독립적인 PR들로 진행해야 한�
 - `3차`: N→N+3 prompt block digest와 Memory revision 변화 비교
 - `재현 결과`: P0/P1 findings 재현. source와 runtime에서 동일 heuristic/identity
   결함 확인. 후속 worktree의 dead Store/field/BasePath hard cut은 변경 OCaml
-  42 files 중 현존 39 files format/parse, dashboard typecheck, focused
-  7 files/257 tests를 통과했다. Dune/CI와 runtime cutover는 미검증.
+  전체 format/parse, dashboard typecheck, focused 7 files/255 tests, Python
+  24 tests와 static check를 통과했다. TTL/expiry authority production reference도
+  제거됐다. Dune/CI와 runtime cutover는 미검증.
 
 ### 15.4 불확실성 (Uncertainty)
 
@@ -1034,7 +1076,8 @@ fresh-state hard cut을 적용한 좁고 독립적인 PR들로 진행해야 한�
   identity라고 단정할 수 없음
 - `추가 확인 필요`: build artifact에 commit SHA를 embed하고 health가 그 값을 직접 반환
 
-- `미확인 항목`: 후속 audit worktree와 open PR #26410/#26389의 최종 exact-head CI 결과
+- `미확인 항목`: 후속 audit worktree의 새 Draft PR exact-head CI, #26428 current-head
+  fresh CI, #26389의 최종 exact-head CI
 - `영향`: 후속 source finding coverage는 정적 검증됐지만 merge/deployment readiness는
   아직 증명되지 않음
 - `추가 확인 필요`: draft PR push 후 head SHA, required checks, unresolved review

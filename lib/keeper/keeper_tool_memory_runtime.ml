@@ -562,7 +562,3 @@ let keeper_memory_write_with_outcome
          detail;
        respond ~ok:false ~error_kind:Persistence_failed [ "detail", `String detail ])
 ;;
-
-let keeper_memory_write_json ~config ~meta ~args =
-  (keeper_memory_write_with_outcome ~config ~meta ~args).raw_output
-;;

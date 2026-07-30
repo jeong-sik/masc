@@ -240,182 +240,16 @@
 <header id="title-block-header">
 <h1 class="title">MASC Librarian / Memory OS 적대적 감사 보고서</h1>
 </header>
-<nav id="TOC" role="doc-toc">
-<ul>
-<li><a href="#masc-librarian-memory-os-적대적-감사-보고서"
-id="toc-masc-librarian-memory-os-적대적-감사-보고서">MASC Librarian /
-Memory OS 적대적 감사 보고서</a>
-<ul>
-<li><a href="#executive-summary" id="toc-executive-summary">1. Executive
-Summary</a></li>
-<li><a href="#감사-범위와-증거-계층" id="toc-감사-범위와-증거-계층">2.
-감사 범위와 증거 계층</a>
-<ul>
-<li><a href="#source" id="toc-source">2.1 Source</a></li>
-<li><a href="#runtime" id="toc-runtime">2.2 Runtime</a></li>
-<li><a href="#ci-변경" id="toc-ci-변경">2.3 CI / 변경</a></li>
-</ul></li>
-<li><a href="#현재-open-pr과의-관계" id="toc-현재-open-pr과의-관계">3.
-현재 Open PR과의 관계</a>
-<ul>
-<li><a href="#pr-26324가-해결하는-부분"
-id="toc-pr-26324가-해결하는-부분">3.1 PR #26324가 해결하는 부분</a></li>
-<li><a href="#pr-26324가-해결하지-않는-부분"
-id="toc-pr-26324가-해결하지-않는-부분">3.2 PR #26324가 해결하지 않는
-부분</a></li>
-<li><a href="#pr-26410의-정확한-경계"
-id="toc-pr-26410의-정확한-경계">3.3 PR #26410의 정확한 경계</a></li>
-</ul></li>
-<li><a href="#실제-호출-흐름" id="toc-실제-호출-흐름">4. 실제 호출
-흐름</a></li>
-<li><a href="#p0-findings" id="toc-p0-findings">5. P0 Findings</a>
-<ul>
-<li><a href="#p0-1.-persistence-authority가-둘이다"
-id="toc-p0-1.-persistence-authority가-둘이다">P0-1. Persistence
-authority가 둘이다</a></li>
-<li><a href="#p0-2.-legacymigration-surface가-명시적으로-존재한다"
-id="toc-p0-2.-legacymigration-surface가-명시적으로-존재한다">P0-2.
-Legacy/migration surface가 명시적으로 존재한다</a></li>
-<li><a href="#p0-3.-turn-identity-ssot가-실제-데이터에서-깨진다"
-id="toc-p0-3.-turn-identity-ssot가-실제-데이터에서-깨진다">P0-3. Turn
-identity SSOT가 실제 데이터에서 깨진다</a></li>
-<li><a href="#p0-4.-손상된-fact가-무음으로-사라진다"
-id="toc-p0-4.-손상된-fact가-무음으로-사라진다">P0-4. 손상된 fact가
-무음으로 사라진다</a></li>
-<li><a
-href="#p0-5.-context-management가-고정-수치와-문자열-휴리스틱이다"
-id="toc-p0-5.-context-management가-고정-수치와-문자열-휴리스틱이다">P0-5.
-Context management가 고정 수치와 문자열 휴리스틱이다</a></li>
-<li><a
-href="#p0-6.-consolidation이-부분-모델-출력을-파괴적으로-적용한다"
-id="toc-p0-6.-consolidation이-부분-모델-출력을-파괴적으로-적용한다">P0-6.
-Consolidation이 부분 모델 출력을 파괴적으로 적용한다</a></li>
-<li><a
-href="#p0-7.-claim_kind-valid_until과-사망-field가-context와-분리된-authority다"
-id="toc-p0-7.-claim_kind-valid_until과-사망-field가-context와-분리된-authority다">P0-7.
-<code>claim_kind</code>, <code>valid_until</code>과 사망 field가
-context와 분리된 authority다</a></li>
-<li><a
-href="#p0-8.-park와-lease가-keeper-진행을-제약하는-별도-lifecycle이-됐다"
-id="toc-p0-8.-park와-lease가-keeper-진행을-제약하는-별도-lifecycle이-됐다">P0-8.
-<code>park</code>와 <code>lease</code>가 Keeper 진행을 제약하는 별도
-lifecycle이 됐다</a></li>
-<li><a
-href="#p0-9.-settlement가-canonical-terminal-state-위에-두-번째-facade를-만든다"
-id="toc-p0-9.-settlement가-canonical-terminal-state-위에-두-번째-facade를-만든다">P0-9.
-<code>settlement</code>가 canonical terminal state 위에 두 번째 Facade를
-만든다</a></li>
-</ul></li>
-<li><a href="#p1-findings" id="toc-p1-findings">6. P1 Findings</a>
-<ul>
-<li><a
-href="#p1-1.-librarian-snapshot-coalescing으로-의미-있는-turn이-유실될-수-있다"
-id="toc-p1-1.-librarian-snapshot-coalescing으로-의미-있는-turn이-유실될-수-있다">P1-1.
-Librarian snapshot coalescing으로 의미 있는 turn이 유실될 수
-있다</a></li>
-<li><a href="#p1-2.-memory-publication이-transaction이-아니다"
-id="toc-p1-2.-memory-publication이-transaction이-아니다">P1-2. Memory
-publication이 transaction이 아니다</a></li>
-<li><a href="#p1-3.-librarian-prompt-계약이-서로-모순된다"
-id="toc-p1-3.-librarian-prompt-계약이-서로-모순된다">P1-3. Librarian
-prompt 계약이 서로 모순된다</a></li>
-<li><a href="#p1-4.-provenance와-multimodal-정보가-손실된다"
-id="toc-p1-4.-provenance와-multimodal-정보가-손실된다">P1-4.
-Provenance와 multimodal 정보가 손실된다</a></li>
-<li><a
-href="#p1-5.-fleet-wide-serial-maintenance가-keeper-독립성을-침해한다"
-id="toc-p1-5.-fleet-wide-serial-maintenance가-keeper-독립성을-침해한다">P1-5.
-Fleet-wide serial maintenance가 Keeper 독립성을 침해한다</a></li>
-<li><a href="#p1-6.-ledger-관측-필드가-실제-의미와-다르다"
-id="toc-p1-6.-ledger-관측-필드가-실제-의미와-다르다">P1-6. Ledger 관측
-필드가 실제 의미와 다르다</a></li>
-<li><a href="#p1-7.-librarian-실패가-typed-turnhealth-상태가-아니다"
-id="toc-p1-7.-librarian-실패가-typed-turnhealth-상태가-아니다">P1-7.
-Librarian 실패가 typed turn/health 상태가 아니다</a></li>
-</ul></li>
-<li><a href="#n-n3-라이브-흐름" id="toc-n-n3-라이브-흐름">7. N → N+3
-라이브 흐름</a>
-<ul>
-<li><a href="#rondo-autonomous-turns-17721775"
-id="toc-rondo-autonomous-turns-17721775">7.1 Rondo autonomous turns
-1772–1775</a></li>
-<li><a href="#user-input-주변" id="toc-user-input-주변">7.2 User input
-주변</a></li>
-</ul></li>
-<li><a href="#확인된-양호점" id="toc-확인된-양호점">8. 확인된
-양호점</a></li>
-<li><a href="#ocaml-5.5-eio-기준" id="toc-ocaml-5.5-eio-기준">9. OCaml
-5.5 / Eio 기준</a></li>
-<li><a href="#시장-구현-비교" id="toc-시장-구현-비교">10. 시장 구현
-비교</a>
-<ul>
-<li><a href="#채택할-원칙" id="toc-채택할-원칙">10.1 채택할
-원칙</a></li>
-<li><a href="#복제하면-안-되는-것" id="toc-복제하면-안-되는-것">10.2
-복제하면 안 되는 것</a></li>
-</ul></li>
-<li><a href="#목표-아키텍처" id="toc-목표-아키텍처">11. 목표
-아키텍처</a>
-<ul>
-<li><a href="#유일한-조립-수식" id="toc-유일한-조립-수식">11.1 유일한
-조립 수식</a></li>
-<li><a href="#결정론-코드의-권한" id="toc-결정론-코드의-권한">11.2
-결정론 코드의 권한</a></li>
-<li><a href="#llm의-권한" id="toc-llm의-권한">11.3 LLM의 권한</a></li>
-<li><a href="#spatial-namespace" id="toc-spatial-namespace">11.4 Spatial
-namespace</a></li>
-</ul></li>
-<li><a href="#개선-goals와-측정-가능한-tasks"
-id="toc-개선-goals와-측정-가능한-tasks">12. 개선 Goals와 측정 가능한
-Tasks</a>
-<ul>
-<li><a href="#g0.-fresh-state-persistence-ssot"
-id="toc-g0.-fresh-state-persistence-ssot">G0. Fresh-state persistence
-SSOT</a></li>
-<li><a href="#g1.-turn-ledger-ssot" id="toc-g1.-turn-ledger-ssot">G1.
-Turn Ledger SSOT</a></li>
-<li><a href="#g2.-context-assembler" id="toc-g2.-context-assembler">G2.
-Context Assembler</a></li>
-<li><a href="#g3.-per-keeper-librarian-lane"
-id="toc-g3.-per-keeper-librarian-lane">G3. Per-Keeper Librarian
-Lane</a></li>
-<li><a href="#g4.-semantic-memory-policy"
-id="toc-g4.-semantic-memory-policy">G4. Semantic Memory Policy</a></li>
-<li><a href="#g5.-atomic-failure-and-failover"
-id="toc-g5.-atomic-failure-and-failover">G5. Atomic Failure and
-Failover</a></li>
-<li><a href="#g6.-observability" id="toc-g6.-observability">G6.
-Observability</a></li>
-<li><a href="#후속-구현-상태" id="toc-후속-구현-상태">12.1 2026-07-30
-후속 구현 상태</a></li>
-</ul></li>
-<li><a href="#권장-실행-순서" id="toc-권장-실행-순서">13. 권장 실행
-순서</a></li>
-<li><a href="#최종-결론" id="toc-최종-결론">14. 최종 결론</a></li>
-<li><a href="#evidence-record" id="toc-evidence-record">15. Evidence
-Record</a>
-<ul>
-<li><a href="#공통-헤더" id="toc-공통-헤더">15.1 공통 헤더</a></li>
-<li><a href="#근거-evidence" id="toc-근거-evidence">15.2 근거
-(Evidence)</a></li>
-<li><a href="#검증-verification" id="toc-검증-verification">15.3 검증
-(Verification)</a></li>
-<li><a href="#불확실성-uncertainty" id="toc-불확실성-uncertainty">15.4
-불확실성 (Uncertainty)</a></li>
-<li><a href="#적용범위-scope" id="toc-적용범위-scope">15.5 적용범위
-(Scope)</a></li>
-</ul></li>
-</ul></li>
-</ul>
-</nav>
-<h1 id="masc-librarian-memory-os-적대적-감사-보고서">MASC Librarian /
-Memory OS 적대적 감사 보고서</h1>
+<section id="masc-librarian--memory-os-적대적-감사-보고서"
+class="level1">
+<h1>MASC Librarian / Memory OS 적대적 감사 보고서</h1>
 <p>작성일: 2026-07-30</p>
 <p>대상 저장소:
 <code>/Users/dancer/me/workspace/yousleepwhen/masc</code></p>
 <p>라이브 상태 루트: <code>/Users/dancer/me/.masc</code> 판정:
 <strong>BLOCK / NO-GO</strong></p>
-<h2 id="executive-summary">1. Executive Summary</h2>
+<section id="1-executive-summary" class="level2">
+<h2>1. Executive Summary</h2>
 <p>Librarian과 Memory OS는 라이브 런타임에서 실제로 동작한다.</p>
 <ul>
 <li>Keeper turn마다 <code>memory_os_recall</code> 블록이 prompt에
@@ -444,9 +278,14 @@ prompt-local turn과 current trace를 사용하므로 canonical TurnRef가
 아니다. 파일 I/O는 production entrypoint마다
 <code>config.base_path</code>에서 한 번 해석한
 <code>keepers_dir</code>로 통일하고 <code>episode-bundle → facts</code>
-락 순서를 적용했다. 이 개선은 아직 PR CI·배포·fresh-state cutover가
-증명되지 않았고, canonical TurnRef·TTL·recency selection·latest-wins·
-비원자 publication이 남으므로 최종 판정은 계속 NO-GO다.</p>
+락 순서를 적용했다. 두 번째 hard-cut은
+<code>valid_for_days</code>/<code>valid_until</code>/<code>Ephemeral</code>,
+expiry GC·sanity sweep·maintenance fiber와 dashboard TTL projection까지
+삭제했다. retired TTL 입력과 persisted field는 closed decoder가
+명시적으로 거부한다. 이 개선은 아직 새 PR CI·배포·fresh-state cutover가
+증명되지 않았고, canonical TurnRef·recency selection·latest-wins·
+echo/dedupe 휴리스틱·비원자 publication이 남으므로 최종 판정은 계속
+NO-GO다.</p>
 <p>가장 중요한 차단 사유는 다음과 같다.</p>
 <ol type="1">
 <li>사용되지 않는 canonical store와 실제 JSONL store가 병존한다.</li>
@@ -471,8 +310,11 @@ projection contract를 만든다.</li>
 <p>따라서 새 Gate나 retrieval 기능을 추가하기 전에 다음 순서로 기반을
 바로잡아야 한다.</p>
 <p><code>Fresh-state persistence SSOT → Turn identity SSOT → per-Keeper durable Librarian FIFO → atomic revision/failure contract → semantic context projection</code></p>
-<h2 id="감사-범위와-증거-계층">2. 감사 범위와 증거 계층</h2>
-<h3 id="source">2.1 Source</h3>
+</section>
+<section id="2-감사-범위와-증거-계층" class="level2">
+<h2>2. 감사 범위와 증거 계층</h2>
+<section id="21-source" class="level3">
+<h3>2.1 Source</h3>
 <ul>
 <li>집중 정적 감사 SHA:
 <code>8c4dae264e6b1d03708029718f868efbb3c2613b</code></li>
@@ -482,11 +324,19 @@ projection contract를 만든다.</li>
 <code>3b6b901b05e88fe1668116d959cf7ac10c628911</code></li>
 <li>후속 구현 branch:
 <code>report/memory-os-adversarial-audit-20260730</code></li>
-<li>worktree는 current <code>origin/main</code> 위 1 commit이며 이
-snapshot에서는 아직 push/PR CI 전이다. main/CI/runtime 상태로 간주하지
-않는다.</li>
+<li>current-only 1차 source slice:
+<code>1c4692b806dd34e948afa99ea34d627092e880cc</code></li>
+<li>TTL authority 제거 2차 source slice:
+<code>1e71d90f43b52c4fe0cd9e21e502abd0ad3ce4e4</code></li>
+<li>닫힌 PR #26436의 remote head는 1차 slice 뒤 deterministic fix
+<code>6a5d575629a12bac12bc9c6758ba2dc3a561e14c</code>로 갈라져 있다.
+같은 fix는 2차 slice에도 이미 포함되어 있으므로 닫힌 branch를
+merge/reopen하지 않고 새 branch와 Draft PR로 증명한다. 어느 slice도
+main/CI/runtime 상태로 간주하지 않는다.</li>
 </ul>
-<h3 id="runtime">2.2 Runtime</h3>
+</section>
+<section id="22-runtime" class="level3">
+<h3>2.2 Runtime</h3>
 <ul>
 <li>PID: <code>25820</code></li>
 <li>listener: <code>127.0.0.1:8935</code></li>
@@ -503,31 +353,38 @@ snapshot에서는 아직 push/PR CI 전이다. main/CI/runtime 상태로 간주�
 값은 binary-embedded commit 증거가 아니다. 실행 시작 시 repo HEAD와
 binary mtime은 일치하지만 정확한 deployed binary SHA는 미증명으로
 남긴다.</p>
-<h3 id="ci-변경">2.3 CI / 변경</h3>
+</section>
+<section id="23-ci--변경" class="level3">
+<h3>2.3 CI / 변경</h3>
 <ul>
 <li>최초 감사에서는 코드 수정이나 runtime mutation을 하지 않았다.</li>
 <li>후속 구현 worktree에서는 dead Store, Memory <code>claim_kind</code>,
 persisted <code>schema_version</code>, serialization-only episode
 fields를 제거했다. strict reader, current-only exact journal, explicit
-BasePath I/O, current-only dashboard/health decoder도 추가했다.
+BasePath I/O, current-only dashboard/health decoder도 추가했다. 2차
+slice는 61 files, +372/-4,077로 TTL producer/schema/
+persistence/recall/GC/maintenance/dashboard를 함께 제거했다.
 prompt/validator는 동일 immutable snapshot을 보지만 canonical TurnRef
 provenance는 아직 구현하지 않았다. live runtime은 수정하지 않았다.</li>
 <li>로컬 Dune build는 실행하지 않았다. OCaml type/build 권위는 PR CI로
 남아 있다.</li>
-<li>dashboard <code>tsc --noEmit</code>과 focused Vitest 7 files / 257
-tests는 통과했다.</li>
+<li>변경 후 현존 OCaml 전체 <code>ocamlformat --check</code>와
+parse-only 검증, <code>scripts/ci/check-determinism-contract.sh</code>,
+<code>git diff --check</code>,
+<code>scripts/check-doc-code-refs.sh</code>는 통과했다.</li>
+<li>dashboard <code>tsc --noEmit</code>과 focused Vitest 7 files / 255
+tests, Python judge eval 24 tests, Ruff, Pyright는 통과했다.</li>
+<li><code>scripts/ci_verify_linked_modules.sh</code>는 worktree에 CI
+build artifact가 없어 실행할 수 없었다. 이를 위해 로컬 Dune build를 하지
+않으며 새 PR CI에서 증명한다.</li>
 <li>source, CI, merge, deployment, runtime 증거를 서로 분리했다.</li>
 </ul>
-<h2 id="현재-open-pr과의-관계">3. 현재 Open PR과의 관계</h2>
-<p>확인 시각: 2026-07-30 15:20 KST</p>
+</section>
+</section>
+<section id="3-현재-open-pr과의-관계" class="level2">
+<h2>3. 현재 Open PR과의 관계</h2>
+<p>확인 시각: 2026-07-30 16:05 KST</p>
 <table>
-<colgroup>
-<col style="width: 20%" />
-<col style="width: 20%" />
-<col style="width: 20%" />
-<col style="width: 20%" />
-<col style="width: 20%" />
-</colgroup>
 <thead>
 <tr>
 <th>PR</th>
@@ -554,23 +411,64 @@ input의 ignored <code>schema_version</code>, unknown category, retired
 <td><a href="https://github.com/jeong-sik/masc/pull/26410">#26410</a>
 <code>park chat before claiming receipt</code></td>
 <td>직접 재검토 필요</td>
-<td>Open, head <code>bde47167ea442db9e91b91a61c27832d66485e10</code>,
-<code>MERGEABLE/BLOCKED</code>; 15 checks pass,
-<code>Build and Test</code> pending</td>
+<td><strong>Merged</strong>, head
+<code>bde47167ea442db9e91b91a61c27832d66485e10</code>, 2026-07-30 16:03
+KST merge</td>
 <td>lease-before-admission을 줄이고 pending receipt를 admission 뒤
 claim하는 ordering은 개선한다. 그러나 <code>park</code>를 공식 흐름으로
 만들고 별도 <code>lease_id</code> lifecycle을 유지한다.</td>
-<td><strong>현재 방향 그대로는 숙청 기준과 충돌. TurnRef/AttemptId 단일
-FSM으로 재구성 필요</strong></td>
+<td><strong>merge됐어도 숙청 기준과 충돌. TurnRef/AttemptId 단일 FSM으로
+재구성 필요</strong></td>
+</tr>
+<tr>
+<td><a href="https://github.com/jeong-sik/masc/pull/26428">#26428</a>
+<code>make current memory and provider input observable</code></td>
+<td>직접 충돌</td>
+<td><strong>Draft</strong>, head
+<code>508d77896e12f26652950d68c040830e0cb34691</code>,
+<code>MERGEABLE/BLOCKED</code>, <code>status:do-not-merge</code>,
+<code>reviewed:adversarial-non-pass</code></td>
+<td>immutable current snapshot/CAS와 provider-input observability 방향은
+유효하다. 그러나 current head에도 TTL/<code>claim_kind</code>/dead
+episode fields/latest-wins/cadence/prompt-local provenance가
+그대로다.</td>
+<td><strong>전체 채택 금지. atomic snapshot/관측성만 분리
+재구성</strong></td>
+</tr>
+<tr>
+<td><a href="https://github.com/jeong-sik/masc/pull/26435">#26435</a>
+<code>collapse compaction commit onto source CAS</code></td>
+<td>직접 인접</td>
+<td><strong>Merged</strong>, head
+<code>5866b26c14b91088349d21033a884ab6f1c65136</code>, merge commit
+<code>07a3d4f19d1f0c9563be01b8b6f8b4c90da14841</code>; exact-head
+<code>Build and Test</code>/<code>CI Gate</code>는 merge 뒤 취소</td>
+<td>compaction terminal projection을 source CAS에 접어 settlement 중복
+authority를 줄인다.</td>
+<td><strong>exact-head full CI green 없이 admin merge. Memory
+facts→episode→event publication/TurnRef/FIFO는 해결하지
+않음</strong></td>
+</tr>
+<tr>
+<td><a href="https://github.com/jeong-sik/masc/pull/26436">#26436</a>
+<code>enforce current-only Memory OS contracts</code></td>
+<td>본 감사 1차 구현</td>
+<td><strong>Closed</strong>, head
+<code>1c4692b806dd34e948afa99ea34d627092e880cc</code>,
+<code>status:do-not-merge</code>,
+<code>reviewed:adversarial-non-pass</code></td>
+<td>1차 hard-cut의 CI Meta Guard 문제는 local 2차 slice에서 수정됐고 TTL
+authority도 추가 삭제했다.</td>
+<td><strong>reopen 금지. 새 exact-head Draft PR로 다시
+증명</strong></td>
 </tr>
 <tr>
 <td><a href="https://github.com/jeong-sik/masc/pull/26389">#26389</a>
 <code>separate Keeper context from turn usage</code></td>
 <td>원칙상 인접</td>
-<td><strong>Draft</strong>, head
-<code>29835791f23db2f33dcbeca27f473c4e53e54cbe</code>,
-<code>MERGEABLE/BLOCKED</code>; 16 checks pass,
-<code>Build and Test</code>/<code>Dashboard</code> pending</td>
+<td>head <code>bc4ab6d0fde691a4c43e588d549b4a3389e5d31e</code>,
+<code>MERGEABLE/BLOCKED</code>, <code>status:do-not-merge</code>,
+<code>reviewed:adversarial-non-pass</code></td>
 <td>producer 없는 context 추정과 legacy metric surface를 제거한다.</td>
 <td>Memory OS persistence/context flow의 직접 수정은 아님</td>
 </tr>
@@ -586,7 +484,8 @@ FSM으로 재구성 필요</strong></td>
 </tr>
 </tbody>
 </table>
-<h3 id="pr-26324가-해결하는-부분">3.1 PR #26324가 해결하는 부분</h3>
+<section id="31-pr-26324가-해결하는-부분" class="level3">
+<h3>3.1 PR #26324가 해결하는 부분</h3>
 <p>현재 exact-head patch에서 확인한 직접 개선:</p>
 <ul>
 <li><code>keeper_memory_os_consolidation_runtime.ml</code> 전체
@@ -603,8 +502,9 @@ FSM으로 재구성 필요</strong></td>
 </ul>
 <p>따라서 본 보고서의 <strong>P0-6 destructive consolidation</strong>은
 #26324 merge로 제거됐다.</p>
-<h3 id="pr-26324가-해결하지-않는-부분">3.2 PR #26324가 해결하지 않는
-부분</h3>
+</section>
+<section id="32-pr-26324가-해결하지-않는-부분" class="level3">
+<h3>3.2 PR #26324가 해결하지 않는 부분</h3>
 <p>merge된 main에 그대로 남는 항목:</p>
 <ul>
 <li><code>Keeper_memory_os_store</code>와 JSONL store의 이중
@@ -629,17 +529,16 @@ authority</li>
 <p>후속 audit worktree는 이 목록 중 dead
 <code>Keeper_memory_os_store</code>, Memory <code>claim_kind</code>,
 persisted Memory <code>schema_version</code>, serialization-only episode
-fields, global slot facade, lenient reader를 삭제했다. retired
+fields, global slot facade, lenient reader뿐 아니라
+<code>valid_for_days</code>/<code>valid_until</code>/<code>Ephemeral</code>,
+expiry GC·sanity sweep·maintenance·TTL dashboard를 삭제했다. retired
 row/field는 current decoder가 명시적으로 거부한다. 이는 아직
-main/CI/runtime 증거가 아니며, recall budget/recency, latest-wins,
-production Memory authority·atomic receipt·Turn identity 문제는 그대로
-남는다.</p>
-<p>또한 #26324는 fact retention을 <code>valid_until</code> expiry GC에
-남긴다. 이는 current schema의 명시적 producer field이기는 하지만, 사용자
-요구상 horizon/TTL 의미 자체가 제거 대상이다. 단순히 periodic
-consolidation을 삭제하고 expiry만 남기면 semantic forget decision을
-typed LLM operation으로 만들었다고 볼 수 없다.</p>
-<h3 id="pr-26410의-정확한-경계">3.3 PR #26410의 정확한 경계</h3>
+main/CI/runtime 증거가 아니며, recall budget/recency, echo/dedupe,
+latest-wins, production Memory authority·atomic receipt·Turn identity
+문제는 그대로 남는다.</p>
+</section>
+<section id="33-pr-26410의-정확한-경계" class="level3">
+<h3>3.3 PR #26410의 정확한 경계</h3>
 <p>#26410은 다음 측면에서 유용하다.</p>
 <ul>
 <li>chat/autonomous admission authority를 turn mutex 하나로 축소</li>
@@ -680,7 +579,10 @@ FSM이다.</p>
 별도 domain concept가 되어서는 안 된다. Busy Keeper는 현재 활동을
 계속하고, 수신 acknowledgement 또는 다음 event tail로 입력을 소비해야
 한다.</p>
-<h2 id="실제-호출-흐름">4. 실제 호출 흐름</h2>
+</section>
+</section>
+<section id="4-실제-호출-흐름" class="level2">
+<h2>4. 실제 호출 흐름</h2>
 <pre class="mermaid"><code>flowchart TD
     A[Keeper turn admission] --&gt; B[Memory OS JSONL read]
     B --&gt; C[recency/count/byte selection]
@@ -703,9 +605,11 @@ FSM이다.</p>
     R --&gt; S[prompt-only JSON provider call]
     S --&gt; T[partial plan salvage/apply]
     T --&gt; N</code></pre>
-<h2 id="p0-findings">5. P0 Findings</h2>
-<h3 id="p0-1.-persistence-authority가-둘이다">P0-1. Persistence
-authority가 둘이다</h3>
+</section>
+<section id="5-p0-findings" class="level2">
+<h2>5. P0 Findings</h2>
+<section id="p0-1-persistence-authority가-둘이다" class="level3">
+<h3>P0-1. Persistence authority가 둘이다</h3>
 <p><code>lib/keeper/keeper_memory_os_store.mli:1</code>은 자신을
 <code>Canonical, fresh-state-only Memory OS persistence</code>로
 선언하고 HEAD를 sole mutable authority로 규정한다.</p>
@@ -730,8 +634,10 @@ publish</li>
 worktree에서 삭제했다. 이로써 거짓 canonical authority는 제거됐지만,
 <code>Keeper_memory_os_io</code>의 facts/episode/event publication이
 아직 하나의 atomic commit/receipt가 아니므로 G0 완료는 아니다.</p>
-<h3 id="p0-2.-legacymigration-surface가-명시적으로-존재한다">P0-2.
-Legacy/migration surface가 명시적으로 존재한다</h3>
+</section>
+<section id="p0-2-legacymigration-surface가-명시적으로-존재한다"
+class="level3">
+<h3>P0-2. Legacy/migration surface가 명시적으로 존재한다</h3>
 <p><code>lib/keeper/keeper_memory_os_types.mli:5</code>:</p>
 <blockquote>
 <p>All records carry a schema_version to support future migrations.</p>
@@ -744,8 +650,8 @@ Legacy/migration surface가 명시적으로 존재한다</h3>
 <li><code>librarian-exact-state-v2</code> journal</li>
 <li>retired fleet gate인
 <code>MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT</code></li>
-<li>2026-07-30 15:20 KST live 127 facts 중 13개가
-<code>claim_kind</code> 없음</li>
+<li>2026-07-30 16:05 KST live 174 facts 전부가 retired
+<code>schema_version</code>을 보유</li>
 </ul>
 <p><strong>Required resolution</strong></p>
 <ul>
@@ -764,8 +670,10 @@ evidence는 provider dispatch 전에 typed setup failure로 거부한다. 과거
 journal을 읽거나 옮기는 compatibility/migration 경로는 없다. 다만 live
 root가 모두 retired schema이므로 fresh-state cold reset/reseed와 새
 schema write→restart→recall 증거 전에는 배포할 수 없다.</p>
-<h3 id="p0-3.-turn-identity-ssot가-실제-데이터에서-깨진다">P0-3. Turn
-identity SSOT가 실제 데이터에서 깨진다</h3>
+</section>
+<section id="p0-3-turn-identity-ssot가-실제-데이터에서-깨진다"
+class="level3">
+<h3>P0-3. Turn identity SSOT가 실제 데이터에서 깨진다</h3>
 <p>동일 <code>(trace_id, absolute_turn)</code>에 서로 다른 prompt block
 digest가 여러 번 append됐다.</p>
 <ul>
@@ -787,8 +695,9 @@ digest가 여러 번 append됐다.</p>
 전파</li>
 <li>timestamp fuzzy join 금지</li>
 </ul>
-<h3 id="p0-4.-손상된-fact가-무음으로-사라진다">P0-4. 손상된 fact가
-무음으로 사라진다</h3>
+</section>
+<section id="p0-4-손상된-fact가-무음으로-사라진다" class="level3">
+<h3>P0-4. 손상된 fact가 무음으로 사라진다</h3>
 <p><code>lib/keeper/keeper_memory_os_io.ml:489-506</code>:</p>
 <ul>
 <li>JSON parse error → <code>None</code></li>
@@ -815,9 +724,10 @@ context로 렌더링하고, dashboard와 fleet health는
 consumer도 item을 <code>filter</code>하지 않고 closed payload 전체를
 거부한다. 마지막 성공 projection과 stale generation/commit receipt는
 아직 없으므로 G5/G6 전체 완료는 아니다.</p>
-<h3
-id="p0-5.-context-management가-고정-수치와-문자열-휴리스틱이다">P0-5.
-Context management가 고정 수치와 문자열 휴리스틱이다</h3>
+</section>
+<section id="p0-5-context-management가-고정-수치와-문자열-휴리스틱이다"
+class="level3">
+<h3>P0-5. Context management가 고정 수치와 문자열 휴리스틱이다</h3>
 <p>현재 recall:</p>
 <ul>
 <li>max facts 500</li>
@@ -888,9 +798,10 @@ state 7–30</li>
 포함</li>
 <li>원 ledger/store를 수정하거나 대체하지 않음</li>
 </ul>
-<h3
-id="p0-6.-consolidation이-부분-모델-출력을-파괴적으로-적용한다">P0-6.
-Consolidation이 부분 모델 출력을 파괴적으로 적용한다</h3>
+</section>
+<section id="p0-6-consolidation이-부분-모델-출력을-파괴적으로-적용한다"
+class="level3">
+<h3>P0-6. Consolidation이 부분 모델 출력을 파괴적으로 적용한다</h3>
 <p><code>lib/keeper/keeper_memory_os_consolidation.ml:108-190</code>:</p>
 <ul>
 <li>malformed index item을 <code>filter_map</code></li>
@@ -912,20 +823,15 @@ Consolidation이 부분 모델 출력을 파괴적으로 적용한다</h3>
 <p>#26324는 이 subsystem 전체를 삭제하므로 이 finding의 직접 해결
 후보다. 그러나 #26324가 merge되기 전에는 live P0이며, merge 이후에도
 나머지 P0는 그대로다.</p>
-<h3
-id="p0-7.-claim_kind-valid_until과-사망-field가-context와-분리된-authority다">P0-7.
-<code>claim_kind</code>, <code>valid_until</code>과 사망 field가
-context와 분리된 authority다</h3>
+</section>
+<section
+id="p0-7-claim_kind-valid_until과-사망-field가-context와-분리된-authority다"
+class="level3">
+<h3>P0-7. <code>claim_kind</code>, <code>valid_until</code>과 사망
+field가 context와 분리된 authority다</h3>
 <p><code>claim_kind</code>와 <code>valid_until</code>은 dead field는
 아니다. 오히려 더 위험하게 load-bearing policy field다.</p>
 <table>
-<colgroup>
-<col style="width: 20%" />
-<col style="width: 20%" />
-<col style="width: 20%" />
-<col style="width: 20%" />
-<col style="width: 20%" />
-</colgroup>
 <thead>
 <tr>
 <th>Field</th>
@@ -1013,13 +919,19 @@ prompt/schema/parser/fact codec/search API/dashboard에서 제거하고, 과거
 유효값 <code>durable_knowledge</code>의 재등장을 current decoder가
 거부하는 회귀를 추가했다. <code>open_items</code>, episode
 <code>constraints</code>, <code>preserved_tool_refs</code>도
-producer/codec/test에서 삭제했다. <code>valid_for_days</code>,
-<code>valid_until</code>, expiry GC는 아직 남아 있어 이 finding은 부분
-해결 상태다.</p>
-<h3
-id="p0-8.-park와-lease가-keeper-진행을-제약하는-별도-lifecycle이-됐다">P0-8.
-<code>park</code>와 <code>lease</code>가 Keeper 진행을 제약하는 별도
-lifecycle이 됐다</h3>
+producer/codec/test에서 삭제했다. 두 번째 hard-cut은
+<code>valid_for_days</code>, fact/episode <code>valid_until</code>,
+<code>Ephemeral</code>, expiry GC, dry-run, sanity sweep, maintenance
+fiber와 TTL dashboard를 삭제했다. retired TTL field와 category는 current
+decoder에서 거부된다. 따라서 <strong>source finding은
+해결</strong>됐지만, fresh-state cutover와 새 exact-head CI/runtime
+증거가 없어 release finding은 아직 해결되지 않았다.</p>
+</section>
+<section
+id="p0-8-park와-lease가-keeper-진행을-제약하는-별도-lifecycle이-됐다"
+class="level3">
+<h3>P0-8. <code>park</code>와 <code>lease</code>가 Keeper 진행을
+제약하는 별도 lifecycle이 됐다</h3>
 <p>현재 흐름:</p>
 <ul>
 <li>chat fiber가 turn mutex에서 대기하면
@@ -1048,10 +960,12 @@ model/runtime exit authority에서 제거</li>
 <li>incoming chat은 immutable event tail에 쌓고 current turn을 강제
 종료하지 않음</li>
 </ul>
-<h3
-id="p0-9.-settlement가-canonical-terminal-state-위에-두-번째-facade를-만든다">P0-9.
-<code>settlement</code>가 canonical terminal state 위에 두 번째 Facade를
-만든다</h3>
+</section>
+<section
+id="p0-9-settlement가-canonical-terminal-state-위에-두-번째-facade를-만든다"
+class="level3">
+<h3>P0-9. <code>settlement</code>가 canonical terminal state 위에 두
+번째 Facade를 만든다</h3>
 <p><code>Keeper_msg_async.worker_settlement</code>은 다음 variant를
 가진다.</p>
 <ul>
@@ -1080,10 +994,15 @@ commit 결과 하나로 축소해야 한다.</p>
 <code>settlement_durability</code>, <code>settlement_origin</code>,
 <code>Settlement_projection_error</code>라는 별도 vocabulary와 callback
 Facade는 삭제한다.</p>
-<h2 id="p1-findings">6. P1 Findings</h2>
-<h3
-id="p1-1.-librarian-snapshot-coalescing으로-의미-있는-turn이-유실될-수-있다">P1-1.
-Librarian snapshot coalescing으로 의미 있는 turn이 유실될 수 있다</h3>
+</section>
+</section>
+<section id="6-p1-findings" class="level2">
+<h2>6. P1 Findings</h2>
+<section
+id="p1-1-librarian-snapshot-coalescing으로-의미-있는-turn이-유실될-수-있다"
+class="level3">
+<h3>P1-1. Librarian snapshot coalescing으로 의미 있는 turn이 유실될 수
+있다</h3>
 <p><code>keeper_memory_lane.ml:279-295</code>는 in-flight 1개와 latest
 1개만 유지한다. 세 번째 submission은 기존 latest closure를
 <code>Replace_latest</code>로 덮어쓴다.</p>
@@ -1097,8 +1016,10 @@ Librarian snapshot coalescing으로 의미 있는 turn이 유실될 수 있다</
 버린다. 각 meaningful turn이
 <code>committed | intentionally skipped | retryable failure</code> 중
 무엇이 됐는지 증명할 수 없다.</p>
-<h3 id="p1-2.-memory-publication이-transaction이-아니다">P1-2. Memory
-publication이 transaction이 아니다</h3>
+</section>
+<section id="p1-2-memory-publication이-transaction이-아니다"
+class="level3">
+<h3>P1-2. Memory publication이 transaction이 아니다</h3>
 <p>현재 순서:</p>
 <ol type="1">
 <li>facts rewrite</li>
@@ -1112,8 +1033,9 @@ publication이 transaction이 아니다</h3>
 <li>missing event</li>
 <li>cursor와 실제 store 불일치</li>
 </ul>
-<h3 id="p1-3.-librarian-prompt-계약이-서로-모순된다">P1-3. Librarian
-prompt 계약이 서로 모순된다</h3>
+</section>
+<section id="p1-3-librarian-prompt-계약이-서로-모순된다" class="level3">
+<h3>P1-3. Librarian prompt 계약이 서로 모순된다</h3>
 <p><code>config/prompts/keeper.librarian.episode_extraction.md</code>:</p>
 <ul>
 <li>cross-Keeper store라고 설명하지만 production store/recall은
@@ -1124,8 +1046,10 @@ per-Keeper</li>
 <li>source code/git/board에서 derivable한지 판단하라고 하지만 Librarian
 input에는 해당 source authority가 없음</li>
 </ul>
-<h3 id="p1-4.-provenance와-multimodal-정보가-손실된다">P1-4.
-Provenance와 multimodal 정보가 손실된다</h3>
+</section>
+<section id="p1-4-provenance와-multimodal-정보가-손실된다"
+class="level3">
+<h3>P1-4. Provenance와 multimodal 정보가 손실된다</h3>
 <ul>
 <li>tool result는 id/error placeholder</li>
 <li>tool call은 id/name placeholder</li>
@@ -1147,16 +1071,19 @@ validator가 동일한 immutable <code>source_input</code>을 공유하며,
 capacity+1 메시지와 ToolResult ID를 사용한 회귀가 이를 고정한다. actual
 <code>Turn_ref</code>, multimodal payload, spatial namespace는 아직
 없으므로 finding은 부분 해결이다.</p>
-<h3
-id="p1-5.-fleet-wide-serial-maintenance가-keeper-독립성을-침해한다">P1-5.
-Fleet-wide serial maintenance가 Keeper 독립성을 침해한다</h3>
+</section>
+<section
+id="p1-5-fleet-wide-serial-maintenance가-keeper-독립성을-침해한다"
+class="level3">
+<h3>P1-5. Fleet-wide serial maintenance가 Keeper 독립성을 침해한다</h3>
 <p>모든 Keeper consolidation을 같은 runtime 후보열에 대해 순차 실행한다.
 한 Keeper/provider가 느리면 뒤 Keeper 전체가 지연된다. 이는 Lane Per
 Keeper와 “하나가 멈추면 모두 멈추지 않는다”는 계약에 어긋난다.</p>
 <p>#26324가 periodic consolidation을 제거하면 해당 serial loop는
 사라진다.</p>
-<h3 id="p1-6.-ledger-관측-필드가-실제-의미와-다르다">P1-6. Ledger 관측
-필드가 실제 의미와 다르다</h3>
+</section>
+<section id="p1-6-ledger-관측-필드가-실제-의미와-다르다" class="level3">
+<h3>P1-6. Ledger 관측 필드가 실제 의미와 다르다</h3>
 <p><code>keeper_recall_injection_ledger.ml:383</code>:</p>
 <div class="sourceCode" id="cb4"><pre
 class="sourceCode ocaml"><code class="sourceCode ocaml"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>~n_episodes_in_store:(<span class="dt">List</span>.length injected_episode_keys)</span></code></pre></div>
@@ -1171,8 +1098,10 @@ dashboard는 sangsu episode 223개를 보고했지만 ledger는 166개를
 wire는 decoder가 거부하며, Keeper/read-error identity 중복과 두 집합의
 교차도 거부한다. 위 <code>n_episodes_in_store</code> ledger 오표기는
 아직 남아 있으므로 이 finding은 부분 해결이다.</p>
-<h3 id="p1-7.-librarian-실패가-typed-turnhealth-상태가-아니다">P1-7.
-Librarian 실패가 typed turn/health 상태가 아니다</h3>
+</section>
+<section id="p1-7-librarian-실패가-typed-turnhealth-상태가-아니다"
+class="level3">
+<h3>P1-7. Librarian 실패가 typed turn/health 상태가 아니다</h3>
 <p><code>run_best_effort</code>는 실패를 log/metric에 남기지만 caller에
 typed terminal result를 반환하지 않는다.</p>
 <p>라이브 집계:</p>
@@ -1184,18 +1113,15 @@ typed terminal result를 반환하지 않는다.</p>
 <p>그러나 <code>/health</code>에 per-Keeper Librarian
 pending/failure/oldest-age 상태가 없다. 로그 수준에서는 보이지만 runtime
 contract 수준에서는 사실상 silent하다.</p>
-<h2 id="n-n3-라이브-흐름">7. N → N+3 라이브 흐름</h2>
+</section>
+</section>
+<section id="7-n--n3-라이브-흐름" class="level2">
+<h2>7. N → N+3 라이브 흐름</h2>
 <p>민감한 원문은 읽거나 보고서에 기록하지 않았다. prompt block size와
 digest, typed outcome, store count만 비교했다.</p>
-<h3 id="rondo-autonomous-turns-17721775">7.1 Rondo autonomous turns
-1772–1775</h3>
+<section id="71-rondo-autonomous-turns-17721775" class="level3">
+<h3>7.1 Rondo autonomous turns 1772–1775</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Turn</th>
@@ -1247,13 +1173,18 @@ digest, typed outcome, store count만 비교했다.</p>
 <li>user input과 assistant turn의 exact identity</li>
 <li>failover 후 어느 runtime 결과가 authoritative한지</li>
 </ul>
-<h3 id="user-input-주변">7.2 User input 주변</h3>
+</section>
+<section id="72-user-input-주변" class="level3">
+<h3>7.2 User input 주변</h3>
 <p>Rondo 1686–1689에서 dashboard user input 직후 persona/dynamic
 digest가 direct-chat 값으로 바뀌고 다음 turn에서 autonomous 값으로
 돌아오는 흐름은 확인했다.</p>
 <p>하지만 user row가 <code>turn_ref=null</code>이므로 “이 입력이 정확히
 turn #1687을 열었다”는 계약 수준 증명은 불가능하다.</p>
-<h2 id="확인된-양호점">8. 확인된 양호점</h2>
+</section>
+</section>
+<section id="8-확인된-양호점" class="level2">
+<h2>8. 확인된 양호점</h2>
 <ul>
 <li>scoped Memory hot path에서 MASC → OAS 의존만 확인했다.</li>
 <li>OAS → MASC 역방향 참조는 발견되지 않았다.</li>
@@ -1268,7 +1199,9 @@ turn #1687을 열었다”는 계약 수준 증명은 불가능하다.</p>
 <p>단, 마지막 항목은 horizon policy가 제거됐다는 의미가 아니다.
 <code>valid_for_days</code>, TTL, recency, 32-turn window가 같은 역할을
 수행한다.</p>
-<h2 id="ocaml-5.5-eio-기준">9. OCaml 5.5 / Eio 기준</h2>
+</section>
+<section id="9-ocaml-55--eio-기준" class="level2">
+<h2>9. OCaml 5.5 / Eio 기준</h2>
 <p>OCaml 5.5 공식 문서 기준:</p>
 <ul>
 <li>Domain은 OS thread와 1:1인 heavyweight parallel unit이다.</li>
@@ -1302,8 +1235,11 @@ Cancel</a></li>
 href="https://ocaml-multicore.github.io/eio/eio/Eio/Fiber/index.html">Eio
 Fiber</a></li>
 </ul>
-<h2 id="시장-구현-비교">10. 시장 구현 비교</h2>
-<h3 id="채택할-원칙">10.1 채택할 원칙</h3>
+</section>
+<section id="10-시장-구현-비교" class="level2">
+<h2>10. 시장 구현 비교</h2>
+<section id="101-채택할-원칙" class="level3">
+<h3>10.1 채택할 원칙</h3>
 <p>Hermes Agent:</p>
 <ul>
 <li>post-turn single-worker FIFO</li>
@@ -1333,7 +1269,9 @@ compaction architecture</a></p>
 <li>성공 commit 후에만 cursor advance</li>
 <li>main-agent direct writer와 background writer authority 분리</li>
 </ul>
-<h3 id="복제하면-안-되는-것">10.2 복제하면 안 되는 것</h3>
+</section>
+<section id="102-복제하면-안-되는-것" class="level3">
+<h3>10.2 복제하면 안 되는 것</h3>
 <ul>
 <li>Hermes prefetch failure의 empty context/log-only degrade</li>
 <li>OpenClaw score/recency/threshold dreaming과 legacy migration</li>
@@ -1343,8 +1281,12 @@ threshold</li>
 </ul>
 <p>시장 구현은 invariant의 참고 자료일 뿐 MASC의 사용자 계약보다 상위
 authority가 아니다.</p>
-<h2 id="목표-아키텍처">11. 목표 아키텍처</h2>
-<h3 id="유일한-조립-수식">11.1 유일한 조립 수식</h3>
+</section>
+</section>
+<section id="11-목표-아키텍처" class="level2">
+<h2>11. 목표 아키텍처</h2>
+<section id="111-유일한-조립-수식" class="level3">
+<h3>11.1 유일한 조립 수식</h3>
 <pre class="text"><code>Prompt(N) =
   latest_committed_memory_revision
   + immutable_turn_events(memory_revision.covers_through_seq + 1 .. N)</code></pre>
@@ -1355,7 +1297,9 @@ authority가 아니다.</p>
 <li>Librarian이 느리거나 실패해도 Keeper main turn 진행</li>
 <li>restart 후 같은 cursor/watermark에서 재개</li>
 </ul>
-<h3 id="결정론-코드의-권한">11.2 결정론 코드의 권한</h3>
+</section>
+<section id="112-결정론-코드의-권한" class="level3">
+<h3>11.2 결정론 코드의 권한</h3>
 <ul>
 <li>event identity와 ordering</li>
 <li>namespace와 ACL</li>
@@ -1364,7 +1308,9 @@ authority가 아니다.</p>
 <li>atomic commit</li>
 <li>explicit typed failure</li>
 </ul>
-<h3 id="llm의-권한">11.3 LLM의 권한</h3>
+</section>
+<section id="113-llm의-권한" class="level3">
+<h3>11.3 LLM의 권한</h3>
 <pre class="text"><code>Create
 Update existing_fact_id
 Supersede existing_fact_id
@@ -1379,7 +1325,9 @@ Noop</code></pre>
 <li>policy revision</li>
 <li>created/committed timestamp</li>
 </ul>
-<h3 id="spatial-namespace">11.4 Spatial namespace</h3>
+</section>
+<section id="114-spatial-namespace" class="level3">
+<h3>11.4 Spatial namespace</h3>
 <p>최소 exact tuple:</p>
 <pre class="text"><code>keeper
 × connector
@@ -1389,10 +1337,12 @@ Noop</code></pre>
 × actor</code></pre>
 <p>다른 공간의 기억 공유는 typed explicit relation으로만 허용한다. 동일
 문구 또는 유사 embedding만으로 namespace를 합치지 않는다.</p>
-<h2 id="개선-goals와-측정-가능한-tasks">12. 개선 Goals와 측정 가능한
-Tasks</h2>
-<h3 id="g0.-fresh-state-persistence-ssot">G0. Fresh-state persistence
-SSOT</h3>
+</section>
+</section>
+<section id="12-개선-goals와-측정-가능한-tasks" class="level2">
+<h2>12. 개선 Goals와 측정 가능한 Tasks</h2>
+<section id="g0-fresh-state-persistence-ssot" class="level3">
+<h3>G0. Fresh-state persistence SSOT</h3>
 <p>Tasks:</p>
 <ol type="1">
 <li><code>Keeper_memory_os_store</code> 채택 또는 삭제 결정</li>
@@ -1407,7 +1357,9 @@ SSOT</h3>
 <li>compatibility/migration branch 0개</li>
 <li>facts/episodes/events commit receipt 1개</li>
 </ul>
-<h3 id="g1.-turn-ledger-ssot">G1. Turn Ledger SSOT</h3>
+</section>
+<section id="g1-turn-ledger-ssot" class="level3">
+<h3>G1. Turn Ledger SSOT</h3>
 <p>Tasks:</p>
 <ol type="1">
 <li><code>Input_ref</code>, <code>Turn_ref</code>,
@@ -1424,7 +1376,9 @@ row에 전파</li>
 <li>null user TurnRef 0</li>
 <li>duplicate TurnRef 0</li>
 </ul>
-<h3 id="g2.-context-assembler">G2. Context Assembler</h3>
+</section>
+<section id="g2-context-assembler" class="level3">
+<h3>G2. Context Assembler</h3>
 <p>Tasks:</p>
 <ol type="1">
 <li><code>memory revision + uncovered event tail</code> 단일 조립</li>
@@ -1439,8 +1393,9 @@ row에 전파</li>
 <li>tool call/result 분리 0</li>
 <li>private channel leakage 0</li>
 </ul>
-<h3 id="g3.-per-keeper-librarian-lane">G3. Per-Keeper Librarian
-Lane</h3>
+</section>
+<section id="g3-per-keeper-librarian-lane" class="level3">
+<h3>G3. Per-Keeper Librarian Lane</h3>
 <p>Tasks:</p>
 <ol type="1">
 <li><code>Replace_latest</code> 제거</li>
@@ -1467,7 +1422,9 @@ slice로 구현</li>
 <li>waiting chat 때문에 current autonomous run이 종료되는 경우 0</li>
 <li>separate lease/settlement identity 0</li>
 </ul>
-<h3 id="g4.-semantic-memory-policy">G4. Semantic Memory Policy</h3>
+</section>
+<section id="g4-semantic-memory-policy" class="level3">
+<h3>G4. Semantic Memory Policy</h3>
 <p>Tasks:</p>
 <ol type="1">
 <li>typed <code>Create|Update|Supersede|Forget|Noop</code></li>
@@ -1488,8 +1445,9 @@ slice로 구현</li>
 <li>paraphrase, contradiction, correction fixture 통과</li>
 <li>restart 전후 동일 causal decision</li>
 </ul>
-<h3 id="g5.-atomic-failure-and-failover">G5. Atomic Failure and
-Failover</h3>
+</section>
+<section id="g5-atomic-failure-and-failover" class="level3">
+<h3>G5. Atomic Failure and Failover</h3>
 <p>Tasks:</p>
 <ol type="1">
 <li>authoritative strict reader</li>
@@ -1506,7 +1464,9 @@ Failover</h3>
 <li>invalid candidate 이후 configured fallback 동작과 provenance
 증명</li>
 </ul>
-<h3 id="g6.-observability">G6. Observability</h3>
+</section>
+<section id="g6-observability" class="level3">
+<h3>G6. Observability</h3>
 <p>Tasks:</p>
 <ol type="1">
 <li>TurnRecord에 memory revision ID, source range, Librarian receipt ID
@@ -1522,13 +1482,10 @@ generation</li>
 <li>misleading store count field 0</li>
 <li>log-only Librarian terminal failure 0</li>
 </ul>
-<h3 id="후속-구현-상태">12.1 2026-07-30 후속 구현 상태</h3>
+</section>
+<section id="121-2026-07-30-후속-구현-상태" class="level3">
+<h3>12.1 2026-07-30 후속 구현 상태</h3>
 <table>
-<colgroup>
-<col style="width: 33%" />
-<col style="width: 33%" />
-<col style="width: 33%" />
-</colgroup>
 <thead>
 <tr>
 <th>Goal</th>
@@ -1570,9 +1527,11 @@ trace-scoped restart fence, canonical path identity로 강화</td>
 <tr>
 <td>G4</td>
 <td>Memory <code>claim_kind</code>, <code>open_items</code>, episode
-<code>constraints</code>, <code>preserved_tool_refs</code> 제거</td>
-<td><strong>부분 완료</strong> — TTL, echo window, substring score,
-first-100-byte dedupe 잔존</td>
+<code>constraints</code>, <code>preserved_tool_refs</code>,
+<code>valid_for_days</code>/<code>valid_until</code>/<code>Ephemeral</code>와
+expiry authority 제거</td>
+<td><strong>부분 완료</strong> — echo window, recency/byte cap,
+substring score, first-100-byte dedupe 잔존</td>
 </tr>
 <tr>
 <td>G5</td>
@@ -1585,8 +1544,9 @@ revision/failover receipt 미구현</td>
 </tr>
 <tr>
 <td>G6</td>
-<td>stale claim-kind projection 제거, dashboard closed wire와 per-Keeper
-read error 추가</td>
+<td>stale claim-kind projection 제거, 축소된 dashboard wire를 새
+<code>keeper.memory_os.recall_observability.v2</code> closed contract로
+고정, per-Keeper read error 추가</td>
 <td><strong>부분 완료</strong> — receipt/age/stale generation
 미구현</td>
 </tr>
@@ -1594,34 +1554,52 @@ read error 추가</td>
 </table>
 <p>Focused verification:</p>
 <ul>
-<li>변경 OCaml <code>.ml/.mli</code> 42개 중 현존 39개:
+<li>2차 slice 61 files, +372/-4,077</li>
+<li>2차 slice의 변경 후 현존 OCaml <code>.ml/.mli</code> 전체:
 <code>ocamlformat --check</code>,
 <code>ocamlc -stop-after parsing</code> 통과</li>
 <li>dashboard: <code>tsc --noEmit</code> 통과</li>
-<li>dashboard focused Vitest: 7 files, 257 tests 통과</li>
+<li>dashboard focused Vitest: 7 files, 255 tests 통과</li>
+<li>Python judge eval: 24 tests, Ruff, Pyright 통과</li>
 <li><code>git diff --check</code> 통과</li>
 <li><code>scripts/check-doc-code-refs.sh</code> 통과</li>
-<li>removed Memory <code>claim_kind</code>/dead episode field/Store
+<li><code>scripts/ci/check-determinism-contract.sh</code> 통과</li>
+<li>removed Memory <code>claim_kind</code>/TTL/dead episode field/Store
 production symbol scan 0</li>
+<li>retention sweep 전용 episode enumeration/strict-file-reader와 dead
+<code>keeper_memory_write_json → handle_memory_write</code> facade
+production symbol scan 0</li>
+<li>실제 descriptor admission이 retired <code>valid_for_days</code>를
+거부하는 회귀 추가</li>
 <li>retired <code>MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT</code>
 config/snapshot/docs/test symbol scan 0</li>
-<li>로컬 Dune 미실행; OCaml type/build/test는 <strong>CI
+<li><code>scripts/ci_verify_linked_modules.sh</code>는 worktree에 CI
+build artifact가 없어 미실행</li>
+<li>로컬 Dune 미실행; OCaml type/link/build/test는 <strong>CI
 미증명</strong></li>
 </ul>
 <p>Fresh-state cutover blocker:</p>
 <ul>
-<li>2026-07-30 15:20 KST live <code>*.facts.jsonl</code>에는 127 fact
-rows가 있고, 114 rows가 <code>claim_kind</code>를, 127 rows 모두가
-<code>schema_version</code>을 갖는다.</li>
-<li>live <code>/Users/dancer/me/.masc/config/keepers</code> 전체에는
-과거 <code>claim_kind</code>가 1,368개 JSON/JSONL 파일, 5,704회 남아
-있다. 런타임이 계속 움직이므로 이 수치는 snapshot이다.</li>
-<li>새 closed decoder는 이를 거부한다. 호환 reader나 migration을
-추가하지 않는다.</li>
-<li>배포 전에 해당 Memory root를 명시적으로 cold reset/reseed하고, 새
-current-only schema로 write→restart→recall을 검증해야 한다.</li>
+<li>2026-07-30 16:05 KST live <code>*.facts.jsonl</code>은 10 files/174
+rows이며 <strong>174 rows 전부</strong> <code>schema_version</code>, 68
+rows가 <code>valid_until</code>을 갖는다.</li>
+<li>live episode JSON은 1,957 files이며 전부
+<code>schema_version</code>과
+<code>open_items|constraints|preserved_tool_refs</code> 중 적어도 하나를
+갖는다.</li>
+<li>새 closed decoder는 10/10 fact store와 1,957/1,957 episode files를
+거부한다. 호환 reader나 migration을 추가하지 않는다.</li>
+<li>old runtime이 계속 retired row를 쓰므로 reset-before-stop은 race다.
+배포 승인은
+<code>old runtime stop → exact &lt;base_path&gt;/.masc/config/keepers cold archive/reset → new binary start → health/recall/write/restart proof</code>의
+한 cold-cut 절차가 필요하다.</li>
+<li>이 operational proof/runbook은 아직 diff에 없다. 따라서 source
+hard-cut과 별개로 release는 <strong>P0 BLOCK</strong>이다.</li>
 </ul>
-<h2 id="권장-실행-순서">13. 권장 실행 순서</h2>
+</section>
+</section>
+<section id="13-권장-실행-순서" class="level2">
+<h2>13. 권장 실행 순서</h2>
 <ol type="1">
 <li>G0 Fresh-state SSOT</li>
 <li>G1 Turn identity</li>
@@ -1633,9 +1611,12 @@ current-only schema로 write→restart→recall을 검증해야 한다.</li>
 </ol>
 <p>G0/G1 이전에 새로운 retrieval, dedupe, Gate, TTL을 추가하면 잘못된
 authority와 identity 위에 기능을 더 쌓게 된다.</p>
-<h2 id="최종-결론">14. 최종 결론</h2>
+</section>
+<section id="14-최종-결론" class="level2">
+<h2>14. 최종 결론</h2>
 <p>현재 MASC Librarian/Memory OS는 “실제로 호출되는 prototype” 단계를
-넘었지만, 다음 조건을 충족하지 못한다.</p>
+넘었고, 후속 source slice에서 TTL/horizon authority까지 제거했지만, 다음
+조건을 충족하지 못한다.</p>
 <ul>
 <li>fresh-state-only</li>
 <li>single persistence authority</li>
@@ -1651,19 +1632,32 @@ authority와 identity 위에 기능을 더 쌓게 된다.</p>
 <p>#26324는 destructive periodic consolidation 제거라는 중요한 P0
 slice이며 <code>a8683ea2ccc26c168664e114dbc0b01b8e1ed770</code>으로
 merge됐다. 그러나 본 보고서의 나머지 P0/P1을 해결하지 않는다.</p>
-<p>#26410은 lease-before-admission ordering을 개선하지만
-<code>park</code>와 별도 lease lifecycle을 공식화한다. 현재 형태는
-Memory Turn identity와 Librarian FIFO의 직접 해결책도 아니며, 추가 숙청
-기준상 단순 후속 보완이 아니라 <code>Receipt/Turn/Attempt</code> 단일
-FSM으로 방향을 재검토해야 한다.</p>
+<p>#26410은 lease-before-admission ordering을 개선한 채 merge됐지만
+<code>park</code>와 별도 lease lifecycle을 공식화한다. Memory Turn
+identity와 Librarian FIFO의 직접 해결책이 아니며, 추가 숙청 기준상
+<code>Receipt/Turn/Attempt</code> 단일 FSM으로 후속 재구성이
+필요하다.</p>
+<p>#26428 current head는 atomic current snapshot/CAS와 provider-input
+관측성이라는 좋은 재사용 후보가 있으나, 감사로 제거한 TTL/legacy/dead
+fields/latest-wins/cadence를 다시 포함한다. 120 PR files 중 감사
+worktree와 60 files가 겹치므로 전체 stack이나 cherry-pick이 아니라
+snapshot/observability만 좁은 slice로 다시 구현해야 한다.</p>
+<p>#26435는 checkpoint compaction source CAS의 중복 terminal
+projection을 줄였지만 Memory OS publication domain과 무관하고,
+exact-head <code>Build and Test</code>/<code>CI Gate</code>가 merge 뒤
+취소되어 full green 증거가 없다. 이를 Memory atomicity 증거로 사용하지
+않는다.</p>
 <p>따라서 Memory OS 개선은 하나의 거대한 호환 PR이 아니라, 위 Goal
 순서대로 fresh-state hard cut을 적용한 좁고 독립적인 PR들로 진행해야
 한다.</p>
-<h2 id="evidence-record">15. Evidence Record</h2>
-<h3 id="공통-헤더">15.1 공통 헤더</h3>
+</section>
+<section id="15-evidence-record" class="level2">
+<h2>15. Evidence Record</h2>
+<section id="151-공통-헤더" class="level3">
+<h3>15.1 공통 헤더</h3>
 <ul>
 <li><code>날짜(ISO8601)</code>:
-<code>2026-07-30T15:25:41+09:00</code></li>
+<code>2026-07-30T16:05:00+09:00</code></li>
 <li><code>작성자</code>: <code>Codex</code></li>
 <li><code>결정 ID</code>:
 <code>masc-memory-os-adversarial-audit-20260730</code></li>
@@ -1672,18 +1666,23 @@ FSM으로 방향을 재검토해야 한다.</p>
 <code>/Users/dancer/me/.masc</code></li>
 <li><code>결정 상태</code>: <code>보류 — BLOCK / NO-GO</code></li>
 </ul>
-<h3 id="근거-evidence">15.2 근거 (Evidence)</h3>
-<h4 id="source-1">Source</h4>
+</section>
+<section id="152-근거-evidence" class="level3">
+<h3>15.2 근거 (Evidence)</h3>
+<section id="source" class="level4">
+<h4>Source</h4>
 <ul>
 <li><code>항목</code>: Librarian/Memory OS current source contract</li>
 <li><code>출처</code>: <code>git rev-parse origin/main</code>,
 <code>git diff HEAD</code>, production caller scan</li>
-<li><code>확인일시</code>: <code>2026-07-30T15:25:41+09:00</code></li>
+<li><code>확인일시</code>: <code>2026-07-30T16:14:00+09:00</code></li>
 <li><code>신뢰도</code>: <code>High</code></li>
-<li><code>제한조건</code>: 후속 worktree는 current origin/main 위 1
-commit이며 아직 push/PR CI 전</li>
+<li><code>제한조건</code>: 후속 2개 source slice와 report update는 아직
+새 Draft PR CI 전</li>
 </ul>
-<h4 id="runtime-1">Runtime</h4>
+</section>
+<section id="runtime" class="level4">
+<h4>Runtime</h4>
 <ul>
 <li><code>항목</code>: live recall, Librarian, consolidation, Turn
 identity</li>
@@ -1695,17 +1694,21 @@ deployed binary SHA <code>Medium</code></li>
 <li><code>제한조건</code>: health commit은 binary-embedded SHA가 아니라
 startup repo HEAD</li>
 </ul>
-<h4 id="pull-requests">Pull Requests</h4>
+</section>
+<section id="pull-requests" class="level4">
+<h4>Pull Requests</h4>
 <ul>
 <li><code>항목</code>: 현재 open PR의 finding coverage</li>
 <li><code>출처</code>: <code>gh pr list</code>, <code>gh pr view</code>,
 GitHub changed-file 및 exact file patch</li>
-<li><code>확인일시</code>: <code>2026-07-30T15:20:17+09:00</code></li>
+<li><code>확인일시</code>: <code>2026-07-30T16:05:00+09:00</code></li>
 <li><code>신뢰도</code>: <code>High</code></li>
 <li><code>제한조건</code>: PR head/check 상태는 이후 push에 따라 변경
 가능</li>
 </ul>
-<h4 id="ocaml-eio">OCaml / Eio</h4>
+</section>
+<section id="ocaml--eio" class="level4">
+<h4>OCaml / Eio</h4>
 <ul>
 <li><code>항목</code>: OCaml 5.5 memory model과 Eio cancellation/mutex
 기준</li>
@@ -1716,7 +1719,9 @@ docs</li>
 <li><code>제한조건</code>: MASC-specific architecture 판정은 공식
 언어/runtime 계약의 적용 결과</li>
 </ul>
-<h4 id="market-comparison">Market comparison</h4>
+</section>
+<section id="market-comparison" class="level4">
+<h4>Market comparison</h4>
 <ul>
 <li><code>항목</code>: Hermes/OpenClaw/local claude-code memory/context
 implementation</li>
@@ -1727,7 +1732,10 @@ implementation</li>
 <li><code>제한조건</code>: 로컬 claude-code는 upstream-current 주장
 아님</li>
 </ul>
-<h3 id="검증-verification">15.3 검증 (Verification)</h3>
+</section>
+</section>
+<section id="153-검증-verification" class="level3">
+<h3>15.3 검증 (Verification)</h3>
 <ul>
 <li><code>1차</code>: current source entrypoint, producer, typed
 consumer, caller 추적</li>
@@ -1737,11 +1745,14 @@ JSONL/SQLite aggregate 확인</li>
 비교</li>
 <li><code>재현 결과</code>: P0/P1 findings 재현. source와 runtime에서
 동일 heuristic/identity 결함 확인. 후속 worktree의 dead
-Store/field/BasePath hard cut은 변경 OCaml 42 files 중 현존 39 files
-format/parse, dashboard typecheck, focused 7 files/257 tests를 통과했다.
+Store/field/BasePath hard cut은 변경 OCaml 전체 format/parse, dashboard
+typecheck, focused 7 files/255 tests, Python 24 tests와 static check를
+통과했다. TTL/expiry authority production reference도 제거됐다.
 Dune/CI와 runtime cutover는 미검증.</li>
 </ul>
-<h3 id="불확실성-uncertainty">15.4 불확실성 (Uncertainty)</h3>
+</section>
+<section id="154-불확실성-uncertainty" class="level3">
+<h3>15.4 불확실성 (Uncertainty)</h3>
 <ul>
 <li><p><code>미확인 항목</code>: 실행 binary에 embedded된 exact git
 SHA</p></li>
@@ -1749,14 +1760,17 @@ SHA</p></li>
 cryptographic deployment identity라고 단정할 수 없음</p></li>
 <li><p><code>추가 확인 필요</code>: build artifact에 commit SHA를
 embed하고 health가 그 값을 직접 반환</p></li>
-<li><p><code>미확인 항목</code>: 후속 audit worktree와 open PR
-#26410/#26389의 최종 exact-head CI 결과</p></li>
+<li><p><code>미확인 항목</code>: 후속 audit worktree의 새 Draft PR
+exact-head CI, #26428 current-head fresh CI, #26389의 최종 exact-head
+CI</p></li>
 <li><p><code>영향</code>: 후속 source finding coverage는 정적 검증됐지만
 merge/deployment readiness는 아직 증명되지 않음</p></li>
 <li><p><code>추가 확인 필요</code>: draft PR push 후 head SHA, required
 checks, unresolved review threads 재확인</p></li>
 </ul>
-<h3 id="적용범위-scope">15.5 적용범위 (Scope)</h3>
+</section>
+<section id="155-적용범위-scope" class="level3">
+<h3>15.5 적용범위 (Scope)</h3>
 <ul>
 <li><code>영향 받는 영역</code>: Keeper turn identity, Librarian lane,
 Memory persistence, recall/context assembly, chat admission, async
@@ -1767,5 +1781,8 @@ terminal projection</li>
 가능한 설계라면 해당 change를 중단하고 fresh-state authority부터
 재설계</li>
 </ul>
+</section>
+</section>
+</section>
 </body>
 </html>

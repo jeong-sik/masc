@@ -201,7 +201,7 @@ let memory_os_episode_json (episode : Keeper_memory_os_types.episode) =
 
 (* RFC-keeper-memory-panel-real-data §4a: surface the fact rows the panel renders, mirroring
    [memory_os_episode_json]. Serializes ONLY the existing [fact] structure —
-   claim, typed category, provenance, the three timestamps, and current-ness —
+   claim, typed category, provenance, and verification timestamps —
    never the deleted score fields (confidence / access_count / last_accessed,
    RFC-0247): they are absent from the [fact] record, so the type system makes
    re-emitting them unrepresentable. [reference_time] is the shared staleness
@@ -266,7 +266,7 @@ let memory_os_dashboard_json_unlocked ~keepers_dir ~keeper_id =
       episodes
   in
   `Assoc
-    [ "schema", `String "keeper.memory_os.recall_observability.v1"
+    [ "schema", `String "keeper.memory_os.recall_observability.v2"
     ; "keeper", `String keeper_id
     ; "source", `String "memory_os_files"
     ; "producer", `String "keeper_librarian|keeper_memory_os_recall"

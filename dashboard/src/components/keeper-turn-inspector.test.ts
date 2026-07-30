@@ -96,7 +96,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
     count: 2,
     skipped_rows: 0,
     memory_os: {
-      schema: 'keeper.memory_os.recall_observability.v1',
+      schema: 'keeper.memory_os.recall_observability.v2',
       keeper: 'albini',
       source: 'memory_os_files',
       producer: 'keeper_librarian|keeper_memory_os_recall',

@@ -481,7 +481,7 @@ describe('keeper tool telemetry fetchers', () => {
         health: 'ok',
         stale_reason: null,
         memory_os: {
-          schema: 'keeper.memory_os.recall_observability.v1',
+          schema: 'keeper.memory_os.recall_observability.v2',
           keeper: 'keeper-alpha',
           source: 'memory_os_files',
           producer: 'keeper_librarian|keeper_memory_os_recall',
@@ -752,7 +752,7 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
       stale_reason: 'no_entries',
       entries: [],
       memory_os: {
-        schema: 'keeper.memory_os.recall_observability.v1',
+        schema: 'keeper.memory_os.recall_observability.v2',
         keeper: 'keeper-alpha',
         source: 'memory_os_files',
         producer: 'keeper_librarian|keeper_memory_os_recall',

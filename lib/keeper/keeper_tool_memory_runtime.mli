@@ -48,12 +48,6 @@ val keeper_context_status_json
     - On success: [ok=true], [rows_written], [outcome], [store].
     - On validation or persistence failure: [ok=false] with the
       corresponding explicit [error_kind]. *)
-val keeper_memory_write_json
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> args:Yojson.Safe.t
-  -> string
-
 val keeper_memory_write_with_outcome
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta

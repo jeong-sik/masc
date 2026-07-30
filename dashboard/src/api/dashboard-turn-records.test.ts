@@ -43,7 +43,7 @@ function payload(...entries: ReturnType<typeof entry>[]) {
     health: 'ok',
     stale_reason: null,
     memory_os: {
-      schema: 'keeper.memory_os.recall_observability.v1',
+      schema: 'keeper.memory_os.recall_observability.v2',
       keeper: 'sangsu',
       source: 'memory_os_files',
       producer: 'keeper_librarian|keeper_memory_os_recall',
@@ -175,6 +175,16 @@ describe('keeper turn record cache token counts', () => {
   it('rejects removed Memory OS retention fields', async () => {
     const raw = payload(entry())
     Object.assign(raw.memory_os.facts, { current: 0, expired: 0 })
+    getMock.mockResolvedValue(raw)
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects the retired Memory OS wire contract token', async () => {
+    const raw = payload(entry())
+    Object.assign(raw.memory_os, { schema: 'keeper.memory_os.recall_observability.v1' })
     getMock.mockResolvedValue(raw)
 
     await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(

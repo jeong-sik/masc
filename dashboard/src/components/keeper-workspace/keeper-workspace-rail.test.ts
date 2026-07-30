@@ -47,7 +47,7 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
       stale_reason: null,
       coverage_gaps: [],
       memory_os: {
-        schema: 'keeper.memory_os.recall_observability.v1',
+        schema: 'keeper.memory_os.recall_observability.v2',
         keeper: 'masc-improver',
         source: 'memory_os_files',
         producer: 'keeper_librarian|keeper_memory_os_recall',

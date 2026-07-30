@@ -140,13 +140,14 @@ let test_write_comes_back_through_recall () =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
   in
   let response =
-    Runtime.keeper_memory_write_json
+    Runtime.keeper_memory_write_with_outcome
       ~config
       ~meta
       ~args:
         (make_args
            ~title:""
            ~content:"reasoning_content must be replayed unmodified")
+    |> fun result -> result.Masc.Keeper_tool_execution.raw_output
     |> Yojson.Safe.from_string
   in
   Alcotest.(check bool)
@@ -207,10 +208,11 @@ let test_tools_isolate_workspace_base_path_from_ambient_decoy () =
     [ fact "ambient decoy workspace only" ];
   with_env "MASC_BASE_PATH" decoy_base (fun () ->
     let write_response =
-      Runtime.keeper_memory_write_json
+      Runtime.keeper_memory_write_with_outcome
         ~config
         ~meta
         ~args:(make_args ~title:"" ~content:"workspace A only")
+      |> fun result -> result.Masc.Keeper_tool_execution.raw_output
       |> Yojson.Safe.from_string
     in
     Alcotest.(check bool)

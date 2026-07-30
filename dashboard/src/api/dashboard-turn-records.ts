@@ -151,7 +151,7 @@ export type MemoryOsSelectionPolicy = {
 }
 
 export type MemoryOsTurnRecordSnapshot = {
-  schema: 'keeper.memory_os.recall_observability.v1'
+  schema: 'keeper.memory_os.recall_observability.v2'
   keeper: string
   source: 'memory_os_files'
   producer: 'keeper_librarian|keeper_memory_os_recall'
@@ -716,7 +716,7 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
     'episodes',
     'facts',
   ])) return null
-  const schema = raw.schema === 'keeper.memory_os.recall_observability.v1'
+  const schema = raw.schema === 'keeper.memory_os.recall_observability.v2'
     ? raw.schema
     : null
   const keeper = decodeExactNonEmptyString(raw.keeper)

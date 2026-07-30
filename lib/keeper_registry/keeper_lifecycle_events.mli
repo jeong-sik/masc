@@ -43,3 +43,11 @@ type lifecycle_event =
 val lifecycle_event_to_string : lifecycle_event -> string
 val lifecycle_event_phase :
   lifecycle_event -> Keeper_state_machine.phase option
+
+val lifecycle_event_of_wire :
+  event:string ->
+  phase:string option ->
+  lifecycle_event option
+(** Decode the exact current event-bus contract. Custom events may omit phase;
+    phase events require matching [event] and [phase] labels. Unknown or
+    inconsistent payloads fail closed. *)

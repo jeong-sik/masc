@@ -486,20 +486,11 @@ let dashboard_transport_health_snapshot_json () =
   Server_dashboard_http_cache.cached_surface_json transport_health_cache
 ;;
 
-(* Issue #8396 / #22071: cache patchers project a wire lifecycle event name onto
-   dashboard row fields (keepalive_running / phase / pipeline_stage / paused).
-   Cache rows deserialise from JSON, so the input is a [string]; but the closed
-   custom-event vocabulary ([Keeper_lifecycle_events.t]) is parsed to the typed
-   verb and matched EXHAUSTIVELY in [display_of_custom_event]. Adding a custom
-   lifecycle variant now fails to compile here until its projection is defined —
-   replacing the prior raw-string whitelist that silently dropped new variants
-   to [None] (and an in-doc reference to a coverage test that did not exist).
-
-   Phase-derived names ([running]/[stopped]/[crashed]/[dead]) and legacy operator
-   strings ([paused]/[resumed]) are not custom-event verbs and cross the JSON
-   boundary as raw strings, so they stay string-keyed and fail closed to [None]
-   for unknown input. Coverage over the SSOT vocabulary is pinned by
-   [test/test_dashboard_http_core.ml :: lifecycle_event_cache_patcher_coverage]. *)
+(* Cache patchers project a typed lifecycle transition onto dashboard row fields
+   (keepalive_running / phase / pipeline_stage / paused). Phase-derived events
+   and custom events arrive here only after the event-bus
+   payload has been decoded by [Keeper_lifecycle_events.lifecycle_event_of_wire].
+   The operator pause path constructs [Phase_event Paused] directly. *)
 
 type lifecycle_display =
   { ld_keepalive_running : bool
@@ -507,14 +498,6 @@ type lifecycle_display =
   ; ld_pipeline_stage : string
   ; ld_paused : bool option
   }
-
-type lifecycle_legacy_wire_event =
-  | Legacy_running
-  | Legacy_stopped
-  | Legacy_crashed
-  | Legacy_dead
-  | Legacy_paused
-  | Legacy_resumed
 
 (* Exhaustive over the closed custom-event sum. A new [Keeper_lifecycle_events.t]
    variant breaks this match (no catch-all) until its dashboard projection is
@@ -534,44 +517,34 @@ let display_of_custom_event (verb : Keeper_lifecycle_events.t) : lifecycle_displ
     { ld_keepalive_running = false; ld_phase = "dead"; ld_pipeline_stage = "offline"; ld_paused = Some false }
 ;;
 
-(* Phase-derived + legacy operator strings (not custom-event verbs). Raw-string
-   keyed by necessity (JSON boundary); unknown input fails closed to [None]. *)
-let lifecycle_legacy_wire_event_of_string = function
-  | "running" -> Some Legacy_running
-  | "stopped" -> Some Legacy_stopped
-  | "crashed" -> Some Legacy_crashed
-  | "dead" -> Some Legacy_dead
-  | "paused" -> Some Legacy_paused
-  | "resumed" -> Some Legacy_resumed
-  | _ -> None
-;;
-
-let display_of_phase_or_legacy_event = function
-  | Legacy_running ->
+let display_of_phase_event = function
+  | Keeper_state_machine.Running ->
     Some { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = Some false }
-  | Legacy_stopped ->
+  | Keeper_state_machine.Stopped ->
     Some
       { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = None }
-  | Legacy_crashed ->
+  | Keeper_state_machine.Crashed ->
     Some
       { ld_keepalive_running = false; ld_phase = "crashed"; ld_pipeline_stage = "crashed"; ld_paused = Some false }
-  | Legacy_dead ->
+  | Keeper_state_machine.Dead ->
     Some { ld_keepalive_running = false; ld_phase = "dead"; ld_pipeline_stage = "offline"; ld_paused = Some false }
-  | Legacy_paused ->
+  | Keeper_state_machine.Paused ->
     Some { ld_keepalive_running = true; ld_phase = "paused"; ld_pipeline_stage = "paused"; ld_paused = Some true }
-  | Legacy_resumed ->
-    Some { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = Some false }
-
-let display_of_phase_or_legacy_string s =
-  match lifecycle_legacy_wire_event_of_string s with
-  | None -> None
-  | Some event -> display_of_phase_or_legacy_event event
+  | Keeper_state_machine.Offline
+  | Keeper_state_machine.Failing
+  | Keeper_state_machine.Overflowed
+  | Keeper_state_machine.Compacting
+  | Keeper_state_machine.HandingOff
+  | Keeper_state_machine.Draining
+  | Keeper_state_machine.Restarting ->
+    None
 ;;
 
-let lifecycle_display_of_event event =
-  match Keeper_lifecycle_events.event_of_string event with
-  | Some verb -> Some (display_of_custom_event verb)
-  | None -> display_of_phase_or_legacy_string event
+let lifecycle_display_of_event = function
+  | Keeper_lifecycle_events.Custom_event { verb; _ } ->
+    Some (display_of_custom_event verb)
+  | Keeper_lifecycle_events.Phase_event phase ->
+    display_of_phase_event phase
 ;;
 
 let keepalive_running_of_lifecycle_event event =
@@ -608,14 +581,17 @@ let keeper_agent_status_opt row =
 
 let lifecycle_display_for_row row event =
   match
-    ( Keeper_lifecycle_events.event_of_string event
+    ( event
     , Option.bind
         (keeper_top_level_status_opt row)
         Keeper_status_runtime.control_plane_status_of_string_opt )
   with
-  | Some Keeper_lifecycle_events.Reconciled, Some Keeper_status_runtime.Cp_paused ->
-    display_of_phase_or_legacy_event Legacy_paused
-  | Some _, _ | None, _ -> lifecycle_display_of_event event
+  | ( Keeper_lifecycle_events.Custom_event
+        { verb = Keeper_lifecycle_events.Reconciled; _ }
+    , Some Keeper_status_runtime.Cp_paused ) ->
+    display_of_phase_event Keeper_state_machine.Paused
+  | (Keeper_lifecycle_events.Custom_event _ | Keeper_lifecycle_events.Phase_event _), _ ->
+    lifecycle_display_of_event event
 ;;
 
 let control_status_override_of_lifecycle_event row event =
@@ -623,14 +599,12 @@ let control_status_override_of_lifecycle_event row event =
   | Some { ld_paused = Some true; _ } ->
     Some Keeper_status_runtime.Cp_paused
   | Some _ | None ->
-    (match lifecycle_legacy_wire_event_of_string event with
-  | Some Legacy_paused ->
-    Some Keeper_status_runtime.Cp_paused
-  | Some Legacy_resumed ->
+    (match event with
+  | Keeper_lifecycle_events.Phase_event Keeper_state_machine.Running ->
     Some
       (Keeper_status_runtime.Cp_surface
          Keeper_status_runtime.Surface_idle)
-  | Some Legacy_stopped ->
+  | Keeper_lifecycle_events.Phase_event Keeper_state_machine.Stopped ->
     (match
        Option.bind
          (match keeper_top_level_status_opt row with
@@ -641,7 +615,19 @@ let control_status_override_of_lifecycle_event row event =
      | Some Keeper_status_runtime.Cp_paused ->
        Some Keeper_status_runtime.Cp_paused
      | Some (Keeper_status_runtime.Cp_surface _) | None -> None)
-  | Some (Legacy_running | Legacy_crashed | Legacy_dead) | None -> None)
+  | Keeper_lifecycle_events.Custom_event _
+  | Keeper_lifecycle_events.Phase_event
+      ( Keeper_state_machine.Offline
+      | Keeper_state_machine.Failing
+      | Keeper_state_machine.Overflowed
+      | Keeper_state_machine.Compacting
+      | Keeper_state_machine.HandingOff
+      | Keeper_state_machine.Draining
+      | Keeper_state_machine.Paused
+      | Keeper_state_machine.Crashed
+      | Keeper_state_machine.Restarting
+      | Keeper_state_machine.Dead ) ->
+    None)
 ;;
 
 let patched_keeper_status row ~event ~keepalive_running =
@@ -794,7 +780,11 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
           (fun acc keeper_name ->
              patch_keeper_rows
                ~keeper_name
-               ~event:"reconciled"
+               ~event:
+                 (Keeper_lifecycle_events.Custom_event
+                    { verb = Keeper_lifecycle_events.Reconciled
+                    ; phase = None
+                    })
                ~keepalive_running:true
                acc)
           rows

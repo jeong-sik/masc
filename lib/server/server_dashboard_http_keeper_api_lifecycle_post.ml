@@ -41,6 +41,9 @@ let tool_detail_json body =
    - Operator control snapshot cache: [Operator_control_snapshot.invalidate_snapshot_cache]
    - Projection cache: [Dashboard_projection_cache.invalidate_snapshot_json] *)
 let refresh_keeper_execution_surfaces ~config ~name event =
+  let event_label =
+    Keeper_lifecycle_events.lifecycle_event_to_string event
+  in
   Operator_control_snapshot.invalidate_snapshot_cache ();
   Dashboard_projection_cache.invalidate_snapshot_json ~config;
   (try Dashboard_cache.invalidate_prefix "execution:" with
@@ -48,7 +51,7 @@ let refresh_keeper_execution_surfaces ~config ~name event =
    | exn ->
        Log.Dashboard.warn
          "keeper %s %s: execution dashboard cache invalidate failed: %s"
-         name event (Printexc.to_string exn));
+         name event_label (Printexc.to_string exn));
   (try
      Dashboard_cache.invalidate_prefix
        (Server_dashboard_http_core.dashboard_shell_cache_prefix config)
@@ -57,7 +60,7 @@ let refresh_keeper_execution_surfaces ~config ~name event =
    | exn ->
        Log.Dashboard.warn
          "keeper %s %s: shell surface cache invalidate failed: %s"
-         name event (Printexc.to_string exn));
+         name event_label (Printexc.to_string exn));
   Server_dashboard_http_execution_surfaces.patch_keeper_dependent_caches
     ~keeper_name:name ~event
 
@@ -296,7 +299,13 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
            Keeper_keepalive.process_directive
              ~agent_name:entry.meta.agent_name
              Keeper_directive.Wakeup;
-           refresh_keeper_execution_surfaces ~config ~name "started";
+           refresh_keeper_execution_surfaces
+             ~config
+             ~name
+             (Keeper_lifecycle_events.Custom_event
+                { verb = Keeper_lifecycle_events.Started
+                ; phase = Some Keeper_state_machine.Running
+                });
            let detail =
              match Keeper_registry.get ~base_path:config.base_path name with
              | Some latest -> Keeper_meta_json.meta_to_json latest.meta
@@ -322,7 +331,13 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               let post_action_result =
                 if String.equal action "boot"
                 then (
-                  refresh_keeper_execution_surfaces ~config ~name "started";
+                  refresh_keeper_execution_surfaces
+                    ~config
+                    ~name
+                    (Keeper_lifecycle_events.Custom_event
+                       { verb = Keeper_lifecycle_events.Started
+                       ; phase = Some Keeper_state_machine.Running
+                       });
                   Ok ())
                 else (
                   match Keeper_registry.get_phase ~base_path:config.base_path name with
@@ -359,7 +374,11 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                 | "shutdown" ->
                   if persist_keeper_pause ()
                   then (
-                    refresh_keeper_execution_surfaces ~config ~name "paused";
+                    refresh_keeper_execution_surfaces
+                      ~config
+                      ~name
+                      (Keeper_lifecycle_events.Phase_event
+                         Keeper_state_machine.Paused);
                     Ok ())
                   else Error "paused-state persist failed after shutdown"
                 | _ ->

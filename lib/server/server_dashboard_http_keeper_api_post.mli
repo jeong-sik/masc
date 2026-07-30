@@ -85,7 +85,10 @@ val handle_keeper_checkpoints_post :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 
 val refresh_keeper_execution_surfaces :
-  config:Workspace_utils.config -> name:String.t -> string -> unit
+  config:Workspace_utils.config ->
+  name:String.t ->
+  Keeper_lifecycle_events.lifecycle_event ->
+  unit
 val invalidate_keeper_execution_surfaces :
   config:Workspace_utils.config -> unit -> unit
 

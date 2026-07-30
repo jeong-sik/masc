@@ -1223,7 +1223,19 @@ let start_keeper_loops_owned
                    , Safe_ops.json_string_opt "keeper_name" payload )
                  with
                  | Some event, Some keeper_name ->
-                   Server_dashboard_http.patch_keeper_dependent_caches ~keeper_name ~event
+                   (match
+                      Keeper_lifecycle_events.lifecycle_event_of_wire
+                        ~event
+                        ~phase:(Safe_ops.json_string_opt "phase" payload)
+                    with
+                    | Some event ->
+                      Server_dashboard_http.patch_keeper_dependent_caches
+                        ~keeper_name
+                        ~event
+                    | None ->
+                      Otel_metric_store.inc_counter
+                        "masc_keeper_lifecycle_malformed_total"
+                        ())
                  | None, _ | Some _, None ->
                    (* P3 cleanup: previously malformed lifecycle events
                        (missing `event` or `keeper_name` field) were

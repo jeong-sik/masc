@@ -125,3 +125,16 @@ let lifecycle_event_to_string = function
 let lifecycle_event_phase = function
   | Custom_event { phase; _ } -> phase
   | Phase_event p -> Some p
+
+let lifecycle_event_of_wire ~event ~phase =
+  match event_of_string event, phase with
+  | Some verb, None -> Some (Custom_event { verb; phase = None })
+  | Some verb, Some phase ->
+    Option.map
+      (fun phase -> Custom_event { verb; phase = Some phase })
+      (Keeper_state_machine.phase_of_string phase)
+  | None, Some phase when String.equal event phase ->
+    Option.map
+      (fun phase -> Phase_event phase)
+      (Keeper_state_machine.phase_of_string phase)
+  | None, None | None, Some _ -> None

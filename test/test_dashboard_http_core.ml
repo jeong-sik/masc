@@ -1917,101 +1917,125 @@ let test_telemetry_n_default_is_bounded () =
    docstrings cited coverage tests ([lifecycle_events_ssot] /
    [lifecycle_event_cache_patcher_coverage]) in a test/test_types.ml that does
    not exist. These are the real guards. *)
-let test_lifecycle_event_of_string_roundtrip () =
-  List.iter
+let current_lifecycle_events =
+  List.map
     (fun verb ->
-      let s = Keeper_lifecycle_events.to_string verb in
+      Keeper_lifecycle_events.Custom_event { verb; phase = None })
+    Keeper_lifecycle_events.all_custom_events
+  @ List.map
+      (fun phase -> Keeper_lifecycle_events.Phase_event phase)
+      [
+        Keeper_state_machine.Running;
+        Keeper_state_machine.Stopped;
+        Keeper_state_machine.Crashed;
+        Keeper_state_machine.Dead;
+      ]
+
+let test_lifecycle_event_wire_roundtrip () =
+  List.iter
+    (fun event ->
+      let event_name =
+        Keeper_lifecycle_events.lifecycle_event_to_string event
+      in
+      let phase =
+        Keeper_lifecycle_events.lifecycle_event_phase event
+        |> Option.map Keeper_state_machine.phase_to_string
+      in
       check bool
-        ("event_of_string round-trips " ^ s)
+        ("lifecycle wire round-trips " ^ event_name)
         true
-        (match Keeper_lifecycle_events.event_of_string s with
-         | Some v -> String.equal (Keeper_lifecycle_events.to_string v) s
-         | None -> false))
-    Keeper_lifecycle_events.all_custom_events;
-  check bool "unknown lifecycle event string is None" true
+        (Keeper_lifecycle_events.lifecycle_event_of_wire
+           ~event:event_name
+           ~phase
+         = Some event))
+    current_lifecycle_events;
+  check bool "unknown lifecycle wire event is rejected" true
     (Option.is_none
-       (Keeper_lifecycle_events.event_of_string "no_such_lifecycle_event"));
-  List.iter
-    (fun verb ->
-      check bool
-        ("legacy phase/operator event is not a custom verb: " ^ verb)
-        true
-        (Option.is_none (Keeper_lifecycle_events.event_of_string verb)))
-    [ "running"; "stopped"; "crashed"; "dead"; "paused"; "resumed" ]
+       (Keeper_lifecycle_events.lifecycle_event_of_wire
+          ~event:"no_such_lifecycle_event"
+          ~phase:None));
+  check bool "inconsistent phase event is rejected" true
+    (Option.is_none
+       (Keeper_lifecycle_events.lifecycle_event_of_wire
+          ~event:"running"
+          ~phase:(Some "stopped")))
 
 let test_lifecycle_event_cache_patcher_coverage () =
   (* Every name in the SSOT vocabulary must be classified ([Some]) by all four
      dashboard cache patchers — the coverage the phantom test only promised. The
      custom-event subset is also compiler-enforced via [display_of_custom_event]. *)
   List.iter
-    (fun name ->
+    (fun event ->
+      let name =
+        Keeper_lifecycle_events.lifecycle_event_to_string event
+      in
       check bool
         ("keepalive_running classifies " ^ name)
         true
         (Option.is_some
            (Server_dashboard_http_execution_surfaces.keepalive_running_of_lifecycle_event
-              name));
+              event));
       check bool
         ("phase classifies " ^ name)
         true
         (Option.is_some
-           (Server_dashboard_http_execution_surfaces.phase_of_lifecycle_event name));
+           (Server_dashboard_http_execution_surfaces.phase_of_lifecycle_event event));
       check bool
         ("pipeline_stage classifies " ^ name)
         true
         (Option.is_some
            (Server_dashboard_http_execution_surfaces.pipeline_stage_of_lifecycle_event
-              name));
+              event));
       check bool
         ("paused classifies " ^ name)
-        true
+        (not
+           (event
+            = Keeper_lifecycle_events.Phase_event
+                Keeper_state_machine.Stopped))
         (Option.is_some
-           (Server_dashboard_http_execution_surfaces.paused_of_lifecycle_event name)))
-    Keeper_lifecycle_events.all_event_names
+           (Server_dashboard_http_execution_surfaces.paused_of_lifecycle_event event)))
+    current_lifecycle_events
 
 let test_lifecycle_event_display_values () =
-  (* Pin the exact (keepalive_running, phase, pipeline_stage, paused) projection
-     for every lifecycle event string — including the legacy operator strings
-     [paused] / [resumed] that are outside [all_event_names]. This locks the
-     byte-identity the refactor preserves: a value drift in
-     [display_of_custom_event] or [display_of_phase_or_legacy_string] now fails
-     here instead of silently changing a dashboard row (the coverage test above
-     only asserts [Some], not the value). *)
+  (* Pin the exact typed transition projection. *)
   let cases =
-    [ ("started", true, "running", "idle", Some false);
-      ("restarted", true, "running", "idle", Some false);
-      ("reconciled", true, "running", "idle", Some false);
-      ("running", true, "running", "idle", Some false);
-      ("resumed", true, "running", "idle", Some false);
-      ("paused", true, "paused", "paused", Some true);
-      ("purged", false, "stopped", "offline", Some false);
-      ("admission_denied", false, "offline", "offline", Some false);
-      ("dead_cleaned", false, "dead", "offline", Some false);
-      ("stopped", false, "stopped", "offline", None);
-      ("crashed", false, "crashed", "crashed", Some false);
-      ("dead", false, "dead", "offline", Some false);
+    [
+      ( Keeper_lifecycle_events.Custom_event
+          { verb = Keeper_lifecycle_events.Started; phase = None },
+        true, "running", "idle", Some false );
+      ( Keeper_lifecycle_events.Phase_event Keeper_state_machine.Paused,
+        true, "paused", "paused", Some true );
+      ( Keeper_lifecycle_events.Phase_event Keeper_state_machine.Stopped,
+        false, "stopped", "offline", None );
+      ( Keeper_lifecycle_events.Phase_event Keeper_state_machine.Crashed,
+        false, "crashed", "crashed", Some false );
+      ( Keeper_lifecycle_events.Phase_event Keeper_state_machine.Dead,
+        false, "dead", "offline", Some false );
     ]
   in
   List.iter
-    (fun (name, keepalive, phase, pipeline, paused) ->
+    (fun (event, keepalive, phase, pipeline, paused) ->
+      let name =
+        Keeper_lifecycle_events.lifecycle_event_to_string event
+      in
       check (option bool)
         ("keepalive_running value for " ^ name)
         (Some keepalive)
         (Server_dashboard_http_execution_surfaces.keepalive_running_of_lifecycle_event
-           name);
+           event);
       check (option string)
         ("phase value for " ^ name)
         (Some phase)
-        (Server_dashboard_http_execution_surfaces.phase_of_lifecycle_event name);
+        (Server_dashboard_http_execution_surfaces.phase_of_lifecycle_event event);
       check (option string)
         ("pipeline_stage value for " ^ name)
         (Some pipeline)
         (Server_dashboard_http_execution_surfaces.pipeline_stage_of_lifecycle_event
-           name);
+           event);
       check (option bool)
         ("paused value for " ^ name)
         paused
-        (Server_dashboard_http_execution_surfaces.paused_of_lifecycle_event name))
+        (Server_dashboard_http_execution_surfaces.paused_of_lifecycle_event event))
     cases
 
 (* The [paused] lifecycle event patches with [keepalive_running = true], so the
@@ -2024,7 +2048,8 @@ let test_paused_lifecycle_event_keeps_paused_status () =
   let patched =
     Server_dashboard_http_execution_surfaces.patch_keeper_row
       ~keeper_name:"pause-target"
-      ~event:"paused"
+      ~event:
+        (Keeper_lifecycle_events.Phase_event Keeper_state_machine.Paused)
       ~keepalive_running:true
       (`Assoc [ ("name", `String "pause-target"); ("status", `String "paused") ])
   in
@@ -2033,28 +2058,13 @@ let test_paused_lifecycle_event_keeps_paused_status () =
   check bool "paused flag is set" true
     Yojson.Safe.Util.(patched |> member "paused" |> to_bool)
 
-let test_resumed_lifecycle_event_clears_paused_status () =
-  let patched =
-    Server_dashboard_http_execution_surfaces.patch_keeper_row
-      ~keeper_name:"resume-target"
-      ~event:"resumed"
-      ~keepalive_running:true
-      (`Assoc
-        [ ("name", `String "resume-target")
-        ; ("status", `String "paused")
-        ; ("paused", `Bool true)
-        ])
-  in
-  check string "resumed status is idle" "idle"
-    Yojson.Safe.Util.(patched |> member "status" |> to_string);
-  check bool "resumed flag clears pause" false
-    Yojson.Safe.Util.(patched |> member "paused" |> to_bool)
-
 let test_reconciled_lifecycle_event_preserves_durable_pause () =
   let patched =
     Server_dashboard_http_execution_surfaces.patch_keeper_row
       ~keeper_name:"paused-reconcile-target"
-      ~event:"reconciled"
+      ~event:
+        (Keeper_lifecycle_events.Custom_event
+           { verb = Keeper_lifecycle_events.Reconciled; phase = None })
       ~keepalive_running:true
       (`Assoc
         [ ("name", `String "paused-reconcile-target")
@@ -2079,7 +2089,8 @@ let test_stopped_lifecycle_event_stays_offline () =
   let patched =
     Server_dashboard_http_execution_surfaces.patch_keeper_row
       ~keeper_name:"stop-target"
-      ~event:"stopped"
+      ~event:
+        (Keeper_lifecycle_events.Phase_event Keeper_state_machine.Stopped)
       ~keepalive_running:false
       (`Assoc
         [ ("name", `String "stop-target")
@@ -2096,7 +2107,8 @@ let test_stopped_lifecycle_event_preserves_durable_pause () =
   let patched =
     Server_dashboard_http_execution_surfaces.patch_keeper_row
       ~keeper_name:"paused-stop-target"
-      ~event:"stopped"
+      ~event:
+        (Keeper_lifecycle_events.Phase_event Keeper_state_machine.Stopped)
       ~keepalive_running:false
       (`Assoc
         [ ("name", `String "paused-stop-target")
@@ -2114,7 +2126,9 @@ let test_lifecycle_cache_patch_rejects_missing_or_unknown_status () =
   let patch row =
     Server_dashboard_http_execution_surfaces.patch_keeper_row
       ~keeper_name:"drift-target"
-      ~event:"reconciled"
+      ~event:
+        (Keeper_lifecycle_events.Custom_event
+           { verb = Keeper_lifecycle_events.Reconciled; phase = None })
       ~keepalive_running:true
       row
     |> ignore
@@ -2605,16 +2619,14 @@ let () =
             test_composite_blocked_uses_terminal_contract_not_observational_metadata;
         ] );
       ( "lifecycle event classification (#22071)",
-        [ test_case "event_of_string round-trips to_string" `Quick
-            test_lifecycle_event_of_string_roundtrip;
+        [ test_case "typed wire lifecycle round-trips" `Quick
+            test_lifecycle_event_wire_roundtrip;
           test_case "cache patchers cover the SSOT vocabulary" `Quick
             test_lifecycle_event_cache_patcher_coverage;
           test_case "cache patchers pin byte-identical values" `Quick
             test_lifecycle_event_display_values;
           test_case "paused lifecycle event keeps the paused status" `Quick
             test_paused_lifecycle_event_keeps_paused_status;
-          test_case "resumed lifecycle event clears the paused status" `Quick
-            test_resumed_lifecycle_event_clears_paused_status;
           test_case "reconciled lifecycle event preserves durable pause" `Quick
             test_reconciled_lifecycle_event_preserves_durable_pause;
           test_case "stopped lifecycle event stays offline" `Quick

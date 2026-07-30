@@ -127,7 +127,9 @@ val invalidate_execution_cache_with_hooks_for_testing :
     callers should use {!invalidate_execution_cache}. *)
 
 val patch_keeper_dependent_caches :
-  keeper_name:string -> event:string -> unit
+  keeper_name:string ->
+  event:Keeper_lifecycle_events.lifecycle_event ->
+  unit
 (** Applies the lifecycle delta to the execution cache and its serialized
     default body. Operator snapshots are never patched in place; their mutation
     paths advance the projection generation and publish a canonical tombstone.
@@ -217,23 +219,22 @@ val dashboard_transport_health_http_json :
 
 (** {1 Lifecycle-event patchers}
 
-    Mapping from SSOT keeper-lifecycle event names
-    (e.g. [started] / [paused] / [resumed]) to the four
-    cache-row fields the dashboard exposes.  Pinned at
-    this boundary because [test/test_types] asserts
-    every SSOT event has an entry in each map (#8396).
-    [None] means "the event does not change this
+    Mapping from typed SSOT keeper-lifecycle transitions
+    to the four cache-row fields the dashboard exposes.
+    [None] means "the transition does not change this
     field". *)
 
 val keepalive_running_of_lifecycle_event :
-  string -> bool option
+  Keeper_lifecycle_events.lifecycle_event -> bool option
 
-val phase_of_lifecycle_event : string -> string option
+val phase_of_lifecycle_event :
+  Keeper_lifecycle_events.lifecycle_event -> string option
 
 val pipeline_stage_of_lifecycle_event :
-  string -> string option
+  Keeper_lifecycle_events.lifecycle_event -> string option
 
-val paused_of_lifecycle_event : string -> bool option
+val paused_of_lifecycle_event :
+  Keeper_lifecycle_events.lifecycle_event -> bool option
 
 val seed_execution_cache_for_test : unit -> unit
 
@@ -242,7 +243,7 @@ val patch_surface_json_for_running_keepers :
 
 val patch_keeper_row :
   keeper_name:string ->
-  event:string ->
+  event:Keeper_lifecycle_events.lifecycle_event ->
   keepalive_running:bool ->
   Yojson.Safe.t ->
   Yojson.Safe.t

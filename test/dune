@@ -2577,3 +2577,8 @@
 (include stanzas/test_keeper_chat_admission_contention.inc)
 
 (include stanzas/test_dashboard_continuity_briefs.inc)
+
+(test
+ (name test_slack_mrkdwn_converter)
+ (modules test_slack_mrkdwn_converter)
+ (libraries alcotest masc_gate re))

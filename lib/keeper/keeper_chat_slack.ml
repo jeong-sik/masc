@@ -256,7 +256,7 @@ let send_message_with_blocks ?clock
     ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
     ?thread_ts ~token ~channel ~content ~blocks () =
   let content =
-    redact content |> escape_mrkdwn_text |> fun s ->
+    redact content |> Slack_mrkdwn_converter.to_slack_mrkdwn |> fun s ->
     truncate_to_limit s slack_message_limit
   in
   let blocks = limit_blocks_for_slack blocks in

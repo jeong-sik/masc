@@ -2010,7 +2010,7 @@ let test_lifecycle_event_display_values () =
            name);
       check (option bool)
         ("paused value for " ^ name)
-        (Some paused)
+        paused
         (Server_dashboard_http_execution_surfaces.paused_of_lifecycle_event name))
     cases
 

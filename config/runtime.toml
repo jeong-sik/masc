@@ -112,7 +112,6 @@ supports-tool-choice = true
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-response-format-json = true
 supports-structured-output = false
 
@@ -129,7 +128,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -148,7 +146,6 @@ streaming = true
 max-output-tokens = 128000
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-native-streaming = true
 supports-response-format-json = true
 supports-structured-output = false
 
@@ -171,7 +168,6 @@ streaming = true
 supports-tool-choice = false
 thinking-control-format = "chat_template_token"
 thinking-control-token = "<|think|>"
-supports-native-streaming = true
 supports-top-k = true
 supports-seed = true
 supports-image-input = true
@@ -193,7 +189,6 @@ streaming = true
 supports-tool-choice = false
 thinking-control-format = "chat_template_token"
 thinking-control-token = "<|think|>"
-supports-native-streaming = true
 supports-top-k = true
 supports-seed = true
 supports-image-input = true
@@ -236,7 +231,6 @@ streaming = true
 max-output-tokens = 131072
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-native-streaming = true
 supports-response-format-json = true
 supports-structured-output = false
 
@@ -261,7 +255,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 # SSOT = OAS models.toml per official MiniMax Chat docs: Chat tool_choice /
 # response_format / structured output are not documented (jeong-sik/oas#2339).
 supports-response-format-json = false
@@ -288,7 +281,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "ollama_think"
-supports-native-streaming = true
 supports-response-format-json = true
 supports-structured-output = true
 supports-image-input = true
@@ -316,7 +308,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 # SSOT = OAS models.toml; Ollama Cloud Kimi rows do not currently advertise a
 # native schema/response_format guarantee.
 supports-response-format-json = false
@@ -342,7 +333,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -360,7 +350,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -378,7 +367,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -397,7 +385,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -415,7 +402,6 @@ supports-tool-choice = false
 supports-extended-thinking = false
 supports-reasoning-budget = false
 thinking-control-format = "none"
-supports-native-streaming = true
 supports-response-format-json = true
 supports-structured-output = true
 supports-image-input = false
@@ -435,7 +421,6 @@ supports-tool-choice = false
 supports-extended-thinking = false
 supports-reasoning-budget = false
 thinking-control-format = "none"
-supports-native-streaming = true
 supports-response-format-json = true
 supports-structured-output = true
 supports-image-input = true
@@ -455,7 +440,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -473,7 +457,6 @@ supports-tool-choice = false
 supports-extended-thinking = false
 supports-reasoning-budget = false
 thinking-control-format = "none"
-supports-native-streaming = true
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -491,7 +474,6 @@ supports-tool-choice = false
 supports-extended-thinking = false
 supports-reasoning-budget = false
 thinking-control-format = "none"
-supports-native-streaming = true
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -509,7 +491,6 @@ supports-tool-choice = false
 supports-extended-thinking = false
 supports-reasoning-budget = false
 thinking-control-format = "none"
-supports-native-streaming = true
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -527,7 +508,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -545,7 +525,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -563,7 +542,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -581,7 +559,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -599,7 +576,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -617,7 +593,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -635,7 +610,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -653,7 +627,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -671,7 +644,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -689,7 +661,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -707,7 +678,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -725,7 +695,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -743,7 +712,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -761,7 +729,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 # SSOT = OAS models.toml per official MiniMax Chat docs (jeong-sik/oas#2339).
 supports-response-format-json = false
 supports-structured-output = false
@@ -782,7 +749,6 @@ supports-tool-choice = false
 supports-extended-thinking = false
 supports-reasoning-budget = false
 thinking-control-format = "none"
-supports-native-streaming = true
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -800,7 +766,6 @@ supports-tool-choice = false
 supports-extended-thinking = false
 supports-reasoning-budget = false
 thinking-control-format = "none"
-supports-native-streaming = true
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -818,7 +783,6 @@ supports-tool-choice = false
 supports-extended-thinking = false
 supports-reasoning-budget = false
 thinking-control-format = "none"
-supports-native-streaming = true
 supports-response-format-json = true
 supports-structured-output = true
 supports-image-input = true
@@ -838,7 +802,6 @@ supports-tool-choice = false
 supports-extended-thinking = false
 supports-reasoning-budget = false
 thinking-control-format = "none"
-supports-native-streaming = true
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -856,7 +819,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -874,7 +836,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -892,7 +853,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -910,7 +870,6 @@ supports-tool-choice = false
 supports-extended-thinking = false
 supports-reasoning-budget = false
 thinking-control-format = "none"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -928,7 +887,6 @@ supports-tool-choice = false
 supports-extended-thinking = false
 supports-reasoning-budget = false
 thinking-control-format = "none"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -946,7 +904,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -964,7 +921,6 @@ supports-tool-choice = false
 supports-extended-thinking = false
 supports-reasoning-budget = false
 thinking-control-format = "none"
-supports-native-streaming = true
 supports-image-input = false
 supports-multimodal-inputs = false
 

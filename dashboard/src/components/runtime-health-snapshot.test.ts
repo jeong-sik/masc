@@ -128,7 +128,6 @@ function providerPayload(overrides: Record<string, unknown> = {}) {
               supports_parallel_tool_calls: true,
               supports_extended_thinking: true,
               supports_reasoning_budget: true,
-              supports_native_streaming: true,
               supports_system_prompt: true,
               supports_caching: true,
               supports_prompt_caching: true,

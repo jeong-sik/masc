@@ -269,7 +269,6 @@ function runtimeDeclaredModelControlText(provider: DashboardRuntimeProviderSnaps
     flagText(caps.supports_parallel_tool_calls, 'parallel'),
     flagText(caps.supports_extended_thinking, 'extended-thinking'),
     flagText(caps.supports_reasoning_budget, 'reasoning-budget'),
-    flagText(caps.supports_native_streaming, 'native-stream'),
     flagText(caps.supports_system_prompt, 'system-prompt'),
     flagText(caps.supports_caching, 'cache'),
     caps.supports_prompt_caching

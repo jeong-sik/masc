@@ -73,7 +73,6 @@ describe('RuntimeMonitor', () => {
           thinking_control_format: 'reasoning-effort',
           supports_response_format_json: true,
           supports_structured_output: true,
-          supports_native_streaming: true,
           supports_system_prompt: true,
           supports_caching: true,
           supports_prompt_caching: true,
@@ -224,7 +223,6 @@ describe('RuntimeMonitor', () => {
                 supports_multimodal_inputs: true,
                 supports_response_format_json: true,
                 supports_structured_output: true,
-                supports_native_streaming: true,
                 supports_system_prompt: true,
                 supports_caching: true,
                 supports_prompt_caching: true,
@@ -386,12 +384,12 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('reasoning-budget:on')
     expect(container.textContent).toContain('thinking-control:reasoning-effort')
     expect(container.textContent).toContain(
-      'controls:tool-choice,required,named,parallel,extended-thinking,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
+      'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
     )
     expect(container.textContent).toContain('note:verified by runtime discovery')
     expect(container.textContent).toContain('behavior:inline-tools,argv-preflight,anthropic-cache')
     expect(container.textContent).toContain(
-      'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
+      'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
     )
     expect(container.textContent).toContain('price-in:0.1')
     expect(container.textContent).toContain('effective · source:oas-provider-config-model · ctx:131072 · out:65536')

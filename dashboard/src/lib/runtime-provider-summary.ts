@@ -34,7 +34,6 @@ export function runtimeCatalogSnapshotFacts(item: DashboardRuntimeProviderSnapsh
     item.supports_named_tool_choice ? 'named' : null,
     item.supports_parallel_tool_calls ? 'parallel' : null,
     item.supports_extended_thinking ? 'extended-thinking' : null,
-    item.supports_native_streaming ? 'native-stream' : null,
     item.supports_system_prompt ? 'system-prompt' : null,
     item.supports_caching ? 'cache' : null,
     runtimeSnapshotPromptCache(item),
@@ -206,7 +205,6 @@ export function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapsho
     caps?.supports_parallel_tool_calls ? 'parallel' : null,
     caps?.supports_extended_thinking ? 'extended-thinking' : null,
     caps?.supports_reasoning_budget ? 'reasoning-budget' : null,
-    caps?.supports_native_streaming ? 'native-stream' : null,
     caps?.supports_system_prompt ? 'system-prompt' : null,
     caps?.supports_caching ? 'cache' : null,
     caps?.supports_prompt_caching

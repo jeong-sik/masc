@@ -241,7 +241,6 @@ streaming = true
 
 [models.mockmodel.capabilities]
 max-output-tokens = 4096
-supports-native-streaming = true
 emits-usage-tokens = true
 
 [mock.mockmodel]

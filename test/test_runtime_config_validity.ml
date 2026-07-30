@@ -755,6 +755,27 @@ let test_exact_output_lane_rejects_unknown_key () =
          errors)
   | Ok _ -> fail "unknown exact-output lane key must fail config parsing"
 
+let test_retired_native_streaming_capability_is_rejected () =
+  let config =
+    "[models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.sample.capabilities]\n\
+     supports-native-streaming = true\n"
+  in
+  match Runtime_toml.parse_string config with
+  | Ok _ -> fail "retired supports-native-streaming key must fail config parsing"
+  | Error errors ->
+    check bool "retired key path is exact" true
+      (List.exists
+         (fun (error : Runtime_toml.parse_error) ->
+            String.equal
+              error.path
+              "models.sample.capabilities.supports-native-streaming"
+            && String_util.contains_substring error.message "was removed")
+         errors)
+
 let test_repo_runtime_toml_loads () =
   with_deployment_oas_model_catalog @@ fun _catalog ->
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
@@ -3152,6 +3173,8 @@ let () =
             test_exact_output_lane_config_is_ordered_and_rejects_duplicates;
           test_case "exact-output lane rejects unknown keys" `Quick
             test_exact_output_lane_rejects_unknown_key;
+          test_case "retired native-streaming capability is rejected" `Quick
+            test_retired_native_streaming_capability_is_rejected;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
           test_case

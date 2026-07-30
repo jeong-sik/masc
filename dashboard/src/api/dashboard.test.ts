@@ -3092,7 +3092,6 @@ describe('fetchRuntimeProviders', () => {
             supports_extended_thinking: true,
             supports_response_format_json: true,
             supports_structured_output: true,
-            supports_native_streaming: true,
             supports_system_prompt: true,
             supports_caching: true,
             supports_prompt_caching: true,
@@ -3248,7 +3247,6 @@ describe('fetchRuntimeProviders', () => {
                   supports_multimodal_inputs: true,
                   supports_response_format_json: true,
                   supports_structured_output: true,
-                  supports_native_streaming: true,
                   supports_system_prompt: true,
                   supports_caching: true,
                   supports_prompt_caching: true,
@@ -3370,7 +3368,7 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.supports_extended_thinking).toBe(true)
     expect(result.providers[0]?.supports_response_format_json).toBe(true)
     expect(result.providers[0]?.supports_structured_output).toBe(true)
-    expect(result.providers[0]?.supports_native_streaming).toBe(true)
+    expect(result.providers[0]?.effective_capabilities?.supports_native_streaming).toBe(true)
     expect(result.providers[0]?.supports_system_prompt).toBe(true)
     expect(result.providers[0]?.supports_prompt_caching).toBe(true)
     expect(result.providers[0]?.prompt_cache_alignment).toBe(1024)

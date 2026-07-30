@@ -465,7 +465,6 @@ describe('KeeperWorkspaceRail', () => {
                 supports_multimodal_inputs: true,
                 supports_response_format_json: true,
                 supports_structured_output: true,
-                supports_native_streaming: true,
                 supports_system_prompt: true,
                 supports_caching: true,
                 supports_prompt_caching: true,
@@ -552,7 +551,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('budget:32768')
     expect(container.textContent).toContain('behavior:inline-tools,argv-preflight,anthropic-cache')
     expect(container.textContent).toContain(
-      'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
+      'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
     )
     expect(container.textContent).toContain('source:oas-provider-config-model')
     expect(container.textContent).toContain('ctx:131072 · out:65536 · tools · tool-choice+required+named+parallel')

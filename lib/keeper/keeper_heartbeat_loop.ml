@@ -54,7 +54,7 @@ type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
-  pending_selection : Keeper_event_queue.stimulus option;
+  pending_selection : Keeper_event_queue_state.pending_selection option;
   event_queue_intake_error : Stimulus_intake.event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
@@ -333,83 +333,44 @@ let manual_compaction_requested_of_stimuli = function
   | [] | [ _ ] | _ :: _ :: _ -> false
 ;;
 
-let compaction_outcome_of_cycle_outcome = function
-  | Some (Cycle.Manual_compaction_applied _) -> Some `Committed
-  | Some (Cycle.Manual_compaction_failed _) -> Some `Failed
-  | Some (Cycle.Failed { failure; _ }) ->
+let rec compaction_outcomes_of_cycle_outcome = function
+  | Cycle.Manual_compaction_applied { receipt; followup } ->
+    `Manual_committed receipt.commit_count
+    :: compaction_outcomes_of_cycle_outcome followup
+  | Cycle.Manual_compaction_failed _ -> [ `Failed ]
+  | Cycle.Failed { failure; _ } ->
     (match failure.Keeper_unified_turn.source_disposition with
-     | Keeper_unified_turn.Requeue_after_context_compaction
-         Keeper_unified_turn.Compaction_committed ->
-       (* #25538: an in-lane commit is still one provider-overflow episode.
-          Advancing (not resetting) the streak is what lets an
-          incompressible floor reach the ceiling; only an overflow-free
-          completed turn — or the operator's manual commit — resets. *)
-       Some `Overflow_episode_committed
-     | Keeper_unified_turn.Requeue_after_context_compaction
-         (Keeper_unified_turn.Compaction_attempt_failed _)
-     | Keeper_unified_turn.Follow_failure_route_after_no_compaction _ ->
-       Some `Failed
-     | Keeper_unified_turn.Requeue_after_context_compaction
-         (Keeper_unified_turn.Compaction_refused_without_attempt _) ->
-       (* The admission gate declined the trigger before reading a checkpoint or
-          calling the summarizer, so there is no compaction outcome to record.
-          Counting it advanced the streak the gate itself reads: live keeper
-          kidsnote reached 907 against a threshold of 3. *)
-       None
-     | Keeper_unified_turn.Acknowledge_after_in_turn_handling -> Some `Failed
+     | Keeper_unified_turn.Requeue_after_context_compaction { commit_count } ->
+       [ `Reactive_committed commit_count ]
+     | Keeper_unified_turn.Acknowledge_after_in_turn_handling -> [ `Failed ]
      | Keeper_unified_turn.Follow_failure_route
-     | Keeper_unified_turn.Pause_after_transcript_corruption _ -> None)
-  | Some (Cycle.Completed _) -> Some `Recovered
-  | Some
-      ( Cycle.Checkpointed _
-      | Cycle.Input_required _
-      | Cycle.Cancelled _
-      | Cycle.Skipped _
-      | Cycle.Busy _
-      | Cycle.Manual_compaction_not_applied _ )
-  | None -> None
+     | Keeper_unified_turn.Pause_after_transcript_corruption _ -> [])
+  | Cycle.Completed _
+  | Cycle.Checkpointed _
+  | Cycle.Input_required _
+  | Cycle.Cancelled _
+  | Cycle.Skipped _
+  | Cycle.Busy _
+  | Cycle.Manual_compaction_not_applied _ ->
+    []
 ;;
 
-type transcript_corruption_commit =
-  | Transcript_pause_persisted
-  | Transcript_pause_and_settlement_persisted
-  | Transcript_pause_persistence_failed of string
-  | Transcript_pause_settlement_failed of string
+let compaction_outcome_label = function
+  | `Manual_committed _ -> "manual_committed"
+  | `Reactive_committed _ -> "reactive_committed"
+  | `Failed -> "failed"
+;;
 
-let commit_transcript_corruption ~stop ~persist_pause ?settle () =
-  Atomic.set stop true;
-  Eio.Cancel.protect (fun () ->
-    let guarded_call ~site call =
-      try call () with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printf.sprintf "%s raised: %s" site (Printexc.to_string exn))
-    in
-    match guarded_call ~site:"transcript corruption pause CAS" persist_pause with
-    | Error detail -> Transcript_pause_persistence_failed detail
-    | Ok `No_durable_meta ->
-      Transcript_pause_persistence_failed
-        "transcript corruption pause has no durable Keeper metadata"
-    | Ok `Persisted ->
-      (match settle with
-       | None -> Transcript_pause_persisted
-       | Some settle ->
-         (match guarded_call ~site:"transcript corruption settlement" settle with
-          | Ok () -> Transcript_pause_and_settlement_persisted
-          | Error detail -> Transcript_pause_settlement_failed detail)))
+let record_compaction_outcome_metric ~keeper_name outcome =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string CompactionOutcomes)
+    ~labels:[ "keeper", keeper_name; "outcome", compaction_outcome_label outcome ]
+    ()
 ;;
 
 module For_testing = struct
   let consume_deferred_runtime_lane_hint =
     consume_deferred_runtime_lane_hint
-
-  type nonrec transcript_corruption_commit = transcript_corruption_commit =
-    | Transcript_pause_persisted
-    | Transcript_pause_and_settlement_persisted
-    | Transcript_pause_persistence_failed of string
-    | Transcript_pause_settlement_failed of string
-
-  let commit_transcript_corruption = commit_transcript_corruption
-
 end
 
 (* Pure: post-turn status event derived from the registry turn-failure
@@ -460,7 +421,7 @@ let run_keepalive_unified_turn
         (fun admission_token ->
     let consumed_stimuli = ref [] in
     let pending_selection
-      : Keeper_event_queue.stimulus option ref
+      : Keeper_event_queue_state.pending_selection option ref
       =
       ref None
     in
@@ -784,41 +745,119 @@ let run_keepalive_unified_turn
           Cycle.meta cycle_outcome)
         else meta_after_triage
       in
-      let transcript_corruption_commit =
-        match !cycle_outcome_ref with
-        | Some (Cycle.Failed { failure; _ }) ->
-          (match failure.Keeper_unified_turn.source_disposition with
-           | Keeper_unified_turn.Pause_after_transcript_corruption { detail } ->
-             Log.Keeper.error
-               ~keeper_name:meta_after_triage.name
-               "transcript corruption retained its exact pending source without \
-                pausing the Keeper: %s"
-               detail;
-             None
-           | Keeper_unified_turn.Follow_failure_route
-           | Keeper_unified_turn.Follow_failure_route_after_no_compaction _
-           | Keeper_unified_turn.Requeue_after_context_compaction _
-           | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
-             None)
-        | Some
-            ( Cycle.Completed _
-            | Cycle.Checkpointed _
-            | Cycle.Input_required _
-            | Cycle.Cancelled _
-            | Cycle.Skipped _
-            | Cycle.Busy _
-            | Cycle.Manual_compaction_applied _
-            | Cycle.Manual_compaction_failed _
-            | Cycle.Manual_compaction_not_applied _ )
-        | None ->
-          None
+      let terminalize_failed_selection ~selection ~detail =
+        match
+          Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
+            ~base_path:ctx.config.base_path
+            meta_after_triage.name
+            ~current_owner_nonce:meta_after_triage.runtime.nonce
+            ~applied_at:(Time_compat.now ())
+            ~selection
+            ~detail
+        with
+        | Error message -> record_event_queue_failure message
+        | Ok
+            ( Keeper_registry_event_queue.Acked _
+            | Keeper_registry_event_queue.Already_acked _ ) ->
+          selection_acked := true;
+          (match
+             fail_schedule_due
+               ~ctx
+               ~error:detail
+               !consumed_stimuli
+           with
+           | Ok () -> ()
+           | Error message -> record_event_queue_failure message)
+        | Ok
+            (Keeper_registry_event_queue.Ack_committed_followup_failed
+               { stage; detail = followup_detail; _ }) ->
+          selection_acked := true;
+          let stage =
+            match stage with
+            | `Checkpoint -> "checkpoint"
+            | `Wal_compaction -> "wal_compaction"
+            | `Projection -> "projection"
+          in
+          record_event_queue_failure
+            (Printf.sprintf
+               "turn-attempt terminal receipt committed but %s follow-up \
+                failed: %s"
+               stage
+               followup_detail)
       in
-      let meta_after_cycle = meta_after_cycle in
-      (if Option.is_none transcript_corruption_commit
-       then
-         match !pending_selection with
-         | None -> ()
-         | Some selection ->
+      let persist_transcript_corruption_pause ~detail =
+        let pause_result =
+          try
+            Keeper_meta_store.persist_transcript_corruption_pause
+              ctx.config
+              ~keeper_name:meta_after_triage.name
+              ~trace_id:meta_after_triage.runtime.trace_id
+              ~generation:meta_after_triage.runtime.nonce
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            Error
+              ("transcript corruption pause raised: "
+               ^ Printexc.to_string exn)
+        in
+        match pause_result with
+        | Ok `Persisted -> true
+        | Ok `No_durable_meta ->
+          record_event_queue_failure
+            "transcript corruption pause has no durable Keeper metadata";
+          Log.Keeper.error
+            ~keeper_name:meta_after_triage.name
+            "transcript corruption retained its exact pending source because \
+             the Keeper has no durable metadata: %s"
+            detail;
+          false
+        | Error pause_detail ->
+          record_event_queue_failure
+            ("transcript corruption pause failed: " ^ pause_detail);
+          Log.Keeper.error
+            ~keeper_name:meta_after_triage.name
+            "transcript corruption retained its exact pending source because \
+             the durable pause failed: %s; pause_error=%s"
+            detail
+            pause_detail;
+          false
+      in
+      let commit_transcript_corruption ~detail =
+        Eio.Cancel.protect (fun () ->
+          Atomic.set stop true;
+          if persist_transcript_corruption_pause ~detail
+          then
+            Option.iter
+              (fun selection ->
+                 terminalize_failed_selection
+                   ~selection
+                   ~detail)
+              !pending_selection)
+      in
+      (match !cycle_outcome_ref with
+       | Some (Cycle.Failed { failure; _ }) ->
+         (match failure.Keeper_unified_turn.source_disposition with
+          | Keeper_unified_turn.Pause_after_transcript_corruption { detail } ->
+            commit_transcript_corruption ~detail
+          | Keeper_unified_turn.Follow_failure_route
+          | Keeper_unified_turn.Requeue_after_context_compaction _
+          | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
+            ())
+       | Some
+           ( Cycle.Completed _
+           | Cycle.Checkpointed _
+           | Cycle.Input_required _
+           | Cycle.Cancelled _
+           | Cycle.Skipped _
+           | Cycle.Busy _
+           | Cycle.Manual_compaction_applied _
+           | Cycle.Manual_compaction_failed _
+           | Cycle.Manual_compaction_not_applied _ )
+       | None ->
+         ());
+      (match !pending_selection with
+       | None -> ()
+       | Some selection ->
            let remove_completed_selection () =
              match
                Keeper_registry_event_queue.ack_pending_result
@@ -837,8 +876,7 @@ let run_keepalive_unified_turn
            match !cycle_outcome_ref with
            | Some
                ( Cycle.Completed _
-               | Cycle.Manual_compaction_applied _
-               | Cycle.Manual_compaction_not_applied _ ) ->
+               | Cycle.Manual_compaction_applied _ ) ->
              (match
                 complete_schedule_due
                   ~ctx
@@ -850,57 +888,63 @@ let run_keepalive_unified_turn
            | Some (Cycle.Failed { failure; _ }) ->
              (match failure.Keeper_unified_turn.source_disposition with
               | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
-                (match
-                   fail_schedule_due
-                     ~ctx
-                     ~error:
-                       (Agent_sdk.Error.to_string failure.Keeper_unified_turn.error)
-                     !consumed_stimuli
-                 with
-                 | Ok () -> remove_completed_selection ()
-                 | Error message -> record_event_queue_failure message)
+                terminalize_failed_selection
+                  ~selection
+                  ~detail:
+                    (Agent_sdk.Error.to_string
+                       failure.Keeper_unified_turn.error)
               | Keeper_unified_turn.Follow_failure_route
-              | Keeper_unified_turn.Follow_failure_route_after_no_compaction _
               | Keeper_unified_turn.Requeue_after_context_compaction _
               | Keeper_unified_turn.Pause_after_transcript_corruption _ ->
                 ())
+           | Some (Cycle.Manual_compaction_failed { failure; _ }) ->
+             terminalize_failed_selection
+               ~selection
+               ~detail:(Keeper_manual_compaction.failure_to_string failure)
+           | Some (Cycle.Manual_compaction_not_applied { no_compaction; _ }) ->
+             terminalize_failed_selection
+               ~selection
+               ~detail:
+                 (Keeper_post_turn.compaction_recovery_error_to_string
+                    (Keeper_post_turn.No_compaction no_compaction))
            | Some
                ( Cycle.Checkpointed _
                | Cycle.Input_required _
                | Cycle.Cancelled _
                | Cycle.Skipped _
-               | Cycle.Busy _
-               | Cycle.Manual_compaction_failed _ )
+               | Cycle.Busy _ )
            | None ->
              ());
-      (* RFC-0351 S0 / #25461: advance the compaction streak read by the trigger.
-         [Keeper_post_turn] refuses another compaction once the streak reaches
-         [compaction_retry_escalation_threshold]. This update is intentionally
-         independent of Event Queue source selection: every failed compaction
-         must consume retry budget, including cycles with no selected source. *)
-      (let compaction_outcome =
-         compaction_outcome_of_cycle_outcome !cycle_outcome_ref
+      (let compaction_outcomes =
+         match !cycle_outcome_ref with
+         | Some outcome -> compaction_outcomes_of_cycle_outcome outcome
+         | None -> []
        in
-       match compaction_outcome with
-       | None -> ()
-       | Some `Recovered
-         when meta_after_triage.runtime.compaction_rt.consecutive_failures = 0 ->
-         (* Streak already clear: skip the read-modify-write that every healthy
-            completed turn would otherwise pay. *)
-         ()
-       | Some outcome ->
-         (match
-            Keeper_meta_store.persist_compaction_outcome
-              ctx.config
-              ~keeper_name:meta_after_triage.name
-              ~outcome
-          with
-          | Ok (`Persisted | `No_durable_meta) -> ()
-          | Error message ->
-            Log.Keeper.warn
-              "compaction outcome counter not persisted keeper=%s: %s"
-              meta_after_triage.name
-              message));
+       List.iter
+         (function
+           | `Failed ->
+             record_compaction_outcome_metric
+               ~keeper_name:meta_after_triage.name
+               `Failed
+           | (`Manual_committed commit_count as outcome)
+           | (`Reactive_committed commit_count as outcome) ->
+             record_compaction_outcome_metric
+               ~keeper_name:meta_after_triage.name
+               outcome;
+             (match
+                Keeper_meta_store.persist_compaction_commit_projection
+                  ctx.config
+                  ~keeper_name:meta_after_triage.name
+                  ~commit_count
+              with
+              | Ok `Persisted -> ()
+              | Ok `No_durable_meta -> ()
+              | Error message ->
+                Log.Keeper.warn
+                  "compaction commit count not persisted keeper=%s: %s"
+                  meta_after_triage.name
+                  message))
+         compaction_outcomes);
       { meta = meta_after_cycle
       ; cycle_status =
           if !event_queue_failed then Turn_cycle_crashed else Turn_cycle_completed

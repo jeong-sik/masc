@@ -72,21 +72,18 @@ type status =
 
 type compaction_outcome =
   | Checkpoint_committed
-  | Retry_without_checkpoint
   | Lifecycle_cleanup_failed_without_checkpoint
 
 let compaction_outcome_key = "compaction_outcome"
 
 let compaction_outcome_to_string = function
   | Checkpoint_committed -> "checkpoint_committed"
-  | Retry_without_checkpoint -> "retry_without_checkpoint"
   | Lifecycle_cleanup_failed_without_checkpoint ->
     "lifecycle_cleanup_failed_without_checkpoint"
 ;;
 
 let compaction_outcome_of_string = function
   | "checkpoint_committed" -> Some Checkpoint_committed
-  | "retry_without_checkpoint" -> Some Retry_without_checkpoint
   | "lifecycle_cleanup_failed_without_checkpoint" ->
     Some Lifecycle_cleanup_failed_without_checkpoint
   | _ -> None
@@ -707,9 +704,7 @@ let canonicalize_compaction_evidence ~event_wire decision =
                  (Printf.sprintf
                     "field \"decision.%s\" must appear exactly once"
                     evidence_key))
-          | Some
-              (Retry_without_checkpoint
-              | Lifecycle_cleanup_failed_without_checkpoint) ->
+          | Some Lifecycle_cleanup_failed_without_checkpoint ->
             (match evidence_entries with
              | _ :: _ ->
                Error

@@ -1,6 +1,6 @@
 type pending_request =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
@@ -88,7 +88,7 @@ let cancellation_of_pending_request (request : pending_request) :
   Keeper_registry_event_queue.accepted_cancellation
   =
   { source = request.source
-  ; source_revision = request.source_revision
+  ; source_incarnation = request.source_incarnation
   ; owner_nonce = request.owner_nonce
   ; operator_operation_id = request.operator_operation_id
   ; reason = request.reason

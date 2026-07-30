@@ -34,6 +34,7 @@ type compaction_recovery =
   ; trigger : Compaction_trigger.t
   ; evidence : Keeper_compaction_evidence.t
   ; turn_generation : int
+  ; commit_count : int
   } [@@warning "-69"]
 
 type no_compaction = Keeper_compaction_outcome.no_compaction =
@@ -46,15 +47,6 @@ type compaction_recovery_error =
   | Checkpoint_candidate_failed of string
   | Compaction_rejected of Keeper_compact_policy.compaction_rejection
   | No_compaction of no_compaction
-  | Retry_suspended of { consecutive_failures : int }
-      (** RFC-0351 S0 / #25461: the keeper's compaction failure streak reached
-          [Keeper_meta_contract.compaction_retry_escalation_threshold], so a
-          reactive ([Provider_overflow]) prepare is refused before the
-          checkpoint load and the summarizer LLM call. The pending source
-          remains on the ordinary failure route without a fabricated durable
-          escalation.
-          [Manual] prepares bypass the gate: an operator-committed compaction
-          resets the streak and lifts the suspension. *)
 
 type prepared_commit_failure =
   { error : compaction_recovery_error

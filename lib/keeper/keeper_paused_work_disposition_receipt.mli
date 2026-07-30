@@ -10,13 +10,13 @@ type transfer_owner =
   ; target_trace_id : Keeper_id.Trace_id.t
   ; target_generation : int
   ; source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; continuation_binding : continuation_binding
   }
 
 type source_terminal_operation =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; source_receipt : Keeper_event_queue_state.source_terminal_receipt
   }
 

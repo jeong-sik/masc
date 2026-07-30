@@ -30,7 +30,6 @@ type field =
   | Last_compaction_ts
   | Last_compaction_before_tokens
   | Last_compaction_after_tokens
-  | Compaction_consecutive_failures
   | Proactive_count_total
   | Last_proactive_ts
   | Proactive_visible_count_total

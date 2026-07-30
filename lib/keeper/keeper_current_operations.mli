@@ -2,7 +2,7 @@
 
 type source = private
   | Event_queue_pending of
-      { revision : int64
+      { source_incarnation : int64
       ; stimulus : Keeper_event_queue.stimulus
       }
   | Event_queue_outbox of

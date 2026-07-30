@@ -83,7 +83,7 @@ type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
-  pending_selection : Keeper_event_queue.stimulus option;
+  pending_selection : Keeper_event_queue_state.pending_selection option;
   event_queue_intake_error : event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
@@ -106,7 +106,7 @@ type spent_selection_reconciliation =
 val reconcile_spent_selection
   :  config:Workspace_utils.config
   -> keeper_name:string
-  -> Keeper_event_queue.stimulus
+  -> Keeper_event_queue_state.pending_selection
   -> (spent_selection_reconciliation, string) result
 (** Acknowledges a selection whose work has already settled elsewhere, so no
     turn is spent re-observing it. Two kinds settle that way.

@@ -26,7 +26,7 @@ RESTART_HOOK="${RESTART_HOOK:-}"
 RUN_ID="${RUN_ID:-paused-work-soak-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 RUN_DIR="${RUN_DIR:-$REPO_ROOT/logs/paused-work-soak/$RUN_ID}"
 AUTHOR="${AUTHOR:-paused_work_soak}"
-REQUEST_SCHEMA="masc.keeper.paused-work.operator-request.v3"
+REQUEST_SCHEMA="masc.keeper.paused-work.operator-request.v4"
 MIN_ACCEPTANCE_SEC=28800
 
 usage() {
@@ -241,8 +241,8 @@ get_inventory() {
   [[ "$HTTP_LAST_STATUS" == "200" ]] || return 1
   INVENTORY="$HTTP_LAST_BODY"
   jq -e '
-    .schema == "masc.keeper.paused-work.inventory.v1" and
-    .operator_request_schema == "masc.keeper.paused-work.operator-request.v3" and
+    .schema == "masc.keeper.paused-work.inventory.v2" and
+    .operator_request_schema == "masc.keeper.paused-work.operator-request.v4" and
     (.queue.accepted_transfer_projection_count | type) == "number" and
     .queue.accepted_transfer_projection_count >= 0 and
     .queue.accepted_transfer_projection_count == (.queue.accepted_transfer_projection_count | floor)
@@ -317,7 +317,7 @@ post_disposition() {
 receipt_canonical() { jq -S -c '.receipt' <<<"$1"; }
 
 verify_receipt_file() {
-  local keeper="$1" operation_id="$2" root="$MASC_BASE_PATH/.masc/paused-work-dispositions-v5"
+  local keeper="$1" operation_id="$2" root="$MASC_BASE_PATH/.masc/paused-work-dispositions-v6"
   local matches=0 file
   [[ -d "$root" ]] || return 1
   while IFS= read -r -d '' file; do
@@ -410,7 +410,9 @@ while (( $(date +%s) - START_EPOCH < DURATION_SEC )); do
     die "paused source was not retained exactly once for $source_keeper/$post_id" "silent_loss"
   source="$(jq -c --arg post_id "$post_id" '.queue.pending[] | select(.source.post_id == $post_id) | .source' <<<"$INVENTORY")"
   binding="$(jq -c --arg post_id "$post_id" '.queue.pending[] | select(.source.post_id == $post_id) | .continuation_binding' <<<"$INVENTORY")"
-  source_revision="$(jq -r '.queue.revision | tostring' <<<"$INVENTORY")"
+  source_incarnation="$(jq -r --arg post_id "$post_id" \
+    '.queue.pending[] | select(.source.post_id == $post_id) | .source_incarnation | tostring' \
+    <<<"$INVENTORY")"
   operation_id="$RUN_ID/$ITERATIONS/$action"
 
   case "$action" in
@@ -422,20 +424,20 @@ while (( $(date +%s) - START_EPOCH < DURATION_SEC )); do
       ;;
     transfer)
       request="$(jq -cn --arg schema "$REQUEST_SCHEMA" --arg op "$operation_id" \
-        --argjson source "$source" --arg revision "$source_revision" \
+        --argjson source "$source" --arg revision "$source_incarnation" \
         --argjson generation "$source_generation" --argjson target_generation "$target_generation" \
         --arg target "$target_keeper" --argjson binding "$binding" \
-        '{schema:$schema,operation:"transfer_owner",source:$source,source_revision:$revision,
+        '{schema:$schema,operation:"transfer_owner",source:$source,source_incarnation:$revision,
           owner_nonce:$generation,target_generation:$target_generation,to_keeper:$target,
           continuation_binding:$binding,operator_operation_id:$op}')"
       TRANSFER_CASES=$((TRANSFER_CASES + 1))
       ;;
     cancel)
       request="$(jq -cn --arg schema "$REQUEST_SCHEMA" --arg op "$operation_id" \
-        --argjson source "$source" --arg revision "$source_revision" \
+        --argjson source "$source" --arg revision "$source_incarnation" \
         --argjson generation "$source_generation" \
         '{schema:$schema,operation:"cancel_accepted",source_state:"pending",source:$source,
-          source_revision:$revision,owner_nonce:$generation,operator_operation_id:$op,
+          source_incarnation:$revision,owner_nonce:$generation,operator_operation_id:$op,
           reason:"paused-work soak accepted cancellation"}')"
       CANCEL_CASES=$((CANCEL_CASES + 1))
       ;;
@@ -509,11 +511,11 @@ while (( $(date +%s) - START_EPOCH < DURATION_SEC )); do
     --argjson iteration "$ITERATIONS" --arg action "$action" --arg source_keeper "$source_keeper" \
     --arg target_keeper "$( [[ "$action" == "transfer" ]] && printf '%s' "$target_keeper" || printf '')" \
     --arg post_id "$post_id" --arg operation_id "$operation_id" --argjson source "$source" \
-    --argjson source_revision "$source_revision" --argjson owner_nonce "$source_generation" \
+    --argjson source_incarnation "$source_incarnation" --argjson owner_nonce "$source_generation" \
     --argjson restarted "$restarted" --argjson receipt "$first_receipt" \
     '{schema:$schema,run_id:$run_id,iteration:$iteration,action:$action,
       source_keeper:$source_keeper,target_keeper:(if $target_keeper == "" then null else $target_keeper end),
-      post_id:$post_id,operation_id:$operation_id,source:$source,source_revision:$source_revision,
+      post_id:$post_id,operation_id:$operation_id,source:$source,source_incarnation:$source_incarnation,
       owner_nonce:$owner_nonce,restarted:$restarted,receipt:$receipt,
       duplicate_terminal_effects:0,silent_losses:0}' >>"$LEDGER_FILE"
 

@@ -3619,11 +3619,6 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
       |> append
     in
     append_failure
-      ~ts:"2026-06-26T03:03:10Z"
-      ~status:"retryable_failure"
-      ~compaction_outcome:Runtime_manifest.Retry_without_checkpoint
-      ~error:"compaction dispatch failed";
-    append_failure
       ~ts:"2026-06-26T03:03:20Z"
       ~status:"lifecycle_cleanup_failed"
       ~compaction_outcome:Runtime_manifest.Lifecycle_cleanup_failed_without_checkpoint
@@ -3688,7 +3683,7 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
       "schema"
       "keeper.compaction_snapshots.v1"
       (json_string_field "compaction_snapshots" top "schema");
-    Alcotest.(check int) "count" 5 (json_int_field "compaction_snapshots" top "count");
+    Alcotest.(check int) "count" 4 (json_int_field "compaction_snapshots" top "count");
     Alcotest.(check int)
       "read errors"
       0
@@ -3771,8 +3766,7 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
            (outcome ^ " has no exact evidence")
            `Null
            (List.assoc "exact_evidence" failed))
-      [ "retry_without_checkpoint", "compaction dispatch failed"
-      ; ( "lifecycle_cleanup_failed_without_checkpoint"
+      [ ( "lifecycle_cleanup_failed_without_checkpoint"
         , "lifecycle cleanup failed" )
       ];
     List.iter

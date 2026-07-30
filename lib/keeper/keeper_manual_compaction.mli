@@ -11,6 +11,7 @@ type applied_receipt =
   { installation : Keeper_checkpoint_store.installed_checkpoint
   ; lifecycle : post_install_lifecycle
   ; manifest : (unit, string) result
+  ; commit_count : int
   }
 
 type success =

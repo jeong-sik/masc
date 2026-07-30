@@ -81,11 +81,52 @@ let test_terminal_async_entry_is_not_current () =
   | _ -> fail "terminal async entry was projected as a current operation"
 ;;
 
+let test_pending_operations_expose_source_incarnations () =
+  let first = stimulus "source-a" 1.0 in
+  let second = stimulus "source-b" 2.0 in
+  let first_state =
+    S.empty
+    |> S.with_pending (queue [ first ])
+    |> S.with_revision 1L
+  in
+  let state =
+    first_state
+    |> S.with_pending (queue [ first; second ])
+    |> S.with_revision 2L
+  in
+  let operations = O.project_event_queue_state ~keeper_name:"keeper-a" state in
+  let incarnations =
+    operations
+    |> List.map (fun operation ->
+      O.to_yojson operation
+      |> J.member "source"
+      |> J.member "source_incarnation"
+      |> J.to_string)
+  in
+  check (list string)
+    "pending operations retain each source incarnation"
+    [ "0"; "1" ]
+    incarnations;
+  let snapshot =
+    O.project_snapshot
+      ~keeper_name:"keeper-a"
+      ~event_queue:(Ok state)
+      ~async_requests:(Ok [])
+    |> O.snapshot_to_yojson
+  in
+  check string
+    "source-incarnation wire has a new schema"
+    "keeper.current_operations.v2"
+    J.(snapshot |> member "schema" |> to_string)
+;;
+
 let () =
   run "keeper_current_operations"
     [ "projection",
       [ test_case "async active and unavailable" `Quick test_async_active_and_unavailable
       ; test_case "terminal async is not current" `Quick
           test_terminal_async_entry_is_not_current
+      ; test_case "pending source incarnations" `Quick
+          test_pending_operations_expose_source_incarnations
       ] ]
 ;;

@@ -7,7 +7,6 @@ module State = Keeper_event_queue_state
 module Transaction = Keeper_paused_work_cancellation_transaction
 module Disposition_receipt = Keeper_paused_work_disposition_receipt
 module Resume_transaction = Keeper_paused_work_resume_transaction
-module Heartbeat_testing = Keeper_heartbeat_loop.For_testing
 
 let require_ok label = function
   | Ok value -> value
@@ -97,16 +96,19 @@ let with_pending_lane ?registered ?latched_reason ~paused ~generation f =
     ~paused
     ~generation
     (fun config keeper_name source ->
-       let source_revision =
+       let source_incarnation =
          Persistence.load_state_result
            ~base_path:config.Workspace.base_path
            ~keeper_name
-         |> require_ok "load pending accepted source revision"
-         |> State.revision
+         |> require_ok "load pending accepted source incarnation"
+         |> State.select_when
+              ~ready:(Queue.stimulus_identity_equal source)
+         |> require_some "select pending accepted source"
+         |> fun selection -> selection.admitted_revision
        in
        let request : Transaction.pending_request =
          { source
-         ; source_revision
+         ; source_incarnation
          ; owner_nonce = generation
          ; operator_operation_id = "operator-pending-cancel-1"
          ; reason = "operator rejected exact pending paused work"
@@ -164,7 +166,7 @@ let test_pending_cancellation_commits_exact_remove () =
         | Registry_queue.Transition_applied _
         | Registry_queue.Transition_committed_followup_failed _ -> ()
         | Registry_queue.Transition_already_applied _ ->
-          Alcotest.fail "first pending transaction was already settled");
+          Alcotest.fail "first pending cancellation was already applied");
        let state =
          Persistence.load_state_result
            ~base_path:config.Workspace.base_path
@@ -201,6 +203,91 @@ let test_pending_cancellation_busy_has_zero_mutation () =
        in
        Alcotest.(check int)
          "admission busy retains pending source"
+         1
+         (Queue.length (State.pending state)))
+;;
+
+let test_unrelated_enqueue_preserves_pending_incarnation () =
+  with_pending_lane
+    ~registered:false
+    ~paused:true
+    ~generation:18
+    (fun config keeper_name request ->
+       let unrelated : Queue.stimulus =
+         { post_id = "unrelated-cancellation-source"
+         ; urgency = Queue.Low
+         ; arrived_at = 2.0
+         ; payload = Queue.Bootstrap
+         }
+       in
+       Persistence.update_result
+         ~base_path:config.Workspace.base_path
+         ~keeper_name
+         (fun pending -> Queue.enqueue pending unrelated)
+       |> require_ok "enqueue unrelated cancellation source";
+       let result =
+         Transaction.cancel_pending config ~keeper_name request
+         |> Result.map_error Transaction.error_to_string
+         |> require_ok "cancel selected source after unrelated enqueue"
+       in
+       (match result.transition with
+        | Registry_queue.Transition_applied _
+        | Registry_queue.Transition_committed_followup_failed _ -> ()
+        | Registry_queue.Transition_already_applied _ ->
+          Alcotest.fail "unrelated enqueue replayed pending cancellation");
+       let state =
+         Persistence.load_state_result
+           ~base_path:config.Workspace.base_path
+           ~keeper_name
+         |> require_ok "load cancellation result after unrelated enqueue"
+       in
+       Alcotest.(check int)
+         "only unrelated source remains"
+         1
+         (Queue.length (State.pending state));
+       Alcotest.(check bool)
+         "unrelated cancellation source is preserved"
+         true
+         (State.pending state
+          |> Queue.to_list
+          |> List.exists (Queue.stimulus_identity_equal unrelated)))
+;;
+
+let test_reinserted_source_rejects_old_pending_incarnation () =
+  with_pending_lane
+    ~registered:false
+    ~paused:true
+    ~generation:19
+    (fun config keeper_name request ->
+       let base_path = config.Workspace.base_path in
+       let old_selection : State.pending_selection =
+         { source = request.source
+         ; admitted_revision = request.source_incarnation
+         }
+       in
+       Persistence.ack_pending_result
+         ~base_path
+         ~keeper_name
+         ~selection:old_selection
+         ()
+       |> require_ok "remove old cancellation source incarnation";
+       Persistence.update_result ~base_path ~keeper_name (fun pending ->
+         Queue.enqueue pending request.source)
+       |> require_ok "reinsert cancellation source";
+       (match Transaction.cancel_pending config ~keeper_name request with
+        | Error
+            (Transaction.Failed
+               { cause = Transaction.Queue_commit_failed _; _ }) ->
+          ()
+        | Error error -> Alcotest.fail (Transaction.error_to_string error)
+        | Ok _ ->
+          Alcotest.fail "old cancellation incarnation removed the reinserted source");
+       let state =
+         Persistence.load_state_result ~base_path ~keeper_name
+         |> require_ok "load reinserted cancellation source"
+       in
+       Alcotest.(check int)
+         "reinserted cancellation source remains"
          1
          (Queue.length (State.pending state)))
 ;;
@@ -514,55 +601,6 @@ let test_resume_owner_rejects_transcript_reset_without_receipt () =
        | Error detail -> Alcotest.fail detail)
 ;;
 
-let test_transcript_corruption_pause_precedes_settlement () =
-  let stop = Atomic.make false in
-  let calls = ref [] in
-  let result =
-    Heartbeat_testing.commit_transcript_corruption
-      ~stop
-      ~persist_pause:(fun () ->
-        calls := "pause" :: !calls;
-        Ok `Persisted)
-      ~settle:(fun () ->
-        calls := "settle" :: !calls;
-        Ok ())
-      ()
-  in
-  Alcotest.(check bool) "corrupted fiber is stopped" true (Atomic.get stop);
-  Alcotest.(check (list string))
-    "durable pause commits before terminal settlement"
-    [ "pause"; "settle" ]
-    (List.rev !calls);
-  Alcotest.(check bool)
-    "both commits are reported"
-    true
-    (match result with
-     | Heartbeat_testing.Transcript_pause_and_settlement_persisted -> true
-     | Heartbeat_testing.Transcript_pause_persisted
-     | Heartbeat_testing.Transcript_pause_persistence_failed _
-     | Heartbeat_testing.Transcript_pause_settlement_failed _ ->
-       false)
-;;
-
-let test_unleased_transcript_corruption_only_persists_pause () =
-  let stop = Atomic.make false in
-  let result =
-    Heartbeat_testing.commit_transcript_corruption
-      ~stop
-      ~persist_pause:(fun () -> Ok `Persisted)
-      ()
-  in
-  Alcotest.(check bool)
-    "unleased corruption commits only durable pause"
-    true
-    (match result with
-     | Heartbeat_testing.Transcript_pause_persisted -> true
-     | Heartbeat_testing.Transcript_pause_and_settlement_persisted
-     | Heartbeat_testing.Transcript_pause_persistence_failed _
-     | Heartbeat_testing.Transcript_pause_settlement_failed _ ->
-       false)
-;;
-
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -588,6 +626,14 @@ let () =
             `Quick
             test_pending_cancellation_busy_has_zero_mutation
         ; Alcotest.test_case
+            "unrelated enqueue preserves pending incarnation"
+            `Quick
+            test_unrelated_enqueue_preserves_pending_incarnation
+        ; Alcotest.test_case
+            "reinserted source rejects old pending incarnation"
+            `Quick
+            test_reinserted_source_rejects_old_pending_incarnation
+        ; Alcotest.test_case
             "Resume_owner commits receipt and preserves pending"
             `Quick
             test_resume_owner_commits_receipt_and_preserves_pending
@@ -611,14 +657,6 @@ let () =
             "Resume_owner rejects transcript reset without receipt"
             `Quick
             test_resume_owner_rejects_transcript_reset_without_receipt
-        ; Alcotest.test_case
-            "transcript pause precedes settlement"
-            `Quick
-            test_transcript_corruption_pause_precedes_settlement
-        ; Alcotest.test_case
-            "unleased transcript only persists pause"
-            `Quick
-            test_unleased_transcript_corruption_only_persists_pause
         ] )
     ]
 ;;

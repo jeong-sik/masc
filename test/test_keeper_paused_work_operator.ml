@@ -73,7 +73,7 @@ let terminal_source () =
 
 let common operation fields =
   `Assoc
-    ([ "schema", `String "masc.keeper.paused-work.operator-request.v3"
+    ([ "schema", `String "masc.keeper.paused-work.operator-request.v4"
      ; "operation", `String operation
      ]
      @ fields)
@@ -112,10 +112,13 @@ let with_source_terminal_lane f =
        Persistence.update_result ~base_path ~keeper_name (fun pending ->
          Queue.enqueue pending source)
        |> require_ok "seed source-terminal event";
-       let source_revision =
+       let source_incarnation =
          Persistence.load_state_result ~base_path ~keeper_name
          |> require_ok "load source-terminal state"
-         |> State.revision
+         |> State.select_when
+              ~ready:(Queue.stimulus_identity_equal source)
+         |> require_some "select source-terminal event"
+         |> fun selection -> selection.admitted_revision
        in
        let source_receipt =
          State.source_terminal_receipt_of_stimulus source
@@ -123,7 +126,7 @@ let with_source_terminal_lane f =
        in
        let request : Keeper_paused_work_source_terminal_transaction.request =
          { source
-         ; source_revision
+         ; source_incarnation
          ; owner_nonce = meta.runtime.nonce
          ; source_receipt
          ; operator_operation_id = "operator-source-terminal-response"
@@ -174,7 +177,7 @@ let test_strict_request_codec () =
       "cancel_accepted"
       [ "source_state", `String "pending"
       ; "source", Queue.stimulus_to_yojson board_source
-      ; "source_revision", int64_json 11L
+      ; "source_incarnation", int64_json 11L
       ; "owner_nonce", `Int 7
       ; "operator_operation_id", `String "operator-cancel"
       ; "reason", `String "operator rejected retained work"
@@ -183,7 +186,10 @@ let test_strict_request_codec () =
   (match Operator.request_of_yojson cancel with
    | Ok (Operator.Cancel_pending request) ->
      Alcotest.(check bool) "cancel source exact" true (request.source = board_source);
-     Alcotest.(check int64) "cancel revision exact" 11L request.source_revision
+     Alcotest.(check int64)
+       "cancel incarnation exact"
+       11L
+       request.source_incarnation
   | Ok _ -> Alcotest.fail "pending cancellation decoded to the wrong operation"
   | Error detail -> Alcotest.fail detail);
   let cancel_with_obsolete_settled_at =
@@ -199,7 +205,7 @@ let test_strict_request_codec () =
     common
       "transfer_owner"
       [ "source", Queue.stimulus_to_yojson terminal_source
-      ; "source_revision", int64_json 12L
+      ; "source_incarnation", int64_json 12L
       ; "owner_nonce", `Int 7
       ; "target_generation", `Int 8
       ; "to_keeper", `String "successor"
@@ -228,7 +234,7 @@ let test_strict_request_codec () =
     common
       "ack_source_terminal"
       [ "source", Queue.stimulus_to_yojson terminal_source
-      ; "source_revision", int64_json 13L
+      ; "source_incarnation", int64_json 13L
       ; "owner_nonce", `Int 7
       ; "source_receipt_kind", `String "hitl_terminal"
       ; "operator_operation_id", `String "operator-source-terminal"
@@ -300,7 +306,7 @@ let test_source_terminal_outcome_is_ack_boundary () =
       (json |> member "receipt" |> member "operation" |> to_string);
     Alcotest.(check (list string))
       "durable source-terminal receipt has the exact hard-cut fields"
-      [ "source"; "source_receipt_kind"; "source_revision" ]
+      [ "source"; "source_incarnation"; "source_receipt_kind" ]
       (source_terminal_fields
        |> List.map fst
        |> List.sort String.compare))

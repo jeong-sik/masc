@@ -1,24 +1,24 @@
 (** Pure durable state machine for one Keeper event queue owner.
 
-    [event-queue-v13.json] is the sole authority for pending stimuli and
+    [event-queue-v14.json] is the sole authority for pending stimuli and
     source-bearing transition projection work. This module performs no I/O;
     persistence supplies the atomic file boundary and publishes [pending] into
     the live registry only after a durable commit. *)
 
 type accepted_cancellation =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
 (** Exact operator authority for terminally cancelling one accepted event.
-    [source_revision] and [owner_nonce] fence the observed paused owner;
+    [source_incarnation] and [owner_nonce] fence the observed paused owner;
     [operator_operation_id] makes replay/conflict explicit. *)
 
 type accepted_transfer =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
@@ -33,12 +33,16 @@ type source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Background_job_terminal of Keeper_event_queue.bg_job_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
-(** Closed terminal source families that are intrinsically represented by a
-    durable event payload. No prose or external status inference is admitted. *)
+  | Turn_attempt_terminal of { detail : string }
+(** Closed terminal source evidence. The first three families are intrinsically
+    represented by their durable event payload. [Turn_attempt_terminal] records
+    that one admitted turn ended without durable compaction progress; the exact
+    source remains in the transition receipt instead of being discarded by a
+    raw ACK. [detail] is diagnostic only and carries no transition authority. *)
 
 type accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
@@ -63,6 +67,13 @@ type outbox_entry =
 
 type t
 
+type pending_selection =
+  { source : Keeper_event_queue.stimulus
+  ; admitted_revision : int64
+  }
+(** One exact durable queue entry. [admitted_revision] identifies the source
+    incarnation without making later unrelated queue changes invalidate it. *)
+
 type transition_result =
   | Transition_applied of transition_receipt
   | Transition_already_applied of transition_receipt
@@ -74,6 +85,9 @@ type transfer_projection_result =
 val empty : t
 val revision : t -> int64
 val pending : t -> Keeper_event_queue.t
+val pending_selections : t -> pending_selection list
+(** FIFO pending entries with their exact source incarnation authority. *)
+
 val last_transition : t -> transition_receipt option
 val projected_dispositions : t -> transition_receipt list
 (** Newest-first projected operator dispositions, including
@@ -94,15 +108,18 @@ val peek_when :
   t ->
   Keeper_event_queue.stimulus option
 
+val select_when :
+  ready:(Keeper_event_queue.stimulus -> bool) -> t -> pending_selection option
+
 val validate_pending_selection :
-  selection:Keeper_event_queue.stimulus ->
+  selection:pending_selection ->
   t ->
   (unit, string) result
 (** Read-only exact immutable selection validation. Unrelated pending entries
     and queue revisions do not invalidate the selected source. *)
 
 val ack_pending :
-  selection:Keeper_event_queue.stimulus ->
+  selection:pending_selection ->
   t ->
   (t, string) result
 (** Compare-and-remove the exact immutable selected stimulus snapshot.
@@ -115,7 +132,7 @@ val cancel_pending_accepted :
   cancellation:accepted_cancellation ->
   t ->
   (t * transition_result, string) result
-(** Atomically apply the exact pending cancellation. The source revision and
+(** Atomically apply the exact pending cancellation. The source incarnation and
     owner generation are checked before removal. The transition is committed
     through a source-bearing WAL outbox entry by persistence. *)
 
@@ -125,7 +142,7 @@ val transfer_pending_accepted :
   transfer:accepted_transfer ->
   t ->
   (t * transition_result, string) result
-(** Atomically apply the exact pending transfer. The source revision and owner
+(** Atomically apply the exact pending transfer. The source incarnation and owner
     generation are checked before removal, and the source-bearing WAL remains
     the replay authority until the target projection completes. *)
 
@@ -135,8 +152,23 @@ val ack_pending_source_terminal :
   source_terminal:accepted_source_terminal ->
   t ->
   (t * transition_result, string) result
-(** ACK one exact pending event only when its closed payload
-    exactly matches [source_terminal.source_receipt]. *)
+(** ACK one exact pending event. Intrinsic product-terminal receipts must match
+    the source payload exactly. A turn-attempt terminal receipt carries the
+    exact source itself; its detail is diagnostic and never admission
+    authority. *)
+
+val terminalize_pending_turn_attempt :
+  current_owner_nonce:int ->
+  applied_at:float ->
+  selection:pending_selection ->
+  detail:string ->
+  t ->
+  (t * transition_result, string) result
+(** End one admitted turn attempt with a deterministic operation identity
+    derived from the exact selected queue snapshot and owner generation.
+    Repeating the same request after WAL projection returns its original
+    receipt, while a later selection of the same source is a new attempt;
+    diagnostic [detail] never participates in admission or idempotency. *)
 
 val accepted_pending_cancellation_replay :
   accepted_cancellation ->
@@ -190,4 +222,4 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v13"] is the only accepted schema. *)
+(** ["keeper.event_queue.state.v14"] is the only accepted schema. *)

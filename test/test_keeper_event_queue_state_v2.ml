@@ -22,8 +22,9 @@ let post_ids queue =
   Queue.to_list queue |> List.map (fun (item : Queue.stimulus) -> item.post_id)
 ;;
 
-let selection state =
-  State.peek_when ~ready:(fun _ -> true) state |> require_some "pending selection"
+let select state =
+  State.select_when ~ready:(fun _ -> true) state
+  |> require_some "pending selection"
 ;;
 
 let test_peek_keeps_pending_authoritative () =
@@ -32,8 +33,11 @@ let test_peek_keeps_pending_authoritative () =
     |> State.with_revision 7L
     |> State.with_pending (queue [ stimulus "first" 1.0; stimulus "second" 2.0 ])
   in
-  let selected = selection state in
-  Alcotest.(check string) "selected exact head" "first" selected.post_id;
+  let selected = select state in
+  Alcotest.(check string)
+    "selected exact head"
+    "first"
+    selected.source.post_id;
   Alcotest.(check (list string))
     "peek does not dequeue"
     [ "first"; "second" ]
@@ -45,7 +49,7 @@ let test_exact_ack_removes_only_selected_identity () =
   let first = stimulus "approval-a" 1.0 in
   let second = stimulus "approval-b" 2.0 in
   let state = State.with_pending (queue [ first; second ]) State.empty in
-  let selected = selection state in
+  let selected = select state in
   let acked = State.ack_pending ~selection:selected state |> require_ok "exact ack" in
   Alcotest.(check (list string))
     "distinct source remains"
@@ -55,7 +59,7 @@ let test_exact_ack_removes_only_selected_identity () =
 
 let test_failure_without_ack_retains_source () =
   let state = State.with_pending (queue [ stimulus "retry-me" 1.0 ]) State.empty in
-  ignore (selection state);
+  ignore (select state);
   Alcotest.(check (list string))
     "failure or crash performs no queue mutation"
     [ "retry-me" ]
@@ -65,7 +69,7 @@ let test_failure_without_ack_retains_source () =
 let test_unrelated_enqueue_does_not_invalidate_exact_ack () =
   let source = stimulus "source" 1.0 in
   let state = State.with_pending (queue [ source ]) State.empty in
-  let selected = selection state in
+  let selected = select state in
   let changed =
     state
     |> State.with_revision 1L
@@ -81,10 +85,35 @@ let test_unrelated_enqueue_does_not_invalidate_exact_ack () =
     (post_ids (State.pending acked))
 ;;
 
+let test_reinserted_source_invalidates_old_selection () =
+  let source = stimulus "source-aba" 1.0 in
+  let initial = State.with_pending (queue [ source ]) State.empty in
+  let old_selection = select initial in
+  let reinserted =
+    initial
+    |> State.with_pending Queue.empty
+    |> State.with_revision 1L
+    |> State.with_pending (queue [ source ])
+    |> State.with_revision 2L
+  in
+  (match State.ack_pending ~selection:old_selection reinserted with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "old selection consumed a reinserted source");
+  let current_selection = select reinserted in
+  let acked =
+    State.ack_pending ~selection:current_selection reinserted
+    |> require_ok "current source incarnation ACK"
+  in
+  Alcotest.(check (list string))
+    "current source incarnation is removable"
+    []
+    (post_ids (State.pending acked))
+;;
+
 let test_changed_selected_snapshot_fails_closed () =
   let source = stimulus "source" 1.0 in
   let state = State.with_pending (queue [ source ]) State.empty in
-  let selected = selection state in
+  let selected = select state in
   let changed_source = { source with arrived_at = 9.0 } in
   let changed = State.with_pending (queue [ changed_source ]) state in
   (match State.ack_pending ~selection:selected changed with
@@ -96,6 +125,97 @@ let test_changed_selected_snapshot_fails_closed () =
     (post_ids (State.pending changed))
 ;;
 
+let test_turn_attempt_terminal_receipt_preserves_exact_source () =
+  let source = stimulus "failed-turn-source" 1.0 in
+  let initial = State.with_pending (queue [ source ]) State.empty in
+  let selection = select initial in
+  let staged, receipt =
+    match
+      State.terminalize_pending_turn_attempt
+        ~current_owner_nonce:7
+        ~applied_at:2.0
+        ~selection
+        ~detail:""
+        initial
+      |> require_ok "terminalize failed turn source"
+    with
+    | state, State.Transition_applied receipt -> state, receipt
+    | _, State.Transition_already_applied _ ->
+      Alcotest.fail "first turn-attempt terminalization was replayed"
+  in
+  Alcotest.(check (list string))
+    "terminal source leaves runnable pending"
+    []
+    (post_ids (State.pending staged));
+  (match State.transition_outbox staged with
+   | [ { receipt = actual; stimuli = [ retained ] } ] ->
+     Alcotest.(check string)
+       "receipt identity is stable"
+       receipt.transition_id
+       actual.transition_id;
+     Alcotest.(check bool)
+       "exact source survives in the durable receipt"
+       true
+       (retained = source)
+   | _ -> Alcotest.fail "turn-attempt terminal receipt did not retain one source");
+  let projected =
+    State.mark_transition_projected
+      ~transition_id:receipt.transition_id
+      staged
+    |> require_ok "project turn-attempt terminal receipt"
+  in
+  (match
+     State.terminalize_pending_turn_attempt
+       ~current_owner_nonce:7
+       ~applied_at:3.0
+       ~selection
+       ~detail:"different diagnostic"
+       projected
+     |> require_ok "replay projected turn-attempt terminal receipt"
+   with
+   | replayed, State.Transition_already_applied actual ->
+     Alcotest.(check string)
+       "projected replay keeps operation identity"
+       receipt.transition_id
+       actual.transition_id;
+     Alcotest.(check int64)
+       "projected replay does not revise queue"
+       (State.revision projected)
+       (State.revision replayed)
+   | _, State.Transition_applied _ ->
+     Alcotest.fail "projected turn-attempt terminal receipt applied twice");
+  let requeued =
+    projected
+    |> State.with_revision (Int64.succ (State.revision projected))
+    |> State.with_pending (queue [ source ])
+  in
+  let next_selection = select requeued in
+  (match
+     State.terminalize_pending_turn_attempt
+       ~current_owner_nonce:7
+       ~applied_at:4.0
+       ~selection:next_selection
+       ~detail:"later attempt"
+       requeued
+     |> require_ok "terminalize re-enqueued identical source"
+   with
+   | next, State.Transition_applied next_receipt ->
+     Alcotest.(check bool)
+       "later selection receives a distinct operation"
+       false
+       (String.equal receipt.transition_id next_receipt.transition_id);
+     Alcotest.(check (list string))
+       "later identical source is removed"
+       []
+       (post_ids (State.pending next))
+   | _, State.Transition_already_applied _ ->
+     Alcotest.fail "later identical source was mistaken for the prior attempt");
+  State.to_yojson projected
+  |> State.of_yojson
+  |> require_ok "turn-attempt terminal receipt round trip"
+  |> ignore
+;;
+
 let test_projected_disposition_ledger_replays_older_operation () =
   let cancelled_source = stimulus "cancelled-source" 1.0 in
   let transferred_source = stimulus "transferred-source" 2.0 in
@@ -105,7 +225,12 @@ let test_projected_disposition_ledger_replays_older_operation () =
   in
   let cancellation : State.accepted_cancellation =
     { source = cancelled_source
-    ; source_revision = State.revision initial
+    ; source_incarnation =
+        (State.select_when
+           ~ready:(Queue.stimulus_identity_equal cancelled_source)
+           initial
+         |> require_some "select cancellation source")
+          .admitted_revision
     ; owner_nonce = 7
     ; operator_operation_id = "cancel-operation"
     ; reason = "operator cancelled"
@@ -132,7 +257,12 @@ let test_projected_disposition_ledger_replays_older_operation () =
   in
   let transfer : State.accepted_transfer =
     { source = transferred_source
-    ; source_revision = State.revision projected_cancel
+    ; source_incarnation =
+        (State.select_when
+           ~ready:(Queue.stimulus_identity_equal transferred_source)
+           projected_cancel
+         |> require_some "select transfer source")
+          .admitted_revision
     ; owner_nonce = 7
     ; operator_operation_id = "transfer-operation"
     ; from_keeper = "source-keeper"
@@ -209,7 +339,23 @@ let test_current_schema_round_trip () =
   Alcotest.(check (list string))
     "fresh pending survives"
     [ "fresh" ]
-    (post_ids (State.pending decoded))
+    (post_ids (State.pending decoded));
+  let duplicated_pending =
+    match json with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "pending", `List [ entry ] ->
+               "pending", `List [ entry; entry ]
+             | field -> field)
+           fields)
+    | _ -> Alcotest.fail "state codec did not emit an object"
+  in
+  (match State.of_yojson duplicated_pending with
+   | Error _ -> ()
+   | Ok _ ->
+     Alcotest.fail "duplicate pending source identity was accepted")
 ;;
 
 let with_temp_dir prefix f =
@@ -229,7 +375,10 @@ let test_durable_peek_ack_restart () =
       Queue.enqueue pending (stimulus "two" 2.0))
     |> require_ok "seed durable pending";
     let selected =
-      Persistence.peek_when_result ~base_path ~keeper_name ~ready:(fun _ -> true)
+      Persistence.select_when_result
+        ~base_path
+        ~keeper_name
+        ~ready:(fun _ -> true)
       |> require_ok "durable peek"
       |> require_some "durable selection"
     in
@@ -296,6 +445,185 @@ let test_durable_reprioritize_is_revision_fenced () =
     | Ok _ -> Alcotest.fail "stale priority revision was accepted")
 ;;
 
+let test_durable_turn_attempt_terminal_restart () =
+  with_temp_dir "keeper-turn-attempt-terminal" (fun base_path ->
+    let keeper_name = "failed-turn-keeper" in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      let pending = Queue.enqueue pending (stimulus "failed" 1.0) in
+      Queue.enqueue pending (stimulus "unrelated" 2.0))
+    |> require_ok "seed failed turn pending";
+    let selection =
+      Persistence.select_when_result
+        ~base_path
+        ~keeper_name
+        ~ready:(fun _ -> true)
+      |> require_ok "peek failed turn source"
+      |> require_some "failed turn selection"
+    in
+    Persistence.terminalize_pending_turn_attempt_result
+      ~base_path
+      ~keeper_name
+      ~current_owner_nonce:7
+      ~applied_at:3.0
+      ~selection
+      ~detail:""
+      ()
+    |> require_ok "commit failed turn terminal receipt"
+    |> ignore;
+    let restarted =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "restart failed turn state"
+    in
+    Alcotest.(check (list string))
+      "only unrelated source remains runnable"
+      [ "unrelated" ]
+      (post_ids (State.pending restarted));
+    (match State.transition_outbox restarted with
+     | [ { stimuli = [ retained ]; _ } ] ->
+       Alcotest.(check bool)
+         "restart retains exact failed source in WAL"
+         true
+         (retained = selection.source)
+     | _ ->
+       Alcotest.fail
+         "restart did not retain exactly one source-bearing failed turn receipt");
+    Persistence.project_transition_outbox_result
+      ~append_before_retire:(fun _ -> Ok ())
+      ~base_path
+      ~keeper_name
+    |> require_ok "project failed turn terminal receipt";
+    (match
+       Persistence.terminalize_pending_turn_attempt_result
+         ~base_path
+         ~keeper_name
+         ~current_owner_nonce:7
+         ~applied_at:4.0
+         ~selection
+         ~detail:"replayed after projection"
+         ()
+       |> require_ok "replay projected failed turn after restart"
+     with
+     | Persistence.Transition_already_applied _ -> ()
+     | Persistence.Transition_applied _
+     | Persistence.Transition_committed_followup_failed _ ->
+       Alcotest.fail "projected failed turn replay committed twice");
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending selection.source)
+    |> require_ok "re-enqueue identical source";
+    (match
+       Persistence.ack_pending_result
+         ~base_path
+         ~keeper_name
+         ~selection
+         ()
+     with
+     | Error _ -> ()
+     | Ok () ->
+       Alcotest.fail "old successful-turn selection ACKed a later incarnation");
+    (match
+       Persistence.terminalize_pending_turn_attempt_result
+         ~base_path
+         ~keeper_name
+         ~current_owner_nonce:7
+         ~applied_at:4.5
+         ~selection
+         ~detail:"stale in-flight attempt"
+         ()
+     with
+     | Ok (Persistence.Transition_already_applied _) -> ()
+     | Ok
+         ( Persistence.Transition_applied _
+         | Persistence.Transition_committed_followup_failed _ )
+     | Error _ ->
+       Alcotest.fail "projected replay did not return its original receipt");
+    let later_selection =
+      Persistence.select_when_result
+        ~base_path
+        ~keeper_name
+        ~ready:(Queue.stimulus_identity_equal selection.source)
+      |> require_ok "select re-enqueued identical source"
+      |> require_some "later identical selection"
+    in
+    (match
+       Persistence.terminalize_pending_turn_attempt_result
+         ~base_path
+         ~keeper_name
+         ~current_owner_nonce:7
+         ~applied_at:5.0
+         ~selection:later_selection
+         ~detail:"later attempt"
+         ()
+       |> require_ok "terminalize later identical source"
+     with
+     | Persistence.Transition_applied _ -> ()
+     | Persistence.Transition_already_applied _
+     | Persistence.Transition_committed_followup_failed _ ->
+       Alcotest.fail "later identical source did not commit a new terminal receipt");
+    let final_pending =
+      Persistence.load_pending_result ~base_path ~keeper_name
+      |> require_ok "reload after later identical source"
+    in
+    Alcotest.(check (list string))
+      "later identical source is removed"
+      [ "unrelated" ]
+      (post_ids final_pending))
+;;
+
+let test_durable_inflight_selection_rejects_reinserted_source () =
+  with_temp_dir "keeper-pending-incarnation" (fun base_path ->
+    let keeper_name = "inflight-keeper" in
+    let source = stimulus "same-source" 1.0 in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending source)
+    |> require_ok "seed in-flight source";
+    let stale_selection =
+      Persistence.select_when_result
+        ~base_path
+        ~keeper_name
+        ~ready:(fun _ -> true)
+      |> require_ok "select first source incarnation"
+      |> require_some "first source selection"
+    in
+    Persistence.ack_pending_result
+      ~base_path
+      ~keeper_name
+      ~selection:stale_selection
+      ()
+    |> require_ok "remove first source incarnation";
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending source)
+    |> require_ok "reinsert exact source";
+    (match
+       Persistence.ack_pending_result
+         ~base_path
+         ~keeper_name
+         ~selection:stale_selection
+         ()
+     with
+     | Error _ -> ()
+     | Ok () -> Alcotest.fail "stale selection ACKed reinserted source");
+    (match
+       Persistence.terminalize_pending_turn_attempt_result
+         ~base_path
+         ~keeper_name
+         ~current_owner_nonce:7
+         ~applied_at:3.0
+         ~selection:stale_selection
+         ~detail:"old in-flight turn"
+         ()
+     with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "stale turn terminalized reinserted source");
+    let pending =
+      Persistence.load_pending_result ~base_path ~keeper_name
+      |> require_ok "reload reinserted source"
+    in
+    Alcotest.(check (list string))
+      "reinserted source remains pending"
+      [ "same-source" ]
+      (post_ids pending))
+;;
+
 let () =
   Alcotest.run
     "keeper pending queue current schema"
@@ -308,9 +636,17 @@ let () =
             `Quick
             test_unrelated_enqueue_does_not_invalidate_exact_ack
         ; Alcotest.test_case
+            "reinserted source rejects old selection"
+            `Quick
+            test_reinserted_source_invalidates_old_selection
+        ; Alcotest.test_case
             "changed selected snapshot fails closed"
             `Quick
             test_changed_selected_snapshot_fails_closed
+        ; Alcotest.test_case
+            "turn-attempt terminal receipt preserves exact source"
+            `Quick
+            test_turn_attempt_terminal_receipt_preserves_exact_source
         ; Alcotest.test_case
             "older projected disposition replays"
             `Quick
@@ -326,6 +662,14 @@ let () =
             "durable reprioritize is revision fenced"
             `Quick
             test_durable_reprioritize_is_revision_fenced
+        ; Alcotest.test_case
+            "durable failed turn receipt restart"
+            `Quick
+            test_durable_turn_attempt_terminal_restart
+        ; Alcotest.test_case
+            "durable in-flight selection rejects reinserted source"
+            `Quick
+            test_durable_inflight_selection_rejects_reinserted_source
         ] )
-    ]
+      ]
 ;;

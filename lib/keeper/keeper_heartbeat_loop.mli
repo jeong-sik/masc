@@ -58,7 +58,7 @@ type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
-  pending_selection : Keeper_event_queue.stimulus option;
+  pending_selection : Keeper_event_queue_state.pending_selection option;
   event_queue_intake_error :
     Keeper_heartbeat_stimulus_intake.event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
@@ -145,19 +145,12 @@ type keepalive_turn_outcome = {
 val record_crashed_cycle_failure :
   base_path:string -> keeper_name:string -> exn -> unit
 
-val compaction_outcome_of_cycle_outcome :
-  Keeper_heartbeat_loop_cycle.cycle_outcome option ->
-  [ `Committed | `Overflow_episode_committed | `Failed | `Recovered ] option
-(** Pure mapping from a cycle outcome to the compaction-streak stamp
-    ([Keeper_meta_store.persist_compaction_outcome]). Manual-lane
-    applied/failed outcomes and in-lane provider-overflow dispositions join
-    the same per-keeper streak. The streak counts consecutive
-    provider-overflow episodes (#25538): an in-lane commit maps to
-    [`Overflow_episode_committed] (advances the streak — committed savings
-    under an incompressible floor must still reach the ceiling), a completed
-    overflow-free turn maps to [`Recovered] (resets it), and only the
-    operator's manual commit maps to [`Committed] (count + reset).
-    Outcomes with no compaction involvement return [None]. *)
+val compaction_outcomes_of_cycle_outcome :
+  Keeper_heartbeat_loop_cycle.cycle_outcome ->
+  [ `Manual_committed of int | `Reactive_committed of int | `Failed ] list
+(** Pure mapping from one possibly nested cycle to every compaction
+    commit/failure observation it contains. Only committed outcomes mutate
+    durable compaction state. *)
 
 
 (** Pure: post-turn status event derived from the registry
@@ -230,19 +223,4 @@ module For_testing : sig
     Keeper_turn_driver.deferred_runtime_lane option ref ->
     Keeper_turn_driver.deferred_runtime_lane ->
     bool
-
-  type transcript_corruption_commit =
-    | Transcript_pause_persisted
-    | Transcript_pause_and_settlement_persisted
-    | Transcript_pause_persistence_failed of string
-    | Transcript_pause_settlement_failed of string
-
-  val commit_transcript_corruption :
-    stop:bool Atomic.t ->
-    persist_pause:
-      (unit -> ([ `Persisted | `No_durable_meta ], string) result) ->
-    ?settle:(unit -> (unit, string) result) ->
-    unit ->
-    transcript_corruption_commit
-
 end

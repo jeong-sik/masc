@@ -16,7 +16,7 @@ type t =
   | Ack_source_terminal of Source_terminal.request
 
 let ( let* ) = Result.bind
-let schema = "masc.keeper.paused-work.operator-request.v3"
+let schema = "masc.keeper.paused-work.operator-request.v4"
 
 let sorted fields =
   List.sort (fun (left, _) (right, _) -> String.compare left right) fields
@@ -69,13 +69,13 @@ let parse_cancel_pending = function
     ; ("reason", `String reason)
     ; ("schema", `String request_schema)
     ; ("source", source_json)
-    ; ("source_revision", source_revision_json)
+    ; ("source_incarnation", source_incarnation_json)
     ; ("source_state", `String "pending")
     ]
     when String.equal request_schema schema ->
     let* source = Queue.stimulus_of_yojson source_json in
-    let* source_revision = int64_of_yojson "source_revision" source_revision_json in
-    let* source_revision = nonnegative_int64 "source_revision" source_revision in
+    let* source_incarnation = int64_of_yojson "source_incarnation" source_incarnation_json in
+    let* source_incarnation = nonnegative_int64 "source_incarnation" source_incarnation in
     let* operator_operation_id =
       nonblank "operator_operation_id" operator_operation_id
     in
@@ -85,7 +85,7 @@ let parse_cancel_pending = function
       (Cancel_pending
          Cancellation.
            { source
-           ; source_revision
+           ; source_incarnation
            ; owner_nonce
            ; operator_operation_id
            ; reason
@@ -100,14 +100,14 @@ let parse_transfer = function
     ; ("owner_nonce", `Int owner_nonce)
     ; ("schema", `String request_schema)
     ; ("source", source_json)
-    ; ("source_revision", source_revision_json)
+    ; ("source_incarnation", source_incarnation_json)
     ; ("target_generation", `Int target_generation)
     ; ("to_keeper", `String to_keeper)
     ]
     when String.equal request_schema schema ->
     let* source = Queue.stimulus_of_yojson source_json in
-    let* source_revision = int64_of_yojson "source_revision" source_revision_json in
-    let* source_revision = nonnegative_int64 "source_revision" source_revision in
+    let* source_incarnation = int64_of_yojson "source_incarnation" source_incarnation_json in
+    let* source_incarnation = nonnegative_int64 "source_incarnation" source_incarnation in
     let* continuation_binding =
       Disposition.continuation_binding_of_yojson continuation_binding_json
     in
@@ -123,7 +123,7 @@ let parse_transfer = function
          ; request =
              Transfer.
                { source
-               ; source_revision
+               ; source_incarnation
                ; owner_nonce
                ; target_generation
                ; continuation_binding
@@ -139,13 +139,13 @@ let parse_source_terminal = function
     ; ("owner_nonce", `Int owner_nonce)
     ; ("schema", `String request_schema)
     ; ("source", source_json)
+    ; ("source_incarnation", source_incarnation_json)
     ; ("source_receipt_kind", `String source_receipt_kind)
-    ; ("source_revision", source_revision_json)
     ]
     when String.equal request_schema schema ->
     let* source = Queue.stimulus_of_yojson source_json in
-    let* source_revision = int64_of_yojson "source_revision" source_revision_json in
-    let* source_revision = nonnegative_int64 "source_revision" source_revision in
+    let* source_incarnation = int64_of_yojson "source_incarnation" source_incarnation_json in
+    let* source_incarnation = nonnegative_int64 "source_incarnation" source_incarnation in
     let* source_receipt = Queue_state.source_terminal_receipt_of_stimulus source in
     let* () =
       if
@@ -163,7 +163,7 @@ let parse_source_terminal = function
       (Ack_source_terminal
          Source_terminal.
            { source
-           ; source_revision
+           ; source_incarnation
            ; owner_nonce
            ; source_receipt
            ; operator_operation_id

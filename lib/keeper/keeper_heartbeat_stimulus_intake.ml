@@ -170,7 +170,7 @@ type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
-  pending_selection : Keeper_event_queue.stimulus option;
+  pending_selection : Keeper_event_queue_state.pending_selection option;
   event_queue_intake_error : event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
@@ -376,8 +376,12 @@ type spent_selection_reconciliation =
   | Spent_schedule_acknowledged
   | Spent_grant_replay_acknowledged
 
-let reconcile_spent_selection ~config ~keeper_name selection =
-  match selection.Keeper_event_queue.payload with
+let reconcile_spent_selection
+      ~config
+      ~keeper_name
+      (selection : Keeper_event_queue_state.pending_selection)
+  =
+  match selection.source.Keeper_event_queue.payload with
   | Schedule_due wake ->
     (* The schedule lock covers both the terminal read and queue ACK. A retry
        must start under the same lock, so either it starts first and this sees
@@ -495,7 +499,7 @@ let heartbeat_event_intake
   let base_path = ctx.config.base_path in
   let keeper_name = meta_after_triage.name in
   let select_pending_matching ready =
-    Keeper_registry_event_queue.peek_when_result
+    Keeper_registry_event_queue.select_when_result
       ~base_path
       keeper_name
       ~ready
@@ -528,7 +532,10 @@ let heartbeat_event_intake
     | Ok None as empty -> empty
     | Ok (Some selection) ->
       (match
-         reconcile_spent_selection ~config:ctx.config ~keeper_name selection
+         reconcile_spent_selection
+           ~config:ctx.config
+           ~keeper_name
+           selection
        with
        | Error message -> Error message
        | Ok Selection_actionable -> Ok (Some selection)
@@ -560,10 +567,10 @@ let heartbeat_event_intake
          consume_single_heartbeat_stimulus
            ~ctx
            ~meta_after_triage
-           selection
+           selection.source
        with
        | Stimulus_consumed observations ->
-         observations, [ selection ], Some selection, None
+         observations, [ selection.source ], Some selection, None
        | Stimulus_retry_later unavailable ->
          [], [], Some selection, Some (Transient_board_read unavailable))
   in

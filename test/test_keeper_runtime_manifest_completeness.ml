@@ -231,10 +231,7 @@ let test_current_compaction_evidence_read_boundary () =
            (label ^ " cause retained")
            cause
            (restored.decision |> member "error" |> to_string))
-    [ ( "retry without checkpoint"
-      , M.Retry_without_checkpoint
-      , "compaction dispatch failed" )
-    ; ( "lifecycle cleanup without checkpoint"
+    [ ( "lifecycle cleanup without checkpoint"
       , M.Lifecycle_cleanup_failed_without_checkpoint
       , "lifecycle cleanup failed" )
     ];
@@ -263,15 +260,15 @@ let test_current_compaction_evidence_read_boundary () =
              [ Keeper_compaction_evidence.exact_evidence_key
              , unknown_evidence
              ]) )
-    ; ( "evidence on retry without checkpoint"
+    ; ( "evidence on lifecycle cleanup without checkpoint"
       , row
           (decision
-             M.Retry_without_checkpoint
-             [ "error", `String "retry"
+             M.Lifecycle_cleanup_failed_without_checkpoint
+             [ "error", `String "cleanup"
              ; Keeper_compaction_evidence.exact_evidence_key, evidence
              ]) )
-    ; ( "missing retry cause"
-      , row (decision M.Retry_without_checkpoint []) )
+    ; ( "missing lifecycle cleanup cause"
+      , row (decision M.Lifecycle_cleanup_failed_without_checkpoint []) )
     ]
 
 let () =

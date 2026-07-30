@@ -8,13 +8,13 @@ type transfer_owner =
   ; target_trace_id : Keeper_id.Trace_id.t
   ; target_generation : int
   ; source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; continuation_binding : continuation_binding
   }
 
 type source_terminal_operation =
   { source : Keeper_event_queue.stimulus
-  ; source_revision : int64
+  ; source_incarnation : int64
   ; source_receipt : Keeper_event_queue_state.source_terminal_receipt
   }
 
@@ -39,7 +39,7 @@ type save_result =
   | Existing of t
 
 let ( let* ) = Result.bind
-let schema = "masc.keeper.paused-work-disposition.v5"
+let schema = "masc.keeper.paused-work-disposition.v6"
 
 let equal left right =
   String.equal left.keeper_name right.keeper_name
@@ -87,8 +87,8 @@ let validate receipt =
       then Error "paused-work transfer source and target Keepers must differ"
       else if transfer.target_generation < 0
       then Error "paused-work transfer target generation must not be negative"
-      else if Int64.compare transfer.source_revision 0L < 0
-      then Error "paused-work transfer source revision must not be negative"
+      else if Int64.compare transfer.source_incarnation 0L < 0
+      then Error "paused-work transfer source incarnation must not be negative"
       else if String.equal (String.trim transfer.source.post_id) ""
       then Error "paused-work transfer source post id must not be empty"
       else if
@@ -97,8 +97,8 @@ let validate receipt =
       then Error "paused-work transfer continuation binding does not match source"
       else Ok ()
     | Ack_source_terminal operation ->
-      if Int64.compare operation.source_revision 0L < 0
-      then Error "paused-work source-terminal revision must not be negative"
+      if Int64.compare operation.source_incarnation 0L < 0
+      then Error "paused-work source-terminal incarnation must not be negative"
       else
         let* exact =
           Keeper_event_queue_state.source_terminal_receipt_of_stimulus
@@ -114,7 +114,7 @@ let sha256 value = Digestif.SHA256.(digest_string value |> to_hex)
 let keeper_dir config keeper_name =
   let root = Workspace.masc_root_dir config in
   Filename.concat
-    (Filename.concat root "paused-work-dispositions-v5")
+    (Filename.concat root "paused-work-dispositions-v6")
     ("keeper-" ^ sha256 keeper_name)
 ;;
 
@@ -140,7 +140,7 @@ let transfer_owner_to_yojson transfer =
     ; "target_trace_id", `String (Keeper_id.Trace_id.to_string transfer.target_trace_id)
     ; "target_generation", `Int transfer.target_generation
     ; "source", Keeper_event_queue.stimulus_to_yojson transfer.source
-    ; "source_revision", `Intlit (Int64.to_string transfer.source_revision)
+    ; "source_incarnation", `Intlit (Int64.to_string transfer.source_incarnation)
     ; "continuation_binding", continuation_binding_to_yojson transfer.continuation_binding
     ]
 ;;
@@ -150,12 +150,14 @@ let source_terminal_receipt_kind = function
   | Keeper_event_queue_state.Background_job_terminal _ ->
     "background_job_terminal"
   | Keeper_event_queue_state.Hitl_terminal _ -> "hitl_terminal"
+  | Keeper_event_queue_state.Turn_attempt_terminal _ ->
+    "turn_attempt_terminal"
 ;;
 
 let source_terminal_operation_to_yojson operation =
   `Assoc
     [ "source", Keeper_event_queue.stimulus_to_yojson operation.source
-    ; "source_revision", `Intlit (Int64.to_string operation.source_revision)
+    ; "source_incarnation", `Intlit (Int64.to_string operation.source_incarnation)
     ; "source_receipt_kind", `String (source_terminal_receipt_kind operation.source_receipt)
     ]
 ;;
@@ -200,13 +202,13 @@ let requested_at_of_yojson = function
   | _ -> Error "paused-work disposition request time must be numeric"
 ;;
 
-let source_revision_of_yojson = function
+let source_incarnation_of_yojson = function
   | `Int value -> Ok (Int64.of_int value)
   | `Intlit value ->
     (match Int64.of_string_opt value with
      | Some value -> Ok value
-     | None -> Error "paused-work disposition source revision is invalid")
-  | _ -> Error "paused-work disposition source revision must be an integer"
+     | None -> Error "paused-work disposition source incarnation is invalid")
+  | _ -> Error "paused-work disposition source incarnation must be an integer"
 ;;
 
 let continuation_binding_of_yojson = function
@@ -226,14 +228,14 @@ let transfer_owner_of_yojson = function
      | [ ("continuation_binding", continuation_binding_json)
        ; ("from_keeper", `String from_keeper)
        ; ("source", source_json)
-       ; ("source_revision", source_revision_json)
+       ; ("source_incarnation", source_incarnation_json)
        ; ("target_generation", `Int target_generation)
        ; ("target_trace_id", `String target_trace_id)
        ; ("to_keeper", `String to_keeper)
        ] ->
        let* target_trace_id = Keeper_id.Trace_id.of_string target_trace_id in
        let* source = Keeper_event_queue.stimulus_of_yojson source_json in
-       let* source_revision = source_revision_of_yojson source_revision_json in
+       let* source_incarnation = source_incarnation_of_yojson source_incarnation_json in
        let* continuation_binding =
          continuation_binding_of_yojson continuation_binding_json
        in
@@ -243,7 +245,7 @@ let transfer_owner_of_yojson = function
          ; target_trace_id
          ; target_generation
          ; source
-         ; source_revision
+         ; source_incarnation
          ; continuation_binding
          }
      | _ -> Error "paused-work transfer fields are not exact")
@@ -254,11 +256,11 @@ let source_terminal_operation_of_yojson = function
   | `Assoc fields ->
     (match sorted fields with
      | [ ("source", source_json)
+       ; ("source_incarnation", source_incarnation_json)
        ; ("source_receipt_kind", `String source_receipt_kind)
-       ; ("source_revision", source_revision_json)
        ] ->
        let* source = Keeper_event_queue.stimulus_of_yojson source_json in
-       let* source_revision = source_revision_of_yojson source_revision_json in
+       let* source_incarnation = source_incarnation_of_yojson source_incarnation_json in
        let* source_receipt =
          Keeper_event_queue_state.source_terminal_receipt_of_stimulus source
        in
@@ -267,7 +269,7 @@ let source_terminal_operation_of_yojson = function
          then Ok ()
          else Error "paused-work source-terminal receipt kind does not match source"
        in
-       Ok { source; source_revision; source_receipt }
+       Ok { source; source_incarnation; source_receipt }
      | _ -> Error "paused-work source-terminal fields are not exact")
   | _ -> Error "paused-work source-terminal operation must be an object"
 ;;

@@ -779,8 +779,10 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
      needs a bound, add a real counter — do not claim one here without the
      device.
    - context overflow: accounted at the point of detection by
-     [Keeper_turn_runtime_budget.record_overflow_failure], and its in-lane
-     compaction retries are bounded (#25536).
+     [Keeper_turn_runtime_budget.record_overflow_failure]. Its in-lane recovery
+     either commits a smaller checkpoint before requeue or follows the ordinary
+     typed failure route. It has no separate retry counter or suspension
+     authority.
    - 0-byte empty completion: bounded by
      [Keeper_unified_turn_failure]'s per-keeper exemption budget — after
      [empty_completion_exemption_budget] consecutive exempted empty

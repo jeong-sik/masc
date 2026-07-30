@@ -59,17 +59,15 @@ Path (`lib/keeper/keeper_unified_turn.ml`):
 - If that returns `Error _` (any `compaction_rejection`), the code takes
   `retry_after_started` → `record_overflow_failure` +
   `release_failed_lifecycle (Compaction_failed)` → returns
-  `Provider_overflow_retry_without_checkpoint`.
-- The consumer (`keeper_unified_turn.ml:309`) maps that to
-  `Requeue_after_context_compaction` — **the source stimulus is requeued with
-  the same, still-over-limit context.**
+  `Provider_overflow_failed_without_checkpoint`.
+- The consumer acknowledges the selected source as a terminal failed turn.
+  `Requeue_after_context_compaction` is reserved for a durably smaller
+  checkpoint.
 
-So on any compaction rejection the next cycle re-overflows and re-attempts the
-same compaction. Nothing between the failures reduces context size. When the
-cause is persistent (the one schema-capable model is weekly-rate-limited), the
-loop does not terminate. This matches the live observation of a keeper emitting
-`compaction_started` repeatedly with zero `compaction_completed`
-(#25062 track; project memory 2026-07-18).
+Before the 2026-07-30 hard cut, any compaction rejection requeued the same,
+still-over-limit source and repeated provider → compactor indefinitely. The
+current source disposition removes that loop without adding another retry
+counter or suspension authority.
 
 ### 1.2 Size reduction is coupled to semantic summarization
 

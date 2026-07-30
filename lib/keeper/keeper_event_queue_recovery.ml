@@ -22,6 +22,10 @@ type projection_error =
       { target_keeper : string
       ; detail : string
       }
+  | Paused_transfer_target_projection_failed of
+      { target_keeper : string
+      ; cause : Keeper_paused_work_transfer_transaction.failure
+      }
   | Ledger_projection_failed of string
   | Unexpected_projection_failure of Eio.Exn.with_bt
 
@@ -74,6 +78,12 @@ let projection_error_to_string = function
       "event queue transfer target projection failed target_keeper=%s: %s"
       target_keeper
       detail
+  | Paused_transfer_target_projection_failed { target_keeper; cause } ->
+    Printf.sprintf
+      "paused-work transfer target projection failed target_keeper=%s: %s"
+      target_keeper
+      (Keeper_paused_work_transfer_transaction.error_to_string
+         { cause; reservation_release = None })
   | Ledger_projection_failed detail ->
     "event queue transition ledger projection failed: " ^ detail
   | Unexpected_projection_failure (exn, backtrace) ->
@@ -144,6 +154,35 @@ let with_owner_claim owner f =
       (fun () -> Owner_claim_acquired (f ()))
 ;;
 
+let wake_transfer_target ~base_path target_keeper =
+  ignore
+    (Keeper_registry.wakeup_running
+       ~intent:Keeper_registry.Broadcast_signal
+       ~base_path
+       target_keeper :
+       Keeper_registry.wakeup_outcome)
+;;
+
+let project_generic_transfer_target_result
+      ~base_path
+      (transfer : Keeper_registry_event_queue.accepted_transfer)
+  =
+  match
+    Keeper_registry_event_queue.project_accepted_transfer_durable_result
+      ~base_path
+      transfer.to_keeper
+      ~transfer
+  with
+  | Keeper_registry_event_queue.Stimulus_enqueued
+  | Keeper_registry_event_queue.Stimulus_already_present ->
+    wake_transfer_target ~base_path transfer.to_keeper;
+    Ok ()
+  | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+    Error
+      (Target_transfer_projection_failed
+         { target_keeper = transfer.to_keeper; detail })
+;;
+
 let project_transfer_target_result ~base_path (entry : Persistence.outbox_entry) =
   match entry.receipt.transition with
   | Persistence.Cancel_accepted _
@@ -151,24 +190,18 @@ let project_transfer_target_result ~base_path (entry : Persistence.outbox_entry)
     Ok ()
   | Persistence.Transfer_accepted transfer ->
     (match
-       Keeper_registry_event_queue.project_accepted_transfer_durable_result
-         ~base_path
-         transfer.to_keeper
+       Keeper_paused_work_transfer_transaction.project_committed_target_if_receipted
+         (Workspace.default_config base_path)
          ~transfer
      with
-     | Keeper_registry_event_queue.Stimulus_enqueued
-     | Keeper_registry_event_queue.Stimulus_already_present ->
-       ignore
-         (Keeper_registry.wakeup_running
-            ~intent:Keeper_registry.Broadcast_signal
-            ~base_path
-            transfer.to_keeper :
-            Keeper_registry.wakeup_outcome);
+     | Ok None -> project_generic_transfer_target_result ~base_path transfer
+     | Ok (Some _) ->
+       wake_transfer_target ~base_path transfer.to_keeper;
        Ok ()
-     | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+     | Error cause ->
        Error
-         (Target_transfer_projection_failed
-            { target_keeper = transfer.to_keeper; detail }))
+         (Paused_transfer_target_projection_failed
+            { target_keeper = transfer.to_keeper; cause }))
 ;;
 
 let project_claimed_owner owner =

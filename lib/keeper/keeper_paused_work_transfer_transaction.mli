@@ -38,6 +38,7 @@ type failure =
       { expected : int
       ; actual : int
       }
+  | Target_owner_identity_changed
   | Continuation_binding_mismatch
   | Source_queue_validation_failed of string
   | Committed_projection_failed of
@@ -70,6 +71,15 @@ type success =
   }
 
 val error_to_string : error -> string
+
+val project_committed_target_if_receipted :
+  Workspace.config ->
+  transfer:Keeper_registry_event_queue.accepted_transfer ->
+  (target_projection option, failure) result
+(** If [transfer] originated from a durable paused-work receipt, validate that
+    receipt's exact target generation and trace before projecting it. [None]
+    means no paused-work receipt owns this generic operator transfer. Receipt
+    conflicts and target identity changes fail closed. *)
 
 val transfer_pending :
   Workspace.config ->

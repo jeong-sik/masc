@@ -19,6 +19,10 @@ type projection_error =
       { target_keeper : string
       ; detail : string
       }
+  | Paused_transfer_target_projection_failed of
+      { target_keeper : string
+      ; cause : Keeper_paused_work_transfer_transaction.failure
+      }
   | Ledger_projection_failed of string
   | Unexpected_projection_failure of Eio.Exn.with_bt
 

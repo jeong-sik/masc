@@ -317,8 +317,8 @@ let test_explicit_failure_finalizes_failed_receipt () =
       check_terminal_snapshot ~label:"explicit failure" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
-let test_structured_cancellation_nacks_and_preserves_receipt () =
-  Printf.printf "Test: structured cancellation nacks the unchanged receipt\n%!";
+let test_structured_cancellation_terminalizes_claimed_receipt () =
+  Printf.printf "Test: structured cancellation terminalizes the claimed receipt\n%!";
   with_env (fun ~base ~clock ->
     match
       enqueue_checked ~label:"cancellation enqueue" ~keeper_name
@@ -349,30 +349,43 @@ let test_structured_cancellation_nacks_and_preserves_receipt () =
            ~receipt_id:accepted.receipt_id
        with
        | Ok
-           { receipt = Some { state = Keeper_chat_queue.Pending; receipt_id }
+           { receipt =
+               Some
+                 { state =
+                     Keeper_chat_queue.Failed
+                       { kind = Keeper_chat_queue.Interrupted; detail; _ }
+                 ; receipt_id
+                 }
            ; _
            } ->
          check "cancellation preserves the accepted receipt id"
-           (Keeper_chat_queue.Receipt_id.equal receipt_id accepted.receipt_id)
+           (Keeper_chat_queue.Receipt_id.equal receipt_id accepted.receipt_id);
+         check "cancellation records unknown external effect"
+           (String.equal detail
+              "Keeper stopped before this claimed turn completed; its external effect is unknown.")
        | Ok
            { receipt =
                Some
                  { state =
-                     Inflight _ | Recovery_required _ | Delivered _ | Failed _
+                     Pending
+                     | Inflight _
+                     | Recovery_required _
+                     | Delivered _
+                     | Failed _
                  ; _
                  }
              | None
            ; _
            }
        | Error _ ->
-         check "cancellation returns the receipt to Pending" false);
+         check "cancellation terminalizes the claimed receipt" false);
       let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
-      check "cancelled receipt remains pending"
-        (receipt_id_in_active accepted.receipt_id snapshot.pending);
+      check "cancelled receipt is not pending"
+        (not (receipt_id_in_active accepted.receipt_id snapshot.pending));
       check "cancelled receipt is not left inflight"
         (not (receipt_id_in_active accepted.receipt_id snapshot.inflight));
-      check "cancelled receipt is not terminal"
-        (not (receipt_id_is_terminal ~keeper_name accepted.receipt_id)))
+      check "cancelled receipt is terminal"
+        (receipt_id_is_terminal ~keeper_name accepted.receipt_id))
 
 let test_dispatch_is_concurrent_per_keeper () =
   Printf.printf "Test: queued turns dispatch concurrently across keepers\n%!";
@@ -893,7 +906,7 @@ let test_shutdown_fence_keeps_receipt_pending_until_rollback () =
 let () =
   test_delivery_finalizes_terminal_receipt ();
   test_explicit_failure_finalizes_failed_receipt ();
-  test_structured_cancellation_nacks_and_preserves_receipt ();
+  test_structured_cancellation_terminalizes_claimed_receipt ();
   test_dispatch_is_concurrent_per_keeper ();
   test_finalization_persistence_retry_does_not_redeliver ();
   test_busy_turn_release_wakes_pending_receipt ();

@@ -390,6 +390,16 @@ let nack_or_warn state ~keeper_name ~lease_id =
   match settle_lease state ~keeper_name ~lease_id Nack with
   | `Settled | `Pending -> ()
 
+let interrupt_or_warn state ~clock ~keeper_name ~lease_id =
+  finalize_or_warn state ~keeper_name ~lease_id
+    (Keeper_chat_queue.Mark_failed
+       { completed_at = Eio.Time.now clock
+       ; kind = Keeper_chat_queue.Interrupted
+       ; detail =
+           "Keeper stopped before this claimed turn completed; its external effect is unknown."
+       ; outcome_ref = None
+       })
+
 (* Kept as a separate helper so a later wake cannot start a new turn while an
    earlier turn's durable ack/nack is still unresolved. *)
 let retry_pending_finalization state ~keeper_name =
@@ -549,7 +559,7 @@ let run_observed_turn state ~sw ~clock ~handle_turn ~keeper_name observation =
       (match !claim with
        | Claim_leased { lease_id; _ } ->
          Eio.Cancel.protect (fun () ->
-             nack_or_warn state ~keeper_name ~lease_id)
+             interrupt_or_warn state ~clock ~keeper_name ~lease_id)
        | Claim_not_attempted | Claim_stale _ | Claim_failed _ -> ());
       raise exn
     | exception exn -> `Raised exn

@@ -704,23 +704,19 @@ let test_prepare_commit_source_cas () =
                (Post_turn.compaction_recovery_error_to_string
                   (Post_turn.No_compaction no_compaction)))
     in
-    (match recovery.checkpoint_installation with
-     | Masc.Keeper_checkpoint_store.Installed installed ->
-       check bool
-         "history cancellation remains typed after install"
-         true
-         (List.exists
-            (function
-              | Masc.Keeper_checkpoint_store.History_write_failed
-                  (Eio.Cancel.Cancelled _, backtrace) ->
-                Printexc.raw_backtrace_length backtrace > 0
-                && string_contains
-                     ~needle:"raise_history_cancellation"
-                     (Printexc.raw_backtrace_to_string backtrace)
-              | _ -> false)
-            installed.auxiliary)
-     | Masc.Keeper_checkpoint_store.Not_installed _ ->
-       fail "history cancellation downgraded the installed checkpoint");
+    check bool
+      "history cancellation remains typed after install"
+      true
+      (List.exists
+         (function
+           | Masc.Keeper_checkpoint_store.History_write_failed
+               (Eio.Cancel.Cancelled _, backtrace) ->
+             Printexc.raw_backtrace_length backtrace > 0
+             && string_contains
+                  ~needle:"raise_history_cancellation"
+                  (Printexc.raw_backtrace_to_string backtrace)
+           | _ -> false)
+         recovery.checkpoint_installation.auxiliary);
     (* Both tokens were prepared from the same source. The first commit
        advances it; the second token now proves that source CAS alone rejects
        the stale candidate. *)

@@ -55,7 +55,7 @@ type post_turn_lifecycle = {
 
 type compaction_recovery = {
   checkpoint : Agent_sdk.Checkpoint.t;
-  checkpoint_installation : Keeper_checkpoint_store.checkpoint_installation;
+  checkpoint_installation : Keeper_checkpoint_store.installed_checkpoint;
   trigger : Compaction_trigger.t;
   evidence : Keeper_compaction_evidence.t;
   turn_generation : int;
@@ -68,7 +68,6 @@ type no_compaction = Keeper_compaction_outcome.no_compaction =
 
 type compaction_recovery_error =
   | Checkpoint_ref_load_failed of Keeper_checkpoint_store.checkpoint_ref_load_error
-  | Checkpoint_cas_failed of Keeper_checkpoint_store.checkpoint_cas_error
   | Checkpoint_candidate_failed of string
   | Compaction_rejected of Keeper_compact_policy.compaction_rejection
   | No_compaction of no_compaction
@@ -88,18 +87,6 @@ let compaction_recovery_error_to_tag = function
   | Checkpoint_ref_load_failed Keeper_checkpoint_store.Ref_not_found ->
     "checkpoint_not_found"
   | Checkpoint_ref_load_failed _ -> "checkpoint_load_failed"
-  | Checkpoint_cas_failed (Keeper_checkpoint_store.Source_changed _) ->
-    "checkpoint_source_changed"
-  | Checkpoint_cas_failed (Source_unavailable _) ->
-    "checkpoint_source_unavailable"
-  | Checkpoint_cas_failed
-      (Candidate_identity_invalid _
-      | Candidate_session_mismatch _
-      | Candidate_generation_mismatch _
-      | Candidate_turn_regressed _) ->
-    "checkpoint_candidate_invalid"
-  | Checkpoint_cas_failed (Commit_not_installed _) ->
-    "checkpoint_commit_not_installed"
   | Checkpoint_candidate_failed _ -> "checkpoint_candidate_failed"
   | Compaction_rejected reason ->
     Keeper_compact_policy.compaction_rejection_to_tag reason
@@ -174,7 +161,6 @@ let checkpoint_cas_error_detail = function
 
 let compaction_recovery_error_to_string = function
   | Checkpoint_ref_load_failed error -> checkpoint_ref_load_error_detail error
-  | Checkpoint_cas_failed error -> checkpoint_cas_error_detail error
   | Checkpoint_candidate_failed detail -> detail
   | Compaction_rejected reason ->
     "compaction rejected: "
@@ -488,7 +474,6 @@ let apply_post_turn_lifecycle_with_resilience_handles
 
 type rejection_disposition =
   | Terminal_no_compaction of Keeper_compaction_outcome.no_compaction_reason
-  | Owner_generation_deferred
   | Nonterminal_rejection
 
 let rejection_disposition = function
@@ -626,7 +611,6 @@ let prepare_compaction_admitted
        (match rejection_disposition reason with
         | Terminal_no_compaction terminal_reason ->
           Error (No_compaction { source = source_ref; reason = terminal_reason })
-        | Owner_generation_deferred
         | Nonterminal_rejection ->
           Error (Compaction_rejected reason))
      | (Keeper_compact_policy.Applied _
@@ -747,10 +731,10 @@ let commit_prepared_compaction_with
     with
     | Ok
         ( saved_checkpoint
-        , (Keeper_checkpoint_store.Installed _ as installation) ) ->
+        , Keeper_checkpoint_store.Installed installed ) ->
       let recovery =
         { checkpoint = saved_checkpoint
-        ; checkpoint_installation = installation
+        ; checkpoint_installation = installed
         ; trigger = prepared_trigger
         ; evidence
         ; turn_generation

@@ -30,7 +30,7 @@ type post_turn_lifecycle =
     Manual and provider-overflow callers consume the same result. *)
 type compaction_recovery =
   { checkpoint : Agent_sdk.Checkpoint.t
-  ; checkpoint_installation : Keeper_checkpoint_store.checkpoint_installation
+  ; checkpoint_installation : Keeper_checkpoint_store.installed_checkpoint
   ; trigger : Compaction_trigger.t
   ; evidence : Keeper_compaction_evidence.t
   ; turn_generation : int
@@ -43,7 +43,6 @@ type no_compaction = Keeper_compaction_outcome.no_compaction =
 
 type compaction_recovery_error =
   | Checkpoint_ref_load_failed of Keeper_checkpoint_store.checkpoint_ref_load_error
-  | Checkpoint_cas_failed of Keeper_checkpoint_store.checkpoint_cas_error
   | Checkpoint_candidate_failed of string
   | Compaction_rejected of Keeper_compact_policy.compaction_rejection
   | No_compaction of no_compaction

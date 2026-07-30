@@ -374,7 +374,6 @@ let recover_provider_context_overflow_in_lane
         refused_without_attempt ~consecutive_failures
       | ( None
         , ( Keeper_post_turn.Checkpoint_ref_load_failed _
-          | Keeper_post_turn.Checkpoint_cas_failed _
           | Keeper_post_turn.Checkpoint_candidate_failed _
           | Keeper_post_turn.Compaction_rejected _
           | Keeper_post_turn.No_compaction _ ) ) ->

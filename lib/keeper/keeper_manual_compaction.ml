@@ -267,47 +267,37 @@ let run_commit ~config ~meta prepared =
     Error (Recovery (error, failure_dispatch))
   in
   let committed (recovery : Keeper_post_turn.compaction_recovery) =
-    (match recovery.checkpoint_installation with
-     | Keeper_checkpoint_store.Not_installed not_installed ->
-       let error = Keeper_post_turn.Checkpoint_cas_failed not_installed.cause in
-       let failure_dispatch =
-         dispatch_failed
-           ~config
-           ~meta
-           (Keeper_post_turn.compaction_recovery_error_to_tag error)
-       in
-       Error (Recovery (error, failure_dispatch))
-     | Keeper_checkpoint_store.Installed installed ->
-       let lifecycle =
-         match
-           Keeper_context_runtime.dispatch_compaction_completed
+    let installation = recovery.checkpoint_installation in
+    let lifecycle =
+      match
+        Keeper_context_runtime.dispatch_compaction_completed
+          ~config
+          ~keeper_name:meta.name
+          ~origin:Keeper_registry.Operator_compact
+      with
+      | Ok () -> Completion_applied
+      | Error completion_error ->
+        Log.Keeper.error
+          ~keeper_name:meta.name
+          "manual compaction completion lifecycle dispatch failed after durable commit; preserving the committed checkpoint and dispatching typed failure cleanup: %s"
+          (Keeper_context_runtime.lifecycle_dispatch_error_to_string
+             completion_error);
+        (match
+           dispatch_failed
              ~config
-             ~keeper_name:meta.name
-             ~origin:Keeper_registry.Operator_compact
+             ~meta
+             "compaction_completed_rejected_after_checkpoint"
          with
-         | Ok () -> Completion_applied
-         | Error completion_error ->
-           Log.Keeper.error
-             ~keeper_name:meta.name
-             "manual compaction completion lifecycle dispatch failed after durable commit; preserving the committed checkpoint and dispatching typed failure cleanup: %s"
-             (Keeper_context_runtime.lifecycle_dispatch_error_to_string
-                completion_error);
-           (match
-              dispatch_failed
-                ~config
-                ~meta
-                "compaction_completed_rejected_after_checkpoint"
-            with
-            | Ok () ->
-              Completion_rejected_failure_dispatched { completion_error }
-            | Error failure_dispatch_error ->
-              Completion_rejected_failure_dispatch_failed
-                { completion_error; failure_dispatch_error })
-       in
-       Keeper_unified_metrics.broadcast_compaction
-         ~name:meta.name
-         recovery;
-       Ok (Compacted { recovery; installation = installed; lifecycle }))
+         | Ok () ->
+           Completion_rejected_failure_dispatched { completion_error }
+         | Error failure_dispatch_error ->
+           Completion_rejected_failure_dispatch_failed
+             { completion_error; failure_dispatch_error })
+    in
+    Keeper_unified_metrics.broadcast_compaction
+      ~name:meta.name
+      recovery;
+    Ok (Compacted { recovery; installation; lifecycle })
   in
   match Keeper_context_runtime.commit_prepared_compaction prepared with
   | Keeper_post_turn.Committed recovery -> committed recovery

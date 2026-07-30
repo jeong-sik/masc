@@ -368,10 +368,34 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
           |> member "context_metrics_unavailable"
           |> member "kind"
           |> to_string);
+      Alcotest.(check int) "live last-turn usage remains separate" 6_637_033
+        Yojson.Safe.Util.(
+          keeper
+          |> member "last_turn_usage"
+          |> member "input_tokens"
+          |> to_int);
+      Keeper_registry.For_testing.clear ();
+      Operator_control.invalidate_snapshot_cache ();
+      let persisted_json =
+        Operator_control.snapshot_json ~view:"summary"
+          ~include_keepers:true ~include_messages:false
+          (operator_ctx env sw config "owner")
+      in
+      let persisted_keeper =
+        match
+          Yojson.Safe.Util.(
+            persisted_json |> member "keepers" |> member "items" |> to_list)
+          |> List.find_opt (fun row ->
+                 Yojson.Safe.Util.(row |> member "name" |> to_string)
+                 = keeper_name)
+        with
+        | Some keeper -> keeper
+        | None -> Alcotest.fail "expected persisted keeper in snapshot"
+      in
       Alcotest.(check bool)
         "persisted token counters do not imply an observed last-turn usage"
         true
-        Yojson.Safe.Util.(keeper |> member "last_turn_usage" = `Null))
+        Yojson.Safe.Util.(persisted_keeper |> member "last_turn_usage" = `Null))
 
 let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
   Eio_main.run @@ fun env ->

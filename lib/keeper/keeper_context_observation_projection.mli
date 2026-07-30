@@ -18,3 +18,11 @@ val last_turn_usage_json_of_meta :
 (** Provider-reported usage for the latest completed turn. This is not
     context occupancy and must never feed context pressure or compaction
     decisions. *)
+
+val last_turn_usage_json :
+  base_path:string ->
+  Keeper_meta_contract.keeper_meta ->
+  Yojson.Safe.t
+(** Process-local provider usage for the same persisted Keeper identity.
+    Persisted token counters are never promoted when the live registry has no
+    typed observation. *)

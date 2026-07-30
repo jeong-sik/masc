@@ -484,20 +484,54 @@ network_mode = "inherit"
     "fixture raw meta starts from persisted/default sandbox"
     "local"
     (Profile.sandbox_profile_to_string raw_meta.sandbox_profile);
-  let effective =
-    Heartbeat_presence.effective_keepalive_meta
-      ~base_path:config.base_path
-      ~fallback:raw_meta
-      ~disk_meta_opt:(Some raw_meta)
+  let observed_meta =
+    {
+      raw_meta with
+      runtime =
+        {
+          raw_meta.runtime with
+          usage =
+            {
+              raw_meta.runtime.usage with
+              last_input_tokens = 123;
+              last_output_tokens = 4;
+              last_total_tokens = 127;
+              last_usage_reported_at = Some 1_700_000_000.0;
+            };
+        };
+    }
   in
-  Alcotest.(check string)
-    "keepalive disk meta selection applies TOML sandbox overlay"
-    "docker"
-    (Profile.sandbox_profile_to_string effective.sandbox_profile);
-  Alcotest.(check string)
-    "keepalive disk meta selection applies TOML network overlay"
-    "inherit"
-    (Profile.network_mode_to_string effective.network_mode)
+  Masc.Keeper_registry.For_testing.clear ();
+  ignore
+    (Masc.Keeper_registry.For_testing.register
+       ~base_path:config.base_path
+       name
+       observed_meta);
+  Fun.protect
+    ~finally:Masc.Keeper_registry.For_testing.clear
+    (fun () ->
+      let effective =
+        Heartbeat_presence.effective_keepalive_meta
+          ~base_path:config.base_path
+          ~fallback:raw_meta
+          ~disk_meta_opt:(Some raw_meta)
+      in
+      Alcotest.(check string)
+        "keepalive disk meta selection applies TOML sandbox overlay"
+        "docker"
+        (Profile.sandbox_profile_to_string effective.sandbox_profile);
+      Alcotest.(check string)
+        "keepalive disk meta selection applies TOML network overlay"
+        "inherit"
+        (Profile.network_mode_to_string effective.network_mode);
+      Alcotest.(check int)
+        "disk refresh preserves process-local observed input"
+        123
+        effective.runtime.usage.last_input_tokens;
+      Alcotest.(check (option (float 0.0)))
+        "disk refresh preserves process-local observation timestamp"
+        (Some 1_700_000_000.0)
+        effective.runtime.usage.last_usage_reported_at)
 
 let test_missing_sandbox_profile_fails_loud_for_profile_source () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->

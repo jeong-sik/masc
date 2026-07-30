@@ -489,7 +489,8 @@ let keepers_json
                          @ context_snapshot_fields
                          @ [ ( "last_turn_usage"
                              , Keeper_context_observation_projection
-                               .last_turn_usage_json_of_meta
+                               .last_turn_usage_json
+                                 ~base_path:config.base_path
                                  meta )
                            ]
                          @ Keeper_status_bridge.runtime_blocker_fields_json config meta

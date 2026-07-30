@@ -147,7 +147,8 @@ let handle_keeper_list ctx args : tool_result =
             @ Keeper_context_observation_projection.missing_context_fields ()
             @ [
               ( "last_turn_usage"
-              , Keeper_context_observation_projection.last_turn_usage_json_of_meta
+              , Keeper_context_observation_projection.last_turn_usage_json
+                  ~base_path:ctx.config.base_path
                   m );
               ("metrics_overview", metrics_summary_to_json metrics_overview);
               ("storage_paths", `Assoc [

@@ -47,3 +47,21 @@ let last_turn_usage_json_of_meta
       ; "source", `String "keeper_runtime_usage"
       ]
 ;;
+
+let last_turn_usage_json ~base_path
+      (persisted_meta : Keeper_meta_contract.keeper_meta)
+  =
+  let observation_meta =
+    match Keeper_registry.get ~base_path persisted_meta.name with
+    | Some entry
+      when Keeper_id.Trace_id.equal
+             entry.meta.runtime.trace_id
+             persisted_meta.runtime.trace_id
+           && Int.equal
+                entry.meta.runtime.nonce
+                persisted_meta.runtime.nonce ->
+      entry.meta
+    | Some _ | None -> persisted_meta
+  in
+  last_turn_usage_json_of_meta observation_meta
+;;

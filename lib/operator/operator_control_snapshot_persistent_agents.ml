@@ -124,7 +124,8 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                     @ Keeper_context_observation_projection.missing_context_fields ()
                     @ [ ( "last_turn_usage"
                         , Keeper_context_observation_projection
-                          .last_turn_usage_json_of_meta
+                          .last_turn_usage_json
+                            ~base_path:config.base_path
                             meta )
                       ])))
         names

@@ -903,7 +903,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
             @ context_projection_fields
             @ [
               ( "last_turn_usage"
-              , Keeper_context_observation_projection.last_turn_usage_json_of_meta
+              , Keeper_context_observation_projection.last_turn_usage_json
+                  ~base_path:config.base_path
                   m );
               ("metrics_window", metrics_window_summary);
               ("recent_input_preview", Json_util.string_opt_to_json (recent_preview_for_role "user"));

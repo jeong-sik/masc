@@ -21,13 +21,47 @@ let effective_keepalive_meta
       ~(disk_meta_opt : keeper_meta option)
   : keeper_meta
   =
-  let selected =
+  let selected, registry_meta_opt =
     match disk_meta_opt with
-  | Some latest -> latest
-  | None ->
-    (match Keeper_registry.get ~base_path fallback.name with
-     | Some entry -> entry.meta
-     | None -> fallback)
+    | Some latest ->
+      let registry_meta_opt =
+        Keeper_registry.get ~base_path fallback.name
+        |> Option.map (fun (entry : Keeper_registry.registry_entry) ->
+               entry.meta)
+      in
+      latest, registry_meta_opt
+    | None ->
+      (match Keeper_registry.get ~base_path fallback.name with
+       | Some entry -> entry.meta, Some entry.meta
+       | None -> fallback, None)
+  in
+  let selected =
+    match registry_meta_opt with
+    | Some registry_meta
+      when Keeper_id.Trace_id.equal
+             registry_meta.runtime.trace_id
+             selected.runtime.trace_id
+           && Int.equal registry_meta.runtime.nonce selected.runtime.nonce
+           && Option.is_some
+                registry_meta.runtime.usage.last_usage_reported_at ->
+      let observed_usage = registry_meta.runtime.usage in
+      {
+        selected with
+        runtime =
+          {
+            selected.runtime with
+            usage =
+              {
+                selected.runtime.usage with
+                last_input_tokens = observed_usage.last_input_tokens;
+                last_output_tokens = observed_usage.last_output_tokens;
+                last_total_tokens = observed_usage.last_total_tokens;
+                last_usage_reported_at =
+                  observed_usage.last_usage_reported_at;
+              };
+          };
+      }
+    | Some _ | None -> selected
   in
   match Keeper_meta_contract.effective_meta_result ~base_path selected with
   | Ok effective -> effective

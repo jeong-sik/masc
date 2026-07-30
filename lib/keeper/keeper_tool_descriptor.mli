@@ -24,12 +24,14 @@ type sandbox =
 
 (** One explicit Keeper-model exposure choice per descriptor. Compatibility
     aliases remain routable at transport boundaries but never become a second
-    model-facing name. [Transport_alias] identifies a descriptor whose exact
-    capability is already projected by another descriptor; it is not a
-    subjective visibility policy. *)
+    model-facing name. [Operator_only] keeps a control-plane descriptor
+    available to trusted operator entrypoints without exposing it to the
+    autonomous Keeper model. [Transport_alias] identifies a descriptor whose
+    exact capability is already projected by another descriptor. *)
 type keeper_model_projection =
   | Preferred_public_name
   | Internal_name
+  | Operator_only
   | Transport_alias of { projected_by : string }
 
 (** Typed display group for Keeper capability discovery. *)
@@ -175,12 +177,13 @@ val all_descriptors : unit -> t list
 val model_schema_errors : t -> string list
 
 (** Descriptors with one explicit model-facing projection and a resolved input
-    schema. Only exact transport aliases and missing/structurally invalid schemas
-    are excluded. *)
+    schema. Operator-only controls, exact transport aliases, and
+    missing/structurally invalid schemas are excluded. *)
 val model_visible_descriptors : unit -> t list
 
 (** The sole active Keeper model name. Empty only for an exact
-    [Transport_alias] or a descriptor without a resolved schema. *)
+    [Operator_only], [Transport_alias], or a descriptor without a resolved
+    schema. *)
 val keeper_model_names : t -> string list
 
 (** Names admitted by the Keeper execution/candidate boundary. A preferred

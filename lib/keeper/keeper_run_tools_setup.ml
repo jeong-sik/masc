@@ -260,7 +260,23 @@ let prepare_agent_setup
          | _ :: _, _
          | [],
            ( Keeper_tool_descriptor.Preferred_public_name
-           | Keeper_tool_descriptor.Internal_name ) -> count)
+           | Keeper_tool_descriptor.Internal_name
+           | Keeper_tool_descriptor.Operator_only ) -> count)
+      0
+      registered_descriptors
+  in
+  let operator_only_count =
+    List.fold_left
+      (fun count (descriptor : Keeper_tool_descriptor.t) ->
+         match
+           Keeper_tool_descriptor.model_schema_errors descriptor
+         , descriptor.keeper_model_projection
+         with
+         | [], Keeper_tool_descriptor.Operator_only -> count + 1
+         | ([], (Keeper_tool_descriptor.Preferred_public_name
+                | Keeper_tool_descriptor.Internal_name
+                | Keeper_tool_descriptor.Transport_alias _))
+         | (_ :: _, _) -> count)
       0
       registered_descriptors
   in
@@ -277,6 +293,7 @@ let prepare_agent_setup
     List.length registered_descriptors
     - List.length model_visible_descriptors
     - transport_alias_count
+    - operator_only_count
     - invalid_schema_count
   in
   let all_tool_names =
@@ -345,6 +362,7 @@ let prepare_agent_setup
                ; "registered_descriptor_count", `Int (List.length registered_descriptors)
                ; "model_visible_descriptor_count", `Int (List.length model_visible_descriptors)
                ; "transport_alias_count", `Int transport_alias_count
+               ; "operator_only_count", `Int operator_only_count
                ; "invalid_schema_count", `Int invalid_schema_count
                ; "unexplained_exclusion_count", `Int unexplained_exclusion_count
                ; ( "all_model_eligible_tools_visible"
@@ -352,11 +370,12 @@ let prepare_agent_setup
                ])));
   Log.Keeper.routine
     "keeper:%s tool visibility: registered=%d visible=%d transport_alias=%d \
-     invalid_schema=%d unexplained=%d"
+     operator_only=%d invalid_schema=%d unexplained=%d"
     meta.name
     (List.length registered_descriptors)
     (List.length all_tool_names)
     transport_alias_count
+    operator_only_count
     invalid_schema_count
     unexplained_exclusion_count;
   let record_tool_assignment ~turn ~tool_list ~lane =

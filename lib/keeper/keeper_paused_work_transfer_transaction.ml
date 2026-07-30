@@ -36,6 +36,7 @@ type failure =
       { expected : int
       ; actual : int
       }
+  | Target_owner_identity_changed
   | Continuation_binding_mismatch
   | Source_queue_validation_failed of string
   | Committed_projection_failed of
@@ -112,6 +113,8 @@ let failure_to_string = function
       "Transfer_owner target generation changed: expected %d, actual %d"
       expected
       actual
+  | Target_owner_identity_changed ->
+    "Transfer_owner target trace identity changed"
   | Continuation_binding_mismatch ->
     "Transfer_owner continuation binding does not match the exact source event"
   | Source_queue_validation_failed detail ->
@@ -358,10 +361,7 @@ let validate_committed_target config transfer =
       (Target_owner_nonce_changed
          { expected = transfer.target_generation; actual = meta.runtime.nonce })
   else if not (Keeper_id.Trace_id.equal meta.runtime.trace_id transfer.target_trace_id)
-  then
-    Error
-      (Committed_projection_failed
-         { stage = Target_enqueue; detail = "target trace identity changed" })
+  then Error Target_owner_identity_changed
   else Ok ()
 ;;
 
@@ -378,6 +378,40 @@ let target_enqueue config receipt transfer =
   | Keeper_registry_event_queue.Stimulus_already_present -> Ok Already_present
   | Keeper_registry_event_queue.Stimulus_storage_error detail ->
     Error (Committed_projection_failed { stage = Target_enqueue; detail })
+;;
+
+let receipt_matches_accepted_transfer
+      receipt
+      (receipt_transfer : Keeper_paused_work_disposition_receipt.transfer_owner)
+      (accepted : Keeper_registry_event_queue.accepted_transfer)
+  =
+  String.equal receipt.Keeper_paused_work_disposition_receipt.keeper_name accepted.from_keeper
+  && Int.equal receipt.expected_generation accepted.owner_nonce
+  && String.equal receipt.operator_operation_id accepted.operator_operation_id
+  && String.equal receipt_transfer.from_keeper accepted.from_keeper
+  && String.equal receipt_transfer.to_keeper accepted.to_keeper
+  && receipt_transfer.source = accepted.source
+  && Int64.equal receipt_transfer.source_incarnation accepted.source_incarnation
+;;
+
+let project_committed_target_if_receipted
+      config
+      ~(transfer : Keeper_registry_event_queue.accepted_transfer)
+  =
+  let* receipt =
+    Keeper_paused_work_disposition_receipt.load
+      config
+      ~keeper_name:transfer.from_keeper
+      ~operator_operation_id:transfer.operator_operation_id
+    |> Result.map_error (fun detail -> Receipt_read_failed detail)
+  in
+  match receipt with
+  | None -> Ok None
+  | Some receipt ->
+    let* receipt_transfer = transfer_of_receipt receipt in
+    if receipt_matches_accepted_transfer receipt receipt_transfer transfer
+    then target_enqueue config receipt receipt_transfer |> Result.map Option.some
+    else Error (Receipt_conflict receipt)
 ;;
 
 let project_receipt config receipt =

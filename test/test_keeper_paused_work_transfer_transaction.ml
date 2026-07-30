@@ -16,6 +16,22 @@ let require_some label = function
   | None -> Alcotest.failf "%s: expected Some" label
 ;;
 
+let with_strict_executor f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let pool =
+    Domain_pool.create
+      ~sw
+      ~domain_count:1
+      (Eio.Stdenv.domain_mgr env)
+  in
+  Executor_pool_ref.For_testing.with_pool
+    (Domain_pool.executor_pool pool)
+    f
+;;
+
 let rec remove_tree path =
   if Sys.file_exists path
   then if Sys.is_directory path
@@ -547,6 +563,130 @@ let test_replay_after_source_ack_projects_target () =
     assert_converged config ~from_keeper ~to_keeper request.source)
 ;;
 
+let test_generic_recovery_preserves_receipted_target_identity () =
+  with_transfer_lane
+  @@ fun config from_keeper to_keeper source_meta target_meta request ->
+  let transfer : Receipt.transfer_owner =
+    { from_keeper
+    ; to_keeper
+    ; target_trace_id = target_meta.runtime.trace_id
+    ; target_generation = request.target_generation
+    ; source = request.source
+    ; source_incarnation = request.source_incarnation
+    ; continuation_binding = request.continuation_binding
+    }
+  in
+  let receipt : Receipt.t =
+    { keeper_name = from_keeper
+    ; expected_trace_id = source_meta.runtime.trace_id
+    ; expected_generation = request.owner_nonce
+    ; operator_operation_id = request.operator_operation_id
+    ; requested_at = 2.0
+    ; operation = Receipt.Transfer_owner transfer
+    }
+  in
+  (match
+     Receipt.with_keeper_lock config ~keeper_name:from_keeper (fun lock ->
+       Receipt.save_if_absent lock config receipt)
+   with
+   | Ok (Ok Receipt.Created) -> ()
+   | Ok (Ok (Receipt.Existing _)) -> Alcotest.fail "prepared receipt already existed"
+   | Ok (Error detail) | Error detail -> Alcotest.fail detail);
+  let causal : Keeper_registry_event_queue.accepted_transfer =
+    { source = request.source
+    ; source_incarnation = request.source_incarnation
+    ; owner_nonce = request.owner_nonce
+    ; operator_operation_id = request.operator_operation_id
+    ; from_keeper
+    ; to_keeper
+    }
+  in
+  ignore
+    (Keeper_registry_event_queue.transfer_pending_accepted_result
+       ~base_path:config.Workspace.base_path
+       from_keeper
+       ~current_owner_nonce:request.owner_nonce
+       ~applied_at:receipt.requested_at
+       ~transfer:causal
+     |> require_ok "simulate committed source ACK");
+  ignore
+    (write_meta
+       config
+       ~keeper_name:to_keeper
+       ~trace_id:"trace-restarted-target"
+       ~generation:request.target_generation
+       ~paused:false :
+      Keeper_meta_contract.keeper_meta);
+  (match
+     with_strict_executor
+     @@ fun () ->
+     Keeper_event_queue_recovery.project_owner_result
+       ~base_path:config.Workspace.base_path
+       ~keeper_name:from_keeper
+   with
+   | Error
+       (Keeper_event_queue_recovery.Paused_transfer_target_projection_failed
+          { target_keeper
+          ; cause = Transaction.Target_owner_identity_changed
+          }) ->
+     Alcotest.(check string) "trace failure target" to_keeper target_keeper
+   | Error error ->
+     Alcotest.fail (Keeper_event_queue_recovery.projection_error_to_string error)
+   | Ok _ -> Alcotest.fail "generic recovery ignored the target trace identity");
+  ignore
+    (write_meta
+       config
+       ~keeper_name:to_keeper
+       ~trace_id:(Keeper_id.Trace_id.to_string target_meta.runtime.trace_id)
+       ~generation:(request.target_generation + 1)
+       ~paused:false :
+      Keeper_meta_contract.keeper_meta);
+  (match
+     with_strict_executor
+     @@ fun () ->
+     Keeper_event_queue_recovery.project_owner_result
+       ~base_path:config.Workspace.base_path
+       ~keeper_name:from_keeper
+   with
+   | Error
+       (Keeper_event_queue_recovery.Paused_transfer_target_projection_failed
+          { target_keeper
+          ; cause = Transaction.Target_owner_nonce_changed { expected; actual }
+          }) ->
+     Alcotest.(check string) "generation failure target" to_keeper target_keeper;
+     Alcotest.(check int)
+       "expected target generation"
+       request.target_generation
+       expected;
+     Alcotest.(check int)
+       "current target generation"
+       (request.target_generation + 1)
+       actual
+   | Error error ->
+     Alcotest.fail (Keeper_event_queue_recovery.projection_error_to_string error)
+   | Ok _ -> Alcotest.fail "generic recovery ignored the target generation");
+  let source =
+    Persistence.load_state_result
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:from_keeper
+    |> require_ok "load retained source transition"
+  in
+  let target =
+    Persistence.load_state_result
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:to_keeper
+    |> require_ok "load unchanged target queue"
+  in
+  Alcotest.(check int)
+    "identity failure retains the source outbox"
+    1
+    (List.length (State.transition_outbox source));
+  Alcotest.(check int)
+    "identity failure has no target effect"
+    0
+    (Queue.length (State.pending target))
+;;
+
 let test_unrelated_enqueue_preserves_source_incarnation () =
   with_transfer_lane (fun config from_keeper to_keeper _source_meta _target_meta request ->
     let unrelated : Queue.stimulus =
@@ -664,6 +804,10 @@ let () =
             "replay after source ACK projects target"
             `Quick
             test_replay_after_source_ack_projects_target
+        ; Alcotest.test_case
+            "generic recovery preserves receipted target identity"
+            `Quick
+            test_generic_recovery_preserves_receipted_target_identity
         ] )
     ]
 ;;

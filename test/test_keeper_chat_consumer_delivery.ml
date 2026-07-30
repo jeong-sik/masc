@@ -664,7 +664,8 @@ let test_stale_parked_observation_rearms_next_pending_receipt () =
     let release_holder, resolve_release_holder = Eio.Promise.create () in
     let calls = ref 0 in
     let handled_content = ref None in
-    let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message =
+    let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_
+        ~(queued_message : Keeper_chat_queue.queued_message) =
       incr calls;
       handled_content := Some queued_message.content;
       Keeper_chat_consumer.Delivered

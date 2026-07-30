@@ -77,6 +77,11 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
               { block: 'dynamic_context', bytes: 1024, digest: 'dynamic-digest-bbbbbbbb' },
               { block: 'memory_os_recall', bytes: 512, digest: 'memory-digest-cccccccc' },
             ],
+            input_components: [
+              { component: 'prompt.persona', bytes: 2048 },
+              { component: 'prompt.dynamic_context', bytes: 1024 },
+              { component: 'prompt.memory_os_recall', bytes: 512 },
+            ],
             runtime_profile: 'oas-seoul-1',
             request_runtime_profile: 'oas-seoul-1',
             request_body_bytes: 65536,

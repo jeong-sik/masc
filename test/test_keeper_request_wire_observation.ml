@@ -1,12 +1,11 @@
 (** The admitted request-body size is recorded per keeper.
 
-    Only a refused request reports its size today, so nothing could compare a
-    keeper's real serialized wire size against its runtime's
-    [max_request_body_bytes]. These tests pin that the observer records the
-    exact [body_bytes] OAS reports, attributes it to the right keeper and
-    runtime and admitted cap, emits byte-scale histogram buckets, and admits
-    every observation — a rejection would turn measurement into typed failure
-    evidence on the provider path. *)
+    These tests pin that the observer records the exact [body_bytes] OAS
+    reports after provider-specific serialization, attributes it to the right
+    keeper, runtime and admitted cap, emits byte-scale histogram buckets, and
+    admits every observation — a rejection would turn measurement into typed
+    failure evidence on the provider path. Typed body-size refusals are
+    projected separately at the provider-attempt result boundary. *)
 
 open Alcotest
 

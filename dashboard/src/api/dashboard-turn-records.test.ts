@@ -19,6 +19,7 @@ function entry(overrides: Record<string, unknown> = {}) {
       ts: 1_700_000_000,
       execution_ids: ['exec-1'],
       blocks: [],
+      input_components: [],
       request_runtime_profile: null,
       request_body_bytes: null,
       input_tokens: 1200,
@@ -231,6 +232,39 @@ describe('keeper turn record request-wire observation', () => {
     { request_runtime_profile: '' },
     { request_body_bytes: -1 },
   ])('rejects malformed current request-wire fields: %j', async (override) => {
+    getMock.mockResolvedValue(payload(entry(override)))
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+})
+
+describe('keeper turn record input composition', () => {
+  it('keeps exact attributed input component bytes', async () => {
+    getMock.mockResolvedValue(payload(entry({
+      input_components: [
+        { component: 'prompt.memory_os_recall', bytes: 8192 },
+        { component: 'tool_schemas', bytes: 65_536 },
+        { component: 'message_tool_result', bytes: 41_233 },
+      ],
+    })))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response.entries[0]?.record.input_components).toEqual([
+      { component: 'prompt.memory_os_recall', bytes: 8192 },
+      { component: 'tool_schemas', bytes: 65_536 },
+      { component: 'message_tool_result', bytes: 41_233 },
+    ])
+  })
+
+  it.each([
+    { input_components: undefined },
+    { input_components: [{ component: 'legacy_prompt', bytes: 10 }] },
+    { input_components: [{ component: 'tool_schemas', bytes: -1 }] },
+    { input_components: [{ component: 'tool_schemas', bytes: 10, estimate: true }] },
+  ])('rejects malformed current input composition: %j', async (override) => {
     getMock.mockResolvedValue(payload(entry(override)))
 
     await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(

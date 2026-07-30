@@ -8,7 +8,8 @@
 // salience/uses/lastUsed score fields) is gone.
 //
 // Section data sources (RFC-keeper-memory-panel-real-data §4; hybrid treatment confirmed 2026-06-24):
-//   컨텍스트 구성        ← real prompt-assembly block bytes (entries[latest].blocks)
+//   컨텍스트 구성        ← real final-input content bytes + provider wire bytes
+//                           (entries[latest].input_components/request_body_bytes)
 //   장기 메모리 스토어    ← real memory_os.facts.items (typed category, provenance)
 //   압축 유지·요약        ← real memory_os.episodes.items
 //   최근 회상·주입        ← real memory_os_recall prompt blocks (entries[*].blocks)
@@ -31,6 +32,7 @@ import {
   type MemoryOsFactCategory,
   type MemoryOsSelectionPolicy,
   type TurnBlock,
+  type TurnInputComponent,
   type TurnRecordRow,
 } from '../api/dashboard'
 
@@ -124,6 +126,46 @@ export function memCompositionFromBlocks(blocks: readonly TurnBlock[]): Composit
   return { totalBytes, parts }
 }
 
+const INPUT_COMPONENT_META: Readonly<Record<string, BlockMeta>> = {
+  tool_schemas: { lbl: '도구 스키마', color: 'var(--status-warn)', mem: false },
+  message_user: { lbl: '사용자 메시지', color: 'var(--info)', mem: false },
+  message_system: { lbl: '시스템 메시지', color: 'var(--text-dim)', mem: false },
+  message_assistant_text: { lbl: '어시스턴트 응답', color: 'var(--status-ok)', mem: false },
+  message_thinking: { lbl: '사고', color: 'var(--volt)', mem: false },
+  message_redacted_thinking: { lbl: '비공개 사고', color: 'var(--volt)', mem: false },
+  message_tool_use: { lbl: '도구 호출', color: 'var(--status-bad)', mem: false },
+  message_tool_result: { lbl: '도구 결과', color: 'var(--volt-strong)', mem: false },
+  message_image: { lbl: '이미지', color: 'var(--info)', mem: false },
+  message_document: { lbl: '문서', color: 'var(--status-warn)', mem: false },
+  message_audio: { lbl: '오디오', color: 'var(--status-ok)', mem: false },
+}
+
+export function inputComponentMeta(token: string): BlockMeta {
+  if (token.startsWith('prompt.')) return promptBlockMeta(token.slice('prompt.'.length))
+  return INPUT_COMPONENT_META[token] ?? { lbl: token, color: 'var(--text-dim)', mem: false }
+}
+
+export function memCompositionFromInputComponents(
+  components: readonly TurnInputComponent[],
+): Composition {
+  const parts: CompositionPart[] = components
+    .filter(component => component.bytes > 0)
+    .map(component => {
+      const meta = inputComponentMeta(component.component)
+      return {
+        key: component.component,
+        lbl: meta.lbl,
+        bytes: component.bytes,
+        color: meta.color,
+        mem: meta.mem,
+      }
+    })
+  return {
+    totalBytes: parts.reduce((sum, part) => sum + part.bytes, 0),
+    parts,
+  }
+}
+
 // The most recent turn that actually assembled a prompt (has blocks). Entries
 // are append-ordered; an error/empty-block turn at the tail is skipped so the
 // composition reflects the last real prompt assembly — and the header token
@@ -132,6 +174,22 @@ export function latestEntryWithBlocks(rows: readonly TurnRecordRow[]): TurnRecor
   for (let i = rows.length - 1; i >= 0; i--) {
     const row = rows[i]
     if (row && row.record.blocks.length > 0) return row
+  }
+  return null
+}
+
+export function latestEntryWithInputComponents(
+  rows: readonly TurnRecordRow[],
+): TurnRecordRow | null {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i]
+    if (
+      row
+      && (
+        row.record.input_components.length > 0
+        || row.record.request_body_bytes != null
+      )
+    ) return row
   }
   return null
 }
@@ -224,18 +282,22 @@ function latestMemoryRecallBlock(row: TurnRecordRow | null): TurnBlock | null {
 
 function MemBar({ parts, total }: { parts: readonly CompositionPart[]; total: number }) {
   return html`
-    <div class="mem-bar" title="프롬프트 구성 (bytes)">
+    <div class="mem-bar" title="최종 provider 입력 콘텐츠 구성 (bytes)">
       ${parts.map(p => html`<span key=${p.key} style=${{ width: `${(p.bytes / total) * 100}%`, background: p.color }}></span>`)}
     </div>`
 }
 
 function MemCompoReal({ row }: { row: TurnRecordRow | null }) {
-  const blocks = row?.record.blocks ?? []
-  const { totalBytes, parts } = memCompositionFromBlocks(blocks)
-  if (!row || totalBytes === 0) {
-    return html`<div class="mem-empty">조립된 프롬프트 블록 없음 — 활성 컨텍스트 없음.</div>`
+  const components = row?.record.input_components ?? []
+  const { totalBytes, parts } = memCompositionFromInputComponents(components)
+  if (!row) {
+    return html`<div class="mem-empty">최종 provider 입력 구성 관측 없음.</div>`
   }
   const inputTok = row.record.input_tokens
+  const requestBodyBytes = row.record.request_body_bytes
+  if (totalBytes === 0 && requestBodyBytes == null) {
+    return html`<div class="mem-empty">최종 provider 입력 구성 관측 없음.</div>`
+  }
   const ctxWin = row.record.context_window
   const pct = inputTok != null && ctxWin != null && ctxWin > 0
     ? Math.round((inputTok / ctxWin) * 100)
@@ -243,25 +305,33 @@ function MemCompoReal({ row }: { row: TurnRecordRow | null }) {
   return html`
     <div class="mem-compo">
       <div class="mem-compo-head">
-        <span class="mono mem-compo-tot">${memFmtBytes(totalBytes)} prompt blocks</span>
+        <span class="mono mem-compo-tot">
+          ${requestBodyBytes == null
+            ? html`wire 측정 없음 · ${memFmtBytes(totalBytes)} content`
+            : html`${memFmtBytes(requestBodyBytes)} wire · ${memFmtBytes(totalBytes)} content`}
+        </span>
         <span class="mem-compo-sub">
           ${inputTok != null
-            ? html`${memFmtTok(inputTok)} tok${ctxWin != null ? html` / ${memFmtTok(ctxWin)} 윈도우` : null}${pct != null ? html` · ${pct}%` : null}`
-            : html`${parts.length}개 블록`}
-          ${row.record.request_body_bytes != null
-            ? html` · wire ${memFmtBytes(row.record.request_body_bytes)} · ${row.record.request_runtime_profile}`
-            : html` · wire 미관측`}
+            ? html`${memFmtTok(inputTok)} provider tok${ctxWin != null ? html` / ${memFmtTok(ctxWin)} 윈도우` : null}${pct != null ? html` · ${pct}%` : null}`
+            : html`${parts.length}개 구성요소`}
+          ${row.record.request_runtime_profile != null
+            ? html` · ${row.record.request_runtime_profile}`
+            : null}
         </span>
       </div>
-      <${MemBar} parts=${parts} total=${totalBytes} />
-      <div class="mem-legend">
-        ${parts.map(p => html`
-          <div key=${p.key} class="mem-leg">
-            <span class="mem-leg-sw" style=${{ background: p.color }}></span>
-            <span class="mem-leg-lbl">${p.lbl}${p.mem ? html`<span class="mem-leg-tag">메모리</span>` : null}</span>
-            <span class="mem-leg-v mono">${memFmtBytes(p.bytes)}</span>
-          </div>`)}
-      </div>
+      ${totalBytes === 0
+        ? html`<div class="mem-empty">wire 측정은 존재하지만 content 구성 관측은 없습니다.</div>`
+        : html`
+            <${MemBar} parts=${parts} total=${totalBytes} />
+            <div class="mem-legend">
+              ${parts.map(p => html`
+                <div key=${p.key} class="mem-leg">
+                  <span class="mem-leg-sw" style=${{ background: p.color }}></span>
+                  <span class="mem-leg-lbl">${p.lbl}${p.mem ? html`<span class="mem-leg-tag">메모리</span>` : null}</span>
+                  <span class="mem-leg-v mono">${memFmtBytes(p.bytes)}</span>
+                </div>`)}
+            </div>
+          `}
     </div>`
 }
 
@@ -441,6 +511,7 @@ function OneKeeperMemoryReal({
 }) {
   const kindFilter = useSignal<string>('all')
   const latestPromptRow = latestEntryWithBlocks(rows)
+  const latestInputRow = latestEntryWithInputComponents(rows)
   const facts = sortMemoryFactsForReview(snapshot.facts.items)
   const episodes = snapshot.episodes.items
   const seen = new Set<string>()
@@ -463,7 +534,7 @@ function OneKeeperMemoryReal({
 
       <div class="turn-sec">
         <h4>컨텍스트 구성</h4>
-        <${MemCompoReal} row=${latestPromptRow} />
+        <${MemCompoReal} row=${latestInputRow} />
       </div>
 
       <div class="turn-sec">

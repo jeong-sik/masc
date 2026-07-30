@@ -286,6 +286,7 @@ export { fetchKeeperToolCalls } from './dashboard-keeper-tool-calls'
 
 export type {
   TurnBlock,
+  TurnInputComponent,
   TurnRecordEntry,
   TurnBlockDiff,
   TurnRecordRow,

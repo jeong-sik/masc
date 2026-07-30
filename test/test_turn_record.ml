@@ -44,6 +44,13 @@ let sample_record () : Turn_record.t =
       ; sample_block Prompt_block_id.Dynamic_context "bbbb"
       ; sample_block Prompt_block_id.Memory_os_recall "cccc"
       ]
+  ; input_components =
+      [ { component = Turn_record.Prompt_block Prompt_block_id.Persona
+        ; bytes = 4
+        }
+      ; { component = Turn_record.Tool_schemas; bytes = 8192 }
+      ; { component = Turn_record.Message_user; bytes = 256 }
+      ]
   ; runtime_profile = "ollama_cloud.deepseek-v4-flash"
   ; model = Some "deepseek-v4-flash"
   ; finish_reason = Some "completed"
@@ -135,6 +142,22 @@ let test_codec_roundtrip () =
            && a.bytes = b.bytes
            && String.equal a.digest b.digest)
          record.blocks decoded.blocks);
+    check (list string) "input component ids preserved"
+      (List.map
+         (fun (component : Turn_record.input_component) ->
+            Turn_record.input_component_id_to_string component.component)
+         record.input_components)
+      (List.map
+         (fun (component : Turn_record.input_component) ->
+            Turn_record.input_component_id_to_string component.component)
+         decoded.input_components);
+    check (list int) "input component bytes preserved"
+      (List.map
+         (fun (component : Turn_record.input_component) -> component.bytes)
+         record.input_components)
+      (List.map
+         (fun (component : Turn_record.input_component) -> component.bytes)
+         decoded.input_components);
     check string "runtime_profile" record.runtime_profile decoded.runtime_profile;
     check (option string) "model" record.model decoded.model;
     check (option string) "finish_reason" record.finish_reason decoded.finish_reason;
@@ -281,7 +304,7 @@ let test_codec_rejects_malformed () =
     check bool "error names the missing field" true
       (Astring.String.is_infix ~affix:"execution_ids" msg)
 
-let test_codec_requires_request_wire_fields () =
+let test_codec_requires_current_observation_fields () =
   let remove field =
     match Turn_record.to_json (sample_record ()) with
     | `Assoc fields -> `Assoc (List.remove_assoc field fields)
@@ -294,7 +317,7 @@ let test_codec_requires_request_wire_fields () =
       | Error message ->
         check bool "missing current field is explicit" true
           (Astring.String.is_infix ~affix:field message))
-    [ "request_runtime_profile"; "request_body_bytes" ]
+    [ "input_components"; "request_runtime_profile"; "request_body_bytes" ]
 
 let test_codec_rejects_partial_or_invalid_request_wire_observation () =
   let replace fields =
@@ -318,6 +341,49 @@ let test_codec_rejects_partial_or_invalid_request_wire_observation () =
     ; [ "request_runtime_profile", `String "" ]
     ; [ "request_body_bytes", `Int (-1) ]
     ]
+
+let test_codec_rejects_unknown_input_component () =
+  let json =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        (( "input_components"
+         , `List
+             [ `Assoc
+                 [ "component", `String "history_guess"
+                 ; "bytes", `Int 1
+                 ]
+             ] )
+         :: List.remove_assoc "input_components" fields)
+    | other -> other
+  in
+  match Turn_record.of_json json with
+  | Ok _ -> fail "decoded an unknown input component"
+  | Error message ->
+    check bool "unknown component is explicit" true
+      (Astring.String.is_infix ~affix:"unknown input component" message)
+
+let test_codec_rejects_input_component_extra_field () =
+  let json =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        (( "input_components"
+         , `List
+             [ `Assoc
+                 [ "component", `String "tool_schemas"
+                 ; "bytes", `Int 1
+                 ; "estimated", `Bool true
+                 ]
+             ] )
+         :: List.remove_assoc "input_components" fields)
+    | other -> other
+  in
+  match Turn_record.of_json json with
+  | Ok _ -> fail "decoded an input component with an extra field"
+  | Error message ->
+    check bool "extra field is explicit" true
+      (Astring.String.is_infix ~affix:"fields are not exact" message)
 
 let test_codec_unknown_block_decodes_as_other () =
   let json =
@@ -451,11 +517,15 @@ let () =
             test_cache_counts_round_trip_and_stay_optional
         ; test_case "optional fields absent" `Quick test_codec_optional_fields_absent
         ; test_case "rejects malformed rows" `Quick test_codec_rejects_malformed
-        ; test_case "request wire fields required" `Quick
-            test_codec_requires_request_wire_fields
+        ; test_case "current observation fields required" `Quick
+            test_codec_requires_current_observation_fields
         ; test_case "partial or invalid request wire observation rejected"
             `Quick
             test_codec_rejects_partial_or_invalid_request_wire_observation
+        ; test_case "unknown input component rejected" `Quick
+            test_codec_rejects_unknown_input_component
+        ; test_case "input component extra field rejected" `Quick
+            test_codec_rejects_input_component_extra_field
         ; test_case "unknown block decodes as Other" `Quick
             test_codec_unknown_block_decodes_as_other
         ] )

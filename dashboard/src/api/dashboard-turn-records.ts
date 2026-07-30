@@ -11,6 +11,11 @@ export type TurnBlock = {
   digest: string
 }
 
+export type TurnInputComponent = {
+  component: string
+  bytes: number
+}
+
 export type TurnRequestWireObservation =
   | {
       request_runtime_profile: string
@@ -28,6 +33,7 @@ export type TurnRecordEntry = {
   absolute_turn: number
   turn_ref: string
   blocks: TurnBlock[]
+  input_components: TurnInputComponent[]
   runtime_profile: string
   // RFC-0233 §2.3 — grounded from the backend turn record (boundary-redacted
   // model label + keeper stop reason). Absent (undefined) on error turns and
@@ -319,6 +325,43 @@ function decodeTurnBlockList(raw: unknown): TurnBlock[] | null {
   return blocks.every((block): block is TurnBlock => block !== null) ? blocks : null
 }
 
+const TURN_INPUT_COMPONENTS = new Set([
+  'prompt.persona',
+  'prompt.continuity',
+  'prompt.dynamic_context',
+  'prompt.temporal_summary',
+  'prompt.claimed_task_nudge',
+  'prompt.retry_nudge',
+  'prompt.memory_os_recall',
+  'prompt.connected_surface',
+  'tool_schemas',
+  'message_user',
+  'message_system',
+  'message_assistant_text',
+  'message_thinking',
+  'message_redacted_thinking',
+  'message_tool_use',
+  'message_tool_result',
+  'message_image',
+  'message_document',
+  'message_audio',
+])
+
+function decodeTurnInputComponents(raw: unknown): TurnInputComponent[] | null {
+  if (!Array.isArray(raw)) return null
+  const components: TurnInputComponent[] = []
+  for (const item of raw) {
+    if (!isRecord(item) || !hasExactKeys(item, ['component', 'bytes'])) return null
+    const component = decodeExactNonEmptyString(item.component)
+    const bytes = decodeNonNegativeSafeInteger(item.bytes)
+    if (component === null || !TURN_INPUT_COMPONENTS.has(component) || bytes === null) {
+      return null
+    }
+    components.push({ component, bytes })
+  }
+  return components
+}
+
 function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   if (!isRecord(raw) || !hasNoUnknownKeys(raw, [
     'execution_ids',
@@ -327,6 +370,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     'absolute_turn',
     'turn_ref',
     'blocks',
+    'input_components',
     'request_runtime_profile',
     'request_body_bytes',
     'runtime_profile',
@@ -354,6 +398,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   const runtime_profile = decodeExactNonEmptyString(raw.runtime_profile)
   const ts = asNumber(raw.ts)
   const blocks = decodeTurnBlockList(raw.blocks)
+  const input_components = decodeTurnInputComponents(raw.input_components)
   const request_runtime_profile =
     raw.request_runtime_profile === null
       ? null
@@ -400,6 +445,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     || runtime_profile === null
     || ts == null
     || blocks === null
+    || input_components === null
     || !Object.hasOwn(raw, 'request_runtime_profile')
     || request_runtime_profile === null && raw.request_runtime_profile !== null
     || !Object.hasOwn(raw, 'request_body_bytes')
@@ -436,6 +482,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     absolute_turn,
     turn_ref,
     blocks,
+    input_components,
     ...requestWireObservation,
     runtime_profile,
     model,

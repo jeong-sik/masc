@@ -8,7 +8,9 @@ import {
   factCategoryMeta,
   factSelectionReason,
   latestEntryWithBlocks,
+  latestEntryWithInputComponents,
   memCompositionFromBlocks,
+  memCompositionFromInputComponents,
   memFmtBytes,
   memFmtTok,
   promptBlockMeta,
@@ -126,6 +128,12 @@ function turnRecordsPayload() {
             { block: 'dynamic_context', bytes: 400, digest: 'eeee3333ffff' },
             { block: 'zero_block', bytes: 0, digest: '000000000000' },
           ],
+          input_components: [
+            { component: 'prompt.persona', bytes: 1200 },
+            { component: 'prompt.memory_os_recall', bytes: 800 },
+            { component: 'prompt.dynamic_context', bytes: 400 },
+            { component: 'tool_schemas', bytes: 1012 },
+          ],
           request_runtime_profile: 'anthropic.fallback',
           request_body_bytes: 3412,
           execution_ids: [],
@@ -180,7 +188,7 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/masc-improver/turn-records?limit=24')
   })
 
-  it('builds the composition bar from real prompt-block bytes (zero blocks dropped)', async () => {
+  it('builds the composition bar from exact provider input components', async () => {
     stubFetch()
     const { container } = renderInspector()
     const bar = await waitFor(() => {
@@ -188,18 +196,20 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
       expect(b).toBeTruthy()
       return b!
     })
-    // 4 blocks in payload, 1 has 0 bytes → 3 segments + 3 legend rows.
-    expect(bar.querySelectorAll('span').length).toBe(3)
-    expect(container.querySelectorAll('.mem-leg').length).toBe(3)
-    // total bytes = 1200+800+400 = 2400, shown as KB; token readout from input_tokens.
-    expect(container.querySelector('.mem-compo-tot')?.textContent).toBe('2.3KB prompt blocks')
-    expect(container.querySelector('.mem-compo-sub')?.textContent).toContain('3.5k tok')
-    expect(container.querySelector('.mem-compo-sub')?.textContent).toContain(
-      'wire 3.3KB · anthropic.fallback',
+    expect(bar.querySelectorAll('span').length).toBe(4)
+    expect(container.querySelectorAll('.mem-leg').length).toBe(4)
+    expect(container.querySelector('.mem-compo-tot')?.textContent).toBe(
+      '3.3KB wire · 3.3KB content',
     )
-    // block labels come from the Prompt_block_id mirror, not raw tokens.
+    expect(container.querySelector('.mem-compo-sub')?.textContent).toContain(
+      '3.5k provider tok',
+    )
+    expect(container.querySelector('.mem-compo-sub')?.textContent).toContain(
+      'anthropic.fallback',
+    )
     expect(container.textContent).toContain('메모리 회상')
     expect(container.textContent).toContain('동적 컨텍스트')
+    expect(container.textContent).toContain('도구 스키마')
   })
 
   it('renders all facts in persisted source order with stored timestamps', async () => {
@@ -547,6 +557,17 @@ describe('memory view-model helpers', () => {
     expect(comp.parts[0]?.lbl).toBe('페르소나')
   })
 
+  it('memCompositionFromInputComponents sums only measured content bytes', () => {
+    const comp = memCompositionFromInputComponents([
+      { component: 'tool_schemas', bytes: 64_000 },
+      { component: 'message_tool_result', bytes: 42_100 },
+      { component: 'message_audio', bytes: 0 },
+    ])
+    expect(comp.totalBytes).toBe(106_100)
+    expect(comp.parts.map(p => p.key)).toEqual(['tool_schemas', 'message_tool_result'])
+    expect(comp.parts.map(p => p.lbl)).toEqual(['도구 스키마', '도구 결과'])
+  })
+
   it('latestEntryWithBlocks skips an empty-block tail turn and returns the last assembled prompt', () => {
     const mkRow = (turn: number, blocks: { block: string; bytes: number; digest: string }[]): TurnRecordRow => ({
       record: {
@@ -554,6 +575,7 @@ describe('memory view-model helpers', () => {
         turn_ref: `t#${turn}`,
         request_runtime_profile: null,
         request_body_bytes: null,
+        input_components: [],
         blocks, execution_ids: [],
       },
       diff_vs_prev: null,
@@ -567,6 +589,38 @@ describe('memory view-model helpers', () => {
     expect(latestEntryWithBlocks([errorTail])).toBeNull()
   })
 
+  it('latestEntryWithInputComponents keeps a wire-only rejected tail turn visible', () => {
+    const baseRecord: TurnRecordRow['record'] = {
+      keeper: 'k',
+      trace_id: 't',
+      absolute_turn: 1,
+      turn_ref: 't#1',
+      ts: 1,
+      runtime_profile: 'local',
+      request_runtime_profile: null,
+      request_body_bytes: null,
+      input_components: [{ component: 'tool_schemas', bytes: 100 }],
+      blocks: [],
+      execution_ids: [],
+    }
+    const contentRow: TurnRecordRow = { record: baseRecord, diff_vs_prev: null }
+    const rejectedRow: TurnRecordRow = {
+      record: {
+        ...baseRecord,
+        absolute_turn: 2,
+        turn_ref: 't#2',
+        ts: 2,
+        request_runtime_profile: 'anthropic.fallback',
+        request_body_bytes: 1_671_330,
+        input_components: [],
+      },
+      diff_vs_prev: null,
+    }
+
+    expect(latestEntryWithInputComponents([contentRow, rejectedRow])).toBe(rejectedRow)
+    expect(latestEntryWithInputComponents([])).toBeNull()
+  })
+
   it('recentMemoryRecallInjections returns newest real memory_os_recall blocks only', () => {
     const mkRow = (turn: number, block: string, bytes: number): TurnRecordRow => ({
       record: {
@@ -578,6 +632,7 @@ describe('memory view-model helpers', () => {
         runtime_profile: 'local',
         request_runtime_profile: null,
         request_body_bytes: null,
+        input_components: [],
         blocks: [{ block, bytes, digest: `digest-${turn}` }],
         execution_ids: [],
       },

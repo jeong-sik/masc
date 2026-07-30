@@ -74,4 +74,11 @@ module For_testing : sig
     accept:(Agent_sdk_response.api_response -> bool) ->
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+
+  val observe_request_wire_error :
+    runtime_id:string ->
+    on_request_wire_observation:
+      (runtime_id:string -> body_bytes:int -> unit) option ->
+    Agent_sdk.Error.sdk_error ->
+    unit
 end

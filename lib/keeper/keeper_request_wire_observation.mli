@@ -1,11 +1,10 @@
 (** Keeper_request_wire_observation — the serialized request body size OAS
     admitted for one keeper turn.
 
-    Only a refused request reports its size today
-    ([Agent_sdk.Retry.Request_body_too_large] carries [actual_bytes]), so the
-    admitted population is unmeasured and nothing can compare a keeper's real
-    wire size against its runtime's [max_request_body_bytes]. Nothing MASC
-    already computes substitutes:
+    OAS's provider-specific serialization observer measures admitted requests;
+    a refused request instead carries the same exact size in
+    [Agent_sdk.Retry.Request_body_too_large.actual_bytes]. Nothing MASC already
+    computes substitutes:
     [Keeper_context_core_accessors.serialize_context] covers
     [{system_prompt, messages}] and excludes tool schemas and every
     provider-specific stream field, and [last_input_tokens] is a different unit
@@ -16,7 +15,9 @@
     stream-field injection, and after its own serialized-body admission check,
     so [body_bytes] is the exact admitted count. The observation is diagnostic:
     OAS reports a rejecting or raising callback as typed failure evidence and
-    does not rewrite the provider result. *)
+    does not rewrite the provider result. The rejected-request projection is
+    handled at the typed provider-attempt result boundary, not by this metric
+    observer. *)
 
 val metric : Keeper_metrics.t
 (** Histogram the admitted byte count lands in, labelled by keeper and the

@@ -451,6 +451,17 @@ let parse_thinking_control_format ~(path : string) ~(token : string option) (raw
 let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   : (Runtime_schema.model_capabilities, parse_error list) result
   =
+  let retired_native_streaming_key = "supports-native-streaming" in
+  let retired_key_errors =
+    match Otoml.find_opt tbl Fun.id [ retired_native_streaming_key ] with
+    | None -> []
+    | Some _ ->
+      error
+        (path ^ "." ^ retired_native_streaming_key)
+        (Printf.sprintf
+           "%s was removed; streaming support is derived from the OAS model catalog"
+           retired_native_streaming_key)
+  in
   let b key = Otoml.find_or ~default:false tbl Otoml.get_boolean [ key ] in
   let b_default_true key = Otoml.find_or ~default:true tbl Otoml.get_boolean [ key ] in
   let positive_int_opt_field key =
@@ -481,8 +492,12 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
                \"chat-template-token\""))
     | Ok (Some raw), Ok token -> parse_thinking_control_format ~path ~token raw
   in
-  Result.map
-    (fun thinking_control_format ->
+  match thinking_control_format_result, retired_key_errors with
+  | Error errors, retired_key_errors ->
+    Error (errors @ retired_key_errors)
+  | Ok _, _ :: _ -> Error retired_key_errors
+  | Ok thinking_control_format, [] ->
+    Ok
       { Runtime_schema.max_output_tokens = positive_int_opt_field "max-output-tokens"
       ; supports_tool_choice = b "supports-tool-choice"
       ; supports_required_tool_choice = b "supports-required-tool-choice"
@@ -508,8 +523,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
       ; emits_usage_tokens = b_default_true "emits-usage-tokens"
       ; supports_computer_use = b "supports-computer-use"
       ; supports_code_execution = b "supports-code-execution"
-      })
-    thinking_control_format_result
+      }
 ;;
 
 (* LLM sampling temperature bounds. OpenAI/Kimi/DeepSeek accept [0.0, 2.0]; a

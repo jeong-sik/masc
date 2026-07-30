@@ -323,6 +323,7 @@ let sparse_provider_context_entry ~outcome ~runtime_id ~ts () =
       ] );
     ( "telemetry",
       `Assoc ([
+        ("outcome", `String outcome);
         ("model_used", `Null);
         ("selected_model", `Null);
         ("usage_reported", `Bool false);
@@ -1059,16 +1060,23 @@ let test_cost_read_failure_is_not_empty_success () =
       keeper_path
       [ success_entry ~model:"decision-model" ~ts:(now_unix ()) () ];
     let costs_dir = Filename.concat base ".masc/costs" in
-    append_raw_line costs_dir "{}";
+    (* A read failure must surface as [unavailable], not empty success:
+       [.masc/costs] as a regular file is present but not listable. *)
+    let masc_dir = Filename.concat base ".masc" in
+    if not (Sys.file_exists masc_dir) then Unix.mkdir masc_dir 0o755;
+    let oc = open_out costs_dir in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc "{}");
     let json = M.compute ~base_path:base ~window_minutes:60 |> M.to_json in
     check int "decision metrics remain available" 1
       Yojson.Safe.Util.(json |> member "total_entries" |> to_int);
     let diagnostics = Yojson.Safe.Util.member "cost_ledger_read" json in
     check string "cost read state" "unavailable"
       Yojson.Safe.Util.(diagnostics |> member "state" |> to_string);
+    let detail = Yojson.Safe.Util.(diagnostics |> member "detail" |> to_string) in
     check bool "typed read detail is surfaced" true
-      (Yojson.Safe.Util.(diagnostics |> member "detail" |> to_string)
-       |> contains_substring costs_dir))
+      (contains_substring detail costs_dir))
 ;;
 
 let test_cost_latency_json_composes_axes_and_percentiles () =

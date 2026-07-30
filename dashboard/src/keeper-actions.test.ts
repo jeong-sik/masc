@@ -2232,6 +2232,56 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(keeperActionErrors.value.echo).toContain('표시할 답변')
   })
 
+  it('resumes a continuation checkpoint as delivered without assistant prose', async () => {
+    upsertPendingKeeperChatRequest({
+      requestId: 'kmsg_echo_1',
+      keeperName: 'echo',
+      message: '계속 진행해',
+      submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
+    })
+    fetchQueuedKeeperMessageResult.mockResolvedValue({
+      requestId: 'kmsg_echo_1',
+      keeperName: 'echo',
+      status: 'done',
+      ok: true,
+      result: {
+        reply: '',
+        turn_outcome: 'continuation_checkpoint',
+      },
+    })
+    queuedKeeperMessageToReply.mockImplementation(() => ({
+      text: '',
+      details: {
+        traceId: null,
+        turnRef: null,
+        providerMessageId: null,
+        generation: null,
+        modelUsed: null,
+        stopReason: null,
+        latencyMs: null,
+        costUsd: null,
+        usage: null,
+        replyText: null,
+        turnOutcome: 'continuation_checkpoint',
+        rawPayload: {
+          reply: '',
+          turn_outcome: 'continuation_checkpoint',
+        },
+      },
+    }))
+    fetchKeeperChatHistory.mockResolvedValue([])
+
+    await resumePendingKeeperChatRequests('echo')
+
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.map(entry => [entry.role, entry.text, entry.delivery])).toEqual([
+      ['user', '계속 진행해', 'delivered'],
+      ['assistant', '', 'delivered'],
+    ])
+    expect(keeperActionErrors.value.echo).toBeNull()
+  })
+
   it('resumes repeated same-message sends as distinct request ids', async () => {
     const submittedAt = Date.UTC(2026, 5, 15, 9, 0, 0)
     upsertPendingKeeperChatRequest({

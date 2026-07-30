@@ -215,6 +215,35 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('.chat-bubble')).toBeNull()
   })
 
+  it('renders a typed continuation checkpoint as durable status, not assistant prose', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'continuation-1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            rawText: '',
+            blocks: [{ t: 'status', kind: 'continuation_checkpoint' }],
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="continuation_checkpoint"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.textContent).toContain('이어가기 예약됨')
+    expect(status?.textContent).toContain('다음 주기에 이어서')
+    expect(container.querySelector('.chat-bubble')).toBeNull()
+  })
+
   it('renders failure rows as a typed card with collapsed diagnostic detail', async () => {
     const text = 'Keeper request failed: Internal error: [masc_oas_error] {"kind":"accept_rejected","scope":"ollama_cloud.deepseek-v4-flash","reason_kind":"no_usable_progress"}'
     render(

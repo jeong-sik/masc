@@ -100,7 +100,9 @@ type fusion_block = {
   run_id : string;
 }
 
-type status_kind = External_effect_pending
+type status_kind =
+  | Continuation_checkpoint
+  | External_effect_pending
 
 type status_block = { kind : status_kind }
 

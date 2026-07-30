@@ -162,7 +162,6 @@ type queued_turn_failure_kind =
   | Turn_failed
   | Turn_cancelled
   | No_visible_reply
-  | Continuation_checkpoint_without_reply
   | Missing_turn_ref
   | Transcript_persist_failed
   | Stream_projection_failed
@@ -227,8 +226,9 @@ val process_single_turn :
     queue-consumer [handle_turn] wiring) changes terminal handling for
     [No_visible_reply], an empty [Visible_reply], and
     [Continuation_checkpoint]. A media-only ordinary reply is delivered even
-    when its text is empty. A queued continuation remains a typed failure but
-    retains any streamed media blocks on that durable failure row. Its [claim]
+    when its text is empty. A continuation persists a typed status block and
+    is delivered to the originating connector without inventing assistant
+    prose. The [claim]
     callback atomically claims the exact observed queue receipt after turn
     admission and before transcript or provider effects.
 

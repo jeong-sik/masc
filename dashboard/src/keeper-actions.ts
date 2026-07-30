@@ -687,7 +687,6 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       }
 
       const reply = queuedKeeperMessageToReply(result)
-      const isCheckpoint = reply.details?.turnOutcome === 'continuation_checkpoint'
       const isNoVisibleReply = reply.details?.turnOutcome === 'no_visible_reply'
       const suppressReply = keeperTurnOutcomeSuppressesReply(reply.details?.turnOutcome)
       const isCancelled = result.status === 'cancelled'
@@ -707,8 +706,6 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       let assistantDelivery: KeeperConversationDelivery = 'delivered'
       if (isCancelled) {
         assistantDelivery = 'cancelled'
-      } else if (isCheckpoint) {
-        assistantDelivery = 'queued'
       } else if (isNoVisibleReply) {
         assistantDelivery = 'error'
       } else if (isError) {

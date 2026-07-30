@@ -232,12 +232,14 @@ no longer disagree about who "me" is.
 ```ocaml
 type turn_outcome =
   | Visible_reply of string                (* persist to lane *)
-  | Continuation_checkpoint                (* internal; not a lane line *)
+  | Continuation_checkpoint                (* persist typed status to lane *)
 ```
 
 The pipeline that *creates* the checkpoint returns
 `Continuation_checkpoint`; the keeper-stream persistence site matches on
-the variant. `is_continuation_checkpoint_reply` and its prefix constant
+the variant and persists a typed continuation status block without
+assistant prose. Connectors project the same typed status to canonical
+status text. `is_continuation_checkpoint_reply` and its prefix constant
 are deleted. New outcome variants (e.g. a future `Deferred`) break the
 persistence site at compile time instead of silently persisting or
 silently vanishing.

@@ -337,7 +337,7 @@ describe('applyKeeperStreamEvent', () => {
     expect(activeStreamRequestId('sangsu')).toBeNull()
   })
 
-  it('keeps explicit continuation checkpoints queued when a successful terminal follows', () => {
+  it('projects explicit continuation checkpoints as a durable status', () => {
     assistantEntry()
     setActiveStreamRequestId('sangsu', 'kmsg_current')
     applyKeeperStreamEvent('sangsu', 'reply-1', {
@@ -363,9 +363,12 @@ describe('applyKeeperStreamEvent', () => {
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.text).toBe('')
-    expect(entry?.delivery).toBe('queued')
+    expect(entry?.delivery).toBe('delivered')
     expect(entry?.streamState).toBeNull()
     expect(entry?.details?.turnOutcome).toBe('continuation_checkpoint')
+    expect(entry?.blocks).toEqual([
+      { t: 'status', kind: 'continuation_checkpoint' },
+    ])
     expect(activeStreamRequestId('sangsu')).toBeNull()
   })
 

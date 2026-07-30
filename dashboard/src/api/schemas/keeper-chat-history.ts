@@ -205,7 +205,10 @@ export const KeeperChatBlockSchema = union([
   }),
   object({
     t: literal('status'),
-    kind: literal('external_effect_pending'),
+    kind: union([
+      literal('continuation_checkpoint'),
+      literal('external_effect_pending'),
+    ]),
   }),
   object({
     t: literal('trace'),

@@ -146,6 +146,20 @@ let test_external_effect_status_becomes_persisted_chat_block () =
   | Some _ -> fail "typed Gate wait persisted the wrong block shape"
   | None -> fail "typed Gate wait did not persist a status block"
 
+let test_continuation_status_becomes_persisted_chat_block () =
+  match
+    Stream.For_testing.persisted_reply_blocks
+      ~turn_outcome:TO.Continuation_checkpoint
+      None
+  with
+  | Some
+      [ Masc.Keeper_chat_blocks.Status
+          { kind = Masc.Keeper_chat_blocks.Continuation_checkpoint }
+      ] ->
+    ()
+  | Some _ -> fail "typed continuation persisted the wrong block shape"
+  | None -> fail "typed continuation did not persist a status block"
+
 let test_terminal_effect_defer_kinds_remain_distinct () =
   let expect_yield label state expected =
     match Masc.Keeper_agent_run.terminal_effect_boundary_decision state with
@@ -494,6 +508,22 @@ let test_media_continuation_uses_assistant_delivery_path () =
            "media continuation must persist and broadcast the structured assistant row")
     [ false; true ]
 
+let test_continuation_status_uses_assistant_delivery_path () =
+  let blocks =
+    Stream.For_testing.persisted_reply_blocks
+      ~turn_outcome:TO.Continuation_checkpoint
+      None
+  in
+  match
+    Stream.For_testing.continuation_delivery_plan
+      ~has_direct_checkpoint:false
+      ~has_visible_blocks:(Option.is_some blocks)
+      ~has_tool_calls:false
+  with
+  | `Assistant_reply -> ()
+  | `Tool_calls_only | `No_assistant_reply | `User_only ->
+    fail "typed continuation status must use the delivered assistant path"
+
 let body fields = `Assoc fields
 
 let test_direct_reply_visible_text () =
@@ -546,8 +576,20 @@ let test_connector_projection_keeps_external_wait_typed () =
       ~reply:(Some "assistant preface that must not survive")
   with
   | Connector_status { kind = External_effect_pending } -> ()
+  | Connector_status { kind = Continuation_checkpoint }
   | Connector_text _ | Connector_no_visible_reply ->
     fail "external-effect wait must remain a typed connector status"
+
+let test_connector_projection_keeps_continuation_typed () =
+  match
+    Masc.Keeper_chat_blocks.connector_projection
+      ~turn_outcome:TO.Continuation_checkpoint
+      ~reply:(Some "assistant preface that must not survive")
+  with
+  | Connector_status { kind = Continuation_checkpoint } -> ()
+  | Connector_status { kind = External_effect_pending }
+  | Connector_text _ | Connector_no_visible_reply ->
+    fail "continuation checkpoint must remain a typed connector status"
 
 let test_direct_reply_projection_keeps_external_wait_typed () =
   match
@@ -558,6 +600,7 @@ let test_direct_reply_projection_keeps_external_wait_typed () =
          ])
   with
   | Connector_status { kind = External_effect_pending } -> ()
+  | Connector_status { kind = Continuation_checkpoint }
   | Connector_text _ | Connector_no_visible_reply ->
     fail "direct reply collapsed external-effect wait into silence"
 
@@ -604,6 +647,10 @@ let () =
             test_media_only_queued_reply_uses_delivery_path;
           test_case "media continuation uses assistant delivery path" `Quick
             test_media_continuation_uses_assistant_delivery_path;
+          test_case "continuation status uses assistant delivery path" `Quick
+            test_continuation_status_uses_assistant_delivery_path;
+          test_case "continuation status persists as a chat block" `Quick
+            test_continuation_status_becomes_persisted_chat_block;
         ] );
       ( "direct_reply",
         [
@@ -611,6 +658,8 @@ let () =
             test_direct_reply_visible_text;
           test_case "connector projection keeps external wait typed" `Quick
             test_connector_projection_keeps_external_wait_typed;
+          test_case "connector projection keeps continuation typed" `Quick
+            test_connector_projection_keeps_continuation_typed;
           test_case "direct reply keeps external wait typed" `Quick
             test_direct_reply_projection_keeps_external_wait_typed;
         ] );

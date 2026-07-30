@@ -850,7 +850,10 @@ export type ChatBroadcastBlock = { t: 'broadcast'; scope: string; via?: string; 
 // keeper_chat_blocks.ml); ChatFusionCard lazy-fetches the board post by
 // board_post_id and renders its meta_json (panel answers + judge synthesis).
 export type ChatFusionBlock = { t: 'fusion'; board_post_id: string; run_id?: string }
-export type ChatStatusBlock = { t: 'status'; kind: 'external_effect_pending' }
+export type ChatStatusBlock = {
+  t: 'status'
+  kind: 'continuation_checkpoint' | 'external_effect_pending'
+}
 
 export type ChatBlock =
   | ChatTextBlock

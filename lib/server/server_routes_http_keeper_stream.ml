@@ -1064,6 +1064,16 @@ let direct_reply_terminal_error ?(has_visible_blocks = false) payload_json_opt v
 
 let persisted_reply_blocks ~turn_outcome media_blocks =
   match turn_outcome, media_blocks with
+  | Keeper_turn_outcome.Continuation_checkpoint, Some media_blocks ->
+    Some
+      (Keeper_chat_blocks.Status
+         { kind = Keeper_chat_blocks.Continuation_checkpoint }
+       :: media_blocks)
+  | Keeper_turn_outcome.Continuation_checkpoint, None ->
+    Some
+      [ Keeper_chat_blocks.Status
+          { kind = Keeper_chat_blocks.Continuation_checkpoint }
+      ]
   | Keeper_turn_outcome.External_effect_pending, Some media_blocks ->
     Some
       (Keeper_chat_blocks.Status
@@ -1074,9 +1084,8 @@ let persisted_reply_blocks ~turn_outcome media_blocks =
       [ Keeper_chat_blocks.Status
           { kind = Keeper_chat_blocks.External_effect_pending }
       ]
-  | ( Keeper_turn_outcome.Visible_reply
-    | Keeper_turn_outcome.Continuation_checkpoint
-    | Keeper_turn_outcome.No_visible_reply ), media_blocks ->
+  | (Keeper_turn_outcome.Visible_reply | Keeper_turn_outcome.No_visible_reply),
+    media_blocks ->
     media_blocks
 
 type keeper_stream_terminal_status =
@@ -1166,7 +1175,6 @@ and queued_turn_failure_kind =
   | Turn_failed
   | Turn_cancelled
   | No_visible_reply
-  | Continuation_checkpoint_without_reply
   | Missing_turn_ref
   | Transcript_persist_failed
   | Stream_projection_failed
@@ -1333,8 +1341,6 @@ let queued_turn_failure_kind_to_string = function
   | Turn_failed -> "turn_failed"
   | Turn_cancelled -> "turn_cancelled"
   | No_visible_reply -> "no_visible_reply"
-  | Continuation_checkpoint_without_reply ->
-      "continuation_checkpoint_without_reply"
   | Missing_turn_ref -> "missing_turn_ref"
   | Transcript_persist_failed -> "transcript_persist_failed"
   | Stream_projection_failed -> "stream_projection_failed"
@@ -2260,19 +2266,6 @@ let process_single_turn ~user_row_origin ~submission
                  let turn_outcome = canonical_reply.turn_outcome in
                  let delivery_result =
                    match turn_outcome, String_util.trim_to_option visible_reply with
-                   | Keeper_turn_outcome.Continuation_checkpoint, _ when queued_turn ->
-                       let detail =
-                         "queued turn ended with a continuation checkpoint and no delivered reply"
-                       in
-                       (match persist_failure_reply ?blocks ?turn_ref detail with
-                        | Ok () ->
-                            Ok
-                              (Some
-                                 (Failed
-                                    { kind = Continuation_checkpoint_without_reply
-                                    ; detail
-                                    }))
-                        | Error persist_error -> Error persist_error)
                    | Keeper_turn_outcome.Continuation_checkpoint, _ ->
                        (match
                           continuation_delivery_plan
@@ -2835,17 +2828,22 @@ let process_single_turn ~user_row_origin ~submission
             Keeper_turn_outcome.equal turn_outcome
               Keeper_turn_outcome.Continuation_checkpoint
           then
-            Keeper_chat_events.publish events
-              (Custom
-                 { name = "KEEPER_CONTINUATION_CHECKPOINT";
-                   value =
-                     `Assoc
-                       (("message", `String visible_reply)
-                        :: (match request_id with
-                            | Some request_id ->
-                                [ ("request_id", `String request_id) ]
-                            | None -> []))
-                 });
+            begin
+              Keeper_chat_events.publish events
+                (Status_block
+                   { kind = Keeper_chat_blocks.Continuation_checkpoint });
+              Keeper_chat_events.publish events
+                (Custom
+                   { name = "KEEPER_CONTINUATION_CHECKPOINT";
+                     value =
+                       `Assoc
+                         (("message", `String visible_reply)
+                          :: (match request_id with
+                              | Some request_id ->
+                                  [ ("request_id", `String request_id) ]
+                              | None -> []))
+                   })
+            end;
           publish_terminal ~status:(Request_stream Stream_done) ();
           Keeper_chat_events.publish events Text_message_end;
           Keeper_chat_events.publish events (Run_finished { run_id });

@@ -974,7 +974,7 @@ let test_post_dispatch_non_reducing_output_is_terminal () =
 (* RFC-0351 S0 / #25461: once the persisted failure streak suspends
    compaction retries, a reactive prepare must be refused before any
    checkpoint I/O — each new stimulus used to pay one full prepare
-   (checkpoint load + summarizer LLM call) before its escalation settled.
+   (checkpoint load + summarizer LLM call) before its escalation completed.
    The fixture base_dir holds no checkpoint, so any prepare that passes the
    gate deterministically fails with [Checkpoint_ref_load_failed Ref_not_found];
    returning [Retry_suspended] instead proves the refusal fired first. *)

@@ -1057,9 +1057,7 @@ let test_cost_read_failure_is_not_empty_success () =
       keeper_path
       [ success_entry ~model:"decision-model" ~ts:(now_unix ()) () ];
     let costs_dir = Filename.concat base ".masc/costs" in
-    Unix.mkdir costs_dir 0o755;
-    let invalid_entry = Filename.concat costs_dir "not-a-month" in
-    Unix.mkdir invalid_entry 0o755;
+    append_raw_line costs_dir "{}";
     let json = M.compute ~base_path:base ~window_minutes:60 |> M.to_json in
     check int "decision metrics remain available" 1
       Yojson.Safe.Util.(json |> member "total_entries" |> to_int);
@@ -1068,7 +1066,7 @@ let test_cost_read_failure_is_not_empty_success () =
       Yojson.Safe.Util.(diagnostics |> member "state" |> to_string);
     check bool "typed read detail is surfaced" true
       (Yojson.Safe.Util.(diagnostics |> member "detail" |> to_string)
-       |> contains_substring "not-a-month"))
+       |> contains_substring costs_dir))
 ;;
 
 let test_cost_latency_json_composes_axes_and_percentiles () =

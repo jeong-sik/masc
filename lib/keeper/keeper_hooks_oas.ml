@@ -349,7 +349,7 @@ let make_hooks
            Trajectory.set_turn acc turn;
            emit_cost_event ~masc_root:acc.masc_root
              ~agent_name:meta.name ~task_id:acc.task_id
-             ~trace_id ~keeper_turn_id ~oas_turn_ordinal:turn ~model:response.model
+             ~trace_id ~keeper_turn_id ~oas_turn_ordinal:turn ~model
              ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
              ~cost_usd:cost_usd_for_event ~usage_missing
              ~cache_creation_input_tokens:raw_cache_creation_input_tokens

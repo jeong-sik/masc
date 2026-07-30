@@ -430,7 +430,7 @@ let test_post_turn_librarian_live_config_boundaries () =
         run_post_turn ~config ~meta ~turn;
         match
           Lane.For_testing.pending
-            ~base_path:config.Workspace.base_path
+            ~base_path:config.base_path
             ~keeper_name
             ~lane:Lane.Librarian
         with
@@ -451,7 +451,7 @@ let test_post_turn_librarian_live_config_boundaries () =
         let meta = make_meta keeper_name in
         let keepers_dir =
           Config_dir_resolver.keepers_dir_for_base_path
-            ~base_path:config.Workspace.base_path
+            ~base_path:config.base_path
         in
         if poison_snapshot
         then
@@ -463,7 +463,7 @@ let test_post_turn_librarian_live_config_boundaries () =
         let release, set_release = Eio.Promise.create () in
         let blocker =
           Lane.submit
-            ~base_path:config.Workspace.base_path
+            ~base_path:config.base_path
             ~keeper_name
             ~lane:Lane.Librarian
             (fun () ->
@@ -480,7 +480,7 @@ let test_post_turn_librarian_live_config_boundaries () =
           "one running plus one queued Librarian unit"
           (Some 2)
           (Lane.For_testing.pending
-             ~base_path:config.Workspace.base_path
+             ~base_path:config.base_path
              ~keeper_name
              ~lane:Lane.Librarian);
         Unix.putenv env_key terminal_value;

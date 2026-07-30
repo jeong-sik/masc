@@ -57,13 +57,21 @@ let field_opt name = function
 let build_post_message_request ~token ~channel_id ~text ?thread_ts () =
   let url = "https://slack.com/api/chat.postMessage" in
   let headers = ("Content-Type", "application/json") :: auth_headers ~token in
-  (* Slack owns Markdown parsing at this protocol boundary. Using its native
-     [markdown_text] field preserves the authored document without a local,
-     incomplete Markdown-to-mrkdwn heuristic. Slack rejects combining this
-     field with [text] or [blocks], so this builder emits exactly one content
-     representation. *)
+  (* Slack Web API standard: [text] provides the push notification / fallback string,
+     and [blocks] delivers the structured Slack mrkdwn section block. *)
+  let block_payload =
+    `List
+      [ `Assoc
+          [ ("type", `String "section")
+          ; ("text", `Assoc [ ("type", `String "mrkdwn"); ("text", `String text) ])
+          ]
+      ]
+  in
   let fields =
-    [ ("channel", `String channel_id); ("markdown_text", `String text) ]
+    [ ("channel", `String channel_id)
+    ; ("text", `String text)
+    ; ("blocks", block_payload)
+    ]
   in
   let fields =
     match thread_ts with

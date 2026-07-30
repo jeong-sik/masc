@@ -31,8 +31,18 @@ let test_block_id_unknown_rejected () =
 
 (* ── TurnRecord codec ─────────────────────────────────── *)
 
-let sample_block block digest =
-  { Turn_record.block; bytes = String.length digest; digest }
+let digest_of_label label =
+  Digestif.SHA256.digest_string label |> Digestif.SHA256.to_hex
+
+let sample_block block label =
+  { Turn_record.block
+  ; bytes = String.length label
+  ; digest = digest_of_label label
+  }
+
+let input_components_or_fail = function
+  | Some components -> components
+  | None -> fail "expected available input components"
 
 let sample_record () : Turn_record.t =
   { execution_ids =
@@ -50,12 +60,13 @@ let sample_record () : Turn_record.t =
       ; sample_block Prompt_block_id.Memory_os_recall "cccc"
       ]
   ; input_components =
-      [ { component = Turn_record.Prompt_block Prompt_block_id.Persona
-        ; bytes = 4
-        }
-      ; { component = Turn_record.Tool_schemas; bytes = 8192 }
-      ; { component = Turn_record.Message_user; bytes = 256 }
-      ]
+      Some
+        [ { component = Turn_record.Prompt_block Prompt_block_id.Persona
+          ; bytes = 4
+          }
+        ; { component = Turn_record.Tool_schemas; bytes = 8192 }
+        ; { component = Turn_record.Message_user; bytes = 256 }
+        ]
   ; runtime_profile = "ollama_cloud.deepseek-v4-flash"
   ; model = Some "deepseek-v4-flash"
   ; finish_reason = Some "completed"
@@ -143,18 +154,18 @@ let test_codec_roundtrip () =
       (List.map
          (fun (component : Turn_record.input_component) ->
             Turn_record.input_component_id_to_string component.component)
-         record.input_components)
+         (input_components_or_fail record.input_components))
       (List.map
          (fun (component : Turn_record.input_component) ->
             Turn_record.input_component_id_to_string component.component)
-         decoded.input_components);
+         (input_components_or_fail decoded.input_components));
     check (list int) "input component bytes preserved"
       (List.map
          (fun (component : Turn_record.input_component) -> component.bytes)
-         record.input_components)
+         (input_components_or_fail record.input_components))
       (List.map
          (fun (component : Turn_record.input_component) -> component.bytes)
-         decoded.input_components);
+         (input_components_or_fail decoded.input_components));
     check string "runtime_profile" record.runtime_profile decoded.runtime_profile;
     check (option string) "model" record.model decoded.model;
     check (option string) "finish_reason" record.finish_reason decoded.finish_reason;
@@ -401,6 +412,80 @@ let test_codec_rejects_input_component_extra_field () =
     check bool "extra field is explicit" true
       (Astring.String.is_infix ~affix:"fields are not exact" message)
 
+let test_codec_preserves_explicit_unavailable_input_components () =
+  let record = { (sample_record ()) with input_components = None } in
+  let json = Turn_record.to_json record in
+  (match json with
+   | `Assoc fields ->
+     check bool "unavailable is serialized as null" true
+       (List.assoc_opt "input_components" fields = Some `Null)
+   | _ -> fail "record did not encode as an object");
+  match Turn_record.of_json json with
+  | Error message -> failf "explicit unavailable failed to decode: %s" message
+  | Ok decoded ->
+    check bool "unavailable survives round-trip" true
+      (decoded.input_components = None)
+
+let replace_blocks blocks =
+  match Turn_record.to_json (sample_record ()) with
+  | `Assoc fields ->
+    `Assoc (("blocks", `List blocks) :: List.remove_assoc "blocks" fields)
+  | other -> other
+
+let valid_block_json ?(bytes = 4) ?(digest = digest_of_label "block") block =
+  `Assoc
+    [ "block", `String (Prompt_block_id.to_string block)
+    ; "bytes", `Int bytes
+    ; "digest", `String digest
+    ]
+
+let test_codec_rejects_malformed_blocks () =
+  let cases =
+    [ ( "negative bytes"
+      , valid_block_json ~bytes:(-1) Prompt_block_id.Persona )
+    ; ( "non-sha256 digest"
+      , valid_block_json ~digest:"abcd" Prompt_block_id.Persona )
+    ; ( "uppercase digest"
+      , valid_block_json
+          ~digest:(String.make 64 'A')
+          Prompt_block_id.Persona )
+    ]
+  in
+  List.iter
+    (fun (label, block) ->
+      match Turn_record.of_json (replace_blocks [ block ]) with
+      | Ok _ -> failf "decoded block with %s" label
+      | Error _ -> ())
+    cases
+
+let test_codec_rejects_duplicate_blocks_and_components () =
+  let persona = valid_block_json Prompt_block_id.Persona in
+  (match Turn_record.of_json (replace_blocks [ persona; persona ]) with
+   | Ok _ -> fail "decoded duplicate prompt blocks"
+   | Error message ->
+     check bool "duplicate block is explicit" true
+       (Astring.String.is_infix ~affix:"duplicate block" message));
+  let duplicate_components =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      let tool_schema =
+        `Assoc
+          [ "component", `String "tool_schemas"
+          ; "bytes", `Int 1
+          ]
+      in
+      `Assoc
+        (( "input_components"
+         , `List [ tool_schema; tool_schema ] )
+         :: List.remove_assoc "input_components" fields)
+    | other -> other
+  in
+  match Turn_record.of_json duplicate_components with
+  | Ok _ -> fail "decoded duplicate input components"
+  | Error message ->
+    check bool "duplicate component is explicit" true
+      (Astring.String.is_infix ~affix:"duplicate input component" message)
+
 let test_codec_rejects_unknown_block () =
   let json =
     match Turn_record.to_json (sample_record ()) with
@@ -411,7 +496,7 @@ let test_codec_rejects_unknown_block () =
              [ `Assoc
                  [ "block", `String "future_block"
                  ; "bytes", `Int 4
-                 ; "digest", `String "dddd"
+                 ; "digest", `String (digest_of_label "dddd")
                  ]
              ] )
          :: List.remove_assoc "blocks" fields)
@@ -582,6 +667,12 @@ let () =
             test_codec_rejects_unknown_input_component
         ; test_case "input component extra field rejected" `Quick
             test_codec_rejects_input_component_extra_field
+        ; test_case "explicit unavailable input components round-trip" `Quick
+            test_codec_preserves_explicit_unavailable_input_components
+        ; test_case "malformed blocks rejected" `Quick
+            test_codec_rejects_malformed_blocks
+        ; test_case "duplicate blocks and components rejected" `Quick
+            test_codec_rejects_duplicate_blocks_and_components
         ; test_case "unknown block is rejected" `Quick
             test_codec_rejects_unknown_block
         ; test_case "unknown fields are rejected" `Quick

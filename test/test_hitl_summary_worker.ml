@@ -535,13 +535,33 @@ let test_predispatch_failure_advances_only_to_oas_successor () =
          [ "hitl-unreachable"; "hitl-successor" ]
          (F.resolver_snapshot ~source:"hitl-flow-failover" fixtures);
        let entry = pending_entry ~base_path () in
+       let prepared = prepare_exn entry in
        Worker.For_testing.execute_prepared_flow
          ~net
          ~clock
          ~on_summary:(fun _ -> ())
-         (prepare_exn entry)
+         prepared
        |> require_executed;
        check int "OAS-selected successor posted once" 1 (F.post_count successor);
+       (match (Worker.For_testing.flow_evidence prepared).advances with
+        | [ advance ] ->
+          check string
+            "advance targets the frozen successor"
+            "hitl-successor"
+            advance.next.identity.candidate_id;
+          (match advance.failed with
+           | EO.Flow_advance_execution_failed { candidate; cause; _ } ->
+             check string
+               "advance retains the failed candidate"
+               "hitl-unreachable"
+               candidate.visit.identity.candidate_id;
+             check bool
+               "advance retains the typed transport failure"
+               true
+               (cause = EO.Completion_failed)
+           | EO.Flow_advance_candidate_rejected _ ->
+             fail "transport failure was recorded as a candidate rejection")
+        | _ -> fail "exactly one typed OAS advance should be retained");
        match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt =

@@ -165,7 +165,7 @@ export function latestEntryWithInputComponents(
     if (
       row
       && (
-        row.record.input_components.length > 0
+        row.record.input_components !== null
         || row.record.request_body_bytes != null
       )
     ) return row
@@ -274,9 +274,7 @@ function MemCompoReal({ row }: { row: TurnRecordRow | null }) {
   }
   const inputTok = row.record.input_tokens
   const requestBodyBytes = row.record.request_body_bytes
-  if (totalBytes === 0 && requestBodyBytes == null) {
-    return html`<div class="mem-empty">최종 provider 입력 구성 관측 없음.</div>`
-  }
+  const inputComponentsUnavailable = row.record.input_components === null
   const ctxWin = row.record.context_window
   const pct = inputTok != null && ctxWin != null && ctxWin > 0
     ? Math.round((inputTok / ctxWin) * 100)
@@ -298,8 +296,10 @@ function MemCompoReal({ row }: { row: TurnRecordRow | null }) {
             : null}
         </span>
       </div>
-      ${totalBytes === 0
-        ? html`<div class="mem-empty">wire 측정은 존재하지만 content 구성 관측은 없습니다.</div>`
+      ${inputComponentsUnavailable
+        ? html`<div class="mem-empty">content 구성 관측 불가 — 빈 입력으로 간주하지 않습니다.</div>`
+        : totalBytes === 0
+          ? html`<div class="mem-empty">관측된 content 구성요소가 없습니다.</div>`
         : html`
             <${MemBar} parts=${parts} total=${totalBytes} />
             <div class="mem-legend">

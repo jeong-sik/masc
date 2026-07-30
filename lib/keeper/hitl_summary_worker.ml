@@ -435,17 +435,37 @@ let log_exact_error (entry : pending_approval) operation detail =
    counter [record_outcome] already writes. Render the per-attempt provenance so
    the branch and the slot it died on are recoverable. *)
 let flow_evidence_detail (evidence : Exact_output.flow_evidence) =
-  match evidence.attempts with
-  | [] -> "no candidate attempt was recorded"
-  | attempts ->
-    attempts
-    |> List.map (fun (attempt : Exact_output.flow_attempt_snapshot) ->
+  let attempts =
+    List.map
+      (fun (attempt : Exact_output.flow_attempt_snapshot) ->
       Printf.sprintf
         "slot=%s call_id=%s"
         attempt.visit.identity.candidate_id
         (Exact_output.generation_receipt_snapshot_call_id attempt.receipt
          |> Exact_output.call_id_to_string))
-    |> String.concat "; "
+      evidence.attempts
+  in
+  let advances =
+    List.map
+      (fun (advance : Exact_output.flow_advance_receipt) ->
+         let failed_slot, failure_kind =
+           match advance.failed with
+           | Exact_output.Flow_advance_candidate_rejected rejection ->
+             ( (Exact_output.candidate_rejection_identity rejection).candidate_id
+             , "candidate_rejected" )
+           | Exact_output.Flow_advance_execution_failed { candidate; _ } ->
+             candidate.visit.identity.candidate_id, "execution_failed"
+         in
+         Printf.sprintf
+           "advance=%s->%s kind=%s"
+           failed_slot
+           advance.next.identity.candidate_id
+           failure_kind)
+      evidence.advances
+  in
+  match attempts @ advances with
+  | [] -> "no candidate attempt or advance was recorded"
+  | details -> String.concat "; " details
 ;;
 
 let optional_tokens = function
@@ -521,6 +541,8 @@ let candidate_rejection_detail (rejection : Exact_output.candidate_rejection_rec
      |> rejection_disposition_detail)
 ;;
 
+(* [Flow_exact_execution_failed] is the branch that carries the provider's own
+   verdict, and it was the only flow error settled with no log line at all. *)
 let execution_cause_detail : Exact_output.execution_error_cause -> string = function
   | Attempt_already_started -> "attempt already started"
   | Clock_required_for_timeout -> "clock required for timeout"

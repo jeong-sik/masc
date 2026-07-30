@@ -54,7 +54,9 @@ export type TurnRecordEntry = {
   absolute_turn: number
   turn_ref: string
   blocks: TurnBlock[]
-  input_components: TurnInputComponent[]
+  // null means the producer reached no exact composition observation; an
+  // observed empty input remains [].
+  input_components: TurnInputComponent[] | null
   request_runtime_profile: string | null
   request_body_bytes: number | null
   runtime_profile: string
@@ -381,6 +383,7 @@ function decodeTurnBlock(raw: unknown): TurnBlock | null {
   if (
     block === null
     || digest === null
+    || !/^[0-9a-f]{64}$/.test(digest)
     || bytes == null
     || !Number.isSafeInteger(bytes)
     || bytes < 0
@@ -389,7 +392,11 @@ function decodeTurnBlock(raw: unknown): TurnBlock | null {
 }
 
 function decodeTurnBlockList(raw: unknown): TurnBlock[] | null {
-  return decodeArray(raw, decodeTurnBlock)
+  const blocks = decodeArray(raw, decodeTurnBlock)
+  if (blocks === null) return null
+  return new Set(blocks.map(block => block.block)).size === blocks.length
+    ? blocks
+    : null
 }
 
 function decodeTurnInputComponentId(raw: unknown): TurnInputComponentId | null {
@@ -427,7 +434,10 @@ function decodeTurnInputComponents(raw: unknown): TurnInputComponent[] | null {
     }
     components.push({ component, bytes })
   }
-  return components
+  return new Set(components.map(component => component.component)).size
+    === components.length
+    ? components
+    : null
 }
 
 function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
@@ -467,7 +477,10 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   const runtime_profile = decodeExactNonEmptyString(raw.runtime_profile)
   const ts = asNumber(raw.ts)
   const blocks = decodeTurnBlockList(raw.blocks)
-  const input_components = decodeTurnInputComponents(raw.input_components)
+  const input_components =
+    raw.input_components === null
+      ? null
+      : decodeTurnInputComponents(raw.input_components)
   const request_runtime_profile =
     raw.request_runtime_profile === null
       ? null
@@ -515,7 +528,8 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     || runtime_profile === null
     || ts == null
     || blocks === null
-    || input_components == null
+    || !Object.hasOwn(raw, 'input_components')
+    || input_components === null && raw.input_components !== null
     || !Object.hasOwn(raw, 'request_runtime_profile')
     || request_runtime_profile === null && raw.request_runtime_profile !== null
     || !Object.hasOwn(raw, 'request_body_bytes')

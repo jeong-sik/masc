@@ -284,6 +284,18 @@ describe('keeper turn record final input composition', () => {
     ])
   })
 
+  it('preserves explicit unavailable composition instead of inventing an empty list', async () => {
+    getMock.mockResolvedValue(payload(entry({
+      input_components: null,
+      request_runtime_profile: 'anthropic.fallback',
+      request_body_bytes: 560_513,
+    })))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response.entries[0]?.record.input_components).toBeNull()
+  })
+
   it('rejects rows without the current composition contract', async () => {
     getMock.mockResolvedValue(payload(entry({ input_components: undefined })))
 
@@ -316,6 +328,50 @@ describe('keeper turn record final input composition', () => {
     getMock.mockResolvedValue(payload(entry({
       input_components: [{ component: 'prompt.retry_nudge', bytes: 1 }],
     })))
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects duplicate component ids', async () => {
+    const component = { component: 'tool_schemas', bytes: 1 }
+    getMock.mockResolvedValue(payload(entry({
+      input_components: [component, component],
+    })))
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('accepts only current unique blocks with lowercase sha256 digests', async () => {
+    getMock.mockResolvedValue(payload(entry({
+      blocks: [{
+        block: 'persona',
+        bytes: 4,
+        digest: 'a'.repeat(64),
+      }],
+    })))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+    expect(response.entries[0]?.record.blocks).toEqual([{
+      block: 'persona',
+      bytes: 4,
+      digest: 'a'.repeat(64),
+    }])
+  })
+
+  it.each([
+    { blocks: [{ block: 'persona', bytes: 4, digest: 'A'.repeat(64) }] },
+    {
+      blocks: [
+        { block: 'persona', bytes: 4, digest: 'a'.repeat(64) },
+        { block: 'persona', bytes: 5, digest: 'b'.repeat(64) },
+      ],
+    },
+  ])('rejects malformed or duplicate current blocks', async ({ blocks }) => {
+    getMock.mockResolvedValue(payload(entry({ blocks })))
 
     await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
       '유효하지 않은 keeper turn record payload',

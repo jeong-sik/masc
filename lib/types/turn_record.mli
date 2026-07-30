@@ -6,10 +6,11 @@
     stores. Diffing two consecutive records by [(block, digest)] answers
     "which instruction blocks entered, left, or changed between turns".
 
-    The assembly chain re-runs once per SDK turn inside one keeper turn;
-    [blocks] records the LAST SDK turn's assembly, matching the
-    last-write-wins semantics of the turn context the receipt already
-    uses. *)
+    The assembly chain re-runs once per SDK turn inside one keeper turn.
+    When a request reached the wire boundary, [blocks] and
+    [input_components] describe that same latest serialized request. If no
+    request reached the boundary, [blocks] records the last assembly and
+    [input_components] is [None]. *)
 
 type prompt_block =
   { block : Prompt_block_id.t
@@ -73,11 +74,12 @@ type t =
        chat/board. The decoder rejects a key that does not exactly match the
        row's [trace_id] and [absolute_turn]. *)
   ; blocks : prompt_block list (* assembly order *)
-  ; input_components : input_component list
+  ; input_components : input_component list option
     (* Exact UTF-8/JSON payload bytes attributed to the concrete prompt blocks,
        tool schemas, and content blocks that formed the dispatched input.
        This excludes provider envelope metadata and is therefore shown beside,
-       never substituted for, [request_wire_observation]. *)
+       never substituted for, [request_wire_observation]. [None] means exact
+       attribution was unavailable; an observed empty input is [Some []]. *)
   ; runtime_profile : string
   ; model : string option
     (* RFC-0233 §2.2/§2.3 — boundary-redacted runtime model label, the
@@ -166,8 +168,8 @@ type block_diff =
   }
 
 val diff_blocks : prev:t -> next:t -> block_diff
-(** Blocks are keyed by [block] id; assembly produces at most one block
-    per id, so first occurrence wins if a malformed row repeats one. *)
+(** Blocks are keyed by [block] id. Current rows have unique ids;
+    malformed duplicates are rejected by [of_json]. *)
 
 val entries_with_diffs : t list -> (t * block_diff option) list
 (** Pair each record (oldest-first) with its diff against the previous

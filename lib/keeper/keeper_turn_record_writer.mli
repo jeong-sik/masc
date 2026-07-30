@@ -23,6 +23,6 @@ val write :
   usage:Turn_record.usage ->
   execution_ids:Ids.Execution_id.t list ->
   blocks:Turn_record.prompt_block list ->
-  input_components:Turn_record.input_component list ->
+  input_components:Turn_record.input_component list option ->
   unit ->
   unit

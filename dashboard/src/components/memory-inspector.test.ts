@@ -97,8 +97,8 @@ function turnRecordsPayload() {
         absolute_turn: 7,
         turn_ref: 'trace-a#7',
         blocks: [
-          { block: 'persona', bytes: 1_200, digest: 'aaaa1111bbbb' },
-          { block: 'memory_os_recall', bytes: 800, digest: 'cccc2222dddd' },
+          { block: 'persona', bytes: 1_200, digest: 'a'.repeat(64) },
+          { block: 'memory_os_recall', bytes: 800, digest: 'c'.repeat(64) },
         ],
         input_components: [
           { component: 'prompt.persona', bytes: 1_200 },
@@ -176,6 +176,22 @@ describe('MemoryInspector current snapshot', () => {
     })
     expect(container.textContent).not.toContain('계속 유지할 핵심 기억')
   })
+
+  it('renders unavailable content attribution separately from an observed empty input', async () => {
+    const payload = turnRecordsPayload()
+    Object.assign(payload.entries[0]?.record ?? {}, { input_components: null })
+    stubFetch(payload)
+    const { container } = render(
+      html`<${MemoryInspector} keeper=${keeper} keepers=${[keeper]} onClose=${vi.fn()} />`,
+    )
+
+    await waitFor(() => {
+      expect(container.textContent).toContain(
+        'content 구성 관측 불가 — 빈 입력으로 간주하지 않습니다.',
+      )
+    })
+    expect(container.textContent).toContain('547.4KB wire')
+  })
 })
 
 describe('MemoryInspector pure projections', () => {
@@ -230,7 +246,7 @@ describe('MemoryInspector pure projections', () => {
     ], [{ component: 'prompt.memory_os_recall', bytes: 100 }])
     const emptyTail = row(2, [])
     expect(latestEntryWithBlocks([assembled, emptyTail])).toBe(assembled)
-    expect(latestEntryWithInputComponents([assembled, emptyTail])).toBe(assembled)
+    expect(latestEntryWithInputComponents([assembled, emptyTail])).toBe(emptyTail)
     expect(recentMemoryRecallInjections([assembled, emptyTail])).toEqual([{
       traceId: 'trace',
       turn: 1,

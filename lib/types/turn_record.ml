@@ -50,7 +50,7 @@ type t =
   ; absolute_turn : int
   ; turn_ref : Ids.Turn_ref.t
   ; blocks : prompt_block list
-  ; input_components : input_component list
+  ; input_components : input_component list option
   ; runtime_profile : string
   ; model : string option
   ; finish_reason : string option
@@ -114,7 +114,10 @@ let to_json (r : t) : Yojson.Safe.t =
      ; ("turn_ref", Ids.Turn_ref.to_yojson r.turn_ref)
      ; ("blocks", `List (List.map prompt_block_to_json r.blocks))
      ; ( "input_components"
-       , `List (List.map input_component_to_json r.input_components) )
+       , match r.input_components with
+         | Some components ->
+           `List (List.map input_component_to_json components)
+         | None -> `Null )
      ; ("runtime_profile", `String r.runtime_profile)
      ; "request_runtime_profile", request_runtime_profile
      ; "request_body_bytes", request_body_bytes
@@ -175,6 +178,20 @@ let as_nonnegative_int name json =
   then Error (Printf.sprintf "turn_record: field %S is negative" name)
   else Ok value
 
+let as_sha256_digest name json =
+  let* value = as_string name json in
+  let is_lower_hex = function
+    | '0' .. '9' | 'a' .. 'f' -> true
+    | _ -> false
+  in
+  if String.length value = 64 && String.for_all is_lower_hex value
+  then Ok value
+  else
+    Error
+      (Printf.sprintf
+         "turn_record: field %S is not a lowercase sha256 digest"
+         name)
+
 let as_float name = function
   | `Float f -> Ok f
   | `Int i -> Ok (float_of_int i)
@@ -215,9 +232,9 @@ let prompt_block_of_json (json : Yojson.Safe.t) : (prompt_block, string) result 
       let* block_json = require "block" fields in
       let* block_name = as_string "block" block_json in
       let* bytes_json = require "bytes" fields in
-      let* bytes = as_int "bytes" bytes_json in
+      let* bytes = as_nonnegative_int "bytes" bytes_json in
       let* digest_json = require "digest" fields in
-      let* digest = as_string "digest" digest_json in
+      let* digest = as_sha256_digest "digest" digest_json in
       let* block = Prompt_block_id.of_string block_name in
       Ok { block; bytes; digest }
   | _ -> Error "turn_record: block entry is not an object"
@@ -259,14 +276,8 @@ let input_component_of_json
   match json with
   | `Assoc fields ->
       let expected_fields = [ "component"; "bytes" ] in
-      let exact_fields =
-        List.length fields = List.length expected_fields
-        && List.for_all
-             (fun (name, _) -> List.mem name expected_fields)
-             fields
-      in
       let* () =
-        if exact_fields
+        if fields_are_unique_known expected_fields fields
         then Ok ()
         else Error "turn_record: input component fields are not exact"
       in
@@ -284,6 +295,42 @@ let rec collect_results acc = function
       match item with
       | Ok value -> collect_results (value :: acc) rest
       | Error _ as e -> e)
+
+let ensure_unique_blocks blocks =
+  let rec loop seen = function
+    | [] -> Ok blocks
+    | (block : prompt_block) :: rest ->
+      if
+        List.exists
+          (fun (seen_block : prompt_block) ->
+            Prompt_block_id.equal seen_block.block block.block)
+          seen
+      then
+        Error
+          (Printf.sprintf
+             "turn_record: duplicate block %S"
+             (Prompt_block_id.to_string block.block))
+      else loop (block :: seen) rest
+  in
+  loop [] blocks
+
+let ensure_unique_input_components components =
+  let rec loop seen = function
+    | [] -> Ok components
+    | (component : input_component) :: rest ->
+      if
+        List.exists
+          (fun (seen_component : input_component) ->
+            seen_component.component = component.component)
+          seen
+      then
+        Error
+          (Printf.sprintf
+             "turn_record: duplicate input component %S"
+             (input_component_id_to_string component.component))
+      else loop (component :: seen) rest
+  in
+  loop [] components
 
 let of_json (json : Yojson.Safe.t) : (t, string) result =
   match json with
@@ -350,15 +397,24 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
       let* blocks_json = require "blocks" fields in
       let* blocks =
         match blocks_json with
-        | `List items -> collect_results [] (List.map prompt_block_of_json items)
+        | `List items ->
+          let* blocks =
+            collect_results [] (List.map prompt_block_of_json items)
+          in
+          ensure_unique_blocks blocks
         | _ -> Error "turn_record: blocks is not a list"
       in
       let* input_components_json = require "input_components" fields in
       let* input_components =
         match input_components_json with
         | `List items ->
-          collect_results [] (List.map input_component_of_json items)
-        | _ -> Error "turn_record: input_components is not a list"
+          let* components =
+            collect_results [] (List.map input_component_of_json items)
+          in
+          let* components = ensure_unique_input_components components in
+          Ok (Some components)
+        | `Null -> Ok None
+        | _ -> Error "turn_record: input_components is not a list or null"
       in
       let* profile_json = require "runtime_profile" fields in
       let* runtime_profile = as_string "runtime_profile" profile_json in
@@ -439,20 +495,9 @@ type block_diff =
 let find_block blocks id =
   List.find_opt (fun (b : prompt_block) -> Prompt_block_id.equal b.block id) blocks
 
-let dedupe_by_id blocks =
-  List.fold_left
-    (fun acc (b : prompt_block) ->
-      if List.exists (fun (seen : prompt_block) ->
-             Prompt_block_id.equal seen.block b.block)
-           acc
-      then acc
-      else b :: acc)
-    [] blocks
-  |> List.rev
-
 let diff_blocks ~(prev : t) ~(next : t) : block_diff =
-  let prev_blocks = dedupe_by_id prev.blocks in
-  let next_blocks = dedupe_by_id next.blocks in
+  let prev_blocks = prev.blocks in
+  let next_blocks = next.blocks in
   let added =
     List.filter
       (fun (b : prompt_block) -> find_block prev_blocks b.block = None)

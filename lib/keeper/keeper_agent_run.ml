@@ -70,6 +70,12 @@ type raw_trace_sink_outcome =
   | Sink_ready of Agent_sdk.Raw_trace.t
   | Sink_degraded of Agent_sdk.Error.sdk_error
 
+type request_evidence =
+  { wire_observation : Turn_record.request_wire_observation
+  ; prompt_blocks : Turn_record.prompt_block list
+  ; input_messages : Agent_sdk.Types.message list option
+  }
+
 (* What the queue held when the turn decided to yield. The decision itself is
    [pending <> empty], so without this the record says a yield happened and
    nothing about what it yielded to. *)
@@ -664,7 +670,9 @@ let run_turn
     in
     let model_input_projection messages =
       match source_model_input_projection messages with
-      | Error _ as error -> error
+      | Error _ as error ->
+        current_request_input_messages_ref := None;
+        error
       | Ok projected_messages as result ->
         let prompt_context_present =
           Option.is_some acc.Keeper_run_tools.extra_system_context_size
@@ -874,10 +882,14 @@ let run_turn
                              ~body_bytes;
                            request_evidence_ref :=
                              Some
-                               ( { Turn_record.runtime_profile = runtime_id
-                                 ; body_bytes
-                                 }
-                               , !current_request_input_messages_ref ))
+                               { wire_observation =
+                                   { Turn_record.runtime_profile = runtime_id
+                                   ; body_bytes
+                                   }
+                               ; prompt_blocks = acc.prompt_blocks
+                               ; input_messages =
+                                   !current_request_input_messages_ref
+                               })
                       ())
          in
          (* Trace-store failure isolation: [raw_trace_for_dispatch]
@@ -922,13 +934,13 @@ let run_turn
                  let usage = Keeper_context_runtime.usage_of_response result.response in
                  let ctx_composition =
                    match !request_evidence_ref with
-                   | Some (_, Some input_messages) ->
+                   | Some { prompt_blocks; input_messages = Some input_messages; _ } ->
                      Keeper_agent_prompt_metrics.build_ctx_composition_metrics
-                       ~prompt_blocks:acc.prompt_blocks
+                       ~prompt_blocks
                        ~tools
                        ~input_messages
                        ~actual_input_tokens:(Some usage.input_tokens)
-                   | Some (_, None) | None ->
+                   | Some { input_messages = None; _ } | None ->
                      { Keeper_agent_prompt_metrics.actual_input_tokens =
                          (if usage.input_tokens > 0
                           then Some usage.input_tokens
@@ -1149,26 +1161,34 @@ let run_turn
           Runtime.pricing_of_runtime_id runtime_id_string
         in
         let input_components =
-          let segments =
-            match turn_result, !request_evidence_ref with
-            | Ok result, _ ->
-              result.Keeper_agent_result.ctx_composition.segments
-            | Error _, Some (_, Some input_messages) ->
+          match !request_evidence_ref with
+          | Some
+              { prompt_blocks
+              ; input_messages = Some input_messages
+              ; _
+              } ->
+            let segments =
               (Keeper_agent_prompt_metrics.build_ctx_composition_metrics
-                 ~prompt_blocks:acc.prompt_blocks
+                 ~prompt_blocks
                  ~tools
                  ~input_messages
                  ~actual_input_tokens:None)
                 .segments
-            | Error _, (Some (_, None) | None) -> []
-          in
-          List.map
-            (fun
-              (component,
-               (segment :
-                 Keeper_agent_prompt_metrics.prompt_segment_metrics)) ->
-               { Turn_record.component = component; bytes = segment.bytes })
-            segments
+            in
+            Some
+              (List.map
+                 (fun
+                   (component,
+                    (segment :
+                      Keeper_agent_prompt_metrics.prompt_segment_metrics)) ->
+                    { Turn_record.component = component; bytes = segment.bytes })
+                 segments)
+          | Some { input_messages = None; _ } | None -> None
+        in
+        let blocks =
+          match !request_evidence_ref with
+          | Some evidence -> evidence.prompt_blocks
+          | None -> acc.prompt_blocks
         in
         Keeper_turn_record_writer.write
           ~config
@@ -1186,7 +1206,10 @@ let run_turn
           ~price_output_per_million
           ~request_latency_ms
           ~ttfrc_ms
-          ~request_wire_observation:(Option.map fst !request_evidence_ref)
+          ~request_wire_observation:
+            (Option.map
+               (fun evidence -> evidence.wire_observation)
+               !request_evidence_ref)
           ~sampling:
             { temperature = Some temperature
             ; top_p = Runtime.top_p_of_runtime_id runtime_id_string
@@ -1196,7 +1219,7 @@ let run_turn
             }
           ~usage
           ~execution_ids
-          ~blocks:acc.prompt_blocks
+          ~blocks
           ~input_components
           ();
         (* RFC-0233 §2.3 PR-4: project the same record onto the ambient
@@ -1212,8 +1235,7 @@ let run_turn
               , `String
                   (Yojson.Safe.to_string
                      (`List
-                        (List.map Turn_record.prompt_block_to_json
-                           acc.prompt_blocks))) )
+                        (List.map Turn_record.prompt_block_to_json blocks))) )
             ; ( Otel_genai.Attr_key.masc_turn_profile
               , `String runtime_id_string )
             ; ( Otel_genai.Attr_key.masc_turn_execution_ids

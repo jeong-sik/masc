@@ -13,13 +13,20 @@
 //     post-completion state (a drained wake leaves the
 //     queue), so not_found alone cannot mean "lost".
 //   · keeper_reaction_evidence — did the keeper actually react to the stimulus
-//     (consumed_ack / turn_started / stimulus recorded)? This disambiguates a
+//     (consumed_ack / turn_started)? This disambiguates a
 //     drained-and-handled wake from a genuinely lost one.
 //
-// A genuine miss is ONLY queue=not_found AND reaction=not_found: dispatched, not
-// in the queue, and never recorded as reacted. Every other not_found is a
-// healthy completion. Labeling not_found alone as "missed" would false-alarm on
-// every successful wake.
+// matched_stimulus is NOT a keeper reaction: it is the producer's own dispatch
+// record, written fail-closed when the wake was enqueued
+// (server_schedule_consumers.ml). Because every successfully dispatched wake
+// has it, treating it as "reacted" absorbs every genuine loss into a healthy
+// completion and makes the miss detector structurally inert.
+//
+// A receipt leaves the queue only via ack (normal), cancel, or drop/reset —
+// never silently between dispatch and turn start. So:
+//   · not_found + consumed_ack/turn_started → drained (the keeper handled it)
+//   · not_found + matched_stimulus (or no ledger row at all) → missed
+//     (dispatched, but no keeper ever consumed it)
 
 import type { DashboardScheduledAutomationRequest } from '../../api'
 import type { StatusChipTone } from '../common/status-chip'
@@ -41,10 +48,11 @@ export interface QueueDrainStatus {
 }
 
 // keeper_reaction_evidence statuses that prove the keeper handled the stimulus.
+// matched_stimulus is deliberately absent: it is the producer's dispatch
+// record, not a keeper reaction (see the header note).
 const REACTED: ReadonlySet<string> = new Set([
   'matched_consumed_ack',
   'matched_turn_started',
-  'matched_stimulus',
 ])
 
 const PRESENTATION: Readonly<Record<QueueDrainState, Omit<QueueDrainStatus, 'state'>>> = {
@@ -56,12 +64,13 @@ const PRESENTATION: Readonly<Record<QueueDrainState, Omit<QueueDrainStatus, 'sta
   drained: {
     label: '완료',
     tone: 'neutral',
-    title: '큐에서 빠졌고 keeper 반응이 기록됨 (consumed_ack / turn_started / stimulus)',
+    title: '큐에서 빠졌고 keeper 반응이 기록됨 (consumed_ack / turn_started)',
   },
   missed: {
     label: '누락 ⚠',
     tone: 'warn',
-    title: 'dispatch됐으나 큐에 없고 keeper 반응 기록도 없음 — 실행 누락',
+    title:
+      'dispatch 기록만 남았고 keeper 반응(turn_started/ack)이 없음 — 큐에서 빠졌으나 아무도 소비 안 함',
   },
   read_error: {
     label: '읽기 오류',
@@ -94,6 +103,11 @@ function stateOf(request: DashboardScheduledAutomationRequest): QueueDrainState 
     case 'not_found': {
       const reaction = request.keeper_reaction_evidence?.projection_status
       if (reaction != null && REACTED.has(reaction)) return 'drained'
+      // matched_stimulus means only the producer's dispatch record exists.
+      // A receipt leaves the queue only via ack/cancel/drop, so stimulus-only
+      // is a dispatched wake no keeper ever consumed — a genuine miss, not a
+      // healthy completion.
+      if (reaction === 'matched_stimulus') return 'missed'
       if (reaction === 'not_found') return 'missed'
       if (reaction === 'read_error') return 'read_error'
       if (reaction === 'quarantined') return 'evidence_invalid'
@@ -133,7 +147,8 @@ export function isCalendarVisible(status: QueueDrainStatus): boolean {
 }
 
 /** Count of requests whose last keeper-wake execution is a genuine miss
- * (queue=not_found AND reaction=not_found). Feeds the KPI strip. */
+ * (queue=not_found AND no keeper reaction — matched_stimulus counts as a miss
+ * because it is only the producer's dispatch record). Feeds the KPI strip. */
 export function countQueueDrainMisses(
   requests: readonly DashboardScheduledAutomationRequest[],
 ): number {

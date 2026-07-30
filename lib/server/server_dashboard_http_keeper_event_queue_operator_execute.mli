@@ -21,16 +21,6 @@ type request =
       ; urgency : Keeper_event_queue.urgency
       }
 
-val pending_selection_at :
-  queue_index:int ->
-  Keeper_event_queue_state.pending_selection list ->
-  Keeper_event_queue_state.pending_selection option
-
-val pending_selection_at :
-  queue_index:int ->
-  Keeper_event_queue_state.t ->
-  Keeper_event_queue_state.pending_selection option
-
 val run :
   config:Workspace.config ->
   keeper_name:string ->

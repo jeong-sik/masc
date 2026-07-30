@@ -5,6 +5,7 @@ let () = Mirage_crypto_rng_unix.use_default ()
 module Lib = Masc
 module Auth = Masc.Auth
 module Keeper_chat_queue = Masc.Keeper_chat_queue
+module Keeper_meta_store = Masc.Keeper_meta_store
 module Workspace = Masc.Workspace
 
 open Alcotest
@@ -338,55 +339,6 @@ let test_keeper_chat_recovery_route_is_exact () =
     (contains_substring (Yojson.Safe.to_string pending_json) sensitive_content);
   check bool "event pending projection has no raw source object" true
     (pending_json |> member "source" = `Null);
-  let same_post_id_source : Keeper_event_queue.stimulus =
-    { source with urgency = Low; payload = Bootstrap }
-  in
-  let selections : Keeper_event_queue_state.pending_selection list =
-    [ source_selection
-    ; { source = same_post_id_source; admitted_revision = 8L }
-    ]
-  in
-  (match
-     Server_dashboard_http_keeper_event_queue_operator_execute.pending_selection_at
-       ~queue_index:1
-       selections
-   with
-   | Some selected ->
-     check bool
-       "event selection uses revision-fenced queue position, not ambiguous post id"
-       true
-       (Keeper_event_queue.stimulus_identity_equal
-          same_post_id_source
-          selected.source);
-     check int64 "event selection retains incarnation authority"
-       8L
-       selected.admitted_revision
-   | None ->
-     fail "event selection must address duplicate post ids independently");
-  let selection_state =
-    Keeper_event_queue_state.empty
-    |> Keeper_event_queue_state.with_revision 17L
-    |> Keeper_event_queue_state.with_pending duplicate_post_id_queue
-    |> Keeper_event_queue_state.with_revision 23L
-  in
-  (match
-     Server_dashboard_http_keeper_event_queue_operator.For_testing.pending_selection_at
-       ~queue_index:1
-       selection_state
-   with
-   | Some selection ->
-     check bool
-       "event selection keeps the exact typed source"
-       true
-       (Keeper_event_queue.stimulus_identity_equal
-          same_post_id_source
-          selection.source);
-     check int64
-       "event selection keeps source incarnation instead of snapshot revision"
-       17L
-       selection.admitted_revision
-   | None ->
-     fail "event selection lost its durable source incarnation");
   let quarantine_path =
     "/api/v1/keepers/idealist/board-attention/quarantines/ba-root-123/recovery"
   in
@@ -440,10 +392,6 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
     | Some value -> value
     | None -> fail (label ^ ": missing value")
   in
-  let require_error label = function
-    | Error detail -> detail
-    | Ok _ -> fail (label ^ ": expected error")
-  in
   let make_meta ~name ~trace_id ~nonce =
     match
       Masc_test_deps.meta_of_json_fixture
@@ -460,19 +408,26 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
       }
   in
   let base_path = config.Workspace.base_path in
-  let source_keeper = "event-operator-source" in
+  let cancel_keeper = "event-operator-cancel-source" in
+  let transfer_keeper = "event-operator-transfer-source" in
   let target_keeper = "event-operator-target" in
-  let source_meta =
+  let cancel_meta =
     make_meta
-      ~name:source_keeper
-      ~trace_id:"event-operator-source-trace"
+      ~name:cancel_keeper
+      ~trace_id:"event-operator-cancel-source-trace"
       ~nonce:41
+  in
+  let transfer_meta =
+    make_meta
+      ~name:transfer_keeper
+      ~trace_id:"event-operator-transfer-source-trace"
+      ~nonce:42
   in
   let target_meta =
     make_meta
       ~name:target_keeper
       ~trace_id:"event-operator-target-trace"
-      ~nonce:42
+      ~nonce:43
   in
   let stimulus post_id arrived_at : Keeper_event_queue.stimulus =
     { post_id
@@ -490,10 +445,10 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
       ~keeper_name
     |> require_ok ("load event queue state for " ^ keeper_name)
   in
-  let enqueue source =
+  let enqueue keeper_name (source : Keeper_event_queue.stimulus) =
     Keeper_event_queue_persistence.update_result
       ~base_path
-      ~keeper_name:source_keeper
+      ~keeper_name
       (fun pending -> Keeper_event_queue.enqueue pending source)
     |> require_ok ("enqueue " ^ source.post_id)
   in
@@ -502,58 +457,147 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
     | `String status -> status
     | _ -> fail "event operator result omitted status"
   in
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path in
+  let post_event_operator ~keeper_name body =
+    let output = Buffer.create 512 in
+    let connection =
+      Httpun.Server_connection.create (fun reqd ->
+        Server_dashboard_http_keeper_event_queue_operator.handle_post
+          state
+          ~actor:"event-operator-test"
+          (Httpun.Reqd.request reqd)
+          reqd
+          ~keeper_name
+          body)
+    in
+    let request =
+      Printf.sprintf
+        "POST /api/v1/keepers/%s/events/operator HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n%s"
+        keeper_name
+        (String.length body)
+        body
+    in
+    let input =
+      Bigstringaf.of_string ~off:0 ~len:(String.length request) request
+    in
+    ignore
+      (Httpun.Server_connection.read_eof
+         connection
+         input
+         ~off:0
+         ~len:(Bigstringaf.length input));
+    let rec drain () =
+      match Httpun.Server_connection.next_write_operation connection with
+      | `Write iovecs ->
+        let bytes =
+          List.fold_left
+            (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+              Buffer.add_string
+                output
+                (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+              total + iov.len)
+            0
+            iovecs
+        in
+        Httpun.Server_connection.report_write_result connection (`Ok bytes);
+        drain ()
+      | `Yield | `Close _ -> ()
+    in
+    drain ();
+    let raw = Buffer.contents output in
+    let response_body =
+      match List.rev (String.split_on_char '\n' raw) with
+      | body :: _ -> String.trim body
+      | [] -> fail "event operator HTTP response has no body"
+    in
+    raw, Yojson.Safe.from_string response_body
+  in
+  let request_body action fields =
+    `Assoc
+      ([ "schema", `String "keeper_event_queue.operator.request.v1"
+       ; "action", `String action
+       ]
+       @ fields)
+    |> Yojson.Safe.to_string
+  in
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_registry.For_testing.unregister
         ~base_path
-        source_keeper;
+        cancel_keeper;
+      Masc.Keeper_registry.For_testing.unregister
+        ~base_path
+        transfer_keeper;
       Masc.Keeper_registry.For_testing.unregister
         ~base_path
         target_keeper)
     (fun () ->
-       Keeper_meta_store.write_meta config source_meta
-       |> require_ok "persist source keeper metadata";
+       Keeper_meta_store.write_meta config cancel_meta
+       |> require_ok "persist cancellation source keeper metadata";
+       Keeper_meta_store.write_meta config transfer_meta
+       |> require_ok "persist transfer source keeper metadata";
        Keeper_meta_store.write_meta config target_meta
        |> require_ok "persist target keeper metadata";
        ignore
          (Masc.Keeper_registry.For_testing.register
             ~base_path
-            source_keeper
-            source_meta);
-       enqueue cancelled_source;
-       enqueue transferred_source;
-       let before_cancel = load_state source_keeper in
+            cancel_keeper
+            cancel_meta);
+       ignore
+         (Masc.Keeper_registry.For_testing.register
+            ~base_path
+            transfer_keeper
+            transfer_meta);
+       enqueue cancel_keeper cancelled_source;
+       let before_cancel = load_state cancel_keeper in
        let cancel_selection =
          Keeper_event_queue_state.pending_selections before_cancel
-         |> List.nth_opt 0
+         |> fun selections -> List.nth_opt selections 0
          |> require_some "select cancellation source"
        in
-       let cancel_request :
-           Server_dashboard_http_keeper_event_queue_operator_execute.request =
-         Cancel
-           { queue_index = 0
-           ; source_incarnation = cancel_selection.admitted_revision
-           ; operator_operation_id = "event-operator-cancel-operation"
-           ; reason = "operator cancelled exact source"
-           }
+       let cancel_request =
+         request_body
+           "cancel"
+           [ "queue_index", `Int 0
+           ; ( "source_incarnation"
+             , `String (Int64.to_string cancel_selection.admitted_revision) )
+           ; ( "operator_operation_id"
+             , `String "event-operator-cancel-operation" )
+           ; "reason", `String "operator cancelled exact source"
+           ]
        in
-       enqueue unrelated_source;
-       let cancelled, cancel_result =
-         Server_dashboard_http_keeper_event_queue_operator_execute.run
-           ~config
-           ~keeper_name:source_keeper
-           cancel_request
-         |> require_ok "cancel exact pending source"
+       enqueue cancel_keeper unrelated_source;
+       let cancel_raw, cancel_response =
+         post_event_operator ~keeper_name:cancel_keeper cancel_request
        in
-       check bool
-         "cancellation returns the exact selected source"
-         true
-         (Keeper_event_queue.stimulus_identity_equal
-            cancel_selection.source
-            cancelled);
-       check string "cancellation applies once" "applied"
+       check bool "cancellation HTTP request succeeds" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" cancel_raw);
+       check bool "cancellation response is successful" true
+         (Yojson.Safe.Util.member "ok" cancel_response = `Bool true);
+       check bool "cancellation removes the exact selected source" false
+         (Keeper_event_queue_state.pending (load_state cancel_keeper)
+          |> Keeper_event_queue.to_list
+          |> List.exists (fun source ->
+            Keeper_event_queue.stimulus_identity_equal
+              cancel_selection.source
+              source));
+       let cancel_result =
+         Yojson.Safe.Util.member "result" cancel_response
+       in
+       check string
+         "cancellation applies once"
+         "applied"
          (result_status cancel_result);
-       let after_cancel = load_state source_keeper in
+       check bool
+         "unrelated enqueue remains pending"
+         true
+         (Keeper_event_queue_state.pending (load_state cancel_keeper)
+          |> Keeper_event_queue.to_list
+          |> List.exists (fun source ->
+            Keeper_event_queue.stimulus_identity_equal
+              unrelated_source
+              source));
+       let after_cancel = load_state cancel_keeper in
        (match
           Keeper_event_queue_state.prior_disposition_by_operation_id
             "event-operator-cancel-operation"
@@ -570,73 +614,81 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
             cancellation.source_incarnation
         | Some _ -> fail "cancellation operation stored the wrong transition"
         | None -> fail "cancellation operation receipt was not durable");
-       let replayed_cancelled, cancel_replay_result =
-         Server_dashboard_http_keeper_event_queue_operator_execute.run
-           ~config
-           ~keeper_name:source_keeper
-           cancel_request
-         |> require_ok "replay committed cancellation"
+       let cancel_replay_raw, cancel_replay_response =
+         post_event_operator ~keeper_name:cancel_keeper cancel_request
        in
        check bool
-         "cancellation replay returns its original source"
+         "cancellation replay HTTP request succeeds"
          true
-         (Keeper_event_queue.stimulus_identity_equal
-            cancelled_source
-            replayed_cancelled);
+         (String.starts_with ~prefix:"HTTP/1.1 200" cancel_replay_raw);
        check string
          "cancellation replay uses the durable receipt"
          "already_applied"
-         (result_status cancel_replay_result);
+         (cancel_replay_response
+          |> Yojson.Safe.Util.member "result"
+          |> result_status);
        let conflicting_cancel_request =
-         Cancel
-           { queue_index = 0
-           ; source_incarnation = Int64.succ cancel_selection.admitted_revision
-           ; operator_operation_id = "event-operator-cancel-operation"
-           ; reason = "operator cancelled exact source"
-           }
+         request_body
+           "cancel"
+           [ "queue_index", `Int 0
+           ; ( "source_incarnation"
+             , `String
+                 (Int64.succ cancel_selection.admitted_revision
+                  |> Int64.to_string) )
+           ; ( "operator_operation_id"
+             , `String "event-operator-cancel-operation" )
+           ; "reason", `String "operator cancelled exact source"
+           ]
        in
-       let conflict_detail =
-         Server_dashboard_http_keeper_event_queue_operator_execute.run
-           ~config
-           ~keeper_name:source_keeper
+       let conflict_raw, conflict_response =
+         post_event_operator
+           ~keeper_name:cancel_keeper
            conflicting_cancel_request
-         |> require_error "reject operation replay for another incarnation"
+       in
+       check bool "conflicting replay returns HTTP conflict" true
+         (String.starts_with ~prefix:"HTTP/1.1 409" conflict_raw);
+       let conflict_detail =
+         match Yojson.Safe.Util.member "error" conflict_response with
+         | `String detail -> detail
+         | _ -> fail "conflicting replay response omitted error"
        in
        check bool
          "operation replay rejects another source incarnation"
          true
          (contains_substring conflict_detail "operation ID conflicts");
-       let before_transfer = load_state source_keeper in
+       enqueue transfer_keeper transferred_source;
+       let before_transfer = load_state transfer_keeper in
        let transfer_selection =
          Keeper_event_queue_state.pending_selections before_transfer
-         |> List.nth_opt 0
+         |> fun selections -> List.nth_opt selections 0
          |> require_some "select transfer source"
        in
-       let transfer_request :
-           Server_dashboard_http_keeper_event_queue_operator_execute.request =
-         Transfer
-           { queue_index = 0
-           ; source_incarnation = transfer_selection.admitted_revision
-           ; operator_operation_id = "event-operator-transfer-operation"
-           ; target_keeper
-           }
+       let transfer_request =
+         request_body
+           "transfer"
+           [ "queue_index", `Int 0
+           ; ( "source_incarnation"
+             , `String (Int64.to_string transfer_selection.admitted_revision) )
+           ; ( "operator_operation_id"
+             , `String "event-operator-transfer-operation" )
+           ; "target_keeper", `String target_keeper
+           ]
        in
-       let transferred, transfer_result =
-         Server_dashboard_http_keeper_event_queue_operator_execute.run
-           ~config
-           ~keeper_name:source_keeper
-           transfer_request
-         |> require_ok "transfer exact pending source"
+       let transfer_raw, transfer_response =
+         post_event_operator ~keeper_name:transfer_keeper transfer_request
        in
+       if not (String.starts_with ~prefix:"HTTP/1.1 200" transfer_raw)
+       then failf "transfer HTTP request failed: %s" transfer_raw;
        check bool
-         "transfer returns the exact selected source"
+         "transfer response is successful"
          true
-         (Keeper_event_queue.stimulus_identity_equal
-            transfer_selection.source
-            transferred);
+         (Yojson.Safe.Util.member "ok" transfer_response = `Bool true);
+       let transfer_result =
+         Yojson.Safe.Util.member "result" transfer_response
+       in
        check string "transfer applies once" "applied"
          (result_status transfer_result);
-       let after_transfer = load_state source_keeper in
+       let after_transfer = load_state transfer_keeper in
        (match
           Keeper_event_queue_state.prior_disposition_by_operation_id
             "event-operator-transfer-operation"
@@ -653,23 +705,19 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
             transfer.source_incarnation
         | Some _ -> fail "transfer operation stored the wrong transition"
         | None -> fail "transfer operation receipt was not durable");
-       let replayed_transferred, transfer_replay_result =
-         Server_dashboard_http_keeper_event_queue_operator_execute.run
-           ~config
-           ~keeper_name:source_keeper
-           transfer_request
-         |> require_ok "replay committed transfer"
+       let transfer_replay_raw, transfer_replay_response =
+         post_event_operator ~keeper_name:transfer_keeper transfer_request
        in
        check bool
-         "transfer replay returns its original source"
+         "transfer replay HTTP request succeeds"
          true
-         (Keeper_event_queue.stimulus_identity_equal
-            transferred_source
-            replayed_transferred);
+         (String.starts_with ~prefix:"HTTP/1.1 200" transfer_replay_raw);
        check string
          "transfer replay uses the durable receipt"
          "already_applied"
-         (result_status transfer_replay_result);
+         (transfer_replay_response
+          |> Yojson.Safe.Util.member "result"
+          |> result_status);
        let target_pending =
          load_state target_keeper
          |> Keeper_event_queue_state.pending

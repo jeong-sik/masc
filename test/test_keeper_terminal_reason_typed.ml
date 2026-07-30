@@ -22,6 +22,7 @@ module Tr = Keeper_terminal_reason
 module UTS = Masc.Keeper_unified_turn_success.For_testing
 module KMC = Masc.Keeper_meta_contract
 module KMS = Masc.Keeper_meta_store
+module Keeper_identity = Masc.Keeper_identity
 
 let failures = ref []
 let check name cond = if not cond then failures := name :: !failures

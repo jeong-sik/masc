@@ -332,6 +332,28 @@ let test_keeper_chat_recovery_route_is_exact () =
     (contains_substring (Yojson.Safe.to_string pending_json) sensitive_content);
   check bool "event pending projection has no raw source object" true
     (pending_json |> member "source" = `Null);
+  let same_post_id_source : Keeper_event_queue.stimulus =
+    { source with urgency = Low; payload = Bootstrap }
+  in
+  let duplicate_post_id_queue =
+    Keeper_event_queue.empty
+    |> fun queue -> Keeper_event_queue.enqueue queue source
+    |> fun queue -> Keeper_event_queue.enqueue queue same_post_id_source
+  in
+  (match
+     Server_dashboard_http_keeper_event_queue_operator.For_testing.pending_source_at
+       ~queue_index:1
+       duplicate_post_id_queue
+   with
+   | Some selected ->
+     check bool
+       "event selection uses revision-fenced queue position, not ambiguous post id"
+       true
+       (Keeper_event_queue.stimulus_identity_equal
+          same_post_id_source
+          selected)
+   | None ->
+     fail "event selection must address duplicate post ids independently");
   let quarantine_path =
     "/api/v1/keepers/idealist/board-attention/quarantines/ba-root-123/recovery"
   in

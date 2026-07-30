@@ -30,6 +30,7 @@ import {
   fetchQueuedKeeperMessageResult,
   fetchKeeperRuntimeTrace,
   isTerminalQueuedKeeperMessage,
+  KeeperEventQueueOperationError,
   moveKeeperChatPendingReceiptToEnd,
   operateKeeperEventQueue,
   pauseKeeper,
@@ -459,6 +460,47 @@ describe('Keeper chat durable receipt API', () => {
     )
   })
 
+  it('rejects chat pagination revision drift without a fixed retry loop', async () => {
+    const entry = (revision: string, suffix: string) => ({
+      receipt: {
+        schema: 'keeper_chat_queue.receipt.v2',
+        keeper_name: 'sangsu',
+        receipt_id: `chatq_00000000-0000-4000-8000-0000000000${suffix}`,
+        revision,
+        state: { kind: 'pending' },
+      },
+      content: `revision ${revision}`,
+      user_blocks: [],
+      attachments: [],
+      submitted_at: 42,
+    })
+    const envelope = (revision: string, nextAfter: string | null) => ({
+      schema: 'keeper_chat_queue.pending.v1',
+      ok: true,
+      keeper_name: 'sangsu',
+      revision,
+      current_work: null,
+      total_pending: 2,
+      next_after: nextAfter,
+      pending: [entry(revision, revision)],
+    })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(envelope('22', '41')), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(envelope('23', null)), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchKeeperChatPending('sangsu')).rejects.toThrow(
+      'fetchKeeperChatPending: queue changed during pagination',
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('combines metadata-only event refs across one stable Admin inventory revision', async () => {
     const item = (queueIndex: number, postId: string) => ({
       queue_index: queueIndex,
@@ -515,6 +557,39 @@ describe('Keeper chat durable receipt API', () => {
       '/api/v1/keepers/sangsu/events/pending?limit=100&after=1',
       expect.objectContaining({ headers: expect.any(Object) }),
     )
+  })
+
+  it('rejects event pagination revision drift without a fixed retry loop', async () => {
+    const envelope = (revision: string, queueIndex: number, nextAfter: string | null) => ({
+      schema: 'keeper_event_queue.pending.v1',
+      ok: true,
+      keeper_name: 'sangsu',
+      revision,
+      total_pending: 2,
+      next_after: nextAfter,
+      pending: [{
+        queue_index: queueIndex,
+        post_id: `post-${revision}`,
+        urgency: 'normal',
+        arrived_at_unix: 42,
+        payload_kind: 'bootstrap',
+      }],
+    })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(envelope('31', 0, '1')), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(envelope('32', 1, null)), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchKeeperEventQueuePending('sangsu')).rejects.toThrow(
+      'fetchKeeperEventQueuePending: queue changed during pagination',
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('sends revision-fenced pending edit and move requests', async () => {
@@ -581,8 +656,7 @@ describe('Keeper chat durable receipt API', () => {
     await operateKeeperEventQueue('sangsu', {
       action: 'reprioritize',
       expectedRevision: '7',
-      operationId: 'operation-7',
-      postId: 'post-1',
+      queueIndex: 0,
       urgency: 'immediate',
     })
 
@@ -593,8 +667,7 @@ describe('Keeper chat durable receipt API', () => {
           schema: 'keeper_event_queue.operator.request.v1',
           action: 'reprioritize',
           expected_revision: '7',
-          operator_operation_id: 'operation-7',
-          post_id: 'post-1',
+          queue_index: 0,
           urgency: 'immediate',
         }),
       }),
@@ -610,22 +683,87 @@ describe('Keeper chat durable receipt API', () => {
         result: {
           status: 'committed_followup_failed',
           transition_id: 'transition-9',
-          stage: 'projection',
-          detail: 'reaction ledger unavailable',
+          stage: 'target_projection',
+          detail: 'target queue unavailable',
         },
         audit: { recorded: true },
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(operateKeeperEventQueue('sangsu', {
-      action: 'cancel',
-      expectedRevision: '8',
-      operationId: 'operation-9',
-      postId: 'post-9',
-      reason: 'operator cancellation',
-    })).rejects.toThrow(
-      'Event queue mutation committed, but projection follow-up failed (transition-9)',
+    let observed: unknown
+    try {
+      await operateKeeperEventQueue('sangsu', {
+        action: 'cancel',
+        expectedRevision: '8',
+        operationId: 'operation-9',
+        queueIndex: 1,
+        reason: 'operator cancellation',
+      })
+    } catch (cause) {
+      observed = cause
+    }
+
+    expect(observed).toBeInstanceOf(KeeperEventQueueOperationError)
+    expect(observed).toMatchObject({
+      commitState: 'committed',
+      operation: {
+        action: 'cancel',
+        expectedRevision: '8',
+        operationId: 'operation-9',
+        queueIndex: 1,
+        reason: 'operator cancellation',
+      },
+    })
+    expect((observed as Error).message).toContain(
+      'Event queue mutation committed, but target_projection follow-up failed (transition-9)',
+    )
+  })
+
+  it('retains the generated event operation identity when the POST result is unknown', async () => {
+    vi.stubGlobal('crypto', {
+      randomUUID: vi.fn(() => '00000000-0000-4000-8000-000000000099'),
+    })
+    const fetchMock = vi.fn().mockRejectedValue(
+      new TypeError('connection reset after possible commit'),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    let observed: unknown
+    try {
+      await operateKeeperEventQueue('sangsu', {
+        action: 'transfer',
+        expectedRevision: '9',
+        queueIndex: 2,
+        targetKeeper: 'rondo',
+      })
+    } catch (cause) {
+      observed = cause
+    }
+
+    expect(observed).toBeInstanceOf(KeeperEventQueueOperationError)
+    expect(observed).toMatchObject({
+      commitState: 'unknown',
+      operation: {
+        action: 'transfer',
+        expectedRevision: '9',
+        operationId: '00000000-0000-4000-8000-000000000099',
+        queueIndex: 2,
+        targetKeeper: 'rondo',
+      },
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/keepers/sangsu/events/operator',
+      expect.objectContaining({
+        body: JSON.stringify({
+          schema: 'keeper_event_queue.operator.request.v1',
+          action: 'transfer',
+          expected_revision: '9',
+          queue_index: 2,
+          operator_operation_id: '00000000-0000-4000-8000-000000000099',
+          target_keeper: 'rondo',
+        }),
+      }),
     )
   })
 

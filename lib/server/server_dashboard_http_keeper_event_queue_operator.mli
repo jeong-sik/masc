@@ -13,11 +13,6 @@ module For_testing : sig
     limit:int ->
     Keeper_event_queue_state.pending_selection list ->
     Yojson.Safe.t list
-
-  val pending_selection_at :
-    queue_index:int ->
-    Keeper_event_queue_state.pending_selection list ->
-    Keeper_event_queue_state.pending_selection option
 end
 
 val handle_get :

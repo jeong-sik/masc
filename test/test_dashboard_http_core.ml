@@ -347,7 +347,7 @@ let test_keeper_chat_recovery_route_is_exact () =
     ]
   in
   (match
-     Server_dashboard_http_keeper_event_queue_operator.For_testing.pending_selection_at
+     Server_dashboard_http_keeper_event_queue_operator_execute.pending_selection_at
        ~queue_index:1
        selections
    with

@@ -29,6 +29,12 @@ module For_testing : sig
     -> Keeper_world_observation.world_observation
     -> Keeper_meta_contract.keeper_meta
 
+  val should_project_autonomous_chat
+    :  response_text:string
+    -> has_tool_calls:bool
+    -> surface_already_persisted:bool
+    -> bool
+
   type cycle_post_action =
     | Assign_task
     | Empty_queue_sleep

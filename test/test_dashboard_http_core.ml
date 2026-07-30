@@ -2077,6 +2077,7 @@ let test_stopped_lifecycle_event_preserves_durable_pause () =
         [ ("name", `String "paused-stop-target")
         ; ("status", `String "paused")
         ; ("paused", `Bool true)
+        ; ("agent", `Assoc [ ("status", `String "active") ])
         ])
   in
   check string "terminal stop preserves paused status" "paused"

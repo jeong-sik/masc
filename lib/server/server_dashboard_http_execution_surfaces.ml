@@ -591,18 +591,19 @@ let paused_of_lifecycle_event event =
     (fun (d : lifecycle_display) -> d.ld_paused)
 ;;
 
+let keeper_top_level_status_opt row =
+  match Json_util.assoc_member_opt "status" row with
+  | Some (`String status) -> Some status
+  | _ -> None
+;;
+
 let keeper_agent_status_opt row =
-  let top_level_status () =
-    match Json_util.assoc_member_opt "status" row with
-    | Some (`String status) -> Some status
-    | _ -> None
-  in
   match Json_util.assoc_member_opt "agent" row with
   | Some (`Assoc _ as agent) ->
     (match Json_util.assoc_member_opt "status" agent with
      | Some (`String status) -> Some status
-     | _ -> top_level_status ())
-  | None | Some _ -> top_level_status ()
+     | _ -> keeper_top_level_status_opt row)
+  | None | Some _ -> keeper_top_level_status_opt row
 ;;
 
 let control_status_override_of_lifecycle_event row event =
@@ -615,7 +616,10 @@ let control_status_override_of_lifecycle_event row event =
          Keeper_status_runtime.Surface_idle)
   | Some Legacy_stopped ->
     (match
-       Option.bind (keeper_agent_status_opt row)
+       Option.bind
+         (match keeper_top_level_status_opt row with
+          | Some _ as status -> status
+          | None -> keeper_agent_status_opt row)
          Keeper_status_runtime.control_plane_status_of_string_opt
      with
      | Some Keeper_status_runtime.Cp_paused ->

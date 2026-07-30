@@ -107,6 +107,22 @@ let test_new_claim_cannot_collide_with_retained_identity () =
   | Ok _ -> fail "retained/new identity collision accepted"
 ;;
 
+let test_new_claim_cannot_recreate_omitted_current_identity () =
+  match
+    parse
+      (selection_json
+         ~retained:[]
+         ~new_claims:[ new_claim ~claim_id:"a" ~claim:"recreated A" () ]
+         ())
+  with
+  | Error (Librarian.Duplicate_selected_claim_id "id:a") -> ()
+  | Error error ->
+    failf
+      "wrong omitted-current collision error: %s"
+      (Librarian.parse_error_to_string error)
+  | Ok _ -> fail "omitted current identity was recreated as a new claim"
+;;
+
 let test_strict_output_boundary () =
   let exact = Yojson.Safe.to_string (selection_json ()) in
   (match Librarian.selection_of_output_result ~now:2_000_000. (input ()) exact with
@@ -181,6 +197,8 @@ let () =
             test_unknown_and_duplicate_retained_ids_reject
         ; test_case "retained/new collision rejects" `Quick
             test_new_claim_cannot_collide_with_retained_identity
+        ; test_case "omitted/new recreation rejects" `Quick
+            test_new_claim_cannot_recreate_omitted_current_identity
         ; test_case "strict output boundary" `Quick test_strict_output_boundary
         ; test_case "prompt carries exact ids" `Quick
             test_prompt_contains_exact_current_memory_ids

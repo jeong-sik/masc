@@ -207,6 +207,39 @@ let test_repeated_exact_tool_call_boundary () =
        ; tool_call ~input:None "keeper_tasks_list"
        ])
 
+let test_error_turn_preserves_exact_request_body_bytes () =
+  let error =
+    Agent_sdk.Error.Api
+      (InvalidRequest
+         { message = "serialized request body exceeds the declared limit"
+         ; reason =
+             Agent_sdk.Retry.Request_body_too_large
+               { actual_bytes = 1_671_330; limit_bytes = 1_048_576 }
+         })
+  in
+  let project observed =
+    Masc.Keeper_agent_run.For_testing.request_body_bytes_for_turn_record
+      ~observed
+      (Error error)
+  in
+  check
+    (option int)
+    "pre-dispatch callback survives a later provider error"
+    (Some 777_777)
+    (project (Some 777_777));
+  check
+    (option int)
+    "typed admission refusal supplies its exact serialized bytes"
+    (Some 1_671_330)
+    (project None);
+  check
+    (option int)
+    "a pre-serialization error remains unobserved"
+    None
+    (Masc.Keeper_agent_run.For_testing.request_body_bytes_for_turn_record
+       ~observed:None
+       (Error (Agent_sdk.Error.Internal "failed before serialization")))
+
 let test_autonomous_yield_boundary_contract () =
   let module F = Masc.Keeper_agent_run.For_testing in
   let chat : Masc.Keeper_agent_run.autonomous_yield_request =
@@ -583,6 +616,8 @@ let () =
             test_terminal_effect_defer_kinds_remain_distinct;
           test_case "repeated exact tool call boundary" `Quick
             test_repeated_exact_tool_call_boundary;
+          test_case "error turn preserves request bytes" `Quick
+            test_error_turn_preserves_exact_request_body_bytes;
           test_case "autonomous yield boundary contract" `Quick
             test_autonomous_yield_boundary_contract;
           test_case "terminal effect handler contract" `Quick

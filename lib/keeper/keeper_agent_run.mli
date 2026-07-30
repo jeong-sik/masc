@@ -123,6 +123,11 @@ module For_testing : sig
     -> dispatch:(unit -> ('a, Agent_sdk.Error.sdk_error) result)
     -> ('a, Agent_sdk.Error.sdk_error) result
 
+  val request_body_bytes_for_turn_record
+    :  observed:int option
+    -> (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+    -> int option
+
 end
 
 (** {1 Turn execution} *)

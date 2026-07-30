@@ -5,7 +5,8 @@
     episode fallback, or deterministic importance policy. *)
 
 val render_context
-  :  keeper_id:string
+  :  keepers_dir:string
+  -> keeper_id:string
   -> now:float
   -> unit
   -> string
@@ -13,7 +14,8 @@ val render_context
 val enabled : unit -> bool
 
 val render_if_enabled
-  :  keeper_id:string
+  :  keepers_dir:string
+  -> keeper_id:string
   -> now:float
   -> trace_id:string
   -> turn:int

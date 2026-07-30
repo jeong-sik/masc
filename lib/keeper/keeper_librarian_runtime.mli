@@ -53,11 +53,15 @@ val extract_with_exact_output_classified
 val extract_and_commit_with_exact_output_classified
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> keepers_dir:string
   -> keeper_id:string
+  -> expected_revision:int option
   -> Keeper_librarian.input
   -> (Keeper_memory_os_current.t, extraction_error) result
 
 val run_best_effort
-  :  keeper_id:string
+  :  keepers_dir:string
+  -> keeper_id:string
+  -> expected_revision:int option
   -> Keeper_librarian.input
   -> unit

@@ -39,19 +39,18 @@ type t =
 
 val schema : string
 
-val path : keeper_id:string -> string
 val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
-val list_keeper_ids : unit -> string list
 val list_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
 
-val read : keeper_id:string -> (t option, string) result
 val read_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> (t option, string) result
 
 val replace
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> keepers_dir:string
   -> keeper_id:string
+  -> expected_revision:int option
   -> now:float
   -> source:source
   -> summary:string
@@ -61,12 +60,15 @@ val replace
   -> preserved_tool_refs:string list
   -> unit
   -> (t, string) result
-(** Atomically replace the complete current snapshot. Duplicate fact identities
-    reject before writing. Existing state must parse as the exact current
-    schema; malformed or non-current state fails closed and is not overwritten. *)
+(** Atomically replace the complete current snapshot only when its revision
+    still equals [expected_revision]. Duplicate fact identities reject before
+    writing. Existing state must parse as the exact current schema; malformed,
+    non-current, or concurrently changed state fails closed and is not
+    overwritten. *)
 
 val upsert_fact
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> keepers_dir:string
   -> keeper_id:string
   -> now:float
   -> source:source
@@ -78,7 +80,3 @@ val upsert_fact
     echo heuristic participates. *)
 
 val to_json : t -> Yojson.Safe.t
-
-module For_testing : sig
-  val with_keepers_dir : string -> (unit -> 'a) -> 'a
-end

@@ -341,7 +341,9 @@ let materialize_facts ~current_facts ~retained_claim_ids ~new_claims =
     | [] -> Ok (retained @ List.rev new_rev)
     | fact :: rest ->
       let identity = claim_identity fact in
-      if String_set.mem identity selected_ids
+      if
+        String_set.mem identity selected_ids
+        || String_map.mem identity current_by_id
       then Error (Duplicate_selected_claim_id identity)
       else
         append_new

@@ -125,8 +125,8 @@ let test_valid_body_composition () =
   |> assert_ok ~body:"**hook** body text"
 ;;
 
-let current_facts keeper_id =
-  match Current.read ~keeper_id with
+let current_facts ~keepers_dir keeper_id =
+  match Current.read_for_keepers_dir ~keepers_dir ~keeper_id with
   | Ok (Some snapshot) -> snapshot.facts
   | Ok None -> Alcotest.fail "current snapshot missing after successful write"
   | Error detail -> Alcotest.fail ("current snapshot unreadable: " ^ detail)
@@ -139,49 +139,50 @@ let test_write_comes_back_through_recall () =
   @@ fun base_path ->
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "durable-write" in
-  let keepers_dir = Filename.concat base_path "keepers" in
-  Current.For_testing.with_keepers_dir keepers_dir (fun () ->
-    let response =
-      Runtime.keeper_memory_write_json
-        ~config
-        ~meta
-        ~args:
-          (make_args
-             ~title:""
-             ~content:"reasoning_content must be replayed unmodified")
-      |> Yojson.Safe.from_string
-    in
-    Alcotest.(check bool)
-      "write succeeds"
-      true
-      (match json_field "ok" response with
-       | `Bool value -> value
-       | _ -> false);
-    Alcotest.(check string)
-      "routed to the durable store"
-      "current_memory_snapshot"
-      (string_field "store" response);
-    let facts = current_facts meta.name in
-    Alcotest.(check int) "one durable claim" 1 (List.length facts);
-    let fact = List.hd facts in
-    Alcotest.(check string)
-      "the claim reaches a later turn"
-      "reasoning_content must be replayed unmodified"
-      fact.Masc.Keeper_memory_os_types.claim;
-    Alcotest.(check int)
-      "provenance carries this turn"
-      7
-      fact.Masc.Keeper_memory_os_types.source.turn;
-    (* The model asserted this itself; it did not carry it out of another
-       tool's result, and the field says where an observation came from. *)
-    Alcotest.(check bool)
-      "no borrowed tool provenance"
-      true
-      (fact.Masc.Keeper_memory_os_types.source.tool_call_id = None);
-    Alcotest.(check bool)
-      "a claim with no declared lifetime stays permanent"
-      true
-      (fact.Masc.Keeper_memory_os_types.valid_until = None))
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path
+  in
+  let response =
+    Runtime.keeper_memory_write_json
+      ~config
+      ~meta
+      ~args:
+        (make_args
+           ~title:""
+           ~content:"reasoning_content must be replayed unmodified")
+    |> Yojson.Safe.from_string
+  in
+  Alcotest.(check bool)
+    "write succeeds"
+    true
+    (match json_field "ok" response with
+     | `Bool value -> value
+     | _ -> false);
+  Alcotest.(check string)
+    "routed to the durable store"
+    "current_memory_snapshot"
+    (string_field "store" response);
+  let facts = current_facts ~keepers_dir meta.name in
+  Alcotest.(check int) "one durable claim" 1 (List.length facts);
+  let fact = List.hd facts in
+  Alcotest.(check string)
+    "the claim reaches a later turn"
+    "reasoning_content must be replayed unmodified"
+    fact.Masc.Keeper_memory_os_types.claim;
+  Alcotest.(check int)
+    "provenance carries this turn"
+    7
+    fact.Masc.Keeper_memory_os_types.source.turn;
+  (* The model asserted this itself; it did not carry it out of another
+     tool's result, and the field says where an observation came from. *)
+  Alcotest.(check bool)
+    "no borrowed tool provenance"
+    true
+    (fact.Masc.Keeper_memory_os_types.source.tool_call_id = None);
+  Alcotest.(check bool)
+    "a claim with no declared lifetime stays permanent"
+    true
+    (fact.Masc.Keeper_memory_os_types.valid_until = None)
 ;;
 
 (* RFC-0351 S2. The declared lifetime reaches the current snapshot. *)
@@ -190,48 +191,49 @@ let test_declared_lifetime_expires () =
   @@ fun base_path ->
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "expiring-write" in
-  let keepers_dir = Filename.concat base_path "keepers" in
-  Current.For_testing.with_keepers_dir keepers_dir (fun () ->
-    let response =
-      Runtime.keeper_memory_write_json
-        ~config
-        ~meta
-        ~args:
-          (with_days
-             (make_args ~title:"" ~content:"task-2288 is blocked on the git-root gate")
-             7)
-      |> Yojson.Safe.from_string
-    in
-    Alcotest.(check bool)
-      "write succeeds"
-      true
-      (match json_field "ok" response with
-       | `Bool value -> value
-       | _ -> false);
-    let fact = List.hd (current_facts meta.name) in
-    let valid_until =
-      match fact.Masc.Keeper_memory_os_types.valid_until with
-      | Some ts -> ts
-      | None -> Alcotest.fail "declared lifetime did not reach the store"
-    in
-    let first_seen = fact.Masc.Keeper_memory_os_types.first_seen in
-    (* 7 days from the write, to the second. *)
-    Alcotest.(check (float 1.0))
-      "boundary is the declared span"
-      (7.0 *. 86_400.)
-      (valid_until -. first_seen);
-    Alcotest.(check bool)
-      "still current inside the window"
-      true
-      (Masc.Keeper_memory_os_types.fact_is_current
-         ~now:(valid_until -. 86_400.)
-         fact);
-    Alcotest.(check bool)
-      "recall drops it past the window"
-      false
-      (Masc.Keeper_memory_os_types.fact_is_current
-         ~now:(valid_until +. 1.0)
-         fact))
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path
+  in
+  let response =
+    Runtime.keeper_memory_write_json
+      ~config
+      ~meta
+      ~args:
+        (with_days
+           (make_args ~title:"" ~content:"task-2288 is blocked on the git-root gate")
+           7)
+    |> Yojson.Safe.from_string
+  in
+  Alcotest.(check bool)
+    "write succeeds"
+    true
+    (match json_field "ok" response with
+     | `Bool value -> value
+     | _ -> false);
+  let fact = List.hd (current_facts ~keepers_dir meta.name) in
+  let valid_until =
+    match fact.Masc.Keeper_memory_os_types.valid_until with
+    | Some ts -> ts
+    | None -> Alcotest.fail "declared lifetime did not reach the store"
+  in
+  let first_seen = fact.Masc.Keeper_memory_os_types.first_seen in
+  (* 7 days from the write, to the second. *)
+  Alcotest.(check (float 1.0))
+    "boundary is the declared span"
+    (7.0 *. 86_400.)
+    (valid_until -. first_seen);
+  Alcotest.(check bool)
+    "still current inside the window"
+    true
+    (Masc.Keeper_memory_os_types.fact_is_current
+       ~now:(valid_until -. 86_400.)
+       fact);
+  Alcotest.(check bool)
+    "recall drops it past the window"
+    false
+    (Masc.Keeper_memory_os_types.fact_is_current
+       ~now:(valid_until +. 1.0)
+       fact)
 ;;
 
 let () =

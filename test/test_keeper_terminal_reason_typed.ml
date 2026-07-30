@@ -821,6 +821,7 @@ let () =
     ; runtime_observation = None
     ; turn_count = 1
     ; final_oas_turn_ordinal = 0
+    ; request_body_bytes = None
     ; usage = Masc.Inference_utils.zero_usage
     ; usage_reported = true
     ; tool_calls = []

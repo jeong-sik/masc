@@ -375,6 +375,9 @@ let assemble_hooks
                       state, so it is domain-safe on the shared pool. *)
                    Domain_pool_ref.submit_io_or_inline (fun () ->
                      Keeper_memory_os_recall.render_if_enabled
+                       ~keepers_dir:
+                         (Config_dir_resolver.keepers_dir_for_base_path
+                            ~base_path:config.Workspace.base_path)
                        ~keeper_id:meta.name
                        ~now:(Time_compat.now ())
                        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)

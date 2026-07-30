@@ -5,24 +5,6 @@ open Result.Syntax
 
 let schema = "keeper.memory.current.v1"
 let suffix = ".memory.json"
-let keepers_dir_override : string option ref = ref None
-
-let keepers_dir () =
-  match !keepers_dir_override with
-  | Some path -> path
-  | None -> Config_dir_resolver.keepers_dir ()
-;;
-
-module For_testing = struct
-  let with_keepers_dir path f =
-    Fs_compat.mkdir_p path;
-    let previous = !keepers_dir_override in
-    keepers_dir_override := Some path;
-    Fun.protect
-      ~finally:(fun () -> keepers_dir_override := previous)
-      f
-  ;;
-end
 
 type source_kind =
   | Librarian
@@ -56,12 +38,6 @@ let path_for_keepers_dir ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ suffix)
 ;;
 
-let path ~keeper_id =
-  path_for_keepers_dir
-    ~keepers_dir:(keepers_dir ())
-    ~keeper_id
-;;
-
 let list_keeper_ids_for_keepers_dir ~keepers_dir =
   if not (Sys.file_exists keepers_dir && Sys.is_directory keepers_dir)
   then []
@@ -70,11 +46,6 @@ let list_keeper_ids_for_keepers_dir ~keepers_dir =
     |> Array.to_list
     |> List.filter_map (Filename.chop_suffix_opt ~suffix)
     |> List.sort String.compare
-;;
-
-let list_keeper_ids () =
-  list_keeper_ids_for_keepers_dir
-    ~keepers_dir:(keepers_dir ())
 ;;
 
 let source_kind_to_string = function
@@ -298,12 +269,6 @@ let read_for_keepers_dir ~keepers_dir ~keeper_id =
     Some snapshot
 ;;
 
-let read ~keeper_id =
-  read_for_keepers_dir
-    ~keepers_dir:(keepers_dir ())
-    ~keeper_id
-;;
-
 module Identity_map = Map.Make (String)
 
 let fact_payload fact =
@@ -358,10 +323,12 @@ let lock_path snapshot_path = snapshot_path ^ ".lock"
 
 let update_locked
       ?clock
+      ~keepers_dir
       ~keeper_id
       build
   =
-  let snapshot_path = path ~keeper_id in
+  Fs_compat.mkdir_p keepers_dir;
+  let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
   File_lock_eio.with_lock ?clock (lock_path snapshot_path) (fun () ->
     let* previous =
       match Fs_compat.load_file_opt snapshot_path with
@@ -413,7 +380,9 @@ let make_snapshot
 
 let replace
       ?clock
+      ~keepers_dir
       ~keeper_id
+      ~expected_revision
       ~now
       ~source
       ~summary
@@ -423,27 +392,39 @@ let replace
       ~preserved_tool_refs
       ()
   =
-  update_locked ?clock ~keeper_id (fun previous ->
-    make_snapshot
-      ~previous
-      ~now
-      ~source
-      ~summary
-      ~facts
-      ~open_items
-      ~constraints
-      ~preserved_tool_refs
-      ())
+  update_locked ?clock ~keepers_dir ~keeper_id (fun previous ->
+    let observed_revision =
+      Option.map (fun snapshot -> snapshot.revision) previous
+    in
+    if observed_revision <> expected_revision
+    then
+      Error
+        (Printf.sprintf
+           "current Memory OS revision conflict expected=%s observed=%s"
+           (Option.fold ~none:"absent" ~some:string_of_int expected_revision)
+           (Option.fold ~none:"absent" ~some:string_of_int observed_revision))
+    else
+      make_snapshot
+        ~previous
+        ~now
+        ~source
+        ~summary
+        ~facts
+        ~open_items
+        ~constraints
+        ~preserved_tool_refs
+        ())
 ;;
 
 let upsert_fact
       ?clock
+      ~keepers_dir
       ~keeper_id
       ~now
       ~source
       incoming
   =
-  update_locked ?clock ~keeper_id (fun previous ->
+  update_locked ?clock ~keepers_dir ~keeper_id (fun previous ->
     let current_facts, summary, open_items, constraints, preserved_tool_refs =
       match previous with
       | None -> [], "Explicit keeper memory write.", [], [], []

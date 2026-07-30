@@ -249,6 +249,23 @@ let dispatch_after_provider_transcript_admission ~messages ~dispatch =
   | Ok () -> dispatch ()
 ;;
 
+let request_body_bytes_for_turn_record ~observed = function
+  | Ok result -> result.Runtime_agent.request_body_bytes
+  | Error error ->
+    (match observed with
+     | Some _ as bytes -> bytes
+     | None ->
+       (match Keeper_turn_runtime_budget.capacity_refusal_of_error error with
+        | Some
+            (Keeper_turn_runtime_budget.Serialized_request_body
+               { actual_bytes; _ }) ->
+          Some actual_bytes
+        | Some
+            (Keeper_turn_runtime_budget.Provider_context_window _
+            | Keeper_turn_runtime_budget.Provider_request_body_refusal _)
+        | None -> None))
+;;
+
 let terminal_effect_boundary_decision = function
   | Keeper_tools_oas.Terminal_effect_open -> Ok Runtime_agent.Continue
   | Keeper_tools_oas.Deferred_tool_result ->
@@ -281,6 +298,8 @@ module For_testing = struct
   let provider_transcript_admission = provider_transcript_admission
   let dispatch_after_provider_transcript_admission =
     dispatch_after_provider_transcript_admission
+  let request_body_bytes_for_turn_record =
+    request_body_bytes_for_turn_record
 end
 
 (** Run a single keeper turn via OAS Agent.run().
@@ -660,6 +679,7 @@ let run_turn
     let receipt_response_text_present_ref =
       s.Keeper_run_tools.receipt_response_text_present_ref
     in
+    let observed_request_body_bytes_ref = ref None in
     (* 8. Run Agent *)
     let record_turn_progress, yield_on_tool, on_yield, on_resume, on_event =
       Turn_helpers.turn_progress_callbacks
@@ -836,6 +856,9 @@ let run_turn
                       ~on_runtime_observation:
                         (fun observation ->
                            receipt_runtime_observation_ref := Some observation)
+                      ~on_request_body_bytes:
+                        (fun bytes ->
+                           observed_request_body_bytes_ref := Some bytes)
                       ())
          in
          (* Trace-store failure isolation: [raw_trace_for_dispatch]
@@ -1156,9 +1179,9 @@ let run_turn
           ~request_latency_ms
           ~ttfrc_ms
           ~request_body_bytes:
-            (match turn_result with
-             | Ok result -> result.request_body_bytes
-             | Error _ -> None)
+            (request_body_bytes_for_turn_record
+               ~observed:!observed_request_body_bytes_ref
+               turn_result)
           ~sampling:
             { temperature = Some temperature
             ; top_p = Runtime.top_p_of_runtime_id runtime_id_string

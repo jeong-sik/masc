@@ -355,7 +355,9 @@ let extract_with_exact_output_classified
 let extract_and_commit_with_exact_output_classified
       ?clock
       ~net
+      ~keepers_dir
       ~keeper_id
+      ~expected_revision
       inp
   =
   let open Result.Syntax in
@@ -364,7 +366,9 @@ let extract_and_commit_with_exact_output_classified
   in
   Keeper_memory_os_current.replace
     ?clock
+    ~keepers_dir
     ~keeper_id
+    ~expected_revision
     ~now:(Time_compat.now ())
     ~source:
       { kind = Keeper_memory_os_current.Librarian
@@ -381,7 +385,12 @@ let extract_and_commit_with_exact_output_classified
     Memory_snapshot_write_failed detail)
 ;;
 
-let run_best_effort ~keeper_id (inp : Keeper_librarian.input) =
+let run_best_effort
+      ~keepers_dir
+      ~keeper_id
+      ~expected_revision
+      (inp : Keeper_librarian.input)
+  =
   if enabled () && cadence_due ~keeper_id ~trace_id:inp.trace_id
   then (
     try
@@ -391,7 +400,9 @@ let run_best_effort ~keeper_id (inp : Keeper_librarian.input) =
            extract_and_commit_with_exact_output_classified
              ~clock
              ~net
+             ~keepers_dir
              ~keeper_id
+             ~expected_revision
              inp
          with
          | Ok snapshot ->

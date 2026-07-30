@@ -23,10 +23,18 @@ let () =
     bucket_upper_bounds_bytes
 ;;
 
-let observer ~keeper_name ~runtime_id ~max_request_body_bytes
+let observer
+      ?on_request_body_bytes
+      ~keeper_name
+      ~runtime_id
+      ~max_request_body_bytes
   : Agent_sdk.Agent.pre_dispatch_serialization_observer
   =
   fun observation ->
+  Option.iter
+    (fun observe ->
+       observe observation.Llm_provider.Request_wire_observer.body_bytes)
+    on_request_body_bytes;
   Otel_metric_store.observe_histogram
     (Keeper_metrics.to_string metric)
     ~labels:

@@ -228,6 +228,19 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(container.textContent).toContain('도구 결과')
   })
 
+  it('renders wire bytes when content attribution is unavailable', async () => {
+    const payload = turnRecordsPayload()
+    payload.entries[0]!.record.input_components = []
+    stubFetch(payload)
+    const { container } = renderInspector()
+    await waitFor(() => {
+      expect(container.querySelector('.mem-compo-tot')?.textContent).toBe('547.4KB wire · 0B content')
+    })
+    expect(container.querySelector('.mem-bar')).toBeFalsy()
+    expect(container.textContent).toContain('wire 측정은 존재하지만 content 구성 관측은 없습니다.')
+    expect(container.textContent).not.toContain('최종 provider 입력 구성 관측 없음.')
+  })
+
   it('renders all facts in persisted source order with stored time and validity', async () => {
     stubFetch()
     const { container } = renderInspector()
@@ -632,6 +645,24 @@ describe('memory view-model helpers', () => {
     const unavailable = mkRow(2, [])
     expect(latestEntryWithInputComponents([observed, unavailable])?.record.absolute_turn).toBe(1)
     expect(latestEntryWithInputComponents([unavailable])).toBeNull()
+  })
+
+  it('latestEntryWithInputComponents keeps a wire-only observed turn', () => {
+    const wireOnly: TurnRecordRow = {
+      record: {
+        keeper: 'k',
+        trace_id: 't',
+        absolute_turn: 1,
+        ts: 1,
+        runtime_profile: 'local',
+        blocks: [],
+        input_components: [],
+        request_body_bytes: 42,
+        execution_ids: [],
+      },
+      diff_vs_prev: null,
+    }
+    expect(latestEntryWithInputComponents([wireOnly])).toBe(wireOnly)
   })
 
   it('recentMemoryRecallInjections returns newest real memory_os_recall blocks only', () => {

@@ -180,7 +180,13 @@ export function latestEntryWithInputComponents(
 ): TurnRecordRow | null {
   for (let i = rows.length - 1; i >= 0; i--) {
     const row = rows[i]
-    if (row && row.record.input_components.length > 0) return row
+    if (
+      row
+      && (
+        row.record.input_components.length > 0
+        || row.record.request_body_bytes != null
+      )
+    ) return row
   }
   return null
 }
@@ -314,11 +320,14 @@ function MemBar({ parts, total }: { parts: readonly CompositionPart[]; total: nu
 function MemCompoReal({ row }: { row: TurnRecordRow | null }) {
   const components = row?.record.input_components ?? []
   const { totalBytes, parts } = memCompositionFromInputComponents(components)
-  if (!row || totalBytes === 0) {
+  if (!row) {
     return html`<div class="mem-empty">최종 provider 입력 구성 관측 없음.</div>`
   }
   const inputTok = row.record.input_tokens
   const requestBodyBytes = row.record.request_body_bytes
+  if (totalBytes === 0 && requestBodyBytes == null) {
+    return html`<div class="mem-empty">최종 provider 입력 구성 관측 없음.</div>`
+  }
   const ctxWin = row.record.context_window
   const pct = inputTok != null && ctxWin != null && ctxWin > 0
     ? Math.round((inputTok / ctxWin) * 100)
@@ -337,15 +346,19 @@ function MemCompoReal({ row }: { row: TurnRecordRow | null }) {
             : html`${parts.length}개 구성요소`}
         </span>
       </div>
-      <${MemBar} parts=${parts} total=${totalBytes} />
-      <div class="mem-legend">
-        ${parts.map(p => html`
-          <div key=${p.key} class="mem-leg">
-            <span class="mem-leg-sw" style=${{ background: p.color }}></span>
-            <span class="mem-leg-lbl">${p.lbl}${p.mem ? html`<span class="mem-leg-tag">메모리</span>` : null}</span>
-            <span class="mem-leg-v mono">${memFmtBytes(p.bytes)}</span>
-          </div>`)}
-      </div>
+      ${totalBytes === 0
+        ? html`<div class="mem-empty">wire 측정은 존재하지만 content 구성 관측은 없습니다.</div>`
+        : html`
+            <${MemBar} parts=${parts} total=${totalBytes} />
+            <div class="mem-legend">
+              ${parts.map(p => html`
+                <div key=${p.key} class="mem-leg">
+                  <span class="mem-leg-sw" style=${{ background: p.color }}></span>
+                  <span class="mem-leg-lbl">${p.lbl}${p.mem ? html`<span class="mem-leg-tag">메모리</span>` : null}</span>
+                  <span class="mem-leg-v mono">${memFmtBytes(p.bytes)}</span>
+                </div>`)}
+            </div>
+          `}
     </div>`
 }
 

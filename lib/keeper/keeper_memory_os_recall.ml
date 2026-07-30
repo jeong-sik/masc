@@ -97,8 +97,10 @@ let render_snapshot ~now snapshot =
        })
 ;;
 
-let render_context_result ~keeper_id ~now =
-  match Keeper_memory_os_current.read ~keeper_id with
+let render_context_result ~keepers_dir ~keeper_id ~now =
+  match
+    Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
+  with
   | Ok None ->
     { block = ""
     ; injected_fact_keys = []
@@ -118,20 +120,28 @@ let render_context_result ~keeper_id ~now =
     }
 ;;
 
-let render_context ~keeper_id ~now () =
-  (render_context_result ~keeper_id ~now).block
+let render_context ~keepers_dir ~keeper_id ~now () =
+  (render_context_result ~keepers_dir ~keeper_id ~now).block
 ;;
 
 let enabled () =
   Env_config.KeeperMemoryOs.recall_enabled ()
 ;;
 
-let render_if_enabled ~keeper_id ~now ~trace_id ~turn ~masc_root () =
+let render_if_enabled
+      ~keepers_dir
+      ~keeper_id
+      ~now
+      ~trace_id
+      ~turn
+      ~masc_root
+      ()
+  =
   if not (enabled ())
   then None
   else
     let result =
-      try render_context_result ~keeper_id ~now with
+      try render_context_result ~keepers_dir ~keeper_id ~now with
       | Eio.Cancel.Cancelled _ as error -> raise error
       | exn ->
         Log.Keeper.warn

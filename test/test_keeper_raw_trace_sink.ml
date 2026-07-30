@@ -387,6 +387,7 @@ let test_traced_turn_yields_result_level_fields () =
       checkpoint = None;
       session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id;
       turns = 1;
+      request_body_bytes = None;
       trace_ref;
       run_validation;
       runtime_observation = None;

@@ -35,18 +35,26 @@ let require_ok = function
 ;;
 
 let write_snapshot ~keepers_dir ~keeper_id facts =
-  Current.For_testing.with_keepers_dir keepers_dir (fun () ->
-    Current.replace
-      ~keeper_id
-      ~now:test_now
-      ~source
-      ~summary:"current memory"
-      ~facts
-      ~open_items:[]
-      ~constraints:[]
-      ~preserved_tool_refs:[]
-      ()
-    |> require_ok)
+  Fs_compat.mkdir_p keepers_dir;
+  let expected_revision =
+    match Current.read_for_keepers_dir ~keepers_dir ~keeper_id with
+    | Ok None -> None
+    | Ok (Some snapshot) -> Some snapshot.revision
+    | Error detail -> Alcotest.fail detail
+  in
+  Current.replace
+    ~keepers_dir
+    ~keeper_id
+    ~expected_revision
+    ~now:test_now
+    ~source
+    ~summary:"current memory"
+    ~facts
+    ~open_items:[]
+    ~constraints:[]
+    ~preserved_tool_refs:[]
+    ()
+  |> require_ok
 ;;
 
 let assoc_field name = function

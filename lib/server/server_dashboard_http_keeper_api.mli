@@ -274,7 +274,10 @@ val memory_os_fact_json :
     Exported so the test suite can assert the JSON shape (and that drift guard)
     in isolation, per the module's "JSON shapes exported for testing" convention. *)
 
-val memory_os_dashboard_json : keeper_id:string -> Yojson.Safe.t
+val memory_os_dashboard_json
+  :  config:Workspace.config
+  -> keeper_id:string
+  -> Yojson.Safe.t
 (** Current-memory observability payload for one keeper. Recall and this
     projection read the same snapshot; [change] exposes exact added/removed
     facts from the latest atomic Librarian or explicit-write update. *)

@@ -206,10 +206,16 @@ let memory_os_change_json ~now (change : Keeper_memory_os_current.change) =
     ]
 ;;
 
-let memory_os_dashboard_json ~keeper_id =
+let memory_os_dashboard_json ~(config : Workspace.config) ~keeper_id =
   let now = Time_compat.now () in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path
+  in
   let snapshot, read_error =
-    match Keeper_memory_os_current.read ~keeper_id with
+    match
+      Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
+    with
     | Ok snapshot -> snapshot, None
     | Error message -> None, Some message
   in
@@ -247,7 +253,11 @@ let memory_os_dashboard_json ~keeper_id =
     ; "keeper", `String keeper_id
     ; "source", `String "current_memory_snapshot"
     ; "producer", `String "keeper_librarian"
-    ; "snapshot_store", `String (Keeper_memory_os_current.path ~keeper_id)
+    ; ( "snapshot_store"
+      , `String
+          (Keeper_memory_os_current.path_for_keepers_dir
+             ~keepers_dir
+             ~keeper_id) )
     ; "recall_enabled", `Bool (Keeper_memory_os_recall.enabled ())
     ; "revision", `Int revision
     ; "updated_at", (match updated_at with Some value -> `Float value | None -> `Null)
@@ -1746,7 +1756,10 @@ let handle_keeper_get_subroutes state req request reqd =
         ("health", `String health);
         ( "stale_reason",
           if stale_reason = "" then `Null else `String stale_reason );
-        ("memory_os", memory_os_dashboard_json ~keeper_id:name);
+        ( "memory_os"
+        , memory_os_dashboard_json
+            ~config:(Mcp_server.workspace_config state)
+            ~keeper_id:name );
         ("entries", `List entries);
       ] in
       Http.Response.json_value ~compress:true ~request:req json reqd

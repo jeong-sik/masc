@@ -56,14 +56,23 @@ type fact_match =
    ([first_seen] desc). Expired facts (past [valid_until]) are excluded the
    same way recall excludes them ([fact_is_current]). *)
 let search_durable_facts
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(query : string)
       ~(limit : int)
   : fact_match list * int
   =
   let now = Time_compat.now () in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path
+  in
   let current =
-    (match Keeper_memory_os_current.read ~keeper_id:meta.name with
+    (match
+       Keeper_memory_os_current.read_for_keepers_dir
+         ~keepers_dir
+         ~keeper_id:meta.name
+     with
      | Ok None -> []
      | Ok (Some snapshot) -> snapshot.facts
      | Error message -> invalid_arg message)
@@ -237,7 +246,9 @@ let keeper_memory_search_with_outcome
          ]
          @ if no_match then [ "no_match", `Bool true ] else [])
     | All ->
-      let fact_matches, fact_total = search_durable_facts ~meta ~query ~limit in
+      let fact_matches, fact_total =
+        search_durable_facts ~config ~meta ~query ~limit
+      in
       let history_limit = max 0 (limit - List.length fact_matches) in
       let history_matches =
         if history_limit > 0
@@ -265,7 +276,9 @@ let keeper_memory_search_with_outcome
          ]
          @ if no_match then [ "no_match", `Bool true ] else [])
     | Memory ->
-      let matches, total_candidates = search_durable_facts ~meta ~query ~limit in
+      let matches, total_candidates =
+        search_durable_facts ~config ~meta ~query ~limit
+      in
       let no_match = matches = [] in
       let match_jsons = List.map fact_match_to_json matches in
       `Assoc
@@ -343,8 +356,16 @@ let keeper_context_status_json
   let checkpoint_bytes = Keeper_context_runtime.serialized_bytes ctx_work in
   let memory_facts_total, memory_facts_current =
     let now = Time_compat.now () in
+    let keepers_dir =
+      Config_dir_resolver.keepers_dir_for_base_path
+        ~base_path:config.Workspace.base_path
+    in
     let facts =
-      match Keeper_memory_os_current.read ~keeper_id:meta.name with
+      match
+        Keeper_memory_os_current.read_for_keepers_dir
+          ~keepers_dir
+          ~keeper_id:meta.name
+      with
       | Ok None -> []
       | Ok (Some snapshot) -> snapshot.facts
       | Error message -> invalid_arg message
@@ -539,6 +560,7 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
    Importance and later retention remain the librarian model's decision; no
    local echo window or recency rule rewrites the write. *)
 let append_durable_fact
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(body : string)
       ~(valid_for_days : int option)
@@ -570,7 +592,12 @@ let append_durable_fact
     }
   in
   let result =
+    let keepers_dir =
+      Config_dir_resolver.keepers_dir_for_base_path
+        ~base_path:config.Workspace.base_path
+    in
     Keeper_memory_os_current.upsert_fact
+      ~keepers_dir
       ~keeper_id
       ~now
       ~source:
@@ -591,7 +618,7 @@ let append_durable_fact
 ;;
 
 let keeper_memory_write_with_outcome
-      ~config:(_ : Workspace.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   : Keeper_tool_execution.t
@@ -610,7 +637,7 @@ let keeper_memory_write_with_outcome
   | Memory_write_invalid { error_kind; extras } ->
     respond ~ok:false ~error_kind extras
   | Memory_write_ok { body; valid_for_days } ->
-    (match append_durable_fact ~meta ~body ~valid_for_days with
+    (match append_durable_fact ~config ~meta ~body ~valid_for_days with
      | Ok snapshot ->
        let merged =
          List.length snapshot.change.added = 1

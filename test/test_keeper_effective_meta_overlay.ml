@@ -437,6 +437,78 @@ active_goal_ids = ["goal-masc-improver"]
     [ "goal-masc-improver" ]
     returned.active_goal_ids
 
+let test_ensure_keeper_meta_preserves_live_usage_during_reconcile () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "reconcile-live-usage" in
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+sandbox_profile = "local"
+instructions = "fresh instructions"
+|};
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  let persisted =
+    match Store.read_meta config name with
+    | Ok (Some meta) -> meta
+    | Ok None -> Alcotest.fail "expected seeded keeper meta"
+    | Error err -> Alcotest.failf "read_meta failed: %s" err
+  in
+  let stale = { persisted with instructions = "stale instructions" } in
+  (match Store.write_meta config stale with
+   | Ok () -> ()
+   | Error err -> Alcotest.failf "write stale meta failed: %s" err);
+  let observed =
+    {
+      stale with
+      runtime =
+        {
+          stale.runtime with
+          usage =
+            {
+              stale.runtime.usage with
+              last_input_tokens = 123;
+              last_output_tokens = 4;
+              last_total_tokens = 127;
+              last_usage_reported_at = Some 1_700_000_000.0;
+            };
+        };
+    }
+  in
+  Masc.Keeper_registry.For_testing.clear ();
+  Fun.protect
+    ~finally:Masc.Keeper_registry.For_testing.clear
+    (fun () ->
+      ignore
+        (Masc.Keeper_registry.For_testing.register
+           ~base_path:config.base_path
+           name
+           observed);
+      let reconciled =
+        match Keeper_runtime.ensure_keeper_meta config name with
+        | Ok meta -> meta
+        | Error err -> Alcotest.failf "ensure_keeper_meta failed: %s" err
+      in
+      Masc.Keeper_registry.update_meta_from_persisted
+        ~base_path:config.base_path
+        name
+        reconciled;
+      match Masc.Keeper_registry.get ~base_path:config.base_path name with
+      | Some entry ->
+        Alcotest.(check string)
+          "reconcile installs fresh instructions"
+          "fresh instructions"
+          entry.meta.instructions;
+        Alcotest.(check int)
+          "reconcile preserves live observed input"
+          123
+          entry.meta.runtime.usage.last_input_tokens;
+        Alcotest.(check (option (float 0.0)))
+          "reconcile preserves live observation timestamp"
+          (Some 1_700_000_000.0)
+          entry.meta.runtime.usage.last_usage_reported_at
+      | None -> Alcotest.fail "expected registered keeper after reconcile")
+
 let test_turn_setup_uses_effective_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "turnsetup" in
@@ -1273,6 +1345,10 @@ let () =
           Alcotest.test_case
             "ensure keeper meta persists TOML identity snapshot"
             `Quick test_ensure_keeper_meta_persists_toml_identity_snapshot;
+          Alcotest.test_case
+            "ensure keeper meta preserves live usage during reconcile"
+            `Quick
+            test_ensure_keeper_meta_preserves_live_usage_during_reconcile;
           Alcotest.test_case "status resolves keeper alias names" `Quick
             test_status_resolves_keeper_alias_names;
           Alcotest.test_case "keeper surface resolves alias names" `Quick

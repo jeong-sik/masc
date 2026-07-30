@@ -328,7 +328,12 @@ let write_meta_error_to_string = function
    counters are a monotone invariant (RFC-0225 §3.2, RFC-0237); a caller that
    lost the race must resolve the conflict through [write_meta_with_merge],
    never overwrite the disk snapshot. *)
-let write_meta_typed ?lifecycle_token config (m : Keeper_meta_contract.keeper_meta) =
+let write_meta_typed
+      ?lifecycle_token
+      ?runtime_sync_override
+      config
+      (m : Keeper_meta_contract.keeper_meta)
+  =
   let path = keeper_meta_path config m.name in
   (* Write-boundary invariant (fail-closed): never persist [paused=false] with
      a terminal or reset-required latch. *)
@@ -351,9 +356,10 @@ let write_meta_typed ?lifecycle_token config (m : Keeper_meta_contract.keeper_me
          File_lock_eio.with_mutex path (fun () ->
            let persist persisted =
              let runtime_sync =
-               match lifecycle_token with
-               | None -> Sync_runtime
-               | Some _ -> Defer_runtime_sync
+               match lifecycle_token, runtime_sync_override with
+               | Some _, _ -> Defer_runtime_sync
+               | None, Some runtime_sync -> runtime_sync
+               | None, None -> Sync_runtime
              in
              persist_meta_internal
                ~runtime_sync
@@ -385,6 +391,14 @@ let write_meta_typed ?lifecycle_token config (m : Keeper_meta_contract.keeper_me
 
 let write_meta config m =
   write_meta_typed config m |> Result.map_error write_meta_error_to_string
+;;
+
+let write_meta_deferred_runtime_sync config m =
+  write_meta_typed
+    ~runtime_sync_override:Defer_runtime_sync
+    config
+    m
+  |> Result.map_error write_meta_error_to_string
 ;;
 
 let write_meta_for_lifecycle token config m =

@@ -466,7 +466,7 @@ let ensure_keeper_meta_with_cause config name =
              | None -> target_active_goal_ids)
         }
       in
-      match write_meta config persisted_updated with
+      match write_meta_deferred_runtime_sync config persisted_updated with
       | Ok () -> Ok { effective_updated with meta_version = effective_updated.meta_version + 1 }
       | Error e ->
         Otel_metric_store.inc_counter

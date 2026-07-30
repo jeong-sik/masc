@@ -36,13 +36,6 @@ let with_temp_base_path f =
   let dir = Filename.temp_file "masc_e2e_test" "" in
   Sys.remove dir;
   Unix.mkdir dir 0o755;
-  let prev = Sys.getenv_opt "MASC_BASE_PATH" in
-  Unix.putenv "MASC_BASE_PATH" dir;
-  let restore () =
-    match prev with
-    | Some v -> Unix.putenv "MASC_BASE_PATH" v
-    | None -> Unix.putenv "MASC_BASE_PATH" ""
-  in
   let cleanup () =
     let rec rm path =
       if Sys.file_exists path then
@@ -55,7 +48,6 @@ let with_temp_base_path f =
     try rm dir with _ -> ()
   in
   let r = try Ok (f dir) with e -> Error e in
-  restore ();
   cleanup ();
   match r with Ok v -> v | Error e -> raise e
 
@@ -263,11 +255,9 @@ let test_full_flow_externalize_reference_serve () =
        | Tool_result.Failed _ | Tool_result.Deferred () ->
          Alcotest.fail "public-read artifact capability was rejected");
 
-      (* Step 7: The HTTP endpoint helper returns the same bytes. The
-         endpoint reads MASC_BASE_PATH, so it sees the same store our
-         bridge wrote into. This catches base-path drift between
-         producer and consumer. *)
-      let json, status = A.blob_response ~sha256 in
+      (* Step 7: The HTTP endpoint helper receives the same explicit Workspace
+         base path as the producer and returns the same bytes. *)
+      let json, status = A.blob_response ~base_path:dir ~sha256 in
       Alcotest.(check bool) "endpoint returns 200" true (status = `OK);
       let envelope_content =
         Yojson.Safe.Util.(json |> member "content" |> to_string)

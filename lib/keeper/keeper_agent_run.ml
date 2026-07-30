@@ -249,21 +249,30 @@ let dispatch_after_provider_transcript_admission ~messages ~dispatch =
   | Ok () -> dispatch ()
 ;;
 
-let request_body_bytes_for_turn_record ~observed = function
-  | Ok (result : run_result) -> result.request_body_bytes
-  | Error error ->
-    (match observed with
-     | Some _ as bytes -> bytes
+let request_body_bytes_for_error ~observed error =
+  match observed with
+  | Some _ as bytes -> bytes
+  | None ->
+    (match Keeper_turn_runtime_budget.capacity_refusal_of_error error with
+     | Some
+         (Keeper_turn_runtime_budget.Serialized_request_body
+            { actual_bytes; _ }) ->
+       Some actual_bytes
+     | Some
+         (Keeper_turn_runtime_budget.Provider_context_window _
+         | Keeper_turn_runtime_budget.Provider_request_body_refusal _)
      | None ->
-       (match Keeper_turn_runtime_budget.capacity_refusal_of_error error with
-        | Some
-            (Keeper_turn_runtime_budget.Serialized_request_body
-               { actual_bytes; _ }) ->
-          Some actual_bytes
-        | Some
-            (Keeper_turn_runtime_budget.Provider_context_window _
-            | Keeper_turn_runtime_budget.Provider_request_body_refusal _)
-        | None -> None))
+       None)
+;;
+
+let request_body_bytes_for_turn_record ~observed = function
+  | Ok result -> result.Runtime_agent.request_body_bytes
+  | Error error -> request_body_bytes_for_error ~observed error
+;;
+
+let keeper_request_body_bytes_for_turn_record ~observed = function
+  | Ok (result : run_result) -> result.request_body_bytes
+  | Error error -> request_body_bytes_for_error ~observed error
 ;;
 
 let terminal_effect_boundary_decision = function
@@ -1179,7 +1188,7 @@ let run_turn
           ~request_latency_ms
           ~ttfrc_ms
           ~request_body_bytes:
-            (request_body_bytes_for_turn_record
+            (keeper_request_body_bytes_for_turn_record
                ~observed:!observed_request_body_bytes_ref
                turn_result)
           ~sampling:

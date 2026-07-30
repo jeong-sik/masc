@@ -67,10 +67,13 @@ let pending_page ~after ~limit pending =
     | _ :: rest when index < after ->
       loop (index + 1) remaining page_rev rest
     | _ when remaining = 0 -> List.rev page_rev
-    | stimulus :: rest ->
+    | (selection : Keeper_event_queue_state.pending_selection) :: rest ->
+      let stimulus = selection.source in
       let item =
         `Assoc
           [ "queue_index", `Int index
+          ; ( "source_incarnation"
+            , `String (Int64.to_string selection.admitted_revision) )
           ; "post_id", `String stimulus.Keeper_event_queue.post_id
           ; ( "urgency"
             , `String
@@ -88,7 +91,6 @@ let pending_page ~after ~limit pending =
 
 module For_testing = struct
   let pending_page = pending_page
-  let pending_source_at = Execute.pending_source_at
   let pending_selection_at = Execute.pending_selection_at
 end
 
@@ -120,10 +122,7 @@ let handle_get state request reqd ~keeper_name =
        | Error detail -> error ~status:`Service_unavailable detail
        | Ok queue_state ->
          let revision = Keeper_event_queue_state.revision queue_state in
-         let pending =
-           Keeper_event_queue_state.pending queue_state
-           |> Keeper_event_queue.to_list
-         in
+         let pending = Keeper_event_queue_state.pending_selections queue_state in
          let total_pending = List.length pending in
          let page = pending_page ~after ~limit pending in
          let consumed = after + List.length page in
@@ -146,20 +145,21 @@ let handle_get state request reqd ~keeper_name =
 
 type request = Execute.request =
   | Cancel of
-      { expected_revision : int64
-      ; queue_index : int
+      { queue_index : int
+      ; source_incarnation : int64
       ; operator_operation_id : string
       ; reason : string
       }
   | Transfer of
-      { expected_revision : int64
-      ; queue_index : int
+      { queue_index : int
+      ; source_incarnation : int64
       ; operator_operation_id : string
       ; target_keeper : string
       }
   | Reprioritize of
       { expected_revision : int64
       ; queue_index : int
+      ; source_incarnation : int64
       ; urgency : Keeper_event_queue.urgency
       }
 
@@ -189,6 +189,14 @@ let queue_index fields =
   | `Int queue_index when queue_index >= 0 -> Ok queue_index
   | `Int _ -> Error "queue_index must be non-negative"
   | _ -> Error "queue_index must be an integer"
+;;
+
+let source_incarnation fields =
+  let* value = string_field "source_incarnation" fields in
+  match Int64.of_string_opt value with
+  | Some revision when Int64.compare revision 0L >= 0 -> Ok revision
+  | Some _ | None ->
+    Error "source_incarnation must be a non-negative int64 string"
 ;;
 
 let operator_operation_id fields =
@@ -231,13 +239,13 @@ let parse body =
     then Error ("unsupported schema: " ^ request_schema)
     else
       let* action = string_field "action" fields in
-      let* expected_revision = expected_revision fields in
       let* queue_index = queue_index fields in
+      let* source_incarnation = source_incarnation fields in
       let common =
         [ "action"
-        ; "expected_revision"
         ; "queue_index"
         ; "schema"
+        ; "source_incarnation"
         ]
       in
       match action with
@@ -254,8 +262,8 @@ let parse body =
         else
           Ok
             (Cancel
-               { expected_revision
-               ; queue_index
+               { queue_index
+               ; source_incarnation
                ; operator_operation_id
                ; reason
                })
@@ -272,18 +280,27 @@ let parse body =
         else
           Ok
             (Transfer
-               { expected_revision
-               ; queue_index
+               { queue_index
+               ; source_incarnation
                ; operator_operation_id
                ; target_keeper
                })
       | "reprioritize" ->
-        let* () = require_exact_fields ("urgency" :: common) fields in
+        let* () =
+          require_exact_fields
+            ("expected_revision" :: "urgency" :: common)
+            fields
+        in
+        let* expected_revision = expected_revision fields in
         let* urgency_value = string_field "urgency" fields in
         let* urgency = Keeper_event_queue.urgency_of_string urgency_value in
         Ok
           (Reprioritize
-             { expected_revision; queue_index; urgency })
+             { expected_revision
+             ; queue_index
+             ; source_incarnation
+             ; urgency
+             })
       | value -> Error ("unknown event queue operator action: " ^ value)
 ;;
 
@@ -312,14 +329,15 @@ let handle_post state ~actor request reqd ~keeper_name body =
           ])
     | Ok operation ->
       let config = Mcp_server.workspace_config state in
-      let queue_index, action, operator_operation_id =
+      let queue_index, source_incarnation, action, operator_operation_id =
         match operation with
-        | Cancel { queue_index; operator_operation_id; _ } ->
-          queue_index, "cancel", Some operator_operation_id
-        | Transfer { queue_index; operator_operation_id; _ } ->
-          queue_index, "transfer", Some operator_operation_id
-        | Reprioritize { queue_index; _ } ->
-          queue_index, "reprioritize", None
+        | Cancel { queue_index; source_incarnation; operator_operation_id; _ } ->
+          queue_index, source_incarnation, "cancel", Some operator_operation_id
+        | Transfer
+            { queue_index; source_incarnation; operator_operation_id; _ } ->
+          queue_index, source_incarnation, "transfer", Some operator_operation_id
+        | Reprioritize { queue_index; source_incarnation; _ } ->
+          queue_index, source_incarnation, "reprioritize", None
       in
       let result =
         Execute.run
@@ -359,6 +377,8 @@ let handle_post state ~actor request reqd ~keeper_name body =
                 (([ "keeper_name", `String keeper_name
                   ; "action", `String action
                   ; "queue_index", `Int queue_index
+                  ; ( "source_incarnation"
+                    , `String (Int64.to_string source_incarnation) )
                   ]
                   @ (match operator_operation_id with
                      | Some value ->

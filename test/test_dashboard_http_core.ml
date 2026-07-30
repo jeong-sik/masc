@@ -311,12 +311,15 @@ let test_keeper_chat_recovery_route_is_exact () =
           }
     }
   in
+  let source_selection : Keeper_event_queue_state.pending_selection =
+    { source; admitted_revision = 7L }
+  in
   let pending_json =
     match
       Server_dashboard_http_keeper_event_queue_operator.For_testing.pending_page
         ~after:0
         ~limit:100
-        [ source ]
+        [ source_selection ]
     with
     | [ json ] -> json
     | _ -> fail "event pending projection must return one metadata row"
@@ -328,6 +331,9 @@ let test_keeper_chat_recovery_route_is_exact () =
   check string "event pending projection retains typed payload kind"
     "board_signal"
     (pending_json |> member "payload_kind" |> to_string);
+  check string "event pending projection exposes exact source incarnation"
+    "7"
+    (pending_json |> member "source_incarnation" |> to_string);
   check bool "event pending projection omits raw payload content" false
     (contains_substring (Yojson.Safe.to_string pending_json) sensitive_content);
   check bool "event pending projection has no raw source object" true
@@ -335,15 +341,15 @@ let test_keeper_chat_recovery_route_is_exact () =
   let same_post_id_source : Keeper_event_queue.stimulus =
     { source with urgency = Low; payload = Bootstrap }
   in
-  let duplicate_post_id_queue =
-    Keeper_event_queue.empty
-    |> fun queue -> Keeper_event_queue.enqueue queue source
-    |> fun queue -> Keeper_event_queue.enqueue queue same_post_id_source
+  let selections : Keeper_event_queue_state.pending_selection list =
+    [ source_selection
+    ; { source = same_post_id_source; admitted_revision = 8L }
+    ]
   in
   (match
-     Server_dashboard_http_keeper_event_queue_operator.For_testing.pending_source_at
+     Server_dashboard_http_keeper_event_queue_operator.For_testing.pending_selection_at
        ~queue_index:1
-       duplicate_post_id_queue
+       selections
    with
    | Some selected ->
      check bool
@@ -351,7 +357,10 @@ let test_keeper_chat_recovery_route_is_exact () =
        true
        (Keeper_event_queue.stimulus_identity_equal
           same_post_id_source
-          selected)
+          selected.source);
+     check int64 "event selection retains incarnation authority"
+       8L
+       selected.admitted_revision
    | None ->
      fail "event selection must address duplicate post ids independently");
   let selection_state =
@@ -431,6 +440,10 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
     | Some value -> value
     | None -> fail (label ^ ": missing value")
   in
+  let require_error label = function
+    | Error detail -> detail
+    | Ok _ -> fail (label ^ ": expected error")
+  in
   let make_meta ~name ~trace_id ~nonce =
     match
       Masc_test_deps.meta_of_json_fixture
@@ -470,6 +483,7 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
   in
   let cancelled_source = stimulus "event-operator-cancel" 1.0 in
   let transferred_source = stimulus "event-operator-transfer" 2.0 in
+  let unrelated_source = stimulus "event-operator-unrelated" 3.0 in
   let load_state keeper_name =
     Keeper_event_queue_persistence.load_state_result
       ~base_path
@@ -517,13 +531,13 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
        let cancel_request :
            Server_dashboard_http_keeper_event_queue_operator_execute.request =
          Cancel
-           { expected_revision =
-               Keeper_event_queue_state.revision before_cancel
-           ; queue_index = 0
+           { queue_index = 0
+           ; source_incarnation = cancel_selection.admitted_revision
            ; operator_operation_id = "event-operator-cancel-operation"
            ; reason = "operator cancelled exact source"
            }
        in
+       enqueue unrelated_source;
        let cancelled, cancel_result =
          Server_dashboard_http_keeper_event_queue_operator_execute.run
            ~config
@@ -573,6 +587,25 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
          "cancellation replay uses the durable receipt"
          "already_applied"
          (result_status cancel_replay_result);
+       let conflicting_cancel_request =
+         Cancel
+           { queue_index = 0
+           ; source_incarnation = Int64.succ cancel_selection.admitted_revision
+           ; operator_operation_id = "event-operator-cancel-operation"
+           ; reason = "operator cancelled exact source"
+           }
+       in
+       let conflict_detail =
+         Server_dashboard_http_keeper_event_queue_operator_execute.run
+           ~config
+           ~keeper_name:source_keeper
+           conflicting_cancel_request
+         |> require_error "reject operation replay for another incarnation"
+       in
+       check bool
+         "operation replay rejects another source incarnation"
+         true
+         (contains_substring conflict_detail "operation ID conflicts");
        let before_transfer = load_state source_keeper in
        let transfer_selection =
          Keeper_event_queue_state.pending_selections before_transfer
@@ -582,9 +615,8 @@ let test_event_operator_uses_v14_source_incarnation_and_receipt_replay () =
        let transfer_request :
            Server_dashboard_http_keeper_event_queue_operator_execute.request =
          Transfer
-           { expected_revision =
-               Keeper_event_queue_state.revision before_transfer
-           ; queue_index = 0
+           { queue_index = 0
+           ; source_incarnation = transfer_selection.admitted_revision
            ; operator_operation_id = "event-operator-transfer-operation"
            ; target_keeper
            }

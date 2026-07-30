@@ -1,26 +1,30 @@
 type request =
+  (* Cancellation and transfer target one durable source incarnation, so an
+     unrelated queue revision change must not invalidate them. Reprioritize
+     rewrites queue order and therefore retains the queue-wide CAS revision. *)
   | Cancel of
-      { expected_revision : int64
-      ; queue_index : int
+      { queue_index : int
+      ; source_incarnation : int64
       ; operator_operation_id : string
       ; reason : string
       }
   | Transfer of
-      { expected_revision : int64
-      ; queue_index : int
+      { queue_index : int
+      ; source_incarnation : int64
       ; operator_operation_id : string
       ; target_keeper : string
       }
   | Reprioritize of
       { expected_revision : int64
       ; queue_index : int
+      ; source_incarnation : int64
       ; urgency : Keeper_event_queue.urgency
       }
 
-val pending_source_at :
+val pending_selection_at :
   queue_index:int ->
-  Keeper_event_queue.t ->
-  Keeper_event_queue.stimulus option
+  Keeper_event_queue_state.pending_selection list ->
+  Keeper_event_queue_state.pending_selection option
 
 val pending_selection_at :
   queue_index:int ->

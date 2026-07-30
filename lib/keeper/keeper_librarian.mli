@@ -1,14 +1,23 @@
 (** Pure prompt and output contract for LLM-owned current Memory OS selection.
 
-    The Librarian receives the exact current facts plus a bounded slice of new
-    conversation. It returns existing fact identities to retain and new facts
-    to add. Omitting an existing identity removes that memory. No deterministic
-    ranking, recency rule, byte budget, or migration path participates. *)
+    The Librarian receives the exact current selection plus a bounded slice of
+    new conversation. It returns existing fact identities to retain and new
+    facts to add. Omitting an existing identity removes that memory. No
+    deterministic ranking, recency rule, byte budget, or migration path
+    participates. *)
+
+type current_selection =
+  { summary : string
+  ; facts : Keeper_memory_os_types.fact list
+  ; open_items : string list
+  ; constraints : string list
+  ; preserved_tool_refs : string list
+  }
 
 type input =
   { turn_ref : Ids.Turn_ref.t
   ; generation : int
-  ; current_facts : Keeper_memory_os_types.fact list
+  ; current : current_selection option
   ; messages : Agent_sdk.Types.message list
   }
 

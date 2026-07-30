@@ -88,11 +88,18 @@ let run
         "memory os librarian skipped: current snapshot unavailable: %s"
         detail
     | Ok current ->
-      let current_facts, expected_revision =
+      let current_selection, expected_revision =
         match current with
-        | None -> [], None
+        | None -> None, None
         | Some snapshot ->
-          snapshot.Keeper_memory_os_current.facts, Some snapshot.revision
+          ( Some
+              { Keeper_librarian.summary = snapshot.summary
+              ; facts = snapshot.facts
+              ; open_items = snapshot.open_items
+              ; constraints = snapshot.constraints
+              ; preserved_tool_refs = snapshot.preserved_tool_refs
+              }
+          , Some snapshot.revision )
       in
       let trace_id =
         Keeper_id.Trace_id.to_string meta.runtime.trace_id
@@ -100,7 +107,7 @@ let run
       let librarian_input : Keeper_librarian.input =
         { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
         ; generation
-        ; current_facts
+        ; current = current_selection
         ; messages = librarian_messages
         }
       in

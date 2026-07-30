@@ -23,7 +23,14 @@ let input () : Librarian.input =
         ~trace_id:"trace-selection"
         ~absolute_turn:7
   ; generation = 7
-  ; current_facts = [ current_a; current_b ]
+  ; current =
+      Some
+        { Librarian.summary = "prior summary"
+        ; facts = [ current_a; current_b ]
+        ; open_items = [ "prior open item" ]
+        ; constraints = [ "prior constraint" ]
+        ; preserved_tool_refs = [ "call-prior" ]
+        }
   ; messages =
       [ Agent_sdk.Types.make_message
           ~role:Agent_sdk.Types.User
@@ -144,13 +151,57 @@ let test_strict_output_boundary () =
   | Ok _ -> fail "markdown-fenced output accepted"
 ;;
 
-let test_prompt_contains_exact_current_memory_ids () =
+let test_required_current_metadata_fields_reject_when_missing_or_null () =
+  let remove field =
+    match selection_json () with
+    | `Assoc fields ->
+      `Assoc (List.filter (fun (name, _) -> not (String.equal name field)) fields)
+    | _ -> assert false
+  in
+  let set_null field =
+    match selection_json () with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              if String.equal name field then name, `Null else name, value)
+           fields)
+    | _ -> assert false
+  in
+  List.iter
+    (fun field ->
+       List.iter
+         (fun json ->
+            match parse json with
+            | Error Librarian.Missing_required_fields -> ()
+            | Error error ->
+              failf
+                "wrong missing metadata error for %s: %s"
+                field
+                (Librarian.parse_error_to_string error)
+            | Ok _ -> failf "missing/null metadata field %s accepted" field)
+         [ remove field; set_null field ])
+    [ Librarian.wire_field_open_items
+    ; Librarian.wire_field_constraints
+    ; Librarian.wire_field_preserved_tool_refs
+    ]
+;;
+
+let test_prompt_contains_exact_current_selection () =
   let variables = Librarian.prompt_variables (input ()) in
   let current_memory = List.assoc "current_memory" variables in
   check bool "contains A identity" true
     (String_util.contains_substring current_memory "\"memory_id\": \"id:a\"");
   check bool "contains B identity" true
-    (String_util.contains_substring current_memory "\"memory_id\": \"id:b\"")
+    (String_util.contains_substring current_memory "\"memory_id\": \"id:b\"");
+  check bool "contains summary" true
+    (String_util.contains_substring current_memory "\"summary\": \"prior summary\"");
+  check bool "contains open item" true
+    (String_util.contains_substring current_memory "\"prior open item\"");
+  check bool "contains constraint" true
+    (String_util.contains_substring current_memory "\"prior constraint\"");
+  check bool "contains preserved tool ref" true
+    (String_util.contains_substring current_memory "\"call-prior\"")
 ;;
 
 let test_cadence_fresh_then_periodic () =
@@ -198,8 +249,10 @@ let () =
         ; test_case "omitted/new recreation rejects" `Quick
             test_new_claim_cannot_recreate_omitted_current_identity
         ; test_case "strict output boundary" `Quick test_strict_output_boundary
-        ; test_case "prompt carries exact ids" `Quick
-            test_prompt_contains_exact_current_memory_ids
+        ; test_case "required current metadata fields reject" `Quick
+            test_required_current_metadata_fields_reject_when_missing_or_null
+        ; test_case "prompt carries exact current selection" `Quick
+            test_prompt_contains_exact_current_selection
         ] )
     ; ( "cadence"
       , [ test_case "fresh then periodic" `Quick test_cadence_fresh_then_periodic

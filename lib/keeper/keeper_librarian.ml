@@ -4,10 +4,18 @@ open Keeper_memory_os_types
 
 module Canonical_tool = Agent_sdk.Canonical_tool
 
+type current_selection =
+  { summary : string
+  ; facts : fact list
+  ; open_items : string list
+  ; constraints : string list
+  ; preserved_tool_refs : string list
+  }
+
 type input =
   { turn_ref : Ids.Turn_ref.t
   ; generation : int
-  ; current_facts : fact list
+  ; current : current_selection option
   ; messages : Agent_sdk.Types.message list
   }
 
@@ -108,13 +116,25 @@ let current_fact_json fact =
     ]
 ;;
 
-let format_current_facts_for_prompt facts =
-  `List (List.map current_fact_json facts)
-  |> Yojson.Safe.pretty_to_string
+let current_selection_json current =
+  `Assoc
+    [ wire_field_summary, `String current.summary
+    ; "facts", `List (List.map current_fact_json current.facts)
+    ; wire_field_open_items, `List (List.map (fun value -> `String value) current.open_items)
+    ; wire_field_constraints, `List (List.map (fun value -> `String value) current.constraints)
+    ; ( wire_field_preserved_tool_refs
+      , `List (List.map (fun value -> `String value) current.preserved_tool_refs) )
+    ]
+;;
+
+let format_current_selection_for_prompt = function
+  | None -> Yojson.Safe.pretty_to_string `Null
+  | Some current ->
+    current_selection_json current |> Yojson.Safe.pretty_to_string
 ;;
 
 let prompt_variables (inp : input) : (string * string) list =
-  [ "current_memory", format_current_facts_for_prompt inp.current_facts
+  [ "current_memory", format_current_selection_for_prompt inp.current
   ; ( "conversation_history"
     , format_messages_for_prompt inp.messages )
   ]
@@ -147,12 +167,6 @@ let string_list_field key fields =
   | Some (`List items) -> traverse (function `String s -> trim_nonempty s | _ -> None) items
   | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _)
   | None -> None
-;;
-
-let string_list_field_or_empty key fields =
-  match List.assoc_opt key fields with
-  | None | Some `Null -> Some []
-  | Some _ -> string_list_field key fields
 ;;
 
 let field_allowed ~allowed field =
@@ -307,6 +321,12 @@ let current_facts_by_id facts =
     facts
 ;;
 
+let current_facts inp =
+  match inp.current with
+  | None -> []
+  | Some current -> current.facts
+;;
+
 let materialize_facts ~current_facts ~retained_claim_ids ~new_claims =
   let open Result.Syntax in
   let current_by_id = current_facts_by_id current_facts in
@@ -363,9 +383,9 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
           string_field wire_field_summary fields
           , string_list_field wire_field_retained_claim_ids fields
           , List.assoc_opt wire_field_new_claims fields
-          , string_list_field_or_empty wire_field_open_items fields
-          , string_list_field_or_empty wire_field_constraints fields
-          , string_list_field_or_empty wire_field_preserved_tool_refs fields
+          , string_list_field wire_field_open_items fields
+          , string_list_field wire_field_constraints fields
+          , string_list_field wire_field_preserved_tool_refs fields
         with
         | ( Some summary
           , Some retained_claim_ids
@@ -387,7 +407,7 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
               | Some new_claims ->
                 (match
                    materialize_facts
-                     ~current_facts:inp.current_facts
+                     ~current_facts:(current_facts inp)
                      ~retained_claim_ids
                      ~new_claims
                  with

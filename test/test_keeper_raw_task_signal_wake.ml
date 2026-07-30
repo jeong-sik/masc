@@ -11,7 +11,6 @@ let base_observation : WO.world_observation =
   ; unclaimed_task_count = 0
   ; claimable_task_count = 0
   ; failed_task_count = 0
-  ; pending_verification_count = 0
   ; scheduled_automation = WO.empty_scheduled_automation_observation
   ; backlog_updated_since_last_scheduled_autonomous = false
   ; running_keeper_fiber_count = 1
@@ -30,10 +29,7 @@ let test_task_signals_reach_the_keeper_without_local_tool_semantics () =
     { base_observation with claimable_task_count = 1 };
   assert_wakes
     "failed task is an observation"
-    { base_observation with failed_task_count = 1 };
-  assert_wakes
-    "pending verification is an observation"
-    { base_observation with pending_verification_count = 1 }
+    { base_observation with failed_task_count = 1 }
 ;;
 
 let () =

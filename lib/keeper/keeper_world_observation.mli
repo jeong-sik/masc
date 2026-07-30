@@ -121,9 +121,6 @@ type world_observation = {
   failed_task_count : int;
   (** Number of failed/cancelled tasks in the workspace backlog. *)
 
-  pending_verification_count : int;
-  (** Number of tasks awaiting cross-agent verification. *)
-
   scheduled_automation : scheduled_automation_observation;
   (** Durable schedule-store state that needs keeper attention, such as due
       requests ready to dispatch. *)

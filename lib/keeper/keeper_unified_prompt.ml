@@ -650,7 +650,6 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path
         observation.unclaimed_task_count > 0
         || observation.claimable_task_count > 0
         || observation.failed_task_count > 0
-        || observation.pending_verification_count > 0
         || observation.running_keeper_fiber_count > 0
       then (
         let ubuf = Buffer.create 256 in
@@ -683,11 +682,6 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path
             (Printf.sprintf
                "- Failed tasks: %d\n"
                observation.failed_task_count);
-        if observation.pending_verification_count > 0 then
-          Buffer.add_string ubuf
-            (Printf.sprintf
-               "- Tasks awaiting verification: %d\n"
-               observation.pending_verification_count);
         Buffer.add_string ubuf
           (Printf.sprintf
              "- Running keeper fibers: %d\n"

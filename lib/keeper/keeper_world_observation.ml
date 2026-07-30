@@ -95,7 +95,6 @@ type world_observation =
   ; unclaimed_task_count : int
   ; claimable_task_count : int
   ; failed_task_count : int
-  ; pending_verification_count : int
   ; scheduled_automation : scheduled_automation_observation
   ; backlog_updated_since_last_scheduled_autonomous : bool
   ; running_keeper_fiber_count : int
@@ -1073,7 +1072,6 @@ let observe
   let ( unclaimed_task_count
       , claimable_task_count
       , failed_task_count
-      , pending_verification_count
       , backlog_updated_since_last_scheduled_autonomous )
     =
     read_backlog_counts ~config ~meta
@@ -1105,7 +1103,6 @@ let observe
   ; unclaimed_task_count
   ; claimable_task_count
   ; failed_task_count
-  ; pending_verification_count
   ; scheduled_automation
   ; backlog_updated_since_last_scheduled_autonomous
   ; running_keeper_fiber_count
@@ -1121,7 +1118,6 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   let ( unclaimed_task_count
       , claimable_task_count
       , failed_task_count
-      , pending_verification_count
       , backlog_updated_since_last_scheduled_autonomous )
     =
     read_backlog_counts ~config ~meta
@@ -1142,7 +1138,6 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; unclaimed_task_count
   ; claimable_task_count
   ; failed_task_count
-  ; pending_verification_count
   ; scheduled_automation
   ; backlog_updated_since_last_scheduled_autonomous
   ; running_keeper_fiber_count = count_running_keeper_fibers ~config
@@ -1157,15 +1152,16 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
    a signal before the Keeper can observe it. *)
 let claimable_drives_wake claimable_task_count = claimable_task_count > 0
 let failed_drives_wake failed_task_count = failed_task_count > 0
-let verification_drives_wake pending_verification_count =
-  pending_verification_count > 0
-
+(* An AwaitingVerification obligation is NOT a keeper wake signal: the verifier
+   is not a Keeper. The completion authority (HITL confirmation or fusion judge)
+   decides it out of band, so surfacing it here would hand keepers work that is
+   not theirs — which is how a keeper named "verifier" came to hold approval
+   authority in the first place. *)
 let actionable_signal_present (observation : world_observation) =
   observation.pending_messages <> []
   || observation.pending_board_events <> []
   || claimable_drives_wake observation.claimable_task_count
   || failed_drives_wake observation.failed_task_count
-  || verification_drives_wake observation.pending_verification_count
   || observation.scheduled_automation.due_ready_count > 0
 ;;
 

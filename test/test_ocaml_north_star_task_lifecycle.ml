@@ -79,31 +79,13 @@ let expect_invalid_transition label = function
   | Ok msg -> fail (label ^ ": unexpectedly succeeded: " ^ msg)
 ;;
 
+(* A plain pass-through now. This wrapper used to route [Done_action] through
+   submit -> peer-keeper claim -> approve, because completion of a claimed task
+   went via a verifier keeper. Neither hop exists: no agent claims an obligation
+   and no agent issues a verdict, so the producer's own [Done_action] is the
+   agent-side completion. *)
 let transition config ~agent_name ~task_id ~action ?(notes = "") ?(reason = "") () =
-  match action with
-  | Masc_domain.Done_action ->
-    (match (task config task_id).task_status with
-     | Masc_domain.Claimed _ | Masc_domain.InProgress _ ->
-       (match
-          Workspace.transition_task_r config ~agent_name ~task_id
-            ~action:Masc_domain.Submit_for_verification ~notes ()
-        with
-        | Error _ as error -> error
-        | Ok _ ->
-          let verifier = "admin-board-keeper" in
-          (match Workspace.claim_task_r config ~agent_name:verifier ~task_id () with
-           | Error _ as error -> error
-           | Ok _ ->
-             Workspace.transition_task_r config ~agent_name:verifier ~task_id
-               ~action:Masc_domain.Approve_verification
-               ~notes:("verified: " ^ notes)
-               ()))
-     | Masc_domain.Todo
-     | Masc_domain.AwaitingVerification _
-     | Masc_domain.Done _
-     | Masc_domain.Cancelled _ ->
-       Workspace.transition_task_r config ~agent_name ~task_id ~action ~notes ~reason ())
-  | _ -> Workspace.transition_task_r config ~agent_name ~task_id ~action ~notes ~reason ()
+  Workspace.transition_task_r config ~agent_name ~task_id ~action ~notes ~reason ()
 ;;
 
 let test_claim_start_done_path () =

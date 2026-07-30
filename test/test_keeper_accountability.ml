@@ -179,26 +179,17 @@ let test_agent_reputation_observes_unsupported_claims () =
       ignore
         (Workspace.claim_task config ~agent_name:"keeper-rep-agent"
            ~task_id:"task-001");
+      (* Producer completion. The submit-then-peer-approve route is gone: no agent
+         claims an obligation and no agent issues a verdict. *)
       (match
          Workspace.transition_task_r config ~agent_name:"keeper-rep-agent"
-           ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification
+           ~task_id:"task-001" ~action:Masc_domain.Done_action
            ~notes:"accountability task completion evidence"
            ()
        with
       | Ok _ -> ()
       | Error err ->
-          Alcotest.failf "verification submission failed: %s"
-            (Masc_domain.masc_error_to_string err));
-      ignore
-        (Workspace.claim_task_r config ~agent_name:"admin-board-keeper"
-           ~task_id:"task-001" ());
-      (match
-         Workspace.transition_task_r config ~agent_name:"admin-board-keeper"
-           ~task_id:"task-001" ~action:Masc_domain.Approve_verification ()
-       with
-      | Ok _ -> ()
-      | Error err ->
-          Alcotest.failf "approve transition failed: %s"
+          Alcotest.failf "producer completion failed: %s"
             (Masc_domain.masc_error_to_string err));
       let created_at =
         iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))

@@ -435,33 +435,15 @@ and handle_transition ~tool_name ~start_time ctx args =
               | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
               | Masc_domain.Done _ | Masc_domain.Cancelled _ -> ())
            | None -> ())
-        | Masc_domain.Approve_verification ->
-          (match verification_id_before with
-           | None ->
-             task_log_warn ~task_id
-               "approve_verification action for task %s without verification_id_before (skipping notify)"
-               task_id
-           | Some verification_id ->
-             (Atomic.get Workspace_hooks.verification_notify_verdict_fn)
-               ~task_id ~verifier:ctx.agent_name ~verification_id
-               ~decision:(`Approve notes))
-        | Masc_domain.Reject_verification ->
-          let reason = if not (String.equal notes "") then notes else reason in
-          (match verification_id_before with
-           | None ->
-             task_log_warn ~task_id
-               "reject_verification action for task %s without verification_id_before (skipping notify)"
-               task_id
-           | Some verification_id ->
-             (Atomic.get Workspace_hooks.verification_notify_verdict_fn)
-               ~task_id ~verifier:ctx.agent_name ~verification_id
-               ~decision:(`Reject reason))
+        (* No verdict notification from this path: a verdict is not an agent
+           action, so the agent transition surface has no approve/reject to
+           report. The authority-side verdict notifier is wired separately. *)
         | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel | Masc_domain.Release -> ())
    | Error err ->
        log_task_transition_failed ~agent_name:ctx.agent_name err);
   (* Record metrics *)
   (match result, action with
-   | Ok _, (Masc_domain.Done_action | Masc_domain.Approve_verification) ->
+   | Ok _, Masc_domain.Done_action ->
        (Atomic.get Workspace_hooks.record_task_metric_fn)
          ctx.config
          ~agent_id:completion_owner

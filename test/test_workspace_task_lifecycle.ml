@@ -36,13 +36,11 @@ let awaiting =
     }
 ;;
 
-let assigned verifier =
-  D.AwaitingVerification
-    { assignee = owner
-    ; submitted_at = now
-    ; verification_id = "vrf-1"
-    ; phase = D.Verifier_assigned { verifier }
-    }
+let contains ~needle haystack =
+  let nl = String.length needle
+  and hl = String.length haystack in
+  let rec go i = i + nl <= hl && (String.equal (String.sub haystack i nl) needle || go (i + 1)) in
+  nl = 0 || go 0
 ;;
 
 let expect_error expected = function
@@ -76,61 +74,67 @@ let test_default_done_is_terminal () =
   | Ok _ | Error _ -> failwith "advisory/default owner completion must be terminal"
 ;;
 
-let test_verdict_requires_assigned_winner () =
-  decide
-    ~same_agent:false
-    ~task_status:awaiting
-    ~action:D.Approve_verification
-    ()
-  |> expect_error L.Verification_claim_required;
-  decide
-    ~same_agent:false
-    ~task_status:(assigned "verifier")
-    ~action:D.Approve_verification
-    ()
-  |> expect_error (L.Verification_assigned_to "verifier");
-  (match
-     decide ~same_agent:true
-       ~task_status:(assigned "verifier") ~action:D.Approve_verification ()
-   with
-   | Ok { new_status = D.Done _; _ } -> ()
-   | Ok _ | Error _ -> failwith "assigned winner must be able to approve");
-  match
-    decide ~same_agent:true
-      ~task_status:(assigned "verifier") ~action:D.Reject_verification ()
-  with
-  | Ok { new_status = D.InProgress { assignee; _ }; _ }
-    when String.equal assignee owner -> ()
-  | Ok _ | Error _ -> failwith "assigned winner reject must return task to producer"
+(* A verdict is not an agent action. There is no [task_action] constructor for it,
+   so the string surface must refuse "approve"/"reject" by naming the authority
+   rather than reporting an unknown action — an agent that asks is told why. *)
+let test_verdict_is_not_an_agent_action () =
+  List.iter
+    (fun verb ->
+       match D.task_action_of_string verb with
+       | Ok _ -> failwith (verb ^ " must not parse as an agent action")
+       | Error msg ->
+         if not (contains ~needle:"completion authority" msg)
+         then failwith (verb ^ " rejection must name the completion authority"))
+    [ "approve"; "reject" ]
 ;;
 
-let test_verdict_requires_justification_before_commit () =
-  decide
-    ~notes:"  "
-    ~same_agent:true
-    ~task_status:(assigned "verifier")
-    ~action:D.Approve_verification
-    ()
-  |> expect_error L.Verification_approval_notes_required;
-  decide
-    ~notes:""
-    ~reason:" "
-    ~same_agent:true
-    ~task_status:(assigned "verifier")
-    ~action:D.Reject_verification
-    ()
-  |> expect_error L.Verification_rejection_reason_required;
+(* The verdict path requires a [completion_authority]. Both constructors take an
+   identity no agent can mint, so this test is also the compile-time proof: there
+   is no way to write this call with an agent name. *)
+let test_verdict_requires_authority_and_reason () =
+  let operator = D.Human_operator { operator_id = "op-1" } in
+  (match
+     L.decide_verdict
+       ~authority:operator
+       ~verdict:D.Verdict_approved
+       ~task_id:"task-1"
+       ~task_status:awaiting
+       ~now
+       ~notes:"evidence at /tmp/proof"
+   with
+   | Ok { decision = { new_status = D.Done { assignee; _ }; _ }; authority_kind; _ }
+     when String.equal assignee owner && String.equal authority_kind "human_operator" -> ()
+   | Ok _ | Error _ -> failwith "operator approval must complete the task");
+  (match
+     L.decide_verdict
+       ~authority:operator
+       ~verdict:(D.Verdict_rejected { reason = " " })
+       ~task_id:"task-1"
+       ~task_status:awaiting
+       ~now
+       ~notes:""
+   with
+   | Error L.Verdict_rejection_reason_required -> ()
+   | Ok _ | Error _ -> failwith "a blank rejection reason must be refused");
   match
-    decide
+    L.decide_verdict
+      ~authority:(D.Auto_judge { judge_run_id = "fusion-run-9" })
+      ~verdict:(D.Verdict_rejected { reason = "missing test evidence" })
+      ~task_id:"task-1"
+      ~task_status:awaiting
+      ~now
       ~notes:""
-      ~reason:"missing test evidence"
-      ~same_agent:true
-      ~task_status:(assigned "verifier")
-      ~action:D.Reject_verification
-      ()
   with
-  | Ok { new_status = D.InProgress _; _ } -> ()
-  | Ok _ | Error _ -> failwith "non-empty rejection reason must be accepted"
+  | Ok { decision = { new_status = D.InProgress { assignee; _ }; _ }; authority_kind; _ }
+    when String.equal assignee owner && String.equal authority_kind "auto_judge" -> ()
+  | Ok _ | Error _ -> failwith "judge rejection must return the task to its producer"
+;;
+
+(* Claiming an obligation used to bind the claimant as its verifier, so whichever
+   keeper won the race held approval authority. Nobody claims it now. *)
+let test_claim_on_awaiting_is_refused () =
+  decide ~same_agent:false ~task_status:awaiting ~action:D.Claim ()
+  |> expect_error L.Verification_pending_verdict
 ;;
 
 let task_with_status task_status : D.task =
@@ -151,40 +155,27 @@ let task_with_status task_status : D.task =
   }
 ;;
 
-let test_awaiting_claim_has_one_non_producer_winner () =
-  let task : D.task =
-    task_with_status awaiting
-  in
-  (match L.resolve_claim ~same_actor:(String.equal owner) ~agent_name:owner ~now task with
-   | L.Self_verification -> ()
-   | _ -> failwith "producer must not claim its own verification");
-  let won =
-    match L.resolve_claim ~same_actor:(String.equal "verifier") ~agent_name:"verifier" ~now task with
-    | L.Verifier_claim
-        (D.AwaitingVerification
-          ({ phase = D.Verifier_assigned { verifier = "verifier" }; _ } as status)) ->
-      D.AwaitingVerification status
-    | _ -> failwith "peer verifier must claim the awaiting obligation"
-  in
-  (match
-     L.resolve_claim ~same_actor:(String.equal "verifier") ~agent_name:"verifier" ~now
-       (task_with_status won)
-   with
-   | L.Self_owned -> ()
-   | _ -> failwith "winner must retain its assignment");
-  match
-    L.resolve_claim ~same_actor:(String.equal "other") ~agent_name:"other" ~now
-      (task_with_status won)
-  with
-  | L.Held_by_other "verifier" -> ()
-  | _ -> failwith "another verifier must not steal the assignment"
+(* Inverts the removed authority-by-claim behaviour. Previously the producer was
+   refused and any peer that claimed became the verifier; now no actor at all can
+   claim an obligation that is awaiting a verdict. *)
+let test_awaiting_is_claimable_by_nobody () =
+  let task = task_with_status awaiting in
+  List.iter
+    (fun actor ->
+       match L.resolve_claim ~same_actor:(String.equal actor) ~agent_name:actor ~now task with
+       | L.Held_pending_verdict { verification_id }
+         when String.equal verification_id "vrf-1" -> ()
+       | _ ->
+         failwith (actor ^ " must not claim an obligation awaiting a completion verdict"))
+    [ owner; "verifier"; "other" ]
 ;;
 
 let () =
   test_done_requires_verification_submission ();
   test_claimed_done_requires_verification_submission ();
   test_default_done_is_terminal ();
-  test_verdict_requires_assigned_winner ();
-  test_verdict_requires_justification_before_commit ();
-  test_awaiting_claim_has_one_non_producer_winner ();
+  test_verdict_is_not_an_agent_action ();
+  test_verdict_requires_authority_and_reason ();
+  test_claim_on_awaiting_is_refused ();
+  test_awaiting_is_claimable_by_nobody ();
   Printf.printf "workspace_task_lifecycle: all tests passed\n%!"

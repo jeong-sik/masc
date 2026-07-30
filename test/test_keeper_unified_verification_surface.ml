@@ -529,12 +529,8 @@ let () =
     [
       ( "verification_surface",
         [
-          test_case "affordance: keeper sees task_verify when pending>0" `Quick
-            test_task_verify_affordance_for_keeper;
-          test_case "affordance: verifier-tagged keeper also sees task_verify"
-            `Quick test_task_verify_affordance_for_verifier_tag;
-          test_case "affordance: no meta keeps legacy surface-to-all" `Quick
-            test_task_verify_affordance_without_meta;
+          test_case "affordance: no keeper is offered task_verify" `Quick
+            test_no_task_verify_affordance_for_any_keeper;
           test_case "affordance: Board activity exposes curation without threshold"
             `Quick test_board_activity_exposes_curation_affordance_without_threshold;
           test_case "affordance: no Board activity has no curation affordance" `Quick
@@ -556,11 +552,8 @@ let () =
             test_backlog_trigger_split;
           test_case "trigger: unclaimable backlog is not claimable work" `Quick
             test_unclaimable_backlog_is_not_a_claim_trigger;
-          test_case "trigger: keeper sees pending_verification" `Quick
-            test_pending_verification_trigger_for_keeper;
-          test_case
-            "trigger: verifier-tagged keeper also sees pending_verification"
-            `Quick test_pending_verification_trigger_for_verifier_tag;
+          test_case "trigger: no keeper wakes on pending_verification" `Quick
+            test_no_pending_verification_trigger_for_any_keeper;
           test_case
             "trigger: scheduled automation attention is observable"
             `Quick test_scheduled_automation_triggers_and_affordances;

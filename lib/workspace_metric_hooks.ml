@@ -157,9 +157,7 @@ let observe_task_transition_event
          let duration_ms = Safe_ops.json_int ~default:0 "duration_ms" details in
          Telemetry_eio.track_task_completed config ~task_id ~duration_ms ~success:false;
          Otel_metric_store.record_task_failed ()
-       | Masc_domain.Release
-       | Masc_domain.Submit_for_verification
-       | Masc_domain.Reject_verification -> ())
+       | Masc_domain.Release | Masc_domain.Submit_for_verification -> ())
    with
    | Stdlib.Effect.Unhandled _ as exn ->
      warn_telemetry_drop ~event:(Task_transition transition) exn);

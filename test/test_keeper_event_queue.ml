@@ -145,9 +145,6 @@ let with_strict_executor f =
     (Domain_pool.executor_pool pool)
     f
 
-(* [claim_single] and [settle_and_project] built and settled leases for the
-   blocks removed above. *)
-
 let project_transition_canonically ~base_path ~keeper_name ~transition_id:_ =
   with_strict_executor
   @@ fun () ->
@@ -982,6 +979,73 @@ let () =
         (load_queue_state ~base_path ~keeper_name:from_keeper
          |> Keeper_event_queue_state.transition_outbox
          |> List.length));
+
+  (* --- a stale recovery worker cannot retire a newer transfer after it
+         projected the target for an earlier transition. --- *)
+  let base_path = temp_dir "keeper-event-queue-transfer-recovery-stale-worker" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let from_keeper = "keeper-transfer-recovery-stale-source" in
+      let to_keeper = "keeper-transfer-recovery-stale-target" in
+      stage_transfer
+        ~base_path
+        ~from_keeper
+        ~to_keeper
+        ~source:board_stim
+        ~owner_nonce:31
+        ~operation_id:"recover-transfer-first";
+      let first_transition_id =
+        match
+          load_queue_state ~base_path ~keeper_name:from_keeper
+          |> Keeper_event_queue_state.transition_outbox
+        with
+        | [ entry ] -> entry.receipt.transition_id
+        | _ -> Alcotest.fail "first transfer did not stage one outbox entry"
+      in
+      (match
+         Masc.Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+           ~base_path
+           ~keeper_name:from_keeper
+           ~expected_transition_id:first_transition_id
+       with
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail);
+      stage_transfer
+        ~base_path
+        ~from_keeper
+        ~to_keeper
+        ~source:bootstrap_stim
+        ~owner_nonce:31
+        ~operation_id:"recover-transfer-second";
+      let second_transition_id =
+        match
+          load_queue_state ~base_path ~keeper_name:from_keeper
+          |> Keeper_event_queue_state.transition_outbox
+        with
+        | [ entry ] -> entry.receipt.transition_id
+        | _ -> Alcotest.fail "second transfer did not stage one outbox entry"
+      in
+      (match
+         Masc.Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+           ~base_path
+           ~keeper_name:from_keeper
+           ~expected_transition_id:first_transition_id
+       with
+       | Error _ -> ()
+       | Ok () -> Alcotest.fail "stale recovery retired the newer transfer");
+      let retained_transition_id =
+        match
+          load_queue_state ~base_path ~keeper_name:from_keeper
+          |> Keeper_event_queue_state.transition_outbox
+        with
+        | [ entry ] -> entry.receipt.transition_id
+        | _ -> Alcotest.fail "stale recovery did not preserve one outbox entry"
+      in
+      Alcotest.(check string)
+        "newer transfer remains authoritative"
+        second_transition_id
+        retained_transition_id);
 
   (* --- current-only hard cut: the retired v12 filename is not a read,
          migration, or overwrite source for the v14 queue. --- *)

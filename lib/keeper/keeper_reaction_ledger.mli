@@ -68,13 +68,18 @@ val record_event_queue_turn_started :
     reaction kind so callers cannot manufacture transition evidence. *)
 
 val project_event_queue_transition_outbox_result :
-  base_path:string -> keeper_name:string -> (unit, string) result
+  base_path:string ->
+  keeper_name:string ->
+  expected_transition_id:string ->
+  (unit, string) result
 (** Read the sole durable event-queue transition outbox, append every source in
-    exact order, then retire that same transition. Callers supply no receipt,
-    stimulus, source index, or outbox record, so transition evidence can only
-    originate from the event-queue SSOT. Persistence failures remain explicit
-    [Error]. Retries are logically idempotent through deterministic per-source
-    event ids. *)
+    exact order, then retire that same transition. [expected_transition_id]
+    binds the outbox read to the transfer whose target the recovery caller
+    already projected; a newer transition remains authoritative. Callers
+    supply no receipt, stimulus, source index, or outbox record, so transition
+    evidence can only originate from the event-queue SSOT. Persistence failures
+    remain explicit [Error]. Retries are logically idempotent through
+    deterministic per-source event ids. *)
 
 type event_queue_reaction_evidence =
   { keeper_name : string

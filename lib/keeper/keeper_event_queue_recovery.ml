@@ -191,6 +191,7 @@ let project_claimed_owner owner =
              Keeper_reaction_ledger.project_event_queue_transition_outbox_result
                ~base_path
                ~keeper_name
+               ~expected_transition_id:entry.receipt.transition_id
            with
            | Ok () -> Ok Transition_converged
            | Error detail -> Error (Ledger_projection_failed detail))))

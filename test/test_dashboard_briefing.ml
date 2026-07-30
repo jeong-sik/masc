@@ -352,20 +352,21 @@ let test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidenc
       check bool "no observed tools without evidence" true
         ((brief |> member "latest_tool_names" |> to_list) = []))
 
-let test_dashboard_keeper_unknown_context_requires_attention () =
+let test_dashboard_keeper_unknown_context_is_informational () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       with_test_env @@ fun ~clock:_ ~sw:_ ->
       let config = Workspace_utils.default_config dir in
-      let keeper name context_ratio =
+      let now_ts = Unix.gettimeofday () in
+      let keeper ~updated_at name context_ratio =
         `Assoc
           [
             ("name", `String name);
             ("agent_name", `String name);
             ("status", `String "active");
-            ("updated_at", `String (Masc_domain.now_iso ()));
+            ("updated_at", `String updated_at);
             ("context_ratio", context_ratio);
             ( "context_metrics_unavailable",
               match context_ratio with
@@ -380,28 +381,40 @@ let test_dashboard_keeper_unknown_context_requires_attention () =
             ("turn_count", `Int 1);
           ]
       in
-      let unknown = keeper "unknown-context" `Null in
-      let observed = keeper "observed-context" (`Float 0.1) in
+      let unknown =
+        keeper
+          ~updated_at:(Masc_domain.iso8601_of_unix_seconds (now_ts -. 1.0))
+          "unknown-context" `Null
+      in
+      let observed =
+        keeper
+          ~updated_at:(Masc_domain.iso8601_of_unix_seconds now_ts)
+          "observed-context" (`Float 0.1)
+      in
       let open Yojson.Safe.Util in
       let briefs =
         Dashboard_briefing_assembly.build_keeper_briefs config [ observed; unknown ]
       in
-      check string "unknown context is ordered as attention" "unknown-context"
+      check string "missing context does not add pressure" "observed-context"
         (briefs |> List.hd |> member "name" |> to_string);
+      let unknown_brief =
+        briefs
+        |> List.find (fun row ->
+               row |> member "name" |> to_string = "unknown-context")
+      in
       check string "brief preserves unavailable context kind" "not_observed"
-        (briefs
-         |> List.hd
+        (unknown_brief
          |> member "context_metrics_unavailable"
          |> member "kind"
          |> to_string);
       let continuity =
         Dashboard_execution_builders.build_continuity_briefs
-          ~now_ts:(Unix.gettimeofday ()) [ unknown ] []
+          ~now_ts [ unknown ] []
         |> List.hd
       in
-      check string "unknown context cannot be healthy" "warning"
+      check string "missing context does not downgrade healthy activity" "healthy"
         (continuity.json |> member "state" |> to_string);
-      check string "unknown context has an explicit note" "컨텍스트 측정값 없음"
+      check string "health note follows remaining predicates" "정상 동작 중"
         (continuity.json |> member "note" |> to_string);
       check string "continuity preserves unavailable context reason"
         "context_measurement_missing"
@@ -454,7 +467,7 @@ let () =
             test_dashboard_briefing_http_cache_isolation;
           Alcotest.test_case "keeper brief keeps in-band tools without evidence" `Quick
             test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidence;
-          Alcotest.test_case "unknown keeper context requires attention" `Quick
-            test_dashboard_keeper_unknown_context_requires_attention;
+          Alcotest.test_case "unknown keeper context is informational" `Quick
+            test_dashboard_keeper_unknown_context_is_informational;
         ] );
     ]

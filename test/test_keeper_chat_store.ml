@@ -358,6 +358,59 @@ let test_recent_direct_context_omits_transport_failure_as_self_reply () =
       Alcotest.(check bool) "failure text is not a self utterance" false
         (contains_substring rendered "Keeper request failed"))
 
+let test_recent_direct_context_pages_past_autonomous_activity () =
+  let base_dir = temp_base_path "keeper-chat-recent-autonomous-page" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-recent-autonomous-page" in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"remember this direct question"
+        ~user_attachments:[]
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~assistant_content:"remember this direct answer"
+        ();
+      for absolute_turn = 1 to 105 do
+        let turn_ref =
+          Ids.Turn_ref.make
+            ~trace_id:"trace-autonomous-page"
+            ~absolute_turn
+        in
+        let delivery_key =
+          Keeper_chat_delivery_identity.Autonomous_turn turn_ref
+        in
+        match
+          K.append_assistant_message_once ~base_dir ~keeper_name ~delivery_key
+            ~content:(Printf.sprintf "autonomous activity %d" absolute_turn)
+            ~surface:Masc.Surface_ref.Agent
+            ~assistant_kind:K.Row_kind.Autonomous_activity
+            ~turn_ref
+            ()
+        with
+        | Ok (K.Appended _) -> ()
+        | Ok (K.Already_present _) ->
+          Alcotest.fail "unique autonomous turn unexpectedly already present"
+        | Error detail -> Alcotest.fail detail
+      done;
+      let config = Masc.Workspace.default_config base_dir in
+      let meta = make_meta keeper_name in
+      let lines =
+        MS.collect_recent_direct_conversation
+          ~limit:2
+          ~config
+          ~meta
+          ()
+      in
+      Alcotest.(check (list string))
+        "autonomous rows do not consume the direct-context window"
+        [ "user"; "assistant" ]
+        (recent_roles lines);
+      let rendered = MS.render_recent_direct_conversation_context lines in
+      Alcotest.(check bool) "older direct question remains visible" true
+        (contains_substring rendered "remember this direct question");
+      Alcotest.(check bool) "older direct answer remains visible" true
+        (contains_substring rendered "remember this direct answer"))
+
 let test_recent_direct_context_omits_voice_audio_self_echo () =
   let base_dir = temp_base_path "keeper-chat-recent-voice" in
   Fun.protect
@@ -2208,6 +2261,8 @@ let () =
             test_recent_direct_context_renders_prior_reply_and_tool_evidence;
           Alcotest.test_case "recent context omits transport failure as reply" `Quick
             test_recent_direct_context_omits_transport_failure_as_self_reply;
+          Alcotest.test_case "recent context pages past autonomous activity"
+            `Quick test_recent_direct_context_pages_past_autonomous_activity;
           Alcotest.test_case "recent context omits voice audio self echo" `Quick
             test_recent_direct_context_omits_voice_audio_self_echo;
           Alcotest.test_case "recent context is owner-direct only" `Quick

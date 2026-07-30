@@ -432,62 +432,32 @@ const QUEUED_KEEPER_REQUEST_LOST_MESSAGE =
   '서버 재시작으로 대기 중이던 요청을 찾을 수 없습니다. 메시지를 다시 보내주세요.'
 const PENDING_KEEPER_CHAT_RESUME_FAILED_MESSAGE =
   '응답을 확인할 수 없어 메시지 복구를 중단했습니다. 다시 보내주세요.'
-const STREAM_FAILURE_HISTORY_SKEW_MS = 30_000
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-function entryTimeMs(entry: KeeperConversationEntry): number | null {
-  if (!entry.timestamp) return null
-  const ms = Date.parse(entry.timestamp)
-  return Number.isFinite(ms) ? ms : null
-}
-
-function hasServerAssistantAfterLocalMessage(
+function hasServerAssistantForRequest(
   entries: readonly KeeperConversationEntry[],
-  message: string,
-  sentAtMs: number | null,
+  requestId: string,
 ): boolean {
-  const expectedText = message.trim()
-  if (!expectedText) return false
-  let matchedUser = false
-
-  for (const entry of entries) {
-    const tsMs = entryTimeMs(entry)
-    if (
-      sentAtMs !== null
-      && tsMs !== null
-      && tsMs < sentAtMs - STREAM_FAILURE_HISTORY_SKEW_MS
-    ) {
-      continue
-    }
-
-    if (entry.role === 'user' && entry.text.trim() === expectedText) {
-      matchedUser = true
-      continue
-    }
-
-    if (matchedUser && entry.role === 'assistant' && entry.text.trim() !== '') {
-      return true
-    }
-  }
-
-  return false
+  const expectedRequestId = requestId.trim()
+  return expectedRequestId !== '' && entries.some(entry => (
+    entry.role === 'assistant'
+    && entry.requestId?.trim() === expectedRequestId
+  ))
 }
 
 async function reconcileStreamFailureFromServerHistory(
   keeperName: string,
-  message: string,
+  requestId: string | null,
   localUserId: string,
   localAssistantId: string,
 ): Promise<boolean> {
-  const localUser = (keeperThreads.value[keeperName] ?? [])
-    .find(entry => entry.id === localUserId) ?? null
-  const sentAtMs = localUser ? entryTimeMs(localUser) : null
+  if (!requestId) return false
   const history = await fetchKeeperChatHistory(keeperName)
   const historyEntries = chatHistoryEntriesFromRest(keeperName, history)
-  if (!hasServerAssistantAfterLocalMessage(historyEntries, message, sentAtMs)) {
+  if (!hasServerAssistantForRequest(historyEntries, requestId)) {
     return false
   }
 
@@ -1840,11 +1810,15 @@ export async function sendKeeperThreadMessage(
     try {
       const reconciled = await reconcileStreamFailureFromServerHistory(
         keeperName,
-        message,
+        requestId,
         localId,
         assistantId,
       )
       if (reconciled) {
+        if (requestId) {
+          removePendingKeeperChatRequest(requestId)
+          releaseActiveStreamRequestId(requestId)
+        }
         setRecordValue(keeperActionErrors, keeperName, null)
         return
       }

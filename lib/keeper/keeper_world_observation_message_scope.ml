@@ -170,14 +170,31 @@ let recent_direct_conversation_of_messages
 ;;
 
 let collect_recent_direct_conversation
-      ?limit
+      ?(limit = default_recent_direct_limit)
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ()
   : recent_direct_line list
   =
-  Keeper_chat_store.load ~base_dir:config.base_path ~keeper_name:meta.name
-  |> recent_direct_conversation_of_messages ?limit
+  let rec collect before newer_lines =
+    let page =
+      Keeper_chat_store.load_page
+        ~base_dir:config.base_path
+        ~keeper_name:meta.name
+        ?before
+        ()
+    in
+    let page_lines =
+      recent_direct_conversation_of_messages ~limit page.messages
+    in
+    let lines = take_last limit (page_lines @ newer_lines) in
+    if List.length lines >= limit || not page.has_more then lines
+    else
+      match List.find_map (fun message -> message.Keeper_chat_store.ts) page.messages with
+      | Some oldest_ts -> collect (Some oldest_ts) lines
+      | None -> lines
+  in
+  if limit <= 0 then [] else collect None []
 ;;
 
 let render_recent_direct_conversation_context

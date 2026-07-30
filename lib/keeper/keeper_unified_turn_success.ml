@@ -93,13 +93,13 @@ let terminal_outcome_to_log_label = function
   | Terminal_input_required -> "input_required"
 
 let successful_surface_post (detail : Keeper_agent_run.tool_call_detail) =
-  String.equal
-    (Keeper_tool_resolution.canonical_tool_name detail.tool_name)
-    "keeper_surface_post"
-  &&
-  match detail.execution_outcome with
-  | Tool_result.Ok -> true
-  | Tool_result.Error | Tool_result.Unknown -> false
+  match
+    ( Keeper_tool_name.of_string
+        (Keeper_tool_resolution.canonical_tool_name detail.tool_name),
+      detail.execution_outcome )
+  with
+  | Some Keeper_tool_name.Surface_post, Tool_result.Ok -> true
+  | _, _ -> false
 ;;
 
 let should_project_autonomous_chat
@@ -127,6 +127,14 @@ let project_autonomous_chat
       ~has_tool_calls:(result.tool_calls <> [])
       ~surface_already_persisted
   then (
+    let redaction =
+      Keeper_secret_redaction.snapshot
+        ~base_path:config.Workspace.base_path
+        ~keeper_name:meta.name
+    in
+    let response_text =
+      Keeper_secret_redaction.redact_text redaction result.response_text
+    in
     let turn_ref =
       Ids.Turn_ref.make
         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -140,10 +148,10 @@ let project_autonomous_chat
         ~base_dir:config.Workspace.base_path
         ~keeper_name:meta.name
         ~delivery_key
-        ~content:result.response_text
+        ~content:response_text
         ~surface:Surface_ref.Agent
         ~assistant_kind:Keeper_chat_store.Row_kind.Autonomous_activity
-        ~blocks:(Keeper_chat_blocks.parse_text_to_blocks result.response_text)
+        ~blocks:(Keeper_chat_blocks.parse_text_to_blocks response_text)
         ~turn_ref
         ()
     with
@@ -151,7 +159,7 @@ let project_autonomous_chat
       Keeper_chat_broadcast.chat_appended
         ~keeper_name:meta.name
         ~source:(Surface_ref.lane_label Surface_ref.Agent)
-        ~content:result.response_text
+        ~content:response_text
         ()
     | Ok (Keeper_chat_store.Already_present _) -> ()
     | Error detail ->

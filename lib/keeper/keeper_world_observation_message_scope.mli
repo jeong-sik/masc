@@ -71,6 +71,8 @@ val collect_recent_direct_conversation
   -> meta:keeper_meta
   -> unit
   -> recent_direct_line list
+(** Page backward through bounded chat history until the direct-conversation
+    limit is filled; autonomous activity does not consume that window. *)
 
 val render_recent_direct_conversation_context
   :  recent_direct_line list

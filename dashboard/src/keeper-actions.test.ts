@@ -2120,27 +2120,85 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     })
   })
 
-  it('reconciles a stream network failure when the server history has the completed reply', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-06-15T13:08:38Z'))
-    try {
-      streamKeeperMessage.mockRejectedValue(new TypeError('network error'))
-      fetchKeeperChatHistory.mockResolvedValue([
-        { role: 'user', content: '진행 상황?', ts: 1_781_528_918 },
-        { role: 'assistant', content: '서버에는 답변이 저장됐습니다.', ts: 1_781_528_920 },
-      ])
+  it('reconciles a stream failure only with the exact direct request identity', async () => {
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: { onEvent: (event: KeeperChatStreamEvent) => void },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_QUEUE_REQUEST',
+        value: { request_id: 'kmsg_echo_1', status: 'queued' },
+      })
+      throw new TypeError('network error')
+    })
+    fetchKeeperChatHistory.mockResolvedValue([
+      {
+        role: 'user',
+        content: '진행 상황?',
+        ts: 1_781_528_918,
+        delivery_key: { kind: 'direct_request', request_id: 'kmsg_echo_1' },
+      },
+      {
+        role: 'assistant',
+        content: '서버에는 답변이 저장됐습니다.',
+        ts: 1_781_528_920,
+        delivery_key: { kind: 'direct_request', request_id: 'kmsg_echo_1' },
+      },
+    ])
 
-      await sendKeeperThreadMessage('echo', '진행 상황?')
+    await sendKeeperThreadMessage('echo', '진행 상황?')
 
-      const thread = keeperThreads.value.echo ?? []
-      expect(thread.map(entry => [entry.role, entry.text, entry.delivery])).toEqual([
-        ['user', '진행 상황?', 'history'],
-        ['assistant', '서버에는 답변이 저장됐습니다.', 'history'],
-      ])
-      expect(keeperActionErrors.value.echo).toBeNull()
-    } finally {
-      vi.useRealTimers()
-    }
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.map(entry => [entry.role, entry.text, entry.delivery])).toEqual([
+      ['user', '진행 상황?', 'history'],
+      ['assistant', '서버에는 답변이 저장됐습니다.', 'history'],
+    ])
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+    expect(keeperActionErrors.value.echo).toBeNull()
+  })
+
+  it('does not reconcile a failed direct request with autonomous activity', async () => {
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: { onEvent: (event: KeeperChatStreamEvent) => void },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_QUEUE_REQUEST',
+        value: { request_id: 'kmsg_echo_1', status: 'queued' },
+      })
+      throw new TypeError('network error')
+    })
+    fetchKeeperChatHistory.mockResolvedValue([
+      {
+        role: 'user',
+        content: '진행 상황?',
+        ts: 1_781_528_918,
+        delivery_key: { kind: 'direct_request', request_id: 'kmsg_echo_1' },
+      },
+      {
+        role: 'assistant',
+        content: 'unrelated autonomous result',
+        ts: 1_781_528_920,
+        kind: 'autonomous_activity',
+        delivery_key: {
+          kind: 'autonomous_turn',
+          turn_ref: 'trace-autonomous#42',
+        },
+      },
+    ])
+
+    await expect(sendKeeperThreadMessage('echo', '진행 상황?'))
+      .rejects.toThrow('network error')
+
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.some(entry => (
+      entry.role === 'assistant' && entry.text === 'unrelated autonomous result'
+    ))).toBe(false)
+    expect(keeperActionErrors.value.echo).toContain('network error')
   })
 
   it('resumes a pending request from storage and finalizes the transcript', async () => {

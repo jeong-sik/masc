@@ -11,16 +11,9 @@ val oas_checkpoint_summary_json :
   Agent_sdk.Checkpoint.t ->
   Yojson.Safe.t
 
-(** Total dashboard projection of a typed checkpoint load failure, as the
-    fields themselves. Returning the association list keeps callers that splice
-    it into a larger row from having to match a JSON shape this cannot
-    produce. *)
-val checkpoint_load_error_fields :
-  Keeper_checkpoint_store.checkpoint_load_error -> (string * Yojson.Safe.t) list
-
-(** {!checkpoint_load_error_fields} as a standalone object. [Not_found] is a
-    normal missing asset; every other constructor is an unavailable asset with
-    its original categorical kind and detail preserved. *)
+(** Total dashboard projection of a typed checkpoint load failure. [Not_found]
+    is a normal missing asset; every other constructor is an unavailable asset
+    with its original categorical kind and detail preserved. *)
 val checkpoint_load_error_json :
   Keeper_checkpoint_store.checkpoint_load_error -> Yojson.Safe.t
 

@@ -214,22 +214,6 @@ module KeeperMemoryOs = struct
       ~default:recall_enabled_default
   ;;
 
-  (** Memory OS librarian post-turn extraction kill switch. Default: true;
-      invalid values fail closed to false so malformed operator input cannot
-      leave the kill switch accidentally enabled.
-      @category Policies
-      @ops_class operator *)
-  let librarian_enabled () =
-    match librarian_config_state () with
-    | Enabled -> true
-    | Disabled -> false
-    | Invalid ->
-      get_bool_logged
-        ~invalid:Env_config_memory.Fail_closed
-        librarian_env_key
-        ~default:librarian_enabled_default
-  ;;
-
   (** Turns between librarian extraction attempts per keeper. Default: 3,
       floored to 1.
       @category Runtime

@@ -65,3 +65,5 @@ val run_best_effort
   -> expected_revision:int option
   -> Keeper_librarian.input
   -> unit
+(** Execute an already-admitted Librarian unit. The post-turn entrypoint owns
+    the configuration gate before lane submission and snapshot I/O. *)

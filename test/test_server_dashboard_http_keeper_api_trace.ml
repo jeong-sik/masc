@@ -449,6 +449,29 @@ let test_checkpoint_load_error_projection_is_total () =
     ~detail:(Some "sdk failure")
 ;;
 
+(* The caller that splices this projection into a larger row used to take the
+   JSON back apart, with the non-object case as `assert false`. That branch was
+   unreachable because this projection is an object for every constructor.
+   Pinned through the public entry point so the helper behind it stays private:
+   if the projection ever grows a non-object shape, this fails here instead of
+   resurrecting an impossible case at a call site. *)
+let test_checkpoint_load_error_projection_is_always_an_object () =
+  let module Store = Keeper_checkpoint_store in
+  List.iter
+    (fun error ->
+      check bool "the load-error projection is an object" true
+        (match Checkpoints.checkpoint_load_error_json error with
+         | `Assoc _ -> true
+         | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null
+           -> false))
+    [ Store.Not_found;
+      Store.Store_error "store unavailable";
+      Store.Parse_error "invalid checkpoint";
+      Store.Io_error "permission denied";
+      Store.Sdk_other_error "sdk failure";
+    ]
+;;
+
 let test_checkpoint_inventory_preserves_partial_load_failures () =
   with_temp_dir @@ fun dir ->
   let config = Workspace.default_config dir in
@@ -574,6 +597,10 @@ let () =
             "projects every typed checkpoint load error"
             `Quick
             test_checkpoint_load_error_projection_is_total
+        ; test_case
+            "the load-error projection is always an object"
+            `Quick
+            test_checkpoint_load_error_projection_is_always_an_object
         ; test_case
             "preserves partial history failures with HTTP 200"
             `Quick

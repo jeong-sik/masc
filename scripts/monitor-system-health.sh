@@ -5,10 +5,10 @@
 # Docker playground FD hotspot 은 기존 docker-playground-fd-status.sh 를 위임 호출한다.
 #
 # Trigger background (default):
-#   nohup scripts/monitor-system-health.sh >/dev/null 2>&1 & disown
+#   nohup scripts/monitor-system-health.sh --base-path /absolute/workspace >/dev/null 2>&1 & disown
 #
 # One-shot for debugging:
-#   scripts/monitor-system-health.sh --once
+#   scripts/monitor-system-health.sh --base-path /absolute/workspace --once
 #
 # Stop:
 #   pkill -f monitor-system-health.sh
@@ -20,8 +20,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 ONCE=0
 NOTIFY=1
+PRINT_PRESSURE_PATHS=0
 INTERVAL="${MASC_SYSMON_INTERVAL:-60}"
-LOG_DIR="${MASC_SYSMON_LOG_DIR:-$REPO_ROOT/.masc/logs}"
+BASE_PATH="${MASC_BASE_PATH:-}"
+LOG_DIR="${MASC_SYSMON_LOG_DIR:-}"
 
 FD_PCT_WARN="${MASC_SYSMON_FD_PCT_WARN:-30}"
 FD_PCT_CRIT="${MASC_SYSMON_FD_PCT_CRIT:-50}"
@@ -37,27 +39,22 @@ DISK_PCT_WARN="${MASC_SYSMON_DISK_PCT_WARN:-90}"
 DISK_PCT_CRIT="${MASC_SYSMON_DISK_PCT_CRIT:-95}"
 ALERT_COOLDOWN="${MASC_SYSMON_ALERT_COOLDOWN:-300}"
 
-# Pressure flag file. masc server (future) is expected to poll this
-# and engage Keeper_fd_pressure when level=CRIT. We always rewrite it
-# atomically so a reader sees a consistent snapshot.
-DEFAULT_MASC_BASE_PATH="${MASC_BASE_PATH:-$REPO_ROOT}"
-PRESSURE_STATE_DEFAULT="$DEFAULT_MASC_BASE_PATH/.masc/masc-host-pressure.state"
-PRESSURE_EVENTS_DEFAULT="$DEFAULT_MASC_BASE_PATH/.masc/masc-host-pressure.events.jsonl"
-PRESSURE_STATE_FILE="${MASC_HOST_FD_PRESSURE_STATE_FILE:-${MASC_SYSMON_PRESSURE_STATE:-$PRESSURE_STATE_DEFAULT}}"
-PRESSURE_EVENTS_FILE="${MASC_SYSMON_PRESSURE_EVENTS:-$PRESSURE_EVENTS_DEFAULT}"
-
 usage() {
   cat <<'EOF'
 monitor-system-health.sh - Recurring system FD/OOM/Disk monitor with macOS alerts.
 
 Usage:
-  scripts/monitor-system-health.sh [--once] [--interval SEC] [--no-notify] [--log-dir DIR]
+  scripts/monitor-system-health.sh --base-path DIR [--once] [--interval SEC] [--no-notify] [--log-dir DIR]
 
 Options:
+  --base-path DIR Base path used by the running MASC server. Required unless
+                  MASC_BASE_PATH is set.
   --once          Run a single iteration and exit (for debug/cron).
   --interval SEC  Sleep between iterations. Default: 60. Env: MASC_SYSMON_INTERVAL
   --no-notify     Skip macOS notifications (still writes log + alert log).
-  --log-dir DIR   Log directory. Default: <repo>/.masc/logs. Env: MASC_SYSMON_LOG_DIR
+  --log-dir DIR   Log directory. Default: <base-path>/.masc/logs. Env: MASC_SYSMON_LOG_DIR
+  --print-pressure-paths
+                  Print the resolved state/events paths and exit.
 
 Thresholds (env override, defaults shown):
   MASC_SYSMON_FD_PCT_WARN=30    MASC_SYSMON_FD_PCT_CRIT=50
@@ -72,7 +69,7 @@ Logs:
   <log-dir>/sysmon.log         per-iteration metrics
   <log-dir>/sysmon-alerts.log  one line per fired alert
 
-Pressure flag (for masc server integration, future):
+Pressure flag (consumed by the masc server):
   <base-path>/.masc/masc-host-pressure.state
                                    latest snapshot when level != OK;
                                    removed when system is OK.
@@ -81,9 +78,8 @@ Pressure flag (for masc server integration, future):
   Override state path via MASC_HOST_FD_PRESSURE_STATE_FILE.
   Override events path via MASC_SYSMON_PRESSURE_EVENTS.
   Reader contract: parse JSON line for level/kinds/summary/ts/pid.
-  Server polls this file (e.g. once per second) and invokes
-  Keeper_fd_pressure.engage when level=CRIT. Wiring is RFC-pending
-  (Keeper subsystem RFC area).
+  The server polls this file and invokes Keeper_fd_pressure.engage
+  when level=CRIT.
 
 Platform:
   macOS only (sysctl, vm_stat, osascript, lsof). On Linux this script exits early.
@@ -95,14 +91,43 @@ EOF
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --base-path) BASE_PATH="${2:-}"; shift 2;;
     --once) ONCE=1; shift;;
     --no-notify) NOTIFY=0; shift;;
     --interval) INTERVAL="$2"; shift 2;;
     --log-dir) LOG_DIR="$2"; shift 2;;
+    --print-pressure-paths) PRINT_PRESSURE_PATHS=1; shift;;
     -h|--help) usage; exit 0;;
     *) echo "unknown arg: $1" >&2; usage; exit 2;;
   esac
 done
+
+if [ -z "$BASE_PATH" ]; then
+  echo "monitor-system-health.sh: --base-path or MASC_BASE_PATH is required" >&2
+  exit 2
+fi
+case "$BASE_PATH" in
+  /*) ;;
+  *)
+    echo "monitor-system-health.sh: base path must be absolute: $BASE_PATH" >&2
+    exit 2
+    ;;
+esac
+if [ "$BASE_PATH" = "/" ] || [ ! -d "$BASE_PATH" ]; then
+  echo "monitor-system-health.sh: base path must be an existing non-root directory: $BASE_PATH" >&2
+  exit 2
+fi
+
+LOG_DIR="${LOG_DIR:-$BASE_PATH/.masc/logs}"
+PRESSURE_STATE_DEFAULT="$BASE_PATH/.masc/masc-host-pressure.state"
+PRESSURE_EVENTS_DEFAULT="$BASE_PATH/.masc/masc-host-pressure.events.jsonl"
+PRESSURE_STATE_FILE="${MASC_HOST_FD_PRESSURE_STATE_FILE:-$PRESSURE_STATE_DEFAULT}"
+PRESSURE_EVENTS_FILE="${MASC_SYSMON_PRESSURE_EVENTS:-$PRESSURE_EVENTS_DEFAULT}"
+
+if [ "$PRINT_PRESSURE_PATHS" -eq 1 ]; then
+  printf 'state=%s\nevents=%s\n' "$PRESSURE_STATE_FILE" "$PRESSURE_EVENTS_FILE"
+  exit 0
+fi
 
 if [ "$(uname)" != "Darwin" ]; then
   echo "monitor-system-health.sh: macOS only (uname=$(uname))" >&2
@@ -110,7 +135,7 @@ if [ "$(uname)" != "Darwin" ]; then
 fi
 
 mkdir -p "$LOG_DIR"
-mkdir -p "$(dirname "$PRESSURE_STATE_FILE")" "$(dirname "$PRESSURE_EVENTS_FILE")" 2>/dev/null || true
+mkdir -p "$(dirname "$PRESSURE_STATE_FILE")" "$(dirname "$PRESSURE_EVENTS_FILE")"
 LOG="$LOG_DIR/sysmon.log"
 ALERT_LOG="$LOG_DIR/sysmon-alerts.log"
 COOLDOWN_DIR="${TMPDIR:-/tmp}/masc-sysmon-cooldown.$$"
@@ -170,20 +195,33 @@ json_string_escape() {
 write_pressure_state() {
   # Args: level (OK|WARN|CRIT), kinds_csv ("fd,swap,..."), summary
   local level="$1" kinds="$2" summary="$3"
-  local ts=$(date '+%FT%T%z')
-  local payload
+  local ts payload state_tmp
+  ts=$(date '+%FT%T%z')
   payload=$(printf '{"level":"%s","kinds":"%s","summary":"%s","ts":"%s","pid":%d}' \
             "$(json_string_escape "$level")" \
             "$(json_string_escape "$kinds")" \
             "$(json_string_escape "$summary")" \
             "$(json_string_escape "$ts")" "$$")
   if [ "$level" = "OK" ]; then
-    rm -f "$PRESSURE_STATE_FILE" 2>/dev/null || true
+    if ! rm -f "$PRESSURE_STATE_FILE"; then
+      echo "monitor-system-health.sh: failed to remove pressure state: $PRESSURE_STATE_FILE" >&2
+      return 1
+    fi
   else
-    printf '%s\n' "$payload" > "${PRESSURE_STATE_FILE}.tmp" 2>/dev/null \
-      && mv -f "${PRESSURE_STATE_FILE}.tmp" "$PRESSURE_STATE_FILE" 2>/dev/null || true
+    state_tmp="${PRESSURE_STATE_FILE}.tmp.$$"
+    if ! printf '%s\n' "$payload" > "$state_tmp"; then
+      echo "monitor-system-health.sh: failed to write pressure state temp file: $state_tmp" >&2
+      return 1
+    fi
+    if ! mv -f "$state_tmp" "$PRESSURE_STATE_FILE"; then
+      echo "monitor-system-health.sh: failed to publish pressure state: $PRESSURE_STATE_FILE" >&2
+      return 1
+    fi
   fi
-  printf '%s\n' "$payload" >> "$PRESSURE_EVENTS_FILE" 2>/dev/null || true
+  if ! printf '%s\n' "$payload" >> "$PRESSURE_EVENTS_FILE"; then
+    echo "monitor-system-health.sh: failed to append pressure event: $PRESSURE_EVENTS_FILE" >&2
+    return 1
+  fi
 }
 
 iteration() {

@@ -848,6 +848,17 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_runtime_provider_auth_headers"
 
+      - name: Run host FD pressure contract suite
+        id: host_fd_pressure_contract_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          bash test/test_monitor_system_health_paths.sh
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_host_fd_pressure_poller"
+
       - name: Run Keeper request-cap suite
         id: keeper_request_cap_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}

@@ -579,7 +579,8 @@ let test_episode_provenance_invariants () =
 
 let test_librarian_prompt_renders () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-abc"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-abc" ~absolute_turn:1
     ; messages = [ text_message "Please remember the project constraint." ]
     }
   in
@@ -645,7 +646,10 @@ let test_librarian_prompt_omits_private_blocks () =
     }
   in
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-abc"; messages = [ msg ] }
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-abc" ~absolute_turn:1
+    ; messages = [ msg ]
+    }
   in
   with_prompt_registry (fun () ->
     let prompt = render_librarian_user_prompt inp in
@@ -686,7 +690,8 @@ let valid_librarian_output () =
 
 let test_librarian_rejects_extra_confidence_field () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-extra-confidence"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-extra-confidence" ~absolute_turn:1
     ; messages = [ text_message "turn-indexed memory" ]
     }
   in
@@ -724,7 +729,8 @@ let test_librarian_rejects_extra_confidence_field () =
 
 let test_librarian_rejects_removed_claim_kind_field () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-invalid-kind"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-invalid-kind" ~absolute_turn:1
     ; messages = [ text_message "typed memory" ]
     }
   in
@@ -762,7 +768,8 @@ let test_librarian_rejects_removed_claim_kind_field () =
 
 let test_librarian_rejects_duplicate_json_fields () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-duplicate-fields"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-duplicate-fields" ~absolute_turn:1
     ; messages = [ text_message "duplicate fields are invalid" ]
     }
   in
@@ -810,7 +817,10 @@ let test_librarian_rejects_duplicate_json_fields () =
 
 let test_librarian_rejects_duplicate_claim_identity () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-duplicate-claim-identity"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make
+          ~trace_id:"trace-duplicate-claim-identity"
+          ~absolute_turn:1
     ; messages =
         [ text_message "first source observation"
         ; text_message "second source observation"
@@ -854,7 +864,8 @@ let test_librarian_rejects_duplicate_claim_identity () =
 
 let test_librarian_generation_override () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-generation-override"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-generation-override" ~absolute_turn:1
     ; messages = [ text_message "turn-indexed memory" ]
     }
   in
@@ -871,7 +882,8 @@ let test_librarian_generation_override () =
 
 let test_librarian_rejects_removed_lifetime_and_category () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-current-only-contract"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-current-only-contract" ~absolute_turn:1
     ; messages = [ text_message "current-only memory" ]
     }
   in
@@ -922,7 +934,8 @@ let test_librarian_rejects_removed_lifetime_and_category () =
 
 let test_librarian_accepts_nullable_claim_fields () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-nullable-claim-fields"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-nullable-claim-fields" ~absolute_turn:1
     ; messages = [ text_message "nullable structured output" ]
     }
   in
@@ -956,7 +969,10 @@ let test_librarian_accepts_nullable_claim_fields () =
 
 let test_librarian_rejects_missing_nullable_claim_fields () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-missing-nullable-claim-fields"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make
+          ~trace_id:"trace-missing-nullable-claim-fields"
+          ~absolute_turn:1
     ; messages = [ text_message "closed JSON memory contract" ]
     }
   in
@@ -1195,7 +1211,8 @@ let test_memory_os_config_snapshot_surfaces_effective_envs () =
 
 let test_librarian_rejects_out_of_range_source_turn () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-source-turn-out-of-range"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-source-turn-out-of-range" ~absolute_turn:1
     ; messages = [ text_message "Only turn zero exists in this input." ]
     }
   in
@@ -1231,7 +1248,10 @@ let test_librarian_rejects_out_of_range_source_turn () =
 
 let test_librarian_rejects_unrelated_source_tool_call_id () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-unrelated-source-tool-call"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make
+          ~trace_id:"trace-unrelated-source-tool-call"
+          ~absolute_turn:1
     ; messages = [ text_message "This message contains no tool call." ]
     }
   in
@@ -1285,7 +1305,10 @@ let test_librarian_accepts_exact_source_tool_result_id () =
     }
   in
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-exact-source-tool-result"
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make
+          ~trace_id:"trace-exact-source-tool-result"
+          ~absolute_turn:1
     ; messages = [ tool_result_message ]
     }
   in
@@ -1328,7 +1351,10 @@ let test_librarian_accepts_exact_source_tool_result_id () =
 
 let test_librarian_rejects_invalid_claims () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-invalid"; messages = [] }
+    { Librarian.turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-invalid" ~absolute_turn:1
+    ; messages = []
+    }
   in
   let reject name json =
     let accepted =

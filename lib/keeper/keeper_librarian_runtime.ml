@@ -4,6 +4,10 @@ module Exact_output = Agent_sdk.Exact_output
 
 let exact_lane_id = "librarian_exact"
 
+let input_trace_id (inp : Keeper_librarian.input) =
+  Ids.Turn_ref.trace_id inp.turn_ref
+;;
+
 let enabled () =
   (* Default on: a keeper without conversation ingestion is the pathology
      the Memory OS exists to fix (2026-06-12 diagnosis, issue #20909).
@@ -894,7 +898,7 @@ let extract_with_exact_output_classified_unlocked
       preflight_exact_flow_state
         ~keepers_dir
         ~keeper_id
-        ~trace_id:inp.trace_id
+        ~trace_id:(input_trace_id inp)
         ~generation
       |> Result.map_error (fun error -> Exact_setup_failed error)
     in
@@ -938,7 +942,7 @@ let extract_with_exact_output_classified_unlocked
         persist_exact_flow_state
           ~keepers_dir
           ~keeper_id
-          ~trace_id:inp.trace_id
+          ~trace_id:(input_trace_id inp)
           ~generation
           Exact_flow_started
         |> Result.map_error (fun detail ->
@@ -956,7 +960,7 @@ let extract_with_exact_output_classified_unlocked
           persist_exact_flow_state
             ~keepers_dir
             ~keeper_id
-            ~trace_id:inp.trace_id
+            ~trace_id:(input_trace_id inp)
             ~generation
             (Exact_candidate_advance_committed
                { candidate = attempt_receipt_json previous
@@ -967,7 +971,7 @@ let extract_with_exact_output_classified_unlocked
         persist_exact_flow_state
           ~keepers_dir
           ~keeper_id
-          ~trace_id:inp.trace_id
+          ~trace_id:(input_trace_id inp)
           ~generation
           (Exact_candidate_bound (attempt_receipt_json candidate))
       in
@@ -985,7 +989,7 @@ let extract_with_exact_output_classified_unlocked
         persist_exact_flow_state
           ~keepers_dir
           ~keeper_id
-          ~trace_id:inp.trace_id
+          ~trace_id:(input_trace_id inp)
           ~generation
           (Exact_candidate_advance_committed
              { candidate = attempt_receipt_json candidate
@@ -1011,7 +1015,7 @@ let extract_with_exact_output_classified_unlocked
       persist_exact_flow_state
         ~keepers_dir
         ~keeper_id
-        ~trace_id:inp.trace_id
+        ~trace_id:(input_trace_id inp)
         ~generation
         (Exact_oas_success (attempt_receipt_json candidate))
     with
@@ -1021,7 +1025,7 @@ let extract_with_exact_output_classified_unlocked
          persist_exact_flow_state
            ~keepers_dir
            ~keeper_id
-           ~trace_id:inp.trace_id
+           ~trace_id:(input_trace_id inp)
            ~generation
            (Exact_domain_valid (attempt_receipt_json candidate))
        with
@@ -1064,7 +1068,7 @@ let extract_with_exact_output_classified_unlocked
          persist_exact_execution_terminal
            ~keepers_dir
            ~keeper_id
-           ~trace_id:inp.trace_id
+           ~trace_id:(input_trace_id inp)
            ~generation
            error
        with
@@ -1094,7 +1098,7 @@ let extract_with_exact_output_classified_unlocked
          persist_exact_flow_state
            ~keepers_dir
            ~keeper_id
-           ~trace_id:inp.trace_id
+           ~trace_id:(input_trace_id inp)
            ~generation
            (Exact_domain_invalid
               { candidate = attempt_receipt_json candidate; parse_error })
@@ -1123,7 +1127,7 @@ let extract_with_exact_output_classified
       ~generation
       inp
   =
-  if String.equal (String.trim inp.Keeper_librarian.trace_id) ""
+  if String.equal (String.trim (input_trace_id inp)) ""
   then Error (Exact_setup_failed Exact_trace_id_invalid)
   else if generation < 0
   then Error (Exact_setup_failed (Exact_generation_invalid generation))
@@ -1234,12 +1238,12 @@ let extract_and_append_with_exact_output_classified
   : (Keeper_memory_os_types.episode, extraction_error) result =
   match clock with
   | None -> Error Execution_clock_unavailable
-  | Some _ when String.equal (String.trim inp.Keeper_librarian.trace_id) "" ->
+  | Some _ when String.equal (String.trim (input_trace_id inp)) "" ->
     Error (Exact_setup_failed Exact_trace_id_invalid)
   | Some _ when generation_floor < 0 ->
     Error (Exact_setup_failed (Exact_generation_invalid generation_floor))
   | Some clock ->
-    let trace_id = inp.Keeper_librarian.trace_id in
+    let trace_id = input_trace_id inp in
     let keepers_dir =
       Config_dir_resolver.keepers_dir_for_base_path ~base_path
     in
@@ -1318,7 +1322,8 @@ let run_best_effort
      (the messages remain in the window for the next due turn). The cadence
      counter is scoped to the active trace so a rollover does not inherit the
      previous trace's schedule. *)
-  if enabled () && cadence_due ~keeper_id ~trace_id:inp.trace_id
+  let trace_id = input_trace_id inp in
+  if enabled () && cadence_due ~keeper_id ~trace_id
   then (
     try
       match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
@@ -1333,7 +1338,7 @@ let run_best_effort
              inp
          with
          | Ok episode ->
-           cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
+           cadence_record_success ~keeper_id ~trace_id;
            Log.Keeper.info
              ~keeper_name:keeper_id
              "memory os librarian wrote episode trace_id=%s generation=%d claims=%d"
@@ -1346,7 +1351,7 @@ let run_best_effort
              ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
              ();
            if should_record_cadence_backoff_after_error err
-           then cadence_record_attempt ~keeper_id ~trace_id:inp.trace_id;
+           then cadence_record_attempt ~keeper_id ~trace_id;
            Log.Keeper.warn
              ~keeper_name:keeper_id
              "memory os librarian failed lane=%s: %s; cadence deferred=%b"

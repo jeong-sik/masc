@@ -5,7 +5,7 @@ open Keeper_memory_os_types
 module Canonical_tool = Agent_sdk.Canonical_tool
 
 type input =
-  { trace_id : string
+  { turn_ref : Ids.Turn_ref.t
   ; messages : Agent_sdk.Types.message list
   }
 
@@ -239,6 +239,7 @@ let episode_of_json_result ?now ~generation (inp : input) (json : Yojson.Safe.t)
       (* NDT-OK: extraction timestamps are provenance/retention metadata only. *)
       Unix.gettimeofday ()
   in
+  let trace_id = Ids.Turn_ref.trace_id inp.turn_ref in
   match json with
   | `Assoc fields ->
     (match first_unexpected_field ~allowed:wire_episode_fields fields with
@@ -252,14 +253,14 @@ let episode_of_json_result ?now ~generation (inp : input) (json : Yojson.Safe.t)
              (match
                 traverse
                   (fact_of_json
-                     ~trace_id:inp.trace_id
+                     ~trace_id
                      ~messages:inp.messages
                      ~now)
                   claim_items
               with
               | Some claims when claim_identities_are_unique claims ->
                 Ok
-                  { trace_id = inp.trace_id
+                  { trace_id
                   ; generation
                   ; episode_summary
                   ; claims

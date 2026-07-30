@@ -7,7 +7,7 @@
 
 (** Input bundle for one librarian extraction. *)
 type input =
-  { trace_id : string
+  { turn_ref : Ids.Turn_ref.t
   ; messages : Agent_sdk.Types.message list
   }
 

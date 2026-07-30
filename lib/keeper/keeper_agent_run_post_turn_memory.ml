@@ -69,8 +69,9 @@ let run
   (* Memory OS librarian extraction: opt-in, provider-backed, best-effort. Its
      own lane unit, separate from [det_write_series] above. *)
   let librarian_series () =
+    let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
     let librarian_input : Keeper_librarian.input =
-      { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
+      { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
       ; messages = librarian_messages
       }
     in

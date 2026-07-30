@@ -154,7 +154,7 @@ let tool_result_message ~tool_use_id text : Agent_sdk.Types.message =
 ;;
 
 let librarian_input trace_id =
-  { Librarian.trace_id
+  { Librarian.turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
   ; messages = [ text_message "Remember the exact-output boundary." ]
   }
 ;;

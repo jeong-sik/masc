@@ -218,6 +218,12 @@ let launch_supervised_fiber_body
          from a genuine missed-resolution bug. *)
       let cancelled_by_parent = Atomic.make false in
       let cancelled_by_shutdown_request = Atomic.make false in
+      (* Process-local sibling lifetime only: heartbeat completion closes the
+         Board worker without creating durable admission or recovery state. *)
+      let board_worker_stop, resolve_board_worker_stop = Eio.Promise.create () in
+      let stop_board_worker () =
+        ignore (Eio.Promise.try_resolve resolve_board_worker_stop () : bool)
+      in
       let resolve_done ~source value =
         if not (Atomic.get resolved) then
           (* Issue #18335: the keepalive layer (keeper_keepalive.ml:760-791)
@@ -243,28 +249,36 @@ let launch_supervised_fiber_body
                 OAS owns target admission, dispatch, and advancement.
                 Cancellation joins the worker with the Keeper lane. *)
              Eio.Fiber.fork ~sw:lane_sw (fun () ->
-               match
-                 Keeper_board_attention_worker.run
-                   ~sw:lane_sw
-                   ~clock:ctx.clock
-                   ~net:ctx.net
-                   ~base_path
-                   ~keeper_name:meta.name
+               match Eio.Fiber.first
+                 (fun () ->
+                    `Worker
+                      (Keeper_board_attention_worker.run
+                         ~sw:lane_sw
+                         ~clock:ctx.clock
+                         ~net:ctx.net
+                         ~base_path
+                         ~keeper_name:meta.name))
+                 (fun () ->
+                    Eio.Promise.await board_worker_stop;
+                    `Stopped)
                with
-               | Ok () -> ()
-               | Error fatal ->
+               | `Stopped | `Worker (Ok ()) -> ()
+               | `Worker (Error fatal) ->
                  failwith
                    (Keeper_board_attention_worker.fatal_error_to_string fatal));
              (* Keeper lifetime, idle duration, and progress age are
                 observations only. The supervisor runs the lane directly;
                 configured provider/tool boundaries and explicit operator
                 lifecycle events remain independent typed mechanisms. *)
-             Keeper_keepalive.run_heartbeat_loop
-               ~proactive_warmup_sec
-               ctx
-               meta
-               reg.fiber_stop
-               ~wakeup:reg.fiber_wakeup;
+             Eio_guard.protect
+               (fun () ->
+                  Keeper_keepalive.run_heartbeat_loop
+                    ~proactive_warmup_sec
+                    ctx
+                    meta
+                    reg.fiber_stop
+                    ~wakeup:reg.fiber_wakeup)
+               ~finally:stop_board_worker;
              (* A normal return is an explicit stop/shutdown path. Observed
                 idle/progress ages never rewrite it into a crash. *)
                (match

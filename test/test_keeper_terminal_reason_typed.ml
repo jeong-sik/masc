@@ -335,7 +335,7 @@ let () =
       meta_fixture_exn
         (`Assoc
           [ "name", `String "corrupted-transcript"
-          ; "agent_name", `String (Keeper_identity.keeper_agent_name "corrupted-transcript")
+          ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name "corrupted-transcript")
           ; "trace_id", `String "trace-corrupted-transcript"
           ])
     in

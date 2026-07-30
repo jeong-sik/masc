@@ -105,7 +105,7 @@ let prior_cancellation_for_request
   | Some receipt ->
     (match receipt.transition with
      | Keeper_event_queue_state.Cancel_accepted cancellation
-       when Int64.equal cancellation.source_revision expected_revision
+       when Int64.equal cancellation.source_incarnation expected_revision
             && String.equal cancellation.reason reason ->
        Ok (Some { cancellation; applied_at = receipt.applied_at })
      | Keeper_event_queue_state.Cancel_accepted _

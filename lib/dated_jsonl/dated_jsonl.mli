@@ -76,6 +76,11 @@ val create :
 val base_dir : t -> string
 (** Return the base directory of this store. *)
 
+val prepare_for_directory_removal : t -> unit
+(** Close the current append writer and forget its memoized month directory
+    before application-owned code removes [base_dir t]. A later append can
+    then recreate the directory and open the new file identity. *)
+
 val append : t -> Yojson.Safe.t -> unit
 (** Append [json] to today's [DD.jsonl] inside [YYYY-MM/].
     Creates directories as needed.  Thread-safe via internal mutex. *)

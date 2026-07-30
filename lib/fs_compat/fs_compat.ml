@@ -1226,6 +1226,7 @@ let mkdir_p (path : string) : unit =
    Race: two domains may both miss-and-mkdir; the second [mkdir] is a
    harmless EEXIST. The mutex covers the [Hashtbl] op only. *)
 let mkdir_p_memoized path = Mkdir_memo.mkdir_p_memoized ~mkdir_p path
+let invalidate_mkdir_memo path = Mkdir_memo.invalidate path
 let reset_mkdir_memo_for_testing () = Mkdir_memo.reset_for_testing ()
 
 (** Parse pre-read string lines as JSONL.

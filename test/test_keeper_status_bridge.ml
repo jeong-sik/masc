@@ -248,9 +248,10 @@ let test_tool_audit_cache_invalidation_for_recreated_keeper () =
         "initial Keeper audit"
         [ "old_tool" ]
         (latest_tool_names ());
+      Dated_jsonl.prepare_for_directory_removal store;
+      Keeper_status_metrics.invalidate_tool_audit_cache config ~keeper_name;
       Fs_compat.remove_tree
         (Keeper_types_support.keeper_metrics_dir config keeper_name);
-      Keeper_status_metrics.invalidate_tool_audit_cache config ~keeper_name;
       Dated_jsonl.append store (turn "new_tool");
       Alcotest.(check (list string))
         "recreated Keeper does not inherit deleted audit"

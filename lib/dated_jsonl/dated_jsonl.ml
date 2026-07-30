@@ -173,6 +173,12 @@ let create ~base_dir ?mutex ?retention_days ?max_bytes () =
 
 let base_dir t = t.base_dir
 
+let prepare_for_directory_removal t =
+  let dated = Jsonl_writer.dated_path_now ~base_dir:t.base_dir in
+  Fs_compat.invalidate_cached_writer dated.path;
+  Fs_compat.invalidate_mkdir_memo (Filename.dirname dated.path)
+;;
+
 (** Parse ["YYYY-MM-DD"] into [("YYYY-MM", "DD")].
     Returns [None] for malformed strings. *)
 let year_is_leap year =

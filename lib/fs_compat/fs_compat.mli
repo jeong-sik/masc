@@ -854,6 +854,10 @@ val mkdir_p : string -> unit
     silent skip — acceptable for [.masc/] (self-owned). *)
 val mkdir_p_memoized : string -> unit
 
+(** Forget the memoized existence of [path]. Use when application-owned code
+    removes a directory that a later memoized writer may recreate. *)
+val invalidate_mkdir_memo : string -> unit
+
 (** Reset the [mkdir_p_memoized] cache. Test-only — production code
     relies on process-lifetime persistence. *)
 val reset_mkdir_memo_for_testing : unit -> unit

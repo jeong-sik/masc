@@ -1,23 +1,60 @@
-(** Keeper_librarian — structured claim extraction for the Memory OS. *)
+(** Keeper_librarian — LLM-owned current Memory OS selection. *)
 
 open Keeper_memory_os_types
 
 module Canonical_tool = Agent_sdk.Canonical_tool
+module String_map = Map.Make (String)
+module String_set = Set.Make (String)
+
+type object_field_error =
+  | Unexpected_object_field of string
+  | Duplicate_object_field of string
+
+type current_selection =
+  { summary : string
+  ; facts : fact list
+  ; open_items : string list
+  ; constraints : string list
+  ; preserved_tool_refs : string list
+  }
 
 type input =
   { turn_ref : Ids.Turn_ref.t
+  ; generation : int
+  ; current : current_selection option
   ; messages : Agent_sdk.Types.message list
   }
 
-let wire_field_episode_summary = Keeper_memory_os_types.wire_field_episode_summary
-let wire_field_claims = Keeper_memory_os_types.wire_field_claims
+type selection =
+  { summary : string
+  ; retained_claim_ids : string list
+  ; new_claims : fact list
+  ; facts : fact list
+  ; open_items : string list
+  ; constraints : string list
+  ; preserved_tool_refs : string list
+  }
+
+let wire_field_summary = "summary"
+let wire_field_retained_claim_ids = "retained_claim_ids"
+let wire_field_new_claims = "new_claims"
+let wire_field_open_items = Keeper_memory_os_types.wire_field_open_items
+let wire_field_constraints = Keeper_memory_os_types.wire_field_constraints
+let wire_field_preserved_tool_refs = Keeper_memory_os_types.wire_field_preserved_tool_refs
 let wire_field_claim = Keeper_memory_os_types.wire_field_claim
 let wire_field_category = Keeper_memory_os_types.wire_field_category
 let wire_field_source_turn = Keeper_memory_os_types.wire_field_source_turn
 let wire_field_source_tool_call_id = Keeper_memory_os_types.wire_field_source_tool_call_id
 let wire_field_claim_id = Keeper_memory_os_types.wire_field_claim_id
-let wire_episode_fields = Keeper_memory_os_types.wire_librarian_episode_fields
 let wire_claim_fields = Keeper_memory_os_types.wire_librarian_claim_fields
+let wire_current_fields =
+  [ wire_field_summary
+  ; wire_field_retained_claim_ids
+  ; wire_field_new_claims
+  ; wire_field_open_items
+  ; wire_field_constraints
+  ; wire_field_preserved_tool_refs
+  ]
 
 let trim_nonempty s =
   let s = String.trim s in
@@ -78,9 +115,35 @@ let format_messages_for_prompt messages =
     |> String.concat "\n\n---\n\n"
 ;;
 
+let current_fact_json fact =
+  `Assoc
+    [ "memory_id", `String (claim_identity fact)
+    ; "fact", fact_to_json fact
+    ]
+;;
+
+let current_selection_json (current : current_selection) =
+  `Assoc
+    [ wire_field_summary, `String current.summary
+    ; "facts", `List (List.map current_fact_json current.facts)
+    ; wire_field_open_items, `List (List.map (fun value -> `String value) current.open_items)
+    ; wire_field_constraints, `List (List.map (fun value -> `String value) current.constraints)
+    ; ( wire_field_preserved_tool_refs
+      , `List (List.map (fun value -> `String value) current.preserved_tool_refs) )
+    ]
+;;
+
+let format_current_selection_for_prompt (curr : current_selection option) =
+  match curr with
+  | None -> Yojson.Safe.pretty_to_string `Null
+  | Some current ->
+    current_selection_json current |> Yojson.Safe.pretty_to_string
+;;
+
 let prompt_variables (inp : input) : (string * string) list =
-  [ ( "conversation_history"
-    , inp.messages |> format_messages_for_prompt )
+  [ "current_memory", format_current_selection_for_prompt inp.current
+  ; ( "conversation_history"
+    , format_messages_for_prompt inp.messages )
   ]
 ;;
 
@@ -106,36 +169,60 @@ let rec traverse f = function
      | (Some _, None) | (None, _) -> None)
 ;;
 
+let string_list_field key fields =
+  match List.assoc_opt key fields with
+  | Some (`List items) -> traverse (function `String s -> trim_nonempty s | _ -> None) items
+  | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _)
+  | None -> None
+;;
+
 let field_allowed ~allowed field =
   List.exists (String.equal field) allowed
 ;;
 
-let first_unexpected_field ~allowed fields =
+let first_object_field_error ~allowed fields =
   let rec loop seen = function
     | [] -> None
     | (field, _) :: rest ->
-      if List.mem field seen || not (field_allowed ~allowed field)
-      then Some field
-      else loop (field :: seen) rest
+      if String_set.mem field seen
+      then Some (Duplicate_object_field field)
+      else if not (field_allowed ~allowed field)
+      then Some (Unexpected_object_field field)
+      else loop (String_set.add field seen) rest
   in
-  loop [] fields
+  loop String_set.empty fields
 ;;
 
 type parse_error =
   | Top_level_not_object
   | Unexpected_field of string
+  | Duplicate_field of string
   | Missing_required_fields
   | Claim_schema_mismatch
+  | Unknown_retained_claim_id of string
+  | Duplicate_retained_claim_id of string
+  | Duplicate_selected_claim_id of string
 
 let parse_error_to_string = function
   | Top_level_not_object -> "top_level_not_object"
   | Unexpected_field field -> "unexpected_field: " ^ field
+  | Duplicate_field field -> "duplicate_field: " ^ field
   | Missing_required_fields -> "missing_required_fields"
   | Claim_schema_mismatch -> "claim_schema_mismatch"
+  | Unknown_retained_claim_id identity ->
+    "unknown_retained_claim_id: " ^ identity
+  | Duplicate_retained_claim_id identity ->
+    "duplicate_retained_claim_id: " ^ identity
+  | Duplicate_selected_claim_id identity ->
+    "duplicate_selected_claim_id: " ^ identity
 ;;
 
 let claim_source ~trace_id turn tool_call_id =
   { trace_id; turn; tool_call_id }
+;;
+
+let input_trace_id (inp : input) =
+  Ids.Turn_ref.trace_id inp.turn_ref
 ;;
 
 let message_has_tool_call_id (message : Agent_sdk.Types.message) tool_call_id =
@@ -167,16 +254,15 @@ let source_is_in_input ~messages ~turn ~tool_call_id =
      | None -> true)
 ;;
 
-let required_nullable_string_field key fields =
+let optional_string_field_strict key fields =
   match List.assoc_opt key fields with
-  | None -> None
-  | Some `Null -> Some None
+  | None | Some `Null -> Some None
   | Some (`String value) -> Some (Some value)
   | Some _ -> None
 ;;
 
 let claim_id_field fields =
-  match required_nullable_string_field wire_field_claim_id fields with
+  match optional_string_field_strict wire_field_claim_id fields with
   | Some (Some id) when String.equal (String.trim id) "" -> None
   | value -> value
 ;;
@@ -191,18 +277,16 @@ let fact_of_json ~trace_id ~messages ~now (json : Yojson.Safe.t) : fact option =
           | Some _ | None -> None)
        , int_field wire_field_source_turn fields
        , claim_id_field fields
-       , required_nullable_string_field wire_field_source_tool_call_id fields
+       , optional_string_field_strict wire_field_source_tool_call_id fields
      with
      | Some claim, Some category, Some turn, Some claim_id, Some tool_call_id
-       when
-         turn >= 0
-         && source_is_in_input ~messages ~turn ~tool_call_id ->
+       when turn >= 0 && source_is_in_input ~messages ~turn ~tool_call_id ->
       Some
         { claim
         ; category
         ; source = claim_source ~trace_id turn tool_call_id
         ; first_seen = now
-        ; last_verified_at = None (* RFC-0285 §3.3 / RFC-0259 P7: re-extraction must not advance last_verified_at *)
+        ; last_verified_at = None
         ; claim_id
         }
      | (Some _, Some _, Some _, _, _)
@@ -212,25 +296,64 @@ let fact_of_json ~trace_id ~messages ~now (json : Yojson.Safe.t) : fact option =
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
-let unexpected_claim_field = function
-  | `Assoc fields -> first_unexpected_field ~allowed:wire_claim_fields fields
+let claim_field_error = function
+  | `Assoc fields -> first_object_field_error ~allowed:wire_claim_fields fields
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
-let claim_identities_are_unique claims =
-  let rec loop seen = function
-    | [] -> true
-    | claim :: rest ->
-      let identity = Keeper_memory_os_types.claim_identity claim in
-      if Set_util.StringSet.mem identity seen
-      then false
-      else loop (Set_util.StringSet.add identity seen) rest
-  in
-  loop Set_util.StringSet.empty claims
+let current_facts_by_id facts =
+  List.fold_left
+    (fun by_id fact ->
+       String_map.add (claim_identity fact) fact by_id)
+    String_map.empty
+    facts
 ;;
 
-let episode_of_json_result ?now ~generation (inp : input) (json : Yojson.Safe.t) :
-  (episode, parse_error) result
+let current_facts inp =
+  match inp.current with
+  | None -> []
+  | Some current -> current.facts
+;;
+
+let materialize_facts ~current_facts ~retained_claim_ids ~new_claims =
+  let open Result.Syntax in
+  let current_by_id = current_facts_by_id current_facts in
+  let rec retain seen retained_rev = function
+    | [] -> Ok (List.rev retained_rev, seen)
+    | identity :: rest ->
+      if String_set.mem identity seen
+      then Error (Duplicate_retained_claim_id identity)
+      else
+        (match String_map.find_opt identity current_by_id with
+         | None -> Error (Unknown_retained_claim_id identity)
+         | Some fact ->
+           retain
+             (String_set.add identity seen)
+             (fact :: retained_rev)
+             rest)
+  in
+  let* retained, selected_ids =
+    retain String_set.empty [] retained_claim_ids
+  in
+  let rec append_new selected_ids new_rev = function
+    | [] -> Ok (retained @ List.rev new_rev)
+    | fact :: rest ->
+      let identity = claim_identity fact in
+      if
+        String_set.mem identity selected_ids
+        || String_map.mem identity current_by_id
+      then Error (Duplicate_selected_claim_id identity)
+      else
+        append_new
+          (String_set.add identity selected_ids)
+          (fact :: new_rev)
+          rest
+  in
+  append_new selected_ids [] new_claims
+;;
+
+let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
+  (selection, parse_error) result
   =
   let now =
     match now with
@@ -239,36 +362,57 @@ let episode_of_json_result ?now ~generation (inp : input) (json : Yojson.Safe.t)
       (* NDT-OK: extraction timestamps are provenance/retention metadata only. *)
       Unix.gettimeofday ()
   in
-  let trace_id = Ids.Turn_ref.trace_id inp.turn_ref in
   match json with
   | `Assoc fields ->
-    (match first_unexpected_field ~allowed:wire_episode_fields fields with
-     | Some field -> Error (Unexpected_field field)
+    (match first_object_field_error ~allowed:wire_current_fields fields with
+     | Some (Unexpected_object_field field) -> Error (Unexpected_field field)
+     | Some (Duplicate_object_field field) -> Error (Duplicate_field field)
      | None ->
-       (match string_field wire_field_episode_summary fields, List.assoc_opt wire_field_claims fields with
-        | Some episode_summary, Some (`List claim_items) ->
-          (match List.find_map unexpected_claim_field claim_items with
-           | Some field -> Error (Unexpected_field field)
+       (match
+          string_field wire_field_summary fields
+          , string_list_field wire_field_retained_claim_ids fields
+          , List.assoc_opt wire_field_new_claims fields
+          , string_list_field wire_field_open_items fields
+          , string_list_field wire_field_constraints fields
+          , string_list_field wire_field_preserved_tool_refs fields
+        with
+        | ( Some summary
+          , Some retained_claim_ids
+          , Some (`List claim_items)
+          , Some open_items
+          , Some constraints
+          , Some preserved_tool_refs ) ->
+          (match List.find_map claim_field_error claim_items with
+           | Some (Unexpected_object_field field) -> Error (Unexpected_field field)
+           | Some (Duplicate_object_field field) -> Error (Duplicate_field field)
            | None ->
              (match
                 traverse
                   (fact_of_json
-                     ~trace_id
+                     ~trace_id:(input_trace_id inp)
                      ~messages:inp.messages
                      ~now)
                   claim_items
               with
-              | Some claims when claim_identities_are_unique claims ->
-                Ok
-                  { trace_id
-                  ; generation
-                  ; episode_summary
-                  ; claims
-                  ; source_turn_range =
-                      Keeper_memory_os_types.source_turn_range_of_facts claims
-                  ; created_at = now
-                  }
-              | Some _ | None -> Error Claim_schema_mismatch))
+              | Some new_claims ->
+                (match
+                   materialize_facts
+                     ~current_facts:(current_facts inp)
+                     ~retained_claim_ids
+                     ~new_claims
+                 with
+                 | Ok facts ->
+                   Ok
+                     { summary
+                     ; retained_claim_ids
+                     ; new_claims
+                     ; facts
+                     ; open_items
+                     ; constraints
+                     ; preserved_tool_refs
+                     }
+                 | Error _ as error -> error)
+              | None -> Error Claim_schema_mismatch))
         | _ -> Error Missing_required_fields))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Error Top_level_not_object

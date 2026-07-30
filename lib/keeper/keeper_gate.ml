@@ -832,11 +832,14 @@ and retry_auto_judge_entry
        | Error reason -> Error (reblock reason)
        | Ok outcome ->
          (match
-            List.assoc_opt entry.id outcome.failures,
+            List.find_opt
+              (fun (f : auto_judge_owner_failure) ->
+                 Option.equal String.equal f.approval_id (Some entry.id))
+              outcome.failures,
             outcome.started_id,
             outcome.blocker
           with
-          | Some reason, _, _ -> Error (reblock reason)
+          | Some failure, _, _ -> Error (reblock failure.operator_detail)
           | None, Some id, _ when String.equal id entry.id ->
             Ok Retry_started
           | None, Some started_id, _ ->

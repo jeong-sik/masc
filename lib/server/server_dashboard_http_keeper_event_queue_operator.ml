@@ -91,6 +91,8 @@ let pending_page ~after ~limit pending =
 
 module For_testing = struct
   let pending_page = pending_page
+  let pending_selection_at = Execute.pending_selection_at
+  let run = Execute.run
 end
 
 let handle_get state request reqd ~keeper_name =

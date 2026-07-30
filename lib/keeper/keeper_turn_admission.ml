@@ -286,7 +286,7 @@ let shutdown_rejection_snapshot slot operation_id =
     })
 ;;
 
-let admit_autonomous_with_token ~base_path ~keeper_name f =
+let run_if_free_with_token ~base_path ~keeper_name f =
   let slot = slot_for ~base_path ~keeper_name in
   match peek_shutdown slot with
   | Some operation_id -> `Busy (Shutdown_requested operation_id)
@@ -300,19 +300,11 @@ let admit_autonomous_with_token ~base_path ~keeper_name f =
     else `Busy (Turn_busy (peek_info slot))
 ;;
 
-let admit_autonomous ~base_path ~keeper_name f =
-  admit_autonomous_with_token
+let run_if_free ~base_path ~keeper_name f =
+  run_if_free_with_token
     ~base_path
     ~keeper_name
     (fun _token -> f ())
-;;
-
-let run_if_free_with_token ~base_path ~keeper_name f =
-  admit_autonomous_with_token ~base_path ~keeper_name f
-;;
-
-let run_if_free ~base_path ~keeper_name f =
-  admit_autonomous ~base_path ~keeper_name f
 ;;
 
 let run_serialized ~base_path ~keeper_name f =

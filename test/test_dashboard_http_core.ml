@@ -1978,18 +1978,18 @@ let test_lifecycle_event_display_values () =
      here instead of silently changing a dashboard row (the coverage test above
      only asserts [Some], not the value). *)
   let cases =
-    [ ("started", true, "running", "idle", false);
-      ("restarted", true, "running", "idle", false);
-      ("reconciled", true, "running", "idle", false);
-      ("running", true, "running", "idle", false);
-      ("resumed", true, "running", "idle", false);
-      ("paused", true, "paused", "paused", true);
-      ("purged", false, "stopped", "offline", false);
-      ("admission_denied", false, "offline", "offline", false);
-      ("dead_cleaned", false, "dead", "offline", false);
-      ("stopped", false, "stopped", "offline", true);
-      ("crashed", false, "crashed", "crashed", false);
-      ("dead", false, "dead", "offline", false);
+    [ ("started", true, "running", "idle", Some false);
+      ("restarted", true, "running", "idle", Some false);
+      ("reconciled", true, "running", "idle", Some false);
+      ("running", true, "running", "idle", Some false);
+      ("resumed", true, "running", "idle", Some false);
+      ("paused", true, "paused", "paused", Some true);
+      ("purged", false, "stopped", "offline", Some false);
+      ("admission_denied", false, "offline", "offline", Some false);
+      ("dead_cleaned", false, "dead", "offline", Some false);
+      ("stopped", false, "stopped", "offline", None);
+      ("crashed", false, "crashed", "crashed", Some false);
+      ("dead", false, "dead", "offline", Some false);
     ]
   in
   List.iter
@@ -2010,9 +2010,251 @@ let test_lifecycle_event_display_values () =
            name);
       check (option bool)
         ("paused value for " ^ name)
-        (Some paused)
+        paused
         (Server_dashboard_http_execution_surfaces.paused_of_lifecycle_event name))
     cases
+
+(* The [paused] lifecycle event patches with [keepalive_running = true], so the
+   row goes through the keepalive branch of the status patcher. That branch used
+   to classify against the surface vocabulary alone, where "paused" is not a
+   member, and fell through to "idle" — producing a row that said [status =
+   "idle"] and [paused = true] at the same time. [rebuild_continuity_briefs]
+   then read the row as live. *)
+let test_paused_lifecycle_event_keeps_paused_status () =
+  let patched =
+    Server_dashboard_http_execution_surfaces.patch_keeper_row
+      ~keeper_name:"pause-target"
+      ~event:"paused"
+      ~keepalive_running:true
+      (`Assoc [ ("name", `String "pause-target"); ("status", `String "paused") ])
+  in
+  check string "status survives the patch" "paused"
+    Yojson.Safe.Util.(patched |> member "status" |> to_string);
+  check bool "paused flag is set" true
+    Yojson.Safe.Util.(patched |> member "paused" |> to_bool)
+
+let test_resumed_lifecycle_event_clears_paused_status () =
+  let patched =
+    Server_dashboard_http_execution_surfaces.patch_keeper_row
+      ~keeper_name:"resume-target"
+      ~event:"resumed"
+      ~keepalive_running:true
+      (`Assoc
+        [ ("name", `String "resume-target")
+        ; ("status", `String "paused")
+        ; ("paused", `Bool true)
+        ])
+  in
+  check string "resumed status is idle" "idle"
+    Yojson.Safe.Util.(patched |> member "status" |> to_string);
+  check bool "resumed flag clears pause" false
+    Yojson.Safe.Util.(patched |> member "paused" |> to_bool)
+
+let test_reconciled_lifecycle_event_preserves_durable_pause () =
+  let patched =
+    Server_dashboard_http_execution_surfaces.patch_keeper_row
+      ~keeper_name:"paused-reconcile-target"
+      ~event:"reconciled"
+      ~keepalive_running:true
+      (`Assoc
+        [ ("name", `String "paused-reconcile-target")
+        ; ("status", `String "paused")
+        ; ("paused", `Bool true)
+        ; ("phase", `String "paused")
+        ; ("pipeline_stage", `String "paused")
+        ; ("agent", `Assoc [ ("status", `String "active") ])
+        ])
+  in
+  let open Yojson.Safe.Util in
+  check string "reconciliation preserves paused status" "paused"
+    (patched |> member "status" |> to_string);
+  check bool "reconciliation preserves durable pause flag" true
+    (patched |> member "paused" |> to_bool);
+  check string "reconciliation preserves paused phase" "paused"
+    (patched |> member "phase" |> to_string);
+  check string "reconciliation preserves paused pipeline" "paused"
+    (patched |> member "pipeline_stage" |> to_string)
+
+let test_stopped_lifecycle_event_stays_offline () =
+  let patched =
+    Server_dashboard_http_execution_surfaces.patch_keeper_row
+      ~keeper_name:"stop-target"
+      ~event:"stopped"
+      ~keepalive_running:false
+      (`Assoc
+        [ ("name", `String "stop-target")
+        ; ("status", `String "active")
+        ; ("paused", `Bool false)
+        ])
+  in
+  check string "stopped status is offline" "offline"
+    Yojson.Safe.Util.(patched |> member "status" |> to_string);
+  check bool "stopped event does not manufacture a pause" false
+    Yojson.Safe.Util.(patched |> member "paused" |> to_bool)
+
+let test_stopped_lifecycle_event_preserves_durable_pause () =
+  let patched =
+    Server_dashboard_http_execution_surfaces.patch_keeper_row
+      ~keeper_name:"paused-stop-target"
+      ~event:"stopped"
+      ~keepalive_running:false
+      (`Assoc
+        [ ("name", `String "paused-stop-target")
+        ; ("status", `String "paused")
+        ; ("paused", `Bool true)
+        ; ("agent", `Assoc [ ("status", `String "active") ])
+        ])
+  in
+  check string "terminal stop preserves paused status" "paused"
+    Yojson.Safe.Util.(patched |> member "status" |> to_string);
+  check bool "terminal stop preserves durable pause flag" true
+    Yojson.Safe.Util.(patched |> member "paused" |> to_bool)
+
+let test_lifecycle_cache_patch_rejects_missing_or_unknown_status () =
+  let patch row =
+    Server_dashboard_http_execution_surfaces.patch_keeper_row
+      ~keeper_name:"drift-target"
+      ~event:"reconciled"
+      ~keepalive_running:true
+      row
+    |> ignore
+  in
+  check_raises
+    "missing status stays fail-loud"
+    (Invalid_argument
+       "dashboard execution cache: keeper row has no current status")
+    (fun () ->
+      patch (`Assoc [ "name", `String "drift-target" ]));
+  check_raises
+    "unknown status stays fail-loud"
+    (Invalid_argument
+       "dashboard execution cache: unknown current keeper status \"suspended\"")
+    (fun () ->
+      patch
+        (`Assoc
+          [ "name", `String "drift-target"
+          ; "status", `String "suspended"
+          ]))
+
+let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
+  let dir = test_dir () in
+  let config = Workspace.default_config dir in
+  let keeper_name = "continuity-reconcile-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "agent_name", `String ("keeper-" ^ keeper_name ^ "-agent")
+          ; "trace_id", `String "continuity-reconcile-trace"
+          ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail ("meta fixture: " ^ error)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister
+        ~base_path:config.base_path
+        keeper_name;
+      cleanup_dir dir)
+    (fun () ->
+       (match Masc.Keeper_meta_store.write_meta config meta with
+        | Ok () -> ()
+        | Error error -> fail ("write meta: " ^ error));
+       ignore
+         (Masc.Keeper_registry.For_testing.register
+            ~base_path:config.base_path
+            keeper_name
+            meta);
+       let now = Masc_domain.now_iso () in
+       let keeper_row =
+         `Assoc
+           [ "name", `String keeper_name
+           ; "agent", `Assoc []
+           ; "agent_name", `String ("keeper-" ^ keeper_name ^ "-agent")
+           ; "keeper_id", `String ("k-" ^ keeper_name)
+           ; "status", `String "active"
+           ; "keepalive_running", `Bool false
+           ; "generation", `Int 1
+           ; "turn_count", `Int 1
+           ; "autonomous_turn_count", `Int 1
+           ; "autonomous_action_count", `Int 1
+           ; "noop_turn_count", `Int 0
+           ; "active_goal_ids", `List []
+           ; "last_autonomous_action_at", `String now
+           ; "updated_at", `String now
+           ; "tool_audit_at", `String ""
+           ; "recent_tool_names", `List []
+           ; "latest_tool_names", `List []
+           ]
+       in
+       let stale_brief =
+         `Assoc
+           [ "name", `String keeper_name
+           ; "status", `String "offline"
+           ; "state", `String "critical"
+           ; "lifecycle", `String "offline"
+           ; "related_session_id", `String "session-exact"
+           ]
+       in
+       let patched =
+         Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
+           config
+           (`Assoc
+             [ "keepers", `List [ keeper_row ]
+             ; "continuity_briefs", `List [ stale_brief ]
+             ])
+       in
+       let open Yojson.Safe.Util in
+       let patched_keeper = patched |> member "keepers" |> to_list |> List.hd in
+       let patched_brief =
+         patched |> member "continuity_briefs" |> to_list |> List.hd
+       in
+       check string
+         "keeper status falls back to the top-level typed status"
+         "active"
+         (patched_keeper |> member "status" |> to_string);
+       check bool
+         "keeper keepalive uses reconciled registry state"
+         true
+         (patched_keeper |> member "keepalive_running" |> to_bool);
+       check string
+         "brief status is rebuilt from patched keeper"
+         "active"
+         (patched_brief |> member "status" |> to_string);
+       check string
+         "brief lifecycle is rebuilt from patched keeper"
+         "active"
+         (patched_brief |> member "lifecycle" |> to_string);
+       check string
+         "brief state is rebuilt from patched keeper"
+         "healthy"
+         (patched_brief |> member "state" |> to_string);
+       check string
+         "brief keeps exact related session"
+         "session-exact"
+         (patched_brief |> member "related_session_id" |> to_string);
+       let unrelated_surface =
+         `Assoc
+           [ ( "keepers"
+             , `List
+                 [ `Assoc
+                     [ "name", `String "fixture-only-keeper"
+                     ; "status", `String "offline"
+                     ] ] )
+           ; "continuity_briefs", `List [ stale_brief ]
+           ]
+       in
+       check
+         bool
+         "unrelated running keeper leaves fixture surface byte-stable"
+         true
+         (unrelated_surface
+          =
+          Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
+            config
+            unrelated_surface))
 
 let test_composite_blocked_uses_terminal_contract_not_observational_metadata () =
   let execution ~terminal_reason_code ~operator_disposition_reason =
@@ -2369,6 +2611,20 @@ let () =
             test_lifecycle_event_cache_patcher_coverage;
           test_case "cache patchers pin byte-identical values" `Quick
             test_lifecycle_event_display_values;
+          test_case "paused lifecycle event keeps the paused status" `Quick
+            test_paused_lifecycle_event_keeps_paused_status;
+          test_case "resumed lifecycle event clears the paused status" `Quick
+            test_resumed_lifecycle_event_clears_paused_status;
+          test_case "reconciled lifecycle event preserves durable pause" `Quick
+            test_reconciled_lifecycle_event_preserves_durable_pause;
+          test_case "stopped lifecycle event stays offline" `Quick
+            test_stopped_lifecycle_event_stays_offline;
+          test_case "stopped lifecycle event preserves durable pause" `Quick
+            test_stopped_lifecycle_event_preserves_durable_pause;
+          test_case "cache patch rejects missing or unknown status" `Quick
+            test_lifecycle_cache_patch_rejects_missing_or_unknown_status;
+          test_case "running keeper reconciliation rebuilds continuity brief" `Quick
+            test_running_keeper_reconciliation_rebuilds_continuity_brief;
         ] );
       ( "context-window shrink guard (#25062/#25268)",
         [ test_case "shrink of max_context_override is detected" `Quick

@@ -505,7 +505,7 @@ type lifecycle_display =
   { ld_keepalive_running : bool
   ; ld_phase : string
   ; ld_pipeline_stage : string
-  ; ld_paused : bool
+  ; ld_paused : bool option
   }
 
 type lifecycle_legacy_wire_event =
@@ -523,15 +523,15 @@ let display_of_custom_event (verb : Keeper_lifecycle_events.t) : lifecycle_displ
   let open Keeper_lifecycle_events in
   match verb with
   | Started | Restarted | Reconciled ->
-    { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = false }
+    { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = Some false }
   | Purged ->
-    { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = false }
+    { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = Some false }
   | Admission_denied ->
     (* admission guard refused to launch a fiber *)
-    { ld_keepalive_running = false; ld_phase = "offline"; ld_pipeline_stage = "offline"; ld_paused = false }
+    { ld_keepalive_running = false; ld_phase = "offline"; ld_pipeline_stage = "offline"; ld_paused = Some false }
   | Dead_cleaned ->
     (* cleanup == no longer alive *)
-    { ld_keepalive_running = false; ld_phase = "dead"; ld_pipeline_stage = "offline"; ld_paused = false }
+    { ld_keepalive_running = false; ld_phase = "dead"; ld_pipeline_stage = "offline"; ld_paused = Some false }
 ;;
 
 (* Phase-derived + legacy operator strings (not custom-event verbs). Raw-string
@@ -548,19 +548,19 @@ let lifecycle_legacy_wire_event_of_string = function
 
 let display_of_phase_or_legacy_event = function
   | Legacy_running ->
-    Some { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = false }
+    Some { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = Some false }
   | Legacy_stopped ->
     Some
-      { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = true }
+      { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = None }
   | Legacy_crashed ->
     Some
-      { ld_keepalive_running = false; ld_phase = "crashed"; ld_pipeline_stage = "crashed"; ld_paused = false }
+      { ld_keepalive_running = false; ld_phase = "crashed"; ld_pipeline_stage = "crashed"; ld_paused = Some false }
   | Legacy_dead ->
-    Some { ld_keepalive_running = false; ld_phase = "dead"; ld_pipeline_stage = "offline"; ld_paused = false }
+    Some { ld_keepalive_running = false; ld_phase = "dead"; ld_pipeline_stage = "offline"; ld_paused = Some false }
   | Legacy_paused ->
-    Some { ld_keepalive_running = true; ld_phase = "paused"; ld_pipeline_stage = "paused"; ld_paused = true }
+    Some { ld_keepalive_running = true; ld_phase = "paused"; ld_pipeline_stage = "paused"; ld_paused = Some true }
   | Legacy_resumed ->
-    Some { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = false }
+    Some { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = Some false }
 
 let display_of_phase_or_legacy_string s =
   match lifecycle_legacy_wire_event_of_string s with
@@ -587,7 +587,14 @@ let pipeline_stage_of_lifecycle_event event =
 ;;
 
 let paused_of_lifecycle_event event =
-  Option.map (fun (d : lifecycle_display) -> d.ld_paused) (lifecycle_display_of_event event)
+  Option.bind (lifecycle_display_of_event event)
+    (fun (d : lifecycle_display) -> d.ld_paused)
+;;
+
+let keeper_top_level_status_opt row =
+  match Json_util.assoc_member_opt "status" row with
+  | Some (`String status) -> Some status
+  | _ -> None
 ;;
 
 let keeper_agent_status_opt row =
@@ -595,53 +602,116 @@ let keeper_agent_status_opt row =
   | Some (`Assoc _ as agent) ->
     (match Json_util.assoc_member_opt "status" agent with
      | Some (`String status) -> Some status
-     | _ -> None)
-  | None | Some _ ->
-    (match Json_util.assoc_member_opt "status" row with
-     | Some (`String status) -> Some status
-     | _ -> None)
+     | _ -> keeper_top_level_status_opt row)
+  | None | Some _ -> keeper_top_level_status_opt row
 ;;
 
-let patched_keeper_status row ~keepalive_running =
-  if not keepalive_running
-  then `String "offline"
-  else (
-    (* RFC-0089: classify the row's display status via the typed surface_status
+let lifecycle_display_for_row row event =
+  match
+    ( Keeper_lifecycle_events.event_of_string event
+    , Option.bind
+        (keeper_top_level_status_opt row)
+        Keeper_status_runtime.control_plane_status_of_string_opt )
+  with
+  | Some Keeper_lifecycle_events.Reconciled, Some Keeper_status_runtime.Cp_paused ->
+    display_of_phase_or_legacy_event Legacy_paused
+  | Some _, _ | None, _ -> lifecycle_display_of_event event
+;;
+
+let control_status_override_of_lifecycle_event row event =
+  match lifecycle_display_for_row row event with
+  | Some { ld_paused = Some true; _ } ->
+    Some Keeper_status_runtime.Cp_paused
+  | Some _ | None ->
+    (match lifecycle_legacy_wire_event_of_string event with
+  | Some Legacy_paused ->
+    Some Keeper_status_runtime.Cp_paused
+  | Some Legacy_resumed ->
+    Some
+      (Keeper_status_runtime.Cp_surface
+         Keeper_status_runtime.Surface_idle)
+  | Some Legacy_stopped ->
+    (match
+       Option.bind
+         (match keeper_top_level_status_opt row with
+          | Some _ as status -> status
+          | None -> keeper_agent_status_opt row)
+         Keeper_status_runtime.control_plane_status_of_string_opt
+     with
+     | Some Keeper_status_runtime.Cp_paused ->
+       Some Keeper_status_runtime.Cp_paused
+     | Some (Keeper_status_runtime.Cp_surface _) | None -> None)
+  | Some (Legacy_running | Legacy_crashed | Legacy_dead) | None -> None)
+;;
+
+let patched_keeper_status row ~event ~keepalive_running =
+  match control_status_override_of_lifecycle_event row event with
+  | Some status ->
+    `String (Keeper_status_runtime.control_plane_status_to_string status)
+  | None when not keepalive_running -> `String "offline"
+  | None ->
+    (* RFC-0089: classify the row's display status via the typed control-plane
        SSOT. busy/active/listening/idle pass through; inactive/offline collapse
-       to "offline"; anything outside the domain defaults to "idle". *)
-    match
-      Option.bind (keeper_agent_status_opt row)
-        Keeper_status_runtime.surface_status_of_string_opt
-    with
-    | Some ((Surface_busy | Surface_active | Surface_listening | Surface_idle) as s) ->
+       to "offline"; a control-plane pause survives the patch, because a running
+       keepalive fiber does not un-pause a keeper — collapsing it here made
+       [rebuild_continuity_briefs] read the row as live. Missing or unknown
+       values fail loudly instead of manufacturing an idle keeper. *)
+    let status =
+      match keeper_agent_status_opt row with
+      | Some status -> status
+      | None ->
+        invalid_arg
+          "dashboard execution cache: keeper row has no current status"
+    in
+    match Keeper_status_runtime.control_plane_status_of_string_opt status with
+    | Some
+        (Cp_surface
+           ((Surface_busy | Surface_active | Surface_listening | Surface_idle) as s)) ->
       `String (Keeper_status_runtime.surface_status_to_string s)
-    | Some (Surface_offline | Surface_inactive) -> `String "offline"
-    | None -> `String "idle")
+    | Some (Cp_surface (Surface_offline | Surface_inactive)) -> `String "offline"
+    | Some Cp_paused ->
+      `String
+        (Keeper_status_runtime.control_plane_status_to_string
+           Keeper_status_runtime.Cp_paused)
+    | None ->
+      invalid_arg
+        (Printf.sprintf
+           "dashboard execution cache: unknown current keeper status %S"
+           status)
 ;;
 
 let patch_keeper_row ~keeper_name ~event ~keepalive_running = function
   | `Assoc fields as row ->
     (match Json_util.assoc_member_opt "name" row with
      | Some (`String name) when String.equal name keeper_name ->
+       let lifecycle_display = lifecycle_display_for_row row event in
        let row_fields : (string * Yojson.Safe.t) list = fields in
        let row_fields =
          row_fields
          |> upsert_assoc_field "keepalive_running" (`Bool keepalive_running)
-         |> upsert_assoc_field "status" (patched_keeper_status row ~keepalive_running)
+         |> upsert_assoc_field
+              "status"
+              (patched_keeper_status row ~event ~keepalive_running)
        in
        let row_fields =
-         match paused_of_lifecycle_event event with
-         | Some paused -> upsert_assoc_field "paused" (`Bool paused) row_fields
+         match lifecycle_display with
+         | Some { ld_paused = Some paused; _ } ->
+           upsert_assoc_field "paused" (`Bool paused) row_fields
+         | Some { ld_paused = None; _ } | None -> row_fields
+       in
+       let row_fields =
+         match lifecycle_display with
+         | Some { ld_phase; _ } ->
+           upsert_assoc_field "phase" (`String ld_phase) row_fields
          | None -> row_fields
        in
        let row_fields =
-         match phase_of_lifecycle_event event with
-         | Some phase -> upsert_assoc_field "phase" (`String phase) row_fields
-         | None -> row_fields
-       in
-       let row_fields =
-         match pipeline_stage_of_lifecycle_event event with
-         | Some stage -> upsert_assoc_field "pipeline_stage" (`String stage) row_fields
+         match lifecycle_display with
+         | Some { ld_pipeline_stage; _ } ->
+           upsert_assoc_field
+             "pipeline_stage"
+             (`String ld_pipeline_stage)
+             row_fields
          | None -> row_fields
        in
        `Assoc row_fields
@@ -651,6 +721,57 @@ let patch_keeper_row ~keeper_name ~event ~keepalive_running = function
 
 let patch_keeper_rows ~keeper_name ~event ~keepalive_running rows =
   List.map (patch_keeper_row ~keeper_name ~event ~keepalive_running) rows
+;;
+
+let rebuild_continuity_briefs ~now_ts ~keeper_rows ~existing_briefs =
+  let related_session_ids =
+    List.filter_map
+      (fun brief ->
+         match
+           Json_util.assoc_string_opt "name" brief,
+           Json_util.assoc_string_opt "related_session_id" brief
+         with
+         | Some name, Some related_session_id -> Some (name, related_session_id)
+         | _ -> None)
+      existing_briefs
+  in
+  keeper_rows
+  |> List.filter_map (fun keeper ->
+    match Json_util.assoc_string_opt "name" keeper with
+    | Some name ->
+      let related_session_id = List.assoc_opt name related_session_ids in
+      Some
+        (Dashboard_execution_builders.continuity_row_of_keeper
+           ~now_ts
+           ?related_session_id
+           keeper)
+    | None -> None)
+  |> List.sort
+       (fun
+         (left : Dashboard_execution_helpers.continuity_context)
+         (right : Dashboard_execution_helpers.continuity_context)
+       ->
+         let by_tone = Int.compare right.tone_rank left.tone_rank in
+         if by_tone <> 0
+         then by_tone
+         else Float.compare right.last_signal_ts left.last_signal_ts)
+  |> List.map
+       (fun (row : Dashboard_execution_helpers.continuity_context) -> row.json)
+;;
+
+let replace_keeper_rows_and_rebuild_briefs ~now_ts ~keeper_rows ~keepers_json fields =
+  let fields = upsert_assoc_field "keepers" keepers_json fields in
+  match List.assoc_opt "continuity_briefs" fields with
+  | Some (`List existing_briefs) ->
+    upsert_assoc_field
+      "continuity_briefs"
+      (`List
+        (rebuild_continuity_briefs
+           ~now_ts
+           ~keeper_rows
+           ~existing_briefs))
+      fields
+  | Some _ | None -> fields
 ;;
 
 let running_keeper_names (config : Workspace.config) =
@@ -681,14 +802,32 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
       in
       match List.assoc_opt "keepers" fields with
       | Some (`List rows) ->
-        `Assoc (upsert_assoc_field "keepers" (`List (patch_rows rows)) fields)
+        let keeper_rows = patch_rows rows in
+        if keeper_rows = rows
+        then json
+        else
+          `Assoc
+            (replace_keeper_rows_and_rebuild_briefs
+               ~now_ts:(Time_compat.now ())
+               ~keeper_rows
+               ~keepers_json:(`List keeper_rows)
+               fields)
       | Some (`Assoc keeper_fields) ->
         (match List.assoc_opt "items" keeper_fields with
          | Some (`List rows) ->
-           let keeper_fields =
-             upsert_assoc_field "items" (`List (patch_rows rows)) keeper_fields
-           in
-           `Assoc (upsert_assoc_field "keepers" (`Assoc keeper_fields) fields)
+           let keeper_rows = patch_rows rows in
+           if keeper_rows = rows
+           then json
+           else (
+             let keeper_fields =
+               upsert_assoc_field "items" (`List keeper_rows) keeper_fields
+             in
+             `Assoc
+               (replace_keeper_rows_and_rebuild_briefs
+                  ~now_ts:(Time_compat.now ())
+                  ~keeper_rows
+                  ~keepers_json:(`Assoc keeper_fields)
+                  fields))
          | _ -> json)
       | _ -> json)
   | other -> other
@@ -700,12 +839,18 @@ let patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
   | `Assoc fields ->
     (match List.assoc_opt "keepers" fields with
      | Some (`List rows) ->
-       execution_cache.json
-       <- `Assoc
-            (upsert_assoc_field
-               "keepers"
-               (`List (patch_keeper_rows ~keeper_name ~event ~keepalive_running rows))
-               fields)
+       let keeper_rows =
+         patch_keeper_rows ~keeper_name ~event ~keepalive_running rows
+       in
+       if keeper_rows <> rows
+       then
+         execution_cache.json
+         <- `Assoc
+              (replace_keeper_rows_and_rebuild_briefs
+                 ~now_ts:(Time_compat.now ())
+                 ~keeper_rows
+                 ~keepers_json:(`List keeper_rows)
+                 fields)
      | Some _ -> ()
      | None -> ())
   | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ()

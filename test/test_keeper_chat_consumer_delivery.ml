@@ -193,7 +193,13 @@ let start_consumer ~sw ~clock ~base_path ~handle_turn =
           then
             match transition with
             | Keeper_turn_admission.Shutdown_rolled_back ->
-              Keeper_chat_consumer.notify_transition ~keeper_name
+              (match
+                 Keeper_chat_consumer.notify_explicit_retry
+                   ~base_path:transition_base_path
+                   ~keeper_name
+               with
+               | Ok () -> ()
+               | Error error -> fail error)
             | Keeper_turn_admission.Turn_released -> ()));
   let handle_admitted_turn
       ~sw
@@ -516,9 +522,9 @@ let test_finalization_persistence_retry_does_not_redeliver () =
       check_terminal_snapshot ~label:"retried finalization" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
-let test_claim_commit_uncertainty_waits_for_new_revision () =
+let test_claim_commit_uncertainty_waits_for_explicit_retry () =
   Printf.printf
-    "Test: claim commit uncertainty waits for a new durable revision\n%!";
+    "Test: claim commit uncertainty waits for an explicit retry\n%!";
   with_env (fun ~base ~clock ->
     match
       enqueue_checked ~label:"claim uncertainty enqueue" ~keeper_name
@@ -546,8 +552,10 @@ let test_claim_commit_uncertainty_waits_for_new_revision () =
                (function
                  | Keeper_chat_queue.For_testing.Commit_invoked ->
                    incr commit_attempts;
-                   Keeper_chat_queue.For_testing.fail_next_commit_with
-                     Commit_busy
+                   if !commit_attempts = 1
+                   then
+                     Keeper_chat_queue.For_testing.fail_next_commit_with
+                       Commit_busy
                  | Transaction_begun
                  | Mutation_applied
                  | Before_commit
@@ -586,29 +594,21 @@ let test_claim_commit_uncertainty_waits_for_new_revision () =
                    }
                | Error _ -> false);
             Keeper_chat_queue.For_testing.set_transaction_stage_observer None;
-            match
-              enqueue_checked ~label:"claim retry revision enqueue" ~keeper_name
-                (discord_msg ~content:"advance durable revision"
-                   ~channel_id:"channel-claim-retry"
-                   ~user_id:"user-claim-retry" ~timestamp:6.2)
-            with
-            | None -> ()
-            | Some second ->
-              check "new revision re-arms the original Pending receipt"
-                (match
-                   await_receipt ~clock ~seconds:5.0 ~keeper_name
-                     ~receipt_id:first.receipt_id ~accept:is_delivered
-                 with
-                 | Some _ -> true
-                 | None -> false);
-              check "the receipt behind it also drains"
-                (match
-                   await_receipt ~clock ~seconds:5.0 ~keeper_name
-                     ~receipt_id:second.receipt_id ~accept:is_delivered
-                 with
-                 | Some _ -> true
-                 | None -> false));
-          check "each committed receipt runs exactly once" (!turns = 2)))
+            (match
+               Keeper_chat_consumer.notify_explicit_retry
+                 ~base_path:base
+                 ~keeper_name
+             with
+             | Ok () -> ()
+             | Error error -> fail error);
+            check "explicit retry re-arms the original Pending receipt"
+              (match
+                 await_receipt ~clock ~seconds:5.0 ~keeper_name
+                   ~receipt_id:first.receipt_id ~accept:is_delivered
+               with
+               | Some _ -> true
+               | None -> false));
+          check "the committed receipt runs exactly once" (!turns = 1)))
 
 let test_busy_turn_hands_mutex_to_pending_receipt () =
   Printf.printf
@@ -1007,7 +1007,7 @@ let () =
   test_structured_cancellation_terminalizes_claimed_receipt ();
   test_dispatch_is_concurrent_per_keeper ();
   test_finalization_persistence_retry_does_not_redeliver ();
-  test_claim_commit_uncertainty_waits_for_new_revision ();
+  test_claim_commit_uncertainty_waits_for_explicit_retry ();
   test_busy_turn_hands_mutex_to_pending_receipt ();
   test_consumer_cancellation_while_parked_keeps_pending ();
   test_pending_cancellation_while_parked_reobserves_next_receipt ();

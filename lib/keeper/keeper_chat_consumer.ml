@@ -229,17 +229,31 @@ let pending_claim_retry_blocked state ~keeper_name ~revision =
     Int64.equal blocked_revision revision
   | Some { retry = Retry_finalization _; _ } | None -> false
 
-let clear_blocked_pending_claim state ~keeper_name =
+let clear_blocked_pending_claim_for_base_path ~base_path ~keeper_name =
   match
     Persistence_blocked.find
-      ~base_path:state.base_path
+      ~base_path
       ~keeper_name
   with
   | Some { retry = Retry_pending_claim _; _ } ->
     Persistence_blocked.clear
-      ~base_path:state.base_path
+      ~base_path
       ~keeper_name
   | Some { retry = Retry_finalization _; _ } | None -> ()
+
+let clear_blocked_pending_claim state ~keeper_name =
+  clear_blocked_pending_claim_for_base_path
+    ~base_path:state.base_path
+    ~keeper_name
+
+let notify_explicit_retry ~base_path ~keeper_name =
+  match Config_dir_resolver.canonical_base_path base_path with
+  | Error error ->
+    Error (Config_dir_resolver.canonical_base_path_error_to_string error)
+  | Ok base_path ->
+    clear_blocked_pending_claim_for_base_path ~base_path ~keeper_name;
+    notify_transition ~keeper_name;
+    Ok ()
 
 let persistence_blocked_status ~base_path ~keeper_name =
   match Config_dir_resolver.canonical_base_path base_path with

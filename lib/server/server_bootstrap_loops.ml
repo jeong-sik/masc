@@ -1654,10 +1654,21 @@ let start_keeper_loops_owned
            re-arm the still-Pending receipt. *)
         Keeper_turn_admission.set_slot_transition_observer
           (Some
-             (fun ~base_path:_ ~keeper_name ~transition ->
+             (fun ~base_path ~keeper_name ~transition ->
                 match transition with
                 | Keeper_turn_admission.Shutdown_rolled_back ->
-                  Keeper_chat_consumer.notify_transition ~keeper_name
+                  (match
+                     Keeper_chat_consumer.notify_explicit_retry
+                       ~base_path
+                       ~keeper_name
+                   with
+                   | Ok () -> ()
+                   | Error error ->
+                     Log.Keeper.error
+                       "keeper chat consumer explicit retry failed after shutdown rollback keeper=%s: %s"
+                       keeper_name
+                       error;
+                     Keeper_chat_consumer.notify_transition ~keeper_name)
                 | Keeper_turn_admission.Turn_released -> ()));
         Ok ()
       with

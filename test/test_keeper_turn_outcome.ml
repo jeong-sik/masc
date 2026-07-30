@@ -475,6 +475,28 @@ let test_direct_reply_visible_text () =
             ("turn_outcome", `String "visible_reply")
           ]))
 
+let test_connector_projection_keeps_external_wait_typed () =
+  match
+    Masc.Keeper_chat_blocks.connector_projection
+      ~turn_outcome:TO.External_effect_pending
+      ~reply:"assistant preface that must not survive"
+  with
+  | Connector_status { kind = External_effect_pending } -> ()
+  | Connector_text _ | Connector_no_visible_reply ->
+    fail "external-effect wait must remain a typed connector status"
+
+let test_direct_reply_projection_keeps_external_wait_typed () =
+  match
+    Ops.direct_reply_projection
+      (body
+         [ ("reply", `String "assistant preface that must not survive")
+         ; ("turn_outcome", `String "external_effect_pending")
+         ])
+  with
+  | Connector_status { kind = External_effect_pending } -> ()
+  | Connector_text _ | Connector_no_visible_reply ->
+    fail "direct reply collapsed external-effect wait into silence"
+
 let () =
   run "keeper_turn_outcome"
     [
@@ -521,5 +543,9 @@ let () =
         [
           test_case "direct_reply_visible_text" `Quick
             test_direct_reply_visible_text;
+          test_case "connector projection keeps external wait typed" `Quick
+            test_connector_projection_keeps_external_wait_typed;
+          test_case "direct reply keeps external wait typed" `Quick
+            test_direct_reply_projection_keeps_external_wait_typed;
         ] );
     ]

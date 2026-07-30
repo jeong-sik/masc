@@ -90,6 +90,25 @@ let status_kind_connector_text = function
     "승인 대기: 외부 작업을 실행하기 전에 확인이 필요합니다."
 ;;
 
+type connector_projection =
+  | Connector_text of string
+  | Connector_status of status_block
+  | Connector_no_visible_reply
+
+let connector_projection ~turn_outcome ~reply =
+  match turn_outcome with
+  | Keeper_turn_outcome.External_effect_pending ->
+    Connector_status { kind = External_effect_pending }
+  | Keeper_turn_outcome.Visible_reply ->
+    let reply = String.trim reply in
+    if String.equal reply ""
+    then Connector_no_visible_reply
+    else Connector_text reply
+  | Keeper_turn_outcome.Continuation_checkpoint
+  | Keeper_turn_outcome.No_visible_reply ->
+    Connector_no_visible_reply
+;;
+
 type trace_tool_status =
   | Trace_tool_pending
   | Trace_tool_ok

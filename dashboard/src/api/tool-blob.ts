@@ -20,8 +20,8 @@ interface ToolBlobResponse {
  * Fetch the full bytes for a stored tool output.
  *
  * Throws `ApiRequestError` from `./core` on non-2xx responses (404 when
- * the sha256 isn't in the store, 503 when the server's MASC_BASE_PATH
- * is unset). Callers should catch and render the error inline.
+ * the sha256 isn't in the store, 503 when the stored artifact cannot be
+ * read). Callers should catch and render the error inline.
  */
 export async function fetchToolBlob(
   sha256: string,

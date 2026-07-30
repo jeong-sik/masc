@@ -40,8 +40,7 @@ val add_routes :
   Http_server_eio.Router.t ->
   Http_server_eio.Router.t
 (** Register the [GET /api/v1/artifacts/<sha256>] route on
-    [router] using {!Server_auth.with_public_read} (the
-    artifacts endpoint is public-read by design — marker
-    sha256 values do not leak in the dashboard's preview, so
-    full-byte fetch needs no auth). Returns the augmented
-    router. *)
+    [router] using {!Server_auth.with_public_read}. Non-strict deployments keep
+    the dashboard read surface public; strict HTTP auth routes it through the
+    ordinary read authorization boundary because a content digest is not an
+    authorization capability. Returns the augmented router. *)

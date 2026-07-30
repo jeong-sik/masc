@@ -48,11 +48,11 @@ let test_valid_sha256 () =
        "ghi1234567890123456789012345678901234567890123456789012345678901");
   Alcotest.(check bool) "empty" false (A.is_valid_sha256 "")
 
-let test_strict_auth_public_read_contract () =
+let test_strict_auth_requires_read_auth () =
   let sha256 = String.make 64 'a' in
   Alcotest.(check bool)
-    "artifact route stays public in strict auth mode"
-    true
+    "artifact route is not public in strict auth mode"
+    false
     (Server_auth.is_public_read_path
        ("/api/v1/artifacts/" ^ sha256));
   Alcotest.(check bool)
@@ -100,8 +100,8 @@ let () =
     [
       ( "sha256 validation",
         [ Alcotest.test_case "valid + invalid forms" `Quick test_valid_sha256
-        ; Alcotest.test_case "strict auth public-read contract" `Quick
-            test_strict_auth_public_read_contract
+        ; Alcotest.test_case "strict auth requires read auth" `Quick
+            test_strict_auth_requires_read_auth
         ] );
       ( "blob_response",
         [

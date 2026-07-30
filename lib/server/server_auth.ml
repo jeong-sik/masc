@@ -927,10 +927,6 @@ let is_public_read_path path =
   || String.starts_with ~prefix:"/api/v1/multimodal/list" path
   || String.starts_with ~prefix:"/api/v1/multimodal/get/" path
   || String.starts_with ~prefix:"/api/v1/multimodal/provenance/" path
-  (* Tool-output blobs use their lowercase SHA-256 as the public-read
-     capability. This must match the route's [with_public_read] contract in
-     strict mode; malformed or absent digests are still rejected by the route. *)
-  || String.starts_with ~prefix:"/api/v1/artifacts/" path
   (* Voice TTS audio clips: unguessable token filenames act as the
      capability, and the browser <audio> element cannot send a bearer
      token in its request headers. *)

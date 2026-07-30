@@ -428,6 +428,8 @@ type page = { messages : chat_message list; has_more : bool }
     returned window remain — walk backward by passing the oldest
     returned [ts] as the next [before]. Bounded I/O per call:
     binary-search probes plus one window slice, never a full scan.
+    A page never splits rows sharing its oldest timestamp, so an
+    exclusive [before] cursor cannot skip the other half of one turn.
     Legacy rows without [ts] are unreachable through paging (the tail
     window still serves them). *)
 val load_page :

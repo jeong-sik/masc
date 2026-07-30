@@ -376,7 +376,9 @@ let test_recent_direct_context_pages_past_autonomous_activity () =
         ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
         ~assistant_content:"remember this direct answer"
         ();
-      for absolute_turn = 1 to 105 do
+      (* 2 direct rows + 99 autonomous rows puts the 100-row boundary
+         exactly between the direct user and assistant, which share a ts. *)
+      for absolute_turn = 1 to 99 do
         let turn_ref =
           Ids.Turn_ref.make
             ~trace_id:"trace-autonomous-page"

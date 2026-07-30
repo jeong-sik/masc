@@ -34,6 +34,7 @@ type user_input_block = Keeper_multimodal_input.user_input_block =
 type keeper_chat_stream_request = {
   name : string;
   message : string;
+  request_id : string option;
   user_blocks : user_input_block list;
   turn_instructions : string option;
   surface_context : Yojson.Safe.t option;
@@ -540,6 +541,16 @@ let parse_keeper_chat_stream_request body_str =
         Json_util.get_string_with_default json ~key:"message" ~default:""
         |> String.trim
       in
+      let request_id_result =
+        match Json_util.assoc_member_opt "request_id" json with
+        | None | Some `Null -> Ok None
+        | Some (`String value) ->
+          let value = String.trim value in
+          if value = ""
+          then Error "request_id must not be blank"
+          else Ok (Some value)
+        | Some _ -> Error "request_id must be a string"
+      in
       let channel =
         Json_util.get_string_with_default json ~key:"channel" ~default:""
         |> String.trim
@@ -591,39 +602,45 @@ let parse_keeper_chat_stream_request body_str =
         Error
           "channel and channel_workspace_id are required when connector context is supplied"
       else
-        match
-          Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg" json
-        with
+        match request_id_result with
         | Error err -> Error err
-        | Ok () -> (
+        | Ok request_id -> (
           match
-            Keeper_config.reject_removed_keeper_msg_input_keys
+            Keeper_meta_contract.reject_removed_model_args
               ~tool_name:"masc_keeper_msg"
               json
           with
           | Error err -> Error err
           | Ok () -> (
-            match user_blocks_result with
+            match
+              Keeper_config.reject_removed_keeper_msg_input_keys
+                ~tool_name:"masc_keeper_msg"
+                json
+            with
             | Error err -> Error err
-            | Ok user_blocks ->
-              let message = message_of_blocks user_blocks in
-              if message = "" then
-                Error "message is required"
-              else
-              Ok
-                {
-                  name;
-                  message;
-                  user_blocks;
-                  turn_instructions;
-                  surface_context;
-                  channel;
-                  channel_user_id;
-                  channel_user_name;
-                  channel_workspace_id;
-                  attachments;
-                }
-          ))
+            | Ok () -> (
+              match user_blocks_result with
+              | Error err -> Error err
+              | Ok user_blocks ->
+                let message = message_of_blocks user_blocks in
+                if message = "" then
+                  Error "message is required"
+                else
+                Ok
+                  {
+                    name;
+                    message;
+                    request_id;
+                    user_blocks;
+                    turn_instructions;
+                    surface_context;
+                    channel;
+                    channel_user_id;
+                    channel_user_name;
+                    channel_workspace_id;
+                    attachments;
+                  }
+            )))
   with Yojson.Json_error e ->
     Error ("invalid json: " ^ e)
 
@@ -2511,6 +2528,7 @@ let process_single_turn ~user_row_origin ~submission
            else None
          in
          Keeper_msg_async.submit
+           ?requested_request_id:payload.request_id
            ?on_accepted
            ~background_sw
            ~on_worker_aborted

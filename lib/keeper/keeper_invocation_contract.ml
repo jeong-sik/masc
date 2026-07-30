@@ -298,6 +298,12 @@ let delegate_submission_error_to_json request = function
     Keeper_msg_async.access_rejection_to_json rejection
   | Keeper_msg_async.Submit_invalid_keeper_name { reason } ->
     `Assoc [ "error", `String "invalid_target"; "message", `String reason ]
+  | Keeper_msg_async.Submit_request_id_conflict { request_id } ->
+    `Assoc
+      [ "error", `String "request_id_conflict"
+      ; "run_ref", run_ref_to_json (run_ref request request_id)
+      ; "message", `String "request id is already owned by another invocation"
+      ]
   | Keeper_msg_async.Initial_persistence_failed { reason } ->
     `Assoc [ "error", `String "invocation_persistence_failed"; "message", `String reason ]
   | Keeper_msg_async.Acceptance_persistence_failed { request_id; reason } ->

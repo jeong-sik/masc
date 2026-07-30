@@ -475,10 +475,13 @@ function pendingAssistantEntryId(requestId: string): string {
   return `pending-assistant-${requestId}`
 }
 
-// The live-send placeholders are appended before the server mints the
-// request id; once KEEPER_QUEUE_REQUEST arrives, stamp it onto both rows so
-// a later history merge can reconcile the turn by requestId even when the
-// stream dies before the reply text lands.
+function mintKeeperChatRequestId(): string {
+  return `kmsg-client-${globalThis.crypto.randomUUID()}`
+}
+
+// The live-send placeholders carry the caller-owned canonical request id
+// before the SSE body starts. KEEPER_QUEUE_REQUEST re-stamps the accepted
+// server identity so history reconciliation remains exact if the stream dies.
 function stampPlaceholderRequestId(keeperName: string, entryIds: string[], requestId: string): void {
   for (const entryId of entryIds) {
     updateThreadEntry(keeperName, entryId, entry => (
@@ -1545,6 +1548,12 @@ export async function sendKeeperThreadMessage(
   setRecordValue(keeperStreamStartedAt, keeperName, Date.now())
   const controller = new AbortController()
   setActiveStream(keeperName, assistantId, controller)
+  const recoveryRequestId = mintKeeperChatRequestId()
+  stampPlaceholderRequestId(
+    keeperName,
+    [localId, assistantId],
+    recoveryRequestId,
+  )
   let requestId: string | null = null
   let requestTerminalSeen = false
   let toolCallEnded = false
@@ -1553,6 +1562,7 @@ export async function sendKeeperThreadMessage(
 
     const outcome = await streamKeeperMessage(keeperName, message, {
       signal: controller.signal,
+      requestId: recoveryRequestId,
       attachments,
       userBlocks,
       onEvent: event => {
@@ -1811,7 +1821,7 @@ export async function sendKeeperThreadMessage(
     try {
       const reconciled = await reconcileStreamFailureFromServerHistory(
         keeperName,
-        requestId,
+        requestId ?? recoveryRequestId,
         localId,
         assistantId,
       )

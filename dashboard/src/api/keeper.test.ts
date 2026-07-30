@@ -1105,6 +1105,7 @@ describe('streamKeeperMessage', () => {
 
     const events: string[] = []
     await streamKeeperMessage('sangsu', 'ping', {
+      requestId: 'kmsg-client-test-1',
       onEvent: event => {
         events.push(event.type)
       },
@@ -1117,6 +1118,7 @@ describe('streamKeeperMessage', () => {
       name: 'sangsu',
       message: 'ping',
       direct_reply: true,
+      request_id: 'kmsg-client-test-1',
     })
     const actorHeader = headers['X-MASC-Agent'] ?? headers['x-masc-agent']
     expect(actorHeader).toBe('dashboard-eager-manta')

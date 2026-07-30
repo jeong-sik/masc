@@ -2159,6 +2159,47 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(keeperActionErrors.value.echo).toBeNull()
   })
 
+  it('reconciles when the queue event is lost using the client-owned request identity', async () => {
+    let requestedId = ''
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        requestId?: string
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      requestedId = opts.requestId ?? ''
+      throw new TypeError('network error before queue event')
+    })
+    fetchKeeperChatHistory.mockImplementation(async () => [
+      {
+        role: 'user',
+        content: '진행 상황?',
+        ts: 1_781_528_918,
+        kind: 'utterance',
+        delivery_key: { kind: 'direct_request', request_id: requestedId },
+      },
+      {
+        role: 'assistant',
+        content: '서버에는 답변이 저장됐습니다.',
+        ts: 1_781_528_920,
+        kind: 'utterance',
+        delivery_key: { kind: 'direct_request', request_id: requestedId },
+      },
+    ])
+
+    await sendKeeperThreadMessage('echo', '진행 상황?')
+
+    expect(requestedId).toMatch(/^kmsg-client-[0-9a-f-]+$/)
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.map(entry => [entry.role, entry.text, entry.delivery])).toEqual([
+      ['user', '진행 상황?', 'history'],
+      ['assistant', '서버에는 답변이 저장됐습니다.', 'history'],
+    ])
+    expect(keeperActionErrors.value.echo).toBeNull()
+  })
+
   it('does not reconcile a failed direct request with autonomous activity', async () => {
     streamKeeperMessage.mockImplementation(async (
       _name: string,

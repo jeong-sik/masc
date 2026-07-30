@@ -167,6 +167,7 @@ and recovery_record_error_kind =
 type submit_error =
   | Submit_rejected of access_rejection
   | Submit_invalid_keeper_name of { reason : string }
+  | Submit_request_id_conflict of { request_id : string }
   | Initial_persistence_failed of { reason : string }
   | Acceptance_persistence_failed of
       { request_id : string
@@ -294,7 +295,8 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     for SSE or other live terminal notifications. Projection exceptions are
     observed and isolated from request truth. *)
 val submit
-  :  ?on_accepted:(string -> (unit, string) result)
+  :  ?requested_request_id:string
+  -> ?on_accepted:(string -> (unit, string) result)
   -> ?on_worker_aborted:(worker_abort_reason -> (unit, string) result)
   -> ?on_worker_settled:(worker_settlement -> unit)
   -> background_sw:Eio.Switch.t
@@ -307,11 +309,14 @@ val submit
 
 (** Same lifecycle and durability contract as {!submit}, but the worker also
     receives the canonical request id generated and accepted by this module.
+    [requested_request_id] lets an HTTP caller retain that identity before its
+    response stream starts; invalid or already-owned ids fail explicitly.
     Use this when a producer's durable artifacts must share that identity;
     callers needing only fire-and-forget execution should keep using
     {!submit}. *)
 val submit_with_request_id
-  :  ?on_accepted:(string -> (unit, string) result)
+  :  ?requested_request_id:string
+  -> ?on_accepted:(string -> (unit, string) result)
   -> ?on_worker_aborted:(worker_abort_reason -> (unit, string) result)
   -> ?on_worker_settled:(worker_settlement -> unit)
   -> background_sw:Eio.Switch.t
@@ -422,6 +427,7 @@ module For_testing : sig
 
   val submit
     :  request_ops
+    -> ?requested_request_id:string
     -> ?on_accepted:(string -> (unit, string) result)
     -> ?on_worker_aborted:(worker_abort_reason -> (unit, string) result)
     -> ?on_worker_settled:(worker_settlement -> unit)

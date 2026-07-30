@@ -263,14 +263,16 @@ hello from a thread|}
 
 let test_parse_keeper_chat_stream_request_accepts_connector_context () =
   let body =
-    {|{"name":"luna","message":"hello","channel":"discord","channel_user_id":"user-42","channel_user_name":"Alice","channel_workspace_id":"workspace-9"}|}
+    {|{"name":"luna","message":"hello","request_id":"kmsg-client-test-1","channel":"discord","channel_user_id":"user-42","channel_user_name":"Alice","channel_workspace_id":"workspace-9"}|}
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok payload ->
       check string "channel" "discord" payload.channel;
       check string "user id" "user-42" payload.channel_user_id;
       check string "user name" "Alice" payload.channel_user_name;
-      check string "workspace id" "workspace-9" payload.channel_workspace_id
+      check string "workspace id" "workspace-9" payload.channel_workspace_id;
+      check (option string) "client-owned request identity"
+        (Some "kmsg-client-test-1") payload.request_id
   | Error err -> fail ("expected connector context to parse: " ^ err)
 
 let test_parse_keeper_chat_stream_request_rejects_removed_timeout () =
@@ -639,6 +641,7 @@ let test_keeper_stream_args_preserve_user_blocks () =
   let payload =
     { Server_routes_http_keeper_stream.name = "luna";
       message = "describe this";
+      request_id = None;
       user_blocks =
         [
           Keeper_multimodal_input.User_text "describe this";
@@ -2518,6 +2521,7 @@ let test_chat_surface_of_request_labels_copilot_gate () =
   let payload =
     { Server_routes_http_keeper_stream.name = "luna";
       message = "hello";
+      request_id = None;
       turn_instructions = None;
       surface_context = None;
       user_blocks = [];
@@ -2541,6 +2545,7 @@ let test_chat_speaker_of_request_copilot_is_owner () =
   let payload =
     { Server_routes_http_keeper_stream.name = "luna";
       message = "hello";
+      request_id = None;
       turn_instructions = None;
       surface_context = None;
       user_blocks = [];
@@ -2560,6 +2565,7 @@ let test_chat_speaker_of_request_connector_is_external () =
   let payload =
     { Server_routes_http_keeper_stream.name = "luna";
       message = "hello";
+      request_id = None;
       turn_instructions = None;
       surface_context = None;
       user_blocks = [];

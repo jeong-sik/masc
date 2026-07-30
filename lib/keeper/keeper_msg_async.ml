@@ -147,6 +147,7 @@ and recovery_record_error_kind =
 type submit_error =
   | Submit_rejected of access_rejection
   | Submit_invalid_keeper_name of { reason : string }
+  | Submit_request_id_conflict of { request_id : string }
   | Initial_persistence_failed of { reason : string }
   | Acceptance_persistence_failed of
       { request_id : string
@@ -692,6 +693,12 @@ let submit_error_to_json = function
     `Assoc
       [ "error", `String "invalid_keeper_name"
       ; "message", `String reason
+      ]
+  | Submit_request_id_conflict { request_id } ->
+    `Assoc
+      [ "error", `String "request_id_conflict"
+      ; "request_id", `String request_id
+      ; "message", `String "request_id is already owned by another request"
       ]
   | Initial_persistence_failed { reason } ->
     `Assoc
@@ -1890,11 +1897,14 @@ let validate_request_store_root ~base_path =
          { reason = Fs_compat.owned_directory_chain_rejection_to_string rejection })
 ;;
 
-let reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name =
-  let rec reserve () =
-    let request_id = ops.generate_request_id () in
+let reserve_new_request ~ops ?requested_request_id ~base_path ~submitted_by
+    ~keeper_name =
+  let rec reserve request_id =
     if not (is_safe_request_id request_id)
-    then reserve ()
+    then
+      (match requested_request_id with
+       | Some _ -> Error (`Rejected Invalid_request_id)
+       | None -> reserve (ops.generate_request_id ()))
     else
       match
         with_store_transition_lock ~base_path ~request_id (fun () ->
@@ -1934,12 +1944,21 @@ let reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name =
           | Located_rejected rejection -> `Rejected rejection)
       with
       | `Reserved reserved -> Ok reserved
-      | `Collision -> reserve ()
-      | `Rejected rejection -> Error rejection
+      | `Collision ->
+        (match requested_request_id with
+         | Some _ -> Error (`Conflict request_id)
+         | None -> reserve (ops.generate_request_id ()))
+      | `Rejected rejection -> Error (`Rejected rejection)
   in
   match validate_request_store_root ~base_path with
-  | Ok () -> reserve ()
-  | Error _ as error -> error
+  | Ok () ->
+    let request_id =
+      match requested_request_id with
+      | Some request_id -> request_id
+      | None -> ops.generate_request_id ()
+    in
+    reserve request_id
+  | Error rejection -> Error (`Rejected rejection)
 ;;
 
 let remove_runtime_tables_if_owned ~release_reservation key transition_lock =
@@ -2158,8 +2177,8 @@ let runtime_cancelled_status () =
     "keeper_msg worker was cancelled by runtime before terminal result"
 ;;
 
-let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~background_sw
-    ~base_path ~caller
+let submit_with_ops ops ?requested_request_id ?on_accepted ?on_worker_aborted
+    ?on_worker_settled ~background_sw ~base_path ~caller
     ~(f : request_id:string -> Eio.Switch.t -> tool_result)
     ~keeper_name () :
     (submit_outcome, submit_error) result =
@@ -2171,8 +2190,17 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
      | Ok keeper_name_id ->
     let keeper_name = Keeper_id.Keeper_name.to_string keeper_name_id in
     with_keeper_submission_lock ~base_path ~keeper_name:keeper_name_id (fun () ->
-    match reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name with
-    | Error rejection -> Error (Submit_rejected rejection)
+    match
+      reserve_new_request
+        ~ops
+        ?requested_request_id
+        ~base_path
+        ~submitted_by
+        ~keeper_name
+    with
+    | Error (`Rejected rejection) -> Error (Submit_rejected rejection)
+    | Error (`Conflict request_id) ->
+      Error (Submit_request_id_conflict { request_id })
     | Ok (request_id, entry, key, transition_lock) ->
     let reconciliation_outcome reason =
       Ok
@@ -2461,10 +2489,10 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
 
 let submit_with_request_id = submit_with_ops production_request_ops
 
-let submit ?on_accepted ?on_worker_aborted ?on_worker_settled ~background_sw
-    ~base_path ~caller ~f ~keeper_name () =
-  submit_with_request_id ?on_accepted ?on_worker_aborted ?on_worker_settled
-    ~background_sw ~base_path ~caller
+let submit ?requested_request_id ?on_accepted ?on_worker_aborted
+    ?on_worker_settled ~background_sw ~base_path ~caller ~f ~keeper_name () =
+  submit_with_request_id ?requested_request_id ?on_accepted ?on_worker_aborted
+    ?on_worker_settled ~background_sw ~base_path ~caller
     ~f:(fun ~request_id:_ request_sw -> f request_sw)
     ~keeper_name ()
 ;;
@@ -2854,9 +2882,9 @@ module For_testing = struct
   let atomic_staging_dir = atomic_staging_dir
   let load_record = load_record
   let recover_lost_disk_records = recover_lost_disk_records
-  let submit ops ?on_accepted ?on_worker_aborted ?on_worker_settled
+  let submit ops ?requested_request_id ?on_accepted ?on_worker_aborted ?on_worker_settled
       ~background_sw ~base_path ~caller ~f ~keeper_name () =
-    submit_with_ops ops ?on_accepted ?on_worker_aborted
+    submit_with_ops ops ?requested_request_id ?on_accepted ?on_worker_aborted
       ?on_worker_settled ~background_sw ~base_path ~caller
       ~f:(fun ~request_id:_ request_sw -> f request_sw)
       ~keeper_name ()

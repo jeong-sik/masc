@@ -1716,6 +1716,21 @@ let load_page ~base_dir ~keeper_name ?before () : page =
       let popped = Queue.pop q in
       if not (is_tool_message popped) then decr primary_count
     in
+    let same_timestamp (left : chat_message) (right : chat_message) =
+      match left.ts, right.ts with
+      | Some left, Some right -> Float.equal left right
+      | None, None -> true
+      | Some _, None | None, Some _ -> false
+    in
+    let evict_oldest_timestamp_group () =
+      let oldest = Queue.peek q in
+      while
+        not (Queue.is_empty q)
+        && same_timestamp (Queue.peek q) oldest
+      do
+        pop_front ()
+      done
+    in
     List.iter
       (fun line ->
         let trimmed = String.trim line in
@@ -1725,10 +1740,11 @@ let load_page ~base_dir ~keeper_name ?before () : page =
               Queue.push msg q;
               if not (is_tool_message msg) then incr primary_count;
               while
-                !primary_count > max_history
-                || Queue.length q > max_total_lines
+                (!primary_count > max_history
+                 || Queue.length q > max_total_lines)
+                && not (same_timestamp (Queue.peek q) msg)
               do
-                pop_front ()
+                evict_oldest_timestamp_group ()
               done
           | Some _ | None -> ())
       (slice_lines ~path ~from ~upto);

@@ -73,6 +73,7 @@ type user_input_block = Keeper_multimodal_input.user_input_block =
 type keeper_chat_stream_request = {
   name : string;
   message : string;
+  request_id : string option;
   user_blocks : user_input_block list;
   turn_instructions : string option;
   surface_context : Yojson.Safe.t option;
@@ -84,7 +85,9 @@ type keeper_chat_stream_request = {
 }
 (** Parsed payload of a keeper chat-stream HTTP request.
     [message] is the text fallback used by the existing direct keeper
-    path; [user_blocks] preserves semantic text/media input for the
+    path; [request_id], when present, is the caller-owned canonical
+    durable request identity and is validated/reserved before execution.
+    [user_blocks] preserves semantic text/media input for the
     block-aware runtime path. [turn_instructions] and [surface_context]
     are optional copilot context fields; when
     [turn_instructions] is absent but [surface_context]

@@ -24,6 +24,7 @@ let payload ?(name = keeper_name) ?(content = "are you there?") ()
     : Server_routes_http_keeper_stream.keeper_chat_stream_request =
   { name
   ; message = content
+  ; request_id = None
   ; user_blocks = []
   ; turn_instructions = None
   ; surface_context = None

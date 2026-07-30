@@ -559,6 +559,7 @@ async function refreshLoopbackDevTokenAfterMismatch(): Promise<boolean> {
 export interface StreamKeeperMessageOptions {
   signal?: AbortSignal
   onEvent: (event: KeeperChatStreamEvent) => void
+  requestId?: string
   attachments?: StreamAttachment[]
   userBlocks?: KeeperUserInputBlock[]
   channel?: string
@@ -589,6 +590,7 @@ export async function streamKeeperMessage(
   {
     signal,
     onEvent,
+    requestId,
     attachments,
     userBlocks,
     channel,
@@ -601,6 +603,13 @@ export async function streamKeeperMessage(
     name,
     message,
     direct_reply: true,
+  }
+  if (requestId !== undefined) {
+    const canonicalRequestId = requestId.trim()
+    if (!canonicalRequestId) {
+      throw new Error('Keeper stream requestId must not be blank')
+    }
+    body.request_id = canonicalRequestId
   }
   if (channel && channel.trim() !== '') {
     body.channel = channel.trim()

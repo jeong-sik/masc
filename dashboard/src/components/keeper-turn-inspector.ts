@@ -129,11 +129,6 @@ function MemoryOsEpisodeRow({ episode }: { episode: MemoryOsEpisodeSummary }) {
         <span class="font-mono text-2xs text-[var(--color-fg-default)]">
           ${episode.trace_id} g${episode.generation.toString().padStart(4, '0')}
         </span>
-        ${episode.terminal_marker
-          ? html`<span class="rounded-[var(--r-1)] bg-[var(--accent-12)] px-1.5 py-0.5 text-3xs font-mono text-[var(--color-accent-fg)]">
-              terminal=${episode.terminal_marker}
-            </span>`
-          : null}
         <span class="text-3xs text-[var(--color-fg-disabled)]">${episode.claim_count} claims</span>
       </div>
       <div class="line-clamp-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
@@ -173,9 +168,6 @@ function MemoryOsRecallSourcePanel({
         <div class="flex flex-wrap gap-2 text-3xs">
           <span class="font-mono text-[var(--color-fg-muted)]">
             ep ${snapshot.episodes.shown}
-          </span>
-          <span class="font-mono text-[var(--color-fg-muted)]">
-            terminal ${snapshot.episodes.terminal_markers}
           </span>
           <span class="font-mono text-[var(--color-fg-muted)]">
             facts ${snapshot.facts.shown}

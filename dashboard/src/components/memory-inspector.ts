@@ -10,7 +10,7 @@
 // Section data sources (RFC-keeper-memory-panel-real-data §4; hybrid treatment confirmed 2026-06-24):
 //   컨텍스트 구성        ← real prompt-assembly block bytes (entries[latest].blocks)
 //   장기 메모리 스토어    ← real memory_os.facts.items (typed category, provenance)
-//   압축 유지·요약        ← real memory_os.episodes.items (summary + terminal_marker)
+//   압축 유지·요약        ← real memory_os.episodes.items
 //   최근 회상·주입        ← real memory_os_recall prompt blocks (entries[*].blocks)
 // Any future-only section must render an honest disclosure rather than fabricated
 // rows (no-stub): disclose absence instead of faking presence.
@@ -529,9 +529,6 @@ function EpisodeRow({ episode }: { episode: MemoryOsEpisodeSummary }) {
         </div>
         <div class="mem-store-meta">
           <span class="mono">${episode.claim_count} claims</span>
-          ${episode.terminal_marker
-            ? html`<span class="mem-tag">terminal=${episode.terminal_marker}</span>`
-            : null}
           <span class="mem-src mono">${episode.trace_id}</span>
         </div>
       </div>

@@ -96,7 +96,6 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
     count: 2,
     skipped_rows: 0,
     memory_os: {
-      schema: 'keeper.memory_os.recall_observability.v2',
       keeper: 'albini',
       source: 'memory_os_files',
       producer: 'keeper_librarian|keeper_memory_os_recall',
@@ -114,13 +113,11 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
       read_errors: [],
       episodes: {
         shown: 2,
-        terminal_markers: 1,
         items: [
           {
             trace_id: 'trace-active',
             generation: 7,
             created_at: 1_781_583_000,
-            terminal_marker: null,
             claim_count: 2,
             source_turn_range: [1, 6],
             summary: 'Active recall source used by the prompt.',
@@ -129,7 +126,6 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
             trace_id: 'trace-done',
             generation: 3,
             created_at: 1_781_580_000,
-            terminal_marker: 'handoff_complete',
             claim_count: 1,
             source_turn_range: null,
             summary: 'Terminal memory remains visible as source evidence.',
@@ -231,9 +227,8 @@ describe('KeeperMemoryOsRecallPanel', () => {
     expect(text).toContain('latest block')
     expect(text).toContain('3392B')
     expect(text).toContain('ep 2')
-    expect(text).toContain('terminal 1')
     expect(text).toContain('facts 0')
-    expect(text).toContain('terminal=handoff_complete')
+    expect(text).toContain('Terminal memory remains visible as source evidence.')
     expect(text).toContain('facts: .masc/config/keepers/albini.facts.jsonl')
     expect(text).toContain('episodes: .masc/config/keepers/albini/episodes')
   })

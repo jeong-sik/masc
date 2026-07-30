@@ -266,7 +266,6 @@ let episode_of_json_result ?now ~generation (inp : input) (json : Yojson.Safe.t)
                   ; source_turn_range =
                       Keeper_memory_os_types.source_turn_range_of_facts claims
                   ; created_at = now
-                  ; terminal_marker = None
                   }
               | Some _ | None -> Error Claim_schema_mismatch))
         | _ -> Error Missing_required_fields))

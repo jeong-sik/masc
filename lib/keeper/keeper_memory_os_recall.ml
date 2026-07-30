@@ -30,16 +30,10 @@ let render_fact fact =
 ;;
 
 let render_episode episode =
-  let terminal =
-    match episode.terminal_marker with
-    | None -> ""
-    | Some marker -> Printf.sprintf " terminal=%s" marker
-  in
   Printf.sprintf
-    "- [%s g%04d%s] %s"
+    "- [%s g%04d] %s"
     episode.trace_id
     episode.generation
-    terminal
     episode.episode_summary
 ;;
 

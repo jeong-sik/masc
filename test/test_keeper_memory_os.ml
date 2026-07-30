@@ -317,7 +317,6 @@ let episode_fixture ~now ~trace_id ~generation ~summary =
   ; Types.claims = [ fact ]
   ; Types.source_turn_range = Some (0, 0)
   ; Types.created_at = now
-  ; Types.terminal_marker = None
   }
 ;;
 
@@ -338,7 +337,6 @@ let test_json_roundtrip () =
     ; Types.claims = [ f ]
     ; Types.source_turn_range = Some (5, 5)
     ; Types.created_at = now
-    ; Types.terminal_marker = Some "handoff_complete"
     }
   in
   let e2 = Option.get (Types.episode_of_json (Types.episode_to_json e)) in
@@ -346,11 +344,7 @@ let test_json_roundtrip () =
     "episode summary round-trip"
     e.episode_summary
     e2.Types.episode_summary;
-  Alcotest.(check int) "claims length" 1 (List.length e2.Types.claims);
-  Alcotest.(check (option string))
-    "episode terminal_marker round-trip"
-    e.terminal_marker
-    e2.Types.terminal_marker
+  Alcotest.(check int) "claims length" 1 (List.length e2.Types.claims)
 ;;
 
 let test_episode_decoder_rejects_removed_metadata_fields () =
@@ -515,7 +509,6 @@ let test_persisted_memory_decoders_reject_invalid_semantics () =
     ; "generation", `Int (-1)
     ; "episode_summary", `String ""
     ; "created_at", `Float Float.infinity
-    ; "terminal_marker", `String ""
     ; "source_turn_range", `Assoc [ "lo", `Int (-1); "hi", `Int 0 ]
     ; "source_turn_range", `Assoc [ "lo", `Int 2; "hi", `Int 1 ]
     ]
@@ -2036,7 +2029,6 @@ let test_render_if_enabled_renders_persisted_memory () =
           ; Types.claims = [ fact ]
           ; Types.source_turn_range = Some (5, 5)
           ; Types.created_at = now
-          ; Types.terminal_marker = None
           }
         in
         Memory_io.append_episode_bundle ~keeper_id episode;
@@ -2084,7 +2076,6 @@ let test_render_if_enabled_offmain_wrap_is_transparent () =
           ; Types.claims = [ fact ]
           ; Types.source_turn_range = Some (5, 5)
           ; Types.created_at = now
-          ; Types.terminal_marker = None
           }
         in
         Memory_io.append_episode_bundle ~keeper_id episode;
@@ -2139,7 +2130,6 @@ let test_render_if_enabled_keeps_diagnostic_context () =
           ; Types.claims = [ diagnostic_fact ]
           ; Types.source_turn_range = Some (5, 5)
           ; Types.created_at = now
-          ; Types.terminal_marker = Some "diagnostic"
           }
         in
         Memory_io.append_episode_bundle ~keeper_id diagnostic_episode;
@@ -2172,7 +2162,6 @@ let test_render_if_enabled_preserves_empty_claim_episode () =
           ; Types.claims = []
           ; Types.source_turn_range = None
           ; Types.created_at = now
-          ; Types.terminal_marker = None
           }
         in
         Memory_io.append_episode_bundle ~keeper_id episode;
@@ -2365,33 +2354,6 @@ let test_recall_no_prefix_for_plain_fact () =
             (contains "[UNVERIFIED — re-check before acting]" block))))
 ;;
 
-let test_recall_renders_terminal_episode_marker () =
-  with_prompt_registry (fun () ->
-    with_temp_keepers_dir (fun keepers_dir ->
-      let keeper_id = "episode-terminal-keeper" in
-      let now = 1_000_000.0 in
-      let episode =
-        { (episode_fixture
-             ~now
-             ~trace_id:"trace-terminal"
-             ~generation:3
-             ~summary:"terminal handoff summary")
-          with
-          Types.terminal_marker = Some "handoff_complete"
-        }
-      in
-      Memory_io.append_episode_bundle ~keeper_id episode;
-      let ctx = Recall.render_context ~keepers_dir ~keeper_id ~now () in
-      Alcotest.(check bool)
-        "terminal marker is visible in episode line"
-        true
-        (contains "terminal=handoff_complete" ctx);
-      Alcotest.(check bool)
-        "terminal summary still renders"
-        true
-        (contains "terminal handoff summary" ctx)))
-;;
-
 (* Recall preserves every persisted row, including repeated producer identities. *)
 let test_recall_preserves_repeated_claims () =
   with_prompt_registry (fun () ->
@@ -2433,7 +2395,6 @@ let test_recall_preserves_repeated_claims () =
             ]
         ; Types.source_turn_range = Some (1, 9)
         ; Types.created_at = now
-        ; Types.terminal_marker = None
         }
       in
       Memory_io.append_episode_bundle ~keeper_id episode;
@@ -2630,7 +2591,6 @@ let test_recall_context_preserves_semantic_memory_content () =
         ; Types.claims = [ normal_fact; injection_fact ]
         ; Types.source_turn_range = Some (4, 6)
         ; Types.created_at = now
-        ; Types.terminal_marker = None
         }
       in
       Memory_io.append_episode_bundle ~keeper_id episode;
@@ -2694,7 +2654,6 @@ let test_recall_context_preserves_durable_current_rows () =
         ; Types.claims = [ preference_fact ]
         ; Types.source_turn_range = Some (5, 5)
         ; Types.created_at = now
-        ; Types.terminal_marker = None
         }
       in
       let path_episode =
@@ -2704,7 +2663,6 @@ let test_recall_context_preserves_durable_current_rows () =
         ; Types.claims = [ path_fact ]
         ; Types.source_turn_range = Some (7, 7)
         ; Types.created_at = now +. 1.0
-        ; Types.terminal_marker = None
         }
       in
       Memory_io.append_episode_bundle ~keeper_id preference_episode;
@@ -4291,10 +4249,6 @@ let () =
             "plain fact never gets the hard prefix"
             `Quick
             test_recall_no_prefix_for_plain_fact
-        ; Alcotest.test_case
-            "terminal episode marker is rendered"
-            `Quick
-            test_recall_renders_terminal_episode_marker
         ; Alcotest.test_case
             "preserves repeated claim rows"
             `Quick

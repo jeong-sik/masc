@@ -42,7 +42,6 @@ function turnRecordsPayload() {
     health: 'ok',
     stale_reason: null,
     memory_os: {
-      schema: 'keeper.memory_os.recall_observability.v2',
       keeper: 'masc-improver',
       source: 'memory_os_files',
       producer: 'keeper_librarian|keeper_memory_os_recall',
@@ -60,13 +59,11 @@ function turnRecordsPayload() {
       read_errors: [{ scope: 'facts', error: 'fact store decode failed' }],
       episodes: {
         shown: 2,
-        terminal_markers: 2,
         items: [
           {
             trace_id: 'trace-ep1',
             generation: 3,
             created_at: 1_789_900_000,
-            terminal_marker: 'handoff_complete',
             claim_count: 4,
             source_turn_range: { lo: 1, hi: 28 },
             summary: '리텐션 코호트 정의를 정리하고 amplitude 쿼리를 표로 캐시함.',
@@ -75,7 +72,6 @@ function turnRecordsPayload() {
             trace_id: 'trace-diagnostic',
             generation: 4,
             created_at: 1_789_950_000,
-            terminal_marker: 'diagnostic',
             claim_count: 1,
             source_turn_range: null,
             summary: 'provider response diagnostic',
@@ -278,11 +274,10 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(container.querySelector('.mem-pin')).toBeFalsy()
   })
 
-  it('renders the compaction section from real episodes (summary + terminal marker)', async () => {
+  it('renders the compaction section from real episodes', async () => {
     stubFetch()
     const { container } = renderInspector()
     await waitFor(() => expect(container.textContent).toContain('리텐션 코호트 정의'))
-    expect(container.textContent).toContain('terminal=handoff_complete')
     expect(container.textContent).toContain('4 claims')
     // source_turn_range projected → episode subtitle shows the compacted turn span.
     expect(container.querySelector('.mem-tl-range')?.textContent).toBe('turn 1–28')

@@ -24,7 +24,6 @@ let wire_field_source_turn_range = "source_turn_range"
 let wire_field_lo = "lo"
 let wire_field_hi = "hi"
 let wire_field_created_at = "created_at"
-let wire_field_terminal_marker = "terminal_marker"
 
 module Wire_field_set = Set.Make (String)
 
@@ -70,7 +69,6 @@ let episode_wire_fields =
     ; wire_field_claims
     ; wire_field_source_turn_range
     ; wire_field_created_at
-    ; wire_field_terminal_marker
     ]
 ;;
 
@@ -188,7 +186,6 @@ type episode =
   ; claims : fact list
   ; source_turn_range : (int * int) option
   ; created_at : float
-  ; terminal_marker : string option
   }
 
 (* ---------- JSON codecs ---------- *)
@@ -406,8 +403,6 @@ let episode_to_json (e : episode) =
   then invalid_arg "memory episode summary must be non-empty";
   if not (Float.is_finite e.created_at)
   then invalid_arg "memory episode created_at must be finite";
-  if not (optional_non_empty_string e.terminal_marker)
-  then invalid_arg "memory episode terminal_marker must be non-empty";
   if
     not
       (List.for_all
@@ -433,10 +428,7 @@ let episode_to_json (e : episode) =
        , `List (List.rev (List.rev_map fact_to_json e.claims)) )
      ; wire_field_created_at, `Float e.created_at
      ]
-    @ range_json
-    @ (match e.terminal_marker with
-        | Some marker -> [ wire_field_terminal_marker, `String marker ]
-        | None -> []))
+    @ range_json)
 ;;
 
 let facts_of_json values =
@@ -448,13 +440,6 @@ let facts_of_json values =
        | None -> None)
   in
   loop [] values
-;;
-
-let optional_string_json_field key fields =
-  match List.assoc_opt key fields with
-  | None -> Some None
-  | Some (`String value) -> Some (Some value)
-  | Some _ -> None
 ;;
 
 let source_turn_range_field fields =
@@ -480,22 +465,19 @@ let episode_of_json (json : Yojson.Safe.t) =
           | Some (`List claim_items) -> facts_of_json claim_items
           | Some _ | None -> None)
        , source_turn_range_field fields
-       , json_float_field wire_field_created_at fields
-       , optional_string_json_field wire_field_terminal_marker fields )
+       , json_float_field wire_field_created_at fields )
      with
      | ( Some trace_id
        , Some generation
        , Some episode_summary
        , Some claims
        , Some source_turn_range
-       , Some created_at
-       , Some terminal_marker ) ->
+       , Some created_at ) ->
        if
          non_empty_string trace_id
          && generation >= 0
          && non_empty_string episode_summary
          && Float.is_finite created_at
-         && optional_non_empty_string terminal_marker
          && List.for_all
               (fun fact -> String.equal fact.source.trace_id trace_id)
               claims
@@ -508,7 +490,6 @@ let episode_of_json (json : Yojson.Safe.t) =
            ; claims
            ; source_turn_range
            ; created_at
-           ; terminal_marker
            }
        else None
      | _ -> None)

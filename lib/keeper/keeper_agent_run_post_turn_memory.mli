@@ -35,9 +35,11 @@ val run :
     delegation request artifacts on this post-turn memory lane rather than on
     the decision-record append path.
 
-    The post-turn entrypoint owns Librarian admission. Disabled or invalid
-    configuration does not submit a Librarian unit or read its snapshot.
-    When enabled, [turn_effect_record] admits only [Meaningful_turn]; on
+    The post-turn entrypoint owns Librarian admission and its execution fence.
+    Disabled or invalid configuration does not submit a Librarian unit or read
+    its snapshot. An admitted asynchronous unit re-checks the live setting
+    before snapshot I/O so disabling it while queued remains effective. When
+    enabled, [turn_effect_record] admits only [Meaningful_turn]; on
     [Inert_autonomous_turn] the librarian unit is never submitted, so its
     cadence counter does not advance and an idle stretch spends no extraction
     budget.

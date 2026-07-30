@@ -65,5 +65,5 @@ val run_best_effort
   -> expected_revision:int option
   -> Keeper_librarian.input
   -> unit
-(** Execute an already-admitted Librarian unit. The post-turn entrypoint owns
-    the configuration gate before lane submission and snapshot I/O. *)
+(** Execute a Librarian unit already admitted and fenced by the post-turn
+    entrypoint. This runtime owns cadence, not the live configuration gate. *)

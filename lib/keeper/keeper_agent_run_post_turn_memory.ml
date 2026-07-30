@@ -79,7 +79,7 @@ let run
            Config_dir_resolver.keepers_dir_for_base_path
              ~base_path:config.Workspace.base_path
          in
-         let librarian_series () =
+         let run_admitted_librarian () =
            match
              Keeper_memory_os_current.read_for_keepers_dir
                ~keepers_dir
@@ -118,6 +118,14 @@ let run
                ~keeper_id:meta.name
                ~expected_revision
                librarian_input
+         in
+         let librarian_series () =
+           (* Submission is asynchronous. Re-check the same live SSOT at the
+              execution boundary so an ON -> OFF/INVALID change while queued
+              remains a real kill switch before snapshot I/O or provider work. *)
+           match Env_config.KeeperMemoryOs.librarian_config_state () with
+           | Disabled | Invalid -> ()
+           | Enabled -> run_admitted_librarian ()
          in
          let (_ : Keeper_memory_lane.outcome) =
            Keeper_memory_lane.submit

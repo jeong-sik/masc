@@ -759,9 +759,21 @@ export interface KeeperChatPendingAttachment {
   mimeType: string
 }
 
+export type KeeperChatPendingSource =
+  | { kind: 'dashboard'; threadId: string }
+  | { kind: 'discord'; channelId: string; userId: string }
+  | {
+      kind: 'slack'
+      channelId: string
+      userId: string
+      teamId: string | null
+      threadTs: string | null
+    }
+
 export interface KeeperChatPendingInput {
   receipt: KeeperChatReceipt
   content: string
+  source: KeeperChatPendingSource
   attachments: KeeperChatPendingAttachment[]
   userBlocks: KeeperUserInputBlock[]
   submittedAt: number
@@ -960,12 +972,51 @@ function parsePendingUserBlock(value: unknown): KeeperUserInputBlock {
   return { type, attachmentId, name, mimeType, size }
 }
 
+function parsePendingSource(value: unknown): KeeperChatPendingSource {
+  if (!isRecord(value)) {
+    throw new Error('Keeper pending source must be an object')
+  }
+  const kind = asString(value.kind, '').trim()
+  const requiredString = (field: string): string => {
+    const parsed = asString(value[field], '').trim()
+    if (!parsed) throw new Error(`Keeper pending source ${field} is missing`)
+    return parsed
+  }
+  const nullableString = (field: string): string | null => {
+    const raw = value[field]
+    if (raw === null) return null
+    const parsed = asString(raw, '').trim()
+    if (!parsed) throw new Error(`Keeper pending source ${field} is invalid`)
+    return parsed
+  }
+  switch (kind) {
+    case 'dashboard':
+      return { kind, threadId: requiredString('thread_id') }
+    case 'discord':
+      return {
+        kind,
+        channelId: requiredString('channel_id'),
+        userId: requiredString('user_id'),
+      }
+    case 'slack':
+      return {
+        kind,
+        channelId: requiredString('channel_id'),
+        userId: requiredString('user_id'),
+        teamId: nullableString('team_id'),
+        threadTs: nullableString('thread_ts'),
+      }
+    default:
+      throw new Error(`Keeper pending source has unknown kind: ${kind || '<empty>'}`)
+  }
+}
+
 export function parseKeeperChatPendingSnapshot(
   value: unknown,
 ): KeeperChatPendingSnapshot {
   if (
     !isRecord(value)
-    || value.schema !== 'keeper_chat_queue.pending.v1'
+    || value.schema !== 'keeper_chat_queue.pending.v2'
     || value.ok !== true
   ) {
     throw new Error('Keeper pending response has an unsupported schema')
@@ -1010,6 +1061,7 @@ export function parseKeeperChatPendingSnapshot(
     }
     const receipt = parseKeeperChatReceipt(raw.receipt)
     const content = asString(raw.content, '')
+    const source = parsePendingSource(raw.source)
     const submittedAt = asNumber(raw.submitted_at)
     if (
       receipt.keeperName !== keeperName
@@ -1028,7 +1080,7 @@ export function parseKeeperChatPendingSnapshot(
     if (!content.trim() && attachments.length === 0) {
       throw new Error('Keeper pending entry has no input payload')
     }
-    return { receipt, content, attachments, userBlocks, submittedAt }
+    return { receipt, content, source, attachments, userBlocks, submittedAt }
   })
   if (pending.length > totalPending) {
     throw new Error('Keeper pending page exceeds its total count')

@@ -250,28 +250,6 @@ let chat_queue_source_label = function
   | Keeper_chat_queue.Slack _ -> "slack"
 ;;
 
-let chat_queue_source_json = function
-  | Keeper_chat_queue.Dashboard { thread_id } ->
-    `Assoc
-      [ "kind", `String "dashboard"
-      ; "thread_id", `String thread_id
-      ]
-  | Keeper_chat_queue.Discord { channel_id; user_id } ->
-    `Assoc
-      [ "kind", `String "discord"
-      ; "channel_id", `String channel_id
-      ; "user_id", `String user_id
-      ]
-  | Keeper_chat_queue.Slack { channel_id; user_id; team_id; thread_ts; _ } ->
-    `Assoc
-      [ "kind", `String "slack"
-      ; "channel_id", `String channel_id
-      ; "user_id", `String user_id
-      ; "team_id", Json_util.string_opt_to_json team_id
-      ; "thread_ts", Json_util.string_opt_to_json thread_ts
-      ]
-;;
-
 let chat_queue_active_row ~source ~next_action ~lifecycle_fields keeper_name queue_index
     (receipt : Keeper_chat_queue.active_receipt) =
   let msg = receipt.message in
@@ -289,7 +267,10 @@ let chat_queue_active_row ~source ~next_action ~lifecycle_fields keeper_name que
           ; ( "receipt_id"
             , `String
                 (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id) )
-          ; "message_source", chat_queue_source_json msg.source
+          ; ( "message_source"
+            , Server_dashboard_http_keeper_api_types
+              .keeper_chat_message_source_json
+                msg.source )
           ; "content_length", `Int (String.length msg.content)
           ; "user_block_count", `Int (List.length msg.user_blocks)
           ; "attachment_count", `Int (List.length msg.attachments)

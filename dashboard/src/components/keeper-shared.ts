@@ -4,7 +4,7 @@ import { Markdown } from "./common/markdown"
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 import { isInFlightDelivery } from '../lib/keeper-delivery'
-import { relativeTime, NO_TIME_INFO } from '../lib/format-time'
+import { formatTimeAgo, relativeTime, NO_TIME_INFO } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
 import type {
   ChatBlock,
@@ -91,12 +91,16 @@ import { chatShowInternal, chatShowMetadata } from '../lib/chat-view-prefs'
 import {
   cancelKeeperChatPendingReceipt,
   editKeeperChatPendingReceipt,
+  fetchKeeperChatReceipt,
   fetchKeeperEventQueuePending,
   fetchKeeperChatPending,
   KeeperEventQueueOperationError,
   moveKeeperChatPendingReceiptToEnd,
   operateKeeperEventQueue,
+  resolveKeeperChatRecovery,
   type DashboardKeeperWaitingKeeper,
+  type DashboardKeeperWaitingRow,
+  type KeeperChatPendingSource,
   type KeeperChatPendingSnapshot,
   type KeeperEventQueueOperatorAction,
   type KeeperEventQueuePendingSnapshot,
@@ -561,6 +565,74 @@ function BusyToolbar({
   `
 }
 
+function pendingSourceLabel(source: KeeperChatPendingSource): string {
+  switch (source.kind) {
+    case 'dashboard':
+      return `dashboard · thread ${source.threadId}`
+    case 'discord':
+      return `discord · user ${source.userId} · channel ${source.channelId}`
+    case 'slack':
+      return `slack · user ${source.userId} · channel ${source.channelId}`
+  }
+}
+
+type OperatorChatReceiptEvidence = {
+  receiptId: string
+  queueIndex: number | null
+  source: 'chat_queue_inflight' | 'chat_queue_recovery_required'
+  messageSource: string | null
+  contentLength: number | null
+  startedAt: number | null
+}
+
+function detailRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function operatorChatReceiptEvidence(
+  row: DashboardKeeperWaitingRow,
+): OperatorChatReceiptEvidence | null {
+  if (
+    row.source !== 'chat_queue_inflight'
+    && row.source !== 'chat_queue_recovery_required'
+  ) return null
+  const detail = detailRecord(row.detail)
+  const lifecycle = detailRecord(detail?.lifecycle)
+  const receiptId = typeof detail?.receipt_id === 'string'
+    ? detail.receipt_id.trim()
+    : ''
+  if (!receiptId) return null
+  const queueIndex = typeof detail?.queue_index === 'number'
+    && Number.isSafeInteger(detail.queue_index)
+    && detail.queue_index >= 0
+    ? detail.queue_index
+    : null
+  const messageSourceRecord = detailRecord(detail?.message_source)
+  const messageSource = typeof messageSourceRecord?.kind === 'string'
+    ? messageSourceRecord.kind.trim() || null
+    : null
+  const contentLength = typeof detail?.content_length === 'number'
+    && Number.isSafeInteger(detail.content_length)
+    && detail.content_length >= 0
+    ? detail.content_length
+    : null
+  const startedAt = typeof lifecycle?.started_at === 'number'
+    && Number.isFinite(lifecycle.started_at)
+    && lifecycle.started_at >= 0
+    ? lifecycle.started_at
+    : null
+  return {
+    receiptId,
+    queueIndex,
+    source: row.source,
+    messageSource,
+    contentLength,
+    startedAt,
+  }
+}
+
 function ServerQueueStatus({
   busy,
   pendingCount,
@@ -656,11 +728,22 @@ function ServerQueueStatus({
           ? html`
               현재 실행: turn <code>${currentExecution.live_turn.turn_id ?? '-'}</code>
               · phase <code>${currentExecution.turn_phase ?? '-'}</code>
+              ${currentExecution.decision?.stage
+                ? html` · decision <code>${currentExecution.decision.stage}</code>`
+                : null}
+              ${currentExecution.runtime?.state
+                ? html` · runtime <code>${currentExecution.runtime.state}</code>`
+                : null}
               · model <code>${currentExecution.live_turn.selected_model ?? '선택 전'}</code>
               · wake <code>${currentExecution.run_state?.wake_kind ?? 'unknown'}${currentExecution.run_state?.stimulus_kinds?.length ? `:${currentExecution.run_state.stimulus_kinds.join(',')}` : ''}</code>
               · active tools <code>${currentExecution.live_turn.active_tool_count ?? 0}</code>
               · latest tool <code>${currentExecution.latest_tool?.name ?? 'none'}</code>
-              · last progress <code>${currentExecution.live_turn.last_progress_kind ?? 'unknown'}</code>
+              · 시작 <code>${currentExecution.live_turn.started_at === undefined
+                ? 'unknown'
+                : formatTimeAgo(currentExecution.live_turn.started_at)}</code>
+              · 최근 진행 <code>${currentExecution.live_turn.last_progress_kind ?? 'unknown'} / ${currentExecution.live_turn.last_progress_at === undefined
+                ? 'unknown'
+                : formatTimeAgo(currentExecution.live_turn.last_progress_at)}</code>
             `
           : null}
       </div>
@@ -705,17 +788,30 @@ function KeeperQueueControlPanel({
     void load()
   }, [keeperName])
   const eventRows = eventSnapshot?.pending ?? []
+  const activeChatRows = (keeper?.waiting_on ?? [])
+    .map(operatorChatReceiptEvidence)
+    .filter((row): row is OperatorChatReceiptEvidence => row !== null)
+  const inflightRows = activeChatRows.filter(row => row.source === 'chat_queue_inflight')
+  const recoveryRows = activeChatRows.filter(
+    row => row.source === 'chat_queue_recovery_required',
+  )
+  const currentExecution = keeper?.current_execution ?? null
+  const currentWork = snapshot?.currentWork ?? null
   const mutate = async (key: string, operation: () => Promise<unknown>) => {
     setPendingAction(key)
     try {
       await operation()
-      await reconcileKeeperChatReceipts(keeperName)
-      await load()
+      await Promise.all([
+        reconcileKeeperChatReceipts(keeperName),
+        load(),
+        loadTools(),
+      ])
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
       await Promise.allSettled([
         reconcileKeeperChatReceipts(keeperName),
         load(false),
+        loadTools(),
       ])
       setError(message)
       showToast(message, 'error')
@@ -758,6 +854,38 @@ function KeeperQueueControlPanel({
       setPendingAction(null)
     }
   }
+  const resolveRecovery = async (
+    row: OperatorChatReceiptEvidence,
+    decision:
+      | { kind: 'requeue_unconfirmed' }
+      | {
+          kind: 'cancel_unconfirmed'
+          detail: string
+          outcomeRef: null
+        },
+  ) => {
+    await mutate(`recovery:${row.receiptId}`, async () => {
+      const observed = await fetchKeeperChatReceipt(keeperName, row.receiptId)
+      if (observed.state.kind !== 'recovery_required') {
+        throw new Error(
+          `receipt ${row.receiptId} is ${observed.state.kind}, not recovery_required`,
+        )
+      }
+      const result = await resolveKeeperChatRecovery(
+        keeperName,
+        row.receiptId,
+        observed.revision,
+        observed.state.leaseId,
+        decision,
+      )
+      if (!result.audit.recorded) {
+        showToast(
+          `복구 결정은 반영됐지만 audit 기록에 실패했습니다: ${result.audit.error}`,
+          'warning',
+        )
+      }
+    })
+  }
   return html`
     <section
       class="fixed inset-y-0 right-0 z-[120] grid h-dvh w-[min(48rem,100vw)] content-start gap-3 overflow-y-auto border-l border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-2xl"
@@ -775,6 +903,89 @@ function KeeperQueueControlPanel({
       ${error
         ? html`<div class="rounded-[var(--r-0)] bg-[var(--danger-10)] p-2 text-2xs text-[var(--color-status-err)]">${error}</div>`
         : null}
+      <div
+        class="grid gap-2 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] p-2"
+        data-operator-current-execution
+      >
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">현재 실행</div>
+          ${(currentExecution?.live_turn || currentWork)
+            ? html`
+                <button
+                  type="button"
+                  disabled=${pendingAction === 'interrupt-current-turn'}
+                  class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-1 text-2xs text-[var(--color-status-err)] disabled:opacity-50"
+                  onClick=${() => void mutate('interrupt-current-turn', async () => {
+                    const cancelled = await interruptKeeperTurn(keeperName)
+                    showToast(
+                      cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴이 없습니다',
+                      cancelled ? 'success' : 'warning',
+                    )
+                  })}
+                >현재 턴 중단</button>
+              `
+            : null}
+        </div>
+        ${currentExecution?.live_turn
+          ? html`
+              <div class="grid gap-1 text-2xs text-[var(--color-fg-secondary)]">
+                <div>
+                  turn <code>${currentExecution.live_turn.turn_id ?? '-'}</code>
+                  · phase <code>${currentExecution.turn_phase ?? '-'}</code>
+                  · decision <code>${currentExecution.decision?.stage ?? '-'}</code>
+                  · runtime <code>${currentExecution.runtime?.state ?? '-'}</code>
+                </div>
+                <div>
+                  model <code>${currentExecution.live_turn.selected_model ?? '선택 전'}</code>
+                  · wake <code>${currentExecution.run_state?.wake_kind ?? 'unknown'}${currentExecution.run_state?.stimulus_kinds?.length
+                    ? `:${currentExecution.run_state.stimulus_kinds.join(',')}`
+                    : ''}</code>
+                  · active tools <code>${currentExecution.live_turn.active_tool_count ?? 0}</code>
+                </div>
+                <div>
+                  시작 <code>${currentExecution.live_turn.started_at === undefined
+                    ? 'unknown'
+                    : formatTimeAgo(currentExecution.live_turn.started_at)}</code>
+                  · 최근 진행 <code>${currentExecution.live_turn.last_progress_kind ?? 'unknown'} / ${currentExecution.live_turn.last_progress_at === undefined
+                    ? 'unknown'
+                    : formatTimeAgo(currentExecution.live_turn.last_progress_at)}</code>
+                  · latest tool <code>${currentExecution.latest_tool?.name ?? 'none'}</code>
+                </div>
+              </div>
+            `
+          : currentWork
+            ? html`
+                <div class="text-2xs text-[var(--color-fg-secondary)]">
+                  lane <code>${currentWork.lane}</code>
+                  · 시작 <code>${formatTimeAgo(currentWork.startedAt)}</code>
+                  · live turn 상세 투영은 아직 없습니다.
+                </div>
+              `
+            : html`<div class="text-2xs text-[var(--color-fg-muted)]">현재 실행 중인 턴이 없습니다.</div>`}
+        ${inflightRows.map(row => html`
+          <div
+            class="grid gap-1 border-t border-[var(--color-border-subtle)] pt-2 text-2xs text-[var(--color-fg-muted)]"
+            data-operator-chat-inflight=${row.receiptId}
+          >
+            <div class="break-all font-mono text-[var(--color-fg-secondary)]">
+              ${row.receiptId}
+            </div>
+            <div>
+              ${row.queueIndex === null ? '순서 unknown' : `처리 슬롯 #${row.queueIndex + 1}`}
+              · source ${row.messageSource ?? 'unknown'}
+              · content ${row.contentLength ?? 'unknown'} chars
+              · 시작 ${row.startedAt === null ? 'unknown' : formatTimeAgo(row.startedAt)}
+            </div>
+          </div>
+        `)}
+        ${(keeper?.sources?.chat_queue_inflight ?? 0) > inflightRows.length
+          ? html`
+              <div class="text-2xs text-[var(--color-status-warn)]">
+                inflight ${(keeper?.sources?.chat_queue_inflight ?? 0) - inflightRows.length}건의 행 상세가 서버 projection에서 생략됐습니다.
+              </div>
+            `
+          : null}
+      </div>
       <div class="grid gap-2">
         <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">
           채팅 대기 ${snapshot?.pending.length ?? keeper?.sources?.chat_queue_pending ?? 0}
@@ -787,6 +998,9 @@ function KeeperQueueControlPanel({
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <span class="font-mono text-2xs text-[var(--color-fg-muted)]">#${index + 1} · ${key}</span>
                 <span class="text-2xs text-[var(--color-fg-muted)]">${new Date(item.submittedAt * 1000).toLocaleString()}</span>
+              </div>
+              <div class="break-all text-2xs text-[var(--color-fg-muted)]" data-operator-chat-source>
+                ${pendingSourceLabel(item.source)}
               </div>
               <div class="whitespace-pre-wrap break-words text-xs text-[var(--color-fg-primary)]">${item.content}</div>
               <div class="flex flex-wrap gap-1.5">
@@ -827,6 +1041,73 @@ function KeeperQueueControlPanel({
         })}
       </div>
       <div class="grid gap-2 border-t border-[var(--color-border-subtle)] pt-3">
+        <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">
+          배송 복구 확인 필요 ${keeper?.sources?.chat_queue_recovery_required ?? recoveryRows.length}
+        </div>
+        ${recoveryRows.map(row => {
+          const key = `recovery:${row.receiptId}`
+          const busy = pendingAction === key
+          return html`
+            <div
+              class="grid gap-1 rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] p-2"
+              data-operator-chat-recovery=${row.receiptId}
+            >
+              <div class="break-all font-mono text-2xs text-[var(--color-status-err)]">
+                ${row.receiptId}
+              </div>
+              <div class="text-2xs text-[var(--color-fg-secondary)]">
+                이전 배송 결과가 확인되지 않아 자동 재실행이 차단됐습니다.
+                ${row.startedAt === null ? '' : ` · 원래 실행 시작 ${formatTimeAgo(row.startedAt)}`}
+              </div>
+              <div class="text-3xs text-[var(--color-fg-muted)]">
+                ${row.queueIndex === null ? 'queue index unknown' : `queue index ${row.queueIndex}`}
+                · source ${row.messageSource ?? 'unknown'}
+                · content ${row.contentLength ?? 'unknown'} chars
+              </div>
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  disabled=${busy}
+                  class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1 text-2xs disabled:opacity-50"
+                  onClick=${() => void resolveRecovery(row, {
+                    kind: 'requeue_unconfirmed',
+                  })}
+                >재대기</button>
+                <button
+                  type="button"
+                  disabled=${busy}
+                  class="rounded-[var(--r-0)] border border-[var(--danger-20)] px-2 py-1 text-2xs text-[var(--color-status-err)] disabled:opacity-50"
+                  onClick=${() => {
+                    const detail = window.prompt('미확인 배송을 취소하는 이유를 입력하세요.')
+                    if (detail === null) return
+                    const trimmed = detail.trim()
+                    if (!trimmed) {
+                      showToast('취소 이유를 입력해야 합니다.', 'warning')
+                      return
+                    }
+                    void resolveRecovery(row, {
+                      kind: 'cancel_unconfirmed',
+                      detail: trimmed,
+                      outcomeRef: null,
+                    })
+                  }}
+                >미확인 배송 취소</button>
+              </div>
+            </div>
+          `
+        })}
+        ${(keeper?.sources?.chat_queue_recovery_required ?? 0) > recoveryRows.length
+          ? html`
+              <div class="text-2xs text-[var(--color-status-warn)]">
+                복구 필요 ${(keeper?.sources?.chat_queue_recovery_required ?? 0) - recoveryRows.length}건의 행 상세가 서버 projection에서 생략됐습니다.
+              </div>
+            `
+          : null}
+        ${recoveryRows.length === 0
+          ? html`<div class="text-2xs text-[var(--color-fg-muted)]">복구 결정을 기다리는 receipt가 없습니다.</div>`
+          : null}
+      </div>
+      <div class="grid gap-2 border-t border-[var(--color-border-subtle)] pt-3">
         <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">자율 이벤트 대기 ${eventSnapshot?.totalPending ?? 0}</div>
         ${eventRecoveries.map(recovery => {
           const operationId = recovery.operation.operationId
@@ -857,7 +1138,13 @@ function KeeperQueueControlPanel({
           return html`
             <div class="grid gap-1 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] p-2" data-operator-event-row>
               <div class="font-mono text-2xs text-[var(--color-fg-muted)]">#${item.queueIndex + 1} · ${item.postId}</div>
-              <div class="text-2xs text-[var(--color-fg-secondary)]">${item.payloadKind} · ${item.urgency} · ${new Date(item.arrivedAt * 1000).toLocaleString()}</div>
+              <div class="text-2xs text-[var(--color-fg-secondary)]">
+                wake reason ${item.payloadKind} · urgency ${item.urgency}
+                · 도착 ${formatTimeAgo(item.arrivedAt)} (${new Date(item.arrivedAt * 1000).toLocaleString()})
+              </div>
+              <div class="break-all font-mono text-3xs text-[var(--color-fg-muted)]">
+                source ref ${item.sourceRef}
+              </div>
               <div class="flex flex-wrap gap-1.5">
                 ${(['immediate', 'normal', 'low'] as const).map(urgency => html`
                   <button

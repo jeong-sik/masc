@@ -345,7 +345,7 @@ describe('Keeper chat durable receipt API', () => {
   it('fetches pending input metadata without materializing attachment bytes', async () => {
     const receiptId = 'chatq_00000000-0000-4000-8000-000000000004'
     const payload = {
-      schema: 'keeper_chat_queue.pending.v1',
+      schema: 'keeper_chat_queue.pending.v2',
       ok: true,
       keeper_name: 'keeper sangsu',
       revision: '11',
@@ -361,6 +361,13 @@ describe('Keeper chat durable receipt API', () => {
           state: { kind: 'pending' },
         },
         content: '[image attached: photo.png]',
+        source: {
+          kind: 'slack',
+          channel_id: 'channel-1',
+          user_id: 'user-1',
+          team_id: 'team-1',
+          thread_ts: '42.1',
+        },
         user_blocks: [{
           type: 'image',
           attachment_id: 'att-1',
@@ -390,6 +397,13 @@ describe('Keeper chat durable receipt API', () => {
 
     expect(result).toEqual(parseKeeperChatPendingSnapshot(payload))
     expect(result.currentWork).toEqual({ lane: 'autonomous', startedAt: 42 })
+    expect(result.pending[0]?.source).toEqual({
+      kind: 'slack',
+      channelId: 'channel-1',
+      userId: 'user-1',
+      teamId: 'team-1',
+      threadTs: '42.1',
+    })
     expect(result.pending[0]?.userBlocks).toEqual([{
       type: 'image',
       attachmentId: 'att-1',
@@ -421,6 +435,7 @@ describe('Keeper chat durable receipt API', () => {
         state: { kind: 'pending' },
       },
       content,
+      source: { kind: 'dashboard', thread_id: 'thread-1' },
       user_blocks: [],
       attachments: [],
       submitted_at: 42,
@@ -429,7 +444,7 @@ describe('Keeper chat durable receipt API', () => {
       pending: ReturnType<typeof entry>[],
       nextAfter: string | null,
     ) => ({
-      schema: 'keeper_chat_queue.pending.v1',
+      schema: 'keeper_chat_queue.pending.v2',
       ok: true,
       keeper_name: 'sangsu',
       revision: '22',
@@ -470,12 +485,17 @@ describe('Keeper chat durable receipt API', () => {
         state: { kind: 'pending' },
       },
       content: `revision ${revision}`,
+      source: {
+        kind: 'discord',
+        channel_id: 'channel-1',
+        user_id: 'user-1',
+      },
       user_blocks: [],
       attachments: [],
       submitted_at: 42,
     })
     const envelope = (revision: string, nextAfter: string | null) => ({
-      schema: 'keeper_chat_queue.pending.v1',
+      schema: 'keeper_chat_queue.pending.v2',
       ok: true,
       keeper_name: 'sangsu',
       revision,

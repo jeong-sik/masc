@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
-readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.6"
+readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.10"
 # v0.231.0 is a hard-cut wave: checkpoint schema is v9 only (v1-v8
 # rejected; #2867), provider_config.output_schema is removed in favor of
 # response_format = JsonSchema as the single structured-output request state
@@ -51,9 +51,16 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.6"
 # metadata identity (#2894). MASC uses that identity to remove only the carrier
 # from provider-content attribution, independent of message position or text.
 # Previous pin: v0.231.4 (2add6bf4a).
-readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.6"
+# v0.231.10 exposes the current-only canonical validated-flow evidence
+# snapshot and codec added in v0.231.7 (#2896), including the validation and
+# record-boundary fixes released through v0.231.10 (#2899/#2903/#2904/
+# #2906/#2907/#2908). Existing MASC exact-flow callers retain the same public
+# execution contract; durable Memory OS consumption is a separate caller
+# change, with no compatibility decoder or migration path added by this pin.
+# Previous pin: v0.231.6 (ae4cc5536).
+readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.10"
 # TRACK_REF consumed by check-oas-pin.sh / oas-drift-check.sh /
 # sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584).
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="ae4cc55363b12ae47b9090e715c15dabba9f9f16"
-readonly OAS_AGENT_SDK_MIN_VERSION="0.231.6"
+readonly OAS_AGENT_SDK_SHA="1fa61251936758d37c3a33eac07b8d95c5f26d35"
+readonly OAS_AGENT_SDK_MIN_VERSION="0.231.10"

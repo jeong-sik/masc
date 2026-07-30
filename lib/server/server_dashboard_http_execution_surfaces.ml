@@ -562,6 +562,16 @@ let display_of_phase_or_legacy_event = function
   | Legacy_resumed ->
     Some { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = false }
 
+let control_status_override_of_lifecycle_event event =
+  match lifecycle_legacy_wire_event_of_string event with
+  | Some (Legacy_paused | Legacy_stopped) ->
+    Some Keeper_status_runtime.Cp_paused
+  | Some Legacy_resumed ->
+    Some
+      (Keeper_status_runtime.Cp_surface
+         Keeper_status_runtime.Surface_idle)
+  | Some (Legacy_running | Legacy_crashed | Legacy_dead) | None -> None
+
 let display_of_phase_or_legacy_string s =
   match lifecycle_legacy_wire_event_of_string s with
   | None -> None
@@ -604,10 +614,12 @@ let keeper_agent_status_opt row =
   | None | Some _ -> top_level_status ()
 ;;
 
-let patched_keeper_status row ~keepalive_running =
-  if not keepalive_running
-  then `String "offline"
-  else (
+let patched_keeper_status row ~event ~keepalive_running =
+  match control_status_override_of_lifecycle_event event with
+  | Some status ->
+    `String (Keeper_status_runtime.control_plane_status_to_string status)
+  | None when not keepalive_running -> `String "offline"
+  | None ->
     (* RFC-0089: classify the row's display status via the typed control-plane
        SSOT. busy/active/listening/idle pass through; inactive/offline collapse
        to "offline"; a control-plane pause survives the patch, because a running
@@ -635,7 +647,7 @@ let patched_keeper_status row ~keepalive_running =
       invalid_arg
         (Printf.sprintf
            "dashboard execution cache: unknown current keeper status %S"
-           status))
+           status)
 ;;
 
 let patch_keeper_row ~keeper_name ~event ~keepalive_running = function
@@ -646,7 +658,9 @@ let patch_keeper_row ~keeper_name ~event ~keepalive_running = function
        let row_fields =
          row_fields
          |> upsert_assoc_field "keepalive_running" (`Bool keepalive_running)
-         |> upsert_assoc_field "status" (patched_keeper_status row ~keepalive_running)
+         |> upsert_assoc_field
+              "status"
+              (patched_keeper_status row ~event ~keepalive_running)
        in
        let row_fields =
          match paused_of_lifecycle_event event with

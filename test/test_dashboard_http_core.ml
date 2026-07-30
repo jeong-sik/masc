@@ -2033,6 +2033,40 @@ let test_paused_lifecycle_event_keeps_paused_status () =
   check bool "paused flag is set" true
     Yojson.Safe.Util.(patched |> member "paused" |> to_bool)
 
+let test_resumed_lifecycle_event_clears_paused_status () =
+  let patched =
+    Server_dashboard_http_execution_surfaces.patch_keeper_row
+      ~keeper_name:"resume-target"
+      ~event:"resumed"
+      ~keepalive_running:true
+      (`Assoc
+        [ ("name", `String "resume-target")
+        ; ("status", `String "paused")
+        ; ("paused", `Bool true)
+        ])
+  in
+  check string "resumed status is idle" "idle"
+    Yojson.Safe.Util.(patched |> member "status" |> to_string);
+  check bool "resumed flag clears pause" false
+    Yojson.Safe.Util.(patched |> member "paused" |> to_bool)
+
+let test_stopped_lifecycle_event_keeps_operator_pause () =
+  let patched =
+    Server_dashboard_http_execution_surfaces.patch_keeper_row
+      ~keeper_name:"stop-target"
+      ~event:"stopped"
+      ~keepalive_running:false
+      (`Assoc
+        [ ("name", `String "stop-target")
+        ; ("status", `String "active")
+        ; ("paused", `Bool false)
+        ])
+  in
+  check string "operator stop is paused" "paused"
+    Yojson.Safe.Util.(patched |> member "status" |> to_string);
+  check bool "operator stop sets pause" true
+    Yojson.Safe.Util.(patched |> member "paused" |> to_bool)
+
 let test_lifecycle_cache_patch_rejects_missing_or_unknown_status () =
   let patch row =
     Server_dashboard_http_execution_surfaces.patch_keeper_row
@@ -2536,6 +2570,10 @@ let () =
             test_lifecycle_event_display_values;
           test_case "paused lifecycle event keeps the paused status" `Quick
             test_paused_lifecycle_event_keeps_paused_status;
+          test_case "resumed lifecycle event clears the paused status" `Quick
+            test_resumed_lifecycle_event_clears_paused_status;
+          test_case "stopped lifecycle event keeps the operator pause" `Quick
+            test_stopped_lifecycle_event_keeps_operator_pause;
           test_case "cache patch rejects missing or unknown status" `Quick
             test_lifecycle_cache_patch_rejects_missing_or_unknown_status;
           test_case "running keeper reconciliation rebuilds continuity brief" `Quick

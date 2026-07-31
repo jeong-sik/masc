@@ -285,7 +285,52 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.keepers[0]!.context_ratio).toBeNull()
     expect(result.keepers[0]!.context_tokens).toBeNull()
     expect(result.keepers[0]!.context_max).toBeNull()
+    // The nested retired payload names no top-level source; the string stays
+    // absent and no numbers are revived from it.
     expect(result.keepers[0]!.context_source).toBeNull()
+  })
+
+  it('decodes context numbers declared by the turn_record projection', () => {
+    const result = normalizeOperatorSnapshot({
+      keepers: [
+        {
+          name: 'rondo',
+          context_ratio: 0.504435,
+          context_tokens: 100887,
+          context_max: 200000,
+          context_source: 'turn_record',
+          context_metrics_unavailable: null,
+        },
+      ],
+    })
+
+    expect(result.keepers[0]).toMatchObject({
+      context_ratio: 0.504435,
+      context_tokens: 100887,
+      context_max: 200000,
+      context_source: 'turn_record',
+    })
+  })
+
+  it('drops context fields entirely under a retired source', () => {
+    const result = normalizeOperatorSnapshot({
+      keepers: [
+        {
+          name: 'sojin',
+          context_ratio: 0.1274375,
+          context_tokens: 16312,
+          context_max: 128000,
+          context_source: 'keeper_context_status',
+        },
+      ],
+    })
+
+    expect(result.keepers[0]).toMatchObject({
+      context_ratio: null,
+      context_tokens: null,
+      context_max: null,
+      context_source: null,
+    })
   })
 
   it('preserves unknown context and separately typed last-turn usage', () => {

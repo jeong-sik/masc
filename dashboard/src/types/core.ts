@@ -1115,10 +1115,22 @@ export interface KeeperLastTurnUsage {
   source: 'keeper_runtime_usage'
 }
 
+// Mirrors the closed reason set in
+// lib/keeper/keeper_context_observation_projection.ml — extend both together.
+export const KEEPER_CONTEXT_NOT_OBSERVED_REASONS = [
+  'context_measurement_missing',
+  'turn_record_undecodable',
+  'turn_record_read_failed',
+  'turn_record_without_usage',
+] as const
+
+export type KeeperContextNotObservedReason =
+  (typeof KEEPER_CONTEXT_NOT_OBSERVED_REASONS)[number]
+
 export type KeeperContextMetricsUnavailable =
   | {
       kind: 'not_observed'
-      reason: 'context_measurement_missing'
+      reason: KeeperContextNotObservedReason
     }
   | {
       kind: 'invalid_payload'
@@ -1226,6 +1238,12 @@ export interface Keeper {
     context_ratio?: number | null
     context_tokens?: number | null
     context_max?: number | null
+    // Provenance of a turn_record-sourced measurement (RFC-0233): which
+    // completed turn produced the numbers and its serialized request size.
+    observed_at?: string | null
+    turn_ref?: string | null
+    absolute_turn?: number | null
+    request_body_bytes?: number | null
     message_count?: number
     has_checkpoint?: boolean
   }

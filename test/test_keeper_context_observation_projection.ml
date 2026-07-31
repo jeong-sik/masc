@@ -1,0 +1,206 @@
+(** Context-observation projection sources the newest TurnRecord: the
+    provider-measured numbers reach the wire fields, and every absence is a
+    typed reason instead of a pinned null. *)
+
+open Alcotest
+
+module Projection = Masc.Keeper_context_observation_projection
+
+let with_temp_workspace f =
+  let path = Filename.temp_file "ctx-observation-" ".dir" in
+  Sys.remove path;
+  Unix.mkdir path 0o700;
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree path)
+    (fun () -> f (Masc.Workspace.default_config path))
+;;
+
+let digest_of_label label =
+  Digestif.SHA256.digest_string label |> Digestif.SHA256.to_hex
+;;
+
+let sample_record
+      ?(absolute_turn = 4071)
+      ?(input_tokens = Some 18_000)
+      ?(context_window = Some 131_072)
+      ()
+  : Turn_record.t
+  =
+  { execution_ids = []
+  ; keeper = "rondo"
+  ; trace_id = "trace-1780648779957-00000"
+  ; absolute_turn
+  ; turn_ref =
+      Ids.Turn_ref.make ~trace_id:"trace-1780648779957-00000" ~absolute_turn
+  ; blocks =
+      [ { Turn_record.block = Prompt_block_id.Persona
+        ; bytes = 4
+        ; digest = digest_of_label "aaaa"
+        }
+      ]
+  ; input_components = Some [ { component = Turn_record.Tool_schemas; bytes = 8192 } ]
+  ; runtime_profile = "glm-coding.glm-5-turbo"
+  ; model = Some "glm-5-turbo"
+  ; finish_reason = Some "completed"
+  ; context_window
+  ; price_input_per_million = None
+  ; price_output_per_million = None
+  ; request_latency_ms = Some 1234
+  ; ttfrc_ms = None
+  ; request_wire_observation =
+      Some { runtime_profile = "glm-coding.glm-5-turbo"; body_bytes = 560_513 }
+  ; sampling =
+      { temperature = None
+      ; top_p = None
+      ; max_tokens = None
+      ; thinking_budget = None
+      ; enable_thinking = Some true
+      }
+  ; usage =
+      { input_tokens
+      ; output_tokens = Some 412
+      ; cache_creation_input_tokens = None
+      ; cache_read_input_tokens = Some 15_000
+      }
+  ; ts = 1_781_200_000.5
+  }
+;;
+
+let append_record config record =
+  let store =
+    Masc.Keeper_types_support.keeper_turn_record_store config record.Turn_record.keeper
+  in
+  Dated_jsonl.append store (Turn_record.to_json record)
+;;
+
+let append_raw config ~keeper_name json =
+  let store = Masc.Keeper_types_support.keeper_turn_record_store config keeper_name in
+  Dated_jsonl.append store json
+;;
+
+let field fields name =
+  match List.assoc_opt name fields with
+  | Some value -> value
+  | None -> failf "field %s is absent from the projection" name
+;;
+
+let context_object fields =
+  match field fields "context" with
+  | `Assoc context -> context
+  | _ -> fail "context field is not an object"
+;;
+
+let check_not_observed fields ~reason =
+  (match field fields "context_metrics_unavailable" with
+   | `Assoc unavailable ->
+     check string "kind" "not_observed"
+       (match List.assoc_opt "kind" unavailable with
+        | Some (`String kind) -> kind
+        | _ -> "<missing>");
+     check string "reason" reason
+       (match List.assoc_opt "reason" unavailable with
+        | Some (`String value) -> value
+        | _ -> "<missing>")
+   | _ -> fail "context_metrics_unavailable is not an object");
+  check bool "context_tokens is null" true (field fields "context_tokens" = `Null);
+  check bool "context_max is null" true (field fields "context_max" = `Null);
+  check bool "context_source is null" true (field fields "context_source" = `Null)
+;;
+
+let test_missing_store_is_typed_absence () =
+  with_temp_workspace (fun config ->
+    let fields = Projection.context_fields ~config ~keeper_name:"nobody" in
+    check_not_observed fields ~reason:"context_measurement_missing")
+;;
+
+let test_measured_record_projects () =
+  with_temp_workspace (fun config ->
+    let record = sample_record () in
+    append_record config record;
+    let fields = Projection.context_fields ~config ~keeper_name:"rondo" in
+    (match field fields "context_tokens" with
+     | `Int tokens -> check int "tokens" 18_000 tokens
+     | _ -> fail "context_tokens is not an int");
+    (match field fields "context_max" with
+     | `Int window -> check int "window" 131_072 window
+     | _ -> fail "context_max is not an int");
+    (match field fields "context_ratio" with
+     | `Float ratio ->
+       check bool "ratio matches tokens/window" true
+         (Float.abs (ratio -. (18_000.0 /. 131_072.0)) < 1e-9)
+     | _ -> fail "context_ratio is not a float");
+    (match field fields "context_source" with
+     | `String source -> check string "source" "turn_record" source
+     | _ -> fail "context_source is not a string");
+    check bool "unavailable is null" true
+      (field fields "context_metrics_unavailable" = `Null);
+    let context = context_object fields in
+    (match List.assoc_opt "absolute_turn" context with
+     | Some (`Int turn) -> check int "absolute_turn" 4071 turn
+     | _ -> fail "context.absolute_turn missing");
+    (match List.assoc_opt "request_body_bytes" context with
+     | Some (`Int bytes) -> check int "request bytes" 560_513 bytes
+     | _ -> fail "context.request_body_bytes missing");
+    (match List.assoc_opt "turn_ref" context with
+     | Some (`String turn_ref) ->
+       check string "turn_ref" "trace-1780648779957-00000#4071" turn_ref
+     | _ -> fail "context.turn_ref missing");
+    match List.assoc_opt "observed_at" context with
+    | Some (`String _) -> ()
+    | _ -> fail "context.observed_at missing")
+;;
+
+let test_newest_record_wins () =
+  with_temp_workspace (fun config ->
+    append_record config (sample_record ~absolute_turn:1 ~input_tokens:(Some 100) ());
+    append_record config (sample_record ~absolute_turn:2 ~input_tokens:(Some 200) ());
+    let fields = Projection.context_fields ~config ~keeper_name:"rondo" in
+    match field fields "context_tokens" with
+    | `Int tokens -> check int "newest tokens" 200 tokens
+    | _ -> fail "context_tokens is not an int")
+;;
+
+let test_record_without_usage_is_typed () =
+  with_temp_workspace (fun config ->
+    append_record config (sample_record ~input_tokens:None ());
+    let fields = Projection.context_fields ~config ~keeper_name:"rondo" in
+    check_not_observed fields ~reason:"turn_record_without_usage")
+;;
+
+let test_undecodable_newest_line_is_typed () =
+  with_temp_workspace (fun config ->
+    append_raw config ~keeper_name:"rondo" (`Assoc [ "schema", `String "future" ]);
+    let fields = Projection.context_fields ~config ~keeper_name:"rondo" in
+    check_not_observed fields ~reason:"turn_record_undecodable")
+;;
+
+let test_missing_window_keeps_tokens_without_ratio () =
+  with_temp_workspace (fun config ->
+    append_record config (sample_record ~context_window:None ());
+    let fields = Projection.context_fields ~config ~keeper_name:"rondo" in
+    (match field fields "context_tokens" with
+     | `Int tokens -> check int "tokens survive" 18_000 tokens
+     | _ -> fail "context_tokens is not an int");
+    check bool "ratio is null without a window" true
+      (field fields "context_ratio" = `Null);
+    check bool "max is null without a window" true (field fields "context_max" = `Null))
+;;
+
+let () =
+  run
+    "keeper_context_observation_projection"
+    [ ( "projection"
+      , [ test_case "missing store is typed absence" `Quick
+            test_missing_store_is_typed_absence
+        ; test_case "measured record projects tokens/window/provenance" `Quick
+            test_measured_record_projects
+        ; test_case "newest record wins" `Quick test_newest_record_wins
+        ; test_case "record without usage is typed" `Quick
+            test_record_without_usage_is_typed
+        ; test_case "undecodable newest line is typed" `Quick
+            test_undecodable_newest_line_is_typed
+        ; test_case "missing window keeps tokens without ratio" `Quick
+            test_missing_window_keeps_tokens_without_ratio
+        ] )
+    ]
+;;

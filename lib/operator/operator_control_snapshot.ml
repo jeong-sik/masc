@@ -360,7 +360,9 @@ let keepers_json
                         | None -> `Null
                     in
                     let context_snapshot_fields =
-                      Keeper_context_observation_projection.missing_context_fields ()
+                      Keeper_context_observation_projection.context_fields
+                        ~config
+                        ~keeper_name:meta.name
                     in
                     let runtime_trust =
                       let t_trust = Time_compat.now () in

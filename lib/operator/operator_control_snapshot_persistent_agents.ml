@@ -59,6 +59,10 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                  ; "updated_at", field_or_null "updated_at"
                  ; "created_at", field_or_null "created_at"
                  ]
+                 (* Rows here re-project a persisted snapshot verbatim
+                    (field_or_null over stored JSON); reading live
+                    turn-record stores would mix a live measurement into a
+                    persisted view, so context stays typed-absent. *)
                  @ Keeper_context_observation_projection.missing_context_fields ()
                  @ [ "last_turn_usage", field_or_null "last_turn_usage" ]))
          | _ -> None)
@@ -121,7 +125,9 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                     ; "updated_at", `String meta.updated_at
                     ; "created_at", `String meta.created_at
                     ]
-                    @ Keeper_context_observation_projection.missing_context_fields ()
+                    @ Keeper_context_observation_projection.context_fields
+                        ~config
+                        ~keeper_name:meta.name
                     @ [ ( "last_turn_usage"
                         , Keeper_context_observation_projection
                           .last_turn_usage_json

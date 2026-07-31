@@ -138,7 +138,9 @@ let handle_keeper_list ctx args : tool_result =
               ("noop_turn_count", `Int m.runtime.noop_turn_count);
               ("autonomous_action_count", `Int m.runtime.autonomous_action_count);
             ]
-            @ Keeper_context_observation_projection.missing_context_fields ()
+            @ Keeper_context_observation_projection.context_fields
+                ~config:ctx.config
+                ~keeper_name:m.name
             @ [
               ( "last_turn_usage"
               , Keeper_context_observation_projection.last_turn_usage_json

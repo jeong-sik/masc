@@ -429,12 +429,17 @@ let purge_dashboard_keeper_artifacts config operation =
               Keeper_status_metrics.invalidate_tool_audit_cache
                 config
                 ~keeper_name:operation.keeper_name
+            | Keeper_memory_journal_artifact ->
+              (* The journal is written through a memoized appender; unlinking
+                 without dropping that writer would leave a same-process
+                 successor keeper appending to the deleted inode, so no new
+                 journal file would ever appear. *)
+              Fs_compat.invalidate_cached_writer path
             | Keeper_generation_index_artifact
             | Keeper_decision_log_artifact
             | Keeper_feedback_log_artifact
             | Keeper_runtime_directory_artifact
             | Keeper_memory_current_artifact
-            | Keeper_memory_journal_artifact
             | Keeper_configuration_artifact
             | Agent_artifact_bundle _ -> ());
            (match remove_path_strict path with

@@ -413,6 +413,32 @@ let test_rejected_commit_appends_no_journal_entry () =
     (List.length (read_journal_lines ~keepers_dir))
 ;;
 
+(* The purge hook drops the memoized journal appender before unlinking
+   (Fs_compat.invalidate_cached_writer): without that, a same-process
+   successor keeper would keep appending to the deleted inode and no new
+   journal file would ever appear. This exercises that exact sequence. *)
+let test_journal_recreated_after_purge_sequence () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (replace ~keepers_dir ~facts:[ fact ~claim:"before purge" () ] () |> require_ok);
+  let journal_path =
+    Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+  in
+  check bool "journal exists before purge" true (Sys.file_exists journal_path);
+  Fs_compat.invalidate_cached_writer journal_path;
+  Sys.remove journal_path;
+  ignore
+    (Current.upsert_fact
+       ~keepers_dir
+       ~keeper_id:"keeper"
+       ~now:300.0
+       ~source:(source Current.Explicit_write)
+       (fact ~claim:"after purge" ())
+     |> require_ok);
+  check bool "journal recreated after purge" true (Sys.file_exists journal_path);
+  check int "only the post-purge commit is journaled" 1
+    (List.length (read_journal_lines ~keepers_dir))
+;;
+
 (* Both Memory OS sidecars live in the config keepers directory, outside the
    runtime directory the purge already removes: without plan entries a purged
    keeper leaks its facts and journal to a later keeper with the same name. *)
@@ -540,6 +566,10 @@ let () =
             "purge plan removes memory sidecars"
             `Quick
             test_purge_plan_removes_memory_sidecars
+        ; test_case
+            "journal recreated after purge sequence"
+            `Quick
+            test_journal_recreated_after_purge_sequence
         ] )
     ]
 ;;

@@ -413,6 +413,22 @@ let test_rejected_commit_appends_no_journal_entry () =
     (List.length (read_journal_lines ~keepers_dir))
 ;;
 
+(* Both Memory OS sidecars live in the config keepers directory, outside the
+   runtime directory the purge already removes: without plan entries a purged
+   keeper leaks its facts and journal to a later keeper with the same name. *)
+let test_purge_plan_removes_memory_sidecars () =
+  let module Shutdown = Masc.Keeper_shutdown_types in
+  let context =
+    { Shutdown.requested_name = "keeper"; agent_name = "keeper"; meta_version = 1 }
+  in
+  let plan = Shutdown.dashboard_purge_artifact_plan ~keeper_name:"keeper" context in
+  let contains artifact = List.exists (fun entry -> entry = artifact) plan in
+  check bool "plan removes the fact snapshot" true
+    (contains Shutdown.Keeper_memory_current_artifact);
+  check bool "plan removes the memory journal" true
+    (contains Shutdown.Keeper_memory_journal_artifact)
+;;
+
 let test_stale_replace_rejects_concurrent_explicit_write () =
   with_temp_keepers @@ fun keepers_dir ->
   let initial = fact ~claim:"initial" () in
@@ -520,6 +536,10 @@ let () =
             "rejected commit appends no journal entry"
             `Quick
             test_rejected_commit_appends_no_journal_entry
+        ; test_case
+            "purge plan removes memory sidecars"
+            `Quick
+            test_purge_plan_removes_memory_sidecars
         ] )
     ]
 ;;

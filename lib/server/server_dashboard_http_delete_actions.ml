@@ -377,6 +377,20 @@ let keeper_artifact_path config keeper_name artifact =
     Some (Keeper_types_support.keeper_feedback_log_path config keeper_name)
   | Keeper_runtime_directory_artifact ->
     Some (Filename.concat (Keeper_fs.keeper_dir config) keeper_name)
+  | Keeper_memory_current_artifact ->
+    Some
+      (Keeper_memory_os_current.path_for_keepers_dir
+         ~keepers_dir:
+           (Config_dir_resolver.keepers_dir_for_base_path
+              ~base_path:config.Workspace.base_path)
+         ~keeper_id:keeper_name)
+  | Keeper_memory_journal_artifact ->
+    Some
+      (Keeper_memory_os_current.journal_path_for_keepers_dir
+         ~keepers_dir:
+           (Config_dir_resolver.keepers_dir_for_base_path
+              ~base_path:config.Workspace.base_path)
+         ~keeper_id:keeper_name)
   | Keeper_configuration_artifact ->
     Some
       (Filename.concat
@@ -419,6 +433,8 @@ let purge_dashboard_keeper_artifacts config operation =
             | Keeper_decision_log_artifact
             | Keeper_feedback_log_artifact
             | Keeper_runtime_directory_artifact
+            | Keeper_memory_current_artifact
+            | Keeper_memory_journal_artifact
             | Keeper_configuration_artifact
             | Agent_artifact_bundle _ -> ());
            (match remove_path_strict path with
@@ -431,6 +447,8 @@ let purge_dashboard_keeper_artifacts config operation =
                | Keeper_generation_index_artifact
                | Keeper_decision_log_artifact
                | Keeper_feedback_log_artifact
+               | Keeper_memory_current_artifact
+               | Keeper_memory_journal_artifact
                | Keeper_configuration_artifact
                | Agent_artifact_bundle _ -> ());
               Log.Keeper.debug

@@ -57,6 +57,10 @@
   color: var(--accent-warn, #e0a82e);
 }
 
+.kmh-stat-value--error {
+  color: var(--status-bad, #a01818);
+}
+
 .kmh-read-errors {
   display: flex;
   flex-direction: column;
@@ -129,6 +133,16 @@
   background: color-mix(in srgb, var(--accent-warn, #e0a82e) 10%, transparent);
 }
 
+/* Rows carrying an error-severity alert (librarian starvation): the keeper
+   is running memoryless and cannot recover on its own. */
+.kmh-row--error td {
+  background: color-mix(in srgb, var(--status-bad, #a01818) 8%, transparent);
+}
+
+.kmh-row--error:hover td {
+  background: color-mix(in srgb, var(--status-bad, #a01818) 12%, transparent);
+}
+
 .kmh-badge {
   display: inline-flex;
   align-items: center;
@@ -146,6 +160,18 @@
 .kmh-badge--ok {
   background: color-mix(in srgb, var(--status-ok) 15%, transparent);
   color: var(--status-ok);
+}
+
+.kmh-badge--error {
+  background: color-mix(in srgb, var(--status-bad, #a01818) 20%, transparent);
+  color: var(--status-bad, #a01818);
+}
+
+/* Neutral state: a configured keeper with no snapshot and no failures yet
+   (librarian has not run) — informational, not an alert. */
+.kmh-badge--muted {
+  background: var(--surface-hovered);
+  color: var(--text-tertiary);
 }
 
 .kmh-refresh-label {

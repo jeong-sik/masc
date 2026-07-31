@@ -20,7 +20,9 @@ function keeperMemoryHealthPayload() {
       snapshot_bytes: 512,
       added: 1,
       removed: 2,
+      snapshot_present: true,
       librarian_lane_busy: 0,
+      librarian_failures: 0,
       read_error: null,
       alerts: [],
     }, {
@@ -30,7 +32,9 @@ function keeperMemoryHealthPayload() {
       snapshot_bytes: 32,
       added: 0,
       removed: 0,
+      snapshot_present: false,
       librarian_lane_busy: 0,
+      librarian_failures: 0,
       read_error: 'invalid current snapshot',
       alerts: [{
         code: 'snapshot_read_error',
@@ -48,14 +52,64 @@ function keeperMemoryHealthPayload() {
       added: 1,
       removed: 2,
       librarian_lane_busy: 0,
+      librarian_failures: 0,
       read_errors: 1,
     },
     alert_summary: {
       total_alerts: 1,
       warn_alerts: 1,
+      error_alerts: 0,
       keepers_with_alerts: 1,
       snapshot_read_error_keepers: 1,
       librarian_lane_busy_keepers: 0,
+      librarian_starving_keepers: 0,
+    },
+  }
+}
+
+function starvingKeeperPayload() {
+  return {
+    schema: 'keeper.memory_os.current_health.v1',
+    generated_at: 1_700_000_000,
+    cadence_counter_entries: 1,
+    keepers: [{
+      keeper_id: 'starving',
+      revision: 0,
+      facts: 0,
+      snapshot_bytes: 0,
+      added: 0,
+      removed: 0,
+      snapshot_present: false,
+      librarian_lane_busy: 0,
+      librarian_failures: 4,
+      read_error: null,
+      alerts: [{
+        code: 'librarian_starvation',
+        severity: 'error',
+        target: 'librarian_starvation',
+        label: 'Librarian',
+        message: 'Librarian runs failed and no current-memory snapshot exists',
+        value: 4,
+        threshold: 0,
+      }],
+    }],
+    totals: {
+      facts: 0,
+      snapshot_bytes: 0,
+      added: 0,
+      removed: 0,
+      librarian_lane_busy: 0,
+      librarian_failures: 4,
+      read_errors: 0,
+    },
+    alert_summary: {
+      total_alerts: 1,
+      warn_alerts: 0,
+      error_alerts: 1,
+      keepers_with_alerts: 1,
+      snapshot_read_error_keepers: 0,
+      librarian_lane_busy_keepers: 0,
+      librarian_starving_keepers: 1,
     },
   }
 }
@@ -124,6 +178,31 @@ describe('fetchKeeperMemoryHealth', () => {
   it('rejects an alert whose typed target disagrees with its code', async () => {
     const payload = keeperMemoryHealthPayload()
     payload.keepers[1]!.alerts[0]!.target = 'librarian_lane_busy'
+    getMock.mockResolvedValue(payload)
+
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow(
+      '유효하지 않은 keeper memory health payload',
+    )
+  })
+
+  it('decodes the error-severity librarian starvation contract', async () => {
+    getMock.mockResolvedValue(starvingKeeperPayload())
+
+    const response = await fetchKeeperMemoryHealth()
+
+    expect(response.keepers[0]).toMatchObject({
+      keeper_id: 'starving',
+      snapshot_present: false,
+      librarian_failures: 4,
+    })
+    expect(response.keepers[0]?.alerts[0]?.severity).toBe('error')
+    expect(response.alert_summary.error_alerts).toBe(1)
+    expect(response.alert_summary.librarian_starving_keepers).toBe(1)
+  })
+
+  it('rejects an alert whose severity disagrees with its code', async () => {
+    const payload = starvingKeeperPayload()
+    payload.keepers[0]!.alerts[0]!.severity = 'warn'
     getMock.mockResolvedValue(payload)
 
     await expect(fetchKeeperMemoryHealth()).rejects.toThrow(

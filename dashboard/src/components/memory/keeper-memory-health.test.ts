@@ -26,7 +26,9 @@ function makeEntry(
     snapshot_bytes: 512,
     added: 2,
     removed: 1,
+    snapshot_present: true,
     librarian_lane_busy: 0,
+    librarian_failures: 0,
     read_error: null,
     alerts: [],
     ...overrides,
@@ -39,9 +41,11 @@ function makeAlertSummary(
   return {
     total_alerts: 0,
     warn_alerts: 0,
+    error_alerts: 0,
     keepers_with_alerts: 0,
     snapshot_read_error_keepers: 0,
     librarian_lane_busy_keepers: 0,
+    librarian_starving_keepers: 0,
     ...overrides,
   }
 }
@@ -62,6 +66,7 @@ function makeResponse(
       added: 0,
       removed: 0,
       librarian_lane_busy: 0,
+      librarian_failures: 0,
       read_errors: 0,
       ...totalsOverrides,
     },
@@ -145,6 +150,66 @@ describe('KeeperMemoryHealth', () => {
     await waitFor(() => expect(screen.getByText('alpha')).not.toBeNull())
     expect(statValue(container, 'librarian-lane-busy')).toBe('3')
     expect(screen.getByText('Librarian')).not.toBeNull()
+  })
+
+  it('renders librarian starvation as an error row, not a warning', async () => {
+    const alert = {
+      code: 'librarian_starvation' as const,
+      severity: 'error' as const,
+      target: 'librarian_starvation' as const,
+      label: 'Librarian',
+      message: 'Librarian runs failed and no current-memory snapshot exists',
+      value: 4,
+      threshold: 0,
+    }
+    mockFetch.mockResolvedValue(makeResponse(
+      [makeEntry({
+        keeper_id: 'starving',
+        revision: 0,
+        facts: 0,
+        snapshot_bytes: 0,
+        snapshot_present: false,
+        librarian_failures: 4,
+        alerts: [alert],
+      })],
+      { librarian_failures: 4 },
+      makeAlertSummary({
+        total_alerts: 1,
+        error_alerts: 1,
+        keepers_with_alerts: 1,
+        librarian_starving_keepers: 1,
+      }),
+    ))
+    const { container } = render(html`<${KeeperMemoryHealth} />`)
+
+    await waitFor(() => expect(screen.getByText('starving')).not.toBeNull())
+    expect(container.querySelector('.kmh-row--error')).not.toBeNull()
+    expect(container.querySelector('.kmh-badge--error')).not.toBeNull()
+    expect(screen.getByText('없음')).not.toBeNull()
+    expect(statValue(container, 'librarian-failures')).toBe('4')
+    expect(statValue(container, 'starving-keepers')).toBe('1')
+    const alertStat = container.querySelector(
+      '.kmh-totals-strip .kmh-stat[data-stat-key="alerts"] .kmh-stat-value',
+    )
+    expect(alertStat?.classList.contains('kmh-stat-value--error')).toBe(true)
+  })
+
+  it('keeps a never-attempted snapshotless keeper neutral, not alarming', async () => {
+    mockFetch.mockResolvedValue(makeResponse(
+      [makeEntry({
+        keeper_id: 'fresh',
+        revision: 0,
+        facts: 0,
+        snapshot_bytes: 0,
+        snapshot_present: false,
+      })],
+    ))
+    const { container } = render(html`<${KeeperMemoryHealth} />`)
+
+    await waitFor(() => expect(screen.getByText('fresh')).not.toBeNull())
+    expect(container.querySelector('.kmh-row--error')).toBeNull()
+    expect(container.querySelector('.kmh-badge--muted')).not.toBeNull()
+    expect(screen.getByText('없음')).not.toBeNull()
   })
 
   it('shows loading, error, and empty current-snapshot states honestly', async () => {

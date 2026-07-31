@@ -132,6 +132,7 @@
   test_dashboard_nav_event
   test_server_dashboard_http_memory_subsystems
   test_server_dashboard_http_keeper_memory_health
+  test_keeper_exact_flow_detail
   test_server_dashboard_http_audit_integrity
   test_dashboard_execute_output
   test_tool_assignment_telemetry
@@ -431,6 +432,7 @@
   test_dashboard_nav_event
   test_server_dashboard_http_memory_subsystems
   test_server_dashboard_http_keeper_memory_health
+  test_keeper_exact_flow_detail
   test_server_dashboard_http_audit_integrity
   test_dashboard_execute_output
   test_tool_assignment_telemetry

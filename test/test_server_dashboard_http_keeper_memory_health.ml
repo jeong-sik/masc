@@ -71,6 +71,12 @@ let string_field name json =
   | _ -> Alcotest.failf "expected string field %S" name
 ;;
 
+let bool_field name json =
+  match assoc_field name json with
+  | Some (`Bool b) -> b
+  | _ -> Alcotest.failf "expected bool field %S" name
+;;
+
 let list_field name json =
   match assoc_field name json with
   | Some (`List xs) -> xs
@@ -234,6 +240,143 @@ let test_sorts_by_snapshot_bytes_and_handles_empty_store () =
   Alcotest.(check int) "empty bytes" 0 (int_field "snapshot_bytes" (totals empty))
 ;;
 
+(* Canonical identity comes from [keeper.name] with a file-basename fallback
+   (keeper_types_profile_toml_io.inspect_keeper_toml). [name] defaults to the
+   basename because that is the fleet norm;
+   [test_toml_name_override_uses_canonical_identity] exercises the split. *)
+let write_keeper_config ?name ~keepers_dir ~keeper_id () =
+  Fs_compat.mkdir_p keepers_dir;
+  let canonical = Option.value name ~default:keeper_id in
+  Fs_compat.save_file
+    (Filename.concat keepers_dir (keeper_id ^ ".toml"))
+    (Printf.sprintf "[keeper]\nname = %S\n" canonical)
+;;
+
+(* A keeper that has a config but never committed memory is exactly the case
+   the endpoint must not hide: it needs a row even with no snapshot file. *)
+let test_configured_keeper_without_snapshot_gets_row () =
+  let base = fresh_dir "masc-memory-health-configured" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let keeper_id = "configured-" ^ Filename.basename base in
+  write_keeper_config ~keepers_dir ~keeper_id ();
+  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  let keeper = keeper_obj keeper_id json in
+  Alcotest.(check bool) "snapshot_present" false (bool_field "snapshot_present" keeper);
+  Alcotest.(check int) "facts" 0 (int_field "facts" keeper);
+  Alcotest.(check int)
+    "no alerts without failures"
+    0
+    (List.length (list_field "alerts" keeper))
+;;
+
+let test_librarian_starvation_is_error_alert () =
+  let base = fresh_dir "masc-memory-health-starve" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let keeper_id = "starving-" ^ Filename.basename base in
+  write_keeper_config ~keepers_dir ~keeper_id ();
+  Metrics.inc_counter
+    KeeperMetrics.(to_string MemoryOsLibrarianFailures)
+    ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
+    ~delta:4.0
+    ();
+  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  let keeper = keeper_obj keeper_id json in
+  Alcotest.(check int) "failures" 4 (int_field "librarian_failures" keeper);
+  let alerts = list_field "alerts" keeper in
+  Alcotest.(check (list string))
+    "starvation code"
+    [ "librarian_starvation" ]
+    (List.map (string_field "code") alerts);
+  Alcotest.(check (list string))
+    "error severity"
+    [ "error" ]
+    (List.map (string_field "severity") alerts);
+  Alcotest.(check int)
+    "summary error alerts"
+    1
+    (int_field "error_alerts" (alert_summary json));
+  Alcotest.(check int)
+    "summary starving keepers"
+    1
+    (int_field "librarian_starving_keepers" (alert_summary json))
+;;
+
+let test_librarian_failures_with_snapshot_is_warn_alert () =
+  let base = fresh_dir "masc-memory-health-failwarn" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let keeper_id = "failing-" ^ Filename.basename base in
+  ignore (write_snapshot ~keepers_dir ~keeper_id [ fact "existing memory" ]);
+  Metrics.inc_counter
+    KeeperMetrics.(to_string MemoryOsLibrarianFailures)
+    ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
+    ~delta:2.0
+    ();
+  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  let keeper = keeper_obj keeper_id json in
+  Alcotest.(check bool) "snapshot_present" true (bool_field "snapshot_present" keeper);
+  let alerts = list_field "alerts" keeper in
+  Alcotest.(check (list string))
+    "failures code"
+    [ "librarian_failures" ]
+    (List.map (string_field "code") alerts);
+  Alcotest.(check (list string))
+    "warn severity"
+    [ "warn" ]
+    (List.map (string_field "severity") alerts);
+  Alcotest.(check int)
+    "summary error alerts"
+    0
+    (int_field "error_alerts" (alert_summary json))
+;;
+
+(* Metrics and snapshots are keyed by the canonical [name] in the toml, not
+   by the file basename; enumeration must surface the canonical identity or
+   a renamed keeper's starvation stays invisible behind a ghost row. *)
+let test_toml_name_override_uses_canonical_identity () =
+  let base = fresh_dir "masc-memory-health-rename" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let canonical = "actual-" ^ Filename.basename base in
+  write_keeper_config ~name:canonical ~keepers_dir ~keeper_id:"alias" ();
+  Metrics.inc_counter
+    KeeperMetrics.(to_string MemoryOsLibrarianFailures)
+    ~labels:[ "keeper", canonical; "site", "memory_os_librarian" ]
+    ~delta:1.0
+    ();
+  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  Alcotest.(check (list string)) "canonical row only" [ canonical ] (keeper_ids json);
+  let keeper = keeper_obj canonical json in
+  Alcotest.(check int) "failures visible" 1 (int_field "librarian_failures" keeper);
+  Alcotest.(check (list string))
+    "starvation on canonical row"
+    [ "librarian_starvation" ]
+    (list_field "alerts" keeper |> List.map (string_field "code"))
+;;
+
+(* The pre-librarian snapshot read failure aborts before the librarian runs
+   and increments the counter under its own site label; the health row must
+   count it or a keeper with a corrupt first snapshot reports failure-free. *)
+let test_counts_snapshot_read_site_failures () =
+  let base = fresh_dir "masc-memory-health-readsite" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let keeper_id = "readfail-" ^ Filename.basename base in
+  write_keeper_config ~keepers_dir ~keeper_id ();
+  Metrics.inc_counter
+    KeeperMetrics.(to_string MemoryOsLibrarianFailures)
+    ~labels:[ "keeper", keeper_id; "site", "memory_os_current_read" ]
+    ~delta:2.0
+    ();
+  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  let keeper = keeper_obj keeper_id json in
+  Alcotest.(check int)
+    "read-site failures counted"
+    2
+    (int_field "librarian_failures" keeper);
+  Alcotest.(check (list string))
+    "starvation error raised"
+    [ "librarian_starvation" ]
+    (list_field "alerts" keeper |> List.map (string_field "code"))
+;;
+
 let () =
   Alcotest.run
     "server_dashboard_http_keeper_memory_health"
@@ -248,6 +391,16 @@ let () =
             test_corrupt_snapshot_is_visible_as_read_error
         ; Alcotest.test_case "sort and empty store" `Quick
             test_sorts_by_snapshot_bytes_and_handles_empty_store
+        ; Alcotest.test_case "configured keeper without snapshot" `Quick
+            test_configured_keeper_without_snapshot_gets_row
+        ; Alcotest.test_case "librarian starvation error alert" `Quick
+            test_librarian_starvation_is_error_alert
+        ; Alcotest.test_case "librarian failures warn alert" `Quick
+            test_librarian_failures_with_snapshot_is_warn_alert
+        ; Alcotest.test_case "toml name override canonical identity" `Quick
+            test_toml_name_override_uses_canonical_identity
+        ; Alcotest.test_case "snapshot read site failures counted" `Quick
+            test_counts_snapshot_read_site_failures
         ] )
     ]
 ;;

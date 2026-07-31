@@ -287,6 +287,9 @@ let exact_execution_error error =
     | Exact_output.No_generation_dispatch -> No_outward_effect
     | Exact_output.Generation_dispatch_started -> Outward_effect_started
   in
+  (* The static labels stay as prefixes (existing log greps keep working);
+     the payload each branch carries — failing slot, typed cause, raw provider
+     body, flow journey — is rendered after them instead of being discarded. *)
   let detail =
     match error with
     | Exact_output.Flow_attempt_already_started _ ->
@@ -295,15 +298,24 @@ let exact_execution_error error =
       "attempt_start_failed"
     | Flow_measurement_start_failed _ ->
       "measurement_start_failed"
-    | Flow_candidates_exhausted _ ->
-      "candidates_exhausted"
+    | Flow_candidates_exhausted { rejection; evidence } ->
+      Printf.sprintf
+        "candidates_exhausted: %s"
+        (Keeper_exact_flow_detail.candidates_exhausted_detail
+           ~rejection
+           ~evidence)
     | Flow_before_measurement_dispatch_callback_failed _
     | Flow_measurement_terminal_callback_failed _
     | Flow_before_dispatch_callback_failed _
     | Flow_before_advance_callback_failed _ ->
       "unexpected_callback_failure"
-    | Flow_exact_execution_failed _ ->
-      "oas_execution_failed"
+    | Flow_exact_execution_failed { candidate; cause; evidence } ->
+      Printf.sprintf
+        "oas_execution_failed: %s"
+        (Keeper_exact_flow_detail.execution_failure_detail
+           ~candidate
+           ~cause
+           ~evidence)
   in
   { outward_effect; detail }
 ;;
@@ -390,6 +402,31 @@ let extract_and_commit_with_exact_output_classified
     Memory_snapshot_write_failed detail)
 ;;
 
+(* A failure while no current snapshot exists means the keeper is running
+   memoryless and cannot leave that state on its own — that is an ERROR,
+   not a WARN. With a snapshot present the previous memory keeps serving
+   recall and the failure only stales it. Both the classified [Error] path
+   and the exception catch in [run_best_effort] route through this rule so
+   an exception cannot demote a starving keeper's failure back to WARN. *)
+let log_failure_with_snapshot_severity ~keepers_dir ~keeper_id detail =
+  let snapshot_absent =
+    match
+      Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
+    with
+    | Ok (Some _) -> false
+    | Ok None | Error _ -> true
+  in
+  let message =
+    Printf.sprintf
+      "%s current_snapshot=%s"
+      detail
+      (if snapshot_absent then "absent" else "present")
+  in
+  if snapshot_absent
+  then Log.Keeper.error ~keeper_name:keeper_id "%s" message
+  else Log.Keeper.warn ~keeper_name:keeper_id "%s" message
+;;
+
 let run_best_effort
       ~keepers_dir
       ~keeper_id
@@ -425,14 +462,16 @@ let run_best_effort
              Keeper_metrics.(to_string MemoryOsLibrarianFailures)
              ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
              ();
-           if should_record_cadence_backoff_after_error error
-           then cadence_record_attempt ~keeper_id ~trace_id;
-           Log.Keeper.warn
-             ~keeper_name:keeper_id
-             "memory os librarian failed lane=%s: %s; cadence deferred=%b"
-             exact_lane_id
-             (extraction_error_to_string error)
-             (should_record_cadence_backoff_after_error error))
+           let deferred = should_record_cadence_backoff_after_error error in
+           if deferred then cadence_record_attempt ~keeper_id ~trace_id;
+           log_failure_with_snapshot_severity
+             ~keepers_dir
+             ~keeper_id
+             (Printf.sprintf
+                "memory os librarian failed lane=%s: %s; cadence deferred=%b"
+                exact_lane_id
+                (extraction_error_to_string error)
+                deferred))
       | _ ->
         Log.Keeper.warn
           ~keeper_name:keeper_id
@@ -445,9 +484,11 @@ let run_best_effort
         Keeper_metrics.(to_string MemoryOsLibrarianFailures)
         ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
         ();
-      Log.Keeper.warn
-        ~keeper_name:keeper_id
-        "memory os librarian failed lane=%s: %s"
-        exact_lane_id
-        (Printexc.to_string exn))
+      log_failure_with_snapshot_severity
+        ~keepers_dir
+        ~keeper_id
+        (Printf.sprintf
+           "memory os librarian failed lane=%s: %s"
+           exact_lane_id
+           (Printexc.to_string exn)))
 ;;

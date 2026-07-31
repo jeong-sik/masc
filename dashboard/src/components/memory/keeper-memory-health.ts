@@ -17,6 +17,8 @@ import { DEFAULT_PANEL_REFRESH_MS, formatAutoRefreshLabel, setupVisibleAutoRefre
 
 const SNAPSHOT_READ_ERROR_TARGET: KeeperMemoryHealthAlertTarget = 'snapshot_read_error'
 const LIBRARIAN_LANE_BUSY_TARGET: KeeperMemoryHealthAlertTarget = 'librarian_lane_busy'
+const LIBRARIAN_FAILURES_TARGET: KeeperMemoryHealthAlertTarget = 'librarian_failures'
+const LIBRARIAN_STARVATION_TARGET: KeeperMemoryHealthAlertTarget = 'librarian_starvation'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -32,18 +34,25 @@ function hasTargetAlert(alerts: KeeperMemoryHealthAlert[], target: KeeperMemoryH
   return alerts.some(alert => alert.target === target)
 }
 
-function isRowWarning(entry: KeeperMemoryHealthKeeperEntry): boolean {
-  return entryAlerts(entry).length > 0
+function hasErrorAlert(alerts: KeeperMemoryHealthAlert[]): boolean {
+  return alerts.some(alert => alert.severity === 'error')
+}
+
+function alertBadgeClass(alert: KeeperMemoryHealthAlert): string {
+  return alert.severity === 'error' ? 'kmh-badge kmh-badge--error' : 'kmh-badge kmh-badge--warn'
 }
 
 function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
   const alerts = entryAlerts(entry)
-  const warn = isRowWarning(entry)
+  const error = hasErrorAlert(alerts)
+  const warn = alerts.length > 0
   const readErrorWarn = hasTargetAlert(alerts, SNAPSHOT_READ_ERROR_TARGET)
   const laneBusyWarn = hasTargetAlert(alerts, LIBRARIAN_LANE_BUSY_TARGET)
+  const starving = hasTargetAlert(alerts, LIBRARIAN_STARVATION_TARGET)
+  const librarianFailing = starving || hasTargetAlert(alerts, LIBRARIAN_FAILURES_TARGET)
 
   return html`
-    <tr class=${warn ? 'kmh-row--warn' : ''}>
+    <tr class=${error ? 'kmh-row--error' : warn ? 'kmh-row--warn' : ''}>
       <td>${entry.keeper_id}</td>
       <td>${entry.revision}</td>
       <td>${entry.facts.toLocaleString()}</td>
@@ -56,14 +65,25 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
           : html`<span class="kmh-badge kmh-badge--ok">${entry.librarian_lane_busy}</span>`}
       </td>
       <td>
+        ${starving
+          ? html`<span class="kmh-badge kmh-badge--error">${entry.librarian_failures}</span>`
+          : librarianFailing
+            ? html`<span class="kmh-badge kmh-badge--warn">${entry.librarian_failures}</span>`
+            : html`<span class="kmh-badge kmh-badge--ok">${entry.librarian_failures}</span>`}
+      </td>
+      <td>
         ${readErrorWarn
           ? html`<span class="kmh-badge kmh-badge--warn" title=${entry.read_error ?? ''}>오류</span>`
-          : html`<span class="kmh-badge kmh-badge--ok">정상</span>`}
+          : entry.snapshot_present
+            ? html`<span class="kmh-badge kmh-badge--ok">정상</span>`
+            : starving
+              ? html`<span class="kmh-badge kmh-badge--error">없음</span>`
+              : html`<span class="kmh-badge kmh-badge--muted">없음</span>`}
       </td>
       <td>
         ${alerts.length > 0
           ? alerts.map(alert => html`
-            <span class="kmh-badge kmh-badge--warn" title=${alert.message}>${alert.label}</span>
+            <span class=${alertBadgeClass(alert)} title=${alert.message}>${alert.label}</span>
           `)
           : html`<span class="kmh-badge kmh-badge--ok">정상</span>`}
       </td>
@@ -131,8 +151,20 @@ export function KeeperMemoryHealth() {
 
   const generatedAt = new Date(data.generated_at * 1000).toLocaleTimeString()
   const totalAlerts = data.alert_summary.total_alerts
+  const errorAlerts = data.alert_summary.error_alerts
   const readErrorWarn = data.alert_summary.snapshot_read_error_keepers > 0
   const laneBusyWarn = data.alert_summary.librarian_lane_busy_keepers > 0
+  const starvingKeepers = data.alert_summary.librarian_starving_keepers
+  const librarianFailureClass = starvingKeepers > 0
+    ? ' kmh-stat-value--error'
+    : data.totals.librarian_failures > 0
+      ? ' kmh-stat-value--warn'
+      : ''
+  const alertClass = errorAlerts > 0
+    ? ' kmh-stat-value--error'
+    : totalAlerts > 0
+      ? ' kmh-stat-value--warn'
+      : ''
 
   return html`
     <div class="kmh-panel">
@@ -167,9 +199,21 @@ export function KeeperMemoryHealth() {
               ${data.totals.librarian_lane_busy}
             </span>
           </div>
+          <div class="kmh-stat" data-stat-key="librarian-failures">
+            <span class="kmh-stat-label">Librarian 실패</span>
+            <span class=${`kmh-stat-value${librarianFailureClass}`}>
+              ${data.totals.librarian_failures}
+            </span>
+          </div>
+          <div class="kmh-stat" data-stat-key="starving-keepers">
+            <span class="kmh-stat-label">메모리 없는 키퍼</span>
+            <span class=${`kmh-stat-value${starvingKeepers > 0 ? ' kmh-stat-value--error' : ''}`}>
+              ${starvingKeepers}
+            </span>
+          </div>
           <div class="kmh-stat" data-stat-key="alerts">
             <span class="kmh-stat-label">경보</span>
-            <span class=${`kmh-stat-value${totalAlerts > 0 ? ' kmh-stat-value--warn' : ''}`}>
+            <span class=${`kmh-stat-value${alertClass}`}>
               ${totalAlerts}
             </span>
           </div>
@@ -201,6 +245,7 @@ export function KeeperMemoryHealth() {
                   <th>추가</th>
                   <th>제거</th>
                   <th>lane busy</th>
+                  <th>실패</th>
                   <th>snapshot</th>
                   <th>경보</th>
                 </tr>

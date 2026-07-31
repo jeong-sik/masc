@@ -7,12 +7,18 @@ type keeper_health =
   ; snapshot_bytes : int
   ; added : int
   ; removed : int
+  ; snapshot_present : bool
   ; librarian_lane_busy : int
+  ; librarian_failures : int
   ; read_error : string option
   }
 
 let librarian_lane_busy_metric =
   Keeper_metrics.(to_string MemoryLaneCoalesced)
+;;
+
+let librarian_failures_metric =
+  Keeper_metrics.(to_string MemoryOsLibrarianFailures)
 ;;
 
 let file_size_bytes path =
@@ -25,6 +31,45 @@ let librarian_lane_busy_for_keeper keeper_id =
     ~labels:[ "keeper", keeper_id; "lane", "librarian" ]
     ()
   |> int_of_float
+;;
+
+(* Labels mirror the counter increments in [Keeper_librarian_runtime] and the
+   pre-librarian snapshot read in [Keeper_agent_run_post_turn_memory]: a keeper
+   whose current-snapshot read keeps failing aborts before the librarian ever
+   runs, so counting only the librarian site would report it as failure-free. *)
+let librarian_failure_sites = [ "memory_os_librarian"; "memory_os_current_read" ]
+
+let librarian_failures_for_keeper keeper_id =
+  List.fold_left
+    (fun total site ->
+       total
+       + (Otel_metric_store.metric_value_or_zero
+            librarian_failures_metric
+            ~labels:[ "keeper", keeper_id; "site", site ]
+            ()
+          |> int_of_float))
+    0
+    librarian_failure_sites
+;;
+
+(* A keeper with a config but no current snapshot is the starvation case this
+   endpoint exists to expose; enumerating snapshot files alone gives it no
+   row at all. Health rows therefore come from the union of configured
+   keepers and existing snapshots. Discovery goes through
+   [Keeper_types_profile.discover_keepers_toml] rather than toml basenames
+   because a toml may set its canonical [name]: metrics and snapshots are
+   keyed by that name, and a basename row would both miss the real keeper
+   and show a ghost. Invalid tomls keep their basename row so a keeper with
+   a broken config stays visible. *)
+let configured_keeper_ids ~keepers_dir =
+  Keeper_types_profile.discover_keepers_toml keepers_dir
+  |> List.map Keeper_types_profile.keeper_toml_discovery_name
+;;
+
+let health_keeper_ids ~keepers_dir =
+  configured_keeper_ids ~keepers_dir
+  @ Keeper_memory_os_current.list_keeper_ids_for_keepers_dir ~keepers_dir
+  |> List.sort_uniq String.compare
 ;;
 
 let keeper_health ~keepers_dir keeper_id =
@@ -41,7 +86,9 @@ let keeper_health ~keepers_dir keeper_id =
     ; snapshot_bytes = 0
     ; added = 0
     ; removed = 0
+    ; snapshot_present = false
     ; librarian_lane_busy = librarian_lane_busy_for_keeper keeper_id
+    ; librarian_failures = librarian_failures_for_keeper keeper_id
     ; read_error = None
     }
   | Ok (Some snapshot) ->
@@ -51,7 +98,9 @@ let keeper_health ~keepers_dir keeper_id =
     ; snapshot_bytes = file_size_bytes snapshot_path
     ; added = List.length snapshot.change.added
     ; removed = List.length snapshot.change.removed
+    ; snapshot_present = true
     ; librarian_lane_busy = librarian_lane_busy_for_keeper keeper_id
+    ; librarian_failures = librarian_failures_for_keeper keeper_id
     ; read_error = None
     }
   | Error message ->
@@ -61,15 +110,17 @@ let keeper_health ~keepers_dir keeper_id =
     ; snapshot_bytes = file_size_bytes snapshot_path
     ; added = 0
     ; removed = 0
+    ; snapshot_present = false
     ; librarian_lane_busy = librarian_lane_busy_for_keeper keeper_id
+    ; librarian_failures = librarian_failures_for_keeper keeper_id
     ; read_error = Some message
     }
 ;;
 
-let alert_json ~code ~target ~label ~message ~value =
+let alert_json ~code ~severity ~target ~label ~message ~value =
   `Assoc
     [ "code", `String code
-    ; "severity", `String "warn"
+    ; "severity", `String severity
     ; "target", `String target
     ; "label", `String label
     ; "message", `String message
@@ -85,24 +136,61 @@ let alerts h =
     | Some message ->
       [ alert_json
           ~code:"snapshot_read_error"
+          ~severity:"warn"
           ~target:"snapshot_read_error"
           ~label:"읽기"
           ~message
           ~value:1.0
       ]
   in
-  if h.librarian_lane_busy <= 0
-  then read_error_alert
-  else
-    read_error_alert
-    @ [ alert_json
+  let lane_busy_alert =
+    if h.librarian_lane_busy <= 0
+    then []
+    else
+      [ alert_json
           ~code:"librarian_lane_busy"
+          ~severity:"warn"
           ~target:"librarian_lane_busy"
           ~label:"Librarian"
           ~message:
             "The Librarian memory lane was busy; current-memory selection was deferred."
           ~value:(float_of_int h.librarian_lane_busy)
       ]
+  in
+  let failure_alert =
+    if h.librarian_failures <= 0
+    then []
+    else if h.snapshot_present
+    then
+      [ alert_json
+          ~code:"librarian_failures"
+          ~severity:"warn"
+          ~target:"librarian_failures"
+          ~label:"Librarian"
+          ~message:
+            "Librarian runs failed since boot; the existing current-memory snapshot keeps serving recall but is no longer being updated."
+          ~value:(float_of_int h.librarian_failures)
+      ]
+    else
+      [ alert_json
+          ~code:"librarian_starvation"
+          ~severity:"error"
+          ~target:"librarian_starvation"
+          ~label:"Librarian"
+          ~message:
+            "Librarian runs failed and no current-memory snapshot exists; the keeper is running memoryless and cannot leave that state on its own."
+          ~value:(float_of_int h.librarian_failures)
+      ]
+  in
+  read_error_alert @ lane_busy_alert @ failure_alert
+;;
+
+let alert_severity = function
+  | `Assoc fields ->
+    (match List.assoc_opt "severity" fields with
+     | Some (`String severity) -> severity
+     | _ -> "warn")
+  | _ -> "warn"
 ;;
 
 let keeper_health_entry_to_json h =
@@ -113,7 +201,9 @@ let keeper_health_entry_to_json h =
     ; "snapshot_bytes", `Int h.snapshot_bytes
     ; "added", `Int h.added
     ; "removed", `Int h.removed
+    ; "snapshot_present", `Bool h.snapshot_present
     ; "librarian_lane_busy", `Int h.librarian_lane_busy
+    ; "librarian_failures", `Int h.librarian_failures
     ; ( "read_error"
       , match h.read_error with
         | Some message -> `String message
@@ -128,7 +218,7 @@ let keeper_memory_health_http_json ~base_path =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path
   in
   let entries =
-    Keeper_memory_os_current.list_keeper_ids_for_keepers_dir ~keepers_dir
+    health_keeper_ids ~keepers_dir
     |> List.map (keeper_health ~keepers_dir)
     |> List.sort (fun left right ->
       compare right.snapshot_bytes left.snapshot_bytes)
@@ -136,11 +226,12 @@ let keeper_memory_health_http_json ~base_path =
   let sum field =
     List.fold_left (fun total entry -> total + field entry) 0 entries
   in
-  let total_alerts =
-    List.fold_left
-      (fun total entry -> total + List.length (alerts entry))
-      0
-      entries
+  let all_alerts = List.concat_map alerts entries in
+  let count_severity severity =
+    List.length
+      (List.filter
+         (fun alert -> String.equal (alert_severity alert) severity)
+         all_alerts)
   in
   `Assoc
     [ "schema", `String "keeper.memory_os.current_health.v1"
@@ -156,6 +247,8 @@ let keeper_memory_health_http_json ~base_path =
           ; "removed", `Int (sum (fun entry -> entry.removed))
           ; ( "librarian_lane_busy"
             , `Int (sum (fun entry -> entry.librarian_lane_busy)) )
+          ; ( "librarian_failures"
+            , `Int (sum (fun entry -> entry.librarian_failures)) )
           ; ( "read_errors"
             , `Int
                 (sum (fun entry ->
@@ -165,8 +258,9 @@ let keeper_memory_health_http_json ~base_path =
           ] )
     ; ( "alert_summary"
       , `Assoc
-          [ "total_alerts", `Int total_alerts
-          ; "warn_alerts", `Int total_alerts
+          [ "total_alerts", `Int (List.length all_alerts)
+          ; "warn_alerts", `Int (count_severity "warn")
+          ; "error_alerts", `Int (count_severity "error")
           ; ( "keepers_with_alerts"
             , `Int
                 (sum (fun entry ->
@@ -181,6 +275,12 @@ let keeper_memory_health_http_json ~base_path =
             , `Int
                 (sum (fun entry ->
                    if entry.librarian_lane_busy > 0 then 1 else 0)) )
+          ; ( "librarian_starving_keepers"
+            , `Int
+                (sum (fun entry ->
+                   if entry.librarian_failures > 0 && not entry.snapshot_present
+                   then 1
+                   else 0)) )
           ] )
     ]
 ;;

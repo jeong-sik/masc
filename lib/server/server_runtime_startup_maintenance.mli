@@ -17,11 +17,32 @@ val prune_keeper_scoped_stores :
     Exposed for unit tests. *)
 
 val prune_flat_jsonl_older_than : days:int -> string -> int
-(** Delete regular [*.jsonl] files directly under the given directory whose
-    mtime is older than [days]; returns the number of files removed.
+(** Delete regular [*.jsonl] files — and their numeric rotation siblings
+    [*.jsonl.<n>] — directly under the given directory whose mtime is older
+    than [days]; returns the number of files removed.
     Used for stores with a flat layout (e.g. [trajectories/<keeper>/])
     where [Dated_jsonl.prune] finds no [YYYY-MM] month dirs and is a no-op.
     Exposed for unit tests. *)
+
+val keeper_scoped_flat_stores : string list
+(** Flat-JSONL stores pruned keeper-scoped ([keepers/<name>/<store>]) by
+    mtime in BOTH passes: [raw-traces] (one file per turn) and
+    [runtime-manifests] (one rotated JSONL per trace). SSOT like
+    [keeper_scoped_dated_stores]. *)
+
+val top_level_dated_stores : string list
+(** Top-level dated-JSONL stores under the masc root pruned by BOTH the
+    startup pass and the 24h periodic pass. SSOT for both loops — never
+    reintroduce an inline store list in either caller. *)
+
+val prune_shared_jsonl_stores :
+  prune_dir:(string -> int) -> days:int -> masc_root:string -> int
+(** Prune every shared retention-covered JSONL store in one fold:
+    [top_level_dated_stores], flat [logs/] day files, keeper-scoped
+    trajectories, [resilience_audit], [keeper_scoped_dated_stores] and
+    [keeper_scoped_flat_stores]. Both the startup pass and the 24h periodic
+    pass call exactly this function so the covered-store set cannot drift.
+    Returns the number of files removed. Exposed for unit tests. *)
 
 val startup_prune_jsonl : Mcp_server.server_state -> unit
 

@@ -79,11 +79,112 @@ let record_visit dir =
 let test_keeper_scoped_store_list_is_ssot () =
   (* Drift guard: the 24h periodic pass used to prune execution-receipts
      only while startup pruned all three. Pin the shared list so neither
-     loop can silently drop a store again. *)
+     loop can silently drop a store again. turn-records joined 2026-07-31. *)
   Alcotest.(check (list string))
-    "keeper-scoped stores = metrics + crash-events + execution-receipts"
-    [ "crash-events"; "execution-receipts"; "metrics" ]
+    "keeper-scoped stores = metrics + crash-events + execution-receipts + turn-records"
+    [ "crash-events"; "execution-receipts"; "metrics"; "turn-records" ]
     (List.sort String.compare SM.keeper_scoped_dated_stores)
+
+let test_top_level_store_list_is_ssot () =
+  (* Drift guard for the top-level list: the startup and periodic passes
+     kept separate inline sums that drifted (startup lacked
+     tool_calls/transition-audit). Pin the shared list. *)
+  Alcotest.(check (list string))
+    "top-level dated stores pinned"
+    [ "activity-events"
+    ; "audit"
+    ; "events"
+    ; "messages"
+    ; "oas-events"
+    ; "telemetry"
+    ; "tool_calls"
+    ; "transition-audit"
+    ; "voice_sessions"
+    ]
+    (List.sort String.compare SM.top_level_dated_stores)
+
+let test_keeper_scoped_flat_store_list_is_ssot () =
+  Alcotest.(check (list string))
+    "keeper-scoped flat stores = raw-traces + runtime-manifests"
+    [ "raw-traces"; "runtime-manifests" ]
+    (List.sort String.compare SM.keeper_scoped_flat_stores)
+
+let test_prune_flat_jsonl_rotation_siblings () =
+  (* runtime-manifests rotate whole files to <trace>.jsonl.1 — a plain
+     .jsonl suffix check would keep rotation siblings forever. Non-numeric
+     trailing extensions must never be removed. *)
+  let root = fresh_dir "masc_prune_flat_rot" in
+  let write path =
+    let oc = open_out path in
+    output_string oc "{}\n";
+    close_out oc
+  in
+  let old_ts = Unix.gettimeofday () -. (40. *. 86400.) in
+  let old_rotated = Filename.concat root "trace-x.jsonl.1" in
+  let old_plain = Filename.concat root "trace-y.jsonl" in
+  let old_non_numeric = Filename.concat root "trace-z.jsonl.bak" in
+  let fresh_rotated = Filename.concat root "trace-w.jsonl.2" in
+  write old_rotated;
+  write old_plain;
+  write old_non_numeric;
+  write fresh_rotated;
+  Unix.utimes old_rotated old_ts old_ts;
+  Unix.utimes old_plain old_ts old_ts;
+  Unix.utimes old_non_numeric old_ts old_ts;
+  let n = SM.prune_flat_jsonl_older_than ~days:30 root in
+  Alcotest.(check int) "old .jsonl and .jsonl.1 pruned" 2 n;
+  Alcotest.(check bool) "old rotation sibling removed" false (Sys.file_exists old_rotated);
+  Alcotest.(check bool) "old plain jsonl removed" false (Sys.file_exists old_plain);
+  Alcotest.(check bool)
+    "non-numeric extension kept" true (Sys.file_exists old_non_numeric);
+  Alcotest.(check bool) "fresh rotation sibling kept" true (Sys.file_exists fresh_rotated)
+
+let test_prune_shared_jsonl_stores_production_geometry () =
+  (* Round-trip on the production masc-root geometry (guard against
+     dual-path derivation no-ops): every covered store gets one stale file
+     and, where meaningful, one fresh sibling. prune_dir is the same
+     Dated_jsonl-based closure both production passes build. *)
+  let masc_root = fresh_dir "masc_shared_prune" in
+  let write path =
+    Fs_compat.mkdir_p (Filename.dirname path);
+    let oc = open_out path in
+    output_string oc "{}\n";
+    close_out oc
+  in
+  let old_ts = Unix.gettimeofday () -. (40. *. 86400.) in
+  let p segs = List.fold_left Filename.concat masc_root segs in
+  (* top-level dated store: stale by filename month, fresh by future month *)
+  let oas_old = p [ "oas-events"; "2020-01"; "01.jsonl" ] in
+  let oas_fresh = p [ "oas-events"; "2999-01"; "01.jsonl" ] in
+  (* logs: flat day files, stale by mtime *)
+  let logs_old = p [ "logs"; "system_log_2020-01-01.jsonl" ] in
+  let logs_fresh = p [ "logs"; "system_log_2999-01-01.jsonl" ] in
+  (* keeper-scoped dated store *)
+  let turn_old = p [ "keepers"; "keeper-a"; "turn-records"; "2020-01"; "01.jsonl" ] in
+  (* keeper-scoped flat stores *)
+  let raw_old = p [ "keepers"; "keeper-a"; "raw-traces"; "turn-old.jsonl" ] in
+  let manifest_old = p [ "keepers"; "keeper-a"; "runtime-manifests"; "trace-x.jsonl.1" ] in
+  let manifest_fresh = p [ "keepers"; "keeper-a"; "runtime-manifests"; "trace-x.jsonl" ] in
+  List.iter
+    write
+    [ oas_old; oas_fresh; logs_old; logs_fresh; turn_old; raw_old; manifest_old; manifest_fresh ];
+  List.iter (fun f -> Unix.utimes f old_ts old_ts) [ logs_old; raw_old; manifest_old ];
+  let prune_dir dir =
+    if Sys.file_exists dir
+    then Dated_jsonl.prune (Dated_jsonl.create ~base_dir:dir ()) ~days:30
+    else 0
+  in
+  let n = SM.prune_shared_jsonl_stores ~prune_dir ~days:30 ~masc_root in
+  Alcotest.(check int) "five stale files pruned" 5 n;
+  Alcotest.(check bool) "stale oas-events day removed" false (Sys.file_exists oas_old);
+  Alcotest.(check bool) "future oas-events day kept" true (Sys.file_exists oas_fresh);
+  Alcotest.(check bool) "stale log day removed" false (Sys.file_exists logs_old);
+  Alcotest.(check bool) "fresh log day kept" true (Sys.file_exists logs_fresh);
+  Alcotest.(check bool) "stale turn-records day removed" false (Sys.file_exists turn_old);
+  Alcotest.(check bool) "stale raw-trace removed" false (Sys.file_exists raw_old);
+  Alcotest.(check bool)
+    "stale manifest rotation removed" false (Sys.file_exists manifest_old);
+  Alcotest.(check bool) "fresh manifest kept" true (Sys.file_exists manifest_fresh)
 
 let test_prune_keeper_scoped_stores_visits_all_stores () =
   (* Regression for the 24h loop drift: both loops call this function, so
@@ -109,7 +210,7 @@ let test_prune_keeper_scoped_stores_visits_all_stores () =
       [ "keeper-a"; "keeper-b" ]
   in
   Alcotest.(check (list string))
-    "all three stores pruned for every keeper"
+    "every dated store pruned for every keeper"
     (List.sort String.compare expected)
     (List.sort String.compare !visited)
 
@@ -137,14 +238,25 @@ let () =
         [
           Alcotest.test_case "populated trajectories dir prunes old files" `Quick
             test_prune_flat_jsonl_removes_old_files;
+          Alcotest.test_case "numeric rotation siblings prune, others kept" `Quick
+            test_prune_flat_jsonl_rotation_siblings;
         ] );
       ( "prune_keeper_scoped_stores",
         [
-          Alcotest.test_case "store list is SSOT (3 stores)" `Quick
+          Alcotest.test_case "store list is SSOT (4 stores)" `Quick
             test_keeper_scoped_store_list_is_ssot;
-          Alcotest.test_case "visits all three stores per keeper" `Quick
+          Alcotest.test_case "visits every dated store per keeper" `Quick
             test_prune_keeper_scoped_stores_visits_all_stores;
           Alcotest.test_case "missing keepers root counts zero" `Quick
             test_prune_keeper_scoped_stores_missing_root;
+        ] );
+      ( "prune_shared_jsonl_stores",
+        [
+          Alcotest.test_case "top-level store list pinned" `Quick
+            test_top_level_store_list_is_ssot;
+          Alcotest.test_case "keeper-scoped flat store list pinned" `Quick
+            test_keeper_scoped_flat_store_list_is_ssot;
+          Alcotest.test_case "production geometry round-trip" `Quick
+            test_prune_shared_jsonl_stores_production_geometry;
         ] );
     ]

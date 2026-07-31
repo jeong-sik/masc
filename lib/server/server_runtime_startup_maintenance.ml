@@ -23,8 +23,12 @@ let prune_children_dirs ~prune_dir root =
    24h periodic pass. SSOT: both loops fold this exact list via
    [prune_keeper_scoped_stores] — never reintroduce an inline store list in
    either caller (the periodic pass once pruned only execution-receipts,
-   letting metrics/crash-events accumulate until restart). *)
-let keeper_scoped_dated_stores = [ "metrics"; "crash-events"; "execution-receipts" ]
+   letting metrics/crash-events accumulate until restart).
+   turn-records joined 2026-07-31: same [keepers/<name>/<store>/YYYY-MM/DD.jsonl]
+   layout, but absent from every prune list since introduction — ~4 MB/day
+   fleet-wide with no bound. *)
+let keeper_scoped_dated_stores =
+  [ "metrics"; "crash-events"; "execution-receipts"; "turn-records" ]
 
 (* Fold [prune_dir] over every keeper-scoped dated store
    ([keepers/<name>/<store>] for each store in [keeper_scoped_dated_stores]).
@@ -38,6 +42,21 @@ let prune_keeper_scoped_stores ~prune_dir ~masc_root =
         0
         keeper_scoped_dated_stores)
     (Filename.concat masc_root "keepers")
+
+(* A flat-store file is [<name>.jsonl] or a numeric rotation sibling
+   [<name>.jsonl.<n>] (runtime-manifests rotate whole files to [.jsonl.1],
+   which a plain [.jsonl] suffix check would keep forever). Any other
+   extension is never removed. *)
+let is_flat_jsonl_file name =
+  Filename.check_suffix name ".jsonl"
+  ||
+  match String.rindex_opt name '.' with
+  | None -> false
+  | Some dot ->
+    let rot = String.sub name (dot + 1) (String.length name - dot - 1) in
+    rot <> ""
+    && String.for_all (fun c -> c >= '0' && c <= '9') rot
+    && Filename.check_suffix (String.sub name 0 dot) ".jsonl"
 
 (* Trajectory stores are flat [<trace_id>.jsonl] files under
    [trajectories/<keeper>/] — no [YYYY-MM] month dirs — so
@@ -53,7 +72,7 @@ let prune_flat_jsonl_older_than ~days dir =
     in
     Array.fold_left
       (fun acc name ->
-        if Filename.check_suffix name ".jsonl"
+        if is_flat_jsonl_file name
         then
           let path = Filename.concat dir name in
           match (try Some (Unix.stat path) with Unix.Unix_error _ -> None) with
@@ -67,6 +86,66 @@ let prune_flat_jsonl_older_than ~days dir =
         else acc)
       0
       (Sys.readdir dir)
+
+(* Keeper-scoped flat-JSONL stores ([keepers/<name>/<store>] holding
+   [<id>.jsonl] files plus numeric rotation siblings, no month dirs).
+   Pruned by mtime via [prune_flat_jsonl_older_than] in BOTH passes.
+   SSOT like [keeper_scoped_dated_stores]. Both stores had no retention
+   since introduction (raw-traces: one file per turn; runtime-manifests:
+   one rotated JSONL per trace). *)
+let keeper_scoped_flat_stores = [ "raw-traces"; "runtime-manifests" ]
+
+let prune_keeper_scoped_flat_stores ~days ~masc_root =
+  prune_children_dirs
+    ~prune_dir:(fun keeper_dir ->
+      List.fold_left
+        (fun acc store ->
+          acc + prune_flat_jsonl_older_than ~days (Filename.concat keeper_dir store))
+        0
+        keeper_scoped_flat_stores)
+    (Filename.concat masc_root "keepers")
+
+(* Top-level dated-JSONL stores under the masc root pruned by BOTH the
+   startup pass and the 24h periodic pass. SSOT: replaces the two inline
+   sums that had already drifted apart — the startup pass lacked
+   tool_calls/transition-audit while the periodic pass lacked
+   resilience_audit. recall_injections keeps its typed ledger pruner and
+   data/tool-metrics stays startup-only (it lives under base_path, not the
+   masc root); both remain at the callers.
+   oas-events joined 2026-07-31: 434 MB accumulated with no retention. *)
+let top_level_dated_stores =
+  [ "audit"
+  ; "telemetry"
+  ; "messages"
+  ; "events"
+  ; "activity-events"
+  ; "voice_sessions"
+  ; "tool_calls"
+  ; "transition-audit"
+  ; "oas-events"
+  ]
+
+(* Single shared fold over every retention-covered JSONL store. Both the
+   startup pass and the 24h periodic pass call exactly this function, so
+   the covered-store set cannot drift between them again. [prune_dir] is
+   the caller's dated pruner (Dated_jsonl-based in production). *)
+let prune_shared_jsonl_stores ~prune_dir ~days ~masc_root =
+  List.fold_left
+    (fun acc store -> acc + prune_dir (Filename.concat masc_root store))
+    0
+    top_level_dated_stores
+  (* logs/: flat [system_log_YYYY-MM-DD.jsonl] day files (406 MB by
+     2026-07-31, single day up to 180 MB). The active day file keeps a
+     fresh mtime, so only closed day files age out. *)
+  + prune_flat_jsonl_older_than ~days (Filename.concat masc_root "logs")
+  (* trajectories: flat <trace_id>.jsonl under trajectories/<keeper>/ —
+     Dated_jsonl.prune is a no-op there, prune by mtime keeper-scoped. *)
+  + prune_children_dirs
+      ~prune_dir:(prune_flat_jsonl_older_than ~days)
+      (Filename.concat masc_root "trajectories")
+  + prune_children_dirs ~prune_dir (Filename.concat masc_root "resilience_audit")
+  + prune_keeper_scoped_stores ~prune_dir ~masc_root
+  + prune_keeper_scoped_flat_stores ~days ~masc_root
 
 let startup_prune_jsonl (state : Mcp_server.server_state) =
   (try
@@ -96,24 +175,9 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
        Filename.concat (Mcp_server.workspace_config state).base_path "data/tool-metrics"
      in
      let total =
-       prune_dir (Filename.concat masc "audit")
-       + prune_dir (Filename.concat masc "telemetry")
-       + prune_dir tool_metrics_dir
-       + prune_dir (Filename.concat masc "messages")
-       + prune_dir (Filename.concat masc "events")
-       + prune_dir (Filename.concat masc "activity-events")
+       prune_dir tool_metrics_dir
        + prune_recall_injections ()
-       + prune_dir (Filename.concat masc "voice_sessions")
-       (* trajectories: flat <trace_id>.jsonl under trajectories/<keeper>/ —
-          Dated_jsonl.prune is a no-op there, prune by mtime keeper-scoped. *)
-       + prune_children_dirs
-           ~prune_dir:(prune_flat_jsonl_older_than ~days)
-           (Filename.concat masc "trajectories")
-       (* Top-level masc/"execution-receipts" has no writer (canonical layout
-          is keepers/<name>/<store>), so keeper-scoped stores are pruned via
-          the SSOT fold shared with the 24h periodic pass. *)
-       + prune_keeper_scoped_stores ~prune_dir ~masc_root:masc
-       + prune_children_dirs ~prune_dir (Filename.concat masc "resilience_audit")
+       + prune_shared_jsonl_stores ~prune_dir ~days ~masc_root:masc
      in
      if total > 0 then
          Log.Misc.info "startup prune: pruned %d old JSONL day-files (retention=%dd)"

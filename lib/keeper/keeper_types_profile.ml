@@ -650,10 +650,10 @@ let load_resolved_persona_extended ~keeper_name ?profile_defaults () =
     | Some defaults -> resolved_persona_name ~keeper_name defaults
     | None -> keeper_name
   in
-  (* DET-OK: absent persona is a known-valid empty block, not an unknown
-     input — read failures are already operator-visible inside
-     [load_persona_extended], and "" renders as an explicit [no persona]
+  (* Read failures are already operator-visible inside
+     [load_persona_extended]; "" renders as an explicit [no persona]
      marker at the librarian prompt boundary. *)
+  (* DET-OK: absent persona is a known-valid empty block, not unknown input. *)
   Option.value ~default:"" (load_persona_extended persona_name)
 
 let load_persona_summary = Keeper_types_profile_persona.load_persona_summary

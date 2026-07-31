@@ -6,6 +6,8 @@
 let wire_field_claim = "claim"
 let wire_field_category = "category"
 let wire_field_first_seen = "first_seen"
+let wire_field_memory_id = "memory_id"
+let wire_field_reason = "reason"
 
 module Wire_field_set = Set.Make (String)
 
@@ -32,6 +34,22 @@ let fact_wire_fields =
 
 let wire_librarian_claim_fields =
   [ wire_field_claim; wire_field_category ]
+;;
+
+let wire_librarian_dropped_fields =
+  [ wire_field_memory_id; wire_field_reason ]
+;;
+
+type dropped_statement =
+  { memory_id : string
+  ; reason : string
+  }
+
+let dropped_statement_to_json (d : dropped_statement) =
+  `Assoc
+    [ wire_field_memory_id, `String d.memory_id
+    ; wire_field_reason, `String d.reason
+    ]
 ;;
 
 (* The librarian taxonomy as a closed sum. The LLM emits one exact category

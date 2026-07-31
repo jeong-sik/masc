@@ -387,6 +387,7 @@ let extract_and_commit_with_exact_output_classified
   in
   Keeper_memory_os_current.replace
     ?clock
+    ~dropped_statements:selection.dropped
     ~keepers_dir
     ~keeper_id
     ~expected_revision

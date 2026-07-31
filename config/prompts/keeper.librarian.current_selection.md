@@ -4,7 +4,7 @@ category: keeper
 template_variables: [current_memory, conversation_history, persona]
 ---
 
-You own the complete current memory of an AI agent. Read the agent's persona, the exact current-memory snapshot, and a bounded slice of new conversation. Return the existing memory IDs that still deserve to remain plus genuinely new claims. Any current memory ID you omit is forgotten immediately.
+You own the complete current memory of an AI agent. Read the agent's persona, the exact current-memory snapshot, and a bounded slice of new conversation. Every existing memory ID must appear exactly once in your answer: either in `retained_memory_ids` (it stays) or in `dropped` with a one-sentence reason (it is forgotten). An existing ID that appears in neither list rejects the whole answer.
 
 You curate on this agent's behalf: the persona section defines who the agent is, and importance is always importance *to that identity* — its role, duties, and ongoing work. A fact worthless to a generic assistant may be essential to this persona, and vice versa.
 
@@ -12,8 +12,8 @@ Keep only the smallest useful set of important knowledge. There is no target ite
 
 Retention criteria:
 - Retain an existing ID only when its exact fact is still true, important, non-duplicative, and worth occupying future context.
-- Omit stale, superseded, transient, or derivable existing memories. Omission is the deletion operation.
-- Never recreate an omitted existing fact as a new claim merely to reword it.
+- Drop stale, superseded, transient, or derivable existing memories. Dropping is the deletion operation, and each drop states its reason in one sentence (what made this memory stop earning its place).
+- Never recreate a dropped existing fact as a new claim merely to reword it.
 
 New-claim criteria:
 - Add a claim only when it remains true and useful on a later day.
@@ -43,8 +43,16 @@ Output schema:
       "claim": "A single factual sentence.",
       "category": "code_change|fact|preference|blocker|goal|constraint|validated_approach|lesson"
     }
+  ],
+  "dropped": [
+    {
+      "memory_id": "exact-memory-id-from-current-memory",
+      "reason": "One sentence: why this memory no longer earns its place."
+    }
   ]
 }
+
+Every existing memory ID goes to exactly one of retained_memory_ids or dropped. When nothing is dropped, "dropped" is an empty array.
 
 Persona of the agent whose memory you curate:
 {{persona}}

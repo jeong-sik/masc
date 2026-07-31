@@ -294,21 +294,37 @@ let compute_change ~previous ~next =
     }
 ;;
 
-let journal_entry_to_json snapshot =
+(* [dropped_statements = None] means the writer makes no drop-reason
+   statements (explicit keeper writes, upserts); [Some list] is the
+   librarian's own account of every drop in this commit, possibly empty.
+   Statements live only on the journal line: the snapshot codec stays
+   frozen, so existing on-disk snapshots keep parsing unchanged. *)
+let journal_entry_to_json ~dropped_statements snapshot =
   `Assoc
-    [ "recorded_at", `Float snapshot.updated_at
-    ; "revision", `Int snapshot.revision
-    ; "source", source_to_json snapshot.source
-    ; "change", change_to_json snapshot.change
-    ]
+    ([ "recorded_at", `Float snapshot.updated_at
+     ; "revision", `Int snapshot.revision
+     ; "source", source_to_json snapshot.source
+     ; "change", change_to_json snapshot.change
+     ]
+     @
+     match dropped_statements with
+     | None -> []
+     | Some statements ->
+       [ ( "dropped"
+         , `List (List.map dropped_statement_to_json statements) )
+       ])
 ;;
 
 (* The journal is observation only: the snapshot commit it describes already
    reached disk, so an append failure degrades to a warning instead of
    vetoing the commit. Cancellation is never absorbed. *)
-let append_journal_entry ~keepers_dir ~keeper_id snapshot =
+let append_journal_entry ~keepers_dir ~keeper_id ~dropped_statements snapshot =
   let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-  try Fs_compat.append_jsonl path (journal_entry_to_json snapshot) with
+  try
+    Fs_compat.append_jsonl
+      path
+      (journal_entry_to_json ~dropped_statements snapshot)
+  with
   | Eio.Cancel.Cancelled _ as error -> raise error
   | exn ->
     Log.Keeper.warn
@@ -321,6 +337,7 @@ let lock_path snapshot_path = snapshot_path ^ ".lock"
 
 let update_locked
       ?clock
+      ?dropped_statements
       ~keepers_dir
       ~keeper_id
       build
@@ -339,7 +356,7 @@ let update_locked
     let content = Yojson.Safe.pretty_to_string (to_json next) ^ "\n" in
     match Fs_compat.save_file_atomic snapshot_path content with
     | Ok () ->
-      append_journal_entry ~keepers_dir ~keeper_id next;
+      append_journal_entry ~keepers_dir ~keeper_id ~dropped_statements next;
       Ok next
     | Error message ->
       Error
@@ -372,6 +389,7 @@ let make_snapshot
 
 let replace
       ?clock
+      ?dropped_statements
       ~keepers_dir
       ~keeper_id
       ~expected_revision
@@ -380,7 +398,7 @@ let replace
       ~facts
       ()
   =
-  update_locked ?clock ~keepers_dir ~keeper_id (fun previous ->
+  update_locked ?clock ?dropped_statements ~keepers_dir ~keeper_id (fun previous ->
     let observed_revision =
       Option.map (fun snapshot -> snapshot.revision) previous
     in

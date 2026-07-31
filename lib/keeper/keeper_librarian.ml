@@ -24,16 +24,21 @@ type input =
 type selection =
   { retained_memory_ids : string list
   ; new_claims : fact list
+  ; dropped : dropped_statement list
   ; facts : fact list
   }
 
 let wire_field_retained_memory_ids = "retained_memory_ids"
 let wire_field_new_claims = "new_claims"
+let wire_field_dropped = "dropped"
 let wire_field_claim = Keeper_memory_os_types.wire_field_claim
 let wire_field_category = Keeper_memory_os_types.wire_field_category
+let wire_field_memory_id = Keeper_memory_os_types.wire_field_memory_id
+let wire_field_reason = Keeper_memory_os_types.wire_field_reason
 let wire_claim_fields = Keeper_memory_os_types.wire_librarian_claim_fields
+let wire_dropped_fields = Keeper_memory_os_types.wire_librarian_dropped_fields
 let wire_current_fields =
-  [ wire_field_retained_memory_ids; wire_field_new_claims ]
+  [ wire_field_retained_memory_ids; wire_field_new_claims; wire_field_dropped ]
 
 let trim_nonempty s =
   let s = String.trim s in
@@ -96,7 +101,7 @@ let format_messages_for_prompt messages =
 
 let current_fact_json fact =
   `Assoc
-    [ "memory_id", `String (memory_id fact)
+    [ wire_field_memory_id, `String (memory_id fact)
     ; ( "fact"
       , `Assoc
           [ wire_field_claim, `String fact.claim
@@ -178,9 +183,14 @@ type parse_error =
   | Duplicate_field of string
   | Missing_required_fields
   | Claim_schema_mismatch
+  | Dropped_schema_mismatch
   | Unknown_retained_memory_id of string
   | Duplicate_retained_memory_id of string
   | Duplicate_selected_memory_id of string
+  | Unknown_dropped_memory_id of string
+  | Duplicate_dropped_memory_id of string
+  | Dropped_memory_id_also_retained of string
+  | Missing_disposition of string
 
 let parse_error_to_string = function
   | Top_level_not_object -> "top_level_not_object"
@@ -188,12 +198,20 @@ let parse_error_to_string = function
   | Duplicate_field field -> "duplicate_field: " ^ field
   | Missing_required_fields -> "missing_required_fields"
   | Claim_schema_mismatch -> "claim_schema_mismatch"
+  | Dropped_schema_mismatch -> "dropped_schema_mismatch"
   | Unknown_retained_memory_id identity ->
     "unknown_retained_memory_id: " ^ identity
   | Duplicate_retained_memory_id identity ->
     "duplicate_retained_memory_id: " ^ identity
   | Duplicate_selected_memory_id identity ->
     "duplicate_selected_memory_id: " ^ identity
+  | Unknown_dropped_memory_id identity ->
+    "unknown_dropped_memory_id: " ^ identity
+  | Duplicate_dropped_memory_id identity ->
+    "duplicate_dropped_memory_id: " ^ identity
+  | Dropped_memory_id_also_retained identity ->
+    "dropped_memory_id_also_retained: " ^ identity
+  | Missing_disposition identity -> "missing_disposition: " ^ identity
 ;;
 
 let fact_of_json ~now (json : Yojson.Safe.t) : fact option =
@@ -215,6 +233,23 @@ let claim_field_error = function
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
+let dropped_field_error = function
+  | `Assoc fields -> first_object_field_error ~allowed:wire_dropped_fields fields
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+;;
+
+let dropped_statement_of_json (json : Yojson.Safe.t) : dropped_statement option =
+  match json with
+  | `Assoc fields ->
+    (match
+       string_field wire_field_memory_id fields
+       , string_field wire_field_reason fields
+     with
+     | Some memory_id, Some reason -> Some { memory_id; reason }
+     | (Some _, None) | (None, _) -> None)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+;;
+
 let current_facts_by_id facts =
   List.fold_left
     (fun by_id fact ->
@@ -229,7 +264,7 @@ let current_facts inp =
   | Some current -> current.facts
 ;;
 
-let materialize_facts ~current_facts ~retained_memory_ids ~new_claims =
+let materialize_facts ~current_facts ~retained_memory_ids ~new_claims ~dropped =
   let open Result.Syntax in
   let current_by_id = current_facts_by_id current_facts in
   let rec retain seen retained_rev = function
@@ -248,6 +283,34 @@ let materialize_facts ~current_facts ~retained_memory_ids ~new_claims =
   in
   let* retained, selected_ids =
     retain String_set.empty [] retained_memory_ids
+  in
+  (* Totality: every current identity must be dispositioned exactly once —
+     retained or dropped with a stated reason. Silent omission is no longer
+     the deletion operation; it is a contract violation. *)
+  let rec validate_dropped seen = function
+    | [] -> Ok seen
+    | (statement : dropped_statement) :: rest ->
+      if String_set.mem statement.memory_id seen
+      then Error (Duplicate_dropped_memory_id statement.memory_id)
+      else if String_set.mem statement.memory_id selected_ids
+      then Error (Dropped_memory_id_also_retained statement.memory_id)
+      else if not (String_map.mem statement.memory_id current_by_id)
+      then Error (Unknown_dropped_memory_id statement.memory_id)
+      else validate_dropped (String_set.add statement.memory_id seen) rest
+  in
+  let* dropped_ids = validate_dropped String_set.empty dropped in
+  let* () =
+    match
+      List.find_opt
+        (fun fact ->
+           let identity = memory_id fact in
+           not
+             (String_set.mem identity selected_ids
+              || String_set.mem identity dropped_ids))
+        current_facts
+    with
+    | Some fact -> Error (Missing_disposition (memory_id fact))
+    | None -> Ok ()
   in
   let rec append_new selected_ids new_rev = function
     | [] -> Ok (retained @ List.rev new_rev)
@@ -285,31 +348,43 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
        (match
           string_list_field wire_field_retained_memory_ids fields
           , List.assoc_opt wire_field_new_claims fields
+          , List.assoc_opt wire_field_dropped fields
         with
         | ( Some retained_memory_ids
-          , Some (`List claim_items) ) ->
+          , Some (`List claim_items)
+          , Some (`List dropped_items) ) ->
           (match List.find_map claim_field_error claim_items with
            | Some (Unexpected_object_field field) -> Error (Unexpected_field field)
            | Some (Duplicate_object_field field) -> Error (Duplicate_field field)
            | None ->
-             (match
-                traverse (fact_of_json ~now) claim_items
-              with
-              | Some new_claims ->
+             (match List.find_map dropped_field_error dropped_items with
+              | Some (Unexpected_object_field field) ->
+                Error (Unexpected_field field)
+              | Some (Duplicate_object_field field) ->
+                Error (Duplicate_field field)
+              | None ->
                 (match
-                   materialize_facts
-                     ~current_facts:(current_facts inp)
-                     ~retained_memory_ids
-                     ~new_claims
+                   traverse (fact_of_json ~now) claim_items
+                   , traverse dropped_statement_of_json dropped_items
                  with
-                 | Ok facts ->
-                   Ok
-                     { retained_memory_ids
-                     ; new_claims
-                     ; facts
-                     }
-                 | Error _ as error -> error)
-              | None -> Error Claim_schema_mismatch))
+                 | Some new_claims, Some dropped ->
+                   (match
+                      materialize_facts
+                        ~current_facts:(current_facts inp)
+                        ~retained_memory_ids
+                        ~new_claims
+                        ~dropped
+                    with
+                    | Ok facts ->
+                      Ok
+                        { retained_memory_ids
+                        ; new_claims
+                        ; dropped
+                        ; facts
+                        }
+                    | Error _ as error -> error)
+                 | Some _, None -> Error Dropped_schema_mismatch
+                 | None, _ -> Error Claim_schema_mismatch)))
         | _ -> Error Missing_required_fields))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Error Top_level_not_object

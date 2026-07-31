@@ -50,11 +50,21 @@ let librarian_claim_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
+let librarian_dropped_schema =
+  let fields =
+    [ Keeper_librarian.wire_field_memory_id, string_schema
+    ; Keeper_librarian.wire_field_reason, string_schema
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
 let librarian_current_output_schema =
   let fields =
     [ Keeper_librarian.wire_field_retained_memory_ids, string_array_schema
     ; ( Keeper_librarian.wire_field_new_claims
       , `Assoc [ "type", `String "array"; "items", librarian_claim_schema ] )
+    ; Keeper_librarian.wire_field_dropped, array_schema librarian_dropped_schema
     ]
   in
   object_schema ~required:(List.map fst fields) fields

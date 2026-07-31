@@ -34,9 +34,11 @@ let replace
       ~keepers_dir
       ?(expected_revision = None)
       ?(facts = [])
+      ?dropped_statements
       ()
   =
   Current.replace
+    ?dropped_statements
     ~keepers_dir
     ~keeper_id:"keeper"
     ~expected_revision
@@ -376,6 +378,12 @@ let test_every_commit_appends_one_journal_entry () =
        ~keepers_dir
        ~expected_revision:(Some 1)
        ~facts:[ first ]
+       ~dropped_statements:
+         [ { Masc.Keeper_memory_os_types.memory_id =
+               Masc.Keeper_memory_os_types.memory_id second
+           ; reason = "superseded during test"
+           }
+         ]
        ()
      |> require_ok);
   ignore
@@ -397,10 +405,21 @@ let test_every_commit_appends_one_journal_entry () =
     (librarian_drop |> member "change" |> member "removed" |> to_list |> List.length);
   check string "librarian source kind" "librarian"
     (librarian_drop |> member "source" |> member "kind" |> to_string);
+  let dropped = librarian_drop |> member "dropped" |> to_list in
+  check int "one drop statement" 1 (List.length dropped);
+  check string "drop statement names the removed fact"
+    (Masc.Keeper_memory_os_types.memory_id second)
+    (List.hd dropped |> member "memory_id" |> to_string);
+  check string "drop statement carries the reason" "superseded during test"
+    (List.hd dropped |> member "reason" |> to_string);
+  check bool "statement-less commit has no dropped key" true
+    (List.nth lines 0 |> member "dropped" = `Null);
   let explicit = List.nth lines 2 in
   check int "explicit revision" 3 (explicit |> member "revision" |> to_int);
   check string "explicit source kind" "explicit_write"
-    (explicit |> member "source" |> member "kind" |> to_string)
+    (explicit |> member "source" |> member "kind" |> to_string);
+  check bool "explicit commit has no dropped key" true
+    (explicit |> member "dropped" = `Null)
 ;;
 
 let test_rejected_commit_appends_no_journal_entry () =

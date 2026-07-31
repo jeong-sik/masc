@@ -353,6 +353,65 @@ let test_explicit_keepers_dirs_do_not_cross_contaminate () =
     (fact_ids (read second_dir).facts)
 ;;
 
+let read_journal_lines ~keepers_dir =
+  let path =
+    Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+  in
+  if not (Sys.file_exists path)
+  then []
+  else
+    Fs_compat.load_file path
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> not (String.equal line ""))
+    |> List.map Yojson.Safe.from_string
+;;
+
+let test_every_commit_appends_one_journal_entry () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let first = fact ~claim:"first" () in
+  let second = fact ~claim:"second" () in
+  ignore (replace ~keepers_dir ~facts:[ first; second ] () |> require_ok);
+  ignore
+    (replace
+       ~keepers_dir
+       ~expected_revision:(Some 1)
+       ~facts:[ first ]
+       ()
+     |> require_ok);
+  ignore
+    (Current.upsert_fact
+       ~keepers_dir
+       ~keeper_id:"keeper"
+       ~now:300.0
+       ~source:(source Current.Explicit_write)
+       second
+     |> require_ok);
+  let lines = read_journal_lines ~keepers_dir in
+  check int "one journal line per commit" 3 (List.length lines);
+  let open Yojson.Safe.Util in
+  let librarian_drop = List.nth lines 1 in
+  check int "revision" 2 (librarian_drop |> member "revision" |> to_int);
+  check int "facts total" 1 (librarian_drop |> member "facts_total" |> to_int);
+  check int "removed recorded" 1
+    (librarian_drop |> member "change" |> member "removed" |> to_list |> List.length);
+  check string "librarian source kind" "librarian"
+    (librarian_drop |> member "source" |> member "kind" |> to_string);
+  let explicit = List.nth lines 2 in
+  check int "explicit revision" 3 (explicit |> member "revision" |> to_int);
+  check string "explicit source kind" "explicit_write"
+    (explicit |> member "source" |> member "kind" |> to_string)
+;;
+
+let test_rejected_commit_appends_no_journal_entry () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (replace ~keepers_dir ~facts:[ fact () ] () |> require_ok);
+  (match replace ~keepers_dir ~expected_revision:None ~facts:[] () with
+   | Error _ -> ()
+   | Ok _ -> fail "stale revision was accepted");
+  check int "only committed revisions are journaled" 1
+    (List.length (read_journal_lines ~keepers_dir))
+;;
+
 let test_stale_replace_rejects_concurrent_explicit_write () =
   with_temp_keepers @@ fun keepers_dir ->
   let initial = fact ~claim:"initial" () in
@@ -452,6 +511,14 @@ let () =
             "stale replace preserves concurrent explicit write"
             `Quick
             test_stale_replace_rejects_concurrent_explicit_write
+        ; test_case
+            "every commit appends one journal entry"
+            `Quick
+            test_every_commit_appends_one_journal_entry
+        ; test_case
+            "rejected commit appends no journal entry"
+            `Quick
+            test_rejected_commit_appends_no_journal_entry
         ] )
     ]
 ;;

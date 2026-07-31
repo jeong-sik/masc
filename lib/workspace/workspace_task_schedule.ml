@@ -298,10 +298,17 @@ let claim_next_r
              AwaitingVerification tasks into the keeper claim pool. *)
           | Workspace_task_lifecycle.Held_pending_verdict _ -> false
         in
+        let is_executable_task (t : Masc_domain.task) =
+          (* #26487 / #26485 guard: exclude tasks flagged with explicit do_not_reclaim_reason *)
+          match t.do_not_reclaim_reason with
+          | Some reason when String.length (String.trim reason) > 0 -> false
+          | _ -> true
+        in
         let unclaimed =
           sorted
           |> List.filter Masc_domain.task_claim_next_action_is_claimable
           |> List.filter resolves_claimable
+          |> List.filter is_executable_task
           (* [hard_filter] is a hard exclusion (e.g. self-author ownership): unlike
              [task_filter] it survives the [allow_scope_fallback] widening below,
              because it expresses an invariant the scheduler must never relax, not

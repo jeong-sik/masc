@@ -669,7 +669,14 @@ let run_turn
       s.Keeper_run_tools.model_input_projection
     in
     let model_input_projection messages =
-      match source_model_input_projection messages with
+      (* Bounded transmission view first (RFC #26534 PR-C): the cut never
+         sees gate-replay evidence, which [source_model_input_projection]
+         appends afterwards, and the provenance check below compares against
+         the windowed list so its projected-prefix precondition keeps
+         holding. Durable state and checkpoints receive the unwindowed
+         history. *)
+      let windowed = Runtime_model_input_tail_window.project messages in
+      match source_model_input_projection windowed with
       | Error _ as error ->
         current_request_input_messages_ref := None;
         error
@@ -680,7 +687,7 @@ let run_turn
         (match
            Keeper_agent_prompt_metrics.provider_content_messages
              ~prompt_context_present
-             ~projection_input:messages
+             ~projection_input:windowed
              ~projected_messages
          with
          | Some provider_content ->

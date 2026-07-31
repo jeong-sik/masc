@@ -241,13 +241,13 @@ describe('sandbox coerce helpers', () => {
 })
 
 describe('keeperRuntimeConfigCanWrite', () => {
-  it('allows writes only for a TOML-backed keeper manifest', () => {
+  it('allows writes for a TOML-backed keeper manifest', () => {
     const base = makeKeeperConfig()
     expect(keeperRuntimeConfigCanWrite(base)).toBe(true)
     expect(keeperRuntimeConfigWriteUnsupportedReason(base)).toBeNull()
   })
 
-  it('rejects persona-backed config even when a path-like value is present', () => {
+  it('allows persona-backed config when a valid keeper name is present', () => {
     const base = makeKeeperConfig()
     const c = makeKeeperConfig({
       sources: {
@@ -257,22 +257,17 @@ describe('keeperRuntimeConfigCanWrite', () => {
       },
     })
 
-    expect(keeperRuntimeConfigCanWrite(c)).toBe(false)
-    expect(keeperRuntimeConfigWriteUnsupportedReason(c)).toContain('현재 기본 소스: persona')
+    expect(keeperRuntimeConfigCanWrite(c)).toBe(true)
+    expect(keeperRuntimeConfigWriteUnsupportedReason(c)).toBeNull()
   })
 
-  it('rejects TOML config without a manifest path', () => {
-    const base = makeKeeperConfig()
+  it('rejects config without a valid keeper name', () => {
     const c = makeKeeperConfig({
-      sources: {
-        ...base.sources,
-        default_source_kind: 'toml',
-        default_manifest_path: null,
-      },
+      name: '',
     })
 
     expect(keeperRuntimeConfigCanWrite(c)).toBe(false)
-    expect(keeperRuntimeConfigWriteUnsupportedReason(c)).toContain('기본 매니페스트 경로')
+    expect(keeperRuntimeConfigWriteUnsupportedReason(c)).toContain('유효한 키퍼 이름')
   })
 })
 
@@ -364,13 +359,8 @@ describe('keeperConfigControlInventory', () => {
       operation: 'runtime_id',
     })
 
-    const runtimeUnsupported = findItem('runtime', persona, 'kcf-runtime-assignment')
-    expect(runtimeUnsupported.kind).toBe('unsupported')
-    expect(runtimeUnsupported.action).toContain('현재 기본 소스: persona')
-    expect(runtimeUnsupported.contracts).toContainEqual({
-      kind: 'unsupported',
-      reason: expect.stringContaining('현재 기본 소스: persona'),
-    })
+    const runtimeAssignment = findItem('runtime', persona, 'kcf-runtime-assignment')
+    expect(runtimeAssignment.kind).toBe('live-write')
   })
 
   it('reports missing optional config fields without treating present nulls as absent', () => {
@@ -413,7 +403,7 @@ describe('keeperConfigControlInventory', () => {
       },
     })
 
-    expect(findItem('policy', persona, 'kcf-policy-proactive').kind).toBe('unsupported')
+    expect(findItem('policy', persona, 'kcf-policy-proactive').kind).toBe('live-write')
     expect(findItem('health', persona, 'kcf-health-directives').kind).toBe('live-write')
   })
 
@@ -1073,7 +1063,7 @@ describe('KeeperConfigPanel', () => {
     expect(keeperConfigSubscriptionCountsForTests()).toEqual({ reset: 0, update: 0 })
   })
 
-  it('keeps runtime config controls read-only when the keeper is not manifest-backed', async () => {
+  it('allows runtime config assignment writes when keeper name is valid even if persona-backed', async () => {
     const base = makeKeeperConfig()
     const personaConfig = makeKeeperConfig({
       sources: {
@@ -1093,32 +1083,31 @@ describe('KeeperConfigPanel', () => {
     expect(container.querySelector('[data-testid="keeper-config-control-ledger"]')?.textContent)
       .toContain('Control backing')
     expect(container.querySelector('[data-control-id="kcf-runtime-assignment"]')?.getAttribute('data-control-kind'))
-      .toBe('unsupported')
-    expect(container.querySelector('[data-testid="keeper-runtime-write-unsupported"]')).not.toBeNull()
-    expect(container.textContent).toContain('현재 기본 소스: persona')
-    expect(container.querySelector('select[aria-label="runtime_id"]')).toBeNull()
-    expect(container.querySelector('input[aria-label="컨텍스트 오버라이드"]')).toBeNull()
+      .toBe('live-write')
+    expect(container.querySelector('[data-testid="keeper-runtime-write-unsupported"]')).toBeNull()
+    expect(container.querySelector('select[aria-label="runtime_id"]')).not.toBeNull()
+    expect(container.querySelector('input[aria-label="컨텍스트 오버라이드"]')).not.toBeNull()
     expect(container.textContent).toContain('tier-group.keeper_unified')
 
     selectKcfTab(container, '실행 정책')
     await flush()
     expect(container.querySelector('input[aria-label="토큰 게이트"]')).toBeNull()
-    expect(container.querySelector('button[aria-label="자동 부팅"]')).toBeNull()
+    expect(container.querySelector('button[aria-label="자동 부팅"]')).not.toBeNull()
     selectKcfTab(container, '권한·샌드박스')
     await flush()
-    expect(container.querySelector('select[aria-label="sandbox_profile"]')).toBeNull()
-    expect(container.querySelector('select[aria-label="network_mode"]')).toBeNull()
-    expect(container.querySelector('textarea[aria-label="allowed_paths"]')).toBeNull()
-    expect(container.querySelector('textarea[aria-label="mention_targets"]')).toBeNull()
+    expect(container.querySelector('select[aria-label="sandbox_profile"]')).not.toBeNull()
+    expect(container.querySelector('select[aria-label="network_mode"]')).not.toBeNull()
+    expect(container.querySelector('textarea[aria-label="allowed_paths"]')).not.toBeNull()
+    expect(container.querySelector('textarea[aria-label="mention_targets"]')).not.toBeNull()
     expect(container.textContent).toContain('allowed_paths')
     expect(container.textContent).toContain('/tmp/workspace')
 
     selectKcfTab(container, '목표')
     await flush()
-    expect(container.querySelector('input[aria-label="goal 검색"]')).toBeNull()
-    expect(container.querySelectorAll('.kcf-goal').length).toBe(0)
+    expect(container.querySelector('input[aria-label="goal 검색"]')).not.toBeNull()
+    expect(container.querySelectorAll('.kcf-goal').length).toBe(1)
     expect(container.textContent).toContain('goal-runtime')
-    expect(container.textContent).toContain('읽기 전용')
+    expect(container.textContent).toContain('live write')
 
     const runtimeSave = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('런타임 설정 저장'),

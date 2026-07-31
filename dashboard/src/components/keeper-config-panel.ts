@@ -397,13 +397,9 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
 }
 
 export function keeperRuntimeConfigWriteUnsupportedReason(c: KeeperConfig): string | null {
-  const kind = c.sources.default_source_kind ?? 'unknown'
-  if (kind !== 'toml') {
-    return `runtime 설정 저장은 TOML-backed keeper manifest에서만 지원됩니다. 현재 기본 소스: ${kind}.`
-  }
-  const manifestPath = c.sources.default_manifest_path?.trim()
-  if (!manifestPath) {
-    return 'runtime 설정 저장은 기본 매니페스트 경로가 확인될 때만 지원됩니다.'
+  const name = c.name?.trim()
+  if (!name) {
+    return 'runtime 설정 저장은 유효한 키퍼 이름이 확인될 때만 지원됩니다.'
   }
   return null
 }

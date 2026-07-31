@@ -281,9 +281,9 @@ export function KeeperRuntimeModelEditor({
   `
 
   if (!keeperRuntimeConfigCanWrite(config)) {
-    // Non-TOML source: the config modal cannot write this either, so there is no
-    // deep-link — explain WHY it is locked and HOW to unlock it via runtime.toml.
-    const kind = config.sources.default_source_kind ?? 'unknown'
+    // No valid keeper name: keeperRuntimeConfigCanWrite gates on config.name
+    // (the [runtime.assignments] key), so an empty name blocks both the config
+    // modal and this card. Explain the name requirement instead of deep-linking.
     return html`
       <div class="v2-monitoring-card flex flex-col gap-2 rounded-[var(--r-4)] border border-[var(--color-border-default)]/60 bg-[var(--color-bg-surface)]/35 px-4 py-3">
         <${EditorHeader} />
@@ -294,16 +294,15 @@ export function KeeperRuntimeModelEditor({
         ${canonicalRow}
         ${summary}
         <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-status-warn)]">
-          이 keeper는 편집 가능한 TOML 소스가 아니라(소스: ${kind}) model을 바꿀 수 없습니다.
-          편집하려면 <code>.masc/config/runtime.toml</code> 의
-          <code>[runtime.assignments]</code> 에 keeper 배정을 추가하고 서버를 재시작하세요.
+          이 keeper는 식별 이름이 확인되지 않아 runtime model을 바꿀 수 없습니다.
+          keeper 이름이 keeper 구성에 포함되어 있는지 확인하세요.
         </div>
       </div>
     `
   }
 
-  // TOML-backed: read-only display + deep-link to the 설정(.kcf) 런타임 tab, which
-  // owns the single write path for runtime_id.
+  // Writable: a valid keeper name is present, so read-only display + deep-link
+  // to the 설정(.kcf) 런타임 tab, which owns the single write path for runtime_id.
   return html`
     <div class="v2-monitoring-card flex flex-col gap-2 rounded-[var(--r-4)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-4 py-3">
       <${EditorHeader} />

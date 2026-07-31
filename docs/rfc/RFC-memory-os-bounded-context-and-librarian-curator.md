@@ -47,15 +47,15 @@ transition-audit 원장(`.masc/transition-audit/2026-07/31.jsonl`) 실측:
 - M턴 블록 단위로 절단한다 (prompt cache prefix 안정성).
 - 감량 1순위는 오래된 tool result의 포인터 강등(참조로 대체, 원문은 archive)이다. LLM이 필요 없는 결정론 연산이다.
 
-### 3.2 Watermark 불변식
+### 3.2 절단과 librarian의 독립성 — watermark를 두지 않는 이유
 
-`librarian_watermark` = librarian이 읽고 커밋을 마친 마지막 메시지 위치.
+절단은 **전송 뷰에만** 작용한다. checkpoint(실록)는 온전하므로, librarian의 입력(checkpoint 꼬리에서 조립되는 최근 메시지 projection)은 전송 절단과 무관하다. "읽기 전에 잘리는" 재료는 이 구조에 존재하지 않는다 — 그 위험은 컴팩션이 원문을 파괴하던 구 설계의 것이다.
 
-> **불변식: `cut_point ≤ librarian_watermark`.** 절단 함수는 watermark를 인자로 요구하며, watermark 뒤를 자르는 호출은 타입상 구성 불가능하게 한다.
+따라서 절단-librarian 동기화 기제(watermark 류)는 지킬 대상이 없는 보증이며 도입하지 않는다. librarian이 cadence 사이에 무언가를 놓치면 그것은 다음 판단이 다룰 일이지 기제가 막을 일이 아니다. **기억은 문장과 서술이고, librarian은 숫자 기준의 수집기가 아니라 기억의 정리자다.**
 
-이 불변식 하에서 절단으로 working set을 떠나는 원문은 전부 이미 librarian fold에 반영된 것이다. librarian이 정체되면(coalesce, 슬롯 장애) watermark가 멈추고 절단도 멈춰 window가 자란다 — 실패가 침묵 손실이 아니라 **가시적 성장 압력**으로 나타나며, overflow는 죽음의 나선이 아니라 "librarian 정체" 알람으로 의미가 바뀐다.
+### 3.3 Librarian curator 계약
 
-### 3.3 Librarian curator 계약 (typed ops)
+librarian의 정의는 한 줄이다: **persona와 최근 N턴 맥락을 보고, keeper 대신 일기를 써주는 존재.** 무엇이 중요했는지를 문장으로 판단하고 문장으로 남긴다 — 숫자 기준의 수집기가 아니라 기억의 정리자다. 표현력과 서술이 저장 형식이다.
 
 현행 계약을 교체하지 않고 **완성**한다. 순수 diff는 둘뿐이다: `dropped`의 reason 필드, 그리고 총체성 검증.
 
@@ -105,12 +105,12 @@ working set이 "구성상 유계"이려면 모든 항이 유계여야 한다. K�
 
 | 제거되는 흐름 | 추가되는 것 |
 |---|---|
-| 컴팩션 요약 루프 (807 실패/일을 만든 그 흐름) | watermark — 파생 카운터 1 (소비자: 절단 함수 단일) |
-| request-body cap 거절 루프 (§4.6 재평가) | journal — append-only 관측 파일 1 (제어 흐름 소비자 없음) |
-| 빈-retain 침묵 전멸 경로 | persona — 프롬프트 변수 1 |
-| 화석 템플릿 2종 | `dropped.reason` 필드 1 + 총체성 검증 1 |
+| 컴팩션 요약 루프 (807 실패/일을 만든 그 흐름) | journal — append-only 관측 파일 1 (제어 흐름 소비자 없음) |
+| request-body cap 거절 루프 (§4.6 재평가) | persona — 프롬프트 변수 1 |
+| 빈-retain 침묵 전멸 경로 | `dropped.reason` 필드 1 + 총체성 검증 1 |
+| 화석 템플릿 2종 | (없음) |
 
-새 lifecycle 0, 새 tier 0, 새 Facade 0. 예외 하나를 정직하게 기록한다: 이행기 한정으로 컴팩션 결정론적 실패의 terminal phase 1개(§3.6)가 생기며, 컴팩션 숙청과 함께 소멸한다.
+새 lifecycle 0, tier 0, Facade 0, 파생 카운터 0, 수치 0. 신규 저장소는 journal 파일 하나다. 예외 하나를 정직하게 기록한다: 이행기 한정으로 컴팩션 결정론적 실패의 terminal phase 1개(§3.6)가 생기며, 컴팩션 숙청과 함께 소멸한다.
 
 ## 4. 이행 단계
 
@@ -118,7 +118,7 @@ working set이 "구성상 유계"이려면 모든 항이 유계여야 한다. K�
 2. **PR-B** persona 변수 주입 (§3.4) — 계약 불변, 템플릿+변수.
 3. **PR-C** exact 실패 타이핑 + compaction terminal phase (§3.6 이행기, #26533과 정합).
 4. curator ops 계약 교체 (§3.3) — 스키마·파서·검증·템플릿. 하네스로 준수율 측정 동반.
-5. 전송 계약 (§3.1–3.2) — K/M 결정(선행 측정: OAS checkpoint JSON에서 tool result 비중 실측), elision, watermark, archive 조회 도구.
+5. 전송 계약 (§3.1) — K/M 결정(선행 측정: OAS checkpoint JSON에서 tool result 비중 실측), elision, archive 조회 도구.
 6. 숙청 — compaction_exact lane, 화석 템플릿 2종(`memory_consolidation`, `episode_extraction`), request-body cap 재평가(§3.1이 상한을 구성으로 보장하면 거절 cap은 중복 gate).
 
 ## 5. 비제안
@@ -134,7 +134,7 @@ working set이 "구성상 유계"이려면 모든 항이 유계여야 한다. K�
 
 - K/M 값 — checkpoint 구성비 실측 후 결정 (tool result 비중이 지배적일 것으로 추정, 미검증).
 - 로컬 소형 모델(현행 librarian 1순위 슬롯)의 ops 스키마 준수율.
-- coalesce 정책과 watermark의 상호작용 (감사 P1-1) — coalesce 드랍 시 watermark 정지가 기본값인가, 부분 전진인가.
+- coalesce 드랍(감사 P1-1)의 실제 커버리지 손실 크기 — 기제 추가가 아니라 journal 실측으로 확인하고, 필요하면 cadence만 조정한다.
 - archive 조회 도구의 권한 경계 (keeper 자신의 archive만인가).
 - standing instruction의 명시화 경로 — 히스토리에 암묵적으로 실려 있던 "아직 유효한 옛 지시"를 system prompt/facts 중 어디로 승격하는가.
 - facts 예산 값 — 현행 facts 크기 분포 실측 후 결정.
@@ -157,5 +157,5 @@ working set이 "구성상 유계"이려면 모든 항이 유계여야 한다. K�
 | Hermes Agent (Nous, 2026-02) | profile별 fact 저장(SQLite FTS5 검색) + SOUL.md 정체성 문서 + 성공/실패 학습 | facts 저장 + 결정론 검색(FTS)의 선례. SOUL.md = persona 주입(§3.4)의 선례 |
 | 2025–26 서베이 계열 | "working memory는 검색 문제가 아니라 **context-budget 문제**"; 기억 lifecycle = formation/evolution/retrieval | R1·§3.7 예산과 일치. Ebbinghaus류 수치 망각 곡선은 불채택 |
 
-수렴 관찰: 일곱 독립 계보(MemGPT/Letta, Mem0, Generative Agents, CLS, AGM, OpenClaw, Hermes)가 — 2026년 최다 배포 에이전트 두 개를 포함해 — 같은 형태로 수렴한다: **유계 작업 기억 + 작은 큐레이션 기억 + append-only 원장 + 배경 판단자의 소수 연산 + 필요시 검색.** 본 RFC가 새로 보태는 것은 watermark 불변식 하나다.
+수렴 관찰: 일곱 독립 계보(MemGPT/Letta, Mem0, Generative Agents, CLS, AGM, OpenClaw, Hermes)가 — 2026년 최다 배포 에이전트 두 개를 포함해 — 같은 형태로 수렴한다: **유계 작업 기억 + 작은 큐레이션 기억 + append-only 원장 + 배경 판단자의 소수 연산 + 필요시 검색.** 본 RFC가 새로 발명하는 기제는 없다 — 이 수렴 형태를 masc에 이미 있는 파일들(checkpoint, memory-current, keeper toml)에 그대로 사상하며, 신규물은 journal 파일 하나다.
 - 비상 사다리 3단(watermark 앞 절단)의 손실 기록 형식과, 그 상태를 운영 표면(#26531)에 어떻게 노출하는가.

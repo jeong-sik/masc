@@ -57,8 +57,13 @@ async function flush() {
 function makeConfig(
   execution: Partial<KeeperConfig['execution']> = {},
   sources: Partial<KeeperConfig['sources']> = {},
+  name: string = 'test-keeper',
 ): KeeperConfig {
   return {
+    // KeeperConfig.name is a non-optional string and the SSOT key for
+    // [runtime.assignments]; keeperRuntimeConfigCanWrite reads it, so the
+    // helper must populate it instead of relying on the `as unknown` cast.
+    name,
     execution: {
       selected_runtime_id: 'a.one',
       selected_runtime_canonical: 'a.one',
@@ -431,8 +436,8 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
     expect(container.querySelector('select[aria-label="runtime"]')).toBeNull()
   })
 
-  it('shows an actionable read-only hint (no deep-link) for a non-toml keeper', async () => {
-    refs.config = makeConfig({ selected_runtime_id: 'a.one' }, { default_source_kind: 'persona', default_manifest_path: null })
+  it('shows an actionable read-only hint (no deep-link) for a keeper without a valid name', async () => {
+    refs.config = makeConfig({ selected_runtime_id: 'a.one' }, { default_source_kind: 'persona', default_manifest_path: null }, '')
     render(
       html`<${KeeperRuntimeModelEditor} keeperName="persona-keeper" onOpenRuntimeConfig=${vi.fn()} />`,
       container,
@@ -440,8 +445,8 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
     await flush()
 
     expect(container.querySelector('select[aria-label="runtime"]')).toBeNull()
-    // Non-toml sources cannot be written from the config modal either, so the
-    // card explains the runtime.toml path instead of deep-linking.
+    // An empty name fails the keeperRuntimeConfigCanWrite gate, so the card
+    // explains the runtime.toml path instead of deep-linking.
     expect(container.textContent).toContain('편집 가능한 TOML 소스가 아니')
     expect(container.textContent).toContain('runtime.toml')
     expect(container.textContent).toContain('[runtime.assignments]')

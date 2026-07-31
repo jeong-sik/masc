@@ -1316,6 +1316,10 @@
 .ctx-tok-sep { color: var(--text-dim); }
 .ctx-tok-full { color: var(--text-dim) !important; }
 .ctx-tok-lbl { margin-left: auto; font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); }
+/* measurement provenance under the meter: turn ref, age, wire size */
+.ctx-src { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; margin-top: 5px; font-size: var(--fs-11); color: var(--text-mid); }
+.ctx-src .mono { font-family: var(--font-mono); color: var(--text-bright); }
+.ctx-src-lbl { flex-basis: 100%; font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); }
 
 /* recent tool — expandable detail */
 .ctx-item.click { cursor: pointer; }

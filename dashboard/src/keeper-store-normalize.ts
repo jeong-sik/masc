@@ -2,6 +2,7 @@ import type {
   CtxCompositionTelemetry,
   Keeper,
   KeeperContextMetricsUnavailable,
+  KeeperContextNotObservedReason,
   KeeperLifecycleState,
   KeeperLastTurnUsage,
   KeeperMetricPoint,
@@ -13,6 +14,7 @@ import type {
   PromptTelemetry,
   ProviderHealth,
 } from './types'
+import { KEEPER_CONTEXT_NOT_OBSERVED_REASONS } from './types'
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import { isKeeperOffline } from './lib/keeper-predicates'
 import { keeperDisplayStatus } from './lib/keeper-runtime-display'
@@ -44,8 +46,12 @@ export function normalizeKeeperContextMetricsUnavailable(
 
   const kind = asString(raw.kind) ?? null
   const reason = asString(raw.reason) ?? null
-  if (kind === 'not_observed' && reason === 'context_measurement_missing') {
-    return { kind, reason }
+  if (
+    kind === 'not_observed'
+    && reason !== null
+    && (KEEPER_CONTEXT_NOT_OBSERVED_REASONS as readonly string[]).includes(reason)
+  ) {
+    return { kind, reason: reason as KeeperContextNotObservedReason }
   }
 
   return { kind: 'invalid_payload', reported_kind: kind, reported_reason: reason }
@@ -622,18 +628,32 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
       const name = asString(row.name)
       if (!name) return null
 
-      const contextRatio = null
+      // Context fields decode from the wire only when their declared
+      // producer is the TurnRecord projection
+      // (Keeper_context_observation_projection) — the measurement SSOT.
+      // A retired or unknown source drops entirely (numbers and string):
+      // absence is explained by the typed context_metrics_unavailable
+      // channel, never by echoing a retired producer name.
+      const topContextSource = asString(row.context_source) ?? null
+      const topContextMeasured = topContextSource === 'turn_record'
+      const contextRatio = topContextMeasured ? asNumber(row.context_ratio) ?? null : null
       const statusRaw = asString(row.status) ?? asString(agentRaw?.status) ?? 'offline'
       const model = undefined
       const metricsSeries = normalizeMetricsSeries(row.metrics_series)
 
+      const nestedContextSource = contextRaw ? asString(contextRaw.source) ?? null : null
+      const nestedContextMeasured = nestedContextSource === 'turn_record'
       const normalizedContext =
         contextRaw
           ? {
-              source: null,
-              context_ratio: null,
-              context_tokens: null,
-              context_max: null,
+              source: nestedContextMeasured ? nestedContextSource : null,
+              context_ratio: nestedContextMeasured ? asNumber(contextRaw.context_ratio) ?? null : null,
+              context_tokens: nestedContextMeasured ? asNumber(contextRaw.context_tokens) ?? null : null,
+              context_max: nestedContextMeasured ? asNumber(contextRaw.context_max) ?? null : null,
+              observed_at: nestedContextMeasured ? asString(contextRaw.observed_at) ?? null : null,
+              turn_ref: nestedContextMeasured ? asString(contextRaw.turn_ref) ?? null : null,
+              absolute_turn: nestedContextMeasured ? asNumber(contextRaw.absolute_turn) ?? null : null,
+              request_body_bytes: nestedContextMeasured ? asNumber(contextRaw.request_body_bytes) ?? null : null,
               message_count: asNumber(contextRaw.message_count),
               has_checkpoint: typeof contextRaw.has_checkpoint === 'boolean' ? contextRaw.has_checkpoint : undefined,
             }
@@ -768,9 +788,9 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_blocker: asString(row.last_blocker) ?? null,
         runtime_warning_ctx_ratio: asNumber(row.runtime_warning_ctx_ratio) ?? null,
         context_ratio: contextRatio,
-        context_tokens: null,
-        context_max: null,
-        context_source: null,
+        context_tokens: topContextMeasured ? asNumber(row.context_tokens) ?? null : null,
+        context_max: topContextMeasured ? asNumber(row.context_max) ?? null : null,
+        context_source: topContextMeasured ? topContextSource : null,
         context_metrics_unavailable: normalizeKeeperContextMetricsUnavailable(row.context_metrics_unavailable),
         last_turn_usage: normalizeKeeperLastTurnUsage(row.last_turn_usage),
         context: normalizedContext,

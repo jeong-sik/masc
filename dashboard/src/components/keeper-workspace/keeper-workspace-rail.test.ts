@@ -786,9 +786,9 @@ describe('KeeperWorkspaceRail', () => {
   it('renders context metrics as missing when only a zero default exists', () => {
     const k = mkKeeper({ context_ratio: 0, compaction_count: 0 })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
-    // v2 collapses the missing-context state into a single "윈도우 사용률 미수신"
+    // v2 collapses the missing-context state into a single "윈도우 사용률 미측정"
     // empty card (.ctx-empty); no fake usage meter and no usage percentage.
-    expect(container.textContent).toContain('윈도우 사용률 미수신')
+    expect(container.textContent).toContain('윈도우 사용률 미측정')
     expect(container.querySelector('.ctx-empty')).not.toBeNull()
     expect(container.textContent).not.toContain('윈도우 사용량')
     expect(container.querySelector('.meter')).toBeNull()
@@ -800,10 +800,58 @@ describe('KeeperWorkspaceRail', () => {
   it('shows token-only context without a fake window percentage', () => {
     const k = mkKeeper({ context_ratio: 0, context_tokens: 37800 })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
-    expect(container.textContent).toContain('윈도우 사용률 미수신')
+    expect(container.textContent).toContain('윈도우 사용률 미측정')
     expect(container.textContent).toContain('37.8k')
     expect(container.textContent).not.toContain('윈도우 사용량')
     expect(container.querySelector('.meter')).toBeNull()
+  })
+
+  it('names the typed absence reason from the projection', () => {
+    const k = mkKeeper({
+      context_ratio: 0,
+      compaction_count: 0,
+      context_metrics_unavailable: { kind: 'not_observed', reason: 'turn_record_without_usage' },
+    })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    expect(container.textContent).toContain('턴 레코드 기준 측정 불가')
+    expect(container.textContent).toContain('turn_record_without_usage')
+  })
+
+  it('renders measurement provenance for a turn_record-sourced context', () => {
+    const k = mkKeeper({
+      context_ratio: 0.5,
+      context_tokens: 100887,
+      context_max: 200000,
+      context_source: 'turn_record',
+      context: {
+        source: 'turn_record',
+        context_ratio: 0.5,
+        context_tokens: 100887,
+        context_max: 200000,
+        observed_at: new Date(Date.now() - 120000).toISOString(),
+        turn_ref: 'trace-1785189111911-00004#3337',
+        absolute_turn: 3337,
+        request_body_bytes: 402408,
+      },
+    })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    const provenance = container.querySelector('[data-testid="ctx-provenance"]')
+    expect(provenance).not.toBeNull()
+    expect(provenance?.textContent).toContain('T3337')
+    expect(provenance?.textContent).toContain('wire')
+    expect(provenance?.textContent).toContain('393KB')
+    expect(provenance?.textContent).toContain('다음 입력에 함께 실리는 상비 페이로드')
+  })
+
+  it('renders no provenance line for a non-turn_record source', () => {
+    const k = mkKeeper({
+      context_ratio: 0.5,
+      context_tokens: 100887,
+      context_max: 200000,
+      context_source: 'keeper_context_status',
+    })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    expect(container.querySelector('[data-testid="ctx-provenance"]')).toBeNull()
   })
 
   it('runs overflow compaction without force through the existing MCP tool', async () => {

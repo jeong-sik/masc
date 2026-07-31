@@ -620,7 +620,9 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               max_context_resolution
           in
           let context_projection_fields =
-            Keeper_context_observation_projection.missing_context_fields ()
+            Keeper_context_observation_projection.context_fields
+              ~config
+              ~keeper_name:m.name
           in
 	          let summary =
               let trust_json =

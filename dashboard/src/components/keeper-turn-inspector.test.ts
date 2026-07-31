@@ -279,6 +279,27 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(drawerText).toContain('local')
   })
 
+  it('renders input components sorted by bytes with the wire body size', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    const section = container.querySelector('[data-testid="turn-input-components"]')
+    expect(section).toBeTruthy()
+    const text = section?.textContent ?? ''
+    expect(text).toContain('입력 구성')
+    expect(text).toContain('prompt.memory_os_recall')
+    expect(text).toContain('3.3KB')
+    // Sorted by bytes descending: recall (3392B) precedes persona (1200B).
+    expect(text.indexOf('prompt.memory_os_recall')).toBeLessThan(text.indexOf('prompt.persona'))
+    expect(text).toContain('합계 4.5KB')
+    expect(text).toContain('wire 547.4KB')
+  })
+
   it('matches an initial timestamp to the closest retained turn row', () => {
     const response = turnRecordsWithMemoryOs()
     const nearTurn42 = new Date((1_781_587_560 + 12) * 1000).toISOString()

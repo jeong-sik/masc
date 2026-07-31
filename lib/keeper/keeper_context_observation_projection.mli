@@ -10,6 +10,26 @@ val missing_context_fields :
 (** Null context fields plus {!missing_measurement_json}. Checkpoint inventory
     is a separate endpoint and is not loaded by fleet context observation. *)
 
+val context_fields :
+  config:Workspace.config ->
+  keeper_name:string ->
+  (string * Yojson.Safe.t) list
+(** Context occupancy projected from the keeper's newest TurnRecord
+    (RFC-0233), the measurement SSOT: [context_tokens] is the
+    provider-reported prompt total of the last completed turn,
+    [context_max] the context window resolved for that same request, and
+    the nested ["context"] object carries provenance ([turn_ref],
+    [observed_at], [request_body_bytes]).
+
+    Display-only: the projection must never feed context pressure or
+    compaction decisions. It reads only the dated-JSONL tail (one line),
+    never checkpoints. Absence stays typed via
+    [context_metrics_unavailable] with a closed reason set:
+    [context_measurement_missing] (no record),
+    [turn_record_undecodable] (newest line rejected by the strict codec),
+    [turn_record_read_failed] (store IO failed, warn-logged),
+    [turn_record_without_usage] (turn completed without provider usage). *)
+
 val last_turn_usage_json_of_meta :
   Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 (** Provider-reported usage from the latest successful usage observation.

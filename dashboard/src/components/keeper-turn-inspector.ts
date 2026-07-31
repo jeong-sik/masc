@@ -23,6 +23,7 @@ import type {
   ToolCallsResponse,
   TurnBlock,
   TurnBlockDiff,
+  TurnInputComponent,
   TurnRecordEntry,
   TurnRecordRow,
   TurnRecordsResponse,
@@ -106,6 +107,33 @@ function BlockRow({ block }: { block: TurnBlock }) {
       <span class="text-[var(--color-fg-disabled)]" title=${block.digest}>
         ${block.digest.slice(0, 12)}
       </span>
+    </div>
+  `
+}
+
+// Bytes label for input components: sub-KB values stay exact so small
+// prompt blocks do not all round to "0.0KB".
+function formatComponentBytes(bytes: number): string {
+  return bytes >= 1024 ? `${(bytes / 1024).toFixed(1)}KB` : `${bytes}B`
+}
+
+function sortedInputComponents(record: TurnRecordEntry): TurnInputComponent[] {
+  return [...(record.input_components ?? [])].sort((a, b) => b.bytes - a.bytes)
+}
+
+function InputComponentRow({
+  component,
+  totalBytes,
+}: {
+  component: TurnInputComponent
+  totalBytes: number
+}) {
+  const share = totalBytes > 0 ? Math.round((component.bytes / totalBytes) * 100) : 0
+  return html`
+    <div class="flex items-center gap-2 text-2xs font-mono v2-monitoring-row">
+      <span class="text-[var(--color-fg-default)]">${component.component}</span>
+      <span class="text-[var(--color-fg-muted)]">${formatComponentBytes(component.bytes)}</span>
+      <span class="text-[var(--color-fg-disabled)]">${share}%</span>
     </div>
   `
 }
@@ -412,6 +440,12 @@ thinking.budget= ${record.thinking_budget ?? '—'}
 # context blocks (조립 순서)
 ${record.blocks.length
     ? record.blocks.map(b => `  - ${b.block}  ${b.bytes}B  ${b.digest.slice(0, 12)}`).join('\n')
+    : '  (none)'}
+
+# input components (요청 조립 뷰, 큰 순)
+${record.input_components && record.input_components.length
+    ? sortedInputComponents(record).map(c => `  - ${c.component}  ${c.bytes}B`).join('\n')
+      + (record.request_body_bytes != null ? `\n  wire body = ${record.request_body_bytes}B` : '')
     : '  (none)'}
 
 # tool executions
@@ -1184,6 +1218,27 @@ function TurnRow({
             ? html`<div class="text-2xs text-[var(--color-fg-disabled)] v2-monitoring-row">기록된 블록 없음</div>`
             : record.blocks.map(block => html`<${BlockRow} block=${block} />`)}
         </div>
+        ${record.input_components && record.input_components.length > 0
+          ? (() => {
+              const components = sortedInputComponents(record)
+              const totalBytes = components.reduce((sum, c) => sum + c.bytes, 0)
+              return html`
+                <div data-testid="turn-input-components">
+                  <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)] mb-1">
+                    입력 구성 (요청 조립 뷰, 큰 순)
+                  </div>
+                  ${components.map(component =>
+                    html`<${InputComponentRow} component=${component} totalBytes=${totalBytes} />`)}
+                  <div class="flex items-center gap-2 text-2xs font-mono v2-monitoring-row">
+                    <span class="text-[var(--color-fg-muted)]">합계 ${formatComponentBytes(totalBytes)}</span>
+                    ${record.request_body_bytes != null
+                      ? html`<span class="text-[var(--color-fg-disabled)]">· wire ${formatComponentBytes(record.request_body_bytes)} (방언 투영 후 실제 요청 본문)</span>`
+                      : null}
+                  </div>
+                </div>
+              `
+            })()
+          : null}
         <div>
           <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)] mb-1">
             이전 턴 대비

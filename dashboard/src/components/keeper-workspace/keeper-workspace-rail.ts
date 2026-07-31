@@ -39,6 +39,7 @@ import {
   runtimeCatalogRequestConfig,
 } from '../../lib/runtime-provider-summary'
 import { formatContextTokens } from '../../lib/format-number'
+import { formatTimeAgo } from '../../lib/format-time'
 import { persistentSignal } from '../../lib/persistent-signal'
 import { recordManualCompaction } from './compaction-snapshots'
 import type { MemoryKeeper } from '../memory-inspector'
@@ -390,6 +391,21 @@ function ContextSection({
   const compactionCount = keeper.compaction_count ?? null
   const hasCompactionHistory = typeof compactionCount === 'number' && compactionCount > 0
   const hasMeterData = pct !== null && (pct > 0 || max !== null)
+  // Provenance of the measurement: which completed turn produced the numbers
+  // (server projects them from the newest TurnRecord — the measurement SSOT).
+  const ctxSource = keeper.context_source ?? keeper.context?.source ?? null
+  const ctxAbsoluteTurn = keeper.context?.absolute_turn ?? null
+  const ctxObservedAt = keeper.context?.observed_at ?? null
+  const ctxWireBytes = keeper.context?.request_body_bytes ?? null
+  const ctxTurnRef = keeper.context?.turn_ref ?? null
+  const ctxUnavailableReason =
+    keeper.context_metrics_unavailable?.kind === 'not_observed'
+      ? keeper.context_metrics_unavailable.reason
+      : null
+  const wireLabel =
+    typeof ctxWireBytes === 'number' && Number.isFinite(ctxWireBytes) && ctxWireBytes > 0
+      ? `${Math.round(ctxWireBytes / 1024)}KB`
+      : null
   const compactAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   const canCompact = compactAccess.allowed && !compacting
   const compactReason = compactAccess.reason ?? '컴팩션 실행 권한이 필요합니다.'
@@ -482,13 +498,23 @@ function ContextSection({
                 ><span style=${{ width: `${pct ?? 0}%` }}></span></div>
               </div>
             `
-          : html`<div class="ctx-empty" data-missing="context-window"><strong>윈도우 사용률 미수신</strong><span>런타임이 전체 윈도우 총량을 아직 보내지 않았습니다.</span></div>`}
+          : html`<div class="ctx-empty" data-missing="context-window"><strong>윈도우 사용률 미측정</strong><span>${ctxUnavailableReason
+                ? html`턴 레코드 기준 측정 불가: <span class="mono">${ctxUnavailableReason}</span>`
+                : '측정된 턴 레코드가 아직 없습니다.'}</span></div>`}
         <div class="ctx-tok">
           <span class="mono">${tokens ?? '—'}</span>
           <span class="ctx-tok-sep">/</span>
           <span class="mono ctx-tok-full">${maxLabel ?? '—'}</span>
           <span class="ctx-tok-lbl">사용 / 전체 윈도우</span>
         </div>
+        ${ctxSource === 'turn_record'
+          ? html`<div class="ctx-src" data-testid="ctx-provenance" title=${ctxTurnRef ?? undefined}>
+              측정: <span class="mono">T${ctxAbsoluteTurn ?? '—'}</span>
+              ${ctxObservedAt ? html` · ${formatTimeAgo(ctxObservedAt)}` : null}
+              ${wireLabel ? html` · wire <span class="mono">${wireLabel}</span>` : null}
+              <span class="ctx-src-lbl">다음 입력에 함께 실리는 상비 페이로드</span>
+            </div>`
+          : null}
         <div class="cmp-actions">
           <button
             type="button"

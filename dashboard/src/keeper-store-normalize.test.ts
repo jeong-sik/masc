@@ -101,6 +101,83 @@ describe('normalizeKeepers phase field', () => {
   })
 })
 
+describe('normalizeKeepers context measurement', () => {
+  it('decodes context numbers declared by the turn_record projection', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'rondo',
+        status: 'active',
+        context_ratio: 0.504435,
+        context_tokens: 100887,
+        context_max: 200000,
+        context_source: 'turn_record',
+        context_metrics_unavailable: null,
+        context: {
+          source: 'turn_record',
+          context_ratio: 0.504435,
+          context_tokens: 100887,
+          context_max: 200000,
+          observed_at: '2026-07-31T12:37:20Z',
+          turn_ref: 'trace-1785189111911-00004#3337',
+          absolute_turn: 3337,
+          request_body_bytes: 402408,
+        },
+      },
+    ])
+
+    expect(keeper?.context_tokens).toBe(100887)
+    expect(keeper?.context_max).toBe(200000)
+    expect(keeper?.context_ratio).toBeCloseTo(0.504435)
+    expect(keeper?.context_source).toBe('turn_record')
+    expect(keeper?.context?.turn_ref).toBe('trace-1785189111911-00004#3337')
+    expect(keeper?.context?.absolute_turn).toBe(3337)
+    expect(keeper?.context?.request_body_bytes).toBe(402408)
+    expect(keeper?.context?.observed_at).toBe('2026-07-31T12:37:20Z')
+  })
+
+  it('keeps numbers null under a retired or unknown context source', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'sojin',
+        status: 'active',
+        context_ratio: 0.13,
+        context_tokens: 16312,
+        context_max: 128000,
+        context_source: 'keeper_context_status',
+        context: {
+          source: 'keeper_context_status',
+          context_tokens: 16312,
+          context_max: 128000,
+        },
+      },
+    ])
+
+    expect(keeper?.context_tokens).toBeNull()
+    expect(keeper?.context_max).toBeNull()
+    expect(keeper?.context_ratio).toBeNull()
+    expect(keeper?.context_source).toBeNull()
+    expect(keeper?.context?.context_tokens).toBeNull()
+    expect(keeper?.context?.source).toBeNull()
+  })
+
+  it('passes through the new typed absence reasons', () => {
+    for (const reason of [
+      'turn_record_undecodable',
+      'turn_record_read_failed',
+      'turn_record_without_usage',
+    ]) {
+      const [keeper] = normalizeKeepers([
+        {
+          name: 'rondo',
+          status: 'active',
+          context_metrics_unavailable: { kind: 'not_observed', reason },
+        },
+      ])
+      expect(keeper?.context_metrics_unavailable).toEqual({ kind: 'not_observed', reason })
+    }
+  })
+})
+
 describe('normalizeKeepers lifecycle metrics', () => {
   it('drops retired compaction policy fields', () => {
     const [keeper] = normalizeKeepers([

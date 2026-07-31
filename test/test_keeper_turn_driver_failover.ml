@@ -1119,6 +1119,81 @@ let test_attempt_loop_overflow_on_last_candidate_is_terminal () =
     [ "small.test_model"; "smaller.test_model" ]
     !attempts
 
+(* #26530: an overflow on an earlier candidate must survive lane exhaustion.
+   Live incident 2026-07-31: glm overflowed, the ollama fallback then failed
+   with a rate limit, the lane returned that rate limit, the keeper FSM never
+   entered the overflowed phase, and compaction never fired while every cycle
+   replayed the same oversized checkpoint. *)
+let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
+  let attempts = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [ runtime_id ];
+        match candidate with
+        | "small.test_model" ->
+          Error (context_overflow_error "prompt exceeds context window"), None
+        | "fallback.test_model" ->
+          ( Error
+              (Agent_sdk.Error.Api
+                 (Agent_sdk.Retry.RateLimited
+                    { retry_after = None; message = "weekly usage limit" }))
+          , None )
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "small.test_model"; "fallback.test_model" ]
+  in
+  (match result with
+   | Ok _ -> Alcotest.fail "expected exhausted lane"
+   | Error err ->
+     Alcotest.(check bool)
+       "typed overflow outranks the fallback rate limit"
+       true
+       (Masc.Keeper_error_classify.is_context_overflow err));
+  Alcotest.(check (list string))
+    "both candidates attempted"
+    [ "small.test_model"; "fallback.test_model" ]
+    !attempts
+
+(* Overflow precedence applies only to an exhausted lane: a walk stopped
+   mid-lane by a non-retryable error keeps that stopping error, which is the
+   immediate operator signal. *)
+let test_attempt_loop_midwalk_terminal_outranks_observed_overflow () =
+  let attempts = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [ runtime_id ];
+        match candidate with
+        | "small.test_model" ->
+          Error (context_overflow_error "prompt exceeds context window"), None
+        | "broken.test_model" ->
+          Error (Agent_sdk.Error.Internal "hard mid-lane failure"), None
+        | other ->
+          Alcotest.failf "walk must stop before candidate %s" other)
+      [ "small.test_model"; "broken.test_model"; "fallback.test_model" ]
+  in
+  (match result with
+   | Ok _ -> Alcotest.fail "expected mid-lane stop"
+   | Error (Agent_sdk.Error.Internal msg) ->
+     Alcotest.(check string)
+       "stopping error preserved"
+       "hard mid-lane failure"
+       msg
+   | Error e ->
+     Alcotest.failf
+       "expected stopping Internal error, got %s"
+       (Agent_sdk.Error.to_string e));
+  Alcotest.(check (list string))
+    "walk stopped at the terminal candidate"
+    [ "small.test_model"; "broken.test_model" ]
+    !attempts
+
 let test_checkpoint_denial_defers_exact_frozen_suffix_once () =
   let attempts = ref [] in
   let deferred = ref [] in
@@ -1389,6 +1464,14 @@ let () =
             "context overflow on last candidate stays terminal"
             `Quick
             test_attempt_loop_overflow_on_last_candidate_is_terminal;
+          Alcotest.test_case
+            "lane exhaustion preserves earlier overflow"
+            `Quick
+            test_attempt_loop_exhaustion_preserves_earlier_overflow;
+          Alcotest.test_case
+            "mid-lane terminal outranks observed overflow"
+            `Quick
+            test_attempt_loop_midwalk_terminal_outranks_observed_overflow;
           Alcotest.test_case
             "checkpoint denial defers exact frozen suffix once"
             `Quick

@@ -162,11 +162,26 @@ let attempt_runtime_candidates
        ?decision:Yojson.Safe.t ->
        Keeper_runtime_manifest.event_kind ->
        unit) ~run_attempt candidates =
-  let rec loop idx = function
+  (* A typed overflow observed on any candidate is a fact about this turn's
+     input, not about whichever candidate happened to fail last. When the
+     lane ends on a different recoverable error (for example a rate-limited
+     fallback), returning that last error hides the overflow from
+     [context_overflow_event_of_error], the keeper never enters the
+     overflowed phase, and compaction never fires while every cycle repeats
+     the same oversized input (#26530). Remember the first typed overflow
+     and let it represent a naturally exhausted lane. A lane that stops on a
+     non-recoverable error keeps that error: it is the immediate operator
+     signal, and the overflow will be observed again on the next cycle. *)
+  let rec loop ~observed_overflow idx = function
     | [] ->
-      Error
-        (Agent_sdk.Error.Internal
-           (Printf.sprintf "runtime lane %S exhausted all candidates" runtime_id))
+      (match observed_overflow with
+       | Some overflow_error -> Error overflow_error
+       | None ->
+         Error
+           (Agent_sdk.Error.Internal
+              (Printf.sprintf
+                 "runtime lane %S exhausted all candidates"
+                 runtime_id)))
     | candidate :: rest ->
       let is_last = rest = [] in
       let attempt_runtime_id = runtime_id_of candidate in
@@ -216,8 +231,27 @@ let attempt_runtime_candidates
              ~allow_accept_no_progress_retry
              error
          in
+         let observed_overflow =
+           match observed_overflow with
+           | Some _ -> observed_overflow
+           | None ->
+             if
+               Keeper_turn_driver_try_runtime.context_overflow_should_try_next
+                 error
+             then Some error
+             else None
+         in
          if retry_admitted && retryable_with_input_authority
-         then loop (idx + 1) rest
+         then loop ~observed_overflow (idx + 1) rest
+         else if is_last
+         then (
+           (* Lane fully exhausted: an overflow seen anywhere in the rotation
+              outranks the last candidate's error so the reactive compaction
+              trigger fires. Cascade telemetry already published each
+              candidate's own error. *)
+           match observed_overflow with
+           | Some overflow_error -> Error overflow_error
+           | None -> Error error)
          else (
            (match retryable_with_input_authority, rest with
             | true, next :: later ->
@@ -231,7 +265,7 @@ let attempt_runtime_candidates
             | false, _ | true, [] -> ());
            Error error))
   in
-  loop 0 candidates
+  loop ~observed_overflow:None 0 candidates
 
 let runtime_candidate_missing_error id =
   Agent_sdk.Error.Internal

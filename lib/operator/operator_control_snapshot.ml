@@ -363,6 +363,8 @@ let keepers_json
                       Keeper_context_observation_projection.context_fields
                         ~config
                         ~keeper_name:meta.name
+                        ~current_trace_id:
+                          (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                     in
                     let runtime_trust =
                       let t_trust = Time_compat.now () in

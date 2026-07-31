@@ -623,6 +623,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
             Keeper_context_observation_projection.context_fields
               ~config
               ~keeper_name:m.name
+              ~current_trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
           in
 	          let summary =
               let trust_json =

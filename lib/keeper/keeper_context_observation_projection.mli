@@ -13,6 +13,7 @@ val missing_context_fields :
 val context_fields :
   config:Workspace.config ->
   keeper_name:string ->
+  current_trace_id:string ->
   (string * Yojson.Safe.t) list
 (** Context occupancy projected from the keeper's newest TurnRecord
     (RFC-0233), the measurement SSOT: [context_tokens] is the
@@ -21,14 +22,19 @@ val context_fields :
     the nested ["context"] object carries provenance ([turn_ref],
     [observed_at], [request_body_bytes]).
 
-    Display-only: the projection must never feed context pressure or
-    compaction decisions. It reads only the dated-JSONL tail (one line),
-    never checkpoints. Absence stays typed via
-    [context_metrics_unavailable] with a closed reason set:
+    Observation-only: no runtime consumer may derive context-pressure or
+    compaction decisions from these fields; dashboard triage surfaces
+    (bands, ordering, health counts) render them. It reads only the
+    dated-JSONL tail (one strict line), never checkpoints. Absence stays
+    typed via [context_metrics_unavailable] with a closed reason set:
     [context_measurement_missing] (no record),
-    [turn_record_undecodable] (newest line rejected by the strict codec),
-    [turn_record_read_failed] (store IO failed, warn-logged),
-    [turn_record_without_usage] (turn completed without provider usage). *)
+    [turn_record_undecodable] (newest line is not valid JSON or rejects
+    the strict codec, warn-logged),
+    [turn_record_read_failed] (store IO or listing failed, warn-logged),
+    [turn_record_without_usage] (turn completed without provider usage),
+    [turn_record_trace_mismatch] (newest row belongs to a previous trace
+    identity — a reseeded keeper stays typed-absent until its first
+    completed turn). *)
 
 val last_turn_usage_json_of_meta :
   Keeper_meta_contract.keeper_meta -> Yojson.Safe.t

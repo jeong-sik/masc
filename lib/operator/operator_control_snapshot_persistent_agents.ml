@@ -59,11 +59,19 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                  ; "updated_at", field_or_null "updated_at"
                  ; "created_at", field_or_null "created_at"
                  ]
-                 (* Rows here re-project a persisted snapshot verbatim
-                    (field_or_null over stored JSON); reading live
-                    turn-record stores would mix a live measurement into a
-                    persisted view, so context stays typed-absent. *)
-                 @ Keeper_context_observation_projection.missing_context_fields ()
+                 (* Lossless filter (module contract): keeper_rows is the
+                    freshly computed keepers projection, so the measured
+                    context fields forward verbatim like every other field —
+                    synthesizing typed absence here would contradict the
+                    canonical row and trip false diagnostics. *)
+                 @ [ "context_ratio", field_or_null "context_ratio"
+                   ; "context_tokens", field_or_null "context_tokens"
+                   ; "context_max", field_or_null "context_max"
+                   ; "context_source", field_or_null "context_source"
+                   ; ( "context_metrics_unavailable"
+                     , field_or_null "context_metrics_unavailable" )
+                   ; "context", field_or_null "context"
+                   ]
                  @ [ "last_turn_usage", field_or_null "last_turn_usage" ]))
          | _ -> None)
       | _ -> None)
@@ -128,6 +136,8 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                     @ Keeper_context_observation_projection.context_fields
                         ~config
                         ~keeper_name:meta.name
+                        ~current_trace_id:
+                          (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                     @ [ ( "last_turn_usage"
                         , Keeper_context_observation_projection
                           .last_turn_usage_json

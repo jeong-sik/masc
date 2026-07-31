@@ -141,6 +141,7 @@ let handle_keeper_list ctx args : tool_result =
             @ Keeper_context_observation_projection.context_fields
                 ~config:ctx.config
                 ~keeper_name:m.name
+                ~current_trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
             @ [
               ( "last_turn_usage"
               , Keeper_context_observation_projection.last_turn_usage_json

@@ -65,11 +65,26 @@ let new_claim ?(claim = "add C") () =
     ]
 ;;
 
-let selection_json ?(retained = [ current_a_id ]) ?(new_claims = []) () =
+let dropped_json ?(reason = "superseded by newer state") id =
+  `Assoc
+    [ Librarian.wire_field_memory_id, `String id
+    ; Librarian.wire_field_reason, `String reason
+    ]
+;;
+
+(* Defaults keep the totality contract satisfied for the default input:
+   current = [A; B], retained = [A], so B must carry a drop statement. *)
+let selection_json
+      ?(retained = [ current_a_id ])
+      ?(new_claims = [])
+      ?(dropped = [ dropped_json current_b_id ])
+      ()
+  =
   `Assoc
     [ Librarian.wire_field_retained_memory_ids
     , `List (List.map (fun id -> `String id) retained)
     ; Librarian.wire_field_new_claims, `List new_claims
+    ; Librarian.wire_field_dropped, `List dropped
     ]
 ;;
 
@@ -84,7 +99,15 @@ let test_omission_deletes_and_retention_preserves_exact_fact () =
   | Ok selection ->
     check (list string) "retained ids" [ current_a_id ] selection.retained_memory_ids;
     check int "one fact remains" 1 (List.length selection.facts);
-    check string "exact retained claim" current_a.claim (List.hd selection.facts).claim
+    check string "exact retained claim" current_a.claim (List.hd selection.facts).claim;
+    check (list string) "drop statement names B"
+      [ current_b_id ]
+      (List.map
+         (fun (d : Memory.dropped_statement) -> d.memory_id)
+         selection.dropped);
+    check string "drop statement carries the reason"
+      "superseded by newer state"
+      (List.hd selection.dropped).reason
 ;;
 
 let test_new_claim_is_materialized_after_retained_facts () =
@@ -126,11 +149,12 @@ let test_new_claim_cannot_collide_with_retained_identity () =
   | Ok _ -> fail "retained/new identity collision accepted"
 ;;
 
-let test_new_claim_cannot_recreate_omitted_current_identity () =
+let test_new_claim_cannot_recreate_dropped_current_identity () =
   match
     parse
       (selection_json
          ~retained:[]
+         ~dropped:[ dropped_json current_a_id; dropped_json current_b_id ]
          ~new_claims:[ new_claim ~claim:"keep A" () ]
          ())
   with
@@ -138,9 +162,73 @@ let test_new_claim_cannot_recreate_omitted_current_identity () =
     when String.equal identity current_a_id -> ()
   | Error error ->
     failf
-      "wrong omitted-current collision error: %s"
+      "wrong dropped-current collision error: %s"
       (Librarian.parse_error_to_string error)
-  | Ok _ -> fail "omitted current identity was recreated as a new claim"
+  | Ok _ -> fail "dropped current identity was recreated as a new claim"
+;;
+
+let test_totality_rejects_unaccounted_current_id () =
+  (match parse (selection_json ~dropped:[] ()) with
+   | Error (Librarian.Missing_disposition identity)
+     when String.equal identity current_b_id -> ()
+   | Error error ->
+     failf "wrong totality error: %s" (Librarian.parse_error_to_string error)
+   | Ok _ -> fail "unaccounted current id accepted");
+  match
+    parse
+      (`Assoc
+         [ Librarian.wire_field_retained_memory_ids
+         , `List [ `String current_a_id ]
+         ; Librarian.wire_field_new_claims, `List []
+         ])
+  with
+  | Error Librarian.Missing_required_fields -> ()
+  | Error error ->
+    failf
+      "wrong missing-dropped-field error: %s"
+      (Librarian.parse_error_to_string error)
+  | Ok _ -> fail "selection without dropped field accepted"
+;;
+
+let test_dropped_statements_validate () =
+  (match
+     parse (selection_json ~dropped:[ dropped_json "missing" ] ())
+   with
+   | Error (Librarian.Unknown_dropped_memory_id "missing") -> ()
+   | Error error ->
+     failf "wrong unknown-dropped error: %s" (Librarian.parse_error_to_string error)
+   | Ok _ -> fail "unknown dropped id accepted");
+  (match
+     parse
+       (selection_json
+          ~dropped:[ dropped_json current_b_id; dropped_json current_b_id ]
+          ())
+   with
+   | Error (Librarian.Duplicate_dropped_memory_id identity)
+     when String.equal identity current_b_id -> ()
+   | Error error ->
+     failf "wrong duplicate-dropped error: %s" (Librarian.parse_error_to_string error)
+   | Ok _ -> fail "duplicate dropped id accepted");
+  (match
+     parse
+       (selection_json
+          ~dropped:[ dropped_json current_a_id; dropped_json current_b_id ]
+          ())
+   with
+   | Error (Librarian.Dropped_memory_id_also_retained identity)
+     when String.equal identity current_a_id -> ()
+   | Error error ->
+     failf "wrong dropped-retained overlap error: %s"
+       (Librarian.parse_error_to_string error)
+   | Ok _ -> fail "dropped id overlapping retained accepted");
+  match
+    parse
+      (selection_json ~dropped:[ dropped_json ~reason:"  " current_b_id ] ())
+  with
+  | Error Librarian.Dropped_schema_mismatch -> ()
+  | Error error ->
+    failf "wrong blank-reason error: %s" (Librarian.parse_error_to_string error)
+  | Ok _ -> fail "blank drop reason accepted"
 ;;
 
 let test_strict_json_boundary () =
@@ -319,8 +407,12 @@ let () =
             test_unknown_and_duplicate_retained_ids_reject
         ; test_case "retained/new collision rejects" `Quick
             test_new_claim_cannot_collide_with_retained_identity
-        ; test_case "omitted/new recreation rejects" `Quick
-            test_new_claim_cannot_recreate_omitted_current_identity
+        ; test_case "dropped/new recreation rejects" `Quick
+            test_new_claim_cannot_recreate_dropped_current_identity
+        ; test_case "totality rejects unaccounted id" `Quick
+            test_totality_rejects_unaccounted_current_id
+        ; test_case "dropped statements validate" `Quick
+            test_dropped_statements_validate
         ; test_case "strict JSON boundary" `Quick test_strict_json_boundary
         ; test_case "duplicate object fields reject" `Quick
             test_duplicate_object_fields_reject

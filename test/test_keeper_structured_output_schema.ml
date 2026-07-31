@@ -177,6 +177,27 @@ let test_librarian_claim_schema_is_closed () =
     (allows_additional_properties claim_schema)
 ;;
 
+let test_librarian_dropped_schema_is_closed () =
+  let schema = Keeper_structured_output_schema.librarian_current_output_schema in
+  check
+    (list string)
+    "librarian top-level required fields"
+    (List.sort String.compare Keeper_librarian.wire_current_fields)
+    (required_strings schema);
+  let dropped_schema =
+    schema
+    |> schema_property Keeper_librarian.wire_field_dropped
+    |> schema_items
+  in
+  check
+    (list string)
+    "librarian dropped required fields"
+    (List.sort String.compare Keeper_librarian.wire_dropped_fields)
+    (required_strings dropped_schema);
+  check bool "librarian dropped schema is closed" false
+    (allows_additional_properties dropped_schema)
+;;
+
 (* The reviewer config must reach json_object-only providers. Counterfactual
    first: a native schema request on a Glm-kind config is rejected by the OAS
    contract — that rejection is exactly what left every task nonterminal
@@ -345,6 +366,10 @@ let () =
             "minimal claim fields remain required"
             `Quick
             test_librarian_claim_schema_is_closed
+        ; test_case
+            "dropped statements are required and closed"
+            `Quick
+            test_librarian_dropped_schema_is_closed
         ] )
     ; ( "verdict schemas"
       , [ test_case

@@ -25,15 +25,23 @@ type input =
 type selection =
   { retained_memory_ids : string list
   ; new_claims : Keeper_memory_os_types.fact list
+  ; dropped : Keeper_memory_os_types.dropped_statement list
+    (** One statement per dropped current memory. Totality is enforced:
+        every current identity appears in [retained_memory_ids] or here,
+        so [Missing_disposition] replaces silent forgetting. *)
   ; facts : Keeper_memory_os_types.fact list
   }
 
 val wire_field_retained_memory_ids : string
 val wire_field_new_claims : string
+val wire_field_dropped : string
 val wire_field_claim : string
 val wire_field_category : string
+val wire_field_memory_id : string
+val wire_field_reason : string
 val wire_current_fields : string list
 val wire_claim_fields : string list
+val wire_dropped_fields : string list
 
 val prompt_variables : input -> (string * string) list
 
@@ -43,9 +51,14 @@ type parse_error =
   | Duplicate_field of string
   | Missing_required_fields
   | Claim_schema_mismatch
+  | Dropped_schema_mismatch
   | Unknown_retained_memory_id of string
   | Duplicate_retained_memory_id of string
   | Duplicate_selected_memory_id of string
+  | Unknown_dropped_memory_id of string
+  | Duplicate_dropped_memory_id of string
+  | Dropped_memory_id_also_retained of string
+  | Missing_disposition of string
 
 val parse_error_to_string : parse_error -> string
 

@@ -36,7 +36,8 @@ type t =
 val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
 (** Append-only sidecar recording one line per committed snapshot
-    ([recorded_at]/[revision]/[source]/[change]). The resulting fact count
+    ([recorded_at]/[revision]/[source]/[change], plus [dropped] when the
+    writer supplied drop-reason statements). The resulting fact count
     is derivable as [change.retained + length change.added] and is
     deliberately not duplicated. Written on every successful
     [replace]/[upsert_fact] commit; never read on the turn path. *)
@@ -49,6 +50,7 @@ val read_for_keepers_dir :
 
 val replace
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?dropped_statements:Keeper_memory_os_types.dropped_statement list
   -> keepers_dir:string
   -> keeper_id:string
   -> expected_revision:int option
@@ -61,7 +63,13 @@ val replace
     still equals [expected_revision]. Duplicate fact identities reject before
     writing. Existing state must parse as the exact current schema; malformed,
     non-current, or concurrently changed state fails closed and is not
-    overwritten. *)
+    overwritten.
+
+    [dropped_statements], when present, is the writer's own account of every
+    drop in this commit (the librarian's totality output) and is recorded on
+    the journal line only — the snapshot codec never stores it. Omission
+    means the writer makes no drop-reason statements, not that nothing was
+    dropped. *)
 
 val upsert_fact
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t

@@ -9,10 +9,26 @@
 val wire_field_claim : string
 val wire_field_category : string
 val wire_field_first_seen : string
+val wire_field_memory_id : string
+val wire_field_reason : string
 
 (** Claim-object fields accepted from the librarian and rendered in retry
     prompts. *)
 val wire_librarian_claim_fields : string list
+
+(** Dropped-statement object fields accepted from the librarian. *)
+val wire_librarian_dropped_fields : string list
+
+(** The librarian's explicit reason for dropping one existing memory.
+    [memory_id] names a fact in the current snapshot; [reason] is one
+    non-empty sentence. Statements ride the journal line of the commit
+    they explain; the snapshot codec never stores them. *)
+type dropped_statement =
+  { memory_id : string
+  ; reason : string
+  }
+
+val dropped_statement_to_json : dropped_statement -> Yojson.Safe.t
 
 (** Librarian taxonomy as a closed sum. Labels outside the current vocabulary
     reject at the producer and persistence boundaries. Categories are model

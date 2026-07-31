@@ -69,6 +69,91 @@ let resolve_active_goal_ids config p old_ids =
           (Printf.sprintf "unknown active_goal_ids: %s"
              (String.concat ", " missing))
 
+let turn_in_flight_rejection ~keeper_name
+    (info : Keeper_turn_admission.in_flight_info) : tool_result =
+  tool_result_error_data
+    ~class_:Tool_result.Workflow_rejection
+    (`Assoc
+       [ "error", `String "keeper_turn_in_flight"
+       ; "keeper", `String keeper_name
+       ; ( "block"
+         , Keeper_turn_admission.autonomous_block_to_yojson
+             (Keeper_turn_admission.Turn_busy (Some info)) )
+       ; "metadata_committed", `Bool true
+       ; ( "message"
+         , `String
+             "keeper metadata was updated but the keepalive lane was not \
+              restarted: a turn holds this keeper's slot. A keeper's own \
+              turn always holds the slot, so masc_keeper_up cannot restart \
+              its caller from inside that turn. Retry masc_keeper_up when \
+              the keeper is idle to restart the lane." )
+       ])
+;;
+
+(* The lane swap tears down the registry entry a live turn's finalize path
+   still needs: a swap that raced an admitted turn left that turn's slot
+   permanently held after its provider run completed (#26542 — a keeper
+   calling masc_keeper_up on itself mid-turn locked itself out of every
+   subsequent turn until process restart). The swap therefore requires an
+   idle turn slot, enforced with the same admission fence the shutdown
+   path uses:
+
+   - [begin_shutdown] fences new admissions and samples the current holder
+     in one critical section; a published holder rejects the swap (typed,
+     no waiting) — a keeper's own turn always holds the slot, so a
+     mid-turn self keeper_up lands on that rejection by construction.
+   - A holder that acquired the slot but has not yet published bounces at
+     its publish-time fence check without running a turn body, so the
+     fenced swap window stays turn-free.
+   - The fence is rolled back before [start_keepalive]:
+     [commit_registration_if_open] refuses lane registration under any
+     fence.
+   - [Shutdown_already_reserved] with an idle slot proceeds without a
+     fence of our own: that is the durable blocked-shutdown supersession
+     path (metadata commit takes ownership of the foreign fence), and the
+     concurrent-update race it also matches is absorbed by the existing
+     launch-conflict arm. *)
+let swap_keepalive_lane_fenced (ctx : _ context) (updated : keeper_meta)
+  : (joined_stop_result * start_keepalive_outcome, tool_result) result =
+  let base_path = ctx.config.base_path in
+  let keeper_name = updated.name in
+  let rollback ~operation_id =
+    match
+      Keeper_turn_admission.rollback_shutdown
+        ~base_path
+        ~keeper_name
+        ~operation_id
+    with
+    | Keeper_turn_admission.Shutdown_rolled_back
+    | Keeper_turn_admission.Shutdown_not_reserved
+    | Keeper_turn_admission.Shutdown_reserved_by_other _ -> ()
+  in
+  let swap () = stop_keepalive_and_await ~base_path keeper_name in
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  match
+    Keeper_turn_admission.begin_shutdown ~base_path ~keeper_name ~operation_id
+  with
+  | Keeper_turn_admission.Shutdown_reserved { in_flight = Some info; _ } ->
+    rollback ~operation_id;
+    Error (turn_in_flight_rejection ~keeper_name info)
+  | Keeper_turn_admission.Shutdown_already_reserved
+      { in_flight = Some info; _ } ->
+    Error (turn_in_flight_rejection ~keeper_name info)
+  | Keeper_turn_admission.Shutdown_reserved { in_flight = None; _ } ->
+    let stop_outcome =
+      match swap () with
+      | outcome ->
+        rollback ~operation_id;
+        outcome
+      | exception exn ->
+        rollback ~operation_id;
+        raise exn
+    in
+    Ok (stop_outcome, start_keepalive ctx updated)
+  | Keeper_turn_admission.Shutdown_already_reserved { in_flight = None; _ } ->
+    Ok (swap (), start_keepalive ctx updated)
+;;
+
 let update_keeper ?(preserve_prompt_defaults = false)
     (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result
     =
@@ -296,12 +381,9 @@ let update_keeper ?(preserve_prompt_defaults = false)
                   durable, so the keepalive restart below delivers it on the
                   new fiber's first cycle. Removals never wake. *)
                enqueue_goal_assignment_wakes updated;
-               let stop_outcome =
-                 stop_keepalive_and_await
-                   ~base_path:ctx.config.base_path
-                   updated.name
-               in
-               let launch_outcome = start_keepalive ctx updated in
+               (match swap_keepalive_lane_fenced ctx updated with
+                | Error rejection -> rejection
+                | Ok (stop_outcome, launch_outcome) ->
                (match launch_outcome with
                 | Keepalive_started _ ->
                   tool_result_ok_data (Keeper_meta_json.meta_to_json updated)
@@ -326,4 +408,4 @@ let update_keeper ?(preserve_prompt_defaults = false)
                   tool_result_error
                     (Printf.sprintf
                        "keeper metadata was updated but lane restart failed: %s"
-                       (start_keepalive_outcome_to_string rejected))))))))
+                       (start_keepalive_outcome_to_string rejected)))))))))

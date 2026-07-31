@@ -1734,6 +1734,110 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
            stopped_name
           : Masc.Keeper_keepalive.joined_stop_result))
 
+let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir "update-turn-in-flight" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "tester")
+      in
+      let name = "update-turn-in-flight" in
+      let meta = make_meta name in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let profile_defaults =
+        { Keeper_profile_defaults.empty_keeper_profile_defaults with
+          sandbox_profile = Some meta.sandbox_profile
+        }
+      in
+      let parsed : Turn_up_args.parsed_args =
+        { name
+        ; runtime_id_opt = None
+        ; allowed_paths_opt = None
+        ; autoboot_enabled_opt = None
+        ; mention_targets_opt = None
+        ; active_goal_ids_opt = None
+        ; max_context_override_opt = None
+        ; max_context_override_present = false
+        ; proactive_enabled_opt = None
+        ; sandbox_profile_opt = None
+        ; network_mode_opt = None
+        ; persona_name_opt = None
+        ; instructions_arg = Some "rejected mid-turn intent"
+        ; profile_defaults
+        ; instructions_opt = profile_defaults.instructions
+        }
+      in
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = "tester"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = None
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.non_runtime_publication_recovery_provider
+        }
+      in
+      (* A keeper's own turn holds the slot while its tools run: invoking
+         the update from inside the admitted closure reproduces the
+         mid-turn self masc_keeper_up of #26542 structurally. *)
+      (match
+         Masc.Keeper_turn_admission.run_if_free
+           ~base_path:config.base_path
+           ~keeper_name:name
+           (fun () -> Turn_up_update.update_keeper ctx parsed meta)
+       with
+       | `Busy _ -> fail "turn slot unexpectedly busy before the test turn"
+       | `Ran result ->
+         check bool "mid-turn update is rejected" false
+           (Keeper_types_profile.tool_result_success result);
+         let data = Tool_result.data result in
+         check (option string) "rejection is typed"
+           (Some "keeper_turn_in_flight")
+           (Json_util.get_string data "error");
+         let mid_turn_snapshot =
+           Masc.Keeper_turn_admission.snapshot_for
+             ~base_path:config.base_path
+             ~keeper_name:name
+         in
+         check bool "rejection rolls the fence back inside the turn" true
+           (Option.is_none mid_turn_snapshot.snapshot_shutdown_operation_id));
+      let after =
+        match Keeper_meta_store.read_meta config name with
+        | Ok (Some after) -> after
+        | Ok None -> fail "keeper metadata disappeared"
+        | Error detail -> fail detail
+      in
+      check string "metadata commit preceded the rejection"
+        "rejected mid-turn intent"
+        after.instructions;
+      let idle_snapshot =
+        Masc.Keeper_turn_admission.snapshot_for
+          ~base_path:config.base_path
+          ~keeper_name:name
+      in
+      check bool "no shutdown fence remains after the turn" true
+        (Option.is_none idle_snapshot.snapshot_shutdown_operation_id);
+      check bool "turn slot is idle after the turn" true
+        (Option.is_none idle_snapshot.snapshot_in_flight);
+      let retry = Turn_up_update.update_keeper ctx parsed after in
+      check bool "idle update restarts the lane" true
+        (Keeper_types_profile.tool_result_success retry);
+      ignore
+        (Masc.Keeper_keepalive.stop_keepalive_and_await
+           ~base_path:config.base_path
+           name
+          : Masc.Keeper_keepalive.joined_stop_result))
+
 let test_keeper_shutdown_store_isolates_corrupt_owner () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -3900,6 +4004,8 @@ let () =
         test_keeper_shutdown_store_round_trip_and_identity_guard;
       test_case "operator update supersedes exact blocked shutdown" `Quick
         test_operator_update_supersedes_exact_blocked_shutdown;
+      test_case "update rejects lane swap while turn in flight" `Quick
+        test_update_keeper_rejects_lane_swap_while_turn_in_flight;
       test_case "shutdown store isolates corrupt owner" `Quick
         test_keeper_shutdown_store_isolates_corrupt_owner;
       test_case "retired stale paused terminal releases exact fence" `Quick

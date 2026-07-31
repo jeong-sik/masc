@@ -19,6 +19,8 @@ let digest_of_label label =
   Digestif.SHA256.digest_string label |> Digestif.SHA256.to_hex
 ;;
 
+let sample_trace = "trace-1780648779957-00000"
+
 let sample_record
       ?(absolute_turn = 4071)
       ?(input_tokens = Some 18_000)
@@ -28,10 +30,9 @@ let sample_record
   =
   { execution_ids = []
   ; keeper = "rondo"
-  ; trace_id = "trace-1780648779957-00000"
+  ; trace_id = sample_trace
   ; absolute_turn
-  ; turn_ref =
-      Ids.Turn_ref.make ~trace_id:"trace-1780648779957-00000" ~absolute_turn
+  ; turn_ref = Ids.Turn_ref.make ~trace_id:sample_trace ~absolute_turn
   ; blocks =
       [ { Turn_record.block = Prompt_block_id.Persona
         ; bytes = 4
@@ -109,7 +110,7 @@ let check_not_observed fields ~reason =
 
 let test_missing_store_is_typed_absence () =
   with_temp_workspace (fun config ->
-    let fields = Projection.context_fields ~config ~keeper_name:"nobody" in
+    let fields = Projection.context_fields ~config ~keeper_name:"nobody" ~current_trace_id:sample_trace in
     check_not_observed fields ~reason:"context_measurement_missing")
 ;;
 
@@ -117,7 +118,7 @@ let test_measured_record_projects () =
   with_temp_workspace (fun config ->
     let record = sample_record () in
     append_record config record;
-    let fields = Projection.context_fields ~config ~keeper_name:"rondo" in
+    let fields = Projection.context_fields ~config ~keeper_name:"rondo" ~current_trace_id:sample_trace in
     (match field fields "context_tokens" with
      | `Int tokens -> check int "tokens" 18_000 tokens
      | _ -> fail "context_tokens is not an int");
@@ -154,7 +155,7 @@ let test_newest_record_wins () =
   with_temp_workspace (fun config ->
     append_record config (sample_record ~absolute_turn:1 ~input_tokens:(Some 100) ());
     append_record config (sample_record ~absolute_turn:2 ~input_tokens:(Some 200) ());
-    let fields = Projection.context_fields ~config ~keeper_name:"rondo" in
+    let fields = Projection.context_fields ~config ~keeper_name:"rondo" ~current_trace_id:sample_trace in
     match field fields "context_tokens" with
     | `Int tokens -> check int "newest tokens" 200 tokens
     | _ -> fail "context_tokens is not an int")
@@ -163,21 +164,62 @@ let test_newest_record_wins () =
 let test_record_without_usage_is_typed () =
   with_temp_workspace (fun config ->
     append_record config (sample_record ~input_tokens:None ());
-    let fields = Projection.context_fields ~config ~keeper_name:"rondo" in
+    let fields = Projection.context_fields ~config ~keeper_name:"rondo" ~current_trace_id:sample_trace in
     check_not_observed fields ~reason:"turn_record_without_usage")
 ;;
 
 let test_undecodable_newest_line_is_typed () =
   with_temp_workspace (fun config ->
     append_raw config ~keeper_name:"rondo" (`Assoc [ "schema", `String "future" ]);
-    let fields = Projection.context_fields ~config ~keeper_name:"rondo" in
+    let fields = Projection.context_fields ~config ~keeper_name:"rondo" ~current_trace_id:sample_trace in
     check_not_observed fields ~reason:"turn_record_undecodable")
+;;
+
+(* Raw non-JSON tail: the permissive reader would silently skip it and serve
+   the previous row as "the measurement"; the strict reader keeps it visible
+   as a typed decode failure. *)
+let test_malformed_raw_tail_is_undecodable_not_previous_row () =
+  with_temp_workspace (fun config ->
+    append_record config (sample_record ());
+    let store = Masc.Keeper_types_support.keeper_turn_record_store config "rondo" in
+    let base_dir = Dated_jsonl.base_dir store in
+    let day_files =
+      Sys.readdir base_dir
+      |> Array.to_list
+      |> List.concat_map (fun month ->
+        let month_path = Filename.concat base_dir month in
+        Sys.readdir month_path
+        |> Array.to_list
+        |> List.map (Filename.concat month_path))
+    in
+    (match day_files with
+     | [ day_file ] ->
+       let channel =
+         open_out_gen [ Open_append; Open_wronly ] 0o600 day_file
+       in
+       output_string channel "not a json line\n";
+       close_out channel
+     | files -> failf "expected exactly one day file, found %d" (List.length files));
+    let fields = Projection.context_fields ~config ~keeper_name:"rondo" ~current_trace_id:sample_trace in
+    check_not_observed fields ~reason:"turn_record_undecodable")
+;;
+
+let test_previous_trace_row_is_typed_absent () =
+  with_temp_workspace (fun config ->
+    append_record config (sample_record ());
+    let fields =
+      Projection.context_fields
+        ~config
+        ~keeper_name:"rondo"
+        ~current_trace_id:"trace-1780648779957-99999"
+    in
+    check_not_observed fields ~reason:"turn_record_trace_mismatch")
 ;;
 
 let test_missing_window_keeps_tokens_without_ratio () =
   with_temp_workspace (fun config ->
     append_record config (sample_record ~context_window:None ());
-    let fields = Projection.context_fields ~config ~keeper_name:"rondo" in
+    let fields = Projection.context_fields ~config ~keeper_name:"rondo" ~current_trace_id:sample_trace in
     (match field fields "context_tokens" with
      | `Int tokens -> check int "tokens survive" 18_000 tokens
      | _ -> fail "context_tokens is not an int");
@@ -199,6 +241,10 @@ let () =
             test_record_without_usage_is_typed
         ; test_case "undecodable newest line is typed" `Quick
             test_undecodable_newest_line_is_typed
+        ; test_case "malformed raw tail is undecodable, not previous row" `Quick
+            test_malformed_raw_tail_is_undecodable_not_previous_row
+        ; test_case "previous trace row is typed absent" `Quick
+            test_previous_trace_row_is_typed_absent
         ; test_case "missing window keeps tokens without ratio" `Quick
             test_missing_window_keeps_tokens_without_ratio
         ] )

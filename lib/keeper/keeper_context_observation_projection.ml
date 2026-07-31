@@ -20,6 +20,7 @@ let reason_measurement_missing = "context_measurement_missing"
 let reason_undecodable = "turn_record_undecodable"
 let reason_read_failed = "turn_record_read_failed"
 let reason_without_usage = "turn_record_without_usage"
+let reason_trace_mismatch = "turn_record_trace_mismatch"
 
 let not_observed_json ~reason =
   `Assoc [ "kind", `String "not_observed"; "reason", `String reason ]
@@ -58,16 +59,35 @@ type latest_turn_observation =
   | Turn_record_read_failed
   | Observed of Turn_record.t
 
+(* The strict tail read keeps failure classes apart: [read_recent] would
+   silently skip a malformed newest line and serve the previous row as "the
+   measurement", and it flattens listing failures into an empty result. *)
 let latest_turn_observation ~config ~keeper_name =
   match
     let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
-    Dated_jsonl.read_recent store 1
+    Dated_jsonl.read_recent_result store 1
   with
-  | [] -> No_turn_record
-  | json :: _ ->
+  | Ok [] -> No_turn_record
+  | Ok (Dated_jsonl.Parsed json :: _) ->
     (match Turn_record.of_json json with
      | Ok record -> Observed record
      | Error _ -> Undecodable_turn_record)
+  | Ok (Dated_jsonl.Malformed_json { path; line_number; detail } :: _) ->
+    Log.Keeper.warn
+      "context observation newest turn-record row is malformed keeper=%s path=%s line=%s: %s"
+      keeper_name
+      path
+      (match line_number with
+       | Some line -> string_of_int line
+       | None -> "?")
+      detail;
+    Undecodable_turn_record
+  | Error read_error ->
+    Log.Keeper.warn
+      "context observation turn-record read failed keeper=%s: %s"
+      keeper_name
+      (Dated_jsonl.read_error_to_string read_error);
+    Turn_record_read_failed
   | exception (Eio.Cancel.Cancelled _ as error) -> raise error
   | exception exn ->
     Log.Keeper.warn
@@ -117,7 +137,7 @@ let observed_context_fields (record : Turn_record.t) =
   ]
 ;;
 
-let context_fields ~config ~keeper_name =
+let context_fields ~config ~keeper_name ~current_trace_id =
   match latest_turn_observation ~config ~keeper_name with
   | No_turn_record ->
     context_fields_unavailable (not_observed_json ~reason:reason_measurement_missing)
@@ -126,9 +146,16 @@ let context_fields ~config ~keeper_name =
   | Turn_record_read_failed ->
     context_fields_unavailable (not_observed_json ~reason:reason_read_failed)
   | Observed record ->
-    (match record.usage.input_tokens with
-     | None -> context_fields_unavailable (not_observed_json ~reason:reason_without_usage)
-     | Some _ -> observed_context_fields record)
+    (* A reseeded identity starts a new trace while the per-name store keeps
+       the previous trace's rows: projecting those would show the prior
+       generation's occupancy on a keeper whose context is empty. *)
+    if not (String.equal record.trace_id current_trace_id)
+    then context_fields_unavailable (not_observed_json ~reason:reason_trace_mismatch)
+    else (
+      match record.usage.input_tokens with
+      | None ->
+        context_fields_unavailable (not_observed_json ~reason:reason_without_usage)
+      | Some _ -> observed_context_fields record)
 ;;
 
 let last_turn_usage_json_of_meta

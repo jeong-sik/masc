@@ -165,6 +165,7 @@ describe('normalizeKeepers context measurement', () => {
       'turn_record_undecodable',
       'turn_record_read_failed',
       'turn_record_without_usage',
+      'turn_record_trace_mismatch',
     ]) {
       const [keeper] = normalizeKeepers([
         {

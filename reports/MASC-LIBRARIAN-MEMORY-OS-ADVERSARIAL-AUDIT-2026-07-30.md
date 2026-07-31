@@ -516,16 +516,37 @@ spatial namespace는 아직 없으므로 finding은 부분 해결이다.
 ### P1-7. Librarian 실패가 typed turn/health 상태가 아니다
 
 `keeper_librarian_runtime.ml`의 `run_best_effort`는 실패를 log/metric에 남기지만
-caller에 typed terminal result를 반환하지 않는다(2026-07-31 00:27 KST 재확인).
+caller에 typed terminal result를 반환하지 않는다(2026-07-31 00:27 KST 재확인,
+#26528 merge 이후에도 반환 계약은 unit으로 동일).
 
-pre-#26500 runtime 집계:
+관측 표면은 #26528(2026-07-31 merge)이 해소했다.
+
+- keeper-memory-health endpoint가 configured keeper(`discover_keepers_toml`) ∪
+  snapshot union을 열거해 스냅샷 없는 keeper도 행을 갖고, `snapshot_present`와
+  `librarian_failures`(site `memory_os_librarian` + `memory_os_current_read`
+  합산)를 노출하며, `librarian_starvation`(error) / `librarian_failures`(warn)
+  alert를 계산한다.
+- 실패 로그는 `Flow_exact_execution_failed` / `Flow_candidates_exhausted`
+  payload를 per-slot typed cause + redacted raw_response 발췌로 렌더하고,
+  current snapshot 부재 상태의 실패는 WARN이 아니라 ERROR로 남는다.
+
+동작 수치의 신선도 주의: 아래 pre-#26500 집계는 폐기된 JSONL/episode
+아키텍처의 것이다. current 아키텍처(`*.memory-current.json`) 라이브 실측
+(2026-07-31, #26527)은 Librarian 성공 snapshot commit이 sangsu 1회
+(2026-07-30, fact 1)뿐이고, 2026-07-31 시도 15회는 전부 실패했다
+(10 Keeper 중 7 memory absent). 슬롯별 원인은 ollama 3슬롯 weekly limit
+소진이 확정, 잔여 2슬롯(local llama-server, glm)은 #26528 배포 후 per-slot
+로그로 확정한다.
+
+pre-#26500 runtime 집계(참고용, 위 주의 참조):
 
 - Librarian success 107
 - Librarian failure 9
 - consolidation transport failure 16
 
-그러나 `/health`에 per-Keeper Librarian pending/failure/oldest-age 상태가 없다.
-로그 수준에서는 보이지만 runtime contract 수준에서는 사실상 silent하다.
+미해소 잔여: `run_best_effort`의 typed terminal result 반환(turn 상태로의
+연결). 로그/health 수준에서는 보이지만 runtime contract 수준에서는 여전히
+silent하다.
 
 ## 7. 확인된 양호점
 

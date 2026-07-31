@@ -191,6 +191,18 @@ val keeper_default_source_snapshot :
   base_path:string -> string -> keeper_default_source_snapshot
 val persona_description_max_chars : int
 val load_persona_extended : ?max_chars:int -> string -> string option
+
+(** Persona-name resolution ([resolved_persona_name] when defaults are
+    available, else the keeper name) fused with the extended-persona load.
+    Single source of truth for "the persona text this keeper lives with":
+    the unified system prompt and the Memory OS librarian must both read
+    persona through here so their views cannot diverge. Returns [""] when
+    the resolved persona has no extended text. *)
+val load_resolved_persona_extended :
+  keeper_name:string ->
+  ?profile_defaults:keeper_profile_defaults ->
+  unit ->
+  string
 val load_persona_summary : string -> persona_summary option
 val load_persona_summary_from_path : string -> string -> persona_summary option
 val list_persona_summaries : unit -> persona_summary list

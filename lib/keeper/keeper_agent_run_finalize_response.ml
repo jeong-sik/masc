@@ -284,6 +284,7 @@ let finalize
     ~config
     ~meta
     ~generation
+    ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
     ~manifest_keeper_turn_id
     ~session
     ~(append_manifest : Keeper_agent_run_turn_helpers.append_manifest_fn)
@@ -464,6 +465,7 @@ let finalize
       ~config
       ~meta
       ~generation
+      ~profile_defaults
       ~turn:manifest_keeper_turn_id
       ~oas_turn_count:result.turns
       ~actual_tools:actual_keeper_tool_names

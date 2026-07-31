@@ -12,6 +12,12 @@ type current_selection =
 type input =
   { turn_ref : Ids.Turn_ref.t
   ; generation : int
+  ; persona : string
+    (** The same resolved persona text the keeper's own system prompt
+        carries ([Keeper_types_profile.load_resolved_persona_extended]).
+        The librarian curates on the keeper's behalf, so it judges
+        importance through this identity; [""] renders as an explicit
+        [no persona] marker. *)
   ; current : current_selection option
   ; messages : Agent_sdk.Types.message list
   }

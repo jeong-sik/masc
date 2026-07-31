@@ -4,6 +4,30 @@ module Librarian = Masc.Keeper_librarian
 module Runtime = Masc.Keeper_librarian_runtime
 module Memory = Masc.Keeper_memory_os_types
 
+(* Render tests resolve the real repo templates so template <-> code
+   variable drift fails here instead of as a live [Prompt_render_failed]
+   (same pattern as test_keeper_unified_persona_block). *)
+let has_prompt_root path =
+  Sys.file_exists
+    (Filename.concat path "config/prompts/keeper.librarian.current_selection.md")
+
+let repo_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when has_prompt_root root -> root
+  | _ ->
+    let rec ascend path =
+      if has_prompt_root path then path
+      else (
+        let parent = Filename.dirname path in
+        if String.equal parent path then Sys.getcwd () else ascend parent)
+    in
+    ascend (Sys.getcwd ())
+
+let () =
+  let prompts_dir = Filename.concat (repo_root ()) "config/prompts" in
+  Prompt_registry.set_markdown_dir prompts_dir;
+  Masc.Prompt_defaults.init ()
+
 let fact ~claim : Memory.fact =
   { claim
   ; category = Memory.Fact
@@ -22,6 +46,7 @@ let input () : Librarian.input =
         ~trace_id:"trace-selection"
         ~absolute_turn:7
   ; generation = 7
+  ; persona = "You are the retry-test keeper."
   ; current =
       Some
         { Librarian.facts = [ current_a; current_b ] }
@@ -201,6 +226,57 @@ let test_prompt_contains_exact_current_selection () =
     (String_util.contains_substring current_memory "first_seen")
 ;;
 
+let test_prompt_carries_persona () =
+  let variables = Librarian.prompt_variables (input ()) in
+  check string "persona is the resolved text"
+    "You are the retry-test keeper."
+    (List.assoc "persona" variables);
+  let blank = { (input ()) with persona = " \n \t " } in
+  check string "blank persona renders an explicit marker"
+    "[no persona]"
+    (List.assoc "persona" (Librarian.prompt_variables blank))
+;;
+
+let user_text_of_messages messages =
+  messages
+  |> List.filter_map (fun (m : Agent_sdk.Types.message) ->
+    if m.role = Agent_sdk.Types.User
+    then
+      Some
+        (m.content
+         |> List.filter_map (function
+           | Agent_sdk.Types.Text s -> Some s
+           | Agent_sdk.Types.ToolResult _ | Agent_sdk.Types.ToolUse _
+           | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.ReasoningDetails _
+           | Agent_sdk.Types.RedactedThinking _ | Agent_sdk.Types.Image _
+           | Agent_sdk.Types.Document _ | Agent_sdk.Types.Audio _ -> None)
+         |> String.concat "\n")
+    else None)
+  |> String.concat "\n"
+;;
+
+let test_repo_template_renders_persona () =
+  (match Runtime.messages_for_librarian (input ()) with
+   | Error detail -> failf "librarian render failed: %s" detail
+   | Ok messages ->
+     let user_text = user_text_of_messages messages in
+     check bool "persona section header present" true
+       (String_util.contains_substring user_text
+          "Persona of the agent whose memory you curate:");
+     check bool "persona text present" true
+       (String_util.contains_substring user_text
+          "You are the retry-test keeper."));
+  match
+    Runtime.messages_for_librarian { (input ()) with persona = "" }
+  with
+  | Error detail -> failf "blank-persona render failed: %s" detail
+  | Ok messages ->
+    check bool "blank persona renders explicit marker" true
+      (String_util.contains_substring
+         (user_text_of_messages messages)
+         "[no persona]")
+;;
+
 let test_cadence_fresh_then_periodic () =
   check (pair int bool) "fresh due"
     (3, true)
@@ -252,6 +328,10 @@ let () =
             test_removed_contract_fields_reject
         ; test_case "prompt carries exact current selection" `Quick
             test_prompt_contains_exact_current_selection
+        ; test_case "prompt carries persona" `Quick
+            test_prompt_carries_persona
+        ; test_case "repo template renders persona" `Quick
+            test_repo_template_renders_persona
         ] )
     ; ( "cadence"
       , [ test_case "fresh then periodic" `Quick test_cadence_fresh_then_periodic

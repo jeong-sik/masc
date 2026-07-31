@@ -989,7 +989,8 @@ let run_turn
                                  AfterTurn ordinal")
                          | Some final_oas_turn_ordinal ->
                            Keeper_agent_run_finalize_response.finalize
-                             ~config ~meta ~generation ~manifest_keeper_turn_id
+                             ~config ~meta ~generation ~profile_defaults
+                             ~manifest_keeper_turn_id
                              ~session ~append_manifest ~model
                              ~acc
                              ~actual_keeper_tool_names

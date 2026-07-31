@@ -299,7 +299,6 @@ let journal_entry_to_json snapshot =
     [ "recorded_at", `Float snapshot.updated_at
     ; "revision", `Int snapshot.revision
     ; "source", source_to_json snapshot.source
-    ; "facts_total", `Int (List.length snapshot.facts)
     ; "change", change_to_json snapshot.change
     ]
 ;;

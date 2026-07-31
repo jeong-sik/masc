@@ -391,7 +391,8 @@ let test_every_commit_appends_one_journal_entry () =
   let open Yojson.Safe.Util in
   let librarian_drop = List.nth lines 1 in
   check int "revision" 2 (librarian_drop |> member "revision" |> to_int);
-  check int "facts total" 1 (librarian_drop |> member "facts_total" |> to_int);
+  check int "retained recorded" 1
+    (librarian_drop |> member "change" |> member "retained" |> to_int);
   check int "removed recorded" 1
     (librarian_drop |> member "change" |> member "removed" |> to_list |> List.length);
   check string "librarian source kind" "librarian"

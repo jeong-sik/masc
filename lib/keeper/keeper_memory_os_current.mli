@@ -36,9 +36,10 @@ type t =
 val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
 (** Append-only sidecar recording one line per committed snapshot
-    ([recorded_at]/[revision]/[source]/[facts_total]/[change]). Written on
-    every successful [replace]/[upsert_fact] commit; never read on the turn
-    path. *)
+    ([recorded_at]/[revision]/[source]/[change]). The resulting fact count
+    is derivable as [change.retained + length change.added] and is
+    deliberately not duplicated. Written on every successful
+    [replace]/[upsert_fact] commit; never read on the turn path. *)
 val journal_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
 val list_keeper_ids_for_keepers_dir : keepers_dir:string -> string list

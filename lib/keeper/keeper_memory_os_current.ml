@@ -33,6 +33,12 @@ let path_for_keepers_dir ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ suffix)
 ;;
 
+let journal_suffix = ".memory-journal.jsonl"
+
+let journal_path_for_keepers_dir ~keepers_dir ~keeper_id =
+  Filename.concat keepers_dir (keeper_id ^ journal_suffix)
+;;
+
 let list_keeper_ids_for_keepers_dir ~keepers_dir =
   if not (Sys.file_exists keepers_dir && Sys.is_directory keepers_dir)
   then []
@@ -288,6 +294,29 @@ let compute_change ~previous ~next =
     }
 ;;
 
+let journal_entry_to_json snapshot =
+  `Assoc
+    [ "recorded_at", `Float snapshot.updated_at
+    ; "revision", `Int snapshot.revision
+    ; "source", source_to_json snapshot.source
+    ; "change", change_to_json snapshot.change
+    ]
+;;
+
+(* The journal is observation only: the snapshot commit it describes already
+   reached disk, so an append failure degrades to a warning instead of
+   vetoing the commit. Cancellation is never absorbed. *)
+let append_journal_entry ~keepers_dir ~keeper_id snapshot =
+  let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  try Fs_compat.append_jsonl path (journal_entry_to_json snapshot) with
+  | Eio.Cancel.Cancelled _ as error -> raise error
+  | exn ->
+    Log.Keeper.warn
+      "memory journal append failed path=%s: %s"
+      path
+      (Printexc.to_string exn)
+;;
+
 let lock_path snapshot_path = snapshot_path ^ ".lock"
 
 let update_locked
@@ -309,7 +338,9 @@ let update_locked
     let* next = build previous in
     let content = Yojson.Safe.pretty_to_string (to_json next) ^ "\n" in
     match Fs_compat.save_file_atomic snapshot_path content with
-    | Ok () -> Ok next
+    | Ok () ->
+      append_journal_entry ~keepers_dir ~keeper_id next;
+      Ok next
     | Error message ->
       Error
         (Printf.sprintf

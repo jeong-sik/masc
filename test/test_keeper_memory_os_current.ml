@@ -353,6 +353,108 @@ let test_explicit_keepers_dirs_do_not_cross_contaminate () =
     (fact_ids (read second_dir).facts)
 ;;
 
+let read_journal_lines ~keepers_dir =
+  let path =
+    Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+  in
+  if not (Sys.file_exists path)
+  then []
+  else
+    Fs_compat.load_file path
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> not (String.equal line ""))
+    |> List.map Yojson.Safe.from_string
+;;
+
+let test_every_commit_appends_one_journal_entry () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let first = fact ~claim:"first" () in
+  let second = fact ~claim:"second" () in
+  ignore (replace ~keepers_dir ~facts:[ first; second ] () |> require_ok);
+  ignore
+    (replace
+       ~keepers_dir
+       ~expected_revision:(Some 1)
+       ~facts:[ first ]
+       ()
+     |> require_ok);
+  ignore
+    (Current.upsert_fact
+       ~keepers_dir
+       ~keeper_id:"keeper"
+       ~now:300.0
+       ~source:(source Current.Explicit_write)
+       second
+     |> require_ok);
+  let lines = read_journal_lines ~keepers_dir in
+  check int "one journal line per commit" 3 (List.length lines);
+  let open Yojson.Safe.Util in
+  let librarian_drop = List.nth lines 1 in
+  check int "revision" 2 (librarian_drop |> member "revision" |> to_int);
+  check int "retained recorded" 1
+    (librarian_drop |> member "change" |> member "retained" |> to_int);
+  check int "removed recorded" 1
+    (librarian_drop |> member "change" |> member "removed" |> to_list |> List.length);
+  check string "librarian source kind" "librarian"
+    (librarian_drop |> member "source" |> member "kind" |> to_string);
+  let explicit = List.nth lines 2 in
+  check int "explicit revision" 3 (explicit |> member "revision" |> to_int);
+  check string "explicit source kind" "explicit_write"
+    (explicit |> member "source" |> member "kind" |> to_string)
+;;
+
+let test_rejected_commit_appends_no_journal_entry () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (replace ~keepers_dir ~facts:[ fact () ] () |> require_ok);
+  (match replace ~keepers_dir ~expected_revision:None ~facts:[] () with
+   | Error _ -> ()
+   | Ok _ -> fail "stale revision was accepted");
+  check int "only committed revisions are journaled" 1
+    (List.length (read_journal_lines ~keepers_dir))
+;;
+
+(* The purge hook drops the memoized journal appender before unlinking
+   (Fs_compat.invalidate_cached_writer): without that, a same-process
+   successor keeper would keep appending to the deleted inode and no new
+   journal file would ever appear. This exercises that exact sequence. *)
+let test_journal_recreated_after_purge_sequence () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (replace ~keepers_dir ~facts:[ fact ~claim:"before purge" () ] () |> require_ok);
+  let journal_path =
+    Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+  in
+  check bool "journal exists before purge" true (Sys.file_exists journal_path);
+  Fs_compat.invalidate_cached_writer journal_path;
+  Sys.remove journal_path;
+  ignore
+    (Current.upsert_fact
+       ~keepers_dir
+       ~keeper_id:"keeper"
+       ~now:300.0
+       ~source:(source Current.Explicit_write)
+       (fact ~claim:"after purge" ())
+     |> require_ok);
+  check bool "journal recreated after purge" true (Sys.file_exists journal_path);
+  check int "only the post-purge commit is journaled" 1
+    (List.length (read_journal_lines ~keepers_dir))
+;;
+
+(* Both Memory OS sidecars live in the config keepers directory, outside the
+   runtime directory the purge already removes: without plan entries a purged
+   keeper leaks its facts and journal to a later keeper with the same name. *)
+let test_purge_plan_removes_memory_sidecars () =
+  let module Shutdown = Masc.Keeper_shutdown_types in
+  let context =
+    { Shutdown.requested_name = "keeper"; agent_name = "keeper"; meta_version = 1 }
+  in
+  let plan = Shutdown.dashboard_purge_artifact_plan ~keeper_name:"keeper" context in
+  let contains artifact = List.exists (fun entry -> entry = artifact) plan in
+  check bool "plan removes the fact snapshot" true
+    (contains Shutdown.Keeper_memory_current_artifact);
+  check bool "plan removes the memory journal" true
+    (contains Shutdown.Keeper_memory_journal_artifact)
+;;
+
 let test_stale_replace_rejects_concurrent_explicit_write () =
   with_temp_keepers @@ fun keepers_dir ->
   let initial = fact ~claim:"initial" () in
@@ -452,6 +554,22 @@ let () =
             "stale replace preserves concurrent explicit write"
             `Quick
             test_stale_replace_rejects_concurrent_explicit_write
+        ; test_case
+            "every commit appends one journal entry"
+            `Quick
+            test_every_commit_appends_one_journal_entry
+        ; test_case
+            "rejected commit appends no journal entry"
+            `Quick
+            test_rejected_commit_appends_no_journal_entry
+        ; test_case
+            "purge plan removes memory sidecars"
+            `Quick
+            test_purge_plan_removes_memory_sidecars
+        ; test_case
+            "journal recreated after purge sequence"
+            `Quick
+            test_journal_recreated_after_purge_sequence
         ] )
     ]
 ;;

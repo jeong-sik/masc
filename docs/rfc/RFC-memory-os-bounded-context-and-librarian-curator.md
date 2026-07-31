@@ -128,6 +128,7 @@ working set이 "구성상 유계"이려면 모든 항이 유계여야 한다. K�
 - **주입 시점의 facts 절사/ranking**: 침묵 손실이라 비제안. facts 유계는 §3.7의 커밋 시점 예산 계약으로만 달성한다 (결정자가 있는 경계에서의 예산 vs 결정자가 없는 경계에서의 거절 — 후자가 request-body cap의 실패 형태다).
 - **revise/merge/demote/promote typed ops, active/deep 2계층 기억**: 비제안. drop(reason)+add가 동일 표현력을 가지며, lineage 소비자가 없는 타입 확장은 소비자 없는 API다. tier는 journal 위의 두 번째 Facade이자 제거 완료된 Memory Bank 계보의 부활이다 (§3.3, §3.7).
 - **수치 기억 판정(가중치, 중요도 점수, recency/decay 곡선, confidence)**: 비제안. 기억의 가치 판단은 librarian의 판단(비결정론)이고, 수치 휴리스틱은 판단을 상태로 위장한 결정론이다. 현행 템플릿이 confidence 수치를 이미 제거한 선례("Do not emit a confidence number — the store no longer reads one")를 유지한다. 결정론은 운반(절단·예산 집행·보존)에만 쓴다.
+- **바이트/해시 동일성 비교 기반 판정(동일 request body 반복 감지, fingerprint 카운팅)**: 비제안. 실패의 결정론성 분류는 원천의 typed 오류(binding/404/schema vs 429/timeout)에서만 온다. §1의 `request_body_sha256`은 사후 포렌식 증거일 뿐, 런타임 판정의 입력이 아니다.
 
 ## 6. 열린 질문
 

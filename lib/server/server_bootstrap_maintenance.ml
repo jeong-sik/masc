@@ -670,35 +670,15 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                  0
              in
              let total =
-               prune_dir (Filename.concat masc "audit")
-               + prune_dir (Filename.concat masc "telemetry")
-               + prune_dir (Filename.concat masc "messages")
-               + prune_dir (Filename.concat masc "events")
-               + prune_dir (Filename.concat masc "activity-events")
-               + prune_recall_injections ()
-               + prune_dir (Filename.concat masc "voice_sessions")
-               + prune_dir (Filename.concat masc "tool_calls")
-               (* transition-audit was absent from this list since its
-                  introduction (RFC-0002) — 82 MB across 3 month-dirs by
-                  2026-06-10, scanned by every store-fallback read. *)
-               + prune_dir (Filename.concat masc "transition-audit")
-               (* trajectories: flat <trace_id>.jsonl under
-                  trajectories/<keeper>/ — Dated_jsonl.prune is a no-op
-                  there, so prune by mtime, keeper-scoped. *)
-               + Server_runtime_startup_maintenance.prune_children_dirs
-                   ~prune_dir:
-                     (Server_runtime_startup_maintenance
-                      .prune_flat_jsonl_older_than ~days)
-                   (Filename.concat masc "trajectories")
-               (* Keeper-scoped stores (metrics, crash-events,
-                  execution-receipts) live only under keepers/<name>/ — no
-                  top-level writer exists, so prune keeper-scoped only. The
-                  store list is the SSOT shared with the startup pass; the
-                  inline execution-receipts-only fold this replaced had
-                  already drifted, letting metrics/crash-events accumulate
-                  until restart. *)
-               + Server_runtime_startup_maintenance.prune_keeper_scoped_stores
+               prune_recall_injections ()
+               (* Store list and fold are the SSOT in
+                  Server_runtime_startup_maintenance — the two inline sums
+                  this replaces had already drifted (this pass lacked
+                  resilience_audit; the startup pass lacked
+                  tool_calls/transition-audit). *)
+               + Server_runtime_startup_maintenance.prune_shared_jsonl_stores
                    ~prune_dir
+                   ~days
                    ~masc_root:masc
              in
              if total > 0

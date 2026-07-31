@@ -8,10 +8,6 @@ let input_trace_id (inp : Keeper_librarian.input) =
   Ids.Turn_ref.trace_id inp.turn_ref
 ;;
 
-let enabled () =
-  Env_config.KeeperMemoryOs.librarian_enabled ()
-;;
-
 let cadence_turns () =
   Env_config.KeeperMemoryOs.librarian_cadence_turns ()
 ;;
@@ -401,7 +397,7 @@ let run_best_effort
       (inp : Keeper_librarian.input)
   =
   let trace_id = input_trace_id inp in
-  if enabled () && cadence_due ~keeper_id ~trace_id
+  if cadence_due ~keeper_id ~trace_id
   then (
     try
       match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with

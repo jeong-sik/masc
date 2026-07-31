@@ -45,7 +45,6 @@ val scope_of_string_opt : string -> scope option
 val format_section : section -> string
 val parse_iso_timestamp : string -> float option
 val format_elapsed : float -> string -> string -> string
-val format_librarian_status : enabled:bool -> failures_total:int -> string
 val truncate_path : string -> string
 val truncate_message : string -> string
 

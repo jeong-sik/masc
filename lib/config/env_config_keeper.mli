@@ -58,6 +58,11 @@ end
 (** {1 Keeper Memory OS} *)
 
 module KeeperMemoryOs : sig
+  type librarian_config_state =
+    | Enabled
+    | Disabled
+    | Invalid
+
   (** Env-var names (SSOT). The config-introspection registry and tests must
       reference these constants rather than re-spelling the literals, so a
       knob rename breaks compilation instead of silently drifting. *)
@@ -72,8 +77,12 @@ module KeeperMemoryOs : sig
   val librarian_cadence_turns_default : int
   val librarian_max_messages_default : int
 
+  val librarian_config_state : unit -> librarian_config_state
+  (** Typed projection of the effective librarian toggle. Blank or absent
+      input uses {!librarian_enabled_default}; malformed non-blank input is
+      [Invalid] rather than being collapsed into [Disabled]. *)
+
   val recall_enabled : unit -> bool
-  val librarian_enabled : unit -> bool
   val librarian_cadence_turns : unit -> int
   val librarian_max_messages : unit -> int
 end

@@ -4,7 +4,6 @@
     validation, one atomic current-snapshot replacement is the only MASC-side
     effect. There is no secondary journal or episode/facts fan-out. *)
 
-val enabled : unit -> bool
 val cadence_turns : unit -> int
 
 val cadence_step : cadence:int -> counter:int -> int * bool
@@ -65,3 +64,5 @@ val run_best_effort
   -> expected_revision:int option
   -> Keeper_librarian.input
   -> unit
+(** Execute a Librarian unit already admitted and fenced by the post-turn
+    entrypoint. This runtime owns cadence, not the live configuration gate. *)

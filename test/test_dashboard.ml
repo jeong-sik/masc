@@ -68,20 +68,6 @@ let test_format_section_empty () =
   let output = Dashboard.format_section section in
   Alcotest.(check bool) "has empty message" true (contains output "(nothing here)")
 
-let test_format_librarian_status_keeps_facts_separate () =
-  Alcotest.(check string)
-    "disabled"
-    "OFF | LIBRARIAN-FAILURES-TOTAL: 0"
-    (Dashboard.format_librarian_status ~enabled:false ~failures_total:0);
-  Alcotest.(check string)
-    "enabled without failures"
-    "ON | LIBRARIAN-FAILURES-TOTAL: 0"
-    (Dashboard.format_librarian_status ~enabled:true ~failures_total:0);
-  Alcotest.(check string)
-    "cumulative failures do not become current health"
-    "ON | LIBRARIAN-FAILURES-TOTAL: 3"
-    (Dashboard.format_librarian_status ~enabled:true ~failures_total:3)
-
 (* ===== parse_iso_timestamp Tests ===== *)
 
 let test_parse_timestamp_valid () =
@@ -217,7 +203,7 @@ let test_generate_compact_contains_keepers () =
   Alcotest.(check bool) "contains KEEPERS line" true (contains output "KEEPERS:");
   cleanup_dir dir
 
-let test_generate_compact_shows_librarian_off_when_disabled () =
+let test_generate_compact_shows_exact_librarian_facts () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
@@ -233,12 +219,28 @@ let test_generate_compact_shows_librarian_off_when_disabled () =
       cleanup_dir dir)
     (fun () ->
       Unix.putenv key "false";
-      let output = Dashboard.generate_compact config in
+      let disabled_output = Dashboard.generate_compact config in
       Alcotest.(check bool)
-        "contains LIBRARIAN marker" true (contains output "LIBRARIAN:");
+        "contains LIBRARIAN marker" true (contains disabled_output "LIBRARIAN:");
       Alcotest.(check bool)
         "disabled librarian renders OFF" true
-        (contains output "LIBRARIAN: OFF"))
+        (contains disabled_output "LIBRARIAN: OFF");
+      Alcotest.(check bool)
+        "failure counter names process lifetime" true
+        (contains disabled_output "LIBRARIAN-FAILURES-SINCE-START:");
+      Alcotest.(check bool)
+        "retired total label is absent" false
+        (contains disabled_output "LIBRARIAN-FAILURES-TOTAL:");
+      Unix.putenv key "invalid";
+      let invalid_output = Dashboard.generate_compact config in
+      Alcotest.(check bool)
+        "invalid config is not collapsed into OFF" true
+        (contains invalid_output "LIBRARIAN: INVALID");
+      Unix.putenv key "true";
+      let enabled_output = Dashboard.generate_compact config in
+      Alcotest.(check bool)
+        "enabled config renders ON" true
+        (contains enabled_output "LIBRARIAN: ON"))
 
 let test_keepers_section_dead_phase () =
   Eio_main.run @@ fun env ->
@@ -289,9 +291,6 @@ let test_keepers_section_with_error_truncated () =
 let format_tests = [
   "format_section with content", `Quick, test_format_section;
   "format_section empty", `Quick, test_format_section_empty;
-  ( "format librarian status keeps facts separate"
-  , `Quick
-  , test_format_librarian_status_keeps_facts_separate );
 ]
 
 let timestamp_tests = [
@@ -315,11 +314,11 @@ let keepers_tests = [
   "keepers section with entry", `Quick, test_keepers_section_with_entry;
   "generate full contains keepers", `Quick, test_generate_full_contains_keepers;
   "generate compact contains keepers", `Quick, test_generate_compact_contains_keepers;
-  ( "generate compact shows librarian off when disabled"
-  , `Quick
-  , test_generate_compact_shows_librarian_off_when_disabled );
   "keepers section dead phase", `Quick, test_keepers_section_dead_phase;
   "keepers section with error truncated", `Quick, test_keepers_section_with_error_truncated;
+  ( "generate compact shows exact librarian facts"
+  , `Quick
+  , test_generate_compact_shows_exact_librarian_facts );
 ]
 
 let () =

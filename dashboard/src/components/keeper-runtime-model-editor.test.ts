@@ -437,7 +437,7 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
   })
 
   it('shows an actionable read-only hint (no deep-link) for a keeper without a valid name', async () => {
-    refs.config = makeConfig({ selected_runtime_id: 'a.one' }, { default_source_kind: 'persona', default_manifest_path: null }, '')
+    refs.config = makeConfig({ selected_runtime_id: 'a.one' }, {}, '')
     render(
       html`<${KeeperRuntimeModelEditor} keeperName="persona-keeper" onOpenRuntimeConfig=${vi.fn()} />`,
       container,
@@ -446,10 +446,8 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
 
     expect(container.querySelector('select[aria-label="runtime"]')).toBeNull()
     // An empty name fails the keeperRuntimeConfigCanWrite gate, so the card
-    // explains the runtime.toml path instead of deep-linking.
-    expect(container.textContent).toContain('편집 가능한 TOML 소스가 아니')
-    expect(container.textContent).toContain('runtime.toml')
-    expect(container.textContent).toContain('[runtime.assignments]')
+    // explains the name requirement instead of deep-linking.
+    expect(container.textContent).toContain('식별 이름')
     expect(Array.from(container.querySelectorAll('button')).some(b =>
       b.textContent?.includes('설정에서 변경'),
     )).toBe(false)

@@ -434,129 +434,12 @@ let log_exact_error (entry : pending_approval) operation detail =
    the system log, and no metrics endpoint listening to read the per-branch
    counter [record_outcome] already writes. Render the per-attempt provenance so
    the branch and the slot it died on are recoverable. *)
-let flow_evidence_detail (evidence : Exact_output.flow_evidence) =
-  let attempts =
-    List.map
-      (fun (attempt : Exact_output.flow_attempt_snapshot) ->
-      Printf.sprintf
-        "slot=%s call_id=%s"
-        attempt.visit.identity.candidate_id
-        (Exact_output.generation_receipt_snapshot_call_id attempt.receipt
-         |> Exact_output.call_id_to_string))
-      evidence.attempts
-  in
-  let advances =
-    List.map
-      (fun (advance : Exact_output.flow_advance_receipt) ->
-         let failed_slot, failure_kind =
-           match advance.failed with
-           | Exact_output.Flow_advance_candidate_rejected rejection ->
-             ( (Exact_output.candidate_rejection_identity rejection).candidate_id
-             , "candidate_rejected" )
-           | Exact_output.Flow_advance_execution_failed { candidate; _ } ->
-             candidate.visit.identity.candidate_id, "execution_failed"
-         in
-         Printf.sprintf
-           "advance=%s->%s kind=%s"
-           failed_slot
-           advance.next.identity.candidate_id
-           failure_kind)
-      evidence.advances
-  in
-  match attempts @ advances with
-  | [] -> "no candidate attempt or advance was recorded"
-  | details -> String.concat "; " details
-;;
-
-let optional_tokens = function
-  | None -> "unknown"
-  | Some tokens -> string_of_int tokens
-;;
-
-(* [Flow_candidates_exhausted] means every declared slot was refused before any
-   request left this process, and the receipt carries the typed reason with its
-   token arithmetic. Discarding it is what makes a local capacity refusal
-   indistinguishable from a provider outage in the durable row. Matched
-   exhaustively so that a new OAS disposition is a compile error here rather
-   than an unexplained quarantine in production. *)
-let rec capacity_disposition_detail : Exact_output.input_capacity_disposition -> string
-  = function
-  | Token_measurement_required { accepted_through_tokens; rejected_from_tokens } ->
-    Printf.sprintf
-      "token measurement required (accepted_through=%d rejected_from=%s)"
-      accepted_through_tokens
-      (optional_tokens rejected_from_tokens)
-  | Context_window_exceeded { input_tokens; reserved_output_tokens; max_context_tokens } ->
-    Printf.sprintf
-      "context window exceeded (input=%d reserved_output=%d max_context=%d)"
-      input_tokens
-      reserved_output_tokens
-      max_context_tokens
-  | Token_capacity_rejected rejection -> token_capacity_detail rejection
-  | Serialized_request_body_too_large _ ->
-    "serialized request body too large"
-
-and token_capacity_detail : Exact_output.token_capacity_rejection -> string = function
-  | Capacity_evidence_not_yet_valid { now_unix_s; checked_at_unix_s } ->
-    Printf.sprintf
-      "capacity evidence not yet valid (now=%d checked_at=%d)"
-      now_unix_s
-      checked_at_unix_s
-  | Capacity_evidence_expired { now_unix_s; expires_at_unix_s } ->
-    Printf.sprintf
-      "capacity evidence expired (now=%d expires_at=%d)"
-      now_unix_s
-      expires_at_unix_s
-  | Capacity_boundary_unknown { input_tokens; accepted_through_tokens; rejected_from_tokens }
-    ->
-    Printf.sprintf
-      "capacity boundary unknown (input=%d accepted_through=%d rejected_from=%s)"
-      input_tokens
-      accepted_through_tokens
-      (optional_tokens rejected_from_tokens)
-  | Capacity_input_rejected { input_tokens; accepted_through_tokens; rejected_from_tokens }
-    ->
-    Printf.sprintf
-      "capacity input rejected (input=%d accepted_through=%d rejected_from=%d)"
-      input_tokens
-      accepted_through_tokens
-      rejected_from_tokens
-;;
-
-let rejection_disposition_detail : Exact_output.candidate_rejection_disposition -> string
-  = function
-  | Runtime_slot_unavailable -> "runtime slot unavailable"
-  | Runtime_contract_rejected -> "runtime contract rejected"
-  | Input_contract_rejected -> "input contract rejected"
-  | Output_requirement_rejected -> "output requirement rejected"
-  | Input_capacity disposition -> capacity_disposition_detail disposition
-  | Request_preparation_failed -> "request preparation failed"
-;;
-
-let candidate_rejection_detail (rejection : Exact_output.candidate_rejection_receipt) =
-  Printf.sprintf
-    "slot=%s %s"
-    (Exact_output.candidate_rejection_identity rejection).candidate_id
-    (Exact_output.candidate_rejection_disposition rejection
-     |> rejection_disposition_detail)
-;;
-
-(* [Flow_exact_execution_failed] is the branch that carries the provider's own
-   verdict, and it was the only flow error settled with no log line at all. *)
-let execution_cause_detail : Exact_output.execution_error_cause -> string = function
-  | Attempt_already_started -> "attempt already started"
-  | Clock_required_for_timeout -> "clock required for timeout"
-  | Frozen_request_mismatch -> "frozen request mismatch"
-  | Completion_failed -> "completion failed"
-  | Serialized_request_refused { http_status } ->
-    Printf.sprintf "serialized request refused (http_status=%d)" http_status
-  | Incomplete_output -> "incomplete output"
-  | Missing_output -> "missing output"
-  | Ambiguous_output count -> Printf.sprintf "ambiguous output (candidates=%d)" count
-  | Unexpected_output_content -> "unexpected output content"
-  | Invalid_json_output -> "invalid json output"
-  | Internal_non_json_output -> "internal non-json output"
-;;
+(* The renderers themselves moved to [Keeper_exact_flow_detail] so the
+   librarian runtime and this worker print slot provenance identically. *)
+let flow_evidence_detail = Keeper_exact_flow_detail.flow_evidence_detail
+let rejection_disposition_detail = Keeper_exact_flow_detail.rejection_disposition_detail
+let candidate_rejection_detail = Keeper_exact_flow_detail.candidate_rejection_detail
+let execution_cause_detail = Keeper_exact_flow_detail.execution_cause_detail
 
 let exact_attempt_source_resolved (entry : pending_approval) = function
   | Exact_attempt_rejected (Exact_attempt_not_found approval_id) ->
@@ -1040,10 +923,7 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
     log_exact_error
       prepared.entry
       "exact execution"
-      (Printf.sprintf
-         "%s (%s)"
-         (execution_cause_detail cause.cause)
-         (flow_evidence_detail evidence));
+      (Keeper_exact_flow_detail.execution_failure_detail ~candidate ~cause ~evidence);
     quarantine_candidate
       ~queue_ops
       prepared.entry

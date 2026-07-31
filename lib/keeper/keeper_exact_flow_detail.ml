@@ -1,0 +1,177 @@
+module Exact_output = Agent_sdk.Exact_output
+
+let flow_evidence_detail (evidence : Exact_output.flow_evidence) =
+  let attempts =
+    List.map
+      (fun (attempt : Exact_output.flow_attempt_snapshot) ->
+      Printf.sprintf
+        "slot=%s call_id=%s"
+        attempt.visit.identity.candidate_id
+        (Exact_output.generation_receipt_snapshot_call_id attempt.receipt
+         |> Exact_output.call_id_to_string))
+      evidence.attempts
+  in
+  let advances =
+    List.map
+      (fun (advance : Exact_output.flow_advance_receipt) ->
+         let failed_slot, failure_kind =
+           match advance.failed with
+           | Exact_output.Flow_advance_candidate_rejected rejection ->
+             ( (Exact_output.candidate_rejection_identity rejection).candidate_id
+             , "candidate_rejected" )
+           | Exact_output.Flow_advance_execution_failed { candidate; _ } ->
+             candidate.visit.identity.candidate_id, "execution_failed"
+         in
+         Printf.sprintf
+           "advance=%s->%s kind=%s"
+           failed_slot
+           advance.next.identity.candidate_id
+           failure_kind)
+      evidence.advances
+  in
+  match attempts @ advances with
+  | [] -> "no candidate attempt or advance was recorded"
+  | details -> String.concat "; " details
+;;
+
+let optional_tokens = function
+  | None -> "unknown"
+  | Some tokens -> string_of_int tokens
+;;
+
+(* A capacity refusal happens before any request leaves this process, and the
+   receipt carries the typed reason with its token arithmetic. Discarding it
+   is what makes a local capacity refusal indistinguishable from a provider
+   outage in the durable row. Matched exhaustively so that a new OAS
+   disposition is a compile error here rather than an unexplained failure
+   label in production. *)
+let rec capacity_disposition_detail : Exact_output.input_capacity_disposition -> string
+  = function
+  | Token_measurement_required { accepted_through_tokens; rejected_from_tokens } ->
+    Printf.sprintf
+      "token measurement required (accepted_through=%d rejected_from=%s)"
+      accepted_through_tokens
+      (optional_tokens rejected_from_tokens)
+  | Context_window_exceeded { input_tokens; reserved_output_tokens; max_context_tokens } ->
+    Printf.sprintf
+      "context window exceeded (input=%d reserved_output=%d max_context=%d)"
+      input_tokens
+      reserved_output_tokens
+      max_context_tokens
+  | Token_capacity_rejected rejection -> token_capacity_detail rejection
+  | Serialized_request_body_too_large _ ->
+    "serialized request body too large"
+
+and token_capacity_detail : Exact_output.token_capacity_rejection -> string = function
+  | Capacity_evidence_not_yet_valid { now_unix_s; checked_at_unix_s } ->
+    Printf.sprintf
+      "capacity evidence not yet valid (now=%d checked_at=%d)"
+      now_unix_s
+      checked_at_unix_s
+  | Capacity_evidence_expired { now_unix_s; expires_at_unix_s } ->
+    Printf.sprintf
+      "capacity evidence expired (now=%d expires_at=%d)"
+      now_unix_s
+      expires_at_unix_s
+  | Capacity_boundary_unknown { input_tokens; accepted_through_tokens; rejected_from_tokens }
+    ->
+    Printf.sprintf
+      "capacity boundary unknown (input=%d accepted_through=%d rejected_from=%s)"
+      input_tokens
+      accepted_through_tokens
+      (optional_tokens rejected_from_tokens)
+  | Capacity_input_rejected { input_tokens; accepted_through_tokens; rejected_from_tokens }
+    ->
+    Printf.sprintf
+      "capacity input rejected (input=%d accepted_through=%d rejected_from=%d)"
+      input_tokens
+      accepted_through_tokens
+      rejected_from_tokens
+;;
+
+let rejection_disposition_detail : Exact_output.candidate_rejection_disposition -> string
+  = function
+  | Runtime_slot_unavailable -> "runtime slot unavailable"
+  | Runtime_contract_rejected -> "runtime contract rejected"
+  | Input_contract_rejected -> "input contract rejected"
+  | Output_requirement_rejected -> "output requirement rejected"
+  | Input_capacity disposition -> capacity_disposition_detail disposition
+  | Request_preparation_failed -> "request preparation failed"
+;;
+
+let candidate_rejection_detail (rejection : Exact_output.candidate_rejection_receipt) =
+  Printf.sprintf
+    "slot=%s %s"
+    (Exact_output.candidate_rejection_identity rejection).candidate_id
+    (Exact_output.candidate_rejection_disposition rejection
+     |> rejection_disposition_detail)
+;;
+
+(* [Flow_exact_execution_failed] is the branch that carries the provider's own
+   verdict. The typed cause alone ("completion failed") says nothing about
+   which provider said what; the raw response body carried next to it does. *)
+let execution_cause_detail : Exact_output.execution_error_cause -> string = function
+  | Attempt_already_started -> "attempt already started"
+  | Clock_required_for_timeout -> "clock required for timeout"
+  | Frozen_request_mismatch -> "frozen request mismatch"
+  | Completion_failed -> "completion failed"
+  | Serialized_request_refused { http_status } ->
+    Printf.sprintf "serialized request refused (http_status=%d)" http_status
+  | Incomplete_output -> "incomplete output"
+  | Missing_output -> "missing output"
+  | Ambiguous_output count -> Printf.sprintf "ambiguous output (candidates=%d)" count
+  | Unexpected_output_content -> "unexpected output content"
+  | Invalid_json_output -> "invalid json output"
+  | Internal_non_json_output -> "internal non-json output"
+;;
+
+(* Log lines are single-line records; the excerpt bound keeps one failed call
+   from flooding them while the sha256 keeps the full body identifiable in
+   wire captures. *)
+let raw_response_excerpt_max_bytes = 240
+
+let raw_response_excerpt = function
+  | None -> "raw_response=none"
+  | Some (raw : Exact_output.raw_response) ->
+    let flattened =
+      String.map
+        (fun char ->
+           if Char.equal char '\n' || Char.equal char '\r' then ' ' else char)
+        raw.body
+    in
+    if String.length flattened <= raw_response_excerpt_max_bytes
+    then Printf.sprintf "raw_response=%s" flattened
+    else
+      Printf.sprintf
+        "raw_response=%s... (%d bytes total sha256=%s)"
+        (String.sub flattened 0 raw_response_excerpt_max_bytes)
+        (String.length raw.body)
+        raw.body_sha256
+;;
+
+let execution_error_detail (error : Exact_output.execution_error) =
+  Printf.sprintf
+    "call_id=%s cause=%s %s"
+    (Exact_output.call_id_to_string error.call_id)
+    (execution_cause_detail error.cause)
+    (raw_response_excerpt error.raw_response)
+;;
+
+let execution_failure_detail
+      ~(candidate : Exact_output.flow_attempt_receipt)
+      ~cause
+      ~evidence
+  =
+  Printf.sprintf
+    "slot=%s %s; flow=[%s]"
+    candidate.visit.identity.candidate_id
+    (execution_error_detail cause)
+    (flow_evidence_detail evidence)
+;;
+
+let candidates_exhausted_detail ~rejection ~evidence =
+  Printf.sprintf
+    "%s; flow=[%s]"
+    (candidate_rejection_detail rejection)
+    (flow_evidence_detail evidence)
+;;

@@ -49,6 +49,8 @@ let run_post_turn ~config ~meta ~turn =
     ~config
     ~meta
     ~generation:turn
+    ~profile_defaults:
+      Masc.Keeper_types_profile_defaults.empty_keeper_profile_defaults
     ~turn
     ~oas_turn_count:1
     ~actual_tools:[]

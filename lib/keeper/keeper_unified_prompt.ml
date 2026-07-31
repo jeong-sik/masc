@@ -518,18 +518,10 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path :
   =
   let instructions = effective_instructions ~meta ?profile_defaults () in
   let persona_extended =
-    let persona_name =
-      match profile_defaults with
-      | Some defaults ->
-          Keeper_types_profile.resolved_persona_name ~keeper_name:meta.name
-            defaults
-      | None -> meta.name
-    in
-    (* An absent persona is a valid empty block. Read failures are already
-       operator-visible in [load_persona_extended]. *)
-    Option.value
-      ~default:""
-      (Keeper_types_profile.load_persona_extended persona_name)
+    Keeper_types_profile.load_resolved_persona_extended
+      ~keeper_name:meta.name
+      ?profile_defaults
+      ()
   in
   let active_goals =
     Option.value

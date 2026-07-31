@@ -52,6 +52,44 @@ let test_raw_response_excerpt_bounds_long_bodies () =
     (Astring.String.is_infix ~affix:"deadbeef" rendered)
 ;;
 
+let test_raw_response_excerpt_redacts_secrets () =
+  let raw : Exact_output.raw_response =
+    { body = "error: upstream rejected Bearer sk-live-abc123 token"
+    ; body_sha256 = "redsha"
+    }
+  in
+  let rendered = Detail.raw_response_excerpt (Some raw) in
+  Alcotest.(check bool)
+    "secret is gone"
+    false
+    (Astring.String.is_infix ~affix:"sk-live-abc123" rendered);
+  Alcotest.(check bool)
+    "redaction marker present"
+    true
+    (Astring.String.is_infix ~affix:"[REDACTED]" rendered)
+;;
+
+let test_raw_response_excerpt_cuts_on_utf8_boundary () =
+  let body = "a" ^ String.concat "" (List.init 100 (fun _ -> "가")) in
+  let raw : Exact_output.raw_response = { body; body_sha256 = "utf8sha" } in
+  let rendered = Detail.raw_response_excerpt (Some raw) in
+  let start = String.length "raw_response=" in
+  let marker_index =
+    match Astring.String.find_sub ~sub:"... (" rendered with
+    | Some index -> index
+    | None -> Alcotest.fail "expected truncation marker"
+  in
+  let excerpt = String.sub rendered start (marker_index - start) in
+  (* A 240-byte cut would land mid-character: one ASCII byte plus 79 full
+     three-byte "가" characters is 238 bytes, the largest boundary-aligned
+     prefix. A raw [String.sub] would return 240 malformed bytes instead. *)
+  Alcotest.(check int) "boundary-aligned length" 238 (String.length excerpt);
+  Alcotest.(check bool)
+    "keeps original byte count"
+    true
+    (Astring.String.is_infix ~affix:"301 bytes total" rendered)
+;;
+
 let () =
   Alcotest.run
     "keeper_exact_flow_detail"
@@ -64,5 +102,9 @@ let () =
             test_raw_response_excerpt_flattens_newlines
         ; Alcotest.test_case "raw response bounds long bodies" `Quick
             test_raw_response_excerpt_bounds_long_bodies
+        ; Alcotest.test_case "raw response redacts secrets" `Quick
+            test_raw_response_excerpt_redacts_secrets
+        ; Alcotest.test_case "raw response cuts on utf8 boundary" `Quick
+            test_raw_response_excerpt_cuts_on_utf8_boundary
         ] )
     ]

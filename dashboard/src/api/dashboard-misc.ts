@@ -53,12 +53,29 @@ export function fetchMemorySubsystems(
 export type KeeperMemoryHealthAlertCode =
   | 'snapshot_read_error'
   | 'librarian_lane_busy'
+  | 'librarian_failures'
+  | 'librarian_starvation'
 
-export type KeeperMemoryHealthAlertSeverity = 'warn'
+export type KeeperMemoryHealthAlertSeverity = 'warn' | 'error'
 
 export type KeeperMemoryHealthAlertTarget =
   | 'snapshot_read_error'
   | 'librarian_lane_busy'
+  | 'librarian_failures'
+  | 'librarian_starvation'
+
+// Mirrors the backend contract: each alert code carries exactly one severity
+// (starvation is the only error-level alert). The decoder rejects a payload
+// that disagrees.
+const KEEPER_MEMORY_HEALTH_ALERT_SEVERITY: Record<
+  KeeperMemoryHealthAlertCode,
+  KeeperMemoryHealthAlertSeverity
+> = {
+  snapshot_read_error: 'warn',
+  librarian_lane_busy: 'warn',
+  librarian_failures: 'warn',
+  librarian_starvation: 'error',
+}
 
 export interface KeeperMemoryHealthAlert {
   code: KeeperMemoryHealthAlertCode
@@ -77,7 +94,9 @@ export interface KeeperMemoryHealthKeeperEntry {
   snapshot_bytes: number
   added: number
   removed: number
+  snapshot_present: boolean
   librarian_lane_busy: number
+  librarian_failures: number
   read_error: string | null
   alerts: KeeperMemoryHealthAlert[]
 }
@@ -93,14 +112,17 @@ export interface KeeperMemoryHealthResponse {
     added: number
     removed: number
     librarian_lane_busy: number
+    librarian_failures: number
     read_errors: number
   }
   alert_summary: {
     total_alerts: number
     warn_alerts: number
+    error_alerts: number
     keepers_with_alerts: number
     snapshot_read_error_keepers: number
     librarian_lane_busy_keepers: number
+    librarian_starving_keepers: number
   }
 }
 
@@ -134,11 +156,17 @@ function decodeKeeperMemoryHealthAlert(raw: unknown): KeeperMemoryHealthAlert | 
     'threshold',
   ])) return null
   const code =
-    raw.code === 'snapshot_read_error' || raw.code === 'librarian_lane_busy'
+    raw.code === 'snapshot_read_error'
+    || raw.code === 'librarian_lane_busy'
+    || raw.code === 'librarian_failures'
+    || raw.code === 'librarian_starvation'
       ? raw.code
       : null
   const target =
-    raw.target === 'snapshot_read_error' || raw.target === 'librarian_lane_busy'
+    raw.target === 'snapshot_read_error'
+    || raw.target === 'librarian_lane_busy'
+    || raw.target === 'librarian_failures'
+    || raw.target === 'librarian_starvation'
       ? raw.target
       : null
   const label = nonEmptyString(raw.label)
@@ -149,13 +177,21 @@ function decodeKeeperMemoryHealthAlert(raw: unknown): KeeperMemoryHealthAlert | 
     code === null
     || target === null
     || code !== target
-    || raw.severity !== 'warn'
+    || raw.severity !== KEEPER_MEMORY_HEALTH_ALERT_SEVERITY[code]
     || label === null
     || message === null
     || value === null
     || threshold === null
   ) return null
-  return { code, severity: 'warn', target, label, message, value, threshold }
+  return {
+    code,
+    severity: KEEPER_MEMORY_HEALTH_ALERT_SEVERITY[code],
+    target,
+    label,
+    message,
+    value,
+    threshold,
+  }
 }
 
 function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEntry | null {
@@ -166,7 +202,9 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     'snapshot_bytes',
     'added',
     'removed',
+    'snapshot_present',
     'librarian_lane_busy',
+    'librarian_failures',
     'read_error',
     'alerts',
   ])) return null
@@ -176,7 +214,11 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
   const snapshot_bytes = nonNegativeInteger(raw.snapshot_bytes)
   const added = nonNegativeInteger(raw.added)
   const removed = nonNegativeInteger(raw.removed)
+  const snapshot_present = typeof raw.snapshot_present === 'boolean'
+    ? raw.snapshot_present
+    : null
   const librarian_lane_busy = nonNegativeInteger(raw.librarian_lane_busy)
+  const librarian_failures = nonNegativeInteger(raw.librarian_failures)
   const read_error = raw.read_error === null ? null : nonEmptyString(raw.read_error)
   const alerts = Array.isArray(raw.alerts)
     ? raw.alerts.map(decodeKeeperMemoryHealthAlert)
@@ -188,7 +230,9 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     || snapshot_bytes === null
     || added === null
     || removed === null
+    || snapshot_present === null
     || librarian_lane_busy === null
+    || librarian_failures === null
     || (raw.read_error !== null && read_error === null)
     || alerts === null
     || alerts.some(alert => alert === null)
@@ -200,7 +244,9 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     snapshot_bytes,
     added,
     removed,
+    snapshot_present,
     librarian_lane_busy,
+    librarian_failures,
     read_error,
     alerts: alerts as KeeperMemoryHealthAlert[],
   }
@@ -240,6 +286,7 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     'added',
     'removed',
     'librarian_lane_busy',
+    'librarian_failures',
     'read_errors',
   ])) return null
   const expectedTotals = {
@@ -248,6 +295,7 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     added: sum(entry => entry.added),
     removed: sum(entry => entry.removed),
     librarian_lane_busy: sum(entry => entry.librarian_lane_busy),
+    librarian_failures: sum(entry => entry.librarian_failures),
     read_errors: sum(entry => entry.read_error === null ? 0 : 1),
   }
   if (Object.entries(expectedTotals).some(([key, value]) => totals[key] !== value)) return null
@@ -255,17 +303,24 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
   if (!exactKeys(alertSummary, [
     'total_alerts',
     'warn_alerts',
+    'error_alerts',
     'keepers_with_alerts',
     'snapshot_read_error_keepers',
     'librarian_lane_busy_keepers',
+    'librarian_starving_keepers',
   ])) return null
   const totalAlerts = sum(entry => entry.alerts.length)
+  const countAlertSeverity = (severity: KeeperMemoryHealthAlertSeverity) =>
+    sum(entry => entry.alerts.filter(alert => alert.severity === severity).length)
   const expectedAlertSummary = {
     total_alerts: totalAlerts,
-    warn_alerts: totalAlerts,
+    warn_alerts: countAlertSeverity('warn'),
+    error_alerts: countAlertSeverity('error'),
     keepers_with_alerts: sum(entry => entry.alerts.length > 0 ? 1 : 0),
     snapshot_read_error_keepers: sum(entry => entry.read_error === null ? 0 : 1),
     librarian_lane_busy_keepers: sum(entry => entry.librarian_lane_busy > 0 ? 1 : 0),
+    librarian_starving_keepers: sum(entry =>
+      entry.librarian_failures > 0 && !entry.snapshot_present ? 1 : 0),
   }
   if (
     Object.entries(expectedAlertSummary)

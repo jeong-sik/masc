@@ -127,7 +127,13 @@ let execution_cause_detail : Exact_output.execution_error_cause -> string = func
 
 (* Log lines are single-line records; the excerpt bound keeps one failed call
    from flooding them while the sha256 keeps the full body identifiable in
-   wire captures. *)
+   wire captures. Provider bodies can echo prompt, memory, or credential
+   material, so the excerpt passes through [Observability_redact.redact_text]
+   before any truncation — cutting first could split a secret across the
+   boundary where the redactor no longer matches it. The cut itself lands on
+   a UTF-8 character boundary so the log line stays valid UTF-8 for the log
+   ring and its JSON serialization. Byte count and sha256 always describe
+   the original wire body, not the redacted excerpt. *)
 let raw_response_excerpt_max_bytes = 240
 
 let raw_response_excerpt = function
@@ -139,12 +145,15 @@ let raw_response_excerpt = function
            if Char.equal char '\n' || Char.equal char '\r' then ' ' else char)
         raw.body
     in
-    if String.length flattened <= raw_response_excerpt_max_bytes
-    then Printf.sprintf "raw_response=%s" flattened
+    let redacted = Observability_redact.redact_text flattened in
+    if String.length redacted <= raw_response_excerpt_max_bytes
+    then Printf.sprintf "raw_response=%s" redacted
     else
       Printf.sprintf
         "raw_response=%s... (%d bytes total sha256=%s)"
-        (String.sub flattened 0 raw_response_excerpt_max_bytes)
+        (String_util.utf8_prefix
+           ~max_bytes:raw_response_excerpt_max_bytes
+           redacted)
         (String.length raw.body)
         raw.body_sha256
 ;;

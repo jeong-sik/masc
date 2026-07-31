@@ -33,28 +33,37 @@ let librarian_lane_busy_for_keeper keeper_id =
   |> int_of_float
 ;;
 
-(* Labels mirror the counter increments in [Keeper_librarian_runtime]. *)
+(* Labels mirror the counter increments in [Keeper_librarian_runtime] and the
+   pre-librarian snapshot read in [Keeper_agent_run_post_turn_memory]: a keeper
+   whose current-snapshot read keeps failing aborts before the librarian ever
+   runs, so counting only the librarian site would report it as failure-free. *)
+let librarian_failure_sites = [ "memory_os_librarian"; "memory_os_current_read" ]
+
 let librarian_failures_for_keeper keeper_id =
-  Otel_metric_store.metric_value_or_zero
-    librarian_failures_metric
-    ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
-    ()
-  |> int_of_float
+  List.fold_left
+    (fun total site ->
+       total
+       + (Otel_metric_store.metric_value_or_zero
+            librarian_failures_metric
+            ~labels:[ "keeper", keeper_id; "site", site ]
+            ()
+          |> int_of_float))
+    0
+    librarian_failure_sites
 ;;
 
 (* A keeper with a config but no current snapshot is the starvation case this
    endpoint exists to expose; enumerating snapshot files alone gives it no
    row at all. Health rows therefore come from the union of configured
-   keepers (<keeper>.toml) and existing snapshots. *)
-let keeper_config_suffix = ".toml"
-
+   keepers and existing snapshots. Discovery goes through
+   [Keeper_types_profile.discover_keepers_toml] rather than toml basenames
+   because a toml may set its canonical [name]: metrics and snapshots are
+   keyed by that name, and a basename row would both miss the real keeper
+   and show a ghost. Invalid tomls keep their basename row so a keeper with
+   a broken config stays visible. *)
 let configured_keeper_ids ~keepers_dir =
-  if not (Sys.file_exists keepers_dir && Sys.is_directory keepers_dir)
-  then []
-  else
-    Sys.readdir keepers_dir
-    |> Array.to_list
-    |> List.filter_map (Filename.chop_suffix_opt ~suffix:keeper_config_suffix)
+  Keeper_types_profile.discover_keepers_toml keepers_dir
+  |> List.map Keeper_types_profile.keeper_toml_discovery_name
 ;;
 
 let health_keeper_ids ~keepers_dir =

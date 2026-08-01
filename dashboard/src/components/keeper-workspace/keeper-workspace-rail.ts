@@ -13,13 +13,11 @@ import type { VNode } from 'preact'
 import { shellAuthSummary, tasks } from '../../store'
 import type { Keeper, Task } from '../../types'
 import type { KeeperRuntimeLensConfigDriftAxis } from '../../api/keeper-runtime-trace'
-import { navigate } from '../../router'
 import {
   keeperBucket,
   phaseTokenFromKeeper,
   keeperRuntimeLabel,
 } from './keeper-workspace-shared'
-import { CountBadge } from '../v2/primitives-v2'
 import { callMcpTool } from '../../api/mcp'
 import { showToast } from '../common/toast'
 import { requestConfirm } from '../common/confirm-dialog'
@@ -45,6 +43,7 @@ import { recordManualCompaction } from './compaction-snapshots'
 import type { MemoryKeeper } from '../memory-inspector'
 import { keepers } from '../../store'
 import { KeeperLaneSection } from './keeper-lane-strip'
+import { openTaskDetail } from '../goals/task-detail-state'
 
 const LazyCompactionInspectorOverlay = lazy(async () => ({
   default: (await import('./compaction-inspector-overlay')).CompactionInspectorOverlay,
@@ -109,8 +108,6 @@ function attentionItems(keeper: Keeper): AttentionItem[] {
   const items: AttentionItem[] = []
   const blocked = keeper.blocked_task_count ?? 0
   if (blocked > 0) items.push({ sev: 'bad', text: `차단된 태스크 ${blocked}건` })
-  const awaiting = ownedTasks(keeper).filter(t => t.status === 'awaiting_verification')
-  if (awaiting.length > 0) items.push({ sev: 'warn', text: `검증 대기 ${awaiting.length}건` })
   const fallback = items.length === 0 ? attentionFallback(keeper) : null
   if (fallback) items.push({ sev: 'warn', text: fallback })
   return items
@@ -121,7 +118,7 @@ function AttentionSection({ keeper }: { keeper: Keeper }): VNode | null {
   if (items.length === 0) return null
   return html`
     <div class="ctx-sec">
-      <h4 style=${{ display: 'flex', alignItems: 'center', gap: '7px' }}>주의 <${CountBadge}>${items.length}</${CountBadge}></h4>
+      <h4>주의</h4>
       <div class="att-list">
         ${items.map((it, i) => html`
           <div class=${`att-item ${it.sev}`} key=${`${it.text}-${i}`}>
@@ -391,20 +388,16 @@ function ContextSection({
   const compactionCount = keeper.compaction_count ?? null
   const hasCompactionHistory = typeof compactionCount === 'number' && compactionCount > 0
   const hasMeterData = pct !== null && (pct > 0 || max !== null)
-  // Provenance of the measurement: which completed turn produced the numbers
-  // (server projects them from the newest TurnRecord — the measurement SSOT).
+  // The server projects these values from the newest completed TurnRecord.
+  // Keep only turn identity and age here; serialized request bytes are
+  // transport diagnostics, not a second context metric.
   const ctxSource = keeper.context_source ?? keeper.context?.source ?? null
   const ctxAbsoluteTurn = keeper.context?.absolute_turn ?? null
   const ctxObservedAt = keeper.context?.observed_at ?? null
-  const ctxWireBytes = keeper.context?.request_body_bytes ?? null
   const ctxTurnRef = keeper.context?.turn_ref ?? null
   const ctxUnavailableReason =
     keeper.context_metrics_unavailable?.kind === 'not_observed'
       ? keeper.context_metrics_unavailable.reason
-      : null
-  const wireLabel =
-    typeof ctxWireBytes === 'number' && Number.isFinite(ctxWireBytes) && ctxWireBytes > 0
-      ? `${Math.round(ctxWireBytes / 1024)}KB`
       : null
   const compactAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   const canCompact = compactAccess.allowed && !compacting
@@ -491,7 +484,7 @@ function ContextSection({
                 <div
                   class="meter"
                   role="meter"
-                  aria-label="컨텍스트 윈도우 사용률"
+                  aria-label="마지막 완료 요청의 컨텍스트 윈도우 사용률"
                   aria-valuenow=${pct ?? 0}
                   aria-valuemin="0"
                   aria-valuemax="100"
@@ -509,10 +502,8 @@ function ContextSection({
         </div>
         ${ctxSource === 'turn_record'
           ? html`<div class="ctx-src" data-testid="ctx-provenance" title=${ctxTurnRef ?? undefined}>
-              측정: <span class="mono">T${ctxAbsoluteTurn ?? '—'}</span>
+              마지막 완료 요청: <span class="mono">T${ctxAbsoluteTurn ?? '—'}</span>
               ${ctxObservedAt ? html` · ${formatTimeAgo(ctxObservedAt)}` : null}
-              ${wireLabel ? html` · 요청 본문 <span class="mono">${wireLabel}</span>` : null}
-              <span class="ctx-src-lbl">같은 완료 요청: 토큰은 모델 측정, 본문은 직렬화 UTF-8 바이트</span>
             </div>`
           : null}
         <div class="cmp-actions">
@@ -537,9 +528,6 @@ function ContextSection({
 
 function OwnedTasksSection({ keeper }: { keeper: Keeper }): VNode {
   const owned = ownedTasks(keeper)
-  const openTask = (task: Task) => {
-    navigate('workspace', { section: 'planning', task: task.id })
-  }
   return html`
     <div class="ctx-sec">
       <h4>소유 태스크</h4>
@@ -550,9 +538,9 @@ function OwnedTasksSection({ keeper }: { keeper: Keeper }): VNode {
                 type="button"
                 class="tasktag"
                 key=${t.id}
-                title=${`작업으로 이동 · ${t.id} · ${t.title}`}
+                title=${`상세 보기 · ${t.id} · ${t.title}`}
                 aria-label=${`태스크 열기: ${t.id} ${t.title}`}
-                onClick=${() => openTask(t)}
+                onClick=${() => openTaskDetail(t)}
               >
                 <div class="tasktag-top">
                   <span class="tid">${t.id}</span>

@@ -234,6 +234,22 @@ let test_repository_checkout_projection_reports_typed_freshness () =
     (entry |> Json.member "freshness" |> Json.member "ahead" |> Json.to_int)
 ;;
 
+let test_repository_checkout_projection_ignores_symlinked_directory () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  let outside = Filename.concat playground "outside-checkout" in
+  ensure_dir outside;
+  let repos = Filename.concat playground "repos" in
+  ensure_dir repos;
+  Unix.symlink outside (Filename.concat repos "linked-checkout");
+  let entries =
+    Keeper_sandbox_control.repository_checkouts_json ~config ~meta
+    |> Json.member "entries"
+    |> Json.to_list
+  in
+  Alcotest.(check int) "symlink checkout excluded" 0 (List.length entries)
+;;
+
 let test_visible_scratch_read_resolves_to_private_storage () =
   setup
   @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
@@ -437,6 +453,10 @@ let () =
             "reports catalog identity, dirty state, and freshness"
             `Quick
             test_repository_checkout_projection_reports_typed_freshness
+        ; Alcotest.test_case
+            "ignores symlinked checkout directories"
+            `Quick
+            test_repository_checkout_projection_ignores_symlinked_directory
         ] )
     ]
 ;;

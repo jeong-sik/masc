@@ -264,12 +264,26 @@ let cleanup_stale ~(config : Workspace.config) ~(timeout_sec : float) () =
     ()
 
 let observed_is_dir path =
-  try Fs_compat.file_exists path && Sys.is_directory path with
+  try
+    match Fs_compat.exact_path_kind ~follow:false path with
+    | Fs_compat.Exact_kind Unix.S_DIR -> true
+    | Fs_compat.Exact_missing
+    | Fs_compat.Exact_kind _
+    | Fs_compat.Exact_unknown -> false
+  with
   | Sys_error error ->
     Log.Keeper.warn
       "playground filesystem observation failed path=%s error=%s"
       path
       error;
+    false
+  | Unix.Unix_error (error, operation, argument) ->
+    Log.Keeper.warn
+      "playground filesystem observation failed path=%s error=%s(%s): %s"
+      path
+      operation
+      argument
+      (Unix.error_message error);
     false
 
 let valid_checkout_name name =

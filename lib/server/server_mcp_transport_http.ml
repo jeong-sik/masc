@@ -630,6 +630,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           (match
              Auth_oauth.with_expected_resource expected_resource (fun () ->
                Sse.register ~kind:sse_kind ~auth session_id
+                 (* DET-OK: unchanged from main; the authority wrapper only re-indented it. *)
                  ~last_event_id:(Option.value ~default:0 last_event_id)
                  ~on_disconnect:(fun () -> stop_sse_session session_id))
            with

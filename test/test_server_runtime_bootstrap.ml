@@ -2198,9 +2198,17 @@ let test_health_json_keeps_awaiting_verification_in_system_llm_lane () =
         Alcotest.(check string) "pending row preserves task id"
           "task-awaiting-system-llm-verdict"
           (pending_task |> member "task_id" |> to_string);
-        Alcotest.(check string) "pending row preserves status"
-          "awaiting_verification"
-          (pending_task |> member "task_status" |> to_string);
+        Alcotest.(check string) "pending row preserves submission time"
+          "2026-06-26T00:00:01Z"
+          (pending_task |> member "submitted_at" |> to_string);
+        let pending_task_fields =
+          match pending_task with
+          | `Assoc fields -> fields
+          | _ -> Alcotest.fail "pending task row must be a JSON object"
+        in
+        Alcotest.(check bool) "pending row does not duplicate status"
+          false
+          (List.mem_assoc "task_status" pending_task_fields);
         Alcotest.(check string) "pending row preserves verification id"
           "verification-system-llm-001"
           (pending_task |> member "verification_id" |> to_string);

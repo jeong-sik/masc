@@ -576,14 +576,14 @@ type task_claim_decision =
 let task_claim_readiness (_task : task) = Claim_ready
 ;;
 
-let task_claim_decision (task : task) =
-  match task.task_status with
+let task_claim_decision_for_status task_status =
+  match task_status with
   | Todo ->
     (* Todo tasks are always claimable regardless of reclaim_policy.
        reclaim_policy only gates Done -> re-claim, not Todo -> first claim.
        task-1869: 6 TaskError fingerprints show coordination-role tasks
        with Block_reclaim policy were blocked from claiming. *)
-    Claim_available (task_claim_readiness task)
+    Claim_available Claim_ready
   | AwaitingVerification { verification_id; _ } ->
     (* A pending obligation belongs to the completion-authority lane. No
        Keeper claim can grant verifier authority or inspect it as agent work. *)
@@ -597,7 +597,13 @@ let task_claim_decision (task : task) =
   | Claimed _
   | InProgress _
   | Cancelled _ ->
-    Claim_unavailable (Claim_block_not_todo task.task_status)
+    Claim_unavailable (Claim_block_not_todo task_status)
+;;
+
+let task_claim_decision (task : task) =
+  match task_claim_decision_for_status task.task_status with
+  | Claim_available Claim_ready -> Claim_available (task_claim_readiness task)
+  | Claim_unavailable block -> Claim_unavailable block
 ;;
 
 let task_claim_decision_is_available task =

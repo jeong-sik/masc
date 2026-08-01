@@ -115,12 +115,6 @@ module Transport : sig
   val startup_watchdog_sec : unit -> float
 end
 
-(** {1 Verification FSM} *)
-
-module Verification : sig
-  val timeout_deadline_seconds : unit -> float
-end
-
 (** {1 Board persistence} *)
 
 module Board : sig

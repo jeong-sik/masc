@@ -1186,7 +1186,7 @@ type active_task_owner_without_executable_fiber = {
 type completion_authority_pending_task = {
   producer_agent_name : string;
   task_id : string;
-  task_status : string;
+  submitted_at : string;
   verification_id : string;
 }
 
@@ -1240,13 +1240,16 @@ type active_task_assignment =
   | Keeper_task_owner of { assignee : string; task_status : string }
   | Completion_authority_pending of {
       producer_agent_name : string;
+      submitted_at : string;
       verification_id : string;
     }
 
 let active_task_assignment (task : Masc_domain.task) =
   match task.task_status with
-  | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
-      Some (Completion_authority_pending { producer_agent_name = assignee; verification_id })
+  | Masc_domain.AwaitingVerification { assignee; submitted_at; verification_id } ->
+      Some
+        (Completion_authority_pending
+           { producer_agent_name = assignee; submitted_at; verification_id })
   | task_status ->
       Masc_domain.task_assignee_of_status task_status
       |> Option.map (fun assignee ->
@@ -1277,7 +1280,7 @@ let completion_authority_pending_task_json row =
     [
       ("producer_agent_name", `String row.producer_agent_name);
       ("task_id", `String row.task_id);
-      ("task_status", `String row.task_status);
+      ("submitted_at", `String row.submitted_at);
       ("verification_id", `String row.verification_id);
       ("owner_kind", `String "system_llm_completion_authority");
       ("fleet_blocking", `Bool false);
@@ -1372,11 +1375,12 @@ let active_task_owner_fiber_scan config ~executable_names =
              (fun (pending_rows, blocking_rows, non_keeper_rows) task ->
              match active_task_assignment task with
              | None -> (pending_rows, blocking_rows, non_keeper_rows)
-             | Some (Completion_authority_pending { producer_agent_name; verification_id }) ->
+             | Some
+                 (Completion_authority_pending
+                    { producer_agent_name; submitted_at; verification_id }) ->
                  ( { producer_agent_name
                    ; task_id = task.id
-                   ; task_status =
-                       Workspace_task_schedule.task_status_label task.task_status
+                   ; submitted_at
                    ; verification_id
                    }
                    :: pending_rows

@@ -13,7 +13,7 @@ implementation_prs: []
 
 # RFC-0220: Decouple keeper liveness from verification state + guaranteed satisfier for every verification obligation
 
-Status: Draft · Architectural framing + typed-state unification + atomicity fix + deterministic migration
+Status: Withdrawn · Historical analysis; not an implementation contract
 Audit source: `~/me/.tmp/masc-fiber-audit-2026-06-09/DIAGNOSIS.md` (finding S3)
 Ground-truth invariants encoded:
 - **I1** — a keeper must never permanently stop. A blocked/empty claim pool must not idle a keeper.

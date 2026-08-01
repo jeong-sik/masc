@@ -689,7 +689,8 @@ let test_save_raw_token_credential_rejects_blank_token () =
   cleanup_test_workspace dir;
   match result with
   | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken reason)) ->
-    check string "explicit blank token error" "Raw token must not be empty" reason
+    check string "explicit blank token error"
+      "Raw token must not be blank or whitespace-only" reason
   | Error error ->
     failf "expected InvalidToken, received %s" (Masc_domain.masc_error_to_string error)
   | Ok _ -> fail "blank raw token must be rejected"

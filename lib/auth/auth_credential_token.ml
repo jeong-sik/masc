@@ -94,7 +94,11 @@ let constant_time_string_equal = Auth_credential_base.constant_time_string_equal
 
 let validate_raw_token raw_token =
   if String.trim raw_token = ""
-  then Error (Auth (Auth_error.InvalidToken "Raw token must not be empty"))
+  then
+    Error
+      (Auth
+         (Auth_error.InvalidToken
+            "Raw token must not be blank or whitespace-only"))
   else Ok ()
 ;;
 

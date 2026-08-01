@@ -169,6 +169,14 @@ let test_sha256_hash () =
   check bool "different input different hash" true (hash1 <> hash3);
   check int "hash length is 64 chars" 64 (String.length hash1)
 
+let test_eqaf_equality_truth_table () =
+  let equal = Auth_credential_token.constant_time_string_equal in
+  check bool "empty strings" true (equal "" "");
+  check bool "same contents" true (equal "0123456789abcdef" "0123456789abcdef");
+  check bool "different first byte" false (equal "1123456789abcdef" "0123456789abcdef");
+  check bool "different last byte" false (equal "0123456789abcdee" "0123456789abcdef");
+  check bool "different lengths" false (equal "short" "longer")
+
 (* ============================================ *)
 (* Auth config tests                            *)
 (* ============================================ *)
@@ -672,6 +680,21 @@ let test_save_raw_token_credential_uses_provided_token () =
            "provided raw token should verify after save_raw_token_credential: %s"
            (Masc_domain.masc_error_to_string e))
 
+let test_save_raw_token_credential_rejects_blank_token () =
+  let dir = setup_test_workspace () in
+  let result =
+    Auth.save_raw_token_credential dir ~agent_name:"bootstrap-admin"
+      ~role:Masc_domain.Admin ~raw_token:"   "
+  in
+  cleanup_test_workspace dir;
+  match result with
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken reason)) ->
+    check string "explicit blank token error"
+      "Raw token must not be blank or whitespace-only" reason
+  | Error error ->
+    failf "expected InvalidToken, received %s" (Masc_domain.masc_error_to_string error)
+  | Ok _ -> fail "blank raw token must be rejected"
+
 let test_save_raw_token_credential_in_eio_runtime () =
   let dir = setup_test_workspace () in
   let raw_token = "runtime-admin-token" in
@@ -1159,6 +1182,7 @@ let () =
     "token_generation", [
       test_case "generate token" `Quick test_token_generation;
       test_case "sha256 hash" `Quick test_sha256_hash;
+      test_case "Eqaf equality truth table" `Quick test_eqaf_equality_truth_table;
     ];
     "config", [
       test_case "parent Auth is leaf re-export facade" `Quick
@@ -1203,6 +1227,8 @@ let () =
         test_verify_token_rejects_dashboard_dev_legacy_alias;
       test_case "save_raw_token_credential uses provided token" `Quick
         test_save_raw_token_credential_uses_provided_token;
+      test_case "save_raw_token_credential rejects blank token" `Quick
+        test_save_raw_token_credential_rejects_blank_token;
       test_case "save_raw_token_credential works in eio runtime" `Quick
         test_save_raw_token_credential_in_eio_runtime;
       test_case "ensure_keeper_credential uses per-keeper token" `Quick

@@ -16,6 +16,7 @@
   masc.crypto_rng
   eio
   digestif
+  eqaf
   masc.fs_compat
   masc.masc_log
   masc.masc_tool_dispatch

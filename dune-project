@@ -87,6 +87,7 @@
   (eio_posix (>= 0.16))
   (cstruct (>= 6.0))
   (digestif (>= 1.1))
+  (eqaf (>= 0.10))
   optint
   (ocaml-protoc-plugin (>= 4.0))
   (pbrt (and (>= 3.0) (< 4.0)))

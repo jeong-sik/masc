@@ -89,18 +89,17 @@ let collision_log_to_yojson log =
     ]
 ;;
 
-(** Constant-time string equality for raw bearer tokens.  It XOR-accumulates
-    every byte of the shorter input and checks length equality separately so
-    the comparison does not short-circuit on the first differing byte. *)
-let constant_time_string_equal a b =
-  let len_a = String.length a in
-  let len_b = String.length b in
-  let acc = ref 0 in
-  let min_len = min len_a len_b in
-  for i = 0 to min_len - 1 do
-    acc := !acc lor (Char.code a.[i] lxor Char.code b.[i])
-  done;
-  !acc = 0 && len_a = len_b
+(** Auth comparisons use Eqaf's timing-resistant equality. *)
+let constant_time_string_equal = Auth_credential_base.constant_time_string_equal
+
+let validate_raw_token raw_token =
+  if String.trim raw_token = ""
+  then
+    Error
+      (Auth
+         (Auth_error.InvalidToken
+            "Raw token must not be blank or whitespace-only"))
+  else Ok ()
 ;;
 
 (** Compare two credentials field-by-field.  The caller supplies the
@@ -280,27 +279,30 @@ let expires_at_for_auth_config auth_cfg =
 let save_raw_token_credential_with_expiry config ~agent_name ~role ~raw_token ~expires_at
   : (agent_credential, masc_error) result
   =
-  let cred =
-    { id = None
-    ; agent_id = None
-    ; agent_name
-    ; token = sha256_hash raw_token
-    ; role
-    ; created_at = now_iso ()
-    ; expires_at
-    }
-  in
-  try
-    save_credential config cred;
-    Ok cred
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    let msg =
-      Printf.sprintf "Failed to save agent credential: %s" (Printexc.to_string exn)
+  match validate_raw_token raw_token with
+  | Error _ as error -> error
+  | Ok () ->
+    let cred =
+      { id = None
+      ; agent_id = None
+      ; agent_name
+      ; token = sha256_hash raw_token
+      ; role
+      ; created_at = now_iso ()
+      ; expires_at
+      }
     in
-    Log.Auth.error "%s" msg;
-    Error (System (System_error.IoError msg))
+    (try
+       save_credential config cred;
+       Ok cred
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       let msg =
+         Printf.sprintf "Failed to save agent credential: %s" (Printexc.to_string exn)
+       in
+       Log.Auth.error "%s" msg;
+       Error (System (System_error.IoError msg)))
 ;;
 
 let save_raw_token_credential config ~agent_name ~role ~raw_token
@@ -364,29 +366,32 @@ type rotation_outcome =
 let save_rotated_raw_token config (cred : agent_credential) ~raw_token
   : (agent_credential, masc_error) result
   =
-  let auth_cfg = load_auth_config config in
-  let rotated =
-    { cred with
-      token = sha256_hash raw_token
-    ; created_at = now_iso ()
-    ; expires_at = expires_at_for_auth_config auth_cfg
-    }
-  in
-  try
-    persist_raw_token config ~agent_name:rotated.agent_name raw_token;
-    save_credential config rotated;
-    Ok rotated
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    let msg =
-      Printf.sprintf
-        "Failed to rotate agent credential for %s: %s"
-        rotated.agent_name
-        (Printexc.to_string exn)
+  match validate_raw_token raw_token with
+  | Error _ as error -> error
+  | Ok () ->
+    let auth_cfg = load_auth_config config in
+    let rotated =
+      { cred with
+        token = sha256_hash raw_token
+      ; created_at = now_iso ()
+      ; expires_at = expires_at_for_auth_config auth_cfg
+      }
     in
-    Log.Auth.error "%s" msg;
-    Error (System (System_error.IoError msg))
+    (try
+       persist_raw_token config ~agent_name:rotated.agent_name raw_token;
+       save_credential config rotated;
+       Ok rotated
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       let msg =
+         Printf.sprintf
+           "Failed to rotate agent credential for %s: %s"
+           rotated.agent_name
+           (Printexc.to_string exn)
+       in
+       Log.Auth.error "%s" msg;
+       Error (System (System_error.IoError msg)))
 ;;
 
 let rotate_shared_tokens_matching config ~include_agent : rotation_outcome list =
@@ -508,7 +513,7 @@ let verify_token config ~agent_name ~token : (agent_credential, masc_error) resu
   | None -> verify_token_owner_alias config ~agent_name ~token
   | Some cred ->
     let token_hash = sha256_hash token in
-    if cred.token <> token_hash
+    if not (constant_time_string_equal cred.token token_hash)
     then Error (Auth (Auth_error.InvalidToken "Token mismatch"))
     else (
       (* Check expiry *)

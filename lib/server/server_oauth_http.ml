@@ -299,16 +299,22 @@ let ensure_optional_exact fields name expected =
   | Some _ -> Error (Auth_oauth.Invalid_request (name ^ " is not supported"))
 ;;
 
-let ensure_optional_string_set fields name expected =
+(* RFC 7591 §2 declares [grant_types] and [response_types] optional, and a
+   client that names a subset of what this server supports is registering
+   legally: omitting [grant_types] means exactly ["authorization_code"]. So the
+   question is membership, not set equality — the server rejects values it does
+   not support, never a client that wants fewer of them. Duplicates are still
+   rejected, since a repeated value would otherwise pad a list past a
+   length-based check without naming a second grant. *)
+let ensure_optional_string_subset fields name supported =
   let* values = string_list_field fields name in
   match values with
   | None -> Ok ()
   | Some values
-    when List.length values = List.length (List.sort_uniq String.compare values)
-         && List.length values = List.length expected
-         && List.for_all (fun value -> List.mem value expected) values ->
-    Ok ()
-  | Some _ -> Error (Auth_oauth.Invalid_request (name ^ " is not supported"))
+    when List.length values <> List.length (List.sort_uniq String.compare values) ->
+    Error (Auth_oauth.Invalid_request (name ^ " contains duplicate values"))
+  | Some values when List.for_all (fun value -> List.mem value supported) values -> Ok ()
+  | Some _ -> Error (Auth_oauth.Invalid_request (name ^ " contains an unsupported value"))
 ;;
 
 let handle_register request reqd =
@@ -342,12 +348,12 @@ let handle_register request reqd =
               in
               let* () = ensure_optional_exact fields "application_type" "native" in
               let* () =
-                ensure_optional_string_set
+                ensure_optional_string_subset
                   fields
                   "grant_types"
                   [ "authorization_code"; "refresh_token" ]
               in
-              let* () = ensure_optional_string_set fields "response_types" [ "code" ] in
+              let* () = ensure_optional_string_subset fields "response_types" [ "code" ] in
               Auth_oauth.register_client ~base_path ~client_name ~redirect_uris
             in
             (match result with

@@ -76,18 +76,49 @@ let test_html_escape () =
     (Server_oauth_http.html_escape "<&>\"'")
 ;;
 
-let test_exact_string_set_rejects_duplicates () =
+let grant_types values = [ "grant_types", `List (List.map (fun v -> `String v) values) ]
+let supported_grant_types = [ "authorization_code"; "refresh_token" ]
+
+let ensure_grant_types values =
+  Server_oauth_http.ensure_optional_string_subset
+    (grant_types values)
+    "grant_types"
+    supported_grant_types
+;;
+
+let test_string_subset_rejects_duplicates () =
   check
     bool
-    "duplicate grant types cannot replace a required value"
+    "a value repeated twice does not stand in for a second grant"
     true
-    (Result.is_error
-       (Server_oauth_http.ensure_optional_string_set
-          [ ( "grant_types"
-            , `List [ `String "authorization_code"; `String "authorization_code" ] )
-          ]
+    (Result.is_error (ensure_grant_types [ "authorization_code"; "authorization_code" ]))
+;;
+
+let test_string_subset_rejects_unsupported () =
+  check
+    bool
+    "a grant this server does not implement is refused"
+    true
+    (Result.is_error (ensure_grant_types [ "authorization_code"; "client_credentials" ]))
+;;
+
+(* RFC 7591 §2: omitting [grant_types] means exactly ["authorization_code"], so
+   naming that one value must register just as the omission does. *)
+let test_string_subset_accepts_documented_default () =
+  check
+    bool
+    "declaring only the default grant registers"
+    true
+    (Result.is_ok (ensure_grant_types [ "authorization_code" ]));
+  check
+    bool
+    "omitting the field registers"
+    true
+    (Result.is_ok
+       (Server_oauth_http.ensure_optional_string_subset
+          []
           "grant_types"
-          [ "authorization_code"; "refresh_token" ]))
+          supported_grant_types))
 ;;
 
 let () =
@@ -98,9 +129,17 @@ let () =
         ; test_case "form ambiguity" `Quick test_form_parser_rejects_ambiguity
         ; test_case "HTML escaping" `Quick test_html_escape
         ; test_case
-            "exact string set rejects duplicates"
+            "string subset rejects duplicates"
             `Quick
-            test_exact_string_set_rejects_duplicates
+            test_string_subset_rejects_duplicates
+        ; test_case
+            "string subset rejects unsupported"
+            `Quick
+            test_string_subset_rejects_unsupported
+        ; test_case
+            "string subset accepts documented default"
+            `Quick
+            test_string_subset_accepts_documented_default
         ] )
     ]
 ;;

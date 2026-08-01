@@ -357,6 +357,8 @@ let handle_tool_execute_typed
           | Keeper_execution_effect.External ->
             Keeper_gate.decide
               ?cycle_grant:gate_grant
+              (* NDT-OK: this typed, caller-owned policy input is consumed only
+                 at the external-effect authorization boundary. *)
               ~keeper_always_allow:(Option.value ~default:false meta.always_allow)
               gate_request
         in

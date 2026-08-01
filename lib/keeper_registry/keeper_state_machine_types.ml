@@ -35,7 +35,6 @@ type conditions =
   ; dead_tombstone_latched : bool
   ; restart_requested : bool
   ; drain_complete : bool
-  ; context_overflow : bool
   ; credential_archived : bool
   }
 
@@ -52,7 +51,6 @@ let default_conditions =
   ; dead_tombstone_latched = false
   ; restart_requested = false
   ; drain_complete = false
-  ; context_overflow = false
   ; credential_archived = false
   }
 ;;
@@ -99,9 +97,6 @@ type event =
       }
   | Supervisor_restart_attempt of { attempt : int }
   | Credential_archived
-  | Context_overflow_detected of
-      { limit_tokens : int option }
-  | Auto_compact_triggered
   | Operator_compact_requested
   | Operator_clear_requested of
       { preserve_system : bool
@@ -141,14 +136,6 @@ let event_to_string = function
   | Supervisor_restart_attempt r ->
     Printf.sprintf "supervisor_restart_attempt(%d)" r.attempt
   | Credential_archived -> "credential_archived"
-  | Context_overflow_detected r ->
-    let lim =
-      match r.limit_tokens with
-      | Some n -> string_of_int n
-      | None -> "?"
-    in
-    Printf.sprintf "context_overflow_detected(limit=%s)" lim
-  | Auto_compact_triggered -> "auto_compact_triggered"
   | Operator_compact_requested -> "operator_compact_requested"
   | Operator_clear_requested r ->
     Printf.sprintf

@@ -27,7 +27,6 @@ let conditions_to_json (c : conditions) =
     ; "dead_tombstone_latched", `Bool c.dead_tombstone_latched
     ; "restart_requested", `Bool c.restart_requested
     ; "drain_complete", `Bool c.drain_complete
-    ; "context_overflow", `Bool c.context_overflow
     ; "credential_archived", `Bool c.credential_archived
     ]
 ;;
@@ -84,16 +83,6 @@ let event_to_json (ev : event) : Yojson.Safe.t =
   | Supervisor_restart_attempt r ->
     obj "supervisor_restart_attempt" [ "attempt", `Int r.attempt ]
   | Credential_archived -> obj "credential_archived" []
-  | Context_overflow_detected r ->
-    let limit_tokens =
-      match r.limit_tokens with
-      | Some n -> `Int n
-      | None -> `Null
-    in
-    obj
-      "context_overflow_detected"
-      [ "limit_tokens", limit_tokens ]
-  | Auto_compact_triggered -> obj "auto_compact_triggered" []
   | Operator_compact_requested -> obj "operator_compact_requested" []
   | Operator_clear_requested r ->
     obj

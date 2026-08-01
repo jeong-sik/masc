@@ -59,15 +59,13 @@ type tla_action =
   | Action_finish_compaction
   | Action_enter_failing
   | Action_clear_failing
-  | Action_enter_overflowed
-  | Action_overflowed_auto_compact
 
 let all_tla_actions =
   [
     Action_start_turn; Action_measurement_broadcast; Action_decide_guard; Action_select_tool_policy;
     Action_start_runtime_selection; Action_select_runtime; Action_runtime_done;
     Action_runtime_exhausted; Action_finish_turn; Action_start_compaction; Action_finish_compaction;
-    Action_enter_failing; Action_clear_failing; Action_enter_overflowed; Action_overflowed_auto_compact;
+    Action_enter_failing; Action_clear_failing;
   ]
 
 type invariant_key =
@@ -269,8 +267,6 @@ let tla_action_to_string = function
   | Action_finish_compaction -> "FinishCompaction"
   | Action_enter_failing -> "EnterFailing"
   | Action_clear_failing -> "ClearFailing"
-  | Action_enter_overflowed -> "EnterOverflowed"
-  | Action_overflowed_auto_compact -> "OverflowedAutoCompact"
 
 let tla_action_of_string = function
   | "StartTurn" -> Some Action_start_turn
@@ -286,8 +282,6 @@ let tla_action_of_string = function
   | "FinishCompaction" -> Some Action_finish_compaction
   | "EnterFailing" -> Some Action_enter_failing
   | "ClearFailing" -> Some Action_clear_failing
-  | "EnterOverflowed" -> Some Action_enter_overflowed
-  | "OverflowedAutoCompact" -> Some Action_overflowed_auto_compact
   | _ -> None
 
 let invariant_key_to_string = function
@@ -716,9 +710,6 @@ let phase_condition_rows (c : Keeper_state_machine.conditions) : phase_condition
     row "compacting_active" "Compacting: compaction active" 10
       c.compaction_active
       Keeper_state_machine.Compacting;
-    row "overflowed_context" "Overflowed: context overflow awaiting compaction" 11
-      c.context_overflow
-      Keeper_state_machine.Overflowed;
     row "failing_unhealthy" "Failing: heartbeat or turn unhealthy" 12
       ((not c.heartbeat_healthy) || not c.turn_healthy)
       Keeper_state_machine.Failing;

@@ -303,7 +303,6 @@ let pending_measurement_after_event now entry event =
 let compaction_stage_of_event entry event =
   match event with
   | Keeper_state_machine.Compaction_started
-  | Keeper_state_machine.Auto_compact_triggered
   | Keeper_state_machine.Operator_compact_requested -> Packed Compaction_compacting
   | Keeper_state_machine.Compaction_completed -> Packed Compaction_done
   | Keeper_state_machine.Compaction_failed _ -> Packed Compaction_accumulating

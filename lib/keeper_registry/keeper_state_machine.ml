@@ -50,9 +50,8 @@ let is_terminal = function
               |   KeeperConditionsGovernPhase.tla:96-100 (Transition action)
        7b     | KeeperReconcileLiveness.tla:98 (Compacting)
               |   KeeperCompactionLifecycle.tla:171-184 (Compacting cycle)
-       7c     | KeeperCompactionLifecycle.tla:154 (Overflowed) — partition
-              |   (KeeperReconcileLiveness omits Overflowed; coverage by
-              |    sibling spec is intentional, see Note C)
+       7c     | (retired #26546 — Overflowed is no longer derived; the
+              |   phase variant survives only to decode historical records)
        8      | KeeperReconcileLiveness.tla:99 (Failing — health degraded)
        9      | KeeperReconcileLiveness.tla:100 (Running)
               |   KeeperCoreTriad.tla:147,316 (turn_healthy=true -> Running)
@@ -73,10 +72,9 @@ let is_terminal = function
        keeper_registry.ml:340 (set), this file:520 (clear in FSM),
        keeper_registry.ml:407 (clear on death) — all three sources
        are anchored in the spec's source-citation block.
-     Note B — Partition (acknowledged). Overflowed phase derivation
-       lives in KeeperCompactionLifecycle.tla; KeeperReconcileLiveness
-       omits it because reconcile liveness is independent of overflow.
-       Multi-spec coverage by design, not drift.
+     Note B — Retired (#26546). Overflowed phase derivation was removed
+       together with the automatic overflow-compaction trigger; no
+       condition maps to Overflowed anymore.
 
    C1 follow-up scope (plan §3, sequenced):
      - Phase 1 (per-priority): convert each branch to `let try_<action>
@@ -130,8 +128,10 @@ let derive_phase (c : conditions) : phase =
   then HandingOff
   else if c.compaction_active
   then Compacting
-  else if c.context_overflow
-  then Overflowed
+  (* [Overflowed] is retired vocabulary (#26546): the automatic
+     overflow-compaction trigger was removed, no condition derives it, and
+     the phase variant remains only so historical durable lifecycle records
+     ("overflowed") still decode. *)
   else if
     (not c.heartbeat_healthy)
     || (not c.turn_healthy)
@@ -163,14 +163,12 @@ let update_conditions (c : conditions) (ev : event) : conditions =
   | Context_measured { context_actions; _ } ->
     { c with context_handoff_needed = context_actions.handoff }
   | Compaction_started -> { c with compaction_active = true }
-  | Compaction_completed ->
-    { c with compaction_active = false; context_overflow = false }
+  | Compaction_completed -> { c with compaction_active = false }
   | Compaction_failed _ ->
-    (* Durable lane settlement owns the retry. Keeping [context_overflow]
-       latched here made the Keeper non-executable, so the exact requeued work
-       could never retry. The failure remains observable through turn health
-       and receipts while this buffer-operation latch is released. *)
-    { c with compaction_active = false; context_overflow = false }
+    (* Durable lane settlement owns the retry. The failure remains
+       observable through turn health and receipts while this
+       buffer-operation latch is released. *)
+    { c with compaction_active = false }
   | Handoff_started -> { c with handoff_active = true }
   | Handoff_completed _ -> { c with handoff_active = false }
   | Handoff_failed _ -> { c with handoff_active = false }
@@ -202,7 +200,6 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     ; restart_requested = false
     ; drain_complete = false
     ; stop_requested = false
-    ; context_overflow = false
     }
   | Fiber_terminated _ -> { c with fiber_alive = false }
   | Supervisor_restart_attempt _ -> { c with restart_requested = true }
@@ -211,17 +208,13 @@ let update_conditions (c : conditions) (ev : event) : conditions =
       fiber_alive = false
     ; credential_archived = true
     }
-  | Context_overflow_detected _ ->
-    { c with context_overflow = true }
-  | Auto_compact_triggered ->
-    (* Legacy explicit input. No entry action produces this event. *)
-    { c with compaction_active = true }
   | Operator_compact_requested ->
     { c with compaction_active = true }
   | Operator_clear_requested _ ->
-    (* Last resort: context fully dropped by [masc_keeper_clear].
-       Conditions reset in-place without passing through [Compacting]. *)
-    { c with context_overflow = false }
+    (* Last resort: context fully dropped by [masc_keeper_clear]. The
+       context payload change is owned by the clear runtime; with the
+       overflow latch retired (#26546) no lifecycle condition changes. *)
+    c
 ;;
 
 (** Compute entry actions for a phase transition.
@@ -265,7 +258,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Compaction_started
          | Compaction_completed
          | Compaction_failed _
-         | Context_overflow_detected _
          | Handoff_started
          | Handoff_completed _
          | Handoff_failed _
@@ -276,42 +268,15 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Fiber_terminated _
          | Supervisor_restart_attempt _
          | Credential_archived
-         | Auto_compact_triggered
          | Operator_compact_requested
          | Operator_clear_requested _ -> event_to_string event)
     ]
   | Overflowed ->
-    [ lifecycle
-        "overflowed"
-        (match event with
-         | Context_overflow_detected r ->
-           (match r.limit_tokens with
-            | Some n -> Printf.sprintf "limit=%d" n
-            | None -> "limit=unknown")
-         | Heartbeat_ok
-         | Heartbeat_failed _
-         | Turn_succeeded
-         | Turn_failed _
-         | Context_measured _
-         | Compaction_started
-         | Compaction_completed
-         | Compaction_failed _
-         | Handoff_started
-         | Handoff_completed _
-         | Handoff_failed _
-         | Operator_pause
-         | Operator_resume
-         | Operator_stop _
-         | Stop_requested
-         | Drain_complete
-         | Fiber_started
-         | Fiber_terminated _
-         | Supervisor_restart_attempt _
-         | Credential_archived
-         | Auto_compact_triggered
-         | Operator_compact_requested
-         | Operator_clear_requested _ -> event_to_string event)
-    ]
+    (* Retired phase (#26546): no condition derives [Overflowed] anymore, so
+       this arm is unreachable at runtime. It stays for phase-match
+       exhaustiveness because the variant is preserved to decode historical
+       durable lifecycle records. *)
+    [ lifecycle "overflowed" (event_to_string event) ]
   | Failing -> [ lifecycle "failing" (event_to_string event) ]
   | Paused ->
     let detail =
@@ -336,9 +301,7 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
       | Fiber_terminated _
       | Supervisor_restart_attempt _
       | Credential_archived
-      | Auto_compact_triggered
       | Operator_compact_requested
-      | Context_overflow_detected _
       | Operator_clear_requested _ ->
         (* These events should not normally trigger a Paused transition,
            but if they do, label generically rather than mis-attributing
@@ -392,9 +355,7 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Fiber_started
          | Supervisor_restart_attempt _
          | Credential_archived
-         | Auto_compact_triggered
          | Operator_compact_requested
-         | Context_overflow_detected _
          | Operator_clear_requested _ ->
            (* These events should not normally trigger a Paused→Running
               transition; label generically via [event_to_string]. *)
@@ -440,20 +401,18 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
    This helper enforces structural buffer-operation preconditions at the
    [apply_event] boundary so silent corruption becomes a typed
    [Precondition_violation] result:
-     - Context_overflow_detected, Auto_compact_triggered (overflow
-       lifecycle — the two events that drive Overflowed↔Compacting)
      - Operator_compact_requested (operator-driven buffer op
        exclusivity).  Operator_clear_requested is deliberately *not*
        arm-enforced beyond the terminal guard — see its arm below for
        the operator escape-hatch rationale.
    Other events have no spec preconditions beyond NotTerminal and
-   fall through the catch-all.
+   fall through the catch-all.  The overflow-lifecycle preconditions
+   (Context_overflow_detected, Auto_compact_triggered) were retired with
+   their events (#26546).
 
    Background:
      - iter 9 audit memo: docs/tla-audit/ksm-precondition-enforcement-gap-2026-05-12.md
-     - iter 9 PR #14730 (systematic gap class)
-     - TLA+ §ContextOverflowDetected and §AutoCompactTriggered in
-       KeeperStateMachine.tla *)
+     - iter 9 PR #14730 (systematic gap class) *)
 let check_event_precondition (c : conditions) (ev : event)
   : (unit, transition_error) result
   =
@@ -464,53 +423,6 @@ let check_event_precondition (c : conditions) (ev : event)
      precondition that failed, while the long explanatory text stays
      in source comments above each branch. *)
   match ev with
-  | Context_overflow_detected _ ->
-    if c.compaction_active
-    then
-      Error
-        (Precondition_violation
-           { event = event_to_string ev
-           ; reason =
-               "TLA+ §ContextOverflowDetected requires ~compaction_active; \
-                an overflow signal while compaction is already running means \
-                the in-flight compaction is the runaway — the retry latch \
-                must catch it, not a fresh overflow event that conflates the \
-                two attempts"
-           })
-    else Ok ()
-  | Auto_compact_triggered ->
-    if not c.context_overflow
-    then
-      Error
-        (Precondition_violation
-           { event = event_to_string ev
-           ; reason =
-               "TLA+ §AutoCompactTriggered requires context_overflow=true; \
-                triggering auto-compaction on a non-overflowed keeper flips \
-                compaction_active outside the Overflowed→Compacting transition \
-                and corrupts the overflow lifecycle invariant"
-           })
-    else if c.compaction_active
-    then
-      Error
-        (Precondition_violation
-           { event = event_to_string ev
-           ; reason =
-               "TLA+ §AutoCompactTriggered requires ~compaction_active; \
-                re-triggering while a compaction is already in flight \
-                duplicates the buffer op and tangles the ordering"
-           })
-    else if c.handoff_active
-    then
-      Error
-        (Precondition_violation
-           { event = event_to_string ev
-           ; reason =
-               "TLA+ §AutoCompactTriggered requires ~handoff_active; \
-                starting a compaction during handoff entangles two buffer \
-                ops on the same keeper"
-           })
-    else Ok ()
   | Operator_compact_requested ->
     (* TLA+ §OperatorCompactRequested.  Operator path differs from
        AutoCompactTriggered: it does NOT require [context_overflow], so

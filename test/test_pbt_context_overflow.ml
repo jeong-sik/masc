@@ -20,7 +20,7 @@ let gen_context_overflow_error =
 
 let prop_overflow_preserves_provider_limit =
   QCheck.Test.make ~count:200
-    ~name:"overflow event preserves the provider-declared optional limit"
+    ~name:"overflow classification preserves the provider-declared optional limit"
     (QCheck.make gen_context_overflow_error)
     (fun err ->
       let expected_limit =
@@ -28,10 +28,15 @@ let prop_overflow_preserves_provider_limit =
         | Agent_sdk.Error.Api (ContextOverflow { limit; _ }) -> limit
         | _ -> assert false
       in
-      match UT.context_overflow_event_of_error err with
-      | Some (Keeper_state_machine.Context_overflow_detected { limit_tokens }) ->
+      match
+        Masc.Keeper_unified_turn_execution.For_testing
+        .declared_lane_failure_of_error err
+      with
+      | Masc.Keeper_unified_turn_execution.For_testing
+        .Provider_context_overflow { limit_tokens } ->
           Option.equal Int.equal expected_limit limit_tokens
-      | _ -> false)
+      | Masc.Keeper_unified_turn_execution.For_testing
+        .Declared_runtime_lane_exhausted -> false)
 
 let user_text text : Agent_sdk.Types.message =
   { role = Agent_sdk.Types.User

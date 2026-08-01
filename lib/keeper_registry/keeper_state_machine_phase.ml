@@ -17,6 +17,8 @@ type phase =
   | Running
   | Failing
   | Overflowed
+    (* Retired (#26546): never derived anymore; kept so historical durable
+       lifecycle records ("overflowed") still decode via [phase_of_string]. *)
   | Compacting
   | HandingOff
   | Draining

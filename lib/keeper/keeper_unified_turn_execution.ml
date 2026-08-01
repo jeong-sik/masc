@@ -24,13 +24,29 @@ type retry_loop_input =
   }
 
 type declared_lane_failure =
-  | Provider_context_overflow of Keeper_state_machine.event
+  | Provider_context_overflow of { limit_tokens : int option }
   | Declared_runtime_lane_exhausted
 
+(* Only the context-window axis classifies as [Provider_context_overflow]:
+   the blocker below publishes the [Sdk_context_window_exceeded] class,
+   which would be wrong for a declared-byte refusal. *)
 let declared_lane_failure_of_error err =
-  match context_overflow_event_of_error err with
-  | Some event -> Provider_context_overflow event
+  match capacity_refusal_of_error err with
+  | Some (Provider_context_window { limit_tokens }) ->
+    Provider_context_overflow { limit_tokens }
+  | Some (Serialized_request_body _)
+  | Some (Provider_request_body_refusal _)
   | None -> Declared_runtime_lane_exhausted
+
+(* Keeps the exact blocker-detail shape the retired
+   [Keeper_state_machine.Context_overflow_detected] event printed, so
+   operator-facing blocker history stays greppable across #26546. *)
+let context_overflow_blocker_label ~limit_tokens =
+  Printf.sprintf
+    "context_overflow_detected(limit=%s)"
+    (match limit_tokens with
+     | Some n -> string_of_int n
+     | None -> "?")
 
 let run_provider_dispatch_if_authorized ~before_dispatch_authority dispatch =
   match before_dispatch_authority () with
@@ -374,7 +390,7 @@ let run (ctx : ctx)
         Error err, turn_state
       | None ->
         (match declared_lane_failure_of_error err with
-         | Provider_context_overflow overflow_event ->
+         | Provider_context_overflow { limit_tokens } ->
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
             ~keeper_name:meta.name
             ~runtime_id:execution.runtime_id
@@ -396,7 +412,7 @@ let run (ctx : ctx)
                 Some
                   (Keeper_meta_contract.blocker_info_of_class
                      ~detail:
-                       (Keeper_state_machine.event_to_string overflow_event
+                       (context_overflow_blocker_label ~limit_tokens
                         ^ ": "
                         ^ overflow_evidence_detail
                         ^ ": "
@@ -461,7 +477,7 @@ let run (ctx : ctx)
 
 module For_testing = struct
   type nonrec declared_lane_failure = declared_lane_failure =
-    | Provider_context_overflow of Keeper_state_machine.event
+    | Provider_context_overflow of { limit_tokens : int option }
     | Declared_runtime_lane_exhausted
 
   let declared_lane_failure_of_error = declared_lane_failure_of_error

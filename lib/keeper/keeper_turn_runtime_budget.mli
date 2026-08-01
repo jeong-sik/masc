@@ -235,14 +235,6 @@ val capacity_transition_of_error :
 (** Total classifier over typed SDK errors. This function does not inspect
     rendered error prose and does not select a provider, model, or failover. *)
 
-val context_overflow_event_of_error :
-  Agent_sdk.Error.sdk_error ->
-  Keeper_state_machine.event option
-(** The context-window axis of {!capacity_transition_of_error} as a lifecycle event.
-    [Some] only for [Provider_context_window]; a byte refusal returns [None]
-    because this projection's call sites label the failure as a context-window
-    exceedance. *)
-
 val current_keeper_meta :
   config:Workspace.config ->
   fallback_meta:keeper_meta ->

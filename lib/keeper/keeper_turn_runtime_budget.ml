@@ -530,21 +530,6 @@ let capacity_refusal_of_error
     None
 ;;
 
-(* Projection for the two token-axis call sites. Both publish
-   reason="provider_context_overflow" and the [Sdk_context_window_exceeded]
-   blocker class (keeper_unified_turn_execution.ml:485-509), labels that would be
-   wrong for a declared-byte refusal, so this projection admits only the context
-   window. *)
-let context_overflow_event_of_error
-    (err : Agent_sdk.Error.sdk_error) : Keeper_state_machine.event option =
-  match capacity_refusal_of_error err with
-  | Some (Provider_context_window { limit_tokens }) ->
-    Some (Keeper_state_machine.Context_overflow_detected { limit_tokens })
-  | Some (Serialized_request_body _)
-  | Some (Provider_request_body_refusal _)
-  | None ->
-    None
-
 let current_keeper_meta ~(config : Workspace.config) ~(fallback_meta : keeper_meta) =
   match Keeper_registry.get ~base_path:config.base_path fallback_meta.name with
   | Some entry -> entry.meta

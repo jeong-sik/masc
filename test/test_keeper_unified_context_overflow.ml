@@ -94,11 +94,17 @@ let test_input_capacity_is_not_context_overflow () =
     (EC.is_context_overflow capacity_error);
   check
     bool
-    "typed input capacity emits no overflow event"
+    "typed input capacity does not classify as a lane overflow"
     true
-    (Option.is_none
-       (Masc.Keeper_unified_turn.context_overflow_event_of_error
-          capacity_error))
+    (match
+       Masc.Keeper_unified_turn_execution.For_testing
+       .declared_lane_failure_of_error
+         capacity_error
+     with
+     | Masc.Keeper_unified_turn_execution.For_testing
+       .Declared_runtime_lane_exhausted -> true
+     | Masc.Keeper_unified_turn_execution.For_testing
+       .Provider_context_overflow _ -> false)
 ;;
 
 (* ContextOverflow counts toward the ordinary crash threshold (#26546): the
@@ -262,28 +268,33 @@ let test_unusable_capacity_evidence_is_non_compacting () =
   | _ -> fail "measurement-unavailable became compactable"
 ;;
 
-(* The projection feeding the cascade path publishes
+(* The classifier feeding the cascade path publishes
    reason="provider_context_overflow" and the Sdk_context_window_exceeded blocker
    class, so admitting a byte refusal there would label it as a window exceedance. *)
-let test_event_projection_admits_only_the_token_axis () =
+let test_lane_classifier_admits_only_the_token_axis () =
+  let module E = Masc.Keeper_unified_turn_execution.For_testing in
   (match
-     Budget.context_overflow_event_of_error
+     E.declared_lane_failure_of_error
        (request_body_too_large ~actual_bytes:2_000_000 ~limit_bytes:1_048_576)
    with
-   | None -> ()
-   | Some _ -> fail "a byte refusal was projected as a context-overflow event");
+   | E.Declared_runtime_lane_exhausted -> ()
+   | E.Provider_context_overflow _ ->
+     fail "a byte refusal was classified as a context overflow");
   (match
-     Budget.context_overflow_event_of_error
+     E.declared_lane_failure_of_error
        (request_body_refused_by_provider ~status:413)
    with
-   | None -> ()
-   | Some _ -> fail "a provider byte refusal was projected as a token overflow");
+   | E.Declared_runtime_lane_exhausted -> ()
+   | E.Provider_context_overflow _ ->
+     fail "a provider byte refusal was classified as a token overflow");
   match
-    Budget.context_overflow_event_of_error
+    E.declared_lane_failure_of_error
       (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = None }))
   with
-  | Some (Keeper_state_machine.Context_overflow_detected { limit_tokens = None }) -> ()
-  | Some _ | None -> fail "the context overflow event projection regressed"
+  | E.Provider_context_overflow { limit_tokens = None } -> ()
+  | E.Provider_context_overflow { limit_tokens = Some _ }
+  | E.Declared_runtime_lane_exhausted ->
+    fail "the context overflow lane classification regressed"
 ;;
 
 let () =
@@ -321,7 +332,7 @@ let () =
         ; test_case
             "event projection admits only the token axis"
             `Quick
-            test_event_projection_admits_only_the_token_axis
+            test_lane_classifier_admits_only_the_token_axis
         ] )
     ]
 ;;

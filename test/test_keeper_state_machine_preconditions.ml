@@ -153,12 +153,8 @@ let test_attribution_gate_and_origin_invariant () =
     cases
 ;;
 
-let overflowed_conditions : SM.conditions =
-  { running_conditions with context_overflow = true }
-;;
-
 (* [event_to_string] for payload-carrying events appends the payload
-   (e.g. "context_overflow_detected(limit=...)"), so we use
+   (e.g. "heartbeat_failed(3)"), so we use
    prefix match rather than equality. *)
 let assert_precondition_violation ~event_name err =
   match err with
@@ -171,43 +167,6 @@ let assert_precondition_violation ~event_name err =
   | other ->
     Alcotest.fail
       ("expected Precondition_violation, got " ^ SM.transition_error_to_string other)
-;;
-
-let overflow_event =
-  SM.Context_overflow_detected
-    { limit_tokens = Some 200_000 }
-;;
-
-let test_pre_overflow_during_compaction () =
-  let c = { running_conditions with compaction_active = true } in
-  let err = apply_err ~current_phase:SM.Compacting ~conditions:c ~event:overflow_event in
-  assert_precondition_violation ~event_name:"context_overflow_detected" err
-;;
-
-let test_pre_auto_compact_no_overflow () =
-  let err =
-    apply_err
-      ~current_phase:SM.Running
-      ~conditions:running_conditions
-      ~event:SM.Auto_compact_triggered
-  in
-  assert_precondition_violation ~event_name:"auto_compact_triggered" err
-;;
-
-let test_pre_auto_compact_active () =
-  let c = { overflowed_conditions with compaction_active = true } in
-  let err =
-    apply_err ~current_phase:SM.Compacting ~conditions:c ~event:SM.Auto_compact_triggered
-  in
-  assert_precondition_violation ~event_name:"auto_compact_triggered" err
-;;
-
-let test_pre_auto_compact_handoff_active () =
-  let c = { overflowed_conditions with handoff_active = true } in
-  let err =
-    apply_err ~current_phase:SM.HandingOff ~conditions:c ~event:SM.Auto_compact_triggered
-  in
-  assert_precondition_violation ~event_name:"auto_compact_triggered" err
 ;;
 
 let test_pre_operator_compact_during_compaction () =
@@ -233,7 +192,7 @@ let test_pre_operator_compact_during_handoff () =
 ;;
 
 let test_pre_operator_clear_no_extra_precondition () =
-  let c = { running_conditions with context_overflow = true } in
+  let c = running_conditions in
   let clear_event =
     SM.Operator_clear_requested
       { preserve_system = false; reason = "operator escape-hatch" }

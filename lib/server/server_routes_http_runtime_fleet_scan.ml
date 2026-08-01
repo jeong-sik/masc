@@ -947,8 +947,9 @@ let phase_supports_crash_log_failure_reason = function
 let active_task_owner_fiber_scan_semantics =
   "reports keeper-shaped active task owners without executable keeper fibers; \
    disabled keepers are excluded; matching keeper rows can degrade fleet \
-   status; credentialed non-keeper client task owners are reported separately \
-   as advisory rows"
+   status; tasks awaiting a completion-authority verdict are excluded because \
+   their verifier is the system LLM agent rather than a Keeper; credentialed \
+   non-keeper client task owners are reported separately as advisory rows"
 
 let paused_keeper_last_blocker_json paused_keepers_json name =
   match paused_keepers_json with
@@ -1218,9 +1219,16 @@ let compare_non_keeper_active_task_owner left right =
   if cmp <> 0 then cmp else String.compare left.task_id right.task_id
 
 let active_task_assignment (task : Masc_domain.task) =
-  Masc_domain.task_assignee_of_status task.task_status
-  |> Option.map (fun assignee ->
-         (assignee, Workspace_task_schedule.task_status_label task.task_status))
+  match task.task_status with
+  | Masc_domain.AwaitingVerification _ ->
+      (* AwaitingVerification is a durable obligation for the application-owned
+         system LLM completion authority. It is not executable Keeper work and
+         must not degrade Keeper fleet health while waiting for that verdict. *)
+      None
+  | status ->
+      Masc_domain.task_assignee_of_status status
+      |> Option.map (fun assignee ->
+             (assignee, Workspace_task_schedule.task_status_label status))
 
 let active_task_owner_without_executable_fiber_json row =
   let action =

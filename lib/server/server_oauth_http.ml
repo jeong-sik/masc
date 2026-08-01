@@ -64,6 +64,9 @@ let oauth_error_status = function
 ;;
 
 let respond_oauth_error request reqd error =
+  Log.Misc.warn
+    "oauth_http: request rejected error=%s"
+    (Auth_oauth.protocol_error_code error);
   Http.Response.json_value
     ~status:(oauth_error_status error)
     ~request
@@ -174,6 +177,7 @@ let authorization_request_of_params ~base_path ~authority params =
 
 let handle_authorize_get request reqd =
   with_oauth_authority request reqd (fun authority ->
+    Log.Misc.debug "oauth_http: authorization form requested";
     with_base_path request reqd (fun base_path ->
       match query_params request with
       | Error error -> respond_oauth_error request reqd error
@@ -242,6 +246,9 @@ let handle_authorize_post request reqd =
                       with
                       | Error error -> respond_oauth_error request reqd error
                       | Ok code ->
+                        Log.Misc.info
+                          "oauth_http: authorization code issued agent=%s"
+                          bootstrap_credential.agent_name;
                         respond_redirect
                           (redirect_with_code authorization_request code)
                           reqd)))))))
@@ -328,6 +335,7 @@ let handle_register request reqd =
             (match result with
              | Error error -> respond_oauth_error request reqd error
              | Ok client ->
+               Log.Misc.info "oauth_http: dynamic client registered";
                Http.Response.json_value
                  ~status:`Created
                  ~request
@@ -400,6 +408,7 @@ let handle_token request reqd =
           match result with
           | Error error -> respond_oauth_error request reqd error
           | Ok pair ->
+            Log.Misc.info "oauth_http: token grant completed";
             Http.Response.json_value
               ~request
               ~extra_headers:[ "cache-control", "no-store"; "pragma", "no-cache" ]
@@ -409,6 +418,7 @@ let handle_token request reqd =
 
 let handle_protected_resource request reqd =
   with_oauth_authority request reqd (fun authority ->
+    Log.Misc.debug "oauth_http: protected resource metadata requested";
     Http.Response.json_value
       ~request
       ~extra_headers:[ "cache-control", "no-store" ]
@@ -418,6 +428,7 @@ let handle_protected_resource request reqd =
 
 let handle_authorization_server request reqd =
   with_oauth_authority request reqd (fun authority ->
+    Log.Misc.debug "oauth_http: authorization server metadata requested";
     Http.Response.json_value
       ~request
       ~extra_headers:[ "cache-control", "no-store" ]

@@ -2,12 +2,12 @@ import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { shellAuthSummary, tasks } from '../../store'
-import { navigate } from '../../router'
 import { callMcpTool } from '../../api/mcp'
 import { fetchKeeperCompactionSnapshots, fetchKeeperTurnRecords, fetchRuntimeProviders } from '../../api/dashboard'
 import { requestConfirm } from '../common/confirm-dialog'
 import { showToast } from '../common/toast'
 import { KeeperWorkspaceRail, runtimeRawSpecOpen } from './keeper-workspace-rail'
+import { selectedTask } from '../goals/task-detail-selection'
 import type { Keeper, Task } from '../../types'
 import type { KeeperRuntimeLensConfigDriftAxis } from '../../api/keeper-runtime-trace'
 import { resetRuntimeCatalog } from '../../lib/runtime-catalog-resource'
@@ -167,6 +167,7 @@ function mkTask(partial: Partial<Task>): Task {
 }
 
 beforeEach(() => {
+  selectedTask.value = null
   tasks.value = [
     mkTask({ id: 'T-4412', title: '세그먼트 리텐션 대시보드', status: 'in_progress', assignee: 'masc-improver' }),
     mkTask({ id: 'T-9999', title: '남의 태스크', status: 'todo', assignee: 'someone-else' }),
@@ -176,6 +177,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   tasks.value = []
+  selectedTask.value = null
   shellAuthSummary.value = null
   compactionSnapshots.value = {}
   runtimeRawSpecOpen.value = false
@@ -712,7 +714,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('provider 입력 토큰 / 모델 윈도우')
     expect(meter).not.toBeNull()
     expect(meter?.getAttribute('role')).toBe('meter')
-    expect(meter?.getAttribute('aria-label')).toBe('컨텍스트 윈도우 사용률')
+    expect(meter?.getAttribute('aria-label')).toBe('마지막 완료 요청의 컨텍스트 윈도우 사용률')
     expect(meter?.getAttribute('aria-valuenow')).toBe('62')
   })
 
@@ -746,10 +748,19 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).not.toContain('처리량')
   })
 
-  it('opens the planning task detail when an owned task is clicked', () => {
+  it('opens the shared task detail overlay without leaving the keeper route', () => {
     const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
     fireEvent.click(getByRole('button', { name: /태스크 열기: T-4412/ }))
-    expect(navigate).toHaveBeenCalledWith('workspace', { section: 'planning', task: 'T-4412' })
+    expect(selectedTask.value?.id).toBe('T-4412')
+  })
+
+  it('does not duplicate awaiting-verification tasks in the attention section', () => {
+    tasks.value = [
+      mkTask({ id: 'T-review', title: '검증할 태스크', status: 'awaiting_verification', assignee: 'masc-improver' }),
+    ]
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
+    expect(container.textContent).not.toContain('검증 대기 1건')
+    expect(container.textContent).toContain('T-review')
   })
 
   it('renders the attention section from live blocked-task signal', () => {
@@ -839,10 +850,10 @@ describe('KeeperWorkspaceRail', () => {
     const provenance = container.querySelector('[data-testid="ctx-provenance"]')
     expect(provenance).not.toBeNull()
     expect(provenance?.textContent).toContain('T3337')
-    expect(provenance?.textContent).toContain('요청 본문')
-    expect(provenance?.textContent).toContain('393KB')
-    expect(provenance?.textContent).toContain('같은 완료 요청')
-    expect(provenance?.textContent).toContain('직렬화 UTF-8 바이트')
+    expect(provenance?.textContent).toContain('마지막 완료 요청')
+    expect(provenance?.textContent).not.toContain('요청 본문')
+    expect(provenance?.textContent).not.toContain('393KB')
+    expect(provenance?.textContent).not.toContain('직렬화 UTF-8 바이트')
     expect(provenance?.textContent).not.toContain('다음 입력에 함께 실리는 상비 페이로드')
   })
 
@@ -1131,8 +1142,8 @@ describe('KeeperWorkspaceRail', () => {
     expect(diagnostics.textContent).toContain('scan budget')
     const coverage = await findByTestId('compaction-coverage-status')
     expect(coverage.textContent).toContain('표시 0/0')
-    expect(container.textContent).toContain('아직 이 keeper에서 durable compaction snapshot이 없습니다.')
-    expect(container.textContent).toContain('api_count=0 · decoded=0')
+    expect(container.textContent).toContain('컴팩션 이력 유무를 확인하지 못했습니다.')
+    expect(container.textContent).not.toContain('아직 이 keeper에서 durable compaction snapshot이 없습니다.')
   })
 
   it('distinguishes empty durable compaction results from decoded schema drift', async () => {

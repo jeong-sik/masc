@@ -37,7 +37,6 @@ import {
   stateTone,
 } from '../tools/keeper-waiting-inventory-panel'
 import { formatDateTimeKo } from '../../lib/format-time'
-import { formatAutoRefreshLabel } from '../../lib/auto-refresh'
 import { CountBadge } from '../v2/primitives-v2'
 
 const LANE_ROW_LIMIT = 3
@@ -50,6 +49,11 @@ const LANE_ROW_LIMIT = 3
 // waiting on right now" surface; setupVisibleAutoRefresh still pauses when the
 // tab is hidden and refreshes immediately on focus/return.
 const LANE_REFRESH_MS = KEEPER_WAITING_INVENTORY_REFRESH_MS
+
+function formatLaneRefreshLabel(intervalMs: number): string {
+  const seconds = Math.max(1, Math.round(intervalMs / 1000))
+  return `${seconds}초마다 재조회 · 숨김 탭에서는 중지`
+}
 
 function inventoryEntry(
   inventory: DashboardKeeperWaitingInventory | null | undefined,
@@ -183,9 +187,9 @@ export function KeeperLaneStrip({
                   </div>`
                 : null}
               ${inventory?.generated_at
-                ? html`<div class="text-2xs text-[var(--color-fg-muted)]">기준 ${formatDateTimeKo(inventory.generated_at)}${autoRefreshMs ? html` · ${formatAutoRefreshLabel(autoRefreshMs)}` : null}</div>`
+                ? html`<div class="text-2xs text-[var(--color-fg-muted)]">최근 서버 샘플 ${formatDateTimeKo(inventory.generated_at)}${autoRefreshMs ? html` · ${formatLaneRefreshLabel(autoRefreshMs)}` : null}</div>`
                 : autoRefreshMs
-                  ? html`<div class="text-2xs text-[var(--color-fg-muted)]">${formatAutoRefreshLabel(autoRefreshMs)}</div>`
+                  ? html`<div class="text-2xs text-[var(--color-fg-muted)]">${formatLaneRefreshLabel(autoRefreshMs)}</div>`
                   : null}
             </div>
           `

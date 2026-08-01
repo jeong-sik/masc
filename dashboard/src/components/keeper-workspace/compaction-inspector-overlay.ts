@@ -192,6 +192,14 @@ function CompactionEmptyState({
   const source = loadState.payloadSource ?? 'unknown_source'
   const producer = loadState.payloadProducer ?? 'unknown_producer'
   const schemaDrift = payloadCount > 0 && decodedCount === 0
+  if (loadState.scanTruncated && payloadCount === 0) {
+    return html`
+      <div class="cmp-empty">
+        <strong>컴팩션 이력 유무를 확인하지 못했습니다.</strong><br />
+        manifest 조회가 끝나기 전에 중단되어 현재 결과만으로 이력이 없다고 판단할 수 없습니다.
+      </div>
+    `
+  }
   return html`
     <div class="cmp-empty">
       <strong>${schemaDrift ? '표시 가능한 compaction snapshot이 없습니다.' : '아직 이 keeper에서 durable compaction snapshot이 없습니다.'}</strong><br />

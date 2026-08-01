@@ -224,8 +224,8 @@ describe('KeeperLaneStrip', () => {
       />
     `)
     const text = el.textContent ?? ''
-    expect(text).toContain('기준')
-    expect(text).toContain('Auto-refresh 15s')
+    expect(text).toContain('최근 서버 샘플')
+    expect(text).toContain('15초마다 재조회 · 숨김 탭에서는 중지')
   })
 
   it('omits the auto-refresh label when the panel is not polling', () => {
@@ -238,7 +238,7 @@ describe('KeeperLaneStrip', () => {
         error=${null}
       />
     `)
-    expect(el.textContent ?? '').not.toContain('Auto-refresh')
+    expect(el.textContent ?? '').not.toContain('재조회')
   })
 
   it('renders an explicit gap when the keeper is absent from the inventory', () => {

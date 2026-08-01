@@ -26,9 +26,9 @@ let optional_float args key = Json_util.get_float args key
 let optional_int args key = Json_util.get_int args key
 
 let parse_due_at_iso8601 value =
-  match Time_codec.parse_rfc3339 value with
+  match Time_codec.parse_rfc3339_whole_seconds value with
   | Error Time_codec.Invalid_rfc3339 -> None
-  | Ok timestamp -> Some (Float.floor timestamp)
+  | Ok timestamp -> Some timestamp
 ;;
 
 let parse_due_at args =

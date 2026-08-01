@@ -249,6 +249,15 @@ let test_create_accepts_explicit_iso8601_offset () =
   check bool "fractional RFC 3339 accepted" true (Tool_result.is_success fractional);
   check string "fraction normalized to whole-second UTC" "2099-01-02T00:00:00Z"
     (Tool_result.data fractional |> member "due_at_iso" |> to_string);
+  let near_boundary =
+    create
+      ~schedule_id:"sched-fraction-boundary"
+      ~due_at_iso:"2099-01-02T09:00:00.999999999999+09:00"
+  in
+  check bool "near-boundary fraction accepted" true
+    (Tool_result.is_success near_boundary);
+  check string "fraction truncates before float conversion" "2099-01-02T00:00:00Z"
+    (Tool_result.data near_boundary |> member "due_at_iso" |> to_string);
   let non_rfc3339 =
     create
       ~schedule_id:"sched-non-rfc3339-offset"

@@ -23,6 +23,18 @@ let test_offset_normalized () =
   check_timestamp "offset" 0.0 "1970-01-01T09:00:00+09:00"
 ;;
 
+let test_whole_seconds_truncates_before_float_conversion () =
+  match
+    Time_codec.parse_rfc3339_whole_seconds
+      "2099-01-02T09:00:00.999999999999+09:00"
+  with
+  | Error Time_codec.Invalid_rfc3339 -> fail "expected valid RFC 3339 timestamp"
+  | Ok actual ->
+    (match Time_codec.parse_rfc3339 "2099-01-02T00:00:00Z" with
+     | Error Time_codec.Invalid_rfc3339 -> fail "expected valid whole-second reference"
+     | Ok expected -> check (float 0.0) "fraction truncated exactly" expected actual)
+;;
+
 let test_invalid_civil_date_rejected () =
   check_invalid "February 31 is invalid" "2026-02-31T12:00:00Z"
 ;;
@@ -50,6 +62,10 @@ let () =
       , [ test_case "epoch" `Quick test_epoch
         ; test_case "fraction preserved" `Quick test_fraction_preserved
         ; test_case "offset normalized" `Quick test_offset_normalized
+        ; test_case
+            "whole seconds truncate before float conversion"
+            `Quick
+            test_whole_seconds_truncates_before_float_conversion
         ; test_case "invalid civil date rejected" `Quick test_invalid_civil_date_rejected
         ; test_case "invalid offset rejected" `Quick test_invalid_offset_rejected
         ; test_case "bare local rejected" `Quick test_bare_local_rejected

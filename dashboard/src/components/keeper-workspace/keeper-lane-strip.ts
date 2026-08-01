@@ -100,7 +100,7 @@ function truncatedSourceLabels(entry: DashboardKeeperWaitingKeeper): string[] {
 
 function LaneWaitingRow({ row }: { row: DashboardKeeperWaitingRow }): VNode {
   return html`
-    <div class="grid gap-0.5 border-t border-[var(--color-border-subtle)] py-1.5 first:border-t-0">
+    <div data-testid="keeper-lane-waiting-row" class="grid gap-0.5 border-t border-[var(--color-border-subtle)] py-1.5 first:border-t-0">
       <div class="flex min-w-0 flex-wrap items-center gap-1.5">
         <${StatusChip} tone=${sourceTone(row.source)} uppercase=${false}>${enumLabel(row.source)}<//>
         <span class="min-w-0 truncate font-mono text-2xs text-[var(--color-fg-primary)]">${row.waiting_on}</span>
@@ -162,7 +162,7 @@ export function KeeperLaneStrip({
               </div>
               ${rows.length > 0
                 ? html`
-                    <div>
+                    <div class="max-h-60 overflow-y-auto">
                       ${rows.map((row, index) => html`
                         <${LaneWaitingRow} key=${`${row.source}:${row.waiting_on}:${index}`} row=${row} />
                       `)}

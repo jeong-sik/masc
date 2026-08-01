@@ -161,7 +161,7 @@ describe('KeeperLaneStrip', () => {
     expect(text).toContain('≥69')
     // the bare integer would assert a total the server never computed
     expect(text).not.toMatch(/레인\s*69(?!\d)/)
-    expect(el.querySelectorAll('[data-testid="keeper-lane-section"] .border-t').length).toBe(69)
+    expect(el.querySelectorAll('[data-testid="keeper-lane-waiting-row"]').length).toBe(69)
   })
 
   it('attributes the truncation to the capped source and the server limit', () => {

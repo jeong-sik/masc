@@ -1244,7 +1244,7 @@ let keeper_cycle_decision
         }
       else (
         (* Actionless scheduled cycles are durable no-progress: a text-only
-           answer or observation-only tool pass cannot clear the signal that
+           answer or no-tool pass cannot clear the signal that
            caused the wake. Back off the next scheduled attempt by 2x, then
            4x (the persisted [consecutive_noop_count] is capped at two for
            this admission policy). Fresh backlog writes and all reactive/event

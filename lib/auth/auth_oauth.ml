@@ -61,7 +61,17 @@ end
 let enabled () = Env_config_core.get_bool ~default:false Policy.enabled_env
 
 let positive_config ~default env =
-  max 1 (Env_config_core.get_int ~default env)
+  match Sys.getenv_opt env with
+  | None -> default
+  | Some raw ->
+    (match int_of_string_opt (String.trim raw) with
+     | Some value when value > 0 -> value
+     | Some _ | None ->
+       Log.Auth.warn
+         "oauth: invalid positive integer config env=%s; using default=%d"
+         env
+         default;
+       default)
 ;;
 
 let code_ttl_sec () =
@@ -247,6 +257,8 @@ type token_pair =
   ; scope : string
   }
 
+(* Protects only non-yielding in-process Hashtbl operations. Durable store work
+   is serialized separately through [with_store_io]. *)
 let pending_mutex = Stdlib.Mutex.create ()
 let pending_codes : (string, pending_grant) Hashtbl.t = Hashtbl.create 31
 let store_mutex = Stdlib.Mutex.create ()
@@ -885,8 +897,9 @@ let find_access_credential ~base_path ~token =
   then Ok None
   else
     let hash = token_hash token in
+    let request_resource = expected_resource () in
     let result =
-    with_store_io (fun () ->
+      with_store_io (fun () ->
       let* json = load_json_opt (access_path base_path hash) in
       match json with
       | None -> Ok None
@@ -900,7 +913,7 @@ let find_access_credential ~base_path ~token =
              record.expires_at_unix <= now ()
              || Option.is_some family.revoked_at_unix
              || not
-                  (match expected_resource () with
+                  (match request_resource with
                    | Some expected -> String.equal record.resource expected
                    | None -> false)
              || not

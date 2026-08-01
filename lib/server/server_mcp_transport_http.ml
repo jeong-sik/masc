@@ -206,6 +206,14 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
   if not (deps.is_ready ()) then
     respond_not_ready ~deps request reqd
   else
+  (* The admitted authority is a fiber-local binding whose dynamic extent is the
+     router dispatch (bin/main_eio.ml for HTTP/1.1, server_h2_gateway for h2c).
+     Everything below runs from the async body callback and from a fiber forked
+     onto runtime.sw, both outside that extent, so read it here and carry the
+     value. *)
+  let expected_resource =
+    Server_oauth_metadata.resource (Server_request_authority.current_exn ())
+  in
   let session_id_opt = get_session_id_any request in
   let session_id =
     match session_id_opt with
@@ -372,13 +380,6 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
       in
       let sw = runtime.sw in
       let clock = runtime.clock in
-      (* Read the admitted authority HERE, on the request fiber. The binding is
-         installed per request (bin/main_eio.ml for HTTP/1.1, server_h2_gateway
-         for h2c) and is fiber-local, so the fiber forked onto [runtime.sw]
-         below does not inherit it. *)
-      let expected_resource =
-        Server_oauth_metadata.resource (Server_request_authority.current_exn ())
-      in
       Ok (Eio.Fiber.fork ~sw (fun () ->
                             let otel_transport_context =
                               Otel_dispatch_hook.http_transport_context

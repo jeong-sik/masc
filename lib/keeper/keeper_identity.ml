@@ -19,43 +19,35 @@ let parse_keeper_agent_name ~prefix ~suffix agent_name =
   else
     None
 
+(* The four accepted spellings of a runtime keeper-agent identity. Enumerated
+   once: they used to be listed separately in [keeper_name_from_agent_name] and
+   [is_keeper_agent_alias], so adding a spelling to one and not the other made
+   a name an alias that no keeper name could be derived from. *)
+let keeper_agent_affixes =
+  [ "keeper-", "-agent"; "keeper_", "_agent"; "keeper-", "_agent"; "keeper_", "-agent" ]
+;;
+
+(* Answering "is this an agent identity?" and "which keeper does it denote?"
+   with one parse is what removes the unrepresentable middle: a caller cannot
+   observe the first without the second, so it never has to invent a name. *)
+let keeper_name_of_agent_alias agent_name =
+  List.find_map
+    (fun (prefix, suffix) -> parse_keeper_agent_name ~prefix ~suffix agent_name)
+    keeper_agent_affixes
+
 let keeper_name_from_agent_name agent_name =
-  match
-    parse_keeper_agent_name ~prefix:"keeper-" ~suffix:"-agent" agent_name
-  with
+  match keeper_name_of_agent_alias agent_name with
   | Some keeper_name -> Some keeper_name
-  | None -> (
-      match
-        parse_keeper_agent_name ~prefix:"keeper_" ~suffix:"_agent" agent_name
-      with
-      | Some keeper_name -> Some keeper_name
-      | None -> (
-          match
-            parse_keeper_agent_name ~prefix:"keeper-" ~suffix:"_agent" agent_name
-          with
-          | Some keeper_name -> Some keeper_name
-          | None -> (
-              match
-                parse_keeper_agent_name ~prefix:"keeper_" ~suffix:"-agent" agent_name
-              with
-              | Some keeper_name -> Some keeper_name
-              | None ->
-                  if Nickname.is_generated_nickname agent_name
-                     && Keeper_config.validate_name agent_name
-                  then
-                    Some agent_name
-                  else
-                    None)))
+  | None ->
+      if Nickname.is_generated_nickname agent_name
+         && Keeper_config.validate_name agent_name
+      then
+        Some agent_name
+      else
+        None
 
 let is_keeper_agent_alias agent_name =
-  Option.is_some
-    (parse_keeper_agent_name ~prefix:"keeper-" ~suffix:"-agent" agent_name)
-  || Option.is_some
-       (parse_keeper_agent_name ~prefix:"keeper_" ~suffix:"_agent" agent_name)
-  || Option.is_some
-       (parse_keeper_agent_name ~prefix:"keeper-" ~suffix:"_agent" agent_name)
-  || Option.is_some
-       (parse_keeper_agent_name ~prefix:"keeper_" ~suffix:"-agent" agent_name)
+  Option.is_some (keeper_name_of_agent_alias agent_name)
 
 let canonical_keeper_name_from_agent_name agent_name =
   let trimmed = String.trim agent_name in

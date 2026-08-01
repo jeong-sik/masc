@@ -25,13 +25,21 @@ let required_string args key =
 let optional_float args key = Json_util.get_float args key
 let optional_int args key = Json_util.get_int args key
 
+let parse_due_at_iso8601 value =
+  match Ptime.of_rfc3339 ~strict:true value with
+  | Error _ -> None
+  | Ok (timestamp, _, _) -> Some (Ptime.to_float_s (Ptime.truncate ~frac_s:0 timestamp))
+;;
+
 let parse_due_at args =
   match optional_float args "due_at_unix", string_opt args "due_at_iso" with
   | Some due_at, _ -> Ok (Some due_at)
   | None, Some iso ->
-    (match Masc_domain.parse_iso8601_opt iso with
+    (match parse_due_at_iso8601 iso with
      | Some due_at -> Ok (Some due_at)
-     | None -> Error "due_at_iso must be a parseable ISO-8601 timestamp")
+     | None ->
+       Error
+         "due_at_iso must be an RFC 3339 timestamp with Z or an explicit offset such as +09:00")
   | None, None -> Ok None
 ;;
 

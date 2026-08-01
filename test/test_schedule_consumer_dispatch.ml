@@ -540,6 +540,30 @@ let test_keeper_wake_consumer_records_dispatch_without_work_success () =
       (queue_evidence |> member "pending_count" |> to_int);
     check int "queue evidence read errors" 0
       (queue_evidence |> member "read_errors" |> to_list |> List.length)
+  ; (match
+       Schedule_store.complete_dispatched_occurrence
+         config
+         ~now:202.0
+         ~schedule_id:request.schedule_id
+         ~due_at:request.due_at
+         ~payload_digest:(Schedule_domain.payload_digest request.payload)
+         ()
+     with
+     | Ok _ -> ()
+     | Error err -> fail (Schedule_store.store_error_to_string err));
+    let terminal_dashboard =
+      Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    in
+    let terminal_row =
+      dashboard_schedule_row_exn terminal_dashboard ~schedule_id:request.schedule_id
+    in
+    check string "terminal execution succeeded" "succeeded"
+      (terminal_row |> member "last_execution" |> member "status" |> to_string);
+    check string "terminal projection retains recognized receipt" "recognized"
+      (terminal_row
+       |> member "dispatch_receipt"
+       |> member "projection_status"
+       |> to_string)
 ;;
 
 let test_recurring_wakes_keep_distinct_occurrence_ids () =

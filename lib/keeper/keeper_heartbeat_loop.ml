@@ -196,21 +196,13 @@ let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
     stimuli
 ;;
 
-let complete_schedule_due ~ctx ~keeper_name stimuli =
+let complete_schedule_due ~ctx ~keeper_name:_ stimuli =
   let now = Time_compat.now () in
   let rec loop = function
     | [] -> Ok ()
     | (stimulus : Keeper_event_queue.stimulus) :: rest ->
       (match stimulus.payload with
        | Keeper_event_queue.Schedule_due wake ->
-         let detail =
-           `Assoc
-             [ "kind", `String "keeper.turn_terminal"
-             ; "keeper_name", `String keeper_name
-             ; "occurrence_id", `String stimulus.post_id
-             ; "outcome", `String "succeeded"
-             ]
-         in
          (match
             Schedule_store.complete_dispatched_occurrence
               ctx.config
@@ -218,7 +210,6 @@ let complete_schedule_due ~ctx ~keeper_name stimuli =
               ~schedule_id:wake.schedule_id
               ~due_at:wake.due_at
               ~payload_digest:wake.payload_digest
-              ~detail
               ()
           with
           | Ok _ -> loop rest

@@ -19,6 +19,7 @@
   logs
   optint
   re
+  ptime
   re.str
   str
   re.pcre

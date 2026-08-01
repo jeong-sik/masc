@@ -7,6 +7,12 @@ val generate_trace_id : ?now:float -> unit -> string
     for deterministic output.  The counter guarantees uniqueness even when
     [now] is pinned to the same value across consecutive calls. *)
 val keeper_name_from_agent_name : string -> string option
+(** [keeper_name_of_agent_alias s] is [Some keeper] when [s] is a runtime
+    keeper-agent identity in any accepted spelling, and [keeper] is the keeper
+    name it denotes. Returns the name together with the classification so a
+    caller never holds "this is an alias" without the name it resolves to. *)
+val keeper_name_of_agent_alias : string -> string option
+
 val is_keeper_agent_alias : string -> bool
 val canonical_keeper_name_from_agent_name : string -> string option
 val is_keeper_principal_agent_name : string -> bool

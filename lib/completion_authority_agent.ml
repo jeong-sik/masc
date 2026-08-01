@@ -313,6 +313,7 @@ let process_task_once
     | Ok prepared ->
       let result =
         Task.Anti_rationalization.review
+          ~base_path:runtime.config.base_path
           ~sw:(Some runtime.sw)
           ?completion_contract:prepared.completion_contract
           ~required_evidence:prepared.required_artifacts

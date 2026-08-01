@@ -880,6 +880,19 @@ let commit_verdict_r
              ; "verification_id", `String verification_id
              ]
            in
+           (* The task status deliberately stays a small lifecycle sum: a
+              rejection returns the producer to [InProgress]. Keep the
+              verdict and its reason in every durable/observable projection so
+              a failed Board, SSE, or producer-wake projection cannot erase
+              what the completion authority decided. *)
+           let verdict_fields =
+             match verdict with
+             | Masc_domain.Verdict_approved ->
+               [ "verdict", `String "approved" ]
+             | Masc_domain.Verdict_rejected { reason } ->
+               [ "verdict", `String "rejected"; "reason", `String reason ]
+           in
+           let completion_verdict_fields = authority_fields @ verdict_fields in
            run_post_commit "task_activity" (fun () ->
              emit_task_activity
                config
@@ -887,7 +900,7 @@ let commit_verdict_r
                ~agent_name:authority_actor
                ~task_id
                ~kind:(Event_kind.Task.to_string event_kind)
-               ~payload:(`Assoc authority_fields));
+               ~payload:(`Assoc completion_verdict_fields));
            run_post_commit "verification_notification" (fun () ->
              let decision =
                match verdict with
@@ -903,11 +916,13 @@ let commit_verdict_r
              (Atomic.get Workspace_hooks.push_task_event_fn)
                ~event_type:"masc/task_transition"
                ~details:
-                 [ "task_id", `String task_id
-                 ; "action", `String "completion_verdict"
-                 ; "authority_kind", `String authority_kind
-                 ; "authority_actor", `String authority_actor
-                 ]);
+                 ([ "task_id", `String task_id
+                  ; "action", `String "completion_verdict"
+                  ; "authority_kind", `String authority_kind
+                  ; "authority_actor", `String authority_actor
+                  ; "verification_id", `String verification_id
+                  ]
+                  @ verdict_fields));
            (* Authority provenance is recorded here as structured fields. It is
               deliberately NOT written into [Done.notes]: the previous code put
               "Verified by <keeper> (vrf:<id>)" in that human-readable string,
@@ -920,7 +935,7 @@ let commit_verdict_r
                   :: ("from_status", `String (task_status_to_string task.task_status))
                   :: ("to_status", `String (task_status_to_string new_status))
                   :: ("ts", `String now)
-                  :: authority_fields)));
+                  :: completion_verdict_fields)));
            Ok
              { message =
                  Printf.sprintf

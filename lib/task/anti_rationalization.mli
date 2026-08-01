@@ -43,8 +43,11 @@ val review
   -> ?on_verdict:(review_result -> unit)
   -> ?few_shot_block:string
   -> ?sw:Eio.Switch.t option
+  -> base_path:string
   -> review_request
   -> review_result
+(** [base_path] is the workspace BasePath selected by the caller. The review
+    must not rediscover it from process-global environment state. *)
 
 (** Render the single prompt-registry SSOT. There is no inline fallback prompt;
     an error keeps the Task nonterminal. *)
@@ -61,10 +64,13 @@ val parse_review_verdict_from_json : Yojson.Safe.t -> (verdict, string) result
 val outcome_observer_fn : (outcome:string -> runtime:string -> unit) Atomic.t
 
 val run_llm_reviewer_fn
-  :  (?sw:Eio.Switch.t
+  :  (base_path:string
+      -> ?sw:Eio.Switch.t
       -> evaluator_runtime:string
       -> prompt:string
       -> report_tool_schema:Types_core.tool_schema
       -> unit
       -> (verdict option, Agent_sdk.Error.sdk_error) result)
        Atomic.t
+(** The system agent supplies its owning workspace BasePath explicitly; this
+    callback must not substitute a process-global BasePath. *)

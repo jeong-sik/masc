@@ -32,12 +32,13 @@ let outcome_observer_fn
   = Atomic.make (fun ~outcome:_ ~runtime:_ -> ())
 
 let run_llm_reviewer_fn
-  : (?sw:Eio.Switch.t ->
+  : (base_path:string ->
+     ?sw:Eio.Switch.t ->
      evaluator_runtime:string ->
      prompt:string ->
      report_tool_schema:Types_core.tool_schema ->
      unit -> (verdict option, Agent_sdk.Error.sdk_error) result) Atomic.t
-  = Atomic.make (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+  = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
       Error (Agent_sdk.Error.Internal "Workspace_hooks: run_llm_reviewer_fn not connected"))
 
 (** Issue #8436: schema enum used to be hand-rolled as a 2-element
@@ -284,6 +285,7 @@ let review
       ?(on_verdict : review_result -> unit = fun _ -> ())
       ?(few_shot_block = "")
       ?(sw : Eio.Switch.t option = None)
+      ~base_path
       (req : review_request)
   : review_result
   =
@@ -348,6 +350,7 @@ let review
        let reviewer_result =
          try
            (Atomic.get run_llm_reviewer_fn)
+             ~base_path
              ?sw
              ~evaluator_runtime
              ~prompt

@@ -304,7 +304,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
           let reviewer_called, resolve_reviewer_called = Eio.Promise.create () in
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok (Some Masc.Task.Anti_rationalization.Approve));
           Atomic.set Workspace_hooks.verification_notify_verdict_fn
@@ -383,7 +383,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
           let captured_prompt = ref None in
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_ () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_ () ->
                captured_prompt := Some prompt;
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok (Some Masc.Task.Anti_rationalization.Approve));
@@ -481,6 +481,81 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
               (Masc_domain.task_status_to_string task.task_status)
           | tasks -> Alcotest.failf "expected one task, got %d" (List.length tasks)))
   )
+
+let test_rejected_verdict_audit_preserves_reason () =
+  with_eio_temp_dir (fun base_path ->
+    let config = W.default_config base_path in
+    ignore (W.init config ~agent_name:(Some "audit-producer"));
+    ignore
+      (W.add_task
+         config
+         ~title:"preserve rejected verdict fact"
+         ~priority:1
+         ~description:"the durable audit must retain the system decision");
+    let backlog = W.read_backlog config in
+    let tasks =
+      List.map
+        (fun (task : Masc_domain.task) ->
+           if String.equal task.id "task-001"
+           then
+             { task with
+               task_status =
+                 Masc_domain.AwaitingVerification
+                   { assignee = "audit-producer"
+                   ; submitted_at = Masc_domain.now_iso ()
+                   ; verification_id = "vrf-audit-rejected"
+                   }
+             }
+           else task)
+        backlog.tasks
+    in
+    W.write_backlog config { backlog with tasks; version = backlog.version + 1 };
+    (match
+       W.commit_verdict_r
+         config
+         ~authority:
+           (Masc_domain.System_llm_agent { agent_run_id = "system-audit-agent" })
+         ~verdict:
+           (Masc_domain.Verdict_rejected
+              { reason = "required deployment evidence is missing" })
+         ~task_id:"task-001"
+         ~verification_id:"vrf-audit-rejected"
+         ()
+     with
+     | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+     | Ok _ -> ());
+    let open Unix in
+    let tm = gmtime (gettimeofday ()) in
+    let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
+    let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
+    let events_dir = Filename.concat (CU.masc_dir_from_base_path ~base_path) "events" in
+    let event_path = Filename.concat (Filename.concat events_dir month) day in
+    let event =
+      Fs_compat.load_jsonl event_path
+      |> List.find_opt (fun json ->
+           match json with
+           | `Assoc fields ->
+             (match List.assoc_opt "type" fields with
+              | Some (`String value) -> String.equal value "task_completion_verdict"
+              | _ -> false)
+           | _ -> false)
+    in
+    match event with
+    | None -> Alcotest.fail "rejected verdict audit event was not persisted"
+    | Some json ->
+      let open Yojson.Safe.Util in
+      Alcotest.(check string)
+        "audit keeps the typed rejected verdict"
+        "rejected"
+        (json |> member "verdict" |> to_string);
+      Alcotest.(check string)
+        "audit keeps the exact rejection reason"
+        "required deployment evidence is missing"
+        (json |> member "reason" |> to_string);
+      Alcotest.(check string)
+        "audit keeps the system authority boundary"
+        "system_llm_agent"
+        (json |> member "authority_kind" |> to_string))
 
 let test_raw_workspace_submission_notifies_once () =
   with_eio_temp_dir (fun base_path ->
@@ -1387,6 +1462,8 @@ let () =
         test_system_llm_agent_commits_without_a_keeper_verifier;
       Alcotest.test_case "system LLM uses persisted request contract" `Quick
         test_system_llm_agent_uses_persisted_request_contract_snapshot;
+      Alcotest.test_case "rejected verdict audit keeps reason" `Quick
+        test_rejected_verdict_audit_preserves_reason;
     ];
     "workspace_boundary", [
       Alcotest.test_case "raw submit notifies once" `Quick

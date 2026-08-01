@@ -19,7 +19,30 @@ let with_reviewer reviewer f =
        f ())
 ;;
 
-let review () = AR.review ~evaluator_runtime:"task-reviewer" request
+let review () =
+  AR.review
+    ~evaluator_runtime:"task-reviewer"
+    ~base_path:(Filename.get_temp_dir_name ())
+    request
+
+let test_explicit_base_path_reaches_reviewer () =
+  let expected =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-review-base-%d" (Unix.getpid ()))
+  in
+  let received = ref None in
+  with_reviewer
+    (fun ~base_path ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+       received := Some base_path;
+       Ok None)
+    (fun () ->
+       ignore (AR.review ~evaluator_runtime:"task-reviewer" ~base_path:expected request);
+       match !received with
+       | Some actual ->
+         Alcotest.(check string) "review uses the caller BasePath" expected actual
+       | None -> Alcotest.fail "reviewer callback was not called")
+;;
 
 let configure_prompt_registry () =
   Prompt_registry.set_markdown_dir
@@ -28,7 +51,7 @@ let configure_prompt_registry () =
 
 let test_structured_tool_is_the_only_semantic_verdict () =
   with_reviewer
-    (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
        Ok (Some AR.Approve))
     (fun () ->
        let result = review () in
@@ -44,7 +67,7 @@ let test_structured_tool_is_the_only_semantic_verdict () =
 
 let test_response_text_is_never_parsed_as_verdict () =
   with_reviewer
-    (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
        Ok None)
     (fun () ->
        let result = review () in
@@ -57,7 +80,7 @@ let test_response_text_is_never_parsed_as_verdict () =
 
 let test_evaluator_failure_is_unavailable_not_reject () =
   with_reviewer
-    (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
        Error (Agent_sdk.Error.Internal "review transport unavailable"))
     (fun () ->
        let result = review () in
@@ -116,6 +139,10 @@ let () =
             "structured tool verdict"
             `Quick
             test_structured_tool_is_the_only_semantic_verdict
+        ; Alcotest.test_case
+            "explicit BasePath reaches reviewer"
+            `Quick
+            test_explicit_base_path_reaches_reviewer
         ; Alcotest.test_case
             "response text ignored"
             `Quick

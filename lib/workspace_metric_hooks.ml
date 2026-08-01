@@ -336,7 +336,7 @@ let install () =
 
   Atomic.set Task.Anti_rationalization.outcome_observer_fn record_anti_rationalization_outcome;
 
-  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ?sw ~evaluator_runtime ~prompt ~report_tool_schema () ->
+  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path ?sw ~evaluator_runtime ~prompt ~report_tool_schema () ->
     let verdict_ref = ref None in
     let protocol_error_ref = ref None in
     let dispatch ~name ~args =
@@ -380,7 +380,6 @@ let install () =
     in
     match
       Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Anti_rationalization (fun () ->
-        let base_path = Env_config_core.base_path () in
         Keeper_turn_driver_wrappers.run_named_with_masc_tools
           ~runtime_id:evaluator_runtime
           ~base_path

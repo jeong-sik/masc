@@ -12,6 +12,7 @@ let obs ?(tasks = 0) ?(board = 0) () =
   {
     C.unclaimed_task_count = tasks;
     board_activity_count = board;
+    completion_authority_rejection_count = 0;
   }
 
 let test_no_signal_when_empty () =
@@ -47,6 +48,7 @@ let test_is_actionable_boolean_consistency () =
     [
       (C.No_actionable_signal, false);
       (C.Has_unclaimed_tasks, true);
+      (C.Has_completion_authority_rejection, true);
       (C.Has_board_activity, true);
     ]
   in

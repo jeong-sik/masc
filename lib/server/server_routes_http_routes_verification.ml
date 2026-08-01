@@ -137,11 +137,66 @@ let commit_operator_verdict ~config ~operator_id request =
   in
   (match request.verdict with
    | Masc_domain.Verdict_approved -> ()
-   | Masc_domain.Verdict_rejected _ ->
-     Completion_authority_wakeup.wake_rejected_producer
-       ~config
-       ~producer
-       ~task_id:request.task_id);
+   | Masc_domain.Verdict_rejected { reason } ->
+     (match
+        Completion_authority_wakeup.wake_rejected_producer
+          ~config
+          ~producer
+          ~task_id:request.task_id
+          ~verification_id
+          ~reason
+          ~authority
+      with
+      | Completion_authority_wakeup.Signaled _ -> ()
+      | Completion_authority_wakeup.Durable_deferred
+          { keeper_name; wakeup } ->
+        (match wakeup with
+         | Keeper_registry.Deferred_unregistered ->
+           Log.Server.warn
+             "operator completion rejection durably queued for unregistered Keeper task_id=%s verification_id=%s keeper=%s"
+             request.task_id
+             verification_id
+             keeper_name
+         | Keeper_registry.Deferred_not_running phase ->
+           Log.Server.warn
+             "operator completion rejection durably queued for inactive Keeper task_id=%s verification_id=%s keeper=%s phase=%s"
+             request.task_id
+             verification_id
+             keeper_name
+             (Keeper_state_machine.phase_to_string phase)
+         | Keeper_registry.Deferred_lifecycle denial ->
+           Log.Server.warn
+             "operator completion rejection durably queued after lifecycle wake denial task_id=%s verification_id=%s keeper=%s reason=%s"
+             request.task_id
+             verification_id
+             keeper_name
+             (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
+         | Keeper_registry.Signaled ->
+           Log.Server.error
+             "operator completion rejection reported deferred Signaled wake task_id=%s verification_id=%s keeper=%s"
+             request.task_id
+             verification_id
+             keeper_name)
+      | Completion_authority_wakeup.Durable_wake_failed { keeper_name; detail } ->
+        Log.Server.error
+          "operator completion rejection durably queued but live wake failed task_id=%s verification_id=%s keeper=%s detail=%s"
+          request.task_id
+          verification_id
+          keeper_name
+          detail
+      | Completion_authority_wakeup.Unroutable_producer { producer; task_id } ->
+        Log.Server.error
+          "operator completion rejection has no canonical Keeper producer task_id=%s producer=%s verification_id=%s"
+          task_id
+          producer
+          verification_id
+      | Completion_authority_wakeup.Durable_queue_failed { keeper_name; detail } ->
+        Log.Server.error
+          "operator completion rejection durable queue failed task_id=%s verification_id=%s keeper=%s detail=%s"
+          request.task_id
+          verification_id
+          keeper_name
+          detail));
   Ok outcome
 ;;
 

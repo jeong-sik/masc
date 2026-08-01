@@ -298,20 +298,73 @@ let process_task_once
           | Ok _ ->
             (match verdict with
              | Masc_domain.Verdict_approved -> ()
-             | Masc_domain.Verdict_rejected _ ->
-               (try
+             | Masc_domain.Verdict_rejected { reason } ->
+               (match
                   Completion_authority_wakeup.wake_rejected_producer
                     ~config:runtime.config
                     ~producer:assignee
                     ~task_id:task.id
+                    ~verification_id
+                    ~reason
+                    ~authority
                 with
-                | Eio.Cancel.Cancelled _ as exn -> raise exn
-                | exn ->
-                  Log.Misc.error
-                    "completion authority rejection producer wake failed task_id=%s producer=%s detail=%s"
+                | Completion_authority_wakeup.Signaled { keeper_name } ->
+                  Log.Misc.info
+                    "completion authority rejection durably queued and signaled producer Keeper task_id=%s verification_id=%s keeper=%s"
                     task.id
-                    assignee
-                    (Printexc.to_string exn)));
+                    verification_id
+                    keeper_name
+                | Completion_authority_wakeup.Durable_deferred
+                    { keeper_name; wakeup } ->
+                  (match wakeup with
+                   | Keeper_registry.Deferred_unregistered ->
+                     Log.Misc.warn
+                       "completion authority rejection durably queued; producer Keeper is unregistered task_id=%s verification_id=%s keeper=%s"
+                       task.id
+                       verification_id
+                       keeper_name
+                   | Keeper_registry.Deferred_not_running phase ->
+                     Log.Misc.warn
+                       "completion authority rejection durably queued; producer Keeper is not running task_id=%s verification_id=%s keeper=%s phase=%s"
+                       task.id
+                       verification_id
+                       keeper_name
+                       (Keeper_state_machine.phase_to_string phase)
+                   | Keeper_registry.Deferred_lifecycle denial ->
+                     Log.Misc.warn
+                       "completion authority rejection durably queued; producer Keeper wake denied task_id=%s verification_id=%s keeper=%s reason=%s"
+                       task.id
+                       verification_id
+                       keeper_name
+                       (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
+                   | Keeper_registry.Signaled ->
+                     Log.Misc.error
+                       "completion authority rejection returned deferred Signaled outcome task_id=%s verification_id=%s keeper=%s"
+                       task.id
+                       verification_id
+                       keeper_name)
+                | Completion_authority_wakeup.Durable_wake_failed
+                    { keeper_name; detail } ->
+                  Log.Misc.error
+                    "completion authority rejection durably queued but live wake failed task_id=%s verification_id=%s keeper=%s detail=%s"
+                    task.id
+                    verification_id
+                    keeper_name
+                    detail
+                | Completion_authority_wakeup.Unroutable_producer { producer; task_id } ->
+                  Log.Misc.error
+                    "completion authority rejection has no canonical Keeper producer task_id=%s producer=%s verification_id=%s"
+                    task_id
+                    producer
+                    verification_id
+                | Completion_authority_wakeup.Durable_queue_failed
+                    { keeper_name; detail } ->
+                  Log.Misc.error
+                    "completion authority rejection durable queue failed task_id=%s verification_id=%s keeper=%s detail=%s"
+                    task.id
+                    verification_id
+                    keeper_name
+                    detail));
             Log.Misc.info
               "system LLM completion authority committed task_id=%s verification_id=%s authority=%s verdict=%s"
               task.id

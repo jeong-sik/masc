@@ -77,6 +77,7 @@ type stimulus_payload =
          Uses the same no-dedicated-reason pattern as async completions:
          turn_reason; the injected pending observation drives the turn. *)
   | Goal_reconciliation_ready of goal_reconciliation_ready
+  | Completion_authority_rejected of completion_authority_rejection
 
 and board_attention = {
   candidate_id : string;
@@ -165,6 +166,13 @@ and goal_reconciliation_ready = {
   gr_triggering_task_id : string;
 }
 
+and completion_authority_rejection = {
+  car_task_id : string;
+  car_verification_id : string;
+  car_reason : string;
+  car_authority : Masc_domain.completion_authority;
+}
+
 let fusion_completion_post_id (fc : fusion_completion) = "fusion-run:" ^ fc.run_id
 
 let bg_job_completion_post_id (c : bg_job_completion) =
@@ -182,6 +190,12 @@ let goal_assignment_post_id (ga : goal_assignment) =
 
 let goal_reconciliation_ready_post_id (ready : goal_reconciliation_ready) =
   "goal-reconciliation-ready:" ^ ready.gr_goal_id
+
+let completion_authority_rejection_post_id
+      (rejection : completion_authority_rejection)
+  =
+  "completion-authority-rejected:" ^ rejection.car_task_id ^ ":"
+  ^ rejection.car_verification_id
 
 let hitl_resolution_decision_to_string = function
   | Hitl_approved -> "approve"
@@ -229,6 +243,7 @@ let identity_payload = function
   | ( Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
     | Bg_completed _ | Schedule_due _ | Connector_attention _ | Hitl_resolved _
     | Manual_compaction_requested | Goal_reconciliation_ready _
+    | Completion_authority_rejected _
     ) as payload ->
     payload
 
@@ -333,13 +348,14 @@ let payload_kind_label = function
   | Manual_compaction_requested -> "manual_compaction_requested"
   | Goal_assigned _ -> "goal_assigned"
   | Goal_reconciliation_ready _ -> "goal_reconciliation_ready"
+  | Completion_authority_rejected _ -> "completion_authority_rejected"
 
 let is_board_signal = function
   | Board_signal _ | Board_attention _ -> true
   | Bootstrap | Fusion_completed _ | Bg_completed _
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
   | Manual_compaction_requested | Goal_assigned _
-  | Goal_reconciliation_ready _ ->
+  | Goal_reconciliation_ready _ | Completion_authority_rejected _ ->
     false
 
 let drain_board_all (queue : t) : stimulus list * t =
@@ -572,6 +588,19 @@ let payload_to_yojson = function
       ; "goal_id", `String ready.gr_goal_id
       ; "triggering_task_id", `String ready.gr_triggering_task_id
       ]
+  | Completion_authority_rejected rejection ->
+    `Assoc
+      [ "kind", `String "completion_authority_rejected"
+      ; "task_id", `String rejection.car_task_id
+      ; "verification_id", `String rejection.car_verification_id
+      ; "reason", `String rejection.car_reason
+      ; ( "authority_kind"
+        , `String
+            (Masc_domain.completion_authority_kind rejection.car_authority) )
+      ; ( "authority_actor"
+        , `String
+            (Masc_domain.completion_authority_actor rejection.car_authority) )
+      ]
 
 let continuation_channel_field fields =
   let* json = required_field ~context:"stimulus.payload" "channel" fields in
@@ -734,6 +763,49 @@ let payload_of_yojson json =
     Ok
       (Goal_reconciliation_ready
          { gr_goal_id = goal_id; gr_triggering_task_id = triggering_task_id })
+  | "completion_authority_rejected" ->
+    let* () =
+      exact_fields
+        ~context
+        ~expected:
+          [ "kind"
+          ; "task_id"
+          ; "verification_id"
+          ; "reason"
+          ; "authority_kind"
+          ; "authority_actor"
+          ]
+        fields
+    in
+    let* task_id = string_field ~context "task_id" fields in
+    let* verification_id = string_field ~context "verification_id" fields in
+    let* reason = string_field ~context "reason" fields in
+    let* authority_kind = string_field ~context "authority_kind" fields in
+    let* authority_actor = string_field ~context "authority_actor" fields in
+    let* () =
+      if String.equal (String.trim authority_actor) ""
+      then Error "completion authority actor must not be empty"
+      else Ok ()
+    in
+    let* authority =
+      match authority_kind with
+      | "auto_judge" ->
+        Ok (Masc_domain.Auto_judge { judge_run_id = authority_actor })
+      | "human_operator" ->
+        Ok (Masc_domain.Human_operator { operator_id = authority_actor })
+      | value ->
+        Error
+          (Printf.sprintf
+             "unknown completion authority kind: %s"
+             value)
+    in
+    Ok
+      (Completion_authority_rejected
+         { car_task_id = task_id
+         ; car_verification_id = verification_id
+         ; car_reason = reason
+         ; car_authority = authority
+         })
   | value -> Error (Printf.sprintf "unknown stimulus payload kind: %s" value)
 
 let stimulus_to_yojson (stimulus : stimulus) =

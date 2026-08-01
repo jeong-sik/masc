@@ -216,6 +216,63 @@ let test_system_llm_authority_helpers_are_typed () =
     Alcotest.(check string) "typed rejection reason" "missing evidence" reason
   | Masc_domain.Verdict_approved -> Alcotest.fail "reject must remain a rejection"
 
+let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
+  with_eio_temp_dir (fun base_path ->
+    let config = W.default_config base_path in
+    let producer = "keeper-verification-rejection-producer-agent" in
+    let keeper_name = "verification-rejection-producer" in
+    let delivery =
+      Masc.Completion_authority_wakeup.wake_rejected_producer
+        ~config
+        ~producer
+        ~task_id:"task-rejected"
+        ~verification_id:"vrf-rejected"
+        ~reason:"evidence did not demonstrate the required invariant"
+        ~authority:(Masc_domain.Auto_judge { judge_run_id = "judge-test" })
+    in
+    (match delivery with
+     | Masc.Completion_authority_wakeup.Durable_deferred
+         { keeper_name = actual_keeper
+         ; wakeup = Masc.Keeper_registry.Deferred_unregistered
+         }
+       ->
+       Alcotest.(check string)
+         "rejection routes to the canonical producer Keeper"
+         keeper_name
+         actual_keeper
+     | Masc.Completion_authority_wakeup.Durable_deferred _ ->
+       Alcotest.fail "unregistered producer Keeper wake should be deferred"
+     | Masc.Completion_authority_wakeup.Signaled _ ->
+       Alcotest.fail "unregistered producer Keeper cannot be signaled"
+     | Masc.Completion_authority_wakeup.Durable_wake_failed { detail; _ }
+     | Masc.Completion_authority_wakeup.Durable_queue_failed { detail; _ } ->
+       Alcotest.fail detail
+     | Masc.Completion_authority_wakeup.Unroutable_producer { producer; _ } ->
+       Alcotest.failf "producer was unexpectedly unroutable: %s" producer);
+    match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name with
+    | Error detail -> Alcotest.fail detail
+    | Ok queue ->
+      (match Keeper_event_queue.to_list queue with
+       | [ { payload = Completion_authority_rejected rejection; _ } ] ->
+         Alcotest.(check string)
+           "durable rejection preserves task identity"
+           "task-rejected"
+           rejection.car_task_id;
+         Alcotest.(check string)
+           "durable rejection preserves verification identity"
+           "vrf-rejected"
+           rejection.car_verification_id;
+         Alcotest.(check string)
+           "durable rejection preserves reason"
+           "evidence did not demonstrate the required invariant"
+           rejection.car_reason;
+         Alcotest.(check string)
+           "durable rejection preserves system authority actor"
+           "judge-test"
+           (Masc_domain.completion_authority_actor rejection.car_authority)
+       | _ -> Alcotest.fail "system rejection was not durably queued")
+  )
+
 let test_system_llm_agent_commits_without_a_keeper_verifier () =
   with_eio_temp_dir (fun base_path ->
     Masc.Workspace_metric_hooks.install ();
@@ -1193,6 +1250,8 @@ let () =
     "completion_authority", [
       Alcotest.test_case "system LLM helpers keep typed facts" `Quick
         test_system_llm_authority_helpers_are_typed;
+      Alcotest.test_case "system LLM rejection reaches producer queue" `Quick
+        test_system_llm_rejection_is_durably_delivered_to_producer_keeper;
       Alcotest.test_case "system LLM commits without Keeper verifier" `Quick
         test_system_llm_agent_commits_without_a_keeper_verifier;
     ];

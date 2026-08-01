@@ -11,7 +11,7 @@
     - [Keeper_turn_fsm.cancel_reason] (4 variants, Step 4a)
     - [Keeper_turn_fsm.failure_reason] (6 variants, Step 4a)
     - [Keeper_turn_fsm.turn_state]     (10 variants, Step 4a)
-    - [Keeper_contract_classifier.actionable_signal] (3 variants, Step 6a)
+    - [Keeper_contract_classifier.actionable_signal] (4 variants, Step 6a)
     - [Keeper_profile_load_failure_site.t] typed metric labels
     - [Keeper_turn_fsm.pp_failure_reason] surfaces record-bearing fields
 *)
@@ -140,6 +140,7 @@ let all_actionable_signals
     : Keeper_contract_classifier.actionable_signal list =
   [
     Has_unclaimed_tasks;
+    Has_completion_authority_rejection;
     Has_board_activity;
     No_actionable_signal;
   ]
@@ -153,13 +154,14 @@ let test_actionable_signal_labels_unique () =
     "no duplicate actionable_signal labels" [] (duplicates labels)
 
 (* Precedence is documented contract in [keeper_contract_classifier.mli]:
-   unclaimed_tasks > board_activity. The caller in
+   unclaimed_tasks > completion_authority_rejection > board_activity. The caller in
    [keeper_agent_run.ml] (issue #11266 Track 2c) relies on this ordering
    to attribute violation log lines to the strongest available signal. *)
 let test_classify_precedence_unclaimed_dominates_board () =
   let o : Keeper_contract_classifier.world_observation =
     { unclaimed_task_count = 1
     ; board_activity_count = 1
+    ; completion_authority_rejection_count = 0
     }
   in
   match Keeper_contract_classifier.classify_actionable_signal o with
@@ -173,6 +175,7 @@ let test_classify_board_signal () =
   let o : Keeper_contract_classifier.world_observation =
     { unclaimed_task_count = 0
     ; board_activity_count = 1
+    ; completion_authority_rejection_count = 0
     }
   in
   match Keeper_contract_classifier.classify_actionable_signal o with
@@ -186,6 +189,7 @@ let test_classify_no_signal_returns_no_actionable () =
   let o : Keeper_contract_classifier.world_observation =
     { unclaimed_task_count = 0
     ; board_activity_count = 0
+    ; completion_authority_rejection_count = 0
     }
   in
   match Keeper_contract_classifier.classify_actionable_signal o with
@@ -200,6 +204,11 @@ let test_is_actionable_matches_variants () =
     (Keeper_contract_classifier.is_actionable Has_unclaimed_tasks);
   Alcotest.(check bool) "Has_board_activity is actionable" true
     (Keeper_contract_classifier.is_actionable Has_board_activity);
+  Alcotest.(check bool)
+    "Has_completion_authority_rejection is actionable"
+    true
+    (Keeper_contract_classifier.is_actionable
+       Has_completion_authority_rejection);
   Alcotest.(check bool) "No_actionable_signal is not actionable" false
     (Keeper_contract_classifier.is_actionable No_actionable_signal)
 

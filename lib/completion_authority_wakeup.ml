@@ -1,45 +1,67 @@
-(** Reactive wake-up after a completion authority rejects submitted evidence. *)
+(** Durable rejection delivery to the producer Keeper after a system completion
+    authority rejects submitted evidence. *)
+
+type delivery =
+  | Signaled of { keeper_name : string }
+  | Durable_deferred of {
+      keeper_name : string;
+      wakeup : Keeper_registry.wakeup_outcome;
+    }
+  | Durable_wake_failed of { keeper_name : string; detail : string }
+  | Unroutable_producer of { producer : string; task_id : string }
+  | Durable_queue_failed of { keeper_name : string; detail : string }
 
 let wake_rejected_producer
       ~(config : Workspace_utils_backend_setup.config)
       ~producer
       ~task_id
+      ~verification_id
+      ~reason
+      ~authority
   =
   Keeper_current_task_reconcile.sync_current_task_id_for_agent_name
     ~config
     ~agent_name:producer;
   match Keeper_identity.canonical_keeper_name_from_agent_name producer with
   | None ->
-    Log.Misc.warn
-      "completion authority rejection has no canonical Keeper producer task_id=%s producer=%s"
-      task_id
-      producer
+    Unroutable_producer { producer; task_id }
   | Some keeper_name ->
+    let rejection : Keeper_event_queue.completion_authority_rejection =
+      { car_task_id = task_id
+      ; car_verification_id = verification_id
+      ; car_reason = reason
+      ; car_authority = authority
+      }
+    in
+    let stimulus : Keeper_event_queue.stimulus =
+      { post_id = Keeper_event_queue.completion_authority_rejection_post_id rejection
+      ; urgency = Keeper_event_queue.Immediate
+      ; arrived_at = Time_compat.now ()
+      ; payload = Keeper_event_queue.Completion_authority_rejected rejection
+      }
+    in
     (match
-       Keeper_registry.wakeup_running
-         ~intent:Keeper_registry.Reactive_signal
+       Keeper_registry_event_queue.enqueue_durable_result
          ~base_path:config.base_path
          keeper_name
+         stimulus
      with
-     | Keeper_registry.Signaled ->
-       Log.Misc.info
-         "completion authority rejection signaled producer Keeper task_id=%s keeper=%s"
-         task_id
-         keeper_name
-     | Keeper_registry.Deferred_unregistered ->
-       Log.Misc.warn
-         "completion authority rejection producer Keeper is unregistered task_id=%s keeper=%s"
-         task_id
-         keeper_name
-     | Keeper_registry.Deferred_not_running phase ->
-       Log.Misc.warn
-         "completion authority rejection producer Keeper is not running task_id=%s keeper=%s phase=%s"
-         task_id
-         keeper_name
-         (Keeper_state_machine.phase_to_string phase)
-     | Keeper_registry.Deferred_lifecycle denial ->
-       Log.Misc.warn
-         "completion authority rejection producer Keeper wake denied task_id=%s keeper=%s reason=%s"
-         task_id
-         keeper_name
-         (Keeper_lifecycle_admission.autonomous_denial_to_wire denial))
+     | Error detail -> Durable_queue_failed { keeper_name; detail }
+     | Ok () ->
+       (try
+          match
+            Keeper_registry.wakeup_running
+              ~intent:Keeper_registry.Reactive_signal
+              ~base_path:config.base_path
+              keeper_name
+          with
+          | Keeper_registry.Signaled -> Signaled { keeper_name }
+          | ( Keeper_registry.Deferred_unregistered
+            | Keeper_registry.Deferred_not_running _
+            | Keeper_registry.Deferred_lifecycle _ ) as wakeup ->
+            Durable_deferred { keeper_name; wakeup }
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Durable_wake_failed
+            { keeper_name; detail = Printexc.to_string exn }))

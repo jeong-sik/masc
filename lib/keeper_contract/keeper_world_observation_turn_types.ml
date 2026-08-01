@@ -40,6 +40,10 @@ type event_queue_trigger =
           outlived it), the wake arrives with no live tool call to resume, so
           the keeper must be steered back to the originating conversation
           instead of proceeding on its own state. *)
+  | Completion_authority_rejection_stimulus
+      (** A system LLM completion authority rejected evidence submitted by this
+          Keeper. The rejection is a distinct reactive input, not Board or
+          scheduled-work activity. *)
   | Manual_compaction_stimulus
 
 type turn_reason =
@@ -49,6 +53,7 @@ type turn_reason =
   | Bootstrap_stimulus_pending
   | Connector_attention_pending
   | Hitl_resolved_pending
+  | Completion_authority_rejection_pending
   | Manual_compaction_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
@@ -77,6 +82,8 @@ let turn_reason_to_string = function
   | Bootstrap_stimulus_pending -> "bootstrap_stimulus_pending"
   | Connector_attention_pending -> "connector_attention_pending"
   | Hitl_resolved_pending -> "hitl_resolved_pending"
+  | Completion_authority_rejection_pending ->
+    "completion_authority_rejection_pending"
   | Manual_compaction_pending -> "manual_compaction_pending"
   | Scheduled_autonomous_turn -> "scheduled_autonomous_turn"
   | Scheduled_automation_due -> "scheduled_automation_due"
@@ -89,6 +96,8 @@ let turn_reason_of_event_queue_trigger = function
   | Scheduled_automation_stimulus -> Scheduled_automation_due
   | Connector_attention_stimulus -> Connector_attention_pending
   | Hitl_resolved_stimulus -> Hitl_resolved_pending
+  | Completion_authority_rejection_stimulus ->
+    Completion_authority_rejection_pending
   | Manual_compaction_stimulus -> Manual_compaction_pending
 ;;
 

@@ -96,6 +96,10 @@ type stimulus_payload =
       (** Every Task linked to an executing Goal is terminal. This wakes a
           Keeper to re-read SSOT and choose a Goal action; it does not authorize
           automatic completion. *)
+  | Completion_authority_rejected of completion_authority_rejection
+      (** A system completion authority rejected this Keeper's submitted
+          evidence. The event is delivered to the producer Keeper as typed
+          follow-up context; the authority itself is not a Keeper. *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -195,6 +199,15 @@ and goal_reconciliation_ready = {
 }
 (** Identifier-only payload for [Goal_reconciliation_ready]. *)
 
+and completion_authority_rejection = {
+  car_task_id : string;
+  car_verification_id : string;
+  car_reason : string;
+  car_authority : Masc_domain.completion_authority;
+}
+(** Typed follow-up context for a rejected completion-evidence submission,
+    including the authenticated system-LLM or HITL authority provenance. *)
+
 val fusion_completion_post_id : fusion_completion -> post_id
 (** Canonical dedup/correlation id for [Fusion_completed], always
     ["fusion-run:<run_id>"]. Board projection availability is not event
@@ -215,6 +228,9 @@ val goal_assignment_post_id : goal_assignment -> post_id
 
 val goal_reconciliation_ready_post_id :
   goal_reconciliation_ready -> post_id
+
+val completion_authority_rejection_post_id :
+  completion_authority_rejection -> post_id
 
 val hitl_resolution_decision_to_string : hitl_resolution_decision -> string
 (** Stable wire/log label for a HITL resolution wake decision. *)

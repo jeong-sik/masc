@@ -372,6 +372,13 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
       in
       let sw = runtime.sw in
       let clock = runtime.clock in
+      (* Read the admitted authority HERE, on the request fiber. The binding is
+         installed per request (bin/main_eio.ml for HTTP/1.1, server_h2_gateway
+         for h2c) and is fiber-local, so the fiber forked onto [runtime.sw]
+         below does not inherit it. *)
+      let expected_resource =
+        Server_oauth_metadata.resource (Server_request_authority.current_exn ())
+      in
       Ok (Eio.Fiber.fork ~sw (fun () ->
                             let otel_transport_context =
                               Otel_dispatch_hook.http_transport_context
@@ -398,12 +405,6 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                 in
                                 inline_sse := Some info;
                                 spawn_post_sse_keepalive ~sw ~clock info);
-                              let request_authority =
-                                Server_request_authority.current_exn ()
-                              in
-                              let expected_resource =
-                                Server_oauth_metadata.resource request_authority
-                              in
                               let response_json =
                                 Auth_oauth.with_expected_resource expected_resource
                                   (fun () ->

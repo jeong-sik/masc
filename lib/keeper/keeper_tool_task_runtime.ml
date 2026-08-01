@@ -343,7 +343,7 @@ let handle_keeper_task_tool_with_outcome
     let status_filter = Safe_ops.json_string_opt "status" args in
     let include_done = Safe_ops.json_bool ~default:false "include_done" args in
     let limit = Safe_ops.json_int ~default:50 "limit" args |> max 1 |> min 100 in
-    (match Keeper_snapshot_protocol.if_revision args with
+    (match Snapshot_protocol.if_revision args with
      | Error message ->
        Keeper_tool_execution.failure
          ~class_:Tool_result.Policy_rejection
@@ -391,11 +391,18 @@ let handle_keeper_task_tool_with_outcome
          |> List.filteri (fun index _ -> index < limit)
        in
        let revision =
-         Keeper_snapshot_protocol.revision_of_backlog_version backlog.version
+         Snapshot_protocol.revision_of_json
+           ~namespace:"tasks"
+           (`Assoc
+             [ "backlog_version", `Int backlog.version
+             ; "status", Option.fold ~none:`Null ~some:(fun value -> `String value) status_filter
+             ; "include_done", `Bool include_done
+             ; "limit", `Int limit
+             ])
        in
        Keeper_tool_execution.success_data
-         (Keeper_snapshot_protocol.to_yojson
-            (Keeper_snapshot_protocol.respond
+         (Snapshot_protocol.to_yojson
+            (Snapshot_protocol.respond
                ~revision
                ~if_revision
                (`List (List.map Masc_domain.task_to_yojson tasks)))))

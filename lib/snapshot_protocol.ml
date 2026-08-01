@@ -34,9 +34,7 @@ let to_yojson = function
       ]
 ;;
 
-let revision_of_backlog_version version =
-  Printf.sprintf "backlog:%d" version
-;;
+let revision_of_backlog_version version = Printf.sprintf "backlog:%d" version
 
 let revision_of_board_cursor (timestamp, post_id) =
   let cursor =

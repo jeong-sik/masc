@@ -4,7 +4,7 @@ let check_json label expected actual =
 
 let test_snapshot_protocol () =
   let snapshot =
-    Masc.Keeper_snapshot_protocol.respond
+    Masc.Snapshot_protocol.respond
       ~revision:"backlog:7"
       ~if_revision:None
       (`List [ `String "task-1" ])
@@ -12,9 +12,9 @@ let test_snapshot_protocol () =
   check_json
     "snapshot"
     {|{"kind":"snapshot","revision":"backlog:7","snapshot":["task-1"]}|}
-    (Masc.Keeper_snapshot_protocol.to_yojson snapshot);
+    (Masc.Snapshot_protocol.to_yojson snapshot);
   let unchanged =
-    Masc.Keeper_snapshot_protocol.respond
+    Masc.Snapshot_protocol.respond
       ~revision:"backlog:7"
       ~if_revision:(Some "backlog:7")
       (`List [ `String "task-1" ])
@@ -22,8 +22,8 @@ let test_snapshot_protocol () =
   check_json
     "unchanged"
     {|{"kind":"unchanged","revision":"backlog:7"}|}
-    (Masc.Keeper_snapshot_protocol.to_yojson unchanged);
-  (match Masc.Keeper_snapshot_protocol.if_revision
+    (Masc.Snapshot_protocol.to_yojson unchanged);
+  (match Masc.Snapshot_protocol.if_revision
            (`Assoc [ "if_revision", `String " " ]) with
    | Error message ->
      Alcotest.(check string)
@@ -41,7 +41,11 @@ let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~
 
 let test_effect_classification () =
   let docker =
-    Masc_exec.Sandbox_target.docker ~image:"pinned-image" ~runner:mock_runner ()
+    Masc_exec.Sandbox_target.docker
+      ~image:
+        "ubuntu:24.04@sha256:cdb5fd928fced577cfecf12c8966e830fcdf42ee481fb0b91904eeddc2fe5eff"
+      ~runner:mock_runner
+      ()
   in
   let classify = Masc.Keeper_execution_effect.classify in
   Alcotest.(check string)
@@ -62,6 +66,18 @@ let test_effect_classification () =
           ~network_mode:Keeper_types_profile_sandbox.Network_none
           ~target:docker
           ~containment_verified:false));
+  let unpinned_docker =
+    Masc_exec.Sandbox_target.docker ~image:"ubuntu:24.04" ~runner:mock_runner ()
+  in
+  Alcotest.(check string)
+    "untagged docker remains external"
+    "external"
+    (Masc.Keeper_execution_effect.to_string
+       (classify
+          ~sandbox_profile:Keeper_types_profile_sandbox.Docker
+          ~network_mode:Keeper_types_profile_sandbox.Network_none
+          ~target:unpinned_docker
+          ~containment_verified:true));
   Alcotest.(check string)
     "host remains external"
     "external"

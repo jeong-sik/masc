@@ -100,7 +100,7 @@ let handle_keeper_board_tool_with_outcome
     dispatch (Tool_name.Board_name.to_string tool) tool_args
   in
   let dispatch_board_list args =
-    match Keeper_snapshot_protocol.if_revision args with
+    match Snapshot_protocol.if_revision args with
     | Error message ->
       Keeper_tool_execution.failure
         ~class_:Tool_result.Policy_rejection
@@ -113,23 +113,37 @@ let handle_keeper_board_tool_with_outcome
        | Tool_result.Failed _ -> result
        | Tool_result.Completed _ ->
          let revision =
-           Keeper_snapshot_protocol.revision_of_board_cursor
-             (Board_dispatch.current_post_cursor ())
+           Snapshot_protocol.revision_of_json
+             ~namespace:"board"
+             (`Assoc
+               [ ( "cursor"
+                 , `String
+                     (Snapshot_protocol.revision_of_board_cursor
+                        (Board_dispatch.current_post_cursor ())) )
+               ; "args", without_if_revision args
+               ])
          in
          Keeper_tool_execution.success_data
-           (Keeper_snapshot_protocol.to_yojson
-              (Keeper_snapshot_protocol.respond
+           (Snapshot_protocol.to_yojson
+              (Snapshot_protocol.respond
                  ~revision
                  ~if_revision
                  (`String result.raw_output)))
        | Tool_result.Deferred _ ->
          let revision =
-           Keeper_snapshot_protocol.revision_of_board_cursor
-             (Board_dispatch.current_post_cursor ())
+           Snapshot_protocol.revision_of_json
+             ~namespace:"board"
+             (`Assoc
+               [ ( "cursor"
+                 , `String
+                     (Snapshot_protocol.revision_of_board_cursor
+                        (Board_dispatch.current_post_cursor ())) )
+               ; "args", without_if_revision args
+               ])
          in
          Keeper_tool_execution.deferred_data
-           (Keeper_snapshot_protocol.to_yojson
-              (Keeper_snapshot_protocol.respond
+           (Snapshot_protocol.to_yojson
+              (Snapshot_protocol.respond
                  ~revision
                  ~if_revision
                  (`String result.raw_output)))

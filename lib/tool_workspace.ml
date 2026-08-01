@@ -503,7 +503,7 @@ let status_summary_string (ctx : context) =
 let status_revision (ctx : context) =
   let state = Workspace.read_state ctx.config in
   let backlog = safe_read_backlog ctx in
-  Keeper_snapshot_protocol.revision_of_json
+  Snapshot_protocol.revision_of_json
     ~namespace:"status"
     (`Assoc
       [ "workspace_state", Masc_domain.workspace_state_to_yojson state
@@ -512,7 +512,7 @@ let status_revision (ctx : context) =
 ;;
 
 let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
-  match Keeper_snapshot_protocol.if_revision args with
+  match Snapshot_protocol.if_revision args with
   | Error message ->
     Tool_result.make_err
       ~tool_name
@@ -543,8 +543,8 @@ let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
     ~tool_name
     ~start_time
     ~data:
-      (Keeper_snapshot_protocol.to_yojson
-         (Keeper_snapshot_protocol.respond
+      (Snapshot_protocol.to_yojson
+         (Snapshot_protocol.respond
             ~revision
             ~if_revision
             (`String snapshot)))

@@ -207,7 +207,7 @@ let handle_tool_execute_typed
         let timeout_sec = typed_input_timeout_sec input in
         let input = input_with_cwd cwd input in
         let in_playground = Keeper_tool_execute_path.in_playground ~root ~cwd ~meta in
-        let sandbox_profile, _sandbox_network_mode =
+        let sandbox_profile, sandbox_network_mode =
           Keeper_sandbox_runner.effective_sandbox_profile ~meta
         in
         let local_dispatch_sandbox ?(extra_fields = []) () =
@@ -343,14 +343,14 @@ let handle_tool_execute_typed
         let execution_effect =
           Keeper_execution_effect.classify
             ~sandbox_profile
-            ~network_mode:_sandbox_network_mode
+            ~network_mode:sandbox_network_mode
             ~target:dispatch_sandbox
             ~containment_verified:in_playground
         in
         let gate_decision =
           match execution_effect with
           | Keeper_execution_effect.Confined ->
-            (* The target is already a pinned, network-none Docker sandbox whose
+            (* The target is already a digest-pinned, network-none Docker sandbox whose
                path proof passed. Do not create a durable approval row for this
                local effect; the closed effect type is the authority. *)
             Keeper_gate.Allow { source = Keeper_gate.Confined_sandbox }

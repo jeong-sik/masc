@@ -415,15 +415,13 @@ let run (ctx : ctx)
             ();
           Log.Keeper.warn
             "%s: provider returned typed context overflow after runtime \
-             rotation; recording explicit lane recovery evidence: %s"
+             rotation: %s"
             meta.name
             (short_preview (Agent_sdk.Error.to_string err));
-          (* This attempt returns its typed provider error. The Keeper lifecycle
-             remains active; MASC lane compaction owns subsequent recovery. *)
-          record_overflow_failure
-            ~config
-            ~meta
-            ~reason:"provider_context_overflow";
+          (* Automatic overflow-compaction recovery was removed (#26546)
+             after producing no committed compaction. This attempt returns
+             its typed provider error and marks it terminal; no recovery is
+             recorded. Whole-request provider fit remains tracked in #26551. *)
           mark_terminal_error err;
           Error err, turn_state
          | Declared_runtime_lane_exhausted ->

@@ -24,11 +24,11 @@ module R = Masc.Keeper_artifact_read
 module E = Masc.Keeper_tool_execution
 module T = Agent_sdk.Types
 
-let project_completed_exn ~base_path ~tool_name data =
+let project_completed_exn ?model_projection ~base_path ~tool_name data =
   let result =
     Tool_result.make_ok ~tool_name ~start_time:0.0 ~data ()
   in
-  match Bridge.to_oas_typed_result ~base_path result with
+  match Bridge.to_oas_typed_result ?model_projection ~base_path result with
   | Ok { content; _ } -> content
   | Error { message; _ } -> Alcotest.fail message
 
@@ -70,6 +70,25 @@ let test_artifact_page_makes_progress () =
     | Error error -> Alcotest.fail error
   in
   let emoji = "\240\159\152\128x" in
+  let incident_sized_payload = String.make 2_500 'w' in
+  let default_request =
+    match
+      R.For_testing.request_of_json
+        (`Assoc [ "sha256", `String (String.make 64 'a') ])
+    with
+    | Ok request -> request
+    | Error error -> Alcotest.fail error
+  in
+  let incident_page =
+    match R.For_testing.page default_request incident_sized_payload with
+    | Ok page -> page
+    | Error error -> Alcotest.fail error
+  in
+  Alcotest.(check int)
+    "2.5KB artifact completes in one default page"
+    (String.length incident_sized_payload)
+    incident_page.next_offset;
+  Alcotest.(check bool) "2.5KB default page reaches EOF" true incident_page.eof;
   let utf8_page =
     match R.For_testing.page (request 0 4) emoji with
     | Ok page -> page
@@ -189,8 +208,8 @@ let test_full_flow_externalize_reference_serve () =
         (String.equal payload projected_content);
 
       (* Step 6: The model-visible read tool resolves only the explicit
-         requested page. Its bounded typed JSON remains inline, so the generic
-         bridge cannot turn it into a nested artifact reference. *)
+         requested page. Its descriptor-owned bounded-inline projection cannot
+         turn it into a nested artifact reference. *)
       let read_result =
         R.handle
           ~base_path:dir
@@ -207,6 +226,7 @@ let test_full_flow_externalize_reference_serve () =
          Alcotest.fail "explicit artifact read did not complete");
       let read_output =
         project_completed_exn
+          ~model_projection:Tool_output.bounded_inline_model_projection
           ~base_path:dir
           ~tool_name:"keeper_artifact_read"
           (Option.value
@@ -263,7 +283,10 @@ let test_full_flow_externalize_reference_serve () =
         project_completed_exn
           ~base_path:dir
           ~tool_name:"Execute"
-          (`String (String.make 4_096 'z'))
+          (`String
+            (String.make
+               (Bridge.default_externalize_threshold_bytes + 1)
+               'z'))
       in
       let second_sha =
         match O.decode_from_oas second_marker with

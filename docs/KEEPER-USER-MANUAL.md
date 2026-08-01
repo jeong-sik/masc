@@ -700,12 +700,13 @@ flowchart TD
 | 상태 | 의미 | 자동 동작 |
 |------|------|----------|
 | `null` + `not_observed` | 현재 context 점유율을 모름 | attention/compaction 임계 판단 금지 |
-| typed provider overflow | provider가 overflow를 명시적으로 보고 | MASC-owned compaction 경계로 진입 |
+| typed provider overflow | provider가 overflow를 명시적으로 보고 | 일반 typed failure route로 처리 (자동 compaction 없음, #26546) |
 
-`context_ratio`는 관측값일 뿐 compaction 실행 권한이 아니다. 필요하면
-명시적인 compaction을 요청하며, provider overflow는 typed failure에서만
-compaction 경계로 진입한다. Durable owner-lane operation, source CAS,
-reinjection receipt는 진행 중인 completion gate다.
+`context_ratio`는 관측값일 뿐 compaction 실행 권한이 아니다. 자동
+overflow-compaction 회복은 committed compaction을 한 번도 만들지 못해
+제거되었다(#26546). #26545는 conversation history만 제한하며, Memory OS와
+pinned/tool context를 포함한 전체 요청의 provider-fit 계약은 #26551에서
+추적한다. compaction이 필요하면 `masc_keeper_compact`로 명시적으로 요청한다.
 
 ### 7.4 Handoff 실패
 

@@ -1273,64 +1273,6 @@ instructions = "missing sandbox profile"
           | Some (`Assoc _) -> ()
           | _ -> Alcotest.fail "fleet error row missing effective_meta_error")
 
-(* Regression: before the fix the reactive provider-overflow path recorded only a
-   generic Turn_overflow_failure, so compaction_rt.last_decision (surfaced as
-   last_compaction_decision) never showed why a compaction failed. The stamp must
-   now carry the specific recovery reason. *)
-let test_reactive_overflow_stamps_compaction_decision () =
-  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
-  let name = "overflow-observability" in
-  let config = Workspace.default_config base in
-  let meta = seed_runtime_meta config name in
-  Masc.Keeper_registry.For_testing.clear ();
-  ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
-  Fun.protect ~finally:Masc.Keeper_registry.For_testing.clear (fun () ->
-      let reason = "plan_provider_unavailable" in
-      Masc.Keeper_turn_runtime_budget.record_overflow_failure ~config ~meta ~reason;
-      let latest =
-        Masc.Keeper_turn_runtime_budget.current_keeper_meta
-          ~config
-          ~fallback_meta:meta
-      in
-      let decision =
-        Masc.Keeper_meta_contract.compaction_runtime_decision_to_string
-          latest.runtime.compaction_rt.last_decision
-      in
-      Alcotest.(check string)
-        "reactive overflow stamps the specific recovery decision onto compaction_rt"
-        (Masc.Keeper_turn_runtime_budget.provider_overflow_decision ~reason)
-        decision)
-
-(* Regression (codex #25270 P2#1): the reactive overflow decision must be durable
-   on disk. Status (read_meta_resolved) and the dashboard projection read
-   last_compaction_decision from the persisted meta, not the in-memory registry.
-   Counterfactual: without the disk write-through in record_overflow_failure the
-   on-disk last_decision stays at the seeded/empty value and the recovery reason
-   is never surfaced (or is lost across a restart). *)
-let test_reactive_overflow_persists_compaction_decision_to_disk () =
-  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
-  let name = "overflow-durable" in
-  let config = Workspace.default_config base in
-  let meta = seed_runtime_meta config name in
-  Masc.Keeper_registry.For_testing.clear ();
-  ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
-  Fun.protect ~finally:Masc.Keeper_registry.For_testing.clear (fun () ->
-      let reason = "plan_provider_unavailable" in
-      Masc.Keeper_turn_runtime_budget.record_overflow_failure ~config ~meta ~reason;
-      match Store.read_meta config name with
-      | Error err -> Alcotest.failf "read_meta failed: %s" err
-      | Ok None ->
-        Alcotest.fail "keeper meta missing from disk after overflow failure"
-      | Ok (Some disk_meta) ->
-        let decision =
-          Masc.Keeper_meta_contract.compaction_runtime_decision_to_string
-            disk_meta.runtime.compaction_rt.last_decision
-        in
-        Alcotest.(check string)
-          "reactive overflow persists the recovery decision to the durable on-disk meta"
-          (Masc.Keeper_turn_runtime_budget.provider_overflow_decision ~reason)
-          decision)
-
 let () =
   init_runtime_default_for_tests ();
   Alcotest.run "keeper_effective_meta_overlay"
@@ -1393,11 +1335,5 @@ let () =
           Alcotest.test_case
             "sandbox status fleet surfaces effective meta errors"
             `Quick test_sandbox_status_fleet_surfaces_effective_meta_errors;
-          Alcotest.test_case
-            "reactive overflow stamps compaction decision for observability"
-            `Quick test_reactive_overflow_stamps_compaction_decision;
-          Alcotest.test_case
-            "reactive overflow persists compaction decision to durable disk meta"
-            `Quick test_reactive_overflow_persists_compaction_decision_to_disk;
         ] );
     ]

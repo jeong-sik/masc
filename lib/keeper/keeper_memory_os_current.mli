@@ -51,6 +51,7 @@ val read_for_keepers_dir :
 val replace
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?dropped_statements:Keeper_memory_os_types.dropped_statement list
+  -> ?max_fact_bytes:int
   -> keepers_dir:string
   -> keeper_id:string
   -> expected_revision:int option
@@ -60,10 +61,11 @@ val replace
   -> unit
   -> (t, string) result
 (** Atomically replace the complete current snapshot only when its revision
-    still equals [expected_revision]. Duplicate fact identities reject before
-    writing. Existing state must parse as the exact current schema; malformed,
-    non-current, or concurrently changed state fails closed and is not
-    overwritten.
+    still equals [expected_revision]. Duplicate fact identities and a rendered
+    fact payload above [max_fact_bytes] reject before writing. The bound is
+    floored to 1 byte; its default is the Memory OS capacity policy. Existing state must parse as the exact
+    current schema; malformed, non-current, or concurrently changed state fails
+    closed and is not overwritten.
 
     [dropped_statements], when present, is the writer's own account of every
     drop in this commit (the librarian's totality output) and is recorded on
@@ -73,6 +75,7 @@ val replace
 
 val upsert_fact
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?max_fact_bytes:int
   -> keepers_dir:string
   -> keeper_id:string
   -> now:float
@@ -82,6 +85,8 @@ val upsert_fact
 (** Atomically insert or replace one explicit keeper-authored fact while
     preserving the rest of the current snapshot. A matching identity is
     updated from the explicit incoming fact while preserving its original
-    [first_seen]; no local importance, recency, or echo heuristic participates. *)
+    [first_seen]. The same rendered-fact byte budget and 1-byte floor as
+    [replace] apply; no
+    local importance, recency, or echo heuristic participates. *)
 
 val to_json : t -> Yojson.Safe.t

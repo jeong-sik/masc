@@ -299,7 +299,9 @@ let test_terminal_externalization_failure_contract () =
     Masc.Keeper_tools_oas_bundle.For_testing.terminal_externalization_failure
   in
   let error : Masc.Tool_bridge.externalization_error =
-    { message = "disk unavailable" }
+    { kind = Masc.Tool_bridge.Artifact_storage_failure
+    ; message = "disk unavailable"
+    }
   in
   List.iter
     (fun state ->

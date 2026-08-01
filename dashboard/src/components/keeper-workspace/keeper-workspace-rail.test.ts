@@ -709,6 +709,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).not.toContain('윈도우 사용량')
     expect(container.textContent).toContain('62%')
     expect(container.textContent).toContain('124.0k')
+    expect(container.textContent).toContain('provider 입력 토큰 / 모델 윈도우')
     expect(meter).not.toBeNull()
     expect(meter?.getAttribute('role')).toBe('meter')
     expect(meter?.getAttribute('aria-label')).toBe('컨텍스트 윈도우 사용률')
@@ -838,9 +839,11 @@ describe('KeeperWorkspaceRail', () => {
     const provenance = container.querySelector('[data-testid="ctx-provenance"]')
     expect(provenance).not.toBeNull()
     expect(provenance?.textContent).toContain('T3337')
-    expect(provenance?.textContent).toContain('wire')
+    expect(provenance?.textContent).toContain('요청 본문')
     expect(provenance?.textContent).toContain('393KB')
-    expect(provenance?.textContent).toContain('다음 입력에 함께 실리는 상비 페이로드')
+    expect(provenance?.textContent).toContain('같은 완료 요청')
+    expect(provenance?.textContent).toContain('직렬화 UTF-8 바이트')
+    expect(provenance?.textContent).not.toContain('다음 입력에 함께 실리는 상비 페이로드')
   })
 
   it('renders no provenance line for a non-turn_record source', () => {

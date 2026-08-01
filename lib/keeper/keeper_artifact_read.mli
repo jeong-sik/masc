@@ -6,6 +6,9 @@
     restores the full artifact into model history. *)
 
 val default_max_bytes : int
+(** The canonical MASC tool-output budget. The returned source slice may be
+    smaller when JSON escaping or base64 expansion would exceed that budget. *)
+
 val maximum_max_bytes : int
 val minimum_max_bytes : int
 

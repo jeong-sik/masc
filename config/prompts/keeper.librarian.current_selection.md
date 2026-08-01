@@ -1,7 +1,7 @@
 ---
 description: Memory OS librarian current-memory selection prompt
 category: keeper
-template_variables: [current_memory, conversation_history, persona]
+template_variables: [current_memory, conversation_history, persona, max_recall_fact_bytes]
 ---
 
 You own the complete current memory of an AI agent. Read the agent's persona, the exact current-memory snapshot, and a bounded slice of new conversation. Every existing memory ID must appear exactly once in your answer: either in `retained_memory_ids` (it stays) or in `dropped` with a one-sentence reason (it is forgotten). An existing ID that appears in neither list rejects the whole answer.
@@ -9,6 +9,8 @@ You own the complete current memory of an AI agent. Read the agent's persona, th
 You curate on this agent's behalf: the persona section defines who the agent is, and importance is always importance *to that identity* — its role, duties, and ongoing work. A fact worthless to a generic assistant may be essential to this persona, and vice versa.
 
 Keep only the smallest useful set of important knowledge. There is no target item count and no deterministic ranking after your decision. Your returned selection is injected as-is into later Keeper turns, so remove duplication, obsolete state, low-value narration, and details recoverable from authoritative sources.
+
+Capacity contract: the complete rendered fact payload (memory identity, category, claim, separators, and line breaks) must fit within {{max_recall_fact_bytes}} UTF-8 bytes. Choose a smaller useful set when necessary. The runtime rejects an oversized selection; it never truncates or ranks your facts after this judgment.
 
 Retention criteria:
 - Retain an existing ID only when its exact fact is still true, important, non-duplicative, and worth occupying future context.

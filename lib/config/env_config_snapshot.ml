@@ -365,6 +365,10 @@ let memory_entries =
       ~default:(string_of_int Memory_os_defaults.librarian_max_messages_default)
       Memory_os_defaults.librarian_max_messages_env_key
       "Recent-message window for librarian extraction (floor 1)";
+    entry
+      ~default:(string_of_int Memory_os_defaults.recall_facts_max_bytes_default)
+      Memory_os_defaults.recall_facts_max_bytes_env_key
+      "Maximum UTF-8 bytes for rendered Memory OS recall fact lines (floor 1)";
   ]
 
 let message_gc_entries =

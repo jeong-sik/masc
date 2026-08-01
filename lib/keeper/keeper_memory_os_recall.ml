@@ -5,10 +5,12 @@ open Keeper_memory_os_types
 type unavailable_reason =
   | Read_error
   | Prompt_render_error
+  | Fact_budget_exceeded
 
 let unavailable_reason_to_label = function
   | Read_error -> "read_error"
   | Prompt_render_error -> "prompt_render_error"
+  | Fact_budget_exceeded -> "fact_budget_exceeded"
 ;;
 
 let record_unavailable reason =
@@ -42,14 +44,6 @@ let render_unavailable_context reason =
       reason
 ;;
 
-let render_fact fact =
-  Printf.sprintf
-    "- [memory_id=%s category=%s] %s"
-    (memory_id fact)
-    (category_to_string fact.category)
-    fact.claim
-;;
-
 type render_result =
   { block : string
   ; injected_fact_keys : string list
@@ -59,8 +53,7 @@ type render_result =
 
 let render_snapshot ~now:_ snapshot =
   let facts = snapshot.Keeper_memory_os_current.facts in
-  let fact_lines = List.map render_fact facts in
-  match fact_lines with
+  match facts with
   | [] ->
     { block = ""
     ; injected_fact_keys = []
@@ -68,12 +61,25 @@ let render_snapshot ~now:_ snapshot =
     ; failure_reason = None
     }
   | _ ->
-    (match
+    let max_bytes = Env_config.KeeperMemoryOs.recall_facts_max_bytes () in
+    (match Keeper_memory_os_budget.measure ~max_bytes facts with
+     | Exceeds { actual_bytes; max_bytes } ->
+       Log.Keeper.warn
+         "memory os recall fact payload exceeds byte budget actual_bytes=%d max_bytes=%d"
+         actual_bytes
+         max_bytes;
+       { block = render_unavailable_context Fact_budget_exceeded
+       ; injected_fact_keys = []
+       ; n_facts_in_store = List.length facts
+       ; failure_reason = Some Fact_budget_exceeded
+       }
+     | Fits _ ->
+       (match
        render_prompt_template
          Keeper_prompt_names.memory_os_recall_context
          [ "revision", string_of_int snapshot.revision
          ; "updated_at", Masc_domain.iso8601_of_unix_seconds snapshot.updated_at
-         ; "facts", String.concat "\n" fact_lines
+         ; "facts", Keeper_memory_os_budget.render_facts facts
          ]
      with
      | Ok block ->
@@ -90,7 +96,7 @@ let render_snapshot ~now:_ snapshot =
        ; injected_fact_keys = []
        ; n_facts_in_store = List.length facts
        ; failure_reason = Some Prompt_render_error
-       })
+       }))
 ;;
 
 let render_context_result ~keepers_dir ~keeper_id ~now =

@@ -18,7 +18,7 @@ module O = Tool_output
 let externalize_exn ?base_path value =
   match B.maybe_externalize ?base_path value with
   | Ok output -> output
-  | Error { message } -> Alcotest.fail message
+  | Error { message; _ } -> Alcotest.fail message
 
 let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
@@ -56,7 +56,7 @@ let test_threshold_default_under () =
   let small = "short payload" in
   let result = externalize_exn small in
   Alcotest.(check string) "small unchanged" small result;
-  let large = String.make 8192 'x' in
+  let large = String.make (B.default_externalize_threshold_bytes + 1) 'x' in
   let result_large = externalize_exn large in
   Alcotest.(check string) "large unchanged when no base path" large result_large
 
@@ -70,9 +70,56 @@ let test_to_oas_typed_small_inlined () =
       Alcotest.(check bool) "no marker" false (O.is_marker content)
   | Error _ -> Alcotest.fail "expected Ok"
 
+let test_incident_sized_result_stays_inline () =
+  with_temp_base_path (fun dir ->
+    let payload = String.make 2_500 'w' in
+    match
+      B.to_oas_typed_result
+        ~base_path:dir
+        (tool_ok ~tool_name:"WebSearch" payload)
+    with
+    | Ok { content; _ } ->
+      Alcotest.(check string) "2.5KB result stays inline" payload content;
+      Alcotest.(check bool) "no blob marker" false (O.is_marker content)
+    | Error _ -> Alcotest.fail "expected inline result")
+
+let test_bounded_inline_rejects_oversized_result () =
+  let payload = String.make (B.default_externalize_threshold_bytes + 1) 'x' in
+  match
+    B.to_oas_typed_result
+      ~model_projection:Tool_output.bounded_inline_model_projection
+      (tool_ok ~tool_name:"keeper_artifact_read" payload)
+  with
+  | Ok _ -> Alcotest.fail "oversized bounded-inline result was accepted"
+  | Error { message; recoverable; error_class } ->
+    Alcotest.(check string)
+      "provider receives bounded projection failure"
+      "tool output exceeds descriptor budget"
+      message;
+    Alcotest.(check bool) "bounded projection is not retryable" false recoverable;
+    (match error_class with
+     | Some Agent_sdk.Types.Deterministic -> ()
+     | _ -> Alcotest.fail "bounded projection failure is not deterministic")
+
+let test_artifact_reader_owns_inline_projection () =
+  let descriptor =
+    Masc.Keeper_tool_descriptor.all_descriptors ()
+    |> List.find_opt (fun (descriptor : Masc.Keeper_tool_descriptor.t) ->
+      String.equal descriptor.internal_name "keeper_artifact_read")
+  in
+  match descriptor with
+  | None -> Alcotest.fail "artifact reader descriptor is missing"
+  | Some { model_output_projection = Tool_output.Inline_up_to { maximum_bytes }; _ } ->
+    Alcotest.(check int)
+      "artifact reader uses canonical output budget"
+      B.default_externalize_threshold_bytes
+      maximum_bytes
+  | Some { model_output_projection = Tool_output.Store_above _; _ } ->
+    Alcotest.fail "artifact reader can still create a nested blob"
+
 let test_tool_identity_does_not_bypass_externalization () =
   with_temp_base_path (fun dir ->
-    let payload = String.make 5_000 'b' in
+    let payload = String.make (B.default_externalize_threshold_bytes + 1) 'b' in
     let check_tool tool_name =
       match
         B.to_oas_typed_result
@@ -206,7 +253,9 @@ let test_execution_env_preserves_exact_invocation () =
 
 let test_externalize_with_temp_base_path () =
   with_temp_base_path (fun dir ->
-      let payload = String.make 4096 'z' in
+      let payload =
+        String.make (B.default_externalize_threshold_bytes + 1) 'z'
+      in
       let result = externalize_exn ~base_path:dir payload in
       Alcotest.(check bool) "encoded as marker" true (O.is_marker result);
       match O.decode_from_oas result with
@@ -231,7 +280,7 @@ let test_bounded_read_page_is_not_nested () =
       match
         Masc.Keeper_artifact_read.For_testing.page
           request
-          (String.make 4_096 '\000')
+          (String.make Masc.Keeper_artifact_read.maximum_max_bytes '\000')
       with
       | Ok page -> page
       | Error error -> Alcotest.fail error
@@ -245,10 +294,20 @@ let test_bounded_read_page_is_not_nested () =
       "worst-case bounded page fits inline contract"
       true
       (String.length output <= B.default_externalize_threshold_bytes);
+    Alcotest.(check bool)
+      "page advances beyond the removed 256-byte workaround"
+      true
+      (page.next_offset > 256);
     Alcotest.(check string)
       "bounded page remains provider-visible"
       output
-      (externalize_exn output))
+      (match
+         B.to_oas_typed_result
+           ~model_projection:Tool_output.bounded_inline_model_projection
+           (tool_ok ~tool_name:"keeper_artifact_read" output)
+       with
+       | Ok { content; _ } -> content
+       | Error { message; _ } -> Alcotest.fail message))
 
 let test_blob_store_failure_is_typed () =
   let path = Filename.temp_file "masc_bridge_not_a_directory" "" in
@@ -256,10 +315,12 @@ let test_blob_store_failure_is_typed () =
   Fun.protect
     ~finally:restore
     (fun () ->
-      let payload = String.make 4_096 '\000' in
+      let payload =
+        String.make (B.default_externalize_threshold_bytes + 1) '\000'
+      in
       (match B.maybe_externalize ~base_path:path payload with
        | Ok _ -> Alcotest.fail "failed store returned provider content"
-       | Error { message } ->
+       | Error { message; _ } ->
          Alcotest.(check bool)
            "storage failure is visible"
            true
@@ -268,7 +329,7 @@ let test_blob_store_failure_is_typed () =
       (match
          B.to_oas_typed_result
            ~base_path:path
-           ~on_externalization_error:(fun { message } ->
+           ~on_externalization_error:(fun { message; _ } ->
              observed := Some message)
            (tool_ok ~tool_name:"test" payload)
        with
@@ -316,6 +377,12 @@ let () =
       ( "to_oas_typed_result",
         [
           Alcotest.test_case "small inlined" `Quick test_to_oas_typed_small_inlined;
+          Alcotest.test_case "2.5KB result stays inline" `Quick
+            test_incident_sized_result_stays_inline;
+          Alcotest.test_case "bounded inline rejects oversize" `Quick
+            test_bounded_inline_rejects_oversized_result;
+          Alcotest.test_case "artifact reader owns inline projection" `Quick
+            test_artifact_reader_owns_inline_projection;
           Alcotest.test_case "tool name does not bypass externalization" `Quick
             test_tool_identity_does_not_bypass_externalization;
           Alcotest.test_case "error inlined" `Quick test_to_oas_typed_error_inlined;

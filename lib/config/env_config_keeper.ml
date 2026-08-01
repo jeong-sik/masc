@@ -241,7 +241,9 @@ module KeeperMemoryOs = struct
   ;;
 
   (** Maximum UTF-8 bytes for the exact rendered fact lines injected by recall.
-      The Librarian owns selection within this capacity boundary. *)
+      The Librarian owns selection within this capacity boundary.
+      @category Policies
+      @ops_class operator *)
   let recall_facts_max_bytes () =
     max
       1

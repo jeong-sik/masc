@@ -123,30 +123,17 @@ val record_streaming_cancelled_observation
 
 type source_disposition =
   | Follow_failure_route
-  | Requeue_after_context_compaction of { commit_count : int }
   | Pause_after_transcript_corruption of { detail : string }
-  | Acknowledge_after_in_turn_handling
-(** A failed turn normally follows its typed retry/rotate/escalate route.
-    [Requeue_after_context_compaction] preserves the exact source stimulus
-    only after MASC durably committed a smaller checkpoint; the next cycle
-    reloads that progress.
+(** A failed turn normally follows its typed retry/rotate/escalate route —
+    including every provider capacity failure: since #26545 bounds the
+    transmitted history to a quantized tail window, an overflow is an
+    ordinary typed failure, and the automatic overflow-compaction recovery
+    that used to branch here was removed (#26546; it had never produced a
+    committed compaction on record).
     [Pause_after_transcript_corruption] is terminal for automatic execution:
     typed transcript admission rejected before provider dispatch, so the
     heartbeat durably pauses the Keeper and consumes the selected source into an
-    operator-reset-required escalation with no retry successor.
-    [Acknowledge_after_in_turn_handling] ends only this admitted turn attempt
-    when compaction made no durable progress or produced a terminal
-    no-compaction result. The heartbeat removes the runnable selection only
-    through a source-bearing Event Queue WAL receipt; product source authority
-    remains with Board, Goal, Connector, Schedule, or Chat. No second durable
-    escalation is claimed; the cycle remains failed for receipts, counters,
-    and heartbeat freshness. *)
-
-val source_disposition_after_no_compaction_reason
-  :  Keeper_compaction_outcome.no_compaction_reason
-  -> source_disposition
-(** Every typed no-compaction result terminalizes the selected source. The
-    exhaustive mapping makes new reasons choose source semantics explicitly. *)
+    operator-reset-required escalation with no retry successor. *)
 
 type turn_failure =
   { error : Agent_sdk.Error.sdk_error

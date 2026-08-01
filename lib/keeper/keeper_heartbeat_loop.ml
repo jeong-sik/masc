@@ -340,9 +340,6 @@ let rec compaction_outcomes_of_cycle_outcome = function
   | Cycle.Manual_compaction_failed _ -> [ `Failed ]
   | Cycle.Failed { failure; _ } ->
     (match failure.Keeper_unified_turn.source_disposition with
-     | Keeper_unified_turn.Requeue_after_context_compaction { commit_count } ->
-       [ `Reactive_committed commit_count ]
-     | Keeper_unified_turn.Acknowledge_after_in_turn_handling -> [ `Failed ]
      | Keeper_unified_turn.Follow_failure_route
      | Keeper_unified_turn.Pause_after_transcript_corruption _ -> [])
   | Cycle.Completed _
@@ -357,7 +354,6 @@ let rec compaction_outcomes_of_cycle_outcome = function
 
 let compaction_outcome_label = function
   | `Manual_committed _ -> "manual_committed"
-  | `Reactive_committed _ -> "reactive_committed"
   | `Failed -> "failed"
 ;;
 
@@ -839,10 +835,7 @@ let run_keepalive_unified_turn
          (match failure.Keeper_unified_turn.source_disposition with
           | Keeper_unified_turn.Pause_after_transcript_corruption { detail } ->
             commit_transcript_corruption ~detail
-          | Keeper_unified_turn.Follow_failure_route
-          | Keeper_unified_turn.Requeue_after_context_compaction _
-          | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
-            ())
+          | Keeper_unified_turn.Follow_failure_route -> ())
        | Some
            ( Cycle.Completed _
            | Cycle.Checkpointed _
@@ -887,14 +880,7 @@ let run_keepalive_unified_turn
               | Error message -> record_event_queue_failure message)
            | Some (Cycle.Failed { failure; _ }) ->
              (match failure.Keeper_unified_turn.source_disposition with
-              | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
-                terminalize_failed_selection
-                  ~selection
-                  ~detail:
-                    (Agent_sdk.Error.to_string
-                       failure.Keeper_unified_turn.error)
               | Keeper_unified_turn.Follow_failure_route
-              | Keeper_unified_turn.Requeue_after_context_compaction _
               | Keeper_unified_turn.Pause_after_transcript_corruption _ ->
                 ())
            | Some (Cycle.Manual_compaction_failed { failure; _ }) ->
@@ -926,8 +912,7 @@ let run_keepalive_unified_turn
              record_compaction_outcome_metric
                ~keeper_name:meta_after_triage.name
                `Failed
-           | (`Manual_committed commit_count as outcome)
-           | (`Reactive_committed commit_count as outcome) ->
+           | `Manual_committed commit_count as outcome ->
              record_compaction_outcome_metric
                ~keeper_name:meta_after_triage.name
                outcome;

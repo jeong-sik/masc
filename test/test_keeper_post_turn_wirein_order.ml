@@ -159,23 +159,6 @@ let test_final_admission_busy_requeues_only_pre_dispatch_no_compaction () =
           (exact_terminal Keeper_compaction_outcome.Exact_execution_failed)))
 ;;
 
-let test_no_compaction_terminalizes_the_selected_source () =
-  let disposition =
-    Masc.Keeper_unified_turn.source_disposition_after_no_compaction_reason
-  in
-  List.iter
-    (fun reason ->
-       match disposition reason with
-       | Masc.Keeper_unified_turn.Acknowledge_after_in_turn_handling -> ()
-       | _ -> fail "terminal no-compaction did not acknowledge its source")
-    [ Keeper_compaction_outcome.Exact_lane_unconfigured
-    ; Keeper_compaction_outcome.Exact_execution_terminal
-        (exact_terminal Keeper_compaction_outcome.Exact_execution_failed)
-    ; Keeper_compaction_outcome.No_eligible_history
-    ; Keeper_compaction_outcome.Invalid_structural_source
-    ]
-;;
-
 let make_meta
       ?(name = "post-turn-no-auto-compact")
       ?(trace_id = "trace-post-turn-no-auto-compact")
@@ -1069,10 +1052,6 @@ let () =
       test_case
         "final-admission Busy distinguishes pre-dispatch from exact terminal"
         `Quick test_final_admission_busy_requeues_only_pre_dispatch_no_compaction;
-      test_case
-        "no-compaction terminalizes the selected source"
-        `Quick
-        test_no_compaction_terminalizes_the_selected_source;
       test_case "regular post-turn does not auto-compact"
         `Quick test_regular_post_turn_does_not_auto_compact;
       test_case

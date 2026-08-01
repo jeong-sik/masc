@@ -60,7 +60,7 @@
   ;; ordered multimodal delivery contracts;
   ;; its SHA and rationale live in scripts/oas-agent-sdk-pin.sh (SSOT).
   ;; See check-oas-pin.sh.
-  (agent_sdk (>= 0.231.10))
+  (agent_sdk (>= 0.231.11))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

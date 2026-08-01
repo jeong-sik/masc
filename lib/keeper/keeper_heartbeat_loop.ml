@@ -880,7 +880,20 @@ let run_keepalive_unified_turn
               | Error message -> record_event_queue_failure message)
            | Some (Cycle.Failed { failure; _ }) ->
              (match failure.Keeper_unified_turn.source_disposition with
-              | Keeper_unified_turn.Follow_failure_route
+              | Keeper_unified_turn.Follow_failure_route ->
+                (* With automatic overflow-compaction recovery removed
+                   (#26546), a terminal route (context overflow,
+                   deterministic request) has no recovery path: the same
+                   stimulus would re-dispatch the identical provider request
+                   every heartbeat. Terminalize so the keeper moves on;
+                   retryable routes (transient, rotate) stay pending for the
+                   next cycle. *)
+                (match failure.Keeper_unified_turn.route with
+                 | Keeper_runtime_failure_route.Exhausted_visible_alive
+                     { detail; _ } ->
+                   terminalize_failed_selection ~selection ~detail
+                 | Keeper_runtime_failure_route.Retry_after_observed _
+                 | Keeper_runtime_failure_route.Rotate_now _ -> ())
               | Keeper_unified_turn.Pause_after_transcript_corruption _ ->
                 ())
            | Some (Cycle.Manual_compaction_failed { failure; _ }) ->

@@ -161,9 +161,9 @@ let completion_contract_of_request
   in
   let* completion_contract = custom_criteria 0 [] request.criteria in
   let completion_contract =
-    match request.criteria with
+    match completion_contract with
     | [] -> None
-    | _ -> Some completion_contract
+    | descriptions -> Some descriptions
   in
   match request.output with
   | `Assoc fields ->

@@ -18,6 +18,7 @@ type input =
   ; generation : int
   ; persona : string
   ; current : current_selection option
+  ; max_recall_fact_bytes : int
   ; messages : Agent_sdk.Types.message list
   }
 
@@ -133,6 +134,7 @@ let format_persona_for_prompt persona =
 let prompt_variables (inp : input) : (string * string) list =
   [ "persona", format_persona_for_prompt inp.persona
   ; "current_memory", format_current_selection_for_prompt inp.current
+  ; "max_recall_fact_bytes", string_of_int inp.max_recall_fact_bytes
   ; ( "conversation_history"
     , format_messages_for_prompt inp.messages )
   ]
@@ -191,6 +193,10 @@ type parse_error =
   | Duplicate_dropped_memory_id of string
   | Dropped_memory_id_also_retained of string
   | Missing_disposition of string
+  | Recall_fact_budget_exceeded of
+      { actual_bytes : int
+      ; max_bytes : int
+      }
 
 let parse_error_to_string = function
   | Top_level_not_object -> "top_level_not_object"
@@ -212,6 +218,11 @@ let parse_error_to_string = function
   | Dropped_memory_id_also_retained identity ->
     "dropped_memory_id_also_retained: " ^ identity
   | Missing_disposition identity -> "missing_disposition: " ^ identity
+  | Recall_fact_budget_exceeded { actual_bytes; max_bytes } ->
+    Printf.sprintf
+      "recall_fact_budget_exceeded: actual_bytes=%d max_bytes=%d"
+      actual_bytes
+      max_bytes
 ;;
 
 let fact_of_json ~now (json : Yojson.Safe.t) : fact option =
@@ -376,12 +387,22 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
                         ~dropped
                     with
                     | Ok facts ->
-                      Ok
-                        { retained_memory_ids
-                        ; new_claims
-                        ; dropped
-                        ; facts
-                        }
+                      (match
+                         Keeper_memory_os_budget.measure
+                           ~max_bytes:inp.max_recall_fact_bytes
+                           facts
+                       with
+                       | Fits _ ->
+                         Ok
+                           { retained_memory_ids
+                           ; new_claims
+                           ; dropped
+                           ; facts
+                           }
+                       | Exceeds { actual_bytes; max_bytes } ->
+                         Error
+                           (Recall_fact_budget_exceeded
+                              { actual_bytes; max_bytes }))
                     | Error _ as error -> error)
                  | Some _, None -> Error Dropped_schema_mismatch
                  | None, _ -> Error Claim_schema_mismatch)))

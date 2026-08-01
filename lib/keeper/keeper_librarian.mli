@@ -2,9 +2,9 @@
 
     The Librarian receives the exact current selection plus a bounded slice of
     new conversation. It returns existing fact identities to retain and new
-    facts to add. Omitting an existing identity removes that memory. No
-    deterministic ranking, recency rule, byte budget, or migration path
-    participates. *)
+    facts to add. Every existing identity must be retained or explicitly
+    dropped. The LLM owns selection within the rendered-fact byte budget; no
+    deterministic ranking, recency rule, or migration path participates. *)
 
 type current_selection =
   { facts : Keeper_memory_os_types.fact list }
@@ -19,6 +19,9 @@ type input =
         importance through this identity; [""] renders as an explicit
         [no persona] marker. *)
   ; current : current_selection option
+  ; max_recall_fact_bytes : int
+    (** Maximum UTF-8 bytes for the exact rendered fact lines. The prompt states
+        this capacity and the parser rejects an oversized selection. *)
   ; messages : Agent_sdk.Types.message list
   }
 
@@ -59,6 +62,10 @@ type parse_error =
   | Duplicate_dropped_memory_id of string
   | Dropped_memory_id_also_retained of string
   | Missing_disposition of string
+  | Recall_fact_budget_exceeded of
+      { actual_bytes : int
+      ; max_bytes : int
+      }
 
 val parse_error_to_string : parse_error -> string
 

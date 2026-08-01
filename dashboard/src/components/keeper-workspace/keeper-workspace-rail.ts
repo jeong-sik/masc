@@ -505,14 +505,14 @@ function ContextSection({
           <span class="mono">${tokens ?? '—'}</span>
           <span class="ctx-tok-sep">/</span>
           <span class="mono ctx-tok-full">${maxLabel ?? '—'}</span>
-          <span class="ctx-tok-lbl">사용 / 전체 윈도우</span>
+          <span class="ctx-tok-lbl">provider 입력 토큰 / 모델 윈도우</span>
         </div>
         ${ctxSource === 'turn_record'
           ? html`<div class="ctx-src" data-testid="ctx-provenance" title=${ctxTurnRef ?? undefined}>
               측정: <span class="mono">T${ctxAbsoluteTurn ?? '—'}</span>
               ${ctxObservedAt ? html` · ${formatTimeAgo(ctxObservedAt)}` : null}
-              ${wireLabel ? html` · wire <span class="mono">${wireLabel}</span>` : null}
-              <span class="ctx-src-lbl">다음 입력에 함께 실리는 상비 페이로드</span>
+              ${wireLabel ? html` · 요청 본문 <span class="mono">${wireLabel}</span>` : null}
+              <span class="ctx-src-lbl">같은 완료 요청: 토큰은 모델 측정, 본문은 직렬화 UTF-8 바이트</span>
             </div>`
           : null}
         <div class="cmp-actions">

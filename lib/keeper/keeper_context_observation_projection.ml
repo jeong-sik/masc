@@ -3,8 +3,8 @@
     Context occupancy is projected from the newest TurnRecord (RFC-0233):
     [input_tokens] is the provider-reported prompt total for the last
     completed turn and [context_window] the window resolved for that same
-    request, so the pair is the measurement SSOT for "what enters with the
-    next input". This module is the single wire projection for that
+    request. The pair describes that completed request; it does not predict the
+    next input. This module is the single wire projection for that
     measurement, for its typed absence, and for the separate,
     provider-reported last-turn usage.
 

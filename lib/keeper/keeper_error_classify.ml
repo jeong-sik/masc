@@ -86,7 +86,11 @@ let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.AuthError _ | Llm_provider.Error.AuthorizationError _) ->
       Non_transient
-  | Agent_sdk.Error.Provider (Llm_provider.Error.ParseError _) -> Non_transient
+  | Agent_sdk.Error.Provider
+      ( Llm_provider.Error.ParseError _
+      | Llm_provider.Error.ProviderWireError _
+      | Llm_provider.Error.ProviderReportedError _ ) ->
+      Non_transient
   | Agent_sdk.Error.Provider (Llm_provider.Error.InvalidRequest _) -> Non_transient
   | Agent_sdk.Error.Provider (Llm_provider.Error.CapacityExhausted _) -> Transient_capacity
   | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) -> Non_transient
@@ -170,7 +174,8 @@ let is_provider_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Provider (Llm_provider.Error.ParseError _) -> true
   | Agent_sdk.Error.Provider
-      (Llm_provider.Error.InvalidRequest _ | Llm_provider.Error.NetworkError _
+      ( Llm_provider.Error.InvalidRequest _
+      | Llm_provider.Error.NetworkError _
       | Llm_provider.Error.Timeout _
       | Llm_provider.Error.ServerError _ | Llm_provider.Error.RateLimit _
       | Llm_provider.Error.AuthError _
@@ -180,6 +185,8 @@ let is_provider_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
       | Llm_provider.Error.HardQuota _
       | Llm_provider.Error.ProviderUnavailable _
       | Llm_provider.Error.ProviderTerminal _
+      | Llm_provider.Error.ProviderWireError _
+      | Llm_provider.Error.ProviderReportedError _
       | Llm_provider.Error.InvalidConfig _
       | Llm_provider.Error.UnknownVariant _) -> false
   | Agent_sdk.Error.Api _ -> false
@@ -189,6 +196,19 @@ let is_provider_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Serialization _ -> false
   | Agent_sdk.Error.Io _ -> false
   | Agent_sdk.Error.Orchestration _ -> false
+  | Agent_sdk.Error.Internal _ -> false
+
+let is_provider_wire_error (err : Agent_sdk.Error.sdk_error) : bool =
+  match err with
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ProviderWireError _) -> true
+  | Agent_sdk.Error.Provider _
+  | Agent_sdk.Error.Api _
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
   | Agent_sdk.Error.Internal _ -> false
 
 (** 0-byte empty completion: the provider ended the turn with a modeled,
@@ -565,6 +585,13 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
              | Llm_provider.Error.AuthorizationError _
              | Llm_provider.Error.MissingApiKey _ ) ->
              Some Auth_error
+         (* Wire/provided-response failures are intentionally excluded here.
+            This function selects a deferred whole-runtime lane after the
+            current candidate walk; same-turn candidate rotation is already
+            decided by [Keeper_runtime_attempt] mapping these typed facts to
+            [ProviderFailure]. Reclassifying them here would conflate the two
+            boundaries and schedule a second whole-runtime wake for the same
+            malformed provider response. *)
          | Agent_sdk.Error.Provider
              (Llm_provider.Error.ServerError _
              | Llm_provider.Error.InvalidConfig _
@@ -573,6 +600,8 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
              | Llm_provider.Error.NetworkError _
              | Llm_provider.Error.Timeout _
              | Llm_provider.Error.ParseError _
+             | Llm_provider.Error.ProviderWireError _
+             | Llm_provider.Error.ProviderReportedError _
              | Llm_provider.Error.UnknownVariant _
              | Llm_provider.Error.ProviderTerminal _) ->
              None

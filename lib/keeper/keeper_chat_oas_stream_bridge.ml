@@ -481,6 +481,15 @@ let translate ~redact_text ~base_dir bridge_state
               { message =
                   redact_text ("Provider stream parse failed: " ^ reason) } ]
       }
+  | NDJSONParseFailed { raw; reason } ->
+      { bridge_state;
+        chat_events =
+          [ protocol_error ~reason:(redact_text reason)
+              ~raw_bytes:(String.length raw) Ndjson_parse_failed;
+            Event_error
+              { message =
+                  redact_text ("Provider NDJSON stream parse failed: " ^ reason) } ]
+      }
   | SSEUnknownEventType { event_type; raw } ->
       { bridge_state;
         chat_events =

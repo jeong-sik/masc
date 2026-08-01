@@ -93,6 +93,30 @@ let test_provider_parse_rejection_counts_toward_crash () =
     false
     (EC.is_auto_recoverable_turn_error err)
 
+let test_provider_wire_error_is_not_rate_limit_or_request_parse () =
+  let err =
+    Agent_sdk.Error.Provider
+      (Llm_provider.Error.ProviderWireError
+         { provider = "glm"
+         ; format = Llm_provider.Http_client.Sse
+         ; kind = Llm_provider.Http_client.Malformed_payload
+         ; detail = "SSE parse failed: malformed JSON"
+         })
+  in
+  Alcotest.(check bool) "wire error is preserved" true (EC.is_provider_wire_error err);
+  Alcotest.(check bool)
+    "wire error is not request-body parse rejection"
+    false
+    (EC.is_provider_rejected_parse_error err);
+  Alcotest.(check bool)
+    "wire error is not server parse rejection"
+    false
+    (EC.is_server_rejected_parse_error err);
+  Alcotest.(check bool)
+    "wire error remains crash-accounted"
+    false
+    (EC.is_auto_recoverable_turn_error err)
+
 (* A 0-byte empty completion with a modeled non-overflow stop_reason (OAS
    [Retry.Empty_attributed]) surfaces as [ProviderUnavailable] and is
    auto-recoverable: retry/failover can make progress on a broken backend
@@ -283,6 +307,9 @@ let () =
           test_tls_handshake_internal_error_is_transient;
         Alcotest.test_case "provider parse rejection counts toward crash" `Quick
           test_provider_parse_rejection_counts_toward_crash;
+        Alcotest.test_case
+          "provider wire error stays distinct and crash-accounted" `Quick
+          test_provider_wire_error_is_not_rate_limit_or_request_parse;
         Alcotest.test_case "attributed empty completion is auto-recoverable" `Quick
           test_attributed_empty_completion_is_auto_recoverable;
         Alcotest.test_case "parse-error empty completion is auto-recoverable" `Quick

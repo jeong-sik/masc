@@ -38,6 +38,16 @@ val is_server_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 (** [true] for provider-side request-body parse rejections. *)
 val is_provider_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 
+(** [true] only for an accepted provider response whose wire contract failed:
+    the [Provider_wire_error] kinds (malformed, unknown event, incomplete,
+    oversized) across SSE and NDJSON. A [Provider_reported_error] — a
+    structurally valid error envelope the provider put inside an accepted
+    response — is deliberately NOT one of these, and returns [false].
+    Used to select the diagnostic log suffix in the turn-failure path.
+    Candidate rotation eligibility and consecutive-failure accounting are
+    determined by {!Keeper_runtime_attempt}, not by this predicate. *)
+val is_provider_wire_error : Agent_sdk.Error.sdk_error -> bool
+
 (** [true] for model/API-side request-body parse rejections reported as
     [InvalidRequest]. *)
 val is_model_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool

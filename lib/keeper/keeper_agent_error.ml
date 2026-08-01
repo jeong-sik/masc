@@ -240,6 +240,15 @@ let provider_error_terminal_reason_code = function
   | Llm_provider.Error.InvalidConfig { field; _ } ->
     Printf.sprintf "provider_error_invalid_config:%s" field
   | Llm_provider.Error.ParseError _ -> "provider_error_parse"
+  | Llm_provider.Error.ProviderWireError { format; kind; _ } ->
+    Printf.sprintf
+      "provider_error_wire:%s:%s"
+      (Llm_provider.Http_client.provider_wire_format_to_string format)
+      (Llm_provider.Http_client.provider_wire_error_kind_to_string kind)
+  | Llm_provider.Error.ProviderReportedError { error_type = Some error_type; _ } ->
+    Printf.sprintf "provider_error_reported:%s" error_type
+  | Llm_provider.Error.ProviderReportedError { error_type = None; _ } ->
+    "provider_error_reported"
   | Llm_provider.Error.UnknownVariant { type_name; _ } ->
     Printf.sprintf "provider_error_unknown_variant:%s" type_name
   | Llm_provider.Error.ProviderUnavailable _ -> "provider_error_unavailable"

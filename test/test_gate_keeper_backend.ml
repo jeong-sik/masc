@@ -1909,6 +1909,26 @@ let test_keeper_stream_bridge_surfaces_unknown_and_incomplete_events () =
         "Provider stream incomplete: max_output_tokens" message
   | _ -> fail "expected visible events for unknown/incomplete provider stream"
 
+let test_keeper_stream_bridge_preserves_ndjson_parse_failure () =
+  let open Agent_sdk.Types in
+  let raw = "not-json" in
+  let reason = "ollama_ndjson_chunk_parse_failure" in
+  let events =
+    translate_oas_stream_events [ NDJSONParseFailed { raw; reason } ]
+  in
+  match events with
+  | [ Keeper_chat_events.Oas_stream_protocol_error
+        { kind; reason = Some actual_reason; raw_bytes = Some actual_bytes; _ };
+      Keeper_chat_events.Event_error { message } ] ->
+      check string "NDJSON kind" "ndjson_parse_failed"
+        (Keeper_chat_events.stream_protocol_error_kind_to_string kind);
+      check string "NDJSON reason" reason actual_reason;
+      check int "NDJSON raw bytes" (String.length raw) actual_bytes;
+      check string "NDJSON visible error"
+        ("Provider NDJSON stream parse failed: " ^ reason)
+        message
+  | _ -> fail "expected NDJSON parse failure to remain a typed visible error"
+
 let test_keeper_chat_history_persists_attachment_refs_not_raw_media () =
   let base_dir = temp_base_path "gate-keeper-media-history" in
   Fun.protect
@@ -2912,6 +2932,8 @@ let () =
             test_stream_protocol_error_summary_includes_diagnostics;
           test_case "stream bridge surfaces unknown and incomplete events" `Quick
             test_keeper_stream_bridge_surfaces_unknown_and_incomplete_events;
+          test_case "stream bridge preserves NDJSON parse failure" `Quick
+            test_keeper_stream_bridge_preserves_ndjson_parse_failure;
           test_case "chat history persists attachment refs not raw media" `Quick
             test_keeper_chat_history_persists_attachment_refs_not_raw_media;
           test_case "user-only chat history persists attachment refs not raw media" `Quick

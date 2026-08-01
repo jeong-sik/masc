@@ -57,6 +57,16 @@ let provider_error_to_http_error = function
       }
   | Llm_provider.Error.NetworkError { detail; kind; _ } ->
     Llm_provider.Http_client.NetworkError { message = detail; kind }
+  | Llm_provider.Error.ProviderWireError { format; kind; detail; _ } ->
+    Llm_provider.Http_client.ProviderFailure
+      { kind = Llm_provider.Http_client.Provider_wire_error { format; kind }
+      ; message = detail
+      }
+  | Llm_provider.Error.ProviderReportedError { error_type; detail; _ } ->
+    Llm_provider.Http_client.ProviderFailure
+      { kind = Llm_provider.Http_client.Provider_reported_error { error_type }
+      ; message = detail
+      }
   | Llm_provider.Error.ParseError { detail } ->
     Llm_provider.Http_client.ProviderTerminal
       { kind = Llm_provider.Http_client.Other "protocol_error"

@@ -180,6 +180,26 @@ let test_provider_config_judges () =
     Alcotest.failf "missing api key should exhaust config, got %s"
       (KFR.route_kind_label other)
 
+let test_provider_wire_error_is_provider_integration () =
+  match
+    route_of_oas_error
+      (Agent_sdk.Error.Provider
+         (Llm_provider.Error.ProviderWireError
+            { provider = "glm"
+            ; format = Llm_provider.Http_client.Sse
+            ; kind = Llm_provider.Http_client.Malformed_payload
+            ; detail = "malformed JSON"
+            }))
+  with
+  | KFR.Exhausted_visible_alive
+      { terminal = KFR.Provider_integration
+      ; provenance = KFR.Oas_provider_error
+      ; _
+      } -> ()
+  | other ->
+    Alcotest.failf "provider wire error should exhaust provider integration, got %s"
+      (KFR.route_kind_label other)
+
 let test_masc_internal_backpressure_hint () =
   let err =
     internal_err
@@ -278,6 +298,10 @@ let () =
     ; ( "provider"
       , [ Alcotest.test_case "quota family hints" `Quick test_provider_quota_family_threads_hint
         ; Alcotest.test_case "config exhausts" `Quick test_provider_config_judges
+        ; Alcotest.test_case
+            "wire error is provider integration"
+            `Quick
+            test_provider_wire_error_is_provider_integration
         ] )
     ; ( "masc_internal"
       , [ Alcotest.test_case "backpressure hint" `Quick test_masc_internal_backpressure_hint

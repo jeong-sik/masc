@@ -108,8 +108,10 @@ let operator_evidence_json ~config ~operator_id ~task_id =
       [ "task_id", `String task_id
       ; "verification_id", `String verification_id
       ; "producer", `String producer
-      ; "authority_kind", `String "human_operator"
-      ; "authority_actor", `String operator_id
+      ; ( "authority_kind"
+        , `String (Masc_domain.completion_authority_kind authority) )
+      ; ( "authority_actor"
+        , `String (Masc_domain.completion_authority_actor authority) )
       ; ( "evidence"
         , Workspace_verification_store.submitted_evidence_access_to_yojson
             evidence )

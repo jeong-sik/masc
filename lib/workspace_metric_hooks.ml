@@ -487,18 +487,18 @@ let install () =
          ~evidence_refs);
 
   Atomic.set Workspace_hooks.verification_notify_verdict_fn
-    (fun ~task_id ~verifier ~verification_id ~decision ->
+    (fun ~task_id ~authority ~verification_id ~decision ->
        match decision with
        | `Approve notes ->
          Verification_protocol.notify_approve_verification
            ~task_id
-           ~verifier
+           ~authority
            ~verification_id
            ~notes
        | `Reject reason ->
          Verification_protocol.notify_reject_verification
            ~task_id
-           ~verifier
+           ~authority
            ~verification_id
            ~reason);
 

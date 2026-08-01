@@ -102,8 +102,11 @@ let test_verdict_requires_authority_and_reason () =
        ~now
        ~notes:"evidence at /tmp/proof"
    with
-   | Ok { decision = { new_status = D.Done { assignee; _ }; _ }; authority_kind; _ }
-     when String.equal assignee owner && String.equal authority_kind "human_operator" -> ()
+   | Ok
+       { decision = { new_status = D.Done { assignee; _ }; _ }
+       ; authority = D.Human_operator { operator_id }
+       }
+     when String.equal assignee owner && String.equal operator_id "op-1" -> ()
    | Ok _ | Error _ -> failwith "operator approval must complete the task");
   (match
      L.decide_verdict
@@ -136,8 +139,11 @@ let test_verdict_requires_authority_and_reason () =
       ~now
       ~notes:""
   with
-  | Ok { decision = { new_status = D.InProgress { assignee; _ }; _ }; authority_kind; _ }
-    when String.equal assignee owner && String.equal authority_kind "auto_judge" -> ()
+  | Ok
+      { decision = { new_status = D.InProgress { assignee; _ }; _ }
+      ; authority = D.Auto_judge { judge_run_id }
+      }
+    when String.equal assignee owner && String.equal judge_run_id "fusion-run-9" -> ()
   | Ok _ | Error _ -> failwith "judge rejection must return the task to its producer"
 ;;
 

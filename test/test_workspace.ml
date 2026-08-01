@@ -1113,9 +1113,9 @@ let with_verdict_projection_recorders f =
   in
   let previous_notification =
     Atomic.exchange Workspace_hooks.verification_notify_verdict_fn
-      (fun ~task_id ~verifier ~verification_id ~decision ->
+      (fun ~task_id ~authority ~verification_id ~decision ->
         notifications :=
-          (task_id, verifier, verification_id, decision) :: !notifications)
+          (task_id, authority, verification_id, decision) :: !notifications)
   in
   Fun.protect
     ~finally:(fun () ->

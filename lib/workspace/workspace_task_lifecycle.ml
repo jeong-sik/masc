@@ -143,22 +143,20 @@ let decide
     Error Invalid_transition
 ;;
 
-(** A verdict decision plus the authority provenance its caller must record.
-    Returning the provenance keeps it out of [Done.notes]: the previous code
-    wrote ["Verified by <keeper> (vrf:<id>)"] into the notes string, which made a
-    human-readable field the only record of who approved — and nothing parsed
-    it. *)
+(** A verdict decision plus the typed authority provenance its caller must
+    record. Keeping the sum here prevents a system-LLM or HITL authority from
+    being reconstructed later from a free-form Keeper/verifier string. *)
 type verdict_decision =
   { decision : decision
-  ; authority_kind : string
-  ; authority_actor : string
+  ; authority : Masc_domain.completion_authority
   }
 
 (** Terminal verdict on an [AwaitingVerification] obligation.
 
     Deliberately not an arm of {!decide}: a verdict is not an agent action. The
     [authority] parameter carries provenance from an authenticated operator or
-    typed judge boundary. The sum keeps verdicts out of the agent action FSM;
+    typed system-LLM judge boundary. The sum keeps verdicts out of the Keeper
+    action FSM;
     authentication remains the caller's responsibility. *)
 let decide_verdict
       ~(authority : Masc_domain.completion_authority)
@@ -174,8 +172,7 @@ let decide_verdict
     else
       Ok
         { decision
-        ; authority_kind = Masc_domain.completion_authority_kind authority
-        ; authority_actor = Masc_domain.completion_authority_actor authority
+        ; authority
         }
   in
   match task_status with

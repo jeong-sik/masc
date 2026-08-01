@@ -170,7 +170,7 @@ val verification_notify_submit_fn :
 
 val verification_notify_verdict_fn :
   (task_id:string ->
-   verifier:string ->
+   authority:Masc_domain.completion_authority ->
    verification_id:string ->
    decision:[ `Approve of string | `Reject of string ] ->
    unit) Atomic.t

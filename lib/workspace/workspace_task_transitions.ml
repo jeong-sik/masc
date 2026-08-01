@@ -601,6 +601,14 @@ let commit_verdict_r
                           (task_status_to_string task.task_status))))
            in
            let new_status = decided.Workspace_task_lifecycle.decision.new_status in
+           let authority = decided.Workspace_task_lifecycle.authority in
+           let authority_kind = Masc_domain.completion_authority_kind authority in
+           let authority_actor = Masc_domain.completion_authority_actor authority in
+           let authority_actor_kind =
+             match authority with
+             | Masc_domain.Human_operator _ -> Workspace_task_classify.Operator
+             | Masc_domain.Auto_judge _ -> Workspace_task_classify.System
+           in
            let producer, verification_id =
              match task.task_status with
              | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
@@ -636,7 +644,7 @@ let commit_verdict_r
                  "completion verdict committed but post-commit projection failed \
                   task_id=%s authority=%s label=%s detail=%s"
                  task_id
-                 decided.Workspace_task_lifecycle.authority_actor
+                 authority_actor
                  label
                  (Printexc.to_string exn)
            in
@@ -710,8 +718,8 @@ let commit_verdict_r
            in
            let authority_fields =
              [ "task_id", `String task_id
-             ; "authority_kind", `String decided.Workspace_task_lifecycle.authority_kind
-             ; "authority_actor", `String decided.Workspace_task_lifecycle.authority_actor
+             ; "authority_kind", `String authority_kind
+             ; "authority_actor", `String authority_actor
              ; "producer", `String producer
              ; "verification_id", `String verification_id
              ]
@@ -719,7 +727,8 @@ let commit_verdict_r
            run_post_commit "task_activity" (fun () ->
              emit_task_activity
                config
-               ~agent_name:decided.Workspace_task_lifecycle.authority_actor
+               ~actor_kind:authority_actor_kind
+               ~agent_name:authority_actor
                ~task_id
                ~kind:(Event_kind.Task.to_string event_kind)
                ~payload:(`Assoc authority_fields));
@@ -731,7 +740,7 @@ let commit_verdict_r
              in
              (Atomic.get Workspace_hooks.verification_notify_verdict_fn)
                ~task_id
-               ~verifier:decided.Workspace_task_lifecycle.authority_actor
+               ~authority
                ~verification_id
                ~decision);
            run_post_commit "task_transition_subscription" (fun () ->
@@ -740,8 +749,8 @@ let commit_verdict_r
                ~details:
                  [ "task_id", `String task_id
                  ; "action", `String "completion_verdict"
-                 ; ( "authority_actor"
-                   , `String decided.Workspace_task_lifecycle.authority_actor )
+                 ; "authority_kind", `String authority_kind
+                 ; "authority_actor", `String authority_actor
                  ]);
            (* Authority provenance is recorded here as structured fields. It is
               deliberately NOT written into [Done.notes]: the previous code put
@@ -763,7 +772,7 @@ let commit_verdict_r
                    task_id
                    (task_status_to_string task.task_status)
                    (task_status_to_string new_status)
-                   decided.Workspace_task_lifecycle.authority_kind
+                   authority_kind
              ; noop = false
              })
     with

@@ -55,6 +55,56 @@ let contains_substring text needle =
   in
   needle_len = 0 || loop 0
 
+let test_verdict_event_preserves_typed_authority () =
+  let event =
+    VP.For_testing.verdict_event_json
+      ~authority:(Masc_domain.Auto_judge { judge_run_id = "oas-judge-run-7" })
+      ~task_id:"task-001"
+      ~verification_id:"vrf-001"
+      ~verdict:Masc_domain.Verdict_approved
+      ~notes:"reviewed evidence"
+      ~timestamp:1234.5
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "event type"
+    "masc/verification/verdict"
+    (event |> member "type" |> to_string);
+  Alcotest.(check string)
+    "authority kind"
+    "auto_judge"
+    (event |> member "authority_kind" |> to_string);
+  Alcotest.(check string)
+    "authority actor"
+    "oas-judge-run-7"
+    (event |> member "authority_actor" |> to_string);
+  Alcotest.(check bool)
+    "event does not expose verifier role"
+    false
+    (match event with
+     | `Assoc fields -> List.mem_assoc "verifier" fields
+     | _ -> Alcotest.fail "verdict event must be an object")
+
+let test_rejected_verdict_event_preserves_wire_type () =
+  let event =
+    VP.For_testing.verdict_event_json
+      ~authority:(Masc_domain.Auto_judge { judge_run_id = "oas-judge-run-8" })
+      ~task_id:"task-002"
+      ~verification_id:"vrf-002"
+      ~verdict:(Masc_domain.Verdict_rejected { reason = "insufficient evidence" })
+      ~notes:""
+      ~timestamp:1234.5
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "rejected event type"
+    "masc/verification/rejected"
+    (event |> member "type" |> to_string);
+  Alcotest.(check string)
+    "rejected reason"
+    "insufficient evidence"
+    (event |> member "reason" |> to_string)
+
 (* --- Criterion tests --- *)
 
 let test_criterion_roundtrip () =
@@ -923,6 +973,12 @@ let () =
     "id_generation", [
       Alcotest.test_case "vrf- prefix" `Quick test_generate_id_prefix;
       Alcotest.test_case "10k ids collision-free" `Quick test_generate_id_no_collisions;
+    ];
+    "notifications", [
+      Alcotest.test_case "verdict keeps typed authority" `Quick
+        test_verdict_event_preserves_typed_authority;
+      Alcotest.test_case "rejected verdict keeps wire type" `Quick
+        test_rejected_verdict_event_preserves_wire_type;
     ];
     "storage", [
       Alcotest.test_case "create and load" `Quick test_create_and_load;

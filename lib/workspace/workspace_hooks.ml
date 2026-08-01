@@ -320,12 +320,12 @@ let verification_notify_submit_fn
 
 let verification_notify_verdict_fn
   : (task_id:string ->
-     verifier:string ->
+     authority:Masc_domain.completion_authority ->
      verification_id:string ->
      decision:[ `Approve of string | `Reject of string ] ->
      unit) Atomic.t
   = Atomic.make
-      (fun ~task_id:_ ~verifier:_ ~verification_id:_ ~decision:_ -> ())
+      (fun ~task_id:_ ~authority:_ ~verification_id:_ ~decision:_ -> ())
 
 let is_admin_agent_fn
   : (base_path:string -> agent_name:string -> bool) Atomic.t

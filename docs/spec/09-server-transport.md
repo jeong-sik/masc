@@ -452,7 +452,7 @@ let make_routes ~port ~host:_ ~sw ~clock =
 
 ### 7.5 Admin 인증
 
-`MASC_ADMIN_TOKEN` 환경변수로 admin-only API를 보호한다. 타이밍 사이드채널 공격 방지를 위해 XOR 기반 constant-time 비교를 사용한다.
+`MASC_ADMIN_TOKEN` 환경변수로 admin-only API를 보호한다. 토큰 비교는 검증된 Eqaf의 timing-resistant equality에 위임한다.
 
 ### 7.6 CORS
 
@@ -844,7 +844,7 @@ sequenceDiagram
 
 **INV-SERVER-011**: SIGTERM/SIGINT 수신 시 5초 내 graceful shutdown. 타임아웃 초과 시 `exit 1`. Shutdown notification이 모든 SSE 클라이언트에 broadcast된 후 종료한다.
 
-**INV-SERVER-012**: Admin API는 `MASC_ADMIN_TOKEN`과의 constant-time 비교(`with_admin_auth`)로 보호한다. 타이밍 사이드채널 차단.
+**INV-SERVER-012**: Admin API는 `MASC_ADMIN_TOKEN`과의 비교를 `with_admin_auth`에서 Eqaf의 timing-resistant equality에 위임한다.
 
 ---
 

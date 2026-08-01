@@ -59,6 +59,7 @@
   mirage-crypto-rng.unix
   cstruct
   digestif
+  eqaf
   ocaml-protoc-plugin
   masc_proto
   grpc-direct

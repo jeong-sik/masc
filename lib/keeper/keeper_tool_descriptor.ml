@@ -117,6 +117,7 @@ type t =
   ; internal_name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; model_output_projection : Tool_output.model_projection
   ; policy : policy
   ; executor : executor
   ; backend : backend
@@ -570,6 +571,7 @@ let descriptor_with_public_aliases
       ~internal_name
       ~description
       ~input_schema
+      ?(model_output_projection = Tool_output.default_model_projection)
       ~policy
       ~executor
       ~backend
@@ -607,6 +609,7 @@ let descriptor_with_public_aliases
   ; internal_name
   ; description
   ; input_schema
+  ; model_output_projection
   ; policy
   ; executor
   ; backend
@@ -657,6 +660,10 @@ let descriptor
 
 let with_eval_tags eval_tags descriptor =
   { descriptor with eval_tags }
+;;
+
+let with_model_output_projection model_output_projection descriptor =
+  { descriptor with model_output_projection }
 ;;
 
 let public_descriptors =
@@ -1620,6 +1627,7 @@ let internal_descriptors : t list =
       ~input_schema:artifact_read_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_artifact_read
+    |> with_model_output_projection Tool_output.bounded_inline_model_projection
   ; in_process_descriptor_with_schema_source
       ~keeper_model_projection:Internal_name
       ~input_schema_source:memory_search_schema_source

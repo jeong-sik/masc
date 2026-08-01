@@ -74,6 +74,19 @@ type t =
   | Inline of string
   | Stored of artifact_ref
 
+(** Model-visible projection is owned by the tool descriptor, rather than
+    inferred from the tool name or from a bridge-wide magic threshold. *)
+type model_projection =
+  | Store_above of { threshold_bytes : int }
+  | Inline_up_to of { maximum_bytes : int }
+
+val default_model_projection : model_projection
+(** Store results larger than the canonical MASC tool-output budget. *)
+
+val bounded_inline_model_projection : model_projection
+(** Keep a result inline only while it remains inside that same canonical
+    tool-output budget. This is for explicit artifact-page readers. *)
+
 val marker_prefix : string
 val is_marker : string -> bool
 

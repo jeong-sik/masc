@@ -137,6 +137,7 @@ type t =
   ; internal_name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; model_output_projection : Tool_output.model_projection
   ; policy : policy
   ; executor : executor
   ; backend : backend

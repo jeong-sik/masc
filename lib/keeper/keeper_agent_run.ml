@@ -669,12 +669,12 @@ let run_turn
       s.Keeper_run_tools.model_input_projection
     in
     let model_input_projection messages =
-      (* Bounded transmission view first (RFC #26534 PR-C): the cut never
-         sees gate-replay evidence, which [source_model_input_projection]
-         appends afterwards, and the provenance check below compares against
-         the windowed list so its projected-prefix precondition keeps
-         holding. Durable state and checkpoints receive the unwindowed
-         history. *)
+      (* Bounded transmission view first (RFC #26534 PR-C). The source
+         projection appends only a bounded typed Gate replay reference; exact
+         replay bytes remain in the artifact store. The provenance check below
+         compares against the windowed list so its projected-prefix
+         precondition keeps holding. Durable state and checkpoints receive the
+         unwindowed history. *)
       let windowed = Runtime_model_input_tail_window.project messages in
       match source_model_input_projection windowed with
       | Error _ as error ->

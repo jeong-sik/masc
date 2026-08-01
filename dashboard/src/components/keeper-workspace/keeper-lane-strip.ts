@@ -39,8 +39,6 @@ import {
 import { formatDateTimeKo } from '../../lib/format-time'
 import { CountBadge } from '../v2/primitives-v2'
 
-const LANE_ROW_LIMIT = 3
-
 // The strip mirrors a heavy server-side aggregation (per-keeper event-queue,
 // turn-admission, external-attention, HITL, schedule scans). It is refreshed
 // by polling — not server push — while the keeper detail is open, so a busy
@@ -102,7 +100,7 @@ function truncatedSourceLabels(entry: DashboardKeeperWaitingKeeper): string[] {
 
 function LaneWaitingRow({ row }: { row: DashboardKeeperWaitingRow }): VNode {
   return html`
-    <div class="grid gap-0.5 border-t border-[var(--color-border-subtle)] py-1.5 first:border-t-0">
+    <div data-testid="keeper-lane-waiting-row" class="grid gap-0.5 border-t border-[var(--color-border-subtle)] py-1.5 first:border-t-0">
       <div class="flex min-w-0 flex-wrap items-center gap-1.5">
         <${StatusChip} tone=${sourceTone(row.source)} uppercase=${false}>${enumLabel(row.source)}<//>
         <span class="min-w-0 truncate font-mono text-2xs text-[var(--color-fg-primary)]">${row.waiting_on}</span>
@@ -137,7 +135,7 @@ export function KeeperLaneStrip({
   autoRefreshMs?: number
 }): VNode {
   const entry = inventoryEntry(inventory, keeper)
-  const rows = (entry?.waiting_on ?? []).slice(0, LANE_ROW_LIMIT)
+  const rows = entry?.waiting_on ?? []
   const waitingCount = entry?.waiting_count ?? 0
   const countTruncated = entry?.waiting_count_truncated === true
   const truncatedSources = entry ? truncatedSourceLabels(entry) : []
@@ -164,15 +162,10 @@ export function KeeperLaneStrip({
               </div>
               ${rows.length > 0
                 ? html`
-                    <div>
+                    <div class="max-h-60 overflow-y-auto">
                       ${rows.map((row, index) => html`
                         <${LaneWaitingRow} key=${`${row.source}:${row.waiting_on}:${index}`} row=${row} />
                       `)}
-                      ${waitingCount > rows.length
-                        ? html`<div class="pt-1 text-2xs text-[var(--color-fg-muted)]" data-testid="keeper-lane-more">
-                            +${waitingCount - rows.length} more${countTruncated ? ` of at least ${waitingCount}` : ''}
-                          </div>`
-                        : null}
                     </div>
                   `
                 : null}

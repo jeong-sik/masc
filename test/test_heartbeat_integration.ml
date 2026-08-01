@@ -1838,6 +1838,101 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
            name
           : Masc.Keeper_keepalive.joined_stop_result))
 
+let test_cross_keeper_up_lane_outlives_calling_turn () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "cross-keeper-up-lifetime" in
+  let target_name = "cross-keeper-target" in
+  let previous_startup_state = !(Masc.Server_startup_state.state) in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Server_startup_state.state := previous_startup_state;
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      R.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      ensure_default_runtime ();
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "rondo"));
+      seed_keeper_sandbox_profile ~base_dir target_name;
+      ignore Masc.Keeper_tool_surface.schemas;
+      Masc.Server_startup_state.reset ();
+      (match
+         Masc.Server_startup_state.mark_state_ready
+           ~backend:Masc.Server_startup_state.Memory_backend
+       with
+       | Ok () -> ()
+       | Error error ->
+         fail (Masc.Server_startup_state.state_ready_error_to_string error));
+      let clock = Eio.Stdenv.clock env in
+      Eio.Switch.run @@ fun root_sw ->
+      Eio_context.with_test_env
+        ~net:(Eio.Stdenv.net env)
+        ~clock
+        ~mono_clock:(Eio.Stdenv.mono_clock env)
+        ~sw:root_sw
+      @@ fun () ->
+      Masc_test_deps.with_publication_recovery_registry
+        ~sw:root_sw
+        ~fs:(Eio.Stdenv.fs env)
+        ~registry_root:(Workspace.masc_root_dir config)
+      @@ fun publication_recovery_registry ->
+      let stop_target () =
+        ignore
+          (Masc.Keeper_keepalive.stop_keepalive_and_await
+             ~base_path:config.base_path
+             target_name
+            : Masc.Keeper_keepalive.joined_stop_result)
+      in
+      Fun.protect
+        ~finally:stop_target
+        (fun () ->
+          let result =
+            try
+              Some
+                (Eio.Time.with_timeout_exn clock 1.0 (fun () ->
+                   Eio.Switch.run @@ fun turn_sw ->
+                   Eio_context.with_turn_switch turn_sw @@ fun () ->
+                   !Masc.Keeper_dispatch_ref.dispatch
+                     ~config
+                     ~agent_name:"rondo"
+                     ~publication_recovery_provider:
+                       (Masc_test_deps.publication_recovery_provider
+                          publication_recovery_registry)
+                     ~sw:turn_sw
+                     ~clock
+                     ~name:"masc_keeper_up"
+                     ~args:
+                       (`Assoc
+                          [ "name", `String target_name
+                          ; "proactive_enabled", `Bool false
+                          ; "autoboot_enabled", `Bool false
+                          ])
+                     ()))
+            with
+            | Eio.Time.Timeout -> None
+          in
+          let result =
+            match result with
+            | Some (Some result) -> result
+            | Some None -> fail "masc_keeper_up dispatch was missing"
+            | None ->
+              fail
+                "the calling Keeper turn waited for the target's long-lived lane"
+          in
+          check bool
+            "cross-keeper up succeeds"
+            true
+            (Keeper_types_profile.tool_result_success result);
+          match R.get ~base_path:config.base_path target_name with
+          | None -> fail "target Keeper lane was not registered"
+          | Some entry ->
+            check bool
+              "target lane remains alive after the calling turn closes"
+              false
+              (R.lane_has_exited entry)))
+;;
+
 let test_keeper_shutdown_store_isolates_corrupt_owner () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -4006,6 +4101,8 @@ let () =
         test_operator_update_supersedes_exact_blocked_shutdown;
       test_case "update rejects lane swap while turn in flight" `Quick
         test_update_keeper_rejects_lane_swap_while_turn_in_flight;
+      test_case "cross-keeper up lane outlives calling turn" `Quick
+        test_cross_keeper_up_lane_outlives_calling_turn;
       test_case "shutdown store isolates corrupt owner" `Quick
         test_keeper_shutdown_store_isolates_corrupt_owner;
       test_case "retired stale paused terminal releases exact fence" `Quick

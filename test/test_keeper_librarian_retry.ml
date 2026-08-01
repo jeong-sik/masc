@@ -50,6 +50,7 @@ let input () : Librarian.input =
   ; current =
       Some
         { Librarian.facts = [ current_a; current_b ] }
+  ; max_recall_fact_bytes = 64 * 1024
   ; messages =
       [ Agent_sdk.Types.make_message
           ~role:Agent_sdk.Types.User
@@ -118,6 +119,26 @@ let test_new_claim_is_materialized_after_retained_facts () =
     check (list string) "retained then new"
       [ "keep A"; "add C" ]
       (List.map (fun (fact : Memory.fact) -> fact.claim) selection.facts)
+;;
+
+let test_oversized_selection_is_rejected_without_local_truncation () =
+  let constrained = { (input ()) with max_recall_fact_bytes = 256 } in
+  let json =
+    selection_json
+      ~retained:[]
+      ~new_claims:[ new_claim ~claim:(String.make 512 'x') () ]
+      ~dropped:[ dropped_json current_a_id; dropped_json current_b_id ]
+      ()
+  in
+  match
+    Librarian.selection_of_json_result ~now:2_000_000. constrained json
+  with
+  | Error (Librarian.Recall_fact_budget_exceeded { actual_bytes; max_bytes }) ->
+    check int "declared budget" 256 max_bytes;
+    check bool "exact rendered payload exceeds budget" true (actual_bytes > max_bytes)
+  | Error error ->
+    failf "wrong budget error: %s" (Librarian.parse_error_to_string error)
+  | Ok _ -> fail "oversized selection was accepted"
 ;;
 
 let test_unknown_and_duplicate_retained_ids_reject () =
@@ -343,6 +364,22 @@ let user_text_of_messages messages =
   |> String.concat "\n"
 ;;
 
+let test_prompt_carries_recall_fact_byte_budget () =
+  let constrained = { (input ()) with max_recall_fact_bytes = 12_345 } in
+  check string "budget variable is exact"
+    "12345"
+    (List.assoc
+       "max_recall_fact_bytes"
+       (Librarian.prompt_variables constrained));
+  match Runtime.messages_for_librarian constrained with
+  | Error detail -> failf "librarian render failed: %s" detail
+  | Ok messages ->
+    check bool "rendered prompt states the capacity" true
+      (String_util.contains_substring
+         (user_text_of_messages messages)
+         "within 12345 UTF-8 bytes")
+;;
+
 let test_repo_template_renders_persona () =
   (match Runtime.messages_for_librarian (input ()) with
    | Error detail -> failf "librarian render failed: %s" detail
@@ -403,6 +440,10 @@ let () =
             test_omission_deletes_and_retention_preserves_exact_fact
         ; test_case "new claim materialized" `Quick
             test_new_claim_is_materialized_after_retained_facts
+        ; test_case
+            "oversized selection rejects without truncation"
+            `Quick
+            test_oversized_selection_is_rejected_without_local_truncation
         ; test_case "unknown and duplicate retained reject" `Quick
             test_unknown_and_duplicate_retained_ids_reject
         ; test_case "retained/new collision rejects" `Quick
@@ -422,6 +463,8 @@ let () =
             test_prompt_contains_exact_current_selection
         ; test_case "prompt carries persona" `Quick
             test_prompt_carries_persona
+        ; test_case "prompt carries recall byte budget" `Quick
+            test_prompt_carries_recall_fact_byte_budget
         ; test_case "repo template renders persona" `Quick
             test_repo_template_renders_persona
         ] )

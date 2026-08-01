@@ -367,6 +367,7 @@ let update_locked
 ;;
 
 let make_snapshot
+      ~max_fact_bytes
       ~previous
       ~now
       ~source
@@ -378,18 +379,27 @@ let make_snapshot
     | None -> [], 1
     | Some snapshot -> snapshot.facts, snapshot.revision + 1
   in
-  let+ change = compute_change ~previous:previous_facts ~next:facts in
-  { revision
-  ; updated_at = now
-  ; source
-  ; facts
-  ; change
-  }
+  match Keeper_memory_os_budget.measure ~max_bytes:max_fact_bytes facts with
+  | Exceeds { actual_bytes; max_bytes } ->
+    Error
+      (Printf.sprintf
+         "Memory OS rendered fact payload exceeds byte budget actual_bytes=%d max_bytes=%d"
+         actual_bytes
+         max_bytes)
+  | Fits _ ->
+    let+ change = compute_change ~previous:previous_facts ~next:facts in
+    { revision
+    ; updated_at = now
+    ; source
+    ; facts
+    ; change
+    }
 ;;
 
 let replace
       ?clock
       ?dropped_statements
+      ?(max_fact_bytes=Env_config.KeeperMemoryOs.recall_facts_max_bytes ())
       ~keepers_dir
       ~keeper_id
       ~expected_revision
@@ -411,6 +421,7 @@ let replace
            (Option.fold ~none:"absent" ~some:string_of_int observed_revision))
     else
       make_snapshot
+        ~max_fact_bytes
         ~previous
         ~now
         ~source
@@ -420,6 +431,7 @@ let replace
 
 let upsert_fact
       ?clock
+      ?(max_fact_bytes=Env_config.KeeperMemoryOs.recall_facts_max_bytes ())
       ~keepers_dir
       ~keeper_id
       ~now
@@ -446,6 +458,7 @@ let upsert_fact
     in
     let facts = if !found then facts else facts @ [ incoming ] in
     make_snapshot
+      ~max_fact_bytes
       ~previous
       ~now
       ~source

@@ -123,6 +123,8 @@ let run
                ; generation
                ; persona
                ; current = current_selection
+               ; max_recall_fact_bytes =
+                   Env_config.KeeperMemoryOs.recall_facts_max_bytes ()
                ; messages = librarian_messages
                }
              in

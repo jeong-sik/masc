@@ -1,7 +1,7 @@
 (** Pure Task lifecycle transition helper. Producers submit completion evidence
-    for verification; the terminal verdict is issued by a
-    [Masc_domain.completion_authority] through {!decide_verdict}, never by an
-    agent action. *)
+    for verification; the terminal verdict is issued by the configured system
+    LLM agent at the [Masc_domain.completion_authority] boundary (or by an
+    authenticated HITL operator), never by a Keeper action. *)
 
 type invalid =
   | Verification_submission_required

@@ -1,9 +1,9 @@
 ---
 rfc: "0220"
 title: "Decouple keeper liveness from verification state + guaranteed satisfier for every verification obligation"
-status: Draft
+status: Withdrawn
 created: 2026-06-09
-updated: 2026-06-09
+updated: 2026-08-01
 author: vincent
 supersedes: []
 superseded_by: null
@@ -20,6 +20,17 @@ Ground-truth invariants encoded:
 - **I2** — the only legitimate timeout is the OAS provider transport timeout (connect + inter-chunk idle). No heuristic per-turn / wall-clock deadline as control flow.
 
 All file:line anchors in this RFC were verified against the working tree on 2026-06-09 before writing. Anchors are given as `file:line` for reviewer navigation; treat the symbol name as the durable reference.
+
+> **Current implementation boundary (2026-08-01).** This RFC is withdrawn and
+> records historical analysis/proposed design, not the executable task
+> contract. RFC-0323 withdrew mandatory cross-verifier completion: the
+> configured system LLM agent at the OAS/completion-authority boundary (or an
+> authenticated HITL operator) issues the verdict, and no Keeper may claim
+> `AwaitingVerification` or gain verifier authority by winning a claim race.
+> The current typed boundary is `Workspace_task_lifecycle.resolve_claim` →
+> `Held_pending_verdict`, and the current taskboard schema must describe the
+> same fact. In particular, the verifier-by-claiming behavior described below
+> is historical/proposed and must not be used as an implementation instruction.
 
 ---
 

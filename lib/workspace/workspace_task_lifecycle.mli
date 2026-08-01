@@ -1,7 +1,7 @@
 (** Pure Task lifecycle transition helper. Producers submit completion evidence
-    for verification; the terminal verdict is issued by a
-    [Masc_domain.completion_authority] through {!decide_verdict}, never by an
-    agent action. *)
+    for verification; the terminal verdict is issued by the configured system
+    LLM agent at the [Masc_domain.completion_authority] boundary (or by an
+    authenticated HITL operator), never by a Keeper action. *)
 
 type invalid =
   | Verification_submission_required
@@ -23,9 +23,9 @@ type claim_resolution =
   | Held_by_other of string
   | Held_terminal of Masc_domain.task_status
   | Held_pending_verdict of { verification_id : string }
-      (** Awaiting a completion authority's verdict. No agent may claim it: the
-          removed [Verifier_claim] made claiming the authority-granting
-          operation, so a keeper became the approver by winning a race. *)
+      (** Awaiting the system LLM agent or authenticated HITL completion
+          authority's verdict. No Keeper may claim it or gain verifier
+          authority by winning a race. *)
 
 val resolve_claim
   :  same_actor:(string -> bool)

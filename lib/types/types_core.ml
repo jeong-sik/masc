@@ -249,7 +249,7 @@ let all_task_actions =
 let valid_task_action_strings = List.map task_action_to_string all_task_actions
 
 (** Provenance carried by a completion verdict. This type separates verdicts
-    from the agent task-action surface; it does not authenticate the embedded
+    from the Keeper task-action surface; it does not authenticate the embedded
     identity. The producer boundary must construct it only after authenticating
     an operator or accepting a typed system-LLM result. The system LLM agent
     is not a Keeper and has no Keeper lifecycle. *)
@@ -557,7 +557,8 @@ let task_requires_verification (t : task) =
 
 (* RFC-0323 G-10: the typed reclaim claim gate is retired. #23661 removed its
    Todo producer; this change removes the Done producer, so nothing can be
-   blocked-by-reclaim at claim time anymore. [reclaim_policy] survives as
+   blocked-by-reclaim at claim time anymore. Claim blocks now describe the
+   task-status fact that prevents an agent claim. [reclaim_policy] survives as
    release/cancel data plumbing only (its full retirement is a recorded
    follow-up decision, RFC-0323 Radius Map). *)
 
@@ -565,6 +566,7 @@ type task_claim_readiness =
   | Claim_ready
 
 type task_claim_block =
+  | Claim_block_pending_verdict of { verification_id : string }
   | Claim_block_not_todo of task_status
 
 type task_claim_decision =
@@ -583,11 +585,9 @@ let task_claim_decision (task : task) =
        with Block_reclaim policy were blocked from claiming. *)
     Claim_available (task_claim_readiness task)
   | AwaitingVerification { verification_id; _ } ->
-    (* Verification tasks with a valid verification_id can be claimed by
-       other agents for cross-agent verification dispatch. The actual
-       cross-agent check (self-verification block) happens in claim_task_r.
-       Issue #19314. verification_id is a non-empty string — always claimable. *)
-    Claim_available (task_claim_readiness task)
+    (* A pending obligation belongs to the completion-authority lane. No
+       Keeper claim can grant verifier authority or inspect it as agent work. *)
+    Claim_unavailable (Claim_block_pending_verdict { verification_id })
   | Done _
   (* RFC-0323: a verified Done is terminal for every actor, regardless of
      reclaim_policy — re-running completed work creates a NEW task linked via

@@ -194,9 +194,11 @@ type task_claim_readiness =
   | Claim_ready
 
 (** RFC-0323 G-10: the typed reclaim claim gate is retired (#23661 removed
-    the Todo producer, G-10 the Done producer) — only the status blocks a
-    claim now. [reclaim_policy] survives as release/cancel data plumbing. *)
+    the Todo producer, G-10 the Done producer). Claim blocks describe the
+    task-status fact that prevents an agent claim; [reclaim_policy] survives
+    as release/cancel data plumbing. *)
 type task_claim_block =
+  | Claim_block_pending_verdict of { verification_id : string }
   | Claim_block_not_todo of task_status
 
 type task_claim_decision =
@@ -205,7 +207,9 @@ type task_claim_decision =
 
 val task_claim_decision :
   task -> task_claim_decision
-(** Deterministic claim decision for queue/admission surfaces. *)
+(** Deterministic claim decision for queue/admission surfaces. An
+    [AwaitingVerification] task is unavailable to agents until a completion
+    authority commits its verdict. *)
 
 val task_claim_decision_is_available :
   task -> bool

@@ -500,21 +500,55 @@ let status_summary_string (ctx : context) =
     ~backlog
 ;;
 
-let handle_status ~task_list_projection ~tool_name ~start_time ctx _args =
+let status_revision (ctx : context) =
+  let state = Workspace.read_state ctx.config in
+  let backlog = safe_read_backlog ctx in
+  Keeper_snapshot_protocol.revision_of_json
+    ~namespace:"status"
+    (`Assoc
+      [ "workspace_state", Masc_domain.workspace_state_to_yojson state
+      ; "backlog_version", `Int backlog.version
+      ])
+;;
+
+let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
+  match Keeper_snapshot_protocol.if_revision args with
+  | Error message ->
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Policy_rejection
+      ~start_time
+      message
+  | Ok if_revision ->
   let task_list_name =
     Tool_capability_projection.task_list_name task_list_projection
   in
+  let revision = status_revision ctx in
   let cache_key =
-    Printf.sprintf "%s::%s::%s" ctx.config.base_path ctx.agent_name task_list_name
+    Printf.sprintf
+      "%s::%s::%s::%s"
+      ctx.config.base_path
+      ctx.agent_name
+      task_list_name
+      revision
   in
-  Tool_result.ok
+  let snapshot =
+    cached_text_by_key
+      status_cache
+      ~key:cache_key
+      ~ttl_s:(status_cache_ttl_s ())
+      (fun () -> status_summary_string ctx)
+  in
+  Tool_result.make_ok
     ~tool_name
     ~start_time
-    (cached_text_by_key
-       status_cache
-       ~key:cache_key
-       ~ttl_s:(status_cache_ttl_s ())
-       (fun () -> status_summary_string ctx))
+    ~data:
+      (Keeper_snapshot_protocol.to_yojson
+         (Keeper_snapshot_protocol.respond
+            ~revision
+            ~if_revision
+            (`String snapshot)))
+    ()
 ;;
 
 let handle_reset ~tool_name ~start_time ctx args =

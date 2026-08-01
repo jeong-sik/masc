@@ -27,6 +27,7 @@ type authorization_source =
   | Exact_always_rule of string
   | Keeper_always_allow
   | Workspace_always_allow
+  | Confined_sandbox
 
 type authorization = { source : authorization_source }
 

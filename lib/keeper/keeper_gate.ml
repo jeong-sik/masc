@@ -19,6 +19,7 @@ type authorization_source =
   | Exact_always_rule of string
   | Keeper_always_allow
   | Workspace_always_allow
+  | Confined_sandbox
 
 type authorization = { source : authorization_source }
 
@@ -210,6 +211,7 @@ let authorization_source_to_string = function
   | Exact_always_rule _ -> "exact_always_rule"
   | Keeper_always_allow -> "keeper_always_allow"
   | Workspace_always_allow -> "workspace_always_allow"
+  | Confined_sandbox -> "confined_sandbox"
 ;;
 
 let deferred_reason_to_string = function
@@ -245,6 +247,8 @@ let source_fields = function
     [ "authorization_source", `String "keeper_always_allow" ]
   | Workspace_always_allow ->
     [ "authorization_source", `String "workspace_always_allow" ]
+  | Confined_sandbox ->
+    [ "authorization_source", `String "confined_sandbox" ]
 ;;
 
 let request_turn_id request =
@@ -283,7 +287,7 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
       (match source with
        | One_shot_resolution approval_id -> approval_id
        | Exact_always_rule rule_id -> rule_id
-       | Keeper_always_allow | Workspace_always_allow ->
+       | Keeper_always_allow | Workspace_always_allow | Confined_sandbox ->
          Keeper_approval_queue.generate_id ())
     ~keeper_name:request.keeper_name
     ~tool_name:request.operation

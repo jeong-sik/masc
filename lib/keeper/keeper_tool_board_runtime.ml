@@ -21,6 +21,12 @@ let assoc_value_opt key = function
   | _ -> None
 ;;
 
+let without_if_revision = function
+  | `Assoc fields ->
+    `Assoc (List.filter (fun (key, _) -> key <> "if_revision") fields)
+  | other -> other
+;;
+
 let string_arg key = function
   | `Assoc fields ->
     (match List.assoc_opt key fields with
@@ -93,6 +99,42 @@ let handle_keeper_board_tool_with_outcome
   let dispatch_board (tool : Tool_name.Board_name.t) tool_args =
     dispatch (Tool_name.Board_name.to_string tool) tool_args
   in
+  let dispatch_board_list args =
+    match Keeper_snapshot_protocol.if_revision args with
+    | Error message ->
+      Keeper_tool_execution.failure
+        ~class_:Tool_result.Policy_rejection
+        (error_json message)
+    | Ok if_revision ->
+      let result =
+        dispatch_board Tool_name.Board_name.Board_list (without_if_revision args)
+      in
+      (match result.disposition with
+       | Tool_result.Failed _ -> result
+       | Tool_result.Completed _ ->
+         let revision =
+           Keeper_snapshot_protocol.revision_of_board_cursor
+             (Board_dispatch.current_post_cursor ())
+         in
+         Keeper_tool_execution.success_data
+           (Keeper_snapshot_protocol.to_yojson
+              (Keeper_snapshot_protocol.respond
+                 ~revision
+                 ~if_revision
+                 (`String result.raw_output)))
+       | Tool_result.Deferred _ ->
+         let revision =
+           Keeper_snapshot_protocol.revision_of_board_cursor
+             (Board_dispatch.current_post_cursor ())
+         in
+         Keeper_tool_execution.deferred_data
+           (Keeper_snapshot_protocol.to_yojson
+              (Keeper_snapshot_protocol.respond
+                 ~revision
+                 ~if_revision
+                 (`String result.raw_output)))
+      )
+  in
   match Keeper_tool_name.of_string name with
   | Some Keeper_tool_name.Board_post ->
     let author = meta.name in
@@ -136,7 +178,10 @@ let handle_keeper_board_tool_with_outcome
             "keeper_board_post_get requires post_id (format: p-xxxx). \
              You sent empty or missing post_id."))
   | Some keeper_tool ->
-    (match Keeper_tool_name.masc_board_name_of_keeper_tool keeper_tool with
+    (match keeper_tool with
+     | Keeper_tool_name.Board_list -> dispatch_board_list args
+     | _ ->
+       match Keeper_tool_name.masc_board_name_of_keeper_tool keeper_tool with
      | Some board_name ->
        dispatch_board
          board_name

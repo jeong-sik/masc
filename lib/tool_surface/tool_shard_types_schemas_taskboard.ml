@@ -10,10 +10,10 @@ let taskboard_tools : Masc_domain.tool_schema list =
          Read producer sandbox paths directly."
     ; input_schema =
         `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ ( "status"
+                  [ "type", `String "object"
+                  ; ( "properties"
+                      , `Assoc
+                          [ ( "status"
                   , `Assoc
                       [ "type", `String "string"
                       ; (* Derived from the Masc_domain.task_status Variant SSOT. *)
@@ -39,8 +39,15 @@ let taskboard_tools : Masc_domain.tool_schema list =
                       ; "minimum", `Int 1
                       ; "maximum", `Int 100
                       ; "default", `Int 50
-                      ] )
-                ] )
+                              ] )
+                          ; ( "if_revision"
+                            , `Assoc
+                                [ "type", `String "string"
+                                ; ( "description"
+                                  , `String
+                                      "Optional producer revision from the previous keeper_tasks_list snapshot; matching revisions return unchanged." )
+                                ] )
+                          ] )
           ]
     }
   ; { name = "keeper_tasks_audit"

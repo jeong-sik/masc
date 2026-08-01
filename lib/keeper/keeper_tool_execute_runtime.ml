@@ -340,11 +340,28 @@ let handle_tool_execute_typed
           ; continuation_channel
           }
         in
+        let execution_effect =
+          Keeper_execution_effect.classify
+            ~sandbox_profile
+            ~network_mode:_sandbox_network_mode
+            ~target:dispatch_sandbox
+            ~containment_verified:in_playground
+        in
+        let gate_decision =
+          match execution_effect with
+          | Keeper_execution_effect.Confined ->
+            (* The target is already a pinned, network-none Docker sandbox whose
+               path proof passed. Do not create a durable approval row for this
+               local effect; the closed effect type is the authority. *)
+            Keeper_gate.Allow { source = Keeper_gate.Confined_sandbox }
+          | Keeper_execution_effect.External ->
+            Keeper_gate.decide
+              ?cycle_grant:gate_grant
+              ~keeper_always_allow:(Option.value ~default:false meta.always_allow)
+              gate_request
+        in
         (match
-           Keeper_gate.decide
-             ?cycle_grant:gate_grant
-             ~keeper_always_allow:(Option.value ~default:false meta.always_allow)
-             gate_request
+           gate_decision
          with
          | Keeper_gate.Deferred { approval_id; reason } ->
            Keeper_gate_deferred_payload.create
@@ -365,7 +382,8 @@ let handle_tool_execute_typed
          | Keeper_gate.Allow authorization ->
           Log.Keeper.info
             ~keeper_name:meta.name
-            "external effect authorized operation=tool_execute source=%s"
+            "execute effect admitted effect=%s operation=tool_execute source=%s"
+            (Keeper_execution_effect.to_string execution_effect)
             (Keeper_gate.authorization_source_to_string authorization.source);
           (* NDT-OK: wall clock is used only for elapsed telemetry, never for
              dispatch branching or policy decisions. *)

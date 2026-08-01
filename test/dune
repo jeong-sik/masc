@@ -261,6 +261,7 @@
   test_keeper_transition_audit
   test_keeper_tool_search_files_containment
   test_keeper_sandbox_docker_route
+  test_keeper_efficiency_protocol
   test_keeper_tool_search_files_via_field
   test_orphan_surfacer
   test_cap_blocker_structured_error
@@ -563,6 +564,7 @@
   test_keeper_transition_audit
   test_keeper_tool_search_files_containment
   test_keeper_sandbox_docker_route
+  test_keeper_efficiency_protocol
   test_keeper_tool_search_files_via_field
   test_orphan_surfacer
   test_cap_blocker_structured_error

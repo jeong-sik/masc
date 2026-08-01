@@ -769,7 +769,11 @@ let exchange_authorization_code
         match Hashtbl.find_opt pending_codes hash with
         | None -> Error Invalid_grant
         | Some grant ->
-          let resource = Option.value ~default:grant.request.resource resource in
+          let resource =
+            match resource with
+            | Some resource -> resource
+            | None -> grant.request.resource
+          in
           if
             not (String.equal grant.base_path base_path)
             || not (String.equal grant.request.client_id client_id)
@@ -827,7 +831,11 @@ let rotate_refresh_token
       in
       let* family = load_family base_path record.family_id in
       let current = now () in
-      let requested_resource = Option.value ~default:record.resource resource in
+      let requested_resource =
+        match resource with
+        | Some resource -> resource
+        | None -> record.resource
+      in
       match family with
       | None -> Error Invalid_grant
       | Some family

@@ -2105,8 +2105,8 @@ let test_health_json_degrades_on_active_task_owner_without_keeper_binding () =
         Alcotest.(check bool) "health asks operator action" true
           (fleet_safety |> member "operator_action_required" |> to_bool)))
 
-let test_health_json_excludes_awaiting_verification_from_keeper_fleet_scan () =
-  with_temp_dir "health-awaiting-verification-not-keeper-work" (fun dir ->
+let test_health_json_keeps_awaiting_verification_in_system_llm_lane () =
+  with_temp_dir "health-awaiting-verification-system-llm" (fun dir ->
     let config_root = make_config_root dir in
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
@@ -2120,40 +2120,101 @@ let test_health_json_excludes_awaiting_verification_from_keeper_fleet_scan () =
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
-        let assignee = "keeper-awaiting-verification-agent" in
         let task =
           make_task
-            ~id:"task-awaiting-verification"
-            ~title:"System authority owns the verdict"
+            ~id:"task-awaiting-system-llm-verdict"
+            ~title:"Task awaiting system LLM completion verdict"
             ~status:
               (Types.AwaitingVerification
-                 { assignee
-                 ; submitted_at = "2026-06-26T00:00:01Z"
-                 ; verification_id = "vrf-system-authority"
+                 {
+                   assignee = "producer-agent";
+                   submitted_at = "2026-06-26T00:00:01Z";
+                   verification_id = "verification-system-llm-001";
                  })
             ()
         in
         Workspace.write_backlog config
           { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
-        let request = Httpun.Request.create `GET "/health" in
-        let json = Server_routes_http_runtime.make_health_json request in
+        let phase_counts :
+            Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
+          { running = 0; failing = 0; recovering = 0 }
+        in
+        let phase_snapshot :
+            Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
+          {
+            counts = phase_counts;
+            running_names = [];
+            recovering_names = [];
+            phase_values = [];
+            phase_details = [];
+          }
+        in
+        let execution_snapshot :
+            Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot =
+          { owners = []; executable_names = [] }
+        in
+        let fleet_safety =
+          Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+            ~bootable_names:[]
+            ~autoboot_scan:
+              Server_routes_http_runtime_fleet_scan.empty_autoboot_keeper_scan
+            ~phase_snapshot
+            ~execution_snapshot
+            ~phase_counts
+            ~paused_keepers_json:(`Assoc [ ("count", `Int 0) ])
+            ()
+        in
         let open Yojson.Safe.Util in
-        let fleet_safety = json |> member "keeper_fleet_safety" in
-        Alcotest.(check string) "awaiting verification does not degrade fleet" "ok"
+        Alcotest.(check string) "pending verdict does not degrade Keeper fleet"
+          "ok"
           (fleet_safety |> member "status" |> to_string);
-        Alcotest.(check (option string)) "awaiting verification has no fleet blocker" None
+        Alcotest.(check (option string)) "pending verdict is not a Keeper blocker"
+          None
           (fleet_safety |> member "blocker" |> to_string_option);
-        Alcotest.(check bool) "awaiting verification is not keeper work" false
+        Alcotest.(check bool) "pending verdict is absent from Keeper blocker flag"
+          false
           (fleet_safety
            |> member "active_task_owner_without_executable_fiber"
            |> to_bool);
-        Alcotest.(check int) "awaiting verification produces no keeper owner rows" 0
+        Alcotest.(check int) "pending verdict has no Keeper blocker rows" 0
           (fleet_safety
            |> member "active_task_owner_without_executable_fiber_count"
            |> to_int);
-        Alcotest.(check bool) "awaiting verification does not ask fleet action" false
+        Alcotest.(check bool) "system LLM pending flag" true
+          (fleet_safety |> member "completion_authority_pending" |> to_bool);
+        Alcotest.(check int) "one completion authority pending row" 1
+          (fleet_safety
+           |> member "completion_authority_pending_task_count"
+           |> to_int);
+        let pending_tasks =
+          fleet_safety |> member "completion_authority_pending_tasks" |> to_list
+        in
+        Alcotest.(check int) "one exact pending task row" 1
+          (List.length pending_tasks);
+        let pending_task = List.hd pending_tasks in
+        Alcotest.(check string) "pending row preserves producer"
+          "producer-agent"
+          (pending_task |> member "producer_agent_name" |> to_string);
+        Alcotest.(check string) "pending row preserves task id"
+          "task-awaiting-system-llm-verdict"
+          (pending_task |> member "task_id" |> to_string);
+        Alcotest.(check string) "pending row preserves status"
+          "awaiting_verification"
+          (pending_task |> member "task_status" |> to_string);
+        Alcotest.(check string) "pending row preserves verification id"
+          "verification-system-llm-001"
+          (pending_task |> member "verification_id" |> to_string);
+        Alcotest.(check string) "pending row identifies system LLM authority"
+          "system_llm_completion_authority"
+          (pending_task |> member "owner_kind" |> to_string);
+        Alcotest.(check bool) "pending row cannot block Keeper fleet" false
+          (pending_task |> member "fleet_blocking" |> to_bool);
+        Alcotest.(check string) "pending row waits for system LLM verdict"
+          "await_system_llm_verdict"
+          (pending_task |> member "action" |> to_string);
+        Alcotest.(check bool) "pending verdict does not ask Keeper operator action"
+          false
           (fleet_safety |> member "operator_action_required" |> to_bool)))
-
 let test_health_json_reports_non_keeper_active_task_owner_as_advisory () =
   with_temp_dir "health-non-keeper-active-task-owner" (fun dir ->
     let config_root = make_config_root dir in
@@ -5141,6 +5202,10 @@ let () =
             "health json reports dormant task owner as advisory"
             `Quick
             test_health_json_reports_dormant_task_owner_as_advisory;
+          Alcotest.test_case
+            "health json keeps awaiting verification in system LLM lane"
+            `Quick
+            test_health_json_keeps_awaiting_verification_in_system_llm_lane;
           Alcotest.test_case
             "health json ignores stale active task alias when agent executable"
             `Quick

@@ -947,9 +947,10 @@ let phase_supports_crash_log_failure_reason = function
 let active_task_owner_fiber_scan_semantics =
   "reports keeper-shaped active task owners without executable keeper fibers; \
    disabled keepers are excluded; matching keeper rows can degrade fleet \
-   status; tasks awaiting a completion-authority verdict are excluded because \
-   their verifier is the system LLM agent rather than a Keeper; credentialed \
-   non-keeper client task owners are reported separately as advisory rows"
+   status; AwaitingVerification obligations are reported separately as \
+   system-LLM completion-authority pending rows and never as Keeper blockers; \
+   credentialed non-keeper client task owners are reported separately as \
+   advisory rows"
 
 let paused_keeper_last_blocker_json paused_keepers_json name =
   match paused_keepers_json with
@@ -1182,6 +1183,13 @@ type active_task_owner_without_executable_fiber = {
   task_status : string;
 }
 
+type completion_authority_pending_task = {
+  producer_agent_name : string;
+  task_id : string;
+  task_status : string;
+  verification_id : string;
+}
+
 type non_keeper_active_task_owner = {
   agent_name : string;
   task_id : string;
@@ -1191,6 +1199,7 @@ type non_keeper_active_task_owner = {
 type active_task_owner_fiber_scan = {
   active_task_owner_without_executable_fibers :
     active_task_owner_without_executable_fiber list;
+  completion_authority_pending_tasks : completion_authority_pending_task list;
   non_keeper_active_task_owners : non_keeper_active_task_owner list;
   active_task_owner_scan_errors : (string * string) list;
 }
@@ -1198,6 +1207,7 @@ type active_task_owner_fiber_scan = {
 let empty_active_task_owner_fiber_scan =
   {
     active_task_owner_without_executable_fibers = [];
+    completion_authority_pending_tasks = [];
     non_keeper_active_task_owners = [];
     active_task_owner_scan_errors = [];
   }
@@ -1214,21 +1224,37 @@ let compare_active_task_owner_without_executable_fiber left right =
     if cmp <> 0 then cmp
     else String.compare left.task_id right.task_id
 
+let compare_completion_authority_pending_task left right =
+  let cmp = String.compare left.producer_agent_name right.producer_agent_name in
+  if cmp <> 0 then cmp
+  else
+    let cmp = String.compare left.task_id right.task_id in
+    if cmp <> 0 then cmp
+    else String.compare left.verification_id right.verification_id
+
 let compare_non_keeper_active_task_owner left right =
   let cmp = String.compare left.agent_name right.agent_name in
   if cmp <> 0 then cmp else String.compare left.task_id right.task_id
 
+type active_task_assignment =
+  | Keeper_task_owner of { assignee : string; task_status : string }
+  | Completion_authority_pending of {
+      producer_agent_name : string;
+      verification_id : string;
+    }
+
 let active_task_assignment (task : Masc_domain.task) =
   match task.task_status with
-  | Masc_domain.AwaitingVerification _ ->
-      (* AwaitingVerification is a durable obligation for the application-owned
-         system LLM completion authority. It is not executable Keeper work and
-         must not degrade Keeper fleet health while waiting for that verdict. *)
-      None
-  | status ->
-      Masc_domain.task_assignee_of_status status
+  | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
+      Some (Completion_authority_pending { producer_agent_name = assignee; verification_id })
+  | task_status ->
+      Masc_domain.task_assignee_of_status task_status
       |> Option.map (fun assignee ->
-             (assignee, Workspace_task_schedule.task_status_label status))
+             Keeper_task_owner
+               {
+                 assignee;
+                 task_status = Workspace_task_schedule.task_status_label task_status;
+               })
 
 let active_task_owner_without_executable_fiber_json row =
   let action =
@@ -1244,6 +1270,18 @@ let active_task_owner_without_executable_fiber_json row =
       ("task_status", `String row.task_status);
       ("executable", `Bool false);
       ("action", `String action);
+    ]
+
+let completion_authority_pending_task_json row =
+  `Assoc
+    [
+      ("producer_agent_name", `String row.producer_agent_name);
+      ("task_id", `String row.task_id);
+      ("task_status", `String row.task_status);
+      ("verification_id", `String row.verification_id);
+      ("owner_kind", `String "system_llm_completion_authority");
+      ("fleet_blocking", `Bool false);
+      ("action", `String "await_system_llm_verdict");
     ]
 
 let non_keeper_active_task_owner_json row =
@@ -1322,29 +1360,41 @@ let active_task_owner_fiber_scan config ~executable_names =
   | Error err ->
       {
         active_task_owner_without_executable_fibers = [];
+        completion_authority_pending_tasks = [];
         non_keeper_active_task_owners = [];
         active_task_owner_scan_errors =
           ("backlog", err) :: meta_read_errors;
       }
   | Ok backlog ->
-      let blocking_rows, non_keeper_rows =
+      let pending_rows, blocking_rows, non_keeper_rows =
         backlog.tasks
         |> List.fold_left
-             (fun (blocking_rows, non_keeper_rows) task ->
+             (fun (pending_rows, blocking_rows, non_keeper_rows) task ->
              match active_task_assignment task with
-             | None -> (blocking_rows, non_keeper_rows)
-             | Some (assignee, task_status) ->
+             | None -> (pending_rows, blocking_rows, non_keeper_rows)
+             | Some (Completion_authority_pending { producer_agent_name; verification_id }) ->
+                 ( { producer_agent_name
+                   ; task_id = task.id
+                   ; task_status =
+                       Workspace_task_schedule.task_status_label task.task_status
+                   ; verification_id
+                   }
+                   :: pending_rows
+                 , blocking_rows
+                 , non_keeper_rows )
+             | Some (Keeper_task_owner { assignee; task_status }) ->
                  let keeper_names = keeper_names_for_agent agent_bindings assignee in
                  if
                    List.exists
                      (fun keeper_name -> String_set.mem keeper_name executable_set)
                      keeper_names
-                 then (blocking_rows, non_keeper_rows)
+                 then (pending_rows, blocking_rows, non_keeper_rows)
                  else (
                    match keeper_names with
                    | []
                      when is_credentialed_external_client config assignee ->
-                       ( blocking_rows
+                       ( pending_rows
+                       , blocking_rows
                        , {
                            agent_name = assignee;
                            task_id = task.id;
@@ -1354,9 +1404,10 @@ let active_task_owner_fiber_scan config ~executable_names =
                    | []
                      when List.mem assignee binding_scan.disabled_agent_names
                           || meta_read_errors <> [] ->
-                       (blocking_rows, non_keeper_rows)
+                       (pending_rows, blocking_rows, non_keeper_rows)
                    | [] ->
-                       ( {
+                       ( pending_rows
+                       , {
                            keeper_name = None;
                            agent_name = assignee;
                            task_id = task.id;
@@ -1365,7 +1416,8 @@ let active_task_owner_fiber_scan config ~executable_names =
                          :: blocking_rows
                        , non_keeper_rows )
                    | keeper_names ->
-                       ( keeper_names
+                       ( pending_rows
+                       , keeper_names
                          |> List.fold_left
                               (fun rows keeper_name ->
                                 {
@@ -1377,7 +1429,11 @@ let active_task_owner_fiber_scan config ~executable_names =
                                 :: rows)
                               blocking_rows
                        , non_keeper_rows )))
-             ([], [])
+             ([], [], [])
+      in
+      let pending_rows =
+        pending_rows
+        |> List.sort_uniq compare_completion_authority_pending_task
       in
       let rows =
         blocking_rows
@@ -1388,6 +1444,7 @@ let active_task_owner_fiber_scan config ~executable_names =
       in
       {
         active_task_owner_without_executable_fibers = rows;
+        completion_authority_pending_tasks = pending_rows;
         non_keeper_active_task_owners = non_keeper_rows;
         active_task_owner_scan_errors = meta_read_errors;
       }
@@ -1513,6 +1570,10 @@ let keeper_fleet_safety_health_json
   let active_task_owner_without_executable_fiber =
     active_task_owner_without_executable_fiber_count > 0
   in
+  let completion_authority_pending_task_count =
+    List.length active_task_owner_scan.completion_authority_pending_tasks
+  in
+  let completion_authority_pending = completion_authority_pending_task_count > 0 in
   let phase_details =
     match phase_snapshot with
     | Some snapshot -> snapshot.phase_details
@@ -1662,6 +1723,19 @@ let keeper_fleet_safety_health_json
           (List.map
              active_task_owner_without_executable_fiber_json
              active_task_owner_scan.active_task_owner_without_executable_fibers) )
+    ; "completion_authority_pending", `Bool completion_authority_pending
+    ; ( "completion_authority_pending_task_count"
+      , `Int completion_authority_pending_task_count )
+    ; ( "completion_authority_pending_tasks"
+      , `List
+          (List.map
+             completion_authority_pending_task_json
+             active_task_owner_scan.completion_authority_pending_tasks) )
+    ; ( "completion_authority_pending_semantics"
+      , `String
+          "AwaitingVerification obligations awaiting a verdict from the system \
+           LLM completion-authority lane; producer ownership is retained for \
+           task identity but this row is never a Keeper fleet blocker" )
     ; ( "non_keeper_active_task_owner_count"
       , `Int non_keeper_active_task_owner_count )
     ; ( "non_keeper_active_task_owners"

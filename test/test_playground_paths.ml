@@ -46,18 +46,14 @@ let test_bundle_root_format () =
     ".masc/playground/a_b/"
     (PP.bundle_root "a/b")
 
-let test_mind_and_repos_paths () =
-  check string "mind path"
-    ".masc/playground/sangsu/mind/"
-    (PP.mind_path "sangsu");
+let test_repos_path () =
   check string "repos path"
     ".masc/playground/sangsu/repos/"
     (PP.repos_path "sangsu")
 
 let test_bundle_paths_order () =
-  check (list string) "bundle order: root, mind, repos"
+  check (list string) "bundle order: root, repos"
     [ ".masc/playground/k1/";
-      ".masc/playground/k1/mind/";
       ".masc/playground/k1/repos/" ]
     (PP.bundle_paths "k1")
 
@@ -110,10 +106,7 @@ let test_canonical_short_path_identity () =
     (PP.repos_path "keeper-masc-improver-agent");
   check string "bundle_root identity"
     (PP.bundle_root "cheolsu")
-    (PP.bundle_root "keeper-cheolsu-agent");
-  check string "mind_path identity"
-    (PP.mind_path "sangsu")
-    (PP.mind_path "keeper-sangsu-agent")
+    (PP.bundle_root "keeper-cheolsu-agent")
 
 let test_strip_edge_cases () =
   check string "keeper-agent not stripped (inner would be empty)"
@@ -184,8 +177,8 @@ let test_parse_playground_file_path () =
      = parsed "executor" "artifact.txt");
   check bool "nested artifact"
     true
-    (parse ".masc/playground/docker/executor/mind/report.txt"
-     = parsed "executor" "mind/report.txt");
+    (parse ".masc/playground/docker/executor/scratch/report.txt"
+     = parsed "executor" "scratch/report.txt");
   check bool "outside playground rejected"
     true
     (parse "workspace/report.txt" = None);
@@ -208,7 +201,7 @@ let () =
       ]);
       ("paths", [
         test_case "bundle_root format" `Quick test_bundle_root_format;
-        test_case "mind and repos paths" `Quick test_mind_and_repos_paths;
+        test_case "repos path" `Quick test_repos_path;
         test_case "bundle_paths order" `Quick test_bundle_paths_order;
       ]);
       ("security", [

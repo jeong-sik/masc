@@ -377,7 +377,7 @@ let parse_status_exit_code raw =
   | None -> Alcotest.failf "missing status.code in %s" raw
 
 let assert_docker_route_fires ~config ~meta ~playground =
-  let rel_dir = "mind" in
+  let rel_dir = "scratch" in
   let rel_path = Filename.concat rel_dir "demo.txt" in
   let host_path = Filename.concat playground rel_path in
   ensure_dir (Filename.dirname host_path);
@@ -414,7 +414,7 @@ let test_cat_legacy_keeper_skips_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Local
   @@ fun ~config ~meta ~playground ->
-  let host_path = Filename.concat playground "mind/x" in
+  let host_path = Filename.concat playground "scratch/x" in
   ensure_dir (Filename.dirname host_path);
   ignore (Fs_compat.save_file_atomic host_path "matrix");
   let raw =
@@ -528,7 +528,7 @@ let test_rg_no_match_remains_successful_in_docker_route () =
   with_fake_docker fake_docker_rg_no_match_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
-  let host_path = Filename.concat playground "mind/demo.txt" in
+  let host_path = Filename.concat playground "scratch/demo.txt" in
   ensure_dir (Filename.dirname host_path);
   ignore (Fs_compat.save_file_atomic host_path "alpha\nbeta\ngamma\n");
   let raw =
@@ -538,7 +538,7 @@ let test_rg_no_match_remains_successful_in_docker_route () =
             [
               ("op", `String "rg");
               ("pattern", `String "missing");
-              ("path", `String "mind");
+              ("path", `String "scratch");
             ])
   in
   Alcotest.(check (option bool)) "rg no-match stays ok" (Some true)

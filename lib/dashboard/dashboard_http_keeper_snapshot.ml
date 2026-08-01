@@ -133,7 +133,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
          keeper's detail page would consume the live cursor and the next
          real turn would miss those events. Only a turn owns cursor
          advancement. *)
-      let unified_system_prompt_preview, unified_user_message_preview =
+      let assembled_system_prompt_preview, unified_user_message_preview =
         let observation =
           let pending_board_events, _new_count, _mention_count =
             Keeper_world_observation
@@ -175,7 +175,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
                 ("capabilities", prompt_block_json Keeper_prompt_names.capabilities);
               ] );
           ("effective_system_prompt", `String effective_system_prompt);
-          ("unified_system_prompt", `String unified_system_prompt_preview);
+          ("assembled_system_prompt", `String assembled_system_prompt_preview);
           ("unified_user_message_preview", `String unified_user_message_preview);
         ]
       in

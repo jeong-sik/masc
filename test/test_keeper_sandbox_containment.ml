@@ -108,7 +108,7 @@ let test_docker_keeper_allows_inside_playground () =
   let config = Workspace.default_config base in
   let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker () in
   let bundle = Keeper_sandbox.host_root_abs_of_meta ~config meta in
-  let inside = Filename.concat bundle "mind/scratch.md" in
+  let inside = Filename.concat bundle "scratch/scratch.md" in
   Alcotest.(check bool) "playground-internal path is allowed"
     true
     (Result.is_ok

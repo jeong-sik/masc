@@ -57,7 +57,7 @@ import { currentDashboardActor } from '../api'
 import type { Keeper } from '../types'
 import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api/keeper'
 import { KeeperRuntimeAlertStrip } from './keeper-detail-alert-strip'
-import { KeeperCommsPanel, PlaygroundReposPanel } from './keeper-detail-comms'
+import { KeeperCommsPanel, RepositoryCheckoutsPanel } from './keeper-detail-comms'
 import { KeeperClearContextDialog } from './keeper-detail-lifecycle'
 import type { KeeperDetailEvidenceState } from './keeper-detail-hooks'
 
@@ -296,7 +296,7 @@ export function KeeperDetailBody({
               <${KeeperNeighborhood} keeper=${keeper} />
             </div>
           <//>
-          <${PlaygroundReposPanel} keeperName=${keeper.name} />
+          <${RepositoryCheckoutsPanel} keeperName=${keeper.name} />
         <//>
 
         <${KeeperDetailSection}

@@ -264,83 +264,38 @@ let cleanup_stale ~(config : Workspace.config) ~(timeout_sec : float) () =
     ()
 
 let observed_is_dir path =
-  try Fs_compat.file_exists path && Sys.is_directory path with
+  try
+    match Fs_compat.exact_path_kind ~follow:false path with
+    | Fs_compat.Exact_kind Unix.S_DIR -> true
+    | Fs_compat.Exact_missing
+    | Fs_compat.Exact_kind _
+    | Fs_compat.Exact_unknown -> false
+  with
   | Sys_error error ->
     Log.Keeper.warn
       "playground filesystem observation failed path=%s error=%s"
       path
       error;
     false
-
-let repo_name_of_json = function
-  | `Assoc fields -> (
-      match List.assoc_opt "name" fields with
-      | Some (`String raw_name) ->
-          let name = String.trim raw_name in
-          if
-            name <> ""
-            && name <> "."
-            && name <> ".."
-            && not (String.contains name '/')
-            && not (String.contains name '\\')
-            && String.equal (Filename.basename name) name
-          then Some name
-          else None
-      | _ -> None)
-  | _ -> None
-
-let upsert_assoc key value fields =
-  (key, value) :: List.remove_assoc key fields
-
-let playground_repo_entry_json ~(source : string) ~(repo_name : string)
-    (repo_json : Yojson.Safe.t) =
-  let observed_at_unix = Time_compat.now () in
-  let fields =
-    match repo_json with
-    | `Assoc fields -> fields
-    | _ -> [ ("name", `String repo_name) ]
-  in
-  fields
-  |> upsert_assoc "name" (`String repo_name)
-  |> upsert_assoc "path" (`String (Filename.concat "repos" repo_name))
-  |> upsert_assoc "source" (`String source)
-  |> upsert_assoc "observed_at"
-       (`String (Masc_domain.iso8601_of_unix_seconds observed_at_unix))
-  |> upsert_assoc "observed_at_unix" (`Float observed_at_unix)
-  |> fun fields -> `Assoc fields
-
-let cached_playground_repo_entries playground_abs =
-  let cache_path = Filename.concat playground_abs ".playground_state.json" in
-  try
-    (* An absent cache is the normal state before the first observation writes
-       one, so it is not an observation failure; only a present-but-unreadable
-       cache is. The existence check stays inside the handler because
-       [Fs_compat.file_exists] can itself raise [Sys_error], and that raise is a
-       genuine failure. [observed_is_dir] draws the same line for directories. *)
-    if not (Fs_compat.file_exists cache_path) then []
-    else
-    match Yojson.Safe.from_file cache_path with
-    | `Assoc _ as json -> (
-        match Json_util.assoc_member_opt "repos" json with
-        | Some (`List repos) -> repos
-        | _ -> [])
-    | _ -> []
-  with
-  | Sys_error error ->
+  | Unix.Unix_error (error, operation, argument) ->
     Log.Keeper.warn
-      "playground cache observation failed path=%s error=%s"
-      cache_path
-      error;
-    []
-  | Yojson.Json_error error ->
-    Log.Keeper.warn
-      "playground cache JSON invalid path=%s error=%s"
-      cache_path
-      error;
-    []
+      "playground filesystem observation failed path=%s error=%s(%s): %s"
+      path
+      operation
+      argument
+      (Unix.error_message error);
+    false
 
-let filesystem_playground_repo_names playground_abs =
-  let repos_dir = Filename.concat playground_abs "repos" in
+let valid_checkout_name name =
+  name <> ""
+  && name <> "."
+  && name <> ".."
+  && not (String.contains name '/')
+  && not (String.contains name '\\')
+  && String.equal (Filename.basename name) name
+
+let filesystem_checkout_names sandbox_abs =
+  let repos_dir = Filename.concat sandbox_abs "repos" in
   if not (observed_is_dir repos_dir) then []
   else
     try
@@ -348,38 +303,180 @@ let filesystem_playground_repo_names playground_abs =
       |> Array.to_list
       |> List.filter (fun name ->
         let repo_path = Filename.concat repos_dir name in
-        observed_is_dir repo_path)
+        valid_checkout_name name && observed_is_dir repo_path)
       |> List.sort String.compare
     with
     | Sys_error error ->
       Log.Keeper.warn
-        "playground directory observation failed path=%s error=%s"
+        "repository checkout observation failed path=%s error=%s"
         repos_dir
         error;
       []
 
-let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
-  let playground_abs =
+type catalog_resolution =
+  | Registered of Repo_manager_types.repository
+  | Unregistered
+  | Ambiguous of string list
+  | Catalog_unavailable of string
+  | Origin_unavailable of string
+
+type checkout_freshness =
+  | Current of { target_ref : string; upstream_head : string }
+  | Ahead of { target_ref : string; upstream_head : string; ahead : int }
+  | Behind of { target_ref : string; upstream_head : string; behind : int }
+  | Diverged of
+      { target_ref : string
+      ; upstream_head : string
+      ; ahead : int
+      ; behind : int
+      }
+  | Freshness_unavailable of string
+
+let canonical_url raw = Agent_observation.canonical_url_of_remote raw
+
+let resolve_catalog ~catalog ~origin =
+  match catalog with
+  | Error error -> Catalog_unavailable error
+  | Ok repositories ->
+    (match canonical_url origin with
+     | None -> Origin_unavailable "origin URL is not canonicalizable"
+     | Some origin_id ->
+       let matches =
+         List.filter
+           (fun (repo : Repo_manager_types.repository) ->
+             match canonical_url repo.url with
+             | Some catalog_id -> String.equal catalog_id origin_id
+             | None -> false)
+           repositories
+       in
+       match matches with
+       | [ repo ] -> Registered repo
+       | [] -> Unregistered
+       | repos -> Ambiguous (List.map (fun repo -> repo.Repo_manager_types.id) repos))
+
+let first_git_line ~cwd args =
+  match Repo_git.run_git ~cwd args with
+  | Ok (line :: _) -> Ok line
+  | Ok [] -> Error (Printf.sprintf "git %s returned no output" (String.concat " " args))
+  | Error _ as error -> error
+
+let dirty_state ~repository =
+  match Repo_git.status_summary ~repository with
+  | Ok summary -> Ok (summary.Repo_git.changed_files > 0, summary.changed_files)
+  | Error _ as error -> error
+
+let freshness_of_catalog ~repository = function
+  | Registered catalog_repo ->
+    let target_ref = "origin/" ^ catalog_repo.default_branch in
+    (match first_git_line ~cwd:repository.Repo_manager_types.local_path [ "rev-parse"; target_ref ] with
+     | Error error -> Freshness_unavailable error
+     | Ok upstream_head ->
+       (match Repo_git.ahead_behind ~repository ~target_ref with
+        | Error error -> Freshness_unavailable error
+        | Ok (0, 0) -> Current { target_ref; upstream_head }
+        | Ok (0, ahead) -> Ahead { target_ref; upstream_head; ahead }
+        | Ok (behind, 0) -> Behind { target_ref; upstream_head; behind }
+        | Ok (behind, ahead) -> Diverged { target_ref; upstream_head; ahead; behind }))
+  | Unregistered -> Freshness_unavailable "checkout is not registered in the repository catalog"
+  | Ambiguous ids ->
+    Freshness_unavailable
+      (Printf.sprintf "checkout origin matches multiple repository ids: %s"
+         (String.concat ", " ids))
+  | Catalog_unavailable error -> Freshness_unavailable ("repository catalog unavailable: " ^ error)
+  | Origin_unavailable error -> Freshness_unavailable error
+
+let catalog_json = function
+  | Registered repo ->
+    `Assoc [ "state", `String "registered"; "repository_id", `String repo.id ]
+  | Unregistered -> `Assoc [ "state", `String "unregistered" ]
+  | Ambiguous ids ->
+    `Assoc
+      [ "state", `String "ambiguous"
+      ; "repository_ids", `List (List.map (fun id -> `String id) ids)
+      ]
+  | Catalog_unavailable error ->
+    `Assoc [ "state", `String "unavailable"; "error", `String error ]
+  | Origin_unavailable error ->
+    `Assoc [ "state", `String "origin_unavailable"; "error", `String error ]
+
+let freshness_json = function
+  | Current { target_ref; upstream_head } ->
+    `Assoc
+      [ "state", `String "current"; "target_ref", `String target_ref
+      ; "upstream_head", `String upstream_head; "ahead", `Int 0; "behind", `Int 0 ]
+  | Ahead { target_ref; upstream_head; ahead } ->
+    `Assoc
+      [ "state", `String "ahead"; "target_ref", `String target_ref
+      ; "upstream_head", `String upstream_head; "ahead", `Int ahead; "behind", `Int 0 ]
+  | Behind { target_ref; upstream_head; behind } ->
+    `Assoc
+      [ "state", `String "behind"; "target_ref", `String target_ref
+      ; "upstream_head", `String upstream_head; "ahead", `Int 0; "behind", `Int behind ]
+  | Diverged { target_ref; upstream_head; ahead; behind } ->
+    `Assoc
+      [ "state", `String "diverged"; "target_ref", `String target_ref
+      ; "upstream_head", `String upstream_head; "ahead", `Int ahead; "behind", `Int behind ]
+  | Freshness_unavailable error ->
+    `Assoc [ "state", `String "unavailable"; "error", `String error ]
+
+let checkout_json ~catalog ~sandbox_abs name =
+  let checkout_abs = Filename.concat (Filename.concat sandbox_abs "repos") name in
+  let origin = Repo_git.get_origin_url ~local_path:checkout_abs in
+  let catalog_resolution =
+    match origin with
+    | Ok origin -> resolve_catalog ~catalog ~origin
+    | Error error -> Origin_unavailable error
+  in
+  let repository : Repo_manager_types.repository =
+    match catalog_resolution with
+    | Registered repo -> { repo with local_path = checkout_abs }
+    | Unregistered | Ambiguous _ | Catalog_unavailable _ | Origin_unavailable _ ->
+      { id = name; name; url = ""; local_path = checkout_abs; aliases = []
+      ; default_branch = ""; keepers = []; status = Active; auto_sync = false
+      ; sync_interval = 0; created_at = 0L; updated_at = 0L }
+  in
+  let branch = Repo_git.current_branch ~repository in
+  let head = first_git_line ~cwd:checkout_abs [ "rev-parse"; "HEAD" ] in
+  let dirty = dirty_state ~repository in
+  let inspection_errors =
+    [ (match branch with Error error -> Some ("branch: " ^ error) | Ok _ -> None)
+    ; (match head with Error error -> Some ("head: " ^ error) | Ok _ -> None)
+    ; (match dirty with Error error -> Some ("status: " ^ error) | Ok _ -> None)
+    ]
+    |> List.filter_map Fun.id
+  in
+  `Assoc
+    [ "checkout_name", `String name
+    ; "path", `String (Filename.concat "repos" name)
+    ; "catalog", catalog_json catalog_resolution
+    ; "branch", (match branch with Ok value -> `String value | Error _ -> `Null)
+    ; "head", (match head with Ok value -> `String value | Error _ -> `Null)
+    ; "dirty", (match dirty with Ok (value, _) -> `Bool value | Error _ -> `Null)
+    ; "changed_files", (match dirty with Ok (_, value) -> `Int value | Error _ -> `Null)
+    ; "inspection_state", `String (if inspection_errors = [] then "available" else "unavailable")
+    ; "inspection_errors", `List (List.map (fun error -> `String error) inspection_errors)
+    ; "freshness", freshness_json (freshness_of_catalog ~repository catalog_resolution)
+    ]
+
+let repository_checkouts_json ~(config : Workspace.config) ~(meta : keeper_meta) =
+  let sandbox_abs =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> normalize_path
   in
-  let cached =
-    cached_playground_repo_entries playground_abs
-    |> List.map (fun repo ->
-      match repo_name_of_json repo with
-      | Some name ->
-        playground_repo_entry_json ~source:"cache" ~repo_name:name repo
-      | None -> repo)
+  let observed_at_unix = Time_compat.now () in
+  let catalog = Repo_store.load_all ~base_path:config.base_path in
+  let entries =
+    filesystem_checkout_names sandbox_abs
+    |> List.map (checkout_json ~catalog ~sandbox_abs)
   in
-  let cached_names = List.filter_map repo_name_of_json cached in
-  let fs_entries =
-    filesystem_playground_repo_names playground_abs
-    |> List.filter (fun name -> not (List.mem name cached_names))
-    |> List.map (fun name ->
-      playground_repo_entry_json ~source:"filesystem" ~repo_name:name
-        (`Assoc []))
-  in
-  `List (cached @ fs_entries)
+  `Assoc
+    [ "state", `String (match catalog with Ok _ -> "available" | Error _ -> "catalog_unavailable")
+    ; "freshness_basis", `String "local_tracking_ref"
+    ; "observed_at", `String (Masc_domain.iso8601_of_unix_seconds observed_at_unix)
+    ; "observed_at_unix", `Float observed_at_unix
+    ; "entries", `List entries
+    ; "error", (match catalog with Ok _ -> `Null | Error error -> `String error)
+    ]
 
 let preflight_status_json ~timeout_sec =
   Keeper_sandbox_runtime.docker_preflight ~timeout_sec ()
@@ -447,7 +544,7 @@ let identity_json (meta : keeper_meta) =
 let live_status_json ?(include_preflight = true)
     ?preflight_override
     ?containers_override
-    ?(include_playground_repos = true)
+    ?(include_repository_checkouts = true)
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
     ~(timeout_sec : float)
@@ -494,14 +591,10 @@ let live_status_json ?(include_preflight = true)
         if verbose then Json_util.option_to_yojson Fun.id preflight else `Null );
       ("container_error", Json_util.string_opt_to_json container_error);
       ("why_no_container", Json_util.string_opt_to_json why_no_container);
-      ( "playground_repos",
-        if include_playground_repos then
-          playground_repos_json ~config ~meta
+      ( "repository_checkouts",
+        if include_repository_checkouts then
+          repository_checkouts_json ~config ~meta
         else
-          `List [] );
-      ( "playground_repos_source",
-        `String
-          (if include_playground_repos then "live"
-           else "skipped_dashboard_hot_path") );
+          `Assoc [ "state", `String "not_inspected"; "entries", `List [] ] );
       ("identity", identity_json meta);
     ]

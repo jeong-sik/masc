@@ -18,7 +18,6 @@ type t =
   ; host_root_abs : string
   ; container_root : string option
   ; root_arg : string
-  ; mind_arg : string
   ; repos_arg : string
   ; task_overlay_pattern : string
   }
@@ -169,7 +168,6 @@ let of_meta ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_me
        | Local -> None
        | Docker -> Some (container_root meta.name))
   ; root_arg = "."
-  ; mind_arg = "mind"
   ; repos_arg = "repos"
   ; task_overlay_pattern = "repos/<repo>"
   }
@@ -269,13 +267,11 @@ let context_status_fields (t : t) : (string * Yojson.Safe.t) list =
   ; "sandbox_network_mode", `String t.network_mode
   ; "sandbox_lifetime", `String storage_lifetime
   ; "sandbox_root", `String t.root_arg
-  ; "sandbox_mind", `String t.mind_arg
   ; "sandbox_repos", `String t.repos_arg
   ; "sandbox_task_overlay_pattern", `String t.task_overlay_pattern
   ; ( "sandbox_paths"
     , `Assoc
         [ "root", `String t.root_arg
-        ; "mind", `String t.mind_arg
         ; "repos", `String t.repos_arg
         ] )
   ]

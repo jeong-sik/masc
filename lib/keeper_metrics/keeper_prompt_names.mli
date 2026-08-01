@@ -8,7 +8,6 @@ val constitution : string
 val world : string
 val capabilities : string
 val deliberation : string
-val unified_system : string
 val reply_guidelines : string
 val core_behavior : string
 val recovery_block : string

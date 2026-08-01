@@ -22,7 +22,7 @@ let embedded =
     , "---\ndescription: contract\n---\nrules\n" )
   ; ( manifest_rel
     , manifest
-        [ "keeper.example.md"; "behavior/contract.md"; "keeper.retired.md" ] )
+        [ "keeper.example.md"; "behavior/contract.md" ] )
   ; "runtime.toml", "[runtime]\n"
   ]
 
@@ -50,6 +50,10 @@ let with_temp_prompts_dir f =
     (fun () -> f dir)
 
 let read_file path = In_channel.with_open_text path In_channel.input_all
+
+let write_runtime_manifest dir paths =
+  Out_channel.with_open_text (Filename.concat dir "managed-assets.json") (fun oc ->
+      Out_channel.output_string oc (manifest paths))
 
 let sync ~prompts_dir =
   Prompt_defaults.sync_prompt_assets ~read:read_embedded ~files:embedded_files
@@ -89,24 +93,49 @@ let test_overwrites_stale_copy () =
       check string "converged content"
         "---\ndescription: example\n---\nbody v2\n" (read_file stale))
 
-let test_runtime_only_files_survive () =
+let test_runtime_extra_files_are_removed () =
   with_temp_prompts_dir (fun dir ->
       let extra = Filename.concat dir "operator.custom.md" in
       Out_channel.with_open_text extra (fun oc ->
           Out_channel.output_string oc "local-only\n");
       let (_ : Prompt_defaults.sync_result) = sync ~prompts_dir:dir in
-      check bool "runtime-only file kept" true (Sys.file_exists extra);
-      check string "runtime-only content kept" "local-only\n" (read_file extra))
+      check bool "runtime extra removed" false (Sys.file_exists extra))
 
-let test_retired_managed_file_is_removed () =
+let test_empty_embedded_prompt_set_preserves_runtime_tree () =
   with_temp_prompts_dir (fun dir ->
-      let retired = Filename.concat dir "keeper.retired.md" in
-      Out_channel.with_open_text retired (fun oc ->
-          Out_channel.output_string oc "retired distribution copy\n");
+      let existing = Filename.concat dir "keeper.existing.md" in
+      Out_channel.with_open_text existing (fun oc ->
+          Out_channel.output_string oc "must survive empty embedded set\n");
+      let empty_manifest = manifest [] in
+      let result =
+        Prompt_defaults.sync_prompt_assets
+          ~read:(function
+            | rel when String.equal rel manifest_rel -> Some empty_manifest
+            | _ -> None)
+          ~files:[ manifest_rel ]
+          ~prompts_dir:dir
+          ()
+      in
+      check (list string) "removed" [] result.Prompt_defaults.removed;
+      check bool "runtime tree preserved" true (Sys.file_exists existing);
+      check bool "empty set failure visible" true
+        (List.exists
+           (fun (rel, msg) ->
+             String.equal rel manifest_rel
+             && String.equal msg "embedded prompt asset set is empty")
+           result.Prompt_defaults.failed))
+
+let test_removed_managed_file_is_deleted () =
+  with_temp_prompts_dir (fun dir ->
+      let removed = Filename.concat dir "keeper.removed.md" in
+      Out_channel.with_open_text removed (fun oc ->
+          Out_channel.output_string oc "distribution copy\n");
+      write_runtime_manifest dir
+        [ "keeper.example.md"; "behavior/contract.md"; "keeper.removed.md" ];
       let result = sync ~prompts_dir:dir in
-      check (list string) "removed" [ "prompts/keeper.retired.md" ]
+      check (list string) "removed" [ "prompts/keeper.removed.md" ]
         result.Prompt_defaults.removed;
-      check bool "retired asset absent" false (Sys.file_exists retired))
+      check bool "removed asset absent" false (Sys.file_exists removed))
 
 let test_current_managed_leaf_symlink_is_replaced_without_following () =
   with_temp_prompts_dir (fun dir ->
@@ -132,7 +161,7 @@ let test_current_managed_leaf_symlink_is_replaced_without_following () =
           check string "outside content unchanged" "outside must survive\n"
             (read_file outside)))
 
-let test_retired_managed_leaf_symlink_is_removed_without_following () =
+let test_removed_managed_leaf_symlink_is_deleted_without_following () =
   with_temp_prompts_dir (fun dir ->
       let outside = Filename.temp_file "prompt-asset-sync-outside" ".md" in
       Fun.protect
@@ -142,20 +171,22 @@ let test_retired_managed_leaf_symlink_is_removed_without_following () =
         (fun () ->
           Out_channel.with_open_text outside (fun oc ->
               Out_channel.output_string oc "outside must survive\n");
-          let retired = Filename.concat dir "keeper.retired.md" in
-          Unix.symlink outside retired;
+          let removed = Filename.concat dir "keeper.removed.md" in
+          Unix.symlink outside removed;
+          write_runtime_manifest dir
+            [ "keeper.example.md"; "behavior/contract.md"; "keeper.removed.md" ];
           let result = sync ~prompts_dir:dir in
-          check (list string) "retired symlink removed"
-            [ "prompts/keeper.retired.md" ]
+          check (list string) "managed symlink removed"
+            [ "prompts/keeper.removed.md" ]
             result.Prompt_defaults.removed;
-          check bool "retired link absent" false (Sys.file_exists retired);
+          check bool "removed link absent" false (Sys.file_exists removed);
           check string "outside content unchanged" "outside must survive\n"
             (read_file outside)))
 
 let test_invalid_manifest_preserves_managed_file () =
   with_temp_prompts_dir (fun dir ->
-      let retired = Filename.concat dir "keeper.retired.md" in
-      Out_channel.with_open_text retired (fun oc ->
+      let removed = Filename.concat dir "keeper.removed.md" in
+      Out_channel.with_open_text removed (fun oc ->
           Out_channel.output_string oc "must survive invalid manifest\n");
       let read = function
         | rel when String.equal rel manifest_rel -> Some "{not-json"
@@ -166,20 +197,20 @@ let test_invalid_manifest_preserves_managed_file () =
           ~prompts_dir:dir ()
       in
       check (list string) "removed" [] result.Prompt_defaults.removed;
-      check bool "retired asset preserved" true (Sys.file_exists retired);
+      check bool "managed asset preserved" true (Sys.file_exists removed);
       check bool "manifest failure visible" true
         (List.exists
            (fun (rel, _) -> String.equal rel manifest_rel)
            result.Prompt_defaults.failed))
 
-let test_incomplete_manifest_preserves_managed_file () =
+let test_incomplete_embedded_manifest_preserves_managed_file () =
   with_temp_prompts_dir (fun dir ->
-      let retired = Filename.concat dir "keeper.retired.md" in
-      Out_channel.with_open_text retired (fun oc ->
+      let removed = Filename.concat dir "keeper.removed.md" in
+      Out_channel.with_open_text removed (fun oc ->
           Out_channel.output_string oc "must survive incomplete manifest\n");
       let read = function
         | rel when String.equal rel manifest_rel ->
-          Some (manifest [ "keeper.retired.md" ])
+          Some (manifest [ "keeper.removed.md" ])
         | rel -> read_embedded rel
       in
       let result =
@@ -187,7 +218,7 @@ let test_incomplete_manifest_preserves_managed_file () =
           ~prompts_dir:dir ()
       in
       check (list string) "removed" [] result.Prompt_defaults.removed;
-      check bool "retired asset preserved" true (Sys.file_exists retired);
+      check bool "managed asset preserved" true (Sys.file_exists removed);
       check bool "manifest coverage failure visible" true
         (List.exists
            (fun (rel, _) -> String.equal rel manifest_rel)
@@ -207,10 +238,10 @@ let test_symlink_ancestor_cannot_escape_prompt_root () =
           Unix.symlink outside (Filename.concat dir "link");
           let assets =
             [ "prompts/link/current.md", "current embedded body\n"
-            ; ( manifest_rel
-              , manifest [ "link/current.md"; "link/old.md" ] )
+            ; ( manifest_rel, manifest [ "link/current.md" ] )
             ]
           in
+          write_runtime_manifest dir [ "link/current.md"; "link/old.md" ];
           let result =
             Prompt_defaults.sync_prompt_assets
               ~read:(fun rel -> List.assoc_opt rel assets)
@@ -218,13 +249,14 @@ let test_symlink_ancestor_cannot_escape_prompt_root () =
               ~prompts_dir:dir
               ()
           in
-          check (list string) "nothing removed through ancestor symlink" []
+          check (list string) "ancestor symlink removed"
+            [ "prompts/link" ]
             result.Prompt_defaults.removed;
-          check bool "outside retired file survives" true
+          check bool "outside managed file survives" true
             (Sys.file_exists outside_old);
           check string "outside content unchanged" "outside must survive\n"
             (read_file outside_old);
-          check int "write and delete boundary failures" 2
+          check int "no boundary failure after exact-tree purge" 0
             (List.length result.Prompt_defaults.failed)))
 
 let test_unreadable_embedded_entry_is_failed () =
@@ -265,20 +297,22 @@ let () =
           test_case "second run is a no-op" `Quick test_second_run_is_noop;
           test_case "overwrites stale runtime copy" `Quick
             test_overwrites_stale_copy;
-          test_case "runtime-only files are never deleted" `Quick
-            test_runtime_only_files_survive;
-          test_case "retired managed file is removed" `Quick
-            test_retired_managed_file_is_removed;
+          test_case "runtime extra files are removed" `Quick
+            test_runtime_extra_files_are_removed;
+          test_case "empty embedded prompt set preserves runtime tree" `Quick
+            test_empty_embedded_prompt_set_preserves_runtime_tree;
+          test_case "removed managed file is deleted" `Quick
+            test_removed_managed_file_is_deleted;
           test_case "current managed leaf symlink is replaced without following"
             `Quick
             test_current_managed_leaf_symlink_is_replaced_without_following;
-          test_case "retired managed leaf symlink is removed without following"
+          test_case "removed managed leaf symlink is deleted without following"
             `Quick
-            test_retired_managed_leaf_symlink_is_removed_without_following;
+            test_removed_managed_leaf_symlink_is_deleted_without_following;
           test_case "invalid manifest preserves managed files" `Quick
             test_invalid_manifest_preserves_managed_file;
           test_case "incomplete manifest preserves managed files" `Quick
-            test_incomplete_manifest_preserves_managed_file;
+            test_incomplete_embedded_manifest_preserves_managed_file;
           test_case "ancestor symlink cannot escape prompt root" `Quick
             test_symlink_ancestor_cannot_escape_prompt_root;
           test_case "unreadable embedded entry recorded as failure" `Quick

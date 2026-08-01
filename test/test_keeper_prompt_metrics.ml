@@ -193,16 +193,15 @@ let test_soft_context_in_dynamic_only () =
   check bool "no worktree in system" true
     (not (has_in tp.system_prompt "Worktree changes"))
 
-let test_direct_reply_prompt_matches_server_managed_heartbeat_policy () =
+let test_direct_reply_prompt_uses_active_schema_authority () =
   let prompt =
     KP.build_keeper_system_prompt
       ~instructions:""
       ()
   in
-  check bool "mentions server-managed heartbeat" true
-    (has_in prompt "Heartbeats are server-managed");
-  check bool "does not mention masc_heartbeat" false
-    (has_in prompt "masc_heartbeat")
+  check bool "active schema is sole callable catalog" true
+    (has_in prompt "active typed schema is the sole callable catalog");
+  check bool "does not invent heartbeat work" false (has_in prompt "heartbeat")
 
 let test_keeper_prompt_preserves_runtime_continuity_anchors () =
   let prompt =
@@ -211,34 +210,24 @@ let test_keeper_prompt_preserves_runtime_continuity_anchors () =
       ()
   in
   check bool "continuity anchor present" true (has_in prompt "<continuity>");
-  check bool "PR merge rules retained" true (has_in prompt "PR merge rules");
   check bool "runtime checkpoint ownership retained" true
     (has_in prompt "runtime checkpoint");
   check bool "world anchor present" true (has_in prompt "<world>")
 
-let test_no_catalog_repository_injection () =
-  (* RFC-0324 B-1 regression guard: the prompt must never re-grow a
-     catalog-fed repository list. The old <registered_repositories> block
-     asserted that every repositories.toml id "resolves under repos/<name>/"
-     while the sandbox held a different (or empty) set of checkouts —
-     keepers that trusted it referenced un-cloned repos (path_not_found,
-     379/24h in the 2026-07-08 tool-error audit). Filesystem is the truth;
-     the prompt carries only the constant self-discovery instruction. *)
+let test_repository_checkout_authority_prompt () =
   let prompt =
     KP.build_keeper_system_prompt
       ~instructions:""
       ()
   in
-  check bool "catalog injection block stays removed" false
-    (has_in prompt "<registered_repositories>");
-  check bool "constant repositories block present" true
-    (has_in prompt "<repositories>");
-  check bool "names the filesystem as the source of truth" true
-    (has_in prompt "filesystem is the source of truth");
-  check bool "requires visible filesystem inspection before referencing" true
-    (has_in prompt "inspect the repository directory through a visible filesystem capability");
-  check bool "warns registration does not imply a checkout" true
-    (has_in prompt "registration does not imply a checkout")
+  check bool "typed checkout block present" true
+    (has_in prompt "<repository_checkouts>");
+  check bool "catalog owns identity" true
+    (has_in prompt "catalog owns repository identity");
+  check bool "checkout proves availability" true
+    (has_in prompt "checkout entry proves execution availability");
+  check bool "freshness basis present" true
+    (has_in prompt "local tracking ref")
 
 let test_prompt_recovery_guard_restores_missing_anchors () =
   let prompt =
@@ -249,8 +238,6 @@ let test_prompt_recovery_guard_restores_missing_anchors () =
     (has_in prompt "You are imseonghan");
   check bool "recovery continuity anchor present" true
     (has_in prompt "<continuity>");
-  check bool "recovery PR merge rules present" true
-    (has_in prompt "PR merge rules");
   check bool "recovery names runtime-owned continuity" true
     (has_in prompt "Continuity is runtime-owned");
   check bool "recovery world anchor present" true (has_in prompt "<world>")
@@ -264,25 +251,23 @@ let test_prompt_recovery_guard_uses_code_fallback_when_registry_empty () =
       in
       check bool "fallback continuity anchor present" true
         (has_in prompt "<continuity>");
-      check bool "fallback PR merge rules present" true
-        (has_in prompt "PR merge rules");
       check bool "fallback names runtime-owned continuity" true
         (has_in prompt "checkpoint");
       check bool "fallback world anchor present" true
         (has_in prompt "<world>"))
 
-let test_prompt_names_non_hierarchical_effect_gate () =
+let test_prompt_preserves_typed_external_effect_boundary () =
   let prompt =
     KP.build_keeper_system_prompt
       ~instructions:""
       ()
   in
-  check bool "names exact Always Allowed" true
-    (has_in prompt "exact Always Allowed");
-  check bool "names configured Auto Judge" true
-    (has_in prompt "configured Auto Judge");
-  check bool "keeps external systems on typed boundaries" true
-    (has_in prompt "visible typed Tool or Connector")
+  check bool "external effects pass through Gate" true
+    (has_in prompt "External effects pass through the configured Gate");
+  check bool "pending decisions preserve operation identity" true
+    (has_in prompt "keep its operation ID");
+  check bool "pending decisions do not block independent work" true
+    (has_in prompt "continue independent work")
 
 let test_user_message_sanitizer_preserves_normal_text () =
   let text = "Please inspect the current board status." in
@@ -526,19 +511,19 @@ let () =
             test_direct_reply_prompt_requires_action_evidence;
           test_case "soft context in dynamic only" `Quick
             test_soft_context_in_dynamic_only;
-          test_case "direct reply prompt matches server-managed heartbeat policy" `Quick
-            test_direct_reply_prompt_matches_server_managed_heartbeat_policy;
+          test_case "direct reply prompt uses active schema authority" `Quick
+            test_direct_reply_prompt_uses_active_schema_authority;
           test_case "keeper prompt preserves runtime continuity anchors" `Quick
             test_keeper_prompt_preserves_runtime_continuity_anchors;
           test_case "no catalog repository injection (RFC-0324 B-1)" `Quick
-            test_no_catalog_repository_injection;
+            test_repository_checkout_authority_prompt;
           test_case "prompt recovery guard restores missing anchors" `Quick
             test_prompt_recovery_guard_restores_missing_anchors;
           test_case "prompt recovery guard survives empty registry value"
             `Quick
             test_prompt_recovery_guard_uses_code_fallback_when_registry_empty;
-          test_case "prompt names non-hierarchical effect Gate" `Quick
-            test_prompt_names_non_hierarchical_effect_gate;
+          test_case "prompt preserves typed external effect boundary" `Quick
+            test_prompt_preserves_typed_external_effect_boundary;
           test_case "user message sanitizer preserves normal text" `Quick
             test_user_message_sanitizer_preserves_normal_text;
           test_case "user message sanitizer preserves semantic content" `Quick

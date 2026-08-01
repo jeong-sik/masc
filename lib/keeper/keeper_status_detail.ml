@@ -588,6 +588,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          let sandbox_live =
            Keeper_sandbox_control.live_status_json
              ~include_preflight:false
+             ~include_repository_checkouts:false
              ~config:config ~meta:m
              ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
              ~verbose:false ()
@@ -806,7 +807,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("sandbox_backend", `String (Keeper_sandbox.backend_to_string sandbox.backend));
              ("sandbox_root", `String sandbox.root_arg);
              ("sandbox_repos", `String sandbox.repos_arg);
-             ("sandbox_mind", `String sandbox.mind_arg);
              ("sandbox_container_root", Json_util.string_opt_to_json sandbox.container_root);
              ("default_cwd", `String keeper_visible_abs);
              ("sandbox_profile", `String (sandbox_profile_to_string m.sandbox_profile));
@@ -815,8 +815,8 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                Json_util.string_opt_to_json sandbox_last_error);
              ("sandbox_live", sandbox_live);
              ("allowed_paths", Json_util.json_string_list m.allowed_paths);
-             ("playground_repos",
-               Keeper_sandbox_control.playground_repos_json
+             ("repository_checkouts",
+               Keeper_sandbox_control.repository_checkouts_json
                  ~config:config ~meta:m);
              ("pr_history",
                let pr_path = Filename.concat playground_abs

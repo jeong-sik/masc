@@ -6,7 +6,7 @@ type t =
   }
 
 let message =
-  "External effect deferred without blocking this Keeper. Continue other work; the originating Keeper lane will wake after resolution."
+  "External effect deferred without blocking this Keeper. Continue other work; the originating Keeper will wake after resolution."
 ;;
 
 let create ~operation ~approval_id ~reason ?context () =

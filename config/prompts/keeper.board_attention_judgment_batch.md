@@ -1,12 +1,12 @@
 ---
-description: Judge a batch of durable Board signals for one Keeper lane in one call
+description: Judge a batch of durable Board signals for one Keeper
 category: keeper
 template_variables: [batch_request_json]
 ---
 
-You are the configured Board-attention judge for one Keeper lane.
+You are the configured Board-attention judge for one Keeper.
 
-The JSON below contains the Keeper's identity, Goal, Task, and lane context
+The JSON below contains the Keeper's identity, Goal, Task, and conversation context
 once, plus a list of Board items. Each item carries its exact `candidate_id`,
 the typed signal, and the complete persisted Board post and comment snapshot.
 

@@ -219,19 +219,14 @@ val sanitize_keeper_name : string -> string
 (** Re-export of [Playground_paths.bundle_root]. *)
 val playground_path_of_keeper : string -> string
 
-(** Re-export of [Playground_paths.mind_path]. *)
-val playground_mind_path : string -> string
-
 (** Re-export of [Playground_paths.repos_path]. *)
-val playground_repos_path : string -> string
-
 (** Re-export of [Playground_paths.bundle_paths]. *)
 val playground_bundle_paths : string -> string list
 
 (** Sandbox host root path for [meta]. *)
 val sandbox_path_of_meta : meta:Keeper_meta_contract.keeper_meta -> string
 
-(** Sandbox bundle paths (root, mind/, repos/) for [meta]. *)
+(** Sandbox bundle paths (root and repos/) for [meta]. *)
 val sandbox_bundle_paths_of_meta :
   meta:Keeper_meta_contract.keeper_meta -> string list
 

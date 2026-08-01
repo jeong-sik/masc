@@ -123,83 +123,149 @@ let writable_leaf_state dest =
   | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
     Error "managed prompt asset leaf is not a regular file"
 
+let remove_runtime_asset ~prompts_dir runtime_rel acc =
+  let embedded_rel = prompts_asset_prefix ^ runtime_rel in
+  let dest = Filename.concat prompts_dir runtime_rel in
+  try
+    match owned_parent_state ~prompts_dir dest with
+    | Error msg -> { acc with failed = (embedded_rel, msg) :: acc.failed }
+    | Ok `Missing -> acc
+    | Ok `Directory ->
+      (match Fs_compat.exact_path_kind ~follow:false dest with
+       | Fs_compat.Exact_missing -> acc
+       | Fs_compat.Exact_kind Unix.S_REG
+       | Fs_compat.Exact_kind Unix.S_LNK ->
+         Sys.remove dest;
+         { acc with removed = embedded_rel :: acc.removed }
+       | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+         { acc with
+           failed =
+             ( embedded_rel
+             , "managed prompt asset leaf is neither a regular file nor a symbolic link" )
+             :: acc.failed
+         })
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Sys_error msg -> { acc with failed = (embedded_rel, msg) :: acc.failed }
+  | Unix.Unix_error (error, operation, argument) ->
+    { acc with
+      failed =
+        ( embedded_rel
+        , Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error) )
+        :: acc.failed
+    }
+
+let write_runtime_manifest ~prompts_dir content acc =
+  let dest = Filename.concat prompts_dir "managed-assets.json" in
+  try
+    match prepare_owned_parent ~prompts_dir dest with
+    | Error msg -> { acc with failed = (managed_assets_manifest, msg) :: acc.failed }
+    | Ok () ->
+      (match writable_leaf_state dest with
+       | Error msg -> { acc with failed = (managed_assets_manifest, msg) :: acc.failed }
+       | Ok _ ->
+         (match read_file_opt dest with
+          | Some current when String.equal current content -> acc
+          | _ ->
+            (match Fs_compat.save_file_atomic dest content with
+             | Ok () -> acc
+             | Error msg ->
+               { acc with failed = (managed_assets_manifest, msg) :: acc.failed })))
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Sys_error msg -> { acc with failed = (managed_assets_manifest, msg) :: acc.failed }
+  | Unix.Unix_error (error, operation, argument) ->
+    { acc with
+      failed =
+        ( managed_assets_manifest
+        , Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error) )
+        :: acc.failed
+    }
+
+let runtime_prompt_asset_paths ~prompts_dir =
+  let rec collect relative acc =
+    let path =
+      if String.equal relative "" then prompts_dir
+      else Filename.concat prompts_dir relative
+    in
+    match Unix.lstat path with
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+      Sys.readdir path
+      |> Array.to_list
+      |> List.sort String.compare
+      |> List.fold_left
+           (fun result name ->
+             match result with
+             | Error _ as error -> error
+             | Ok acc ->
+               let child =
+                 if String.equal relative "" then name
+                 else Filename.concat relative name
+               in
+               collect child acc)
+           (Ok acc)
+    | { Unix.st_kind = (Unix.S_REG | Unix.S_LNK); _ } ->
+      if String.equal relative "managed-assets.json" then Ok acc
+      else if relative_asset_path relative then Ok (String_set.add relative acc)
+      else Error (Printf.sprintf "unsafe runtime prompt asset path: %s" relative)
+    | _ -> Error (Printf.sprintf "runtime prompt asset is not a file: %s" relative)
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) when String.equal relative "" ->
+      Ok acc
+    | exception Unix.Unix_error (error, operation, argument) ->
+      Error
+        (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))
+  in
+  collect "" String_set.empty
+
+let sync_current_asset ~read ~prompts_dir acc (embedded_rel, runtime_rel) =
+  if not (relative_asset_path runtime_rel)
+  then
+    { acc with failed = (embedded_rel, "unsafe embedded prompt asset path") :: acc.failed }
+  else
+    match read embedded_rel with
+    | None ->
+      { acc with failed = (embedded_rel, "embedded asset unreadable") :: acc.failed }
+    | Some content ->
+      let dest = Filename.concat prompts_dir runtime_rel in
+      (try
+         match prepare_owned_parent ~prompts_dir dest with
+         | Error msg -> { acc with failed = (embedded_rel, msg) :: acc.failed }
+         | Ok () ->
+           (match writable_leaf_state dest with
+            | Error msg -> { acc with failed = (embedded_rel, msg) :: acc.failed }
+            | Ok (`Missing | `Regular | `Symlink as leaf_state) ->
+              let existing = read_file_opt dest in
+              (match existing with
+               | Some current when String.equal current content -> acc
+               | _ ->
+                 (match Fs_compat.save_file_atomic dest content with
+                  | Error msg -> { acc with failed = (embedded_rel, msg) :: acc.failed }
+                  | Ok () ->
+                    if leaf_state = `Missing
+                    then { acc with copied = embedded_rel :: acc.copied }
+                    else { acc with overwritten = embedded_rel :: acc.overwritten })))
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | Sys_error msg -> { acc with failed = (embedded_rel, msg) :: acc.failed }
+       | Unix.Unix_error (error, operation, argument) ->
+         { acc with
+           failed =
+             ( embedded_rel
+             , Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error) )
+             :: acc.failed
+         })
+
 let sync_prompt_assets ~read ~files ~prompts_dir () =
   let current_assets = current_prompt_assets files in
   let initial = { copied = []; overwritten = []; removed = []; failed = [] } in
-  let synced =
-    List.fold_left
-    (fun acc rel ->
-      let embedded_rel, runtime_rel = rel in
-      if not (relative_asset_path runtime_rel)
-      then
-        { acc with
-          failed =
-            (embedded_rel, "unsafe embedded prompt asset path") :: acc.failed
-        }
-      else
-        match read embedded_rel with
-        | None ->
-          { acc with
-            failed =
-              (embedded_rel, "embedded asset unreadable") :: acc.failed
-          }
-        | Some content ->
-          let dest = Filename.concat prompts_dir runtime_rel in
-          (try
-             match prepare_owned_parent ~prompts_dir dest with
-             | Error msg ->
-               { acc with failed = (embedded_rel, msg) :: acc.failed }
-             | Ok () ->
-               (match writable_leaf_state dest with
-                | Error msg ->
-                  { acc with failed = (embedded_rel, msg) :: acc.failed }
-                | Ok `Symlink ->
-                  (match Fs_compat.save_file_atomic dest content with
-                   | Ok () ->
-                     { acc with overwritten = embedded_rel :: acc.overwritten }
-                   | Error msg ->
-                     { acc with failed = (embedded_rel, msg) :: acc.failed })
-                | Ok (`Missing | `Regular as leaf_state) ->
-                  let existing = read_file_opt dest in
-                  (match existing with
-                   | Some current when String.equal current content -> acc
-                   | _ ->
-                     Fs_compat.save_file dest content;
-                     if leaf_state = `Regular
-                     then
-                       { acc with overwritten = embedded_rel :: acc.overwritten }
-                     else { acc with copied = embedded_rel :: acc.copied }))
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | Sys_error msg ->
-             { acc with failed = (embedded_rel, msg) :: acc.failed }
-           | Unix.Unix_error (error, operation, argument) ->
-             { acc with
-               failed =
-                 ( embedded_rel
-                 , Printf.sprintf
-                     "%s(%s): %s"
-                     operation
-                     argument
-                     (Unix.error_message error) )
-                 :: acc.failed
-             }))
-    initial
-    current_assets
-  in
   match read managed_assets_manifest with
   | None ->
-    { synced with
-      failed =
-        (managed_assets_manifest, "embedded managed-assets manifest unreadable")
-        :: synced.failed
+    { initial with
+      failed = [ managed_assets_manifest, "embedded managed-assets manifest unreadable" ]
     }
   | Some content ->
     (match managed_asset_paths content with
-     | Error msg ->
-       { synced with
-         failed = (managed_assets_manifest, msg) :: synced.failed
-       }
+     | Error msg -> { initial with failed = [ managed_assets_manifest, msg ] }
      | Ok managed ->
        let current =
          List.fold_left
@@ -207,61 +273,39 @@ let sync_prompt_assets ~read ~files ~prompts_dir () =
            String_set.empty
            current_assets
        in
-       let untracked_current = String_set.diff current managed in
-       if not (String_set.is_empty untracked_current)
+       if String_set.is_empty current
        then
-         { synced with
+         { initial with
            failed =
-             ( managed_assets_manifest
-             , Printf.sprintf
-                 "current embedded prompt assets missing from managed manifest: %s"
-                 (String.concat ", " (String_set.elements untracked_current)) )
-             :: synced.failed
+             [ managed_assets_manifest, "embedded prompt asset set is empty" ]
          }
        else
-         String_set.fold
-           (fun runtime_rel acc ->
-             if String_set.mem runtime_rel current
-             then acc
-             else
-               let embedded_rel = prompts_asset_prefix ^ runtime_rel in
-               let dest = Filename.concat prompts_dir runtime_rel in
-               (try
-                  match owned_parent_state ~prompts_dir dest with
-                  | Error msg ->
-                    { acc with failed = (embedded_rel, msg) :: acc.failed }
-                  | Ok `Missing -> acc
-                  | Ok `Directory ->
-                    (match Fs_compat.exact_path_kind ~follow:false dest with
-                     | Fs_compat.Exact_missing -> acc
-                     | Fs_compat.Exact_kind Unix.S_REG
-                     | Fs_compat.Exact_kind Unix.S_LNK ->
-                       Sys.remove dest;
-                       { acc with removed = embedded_rel :: acc.removed }
-                     | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
-                       { acc with
-                         failed =
-                           ( embedded_rel
-                           , "managed prompt asset leaf is neither a regular file nor a symbolic link" )
-                           :: acc.failed
-                       })
-                with
-                | Eio.Cancel.Cancelled _ as e -> raise e
-                | Sys_error msg ->
-                  { acc with failed = (embedded_rel, msg) :: acc.failed }
-                | Unix.Unix_error (error, operation, argument) ->
-                  { acc with
-                    failed =
-                      ( embedded_rel
-                      , Printf.sprintf
-                          "%s(%s): %s"
-                          operation
-                          argument
-                          (Unix.error_message error) )
-                      :: acc.failed
-                  }))
-           managed
-           synced)
+       let missing = String_set.diff current managed in
+       let extra = String_set.diff managed current in
+       if not (String_set.is_empty missing && String_set.is_empty extra)
+       then
+         { initial with
+           failed =
+             [ ( managed_assets_manifest
+               , Printf.sprintf
+                   "embedded managed manifest differs from current prompt assets (missing: %s; extra: %s)"
+                   (String.concat ", " (String_set.elements missing))
+                   (String.concat ", " (String_set.elements extra)) )
+             ]
+         }
+       else
+         (match runtime_prompt_asset_paths ~prompts_dir with
+          | Error msg -> { initial with failed = [ managed_assets_manifest, msg ] }
+          | Ok runtime ->
+            let removable = String_set.diff runtime current in
+            let purged =
+              String_set.fold (remove_runtime_asset ~prompts_dir) removable initial
+            in
+            List.fold_left
+              (sync_current_asset ~read ~prompts_dir)
+              purged
+              current_assets
+            |> write_runtime_manifest ~prompts_dir content))
 
 (** Scan the current markdown dir and register all prompts with frontmatter.
     Called by [bootstrap_runtime]; also usable in tests after [set_markdown_dir]. *)

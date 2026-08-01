@@ -11,7 +11,7 @@ module Prompt = Masc.Keeper_unified_prompt
 module KTP = Masc.Keeper_types_profile
 
 let has_repo_prompts root =
-  Sys.file_exists (Filename.concat root "config/prompts/keeper.unified.system.md")
+  Sys.file_exists (Filename.concat root "config/prompts/keeper.core_behavior.md")
 
 let repo_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with

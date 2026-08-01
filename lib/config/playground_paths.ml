@@ -4,7 +4,6 @@
     server [base_path]:
 
     - [.masc/playground/<keeper>/]        — bundle root
-    - [.masc/playground/<keeper>/mind/]   — notes, drafts, scratch
     - [.masc/playground/<keeper>/repos/]  — git clones (one dir per repo)
 
     These helpers are the single source of truth. Both [masc_workspace]
@@ -76,17 +75,13 @@ let sanitize_keeper_name (name : string) : string =
 let bundle_root (name : string) : string =
   Printf.sprintf "%s/%s/" all_playgrounds_prefix (sanitize_keeper_name name)
 
-(** Relative path [".masc/playground/<safe_name>/mind/"]. *)
-let mind_path (name : string) : string =
-  Printf.sprintf "%s/%s/mind/" all_playgrounds_prefix (sanitize_keeper_name name)
-
 (** Relative path [".masc/playground/<safe_name>/repos/"]. *)
 let repos_path (name : string) : string =
   Printf.sprintf "%s/%s/repos/" all_playgrounds_prefix (sanitize_keeper_name name)
 
-(** All three bundle subdirs in canonical order. *)
+(** Bundle directories in canonical order. *)
 let bundle_paths (name : string) : string list =
-  [ bundle_root name; mind_path name; repos_path name ]
+  [ bundle_root name; repos_path name ]
 
 type playground_file_path =
   { keeper_name : string

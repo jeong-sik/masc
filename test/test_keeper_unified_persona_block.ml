@@ -12,7 +12,7 @@ open Alcotest
 module WO = Masc.Keeper_world_observation
 
 let has_prompt_root path =
-  Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
+  Sys.file_exists (Filename.concat path "config/prompts/keeper.core_behavior.md")
 
 let repo_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -119,7 +119,7 @@ let with_config_dir f =
       Config_dir_resolver.reset ();
       f ~config_dir)
 
-let test_persona_reaches_unified_system_prompt () =
+let test_persona_reaches_assembled_system_prompt () =
   with_config_dir @@ fun ~config_dir ->
   let persona_dir = Filename.concat config_dir "personas/test-keeper" in
   mkdir_p persona_dir;
@@ -178,7 +178,7 @@ let () =
       ( "d11",
         [
           test_case "persona reaches the unified system prompt" `Quick
-            test_persona_reaches_unified_system_prompt;
+            test_persona_reaches_assembled_system_prompt;
           test_case "no persona file leaves no empty block" `Quick
             test_no_persona_file_means_no_block;
           test_case "persona sits between identity and shared body" `Quick

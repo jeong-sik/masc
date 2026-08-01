@@ -4,7 +4,7 @@
 let surface_tools : Masc_domain.tool_schema list =
   [ { name = "keeper_surface_read"
     ; description =
-        "Read recent conversation from one connected surface lane (dashboard, \
+        "Read recent messages from one conversation endpoint (dashboard, \
          discord, slack, or another connector label) with speaker identity \
          and a derived participant roster. Use when the user asks about a \
          current connector lane, recent lane messages, or participants. This \
@@ -51,7 +51,7 @@ let surface_tools : Masc_domain.tool_schema list =
     }
   ; { name = "keeper_surface_post"
     ; description =
-        "Post a message to one connected surface lane: 'dashboard' (appears \
+        "Post a message to one conversation endpoint: 'dashboard' (appears \
          in the operator's chat transcript) or 'discord' (sends to the bound \
          channel). Posting to an unbound surface is an error."
     ; input_schema =

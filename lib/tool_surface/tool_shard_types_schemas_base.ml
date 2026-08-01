@@ -17,8 +17,8 @@ let base_tools : Masc_domain.tool_schema list =
     ; description =
         "Check your own persisted checkpoint and session state. Returns: name (your \
          keeper name), checkpoint_bytes, message_count, generation, memory fact counts, \
-         sandbox health, and canonical sandbox paths (sandbox_root, sandbox_mind, \
-         sandbox_repos) plus backend/profile metadata. Context-window occupancy is not \
+         sandbox health, and canonical sandbox paths (sandbox_root, sandbox_repos) plus \
+         backend/profile metadata. Context-window occupancy is not \
          currently observed and is not returned. sandbox paths are tool-ready and can be \
          passed directly as path or cwd to keeper tools without prefix. Use when checking \
          checkpoint/session continuity or resolving a path without string-interpolating \
@@ -118,7 +118,7 @@ let base_tools : Masc_domain.tool_schema list =
          "List all tools currently available to you, grouped by category. Use when asked \
          'what can you do?' or when you need to discover your capabilities. Do not use \
          this to answer connector content questions or channel registry questions; use \
-         keeper_surface_read only for current connected-surface lane context and state \
+         keeper_surface_read only for current conversation context and state \
          the limitation if a connector-wide registry is unavailable. Returns tool names \
          organized by category plus descriptor_surface metadata with executor, \
          schema-shape, and typed usage examples."

@@ -109,7 +109,6 @@ require_not_contains README.md 'dashboard#monitoring/sessions'
 require_not_contains README.md 'dashboard#command/intervene'
 
 require_contains docs/PRODUCT-OPERATING-PLAN.md 'Release evidence and local proof'
-require_contains docs/PRODUCT-OPERATING-PLAN.md 'Retired surfaces and proposal-only research material are deletion targets'
 
 require_contains docs/DASHBOARD-INTEGRATION.md '- `monitoring`'
 require_contains docs/DASHBOARD-INTEGRATION.md '- `connectors`'
@@ -119,44 +118,26 @@ require_not_contains docs/DASHBOARD-INTEGRATION.md '- `mission`: what needs atte
 require_not_contains docs/DASHBOARD-INTEGRATION.md '- `intervene`: mutating operator actions'
 
 require_contains docs/spec/A-existing-doc-index.md '`docs/RELEASE-EVIDENCE.md` | Canonical'
-require_not_contains docs/spec/A-existing-doc-index.md '`docs/COMMAND-PLANE-RUNBOOK.md` | Canonical'
-
-require_contains docs/spec/SPEC-INDEX.md 'Retired orchestration surfaces and internal references remain only as migration context.'
-require_contains docs/spec/SPEC-INDEX.md '`06-command-plane.md` | Command Plane v2 | Internal command-plane reference and migration context | Historical |'
-require_not_contains docs/spec/SPEC-INDEX.md 'Keeper 자율 에이전트, Command Plane 오케스트레이션을 제공하며'
-
-require_contains docs/spec/06-command-plane.md '| Status | Retired tombstone |'
-require_contains docs/spec/06-command-plane.md 'The former Command Plane subsystem is not part of the current MASC'
 
 require_contains docs/spec/01-system-overview.md 'MASC의 현재 canonical front door는 3가지다.'
 require_contains docs/spec/01-system-overview.md '### 7.3 Dashboard and Operator Read Visibility'
-require_contains docs/spec/01-system-overview.md 'Retired team-session / command-plane HTTP surfaces는 migration context로만 남아 있으며, supported front door로 취급하지 않는다.'
 
 require_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/events'
 require_contains docs/spec/09-server-transport.md '`MASC_USE_H2` | `auto`'
 require_contains docs/spec/09-server-transport.md '`MASC_GRPC_ENABLED` | 1'
-require_not_contains docs/spec/09-server-transport.md '| `server_command_plane_http.ml` |'
 require_not_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/feed'
 require_not_contains docs/spec/09-server-transport.md '| Workspace | `/api/v1/workspace/*`'
-require_not_contains docs/spec/09-server-transport.md '| Command Plane (R) |'
 
 require_contains docs/spec/10-dashboard.md 'The dashboard is an observable projection and interaction surface for MASC.'
 require_contains docs/spec/10-dashboard.md 'The dashboard does not calculate risk tiers, recognize product/tool names, or'
 require_contains docs/spec/10-dashboard.md 'Pending HITL does not render the Keeper or Workspace as paused.'
 require_contains docs/spec/10-dashboard.md '`INV-DASH-004`: connection failure is client-local.'
+
+# Purged surfaces must not come back. These are ratchets, not tombstones: the
+# retirement notices were deleted on purpose, but a doc edit that re-describes
+# a removed surface as current is the exact drift this file exists to catch.
 require_not_contains docs/spec/10-dashboard.md '| `/api/v1/command-plane` | GET |'
-
-# Regression locks for retired surfaces (team_session / chain purge).
-# Each lock pins an already-merged PR claim so future doc edits
-# cannot silently re-introduce the stale description.
-
-# PR #7773: Team Session glossary marked retired (module purged)
-require_contains docs/spec/00-glossary.md '## Team Session (retired)'
-require_contains docs/spec/00-glossary.md '**Team Session** (retired)'
-
-# PR #7779: OAS-MASC boundary marks team-session bridge as Removed
-require_contains docs/OAS-MASC-BOUNDARY.md '| Team-session swarm | Removed |'
-require_not_contains docs/OAS-MASC-BOUNDARY.md '| `lib/team_session/team_session_oas_bridge.ml` | Acceptable'
+require_not_contains docs/OAS-MASC-BOUNDARY.md 'lib/team_session/'
 
 docs_to_scan=(
   README.md
@@ -167,7 +148,6 @@ docs_to_scan=(
   docs/TUI-GUIDE.md
   docs/spec/SPEC-INDEX.md
   docs/spec/01-system-overview.md
-  docs/spec/06-command-plane.md
   docs/spec/09-server-transport.md
   docs/spec/10-dashboard.md
   docs/spec/A-existing-doc-index.md

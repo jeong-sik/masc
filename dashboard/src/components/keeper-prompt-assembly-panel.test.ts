@@ -45,11 +45,6 @@ describe('buildKeeperPromptAssemblyReport', () => {
         effective: 'tool policy',
         file_path: '/tmp/.masc/config/prompts/keeper.capabilities.md',
       }),
-      prompt({
-        key: 'keeper.unified.system',
-        effective: 'unified prompt',
-        file_path: '/tmp/.masc/config/prompts/keeper.unified.system.md',
-      }),
     ])
 
     expect(report.stats.totalRows).toBeGreaterThan(10)
@@ -64,7 +59,7 @@ describe('buildKeeperPromptAssemblyReport', () => {
       'turn-soft-context',
       'oas-hook',
     ])
-    expect(report.stages.find(stage => stage.id === 'unified-world')?.promptCount).toBe(2)
+    expect(report.stages.find(stage => stage.id === 'unified-world')?.promptCount).toBe(1)
     expect(report.rows.find(row => row.promptKey === '(computed:world_observation)')?.source).toBe('computed')
     expect(report.rows.find(row => row.promptKey === '(computed:scheduled_automation)')?.source).toBe('computed')
     expect(report.activePromptRoots).toEqual(['/tmp/.masc/config/prompts'])
@@ -125,11 +120,6 @@ describe('buildKeeperPromptAssemblyReport', () => {
             effective: 'tool policy',
             file_path: '/tmp/.masc/config/prompts/keeper.capabilities.md',
           }),
-          prompt({
-            key: 'keeper.unified.system',
-            effective: 'unified prompt',
-            file_path: '/tmp/.masc/config/prompts/keeper.unified.system.md',
-          }),
         ]}
       />
     `)
@@ -156,7 +146,6 @@ describe('buildKeeperPromptAssemblyReport', () => {
     expect(defaultRoute?.textContent).toContain('/tmp/.masc/config/prompts/keeper.world.md')
     expect(defaultRoute?.textContent).toContain('world override')
     expect(defaultRoute?.textContent).toContain('tool policy')
-    expect(defaultRoute?.textContent).toContain('unified prompt')
     expect(defaultRoute?.textContent).toContain('fingerprint')
     expect(defaultRoute?.textContent).toContain('tok')
     expect(defaultRoute?.textContent).toMatch(/saved override/i)

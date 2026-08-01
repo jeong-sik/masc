@@ -129,8 +129,8 @@ let test_loads_profile_policy () =
 let test_loads_continuity_contract () =
   test_loads_block "continuity_contract" "Continuity"
 
-let test_loads_connected_surface_discretion () =
-  test_loads_block "connected_surface_discretion" "lane-local contexts"
+let test_loads_conversation_routing () =
+  test_loads_block "conversation_routing" "Conversations are independent contexts"
 
 let test_system_prompt_includes_continuity_contract () =
   with_repo_root_cwd (fun () ->
@@ -145,7 +145,7 @@ let test_system_prompt_includes_continuity_contract () =
         (contains_substring prompt "When <direct_reply_mode> is present");
       Alcotest.(check bool)
         "constitution still present" true
-        (contains_substring prompt "PR merge rules"))
+        (contains_substring prompt "Continuity rules"))
 
 (* Pin the persona [instructions] channel end-to-end at the render boundary. *)
 let test_system_prompt_includes_instructions () =
@@ -216,8 +216,8 @@ let () =
             test_loads_profile_policy;
           Alcotest.test_case "loads continuity_contract" `Quick
             test_loads_continuity_contract;
-          Alcotest.test_case "loads connected_surface_discretion" `Quick
-            test_loads_connected_surface_discretion;
+          Alcotest.test_case "loads conversation_routing" `Quick
+            test_loads_conversation_routing;
           Alcotest.test_case "system prompt includes continuity_contract"
             `Quick test_system_prompt_includes_continuity_contract;
           Alcotest.test_case "system prompt includes persona instructions"

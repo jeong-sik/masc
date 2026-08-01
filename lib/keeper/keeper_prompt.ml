@@ -25,7 +25,6 @@ let keeper_constitution () =
 
 let critical_prompt_anchors =
   [ ("continuity", "<continuity>");
-    ("pr_merge_rules", "PR merge rules");
     ("world", "<world>") ]
 
 let missing_critical_prompt_anchors prompt =
@@ -38,7 +37,6 @@ let critical_prompt_recovery_block_fallback =
   String.concat "\n"
     [ "<continuity>";
       "Recovery guard: preserve keeper technical instructions even if prompt templates were compacted or partially loaded.";
-      "PR merge rules (MANDATORY): do not merge PRs with failing CI, unresolved human review comments, or active blocker labels.";
       "Continuity is runtime-owned: use the checkpoint, typed task/goal state, events, and tool results. Never infer a runtime transition from prose.";
       "</continuity>";
       "";
@@ -52,7 +50,7 @@ let critical_prompt_recovery_block_fallback =
    when prompt file loading is exactly what degraded.
 
    The registry version is trusted only when it carries all required anchors:
-   an operator who accidentally edits out [<continuity>] or [PR merge rules]
+   an operator who accidentally edits out [<continuity>]
    would otherwise produce a non-empty block that [ensure_critical_prompt_anchors]
    appends without restoring the missing safeguard — a silent regression vs the
    previous hardcoded path. Drift triggers the existing prompt failure counter
@@ -127,18 +125,9 @@ let behavior_prompt_block name =
         name
 
 
-(* RFC-0324 B-1: the [registered_repositories] variant and its catalog-fed
-   prompt block are removed. The prompt used to assert that every id in
-   repositories.toml "resolves under repos/<name>/" — but the catalog and a
-   keeper's sandbox checkouts have no invariant linking them, so keepers that
-   trusted the prompt referenced un-cloned repos (path_not_found, 379/24h in
-   the 2026-07-08 tool-error audit). The filesystem is the repo truth; the
-   constant [repositories_block] below instructs self-discovery instead of
-   injecting a stale fact snapshot. *)
-
 let build_keeper_system_prompt
     ~instructions ?(persona_extended = "") ?(keeper_name = "")
-    ?(home_ground = "") ?(active_goals = []) () =
+    ?(workspace_root = "") ?(active_goals = []) () =
   (* Behavior prompt blocks live under
      [<prompts_dir>/behavior/<name>.md] and are read once per process via
      [Keeper_prompt_external.get]. Missing/unreadable files no longer inject
@@ -187,37 +176,29 @@ let build_keeper_system_prompt
         Printf.sprintf "\n<available_goals>\n%s\n</available_goals>\n"
           (String.concat "\n" lines)
   in
-  let home_ground_block =
-    if home_ground = "" then ""
+  let workspace_block =
+    if workspace_root = "" then ""
     else
       Printf.sprintf
         "\n\
-         <home_ground>\n\
-         - Keeper-visible sandbox root (informational only): %s\n\
+         <workspace>\n\
+         - Visible sandbox root: %s\n\
          - Pass a relative typed `cwd` (usually `.`), not this absolute root.\n\
          - Relative argv path operands resolve from the typed `cwd`.\n\
          - The working directory persists between tool calls, but shell state does not.\n\
          - Prefer relative argv path operands. In Docker, host absolute paths are unavailable.\n\
-         </home_ground>\n"
-        (String_util.escape_xml home_ground)
+         </workspace>\n"
+        (String_util.escape_xml workspace_root)
   in
   let repositories_block =
-    (* RFC-0324 B-1: constant self-discovery instruction. The filesystem is
-       the source of truth for a keeper's repositories — the global catalog
-       may register repositories that were never cloned into this sandbox,
-       and clone directory names may differ from catalog ids. A constant
-       block is also shared across all keepers (KV-cache friendly), unlike
-       the per-keeper catalog listing it replaces. *)
     "\n\
-     <repositories>\n\
-     The filesystem is the source of truth for your repositories: only \
-     checkouts that actually exist under repos/ resolve. Before referencing \
-     a repository, inspect the repository directory through a visible \
-     filesystem capability and use the directory names you find. Do not \
-     assume a repository exists because it \
-     is registered in a catalog — registration does not imply a checkout in \
-     your sandbox.\n\
-     </repositories>\n"
+     <repository_checkouts>\n\
+     Before repository work, inspect the typed repository_checkouts context. \
+     The catalog owns repository identity, a checkout entry proves execution \
+     availability, and freshness is measured against its stated local tracking \
+     ref. Treat unregistered, ambiguous, behind, diverged, dirty, or unavailable \
+     evidence explicitly.\n\
+     </repository_checkouts>\n"
   in
   (* Prefix ordering: common blocks first for LLM KV cache sharing.
      All keepers share the same autonomous-behavior, policy, continuity,
@@ -267,9 +248,7 @@ let build_keeper_system_prompt
       "\n</capabilities>\n\n";
       (* ── Identity anchor (compaction-safe, ~50 tokens) ──────── *)
       identity_anchor;
-      (* ── Home ground (CWD anchor) ───────────────────────────── *)
-      home_ground_block;
-      (* ── Registered repositories (valid repos/<name> segments) ─ *)
+      workspace_block;
       repositories_block;
       (* ── Keeper-specific blocks ─────────────────────────────── *)
       persona_block;

@@ -35,28 +35,87 @@ export function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
   `
 }
 
-// ── Playground Repos Panel ──────────────────────────────
+// ── Repository Checkouts Panel ──────────────────────────
 
-interface PlaygroundRepo {
-  name: string
-  path?: string
-  source?: string
-  branch?: string
-  latest_commit?: string
-  shallow?: boolean
-  last_action?: string
+type CatalogState = 'registered' | 'unregistered' | 'ambiguous' | 'unavailable' | 'origin_unavailable'
+type FreshnessState = 'current' | 'ahead' | 'behind' | 'diverged' | 'unavailable'
+
+interface CatalogProjection {
+  state: CatalogState | 'unsupported'
+  rawState: string | null
+  repositoryId: string | null
 }
 
-function isPlaygroundRepo(r: unknown): r is PlaygroundRepo {
-  if (!isRecord(r)) return false
-  const optionalString = (key: string) => r[key] === undefined || typeof r[key] === 'string'
-  return typeof r.name === 'string'
-    && optionalString('path')
-    && optionalString('source')
-    && optionalString('branch')
-    && optionalString('latest_commit')
-    && (r.shallow === undefined || typeof r.shallow === 'boolean')
-    && optionalString('last_action')
+interface FreshnessProjection {
+  state: FreshnessState | 'unsupported'
+  rawState: string | null
+  behind: number | null
+  ahead: number | null
+}
+
+interface RepositoryCheckout {
+  checkout_name: string
+  path: string
+  branch: string | null
+  head: string | null
+  dirty: boolean | null
+  inspection_state: string
+  catalog: CatalogProjection
+  freshness: FreshnessProjection
+}
+
+const CATALOG_STATES = new Set<CatalogState>([
+  'registered', 'unregistered', 'ambiguous', 'unavailable', 'origin_unavailable',
+])
+const FRESHNESS_STATES = new Set<FreshnessState>([
+  'current', 'ahead', 'behind', 'diverged', 'unavailable',
+])
+
+function parseCatalogProjection(value: unknown): CatalogProjection {
+  const rawState = isRecord(value) && typeof value.state === 'string' ? value.state : null
+  return {
+    state: rawState !== null && CATALOG_STATES.has(rawState as CatalogState)
+      ? rawState as CatalogState
+      : 'unsupported',
+    rawState,
+    repositoryId: isRecord(value) && typeof value.repository_id === 'string'
+      ? value.repository_id
+      : null,
+  }
+}
+
+function parseFreshnessProjection(value: unknown): FreshnessProjection {
+  const rawState = isRecord(value) && typeof value.state === 'string' ? value.state : null
+  return {
+    state: rawState !== null && FRESHNESS_STATES.has(rawState as FreshnessState)
+      ? rawState as FreshnessState
+      : 'unsupported',
+    rawState,
+    behind: isRecord(value) && typeof value.behind === 'number' ? value.behind : null,
+    ahead: isRecord(value) && typeof value.ahead === 'number' ? value.ahead : null,
+  }
+}
+
+function parseRepositoryCheckout(r: unknown): RepositoryCheckout | null {
+  if (!isRecord(r)) return null
+  if (!(typeof r.checkout_name === 'string'
+    && typeof r.path === 'string'
+    && (r.branch === null || typeof r.branch === 'string')
+    && (r.head === null || typeof r.head === 'string')
+    && (r.dirty === null || typeof r.dirty === 'boolean')
+    && typeof r.inspection_state === 'string'
+    && isRecord(r.catalog)
+    && isRecord(r.freshness))) return null
+  return {
+    checkout_name: r.checkout_name,
+    path: r.path,
+    branch: r.branch,
+    head: r.head,
+    dirty: r.dirty,
+    inspection_state: r.inspection_state,
+    catalog: parseCatalogProjection(r.catalog),
+    freshness: parseFreshnessProjection(r.freshness),
+  }
 }
 
 interface PlaygroundPR {
@@ -84,7 +143,7 @@ function isPlaygroundWorktree(r: unknown): r is PlaygroundWorktree {
   return typeof r.name === 'string' && typeof r.path === 'string'
 }
 
-export function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
+export function RepositoryCheckoutsPanel({ keeperName }: { keeperName: string }) {
   const detail = keeperStatusDetails.value[keeperName]
   if (!detail?.rawStatus) return null
   const raw = detail.rawStatus
@@ -92,33 +151,50 @@ export function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
   const execCtx = raw.execution_context
   if (!isRecord(execCtx)) return null
 
-  const repos = (Array.isArray(execCtx.playground_repos) ? execCtx.playground_repos : []).filter(isPlaygroundRepo)
+  const checkoutProjection = execCtx.repository_checkouts
+  const checkouts = isRecord(checkoutProjection) && Array.isArray(checkoutProjection.entries)
+    ? checkoutProjection.entries
+      .map(parseRepositoryCheckout)
+      .filter((checkout): checkout is RepositoryCheckout => checkout !== null)
+    : []
   const prs = (Array.isArray(execCtx.pr_history) ? execCtx.pr_history : []).filter(isPlaygroundPR)
   const worktrees = (Array.isArray(execCtx.active_worktrees) ? execCtx.active_worktrees : []).filter(isPlaygroundWorktree)
 
-  if (repos.length === 0 && prs.length === 0 && worktrees.length === 0) return null
+  if (checkouts.length === 0 && prs.length === 0 && worktrees.length === 0) return null
 
   return html`
-    <${PanelCard} title="플레이그라운드">
+    <${PanelCard} title="저장소 작업">
       <div class="flex flex-col gap-3">
-        ${repos.length > 0 ? html`
+        ${checkouts.length > 0 ? html`
           <div>
-            <${SectionHeader} size="xs" class="mb-1.5">저장소 (${repos.length})</${SectionHeader}>
+            <${SectionHeader} size="xs" class="mb-1.5">체크아웃 (${checkouts.length})</${SectionHeader}>
             <div class="flex flex-col gap-1.5">
-              ${repos.map(r => html`
+              ${checkouts.map(checkout => {
+                const freshnessState = checkout.freshness.state === 'unsupported'
+                  ? `unsupported:${checkout.freshness.rawState ?? 'malformed'}`
+                  : checkout.freshness.state
+                const catalogState = checkout.catalog.state === 'unsupported'
+                  ? `unsupported:${checkout.catalog.rawState ?? 'malformed'}`
+                  : checkout.catalog.state
+                const behind = checkout.freshness.behind
+                const ahead = checkout.freshness.ahead
+                const repositoryId = checkout.catalog.repositoryId
+                return html`
                 <div class="flex items-center gap-3 px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-row">
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2">
-                      <span class="text-xs font-medium text-[var(--color-fg-secondary)] truncate">${r.name}</span>
-                      <${MonoBadge}>${r.branch?.trim() || 'branch unavailable'}</${MonoBadge}>
-                      ${r.shallow === true ? html`<span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]">shallow</span>` : null}
+                      <span class="text-xs font-medium text-[var(--color-fg-secondary)] truncate">${checkout.checkout_name}</span>
+                      <${MonoBadge}>${checkout.branch?.trim() || 'branch unavailable'}</${MonoBadge}>
+                      ${checkout.dirty === true ? html`<span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]">dirty</span>` : null}
+                      <span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] border border-[var(--color-border-default)]">${catalogState}</span>
+                      <span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] border border-[var(--color-border-default)]">${freshnessState}</span>
                     </div>
-                    <div class="text-3xs text-[var(--color-fg-muted)] font-mono mt-0.5 truncate">${r.latest_commit?.trim() || 'Git metadata unavailable'}</div>
-                    ${r.path ? html`<div class="text-3xs text-[var(--color-fg-disabled)] font-mono mt-0.5 truncate">${r.path}</div>` : null}
+                    <div class="text-3xs text-[var(--color-fg-muted)] font-mono mt-0.5 truncate">${checkout.head?.trim() || 'Git metadata unavailable'}</div>
+                    <div class="text-3xs text-[var(--color-fg-disabled)] font-mono mt-0.5 truncate">${checkout.path}${repositoryId ? ` · ${repositoryId}` : ''}</div>
                   </div>
-                  <span class="text-3xs text-[var(--color-fg-disabled)] flex-shrink-0">${r.last_action?.trim() || r.source?.trim() || 'observed'}</span>
+                  <span class="text-3xs text-[var(--color-fg-disabled)] flex-shrink-0">${behind === null || ahead === null ? checkout.inspection_state : `behind ${behind} · ahead ${ahead}`}</span>
                 </div>
-              `)}
+              `})}
             </div>
           </div>
         ` : null}

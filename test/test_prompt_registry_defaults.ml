@@ -27,7 +27,7 @@ let write_file path content =
 
 let prompt_metadata key =
   match key with
-  | "keeper.unified.system" ->
+  | "test.render" ->
       ("test prompt for " ^ key,
        [ "identity_header"; "instructions_block"; "goal_lines" ])
   | "keeper.deliberation" ->
@@ -64,7 +64,7 @@ let fixtures =
     ("keeper.constitution", "Continuity rules from file");
     ("keeper.world", "MASC world from markdown");
     ("keeper.capabilities", "Capabilities from markdown");
-    ("keeper.unified.system", "{{identity_header}}\n{{instructions_block}}{{goal_lines}}");
+    ("test.render", "{{identity_header}}\n{{instructions_block}}{{goal_lines}}");
     ("keeper.deliberation", "Keeper {{keeper_name}} {{soul_profile}} {{goal}} {{triggers}} {{world_state}}");
     ("deliberation.decision", "structured deliberation prompt");
     ("analysis.dry_run", "DRY RUN analysis prompt");
@@ -171,7 +171,7 @@ let () =
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               match
-                Prompt_registry.render_prompt_template "keeper.unified.system"
+                Prompt_registry.render_prompt_template "test.render"
                   [
                     ("identity_header", "TestKeeper");
                     ("instructions_block", "do things");

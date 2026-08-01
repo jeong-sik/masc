@@ -65,5 +65,5 @@ readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.10"
 # TRACK_REF consumed by check-oas-pin.sh / oas-drift-check.sh /
 # sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584).
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="5e0619d6614efa31f76dd758fa26528b5e35550f"
+readonly OAS_AGENT_SDK_SHA="92e3eea36585b043119d9e79276dbf8a8a9e356f"
 readonly OAS_AGENT_SDK_MIN_VERSION="0.231.10"

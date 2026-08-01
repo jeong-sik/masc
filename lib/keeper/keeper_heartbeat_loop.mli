@@ -152,6 +152,19 @@ val compaction_outcomes_of_cycle_outcome :
     commit/failure observation it contains. Only committed outcomes mutate
     durable compaction state. *)
 
+val failed_selection_terminal_detail :
+  Keeper_unified_turn.turn_failure -> string option
+(** Pure source-disposal decision for a failed turn that consumed a pending
+    Event Queue selection. [Some detail] only for a typed context-overflow
+    terminal route with no pending [deferred_runtime_lane]: with automatic
+    overflow-compaction recovery removed (#26546) and #26545 bounding the
+    transmitted history, retrying that selection would re-dispatch the same
+    oversized payload every heartbeat, so the loop terminalizes it. [None]
+    preserves the selection — a deferred lane freezes a successor runtime for
+    this exact selection, other terminal classes may resolve without
+    compaction, retryable routes stay pending, and transcript corruption is
+    consumed by its own pause path. *)
+
 
 (** Pure: post-turn status event derived from the registry
     turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];

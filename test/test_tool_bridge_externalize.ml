@@ -18,7 +18,7 @@ module O = Tool_output
 let externalize_exn ?base_path value =
   match B.maybe_externalize ?base_path value with
   | Ok output -> output
-  | Error { message } -> Alcotest.fail message
+  | Error { message; _ } -> Alcotest.fail message
 
 let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
@@ -91,11 +91,15 @@ let test_bounded_inline_rejects_oversized_result () =
       (tool_ok ~tool_name:"keeper_artifact_read" payload)
   with
   | Ok _ -> Alcotest.fail "oversized bounded-inline result was accepted"
-  | Error { message; _ } ->
+  | Error { message; recoverable; error_class } ->
     Alcotest.(check string)
       "provider receives bounded projection failure"
-      "tool output artifact storage failed"
-      message
+      "tool output exceeds descriptor budget"
+      message;
+    Alcotest.(check bool) "bounded projection is not retryable" false recoverable;
+    (match error_class with
+     | Some Agent_sdk.Types.Deterministic -> ()
+     | _ -> Alcotest.fail "bounded projection failure is not deterministic")
 
 let test_artifact_reader_owns_inline_projection () =
   let descriptor =
@@ -316,7 +320,7 @@ let test_blob_store_failure_is_typed () =
       in
       (match B.maybe_externalize ~base_path:path payload with
        | Ok _ -> Alcotest.fail "failed store returned provider content"
-       | Error { message } ->
+       | Error { message; _ } ->
          Alcotest.(check bool)
            "storage failure is visible"
            true
@@ -325,7 +329,7 @@ let test_blob_store_failure_is_typed () =
       (match
          B.to_oas_typed_result
            ~base_path:path
-           ~on_externalization_error:(fun { message } ->
+           ~on_externalization_error:(fun { message; _ } ->
              observed := Some message)
            (tool_ok ~tool_name:"test" payload)
        with

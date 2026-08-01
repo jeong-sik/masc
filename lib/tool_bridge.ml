@@ -45,7 +45,14 @@ module Float = Stdlib.Float
 
 let default_externalize_threshold_bytes = Common.max_tool_output_bytes
 
-type externalization_error = { message : string }
+type projection_error_kind =
+  | Artifact_storage_failure
+  | Inline_budget_exceeded
+
+type externalization_error =
+  { kind : projection_error_kind
+  ; message : string
+  }
 
 let resolve_blob_store ?base_path () =
   match base_path with
@@ -77,7 +84,7 @@ let maybe_externalize ?base_path ?(mime = "text/plain")
         | exn ->
           let message = Printexc.to_string exn in
           Log.Misc.error "tool_bridge: blob externalization failed: %s" message;
-          Error { message })
+          Error { kind = Artifact_storage_failure; message })
 
 (** {1 Result Conversion} *)
 
@@ -94,7 +101,8 @@ let project_content ?base_path ~model_projection message =
     then Ok message
     else
       Error
-        { message =
+        { kind = Inline_budget_exceeded
+        ; message =
             Printf.sprintf
               "inline tool output exceeds descriptor budget (%d > %d bytes)"
               (String.length message)
@@ -102,14 +110,21 @@ let project_content ?base_path ~model_projection message =
         }
 ;;
 
-let externalization_tool_error ~recoverable _error =
-  make_tool_error
-    ~recoverable
-    ~error_class:
-      (if recoverable
-       then Agent_sdk.Types.Transient
-       else Agent_sdk.Types.Unknown)
-    "tool output artifact storage failed"
+let externalization_tool_error ~recoverable error =
+  match error.kind with
+  | Artifact_storage_failure ->
+    make_tool_error
+      ~recoverable
+      ~error_class:
+        (if recoverable
+         then Agent_sdk.Types.Transient
+         else Agent_sdk.Types.Unknown)
+      "tool output artifact storage failed"
+  | Inline_budget_exceeded ->
+    make_tool_error
+      ~recoverable:false
+      ~error_class:Agent_sdk.Types.Deterministic
+      "tool output exceeds descriptor budget"
 ;;
 
 let oas_error_class_of_tool_failure_class = function

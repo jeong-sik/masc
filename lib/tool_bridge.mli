@@ -28,7 +28,14 @@
 val default_externalize_threshold_bytes : int
 (** Canonical MASC tool-output budget used by the default projection. *)
 
-type externalization_error = { message : string }
+type projection_error_kind =
+  | Artifact_storage_failure
+  | Inline_budget_exceeded
+
+type externalization_error =
+  { kind : projection_error_kind
+  ; message : string
+  }
 
 val maybe_externalize :
   ?base_path:string ->

@@ -23,7 +23,7 @@ let completion_boundary_of_runtime_handler = function
 
 let terminal_externalization_failure
       state
-      ({ message } : Tool_bridge.externalization_error)
+      ({ message; _ } : Tool_bridge.externalization_error)
   =
   match state with
   | Keeper_tools_oas.Terminal_effect_completed ->

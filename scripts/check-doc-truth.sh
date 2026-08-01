@@ -133,6 +133,12 @@ require_contains docs/spec/10-dashboard.md 'The dashboard does not calculate ris
 require_contains docs/spec/10-dashboard.md 'Pending HITL does not render the Keeper or Workspace as paused.'
 require_contains docs/spec/10-dashboard.md '`INV-DASH-004`: connection failure is client-local.'
 
+# Purged surfaces must not come back. These are ratchets, not tombstones: the
+# retirement notices were deleted on purpose, but a doc edit that re-describes
+# a removed surface as current is the exact drift this file exists to catch.
+require_not_contains docs/spec/10-dashboard.md '| `/api/v1/command-plane` | GET |'
+require_not_contains docs/OAS-MASC-BOUNDARY.md 'lib/team_session/'
+
 docs_to_scan=(
   README.md
   ROADMAP.md

@@ -147,10 +147,22 @@ val record_crashed_cycle_failure :
 
 val compaction_outcomes_of_cycle_outcome :
   Keeper_heartbeat_loop_cycle.cycle_outcome ->
-  [ `Manual_committed of int | `Reactive_committed of int | `Failed ] list
+  [ `Manual_committed of int | `Failed ] list
 (** Pure mapping from one possibly nested cycle to every compaction
     commit/failure observation it contains. Only committed outcomes mutate
     durable compaction state. *)
+
+val failed_selection_terminal_detail :
+  Keeper_unified_turn.turn_failure -> string option
+(** Pure source-disposal decision for a failed turn that consumed a pending
+    Event Queue selection. [Some detail] only for a typed context-overflow
+    terminal route with no pending [deferred_runtime_lane]: with automatic
+    overflow-compaction recovery removed (#26546), retry has no evidence of a
+    smaller request, so the loop terminalizes the selection. [None]
+    preserves the selection — a deferred lane freezes a successor runtime for
+    this exact selection, other terminal classes may resolve without
+    compaction, retryable routes stay pending, and transcript corruption is
+    consumed by its own pause path. *)
 
 
 (** Pure: post-turn status event derived from the registry

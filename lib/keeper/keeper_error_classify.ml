@@ -778,11 +778,13 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
      count is bounded (by the runtime candidate list).  If this class ever
      needs a bound, add a real counter — do not claim one here without the
      device.
-   - context overflow: accounted at the point of detection by
-     [Keeper_turn_runtime_budget.record_overflow_failure]. Its in-lane recovery
-     either commits a smaller checkpoint before requeue or follows the ordinary
-     typed failure route. It has no separate retry counter or suspension
-     authority.
+   - context overflow: NOT exempt (#26546). The automatic in-lane compaction
+     recovery was removed after producing no committed compaction. A provider
+     overflow without a state-changing successor has no evidence that
+     mechanical retry will fit. The ordinary consecutive-failure threshold
+     bounds it, and the heartbeat additionally terminalizes the selected
+     source unless the failure carries a deferred runtime lane
+     ([Keeper_heartbeat_loop.failed_selection_terminal_detail]).
    - 0-byte empty completion: bounded by
      [Keeper_unified_turn_failure]'s per-keeper exemption budget — after
      [empty_completion_exemption_budget] consecutive exempted empty
@@ -811,7 +813,6 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_auto_recoverable_runtime_exhausted_error err
-  || is_context_overflow err
   || is_empty_completion_error err
   || is_invalid_request_error err
 

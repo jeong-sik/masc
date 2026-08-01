@@ -340,9 +340,6 @@ let rec compaction_outcomes_of_cycle_outcome = function
   | Cycle.Manual_compaction_failed _ -> [ `Failed ]
   | Cycle.Failed { failure; _ } ->
     (match failure.Keeper_unified_turn.source_disposition with
-     | Keeper_unified_turn.Requeue_after_context_compaction { commit_count } ->
-       [ `Reactive_committed commit_count ]
-     | Keeper_unified_turn.Acknowledge_after_in_turn_handling -> [ `Failed ]
      | Keeper_unified_turn.Follow_failure_route
      | Keeper_unified_turn.Pause_after_transcript_corruption _ -> [])
   | Cycle.Completed _
@@ -357,7 +354,6 @@ let rec compaction_outcomes_of_cycle_outcome = function
 
 let compaction_outcome_label = function
   | `Manual_committed _ -> "manual_committed"
-  | `Reactive_committed _ -> "reactive_committed"
   | `Failed -> "failed"
 ;;
 
@@ -366,6 +362,42 @@ let record_compaction_outcome_metric ~keeper_name outcome =
     Keeper_metrics.(to_string CompactionOutcomes)
     ~labels:[ "keeper", keeper_name; "outcome", compaction_outcome_label outcome ]
     ()
+;;
+
+(* Pure: source-disposal decision for a [Cycle.Failed] outcome that holds a
+   pending Event Queue selection. With automatic overflow-compaction recovery
+   removed (#26546), a typed context overflow has no automatic repair step.
+   Without a deferred runtime successor, retry has no evidence of a smaller
+   request. [Some detail] terminalizes the selection so the keeper moves on.
+   Everything else preserves the selection:
+   - a pending [deferred_runtime_lane] freezes a successor runtime for this
+     exact selection; the next cycle re-runs it on that lane, and a lane list
+     is finite, so the walk terminates without a timed retry cycle;
+   - other terminal classes ([Config_mismatch], [Internal_opaque],
+     [Terminal_effect_*], ...) may resolve without compaction (operator fix,
+     transient internal failure) and effect/durability outcomes must never be
+     acknowledged while unresolved;
+   - retryable routes stay pending for the next cycle;
+   - transcript corruption is consumed by its own pause path, not here. *)
+let failed_selection_terminal_detail
+      (failure : Keeper_unified_turn.turn_failure)
+  : string option
+  =
+  match failure.Keeper_unified_turn.source_disposition with
+  | Keeper_unified_turn.Pause_after_transcript_corruption _ -> None
+  | Keeper_unified_turn.Follow_failure_route ->
+    (match failure.Keeper_unified_turn.deferred_runtime_lane with
+     | Some _ -> None
+     | None ->
+       (match failure.Keeper_unified_turn.route with
+        | Keeper_runtime_failure_route.Exhausted_visible_alive
+            { terminal = Keeper_runtime_failure_route.Context_overflow
+            ; detail
+            ; _
+            } -> Some detail
+        | Keeper_runtime_failure_route.Exhausted_visible_alive _
+        | Keeper_runtime_failure_route.Retry_after_observed _
+        | Keeper_runtime_failure_route.Rotate_now _ -> None))
 ;;
 
 module For_testing = struct
@@ -839,10 +871,7 @@ let run_keepalive_unified_turn
          (match failure.Keeper_unified_turn.source_disposition with
           | Keeper_unified_turn.Pause_after_transcript_corruption { detail } ->
             commit_transcript_corruption ~detail
-          | Keeper_unified_turn.Follow_failure_route
-          | Keeper_unified_turn.Requeue_after_context_compaction _
-          | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
-            ())
+          | Keeper_unified_turn.Follow_failure_route -> ())
        | Some
            ( Cycle.Completed _
            | Cycle.Checkpointed _
@@ -886,17 +915,9 @@ let run_keepalive_unified_turn
               | Ok () -> remove_completed_selection ()
               | Error message -> record_event_queue_failure message)
            | Some (Cycle.Failed { failure; _ }) ->
-             (match failure.Keeper_unified_turn.source_disposition with
-              | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
-                terminalize_failed_selection
-                  ~selection
-                  ~detail:
-                    (Agent_sdk.Error.to_string
-                       failure.Keeper_unified_turn.error)
-              | Keeper_unified_turn.Follow_failure_route
-              | Keeper_unified_turn.Requeue_after_context_compaction _
-              | Keeper_unified_turn.Pause_after_transcript_corruption _ ->
-                ())
+             (match failed_selection_terminal_detail failure with
+              | Some detail -> terminalize_failed_selection ~selection ~detail
+              | None -> ())
            | Some (Cycle.Manual_compaction_failed { failure; _ }) ->
              terminalize_failed_selection
                ~selection
@@ -926,8 +947,7 @@ let run_keepalive_unified_turn
              record_compaction_outcome_metric
                ~keeper_name:meta_after_triage.name
                `Failed
-           | (`Manual_committed commit_count as outcome)
-           | (`Reactive_committed commit_count as outcome) ->
+           | `Manual_committed commit_count as outcome ->
              record_compaction_outcome_metric
                ~keeper_name:meta_after_triage.name
                outcome;

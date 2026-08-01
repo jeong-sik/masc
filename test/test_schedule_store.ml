@@ -2,6 +2,8 @@ open Alcotest
 open Schedule_domain
 open Schedule_store
 
+let json = testable Yojson.Safe.pp Yojson.Safe.equal
+
 let temp_dir () =
   let path = Filename.temp_file "schedule_store_test" "" in
   Sys.remove path;
@@ -578,10 +580,22 @@ let test_dispatched_one_shot_completes_by_exact_occurrence () =
   with_workspace
   @@ fun config ->
   let request = make_request ~schedule_id:"accepted-complete-1" () in
+  let dispatch_receipt =
+    `Assoc
+      [ "kind", `String "keeper.wake_enqueued"
+      ; "occurrence_id", `String "schedule:accepted-complete-1:200"
+      ]
+  in
   ignore (insert_ok config request);
   ignore (refresh_due config ~now:201.0);
   ignore (start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id);
-  ignore (accept_running config ~now:203.0 ~schedule_id:request.schedule_id ());
+  ignore
+    (accept_running
+       config
+       ~now:203.0
+       ~schedule_id:request.schedule_id
+       ~detail:dispatch_receipt
+       ());
   let digest = payload_digest request.payload in
   (match
      complete_dispatched_occurrence
@@ -590,7 +604,6 @@ let test_dispatched_one_shot_completes_by_exact_occurrence () =
        ~schedule_id:request.schedule_id
        ~due_at:request.due_at
        ~payload_digest:digest
-       ~detail:(`Assoc [ "kind", `String "keeper.turn_completed" ])
        ()
    with
    | Ok stored -> check_status "one-shot terminal success" Succeeded stored.status
@@ -602,12 +615,15 @@ let test_dispatched_one_shot_completes_by_exact_occurrence () =
        ~due_at:request.due_at
        ~payload_digest:digest
    with
-   | Some execution ->
-     check string "exact execution succeeded" "succeeded"
-       (execution_status_to_string execution.status);
-     check (option (float 0.001)) "exact execution finished" (Some 204.0)
-       execution.finished_at
-   | None -> fail "exact execution missing");
+     | Some execution ->
+       check string "exact execution succeeded" "succeeded"
+         (execution_status_to_string execution.status);
+       check (option (float 0.001)) "exact execution finished" (Some 204.0)
+         execution.finished_at;
+       check (option json) "dispatch receipt remains available after completion"
+         (Some dispatch_receipt)
+         execution.detail
+     | None -> fail "exact execution missing");
   (match
      complete_dispatched_occurrence
        config

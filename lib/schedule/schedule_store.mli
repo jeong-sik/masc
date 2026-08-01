@@ -174,12 +174,12 @@ val complete_dispatched_occurrence :
   schedule_id:string ->
   due_at:float ->
   payload_digest:string ->
-  ?detail:Yojson.Safe.t ->
   unit ->
   (Schedule_domain.schedule_request, store_error) result
 (** Marks one exact running/dispatched occurrence succeeded. Idempotent when
     that occurrence is already succeeded. A one-shot request becomes
-    [Succeeded]; an already-advanced recurring request keeps its next due row. *)
+    [Succeeded]; an already-advanced recurring request keeps its next due row.
+    The original dispatch receipt in the execution detail is preserved. *)
 
 val fail_dispatched_occurrence :
   Workspace_utils.config ->

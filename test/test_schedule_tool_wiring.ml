@@ -208,6 +208,51 @@ let test_create_list_get_cancel () =
      |> to_string)
 ;;
 
+let test_create_accepts_explicit_iso8601_offset () =
+  with_config
+  @@ fun config ->
+  let create ~schedule_id ~due_at_iso =
+    dispatch_exn config Tool_schemas_schedule.Create_request
+      (`Assoc
+        [ "schedule_id", `String schedule_id
+        ; "due_at_iso", `String due_at_iso
+        ; "payload_kind", `String Schedule_supported_kinds.keeper_wake
+        ; ( "payload_body"
+          , `Assoc
+              [ "keeper_name", `String "schedule-keeper"
+              ; "message", `String "run at nine in Korea"
+              ] )
+        ])
+  in
+  let result =
+    create
+      ~schedule_id:"sched-kst-offset"
+      ~due_at_iso:"2026-08-02T09:00:00+09:00"
+  in
+  check bool "explicit ISO-8601 offset accepted" true (Tool_result.is_success result);
+  let open Yojson.Safe.Util in
+  check string "offset normalized to UTC" "2026-08-02T00:00:00Z"
+    (Tool_result.data result |> member "due_at_iso" |> to_string);
+  let west =
+    create
+      ~schedule_id:"sched-west-offset"
+      ~due_at_iso:"2099-01-02T00:30:00-03:30"
+  in
+  check bool "negative ISO-8601 offset accepted" true (Tool_result.is_success west);
+  check string "negative offset normalized to UTC" "2099-01-02T04:00:00Z"
+    (Tool_result.data west |> member "due_at_iso" |> to_string);
+  let invalid =
+    create
+      ~schedule_id:"sched-invalid-date"
+      ~due_at_iso:"2099-02-29T09:00:00+09:00"
+  in
+  check bool "invalid civil date rejected" false (Tool_result.is_success invalid);
+  check bool "invalid date error is explicit" true
+    (String_util.contains_substring
+       (Tool_result.message invalid)
+       "due_at_iso must be")
+;;
+
 let test_removed_convenience_input_does_not_synthesize_payload () =
   with_config
   @@ fun config ->
@@ -412,6 +457,8 @@ let () =
     [ ( "wiring"
       , [ test_case "flat tool surface" `Quick test_flat_tool_surface
         ; test_case "create list get cancel" `Quick test_create_list_get_cancel
+        ; test_case "create accepts explicit ISO-8601 offset" `Quick
+            test_create_accepts_explicit_iso8601_offset
         ; test_case "removed convenience input does not synthesize payload" `Quick
             test_removed_convenience_input_does_not_synthesize_payload
         ; test_case "unregistered wake target rejected" `Quick

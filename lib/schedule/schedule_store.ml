@@ -660,7 +660,6 @@ let complete_dispatched_occurrence
       ~schedule_id
       ~due_at
       ~payload_digest
-      ?detail
       () =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
@@ -704,7 +703,6 @@ let complete_dispatched_occurrence
              { execution with
                status = Execution_succeeded
              ; finished_at = Some now
-             ; detail
              ; error = None
              })
       in

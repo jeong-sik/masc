@@ -25,124 +25,10 @@ let required_string args key =
 let optional_float args key = Json_util.get_float args key
 let optional_int args key = Json_util.get_int args key
 
-let all_digits value start length =
-  let rec loop index =
-    index = start + length
-    ||
-    match value.[index] with
-    | '0' .. '9' -> loop (index + 1)
-    | _ -> false
-  in
-  length > 0 && start >= 0 && start + length <= String.length value && loop start
-;;
-
-let int_component value start length =
-  if all_digits value start length
-  then Some (int_of_string (String.sub value start length))
-  else None
-;;
-
-let is_leap_year year = year mod 4 = 0 && (year mod 100 <> 0 || year mod 400 = 0)
-
-let days_in_month ~year = function
-  | 1 | 3 | 5 | 7 | 8 | 10 | 12 -> 31
-  | 4 | 6 | 9 | 11 -> 30
-  | 2 -> if is_leap_year year then 29 else 28
-  | _ -> 0
-;;
-
-(* Gregorian civil date to days since 1970-01-01. The arithmetic is independent
-   of the host timezone, unlike [Unix.mktime]. *)
-let days_since_unix_epoch ~year ~month ~day =
-  let adjusted_year = if month <= 2 then year - 1 else year in
-  let era = adjusted_year / 400 in
-  let year_of_era = adjusted_year - (era * 400) in
-  let shifted_month = month + if month > 2 then -3 else 9 in
-  let day_of_year = (((153 * shifted_month) + 2) / 5) + day - 1 in
-  let day_of_era =
-    (year_of_era * 365) + (year_of_era / 4) - (year_of_era / 100) + day_of_year
-  in
-  (era * 146097) + day_of_era - 719468
-;;
-
-let parse_iso8601_zone value =
-  if String.equal value "Z"
-  then Some 0
-  else if String.length value = 6 && (value.[0] = '+' || value.[0] = '-')
-          && value.[3] = ':'
-  then
-    match int_component value 1 2, int_component value 4 2 with
-    | Some hour, Some minute when hour <= 23 && minute <= 59 ->
-      let seconds = ((hour * 60) + minute) * 60 in
-      Some (if value.[0] = '+' then seconds else -seconds)
-    | _ -> None
-  else None
-;;
-
-let parse_iso8601_suffix suffix =
-  if String.length suffix > 0 && suffix.[0] = '.'
-  then
-    let rec fraction_end index =
-      if index >= String.length suffix
-      then index
-      else
-        match suffix.[index] with
-        | '0' .. '9' -> fraction_end (index + 1)
-        | _ -> index
-    in
-    let zone_start = fraction_end 1 in
-    if zone_start = 1 || zone_start = String.length suffix
-    then None
-    else
-      let fraction = float_of_string_opt ("0" ^ String.sub suffix 0 zone_start) in
-      let zone = String.sub suffix zone_start (String.length suffix - zone_start) in
-      (match fraction, parse_iso8601_zone zone with
-       | Some fraction, Some offset -> Some (fraction, offset)
-       | _ -> None)
-  else Option.map (fun offset -> 0.0, offset) (parse_iso8601_zone suffix)
-;;
-
 let parse_due_at_iso8601 value =
-  if String.length value < 20
-     || value.[4] <> '-'
-     || value.[7] <> '-'
-     || value.[10] <> 'T'
-     || value.[13] <> ':'
-     || value.[16] <> ':'
-  then None
-  else
-    match
-      int_component value 0 4,
-      int_component value 5 2,
-      int_component value 8 2,
-      int_component value 11 2,
-      int_component value 14 2,
-      int_component value 17 2,
-      parse_iso8601_suffix (String.sub value 19 (String.length value - 19))
-    with
-    | ( Some year,
-        Some month,
-        Some day,
-        Some hour,
-        Some minute,
-        Some second,
-        Some (fraction, offset_seconds) )
-      when year >= 1
-           && month >= 1
-           && month <= 12
-           && day >= 1
-           && day <= days_in_month ~year month
-           && hour <= 23
-           && minute <= 59
-           && second <= 59 ->
-      let local_seconds =
-        (days_since_unix_epoch ~year ~month ~day * 86400)
-        + (hour * 3600)
-        + (minute * 60)
-        + second
-      in
-      Some ((float_of_int (local_seconds - offset_seconds)) +. fraction)
-    | _ -> None
+  match Ptime.of_rfc3339 ~strict:true value with
+  | Error _ -> None
+  | Ok (timestamp, _, _) -> Some (Ptime.to_float_s (Ptime.truncate ~frac_s:0 timestamp))
 ;;
 
 let parse_due_at args =
@@ -153,7 +39,7 @@ let parse_due_at args =
      | Some due_at -> Ok (Some due_at)
      | None ->
        Error
-         "due_at_iso must be YYYY-MM-DDTHH:MM:SS[.fraction]Z or include an explicit offset such as +09:00")
+         "due_at_iso must be an RFC 3339 timestamp with Z or an explicit offset such as +09:00")
   | None, None -> Ok None
 ;;
 

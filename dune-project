@@ -39,6 +39,7 @@
   (ws-direct-eio (>= 0.1.0))
   ; Standard dependencies
   (re (>= 1.10))
+  (ptime (>= 1.2))
   (yojson (>= 2.0))
   (otoml (>= 1.0))
   (graphql (>= 0.14.0))

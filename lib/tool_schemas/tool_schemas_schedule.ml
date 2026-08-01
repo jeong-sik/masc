@@ -90,7 +90,7 @@ let create_schema =
         "due_at_unix"
     ; string_prop
         ~description:
-          "ISO-8601 timestamp with Z or an explicit numeric offset, for example 2026-08-02T09:00:00+09:00. It is normalized to UTC. Provide this, due_at_unix, or a calendar recurrence (daily/cron) that can derive the first due time."
+          "RFC 3339 timestamp with Z or an explicit numeric offset, for example 2026-08-02T09:00:00+09:00. It is normalized to whole-second UTC; fractional seconds are accepted and truncated. Provide this, due_at_unix, or a calendar recurrence (daily/cron) that can derive the first due time."
         "due_at_iso"
     ; object_prop
         ~description:

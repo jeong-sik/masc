@@ -241,6 +241,20 @@ let test_create_accepts_explicit_iso8601_offset () =
   check bool "negative ISO-8601 offset accepted" true (Tool_result.is_success west);
   check string "negative offset normalized to UTC" "2099-01-02T04:00:00Z"
     (Tool_result.data west |> member "due_at_iso" |> to_string);
+  let fractional =
+    create
+      ~schedule_id:"sched-fractional-offset"
+      ~due_at_iso:"2099-01-02T09:00:00.123456789+09:00"
+  in
+  check bool "fractional RFC 3339 accepted" true (Tool_result.is_success fractional);
+  check string "fraction normalized to whole-second UTC" "2099-01-02T00:00:00Z"
+    (Tool_result.data fractional |> member "due_at_iso" |> to_string);
+  let non_rfc3339 =
+    create
+      ~schedule_id:"sched-non-rfc3339-offset"
+      ~due_at_iso:"2099-01-02T09:00:00+0900"
+  in
+  check bool "offset without colon rejected" false (Tool_result.is_success non_rfc3339);
   let invalid =
     create
       ~schedule_id:"sched-invalid-date"

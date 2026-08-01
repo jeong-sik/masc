@@ -103,7 +103,16 @@ if [[ "${pin_source}" == "${default_pin_source}" ]]; then
         exit 1
       fi
     else
-      echo "WARN: could not fetch ${OAS_AGENT_SDK_REMOTE_REF} from ${OAS_AGENT_SDK_URL}; skipping ref-reachability check" >&2
+      # A fetch failure is not evidence that the pin is reachable. This guard
+      # exists precisely because an orphan SHA still resolves locally until
+      # GitHub collects it, so skipping it on the failure path would pass the
+      # case it was written to catch. Offline verification has its own switch.
+      echo "could not fetch ${OAS_AGENT_SDK_REMOTE_REF} from ${OAS_AGENT_SDK_URL}" >&2
+      echo "  ref-reachability is unproven, which is not the same as proven." >&2
+      echo "  repair: restore network access, or run with --local-only to check" >&2
+      echo "  manifests alone." >&2
+      rm -rf "${reachability_scratch}"
+      exit 1
     fi
     rm -rf "${reachability_scratch}"
   fi

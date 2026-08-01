@@ -303,11 +303,16 @@ let next_actions_hint ~requires_verification status =
 
 let task_started_at_unix status =
   let default_time = Time_compat.now () in
+  let timestamp_or_default value =
+    match Masc_domain.parse_iso8601_opt value with
+    | Some timestamp -> timestamp
+    | None -> default_time
+  in
   match status with
   | Masc_domain.Claimed { claimed_at; _ } ->
-    Masc_domain.parse_iso8601 ~default_time claimed_at
+    timestamp_or_default claimed_at
   | Masc_domain.InProgress { started_at; _ } ->
-    Masc_domain.parse_iso8601 ~default_time started_at
+    timestamp_or_default started_at
   | Masc_domain.Todo
   | Masc_domain.AwaitingVerification _
   | Masc_domain.Done _

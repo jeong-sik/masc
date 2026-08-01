@@ -134,9 +134,9 @@ val record :
   ?fallback_used:bool ->
   ?disagreement_with_truth:bool ->
   generated_at:string ->
-  ?generated_at_unix:float ->
+  generated_at_unix:float ->
   fresh_until:string ->
-  ?fresh_until_unix:float ->
+  fresh_until_unix:float ->
   keeper_name:string ->
   unit ->
   record
@@ -155,9 +155,8 @@ val record :
     - [supersedes]: auto-populated with the previous
       {!latest_active} judgment_id for the same key (or empty
       list if first).
-    - [generated_at_unix]: [now] when omitted.
-    - [fresh_until_unix]: parsed from [fresh_until] ISO string
-      when omitted.
+    - [generated_at_unix] and [fresh_until_unix]: required numeric timestamps;
+      the write boundary does not reparse display strings.
     - [confidence]: clamped to [\[0.0, 1.0\]].
     - [summary]: trimmed.
     - [evidence_refs]: trimmed + empty entries dropped.

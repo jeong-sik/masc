@@ -15,28 +15,8 @@ let now_iso () =
     (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
     tm.tm_hour tm.tm_min tm.tm_sec
 
-(** Parse ISO8601 "YYYY-MM-DDTHH:MM:SSZ" to Unix float (UTC). *)
-let parse_iso8601_opt s =
-  try
-    Scanf.sscanf s "%04d-%02d-%02dT%02d:%02d:%02dZ"
-      (fun year mon day hour min sec ->
-        let tm = {
-          Unix.tm_sec = sec; tm_min = min; tm_hour = hour;
-          tm_mday = day; tm_mon = mon - 1; tm_year = year - 1900;
-          tm_wday = 0; tm_yday = 0; tm_isdst = false;
-        } in
-        let local_epoch, _ = Unix.mktime tm in
-        let utc_of_local = Unix.gmtime local_epoch in
-        let utc_as_local, _ = Unix.mktime utc_of_local in
-        let tz_offset = local_epoch -. utc_as_local in
-        Some (local_epoch +. tz_offset))
-  with Scanf.Scan_failure _ | Failure _ | End_of_file -> None
-
-(** Parse ISO8601 timestamp to Unix float. Returns default_time on parse failure. *)
-let parse_iso8601 ?(default_time = Time_compat.now () -. 60.0) timestamp =
-  match parse_iso8601_opt timestamp with
-  | Some unix_ts -> unix_ts
-  | None -> default_time
+(** Parse a strict RFC 3339 timestamp to Unix seconds. *)
+let parse_iso8601_opt value = Time_codec.parse_rfc3339_opt value
 
 (** Agent status - compile-time state machine *)
 type agent_status =

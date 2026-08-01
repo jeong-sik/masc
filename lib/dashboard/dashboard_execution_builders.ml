@@ -63,10 +63,12 @@ let last_message_map messages =
   List.iter
     (fun (message : Masc_domain.message) ->
       let key = String.lowercase_ascii (String.trim message.from_agent) in
-      let ts = Masc_domain.parse_iso8601 message.timestamp in
-      match Hashtbl.find_opt table key with
-      | Some (existing_ts, _) when existing_ts >= ts -> ()
-      | _ -> Hashtbl.replace table key (ts, message))
+      match Masc_domain.parse_iso8601_opt message.timestamp with
+      | None -> ()
+      | Some ts -> (
+          match Hashtbl.find_opt table key with
+          | Some (existing_ts, _) when existing_ts >= ts -> ()
+          | _ -> Hashtbl.replace table key (ts, message)))
     messages;
   table
 

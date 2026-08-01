@@ -893,6 +893,11 @@
  (modules test_health_status)
  (libraries alcotest masc.masc_types masc.dashboard_utils))
 
+(test
+ (name test_time_codec)
+ (modules test_time_codec)
+ (libraries alcotest masc.time_codec))
+
 ; Group 3: Eio-native tests (single-module, standard deps)
 ; Merged from ~100 individual (test ...) stanzas.
 

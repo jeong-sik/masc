@@ -148,28 +148,12 @@ let test_parse_iso_timestamp_fractional_offset_matches_utc () =
       Alcotest.fail
         "expected dashboard parser to preserve fractional timezone offsets"
 
-let test_parse_iso_timestamp_local_without_timezone_is_supported () =
+let test_parse_iso_timestamp_local_without_timezone_is_rejected () =
   let ts = "2026-04-08T12:38:15.125" in
-  match Dashboard_labels.parse_iso_timestamp ts with
-  | Some actual ->
-      let tm =
-        {
-          Unix.tm_sec = 15;
-          tm_min = 38;
-          tm_hour = 12;
-          tm_mday = 8;
-          tm_mon = 3;
-          tm_year = 126;
-          tm_wday = 0;
-          tm_yday = 0;
-          tm_isdst = false;
-        }
-      in
-      let expected, _ = Unix.mktime tm in
-      Alcotest.(check bool) "bare local timestamps stay parseable" true
-        (abs_float (actual -. (expected +. 0.125)) < 0.001)
-  | None ->
-      Alcotest.fail "expected dashboard parser to accept bare local timestamps"
+  Alcotest.(check (option (float 0.001)))
+    "bare local timestamps have no UTC meaning"
+    None
+    (Dashboard_labels.parse_iso_timestamp ts)
 
 let test_parse_iso_timestamp_empty_rejected () =
   Alcotest.(check (option (float 0.001))) "empty timestamps are rejected" None
@@ -288,8 +272,8 @@ let () =
           ("numeric offset normalizes", `Quick, test_parse_iso_timestamp_offset_matches_utc);
           ("fractional offset normalizes", `Quick,
             test_parse_iso_timestamp_fractional_offset_matches_utc);
-          ("bare local timestamp", `Quick,
-            test_parse_iso_timestamp_local_without_timezone_is_supported);
+          ("bare local timestamp rejected", `Quick,
+            test_parse_iso_timestamp_local_without_timezone_is_rejected);
           ("empty timestamp rejected", `Quick,
             test_parse_iso_timestamp_empty_rejected);
           ("garbage timestamp rejected", `Quick,

@@ -90,12 +90,17 @@ and handle_cancel_task ~tool_name ~start_time ctx args =
   let reason = get_string args "reason" "" in
   let tasks = Workspace.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
+  let timestamp_or ~default value =
+    match Masc_domain.parse_iso8601_opt value with
+    | Some timestamp -> timestamp
+    | None -> default
+  in
   let started_at_actual = match task_opt with
     | Some t -> (match t.task_status with
         | Masc_domain.InProgress { started_at; _ } ->
-            Masc_domain.parse_iso8601 ~default_time:(Time_compat.now () -. 60.0) started_at
+            timestamp_or ~default:(Time_compat.now () -. 60.0) started_at
         | Masc_domain.Claimed { claimed_at; _ } ->
-            Masc_domain.parse_iso8601 ~default_time:(Time_compat.now () -. 60.0) claimed_at
+            timestamp_or ~default:(Time_compat.now () -. 60.0) claimed_at
         | _ -> Time_compat.now () -. 60.0)
     | None -> Time_compat.now () -. 60.0
   in
@@ -298,18 +303,23 @@ and handle_transition ~tool_name ~start_time ctx args =
   else
   let action_s = Masc_domain.task_action_to_string action in
   let default_time = Time_compat.now () -. 60.0 in
+  let timestamp_or_default value =
+    match Masc_domain.parse_iso8601_opt value with
+    | Some timestamp -> timestamp
+    | None -> default_time
+  in
   let (started_at_actual, collaborators_from_task) = match task_opt with
     | Some t -> (match t.task_status with
         | Masc_domain.InProgress { started_at; assignee } ->
-            let ts = Masc_domain.parse_iso8601 ~default_time started_at in
+            let ts = timestamp_or_default started_at in
             let collabs = if not (String.equal assignee "") && not (String.equal assignee ctx.agent_name) then [assignee] else [] in
             (ts, collabs)
         | Masc_domain.Claimed { claimed_at; assignee } ->
-            let ts = Masc_domain.parse_iso8601 ~default_time claimed_at in
+            let ts = timestamp_or_default claimed_at in
             let collabs = if not (String.equal assignee "") && not (String.equal assignee ctx.agent_name) then [assignee] else [] in
             (ts, collabs)
         | Masc_domain.AwaitingVerification { submitted_at; assignee; _ } ->
-            let ts = Masc_domain.parse_iso8601 ~default_time submitted_at in
+            let ts = timestamp_or_default submitted_at in
             let collabs =
               if
                 not (String.equal assignee "")

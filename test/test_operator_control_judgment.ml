@@ -220,6 +220,32 @@ let test_operator_judgment_rejects_retired_target_type_aliases () =
             "write rejects namespace"
             Operator_action_constants.workspace_target_type_error err)
 
+let test_operator_judgment_requires_numeric_timestamps () =
+  let base_fields =
+    [ ("target_type", `String "workspace")
+    ; ("generated_at_unix", `Float 1.0)
+    ; ("fresh_until_unix", `Float 2.0)
+    ]
+  in
+  let without key = `Assoc (List.remove_assoc key base_fields) in
+  Alcotest.(check (result reject string))
+    "missing generated timestamp is rejected"
+    (Error "missing generated_at_unix")
+    (Operator_judgment.of_yojson (without "generated_at_unix"));
+  Alcotest.(check (result reject string))
+    "missing freshness timestamp is rejected"
+    (Error "missing fresh_until_unix")
+    (Operator_judgment.of_yojson (without "fresh_until_unix"));
+  let invalid =
+    `Assoc
+      (("generated_at_unix", `String "1970-01-01T00:00:01Z")
+       :: List.remove_assoc "generated_at_unix" base_fields)
+  in
+  Alcotest.(check (result reject string))
+    "display timestamp is not silently reparsed"
+    (Error "invalid generated_at_unix")
+    (Operator_judgment.of_yojson invalid)
+
 let test_confirm_consumes_pending_token_before_delegated_action_fails () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -289,6 +315,8 @@ let tests =
       test_operator_judgment_write_and_latest_roundtrip;
     Alcotest.test_case "rejects retired target type aliases" `Quick
       test_operator_judgment_rejects_retired_target_type_aliases;
+    Alcotest.test_case "requires numeric timestamps" `Quick
+      test_operator_judgment_requires_numeric_timestamps;
     Alcotest.test_case "confirm consumes token before delegated action failure" `Quick
       test_confirm_consumes_pending_token_before_delegated_action_fails;
   ]

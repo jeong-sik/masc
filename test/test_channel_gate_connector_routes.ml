@@ -74,8 +74,8 @@ let python_utc_iso_now () =
 let test_gate_time_parser_accepts_python_utc_isoformat () =
   check bool "python UTC isoformat parsed" true
     (Option.is_some (Gate_time_util.parse_iso8601_opt (python_utc_iso_now ())));
-  check bool "non-UTC offset remains rejected" true
-    (Option.is_none
+  check bool "explicit non-UTC offset normalizes" true
+    (Option.is_some
        (Gate_time_util.parse_iso8601_opt "2026-06-06T00:00:00+09:00"))
 
 let test_connector_capability_wire_contract () =

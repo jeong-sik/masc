@@ -6,7 +6,6 @@ end
 
 val now_iso : unit -> string
 val parse_iso8601_opt : string -> float option
-val parse_iso8601 : ?default_time:float -> string -> float
 
 type agent_status =
   | Active

@@ -30,6 +30,10 @@ val resolve_state_file_path : base_path:string -> unit -> state_file_resolution
 (** Resolve the state-file path. Explicit env overrides win; otherwise the
     default state file lives under [<base_path>/.masc]. *)
 
+module For_testing : sig
+  val parse_state_timestamp : string -> float option
+end
+
 val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:string -> unit
 (** [start ~sw ~clock ~base_path] forks the poller fiber under [sw]. Wired from
     [Server_bootstrap_loops.start_background_maintenance]. Cancelled

@@ -375,6 +375,57 @@ let test_threaded_stimulus_decision_renders_wake_reason () =
   check bool "bootstrap reason listed" true
     (contains ~needle:"bootstrap" threaded)
 
+let meta_after_actionless_cycle () =
+  let proactive_rt = meta.runtime.proactive_rt in
+  { meta with
+    runtime =
+      { meta.runtime with
+        proactive_rt =
+          { proactive_rt with
+            last_ts = Time_compat.now () -. 1.0
+          ; consecutive_noop_count = 1
+          } }
+  }
+
+let test_actionless_cycle_backoff_is_operator_visible () =
+  let decision =
+    WO.keeper_cycle_decision ~meta:(meta_after_actionless_cycle ()) base_observation
+  in
+  check bool "actionless cycle is rate-limited" false decision.WO.should_run;
+  check bool "backoff keeps scheduled channel" true
+    (WO.is_autonomous decision.WO.channel);
+  match decision.WO.verdict with
+  | WO.Skip { reasons = (WO.No_progress_cooldown_pending { remaining_sec }, []) } ->
+    check bool "remaining delay is positive" true (remaining_sec > 0)
+  | WO.Skip _ -> Alcotest.fail "expected typed no-progress cooldown reason"
+  | WO.Run _ -> Alcotest.fail "expected no-progress cooldown"
+
+let test_fresh_backlog_bypasses_actionless_backoff () =
+  let observation =
+    { base_observation with
+      claimable_task_count = 1
+    ; unclaimed_task_count = 1
+    ; backlog_updated_since_last_scheduled_autonomous = true
+    }
+  in
+  let decision =
+    WO.keeper_cycle_decision ~meta:(meta_after_actionless_cycle ()) observation
+  in
+  check bool "fresh backlog is not delayed" true decision.WO.should_run;
+  check bool "fresh backlog remains autonomous" true
+    (WO.is_autonomous decision.WO.channel)
+
+let test_reactive_stimulus_bypasses_actionless_backoff () =
+  let decision =
+    WO.keeper_cycle_decision
+      ~event_queue_triggers:[ WO.Bootstrap_stimulus ]
+      ~meta:(meta_after_actionless_cycle ())
+      base_observation
+  in
+  check bool "reactive stimulus is not delayed" true decision.WO.should_run;
+  check bool "reactive stimulus keeps reactive channel" true
+    (not (WO.is_autonomous decision.WO.channel))
+
 let test_bootstrap_stimulus_keeps_reactive_post_action () =
   let decision =
     WO.keeper_cycle_decision
@@ -529,6 +580,12 @@ let () =
         [
           test_case "stimulus decision renders wake reason" `Quick
             test_threaded_stimulus_decision_renders_wake_reason;
+          test_case "actionless scheduled cycle has typed visible backoff" `Quick
+            test_actionless_cycle_backoff_is_operator_visible;
+          test_case "fresh backlog bypasses actionless backoff" `Quick
+            test_fresh_backlog_bypasses_actionless_backoff;
+          test_case "reactive stimulus bypasses actionless backoff" `Quick
+            test_reactive_stimulus_bypasses_actionless_backoff;
           test_case "bootstrap keeps reactive post-action" `Quick
             test_bootstrap_stimulus_keeps_reactive_post_action;
           test_case "preview invents no wake reason" `Quick

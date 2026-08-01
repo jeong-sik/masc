@@ -61,6 +61,7 @@ type turn_reason =
 type skip_reason =
   | Keeper_paused
   | Scheduled_autonomous_disabled
+  | No_progress_cooldown_pending of { remaining_sec : int }
   | Reactive_disabled
       (** RFC-0297 P0-1: the global reactive kill-switch
           (MASC_KEEPER_REACTIVE_ENABLED) is off, so a pending reactive trigger
@@ -95,6 +96,7 @@ let turn_reason_of_event_queue_trigger = function
 let skip_reason_to_string = function
   | Keeper_paused -> "keeper_paused"
   | Scheduled_autonomous_disabled -> "scheduled_autonomous_disabled"
+  | No_progress_cooldown_pending _ -> "no_progress_cooldown_pending"
   | Reactive_disabled -> "reactive_disabled"
 ;;
 

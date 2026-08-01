@@ -181,6 +181,9 @@ type turn_reason =
 type skip_reason =
   | Keeper_paused
   | Scheduled_autonomous_disabled
+  | No_progress_cooldown_pending of { remaining_sec : int }
+      (** Previous scheduled cycle made no durable progress; fresh backlog and
+          reactive/event stimuli bypass the remaining delay. *)
   | Reactive_disabled
 
 (** Keeper cycle decision with non-empty reason list (NEL).

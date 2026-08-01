@@ -175,7 +175,11 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
                  (Option.map validated_evidence_preview validated_evidence));
         consecutive_noop_count =
           (if update_proactive_rt && is_scheduled_autonomous_cycle then
-             if is_noop_cycle ~has_text ~tools_used:tool_names
+             (* Text-only autonomous turns cannot clear a durable signal. They
+                are counted as no-progress even when the model explains that
+                it found no actionable work; a later reactive/new-backlog
+                signal bypasses the resulting scheduler backoff. *)
+             if not has_substantive_tools && not has_validated_evidence
              then rt.proactive_rt.consecutive_noop_count + 1
              else 0
            else rt.proactive_rt.consecutive_noop_count);

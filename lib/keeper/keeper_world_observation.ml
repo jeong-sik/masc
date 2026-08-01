@@ -135,6 +135,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
 type skip_reason = Keeper_world_observation_turn_types.skip_reason =
   | Keeper_paused
   | Scheduled_autonomous_disabled
+  | No_progress_cooldown_pending of { remaining_sec : int }
   | Reactive_disabled
 
 type turn_verdict = Keeper_world_observation_turn_types.turn_verdict =
@@ -1242,6 +1243,43 @@ let keeper_cycle_decision
         ; since_last_scheduled_autonomous = Some since_last_scheduled_autonomous
         }
       else (
+        (* Actionless scheduled cycles are durable no-progress: a text-only
+           answer or observation-only tool pass cannot clear the signal that
+           caused the wake. Back off the next scheduled attempt by 2x, then
+           4x (the persisted [consecutive_noop_count] is capped at two for
+           this admission policy). Fresh backlog writes and all reactive/event
+           stimuli bypass this gate, so it cannot delay new work or operator
+           attention. The base is the actual heartbeat cadence rather than a
+           second hand-written interval. *)
+        let no_progress_cooldown_sec =
+          let backoff_shift =
+            min 2 meta.runtime.proactive_rt.consecutive_noop_count
+          in
+          Keeper_heartbeat_snapshot.keepalive_interval_sec ()
+          * (1 lsl max 0 backoff_shift)
+        in
+        let no_progress_remaining_sec =
+          max 0 (no_progress_cooldown_sec - since_last_scheduled_autonomous)
+        in
+        let no_progress_cooldown_pending =
+          meta.runtime.proactive_rt.consecutive_noop_count > 0
+          && not observation.backlog_updated_since_last_scheduled_autonomous
+          && since_last_scheduled_autonomous < no_progress_cooldown_sec
+        in
+        if no_progress_cooldown_pending then
+          { should_run = false
+          ; channel = Scheduled_autonomous
+          ; verdict =
+              Skip
+                { reasons =
+                    ( No_progress_cooldown_pending
+                        { remaining_sec = no_progress_remaining_sec }
+                    , [] )
+                }
+          ; since_last_scheduled_autonomous =
+              Some since_last_scheduled_autonomous
+          }
+        else (
         (* A scheduled heartbeat is itself the wake signal. Backlog, schedule,
            idle time, and previous-turn age remain observations for the model;
            fixed local thresholds never suppress a Keeper cycle. *)
@@ -1271,7 +1309,7 @@ let keeper_cycle_decision
         ; channel = Scheduled_autonomous
         ; verdict = Run { reasons = Scheduled_autonomous_turn, run_reasons }
         ; since_last_scheduled_autonomous = Some since_last_scheduled_autonomous
-        })
+        }) )
     in
     match reactive_triggers with
     | first :: rest when reactive_gate_enabled ->

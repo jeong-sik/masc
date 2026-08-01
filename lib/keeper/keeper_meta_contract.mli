@@ -74,11 +74,11 @@ type proactive_runtime = {
   last_reason : string;
   last_preview : string;
   consecutive_noop_count : int;
-      (** Consecutive autonomous cycles where only observation
-          tools were used with no substantive action.  Used by
-          [effective_scheduled_autonomous_cooldown] for
-          exponential backoff: cooldown *= 2^min(n, 2),
-          capping at 4x.  Resets on any productive cycle. *)
+      (** Consecutive autonomous cycles with no substantive tool call or
+          validated evidence. Text-only explanations cannot clear a durable
+          signal, so the scheduler uses this for exponential backoff:
+          cooldown *= 2^min(n, 2), capping at 4x. Resets on a productive
+          cycle. *)
 }
 
 type usage_metrics = {

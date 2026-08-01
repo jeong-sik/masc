@@ -1,7 +1,11 @@
 # RFC-0303 — Keeper wake without progress heuristics
 
 - Status: Implemented
-- Updated: 2026-07-13
+- Updated: 2026-08-02
+- Superseded clause: the unconditional scheduled-autonomous admission ("a
+  scheduled heartbeat is itself the wake signal") is replaced by RFC-0357
+  typed-stimulus admission. The rejections below (progress scores, no-progress
+  counters, automatic pause, wake tombstones) remain in force.
 
 A Keeper can wake from a message, mention, Board activity, Task/Goal context,
 configured Schedule, completed Job, Connector input, Gate/HITL resolution, or

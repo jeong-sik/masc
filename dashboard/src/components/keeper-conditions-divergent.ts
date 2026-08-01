@@ -37,11 +37,6 @@ const DIVERGENCE_RULES: Partial<Record<keyof KeeperConditions, DivergenceFn>> = 
       ? '핸드오프 필요 신호가 있지만 아직 HandingOff/Compacting으로 전환 전'
       : null,
 
-  context_overflow: (v, p) =>
-    v && p !== 'Overflowed' && !isTerminated(p)
-      ? '컨텍스트 overflow 감지됨 (phase 미반영)'
-      : null,
-
   stop_requested: (v, p) =>
     v && p !== 'Draining' && !isTerminated(p)
       ? '정지 요청됐으나 Draining 미진입'

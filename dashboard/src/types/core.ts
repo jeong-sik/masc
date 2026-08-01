@@ -1341,7 +1341,6 @@ export interface KeeperConditions {
   stop_requested: boolean
   dead_tombstone_latched: boolean
   drain_complete: boolean
-  context_overflow: boolean
 }
 
 export interface KeeperSupervisorCrashLogEntry {

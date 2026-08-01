@@ -330,7 +330,7 @@ let () =
             `Quick
             test_unusable_capacity_evidence_is_non_compacting
         ; test_case
-            "event projection admits only the token axis"
+            "lane classifier admits only the token axis"
             `Quick
             test_lane_classifier_admits_only_the_token_axis
         ] )

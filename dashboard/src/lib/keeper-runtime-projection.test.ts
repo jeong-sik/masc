@@ -54,7 +54,6 @@ function composite(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperComp
         stop_requested: false,
         dead_tombstone_latched: false,
         drain_complete: false,
-        context_overflow: false,
       },
       determining_condition: 'running_fiber_alive',
       rows: [],

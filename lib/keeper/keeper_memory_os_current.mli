@@ -62,8 +62,8 @@ val replace
   -> (t, string) result
 (** Atomically replace the complete current snapshot only when its revision
     still equals [expected_revision]. Duplicate fact identities and a rendered
-    fact payload above [max_fact_bytes] reject before writing. The default is
-    the Memory OS capacity policy. Existing state must parse as the exact
+    fact payload above [max_fact_bytes] reject before writing. The bound is
+    floored to 1 byte; its default is the Memory OS capacity policy. Existing state must parse as the exact
     current schema; malformed, non-current, or concurrently changed state fails
     closed and is not overwritten.
 
@@ -85,7 +85,8 @@ val upsert_fact
 (** Atomically insert or replace one explicit keeper-authored fact while
     preserving the rest of the current snapshot. A matching identity is
     updated from the explicit incoming fact while preserving its original
-    [first_seen]. The same rendered-fact byte budget as [replace] applies; no
+    [first_seen]. The same rendered-fact byte budget and 1-byte floor as
+    [replace] apply; no
     local importance, recency, or echo heuristic participates. *)
 
 val to_json : t -> Yojson.Safe.t

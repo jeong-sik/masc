@@ -379,6 +379,7 @@ let make_snapshot
     | None -> [], 1
     | Some snapshot -> snapshot.facts, snapshot.revision + 1
   in
+  let max_fact_bytes = max 1 max_fact_bytes in
   match Keeper_memory_os_budget.measure ~max_bytes:max_fact_bytes facts with
   | Exceeds { actual_bytes; max_bytes } ->
     Error

@@ -308,6 +308,27 @@ let test_snapshot_write_rejects_rendered_fact_payload_over_budget () =
   | Ok _ -> fail "oversized snapshot was committed"
 ;;
 
+let test_snapshot_write_floors_nonpositive_budget () =
+  with_temp_keepers @@ fun keepers_dir ->
+  match
+    Current.replace
+      ~max_fact_bytes:0
+      ~keepers_dir
+      ~keeper_id:"keeper"
+      ~expected_revision:None
+      ~now:200.0
+      ~source:(source Current.Explicit_write)
+      ~facts:[ fact ~claim:"x" () ]
+      ()
+  with
+  | Error message ->
+    check bool "budget floored to one byte" true
+      (String_util.contains_substring message "max_bytes=1");
+    check bool "invalid zero budget not exposed" false
+      (String_util.contains_substring message "max_bytes=0")
+  | Ok _ -> fail "non-empty snapshot fit within the one-byte floor"
+;;
+
 let test_explicit_upsert_preserves_snapshot_and_records_delta () =
   with_temp_keepers @@ fun keepers_dir ->
   let first = fact ~claim:"first" () in
@@ -585,6 +606,10 @@ let () =
             "snapshot rejects rendered facts over budget"
             `Quick
             test_snapshot_write_rejects_rendered_fact_payload_over_budget
+        ; test_case
+            "snapshot floors nonpositive budget"
+            `Quick
+            test_snapshot_write_floors_nonpositive_budget
         ; test_case
             "explicit upsert preserves snapshot"
             `Quick

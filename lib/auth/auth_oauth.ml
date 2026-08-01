@@ -301,31 +301,17 @@ let ensure_oauth_dirs base_path =
 
 let save_json_private path json =
   let payload = Yojson.Safe.pretty_to_string json in
-  let temporary_path =
-    path ^ ".tmp." ^ Auth_credential_base.generate_token ()
-  in
-  try
-    let channel =
-      Stdlib.open_out_gen
-        [ Open_wronly; Open_creat; Open_excl; Open_binary ]
-        0o600
-        temporary_path
-    in
+  match Fs_compat.save_file_atomic path payload with
+  | Error msg -> Error (Store_error msg)
+  | Ok () ->
     (try
-       output_string channel payload;
-       flush channel;
-       close_out channel
+       Unix.chmod path 0o600;
+       Ok ()
      with
-     | exn ->
-       close_out_noerr channel;
-       raise exn);
-    Unix.rename temporary_path path;
-    Ok ()
-  with
-  | exn ->
-    (try Sys.remove temporary_path with
-     | Sys_error _ -> ());
-    Error (Store_error (Printexc.to_string exn))
+     | Unix.Unix_error (err, fn, arg) ->
+       Error
+         (Store_error
+            (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))))
 ;;
 
 let load_json_opt path =

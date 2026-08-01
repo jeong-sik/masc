@@ -67,8 +67,8 @@ let error_body ?(id = `Null) ?data ~(code : Mcp_error_code.t) msg :
     ]
 
 let respond_mcp_error ?(extra_headers = []) ?data ?id
-    ~(deps : Server_mcp_transport_http_types.deps) request reqd ~session_id
-    ~protocol_version ~(code : Mcp_error_code.t) msg =
+    ~(deps : Server_mcp_transport_http_types.deps) ~request_authority request reqd
+    ~session_id ~protocol_version ~(code : Mcp_error_code.t) msg =
   let origin = deps.get_origin request in
   let id_for_body = Option.value ~default:`Null id in
   let body =
@@ -81,9 +81,8 @@ let respond_mcp_error ?(extra_headers = []) ?data ?id
   let per_code_headers : (string * string) list =
     match code with
     | Mcp_error_code.Auth_error ->
-      let authority = Server_request_authority.current_exn () in
       [ ( "www-authenticate"
-        , Server_oauth_metadata.challenge_for_authority authority ) ]
+        , Server_oauth_metadata.challenge_for_authority request_authority ) ]
     | Mcp_error_code.Not_ready -> [ ("retry-after", "2") ]
     | Mcp_error_code.Backpressure_shed -> [ ("retry-after", "1") ]
     | _ -> []

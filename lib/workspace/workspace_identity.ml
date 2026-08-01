@@ -5,8 +5,7 @@
 open Workspace_utils
 
 let generate_session_id () =
-  let t = Unix.gettimeofday () in
-  Printf.sprintf "%04x%04x" (Hashtbl.hash t land 0xFFFF) (Hashtbl.hash (t *. 1000.0) land 0xFFFF)
+  Random_id.hex ~bytes:16
 
 let get_hostname () =
   try Some (Unix.gethostname ()) with Unix.Unix_error _ -> None

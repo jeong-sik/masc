@@ -48,13 +48,7 @@ type t = {
 (** {1 Utilities} *)
 
 let generate_session_id () =
-  (* intentional: voice session IDs need randomness for distributed uniqueness *)
-  let high = Random.int 0xFFFF in
-  let mid = Random.int 0xFFFF in
-  let low = Random.int 0xFFFF in
-  Printf.sprintf "vs-%08x-%04x%04x%04x"
-    (Random.int 0x3FFFFFFF)
-    high mid low
+  Random_id.prefixed ~prefix:"vs-" ~bytes:16
 
 let string_of_status = function
   | Active -> "active"
@@ -223,7 +217,6 @@ let session_of_json json =
 (** {1 Creation} *)
 
 let create ~config_path =
-  Random.self_init ();
   let session_dir = Filename.concat config_path "voice_sessions" in
   {
     sessions = Hashtbl.create 16;

@@ -13,7 +13,7 @@
   masc.masc_types
   masc.config
   masc.config_dir_resolver
-  masc.crypto_rng
+  masc_random_id
   eio
   digestif
   eqaf

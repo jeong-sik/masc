@@ -60,7 +60,12 @@ val string_of_channel : channel -> string
 (** {1 Identity Creation} *)
 
 val generate_uuid : agent_name:string -> string
+(** Generate a canonical UUIDv7. [agent_name] remains display metadata and is
+    not encoded in the identifier. Existing persisted identifiers stay
+    readable because registry records treat this field as opaque text. *)
 val generate_session_key : unit -> string
+(** Generate a 32-character cryptographically random hex key. Its random
+    prefix remains suitable for fallback display-name derivation. *)
 val from_mcp_params : Yojson.Safe.t -> t
 val anonymous : unit -> t
 

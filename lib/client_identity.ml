@@ -28,19 +28,7 @@ module Random = Stdlib.Random
     @since 0.5.0
 *)
 
-(* UUID / random generation.  [Random.State.t] is NOT fiber-safe —
-   concurrent [Random.State.int] or [Uuidm.v4_gen] calls against a
-   shared state can produce duplicate values or corrupt internal
-   state.  The previous doc comment claiming "Fiber-safe" was
-   incorrect.  Guard the shared state with an [Eio.Mutex] and route
-   every RNG access through [with_identity_rng]. *)
-
 module StringMap = Set_util.StringMap
-
-let identity_rng = Random.State.make_self_init ()
-let identity_rng_mutex = Eio.Mutex.create ()
-let with_identity_rng f =
-  Eio.Mutex.use_ro identity_rng_mutex (fun () -> f identity_rng)
 
 (** Typed classification of a session_key's display prefix.
 
@@ -158,7 +146,7 @@ type agent_name_origin =
 
 (** Agent identity - extracted from session/request context *)
 type t = {
-  uuid : string;                  (** Permanent unique identifier (UUIDv4 or hash) *)
+  uuid : string;                  (** Permanent UUIDv7 identifier *)
   session_key : string;           (** Unique session identifier *)
   agent_name : string;            (** Display name (e.g., "claude-agent-001") *)
   agent_name_origin : agent_name_origin;
@@ -172,21 +160,16 @@ type t = {
 }
 [@@deriving to_yojson]
 
-(** Generate a unique agent UUID from name + timestamp hash *)
-let generate_uuid ~agent_name =
-  let timestamp = Time_compat.now () in
-  let random_part = with_identity_rng (fun rng -> Random.State.int rng 0xFFFFFF) in
-  let input = Printf.sprintf "%s-%f-%d" agent_name timestamp random_part in
-  (* Simple hash-based UUID: first 8 chars of hex digest *)
-  let hash = Stdlib.Digest.string input |> Stdlib.Digest.to_hex in
-  Printf.sprintf "agent-%s" (String.sub hash 0 12)
+(** Generate a permanent UUID. [agent_name] is intentionally not encoded in
+    the identifier; it remains display metadata. *)
+let generate_uuid ~agent_name:_ =
+  Random_id.uuid_v7 ()
 
 (** {1 Identity Creation} *)
 
 (** Generate a unique session key *)
 let generate_session_key () =
-  let uuid = with_identity_rng (fun rng -> Uuidm.v4_gen rng ()) in
-  Uuidm.to_string uuid
+  Random_id.hex ~bytes:16
 
 (** Create identity from MCP request params *)
 let from_mcp_params params =

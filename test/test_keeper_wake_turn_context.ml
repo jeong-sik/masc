@@ -375,7 +375,7 @@ let test_threaded_stimulus_decision_renders_wake_reason () =
   check bool "bootstrap reason listed" true
     (contains ~needle:"bootstrap" threaded)
 
-let meta_after_actionless_cycle () =
+let meta_after_actionless_cycle ?(count = 1) () =
   let proactive_rt = meta.runtime.proactive_rt in
   { meta with
     runtime =
@@ -383,7 +383,7 @@ let meta_after_actionless_cycle () =
         proactive_rt =
           { proactive_rt with
             last_ts = Time_compat.now () -. 1.0
-          ; consecutive_noop_count = 1
+          ; consecutive_noop_count = count
           } }
   }
 
@@ -399,6 +399,20 @@ let test_actionless_cycle_backoff_is_operator_visible () =
     check bool "remaining delay is positive" true (remaining_sec > 0)
   | WO.Skip _ -> Alcotest.fail "expected typed no-progress cooldown reason"
   | WO.Run _ -> Alcotest.fail "expected no-progress cooldown"
+
+let test_actionless_backoff_caps_at_four_x () =
+  let decision =
+    WO.keeper_cycle_decision
+      ~meta:(meta_after_actionless_cycle ~count:9 ())
+      base_observation
+  in
+  match decision.WO.verdict with
+  | WO.Skip { reasons = (WO.No_progress_cooldown_pending { remaining_sec }, []) } ->
+    let base = Masc.Keeper_heartbeat_snapshot.keepalive_interval_sec () in
+    check bool "backoff is capped at 4x cadence" true
+      (remaining_sec >= max 1 (3 * base))
+  | WO.Skip _ -> Alcotest.fail "expected typed no-progress cooldown reason"
+  | WO.Run _ -> Alcotest.fail "expected capped no-progress cooldown"
 
 let test_fresh_backlog_bypasses_actionless_backoff () =
   let observation =
@@ -582,6 +596,8 @@ let () =
             test_threaded_stimulus_decision_renders_wake_reason;
           test_case "actionless scheduled cycle has typed visible backoff" `Quick
             test_actionless_cycle_backoff_is_operator_visible;
+          test_case "actionless backoff caps at four times cadence" `Quick
+            test_actionless_backoff_caps_at_four_x;
           test_case "fresh backlog bypasses actionless backoff" `Quick
             test_fresh_backlog_bypasses_actionless_backoff;
           test_case "reactive stimulus bypasses actionless backoff" `Quick

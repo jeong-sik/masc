@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
-readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.10"
+readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.11"
 # v0.231.0 is a hard-cut wave: checkpoint schema is v9 only (v1-v8
 # rejected; #2867), provider_config.output_schema is removed in favor of
 # response_format = JsonSchema as the single structured-output request state
@@ -58,15 +58,20 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.10"
 # execution contract; durable Memory OS consumption is a separate caller
 # change, with no compatibility decoder or migration path added by this pin.
 # Previous pin: v0.231.6 (ae4cc5536).
-readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.10"
-# Paired malformed-SSE boundary hardening: OAS preserves accepted-response
-# wire failures and provider-owned error envelopes as typed public facts.
-# Keep this SHA aligned with the OAS change before CI builds MASC.
+# v0.231.11 promotes the prior main-head pin (92e3eea36, the #2910
+# streaming-boundary hard-cut this repo already consumes) to a cut release,
+# and adds #2915: the SSE first-event deadline now holds until data actually
+# arrives instead of being cleared by connection acceptance. Release note gap:
+# the upstream CHANGELOG lists only #2915 because #2910's squash title was
+# non-conventional (oas#2922 tracks enforcing titles); the tag contains both.
+# Previous pin: main@92e3eea36 (post-v0.231.10); before that v0.231.10
+# (1fa612519).
+readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.11"
 # TRACK_REF consumed by check-oas-pin.sh / oas-drift-check.sh /
 # sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584). Use main
 # for merge-ready pins. A blocked Draft cross-repo PR may temporarily declare
 # the exact refs/pull/<number>/head review ref; CI rejects that ref once the PR
 # is no longer both Draft and blocked-on-oas.
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="92e3eea36585b043119d9e79276dbf8a8a9e356f"
-readonly OAS_AGENT_SDK_MIN_VERSION="0.231.10"
+readonly OAS_AGENT_SDK_SHA="6ab2e84e1d3a7728e0cac0e727f2d4872cd3f99e"
+readonly OAS_AGENT_SDK_MIN_VERSION="0.231.11"

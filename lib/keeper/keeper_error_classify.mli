@@ -38,10 +38,11 @@ val is_server_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 (** [true] for provider-side request-body parse rejections. *)
 val is_provider_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 
-(** [true] only for an accepted provider response whose wire contract failed.
-    This is separate from provider request-body rejection and from HTTP
-    rate-limit evidence. It is eligible for candidate rotation, but it is not
-    exempt from consecutive-failure accounting. *)
+(** [true] only for an accepted provider response whose wire contract failed
+    (SSE, NDJSON, oversized, incomplete, or provider-reported stream errors).
+    Used to select the diagnostic log suffix in the turn-failure path.
+    Candidate rotation eligibility and consecutive-failure accounting are
+    determined by {!Keeper_runtime_attempt}, not by this predicate. *)
 val is_provider_wire_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] for model/API-side request-body parse rejections reported as

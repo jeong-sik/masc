@@ -157,9 +157,8 @@ val failed_selection_terminal_detail :
 (** Pure source-disposal decision for a failed turn that consumed a pending
     Event Queue selection. [Some detail] only for a typed context-overflow
     terminal route with no pending [deferred_runtime_lane]: with automatic
-    overflow-compaction recovery removed (#26546) and #26545 bounding the
-    transmitted history, retrying that selection would re-dispatch the same
-    oversized payload every heartbeat, so the loop terminalizes it. [None]
+    overflow-compaction recovery removed (#26546), retry has no evidence of a
+    smaller request, so the loop terminalizes the selection. [None]
     preserves the selection — a deferred lane freezes a successor runtime for
     this exact selection, other terminal classes may resolve without
     compaction, retryable routes stay pending, and transcript corruption is

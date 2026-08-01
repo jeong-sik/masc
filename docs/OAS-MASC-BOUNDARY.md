@@ -34,7 +34,7 @@ consumer → MASC (workspace collaboration/orchestration) → OAS (agent runtime
 | 단일 에이전트 실행 | `Agent.run`, `Builder`, `Hooks`, `Guardrails`, `Checkpoint` | 언제/왜/어떤 agent를 돌릴지 결정 |
 | 멀티에이전트 실행 | `Orchestrator`, `Agent_sdk_swarm.Runner` | workspace, board, workflow, policies, operator surfaces |
 | 도구 실행 | `Tool.t`, hook lifecycle, raw trace | tool schema 정의, tool dispatch, auth/join/policy semantics |
-| 컨텍스트 축약 | reducer/automatic truncation 없음; typed capacity/overflow 보고 | manual Keeper compaction (`masc_keeper_compact`), #26545 quantized tail window가 전송 이력 bound |
+| 컨텍스트 축약 | reducer/automatic truncation 없음; typed capacity/overflow 보고 | manual Keeper compaction (`masc_keeper_compact`), #26545 quantized tail window가 conversation history만 제한; 전체 provider-fit은 #26551 |
 | ContextOverflow | provider capacity와 typed overflow 결과 | 일반 typed failure route로 처리; 자동 overflow-compaction 회복 제거 (#26546) |
 | 이벤트 전달 | `Event_bus` | 어떤 MASC 사건을 custom event로 publish할지 정의, SSE/dashboard에 연결 |
 | 장기 메모리 | 없음 | keeper memory bank, institution episodes, procedural memory, workspace/task/social semantics |
@@ -77,7 +77,7 @@ OAS  ──does not know──→ MASC
 
 | Area | Status | Notes |
 |------|--------|-------|
-| Context compaction | MASC-owned, manual only | Automatic provider-overflow compaction removed (#26546); the explicit Manual path (`masc_keeper_compact`) remains. #26545 bounds the transmitted history with a quantized tail window. |
+| Context compaction | MASC-owned, manual only | Automatic provider-overflow compaction removed after no committed recovery (#26546); the explicit Manual path (`masc_keeper_compact`) remains. #26545 bounds conversation history only; #26551 tracks whole-request provider fit. |
 | ContextOverflow ownership | Boundary aligned | OAS reports typed capacity/overflow. MASC routes it through the ordinary typed failure route (terminalizing the selected stimulus unless a deferred runtime lane is pending) and owns Keeper continuation. |
 | Event bus bridge | Complete for current native/custom flow | `oas_event_bridge.ml` relays both OAS native events and `masc:*` custom events, persists them under `.masc/oas-events/`, and feeds dashboard SSE |
 | Dashboard OAS runtime health | Complete with replay/live split | dashboard health SSOT is `durable oas_event replay + live SSE tail`, not live-only counters |

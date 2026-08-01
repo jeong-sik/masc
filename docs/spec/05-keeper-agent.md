@@ -240,9 +240,10 @@ stateDiagram-v2
 
 MASC에는 message importance scorer나 deterministic reducer fallback이 없다.
 compaction 진입은 명시적 manual stimulus뿐이다: provider overflow가
-compaction을 자동으로 시작하는 경로는 제거되었다(#26546). overflow는 일반
-typed failure route로 처리되며, #26545의 quantized tail window가 전송 이력을
-bound한다. OAS는 model call과 provider 오류를 typed 결과로 전달하며, MASC의
+compaction을 자동으로 시작하는 경로는 committed compaction을 한 번도 만들지
+못해 제거되었다(#26546). overflow는 일반 typed failure route로 처리된다.
+#26545는 conversation history만 제한하고 전체 요청 provider-fit은 #26551에서
+추적한다. OAS는 model call과 provider 오류를 typed 결과로 전달하며, MASC의
 compaction profile이나 ratio/message/token gate를 알지 않는다.
 
 ### 4.4 Deliberation Pipeline

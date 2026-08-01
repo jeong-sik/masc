@@ -102,10 +102,9 @@ let test_input_capacity_is_not_context_overflow () =
 ;;
 
 (* ContextOverflow counts toward the ordinary crash threshold (#26546): the
-   automatic overflow-compaction recovery was removed, and #26545 bounds the
-   transmitted history, so mechanical retry re-dispatches the same payload.
-   Exempting it would pin [consecutive] at 0 while the identical provider
-   request loops every cycle. *)
+   automatic overflow-compaction recovery was removed after producing no
+   committed compaction. Exempting it would pin [consecutive] at 0 while a
+   request with no state-changing successor loops every cycle. *)
 let test_context_overflow_is_not_auto_recoverable () =
   check
     bool

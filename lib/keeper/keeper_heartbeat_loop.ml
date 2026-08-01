@@ -366,10 +366,10 @@ let record_compaction_outcome_metric ~keeper_name outcome =
 
 (* Pure: source-disposal decision for a [Cycle.Failed] outcome that holds a
    pending Event Queue selection. With automatic overflow-compaction recovery
-   removed (#26546), a typed context overflow is unrecoverable on retry:
-   #26545 bounds the transmitted history, so the next heartbeat would dispatch
-   the same oversized payload. [Some detail] terminalizes the selection so the
-   keeper moves on. Everything else preserves the selection:
+   removed (#26546), a typed context overflow has no automatic repair step.
+   Without a deferred runtime successor, retry has no evidence of a smaller
+   request. [Some detail] terminalizes the selection so the keeper moves on.
+   Everything else preserves the selection:
    - a pending [deferred_runtime_lane] freezes a successor runtime for this
      exact selection; the next cycle re-runs it on that lane, and a lane list
      is finite, so the walk terminates without a timed retry cycle;

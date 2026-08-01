@@ -703,10 +703,10 @@ flowchart TD
 | typed provider overflow | provider가 overflow를 명시적으로 보고 | 일반 typed failure route로 처리 (자동 compaction 없음, #26546) |
 
 `context_ratio`는 관측값일 뿐 compaction 실행 권한이 아니다. 자동
-overflow-compaction 회복은 제거되었다(#26546): 전송 이력은 #26545의
-quantized tail window가 bound하므로 provider overflow는 재시도로 해소되지
-않는 deterministic 실패이며, 해당 stimulus는 terminalize된다. compaction이
-필요하면 `masc_keeper_compact`로 명시적으로 요청한다.
+overflow-compaction 회복은 committed compaction을 한 번도 만들지 못해
+제거되었다(#26546). #26545는 conversation history만 제한하며, Memory OS와
+pinned/tool context를 포함한 전체 요청의 provider-fit 계약은 #26551에서
+추적한다. compaction이 필요하면 `masc_keeper_compact`로 명시적으로 요청한다.
 
 ### 7.4 Handoff 실패
 

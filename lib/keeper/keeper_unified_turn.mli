@@ -125,11 +125,11 @@ type source_disposition =
   | Follow_failure_route
   | Pause_after_transcript_corruption of { detail : string }
 (** A failed turn normally follows its typed retry/rotate/escalate route —
-    including every provider capacity failure: since #26545 bounds the
-    transmitted history to a quantized tail window, an overflow is an
-    ordinary typed failure, and the automatic overflow-compaction recovery
-    that used to branch here was removed (#26546; it had never produced a
-    committed compaction on record).
+    including every provider capacity failure. The automatic
+    overflow-compaction recovery that used to branch here was removed (#26546)
+    because it had never produced a committed compaction on record. #26545
+    bounds conversation history only; whole-request provider fit is tracked in
+    #26551.
     [Pause_after_transcript_corruption] is terminal for automatic execution:
     typed transcript admission rejected before provider dispatch, so the
     heartbeat durably pauses the Keeper and consumes the selected source into an

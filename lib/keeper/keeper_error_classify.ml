@@ -779,12 +779,11 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
      needs a bound, add a real counter — do not claim one here without the
      device.
    - context overflow: NOT exempt (#26546). The automatic in-lane compaction
-     recovery was removed, and #26545 bounds the transmitted history to a
-     quantized tail window, so a provider overflow is deterministic for the
-     retained window: mechanical retry re-dispatches the same payload. The
-     ordinary consecutive-failure threshold bounds it, and the heartbeat
-     additionally terminalizes the selected source unless the failure carries
-     a deferred runtime lane
+     recovery was removed after producing no committed compaction. A provider
+     overflow without a state-changing successor has no evidence that
+     mechanical retry will fit. The ordinary consecutive-failure threshold
+     bounds it, and the heartbeat additionally terminalizes the selected
+     source unless the failure carries a deferred runtime lane
      ([Keeper_heartbeat_loop.failed_selection_terminal_detail]).
    - 0-byte empty completion: bounded by
      [Keeper_unified_turn_failure]'s per-keeper exemption budget — after

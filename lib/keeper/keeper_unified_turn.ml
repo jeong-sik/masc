@@ -1026,10 +1026,10 @@ dominant source of the observed CAS race exhaustion after
                          caps, serving-input rejection) follow the ordinary
                          typed failure route. The automatic overflow-compaction
                          recovery that used to branch here was removed
-                         (#26546): #26545 bounds the transmitted history, so
-                         these errors no longer signal unbounded growth, and
-                         the recovery it replaced had never produced a
-                         committed compaction on record. *)
+                         (#26546) because it never produced a committed
+                         compaction on record. #26545 bounds conversation
+                         history only; whole-request provider fit is tracked
+                         separately in #26551. *)
                       Follow_failure_route, turn_state
                   in
                   exact_failure_execution :=

@@ -299,12 +299,11 @@ let transition_timeline_event json =
 let receipt_timeline_event receipt =
   match json_string_opt_member "ended_at" receipt with
   | None -> None
-  | Some ended_at ->
-      let ts_unix =
-        Masc_domain.parse_iso8601_opt ended_at |> Option.value ~default:0.0
-      in
-      if ts_unix <= 0.0 then None
-      else
+  | Some ended_at -> (
+      match Masc_domain.parse_iso8601_opt ended_at with
+      | None -> None
+      | Some ts_unix when ts_unix <= 0.0 -> None
+      | Some ts_unix ->
         let outcome =
           json_string_opt_member "outcome" receipt
           |> Option.value ~default:"unknown"
@@ -348,7 +347,7 @@ let receipt_timeline_event receipt =
              ~summary:
                (Printf.sprintf "%s · completion_observation=%s · runtime=%s"
                   outcome completion_contract_result runtime_outcome)
-             ~severity ())
+             ~severity ()))
 
 let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id
     ?observed_at_unix ~ts_unix ~runtime_blocker_fields

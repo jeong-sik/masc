@@ -129,11 +129,10 @@ let terminal_reason_from_runtime_blocker_fields runtime_blocker_fields =
 
 let receipt_ended_at_unix receipt =
   match json_string_opt_member "ended_at" receipt with
-  | Some ended_at ->
-      let ts =
-        Masc_domain.parse_iso8601_opt ended_at |> Option.value ~default:0.0
-      in
-      if ts > 0.0 then Some ts else None
+  | Some ended_at -> (
+      match Masc_domain.parse_iso8601_opt ended_at with
+      | Some ts when ts > 0.0 -> Some ts
+      | Some _ | None -> None)
   | None -> None
 
 (* Receipt timestamps are serialized as whole-second ISO strings, while runtime
@@ -203,12 +202,10 @@ let terminal_reason_timeline_event ~latest_decision ~latest_receipt =
         | Some reason ->
             let ts_unix_opt =
               match json_string_opt_member "ended_at" receipt with
-              | Some ended_at ->
-                  let ts =
-                    Masc_domain.parse_iso8601_opt ended_at
-                    |> Option.value ~default:0.0
-                  in
-                  if ts > 0.0 then Some ts else None
+              | Some ended_at -> (
+                  match Masc_domain.parse_iso8601_opt ended_at with
+                  | Some ts when ts > 0.0 -> Some ts
+                  | Some _ | None -> None)
               | None -> None
             in
             (Some receipt, ts_unix_opt, Some reason)

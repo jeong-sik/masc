@@ -3,6 +3,7 @@ open Alcotest
 module Librarian = Masc.Keeper_librarian
 module Runtime = Masc.Keeper_librarian_runtime
 module Memory = Masc.Keeper_memory_os_types
+module Budget = Masc.Keeper_memory_os_budget
 
 (* Render tests resolve the real repo templates so template <-> code
    variable drift fails here instead of as a live [Prompt_render_failed]
@@ -139,6 +140,21 @@ let test_oversized_selection_is_rejected_without_local_truncation () =
   | Error error ->
     failf "wrong budget error: %s" (Librarian.parse_error_to_string error)
   | Ok _ -> fail "oversized selection was accepted"
+;;
+
+let test_budget_measurement_matches_exact_rendered_utf8_bytes () =
+  let facts =
+    [ fact ~claim:"plain ASCII"
+    ; { (fact ~claim:"한글과 emoji 🧠") with category = Memory.Lesson }
+    ]
+  in
+  let expected = String.length (Budget.render_facts facts) in
+  check int "incremental bytes equal rendered bytes" expected (Budget.rendered_bytes facts);
+  match Budget.measure ~max_bytes:expected facts with
+  | Budget.Fits { actual_bytes; max_bytes } ->
+    check int "measured bytes" expected actual_bytes;
+    check int "boundary is inclusive" expected max_bytes
+  | Budget.Exceeds _ -> fail "exact boundary rejected"
 ;;
 
 let test_unknown_and_duplicate_retained_ids_reject () =
@@ -444,6 +460,10 @@ let () =
             "oversized selection rejects without truncation"
             `Quick
             test_oversized_selection_is_rejected_without_local_truncation
+        ; test_case
+            "incremental budget equals rendered UTF-8 bytes"
+            `Quick
+            test_budget_measurement_matches_exact_rendered_utf8_bytes
         ; test_case "unknown and duplicate retained reject" `Quick
             test_unknown_and_duplicate_retained_ids_reject
         ; test_case "retained/new collision rejects" `Quick

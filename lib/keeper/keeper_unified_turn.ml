@@ -1329,8 +1329,10 @@ let run_keeper_cycle
                      + String.length world_state
                      + String.length user_message)
                     latency_ms
-                    (if is_provider_wire_error
+                    (if is_provider_wire_error && counts_toward_crash
                     then " (provider wire error, counts toward crash threshold)"
+                    else if is_provider_wire_error
+                    then " (provider wire error, crash counting skipped)"
                     else if is_server_parse_rejection && counts_toward_crash
                      then " (server parse rejection, counts toward crash threshold)"
                      else if is_server_parse_rejection

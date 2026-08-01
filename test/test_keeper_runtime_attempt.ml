@@ -30,11 +30,68 @@ let test_429_without_hint_stays_none () =
     (Some None)
     (retry_after_of_outcome (KRA.sdk_error_to_runtime_outcome (rate_limited None)))
 
+let provider_wire_error () =
+  Agent_sdk.Error.Provider
+    (Llm_provider.Error.ProviderWireError
+       { provider = "test-provider"
+       ; format = Llm_provider.Http_client.Sse
+       ; kind = Llm_provider.Http_client.Malformed_payload
+       ; detail = "malformed SSE payload"
+       })
+
+let provider_reported_error () =
+  Agent_sdk.Error.Provider
+    (Llm_provider.Error.ProviderReportedError
+       { provider = "test-provider"
+       ; error_type = Some "overloaded"
+       ; detail = "provider rejected the stream"
+       })
+
+let test_provider_wire_failure_is_next_candidate_eligible () =
+  match KRA.sdk_error_to_runtime_outcome (provider_wire_error ()) with
+  | Some (Runtime_attempt_fsm.Call_err (Llm_provider.Http_client.ProviderFailure error)) ->
+    (match error.kind with
+     | Llm_provider.Http_client.Provider_wire_error
+         { format = Llm_provider.Http_client.Sse
+         ; kind = Llm_provider.Http_client.Malformed_payload
+         } ->
+       Alcotest.(check bool)
+         "typed wire failure tries the next lane candidate"
+         true
+         (Runtime_attempt_fsm.should_try_next
+            (Llm_provider.Http_client.ProviderFailure error))
+     | _ -> Alcotest.fail "wire failure kind was not preserved")
+  | _ -> Alcotest.fail "wire failure did not map to ProviderFailure"
+
+let test_provider_reported_failure_is_next_candidate_eligible () =
+  match KRA.sdk_error_to_runtime_outcome (provider_reported_error ()) with
+  | Some (Runtime_attempt_fsm.Call_err (Llm_provider.Http_client.ProviderFailure error)) ->
+    (match error.kind with
+     | Llm_provider.Http_client.Provider_reported_error
+         { error_type = Some "overloaded" } ->
+       Alcotest.(check bool)
+         "provider-reported failure tries the next lane candidate"
+         true
+         (Runtime_attempt_fsm.should_try_next
+            (Llm_provider.Http_client.ProviderFailure error))
+     | _ -> Alcotest.fail "provider-reported kind was not preserved")
+  | _ -> Alcotest.fail "provider-reported failure did not map to ProviderFailure"
+
 let () =
   Alcotest.run
     "keeper_runtime_attempt"
     [ ( "rate_limited_429"
       , [ Alcotest.test_case "threads resolved retry_after" `Quick test_429_threads_resolved_retry_after
         ; Alcotest.test_case "absent hint stays None" `Quick test_429_without_hint_stays_none
+        ] )
+    ; ( "provider_failures"
+      , [ Alcotest.test_case
+            "wire failure tries next candidate"
+            `Quick
+            test_provider_wire_failure_is_next_candidate_eligible
+        ; Alcotest.test_case
+            "provider-reported failure tries next candidate"
+            `Quick
+            test_provider_reported_failure_is_next_candidate_eligible
         ] )
     ]

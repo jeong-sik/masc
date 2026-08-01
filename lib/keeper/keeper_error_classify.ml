@@ -585,6 +585,13 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
              | Llm_provider.Error.AuthorizationError _
              | Llm_provider.Error.MissingApiKey _ ) ->
              Some Auth_error
+         (* Wire/provided-response failures are intentionally excluded here.
+            This function selects a deferred whole-runtime lane after the
+            current candidate walk; same-turn candidate rotation is already
+            decided by [Keeper_runtime_attempt] mapping these typed facts to
+            [ProviderFailure]. Reclassifying them here would conflate the two
+            boundaries and schedule a second whole-runtime wake for the same
+            malformed provider response. *)
          | Agent_sdk.Error.Provider
              (Llm_provider.Error.ServerError _
              | Llm_provider.Error.InvalidConfig _

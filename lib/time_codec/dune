@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name masc_time_codec)
+ (public_name masc.time_codec)
+ (wrapped false)
+ (modules time_codec)
+ (libraries ptime))

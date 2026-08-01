@@ -108,14 +108,14 @@ let test_now_iso_format () =
 
 let test_parse_iso8601_valid () =
   let ts = "2024-12-25T10:30:45Z" in
-  let result = Masc_domain.parse_iso8601 ts in
-  check bool "positive timestamp" true (result > 0.0)
+  match Masc_domain.parse_iso8601_opt ts with
+  | Some result -> check bool "positive timestamp" true (result > 0.0)
+  | None -> fail "expected valid RFC 3339 timestamp"
 
 let test_parse_iso8601_invalid () =
   let ts = "invalid-timestamp" in
-  let default = 12345.0 in
-  let result = Masc_domain.parse_iso8601 ~default_time:default ts in
-  check (float 0.1) "uses default" default result
+  check (option (float 0.1)) "invalid is absent" None
+    (Masc_domain.parse_iso8601_opt ts)
 
 (* ============================================================ *)
 (* Masc_domain.agent_status Tests                                      *)

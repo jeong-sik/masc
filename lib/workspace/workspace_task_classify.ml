@@ -305,9 +305,9 @@ let task_started_at_unix status =
   let default_time = Time_compat.now () in
   match status with
   | Masc_domain.Claimed { claimed_at; _ } ->
-    Masc_domain.parse_iso8601 ~default_time claimed_at
+    Masc_domain.parse_iso8601_opt claimed_at |> Option.value ~default:default_time
   | Masc_domain.InProgress { started_at; _ } ->
-    Masc_domain.parse_iso8601 ~default_time started_at
+    Masc_domain.parse_iso8601_opt started_at |> Option.value ~default:default_time
   | Masc_domain.Todo
   | Masc_domain.AwaitingVerification _
   | Masc_domain.Done _

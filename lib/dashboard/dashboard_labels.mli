@@ -20,10 +20,9 @@ type workspace_snapshot = {
 
 (** {1 Timestamp parsing}
 
-    Parses dashboard timestamps to Unix time. Accepts canonical UTC,
-    fractional-second RFC3339, numeric UTC offsets, and bare local
-    timestamps from older read models. Returns [None] on any parse
-    failure (empty / malformed / wrong-length). *)
+    Parses strict RFC 3339 dashboard timestamps to Unix time. Accepts [Z],
+    fractional seconds, and explicit numeric offsets. Returns [None] on any
+    parse failure; timestamps without an explicit timezone are rejected. *)
 val parse_iso_timestamp : string -> float option
 
 (** [format_elapsed now timestamp fallback] renders the elapsed time

@@ -18,7 +18,7 @@
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
  (flags
   (:standard -w +4))
- (libraries yojson unix time_compat masc_core base64 uuidm)
+ (libraries yojson unix time_compat masc.time_codec masc_core base64 uuidm)
  (preprocess
   (pps
    ppx_deriving.show

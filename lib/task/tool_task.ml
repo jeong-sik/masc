@@ -93,9 +93,11 @@ and handle_cancel_task ~tool_name ~start_time ctx args =
   let started_at_actual = match task_opt with
     | Some t -> (match t.task_status with
         | Masc_domain.InProgress { started_at; _ } ->
-            Masc_domain.parse_iso8601 ~default_time:(Time_compat.now () -. 60.0) started_at
+            Masc_domain.parse_iso8601_opt started_at
+            |> Option.value ~default:(Time_compat.now () -. 60.0)
         | Masc_domain.Claimed { claimed_at; _ } ->
-            Masc_domain.parse_iso8601 ~default_time:(Time_compat.now () -. 60.0) claimed_at
+            Masc_domain.parse_iso8601_opt claimed_at
+            |> Option.value ~default:(Time_compat.now () -. 60.0)
         | _ -> Time_compat.now () -. 60.0)
     | None -> Time_compat.now () -. 60.0
   in
@@ -301,15 +303,24 @@ and handle_transition ~tool_name ~start_time ctx args =
   let (started_at_actual, collaborators_from_task) = match task_opt with
     | Some t -> (match t.task_status with
         | Masc_domain.InProgress { started_at; assignee } ->
-            let ts = Masc_domain.parse_iso8601 ~default_time started_at in
+            let ts =
+              Masc_domain.parse_iso8601_opt started_at
+              |> Option.value ~default:default_time
+            in
             let collabs = if not (String.equal assignee "") && not (String.equal assignee ctx.agent_name) then [assignee] else [] in
             (ts, collabs)
         | Masc_domain.Claimed { claimed_at; assignee } ->
-            let ts = Masc_domain.parse_iso8601 ~default_time claimed_at in
+            let ts =
+              Masc_domain.parse_iso8601_opt claimed_at
+              |> Option.value ~default:default_time
+            in
             let collabs = if not (String.equal assignee "") && not (String.equal assignee ctx.agent_name) then [assignee] else [] in
             (ts, collabs)
         | Masc_domain.AwaitingVerification { submitted_at; assignee; _ } ->
-            let ts = Masc_domain.parse_iso8601 ~default_time submitted_at in
+            let ts =
+              Masc_domain.parse_iso8601_opt submitted_at
+              |> Option.value ~default:default_time
+            in
             let collabs =
               if
                 not (String.equal assignee "")

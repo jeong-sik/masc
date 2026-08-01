@@ -61,6 +61,7 @@
   ;; unqualified, so it must depend on the leaf explicitly.
   masc.tool_types
   masc.crypto_rng
+  masc.time_codec
   masc_schedule
   ;; Shared leaf helpers extracted out of include_subdirs-unqualified ownership.
   masc.lockfree_atomic

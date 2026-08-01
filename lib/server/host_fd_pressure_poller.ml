@@ -36,56 +36,14 @@ let resolve_state_file_path ~base_path () =
 
 let poll_interval_sec = Env_config_core.host_fd_pressure_poll_interval_sec
 
-(* iso8601 -> unix epoch seconds. sysmon emits e.g.
-   "2026-05-19T22:02:26+0900". We strip the trailing tz offset and
-   accept the local time as-is — for our purposes the absolute value
-   matters only relative to other [ts] values from the same source. *)
-let parse_iso8601_opt s =
-  match String.split_on_char 'T' s with
-  | [ date; rest ] ->
-    let time_part =
-      (* split off "+0900" or "-0500" or "Z" *)
-      let cut_at_tz s =
-        let len = String.length s in
-        let rec find i =
-          if i >= len
-          then s
-          else
-            match s.[i] with
-            | '+' | '-' | 'Z' -> String.sub s 0 i
-            | _ -> find (i + 1)
-        in
-        find 0
-      in
-      cut_at_tz rest
-    in
-    (try
-       Scanf.sscanf
-         (date ^ " " ^ time_part)
-         "%d-%d-%d %d:%d:%d"
-         (fun y mo d h mi s ->
-           let tm =
-             { Unix.tm_year = y - 1900
-             ; tm_mon = mo - 1
-             ; tm_mday = d
-             ; tm_hour = h
-             ; tm_min = mi
-             ; tm_sec = s
-             ; tm_wday = 0
-             ; tm_yday = 0
-             ; tm_isdst = false
-             }
-           in
-           let epoch, _ = Unix.mktime tm in
-           Some epoch)
-     with
-     (* RFC-0145 — narrowed from a wildcard catch-all to the only
-        exceptions [Scanf.sscanf] / [Unix.mktime] raise on ill-formed
-        ISO8601 input.  [Failure] covers numeric conversion failures
-        from [Scanf.sscanf] for malformed external timestamps. *)
-     | Scanf.Scan_failure _ | Failure _ | End_of_file | Unix.Unix_error _ -> None)
-  | _ -> None
-;;
+(* sysmon emits compact numeric offsets such as [+0900]. This is the sole
+   production caller that explicitly opts into Ptime's non-strict ISO-8601
+   compatibility surface; the offset is still applied to the UTC result. *)
+let parse_iso8601_opt value = Time_codec.parse_rfc3339_opt ~strict:false value
+
+module For_testing = struct
+  let parse_state_timestamp = parse_iso8601_opt
+end
 
 type parsed =
   { level : Keeper_fd_pressure.external_level

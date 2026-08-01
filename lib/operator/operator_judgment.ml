@@ -92,6 +92,15 @@ let of_yojson json =
           | None -> Error "invalid target_type")
       | None -> Error "missing target_type"
     in
+    let required_unix key =
+      match Json_util.assoc_member_opt key json with
+      | Some (`Float value) -> Ok value
+      | Some (`Int value) -> Ok (float_of_int value)
+      | Some _ -> Error ("invalid " ^ key)
+      | None -> Error ("missing " ^ key)
+    in
+    let* generated_at_unix = required_unix "generated_at_unix" in
+    let* fresh_until_unix = required_unix "fresh_until_unix" in
     Ok
       {
         judgment_id = (match Json_util.assoc_member_opt "judgment_id" json with Some (`String s) -> s | _ -> "");
@@ -108,17 +117,9 @@ let of_yojson json =
           | Some (`Int value) -> float_of_int value
           | _ -> 0.0);
         generated_at = (match Json_util.assoc_member_opt "generated_at" json with Some (`String s) -> s | _ -> "");
-        generated_at_unix =
-          (match Json_util.assoc_member_opt "generated_at_unix" json with
-          | Some (`Float value) -> value
-          | Some (`Int value) -> float_of_int value
-          | _ -> Masc_domain.parse_iso8601 ((match Json_util.assoc_member_opt "generated_at" json with Some (`String s) -> s | _ -> "")));
+        generated_at_unix;
         fresh_until = (match Json_util.assoc_member_opt "fresh_until" json with Some (`String s) -> s | _ -> "");
-        fresh_until_unix =
-          (match json |> Json_util.assoc_member_opt "fresh_until_unix" with
-          | Some (`Float value) -> value
-          | Some (`Int value) -> float_of_int value
-          | _ -> Masc_domain.parse_iso8601 ((match Json_util.assoc_member_opt "fresh_until" json with Some (`String s) -> s | _ -> "")));
+        fresh_until_unix;
         keeper_name =
           Json_util.get_string json "keeper_name"
           |> Option.value ~default:"operator-judge";
@@ -197,21 +198,11 @@ let latest_active config ~surface ~target_type ~target_id =
 let record config ~surface ~target_type ~target_id ~summary ~confidence
     ?model_name ?runtime_name ?recommended_action ?(evidence_refs = [])
     ?(fallback_used = false) ?(disagreement_with_truth = false) ~generated_at
-    ?generated_at_unix ~fresh_until ?fresh_until_unix ~keeper_name () =
+    ~generated_at_unix ~fresh_until ~fresh_until_unix ~keeper_name () =
   let supersedes =
     match latest_active config ~surface ~target_type ~target_id with
     | Some value -> [ value.judgment_id ]
     | None -> []
-  in
-  let generated_at_unix =
-    match generated_at_unix with
-    | Some value -> value
-    | None -> Unix.gettimeofday ()
-  in
-  let fresh_until_unix =
-    match fresh_until_unix with
-    | Some value -> value
-    | None -> Masc_domain.parse_iso8601 fresh_until
   in
   let value =
     {

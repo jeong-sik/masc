@@ -6,7 +6,7 @@
 (** {1 Time} *)
 
 val parse_iso_opt : string option -> float option
-(** Parse an ISO-8601 timestamp via {!Masc_domain.parse_iso8601}.
+(** Parse an RFC 3339 timestamp via {!Masc_domain.parse_iso8601_opt}.
     Returns [None] for [None], empty/whitespace strings, or parse failures. *)
 
 (** {1 Strings} *)

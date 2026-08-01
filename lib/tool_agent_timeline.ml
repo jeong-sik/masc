@@ -35,30 +35,7 @@ type context = {
   agent_name : string;
 }
 
-(* ISO timestamp parsing (reuses Dashboard logic) *)
-let parse_iso_timestamp (s : string) : float option =
-  try
-    let open Stdlib.Scanf in
-    sscanf s "%d-%d-%dT%d:%d:%d" (fun y m d h min sec ->
-        let tm =
-          {
-            Unix.tm_sec = sec;
-            tm_min = min;
-            tm_hour = h;
-            tm_mday = d;
-            tm_mon = m - 1;
-            tm_year = y - 1900;
-            tm_wday = 0;
-            tm_yday = 0;
-            tm_isdst = false;
-          }
-        in
-        let (local_t, _) = Unix.mktime tm in
-        let utc_tm = Unix.gmtime local_t in
-        let (utc_as_local, _) = Unix.mktime utc_tm in
-        let tz_offset = local_t -. utc_as_local in
-        Some (local_t -. tz_offset))
-  with Stdlib.Scanf.Scan_failure _ | Failure _ | End_of_file -> None
+let parse_iso_timestamp value = Time_codec.parse_rfc3339_opt value
 
 (* Event type for the unified timeline *)
 type timeline_event = {

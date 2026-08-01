@@ -153,20 +153,33 @@ let test_now_iso_format () =
 
 let test_parse_iso8601_valid () =
   let ts = "2024-01-15T12:30:45Z" in
-  let parsed = Masc_domain.parse_iso8601 ts in
-  check bool "is float" true (parsed > 0.0)
+  match Masc_domain.parse_iso8601_opt ts with
+  | Some parsed -> check bool "is float" true (parsed > 0.0)
+  | None -> fail "expected valid RFC 3339 timestamp"
 
 let test_parse_iso8601_invalid () =
   let ts = "not-a-date" in
-  let default = 123.0 in
-  let parsed = Masc_domain.parse_iso8601 ~default_time:default ts in
-  check (float 0.001) "uses default" default parsed
+  check (option (float 0.001)) "invalid is absent" None
+    (Masc_domain.parse_iso8601_opt ts)
 
 let test_parse_iso8601_empty () =
   let ts = "" in
-  let default = 999.0 in
-  let parsed = Masc_domain.parse_iso8601 ~default_time:default ts in
-  check (float 0.001) "uses default" default parsed
+  check (option (float 0.001)) "empty is absent" None
+    (Masc_domain.parse_iso8601_opt ts)
+
+let test_parse_iso8601_rejects_invalid_civil_date () =
+  check
+    (option (float 0.0))
+    "invalid civil date"
+    None
+    (Masc_domain.parse_iso8601_opt "2026-02-31T12:00:00Z")
+
+let test_parse_iso8601_accepts_explicit_offset () =
+  check
+    (option (float 0.000_001))
+    "explicit offset normalized"
+    (Some 0.0)
+    (Masc_domain.parse_iso8601_opt "1970-01-01T09:00:00+09:00")
 
 (* ============================================================
    Agent Status Tests
@@ -1496,6 +1509,8 @@ let () =
       test_case "parse valid" `Quick test_parse_iso8601_valid;
       test_case "parse invalid" `Quick test_parse_iso8601_invalid;
       test_case "parse empty" `Quick test_parse_iso8601_empty;
+      test_case "invalid civil date" `Quick test_parse_iso8601_rejects_invalid_civil_date;
+      test_case "explicit offset" `Quick test_parse_iso8601_accepts_explicit_offset;
     ];
     "agent_status_show", [
       test_case "active" `Quick test_show_agent_status_active;

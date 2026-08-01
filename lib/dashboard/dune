@@ -50,6 +50,7 @@
   agent_sdk.base
   agent_sdk.llm_provider
   masc.tool_types
+  masc.time_codec
   masc.attribution
   masc.exec_policy
   masc.keeper_registry

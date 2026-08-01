@@ -301,7 +301,7 @@ let receipt_timeline_event receipt =
   | None -> None
   | Some ended_at ->
       let ts_unix =
-        Masc_domain.parse_iso8601 ~default_time:0.0 ended_at
+        Masc_domain.parse_iso8601_opt ended_at |> Option.value ~default:0.0
       in
       if ts_unix <= 0.0 then None
       else

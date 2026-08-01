@@ -51,6 +51,20 @@ let test_empty_env_is_absent () =
   with_env [ canonical_env, Some "" ] (fun () ->
     check_resolution "empty" default_path Poller.Default)
 
+let test_compact_offset_is_applied () =
+  check
+    (option (float 0.000_001))
+    "KST compact offset maps to UTC epoch"
+    (Some 0.0)
+    (Poller.For_testing.parse_state_timestamp "1970-01-01T09:00:00+0900")
+
+let test_invalid_civil_date_is_rejected () =
+  check
+    (option (float 0.0))
+    "invalid civil date"
+    None
+    (Poller.For_testing.parse_state_timestamp "2026-02-31T12:00:00+0900")
+
 let () =
   run
     "Host_fd_pressure_poller"
@@ -58,5 +72,10 @@ let () =
       , [ test_case "default path" `Quick test_default_path
         ; test_case "canonical env wins" `Quick test_canonical_env_wins
         ; test_case "empty env is absent" `Quick test_empty_env_is_absent
+        ; test_case "compact offset is applied" `Quick test_compact_offset_is_applied
+        ; test_case
+            "invalid civil date is rejected"
+            `Quick
+            test_invalid_civil_date_is_rejected
         ] )
     ]

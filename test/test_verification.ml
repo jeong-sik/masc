@@ -294,6 +294,66 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
           | tasks -> Alcotest.failf "expected one task, got %d" (List.length tasks)))
   )
 
+let test_raw_workspace_submission_notifies_once () =
+  with_eio_temp_dir (fun base_path ->
+    Masc.Workspace_metric_hooks.install ();
+    let previous_notification =
+      Atomic.get Workspace_hooks.verification_notify_submit_fn
+    in
+    let notifications = ref [] in
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set Workspace_hooks.verification_notify_submit_fn previous_notification)
+      (fun () ->
+        Atomic.set Workspace_hooks.verification_notify_submit_fn
+          (fun _config ~task ~assignee ~verification_id ~evidence_refs ->
+             notifications :=
+               (task.id, assignee, verification_id, evidence_refs) :: !notifications);
+        let config = W.default_config base_path in
+        ignore (W.init config ~agent_name:(Some "raw-workspace-worker"));
+        ignore
+          (W.add_task
+             config
+             ~title:"raw Workspace submission"
+             ~priority:1
+             ~description:"the raw Workspace boundary must publish one submit notification");
+        (match
+           W.claim_task_r
+             config
+             ~agent_name:"raw-workspace-worker"
+             ~task_id:"task-001"
+             ()
+         with
+         | Ok _ -> ()
+         | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error));
+        (match
+           W.transition_task_r
+             config
+             ~agent_name:"raw-workspace-worker"
+             ~task_id:"task-001"
+             ~action:Masc_domain.Submit_for_verification
+             ~notes:"note:raw-workspace-evidence"
+             ()
+         with
+         | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+         | Ok _ -> ());
+        Alcotest.(check int)
+          "raw Workspace transition publishes exactly one submit notification"
+          1
+          (List.length !notifications);
+        match !notifications with
+        | [ task_id, assignee, verification_id, _evidence_refs ] ->
+          Alcotest.(check string) "notification task" "task-001" task_id;
+          Alcotest.(check string)
+            "notification producer"
+            "raw-workspace-worker"
+            assignee;
+          Alcotest.(check bool)
+            "notification has the persisted verification id"
+            true
+            (String.length verification_id > 0)
+        | _ -> Alcotest.fail "expected one raw Workspace submit notification"))
+
 (* --- Storage tests --- *)
 
 let test_create_and_load () =
@@ -1135,6 +1195,10 @@ let () =
         test_system_llm_authority_helpers_are_typed;
       Alcotest.test_case "system LLM commits without Keeper verifier" `Quick
         test_system_llm_agent_commits_without_a_keeper_verifier;
+    ];
+    "workspace_boundary", [
+      Alcotest.test_case "raw submit notifies once" `Quick
+        test_raw_workspace_submission_notifies_once;
     ];
     "id_generation", [
       Alcotest.test_case "vrf- prefix" `Quick test_generate_id_prefix;

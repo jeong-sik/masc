@@ -12,9 +12,45 @@ type runtime =
   ; sw : Eio.Switch.t
   ; wake : Eio.Condition.t
   ; pending : bool Atomic.t
+  ; in_flight : review_key list Atomic.t
+  }
+
+and review_key =
+  { task_id : string
+  ; verification_id : string
   }
 
 let active_runtime : runtime option Atomic.t = Atomic.make None
+
+let review_key_equal left right =
+  String.equal left.task_id right.task_id
+  && String.equal left.verification_id right.verification_id
+;;
+
+let claim_review (runtime : runtime) key =
+  let rec loop () =
+    let current = Atomic.get runtime.in_flight in
+    if List.exists (review_key_equal key) current
+    then false
+    else if Atomic.compare_and_set runtime.in_flight current (key :: current)
+    then true
+    else loop ()
+  in
+  loop ()
+;;
+
+let release_review (runtime : runtime) key =
+  let rec loop () =
+    let current = Atomic.get runtime.in_flight in
+    let next = List.filter (fun candidate -> not (review_key_equal candidate key)) current in
+    if List.length next = List.length current
+    then ()
+    else if Atomic.compare_and_set runtime.in_flight current next
+    then ()
+    else loop ()
+  in
+  loop ()
+;;
 
 let evidence_refs_of_output = function
   | `Assoc fields ->
@@ -203,7 +239,12 @@ let log_deferred ~task_id ~verification_id ~authority ~reason =
     reason
 ;;
 
-let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verification_id =
+let process_task_once
+      (runtime : runtime)
+      (task : Masc_domain.task)
+      ~assignee
+      ~verification_id
+  =
   let judge_run_id = Random_id.prefixed ~prefix:"judge-" ~bytes:16 in
   let authority = Masc_domain.Auto_judge { judge_run_id } in
   try
@@ -293,6 +334,20 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
       ~reason:(Printexc.to_string exn)
 ;;
 
+let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verification_id =
+  let key = { task_id = task.id; verification_id } in
+  if claim_review runtime key
+  then
+    Fun.protect
+      ~finally:(fun () -> release_review runtime key)
+      (fun () -> process_task_once runtime task ~assignee ~verification_id)
+  else
+    Log.Misc.debug
+      "system LLM completion authority skipped duplicate in-flight review task_id=%s verification_id=%s"
+      task.id
+      verification_id
+;;
+
 let process_pending (runtime : runtime) =
   match Workspace_backlog.read_backlog_r runtime.config with
   | Error detail ->
@@ -304,7 +359,8 @@ let process_pending (runtime : runtime) =
       (fun (task : Masc_domain.task) ->
          match task.task_status with
          | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
-           process_task runtime task ~assignee ~verification_id
+           Eio.Fiber.fork ~sw:runtime.sw (fun () ->
+             process_task runtime task ~assignee ~verification_id)
          | Masc_domain.Todo
          | Masc_domain.Claimed _
          | Masc_domain.InProgress _
@@ -349,7 +405,12 @@ let install_callback (runtime : runtime) =
 let start ~sw ~(config : Workspace_utils_backend_setup.config) =
   Eio.Switch.check sw;
   let runtime =
-    { config; sw; wake = Eio.Condition.create (); pending = Atomic.make true }
+    { config
+    ; sw
+    ; wake = Eio.Condition.create ()
+    ; pending = Atomic.make true
+    ; in_flight = Atomic.make []
+    }
   in
   let owner = Some runtime in
   match Atomic.compare_and_set active_runtime None owner with

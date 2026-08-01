@@ -16,6 +16,13 @@ type transition_outcome =
   ; noop : bool
   }
 
+type verification_submission =
+  { task : Masc_domain.task
+  ; assignee : string
+  ; verification_id : string
+  ; evidence_refs : string list
+  }
+
 let transition_task_outcome_r
       config
       ~agent_name
@@ -98,7 +105,9 @@ let transition_task_outcome_r
     | Ok _, Ok _ -> Ok ()
   in
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  with_file_lock_r config backlog_path (fun () ->
+  let committed_verification_submission = ref None in
+  let result =
+    with_file_lock_r config backlog_path (fun () ->
     try
       match read_backlog_r config with
       | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
@@ -232,6 +241,19 @@ let transition_task_outcome_r
         in
         let new_status = decision.Workspace_task_lifecycle.new_status in
         let set_current = decision.set_current in
+        let verification_submission_evidence_refs =
+          match action with
+          | Masc_domain.Submit_for_verification ->
+            Workspace_task_verification.verification_submission_evidence_refs
+              task
+              ~notes
+              handoff_context
+          | Masc_domain.Claim
+          | Masc_domain.Start
+          | Masc_domain.Done_action
+          | Masc_domain.Cancel
+          | Masc_domain.Release -> []
+        in
         let* () =
           match action with
           | Masc_domain.Submit_for_verification
@@ -258,13 +280,16 @@ let transition_task_outcome_r
             (* Collect evidence refs as observability metadata for
                the verifier request output. Empty list is valid for
                analysis-only and no-contract tasks. *)
-            let evidence_refs =
-              Workspace_task_verification.verification_submission_evidence_refs task ~notes handoff_context
-            in
             (match prepare_opt with
              | None -> Ok ()
              | Some prepare ->
-               (match prepare ~task ~assignee ~verification_id ~evidence_refs with
+               (match
+                  prepare
+                    ~task
+                    ~assignee
+                    ~verification_id
+                    ~evidence_refs:verification_submission_evidence_refs
+                with
                 | Ok () -> Ok ()
                 | Error e ->
                   Error
@@ -371,6 +396,28 @@ let transition_task_outcome_r
                  | Masc_domain.Cancel
                  | Masc_domain.Release -> ()));
              raise exn);
+          (match action, new_status with
+           | ( Masc_domain.Submit_for_verification
+             , Masc_domain.AwaitingVerification { assignee; verification_id; _ } ) ->
+             committed_verification_submission :=
+               Some
+                 { task = { task with task_status = new_status }
+                 ; assignee
+                 ; verification_id
+                 ; evidence_refs = verification_submission_evidence_refs
+                 }
+           | ( ( Masc_domain.Claim
+               | Masc_domain.Start
+               | Masc_domain.Done_action
+               | Masc_domain.Cancel
+               | Masc_domain.Release
+               | Masc_domain.Submit_for_verification )
+             , ( Masc_domain.Todo
+               | Masc_domain.Claimed _
+               | Masc_domain.InProgress _
+               | Masc_domain.Done _
+               | Masc_domain.AwaitingVerification _
+               | Masc_domain.Cancelled _ ) ) -> ());
           (* RFC-0221 §3.3: clear stale agent task-cache entries AFTER the
              commit so agents that cache the task don't emit stale broadcasts
              referencing the old status. *)
@@ -580,7 +627,27 @@ let transition_task_outcome_r
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
       Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e))))
-  |> Workspace_task_verification.flatten_lock_result
+    |> Workspace_task_verification.flatten_lock_result
+  in
+  (match !committed_verification_submission with
+   | None -> ()
+   | Some { task; assignee; verification_id; evidence_refs } ->
+     (try
+        (Atomic.get Workspace_hooks.verification_notify_submit_fn)
+          config
+          ~task
+          ~assignee
+          ~verification_id
+          ~evidence_refs
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Log.TaskState.error
+          "verification submit notification degraded after commit task_id=%s verification_id=%s detail=%s"
+          task_id
+          verification_id
+          (Printexc.to_string exn)));
+  result
 ;;
 
 let transition_task_r

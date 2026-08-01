@@ -68,6 +68,37 @@ let test_evaluator_failure_is_unavailable_not_reject () =
        Alcotest.(check bool) "no fabricated reject" true (Option.is_none result.verdict))
 ;;
 
+let test_reject_without_reason_is_malformed () =
+  let malformed =
+    [ `Assoc [ "verdict", `String "REJECT" ]
+    ; `Assoc [ "verdict", `String "REJECT"; "reason", `String "   " ]
+    ; `Assoc [ "verdict", `String "REJECT"; "reason", `Null ]
+    ]
+  in
+  List.iter
+    (fun args ->
+       match AR.parse_review_verdict_from_json args with
+       | Error _ -> ()
+       | Ok AR.Approve -> Alcotest.fail "malformed REJECT became APPROVE"
+       | Ok (AR.Reject reason) ->
+         Alcotest.failf "malformed REJECT fabricated a reason: %s" reason)
+    malformed
+;;
+
+let test_reject_reason_is_preserved () =
+  match
+    AR.parse_review_verdict_from_json
+      (`Assoc
+          [ "verdict", `String "REJECT"
+          ; "reason", `String " evidence is incomplete "
+          ])
+  with
+  | Ok (AR.Reject reason) ->
+    Alcotest.(check string) "rejection reason is not rewritten" " evidence is incomplete " reason
+  | Ok AR.Approve -> Alcotest.fail "REJECT became APPROVE"
+  | Error detail -> Alcotest.fail detail
+;;
+
 let test_evidence_text_is_not_classified_before_llm_review () =
   Alcotest.(check (list string))
     "only blank values are removed"
@@ -93,6 +124,14 @@ let () =
             "provider failure unavailable"
             `Quick
             test_evaluator_failure_is_unavailable_not_reject
+        ; Alcotest.test_case
+            "reject without reason is malformed"
+            `Quick
+            test_reject_without_reason_is_malformed
+        ; Alcotest.test_case
+            "reject reason is preserved"
+            `Quick
+            test_reject_reason_is_preserved
         ; Alcotest.test_case
             "evidence meaning stays with reviewer"
             `Quick

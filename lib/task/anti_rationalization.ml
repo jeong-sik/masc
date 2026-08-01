@@ -211,10 +211,9 @@ let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) re
     match verdict_str with
     | "APPROVE" -> Ok Approve
     | "REJECT" ->
-      let r =
-        if reason = "" then "completion notes did not address the task" else reason
-      in
-      Ok (Reject r)
+      if String.equal (String.trim reason) ""
+      then Error "REJECT verdict requires a non-empty reason"
+      else Ok (Reject reason)
     | other -> Error (sprintf "unexpected review verdict value: %s" other)
   with
   | Yojson.Safe.Util.Type_error (msg, _) -> Error (sprintf "review verdict JSON type error: %s" msg)

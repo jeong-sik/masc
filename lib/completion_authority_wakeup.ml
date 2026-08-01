@@ -19,9 +19,6 @@ let wake_rejected_producer
       ~reason
       ~authority
   =
-  Keeper_current_task_reconcile.sync_current_task_id_for_agent_name
-    ~config
-    ~agent_name:producer;
   match Keeper_identity.canonical_keeper_name_from_agent_name producer with
   | None ->
     Unroutable_producer { producer; task_id }
@@ -48,6 +45,11 @@ let wake_rejected_producer
      with
      | Error detail -> Durable_queue_failed { keeper_name; detail }
      | Ok () ->
+       (* The producer Keeper owns current-task projection. Its next cycle
+          reconciles that projection from the committed backlog before it
+          renders this durable rejection stimulus. Keeping that mutation out
+          of the authority-to-queue boundary means a best-effort Keeper
+          projection can never prevent durable delivery or the live wake. *)
        (try
           match
             Keeper_registry.wakeup_running

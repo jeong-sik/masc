@@ -18,6 +18,8 @@ let non_empty_trimmed_strings values =
          if blank_evidence_ref value then None else Some (String.trim value))
   |> List.sort_uniq String.compare
 
+let note_evidence_ref = Workspace_task_verification.note_evidence_ref
+
 (* Raw (uncleaned) evidence sources, shared by the flat [evidence_refs]
    projection and the typed [verification_evidence] split (task-1664) so a new
    source is declared in exactly one place. [required_*] are what the contract
@@ -44,14 +46,12 @@ let submitted_evidence_sources ?(notes = "") ?handoff_context
     match resolved_handoff_context with
     | Some hc ->
       let trimmed = String.trim hc.summary in
-      if blank_evidence_ref trimmed then []
-      else [ trimmed ]
+      Option.to_list (note_evidence_ref trimmed)
     | None -> []
   in
   let notes_refs =
     let trimmed = String.trim notes in
-    if blank_evidence_ref trimmed then []
-    else [ trimmed ]
+    Option.to_list (note_evidence_ref trimmed)
   in
   submitted_evidence_refs @ handoff_refs @ summary_refs @ notes_refs
 

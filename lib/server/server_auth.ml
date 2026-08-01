@@ -219,8 +219,15 @@ let resolve_agent_name_for_auth_raw ~base_path request ~token :
       | Some raw when String.trim raw <> "" -> Ok (Some (String.trim raw))
       | _ -> Ok None)
 
+(** Bind OAuth credential lookup to the resource derived from the admitted
+    request authority. Static bearer lookup is unaffected by this scope. *)
+let with_mcp_expected_resource f =
+  let authority = Server_request_authority.current_exn () in
+  Auth_oauth.with_expected_resource (Server_oauth_metadata.resource authority) f
+;;
+
 (** Verify Bearer token for MCP endpoints *)
-let verify_mcp_auth ~base_path request =
+let verify_mcp_auth_unscoped ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
   let credential = request_auth_credential_from_request request in
   let* auth_config = ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config in
@@ -259,7 +266,11 @@ let verify_mcp_auth ~base_path request =
             |> Result.map_error Masc_domain.masc_error_to_string
             |> Result.map (fun () -> None))
 
-let verify_mcp_observer_stream_auth ~base_path request =
+let verify_mcp_auth ~base_path request =
+  with_mcp_expected_resource (fun () -> verify_mcp_auth_unscoped ~base_path request)
+;;
+
+let verify_mcp_observer_stream_auth_unscoped ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
   let credential = observer_sse_auth_credential_from_request request in
   let* auth_config = ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config in
@@ -294,7 +305,12 @@ let verify_mcp_observer_stream_auth ~base_path request =
             |> Result.map_error Masc_domain.masc_error_to_string
             |> Result.map (fun () -> None))
 
-let verify_operator_mcp_auth ~base_path request =
+let verify_mcp_observer_stream_auth ~base_path request =
+  with_mcp_expected_resource (fun () ->
+    verify_mcp_observer_stream_auth_unscoped ~base_path request)
+;;
+
+let verify_operator_mcp_auth_unscoped ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
   let credential = request_auth_credential_from_request request in
   if not auth_config.Masc_domain.enabled then
@@ -324,6 +340,11 @@ let verify_operator_mcp_auth ~base_path request =
               ~permission:Masc_domain.CanAdmin
             |> Result.map_error Masc_domain.masc_error_to_string
             |> Result.map (fun () -> None))
+
+let verify_operator_mcp_auth ~base_path request =
+  with_mcp_expected_resource (fun () ->
+    verify_operator_mcp_auth_unscoped ~base_path request)
+;;
 
 let request_actor_hint request =
   match agent_from_request request with

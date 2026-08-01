@@ -161,6 +161,22 @@ let render_authorization_form ?error (request : Auth_oauth.authorization_request
     ]
 ;;
 
+let authorization_form_headers =
+  [ "cache-control", "no-store"
+  ; ( "content-security-policy"
+    , "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'" )
+  ; "x-frame-options", "DENY"
+  ]
+;;
+
+let respond_authorization_form ?(status = `OK) ?error authorization_request reqd =
+  Http.Response.html
+    ~status
+    ~headers:authorization_form_headers
+    (render_authorization_form ?error authorization_request)
+    reqd
+;;
+
 let authorization_request_of_params ~base_path ~authority params =
   Auth_oauth.validate_authorization_request
     ~base_path
@@ -185,14 +201,7 @@ let handle_authorize_get request reqd =
         (match authorization_request_of_params ~base_path ~authority params with
          | Error error -> respond_oauth_error request reqd error
          | Ok authorization_request ->
-           Http.Response.html
-             ~headers:
-               [ "cache-control", "no-store"
-               ; "content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'"
-               ; "x-frame-options", "DENY"
-               ]
-             (render_authorization_form authorization_request)
-             reqd)))
+           respond_authorization_form authorization_request reqd)))
 ;;
 
 let redirect_with_code authorization_request code =
@@ -222,20 +231,22 @@ let handle_authorize_post request reqd =
              | Ok authorization_request ->
                (match param params "bootstrap_token" with
                 | None ->
-                  Http.Response.html
+                  Log.Auth.warn "oauth: bootstrap bearer missing";
+                  respond_authorization_form
                     ~status:`Unauthorized
-                    (render_authorization_form
-                       ~error:"A MASC bearer is required."
-                       authorization_request)
+                    ~error:"A MASC bearer is required."
+                    authorization_request
                     reqd
                 | Some bootstrap_token ->
                   (match Auth.find_static_credential_by_token base_path ~token:bootstrap_token with
-                   | Error _ ->
-                     Http.Response.html
+                   | Error error ->
+                     Log.Auth.warn
+                       "oauth: bootstrap bearer rejected reason=%s"
+                       (Masc_domain.masc_error_to_string error);
+                     respond_authorization_form
                        ~status:`Unauthorized
-                       (render_authorization_form
-                          ~error:"The MASC bearer was not accepted."
-                          authorization_request)
+                       ~error:"The MASC bearer was not accepted."
+                       authorization_request
                        reqd
                    | Ok bootstrap_credential ->
                      (match

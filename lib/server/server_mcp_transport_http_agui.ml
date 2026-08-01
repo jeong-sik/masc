@@ -73,10 +73,15 @@ let handle_ag_ui_events ~deps request reqd =
             Transport_metrics.inc_sse_reconnect ();
           ensure_sse_backing_session_for_known_transport_session
             ~transport_session_id:session_id ~sse_session_id:session_id;
+          let expected_resource =
+            Server_request_authority.current_exn ()
+            |> Server_oauth_metadata.resource
+          in
           (match
-             Sse.register ~kind:Sse.Observer ~auth session_id
-               ~last_event_id:(Option.value ~default:0 last_event_id)
-               ~on_disconnect:(fun () -> stop_sse_session session_id)
+             Auth_oauth.with_expected_resource expected_resource (fun () ->
+               Sse.register ~kind:Sse.Observer ~auth session_id
+                 ~last_event_id:(Option.value ~default:0 last_event_id)
+                 ~on_disconnect:(fun () -> stop_sse_session session_id))
            with
            | Error reg_err ->
                let msg = Sse.registration_error_to_string reg_err in
@@ -190,10 +195,15 @@ let handle_presence_events ~deps request reqd =
           stop_sse_session_preserve_guard session_id;
           ensure_sse_backing_session_for_known_transport_session
             ~transport_session_id:raw_session_id ~sse_session_id:session_id;
+          let expected_resource =
+            Server_request_authority.current_exn ()
+            |> Server_oauth_metadata.resource
+          in
           (match
-             Sse.register ~kind:Sse.Presence ~auth session_id ~last_event_id:0
-               ~on_disconnect:(fun () ->
-                 stop_sse_session_preserve_guard session_id)
+             Auth_oauth.with_expected_resource expected_resource (fun () ->
+               Sse.register ~kind:Sse.Presence ~auth session_id ~last_event_id:0
+                 ~on_disconnect:(fun () ->
+                   stop_sse_session_preserve_guard session_id))
            with
            | Error reg_err ->
                let msg = Sse.registration_error_to_string reg_err in

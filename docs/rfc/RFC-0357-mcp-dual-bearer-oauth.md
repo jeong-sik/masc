@@ -130,11 +130,13 @@ persisted.
 The authorization-code grant requires the same `client_id`, exact
 `redirect_uri`, exact `resource`, and a verifier whose SHA-256 base64url value
 equals the stored challenge. A validation failure does not consume a valid code;
-a successful exchange consumes it before token material is returned.
+a validated exchange attempt consumes it before token minting begins. If the
+durable store fails, the client must start a fresh authorization flow; the code
+is never restored for retry.
 
-The refresh grant rotates both access and refresh tokens. The old refresh token
-is revoked in the same serialized state transition before the new pair is
-returned. Replaying it fails with `invalid_grant`.
+The refresh grant rotates both access and refresh tokens. Replaying any known
+older refresh token revokes the entire token family, including the current
+access and refresh tokens, and fails with `invalid_grant`.
 
 Access and refresh token records store SHA-256 hashes only. An access-token
 record contains the authoritative agent, effective role, resource, scope set,
@@ -210,10 +212,10 @@ commit.
 |---|---|
 | authorization-code interception | S256 PKCE is mandatory; `plain` is rejected |
 | redirect theft | redirect URI is exact-match registered and loopback-only |
-| code replay | successful exchange consumes one code atomically |
-| refresh replay | refresh rotation revokes the presented token atomically |
+| code replay | a validated exchange attempt consumes one code before minting; store failure does not restore it |
+| refresh replay | replay of a known old refresh token revokes the entire token family atomically |
 | token leak at rest | only SHA-256 hashes are persisted; files are mode 0600 |
-| cross-resource token use | authorization and token requests bind exact resource; resource server rechecks it |
+| cross-resource token use | authorization and token requests bind the exact resource derived from admitted request authority; MCP credential lookup requires that same fiber-local resource context |
 | privilege escalation | requested scope intersects downward with bootstrap role; it never upgrades role |
 | host-header injection | issuer/resource URLs derive only from admitted `Server_request_authority`, never raw headers |
 | CSRF/form injection | browser POST requires same-origin checks; every reflected value is HTML escaped |
@@ -258,7 +260,7 @@ Focused tests must prove:
   or scopes;
 - a valid code exchanges once and replay fails;
 - wrong verifier does not mint a token;
-- refresh rotates once and replay fails;
+- refresh rotates once; replay fails and revokes the current token family;
 - expired/revoked/wrong-resource OAuth access tokens fail closed;
 - Worker bootstrap cannot obtain admin scope;
 - Admin bootstrap receives admin only when explicitly requested;

@@ -398,20 +398,28 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                 in
                                 inline_sse := Some info;
                                 spawn_post_sse_keepalive ~sw ~clock info);
-                              let body_with_agent =
-                                body_with_canonical_http_actor ~base_path
-                                  ~auth_token request body_str
+                              let request_authority =
+                                Server_request_authority.current_exn ()
                               in
-                              let internal_keeper_runtime =
-                                Server_auth.is_verified_internal_keeper_request
-                                  ~base_path request
+                              let expected_resource =
+                                Server_oauth_metadata.resource request_authority
                               in
                               let response_json =
-                                runtime.handle_request ?auth_token ~profile
-                                  ~mcp_session_id:session_id
-                                  ~otel_mcp_protocol_version:protocol_version
-                                  ~otel_transport_context
-                                  ~internal_keeper_runtime body_with_agent
+                                Auth_oauth.with_expected_resource expected_resource
+                                  (fun () ->
+                                    let body_with_agent =
+                                      body_with_canonical_http_actor ~base_path
+                                        ~auth_token request body_str
+                                    in
+                                    let internal_keeper_runtime =
+                                      Server_auth.is_verified_internal_keeper_request
+                                        ~base_path request
+                                    in
+                                    runtime.handle_request ?auth_token ~profile
+                                      ~mcp_session_id:session_id
+                                      ~otel_mcp_protocol_version:protocol_version
+                                      ~otel_transport_context
+                                      ~internal_keeper_runtime body_with_agent)
                               in
                               remember_protocol_version_if_initialize_succeeded
                                 ~otel_transport_context
@@ -615,10 +623,15 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
             Transport_metrics.inc_sse_reconnect ();
           ensure_sse_backing_session_for_known_transport_session
             ~transport_session_id:session_id ~sse_session_id:session_id;
+          let expected_resource =
+            Server_request_authority.current_exn ()
+            |> Server_oauth_metadata.resource
+          in
           (match
-             Sse.register ~kind:sse_kind ~auth session_id
-               ~last_event_id:(Option.value ~default:0 last_event_id)
-               ~on_disconnect:(fun () -> stop_sse_session session_id)
+             Auth_oauth.with_expected_resource expected_resource (fun () ->
+               Sse.register ~kind:sse_kind ~auth session_id
+                 ~last_event_id:(Option.value ~default:0 last_event_id)
+                 ~on_disconnect:(fun () -> stop_sse_session session_id))
            with
            | Error reg_err ->
                let msg = Sse.registration_error_to_string reg_err in

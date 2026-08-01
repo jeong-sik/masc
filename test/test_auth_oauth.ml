@@ -9,7 +9,7 @@ let with_env name value f =
     ~finally:(fun () ->
       match previous with
       | Some previous -> Unix.putenv name previous
-      | None -> Unix.putenv name "")
+      | None -> Unix.unsetenv name)
     f
 ;;
 
@@ -65,14 +65,12 @@ let test_pkce_rfc7636_vector () =
 
 let test_dual_auth_code_and_refresh_lifecycle () =
   with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
-    with_env "MASC_URL" "http://127.0.0.1:8935/mcp" (fun () ->
-      with_workspace (fun base_path ->
+    with_workspace (fun base_path ->
       Eio_main.run (fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
         Eio_guard.enable ();
         Fun.protect
           ~finally:(fun () ->
-            Auth_oauth.reset_process_state_for_tests ();
             Eio_guard.disable ();
             Fs_compat.clear_fs ())
           (fun () ->
@@ -144,7 +142,10 @@ let test_dual_auth_code_and_refresh_lifecycle () =
                     ~resource:(Some resource)
                     ~code_verifier:verifier));
             let oauth_credential =
-              Auth.find_credential_by_token base_path ~token:first_pair.access_token
+              Auth_oauth.with_expected_resource resource (fun () ->
+                Auth.find_credential_by_token
+                  base_path
+                  ~token:first_pair.access_token)
               |> auth_ok
             in
             check string "OAuth actor" "codex" oauth_credential.agent_name;
@@ -153,16 +154,23 @@ let test_dual_auth_code_and_refresh_lifecycle () =
               "scope reduces admin bootstrap to worker"
               true
               (Masc_domain.Worker = oauth_credential.role);
-            ignore (Auth.verify_token base_path ~agent_name:"codex" ~token:first_pair.access_token |> auth_ok);
+            ignore
+              (Auth_oauth.with_expected_resource resource (fun () ->
+                 Auth.verify_token
+                   base_path
+                   ~agent_name:"codex"
+                   ~token:first_pair.access_token)
+               |> auth_ok);
             check
               bool
               "OAuth actor mismatch is rejected"
               true
               (Result.is_error
-                 (Auth.verify_token
-                    base_path
-                    ~agent_name:"another-agent"
-                    ~token:first_pair.access_token));
+                 (Auth_oauth.with_expected_resource resource (fun () ->
+                    Auth.verify_token
+                      base_path
+                      ~agent_name:"another-agent"
+                      ~token:first_pair.access_token)));
             ignore (Auth.verify_token base_path ~agent_name:"codex" ~token:static_token |> auth_ok);
             let second_pair =
               Auth_oauth.rotate_refresh_token
@@ -178,10 +186,30 @@ let test_dual_auth_code_and_refresh_lifecycle () =
               "rotation revokes previous access token"
               true
               (Result.is_error
-                 (Auth.find_credential_by_token base_path ~token:first_pair.access_token));
+                 (Auth_oauth.with_expected_resource resource (fun () ->
+                    Auth.find_credential_by_token
+                      base_path
+                      ~token:first_pair.access_token)));
+            ignore
+              (Auth_oauth.with_expected_resource resource (fun () ->
+                 Auth.find_credential_by_token
+                   base_path
+                   ~token:second_pair.access_token)
+               |> auth_ok);
             check
               bool
-              "refresh replay is rejected"
+              "access token is bound to the exact admitted MCP resource"
+              true
+              (Result.is_error
+                 (Auth_oauth.with_expected_resource
+                    "http://localhost:8935/mcp"
+                    (fun () ->
+                      Auth.find_credential_by_token
+                        base_path
+                        ~token:second_pair.access_token)));
+            check
+              bool
+              "refresh replay revokes the token family"
               true
               (Result.is_error
                  (Auth_oauth.rotate_refresh_token
@@ -190,16 +218,13 @@ let test_dual_auth_code_and_refresh_lifecycle () =
                     ~refresh_token:first_pair.refresh_token
                     ~client_id:client.client_id
                     ~resource:None));
-            ignore
-              (Auth.find_credential_by_token base_path ~token:second_pair.access_token
-               |> auth_ok);
-            with_env "MASC_URL" "http://127.0.0.1:19999/mcp" (fun () ->
-              check
-                bool
-                "access token is bound to the exact MCP resource"
-                true
-                (Result.is_error
-                   (Auth.find_credential_by_token
+            check
+              bool
+              "refresh replay invalidates the current access token"
+              true
+              (Result.is_error
+                 (Auth_oauth.with_expected_resource resource (fun () ->
+                    Auth.find_credential_by_token
                       base_path
                       ~token:second_pair.access_token)));
             with_env "MASC_OAUTH_ENABLED" "0" (fun () ->
@@ -211,7 +236,80 @@ let test_dual_auth_code_and_refresh_lifecycle () =
                    (Auth.find_credential_by_token base_path ~token:second_pair.access_token));
               ignore
                 (Auth.verify_token base_path ~agent_name:"codex" ~token:static_token
-                 |> auth_ok)))))))
+                 |> auth_ok))))))
+;;
+
+let test_consumed_code_is_not_restored_after_store_failure () =
+  with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
+    with_workspace (fun base_path ->
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        Eio_guard.enable ();
+        Fun.protect
+          ~finally:(fun () ->
+            Eio_guard.disable ();
+            Fs_compat.clear_fs ())
+          (fun () ->
+            let _, bootstrap_credential =
+              Auth.create_token base_path ~agent_name:"codex" ~role:Masc_domain.Admin
+              |> auth_ok
+            in
+            let redirect_uri = "http://127.0.0.1:43124/callback/codexoauth456" in
+            let resource = "http://127.0.0.1:8935/mcp" in
+            let client =
+              Auth_oauth.register_client
+                ~base_path
+                ~client_name:(Some "Codex")
+                ~redirect_uris:[ redirect_uri ]
+              |> oauth_ok
+            in
+            let verifier = String.make 43 'b' in
+            let request =
+              authorization_request
+                ~base_path
+                ~client_id:client.client_id
+                ~redirect_uri
+                ~resource
+                ~challenge:(Auth_oauth.pkce_s256 verifier)
+            in
+            let code =
+              Auth_oauth.issue_authorization_code
+                ~base_path
+                ~request
+                ~bootstrap_credential
+              |> oauth_ok
+            in
+            let access_tokens_dir =
+              Filename.concat base_path ".masc/auth/oauth/access_tokens"
+            in
+            let first_exchange =
+              Unix.chmod access_tokens_dir 0o500;
+              Fun.protect
+                ~finally:(fun () -> Unix.chmod access_tokens_dir 0o700)
+                (fun () ->
+                  Auth_oauth.exchange_authorization_code
+                    ~base_path
+                    ~expected_resource:resource
+                    ~code
+                    ~client_id:client.client_id
+                    ~redirect_uri
+                    ~resource:(Some resource)
+                    ~code_verifier:verifier)
+            in
+            check bool "token mint fails when its store is unwritable" true (Result.is_error first_exchange);
+            check
+              bool
+              "a claimed code remains consumed after mint failure"
+              true
+              (Result.is_error
+                 (Auth_oauth.exchange_authorization_code
+                    ~base_path
+                    ~expected_resource:resource
+                    ~code
+                    ~client_id:client.client_id
+                    ~redirect_uri
+                    ~resource:(Some resource)
+                    ~code_verifier:verifier))))))
 ;;
 
 let test_scope_cannot_escalate_role () =
@@ -271,6 +369,10 @@ let () =
             "registration loopback restriction"
             `Quick
             test_registration_rejects_non_loopback_redirect
+        ; test_case
+            "consumed code survives store failure"
+            `Quick
+            test_consumed_code_is_not_restored_after_store_failure
         ; test_case "scope cannot escalate role" `Quick test_scope_cannot_escalate_role
         ] )
     ]

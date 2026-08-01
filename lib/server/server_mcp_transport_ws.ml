@@ -473,7 +473,7 @@ let verify_dashboard_token ~base_path token =
     | None ->
         Error "dashboard/hello requires a bearer token"
     | Some raw_token -> (
-        match Auth.find_credential_by_token base_path ~token:raw_token with
+        match Auth.find_static_credential_by_token base_path ~token:raw_token with
         | Error err -> Error (Masc_domain.masc_error_to_string err)
         | Ok cred -> (
             match

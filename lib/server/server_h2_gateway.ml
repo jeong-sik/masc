@@ -452,26 +452,33 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                                    let profile =
                                      mcp_eio_profile_of_transport_profile profile
                                    in
-                                   let body_with_agent =
-                                     Server_mcp_transport_http.body_with_canonical_http_actor
-                                       ~base_path ~auth_token httpun_request
-                                       post_context.body_str
-                                   in
-                                   let internal_keeper_runtime =
-                                     Server_auth.is_verified_internal_keeper_request
-                                       ~base_path httpun_request
-                                   in
                                    let response_json =
                                      let otel_transport_context =
                                        Otel_dispatch_hook.http_transport_context
                                          ~protocol_version:"2"
                                      in
-                                     Mcp_eio.handle_request ~clock ~sw ~profile
-                                       ~mcp_session_id:session_id ?auth_token
-                                       ~otel_mcp_protocol_version:protocol_version
-                                       ~otel_transport_context
-                                       ~internal_keeper_runtime state
-                                       body_with_agent
+                                     let expected_resource =
+                                       Server_request_authority.current_exn ()
+                                       |> Server_oauth_metadata.resource
+                                     in
+                                     Auth_oauth.with_expected_resource
+                                       expected_resource
+                                       (fun () ->
+                                         let body_with_agent =
+                                           Server_mcp_transport_http.body_with_canonical_http_actor
+                                             ~base_path ~auth_token httpun_request
+                                             post_context.body_str
+                                         in
+                                         let internal_keeper_runtime =
+                                           Server_auth.is_verified_internal_keeper_request
+                                             ~base_path httpun_request
+                                         in
+                                         Mcp_eio.handle_request ~clock ~sw ~profile
+                                           ~mcp_session_id:session_id ?auth_token
+                                           ~otel_mcp_protocol_version:protocol_version
+                                           ~otel_transport_context
+                                           ~internal_keeper_runtime state
+                                           body_with_agent)
                                    in
                                    let otel_transport_context =
                                      Otel_dispatch_hook.http_transport_context

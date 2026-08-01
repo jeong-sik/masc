@@ -13,7 +13,7 @@ let with_env name value f =
     ~finally:(fun () ->
       match previous with
       | Some previous -> Unix.putenv name previous
-      | None -> Unix.putenv name "")
+      | None -> Unix.unsetenv name)
     f
 ;;
 

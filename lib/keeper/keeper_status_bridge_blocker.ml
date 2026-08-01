@@ -212,7 +212,9 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
   | Keeper_registry.Turn_overflow_failure ->
     Some
       { blocker_class = "turn_overflow_failure"
-      ; summary = "Context overflow with compact retry exhausted; the failure was recorded and the Keeper remains active."
+      ; summary =
+          "Context overflow recorded by the retired automatic-recovery path \
+           (#26546); the Keeper remains active."
       }
   | Keeper_registry.Exception detail ->
     Some

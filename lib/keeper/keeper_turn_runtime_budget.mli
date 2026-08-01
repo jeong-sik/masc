@@ -222,10 +222,10 @@ type capacity_non_compaction =
 
 type capacity_transition =
   | Not_capacity
-  | Compact_next_cycle of Compaction_trigger.t
+  | Capacity_refusal_classified of Compaction_trigger.t
   | Capacity_non_compacting of capacity_non_compaction
 (** Provider-neutral transition input for the durable compaction lane.
-    [Compact_next_cycle] preserves the measured token or byte axis.
+    [Capacity_refusal_classified] preserves the measured token or byte axis.
     Future/expired serving evidence and unavailable token measurement remain
     typed non-compacting facts; they are never guessed into a capacity limit. *)
 

@@ -850,7 +850,10 @@ let blocked_keeper_action = function
   | Phase Keeper_state_machine.Offline -> Start_or_recover_keeper
   | Phase Keeper_state_machine.Running -> Inspect_capacity_accounting
   | Phase Keeper_state_machine.Failing -> Repair_failing_keeper
-  | Phase Keeper_state_machine.Overflowed -> Recover_context_overflow
+  | Phase Keeper_state_machine.Overflowed ->
+    (* Retired phase (#26546): unreachable for live keepers; kept for
+       exhaustiveness over the preserved variant. *)
+    Recover_context_overflow
   | Phase Keeper_state_machine.Compacting -> Wait_for_compaction
   | Phase Keeper_state_machine.HandingOff -> Wait_for_handoff
   | Phase Keeper_state_machine.Draining -> Wait_for_keeper_drain

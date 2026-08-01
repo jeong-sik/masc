@@ -215,7 +215,7 @@ let test_typed_capacity_transition_preserves_axes () =
          })
   in
   (match Budget.capacity_transition_of_error boundary with
-   | Budget.Compact_next_cycle
+   | Budget.Capacity_refusal_classified
        (Compaction_trigger.Serving_input_capacity
           (Compaction_trigger.Boundary_unknown
              { input_tokens = 524_299
@@ -230,7 +230,7 @@ let test_typed_capacity_transition_preserves_axes () =
          ~actual_bytes:2_000_000
          ~limit_bytes:1_048_576)
   with
-  | Budget.Compact_next_cycle
+  | Budget.Capacity_refusal_classified
       (Compaction_trigger.Request_body_over_capacity
          { actual_bytes = 2_000_000; limit_bytes = 1_048_576 }) ->
     ();
@@ -238,7 +238,7 @@ let test_typed_capacity_transition_preserves_axes () =
        Budget.capacity_transition_of_error
          (request_body_refused_by_provider ~status:413)
      with
-     | Budget.Compact_next_cycle
+     | Budget.Capacity_refusal_classified
          (Compaction_trigger.Request_body_refused_by_provider { status = 413 }) ->
        ()
      | _ -> fail "provider refusal did not become a typed capacity trigger")

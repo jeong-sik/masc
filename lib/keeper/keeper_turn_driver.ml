@@ -142,8 +142,8 @@ let lane_should_retry
        serve the same turn. [sdk_error_to_http_error] folds it into a generic
        HTTP 400 which [Runtime_attempt_fsm.should_try_next] treats as terminal,
        so the typed error must be read before that mapping. Overflow on the
-       last candidate still returns the typed error, keeping the reactive
-       compaction trigger ([context_overflow_event_of_error]) intact. *)
+       last candidate still returns the typed error, keeping the typed
+       overflow observation (blocker label, failure route) intact. *)
     true
   else
     match Keeper_turn_driver_try_runtime.sdk_error_to_http_error error with
@@ -165,13 +165,14 @@ let attempt_runtime_candidates
   (* A typed overflow observed on any candidate is a fact about this turn's
      input, not about whichever candidate happened to fail last. When the
      lane ends on a different recoverable error (for example a rate-limited
-     fallback), returning that last error hides the overflow from
-     [context_overflow_event_of_error], the keeper never enters the
-     overflowed phase, and compaction never fires while every cycle repeats
-     the same oversized input (#26530). Remember the first typed overflow
-     and let it represent a naturally exhausted lane. A lane that stops on a
-     non-recoverable error keeps that error: it is the immediate operator
-     signal, and the overflow will be observed again on the next cycle. *)
+     fallback), returning that last error would hide the overflow from the
+     lane classifier: the failure route would misreport a transient error
+     instead of the deterministic capacity bound, and the operator-facing
+     blocker would name the wrong cause (#26530). Remember the first typed
+     overflow and let it represent a naturally exhausted lane. A lane that
+     stops on a non-recoverable error keeps that error: it is the immediate
+     operator signal, and the overflow will be observed again on the next
+     cycle. *)
   let rec loop ~observed_overflow idx = function
     | [] ->
       (match observed_overflow with
@@ -246,9 +247,9 @@ let attempt_runtime_candidates
          else if is_last
          then (
            (* Lane fully exhausted: an overflow seen anywhere in the rotation
-              outranks the last candidate's error so the reactive compaction
-              trigger fires. Cascade telemetry already published each
-              candidate's own error. *)
+              outranks the last candidate's error so the failure route and
+              blocker report the deterministic capacity bound. Cascade
+              telemetry already published each candidate's own error. *)
            match observed_overflow with
            | Some overflow_error -> Error overflow_error
            | None -> Error error)

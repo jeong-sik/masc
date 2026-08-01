@@ -100,6 +100,16 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
   let name = get_string args "name" "" in
   if not (validate_name name) then
     Error (tool_result_error (invalid_name_error name))
+  else if Keeper_identity.is_keeper_agent_alias name then
+    let canonical_name =
+      Keeper_identity.canonical_keeper_name_from_agent_name name
+      |> Option.value ~default:name
+    in
+    Error
+      (tool_result_error
+         (Printf.sprintf
+            "invalid keeper name: %S is a runtime agent identity; use the canonical keeper name %S"
+            name canonical_name))
   else
     match Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_up" args with
     | Error e -> Error (tool_result_error e)

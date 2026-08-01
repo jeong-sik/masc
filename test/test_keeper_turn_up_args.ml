@@ -33,6 +33,51 @@ let test_resolve_mention_targets_normalizes_explicit_values () =
 
 let override_json value = `Assoc [ "max_context_override", value ]
 
+let with_test_context f =
+  let base = Filename.temp_file "keeper-turn-up-args-" "" in
+  Sys.remove base;
+  Unix.mkdir base 0o755;
+  Fun.protect
+    ~finally:(fun () -> Unix.rmdir base)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let ctx : _ Keeper_types_profile.context =
+        { config = Workspace.default_config base
+        ; agent_name = "test-agent"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = None
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.non_runtime_publication_recovery_provider
+        }
+      in
+      f ctx)
+
+let test_parse_rejects_runtime_agent_identity_as_keeper_name () =
+  with_test_context @@ fun ctx ->
+  List.iter
+    (fun agent_name ->
+      match
+        Keeper_turn_up_args.parse ctx
+          (`Assoc [ "name", `String agent_name ])
+      with
+      | Ok _ ->
+        failf "runtime agent identity %S was accepted as a keeper name" agent_name
+      | Error result ->
+        let body = Keeper_types_profile.tool_result_body result in
+        check bool "identifies the wrong identity kind" true
+          (String.starts_with body ~prefix:"invalid keeper name:");
+        check bool "names the canonical keeper" true
+          (String.ends_with body
+             ~suffix:"use the canonical keeper name \"executor\""))
+    [ "keeper-executor-agent"
+    ; "keeper_executor_agent"
+    ; "keeper-executor_agent"
+    ; "keeper_executor-agent"
+    ]
+
 let test_parse_max_context_override () =
   let check_ok label expected value =
     match Keeper_turn_up_args.parse_max_context_override (override_json value) with
@@ -147,6 +192,12 @@ let () =
       , [ test_case "request values are exact or rejected" `Quick test_parse_max_context_override
         ; test_case "runtime JSON rejects TOML-owned field" `Quick
             test_runtime_json_rejects_toml_owned_max_context_override
+        ] )
+    ; ( "keeper_name"
+      , [ test_case
+            "runtime agent identities are rejected"
+            `Quick
+            test_parse_rejects_runtime_agent_identity_as_keeper_name
         ] )
     ]
 ;;

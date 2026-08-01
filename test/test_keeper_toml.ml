@@ -113,6 +113,34 @@ let test_parse_string_escapes () =
      | _ -> fail "expected Toml_string")
   | Error e -> fail e
 
+let test_parse_literal_string () =
+  match TL.parse_toml "key = 'keeper\\path'" with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) -> check string "literal string" "keeper\\path" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail e
+
+let test_parse_unicode_and_control_escapes () =
+  match TL.parse_toml {|key = "\u0041\b\f"|} with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) -> check string "unicode/control escapes" "A\b\012" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail e
+
+let test_parse_quoted_and_dotted_keys_do_not_collide () =
+  let input = "\"a.b\" = \"literal\"\na.b = \"nested\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt {|"a.b"|} doc with
+     | Some (TL.Toml_string s) -> check string "literal dotted key" "literal" s
+     | _ -> fail "expected quoted literal dotted key");
+    (match List.assoc_opt "a.b" doc with
+     | Some (TL.Toml_string s) -> check string "nested dotted key" "nested" s
+     | _ -> fail "expected nested dotted key")
+  | Error e -> fail e
+
 let test_parse_int_value () =
   let input = "count = 42" in
   match TL.parse_toml input with
@@ -186,6 +214,58 @@ let test_parse_empty_array () =
      | Some (TL.Toml_string_array xs) ->
        check int "empty array" 0 (List.length xs)
      | _ -> fail "expected empty Toml_string_array")
+  | Error e -> fail e
+
+let test_parse_general_array () =
+  match TL.parse_toml {|items = [1, "two", true]|} with
+  | Ok doc ->
+    (match List.assoc_opt "items" doc with
+     | Some
+         (TL.Toml_array
+           [ TL.Toml_int 1; TL.Toml_string "two"; TL.Toml_bool true ]) -> ()
+     | _ -> fail "expected mixed Toml_array")
+  | Error e -> fail e
+
+let test_parse_inline_table () =
+  match TL.parse_toml {|point = { x = 1, label = "origin" }|} with
+  | Ok doc ->
+    (match List.assoc_opt "point" doc with
+     | Some (TL.Toml_inline_table fields) ->
+       check (option int) "x" (Some 1)
+         (match List.assoc_opt "x" fields with
+          | Some (TL.Toml_int value) -> Some value
+          | _ -> None);
+       check (option string) "label" (Some "origin")
+         (match List.assoc_opt "label" fields with
+          | Some (TL.Toml_string value) -> Some value
+          | _ -> None)
+     | _ -> fail "expected Toml_inline_table")
+  | Error e -> fail e
+
+let test_parse_datetime_values () =
+  let input = "offset = 1979-05-27T07:32:00Z\ndate = 1979-05-27" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "offset" doc with
+     | Some (TL.Toml_offset_datetime value) ->
+       check string "offset datetime" "1979-05-27T07:32:00Z" value
+     | _ -> fail "expected Toml_offset_datetime");
+    (match List.assoc_opt "date" doc with
+     | Some (TL.Toml_local_date value) -> check string "local date" "1979-05-27" value
+     | _ -> fail "expected Toml_local_date")
+  | Error e -> fail e
+
+let test_parse_table_array () =
+  let input = "[[products]]\nname = \"hammer\"\n[[products]]\nname = \"nail\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "products" doc with
+     | Some (TL.Toml_table_array [ TL.Toml_table first; TL.Toml_table second ]) ->
+       check bool "first table" true
+         (List.mem ("name", TL.Toml_string "hammer") first);
+       check bool "second table" true
+         (List.mem ("name", TL.Toml_string "nail") second)
+     | _ -> fail "expected Toml_table_array")
   | Error e -> fail e
 
 let test_parse_table () =
@@ -526,6 +606,24 @@ max_context_override = 128001
         d.active_goal_ids;
       check (option int) "max_context_override" (Some 128_001)
         d.max_context_override
+
+let test_profile_rejects_wrong_known_field_shape () =
+  let input =
+    {|
+[keeper]
+autoboot_enabled = [true, false]
+|}
+  in
+  match TL.parse_toml input with
+  | Error error -> fail error
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "known scalar field must not silently use its default"
+     | Error message ->
+       check bool "names field" true
+         (contains_substring message "keeper.autoboot_enabled");
+       check bool "names expected type" true
+         (contains_substring message "boolean"))
 
 let test_profile_rejects_invalid_max_context_override () =
   let input =
@@ -901,7 +999,7 @@ let test_typed_keeper_toml_edits_preserve_unrelated_fields () =
 # operator comment
 [keeper]
 instructions = "keep me"
-proactive_enabled	= true
+"proactive_enabled"	= true
 max_context_override	= 200000
 
 [keeper.oas_env]
@@ -939,6 +1037,24 @@ OAS_OPENAI_BASE_URL = "http://127.0.0.1:1"
     check (option string) "unrelated table survives"
       (Some "http://127.0.0.1:1")
       (TL.toml_string_opt doc "keeper.oas_env.OAS_OPENAI_BASE_URL")
+
+let test_keeper_toml_writer_rejects_table_assignment_shapes () =
+  with_temp_dir "keeper-toml-invalid-writer-shape" @@ fun dir ->
+  let shapes =
+    [ "table", TL.Toml_table [ "nested", TL.Toml_string "value" ]
+    ; "table array", TL.Toml_table_array []
+    ]
+  in
+  List.iter
+    (fun (label, value) ->
+      let path = Filename.concat dir (String.map (function ' ' -> '-' | c -> c) label ^ ".toml") in
+      match TL.create_keeper_toml_file ~path [ "invalid", value ] with
+      | Ok () -> failf "%s must not be rendered as a key assignment" label
+      | Error message ->
+        check bool (label ^ " error is explicit") true
+          (contains_substring message "cannot be rendered");
+        check bool (label ^ " file is not created") false (Sys.file_exists path))
+    shapes
 
 let with_profile_base f =
   with_env_restore [ "MASC_CONFIG_DIR"; "MASC_PERSONAS_DIR" ] @@ fun () ->
@@ -1929,6 +2045,11 @@ let () =
           test_case "comments and blanks" `Quick test_parse_comments_and_blanks;
           test_case "string value" `Quick test_parse_string_value;
           test_case "string escapes" `Quick test_parse_string_escapes;
+          test_case "literal string" `Quick test_parse_literal_string;
+          test_case "unicode and control escapes" `Quick
+            test_parse_unicode_and_control_escapes;
+          test_case "quoted and dotted keys do not collide" `Quick
+            test_parse_quoted_and_dotted_keys_do_not_collide;
           test_case "int value" `Quick test_parse_int_value;
           test_case "negative int" `Quick test_parse_negative_int;
           test_case "float value" `Quick test_parse_float_value;
@@ -1937,6 +2058,10 @@ let () =
           test_case "string array escaped quotes" `Quick
             test_parse_string_array_escaped_quotes;
           test_case "empty array" `Quick test_parse_empty_array;
+          test_case "general array" `Quick test_parse_general_array;
+          test_case "inline table" `Quick test_parse_inline_table;
+          test_case "datetime values" `Quick test_parse_datetime_values;
+          test_case "table array" `Quick test_parse_table_array;
           test_case "table" `Quick test_parse_table;
           test_case "inline comment" `Quick test_parse_inline_comment;
           test_case "multiline basic string" `Quick test_parse_multiline_basic_string;
@@ -1984,6 +2109,8 @@ let () =
           test_case "rejects legacy keeper.goal" `Quick
             test_profile_rejects_legacy_goal;
           test_case "full" `Quick test_profile_full;
+          test_case "rejects wrong known-field shape" `Quick
+            test_profile_rejects_wrong_known_field_shape;
           test_case "rejects invalid max_context_override" `Quick
             test_profile_rejects_invalid_max_context_override;
           test_case "parses multimodal_policy" `Quick
@@ -2011,6 +2138,8 @@ let () =
         [
           test_case "typed edits preserve unrelated fields" `Quick
             test_typed_keeper_toml_edits_preserve_unrelated_fields;
+          test_case "rejects table assignment shapes" `Quick
+            test_keeper_toml_writer_rejects_table_assignment_shapes;
         ] );
       ( "unknown_keys",
         [

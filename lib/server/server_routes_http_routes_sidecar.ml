@@ -813,7 +813,16 @@ let handle_get_config _state request reqd =
                  Some (k, `String (Printf.sprintf "%g" f))
                | Keeper_toml_loader.Toml_bool b ->
                  Some (k, `String (if b then "true" else "false"))
-               | Keeper_toml_loader.Toml_string_array _ -> None)
+               | ( Keeper_toml_loader.Toml_string_array _
+                 | Keeper_toml_loader.Toml_array _
+                 | Keeper_toml_loader.Toml_table _
+                 | Keeper_toml_loader.Toml_inline_table _
+                 | Keeper_toml_loader.Toml_table_array _
+                 | Keeper_toml_loader.Toml_offset_datetime _
+                 | Keeper_toml_loader.Toml_local_datetime _
+                 | Keeper_toml_loader.Toml_local_date _
+                 | Keeper_toml_loader.Toml_local_time _ ) ->
+                 None)
             doc
         in
         respond_json

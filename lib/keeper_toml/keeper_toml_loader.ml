@@ -1,15 +1,9 @@
-(** Keeper_toml_loader -- load keeper configuration from TOML files.
+(** Keeper_toml_loader -- typed keeper projection and comment-preserving edits
+    over the Otoml semantic parser in [Keeper_toml_parser]. *)
 
-    Minimal TOML parser: tables, strings (basic + multiline),
-    integers, floats, booleans, and string arrays (single-line and
-    multi-line).
-    Enough to express all keeper_profile_defaults fields. *)
-
-(* tla-lint: file-scope: parser local state — TOML lexer accumulators
-   (line buffer, multiline-string buffer, current_table, key/value list)
-   are confined to a single parse_lines call and never observed as
-   keeper FSM state. Every [:=] / [<-] in this file mutates parser-
-   internal scaffolding, not state-machine state. *)
+(* tla-lint: file-scope: line-editor state is confined to one update call and
+   never observed as keeper FSM state. Every [:=] in this file mutates only
+   comment-preserving edit accumulators. *)
 
 
 (** Parser types and logic extracted to [Keeper_toml_parser].
@@ -58,12 +52,9 @@ let toml_string_list (doc : toml_doc) (key : string) : string list =
 (* ================================================================ *)
 
 let line_assigns_key ~(key : string) (trimmed : string) =
-  match String.index_opt trimmed '=' with
-  | None -> false
-  | Some equals_at ->
-    String.equal
-      key
-      (String.sub trimmed 0 equals_at |> String.trim)
+  match parse_toml trimmed with
+  | Ok [ parsed_key, _ ] -> String.equal key parsed_key
+  | Ok _ | Error _ -> false
 ;;
 
 (** Update or insert a key under a [table] in a TOML file.
@@ -207,17 +198,61 @@ let toml_escape_string value =
   Buffer.contents buffer
 ;;
 
+let rec otoml_value_of_toml_value = function
+  | Toml_string value -> Ok (Otoml.TomlString value)
+  | Toml_int value -> Ok (Otoml.TomlInteger value)
+  | Toml_float value -> Ok (Otoml.TomlFloat value)
+  | Toml_bool value -> Ok (Otoml.TomlBoolean value)
+  | Toml_string_array values ->
+    Ok (Otoml.TomlArray (List.map (fun value -> Otoml.TomlString value) values))
+  | Toml_array values ->
+    List.fold_right
+      (fun value result ->
+        Result.bind (otoml_value_of_toml_value value) (fun value ->
+          Result.map (fun values -> value :: values) result))
+      values
+      (Ok [])
+    |> Result.map (fun values -> Otoml.TomlArray values)
+  | Toml_inline_table fields ->
+    List.fold_right
+      (fun (key, value) result ->
+        Result.bind (otoml_value_of_toml_value value) (fun value ->
+          Result.map (fun fields -> (key, value) :: fields) result))
+      fields
+      (Ok [])
+    |> Result.map (fun fields -> Otoml.TomlInlineTable fields)
+  | Toml_offset_datetime value -> Ok (Otoml.TomlOffsetDateTime value)
+  | Toml_local_datetime value -> Ok (Otoml.TomlLocalDateTime value)
+  | Toml_local_date value -> Ok (Otoml.TomlLocalDate value)
+  | Toml_local_time value -> Ok (Otoml.TomlLocalTime value)
+  | Toml_table _ | Toml_table_array _ ->
+    Error "standard tables and table arrays cannot be nested in assignment values"
+;;
+
 let render_toml_value = function
-  | Toml_string value -> Printf.sprintf "\"%s\"" (toml_escape_string value)
-  | Toml_int value -> string_of_int value
-  | Toml_float value -> string_of_float value
-  | Toml_bool value -> string_of_bool value
+  | Toml_table _ | Toml_table_array _ ->
+    Error "standard tables and table arrays cannot be rendered as key assignments"
+  | Toml_string value ->
+    Ok (Printf.sprintf "\"%s\"" (toml_escape_string value))
+  | Toml_int value -> Ok (string_of_int value)
+  | Toml_float value -> Ok (string_of_float value)
+  | Toml_bool value -> Ok (string_of_bool value)
   | Toml_string_array values ->
     values
     |> List.map (fun value ->
          Printf.sprintf "\"%s\"" (toml_escape_string value))
     |> String.concat ", "
     |> Printf.sprintf "[%s]"
+    |> Result.ok
+  | ( Toml_array _
+    | Toml_inline_table _
+    | Toml_offset_datetime _
+    | Toml_local_datetime _
+    | Toml_local_date _
+    | Toml_local_time _ ) as value ->
+    Result.map
+      (fun value -> Otoml.Printer.to_string value |> String.trim)
+      (otoml_value_of_toml_value value)
 ;;
 
 let remove_field_in_content ~(table : string) ~(key : string) content =
@@ -259,11 +294,12 @@ let edit_keeper_toml_fields ~(path : string) fields =
           Result.bind result (fun current ->
             match edit with
             | Set value ->
-              update_rendered_field_in_content
-                ~table:"keeper"
-                ~key
-                ~rendered_value:(render_toml_value value)
-                current
+              Result.bind (render_toml_value value) (fun rendered_value ->
+                update_rendered_field_in_content
+                  ~table:"keeper"
+                  ~key
+                  ~rendered_value
+                  current)
             | Remove ->
               Ok (remove_field_in_content ~table:"keeper" ~key current)))
         (Ok content)
@@ -276,17 +312,26 @@ let create_keeper_toml_file ~(path : string) fields =
   if Fs_compat.file_exists path
   then Error (Printf.sprintf "refusing to overwrite existing keeper TOML: %s" path)
   else
-    let content =
-      [ "# Generated by masc_keeper_up."; "[keeper]" ]
-      @ List.map
-          (fun (key, value) ->
-            Printf.sprintf "%s = %s" key (render_toml_value value))
-          fields
-      |> String.concat "\n"
-      |> fun rendered -> rendered ^ "\n"
+    let rendered_fields =
+      List.fold_right
+        (fun (key, value) result ->
+          Result.bind (render_toml_value value) (fun rendered_value ->
+            Result.map
+              (fun rendered ->
+                Printf.sprintf "%s = %s" key rendered_value :: rendered)
+              result))
+        fields
+        (Ok [])
     in
-    Fs_compat.mkdir_p (Filename.dirname path);
-    Fs_compat.save_file_atomic path content
+    Result.bind rendered_fields (fun rendered_fields ->
+      let content =
+        [ "# Generated by masc_keeper_up."; "[keeper]" ]
+        @ rendered_fields
+        |> String.concat "\n"
+        |> fun rendered -> rendered ^ "\n"
+      in
+      Fs_compat.mkdir_p (Filename.dirname path);
+      Fs_compat.save_file_atomic path content)
 ;;
 
 (* Higher-level functions (profile_defaults_of_toml, load_keeper_toml,

@@ -4,6 +4,78 @@ include Keeper_types_profile_defaults
 include Keeper_types_profile_toml_normalizers
 include Keeper_types_profile_oas_env
 
+let toml_value_kind = function
+  | Keeper_toml_loader.Toml_string _ -> "string"
+  | Keeper_toml_loader.Toml_int _ -> "integer"
+  | Keeper_toml_loader.Toml_float _ -> "float"
+  | Keeper_toml_loader.Toml_bool _ -> "boolean"
+  | Keeper_toml_loader.Toml_string_array _ -> "string array"
+  | Keeper_toml_loader.Toml_array _ -> "array"
+  | Keeper_toml_loader.Toml_table _ -> "table"
+  | Keeper_toml_loader.Toml_inline_table _ -> "inline table"
+  | Keeper_toml_loader.Toml_table_array _ -> "table array"
+  | Keeper_toml_loader.Toml_offset_datetime _ -> "offset datetime"
+  | Keeper_toml_loader.Toml_local_datetime _ -> "local datetime"
+  | Keeper_toml_loader.Toml_local_date _ -> "local date"
+  | Keeper_toml_loader.Toml_local_time _ -> "local time"
+;;
+
+let validate_known_keeper_field_types doc =
+  let string_fields =
+    [ "name"; "persona_name"; "instructions"; "sandbox_profile"
+    ; "sandbox_image"; "network_mode"; "multimodal_policy" ]
+  in
+  let bool_fields =
+    [ "autoboot_enabled"; "proactive_enabled"; "telemetry_feedback_enabled"
+    ; "always_allow" ]
+  in
+  let int_fields =
+    [ "max_context_override"; "telemetry_feedback_window_hours" ]
+  in
+  let string_array_fields =
+    [ "mention_targets"; "allowed_paths"; "active_goal_ids" ]
+  in
+  let expected key =
+    let bare_key = String.sub key 7 (String.length key - 7) in
+    if List.mem bare_key string_fields
+    then Some ("string", function Keeper_toml_loader.Toml_string _ -> true | _ -> false)
+    else if List.mem bare_key bool_fields
+    then Some ("boolean", function Keeper_toml_loader.Toml_bool _ -> true | _ -> false)
+    else if List.mem bare_key int_fields
+    then Some ("integer", function Keeper_toml_loader.Toml_int _ -> true | _ -> false)
+    else if List.mem bare_key string_array_fields
+    then
+      Some
+        ( "string array"
+        , function Keeper_toml_loader.Toml_string_array _ -> true | _ -> false )
+    else None
+  in
+  doc
+  |> List.find_map (fun (key, value) ->
+       if String.starts_with key ~prefix:"keeper."
+          && not (String.starts_with key ~prefix:oas_env_key_prefix)
+       then
+         match expected key with
+         | Some (expected_kind, accepts) when not (accepts value) ->
+           Some
+             (Printf.sprintf
+                "%s must be a TOML %s, got %s"
+                key
+                expected_kind
+                (toml_value_kind value))
+         | Some _ | None -> None
+       else if String.starts_with key ~prefix:oas_env_key_prefix
+               && Option.is_none (string_of_toml_value_for_env value)
+       then
+         Some
+           (Printf.sprintf
+              "%s must be a scalar TOML value, got %s"
+              key
+              (toml_value_kind value))
+       else None)
+  |> function None -> Ok () | Some error -> Error error
+;;
+
 let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     : (keeper_profile_defaults, string) result =
   let k key = "keeper." ^ key in
@@ -31,6 +103,10 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
             (Printf.sprintf
                "removed keeper TOML keys: %s"
                (String.concat ", " fields))
+  in
+  let result =
+    Result.bind result (fun () ->
+        validate_known_keeper_field_types doc)
   in
   let result =
     Result.bind result (fun () ->
@@ -91,11 +167,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
      BREAKING: a keeper TOML still carrying [runtime_id] fails to load; migrate
      its value to runtime.toml [[runtime.assignments]]. *)
   let runtime_assignment_result =
-    let present key =
-      match str key with
-      | None -> false
-      | Some raw -> String.trim raw <> ""
-    in
+    let present key = has key in
     match present "model", present "runtime_id" with
     | true, _ | _, true ->
       Error

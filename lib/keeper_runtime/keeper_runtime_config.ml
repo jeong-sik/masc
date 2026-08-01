@@ -91,7 +91,16 @@ let value_to_string = function
     (* Match TOML representation (no trailing zeros). *)
     Some (Printf.sprintf "%g" f)
   | Keeper_toml_loader.Toml_bool b -> Some (if b then "true" else "false")
-  | Keeper_toml_loader.Toml_string_array _ -> None
+  | ( Keeper_toml_loader.Toml_string_array _
+    | Keeper_toml_loader.Toml_array _
+    | Keeper_toml_loader.Toml_table _
+    | Keeper_toml_loader.Toml_inline_table _
+    | Keeper_toml_loader.Toml_table_array _
+    | Keeper_toml_loader.Toml_offset_datetime _
+    | Keeper_toml_loader.Toml_local_datetime _
+    | Keeper_toml_loader.Toml_local_date _
+    | Keeper_toml_loader.Toml_local_time _ ) ->
+    None
 
 (** Resolve a single TOML key to its boot-override value. Returns
     [Some (env_name, value)] when the key is present in the doc and the
@@ -163,7 +172,15 @@ let validate_stream_idle_timeout doc =
   | Some
       (Keeper_toml_loader.Toml_string _
       | Keeper_toml_loader.Toml_bool _
-      | Keeper_toml_loader.Toml_string_array _) ->
+      | Keeper_toml_loader.Toml_string_array _
+      | Keeper_toml_loader.Toml_array _
+      | Keeper_toml_loader.Toml_table _
+      | Keeper_toml_loader.Toml_inline_table _
+      | Keeper_toml_loader.Toml_table_array _
+      | Keeper_toml_loader.Toml_offset_datetime _
+      | Keeper_toml_loader.Toml_local_datetime _
+      | Keeper_toml_loader.Toml_local_date _
+      | Keeper_toml_loader.Toml_local_time _) ->
     Error (Printf.sprintf "%s: expected a numeric TOML value" key)
 
 let load_and_apply ~base_path =

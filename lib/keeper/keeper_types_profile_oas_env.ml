@@ -10,7 +10,16 @@ let string_of_toml_value_for_env = function
   | Keeper_toml_loader.Toml_float f -> Some (string_of_float f)
   | Keeper_toml_loader.Toml_bool true -> Some "1"
   | Keeper_toml_loader.Toml_bool false -> Some "0"
-  | Keeper_toml_loader.Toml_string_array _ -> None
+  | ( Keeper_toml_loader.Toml_string_array _
+    | Keeper_toml_loader.Toml_array _
+    | Keeper_toml_loader.Toml_table _
+    | Keeper_toml_loader.Toml_inline_table _
+    | Keeper_toml_loader.Toml_table_array _
+    | Keeper_toml_loader.Toml_offset_datetime _
+    | Keeper_toml_loader.Toml_local_datetime _
+    | Keeper_toml_loader.Toml_local_date _
+    | Keeper_toml_loader.Toml_local_time _ ) ->
+    None
 ;;
 
 let oas_env_key_prefix = "keeper.oas_env."

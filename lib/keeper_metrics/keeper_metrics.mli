@@ -31,7 +31,6 @@ type t =
   | CompactionRatioChange
   | CompactionSavedTokens
   | CompactionOutcomes
-  | EmergencyCompactRatioThreshold
   | OperatorCompact
   | OperatorClear
   | ToolEmissionRegistrySize

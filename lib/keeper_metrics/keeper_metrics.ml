@@ -40,7 +40,6 @@ type t =
   | CompactionRatioChange
   | CompactionSavedTokens
   | CompactionOutcomes
-  | EmergencyCompactRatioThreshold
   | OperatorCompact
   | OperatorClear
   | ToolEmissionRegistrySize
@@ -247,8 +246,6 @@ let to_string = function
   | CompactionRatioChange -> "masc_keeper_compaction_ratio_change"
   | CompactionSavedTokens -> "masc_keeper_compaction_saved_tokens_total"
   | CompactionOutcomes -> "masc_keeper_compaction_outcomes_total"
-  | EmergencyCompactRatioThreshold ->
-    "masc_keeper_emergency_compact_ratio_threshold"
   | OperatorCompact -> "masc_keeper_operator_compact_total"
   | OperatorClear -> "masc_keeper_operator_clear_total"
   | ToolEmissionRegistrySize -> "masc_keeper_tool_emission_registry_size"

@@ -647,44 +647,38 @@ in
          ; "workspace", workspace_json config
          ; "board_attention_quarantines", board_attention_quarantines
          ]
-         @ ((* Parallelize independent keeper and persistent-agent I/O. *)
-            let empty_section = `Assoc [ "count", `Int 0; "items", `List [] ] in
-            let keepers_ref = ref empty_section in
-            let persistent_ref = ref empty_section in
-            Eio.Fiber.all
-              [ (fun () ->
-                  let keepers_json_value =
-                    timed "keepers_json" (fun () ->
-                      if initialized && include_keepers
-                      then
-                        keepers_json
-                          ~keeper_names
-                          ~lightweight:lightweight_summary
-                          ~include_recent_activity:(not lightweight_summary)
-                          config
-                      else empty_section)
+         @ (let empty_section = `Assoc [ "count", `Int 0; "items", `List [] ] in
+            let keepers_json_value =
+              timed "keepers_json" (fun () ->
+                if initialized && include_keepers
+                then
+                  keepers_json
+                    ~keeper_names
+                    ~lightweight:lightweight_summary
+                    ~include_recent_activity:(not lightweight_summary)
+                    config
+                else empty_section)
+            in
+            let persistent_agents_json_value =
+              timed "persistent_agents_json" (fun () ->
+                if initialized && include_keepers
+                then (
+                  let keeper_rows =
+                    match keepers_json_value with
+                    | `Assoc fields ->
+                      (match List.assoc_opt "items" fields with
+                       | Some (`List rows) -> rows
+                       | _ -> [])
+                    | _ -> []
                   in
-                  keepers_ref := keepers_json_value;
-                  persistent_ref
-                  := timed "persistent_agents_json" (fun () ->
-                       if initialized && include_keepers
-                       then (
-                         let keeper_rows =
-                           match keepers_json_value with
-                           | `Assoc fields ->
-                             (match List.assoc_opt "items" fields with
-                              | Some (`List rows) -> rows
-                              | _ -> [])
-                           | _ -> []
-                         in
-                         persistent_agents_json
-                           ~keeper_names:persistent_keeper_names
-                           ~keeper_rows
-                           config)
-                       else empty_section))
-              ];
-            [ "keepers", !keepers_ref
-            ; "persistent_agents", !persistent_ref
+                  persistent_agents_json
+                    ~keeper_names:persistent_keeper_names
+                    ~keeper_rows
+                    config)
+                else empty_section)
+            in
+            [ "keepers", keepers_json_value
+            ; "persistent_agents", persistent_agents_json_value
             ])
          @ [ ( "recent_messages"
              , if initialized && include_messages && not lightweight_summary

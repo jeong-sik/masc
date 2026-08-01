@@ -297,7 +297,6 @@
   ;; Dashboard API wire contracts (extracted sub-library)
   ;; Shared typed JSON contracts between OCaml handlers and Bonsai island.
   masc.masc_dashboard_api_types
-  ;; Team session types removed (Epic #6107)
   ;; MCP tool schema cluster (extracted sub-library)
   masc.tool_schemas
   ;; Content-addressed blob store for externalizing large tool outputs.

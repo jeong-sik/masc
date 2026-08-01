@@ -37,7 +37,7 @@ consumer → MASC (workspace collaboration/orchestration) → OAS (agent runtime
 | ContextOverflow | provider capacity와 typed overflow 결과 | 일반 typed failure route로 처리; 자동 overflow-compaction 회복 제거 (#26546) |
 | 이벤트 전달 | `Event_bus` | 어떤 MASC 사건을 custom event로 publish할지 정의, SSE/dashboard에 연결 |
 | 장기 메모리 | 없음 | keeper memory bank, institution episodes, procedural memory, workspace/task/social semantics |
-| 조율 상태 | 없음 | workspace, tasks, board, Gate/HITL, social runtime |
+| 조율 상태 | 없음 | workspace, tasks, board, Gate/HITL |
 
 ## 의존 방향
 

@@ -60,7 +60,7 @@ let run_cmd cli_base_path =
     | Server_startup_takeover.Base_path_acquired lease -> lease
     | Server_startup_takeover.Base_path_already_owned { pid } ->
       Log.Server.error
-        "stdio runtime cannot start because PID %s owns BasePath %s; use the owning runtime command plane"
+        "stdio runtime cannot start because PID %s owns BasePath %s; stop that process or choose a different --base-path"
         (Option.fold ~none:"unknown" ~some:string_of_int pid)
         base_path;
       exit 1

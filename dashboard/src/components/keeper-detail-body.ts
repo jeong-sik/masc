@@ -78,7 +78,6 @@ export interface KeeperDetailBodyProps {
   onClearReasonInput: (reason: string) => void
   onPreserveToggle: (preserve: boolean) => void
   onClearSubmit: () => void
-  onSocialSweep: () => void
   // Deep-link the read-only runtime card to the 설정(.kcf) 런타임 tab (the single
   // write path for runtime_id). Optional so isolated renders degrade gracefully.
   onOpenRuntimeConfig?: () => void
@@ -101,7 +100,6 @@ export function KeeperDetailBody({
   onClearReasonInput,
   onPreserveToggle,
   onClearSubmit,
-  onSocialSweep,
   onOpenRuntimeConfig,
 }: KeeperDetailBodyProps) {
   return html`
@@ -221,7 +219,6 @@ export function KeeperDetailBody({
               <${KeeperRuntimeActions}
                 actor=${currentDashboardActor()}
                 keeper=${keeper}
-                onSocialSweep=${onSocialSweep}
               />
               <div class="pt-3 border-t border-[var(--color-border-divider)]">
                 <${SectionHeader} size="xs" class="mb-3">호출 검사기</${SectionHeader}>

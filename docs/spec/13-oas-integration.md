@@ -434,7 +434,6 @@ remain MASC-owned under `Masc.Memory.t` and the `Keeper_memory_*` modules.
 | Dashboard runtime counts | Complete | dashboard `counts` carries active runtimes and `configured_keepers` carries inventory |
 | Checkpoint | Partial | shared worker/runtime paths는 OAS Checkpoint를 사용한다. Public `Oas_worker` surface의 extra checkpoint JSON은 neutral `checkpoint_sidecar` 이름을 쓰지만 keeper 경로는 여전히 `lib/keeper/keeper_context_runtime.ml`의 wrapper + serialized context를 유지 |
 | Memory projection | Removed | MASC memory is not projected into OAS; runtime memory storage remains MASC-owned |
-| Team-session swarm | Partial | OAS Swarm runner 활성, bridge fidelity 불완전 |
 | Runtime config | Complete | runtime_id -> MASC runtime config/profile -> OAS Provider_registry -> Provider_config.t |
 | Verifier | Complete | configured OAS exact-output call; no local tool/effect classifier |
 | Model resolution | Complete | oas_model_resolve.ml이 Provider_Registry SSOT 사용 |
@@ -522,6 +521,5 @@ runtime.toml 기반 변수는 환경변수가 아니라 config 파일에서 관�
 
 ## 15. Future Work
 
-- Team-session swarm bridge fidelity 완성
 - keeper runtime state ownership을 OAS checkpoint/context 쪽으로 더 이동
 - marker/text leakage를 구조화된 metadata 또는 hook path로 축소

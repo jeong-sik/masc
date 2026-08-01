@@ -794,9 +794,10 @@ let start_keepalive
   =
   (* A Keeper lane is server-owned, even when its creation or restart is
      requested by a tool running inside another Keeper's turn.  In production
-     the root switch is installed once by server bootstrap; the context switch
-     remains the owner for standalone/test runtimes that do not install that
-     global server context. *)
+     the root switch is installed once by server bootstrap.  A standalone/test
+     runtime without that global binding makes [ctx.sw] the explicit owner and
+     must therefore pass a switch that outlives the lane; a turn- or lane-scoped
+     context is not a valid launch owner. *)
   let lane_parent_sw =
     match Eio_context.get_root_switch_opt () with
     | Some root_sw -> root_sw

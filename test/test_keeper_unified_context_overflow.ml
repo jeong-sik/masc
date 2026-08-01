@@ -71,7 +71,8 @@ let test_is_context_overflow_only_for_overflow_errors () =
   in
   check bool "exact typed unrecognized stop reason matches" true
     (EC.is_context_overflow unrecognized_stop_reason);
-  check bool "exact typed unrecognized stop reason is auto-recoverable" true
+  check bool "exact typed unrecognized stop reason is not auto-recoverable"
+    false
     (EC.is_auto_recoverable_turn_error unrecognized_stop_reason)
 ;;
 
@@ -100,13 +101,16 @@ let test_input_capacity_is_not_context_overflow () =
           capacity_error))
 ;;
 
-(* ContextOverflow is routed as an explicit recoverable turn failure after OAS
-   has exhausted its own compaction retry. It must not rewrite Keeper lifecycle. *)
-let test_context_overflow_is_auto_recoverable () =
+(* ContextOverflow counts toward the ordinary crash threshold (#26546): the
+   automatic overflow-compaction recovery was removed, and #26545 bounds the
+   transmitted history, so mechanical retry re-dispatches the same payload.
+   Exempting it would pin [consecutive] at 0 while the identical provider
+   request loops every cycle. *)
+let test_context_overflow_is_not_auto_recoverable () =
   check
     bool
-    "ContextOverflow is auto-recoverable at turn level"
-    true
+    "ContextOverflow is not auto-recoverable at turn level"
+    false
     (EC.is_auto_recoverable_turn_error
        (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 })))
 ;;
@@ -292,9 +296,9 @@ let () =
             `Quick
             test_is_context_overflow_only_for_overflow_errors
         ; test_case
-            "context overflow is auto-recoverable"
+            "context overflow is not auto-recoverable"
             `Quick
-            test_context_overflow_is_auto_recoverable
+            test_context_overflow_is_not_auto_recoverable
         ; test_case
             "input capacity is not context overflow"
             `Quick

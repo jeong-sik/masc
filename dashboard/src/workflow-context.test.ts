@@ -259,26 +259,6 @@ describe('workflowActionLabel', () => {
     expect(workflowActionLabel('task_inject')).toBe('Inject Task')
   })
 
-  it('returns "Session Update" for team_turn', () => {
-    expect(workflowActionLabel('team_turn')).toBe('Session Update')
-  })
-
-  it('returns "Session Note" for team_note', () => {
-    expect(workflowActionLabel('team_note')).toBe('Session Note')
-  })
-
-  it('returns "Session Broadcast" for team_broadcast', () => {
-    expect(workflowActionLabel('team_broadcast')).toBe('Session Broadcast')
-  })
-
-  it('returns "Session Task" for team_task_inject', () => {
-    expect(workflowActionLabel('team_task_inject')).toBe('Session Task')
-  })
-
-  it('returns "Stop Session" for team_stop', () => {
-    expect(workflowActionLabel('team_stop')).toBe('Stop Session')
-  })
-
   it('returns "Keeper Message" for keeper_msg', () => {
     expect(workflowActionLabel('keeper_msg')).toBe('Keeper Message')
   })

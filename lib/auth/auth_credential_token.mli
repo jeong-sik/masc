@@ -36,6 +36,9 @@ type credential_comparison =
 
 val collision_log_to_yojson : collision_log -> Yojson.Safe.t
 val constant_time_string_equal : string -> string -> bool
+(** Timing-resistant equality provided by {!Eqaf.equal}. Execution time
+    depends on the input lengths, not their contents. Auth callers compare
+    fixed-width SHA-256 hex digests. *)
 
 val compare_credentials :
   token_hash_prefix:string -> agent_credential -> agent_credential -> credential_comparison
@@ -60,6 +63,9 @@ val expires_at_for_auth_config : auth_config -> string option
 val save_raw_token_credential_with_expiry :
   string -> agent_name:string -> role:agent_role -> raw_token:string -> expires_at:string option ->
   (agent_credential, masc_error) result
+(** Raw externally supplied tokens are opaque and preserve their exact bytes,
+    but must contain at least one non-whitespace character. They are hashed to
+    a fixed-width SHA-256 hex digest before storage or comparison. *)
 
 val save_raw_token_credential :
   string -> agent_name:string -> role:agent_role -> raw_token:string ->

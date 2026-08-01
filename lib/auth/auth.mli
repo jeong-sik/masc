@@ -11,10 +11,12 @@ open Masc_domain
 (** {1 Token Generation} *)
 
 val generate_token : unit -> string
-(** Generate a cryptographically random hex token (64 chars). *)
+(** Generate a cryptographically random token: exactly 64 lowercase hex
+    characters encoding 32 random bytes. *)
 
 val sha256_hash : string -> string
-(** Hash a token/secret with SHA-256 and return lowercase hex. *)
+(** Hash a token/secret with SHA-256 and return exactly 64 lowercase hex
+    characters. Secret comparisons use Eqaf on this fixed-width form. *)
 
 val save_private_text_file : string -> string -> unit
 (** [save_private_text_file path content] writes [content] to [path] with
@@ -218,7 +220,8 @@ val save_raw_token_credential :
   string -> agent_name:string -> role:agent_role -> raw_token:string ->
   (agent_credential, masc_error) result
 (** [save_raw_token_credential config ~agent_name ~role ~raw_token] hashes the
-    raw token and persists the credential. *)
+    raw token and persists the credential. Externally supplied tokens are
+    opaque and byte-preserving, but empty or whitespace-only input is rejected. *)
 
 val save_raw_token_credential_without_expiry :
   string -> agent_name:string -> role:agent_role -> raw_token:string ->

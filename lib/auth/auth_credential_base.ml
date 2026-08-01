@@ -17,6 +17,11 @@ let generate_token () =
 (** SHA256 hash of a string using Digestif *)
 let sha256_hash input = Digestif.SHA256.(digest_string input |> to_hex)
 
+(** Timing-resistant equality delegated to Eqaf. Runtime depends on the public
+    input lengths, not secret contents. Auth comparisons below operate on
+    fixed-width SHA-256 hex digests. *)
+let constant_time_string_equal = Eqaf.equal
+
 (* ============================================ *)
 (* Auth directory management                    *)
 (* ============================================ *)
@@ -88,7 +93,7 @@ let save_internal_keeper_token_hash config ~raw_token =
 
 let verify_internal_keeper_token config ~token =
   match load_internal_keeper_token_hash config with
-  | Some stored_hash -> String.equal stored_hash (sha256_hash token)
+  | Some stored_hash -> constant_time_string_equal stored_hash (sha256_hash token)
   | None -> false
 ;;
 

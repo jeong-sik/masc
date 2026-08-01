@@ -22,6 +22,10 @@
 # and is rejected, matching the ref-reachability policy of check-oas-pin.sh.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=oas-pin-ref.sh
+source "${SCRIPT_DIR}/oas-pin-ref.sh"
+
 if [[ $# -ne 4 ]]; then
   echo "usage: $0 EXPECTED_SHA INSTALLED_SHA REMOTE TRACK_REF" >&2
   exit 2
@@ -36,6 +40,7 @@ track_ref="$4"
 [[ "${installed_sha}" =~ ^[0-9a-f]{40}$ ]] || exit 1
 [[ "${expected_sha}" != "${installed_sha}" ]] || exit 1
 [[ -n "${remote}" && -n "${track_ref}" ]] || exit 1
+remote_ref="$(oas_pin_remote_ref "${track_ref}")" || exit 1
 
 scratch="$(mktemp -d -t oas-pin-forward.XXXXXX)"
 trap 'rm -rf "${scratch}"' EXIT
@@ -44,7 +49,7 @@ if ! GIT_DIR="${scratch}" git init -q --bare; then
   exit 1
 fi
 if ! GIT_DIR="${scratch}" git fetch -q --no-tags "${remote}" \
-       "+refs/heads/${track_ref}:refs/heads/${track_ref}" 2>/dev/null; then
+       "+${remote_ref}:${remote_ref}" 2>/dev/null; then
   exit 1
 fi
 GIT_DIR="${scratch}" git merge-base --is-ancestor \

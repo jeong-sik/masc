@@ -63,7 +63,10 @@ readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.10"
 # wire failures and provider-owned error envelopes as typed public facts.
 # Keep this SHA aligned with the OAS change before CI builds MASC.
 # TRACK_REF consumed by check-oas-pin.sh / oas-drift-check.sh /
-# sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584).
+# sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584). Use main
+# for merge-ready pins. A blocked Draft cross-repo PR may temporarily declare
+# the exact refs/pull/<number>/head review ref; CI rejects that ref once the PR
+# is no longer both Draft and blocked-on-oas.
 readonly OAS_AGENT_SDK_TRACK_REF="main"
 readonly OAS_AGENT_SDK_SHA="92e3eea36585b043119d9e79276dbf8a8a9e356f"
 readonly OAS_AGENT_SDK_MIN_VERSION="0.231.10"

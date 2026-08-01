@@ -53,8 +53,8 @@ OAS  ──does not know──→ MASC
 
 ## Config Ownership
 
-- `config/runtime.toml`은 **MASC runtime contract**다. On-disk
-  `runtime.json`은 retired compatibility input이며 더 이상 생성/소비하지 않는다. (MASC는 TOML에서 in-memory JSON representation을 렌더해 dashboard 등 소비자에게 제공한다.)
+- `config/runtime.toml`은 **MASC runtime contract**다. MASC는 TOML에서
+  in-memory JSON representation을 렌더해 dashboard 등 소비자에게 제공한다.
 - MASC owns keeper-facing logical runtime configuration: named runtime/profile,
   declared capabilities, typed tool visibility, and lane/status projections.
 - OAS owns concrete provider/model identity and execution. MASC must not branch
@@ -70,22 +70,18 @@ OAS  ──does not know──→ MASC
   does not branch on vendor/model literals. Provider/model ids remain
   OAS-owned runtime data, not MASC product data.
 - 따라서 checked-in repo defaults는 review-stable pinning이 중요할 때 explicit `provider:model_id`를 쓰고, adapter default 자체를 계약으로 삼을 때만 `provider:auto`를 쓴다.
-- legacy `allowed_providers` keeper TOML/meta fields는 더 이상 허용하지 않으며 load/parse boundary에서 reject한다.
-- persisted legacy keeper meta tool-policy fields are scrubbed into canonical `tool_access` on read; direct `meta_of_json` callers must use canonical keeper meta keys.
 
 ## Current Integration Status
 
 | Area | Status | Notes |
 |------|--------|-------|
-| Context compaction | MASC-owned, manual only | Automatic provider-overflow compaction removed after no committed recovery (#26546); the explicit Manual path (`masc_keeper_compact`) remains. #26545 bounds conversation history only; #26551 tracks whole-request provider fit. |
+| Context compaction | MASC-owned, manual only | The explicit path is `masc_keeper_compact`. #26545 bounds conversation history; #26551 tracks whole-request provider fit. |
 | ContextOverflow ownership | Boundary aligned | OAS reports typed capacity/overflow. MASC routes it through the ordinary typed failure route (terminalizing the selected stimulus unless a deferred runtime lane is pending) and owns Keeper continuation. |
 | Event bus bridge | Complete for current native/custom flow | `oas_event_bridge.ml` relays both OAS native events and `masc:*` custom events, persists them under `.masc/oas-events/`, and feeds dashboard SSE |
 | Dashboard OAS runtime health | Complete with replay/live split | dashboard health SSOT is `durable oas_event replay + live SSE tail`, not live-only counters |
 | Dashboard runtime counts | Complete with truth split | dashboard `counts` means active runtimes; configured keeper inventory is exposed separately as `configured_keepers` |
 | Checkpoint integration | OAS-owned transcript state | OAS checkpoint is used in shared worker/runtime paths. MASC does not derive checkpoint state from assistant prose or maintain a duplicate prose-derived sidecar. Feature adapters may use typed, owner-specific checkpoint metadata only where the OAS contract explicitly exposes it. |
-| Memory projection | Removed | MASC no longer creates or passes OAS memory objects; memory storage stays MASC-owned |
-| Team-session swarm | Removed | `lib/team_session/` module purged; MASC no longer owns a session orchestration surface. OAS Swarm Runner is the sole substrate; consumers drive swarm runs via OAS primitives directly. |
-| Provider/model identity ownership | OAS-owned | MASC resolves logical `runtime_id` / runtime lane intent only; concrete provider/model selection and cost identity are OAS-owned. Legacy `allowed_providers` inputs are rejected |
+| Provider/model identity ownership | OAS-owned | MASC resolves logical `runtime_id` / runtime lane intent only; concrete provider/model selection and cost identity are OAS-owned. |
 
 ## Boundary Audit Snapshot
 
@@ -98,7 +94,8 @@ OAS  ──does not know──→ MASC
 ## Open Structural Gaps
 
 - keeper runtime still has a small MASC-owned context facade around OAS context/checkpoint primitives for token observation and checkpoint loading; this facade must remain read-only with respect to OAS-owned runtime transcript state.
-- assistant prose is context only. MASC must not parse it into goal, task, continuity, or lifecycle transitions and must not keep compatibility readers for retired prose protocols.
+- assistant prose is context only. MASC must not parse it into goal, task,
+  continuity, or lifecycle transitions.
 - runtime-health signaling still relies on a narrow boolean `resource_check` callback instead of a structured probe
 - proof-store and `oas-runtime` filesystem layout must stay behind thin adapters instead of being reconstructed ad hoc
 - provider/model ownership still has historical debug and lower-level
@@ -244,20 +241,14 @@ These stay in MASC:
    - keep domain state out of OAS transcript/checkpoint content; reduce remaining adapter metadata when its typed owner has stable storage
 2. **P2 — prose/state separation** — Required invariant
    - prompt text and model replies never encode or authorize typed domain transitions
-3. **P3 — team-session bridge fidelity** — Resolved (2026-04, team_session module purged; OAS Swarm Runner is sole substrate)
-   - MASC team-session surface removed; workspace collaboration needs served via board posts + keeper FSM, swarm runs driven through OAS directly
-4. **P4 — memory projection hard cut** — Resolved by removal
-   - OAS memory projection/hooks/flush paths removed; MASC-owned memory remains the runtime storage surface
-5. **P5 — doc truth alignment**
+3. **P3 — doc truth alignment**
    - keep this contract, the implementation spec, and the utilization audit in sync
 
 ## What This Means Practically
 
 - “Context integration in progress” now means **broader state unification**, not compaction.
-- “Event_bus bridge planned” is no longer true for the current dashboard/SSE path.
 - dashboard OAS runtime health should be read as **durable replay + live tail**, not as a live-only pulse.
 - dashboard runtime `counts` should be read as **active truth**, while keeper inventory belongs to `configured_keepers`.
-- “team_session pending migration” is no longer true; the `lib/team_session/` module has been **removed** — swarm runs go through OAS directly, workspace collaboration state lives in board posts and keeper FSM.
 
 ## Boundary Review Checklist
 

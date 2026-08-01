@@ -1,5 +1,5 @@
 ---
-rfc: "0357"
+rfc: "mcp-dual-bearer-oauth"
 title: "MCP dual authentication: static bearer and local OAuth 2.1"
 status: Draft
 created: 2026-08-01
@@ -11,7 +11,7 @@ related: ["0292"]
 implementation_prs: []
 ---
 
-# RFC-0357 — MCP dual authentication: static bearer and local OAuth 2.1
+# RFC — MCP dual authentication: static bearer and local OAuth 2.1
 
 Status: Draft
 Date: 2026-08-01

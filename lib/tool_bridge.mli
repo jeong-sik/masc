@@ -21,18 +21,19 @@
     Blob bytes and their parent directory are synced before the marker is
     returned, so a later durable checkpoint cannot get ahead of its artifact.
 
-    Disabled unless the caller supplies [base_path]. The storage threshold is
-    a single compile-time producer contract; there is no ambient environment
-    projection policy. *)
+    Disabled unless the caller supplies [base_path]. Each model-visible tool
+    descriptor owns its typed projection policy; the default uses MASC's
+    canonical tool-output budget. *)
 
 val default_externalize_threshold_bytes : int
-(** Compile-time storage threshold. *)
+(** Canonical MASC tool-output budget used by the default projection. *)
 
 type externalization_error = { message : string }
 
 val maybe_externalize :
   ?base_path:string ->
   ?mime:string ->
+  ?threshold_bytes:int ->
   string ->
   (string, externalization_error) result
 (** Externalize when over threshold and a blob store is available;
@@ -43,6 +44,7 @@ val maybe_externalize :
 
 val to_oas_typed_result :
   ?base_path:string ->
+  ?model_projection:Tool_output.model_projection ->
   ?on_externalization_error:(externalization_error -> unit) ->
   ?externalization_error_recoverable:bool ->
   Tool_result.result ->
@@ -68,6 +70,7 @@ val params_of_json_schema : Yojson.Safe.t -> Agent_sdk.Types.tool_param list
 val oas_tool_of_masc :
   ?descriptor:Agent_sdk.Tool.descriptor ->
   ?base_path:string ->
+  ?model_projection:Tool_output.model_projection ->
   ?on_externalization_error:(externalization_error -> unit) ->
   ?externalization_error_recoverable:bool ->
   name:string ->
@@ -89,6 +92,7 @@ val oas_tool_of_masc :
 val oas_tool_of_masc_with_execution_env :
   ?descriptor:Agent_sdk.Tool.descriptor ->
   ?base_path:string ->
+  ?model_projection:Tool_output.model_projection ->
   ?on_externalization_error:(externalization_error -> unit) ->
   ?externalization_error_recoverable:bool ->
   name:string ->

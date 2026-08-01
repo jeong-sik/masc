@@ -1,5 +1,5 @@
-let default_max_bytes = 256
-let maximum_max_bytes = 256
+let default_max_bytes = Common.max_tool_output_bytes
+let maximum_max_bytes = Common.max_tool_output_bytes
 let minimum_max_bytes = 1
 
 type request =
@@ -50,7 +50,12 @@ let request_of_json = function
         | Ok () -> Ok { sha256; offset; max_bytes }
         | Error invalid ->
           Error (Tool_output.invalid_sha256_to_string invalid))
-     | _ -> Error "expected sha256, non-negative offset, and max_bytes 1..256")
+     | _ ->
+       Error
+         (Printf.sprintf
+            "expected sha256, non-negative offset, and max_bytes %d..%d"
+            minimum_max_bytes
+            maximum_max_bytes))
   | _ -> Error "expected an object"
 ;;
 
@@ -124,18 +129,6 @@ let page_of_slice (request : request) ~total_bytes requested_bytes =
       }
 ;;
 
-let page (request : request) bytes =
-  let total_bytes = String.length bytes in
-  let available = max 0 (total_bytes - request.offset) in
-  let requested_length = min request.max_bytes available in
-  let requested_bytes =
-    if request.offset > total_bytes
-    then ""
-    else String.sub bytes request.offset requested_length
-  in
-  page_of_slice request ~total_bytes requested_bytes
-;;
-
 let page_to_json page =
   `Assoc
     [ "ok", `Bool true
@@ -151,6 +144,49 @@ let page_to_json page =
            | Base64 -> "base64") )
     ; "content", `String page.content
     ]
+;;
+
+let page_of_slice_within_output_budget request ~total_bytes requested_bytes =
+  let candidate length =
+    page_of_slice
+      request
+      ~total_bytes
+      (String.sub requested_bytes 0 length)
+  in
+  let fits page =
+    page |> page_to_json |> Yojson.Safe.to_string |> String.length
+    <= Common.max_tool_output_bytes
+  in
+  match candidate 0 with
+  | Error _ as error -> error
+  | Ok empty_page when not (fits empty_page) ->
+    Error "artifact page metadata exceeds the model-output budget"
+  | Ok empty_page ->
+    let rec search low high best =
+      if low > high
+      then Ok best
+      else
+        let midpoint = low + ((high - low) / 2) in
+        match candidate midpoint with
+        | Error _ as error -> error
+        | Ok page ->
+          if fits page
+          then search (midpoint + 1) high page
+          else search low (midpoint - 1) best
+    in
+    search 1 (String.length requested_bytes) empty_page
+;;
+
+let page (request : request) bytes =
+  let total_bytes = String.length bytes in
+  let available = max 0 (total_bytes - request.offset) in
+  let requested_length = min request.max_bytes available in
+  let requested_bytes =
+    if request.offset > total_bytes
+    then ""
+    else String.sub bytes request.offset requested_length
+  in
+  page_of_slice_within_output_budget request ~total_bytes requested_bytes
 ;;
 
 let handle ~base_path ~args =
@@ -169,7 +205,7 @@ let handle ~base_path ~args =
        storage_failure (Tool_blob_store.fetch_error_to_string error)
      | Ok None -> invalid_input "artifact does not exist"
      | Ok (Some { content; total_bytes }) ->
-       (match page_of_slice request ~total_bytes content with
+       (match page_of_slice_within_output_budget request ~total_bytes content with
         | Error message -> invalid_input message
         | Ok page -> Keeper_tool_execution.success_data (page_to_json page)))
 ;;

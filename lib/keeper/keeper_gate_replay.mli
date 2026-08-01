@@ -96,12 +96,10 @@ val project_model_input :
   model_evidence ->
   Agent_sdk.Types.message list ->
   (Agent_sdk.Types.message list, string) result
-(** Append the full durable payload as an explicit provider-only message.
-    Canonical history remains reference-only and no text search or replacement
-    decides where evidence is attached. A storage miss is logged and leaves the
-    current input unchanged, matching ordinary artifact hydration. OAS measures
-    and dispatches this same projection; no Keeper byte cap or preview
-    substitutes for the current result. *)
+(** Append the canonical typed artifact reference as an explicit provider-only
+    message. Exact replay bytes remain in durable storage and are read through
+    [keeper_artifact_read], so replay evidence cannot bypass provider-input
+    windowing. *)
 
 val approved_resolution_message :
   approval_id:string ->
@@ -121,7 +119,7 @@ val user_message_with_hitl_resolution :
   model_message
 (** Render a durable HITL resolution that was not freshly replayed in this
     setup. Consumed approvals keep the typed content-addressed reference in
-    canonical state and expose its exact bytes through [project_model_input]. *)
+    canonical state. *)
 
 val compose_model_message :
   base_path:string ->

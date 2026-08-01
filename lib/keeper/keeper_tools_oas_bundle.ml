@@ -268,6 +268,7 @@ let make_tool_bundle
              in
              Tool_bridge.oas_tool_of_masc_with_execution_env
                ~base_path:config.base_path
+               ~model_projection:descriptor.model_output_projection
                ?on_externalization_error
                ~externalization_error_recoverable:descriptor.policy.retryable
                ~name:model_name

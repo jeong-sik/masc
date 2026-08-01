@@ -43,7 +43,7 @@ module Float = Stdlib.Float
     projection capability-aware: runtimes that do not also expose an artifact
     reader cannot accidentally replace exact output with an unreadable marker. *)
 
-let default_externalize_threshold_bytes = 2048
+let default_externalize_threshold_bytes = Common.max_tool_output_bytes
 
 type externalization_error = { message : string }
 
@@ -56,10 +56,11 @@ let resolve_blob_store ?base_path () =
     available; otherwise pass through unchanged. A configured store that
     cannot persist the bytes returns a typed error: putting the oversized
     payload back on the provider wire would defeat this boundary. *)
-let maybe_externalize ?base_path ?(mime = "text/plain") (msg : string)
+let maybe_externalize ?base_path ?(mime = "text/plain")
+      ?(threshold_bytes = default_externalize_threshold_bytes) (msg : string)
   : (string, externalization_error) result
   =
-  if String.length msg <= default_externalize_threshold_bytes then Ok msg
+  if String.length msg <= threshold_bytes then Ok msg
   else
     match resolve_blob_store ?base_path () with
     | None -> Ok msg
@@ -84,8 +85,21 @@ let make_tool_error ?(recoverable = false) ?error_class message
   : Agent_sdk.Types.tool_result =
   Error { Agent_sdk.Types.message; recoverable; error_class }
 
-let project_content ?base_path message =
-  maybe_externalize ?base_path message
+let project_content ?base_path ~model_projection message =
+  match model_projection with
+  | Tool_output.Store_above { threshold_bytes } ->
+    maybe_externalize ?base_path ~threshold_bytes message
+  | Tool_output.Inline_up_to { maximum_bytes } ->
+    if String.length message <= maximum_bytes
+    then Ok message
+    else
+      Error
+        { message =
+            Printf.sprintf
+              "inline tool output exceeds descriptor budget (%d > %d bytes)"
+              (String.length message)
+              maximum_bytes
+        }
 ;;
 
 let externalization_tool_error ~recoverable _error =
@@ -125,11 +139,12 @@ let project_result
       ?base_path
       ?on_externalization_error
       ~externalization_error_recoverable
+      ~model_projection
       message
       on_content
   : Agent_sdk.Types.tool_result
   =
-  match project_content ?base_path message with
+  match project_content ?base_path ~model_projection message with
   | Ok content -> on_content content
   | Error error ->
     Option.iter (fun observe -> observe error) on_externalization_error;
@@ -140,6 +155,7 @@ let project_result
 
 let to_oas_typed_result
       ?base_path
+      ?(model_projection = Tool_output.default_model_projection)
       ?on_externalization_error
       ?(externalization_error_recoverable = true)
       (tr : Tool_result.result)
@@ -151,6 +167,7 @@ let to_oas_typed_result
       ?base_path
       ?on_externalization_error
       ~externalization_error_recoverable
+      ~model_projection
       (Tool_result.message tr)
       (fun content ->
          Ok { Agent_sdk.Types.content; _meta = output.metadata })
@@ -168,6 +185,7 @@ let to_oas_typed_result
       ?base_path
       ?on_externalization_error
       ~externalization_error_recoverable
+      ~model_projection
       (Tool_result.message tr)
       (fun content ->
          Ok { Agent_sdk.Types.content; _meta = Some metadata })
@@ -176,6 +194,7 @@ let to_oas_typed_result
       ?base_path
       ?on_externalization_error
       ~externalization_error_recoverable
+      ~model_projection
       message
       (fun message ->
        make_tool_error
@@ -198,6 +217,7 @@ let to_oas_typed_result
 let oas_tool_of_masc
     ?descriptor
     ?base_path
+    ?model_projection
     ?on_externalization_error
     ?externalization_error_recoverable
     ~name
@@ -208,6 +228,7 @@ let oas_tool_of_masc
   let oas_handler json_args =
     to_oas_typed_result
       ?base_path
+      ?model_projection
       ?on_externalization_error
       ?externalization_error_recoverable
       (handler json_args)
@@ -217,6 +238,7 @@ let oas_tool_of_masc
 let oas_tool_of_masc_with_execution_env
     ?descriptor
     ?base_path
+    ?model_projection
     ?on_externalization_error
     ?externalization_error_recoverable
     ~name
@@ -229,6 +251,7 @@ let oas_tool_of_masc_with_execution_env
   let oas_handler execution_env json_args =
     to_oas_typed_result
       ?base_path
+      ?model_projection
       ?on_externalization_error
       ?externalization_error_recoverable
       (handler execution_env json_args)

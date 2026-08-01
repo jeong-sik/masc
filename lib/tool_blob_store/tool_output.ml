@@ -112,6 +112,16 @@ type t =
   | Inline of string
   | Stored of artifact_ref
 
+type model_projection =
+  | Store_above of { threshold_bytes : int }
+  | Inline_up_to of { maximum_bytes : int }
+
+let default_model_projection =
+  Store_above { threshold_bytes = Common.max_tool_output_bytes }
+
+let bounded_inline_model_projection =
+  Inline_up_to { maximum_bytes = Common.max_tool_output_bytes }
+
 let marker_prefix = "[masc:blob "
 
 let is_marker s = String.starts_with ~prefix:marker_prefix s

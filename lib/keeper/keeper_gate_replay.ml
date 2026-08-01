@@ -432,39 +432,25 @@ let replay_evidence_effect_to_string = function
   | Evidence_indeterminate -> "indeterminate"
 ;;
 
-let replay_evidence_json evidence payload =
+let replay_evidence_json evidence =
   let payload_field =
-    match evidence.effect_kind, payload with
-    | Evidence_applied, `Reference _ -> "untrusted_tool_output_ref"
-    | Evidence_applied, `Hydrated _ -> "untrusted_tool_output"
-    | ( Evidence_applied_with_warning
-      | Evidence_failed
-      | Evidence_indeterminate ),
-      `Reference _ ->
+    match evidence.effect_kind with
+    | Evidence_applied -> "untrusted_tool_output_ref"
+    | Evidence_applied_with_warning | Evidence_failed | Evidence_indeterminate ->
       "detail_ref"
-    | ( Evidence_applied_with_warning
-      | Evidence_failed
-      | Evidence_indeterminate ),
-      `Hydrated _ ->
-      "detail"
-  in
-  let payload =
-    match payload with
-    | `Reference reference ->
-      Tool_output.normalized_artifact_ref_to_json reference
-    | `Hydrated payload -> `String payload
   in
   `Assoc
     [ "approval_id", `String evidence.approval_id
     ; "operation", `String evidence.operation
     ; "effect", `String (replay_evidence_effect_to_string evidence.effect_kind)
     ; "replay_journal", `String (replay_journal_to_string evidence.journal)
-    ; payload_field, payload
+    ; ( payload_field
+      , Tool_output.normalized_artifact_ref_to_json evidence.artifact_ref )
     ]
   |> Yojson.Safe.to_string
 ;;
 
-let replay_evidence_fragment evidence payload =
+let replay_evidence_fragment evidence =
   let heading, instruction =
     match evidence.effect_kind with
     | Evidence_applied ->
@@ -482,14 +468,12 @@ let replay_evidence_fragment evidence payload =
   in
   String.concat
     "\n"
-    [ heading; instruction; replay_evidence_json evidence payload ]
+    [ heading; instruction; replay_evidence_json evidence ]
   |> Inference_utils.sanitize_text_utf8
 ;;
 
 let canonical_replay_evidence_fragment evidence =
-  replay_evidence_fragment
-    evidence
-    (`Reference evidence.artifact_ref)
+  replay_evidence_fragment evidence
 ;;
 
 let replay_model_message
@@ -566,23 +550,9 @@ let append_model_evidence_block evidence blocks =
   @ [ Agent_sdk.Types.Text (canonical_replay_evidence_fragment evidence) ]
 ;;
 
-let project_model_input ~base_path evidence messages =
-  let artifact_ref = evidence.artifact_ref in
-  match retrieve_replay_artifact ~base_path artifact_ref with
-  | Error detail ->
-    Log.Keeper.error
-      "Gate replay evidence hydration failed approval=%s sha256=%s: %s"
-      evidence.approval_id
-      artifact_ref.Tool_output.sha256
-      detail;
-    Ok messages
-  | Ok payload ->
-    let hydrated =
-      replay_evidence_fragment
-        evidence
-        (`Hydrated (Inference_utils.sanitize_text_utf8 payload))
-    in
-    Ok (messages @ [ Agent_sdk.Types.user_msg hydrated ])
+let project_model_input ~base_path:_ evidence messages =
+  let referenced = replay_evidence_fragment evidence in
+  Ok (messages @ [ Agent_sdk.Types.user_msg referenced ])
 ;;
 
 let approved_resolution_message ~approval_id ~tool_name ~input ~user_message =

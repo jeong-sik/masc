@@ -356,12 +356,21 @@ let test_applied_replay_result_is_model_visible () =
          |> List.hd
          |> Yojson.Safe.from_string
        in
-       Alcotest.check
-         Alcotest.string
-         "exact replay evidence reaches the current provider turn"
-         output
-         Yojson.Safe.Util.(
-           evidence |> member "untrusted_tool_output" |> to_string);
+       (match
+          evidence
+          |> Yojson.Safe.Util.member "untrusted_tool_output_ref"
+          |> Tool_output.normalized_artifact_ref_of_json
+        with
+        | Tool_output.Decoded_normalized_artifact_ref decoded ->
+          Alcotest.check
+            Alcotest.string
+            "replay reference reaches the current provider turn"
+            output_ref.sha256
+            decoded.sha256
+        | Tool_output.Not_normalized_artifact_ref ->
+          Alcotest.fail "provider replay evidence lost its artifact reference"
+        | Tool_output.Invalid_normalized_artifact_ref { detail } ->
+          Alcotest.fail detail);
        Alcotest.check
          Alcotest.bool
          "current model turn cannot request the approved effect again"
@@ -371,7 +380,7 @@ let test_applied_replay_result_is_model_visible () =
             "Do not request the approved operation again"))
 ;;
 
-let test_large_replay_result_reaches_model_exactly () =
+let test_large_replay_result_stays_reference_only () =
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
@@ -462,20 +471,29 @@ let test_large_replay_result_reaches_model_exactly () =
          |> List.find (fun line -> not (String.equal (String.trim line) ""))
          |> Yojson.Safe.from_string
        in
-       Alcotest.check
-         Alcotest.string
-         "provider projection receives the full exact replay payload"
-         raw_output
-         Yojson.Safe.Util.(
-           projected_evidence |> member "untrusted_tool_output" |> to_string);
+       (match
+          projected_evidence
+          |> Yojson.Safe.Util.member "untrusted_tool_output_ref"
+          |> Tool_output.normalized_artifact_ref_of_json
+        with
+        | Tool_output.Decoded_normalized_artifact_ref decoded ->
+          Alcotest.check
+            Alcotest.string
+            "provider projection keeps the exact artifact identity"
+            artifact.sha256
+            decoded.sha256
+        | Tool_output.Not_normalized_artifact_ref ->
+          Alcotest.fail "provider projection lost the replay reference"
+        | Tool_output.Invalid_normalized_artifact_ref { detail } ->
+          Alcotest.fail detail);
        Alcotest.check
          Alcotest.bool
-         "provider projection does not substitute a preview marker"
+         "provider projection does not hydrate the large replay payload"
          false
-         (String_util.contains_substring projected Tool_output.marker_prefix))
+         (String_util.contains_substring projected "LARGE-REPLAY-END"))
 ;;
 
-let test_multimodal_goal_projects_exact_replay_evidence () =
+let test_multimodal_goal_projects_replay_reference () =
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
@@ -540,7 +558,7 @@ let test_multimodal_goal_projects_exact_replay_evidence () =
               Alcotest.bool
               "media block survives replay projection"
               true
-              (String_util.contains_substring evidence_text raw_output)
+              (not (String_util.contains_substring evidence_text raw_output))
           | _ ->
             Alcotest.fail
               "multimodal projection did not preserve canonical media and append replay evidence")
@@ -591,11 +609,11 @@ let test_replay_projection_recovers_when_canonical_reference_is_absent () =
            (Agent_sdk.Types.text_of_content original.content);
          Alcotest.check
            Alcotest.bool
-           "exact replay evidence is appended independently of text layout"
+           "replay reference is appended independently of text layout"
            true
            (String_util.contains_substring
               (Agent_sdk.Types.text_of_content recovered.content)
-              "available exact output")
+              artifact.sha256)
        | Ok _ ->
          Alcotest.fail
            "replay recovery did not append one exact provider message")
@@ -772,13 +790,13 @@ let () =
             `Quick
             test_applied_replay_result_is_model_visible
         ; Alcotest.test_case
-            "large result reaches exact provider projection"
+            "large result stays reference-only"
             `Quick
-            test_large_replay_result_reaches_model_exactly
+            test_large_replay_result_stays_reference_only
         ; Alcotest.test_case
-            "multimodal goal projects exact replay evidence"
+            "multimodal goal projects replay reference"
             `Quick
-            test_multimodal_goal_projects_exact_replay_evidence
+            test_multimodal_goal_projects_replay_reference
         ; Alcotest.test_case
             "canonical reference layout does not control projection"
             `Quick

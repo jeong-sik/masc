@@ -345,6 +345,24 @@ let sdk_provider_error_fields error =
     ; "message", `String message
     ; "detail", `String detail
     ]
+  | Llm_provider.Error.ProviderWireError { provider; format; kind; detail } ->
+    [ "variant", `String "provider_wire_error"
+    ; "message", `String message
+    ; "provider", `String provider
+    ; "format", `String (Llm_provider.Http_client.provider_wire_format_to_string format)
+    ; "wire_kind", `String (Llm_provider.Http_client.provider_wire_error_kind_to_string kind)
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.ProviderReportedError { provider; error_type; detail } ->
+    [ "variant", `String "provider_reported_error"
+    ; "message", `String message
+    ; "provider", `String provider
+    ; ( "error_type"
+      , match error_type with
+        | Some error_type -> `String error_type
+        | None -> `Null )
+    ; "detail", `String detail
+    ]
   | Llm_provider.Error.UnknownVariant { type_name; value } ->
     [ "variant", `String "unknown_variant"
     ; "message", `String message

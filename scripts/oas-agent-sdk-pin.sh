@@ -59,8 +59,11 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.10"
 # change, with no compatibility decoder or migration path added by this pin.
 # Previous pin: v0.231.6 (ae4cc5536).
 readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.10"
+# Paired malformed-SSE boundary hardening: OAS preserves accepted-response
+# wire failures and provider-owned error envelopes as typed public facts.
+# Keep this SHA aligned with the OAS change before CI builds MASC.
 # TRACK_REF consumed by check-oas-pin.sh / oas-drift-check.sh /
 # sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584).
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="1fa61251936758d37c3a33eac07b8d95c5f26d35"
+readonly OAS_AGENT_SDK_SHA="95d1ee5ae6a2a8e4a42cbf79c332e957e982bcdf"
 readonly OAS_AGENT_SDK_MIN_VERSION="0.231.10"

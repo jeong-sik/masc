@@ -183,6 +183,8 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   | Llm_provider.Error.InvalidConfig _ -> exhaust_failure Config_mismatch
   | Llm_provider.Error.InvalidRequest _ -> exhaust_failure Deterministic_request
   | Llm_provider.Error.ParseError _
+  | Llm_provider.Error.ProviderWireError _
+  | Llm_provider.Error.ProviderReportedError _
   | Llm_provider.Error.UnknownVariant _
   | Llm_provider.Error.ProviderTerminal _ ->
     exhaust_failure Provider_integration

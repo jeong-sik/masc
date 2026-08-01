@@ -39,8 +39,6 @@ import {
 import { formatDateTimeKo } from '../../lib/format-time'
 import { CountBadge } from '../v2/primitives-v2'
 
-const LANE_ROW_LIMIT = 3
-
 // The strip mirrors a heavy server-side aggregation (per-keeper event-queue,
 // turn-admission, external-attention, HITL, schedule scans). It is refreshed
 // by polling — not server push — while the keeper detail is open, so a busy
@@ -137,7 +135,7 @@ export function KeeperLaneStrip({
   autoRefreshMs?: number
 }): VNode {
   const entry = inventoryEntry(inventory, keeper)
-  const rows = (entry?.waiting_on ?? []).slice(0, LANE_ROW_LIMIT)
+  const rows = entry?.waiting_on ?? []
   const waitingCount = entry?.waiting_count ?? 0
   const countTruncated = entry?.waiting_count_truncated === true
   const truncatedSources = entry ? truncatedSourceLabels(entry) : []
@@ -168,11 +166,6 @@ export function KeeperLaneStrip({
                       ${rows.map((row, index) => html`
                         <${LaneWaitingRow} key=${`${row.source}:${row.waiting_on}:${index}`} row=${row} />
                       `)}
-                      ${waitingCount > rows.length
-                        ? html`<div class="pt-1 text-2xs text-[var(--color-fg-muted)]" data-testid="keeper-lane-more">
-                            +${waitingCount - rows.length} more${countTruncated ? ` of at least ${waitingCount}` : ''}
-                          </div>`
-                        : null}
                     </div>
                   `
                 : null}

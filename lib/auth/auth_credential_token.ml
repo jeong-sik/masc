@@ -89,7 +89,7 @@ let collision_log_to_yojson log =
     ]
 ;;
 
-(** Auth comparisons use Eqaf's timing-resistant equality. *)
+(** Shared constant-time string equality for raw bearer tokens. *)
 let constant_time_string_equal = Auth_credential_base.constant_time_string_equal
 
 let validate_raw_token raw_token =

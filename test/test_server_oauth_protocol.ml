@@ -76,6 +76,20 @@ let test_html_escape () =
     (Server_oauth_http.html_escape "<&>\"'")
 ;;
 
+let test_exact_string_set_rejects_duplicates () =
+  check
+    bool
+    "duplicate grant types cannot replace a required value"
+    true
+    (Result.is_error
+       (Server_oauth_http.ensure_optional_string_set
+          [ ( "grant_types"
+            , `List [ `String "authorization_code"; `String "authorization_code" ] )
+          ]
+          "grant_types"
+          [ "authorization_code"; "refresh_token" ]))
+;;
+
 let () =
   run
     "server_oauth_protocol"
@@ -83,6 +97,10 @@ let () =
       , [ test_case "Codex discovery contract" `Quick test_codex_discovery_contract
         ; test_case "form ambiguity" `Quick test_form_parser_rejects_ambiguity
         ; test_case "HTML escaping" `Quick test_html_escape
+        ; test_case
+            "exact string set rejects duplicates"
+            `Quick
+            test_exact_string_set_rejects_duplicates
         ] )
     ]
 ;;

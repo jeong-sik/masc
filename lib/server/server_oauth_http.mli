@@ -9,3 +9,11 @@ val parse_form : string -> ((string * string) list, Auth_oauth.error) result
 
 val html_escape : string -> string
 (** Escape an untrusted value for an HTML text or quoted attribute context. *)
+
+val ensure_optional_string_set :
+  (string * Yojson.Safe.t) list ->
+  string ->
+  string list ->
+  (unit, Auth_oauth.error) result
+(** Require an optional JSON string array to equal the expected set exactly,
+    rejecting duplicates. Exposed for focused protocol tests. *)

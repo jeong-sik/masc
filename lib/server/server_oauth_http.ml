@@ -47,20 +47,26 @@ let param params name = List.assoc_opt name params
 
 let oauth_error_description = function
   | Auth_oauth.Invalid_request message -> message
-  | Invalid_client -> "client authentication failed"
-  | Invalid_grant -> "authorization grant is invalid or expired"
-  | Invalid_scope -> "requested scope is invalid"
-  | Access_denied -> "authorization was denied"
-  | OAuth_disabled -> "OAuth is disabled"
-  | Temporarily_unavailable -> "authorization server is temporarily unavailable"
-  | Store_error _ -> "authorization server state is unavailable"
+  | Auth_oauth.Invalid_client -> "client authentication failed"
+  | Auth_oauth.Invalid_grant -> "authorization grant is invalid or expired"
+  | Auth_oauth.Invalid_scope -> "requested scope is invalid"
+  | Auth_oauth.Access_denied -> "authorization was denied"
+  | Auth_oauth.OAuth_disabled -> "OAuth is disabled"
+  | Auth_oauth.Temporarily_unavailable ->
+    "authorization server is temporarily unavailable"
+  | Auth_oauth.Store_error _ -> "authorization server state is unavailable"
 ;;
 
 let oauth_error_status = function
   | Auth_oauth.Invalid_client -> `Unauthorized
-  | OAuth_disabled | Temporarily_unavailable -> `Service_unavailable
-  | Store_error _ -> `Internal_server_error
-  | Invalid_request _ | Invalid_grant | Invalid_scope | Access_denied -> `Bad_request
+  | Auth_oauth.OAuth_disabled | Auth_oauth.Temporarily_unavailable ->
+    `Service_unavailable
+  | Auth_oauth.Store_error _ -> `Internal_server_error
+  | Auth_oauth.Invalid_request _
+  | Auth_oauth.Invalid_grant
+  | Auth_oauth.Invalid_scope
+  | Auth_oauth.Access_denied ->
+    `Bad_request
 ;;
 
 let respond_oauth_error request reqd error =
@@ -298,7 +304,8 @@ let ensure_optional_string_set fields name expected =
   match values with
   | None -> Ok ()
   | Some values
-    when List.length values = List.length expected
+    when List.length values = List.length (List.sort_uniq String.compare values)
+         && List.length values = List.length expected
          && List.for_all (fun value -> List.mem value expected) values ->
     Ok ()
   | Some _ -> Error (Auth_oauth.Invalid_request (name ^ " is not supported"))

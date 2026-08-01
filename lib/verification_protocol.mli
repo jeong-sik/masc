@@ -58,8 +58,9 @@ val notify_approve_verification :
   notes:string ->
   unit
 (** [notify_approve_verification ...] emits the SSE
-    [masc/verification/verdict] event with [type=approved] and typed
-    [authority_kind]/[authority_actor] provenance.
+    [masc/verification/verdict] event with [verdict=approved]. The [type]
+    field carries the event name, and [authority_kind]/[authority_actor]
+    carry typed provenance.
     State-free — no FSM mutation, no journal write. *)
 
 val notify_reject_verification :
@@ -69,8 +70,9 @@ val notify_reject_verification :
   reason:string ->
   unit
 (** [notify_reject_verification ...] emits the SSE
-    [masc/verification/rejected] event with [type=rejected] and typed
-    [authority_kind]/[authority_actor] provenance.
+    [masc/verification/rejected] event with [verdict=rejected]. The [type]
+    field carries the event name, and [authority_kind]/[authority_actor]
+    carry typed provenance.
     State-free. *)
 
 module For_testing : sig

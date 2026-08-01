@@ -410,11 +410,11 @@ let task_operation_updated_at (task : Masc_domain.task) =
   | Masc_domain.Todo -> task.created_at
 
 let task_operation_id (task : Masc_domain.task) =
-  let operation_id =
-    Option.bind task.contract (fun contract -> contract.links.operation_id)
-  in
-  match String_util.trim_to_option (Option.value ~default:"" operation_id) with
-  | Some operation_id -> operation_id
+  match Option.bind task.contract (fun contract -> contract.links.operation_id) with
+  | Some operation_id -> (
+      match String_util.trim_to_option operation_id with
+      | Some operation_id -> operation_id
+      | None -> task.id)
   | None -> task.id
 
 let build_operation_contexts ~(tasks : Masc_domain.task list) =

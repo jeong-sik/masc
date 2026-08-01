@@ -54,7 +54,6 @@ const PHASE_DOT_COLOR: Record<FleetTone, string> = {
   busy: 'var(--color-accent-fg)',
   idle: 'var(--text-dim)',
 }
-import { isVerifierRoleKeeper } from '../lib/keeper-utils'
 import { MISSING_DATA_DASH } from '../lib/format-string'
 import { relativeTime } from '../lib/format-time'
 import type { AsyncState } from '../lib/async-state'
@@ -1849,7 +1848,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     : []
 
   // ── Tab content (the live fields, regrouped under the 8 prototype tabs) ──
-  // identity ◈ — source provenance + verifier role
+  // identity ◈ — source provenance
   const identityTab = html`
     <${KcfSec} title="편집 가능 범위" desc="여기서 저장되는 값은 keeper 프롬프트, live override 계층, runtime.toml의 [runtime.assignments]입니다.">
       <${KcfFacts} rows=${[
@@ -1871,14 +1870,6 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       </div>
     </${KcfSec}>
 
-    ${isVerifierRoleKeeper(currentMentionTargets) ? html`
-    <div class="kcf-sec" style="margin-bottom:18px;">
-      <div class="flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-3 py-2">
-        <span class="rounded-[var(--r-1)] border border-[var(--accent-40)] bg-[var(--accent-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg">검증자</span>
-        <span class="text-2xs text-text-body">이 keeper는 task completion_contract를 독립 실측하는 검증자 역할입니다.</span>
-      </div>
-    </div>
-    ` : null}
   `
 
   // prompt ¶ — edit toolbar + active goals + instructions + system prompt preview

@@ -6,8 +6,8 @@
 //
 // Pattern mirrors RuntimeConfigPanel: managed async resource + manual
 // refresh + 15s auto-tick. Row expansion uses <details> so we avoid
-// component-local state plumbing for a read-only table. Async Task verdicts
-// remain exclusively with the Keeper that claimed the verifier phase.
+// component-local state plumbing for a read-only table. Async task verdicts
+// belong to the system LLM completion-authority boundary, not a Keeper claim.
 
 import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'

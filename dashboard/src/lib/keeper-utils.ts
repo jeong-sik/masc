@@ -18,18 +18,3 @@ export function findKeeper(name?: string | null): Keeper | null {
     return keys.includes(needle) || (alias !== null && keys.includes(alias))
   }) ?? null
 }
-
-/**
- * Client-side mirror of Keeper_unified_turn.is_verifier_role_keeper (OCaml).
- * Returns true when mention_targets include one of the verifier role tokens
- * ("verifier" / "검증자"). Used by dashboard surfaces that need to distinguish
- * verification-authority keepers without reloading the persona profile.
- */
-const VERIFIER_ROLE_MENTION_TOKENS: readonly string[] = ['verifier', '검증자']
-
-export function isVerifierRoleKeeper(
-  mentionTargets: readonly string[] | null | undefined,
-): boolean {
-  if (!mentionTargets || mentionTargets.length === 0) return false
-  return VERIFIER_ROLE_MENTION_TOKENS.some(token => mentionTargets.includes(token))
-}

@@ -71,6 +71,15 @@ let test_explicit_cwd_scopes_relative_file_path () =
        [ "file_path", `String "lib/foo.ml"; "cwd", `String "repos/masc" ])
 ;;
 
+let test_scratch_path_stays_sandbox_rooted_with_repo_cwd () =
+  check
+    string
+    "scratch/file_path"
+    "/sandbox/tester/scratch/notes.md"
+    (observed_path
+       [ "file_path", `String "scratch/notes.md"; "cwd", `String "repos/masc" ])
+;;
+
 let test_sandbox_rooted_file_path_ignores_cwd () =
   check
     string
@@ -392,6 +401,10 @@ let () =
             "explicit cwd scopes relative file_path"
             `Quick
             test_explicit_cwd_scopes_relative_file_path
+        ; test_case
+            "scratch path stays sandbox-rooted with repo cwd"
+            `Quick
+            test_scratch_path_stays_sandbox_rooted_with_repo_cwd
         ; test_case
             "sandbox-rooted file_path ignores cwd"
             `Quick

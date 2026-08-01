@@ -41,12 +41,13 @@ val sync_prompt_assets :
   sync_result
 (** Converge the runtime prompt markdown dir onto the binary-embedded
     assets (#20929). Only entries under [prompts/] in [files] are
-    considered; each is written into [prompts_dir] when missing or when
-    its content differs from the embedded copy. Identical files are left
-    untouched. The embedded managed-assets manifest must exactly equal the
-    current embedded prompt set. The runtime prompt directory is an exact
-    distribution-owned projection: paths absent from the current manifest are
-    removed, then the runtime manifest is replaced with the current one.
+    considered. After all sync preconditions validate, each is written into
+    [prompts_dir] when missing or when its content differs from the embedded
+    copy; identical files are left untouched. The embedded managed-assets
+    manifest must exactly equal a non-empty current embedded prompt set. The
+    runtime prompt directory is an exact distribution-owned projection: paths
+    absent from the current manifest are removed, then the runtime manifest is
+    replaced with the current one.
 
     Overwrite-on-differ is safe by design: operator prompt customization
     lives in prompt_overrides.json (replayed after directory load), so a

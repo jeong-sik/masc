@@ -68,4 +68,27 @@ describe('RepositoryCheckoutsPanel', () => {
     expect(screen.getByText('behind')).toBeInTheDocument()
     expect(screen.getByText('behind 22 · ahead 0')).toBeInTheDocument()
   })
+
+  it('renders unsupported catalog and freshness states explicitly', () => {
+    keeperStatusDetails.value = {
+      sangsu: {
+        name: 'sangsu', history: [], rawText: '', loadedAt: '2026-07-13T00:00:00Z',
+        rawStatus: {
+          execution_context: {
+            repository_checkouts: { entries: [{
+              checkout_name: 'future-directory', path: 'repos/future-directory',
+              branch: 'main', head: 'def456', dirty: false, inspection_state: 'available',
+              catalog: { state: 'future_catalog_state' },
+              freshness: { state: 'future_freshness_state' },
+            }] },
+          },
+        },
+      },
+    }
+
+    render(html`<${RepositoryCheckoutsPanel} keeperName="sangsu" />`)
+
+    expect(screen.getByText('unsupported:future_catalog_state')).toBeInTheDocument()
+    expect(screen.getByText('unsupported:future_freshness_state')).toBeInTheDocument()
+  })
 })

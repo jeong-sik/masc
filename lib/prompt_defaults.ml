@@ -273,6 +273,13 @@ let sync_prompt_assets ~read ~files ~prompts_dir () =
            String_set.empty
            current_assets
        in
+       if String_set.is_empty current
+       then
+         { initial with
+           failed =
+             [ managed_assets_manifest, "embedded prompt asset set is empty" ]
+         }
+       else
        let missing = String_set.diff current managed in
        let extra = String_set.diff managed current in
        if not (String_set.is_empty missing && String_set.is_empty extra)

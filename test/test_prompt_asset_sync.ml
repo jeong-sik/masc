@@ -101,6 +101,30 @@ let test_runtime_extra_files_are_removed () =
       let (_ : Prompt_defaults.sync_result) = sync ~prompts_dir:dir in
       check bool "runtime extra removed" false (Sys.file_exists extra))
 
+let test_empty_embedded_prompt_set_preserves_runtime_tree () =
+  with_temp_prompts_dir (fun dir ->
+      let existing = Filename.concat dir "keeper.existing.md" in
+      Out_channel.with_open_text existing (fun oc ->
+          Out_channel.output_string oc "must survive empty embedded set\n");
+      let empty_manifest = manifest [] in
+      let result =
+        Prompt_defaults.sync_prompt_assets
+          ~read:(function
+            | rel when String.equal rel manifest_rel -> Some empty_manifest
+            | _ -> None)
+          ~files:[ manifest_rel ]
+          ~prompts_dir:dir
+          ()
+      in
+      check (list string) "removed" [] result.Prompt_defaults.removed;
+      check bool "runtime tree preserved" true (Sys.file_exists existing);
+      check bool "empty set failure visible" true
+        (List.exists
+           (fun (rel, msg) ->
+             String.equal rel manifest_rel
+             && String.equal msg "embedded prompt asset set is empty")
+           result.Prompt_defaults.failed))
+
 let test_removed_managed_file_is_deleted () =
   with_temp_prompts_dir (fun dir ->
       let removed = Filename.concat dir "keeper.removed.md" in
@@ -275,6 +299,8 @@ let () =
             test_overwrites_stale_copy;
           test_case "runtime extra files are removed" `Quick
             test_runtime_extra_files_are_removed;
+          test_case "empty embedded prompt set preserves runtime tree" `Quick
+            test_empty_embedded_prompt_set_preserves_runtime_tree;
           test_case "removed managed file is deleted" `Quick
             test_removed_managed_file_is_deleted;
           test_case "current managed leaf symlink is replaced without following"

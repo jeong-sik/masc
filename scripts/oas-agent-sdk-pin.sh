@@ -60,7 +60,10 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.10"
 # Previous pin: v0.231.6 (ae4cc5536).
 readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.10"
 # TRACK_REF consumed by check-oas-pin.sh / oas-drift-check.sh /
-# sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584).
+# sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584). Use main
+# for merge-ready pins. A blocked Draft cross-repo PR may temporarily declare
+# the exact refs/pull/<number>/head review ref; CI rejects that ref once the PR
+# is no longer both Draft and blocked-on-oas.
 readonly OAS_AGENT_SDK_TRACK_REF="main"
 readonly OAS_AGENT_SDK_SHA="1fa61251936758d37c3a33eac07b8d95c5f26d35"
 readonly OAS_AGENT_SDK_MIN_VERSION="0.231.10"

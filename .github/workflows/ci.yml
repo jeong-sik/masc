@@ -5,7 +5,10 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
-    types: [opened, synchronize, reopened]
+    # ready_for_review must re-evaluate Draft-only dependency allowances on the
+    # exact same head; otherwise an ephemeral review ref could retain a green
+    # CI Gate after the PR becomes mergeable.
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch: {}
 
 permissions:
@@ -23,13 +26,15 @@ concurrency:
       github.event_name == 'push' && github.ref_name == 'main' && github.sha
       || github.head_ref || github.ref_name || github.run_id
     }}
-  # Code-changing PR events supersede older CI for the same PR. Pushes to the
-  # same branch also supersede older post-merge CI EXCEPT for main pushes —
-  # main commits are independent state that must each be verified (background:
+  # Code-changing and ready-for-review PR events supersede older CI for the
+  # same PR. Pushes to the same branch also supersede older post-merge CI
+  # EXCEPT for main pushes — main commits are independent state that must each
+  # be verified (background:
   # #14668 / #14670, 30+ main runs cancelled before TLA could complete on
   # 2026-05-11). State-only readiness is enforced by PR Automation against the
-  # existing head CI Gate; it must not create a fresh required CI Gate context.
-  cancel-in-progress: ${{ (github.event_name == 'push' && github.ref_name != 'main') || (github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened"]'), github.event.action)) }}
+  # existing head CI Gate. Ready-for-review is the exception: Draft-only
+  # dependency allowances must be revoked and rechecked before merge.
+  cancel-in-progress: ${{ (github.event_name == 'push' && github.ref_name != 'main') || (github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened","ready_for_review"]'), github.event.action)) }}
 
 jobs:
   pr-sync-check:
@@ -427,12 +432,25 @@ jobs:
           scripts/sync-oas-pin-docs.sh --check
           scripts/audit-keeper-tool-boundary-matrix.sh
 
-      - name: Check OAS pin consistency
+      - name: Check OAS pin manifests
         if: needs.changes.outputs.oas_pin == 'true'
         run: |
-          chmod +x scripts/check-oas-pin.sh scripts/oas-drift-check.sh
+          chmod +x scripts/check-oas-pin.sh
+          bash test/test_oas_pin_ref.sh
           scripts/check-oas-pin.sh --local-only
-          scripts/oas-drift-check.sh
+
+      - name: Check OAS API surface source
+        if: needs.changes.outputs.oas_pin == 'true'
+        env:
+          ALLOW_REVIEW_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true && contains(github.event.pull_request.labels.*.name, 'blocked-on-oas') }}
+        run: |
+          chmod +x scripts/oas-drift-check.sh
+          if [[ "$ALLOW_REVIEW_REF" == "true" ]]; then
+            echo "::notice::Draft PR blocked on OAS: validating the explicit upstream review ref"
+            scripts/oas-drift-check.sh --allow-review-ref
+          else
+            scripts/oas-drift-check.sh
+          fi
 
       - name: Run report self-test
         if: needs.changes.outputs.lib_deps == 'true'

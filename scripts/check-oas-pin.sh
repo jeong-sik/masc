@@ -4,14 +4,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 LOCAL_ONLY=0
+ALLOW_REVIEW_REF=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/check-oas-pin.sh [--local-only]
+Usage: scripts/check-oas-pin.sh [--local-only] [--allow-review-ref]
 
 Options:
   --local-only   Skip upstream remote drift lookup and verify only repository
                  manifests plus the current local opam switch.
+  --allow-review-ref
+                 Permit the exact refs/pull/<number>/head configured for a
+                 blocked Draft cross-repo PR during network-backed checks.
   -h, --help     Show this help.
 EOF
 }
@@ -20,6 +24,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --local-only)
       LOCAL_ONLY=1
+      shift
+      ;;
+    --allow-review-ref)
+      ALLOW_REVIEW_REF=1
       shift
       ;;
     -h|--help)
@@ -36,8 +44,20 @@ done
 
 # GitHub release metadata can lag for this repo. Keep the dependency floor
 # aligned with the pinned SDK's declared opam version, and ratchet the runtime
-# pin against upstream main so CI catches drift immediately.
+# pin against its declared upstream source ref so CI catches drift immediately.
 source "${SCRIPT_DIR}/oas-agent-sdk-pin.sh"
+# shellcheck source=oas-pin-ref.sh
+source "${SCRIPT_DIR}/oas-pin-ref.sh"
+
+OAS_AGENT_SDK_REMOTE_REF="$(oas_pin_remote_ref "${OAS_AGENT_SDK_TRACK_REF}")" || {
+  echo "invalid OAS_AGENT_SDK_TRACK_REF: ${OAS_AGENT_SDK_TRACK_REF}" >&2
+  exit 1
+}
+if [[ "${LOCAL_ONLY}" -eq 0 ]]; then
+  oas_pin_require_track_policy \
+    "${OAS_AGENT_SDK_REMOTE_REF}" \
+    "${ALLOW_REVIEW_REF}"
+fi
 
 default_pin_source="${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}"
 pin_source="${AGENT_SDK_PIN_URL:-${default_pin_source}}"
@@ -48,18 +68,18 @@ local_oas_checkout="${AGENT_SDK_LOCAL_REPO:-}"
 
 if [[ "${pin_source}" == "${default_pin_source}" ]]; then
   if [[ "${LOCAL_ONLY}" -eq 0 ]]; then
-    latest_main_sha="$(
-      git ls-remote "${OAS_AGENT_SDK_URL}" "refs/heads/${OAS_AGENT_SDK_TRACK_REF}" \
+    latest_track_sha="$(
+      git ls-remote "${OAS_AGENT_SDK_URL}" "${OAS_AGENT_SDK_REMOTE_REF}" \
         | awk '{print $1}'
     )"
 
-    if [[ -z "${latest_main_sha}" ]]; then
+    if [[ -z "${latest_track_sha}" ]]; then
       echo "failed to resolve upstream ${OAS_AGENT_SDK_TRACK_REF} SHA" >&2
       exit 1
     fi
 
-    if [[ "${OAS_AGENT_SDK_SHA}" != "${latest_main_sha}" ]]; then
-      echo "::warning::OAS main drift: pinned ${OAS_AGENT_SDK_SHA}, upstream ${latest_main_sha} — update pin when API-compatible"
+    if [[ "${OAS_AGENT_SDK_SHA}" != "${latest_track_sha}" ]]; then
+      echo "::warning::OAS track-ref drift: pinned ${OAS_AGENT_SDK_SHA}, ${OAS_AGENT_SDK_TRACK_REF} ${latest_track_sha} — update pin when API-compatible"
     fi
 
     # Ref-reachability guard: the pin SHA must be an ancestor of
@@ -71,11 +91,11 @@ if [[ "${pin_source}" == "${default_pin_source}" ]]; then
     if GIT_DIR="${reachability_scratch}" git init -q --bare \
        && GIT_DIR="${reachability_scratch}" git fetch -q --no-tags \
             "${OAS_AGENT_SDK_URL}" \
-            "+refs/heads/${OAS_AGENT_SDK_TRACK_REF}:refs/heads/${OAS_AGENT_SDK_TRACK_REF}" \
+            "+${OAS_AGENT_SDK_REMOTE_REF}:${OAS_AGENT_SDK_REMOTE_REF}" \
             2>/dev/null; then
       if ! GIT_DIR="${reachability_scratch}" git merge-base --is-ancestor \
            "${OAS_AGENT_SDK_SHA}" \
-           "refs/heads/${OAS_AGENT_SDK_TRACK_REF}" 2>/dev/null; then
+           "${OAS_AGENT_SDK_REMOTE_REF}" 2>/dev/null; then
         echo "OAS pin ${OAS_AGENT_SDK_SHA} is not reachable from ${OAS_AGENT_SDK_TRACK_REF} on ${OAS_AGENT_SDK_URL}" >&2
         echo "  Orphan or diverged SHAs are GC candidates on GitHub and will silently break CI once collected." >&2
         echo "  repair: bump OAS_AGENT_SDK_SHA in scripts/oas-agent-sdk-pin.sh to a commit on ${OAS_AGENT_SDK_TRACK_REF}" >&2
@@ -356,7 +376,14 @@ fi
 # contract.  Local-mode callers (dune-local.sh preflight) get the
 # fingerprint check via the artifact verification above.
 if [[ "${LOCAL_ONLY}" -eq 0 && -x "${SCRIPT_DIR}/oas-drift-check.sh" ]]; then
-  if drift_output="$(bash "${SCRIPT_DIR}/oas-drift-check.sh" 2>&1)"; then
+  run_drift_check() {
+    if [[ "${ALLOW_REVIEW_REF}" -eq 1 ]]; then
+      bash "${SCRIPT_DIR}/oas-drift-check.sh" --allow-review-ref
+    else
+      bash "${SCRIPT_DIR}/oas-drift-check.sh"
+    fi
+  }
+  if drift_output="$(run_drift_check 2>&1)"; then
     echo "OAS API surface: ✓ matches fingerprint"
   else
     drift_exit=$?

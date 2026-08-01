@@ -13,15 +13,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CHECK_ONLY=0
 UPDATE_SURFACE=0
+ALLOW_REVIEW_REF=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/sync-oas-pin-manifests.sh [--check] [--surface]
+Usage: scripts/sync-oas-pin-manifests.sh [--check] [--surface] [--allow-review-ref]
 
 Options:
   --check     Verify generated OAS pin manifests are up to date.
   --surface   Also check/regenerate scripts/oas-api-surface.json.
               In write mode this runs oas-drift-check.sh --regenerate.
+  --allow-review-ref
+              Permit the exact refs/pull/<number>/head configured for a
+              blocked Draft cross-repo PR.
   -h, --help  Show this help.
 EOF
 }
@@ -34,6 +38,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --surface)
       UPDATE_SURFACE=1
+      shift
+      ;;
+    --allow-review-ref)
+      ALLOW_REVIEW_REF=1
       shift
       ;;
     -h | --help)
@@ -150,9 +158,17 @@ sync_surface() {
   fi
 
   if [[ "${CHECK_ONLY}" -eq 1 ]]; then
-    bash "${SCRIPT_DIR}/oas-drift-check.sh"
+    if [[ "${ALLOW_REVIEW_REF}" -eq 1 ]]; then
+      bash "${SCRIPT_DIR}/oas-drift-check.sh" --allow-review-ref
+    else
+      bash "${SCRIPT_DIR}/oas-drift-check.sh"
+    fi
   else
-    bash "${SCRIPT_DIR}/oas-drift-check.sh" --regenerate
+    if [[ "${ALLOW_REVIEW_REF}" -eq 1 ]]; then
+      bash "${SCRIPT_DIR}/oas-drift-check.sh" --regenerate --allow-review-ref
+    else
+      bash "${SCRIPT_DIR}/oas-drift-check.sh" --regenerate
+    fi
   fi
 }
 

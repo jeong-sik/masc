@@ -14,6 +14,9 @@
 #   scripts/oas-drift-check.sh               # check; exit 0 match / 2 drift / 1 error
 #   scripts/oas-drift-check.sh --regenerate  # rewrite fingerprint from pinned SHA source
 #   scripts/oas-drift-check.sh --print       # print current surfaces, no diff
+#   scripts/oas-drift-check.sh --allow-review-ref
+#                                              # allow an exact refs/pull/N/head
+#                                              # source for a blocked Draft PR
 #
 # Source resolution (first hit wins):
 #   1. $AGENT_SDK_LOCAL_REPO if a git checkout at the pinned SHA
@@ -28,12 +31,16 @@ FINGERPRINT_FILE="${REPO_ROOT}/scripts/oas-api-surface.json"
 
 # shellcheck source=oas-agent-sdk-pin.sh
 source "${SCRIPT_DIR}/oas-agent-sdk-pin.sh"
+# shellcheck source=oas-pin-ref.sh
+source "${SCRIPT_DIR}/oas-pin-ref.sh"
 
 MODE="check"
+ALLOW_REVIEW_REF=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --regenerate) MODE="regenerate"; shift ;;
     --print)      MODE="print"; shift ;;
+    --allow-review-ref) ALLOW_REVIEW_REF=1; shift ;;
     -h|--help)
       sed -n '1,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
@@ -42,6 +49,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 command -v jq >/dev/null 2>&1 || { echo "jq required" >&2; exit 1; }
+
+OAS_AGENT_SDK_REMOTE_REF="$(oas_pin_remote_ref "${OAS_AGENT_SDK_TRACK_REF}")" || {
+  echo "invalid OAS_AGENT_SDK_TRACK_REF: ${OAS_AGENT_SDK_TRACK_REF}" >&2
+  exit 1
+}
+oas_pin_require_track_policy \
+  "${OAS_AGENT_SDK_REMOTE_REF}" \
+  "${ALLOW_REVIEW_REF}"
 
 # ---------------------------------------------------------------------------
 # Source resolution
@@ -94,7 +109,7 @@ resolve_source_dir() {
   fi
   if ! GIT_DIR="${scratch}/bare" git fetch -q --no-tags \
          "${OAS_AGENT_SDK_URL}" \
-         "+refs/heads/${OAS_AGENT_SDK_TRACK_REF}:refs/heads/${OAS_AGENT_SDK_TRACK_REF}" \
+         "+${OAS_AGENT_SDK_REMOTE_REF}:${OAS_AGENT_SDK_REMOTE_REF}" \
          2>/dev/null; then
     echo "git fetch of ${OAS_AGENT_SDK_TRACK_REF} from ${OAS_AGENT_SDK_URL} failed" >&2
     return 1
@@ -106,7 +121,7 @@ resolve_source_dir() {
   fi
   if ! GIT_DIR="${scratch}/bare" git merge-base --is-ancestor \
         "${OAS_AGENT_SDK_SHA}" \
-        "refs/heads/${OAS_AGENT_SDK_TRACK_REF}" 2>/dev/null; then
+        "${OAS_AGENT_SDK_REMOTE_REF}" 2>/dev/null; then
     echo "pinned OAS SHA ${OAS_AGENT_SDK_SHA} is not reachable from ${OAS_AGENT_SDK_TRACK_REF} on ${OAS_AGENT_SDK_URL}" >&2
     return 1
   fi

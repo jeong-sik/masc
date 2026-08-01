@@ -89,7 +89,7 @@ let post_raw_json ~(host : string) ~(port : int) ~(path : string) ~(body : strin
   | Error e -> Error e
   | Ok (status_code, body) ->
       if Masc.Tui_decode.is_success_http_status status_code then Ok body
-      else Error (Masc.Tui_decode.http_status_error { status_code; body })
+      else Error (Masc.Tui_decode.http_status_error ~status_code ~body)
 
 (** Fetch /api/v1/dashboard/briefing (Mission / Overview snapshot). *)
 let fetch_dashboard_briefing ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =

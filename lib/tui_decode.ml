@@ -314,21 +314,6 @@ let parse_log_entry line =
 
 let trim = String.trim
 
-type http_response = {
-  status_code : int;
-  body : string;
-}
-
-let parse_http_status_code (line : string) : (int, string) result =
-  match String.split_on_char ' ' (String.trim line) |> List.filter (( <> ) "") with
-  | version :: code :: _
-    when String.length version >= 5 && String.starts_with ~prefix:"HTTP/" version
-    -> (
-      match int_of_string_opt code with
-      | Some status -> Ok status
-      | None -> Error (Printf.sprintf "invalid HTTP status code: %S" code))
-  | _ -> Error (Printf.sprintf "invalid HTTP status line: %S" line)
-
 let split_headers_body response =
   let marker = "\r\n\r\n" in
   let rec find idx =
@@ -342,44 +327,26 @@ let split_headers_body response =
   | Some idx -> Some (String.sub response idx (String.length response - idx))
   | None -> None
 
-let parse_http_response (response : string) : (http_response, string) result =
-  match String.split_on_char '\n' response with
-  | [] | [ "" ] -> Error "empty HTTP response"
-  | status_line :: _ ->
-      let* status_code = parse_http_status_code status_line in
-      let* body =
-        match split_headers_body response with
-        | Some body -> Ok body
-        | None -> Error "no empty line in HTTP response"
-      in
-      Ok { status_code; body }
-
 let is_success_http_status status_code = status_code >= 200 && status_code < 300
 
-let http_status_error response =
-  let body = String.trim response.body in
+let http_status_error ~status_code ~body =
+  let body = String.trim body in
   let detail =
     if body = "" then "empty response body"
     else if String.length body > 240 then String.sub body 0 240 ^ "..."
     else body
   in
-  Printf.sprintf "HTTP %d: %s" response.status_code detail
+  Printf.sprintf "HTTP %d: %s" status_code detail
 
 let decode_json_response_body ~allow_empty ~status_code ~body :
     (Yojson.Safe.t, string) result =
   if not (is_success_http_status status_code) then
-    Error (http_status_error { status_code; body })
+    Error (http_status_error ~status_code ~body)
   else if String.length (String.trim body) = 0 then
     if allow_empty then Ok (`Assoc []) else Error "empty response body"
   else
     try Ok (Yojson.Safe.from_string body)
     with Yojson.Json_error e -> Error (Printf.sprintf "(JSON parse: %s)" e)
-
-let decode_json_http_response ~allow_empty (raw : string) :
-    (Yojson.Safe.t, string) result =
-  let* response = parse_http_response raw in
-  decode_json_response_body ~allow_empty ~status_code:response.status_code
-    ~body:response.body
 
 let missing_field key =
   Error (Printf.sprintf "missing required field '%s'" key)

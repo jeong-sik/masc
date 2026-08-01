@@ -882,16 +882,23 @@ let run_keepalive_unified_turn
              (match failure.Keeper_unified_turn.source_disposition with
               | Keeper_unified_turn.Follow_failure_route ->
                 (* With automatic overflow-compaction recovery removed
-                   (#26546), a terminal route (context overflow,
-                   deterministic request) has no recovery path: the same
-                   stimulus would re-dispatch the identical provider request
-                   every heartbeat. Terminalize so the keeper moves on;
-                   retryable routes (transient, rotate) stay pending for the
-                   next cycle. *)
+                   (#26546), context overflow is unrecoverable on retry:
+                   #26545 bounds the history, so the next heartbeat would
+                   dispatch the same oversized payload. Terminalize only
+                   [Context_overflow] — other terminal classes
+                   ([Config_mismatch], [Internal_opaque], ...) may resolve
+                   without compaction (operator fix, transient internal
+                   failure), so preserve their stimuli. Retryable routes
+                   stay pending for the next cycle. *)
                 (match failure.Keeper_unified_turn.route with
                  | Keeper_runtime_failure_route.Exhausted_visible_alive
-                     { detail; _ } ->
+                     { terminal =
+                         Keeper_runtime_failure_route.Context_overflow
+                     ; detail
+                     ; _
+                     } ->
                    terminalize_failed_selection ~selection ~detail
+                 | Keeper_runtime_failure_route.Exhausted_visible_alive _
                  | Keeper_runtime_failure_route.Retry_after_observed _
                  | Keeper_runtime_failure_route.Rotate_now _ -> ())
               | Keeper_unified_turn.Pause_after_transcript_corruption _ ->

@@ -811,7 +811,6 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_auto_recoverable_runtime_exhausted_error err
-  || is_context_overflow err
   || is_empty_completion_error err
   || is_invalid_request_error err
 

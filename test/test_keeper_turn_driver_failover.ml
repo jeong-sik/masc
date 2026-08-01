@@ -815,6 +815,54 @@ let test_attempt_loop_retries_transport_failure_before_checkpoint () =
        ])
     (List.map (fun (event, _, _) -> event_name event) events)
 
+let test_attempt_loop_retries_provider_wire_failure_same_turn () =
+  let attempts = ref [] in
+  let deferred = ref 0 in
+  let events = ref [] in
+  let provider_wire_error =
+    Agent_sdk.Error.Provider
+      (Llm_provider.Error.ProviderWireError
+         { provider = "test-provider"
+         ; format = Llm_provider.Http_client.Sse
+         ; kind = Llm_provider.Http_client.Malformed_payload
+         ; detail = "malformed SSE payload"
+         })
+  in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(emit_manifest_collector events)
+      ~on_retry_deferred:(fun _ -> incr deferred)
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [ runtime_id ];
+        match candidate with
+        | "primary.test_model" -> Error provider_wire_error, None
+        | "fallback.test_model" -> Ok runtime_id, None
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "primary.test_model"; "fallback.test_model" ]
+  in
+  (match result with
+   | Ok runtime_id ->
+     Alcotest.(check string)
+       "malformed provider stream rotates within the same turn"
+       "fallback.test_model"
+       runtime_id
+   | Error error ->
+     Alcotest.failf
+       "expected same-turn provider-wire fallback, got %s"
+       (Agent_sdk.Error.to_string error));
+  Alcotest.(check (list string))
+    "provider-wire failure advances to the next lane candidate"
+    [ "primary.test_model"; "fallback.test_model" ]
+    !attempts;
+  Alcotest.(check int)
+    "provider-wire failure does not create a deferred whole-runtime retry"
+    0
+    !deferred;
+  let events = List.rev !events in
+  Alcotest.(check int) "both candidate attempts remain observable" 4 (List.length events)
+
 let test_attempt_loop_blocks_no_progress_when_gate_denies () =
   let attempts = ref [] in
   let gate_calls = ref [] in
@@ -1436,6 +1484,10 @@ let () =
             "transport failure before checkpoint safely falls back"
             `Quick
             test_attempt_loop_retries_transport_failure_before_checkpoint;
+          Alcotest.test_case
+            "provider-wire failure rotates in the same turn"
+            `Quick
+            test_attempt_loop_retries_provider_wire_failure_same_turn;
           Alcotest.test_case
             "attempt loop blocks no-progress when gate denies"
             `Quick

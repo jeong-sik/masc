@@ -1056,6 +1056,86 @@ let test_keeper_toml_writer_rejects_table_assignment_shapes () =
         check bool (label ^ " file is not created") false (Sys.file_exists path))
     shapes
 
+let test_keeper_toml_writer_round_trips_control_escapes () =
+  with_temp_dir "keeper-toml-control-escapes" @@ fun dir ->
+  let path = Filename.concat dir "control.toml" in
+  write_file path "[keeper]\ninstructions = \"old\"\n";
+  let value =
+    "before"
+    ^ String.make 1 (Char.chr 8)
+    ^ String.make 1 (Char.chr 12)
+    ^ "after"
+  in
+  (match
+     TL.edit_keeper_toml_fields
+       ~path
+       [ "instructions", TL.Set (TL.Toml_string value) ]
+   with
+   | Error error -> fail error
+   | Ok () -> ());
+  match Safe_ops.read_file_safe path with
+  | Error error -> fail error
+  | Ok content ->
+    (match TL.parse_toml content with
+     | Error error -> fail ("writer emitted invalid TOML: " ^ error)
+     | Ok doc ->
+       check (option string) "control escapes survive writer round-trip"
+         (Some value)
+         (TL.toml_string_opt doc "keeper.instructions"))
+
+let test_keeper_toml_writer_edits_multiline_assignments () =
+  with_temp_dir "keeper-toml-multiline-edits" @@ fun dir ->
+  let fixture () =
+    "[keeper]\n"
+    ^ "instructions = \"\"\"\n"
+    ^ "line one\n"
+    ^ "line two\n"
+    ^ "\"\"\"\n"
+    ^ "allowed_paths = [\n"
+    ^ "  \"/tmp/old-a\",\n"
+    ^ "  \"/tmp/old-b\",\n"
+    ^ "]\n"
+  in
+  let update_path = Filename.concat dir "update.toml" in
+  write_file update_path (fixture ());
+  (match
+     TL.edit_keeper_toml_fields
+       ~path:update_path
+       [ "instructions", TL.Set (TL.Toml_string "updated\ninstructions")
+       ; "allowed_paths", TL.Set (TL.Toml_string_array [ "/tmp/new-a" ])
+       ]
+   with
+   | Error error -> fail error
+   | Ok () -> ());
+  (match Safe_ops.read_file_safe update_path with
+   | Error error -> fail error
+   | Ok content ->
+     match TL.parse_toml content with
+     | Error error -> fail ("multiline update emitted invalid TOML: " ^ error)
+     | Ok doc ->
+       check (option string) "multiline string replaced"
+         (Some "updated\ninstructions")
+         (TL.toml_string_opt doc "keeper.instructions");
+       check (list string) "multiline array replaced" [ "/tmp/new-a" ]
+         (TL.toml_string_list doc "keeper.allowed_paths"));
+  let remove_path = Filename.concat dir "remove.toml" in
+  write_file remove_path (fixture ());
+  (match
+     TL.edit_keeper_toml_fields
+       ~path:remove_path
+       [ "instructions", TL.Remove ]
+   with
+   | Error error -> fail error
+   | Ok () -> ());
+  match Safe_ops.read_file_safe remove_path with
+  | Error error -> fail error
+  | Ok content ->
+    (match TL.parse_toml content with
+     | Error error -> fail ("multiline removal emitted invalid TOML: " ^ error)
+     | Ok doc ->
+       check (option string) "multiline string removed" None
+         (TL.toml_string_opt doc "keeper.instructions"))
+
 let with_profile_base f =
   with_env_restore [ "MASC_CONFIG_DIR"; "MASC_PERSONAS_DIR" ] @@ fun () ->
   Unix.putenv "MASC_CONFIG_DIR" "";
@@ -2140,6 +2220,10 @@ let () =
             test_typed_keeper_toml_edits_preserve_unrelated_fields;
           test_case "rejects table assignment shapes" `Quick
             test_keeper_toml_writer_rejects_table_assignment_shapes;
+          test_case "round-trips control escapes" `Quick
+            test_keeper_toml_writer_round_trips_control_escapes;
+          test_case "edits multiline assignments" `Quick
+            test_keeper_toml_writer_edits_multiline_assignments;
         ] );
       ( "unknown_keys",
         [

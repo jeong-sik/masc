@@ -1280,9 +1280,10 @@ let keeper_cycle_decision
               Some since_last_scheduled_autonomous
           }
         else (
-        (* A scheduled heartbeat is itself the wake signal. Backlog, schedule,
-           idle time, and previous-turn age remain observations for the model;
-           fixed local thresholds never suppress a Keeper cycle. *)
+        (* Once the no-progress backoff has elapsed, a scheduled heartbeat is
+           itself the wake signal. Backlog, schedule, idle time, and
+           previous-turn age remain observations for the model; no other local
+           threshold suppresses the cycle. *)
         let has_actionable_tasks =
           claimable_drives_wake observation.claimable_task_count
           || failed_drives_wake observation.failed_task_count

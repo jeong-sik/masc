@@ -174,7 +174,7 @@ describe('TaskBacklog', () => {
       title: 'Awaiting verification task',
       status: 'awaiting_verification',
       priority: 2,
-      description: 'Verifier keeper is measuring completion contract.',
+      description: 'System LLM agent evaluates the completion contract.',
       created_at: '2026-04-18T00:00:00Z',
       updated_at: '2026-04-18T00:05:00Z',
     }
@@ -185,12 +185,15 @@ describe('TaskBacklog', () => {
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: '검증 대기' })).toBeInTheDocument()
       expect(screen.getByText('Awaiting verification task')).toBeInTheDocument()
+      expect(screen.getByTitle('시스템 LLM agent의 판정을 기다리는 중')).toBeInTheDocument()
+      expect(screen.getByText('시스템 LLM agent의 completion_contract 판정을 기다리는 태스크입니다.')).toBeInTheDocument()
     })
 
     // Both the column header and the card pill include "검증 대기"; assert two
     // occurrences so a regression that drops either surface fails loudly.
     const matches = screen.getAllByText(/검증 대기/)
     expect(matches.length).toBeGreaterThanOrEqual(2)
+    expect(screen.queryByText(/verifier keeper/i)).not.toBeInTheDocument()
   })
 
   it('does not infer external issue links from task title strings', () => {

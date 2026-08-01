@@ -147,7 +147,7 @@ val record_crashed_cycle_failure :
 
 val compaction_outcomes_of_cycle_outcome :
   Keeper_heartbeat_loop_cycle.cycle_outcome ->
-  [ `Manual_committed of int | `Reactive_committed of int | `Failed ] list
+  [ `Manual_committed of int | `Failed ] list
 (** Pure mapping from one possibly nested cycle to every compaction
     commit/failure observation it contains. Only committed outcomes mutate
     durable compaction state. *)

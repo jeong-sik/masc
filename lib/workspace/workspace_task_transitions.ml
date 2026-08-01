@@ -609,20 +609,8 @@ let commit_verdict_r
              | Masc_domain.Human_operator _ -> Workspace_task_classify.Operator
              | Masc_domain.Auto_judge _ -> Workspace_task_classify.System
            in
-           let producer, verification_id =
-             match task.task_status with
-             | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
-               assignee, verification_id
-             | Masc_domain.Todo
-             | Masc_domain.Claimed _
-             | Masc_domain.InProgress _
-             | Masc_domain.Done _
-             | Masc_domain.Cancelled _ ->
-               (* Unreachable: [decide_verdict] admits only AwaitingVerification.
-                  Kept exhaustive so a new status constructor forces a decision
-                  here instead of falling into a default. *)
-               "", ""
-           in
+           let producer = decided.Workspace_task_lifecycle.producer in
+           let verification_id = decided.Workspace_task_lifecycle.verification_id in
            let new_backlog =
              { tasks =
                  List.map

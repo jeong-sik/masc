@@ -145,10 +145,13 @@ let decide
 
 (** A verdict decision plus the typed authority provenance its caller must
     record. Keeping the sum here prevents a system-LLM or HITL authority from
-    being reconstructed later from a free-form Keeper/verifier string. *)
+    being reconstructed later from a free-form Keeper/verifier string. The
+    producer and verification id come from the same awaiting snapshot. *)
 type verdict_decision =
   { decision : decision
   ; authority : Masc_domain.completion_authority
+  ; producer : string
+  ; verification_id : string
   }
 
 (** Terminal verdict on an [AwaitingVerification] obligation.
@@ -166,25 +169,32 @@ let decide_verdict
       ~now
       ~notes
   =
-  let provenance decision =
+  let provenance ~producer ~verification_id decision =
     if not (Masc_domain.completion_authority_has_identity authority)
     then Error Verdict_authority_identity_required
     else
       Ok
         { decision
         ; authority
+        ; producer
+        ; verification_id
         }
   in
   match task_status with
-  | Masc_domain.AwaitingVerification { assignee; _ } ->
+  | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
     (match verdict with
      | Masc_domain.Verdict_approved ->
-       provenance { new_status = done_status ~assignee ~now ~notes; set_current = None }
+       provenance
+         ~producer:assignee
+         ~verification_id
+         { new_status = done_status ~assignee ~now ~notes; set_current = None }
      | Masc_domain.Verdict_rejected { reason } ->
        if String.equal (String.trim reason) ""
        then Error Verdict_rejection_reason_required
        else
          provenance
+           ~producer:assignee
+           ~verification_id
            { new_status = Masc_domain.InProgress { assignee; started_at = now }
            ; set_current = Some task_id
            })

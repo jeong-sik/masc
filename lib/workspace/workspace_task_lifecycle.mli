@@ -49,10 +49,14 @@ val decide
 (** A verdict decision plus the typed authority provenance the caller records.
     The authority is returned as a sum rather than reconstructed from a
     free-form string, so a system-LLM judge or HITL operator cannot be
-    projected as a Keeper/verifier. *)
+    projected as a Keeper/verifier. The producer and verification id are
+    returned from the same [AwaitingVerification] snapshot, so downstream
+    projections do not need an empty-value fallback. *)
 type verdict_decision =
   { decision : decision
   ; authority : Masc_domain.completion_authority
+  ; producer : string
+  ; verification_id : string
   }
 
 (** Terminal verdict on an [AwaitingVerification] obligation.

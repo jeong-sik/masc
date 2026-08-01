@@ -553,18 +553,46 @@ let register_client ~base_path ~client_name ~redirect_uris =
           validate (uri :: seen) rest
     in
     let* () = validate [] redirect_uris in
-    let client =
-      { client_id = "masc_" ^ Auth_credential_base.generate_token ()
-      ; client_name
-      ; redirect_uris
-      ; created_at_unix = now ()
-      }
-    in
     with_store_io (fun () ->
       ensure_oauth_dirs base_path;
-      if Array.length (Sys.readdir (clients_dir base_path)) >= max_clients ()
-      then Error Temporarily_unavailable
-      else
+      let entries =
+        Sys.readdir (clients_dir base_path)
+        |> Array.to_list
+        |> List.filter (fun entry -> Filename.check_suffix entry ".json")
+      in
+      let sorted_redirect_uris = List.sort String.compare redirect_uris in
+      let rec find_exact_registration = function
+        | [] -> Ok None
+        | entry :: rest ->
+          let* json =
+            load_json_opt (Filename.concat (clients_dir base_path) entry)
+          in
+          (match json with
+           | None -> find_exact_registration rest
+           | Some json ->
+             let* stored = client_of_yojson json in
+             if
+               Option.equal String.equal stored.client_name client_name
+               && List.equal
+                    String.equal
+                    (List.sort String.compare stored.redirect_uris)
+                    sorted_redirect_uris
+             then Ok (Some stored)
+             else find_exact_registration rest)
+      in
+      let* existing = find_exact_registration entries in
+      match existing with
+      | Some client -> Ok client
+      | None when List.length entries >= max_clients () ->
+        Error Temporarily_unavailable
+      | None ->
+        let client =
+          { client_id = "masc_" ^ Auth_credential_base.generate_token ()
+          ; client_name
+          ; redirect_uris
+          ; created_at_unix = now ()
+          }
+        in
         let* () =
           save_json_private
             (client_path base_path client.client_id)

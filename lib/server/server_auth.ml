@@ -270,6 +270,12 @@ let verify_mcp_auth ~base_path request =
   with_mcp_expected_resource (fun () -> verify_mcp_auth_unscoped ~base_path request)
 ;;
 
+let verify_mcp_auth_for_authority ~base_path ~request_authority request =
+  Auth_oauth.with_expected_resource
+    (Server_oauth_metadata.resource request_authority)
+    (fun () -> verify_mcp_auth_unscoped ~base_path request)
+;;
+
 let verify_mcp_observer_stream_auth_unscoped ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
   let credential = observer_sse_auth_credential_from_request request in
@@ -691,6 +697,34 @@ let ensure_same_origin_browser_request ~request_authority request :
   | Single_origin { origin; admission = Rejected } ->
     Log.Auth.debug
       "same-origin check failed: origin=%S scheme=%s authority=%S trust=%s"
+      origin
+      (Server_request_authority.scheme request_authority
+       |> Server_request_authority.scheme_to_string)
+      (Server_request_authority.rendered request_authority)
+      (match Server_request_authority.trust_class request_authority with
+       | Server_request_authority.Configured_bind -> "configured_bind"
+       | Server_request_authority.Explicit_trusted_host ->
+         "explicit_trusted_host");
+    Error
+      (Masc_domain.Auth
+         (Masc_domain.Auth_error.Forbidden
+            { agent = "browser"; action = "cross-origin HTTP mutation" }))
+  | Multiple_origins | Malformed_origin ->
+    Error
+      (Masc_domain.Auth
+         (Masc_domain.Auth_error.Forbidden
+            { agent = "browser"; action = "malformed Origin header" }))
+
+let ensure_same_origin_if_browser_request ~request_authority request :
+    (unit, Masc_domain.masc_error) result =
+  match classify_request_origin ~request_authority request with
+  | Missing_origin -> Ok ()
+  | Single_origin
+      { admission = (Same_origin | Allowed_dev_origin); _ } ->
+    Ok ()
+  | Single_origin { origin; admission = Rejected } ->
+    Log.Auth.debug
+      "browser-origin check failed: origin=%S scheme=%s authority=%S trust=%s"
       origin
       (Server_request_authority.scheme request_authority
        |> Server_request_authority.scheme_to_string)

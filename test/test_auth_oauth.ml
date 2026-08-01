@@ -365,7 +365,29 @@ let test_registration_rejects_non_loopback_redirect () =
                  (Auth_oauth.register_client
                     ~base_path
                     ~client_name:(Some "Codex")
-                    ~redirect_uris:[ "https://example.com/callback" ]))))))
+                    ~redirect_uris:[ "https://example.com/callback" ]));
+            let redirect_uris =
+              [ "http://127.0.0.1:43123/callback"; "http://localhost:43123/callback" ]
+            in
+            let first =
+              Auth_oauth.register_client
+                ~base_path
+                ~client_name:(Some "Codex")
+                ~redirect_uris
+              |> oauth_ok
+            in
+            let retry =
+              Auth_oauth.register_client
+                ~base_path
+                ~client_name:(Some "Codex")
+                ~redirect_uris:(List.rev redirect_uris)
+              |> oauth_ok
+            in
+            check
+              string
+              "exact registration retry reuses the existing client"
+              first.client_id
+              retry.client_id))))
 ;;
 
 let () =

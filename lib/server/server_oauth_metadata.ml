@@ -35,7 +35,6 @@ let protected_resource_json authority =
              (fun scope -> `String (Auth_oauth.scope_to_string scope))
              Auth_oauth.scopes_supported) )
     ; "bearer_methods_supported", `List [ `String "header" ]
-    ; "resource_documentation", `String (base_url authority ^ "/docs")
     ]
 ;;
 

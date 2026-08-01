@@ -48,7 +48,53 @@ let test_codex_discovery_contract () =
       [ "S256" ]
       (Yojson.Safe.Util.member "code_challenge_methods_supported" metadata
        |> Yojson.Safe.Util.to_list
-       |> List.map Yojson.Safe.Util.to_string))
+       |> List.map Yojson.Safe.Util.to_string);
+    let resource_metadata = Server_oauth_metadata.protected_resource_json authority in
+    check
+      bool
+      "does not advertise a dead documentation URL"
+      false
+      (Yojson.Safe.Util.to_assoc resource_metadata
+       |> List.mem_assoc "resource_documentation"))
+;;
+
+let registration_request ?origin () =
+  let headers =
+    ("host", "127.0.0.1:8935")
+    :: (match origin with None -> [] | Some value -> [ "origin", value ])
+  in
+  Httpun.Request.create
+    ~headers:(Httpun.Headers.of_list headers)
+    `POST
+    "/oauth/register"
+;;
+
+let test_registration_browser_origin_boundary () =
+  let authority = authority () in
+  check
+    bool
+    "native registration without Origin remains admitted"
+    true
+    (Server_auth.ensure_same_origin_if_browser_request
+       ~request_authority:authority
+       (registration_request ())
+     |> Result.is_ok);
+  check
+    bool
+    "same-origin browser registration remains admitted"
+    true
+    (Server_auth.ensure_same_origin_if_browser_request
+       ~request_authority:authority
+       (registration_request ~origin:"http://127.0.0.1:8935" ())
+     |> Result.is_ok);
+  check
+    bool
+    "cross-origin browser registration is rejected before allocation"
+    true
+    (Server_auth.ensure_same_origin_if_browser_request
+       ~request_authority:authority
+       (registration_request ~origin:"https://evil.example" ())
+     |> Result.is_error)
 ;;
 
 let test_form_parser_rejects_ambiguity () =
@@ -126,6 +172,10 @@ let () =
     "server_oauth_protocol"
     [ ( "protocol"
       , [ test_case "Codex discovery contract" `Quick test_codex_discovery_contract
+        ; test_case
+            "registration browser origin boundary"
+            `Quick
+            test_registration_browser_origin_boundary
         ; test_case "form ambiguity" `Quick test_form_parser_rejects_ambiguity
         ; test_case "HTML escaping" `Quick test_html_escape
         ; test_case

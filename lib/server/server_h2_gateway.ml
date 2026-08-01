@@ -386,7 +386,12 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                     (match auth_result with
                      | Error msg ->
                          let body = json_rpc_error Mcp_error_code.Auth_error msg in
-                         h2_respond_json h2_reqd body ~status:`Unauthorized ~extra_headers:(("www-authenticate", "Bearer") :: cors)
+                         h2_respond_json h2_reqd body ~status:`Unauthorized
+                           ~extra_headers:
+                             (( "www-authenticate"
+                              , Server_oauth_metadata.challenge_for_authority
+                                  request_authority )
+                              :: cors)
                      | Ok _cred_opt ->
                          let otel_transport_context =
                            Otel_dispatch_hook.http_transport_context
@@ -519,7 +524,11 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
            | Error msg ->
                let body = json_rpc_error Mcp_error_code.Auth_error msg in
                h2_respond_json h2_reqd body ~status:`Unauthorized
-                 ~extra_headers:(("www-authenticate", "Bearer") :: cors)
+                 ~extra_headers:
+                   (( "www-authenticate"
+                    , Server_oauth_metadata.challenge_for_authority
+                        request_authority )
+                    :: cors)
            | Ok _ ->
                (match session_id_opt with
                 | Some session_id -> (

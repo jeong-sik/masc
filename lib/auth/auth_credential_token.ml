@@ -222,7 +222,7 @@ let fresh_matches_for_token_hash config token_hash matches =
     When N>=2 credentials are fully identical we still warn and
     increment {!Auth_metric_store.metric_auth_credential_ambiguous_lookup}
     so the duplicate-token audit path remains observable. *)
-let find_credential_by_token config ~token : (agent_credential, masc_error) result =
+let find_static_credential_by_token config ~token : (agent_credential, masc_error) result =
   let token_hash = sha256_hash token in
   let idx = credential_token_index config in
   let matches =
@@ -256,6 +256,17 @@ let find_credential_by_token config ~token : (agent_credential, masc_error) resu
           if now > exp_str
           then Error (Auth (Auth_error.TokenExpired first.agent_name))
           else Ok first))
+;;
+
+(** Resolve either an OAuth access token or the existing static bearer.
+    OAuth owns a token whenever its exact hash file exists, including expired
+    or revoked records; those typed failures must not silently fall through to
+    static lookup. *)
+let find_credential_by_token config ~token : (agent_credential, masc_error) result =
+  match Auth_oauth.find_access_credential ~base_path:config ~token with
+  | Ok (Some credential) -> Ok credential
+  | Ok None -> find_static_credential_by_token config ~token
+  | Error error -> Error error
 ;;
 
 (** Resolve agent_name from raw token *)
@@ -510,11 +521,47 @@ let verify_token_owner_alias config ~agent_name ~token =
 
 let verify_token config ~agent_name ~token : (agent_credential, masc_error) result =
   match load_credential config agent_name with
-  | None -> verify_token_owner_alias config ~agent_name ~token
+  | None ->
+    (match Auth_oauth.find_access_credential ~base_path:config ~token with
+     | Ok (Some credential) when String.equal credential.agent_name agent_name ->
+       Ok credential
+     | Ok (Some credential) ->
+       record_bearer_token_mismatch
+         ~expected_agent:agent_name
+         ~actual_agent:credential.agent_name;
+       Error
+         (Auth
+            (Auth_error.Unauthorized
+               { reason = Actor_mismatch
+               ; message =
+                   bearer_token_owner_mismatch_message
+                     ~requested_agent:agent_name
+                     ~token_owner:credential.agent_name
+               }))
+     | Ok None -> verify_token_owner_alias config ~agent_name ~token
+     | Error error -> Error error)
   | Some cred ->
     let token_hash = sha256_hash token in
     if not (constant_time_string_equal cred.token token_hash)
-    then Error (Auth (Auth_error.InvalidToken "Token mismatch"))
+    then
+      (match Auth_oauth.find_access_credential ~base_path:config ~token with
+       | Ok (Some credential) when String.equal credential.agent_name agent_name ->
+         Ok credential
+       | Ok (Some credential) ->
+         record_bearer_token_mismatch
+           ~expected_agent:agent_name
+           ~actual_agent:credential.agent_name;
+         Error
+           (Auth
+              (Auth_error.Unauthorized
+                 { reason = Actor_mismatch
+                 ; message =
+                     bearer_token_owner_mismatch_message
+                       ~requested_agent:agent_name
+                       ~token_owner:credential.agent_name
+                 }))
+       | Ok None -> Error (Auth (Auth_error.InvalidToken "Token mismatch"))
+       | Error error -> Error error)
     else (
       (* Check expiry *)
       match cred.expires_at with

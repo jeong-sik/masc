@@ -80,7 +80,10 @@ let respond_mcp_error ?(extra_headers = []) ?data ?id
      [~(code : Mcp_error_code.t)] type annotation or relocation. *)
   let per_code_headers : (string * string) list =
     match code with
-    | Mcp_error_code.Auth_error -> [ ("www-authenticate", "Bearer") ]
+    | Mcp_error_code.Auth_error ->
+      let authority = Server_request_authority.current_exn () in
+      [ ( "www-authenticate"
+        , Server_oauth_metadata.challenge_for_authority authority ) ]
     | Mcp_error_code.Not_ready -> [ ("retry-after", "2") ]
     | Mcp_error_code.Backpressure_shed -> [ ("retry-after", "1") ]
     | _ -> []

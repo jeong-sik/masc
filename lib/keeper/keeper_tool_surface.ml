@@ -923,18 +923,29 @@ let () =
          Some (Keeper_tool_surface_ops.handle_keeper_delegate ~submitted_by:agent_name ctx args)
        | _ -> eio_context_missing "masc_keeper_delegate")
     | "masc_keeper_up" ->
-      (match sw, clock with
-       | Some sw, Some clock ->
+      (* The target Keeper lane is server-owned and must outlive the calling
+         Keeper's turn. The forwarded [sw] is turn-scoped on OAS calls. *)
+      (match Eio_context.get_root_switch_opt (), clock with
+       | Some root_sw, Some clock ->
          Some
            (Keeper_tool_surface_ops.keeper_up_body
               ~config
               ~agent_name
-              ~sw
+              ~sw:root_sw
               ~clock
               ~publication_recovery_provider
               ?proc_mgr
               ?net
               args)
-       | _ -> eio_context_missing "masc_keeper_up")
+       | None, _ ->
+         Some
+           (tool_result_error_data
+              ~tool_name:"masc_keeper_up"
+              (`Assoc
+                 [ ( "error"
+                   , `String
+                       "masc_keeper_up requires the server root switch for its long-lived Keeper lane"
+                   ) ]))
+       | Some _, None -> eio_context_missing "masc_keeper_up")
     | _ -> None
 ;;

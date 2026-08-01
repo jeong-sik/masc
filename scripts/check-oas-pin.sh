@@ -74,7 +74,7 @@ if [[ "${pin_source}" == "${default_pin_source}" ]]; then
     )"
 
     if [[ -z "${latest_track_sha}" ]]; then
-      echo "failed to resolve upstream ${OAS_AGENT_SDK_TRACK_REF} SHA" >&2
+      echo "failed to resolve upstream ${OAS_AGENT_SDK_REMOTE_REF} SHA" >&2
       exit 1
     fi
 
@@ -96,14 +96,14 @@ if [[ "${pin_source}" == "${default_pin_source}" ]]; then
       if ! GIT_DIR="${reachability_scratch}" git merge-base --is-ancestor \
            "${OAS_AGENT_SDK_SHA}" \
            "${OAS_AGENT_SDK_REMOTE_REF}" 2>/dev/null; then
-        echo "OAS pin ${OAS_AGENT_SDK_SHA} is not reachable from ${OAS_AGENT_SDK_TRACK_REF} on ${OAS_AGENT_SDK_URL}" >&2
+        echo "OAS pin ${OAS_AGENT_SDK_SHA} is not reachable from ${OAS_AGENT_SDK_REMOTE_REF} on ${OAS_AGENT_SDK_URL}" >&2
         echo "  Orphan or diverged SHAs are GC candidates on GitHub and will silently break CI once collected." >&2
-        echo "  repair: bump OAS_AGENT_SDK_SHA in scripts/oas-agent-sdk-pin.sh to a commit on ${OAS_AGENT_SDK_TRACK_REF}" >&2
+        echo "  repair: bump OAS_AGENT_SDK_SHA in scripts/oas-agent-sdk-pin.sh to a commit on ${OAS_AGENT_SDK_REMOTE_REF}" >&2
         rm -rf "${reachability_scratch}"
         exit 1
       fi
     else
-      echo "WARN: could not fetch ${OAS_AGENT_SDK_TRACK_REF} from ${OAS_AGENT_SDK_URL}; skipping ref-reachability check" >&2
+      echo "WARN: could not fetch ${OAS_AGENT_SDK_REMOTE_REF} from ${OAS_AGENT_SDK_URL}; skipping ref-reachability check" >&2
     fi
     rm -rf "${reachability_scratch}"
   fi

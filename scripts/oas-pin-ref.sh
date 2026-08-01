@@ -10,7 +10,7 @@ oas_pin_remote_ref() {
       [[ "${configured_ref}" != "refs/heads/" ]] || return 1
       printf '%s' "${configured_ref}"
       ;;
-    refs/pull/[1-9]*'/head')
+    refs/pull/[1-9]*/head)
       [[ "${configured_ref}" =~ ^refs/pull/[1-9][0-9]*/head$ ]] || return 1
       printf '%s' "${configured_ref}"
       ;;
@@ -30,7 +30,7 @@ oas_pin_require_track_policy() {
     refs/heads/main)
       return 0
       ;;
-    refs/pull/[1-9]*'/head')
+    refs/pull/[1-9]*/head)
       if [[ "${allow_review_ref}" == "1" ]]; then
         return 0
       fi

@@ -111,18 +111,18 @@ resolve_source_dir() {
          "${OAS_AGENT_SDK_URL}" \
          "+${OAS_AGENT_SDK_REMOTE_REF}:${OAS_AGENT_SDK_REMOTE_REF}" \
          2>/dev/null; then
-    echo "git fetch of ${OAS_AGENT_SDK_TRACK_REF} from ${OAS_AGENT_SDK_URL} failed" >&2
+    echo "git fetch of ${OAS_AGENT_SDK_REMOTE_REF} from ${OAS_AGENT_SDK_URL} failed" >&2
     return 1
   fi
   if ! GIT_DIR="${scratch}/bare" git cat-file -e "${OAS_AGENT_SDK_SHA}^{commit}" \
         2>/dev/null; then
-    echo "pinned OAS SHA ${OAS_AGENT_SDK_SHA} is not reachable from ${OAS_AGENT_SDK_TRACK_REF} on ${OAS_AGENT_SDK_URL}" >&2
+    echo "pinned OAS SHA ${OAS_AGENT_SDK_SHA} is not reachable from ${OAS_AGENT_SDK_REMOTE_REF} on ${OAS_AGENT_SDK_URL}" >&2
     return 1
   fi
   if ! GIT_DIR="${scratch}/bare" git merge-base --is-ancestor \
         "${OAS_AGENT_SDK_SHA}" \
         "${OAS_AGENT_SDK_REMOTE_REF}" 2>/dev/null; then
-    echo "pinned OAS SHA ${OAS_AGENT_SDK_SHA} is not reachable from ${OAS_AGENT_SDK_TRACK_REF} on ${OAS_AGENT_SDK_URL}" >&2
+    echo "pinned OAS SHA ${OAS_AGENT_SDK_SHA} is not reachable from ${OAS_AGENT_SDK_REMOTE_REF} on ${OAS_AGENT_SDK_URL}" >&2
     return 1
   fi
   mkdir -p "${scratch}/tree"

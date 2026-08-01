@@ -30,6 +30,61 @@ let transition_task_outcome_r
       ()
   : transition_outcome Masc_domain.masc_result
   =
+  (* The workspace API owns the task FSM, while persistence of the
+     verification request remains behind the neutral hook registry.  The
+     caller may provide an explicit adapter, but omitting it must still use
+     the installed runtime adapter; otherwise the FSM would create an
+     [AwaitingVerification] state with no request for the system LLM authority
+     to inspect. *)
+  let prepare_verification_request =
+    match prepare_verification_request with
+    | Some prepare -> Some prepare
+    | None ->
+      (match action with
+       | Masc_domain.Submit_for_verification ->
+         Some
+           (fun ~task ~assignee ~verification_id ~evidence_refs ->
+              (Atomic.get Workspace_hooks.verification_submit_request_fn)
+                config
+                ~task
+                ~assignee
+                ~verification_id
+                ~evidence_refs)
+       | Masc_domain.Claim
+       | Masc_domain.Start
+       | Masc_domain.Done_action
+       | Masc_domain.Cancel
+       | Masc_domain.Release -> None)
+  in
+  (* Compensation has the same defaulting rule.  Its result type is [unit],
+     so a failed cleanup is logged by the adapter but cannot hide the original
+     commit failure. *)
+  let compensate_verification_request =
+    match compensate_verification_request with
+    | Some compensate -> Some compensate
+    | None ->
+      (match action with
+       | Masc_domain.Submit_for_verification ->
+         Some
+           (fun ~verification_id ->
+              match
+                (Atomic.get Workspace_hooks.verification_delete_request_fn)
+                  config
+                  ~verification_id
+              with
+              | Ok () -> ()
+              | Error detail ->
+                Log.TaskState.error
+                  "verification request compensation degraded task_id=%s verification_id=%s detail=%s"
+                  task_id
+                  verification_id
+                  detail)
+       | Masc_domain.Claim
+       | Masc_domain.Start
+       | Masc_domain.Done_action
+       | Masc_domain.Cancel
+       | Masc_domain.Release -> None)
+  in
   let open Result.Syntax in
   let* () =
     if not (is_initialized config)
@@ -136,6 +191,17 @@ let transition_task_outcome_r
                  (Masc_domain.Task_error.InvalidState
                     "a completion verdict requires a non-empty authenticated \
                      authority identity"))
+          | Error
+              (Workspace_task_lifecycle.Verification_id_mismatch
+                 { expected; actual }) ->
+            Error
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    (Printf.sprintf
+                       "Task %s verification id mismatch (expected=%s current=%s)"
+                       task_id
+                       expected
+                       actual)))
           | Error Workspace_task_lifecycle.Invalid_transition ->
             let assignee_hint =
               match task_assignee_of_status task.task_status with
@@ -390,6 +456,28 @@ let transition_task_outcome_r
                ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Submit_for_verification)
                ~payload);
+             (match new_status with
+              | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
+                (try
+                   (Atomic.get Workspace_hooks.verification_submitted_fn)
+                     config
+                     ~task:{ task with task_status = new_status }
+                     ~assignee
+                     ~verification_id
+                 with
+                 | Eio.Cancel.Cancelled _ as exn -> raise exn
+                 | exn ->
+                   Log.TaskState.error
+                     "verification authority scheduling degraded after submit commit \
+                      task_id=%s verification_id=%s detail=%s"
+                     task_id
+                     verification_id
+                     (Printexc.to_string exn))
+              | Masc_domain.Todo
+              | Masc_domain.Claimed _
+              | Masc_domain.InProgress _
+              | Masc_domain.Done _
+              | Masc_domain.Cancelled _ -> ());
           (* RFC-0323 G-3: completion side effects key off the RESULT (Done), not
              the action — a verdict-produced completion arrives through
              [decide_verdict] and never as an agent action, so keying off the
@@ -538,6 +626,7 @@ let commit_verdict_r
       ~(authority : Masc_domain.completion_authority)
       ~(verdict : Masc_domain.completion_verdict)
       ~task_id
+      ~verification_id
       ?(notes = "")
       ()
   : transition_outcome Masc_domain.masc_result
@@ -571,6 +660,7 @@ let commit_verdict_r
                  ~authority
                  ~verdict
                  ~task_id
+                 ~verification_id
                  ~task_status:task.task_status
                  ~now
                  ~notes
@@ -586,8 +676,19 @@ let commit_verdict_r
                Error
                  (Masc_domain.Task
                     (Masc_domain.Task_error.InvalidState
-                       "a completion verdict requires a non-empty authenticated \
+                        "a completion verdict requires a non-empty authenticated \
                         authority identity"))
+             | Error
+                 (Workspace_task_lifecycle.Verification_id_mismatch
+                    { expected; actual }) ->
+               Error
+                 (Masc_domain.Task
+                    (Masc_domain.Task_error.InvalidState
+                       (Printf.sprintf
+                          "Task %s verification id mismatch (expected=%s current=%s)"
+                          task_id
+                          expected
+                          actual)))
              | Error Workspace_task_lifecycle.Verification_pending_verdict
              | Error Workspace_task_lifecycle.Verification_submission_required
              | Error Workspace_task_lifecycle.Invalid_transition ->

@@ -9,6 +9,7 @@ type invalid =
       (** An [AwaitingVerification] obligation is not claimable by any agent. *)
   | Verdict_authority_identity_required
   | Verdict_rejection_reason_required
+  | Verification_id_mismatch of { expected : string; actual : string }
   | Invalid_transition
 
 type decision =
@@ -165,6 +166,7 @@ let decide_verdict
       ~(authority : Masc_domain.completion_authority)
       ~(verdict : Masc_domain.completion_verdict)
       ~task_id
+      ~verification_id:expected_verification_id
       ~(task_status : Masc_domain.task_status)
       ~now
       ~notes
@@ -181,23 +183,30 @@ let decide_verdict
         }
   in
   match task_status with
-  | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
-    (match verdict with
-     | Masc_domain.Verdict_approved ->
-       provenance
-         ~producer:assignee
-         ~verification_id
-         { new_status = done_status ~assignee ~now ~notes; set_current = None }
-     | Masc_domain.Verdict_rejected { reason } ->
-       if String.equal (String.trim reason) ""
-       then Error Verdict_rejection_reason_required
-       else
+  | Masc_domain.AwaitingVerification
+      { assignee; verification_id = actual_verification_id; _ } ->
+    if not (String.equal expected_verification_id actual_verification_id)
+    then
+      Error
+        (Verification_id_mismatch
+           { expected = expected_verification_id; actual = actual_verification_id })
+    else
+      (match verdict with
+       | Masc_domain.Verdict_approved ->
          provenance
            ~producer:assignee
-           ~verification_id
-           { new_status = Masc_domain.InProgress { assignee; started_at = now }
-           ; set_current = Some task_id
-           })
+           ~verification_id:actual_verification_id
+           { new_status = done_status ~assignee ~now ~notes; set_current = None }
+       | Masc_domain.Verdict_rejected { reason } ->
+         if String.equal (String.trim reason) ""
+         then Error Verdict_rejection_reason_required
+         else
+           provenance
+             ~producer:assignee
+             ~verification_id:actual_verification_id
+             { new_status = Masc_domain.InProgress { assignee; started_at = now }
+             ; set_current = Some task_id
+             })
   | Masc_domain.Todo
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _

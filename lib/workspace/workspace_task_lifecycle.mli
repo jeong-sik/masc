@@ -9,6 +9,7 @@ type invalid =
       (** An [AwaitingVerification] obligation is not claimable by any agent. *)
   | Verdict_authority_identity_required
   | Verdict_rejection_reason_required
+  | Verification_id_mismatch of { expected : string; actual : string }
   | Invalid_transition
 
 type decision =
@@ -68,6 +69,7 @@ val decide_verdict
   :  authority:Masc_domain.completion_authority
   -> verdict:Masc_domain.completion_verdict
   -> task_id:string
+  -> verification_id:string
   -> task_status:Masc_domain.task_status
   -> now:string
   -> notes:string

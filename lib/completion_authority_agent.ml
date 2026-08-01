@@ -1,0 +1,387 @@
+(** System LLM completion-authority lane.
+
+    This is deliberately an application-owned LLM agent rather than a Keeper:
+    it has no Keeper identity, no Keeper task action, and no Keeper lifecycle.
+    The only durable mutation it can perform is the typed completion-verdict
+    boundary after the verification request and evidence identities match. *)
+
+open Result.Syntax
+
+type runtime =
+  { config : Workspace_utils_backend_setup.config
+  ; sw : Eio.Switch.t
+  ; wake : Eio.Condition.t
+  ; pending : bool Atomic.t
+  }
+
+let active_runtime : runtime option Atomic.t = Atomic.make None
+
+let evidence_refs_of_output = function
+  | `Assoc fields ->
+    (match List.assoc_opt "evidence_refs" fields with
+     | Some (`List values) ->
+       let rec collect index acc = function
+         | [] -> Ok (List.rev acc)
+         | (`String value) :: rest -> collect (index + 1) (value :: acc) rest
+         | value :: _ ->
+           Error
+             (Printf.sprintf
+                "verification request output evidence_refs[%d] must be a string, got %s"
+                index
+                (Json_util.excerpt value))
+       in
+       collect 0 [] values
+     | Some value ->
+       Error
+         (Printf.sprintf
+            "verification request output evidence_refs must be a JSON array, got %s"
+            (Json_util.excerpt value))
+     | None -> Error "verification request output has no evidence_refs")
+  | other ->
+    Error
+      (Printf.sprintf
+         "verification request output must be a JSON object, got %s"
+         (Json_util.excerpt other))
+;;
+
+let completion_verdict_of_review = function
+  | Task.Anti_rationalization.Approve -> Masc_domain.Verdict_approved
+  | Task.Anti_rationalization.Reject reason ->
+    Masc_domain.Verdict_rejected { reason }
+;;
+
+let review_notes ~request ~evidence_access ~result ~authority =
+  let verdict =
+    match result.Task.Anti_rationalization.verdict with
+    | Some Task.Anti_rationalization.Approve -> `String "approve"
+    | Some (Task.Anti_rationalization.Reject reason) ->
+      `Assoc [ "kind", `String "reject"; "reason", `String reason ]
+    | None -> `Null
+  in
+  let review =
+    `Assoc
+      [ "evaluator_runtime", `String result.evaluator_runtime
+      ; "generator_runtime",
+        (match result.generator_runtime with
+         | Some runtime -> `String runtime
+         | None -> `Null)
+      ; "gate", `String (Task.Anti_rationalization.gate_to_string result.gate)
+      ; "verdict", verdict
+      ; "authority_kind", `String (Masc_domain.completion_authority_kind authority)
+      ; "authority_actor", `String (Masc_domain.completion_authority_actor authority)
+      ]
+  in
+  Yojson.Safe.pretty_to_string
+    (`Assoc
+       [ "verification_request", Verification.request_to_yojson request
+       ; ( "submitted_evidence_access"
+         , Workspace_verification_store.submitted_evidence_access_to_yojson
+             evidence_access )
+       ; "review", review
+       ])
+;;
+
+let completion_contract_of_task (task : Masc_domain.task) =
+  match task.contract with
+  | Some contract ->
+    ( Some contract.completion_contract
+    , contract.required_evidence
+    , contract.verify_gate_evidence )
+  | None -> None, [], []
+;;
+
+type prepared_review =
+  { request : Verification.verification_request
+  ; evidence_access : Workspace_verification_store.submitted_evidence_access
+  ; review_request : Task.Anti_rationalization.review_request
+  ; completion_contract : string list option
+  ; required_evidence : string list
+  ; verify_gate_evidence : string list
+  }
+
+let prepare_review
+      ~(config : Workspace_utils_backend_setup.config)
+      ~(task : Masc_domain.task)
+      ~assignee
+      ~verification_id
+      ~(authority : Masc_domain.completion_authority)
+  : (prepared_review, string) result
+  =
+  let* request = Verification.load_request config.base_path verification_id in
+  if not (String.equal request.id verification_id)
+  then
+    Error
+      (Printf.sprintf
+         "verification request id mismatch (path=%s payload=%s)"
+         verification_id
+         request.id)
+  else if not (String.equal request.task_id task.id)
+  then
+    Error
+      (Printf.sprintf
+         "verification request task mismatch (request=%s awaiting=%s)"
+         request.task_id
+         task.id)
+  else if not (String.equal request.worker assignee)
+  then
+    Error
+      (Printf.sprintf
+         "verification request worker mismatch (request=%s awaiting=%s)"
+         request.worker
+         assignee)
+  else
+    let evidence_access =
+      Workspace_verification_store.inspect_submitted_evidence_for_authority
+        ~base_path:config.base_path
+        ~request_id:verification_id
+        ~task_id:task.id
+        ~task_worker:assignee
+        ~authority
+    in
+    match evidence_access with
+    | Workspace_verification_store.Evidence_unavailable { reason; _ } ->
+      Error (Printf.sprintf "submitted evidence unavailable: %s" reason)
+    | Workspace_verification_store.Evidence_available { request = header; _ } ->
+      if not (String.equal header.id verification_id)
+      then
+        Error
+          (Printf.sprintf
+             "submitted evidence header id mismatch (expected=%s actual=%s)"
+             verification_id
+             header.id)
+      else if not (String.equal header.task_id task.id)
+      then
+        Error
+          (Printf.sprintf
+             "submitted evidence header task mismatch (expected=%s actual=%s)"
+             task.id
+             header.task_id)
+      else if not (String.equal header.worker assignee)
+      then
+        Error
+          (Printf.sprintf
+             "submitted evidence header worker mismatch (expected=%s actual=%s)"
+             assignee
+             header.worker)
+      else
+        let* evidence_refs = evidence_refs_of_output request.output in
+        let completion_contract, required_evidence, verify_gate_evidence =
+          completion_contract_of_task task
+        in
+        let completion_notes =
+          Yojson.Safe.pretty_to_string
+            (`Assoc
+               [ "verification_request", Verification.request_to_yojson request
+               ; ( "submitted_evidence_access"
+                 , Workspace_verification_store.submitted_evidence_access_to_yojson
+                     evidence_access )
+               ])
+        in
+        Ok
+          { request
+          ; evidence_access
+          ; review_request =
+              { task_title = task.title
+              ; task_description = task.description
+              ; completion_notes
+              ; agent_name = assignee
+              ; task_id = task.id
+              ; evidence_refs
+              }
+          ; completion_contract
+          ; required_evidence
+          ; verify_gate_evidence
+          }
+;;
+
+let log_deferred ~task_id ~verification_id ~authority ~reason =
+  Log.Misc.warn
+    "system LLM completion authority deferred task_id=%s verification_id=%s authority=%s reason=%s"
+    task_id
+    verification_id
+    (Masc_domain.completion_authority_actor authority)
+    reason
+;;
+
+let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verification_id =
+  let judge_run_id = Random_id.prefixed ~prefix:"judge-" ~bytes:16 in
+  let authority = Masc_domain.Auto_judge { judge_run_id } in
+  try
+    match
+      prepare_review
+        ~config:runtime.config
+        ~task
+        ~assignee
+        ~verification_id
+        ~authority
+    with
+    | Error reason -> log_deferred ~task_id:task.id ~verification_id ~authority ~reason
+    | Ok prepared ->
+      let result =
+        Task.Anti_rationalization.review
+          ~sw:(Some runtime.sw)
+          ?completion_contract:prepared.completion_contract
+          ~required_evidence:prepared.required_evidence
+          ~verify_gate_evidence:prepared.verify_gate_evidence
+          prepared.review_request
+      in
+      (match result.verdict with
+       | None ->
+         log_deferred
+           ~task_id:task.id
+           ~verification_id
+           ~authority
+           ~reason:
+             (Option.value
+                result.fallback_reason
+                ~default:(Task.Anti_rationalization.gate_to_string result.gate))
+       | Some review_verdict ->
+         let verdict = completion_verdict_of_review review_verdict in
+         let notes =
+           review_notes
+             ~request:prepared.request
+             ~evidence_access:prepared.evidence_access
+             ~result
+             ~authority
+         in
+         (match
+            Workspace.commit_verdict_r
+              runtime.config
+              ~authority
+              ~verdict
+              ~task_id:task.id
+              ~verification_id
+              ~notes
+              ()
+          with
+          | Ok _ ->
+            (match verdict with
+             | Masc_domain.Verdict_approved -> ()
+             | Masc_domain.Verdict_rejected _ ->
+               (try
+                  Completion_authority_wakeup.wake_rejected_producer
+                    ~config:runtime.config
+                    ~producer:assignee
+                    ~task_id:task.id
+                with
+                | Eio.Cancel.Cancelled _ as exn -> raise exn
+                | exn ->
+                  Log.Misc.error
+                    "completion authority rejection producer wake failed task_id=%s producer=%s detail=%s"
+                    task.id
+                    assignee
+                    (Printexc.to_string exn)));
+            Log.Misc.info
+              "system LLM completion authority committed task_id=%s verification_id=%s authority=%s verdict=%s"
+              task.id
+              verification_id
+              judge_run_id
+              (Task.Anti_rationalization.verdict_constructor_name review_verdict)
+          | Error error ->
+            log_deferred
+              ~task_id:task.id
+              ~verification_id
+              ~authority
+              ~reason:(Masc_domain.masc_error_to_string error)))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    log_deferred
+      ~task_id:task.id
+      ~verification_id
+      ~authority
+      ~reason:(Printexc.to_string exn)
+;;
+
+let process_pending (runtime : runtime) =
+  match Workspace_backlog.read_backlog_r runtime.config with
+  | Error detail ->
+    Log.Misc.error
+      "system LLM completion authority backlog read failed; pending tasks remain unresolved: %s"
+      detail
+  | Ok backlog ->
+    List.iter
+      (fun (task : Masc_domain.task) ->
+         match task.task_status with
+         | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
+           process_task runtime task ~assignee ~verification_id
+         | Masc_domain.Todo
+         | Masc_domain.Claimed _
+         | Masc_domain.InProgress _
+         | Masc_domain.Done _
+         | Masc_domain.Cancelled _ -> ())
+      backlog.tasks
+;;
+
+let run (runtime : runtime) : [ `Stop_daemon ] =
+  Eio.Condition.loop_no_mutex runtime.wake (fun () ->
+    if Atomic.exchange runtime.pending false
+    then (
+      process_pending runtime;
+      None)
+    else None)
+;;
+
+let install_callback (runtime : runtime) =
+  Atomic.set Workspace_hooks.verification_submitted_fn
+    (fun config ~task ~assignee ~verification_id ->
+       if not (String.equal config.base_path runtime.config.base_path)
+       then
+         Log.Misc.error
+           "system LLM completion authority rejected submit from another base path task_id=%s verification_id=%s"
+           task.id
+           verification_id
+       else if String.equal (String.trim verification_id) ""
+       then
+         Log.Misc.error
+           "system LLM completion authority rejected empty verification id task_id=%s"
+           task.id
+       else (
+         Atomic.set runtime.pending true;
+         Eio.Condition.broadcast runtime.wake;
+         Log.Misc.info
+           "system LLM completion authority scheduled task_id=%s verification_id=%s producer=%s"
+           task.id
+           verification_id
+           assignee))
+;;
+
+let start ~sw ~(config : Workspace_utils_backend_setup.config) =
+  Eio.Switch.check sw;
+  let runtime =
+    { config; sw; wake = Eio.Condition.create (); pending = Atomic.make true }
+  in
+  let owner = Some runtime in
+  match Atomic.compare_and_set active_runtime None owner with
+  | false ->
+    (match Atomic.get active_runtime with
+     | Some active when String.equal active.config.base_path config.base_path ->
+       Log.Misc.warn
+         "system LLM completion authority already started for base path %s"
+         config.base_path
+     | Some active ->
+       Log.Misc.error
+         "system LLM completion authority already owns base path %s; refusing second base path %s"
+         active.config.base_path
+         config.base_path
+     | None ->
+       (* A concurrent starter won the CAS between the failed read and this
+          branch. The next bootstrap owns the diagnostic; no duplicate lane is
+          created here. *)
+       Log.Misc.error
+         "system LLM completion authority start race left no visible owner")
+  | true ->
+    let previous_submitted_hook =
+      Atomic.get Workspace_hooks.verification_submitted_fn
+    in
+    install_callback runtime;
+    Eio.Switch.on_release sw (fun () ->
+      if Atomic.compare_and_set active_runtime owner None
+      then Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted_hook);
+    Eio.Fiber.fork_daemon ~sw (fun () -> run runtime)
+;;
+
+module For_testing = struct
+  let evidence_refs_of_output = evidence_refs_of_output
+  let completion_verdict_of_review = completion_verdict_of_review
+end

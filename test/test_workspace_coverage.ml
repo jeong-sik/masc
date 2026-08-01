@@ -102,6 +102,17 @@ let contains_check result =
   has_legacy_result_prefix "\xE2\x9C\x85" result
   || (String.trim result <> "" && not (contains_problem_result result))
 
+let verification_id_for_task config task_id =
+  match
+    Workspace.get_tasks_raw config
+    |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+  with
+  | Some
+      { task_status = Masc_domain.AwaitingVerification { verification_id; _ }; _ } ->
+    verification_id
+  | Some _ -> Alcotest.failf "task %s is not awaiting verification" task_id
+  | None -> Alcotest.failf "task %s not found" task_id
+
 (** Check for warning/problem result across legacy string result formats. *)
 let contains_warning result =
   has_legacy_result_prefix "\xE2\x9A\xA0" result || contains_problem_result result
@@ -218,6 +229,7 @@ let transition_done_r config ~agent_name ~task_id ~notes =
          ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
          ~verdict:Masc_domain.Verdict_approved
          ~task_id
+         ~verification_id:(verification_id_for_task config task_id)
          ~notes:("verified: " ^ evidence_notes)
          ()
        |> Result.map (fun (o : Workspace.transition_outcome) -> o.Workspace.message))

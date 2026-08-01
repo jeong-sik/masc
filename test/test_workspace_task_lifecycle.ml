@@ -98,6 +98,7 @@ let test_verdict_requires_authority_and_reason () =
        ~authority:operator
        ~verdict:D.Verdict_approved
        ~task_id:"task-1"
+       ~verification_id:"vrf-1"
        ~task_status:awaiting
        ~now
        ~notes:"evidence at /tmp/proof"
@@ -118,6 +119,7 @@ let test_verdict_requires_authority_and_reason () =
        ~authority:operator
        ~verdict:(D.Verdict_rejected { reason = " " })
        ~task_id:"task-1"
+       ~verification_id:"vrf-1"
        ~task_status:awaiting
        ~now
        ~notes:""
@@ -129,6 +131,7 @@ let test_verdict_requires_authority_and_reason () =
        ~authority:(D.Human_operator { operator_id = " " })
        ~verdict:D.Verdict_approved
        ~task_id:"task-1"
+       ~verification_id:"vrf-1"
        ~task_status:awaiting
        ~now
        ~notes:""
@@ -140,6 +143,7 @@ let test_verdict_requires_authority_and_reason () =
       ~authority:(D.Auto_judge { judge_run_id = "fusion-run-9" })
       ~verdict:(D.Verdict_rejected { reason = "missing test evidence" })
       ~task_id:"task-1"
+      ~verification_id:"vrf-1"
       ~task_status:awaiting
       ~now
       ~notes:""
@@ -155,6 +159,22 @@ let test_verdict_requires_authority_and_reason () =
          && String.equal producer owner
          && String.equal verification_id "vrf-1" -> ()
   | Ok _ | Error _ -> failwith "judge rejection must return the task to its producer"
+;;
+
+let test_verdict_rejects_stale_verification_id () =
+  match
+    L.decide_verdict
+      ~authority:(D.Auto_judge { judge_run_id = "judge-run-1" })
+      ~verdict:D.Verdict_approved
+      ~task_id:"task-1"
+      ~verification_id:"vrf-stale"
+      ~task_status:awaiting
+      ~now
+      ~notes:""
+  with
+  | Error (L.Verification_id_mismatch { expected; actual })
+    when String.equal expected "vrf-stale" && String.equal actual "vrf-1" -> ()
+  | Ok _ | Error _ -> failwith "a stale verification verdict must be refused"
 ;;
 
 (* Claiming an obligation used to bind the claimant as its verifier, so whichever
@@ -203,6 +223,7 @@ let () =
   test_default_done_is_terminal ();
   test_verdict_is_not_an_agent_action ();
   test_verdict_requires_authority_and_reason ();
+  test_verdict_rejects_stale_verification_id ();
   test_claim_on_awaiting_is_refused ();
   test_awaiting_is_claimable_by_nobody ();
   Printf.printf "workspace_task_lifecycle: all tests passed\n%!"

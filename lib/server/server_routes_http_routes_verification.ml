@@ -118,24 +118,9 @@ let operator_evidence_json ~config ~operator_id ~task_id =
       ])
 ;;
 
-let wake_rejected_producer ~config producer =
-  Keeper_current_task_reconcile.sync_current_task_id_for_agent_name
-    ~config
-    ~agent_name:producer;
-  match Keeper_identity.canonical_keeper_name_from_agent_name producer with
-  | None -> ()
-  | Some keeper_name ->
-    ignore
-      (Keeper_registry.wakeup_running
-         ~intent:Keeper_registry.Reactive_signal
-         ~base_path:config.Workspace.base_path
-         keeper_name
-        : Keeper_registry.wakeup_outcome)
-;;
-
 let commit_operator_verdict ~config ~operator_id request =
   let open Result.Syntax in
-  let* _task, producer, _verification_id =
+  let* _task, producer, verification_id =
     awaiting_task config request.task_id
   in
   let authority = Masc_domain.Human_operator { operator_id } in
@@ -145,6 +130,7 @@ let commit_operator_verdict ~config ~operator_id request =
       ~authority
       ~verdict:request.verdict
       ~task_id:request.task_id
+      ~verification_id
       ~notes:request.notes
       ()
     |> Result.map_error Masc_domain.masc_error_to_string
@@ -152,7 +138,10 @@ let commit_operator_verdict ~config ~operator_id request =
   (match request.verdict with
    | Masc_domain.Verdict_approved -> ()
    | Masc_domain.Verdict_rejected _ ->
-     wake_rejected_producer ~config producer);
+     Completion_authority_wakeup.wake_rejected_producer
+       ~config
+       ~producer
+       ~task_id:request.task_id);
   Ok outcome
 ;;
 

@@ -9,6 +9,7 @@ module VS = Workspace_verification_store
 module CU = Workspace_utils
 module W = Workspace_core
 module VP = Masc.Verification_protocol
+module CA = Masc.Completion_authority_agent
 
 let persistence_surface = "verification"
 
@@ -135,6 +136,163 @@ let test_criterion_of_yojson_errors () =
     | Error _ -> ()
     | Ok _ -> Alcotest.fail (Printf.sprintf "%s should fail" label)
   ) bad_cases
+
+let valid_request_json =
+  `Assoc
+    [ "id", `String "vrf-1"
+    ; "task_id", `String "task-1"
+    ; "output", `Assoc [ "evidence_refs", `List [ `String "note:done" ] ]
+    ; "criteria", `List [ `Assoc [ "type", `String "custom"; "description", `String "done" ] ]
+    ; "worker", `String "worker-1"
+    ; "created_at", `Float 1234.5
+    ]
+
+let test_request_of_yojson_is_strict () =
+  let expect_error label json =
+    match V.request_of_yojson json with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail (label ^ " must be rejected")
+  in
+  expect_error "missing output"
+    (`Assoc
+      [ "id", `String "vrf-1"
+      ; "task_id", `String "task-1"
+      ; "criteria", `List []
+      ; "worker", `String "worker-1"
+      ; "created_at", `Float 1234.5
+      ]);
+  expect_error "missing criteria"
+    (`Assoc
+      [ "id", `String "vrf-1"
+      ; "task_id", `String "task-1"
+      ; "output", `Null
+      ; "worker", `String "worker-1"
+      ; "created_at", `Float 1234.5
+      ]);
+  expect_error "malformed criterion"
+    (`Assoc
+      [ "id", `String "vrf-1"
+      ; "task_id", `String "task-1"
+      ; "output", `Null
+      ; "criteria", `List [ `Assoc [ "type", `String "custom" ] ]
+      ; "worker", `String "worker-1"
+      ; "created_at", `Float 1234.5
+      ]);
+  expect_error "missing created_at"
+    (`Assoc
+      [ "id", `String "vrf-1"
+      ; "task_id", `String "task-1"
+      ; "output", `Null
+      ; "criteria", `List []
+      ; "worker", `String "worker-1"
+      ]);
+  expect_error "blank worker"
+    (`Assoc
+      [ "id", `String "vrf-1"
+      ; "task_id", `String "task-1"
+      ; "output", `Null
+      ; "criteria", `List []
+      ; "worker", `String "   "
+      ; "created_at", `Float 1234.5
+      ]);
+  match V.request_of_yojson valid_request_json with
+  | Ok request ->
+    Alcotest.(check string) "strict parser preserves request id" "vrf-1" request.id
+  | Error detail -> Alcotest.fail detail
+
+let test_system_llm_authority_helpers_are_typed () =
+  (match
+     Masc.Completion_authority_agent.For_testing.evidence_refs_of_output
+       (`Assoc [ "evidence_refs", `List [ `String "note:one"; `String "artifact:two" ] ])
+   with
+   | Ok [ "note:one"; "artifact:two" ] -> ()
+   | Ok _ | Error _ -> Alcotest.fail "evidence refs must preserve the typed list"
+  );
+  match
+    Masc.Completion_authority_agent.For_testing.completion_verdict_of_review
+      (Masc.Task.Anti_rationalization.Reject "missing evidence")
+  with
+  | Masc_domain.Verdict_rejected { reason } ->
+    Alcotest.(check string) "typed rejection reason" "missing evidence" reason
+  | Masc_domain.Verdict_approved -> Alcotest.fail "reject must remain a rejection"
+
+let test_system_llm_agent_commits_without_a_keeper_verifier () =
+  with_eio_temp_dir (fun base_path ->
+    Masc.Workspace_metric_hooks.install ();
+    let prompt_dir =
+      match Sys.getenv_opt "DUNE_SOURCEROOT" with
+      | Some root -> Filename.concat root "config/prompts"
+      | None -> Filename.concat (Sys.getcwd ()) "config/prompts"
+    in
+    Prompt_registry.set_markdown_dir prompt_dir;
+    Masc.Prompt_defaults.init ();
+    let previous_runtime = Atomic.get Workspace_hooks.get_default_runtime_id_fn in
+    let previous_reviewer =
+      Atomic.get Masc.Task.Anti_rationalization.run_llm_reviewer_fn
+    in
+    let previous_notification =
+      Atomic.get Workspace_hooks.verification_notify_verdict_fn
+    in
+    let previous_submitted = Atomic.get Workspace_hooks.verification_submitted_fn in
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_runtime;
+        Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn previous_reviewer;
+        Atomic.set Workspace_hooks.verification_notify_verdict_fn previous_notification;
+        Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted)
+      (fun () ->
+        Atomic.set Workspace_hooks.get_default_runtime_id_fn
+          (fun () -> "test-system-evaluator");
+        Eio.Switch.run (fun sw ->
+          let reviewer_called, resolve_reviewer_called = Eio.Promise.create () in
+          let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
+          Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
+            (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+               Eio.Promise.resolve resolve_reviewer_called ();
+               Ok (Some Masc.Task.Anti_rationalization.Approve));
+          Atomic.set Workspace_hooks.verification_notify_verdict_fn
+            (fun ~task_id ~authority ~verification_id ~decision ->
+               previous_notification
+                 ~task_id
+                 ~authority
+                 ~verification_id
+                 ~decision;
+               Eio.Promise.resolve resolve_verdict_committed ());
+          let config = W.default_config base_path in
+          ignore (W.init config ~agent_name:(Some "system-test-worker"));
+          ignore
+            (W.add_task
+               config
+               ~title:"system authority test"
+               ~priority:1
+               ~description:"the system LLM must review this evidence");
+          (match
+             W.claim_task_r config ~agent_name:"system-test-worker" ~task_id:"task-001" ()
+           with
+           | Ok _ -> ()
+           | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error));
+          CA.start ~sw ~config;
+          (match
+             W.transition_task_r
+               config
+               ~agent_name:"system-test-worker"
+               ~task_id:"task-001"
+               ~action:Masc_domain.Submit_for_verification
+               ~notes:"note:system-review-evidence"
+               ()
+           with
+           | Ok _ -> ()
+           | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error));
+          Eio.Promise.await reviewer_called;
+          Eio.Promise.await verdict_committed;
+          match W.get_tasks_raw config with
+          | [ { task_status = Masc_domain.Done _; _ } ] -> ()
+          | [ task ] ->
+            Alcotest.failf
+              "system authority did not complete task: %s"
+              (Masc_domain.task_status_to_string task.task_status)
+          | tasks -> Alcotest.failf "expected one task, got %d" (List.length tasks)))
+  )
 
 (* --- Storage tests --- *)
 
@@ -969,6 +1127,14 @@ let () =
     "criterion", [
       Alcotest.test_case "roundtrip" `Quick test_criterion_roundtrip;
       Alcotest.test_case "of_yojson errors" `Quick test_criterion_of_yojson_errors;
+      Alcotest.test_case "request parser is strict" `Quick
+        test_request_of_yojson_is_strict;
+    ];
+    "completion_authority", [
+      Alcotest.test_case "system LLM helpers keep typed facts" `Quick
+        test_system_llm_authority_helpers_are_typed;
+      Alcotest.test_case "system LLM commits without Keeper verifier" `Quick
+        test_system_llm_agent_commits_without_a_keeper_verifier;
     ];
     "id_generation", [
       Alcotest.test_case "vrf- prefix" `Quick test_generate_id_prefix;

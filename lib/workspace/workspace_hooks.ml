@@ -295,17 +295,27 @@ let verification_submit_request_fn
      evidence_refs:string list ->
      (unit, string) result) Atomic.t
   = Atomic.make
-      (fun _config ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ ->
-         Ok ())
+      (fun _config ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs:_ ->
+         Error
+           (Printf.sprintf
+              "verification request persistence hook is not installed (task=%s assignee=%s verification_id=%s)"
+              task.id
+              assignee
+              verification_id))
 
 (* RFC-0221 §3.1: compensation hook for atomic submit. Filled at boot to delete
-   a verification record whose task_status commit failed. Default is a no-op so
-   the workspace layer never hard-depends on the verification store. *)
+   a verification record whose task_status commit failed. A missing hook is an
+   explicit error: a submit must never leave the caller believing that the
+   verification record was persisted when the storage boundary is absent. *)
 let verification_delete_request_fn
   : (Workspace_utils_backend_setup.config ->
      verification_id:string ->
      (unit, string) result) Atomic.t
-  = Atomic.make (fun _config ~verification_id:_ -> Ok ())
+  = Atomic.make (fun _config ~verification_id ->
+      Error
+        (Printf.sprintf
+           "verification request deletion hook is not installed (verification_id=%s)"
+           verification_id))
 
 let verification_notify_submit_fn
   : (Workspace_utils_backend_setup.config ->
@@ -315,8 +325,26 @@ let verification_notify_submit_fn
      evidence_refs:string list ->
      unit) Atomic.t
   = Atomic.make
-      (fun _config ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ ->
-         ())
+      (fun _config ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs:_ ->
+         Log.Misc.warn
+           "verification request notification hook is not installed task_id=%s verification_id=%s producer=%s"
+           task.id
+           verification_id
+           assignee)
+
+let verification_submitted_fn
+  : (Workspace_utils_backend_setup.config ->
+     task:Masc_domain.task ->
+     assignee:string ->
+     verification_id:string ->
+     unit) Atomic.t
+  = Atomic.make
+      (fun _config ~(task : Masc_domain.task) ~assignee ~verification_id ->
+         Log.Misc.warn
+           "verification submitted without an installed system LLM completion authority lane task_id=%s verification_id=%s producer=%s"
+           task.id
+           verification_id
+           assignee)
 
 let verification_notify_verdict_fn
   : (task_id:string ->
@@ -325,7 +353,19 @@ let verification_notify_verdict_fn
      decision:[ `Approve of string | `Reject of string ] ->
      unit) Atomic.t
   = Atomic.make
-      (fun ~task_id:_ ~authority:_ ~verification_id:_ ~decision:_ -> ())
+      (fun ~task_id ~authority ~verification_id ~decision ->
+         let decision_kind =
+           match decision with
+           | `Approve _ -> "approve"
+           | `Reject _ -> "reject"
+         in
+         Log.Misc.warn
+           "verification verdict notification hook is not installed task_id=%s verification_id=%s authority_kind=%s authority_actor=%s decision=%s"
+           task_id
+           verification_id
+           (Masc_domain.completion_authority_kind authority)
+           (Masc_domain.completion_authority_actor authority)
+           decision_kind)
 
 let is_admin_agent_fn
   : (base_path:string -> agent_name:string -> bool) Atomic.t

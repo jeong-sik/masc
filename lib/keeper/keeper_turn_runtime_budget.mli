@@ -222,10 +222,10 @@ type capacity_non_compaction =
 
 type capacity_transition =
   | Not_capacity
-  | Compact_next_cycle of Compaction_trigger.t
+  | Capacity_refusal_classified of Compaction_trigger.t
   | Capacity_non_compacting of capacity_non_compaction
 (** Provider-neutral transition input for the durable compaction lane.
-    [Compact_next_cycle] preserves the measured token or byte axis.
+    [Capacity_refusal_classified] preserves the measured token or byte axis.
     Future/expired serving evidence and unavailable token measurement remain
     typed non-compacting facts; they are never guessed into a capacity limit. *)
 
@@ -234,14 +234,6 @@ val capacity_transition_of_error :
   capacity_transition
 (** Total classifier over typed SDK errors. This function does not inspect
     rendered error prose and does not select a provider, model, or failover. *)
-
-val context_overflow_event_of_error :
-  Agent_sdk.Error.sdk_error ->
-  Keeper_state_machine.event option
-(** The context-window axis of {!capacity_transition_of_error} as a lifecycle event.
-    [Some] only for [Provider_context_window]; a byte refusal returns [None]
-    because this projection's call sites label the failure as a context-window
-    exceedance. *)
 
 val current_keeper_meta :
   config:Workspace.config ->

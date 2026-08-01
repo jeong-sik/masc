@@ -273,9 +273,6 @@ let test_operator_resume_from_paused_commits_latent_blockers () =
     [ ( "unhealthy turn"
       , { running_conditions with operator_paused = true; turn_healthy = false }
       , SM.Failing )
-    ; ( "context overflow"
-      , { running_conditions with operator_paused = true; context_overflow = true }
-      , SM.Overflowed )
     ; ( "handoff active"
       , { running_conditions with operator_paused = true; handoff_active = true }
       , SM.HandingOff )
@@ -1409,7 +1406,6 @@ let test_invariant_fiber_started_reset_exhaustive () =
     ; dead_tombstone_latched = false
     ; restart_requested = true
     ; drain_complete = true
-    ; context_overflow = true
     ; credential_archived = true
     }
   in
@@ -1650,7 +1646,10 @@ let test_invariant_derive_matches_matrix () =
               | SM.Offline -> SM.default_conditions
               | SM.Running -> running_conditions
               | SM.Failing -> { running_conditions with heartbeat_healthy = false }
-              | SM.Overflowed -> { running_conditions with context_overflow = true }
+              | SM.Overflowed ->
+                (* Retired phase (#26546): no conditions derive it, so the
+                   derive guard below skips this row. *)
+                running_conditions
               | SM.Compacting -> { running_conditions with compaction_active = true }
               | SM.HandingOff -> { running_conditions with handoff_active = true }
               | SM.Draining ->
@@ -1708,7 +1707,6 @@ let test_invariant_priority_chain () =
     ; dead_tombstone_latched = false
     ; restart_requested = true
     ; drain_complete = true
-    ; context_overflow = true
     ; credential_archived = false
     }
   in
@@ -1731,7 +1729,7 @@ let test_invariant_priority_chain () =
   check phase_t "no stop: Paused" SM.Paused (SM.derive_phase no_stop);
   (* Only the explicit operator pause condition can hold Paused. *)
   let no_paused =
-    { no_stop with operator_paused = false; context_overflow = false }
+    { no_stop with operator_paused = false }
   in
   check phase_t "no paused: HandingOff" SM.HandingOff (SM.derive_phase no_paused);
   (* Remove handoff: compaction wins *)
@@ -1772,7 +1770,6 @@ let test_setclear_coverage () =
     ; ("dead_tombstone_latched", fun c -> c.dead_tombstone_latched)
     ; ("restart_requested", fun c -> c.restart_requested)
     ; ("drain_complete", fun c -> c.drain_complete)
-    ; ("context_overflow", fun c -> c.context_overflow)
     ; ("credential_archived", fun c -> c.credential_archived)
     ]
   in
@@ -1790,7 +1787,6 @@ let test_setclear_coverage () =
     ; dead_tombstone_latched = false
     ; restart_requested = false
     ; drain_complete = false
-    ; context_overflow = false
     ; credential_archived = false
     }
   in
@@ -1808,7 +1804,6 @@ let test_setclear_coverage () =
     ; dead_tombstone_latched = true
     ; restart_requested = true
     ; drain_complete = true
-    ; context_overflow = true
     ; credential_archived = true
     }
   in
@@ -1853,10 +1848,6 @@ let test_setclear_coverage () =
     ; "Fiber_terminated", SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
     ; "Supervisor_restart_attempt", SM.Supervisor_restart_attempt { attempt = 1 }
     ; "Credential_archived", SM.Credential_archived
-    ; ( "Context_overflow_detected"
-      , SM.Context_overflow_detected
-          { limit_tokens = Some 200_000 } )
-    ; "Auto_compact_triggered", SM.Auto_compact_triggered
     ; "Operator_compact_requested", SM.Operator_compact_requested
     ; ( "Operator_clear_requested"
       , SM.Operator_clear_requested { preserve_system = true; reason = "test" } )
@@ -2232,22 +2223,6 @@ let () =
         ] )
     ; ( "precondition_layer"
       , [ test_case
-            "Context_overflow_detected requires ~compaction_active"
-            `Quick
-            KSP.test_pre_overflow_during_compaction
-        ; test_case
-            "Auto_compact_triggered requires context_overflow"
-            `Quick
-            KSP.test_pre_auto_compact_no_overflow
-        ; test_case
-            "Auto_compact_triggered requires ~compaction_active"
-            `Quick
-            KSP.test_pre_auto_compact_active
-        ; test_case
-            "Auto_compact_triggered requires ~handoff_active"
-            `Quick
-            KSP.test_pre_auto_compact_handoff_active
-        ; test_case
             "Operator_compact_requested requires ~compaction_active"
             `Quick
             KSP.test_pre_operator_compact_during_compaction

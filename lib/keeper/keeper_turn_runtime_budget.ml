@@ -418,27 +418,27 @@ type capacity_non_compaction =
 
 type capacity_transition =
   | Not_capacity
-  | Compact_next_cycle of Compaction_trigger.t
+  | Capacity_refusal_classified of Compaction_trigger.t
   | Capacity_non_compacting of capacity_non_compaction
 
 let capacity_transition_of_error
     (err : Agent_sdk.Error.sdk_error) : capacity_transition =
   match err with
   | Agent_sdk.Error.Api (ContextOverflow { limit; _ }) ->
-    Compact_next_cycle
+    Capacity_refusal_classified
       (Compaction_trigger.Provider_overflow { limit_tokens = limit })
   | Agent_sdk.Error.Api
       (InvalidRequest
          { reason = Request_body_too_large { actual_bytes; limit_bytes }; _ })
     ->
-    Compact_next_cycle
+    Capacity_refusal_classified
       (Compaction_trigger.Request_body_over_capacity
          { actual_bytes; limit_bytes })
   | Agent_sdk.Error.Api
       (InvalidRequest
          { reason = Request_body_refused_by_provider { status }; _ })
     ->
-    Compact_next_cycle
+    Capacity_refusal_classified
       (Compaction_trigger.Request_body_refused_by_provider { status })
   | Agent_sdk.Error.Api
       (InputCapacity
@@ -449,7 +449,7 @@ let capacity_transition_of_error
          ; _
          })
     ->
-    Compact_next_cycle
+    Capacity_refusal_classified
       (Compaction_trigger.Serving_input_capacity
          (Compaction_trigger.Boundary_unknown
             { input_tokens; accepted_through; rejected_from }))
@@ -462,7 +462,7 @@ let capacity_transition_of_error
          ; _
          })
     ->
-    Compact_next_cycle
+    Capacity_refusal_classified
       (Compaction_trigger.Serving_input_capacity
          (Compaction_trigger.Input_rejected
             { input_tokens; accepted_through; rejected_from }))
@@ -514,36 +514,21 @@ let capacity_transition_of_error
 let capacity_refusal_of_error
     (err : Agent_sdk.Error.sdk_error) : capacity_refusal option =
   match capacity_transition_of_error err with
-  | Compact_next_cycle (Compaction_trigger.Provider_overflow { limit_tokens }) ->
+  | Capacity_refusal_classified (Compaction_trigger.Provider_overflow { limit_tokens }) ->
     Some (Provider_context_window { limit_tokens })
-  | Compact_next_cycle
+  | Capacity_refusal_classified
       (Compaction_trigger.Request_body_over_capacity { actual_bytes; limit_bytes })
     ->
     Some (Serialized_request_body { actual_bytes; limit_bytes })
-  | Compact_next_cycle
+  | Capacity_refusal_classified
       (Compaction_trigger.Request_body_refused_by_provider { status }) ->
     Some (Provider_request_body_refusal { status })
-  | Compact_next_cycle (Compaction_trigger.Serving_input_capacity _)
-  | Compact_next_cycle Compaction_trigger.Manual
+  | Capacity_refusal_classified (Compaction_trigger.Serving_input_capacity _)
+  | Capacity_refusal_classified Compaction_trigger.Manual
   | Capacity_non_compacting _
   | Not_capacity ->
     None
 ;;
-
-(* Projection for the two token-axis call sites. Both publish
-   reason="provider_context_overflow" and the [Sdk_context_window_exceeded]
-   blocker class (keeper_unified_turn_execution.ml:485-509), labels that would be
-   wrong for a declared-byte refusal, so this projection admits only the context
-   window. *)
-let context_overflow_event_of_error
-    (err : Agent_sdk.Error.sdk_error) : Keeper_state_machine.event option =
-  match capacity_refusal_of_error err with
-  | Some (Provider_context_window { limit_tokens }) ->
-    Some (Keeper_state_machine.Context_overflow_detected { limit_tokens })
-  | Some (Serialized_request_body _)
-  | Some (Provider_request_body_refusal _)
-  | None ->
-    None
 
 let current_keeper_meta ~(config : Workspace.config) ~(fallback_meta : keeper_meta) =
   match Keeper_registry.get ~base_path:config.base_path fallback_meta.name with

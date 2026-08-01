@@ -91,7 +91,6 @@ const KeeperPhaseDiagnosisSchema = object({
     stop_requested: boolean(),
     dead_tombstone_latched: boolean(),
     drain_complete: boolean(),
-    context_overflow: boolean(),
   }),
   determining_condition: nullable(string()),
   rows: array(KeeperPhaseDiagnosisRowSchema),

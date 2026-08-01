@@ -35,7 +35,6 @@ let phase_to_mermaid ~(current : phase) : string =
   p "    Offline --> Draining : stop requested\n";
   p "    Offline --> Stopped : stop while not started\n";
   p "    Running --> Failing : hb/turn/reconcile fail\n";
-  p "    Running --> Overflowed : prompt exceeded max context\n";
   p "    Running --> Compacting : compact start\n";
   p "    Running --> HandingOff : handoff start\n";
   p "    Running --> Draining : stop requested\n";
@@ -43,15 +42,13 @@ let phase_to_mermaid ~(current : phase) : string =
   p "    Running --> Stopped : stop requested\n";
   p "    Running --> Crashed : fiber death\n";
   p "    Failing --> Running : clean turn recovery\n";
-  p "    Failing --> Overflowed : prompt exceeded max context\n";
   p "    Failing --> Crashed : fiber death\n";
   p "    Failing --> Draining : stop requested\n";
   p "    Failing --> Paused : operator pause\n";
-  p "    Overflowed --> Running : operator clear\n";
-  p "    Overflowed --> Compacting : auto-compact\n";
-  p "    Overflowed --> Paused : operator pause\n";
-  p "    Overflowed --> Draining : stop requested\n";
-  p "    Overflowed --> Crashed : fiber death\n";
+  (* Overflowed is retired (#26546): no condition derives it, so it renders
+     without inbound edges — kept only for historical records that may still
+     name the phase. *)
+  p "    Overflowed --> Running : operator clear (retired phase)\n";
   p "    Compacting --> Running : compact done\n";
   p "    Compacting --> Running : compact failed (Lane retry queued)\n";
   p "    Compacting --> Failing : hb fail\n";

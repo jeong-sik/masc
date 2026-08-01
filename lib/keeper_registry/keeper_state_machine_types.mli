@@ -29,7 +29,6 @@ type conditions = {
   dead_tombstone_latched : bool;
   restart_requested : bool;
   drain_complete : bool;
-  context_overflow : bool;
   credential_archived : bool;
 }
 val default_conditions : conditions
@@ -62,8 +61,6 @@ type event =
     }
   | Supervisor_restart_attempt of { attempt : int; }
   | Credential_archived
-  | Context_overflow_detected of { limit_tokens : int option; }
-  | Auto_compact_triggered
   | Operator_compact_requested
   | Operator_clear_requested of { preserve_system : bool; reason : string; }
 val event_to_string : event -> string

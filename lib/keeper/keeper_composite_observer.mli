@@ -64,8 +64,6 @@ type tla_action =
   | Action_finish_compaction
   | Action_enter_failing
   | Action_clear_failing
-  | Action_enter_overflowed
-  | Action_overflowed_auto_compact
 
 val all_tla_actions : tla_action list
 

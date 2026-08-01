@@ -1092,8 +1092,9 @@ let test_attempt_loop_overflow_tries_next_candidate () =
     !attempts
 
 (* When every candidate overflows, the last typed ContextOverflow must be
-   preserved so the reactive compaction path
-   ([Keeper_turn_runtime_budget.context_overflow_event_of_error]) still fires. *)
+   preserved so the lane classifier
+   ([Keeper_unified_turn_execution.declared_lane_failure_of_error]) still
+   reports the capacity bound. *)
 let test_attempt_loop_overflow_on_last_candidate_is_terminal () =
   let attempts = ref [] in
   let events = ref [] in
@@ -1121,8 +1122,8 @@ let test_attempt_loop_overflow_on_last_candidate_is_terminal () =
 
 (* #26530: an overflow on an earlier candidate must survive lane exhaustion.
    Live incident 2026-07-31: glm overflowed, the ollama fallback then failed
-   with a rate limit, the lane returned that rate limit, the keeper FSM never
-   entered the overflowed phase, and compaction never fired while every cycle
+   with a rate limit, and the lane returned that rate limit — hiding the
+   deterministic capacity bound from the failure route while every cycle
    replayed the same oversized checkpoint. *)
 let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
   let attempts = ref [] in

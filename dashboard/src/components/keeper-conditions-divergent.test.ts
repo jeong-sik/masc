@@ -16,7 +16,6 @@ const allHealthy: KeeperConditions = {
   stop_requested: false,
   dead_tombstone_latched: false,
   drain_complete: false,
-  context_overflow: false,
 }
 
 describe("isOperating", () => {
@@ -61,16 +60,6 @@ describe("computeDivergences", () => {
     expect(divs).toHaveLength(1)
     expect(divs[0].field).toBe("context_handoff_needed")
     expect(divs[0].value).toBe(true)
-  })
-
-  it("detects context_overflow when not Overflowed", () => {
-    const divs = computeDivergences({ ...allHealthy, context_overflow: true }, "Running")
-    expect(divs.some(d => d.field === "context_overflow")).toBe(true)
-  })
-
-  it("ignores context_overflow when phase is Overflowed", () => {
-    const divs = computeDivergences({ ...allHealthy, context_overflow: true }, "Overflowed")
-    expect(divs.some(d => d.field === "context_overflow")).toBe(false)
   })
 
   it("detects stop_requested when not Draining", () => {
@@ -132,7 +121,6 @@ describe("computeDivergences", () => {
     const divs = computeDivergences({
       ...allHealthy,
       context_handoff_needed: true,
-      context_overflow: true,
       stop_requested: true,
       turn_healthy: false,
       heartbeat_healthy: false,

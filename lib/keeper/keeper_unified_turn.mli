@@ -52,12 +52,6 @@ val turn_tool_event_integrity_error
   :  turn_tool_event_tracker
   -> Agent_sdk.Error.sdk_error option
 
-(** Build an overflow event only from typed [Api (ContextOverflow _)].
-    Non-overflow errors return [None]. *)
-val context_overflow_event_of_error
-  :  Agent_sdk.Error.sdk_error
-  -> Keeper_state_machine.event option
-
 (** Project the initial keeper turn context budget from the routed runtime's
     prevalidated resolution, so lifecycle context math matches the provider
     that will receive the first request. Exposed for regression tests. *)

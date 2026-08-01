@@ -28,8 +28,10 @@ type phase =
   | Offline       (** Registered but no heartbeat fiber started *)
   | Running       (** Healthy heartbeat loop executing *)
   | Failing       (** Consecutive failures detected, probing recovery *)
-  | Overflowed    (** Prompt exceeded provider max context; durable lane
-                      compaction is pending. *)
+  | Overflowed    (** Retired (#26546): no condition derives this phase since
+                      the automatic overflow-compaction trigger was removed.
+                      The variant survives so historical durable lifecycle
+                      records ("overflowed") still decode. *)
   | Compacting    (** Context compaction in progress *)
   | HandingOff    (** Generation rollover in progress *)
   | Draining      (** Graceful shutdown: completing current turn *)
@@ -78,11 +80,6 @@ type conditions = {
   (** Supervisor has requested immediate restart of a stopped fiber. *)
   drain_complete : bool;
   (** Current turn finished, no pending work *)
-  context_overflow : bool;
-  (** Provider rejected the most recent prompt for exceeding its max
-      context window. This is a hard failure reported by the provider.
-      Cleared by completed compaction or operator clear; token counts remain
-      observations, not lifecycle gates. *)
   credential_archived : bool;
 }
 
@@ -167,13 +164,6 @@ type event =
       }
   | Supervisor_restart_attempt of { attempt : int }
   | Credential_archived
-  | Context_overflow_detected of {
-      limit_tokens : int option;
-    }
-    (** Provider returned typed [ContextOverflow]. [limit_tokens] is only the
-        provider-declared window limit; actual input tokens remain unknown. *)
-  | Auto_compact_triggered
-    (** Legacy explicit input; no entry action produces this event. *)
   | Operator_compact_requested
     (** Operator invoked [masc_keeper_compact] MCP tool. *)
   | Operator_clear_requested of { preserve_system : bool; reason : string }
@@ -247,7 +237,7 @@ val transition_error_to_string : transition_error -> string
     7.  Paused (operator_paused)
     8.  HandingOff (handoff_active)
     9.  Compacting (compaction_active)
-    10. Overflowed (context_overflow) -- durable compaction pending
+    10. (retired #26546 — Overflowed is no longer derived)
     11. Failing (latest health failure or structural failure observation)
     12. Running (fiber_alive)
     13. Offline (default fallback for inconsistent zero-state)

@@ -36,9 +36,9 @@ digraph keeper_fsm {
   ];
 
   KSM -> KMC [
-    label = "ksm_to_kmc_compact_trigger\n(Auto_compact_triggered)",
+    label = "ksm_to_kmc_compact_trigger\n(Operator_compact_requested)",
     color = "#1976d2",
-    tooltip = "lib/keeper/keeper_registry.ml:995"
+    tooltip = "lib/keeper/keeper_manual_compaction.ml (manual-only since #26546)"
   ];
 
   KMC -> KSM [

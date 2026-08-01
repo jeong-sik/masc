@@ -78,7 +78,7 @@ const PIPELINE_STAGE_DETAIL_LABELS: Record<string, string> = {
   launch_pending_no_fiber: '기동 대기',
   phase_running_idle: '대기',
   health_or_turn_failure_probe: '복구 확인',
-  context_overflow_pending_compaction: '압축 대기',
+  context_overflow_retired_phase: '컨텍스트 초과 (retired)',
   context_compaction_in_progress: '압축 진행',
   generation_handoff_in_progress: '승계 진행',
   graceful_shutdown_draining: '종료 정리',

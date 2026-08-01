@@ -361,7 +361,7 @@ let format_completion_authority_rejection_observations
        ^ string_of_int (List.length rows)
        ^ ")\n"
        ^ "Rows below are typed decisions from the completion-authority boundary. "
-       ^ "auto_judge is the system LLM agent and human_operator is HITL; neither "
+       ^ "system_llm_agent is the system LLM agent and human_operator is HITL; neither "
        ^ "is a Keeper, and this record grants no tool or task authority by itself. "
        ^ "Re-read the current Task and verification state before choosing a "
        ^ "follow-up action.\n"

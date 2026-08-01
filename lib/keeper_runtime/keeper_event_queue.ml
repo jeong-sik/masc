@@ -789,8 +789,8 @@ let payload_of_yojson json =
     in
     let* authority =
       match authority_kind with
-      | "auto_judge" ->
-        Ok (Masc_domain.Auto_judge { judge_run_id = authority_actor })
+      | "system_llm_agent" ->
+        Ok (Masc_domain.System_llm_agent { agent_run_id = authority_actor })
       | "human_operator" ->
         Ok (Masc_domain.Human_operator { operator_id = authority_actor })
       | value ->

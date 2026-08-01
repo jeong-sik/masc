@@ -140,7 +140,7 @@ let test_verdict_requires_authority_and_reason () =
    | Ok _ | Error _ -> failwith "a blank authority identity must be refused");
   match
     L.decide_verdict
-      ~authority:(D.Auto_judge { judge_run_id = "fusion-run-9" })
+      ~authority:(D.System_llm_agent { agent_run_id = "fusion-run-9" })
       ~verdict:(D.Verdict_rejected { reason = "missing test evidence" })
       ~task_id:"task-1"
       ~verification_id:"vrf-1"
@@ -150,12 +150,12 @@ let test_verdict_requires_authority_and_reason () =
   with
   | Ok
       { decision = { new_status = D.InProgress { assignee; _ }; _ }
-      ; authority = D.Auto_judge { judge_run_id }
+      ; authority = D.System_llm_agent { agent_run_id }
       ; producer
       ; verification_id
       }
     when String.equal assignee owner
-         && String.equal judge_run_id "fusion-run-9"
+         && String.equal agent_run_id "fusion-run-9"
          && String.equal producer owner
          && String.equal verification_id "vrf-1" -> ()
   | Ok _ | Error _ -> failwith "judge rejection must return the task to its producer"
@@ -164,7 +164,7 @@ let test_verdict_requires_authority_and_reason () =
 let test_verdict_rejects_stale_verification_id () =
   match
     L.decide_verdict
-      ~authority:(D.Auto_judge { judge_run_id = "judge-run-1" })
+      ~authority:(D.System_llm_agent { agent_run_id = "judge-run-1" })
       ~verdict:D.Verdict_approved
       ~task_id:"task-1"
       ~verification_id:"vrf-stale"

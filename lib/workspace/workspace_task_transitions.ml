@@ -775,7 +775,7 @@ let commit_verdict_r
            let authority_actor_kind =
              match authority with
              | Masc_domain.Human_operator _ -> Workspace_task_classify.Operator
-             | Masc_domain.Auto_judge _ -> Workspace_task_classify.System
+             | Masc_domain.System_llm_agent _ -> Workspace_task_classify.System
            in
            let producer = decided.Workspace_task_lifecycle.producer in
            let verification_id = decided.Workspace_task_lifecycle.verification_id in

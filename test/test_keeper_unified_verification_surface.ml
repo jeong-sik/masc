@@ -55,13 +55,13 @@ let sample_completion_authority_rejection : WO.pending_board_event =
     { car_task_id = "task-rejected"
     ; car_verification_id = "verification-rejected"
     ; car_reason = "evidence omitted the required deployment proof"
-    ; car_authority = Masc_domain.Auto_judge { judge_run_id = "judge-test" }
+    ; car_authority = Masc_domain.System_llm_agent { agent_run_id = "system-agent-test" }
     }
   in
   { sample_board_event with
     event_kind = WO.Completion_authority_rejected rejection
   ; post_id = "completion-authority-rejected:task-rejected:verification-rejected"
-  ; author = "judge-test"
+  ; author = "system-agent-test"
   ; title = "Completion evidence rejected for task task-rejected"
   ; preview =
       "Task task-rejected verification verification-rejected was rejected by the system completion authority"
@@ -436,7 +436,7 @@ let test_completion_authority_rejection_has_own_prompt_layer () =
   check bool "typed rejection reason is preserved" true
     (contains_sub "evidence omitted the required deployment proof" world_state);
   check bool "system LLM provenance is preserved" true
-    (contains_sub "authority_kind=auto_judge" world_state);
+    (contains_sub "authority_kind=system_llm_agent" world_state);
   check bool "rejection is not rendered as Board activity" false
     (contains_sub
        sample_completion_authority_rejection.post_id

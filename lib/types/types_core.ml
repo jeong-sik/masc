@@ -230,7 +230,7 @@ let task_action_of_string s =
     Error
       (Printf.sprintf
          "Task action %S is not an agent action: a completion verdict is issued \
-          by the completion authority (human operator or auto judge), not \
+          by the completion authority (human operator or system LLM agent), not \
           through the task action surface. A Keeper is not a verifier."
          verdict)
   | other -> Error (Printf.sprintf "Unknown task action: %s" other)
@@ -251,10 +251,11 @@ let valid_task_action_strings = List.map task_action_to_string all_task_actions
 (** Provenance carried by a completion verdict. This type separates verdicts
     from the agent task-action surface; it does not authenticate the embedded
     identity. The producer boundary must construct it only after authenticating
-    an operator or accepting a typed judge result. *)
+    an operator or accepting a typed system-LLM result. The system LLM agent
+    is not a Keeper and has no Keeper lifecycle. *)
 type completion_authority =
   | Human_operator of { operator_id: string }
-  | Auto_judge of { judge_run_id: string }
+  | System_llm_agent of { agent_run_id: string }
 [@@deriving show]
 
 (** A verdict cannot exist without an authority: both terminal outcomes are
@@ -267,11 +268,11 @@ type completion_verdict =
 
 let completion_authority_actor = function
   | Human_operator { operator_id } -> operator_id
-  | Auto_judge { judge_run_id } -> judge_run_id
+  | System_llm_agent { agent_run_id } -> agent_run_id
 
 let completion_authority_kind = function
   | Human_operator _ -> "human_operator"
-  | Auto_judge _ -> "auto_judge"
+  | System_llm_agent _ -> "system_llm_agent"
 
 let completion_authority_has_identity authority =
   not (String.equal (String.trim (completion_authority_actor authority)) "")

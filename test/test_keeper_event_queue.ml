@@ -684,7 +684,7 @@ let () =
     { car_task_id = "task-rejected"
     ; car_verification_id = "vrf-rejected"
     ; car_reason = "Evidence did not demonstrate the required invariant."
-    ; car_authority = Masc_domain.Auto_judge { judge_run_id = "judge-rejected" }
+    ; car_authority = Masc_domain.System_llm_agent { agent_run_id = "judge-rejected" }
     }
   in
   let rejection_stimulus : stimulus =

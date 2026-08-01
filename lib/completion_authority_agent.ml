@@ -117,13 +117,68 @@ let review_notes ~request ~evidence_access ~result ~authority =
        ])
 ;;
 
-let completion_contract_of_task (task : Masc_domain.task) =
-  match task.contract with
-  | Some contract ->
-    ( Some contract.completion_contract
-    , contract.required_evidence
-    , contract.verify_gate_evidence )
-  | None -> None, [], []
+let required_string_list_field ~context name fields =
+  match List.assoc_opt name fields with
+  | Some (`List values) ->
+    let rec collect index acc = function
+      | [] -> Ok (List.rev acc)
+      | (`String value) :: rest -> collect (index + 1) (value :: acc) rest
+      | value :: _ ->
+        Error
+          (Printf.sprintf
+             "%s %s[%d] must be a string, got %s"
+             context
+             name
+             index
+             (Json_util.excerpt value))
+    in
+    collect 0 [] values
+  | Some value ->
+    Error
+      (Printf.sprintf
+         "%s %s must be a JSON array, got %s"
+         context
+         name
+         (Json_util.excerpt value))
+  | None ->
+    Error (Printf.sprintf "%s has no %s" context name)
+;;
+
+let completion_contract_of_request
+      (request : Verification.verification_request)
+  =
+  let rec custom_criteria index acc = function
+    | [] -> Ok (List.rev acc)
+    | Verification.Custom description :: rest ->
+      custom_criteria (index + 1) (description :: acc) rest
+    | Verification.Schema_match _ :: _
+    | Verification.Contains _ :: _
+    | Verification.Not_contains _ :: _ ->
+      Error
+        (Printf.sprintf
+           "verification request criteria[%d] is not a persisted custom completion contract"
+           index)
+  in
+  let* completion_contract = custom_criteria 0 [] request.criteria in
+  let completion_contract =
+    match request.criteria with
+    | [] -> None
+    | _ -> Some completion_contract
+  in
+  match request.output with
+  | `Assoc fields ->
+    let* required_artifacts =
+      required_string_list_field
+        ~context:"verification request output"
+        "required_artifacts"
+        fields
+    in
+    Ok (completion_contract, required_artifacts)
+  | other ->
+    Error
+      (Printf.sprintf
+         "verification request output must be a JSON object, got %s"
+         (Json_util.excerpt other))
 ;;
 
 type prepared_review =
@@ -131,8 +186,7 @@ type prepared_review =
   ; evidence_access : Workspace_verification_store.submitted_evidence_access
   ; review_request : Task.Anti_rationalization.review_request
   ; completion_contract : string list option
-  ; required_evidence : string list
-  ; verify_gate_evidence : string list
+  ; required_artifacts : string list
   }
 
 let prepare_review
@@ -201,8 +255,8 @@ let prepare_review
              header.worker)
       else
         let* evidence_refs = evidence_refs_of_output request.output in
-        let completion_contract, required_evidence, verify_gate_evidence =
-          completion_contract_of_task task
+        let* completion_contract, required_artifacts =
+          completion_contract_of_request request
         in
         let completion_notes =
           Yojson.Safe.pretty_to_string
@@ -225,8 +279,7 @@ let prepare_review
               ; evidence_refs
               }
           ; completion_contract
-          ; required_evidence
-          ; verify_gate_evidence
+          ; required_artifacts
           }
 ;;
 
@@ -245,8 +298,8 @@ let process_task_once
       ~assignee
       ~verification_id
   =
-  let judge_run_id = Random_id.prefixed ~prefix:"judge-" ~bytes:16 in
-  let authority = Masc_domain.Auto_judge { judge_run_id } in
+  let agent_run_id = Random_id.prefixed ~prefix:"system-llm-agent-" ~bytes:16 in
+  let authority = Masc_domain.System_llm_agent { agent_run_id } in
   try
     match
       prepare_review
@@ -262,8 +315,8 @@ let process_task_once
         Task.Anti_rationalization.review
           ~sw:(Some runtime.sw)
           ?completion_contract:prepared.completion_contract
-          ~required_evidence:prepared.required_evidence
-          ~verify_gate_evidence:prepared.verify_gate_evidence
+          ~required_evidence:prepared.required_artifacts
+          ~verify_gate_evidence:[]
           prepared.review_request
       in
       (match result.verdict with
@@ -369,7 +422,7 @@ let process_task_once
               "system LLM completion authority committed task_id=%s verification_id=%s authority=%s verdict=%s"
               task.id
               verification_id
-              judge_run_id
+              (Masc_domain.completion_authority_actor authority)
               (Task.Anti_rationalization.verdict_constructor_name review_verdict)
           | Error error ->
             log_deferred

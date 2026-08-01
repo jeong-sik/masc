@@ -1,6 +1,6 @@
 (** Goal_phase — state machine SSOT for goal lifecycle.
 
-    Encodes the seven phases a goal can be in, the operator/system
+    Encodes the five phases a goal can be in, the operator/system
     actions that drive transitions, and the deterministic decision
     function {!decide_transition}. Used by the goal subsystem to keep
     transition logic out of caller code. *)

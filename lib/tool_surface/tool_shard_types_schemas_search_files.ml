@@ -9,7 +9,7 @@ let tool_search_files_schema : Masc_domain.tool_schema =
   ; description =
         "Search file contents with ripgrep. Provide a regex `pattern` (and \
          optionally path/glob/type). Paths resolve automatically — use \
-         'repos/X' or 'mind/X'; never include host paths like \
+         'repos/X' or 'scratch/X'; never include host paths like \
          '.masc/playground/your-name/repos/X'. To list a directory, read a \
          file, run find, or view git status/log/diff, use the Execute tool."
   ; input_schema =

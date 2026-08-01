@@ -116,7 +116,7 @@ const STAGES: AssemblyStageSpec[] = [
     role: 'source_prep',
     messageSlot: 'not sent',
     summary: 'MASC picks the active text from defaults, files, or saved edits.',
-    promptKeys: ['keeper.world', 'keeper.capabilities', 'keeper.unified.system'],
+    promptKeys: ['keeper.world', 'keeper.capabilities'],
   },
   {
     id: 'base-system',
@@ -141,10 +141,7 @@ const STAGES: AssemblyStageSpec[] = [
     role: 'model_input',
     messageSlot: 'user',
     summary: 'Current task, workspace state, scheduler signals, and turn intent.',
-    promptKeys: [
-      'keeper.unified.system',
-      'keeper.turn_intent',
-    ],
+    promptKeys: ['keeper.turn_intent'],
     computedRows: [
       { id: 'world-observation', promptKey: '(computed:world_observation)' },
       { id: 'scheduled-automation', promptKey: '(computed:scheduled_automation)' },

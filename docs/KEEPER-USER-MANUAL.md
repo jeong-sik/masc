@@ -244,10 +244,9 @@ Keeper 상태 조회(`masc_keeper_status`)의 응답에 포함되는 필드들�
 
 | 화면 | 뜻 | 포함하지 않는 것 |
 |------|----|------------------|
-| **FSM Hub** | keeper control-plane. phase, compaction, handoff 같은 런타임 전이 | memory bank 내용, episode 본문 |
-| **Memory Subsystems** | global memory surface. institution episodes + activity signals | keeper checkpoint/history, keeper memory bank |
-| **Keeper Detail > Memory Tier** | 개별 keeper memory bank, cap, compaction 상태 | institution episodes, activity graph 전체 |
-| **Keeper Detail > Trace / Handoff 관련 패널** | 현재 generation의 `trace_id`와 승계 흔적 | 장기 기억 전체 |
+| **FSM Hub** | Keeper phase와 런타임 전이 | Memory OS fact 본문 |
+| **Keeper Detail > Memory** | 개별 Keeper Memory OS 상태 | 다른 Keeper의 memory |
+| **Keeper Detail > Trace** | 현재 generation의 `trace_id`와 실행 기록 | Memory OS fact 전체 |
 
 ### 3.1 사용자 설정 필드 (User-Configured)
 
@@ -261,7 +260,7 @@ spawn 시 인자로 직접 설정하는 필드.
 | `verify` | bool | `false` | 저비용 모델로 action 검증 | `masc_keeper_up`의 `verify` 인자 |
 | `sandbox_profile` | string | `local` | 실행 샌드박스 프로필 (`local`, `docker`). hard mode에서는 `docker`만 허용된다. | `masc_keeper_up`의 `sandbox_profile` 인자 |
 | `network_mode` | string | `inherit` 또는 `none` | 샌드박스 네트워크 정책. `docker`는 기본 `none`이고 hard mode에서는 `none`만 허용된다. | `masc_keeper_up`의 `network_mode` 인자 |
-| `active_goal_ids` | string[] | 없음 | Goal Store 엔티티와 keeper lane의 유일한 목표 연결. 설정 시 `keeper_task_claim`이 goal-linked task만 claim한다. scoped pool에 현재 capability로 claim 가능한 task가 없으면 claim을 멈추며 전체 claimable task fallback은 없다. | `masc_keeper_up`, keeper config API 또는 `keeper.toml` |
+| `active_goal_ids` | string[] | 없음 | Goal Store 엔티티와 Keeper의 목표 연결. 설정 시 `keeper_task_claim`이 goal-linked task만 claim한다. scoped pool에 현재 capability로 claim 가능한 task가 없으면 claim을 멈춘다. | `masc_keeper_up`, keeper config API 또는 `keeper.toml` |
 
 ### 3.1.1 Sandbox Core V1 사용법
 
@@ -279,7 +278,7 @@ spawn 시 인자로 직접 설정하는 필드.
 
 의미:
 
-- keeper shell write는 자기 sandbox 안에서만 허용된다. 현재 local/docker backend의 디스크 구현은 `.masc/playground/<keeper>/`이지만 keeper-facing 경로는 `.` / `mind` / `repos`이다.
+- Keeper file write는 자기 sandbox 안에서만 허용된다. Keeper-facing 경로는 context capability가 반환한 `sandbox_root`와 `sandbox_repos`를 사용한다.
 - `sandbox_profile=docker`는 keeper identity 전체에 적용된다. `tool_execute`, `tool_read_file`, `tool_edit_file`, `tool_write_file`, `tool_search_files`의 sandboxed read/write 흐름이 Docker로 라우팅된다. 기본은 read-only rootfs, tmpfs `/tmp`, `cap-drop=ALL`, `no-new-privileges`, `pids-limit`, memory limit, private sandbox mount, network=`none`이다.
 - Docker 내부에서 더 자유로운 부트스트랩/설치가 필요하면 `MASC_KEEPER_SANDBOX_RELAX_FS=true`로 rootfs writable + executable `/tmp` 조합을 켤 수 있다. 이 경우에도 host mount 범위, `cap-drop=ALL`, `no-new-privileges`, pids/memory limit은 유지된다. hard mode에서는 이 완화가 거부된다.
 - Docker profile은 host credential을 암묵적으로 상속하지 않는다. GitHub/Git 명령도 keeper TOML의 별도 identity 필드가 아니라 현재 tool/sandbox policy와 runtime route의 일반 검증을 따른다.
@@ -533,14 +532,9 @@ flowchart TD
 
 ### 5.2 Runtime/model 표시 필드
 
-일부 dashboard/status payload에는 `active_model`, `last_model_used`,
-`next_model_hint` 같은 legacy/display 필드가 남아 있을 수 있다. 현재
-운영 기준에서는 이 필드를 keeper 설정 권위로 쓰지 않는다.
-
 1. runtime 선택 권위는 `<resolved-config-root>/runtime.toml`이다.
 2. keeper별 override는 `[runtime.assignments] keeper = "provider.model"`에 둔다.
 3. concrete provider/model identity는 외부 operator/product 표면에서 redacted 될 수 있다.
-4. failover/next-model semantics는 user-facing 자동 failover 계약이 아니다.
 
 코드 근거: `keeper_meta_contract.ml:runtime_id_of_meta`, `config/runtime.toml`
 
@@ -604,16 +598,15 @@ context 숫자는 실제 owner-boundary producer와 typed transport가 함께
 
 ### 6.2 Hybrid Autonomy
 
-Keeper는 더 이상 `policy_mode`나 `trigger_mode`로 동작하지 않는다.
-현재 런타임은 하나의 unified turn loop와 hybrid autonomy를 사용한다.
+Keeper는 하나의 turn loop와 hybrid autonomy를 사용한다.
 
 **트리거**:
 
 | 트리거 | 조건 |
 |--------|------|
 | `mention_reactive` | keeper 이름으로 직접 호출 |
-| `board_reactive` | board event 또는 mention이 해당 Keeper lane에 전달됨 |
-| `proactive` | scheduler가 정의한 시간/조건을 만족하고 Keeper lane이 수신함 |
+| `board_reactive` | Board event 또는 mention이 해당 Keeper에 전달됨 |
+| `proactive` | scheduler가 정의한 시간/조건을 만족하고 Keeper가 수신함 |
 
 **반응 규칙**:
 
@@ -805,10 +798,9 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는
 - **Canonical minimal**: `[keeper]` 테이블에 `persona_name`만. 나머지는 persona 기본값에서 해석.
 - **Overlay fields**: `instructions`, `sandbox_profile`, `network_mode`, `active_goal_ids` 등 배치별 override 전용. Runtime/model selection은 keeper TOML overlay가 아니라 `runtime.toml [runtime.assignments]`가 소유한다.
 - **Allowed value sets**: `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`. 실제 실행 가능 여부는 descriptor/registry availability, per-turn OAS allowlist, eval gate까지 통과해야 한다.
-- **Removed / hard-rejected**: `goal`, `tool_access`, `tool_denylist`, `runtime_id`, `model`, `runtime_ref`, `models`, `allowed_models`, `active_model`, `presence_keepalive*`, `trigger_mode`, `initiative_*`, `policy_mode`, `policy_shell_mode`. 로드 시 에러로 실패한다.
-- **Unknown keys**: canonical/removed 둘 다 아닌 key는 **boot 시 warning** 후 무시된다 (`keeper TOML <path> has unknown keys: ...`). 과거에 `legacy_scope`/`scope_kind` 같은 dead config가 축적된 적이 있으므로 warning을 발견하면 정리한다.
+- **Unknown keys**: canonical key가 아닌 값은 boot 시 warning 또는 parse error로 표면화된다. warning을 발견하면 현재 schema와 설정 파일을 맞춘다.
 
-Definitive source는 코드의 `canonical_keeper_toml_key_names` (`lib/keeper/keeper_types_profile.ml`)와 `removed_keeper_input_key_names` (`lib/keeper/keeper_config.ml`)다.
+Definitive source는 코드의 `canonical_keeper_toml_key_names` (`lib/keeper/keeper_types_profile.ml`)다.
 
 운영 기준 active config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리이고, 없으면 `<MASC_BASE_PATH>/.masc/config`다. `repo/config`는 체크인된 seed source이며 live root가 아니다. low-level resolver에는 추가 fallback이 있지만, 운영 기준은 `docs/BOOT-ENV-STATE-INVENTORY.md`를 따른다.
 
@@ -852,9 +844,8 @@ dir-local 실행에서 shared keeper 상태가 보이지 않는 것은 정상이
 | 문서 | 용도 |
 |------|------|
 | [BOOT-ENV-STATE-INVENTORY.md](./BOOT-ENV-STATE-INVENTORY.md) | boot / path / state / active config inventory |
-| [GLOSSARY.md](./GLOSSARY.md) | 용어 정의 |
+| [spec/00-glossary.md](./spec/00-glossary.md) | 용어 정의 |
 | [QUICK-START.md](./QUICK-START.md) | repo workspace collaboration 시작 경로 |
-| [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md) | retired command-plane reference |
 | [SPEC-INDEX.md](./spec/SPEC-INDEX.md) + [01-system-overview.md](./spec/01-system-overview.md) | 아키텍처 SSOT |
 | [EXECUTE-RUNBOOK.md](./EXECUTE-RUNBOOK.md) | Execute flag matrix + dark-launch observer 절차 |
 | [ENV-CONTRACT.md](./ENV-CONTRACT.md) | 환경변수 reload class + Execute §4 |

@@ -180,7 +180,7 @@ let test_container_path_nested_maps_with_suffix () =
   let base, config, meta = setup_config "minjae" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
-  let host_path = Filename.concat host_root "mind/scratch.md" in
+  let host_path = Filename.concat host_root "scratch/scratch.md" in
   let croot = Keeper_sandbox.container_root meta.name in
   match
     Keeper_sandbox_read_backend.container_path_of_host ~config ~meta ~host_path
@@ -188,7 +188,7 @@ let test_container_path_nested_maps_with_suffix () =
   | Ok mapped ->
       Alcotest.(check string)
         "host nested path maps with suffix"
-        (Filename.concat croot "mind/scratch.md")
+        (Filename.concat croot "scratch/scratch.md")
         mapped
   | Error e -> Alcotest.fail e
 
@@ -232,7 +232,7 @@ let test_read_missing_file_preflight_errors () =
   let base, config, meta = setup_config "minjae" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
-  let host_path = Filename.concat host_root "mind/x" in
+  let host_path = Filename.concat host_root "scratch/x" in
   match
     Keeper_sandbox_read_backend.read_file ~config ~meta ~host_path
       ~max_bytes:4096 ~timeout_sec:5.0 ()
@@ -259,7 +259,7 @@ let test_read_directory_names_a_real_listing_tool () =
   let base, config, meta = setup_config "minjae" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
-  let dir_path = Filename.concat host_root "mind/somedir" in
+  let dir_path = Filename.concat host_root "scratch/somedir" in
   ensure_dir dir_path;
   match
     Keeper_sandbox_read_backend.read_file ~config ~meta ~host_path:dir_path
@@ -1463,7 +1463,7 @@ let test_run_command_preserves_bare_command_argv () =
   match
     Keeper_sandbox_read_backend.run_command_with_status ~config ~meta
       ~command_argv:
-        [ "head"; "-n"; "1"; "/home/keeper/playground/minjae/mind/demo.txt" ]
+        [ "head"; "-n"; "1"; "/home/keeper/playground/minjae/scratch/demo.txt" ]
       ~max_bytes:4096 ~timeout_sec:5.0 ()
   with
   | Error msg ->
@@ -1476,7 +1476,7 @@ let test_run_command_preserves_bare_command_argv () =
          | Unix.WSIGNALED code -> ("signaled", code)
          | Unix.WSTOPPED code -> ("stopped", code));
       Alcotest.(check string) "preserves bare head argv"
-        "head -n 1 /home/keeper/playground/minjae/mind/demo.txt\n" out
+        "head -n 1 /home/keeper/playground/minjae/scratch/demo.txt\n" out
 
 let test_run_command_fallback_uses_docker_spawn_slot ~clock () =
   with_fake_docker fake_docker_slow_run_script @@ fun () ->
@@ -1495,7 +1495,7 @@ let test_run_command_fallback_uses_docker_spawn_slot ~clock () =
               (Keeper_sandbox_read_backend.run_command_with_status
                  ~config ~meta
                  ~command_argv:
-                   [ "cat"; "/home/keeper/playground/minjae/mind/demo.txt" ]
+                   [ "cat"; "/home/keeper/playground/minjae/scratch/demo.txt" ]
                  ~max_bytes:4096 ~timeout_sec:5.0 ()));
       let run_started () =
         Sys.file_exists log_path
@@ -1614,7 +1614,7 @@ let test_turn_runtime_reuses_single_container () =
       Keeper_sandbox_read_backend.run_command_with_status
         ~turn_sandbox_factory:factory
         ~config ~meta
-        ~command_argv:[ "cat"; "/home/keeper/playground/minjae/mind/demo.txt" ]
+        ~command_argv:[ "cat"; "/home/keeper/playground/minjae/scratch/demo.txt" ]
         ~max_bytes:4096 ~timeout_sec:5.0 ()
     with
     | Error msg -> Alcotest.failf "expected turn runtime command success, got %s" msg
@@ -2117,7 +2117,7 @@ let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
      Keeper_sandbox_read_backend.run_command_with_status
        ~turn_sandbox_factory:factory
        ~config ~meta
-       ~command_argv:[ "cat"; "/home/keeper/playground/minjae/mind/demo.txt" ]
+       ~command_argv:[ "cat"; "/home/keeper/playground/minjae/scratch/demo.txt" ]
        ~max_bytes:4096 ~timeout_sec:5.0 ()
    with
    | Error msg -> Alcotest.failf "expected turn runtime command success, got %s" msg

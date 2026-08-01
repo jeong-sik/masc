@@ -21,7 +21,6 @@ type t = {
   host_root_abs : string;
   container_root : string option;
   root_arg : string;
-  mind_arg : string;
   repos_arg : string;
   task_overlay_pattern : string;
 }
@@ -222,7 +221,7 @@ val visible_path_of_raw :
 (** {1 Dashboard / status output} *)
 
 (** Key-value fields describing the sandbox shape (id, backend,
-    profile, network mode, lifetime, root/mind/repos args, overlay
+    profile, network mode, lifetime, root/repos args, overlay
     pattern). Suitable for splicing into a JSON [Assoc]. *)
 val context_status_fields :
   t -> (string * Yojson.Safe.t) list

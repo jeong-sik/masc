@@ -31,13 +31,13 @@ function makePrompt(overrides: Partial<DashboardPromptItem> & { key: string }): 
 // Prompt_block_id block body.
 const PROMPTS: DashboardPromptItem[] = [
   makePrompt({
-    key: 'keeper.unified.system',
+    key: 'keeper.core_behavior',
     category: 'keeper',
     description: '이름·역할·능력·담당',
-    file_path: 'config/prompts/keeper.unified.system.md',
-    effective: '{{identity_header}}\n## Where you live\n\nYou are a keeper inside MASC.',
+    file_path: 'config/prompts/keeper.core_behavior.md',
+    effective: 'Inspect current typed state and act on justified work.',
     char_count: 120,
-    template_variables: ['identity_header', 'goal_lines'],
+    template_variables: [],
   }),
   makePrompt({
     key: 'keeper.recovery_block',

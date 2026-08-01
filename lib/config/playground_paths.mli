@@ -4,7 +4,6 @@
     server [base_path]:
 
     - [.masc/playground/<keeper>/]        — bundle root
-    - [.masc/playground/<keeper>/mind/]   — notes, drafts, scratch
     - [.masc/playground/<keeper>/repos/]  — git clones (one dir per repo)
 
     Both [masc_workspace] (worktree resolver) and the keeper modules
@@ -30,15 +29,11 @@ val sanitize_keeper_name : string -> string
 val bundle_root : string -> string
 (** Relative path [".masc/playground/<safe_name>/"] (trailing slash). *)
 
-val mind_path : string -> string
-(** Relative path [".masc/playground/<safe_name>/mind/"]. *)
-
 val repos_path : string -> string
 (** Relative path [".masc/playground/<safe_name>/repos/"]. *)
 
 val bundle_paths : string -> string list
-(** All three bundle subdirs in canonical order:
-    [\[bundle_root; mind_path; repos_path\]]. *)
+(** Bundle directories in canonical order: [\[bundle_root; repos_path\]]. *)
 
 type playground_file_path =
   { keeper_name : string

@@ -1830,7 +1830,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
           <${PromptBlock} title="능력" block=${c.prompt.system_prompt_blocks.capabilities} />
         `
       : promptPreviewTab.value === 'system'
-        ? html`<${LongText} text=${c.prompt.unified_system_prompt || c.prompt.effective_system_prompt} truncateAt=${null} />`
+        ? html`<${LongText} text=${c.prompt.assembled_system_prompt || c.prompt.effective_system_prompt} truncateAt=${null} />`
         : html`<${LongText} text=${c.prompt.unified_user_message_preview} truncateAt=${null} />`}
   `
 

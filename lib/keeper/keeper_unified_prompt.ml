@@ -106,10 +106,9 @@ let format_current_task (task : Masc_domain.task) : string =
     "\n";
   Buffer.contents buf
 
-(** Format one connected-surface presence line (RFC-0223 P2).
-    Presence only: lane label + liveness, no content, no counts. *)
+(** Format one conversation endpoint presence line. *)
 let format_surface_presence (p : Gate_surface.surface_presence) : string =
-  let lane =
+  let endpoint =
     match p.surface with
     | Gate_surface.Dashboard -> "dashboard"
     | Gate_surface.Discord { channel_id = Some channel; _ } ->
@@ -122,14 +121,13 @@ let format_surface_presence (p : Gate_surface.surface_presence) : string =
         Printf.sprintf "%s #%s" channel channel_id
     | Gate_surface.Gate { channel; channel_id = None } -> channel
   in
-  Printf.sprintf "%s (%s)" lane (if p.alive then "alive" else "offline")
+  Printf.sprintf "%s (%s)" endpoint (if p.alive then "alive" else "offline")
 
-let connected_surface_discretion_behavior_name =
-  "connected_surface_discretion"
+let conversation_routing_behavior_name = "conversation_routing"
 
-let connected_surface_discretion_prompt () =
+let conversation_routing_prompt () =
   match
-    Keeper_prompt_external.get connected_surface_discretion_behavior_name
+    Keeper_prompt_external.get conversation_routing_behavior_name
   with
   | Some content -> String.trim content
   | None ->
@@ -138,19 +136,19 @@ let connected_surface_discretion_prompt () =
         ~labels:
           [
             ( "prompt",
-              "behavior/" ^ connected_surface_discretion_behavior_name );
+              "behavior/" ^ conversation_routing_behavior_name );
           ]
         ();
       Log.Keeper.warn
         "build_prompt: behavior prompt %s missing; rendering \
-         config-drift marker instead of in-source connected-surface policy"
-        connected_surface_discretion_behavior_name;
+         config-drift marker instead of in-source conversation policy"
+        conversation_routing_behavior_name;
       Printf.sprintf
         "Behavior prompt config drift: missing \
          config/prompts/behavior/%s.md. Do not improvise connector \
          conversation policy; ask the operator to restore the missing \
-         behavior prompt file before relying on connected-surface context."
-        connected_surface_discretion_behavior_name
+         behavior prompt file before relying on conversation context."
+        conversation_routing_behavior_name
 
 let board_event_kind_label = function
   | Keeper_world_observation.Board_post_created -> "post_created"
@@ -294,7 +292,7 @@ let format_scheduled_automation_summary
            Buffer.add_char ubuf '\n')
         summary.items;
       Buffer.add_string ubuf
-        "- A due Schedule wakes the Keeper lane and grants no effect \
+        "- A due Schedule wakes the Keeper and grants no effect \
          authority.\n");
     Buffer.add_char ubuf '\n';
     Some (Buffer.contents ubuf))
@@ -535,7 +533,7 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path :
       ~persona_extended
       ~keeper_name:meta.name
       ~active_goals
-      ~home_ground:(Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
+      ~workspace_root:(Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
       ()
   in
   let turn_intent_block = resolve_turn_intent_block () in
@@ -631,7 +629,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path
                  (Channel_gate_binding_store.binding_store_error_to_string
                     failure.error)))
           connector_presence_failures;
-        Buffer.add_string ubuf (connected_surface_discretion_prompt ());
+        Buffer.add_string ubuf (conversation_routing_prompt ());
         Buffer.add_char ubuf '\n';
         Buffer.add_char ubuf '\n';
         Some (Buffer.contents ubuf))
@@ -701,7 +699,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path
                   not (Keeper_world_observation.is_board_activity_event event))
                observation.pending_board_events)
         ]
-    (* Pending lane rows are rendered once in exact source order. Mention and
+    (* Pending message rows are rendered once in exact source order. Mention and
        scope remain typed for wake metrics, but splitting them into two prompt
        sections would reorder interleaved arrivals. *)
     | Keeper_context_layers.Pending_mentions ->

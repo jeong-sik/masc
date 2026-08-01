@@ -1586,7 +1586,7 @@ let internal_descriptors : t list =
        ~description:
          "List the active keeper tool surface from descriptors and registered schemas. \
           This is capability introspection, not connector content lookup. Use \
-          keeper_surface_read only for current connected-surface lane context. \
+          keeper_surface_read only for current conversation context. \
           No arguments."
        ~input_schema:empty_object_schema
        ~policy:(read_only_in_process_policy ())
@@ -1670,7 +1670,7 @@ let internal_descriptors : t list =
        ~id:"keeper.surface.read"
        ~name:"keeper_surface_read"
        ~description:
-         "Read recent conversation from one connected surface lane (dashboard, \
+         "Read recent messages from one conversation endpoint (dashboard, \
           discord, slack, or another connector label) with speaker identity \
           and a derived participant roster. Use when the user asks about a \
           current connector lane, recent lane messages, or participants. This \
@@ -1686,7 +1686,7 @@ let internal_descriptors : t list =
       ~id:"keeper.surface.post"
       ~name:"keeper_surface_post"
       ~description:
-        "Post a message to one connected surface lane: 'dashboard' (appears \
+        "Post a message to one conversation endpoint: 'dashboard' (appears \
          in the operator's chat transcript) or 'discord' (sends to the bound \
          channel). Posting to an unbound surface is an error."
       ~input_schema:surface_post_schema

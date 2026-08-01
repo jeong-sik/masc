@@ -166,7 +166,7 @@ network_mode = "none"
 
 Operational intent:
 
-- private writable lane: the keeper sandbox. The current local/docker storage path is `.masc/playground/<keeper>/...`, but keeper tools should use sandbox-relative paths such as `repos/<repo>` and `mind/<file>`.
+- private writable storage: the keeper sandbox. Keeper tools should use sandbox-relative paths such as `repos/<repo>` and `scratch/<file>`.
 - no arbitrary shared writable shell directory
 - `sandbox_profile=docker`는 `allowed_paths=["*"]`를 거부하고, private sandbox root 밖 경로도 허용하지 않는다
 - `MASC_KEEPER_SANDBOX_HARD_MODE=true`에서는 Docker container의 ambient operator credential 사용이 꺼지고, keeper TOML 필드로 credential을 선택하지 않는다.

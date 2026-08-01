@@ -29,8 +29,8 @@ type sync_result = {
   failed : (string * string) list;
 }
 (** Outcome of one prompt asset sync pass. Entries are embedded asset
-    paths (e.g. [prompts/keeper.world.md]); [removed] contains retired
-    distribution assets deleted from the runtime directory, and [failed]
+    paths (e.g. [prompts/keeper.world.md]); [removed] contains distribution
+    assets deleted from the runtime directory, and [failed]
     pairs the path with the error message. *)
 
 val sync_prompt_assets :
@@ -43,10 +43,10 @@ val sync_prompt_assets :
     assets (#20929). Only entries under [prompts/] in [files] are
     considered; each is written into [prompts_dir] when missing or when
     its content differs from the embedded copy. Identical files are left
-    untouched. The embedded cumulative managed-assets manifest identifies
-    distribution-owned paths; a managed path absent from the current embedded
-    assets is removed. Runtime-only paths absent from that manifest are
-    operator-owned and preserved.
+    untouched. The embedded managed-assets manifest must exactly equal the
+    current embedded prompt set. The runtime prompt directory is an exact
+    distribution-owned projection: paths absent from the current manifest are
+    removed, then the runtime manifest is replaced with the current one.
 
     Overwrite-on-differ is safe by design: operator prompt customization
     lives in prompt_overrides.json (replayed after directory load), so a
@@ -57,8 +57,10 @@ val sync_prompt_assets :
     [read]/[files] are typically [Embedded_config.read] /
     [Embedded_config.file_list], passed in by the server bootstrap so
     this module stays asset-source agnostic (and unit-testable).
-    Deletion is fail-closed: an absent, malformed, incomplete, or unsafe
-    manifest records an explicit [failed] entry and no retired path is removed.
+    Deletion is fail-closed: a malformed, incomplete, or unsafe manifest or an
+    unreadable runtime tree records an explicit [failed] entry and no path is
+    removed. Operator customization lives in [prompt_overrides.json], outside
+    this directory.
     [Eio.Cancel.Cancelled] propagates; per-file [Sys_error] is recorded in
     [failed] without aborting the pass. *)
 

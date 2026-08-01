@@ -213,7 +213,7 @@ let handle_keeper_sandbox_status ctx args : tool_result =
           else None
         in
         Keeper_sandbox_control.live_status_json
-          ~include_preflight ?preflight_override
+          ~include_preflight ~include_repository_checkouts:false ?preflight_override
           ~config:ctx.config ~meta ~timeout_sec ~verbose ()
       in
       let items =

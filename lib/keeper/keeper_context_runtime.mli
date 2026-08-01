@@ -212,7 +212,7 @@ val build_keeper_system_prompt
   :  instructions:string
   -> ?persona_extended:string
   -> ?keeper_name:string
-  -> ?home_ground:string
+  -> ?workspace_root:string
   -> ?active_goals:(string * string) list
   -> unit
   -> string

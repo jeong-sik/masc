@@ -35,8 +35,6 @@ val resolve_keeper_target_path :
   (string, Keeper_alerting_path.keeper_path_rejection) result
 val sanitize_keeper_name : string -> string
 val playground_path_of_keeper : string -> string
-val playground_mind_path : string -> string
-val playground_repos_path : string -> string
 val effective_allowed_paths : meta:keeper_meta -> string list
 val effective_write_allowed_paths : meta:keeper_meta -> string list
 val resolve_keeper_read_path :

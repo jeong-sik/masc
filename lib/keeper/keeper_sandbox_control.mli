@@ -47,19 +47,20 @@ val cleanup_stale :
   unit ->
   Keeper_sandbox_runtime.cleanup_result
 
-val playground_repos_json :
+val repository_checkouts_json :
   config:Workspace.config ->
   meta:keeper_meta ->
   Yojson.Safe.t
-(** Observe cached and filesystem-visible playground repository directories.
-    This projection never invokes a product CLI, authorizes or denies access,
-    or emits policy verdict fields. *)
+(** Inspect Keeper-visible repository checkouts. Repository identity comes
+    from the repository catalog; execution availability comes from the
+    checkout directory; freshness is measured against the local tracking ref.
+    Missing or ambiguous evidence is returned as an explicit typed state. *)
 
 val live_status_json :
   ?include_preflight:bool ->
   ?preflight_override:Yojson.Safe.t option ->
   ?containers_override:(Keeper_sandbox_runtime.live_container list, string) result ->
-  ?include_playground_repos:bool ->
+  ?include_repository_checkouts:bool ->
   config:Workspace.config ->
   meta:keeper_meta ->
   timeout_sec:float ->
@@ -77,7 +78,7 @@ val live_status_json :
     Docker listing and filter it by keeper in memory.  Without it the
     render performs its own keeper-scoped Docker listing.
 
-    [include_playground_repos=false] skips playground directory observation for
+    [include_repository_checkouts=false] skips Git checkout inspection for
     dashboard hot paths. *)
 
 val preflight_status_json :

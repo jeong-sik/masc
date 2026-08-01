@@ -2,6 +2,7 @@ module Workspace = Masc.Workspace
 module Json = Yojson.Safe.Util
 module Keeper_registry = Masc.Keeper_registry
 module Keeper_sandbox = Masc.Keeper_sandbox
+module Keeper_sandbox_control = Masc.Keeper_sandbox_control
 module Keeper_tool_filesystem_runtime = Masc.Keeper_tool_filesystem_runtime
 module Keeper_tool_shared_runtime = Masc.Keeper_tool_shared_runtime
 
@@ -182,25 +183,76 @@ let allow_repo ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) repo_id =
   | Error e -> Alcotest.fail ("failed to seed keeper repo mapping: " ^ e)
 ;;
 
-let test_visible_mind_read_resolves_to_private_storage () =
+let run_git_or_fail ~cwd args =
+  match Repo_git.run_git ~cwd args with
+  | Ok lines -> lines
+  | Error error ->
+    Alcotest.failf "git %s failed: %s" (String.concat " " args) error
+;;
+
+let test_repository_checkout_projection_reports_typed_freshness () =
   setup
   @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
-  let target = Filename.concat playground "mind/README.md" in
-  write_file target "visible mind\n";
+  allow_repo ~config ~meta "masc";
+  let checkout = Filename.concat playground "repos/masc" in
+  ensure_dir checkout;
+  ignore (run_git_or_fail ~cwd:checkout [ "init"; "-b"; "fixture" ]);
+  ignore (run_git_or_fail ~cwd:checkout [ "config"; "user.email"; "test@example.com" ]);
+  ignore (run_git_or_fail ~cwd:checkout [ "config"; "user.name"; "Test" ]);
+  ignore
+    (run_git_or_fail ~cwd:checkout
+       [ "remote"; "add"; "origin"; "https://example.invalid/masc.git" ]);
+  write_file (Filename.concat checkout "README.md") "first\n";
+  ignore (run_git_or_fail ~cwd:checkout [ "add"; "README.md" ]);
+  ignore (run_git_or_fail ~cwd:checkout [ "commit"; "-m"; "first" ]);
+  ignore
+    (run_git_or_fail ~cwd:checkout
+       [ "update-ref"; "refs/remotes/origin/main"; "HEAD" ]);
+  write_file (Filename.concat checkout "README.md") "second\n";
+  ignore (run_git_or_fail ~cwd:checkout [ "add"; "README.md" ]);
+  ignore (run_git_or_fail ~cwd:checkout [ "commit"; "-m"; "second" ]);
+  write_file (Filename.concat checkout "dirty.txt") "dirty\n";
+  let projection =
+    Keeper_sandbox_control.repository_checkouts_json ~config ~meta
+  in
+  let entry =
+    projection |> Json.member "entries" |> Json.to_list |> List.hd
+  in
+  Alcotest.(check string) "checkout" "masc"
+    (entry |> Json.member "checkout_name" |> Json.to_string);
+  Alcotest.(check string) "catalog state" "registered"
+    (entry |> Json.member "catalog" |> Json.member "state" |> Json.to_string);
+  Alcotest.(check string) "repository id" "masc"
+    (entry |> Json.member "catalog" |> Json.member "repository_id" |> Json.to_string);
+  Alcotest.(check string) "branch" "fixture"
+    (entry |> Json.member "branch" |> Json.to_string);
+  Alcotest.(check bool) "dirty" true
+    (entry |> Json.member "dirty" |> Json.to_bool);
+  Alcotest.(check string) "freshness" "ahead"
+    (entry |> Json.member "freshness" |> Json.member "state" |> Json.to_string);
+  Alcotest.(check int) "ahead count" 1
+    (entry |> Json.member "freshness" |> Json.member "ahead" |> Json.to_int)
+;;
+
+let test_visible_scratch_read_resolves_to_private_storage () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  let target = Filename.concat playground "scratch/README.md" in
+  write_file target "visible scratch\n";
   match
     Keeper_tool_shared_runtime.resolve_keeper_read_path
       ~config
       ~meta
-      ~raw_path:"mind/README.md"
+      ~raw_path:"scratch/README.md"
   with
   | Ok path -> Alcotest.(check string) "resolved path" target path
-  | Error e -> Alcotest.fail ("visible mind path should resolve: " ^ e)
+  | Error e -> Alcotest.fail ("visible scratch path should resolve: " ^ e)
 ;;
 
 let test_absolute_playground_path_is_allowed () =
   setup
   @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
-  let target = Filename.concat playground "mind/README.md" in
+  let target = Filename.concat playground "scratch/README.md" in
   write_file target "private storage fixture\n";
   (match
      Keeper_tool_shared_runtime.resolve_keeper_read_path
@@ -216,13 +268,13 @@ let test_absolute_playground_path_is_allowed () =
 let test_relative_path_does_not_depend_on_project_root_allowlist () =
   setup
   @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
-  let target = Filename.concat playground "mind/README.md" in
-  let project_root_meta = { meta with allowed_paths = [ "mind" ] } in
+  let target = Filename.concat playground "scratch/README.md" in
+  let project_root_meta = { meta with allowed_paths = [ "scratch" ] } in
   match
     Keeper_tool_shared_runtime.resolve_keeper_read_path
       ~config
       ~meta:project_root_meta
-      ~raw_path:"mind/README.md"
+      ~raw_path:"scratch/README.md"
   with
   | Ok path -> Alcotest.(check string) "relative path stays in playground" target path
   | Error e -> Alcotest.fail ("relative path should resolve in playground: " ^ e)
@@ -317,7 +369,7 @@ let test_repo_prefixed_missing_read_preserves_exact_input () =
     (Json.member "available_repos" json = `Null)
 ;;
 
-let test_write_visible_mind_path () =
+let test_write_visible_scratch_path () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker ~always_allow:true
   @@ fun ~config ~meta ~playground ~publication_recovery ->
   let raw =
@@ -328,7 +380,7 @@ let test_write_visible_mind_path () =
       ~publication_recovery
       ~args:
         (`Assoc
-            [ "path", `String "mind/allowed.txt"
+            [ "path", `String "scratch/allowed.txt"
             ; "mode", `String "overwrite"
             ; "content", `String "allowed"
             ])
@@ -338,7 +390,7 @@ let test_write_visible_mind_path () =
   Alcotest.(check string)
     "content landed"
     "allowed"
-    (Fs_compat.load_file (Filename.concat playground "mind/allowed.txt"))
+    (Fs_compat.load_file (Filename.concat playground "scratch/allowed.txt"))
 ;;
 
 let () =
@@ -346,9 +398,9 @@ let () =
     "Keeper_visible_path_projection"
     [ ( "shared_projection"
       , [ Alcotest.test_case
-            "visible mind read resolves to private storage"
+            "visible scratch read resolves to private storage"
             `Quick
-            test_visible_mind_read_resolves_to_private_storage
+            test_visible_scratch_read_resolves_to_private_storage
         ; Alcotest.test_case
             "absolute playground storage read is allowed"
             `Quick
@@ -368,9 +420,9 @@ let () =
             `Quick
             test_read_with_visible_repo_cwd_and_relative_file_path
         ; Alcotest.test_case
-            "Write visible mind path"
+            "Write visible scratch path"
             `Quick
-            test_write_visible_mind_path
+            test_write_visible_scratch_path
         ; Alcotest.test_case
             "repository backlog.json remains readable"
             `Quick
@@ -379,6 +431,12 @@ let () =
             "repo-prefixed missing read surfaces playground hint"
             `Quick
             test_repo_prefixed_missing_read_preserves_exact_input
+        ] )
+    ; ( "repository_checkouts"
+      , [ Alcotest.test_case
+            "reports catalog identity, dirty state, and freshness"
+            `Quick
+            test_repository_checkout_projection_reports_typed_freshness
         ] )
     ]
 ;;

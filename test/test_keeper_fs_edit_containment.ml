@@ -165,7 +165,7 @@ let test_docker_write_defers_explicit_root () =
 let test_docker_write_allows_playground_without_gate () =
   setup
   @@ fun ~config ~meta ~playground ~publication_recovery ->
-  let path = Filename.concat playground "mind/allowed.txt" in
+  let path = Filename.concat playground "scratch/allowed.txt" in
   ensure_dir (Filename.dirname path);
   let raw =
     handle_file_write

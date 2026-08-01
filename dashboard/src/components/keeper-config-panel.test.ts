@@ -48,7 +48,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
         capabilities: { key: 'keeper.capabilities', source: 'file', text: 'capabilities text' },
       },
       effective_system_prompt: 'full prompt',
-      unified_system_prompt: 'unified prompt',
+      assembled_system_prompt: 'assembled prompt',
       unified_user_message_preview: 'world state',
     },
     execution: {

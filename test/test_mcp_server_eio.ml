@@ -2615,9 +2615,6 @@ let test_handle_request_prompts_get_tool_help () =
     (messages <> []);
   cleanup_dir base_path
 
-(* test_handle_request_prompts_get_command_truth_filters_run_id removed
-   (CP purge: Command_plane_v2 event_record + append_event deleted) *)
-
 let test_handle_request_resources_list_includes_tool_help () =
   with_env "MASC_LIST_PAGE_SIZE" "10" @@ fun () ->
   Eio_main.run @@ fun env ->
@@ -2985,7 +2982,6 @@ let eio_tests = [
   "handle prompts/list rejects invalid cursor", `Quick,
     test_handle_request_prompts_list_rejects_invalid_cursor;
   "handle prompts/get tool_help", `Quick, test_handle_request_prompts_get_tool_help;
-  (* handle prompts/get command_truth filters run_id removed (CP purge) *)
   "handle resources/list includes tool-help", `Quick, test_handle_request_resources_list_includes_tool_help;
   "handle resources/list rejects unknown field", `Quick,
     test_handle_request_resources_list_rejects_unknown_field;
@@ -3014,7 +3010,6 @@ let eio_tests = [
   "handle tools/list with placeholder flag", `Quick, test_handle_request_tools_list_with_placeholder_flag;
   "handle tools/list include hidden metadata", `Quick,
     test_handle_request_tools_list_include_hidden_metadata;
-  (* execution_session_turn hide test removed — team session cleanup *)
   "handle tools/list include usage metadata", `Quick,
     test_handle_request_tools_list_include_usage_metadata;
   "handle tools/list paginates", `Quick, test_handle_request_tools_list_paginates;
@@ -3051,7 +3046,6 @@ let eio_tests = [
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
   (* TRPG tool tests removed — modules archived *)
-  (* execution_session_step direct call test removed — team session cleanup *)
   "explicit agent_name not overridden", `Quick, test_execute_tool_explicit_agent_name_not_overridden;
   "tool-domain agent_name does not reuse bound nickname", `Quick,
     test_execute_tool_domain_agent_name_does_not_reuse_joined_nickname;

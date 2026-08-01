@@ -44,10 +44,9 @@ val compose_namespace_truth_snapshot :
   initialized:bool ->
   shell_json:Yojson.Safe.t ->
   execution_json:Yojson.Safe.t ->
-  command_summary_json:Yojson.Safe.t ->
   Yojson.Safe.t
 (** Composes the full namespace-truth snapshot from the
-    shell / execution / command-summary inputs.  Folds in
+    shell and execution inputs.  Folds in
     {!dashboard_namespace_truth_focus_json} for the focus
     block and the cached pending-confirm summary
     (TTL'd 10 s, stale-served up to 30 s).  Used by

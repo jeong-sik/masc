@@ -571,11 +571,8 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_oas_boundary
-  ; test_contract_risk removed (team session cleanup)
-  ; test_contract_composer removed (team session cleanup)
   test_task_completion_claim
   test_ocaml_north_star_task_lifecycle
-  ; test_risk_digest removed (team session cleanup)
   test_tool_blob_store
   test_tool_bridge_externalize
   test_artifacts_endpoint
@@ -915,7 +912,6 @@
   test_dashboard_workspace
   test_dashboard_briefing
   test_dashboard_briefing_sections
-  ; test_command_plane_help removed (CP purge)
   test_dashboard_cache
   test_dashboard_http_core
   test_eval_feed
@@ -969,7 +965,6 @@
   test_resilience
   test_common
   test_workspace_messages_raw
-  ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
   test_local_runtime_pool
   test_dashboard_render_timing_9766
   test_dashboard_keeper_cost_aggregates
@@ -1024,8 +1019,6 @@
   test_eval_harness
   test_tool_board_coverage
   test_yojson_type_error_board
-  ; test_proof_criteria removed (team session cleanup)
-  ; test_tree_index removed (CP purge)
   test_tool_registry
   test_tool_registry_consistency
   test_tool_dispatch
@@ -1078,7 +1071,6 @@
   test_dashboard_workspace
   test_dashboard_briefing
   test_dashboard_briefing_sections
-  ; test_command_plane_help removed (CP purge)
   test_dashboard_cache
   test_dashboard_http_core
   test_eval_feed
@@ -1132,7 +1124,6 @@
   test_resilience
   test_common
   test_workspace_messages_raw
-  ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
   test_local_runtime_pool
   test_dashboard_render_timing_9766
   test_dashboard_keeper_cost_aggregates
@@ -1187,7 +1178,6 @@
   test_eval_harness
   test_tool_board_coverage
   test_yojson_type_error_board
-  ; test_tree_index removed (CP purge)
   test_tool_registry
   test_tool_registry_consistency
   test_tool_dispatch
@@ -1604,12 +1594,6 @@
 
 ; Special: Multi-module test suites
 
-; test_command_plane_v2 removed (CP purge)
-
-; test_cp_unit_descendant_ids removed (CP purge)
-
-; test_failover_leader removed (CP purge)
-
 ; Keeper Tool Matrix — shared case modules as a library
 
 (library
@@ -1628,13 +1612,6 @@
 ; Special: Heartbeat/keeper minimal deps
 
 ; Executables (benchmarks, distributed tests, tools)
-
-; test_cp_search_fabric_benchmark removed (CP purge)
-
-(executable
- (name test_repo_synthesis_benchmark)
- (modules test_repo_synthesis_benchmark)
- (libraries masc_test_deps))
 
 (executable
  (name tool_call_quality_benchmark_cli)

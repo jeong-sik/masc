@@ -119,7 +119,7 @@ let normalize_action_target_type target_type =
 
 let default_target_type_for action_type =
   match action_type with
-  | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" | "social_sweep"
+  | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject"
     -> Operator_action_constants.workspace_target_type
   | "keeper_message" | "keeper_probe" -> Operator_action_constants.keeper_target_type
   | action when String.equal action Operator_action_constants.keeper_recover ->
@@ -235,5 +235,3 @@ let require_payload_field payload key error_message =
   match get_string_opt payload key with
   | Some value -> Ok value
   | None -> Error error_message
-
-(* parse_turn_kind removed — team session turn types deleted. *)

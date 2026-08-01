@@ -166,36 +166,6 @@ let execution_summary_json execution_json =
           ("keepers", `Int (List.length execution_keepers));
         ]
 
-let namespace_truth_command_summary_json command_summary_json =
-  let command_ops = json_assoc_field "operations" command_summary_json in
-  let command_detachments = json_assoc_field "detachments" command_summary_json in
-  let command_alerts = json_assoc_field "alerts" command_summary_json in
-  let command_decisions = json_assoc_field "decisions" command_summary_json in
-  `Assoc
-    [
-      ( "active_operations",
-        `Int
-          (json_int_field "active" (json_assoc_field "summary" command_ops)
-             ~default:0) );
-      ( "active_detachments",
-        `Int
-          (json_int_field "active" (json_assoc_field "summary" command_detachments)
-             ~default:0) );
-      ( "pending_approvals",
-        `Int
-          (json_int_field "pending" (json_assoc_field "summary" command_decisions)
-             ~default:0) );
-      ( "bad_alerts",
-        `Int
-          (json_int_field "bad" (json_assoc_field "summary" command_alerts)
-             ~default:0) );
-      ( "warn_alerts",
-        `Int
-          (json_int_field "warn" (json_assoc_field "summary" command_alerts)
-             ~default:0) );
-      ("provenance", `String "truth");
-    ]
-
 let namespace_truth_dashboard_surface = "/api/v1/dashboard/namespace-truth"
 let namespace_truth_source = "namespace_truth_read_model"
 
@@ -215,7 +185,6 @@ let namespace_truth_retention_json ~(config : Workspace.config) =
       ("workspace_path", `String config.workspace_path);
       ("shell_input", `String "/api/v1/dashboard/shell");
       ("execution_input", `String "/api/v1/dashboard/execution");
-      ("command_input", `String "command_summary_json");
       ( "cache_policy",
         `String "proactive_execution_cache_last_good_shell_fallback" );
     ]
@@ -620,7 +589,7 @@ let runtime_count_authority_json ~runtime_count ~shell_counts
     ]
 
 let compose_namespace_truth_snapshot ~(config : Workspace.config) ~initialized ~shell_json
-    ~execution_json ~command_summary_json =
+    ~execution_json =
   let generated_at = Masc_domain.now_iso () in
   let pending_confirm_summary = pending_confirm_summary_cached config in
   let top_queue = execution_top_queue execution_json in
@@ -629,7 +598,6 @@ let compose_namespace_truth_snapshot ~(config : Workspace.config) ~initialized ~
     derive_readiness_and_attention ~execution_json ~execution_summary
       ~pending_confirm_summary
   in
-  let command_summary = namespace_truth_command_summary_json command_summary_json in
   let shell_counts = json_assoc_field "counts" shell_json in
   let configured_keepers =
     Option.value ~default:`Null (Json_util.assoc_member_opt "configured_keepers" shell_json)
@@ -668,7 +636,6 @@ let compose_namespace_truth_snapshot ~(config : Workspace.config) ~initialized ~
             ("top_queue", top_queue);
             ("provenance", `String "derived");
           ] );
-      ("command", command_summary);
       ( "operator",
         `Assoc
           [

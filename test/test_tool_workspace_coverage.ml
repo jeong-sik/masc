@@ -822,7 +822,7 @@ let () =
          (Planning_eio.set_deliverable
             ctx.config
             ~task_id:"task-001"
-            ~content:"Task-001 completed. stale control-plane artifact.");
+            ~content:"Task-001 completed. stale operator artifact.");
        match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
        | Some r -> let result = Tool_result.message r in let success = Tool_result.is_success r in
          assert success;

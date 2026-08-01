@@ -4,7 +4,6 @@ import {
   mergeMessages,
   normalizeDashboardRuntimeResolution,
   normalizeExecutionQueueItem,
-  normalizeExecutionSessionBrief,
   normalizeMessage,
   normalizeTask,
   normalizeTaskStatus,
@@ -44,51 +43,6 @@ function message(overrides: Partial<Message> = {}): Message {
     ...overrides,
   }
 }
-
-describe('normalizeExecutionSessionBrief', () => {
-  it('does not promote retired workspace-only payloads to namespace', () => {
-    const normalized = normalizeExecutionSessionBrief({
-      session_id: 'session-1',
-      goal: 'legacy payload',
-      workspace: 'default',
-    })
-    expect(normalized).toMatchObject({
-      session_id: 'session-1',
-      goal: 'legacy payload',
-      namespace: null,
-    })
-    expect(Object.prototype.hasOwnProperty.call(normalized ?? {}, 'workspace')).toBe(false)
-  })
-
-  it('keeps namespace-only payloads canonical without a workspace alias', () => {
-    const normalized = normalizeExecutionSessionBrief({
-      session_id: 'session-2',
-      goal: 'flattened payload',
-      namespace: 'default',
-    })
-    expect(Object.prototype.hasOwnProperty.call(normalized ?? {}, 'workspace')).toBe(false)
-    expect(normalized).toMatchObject({
-      session_id: 'session-2',
-      goal: 'flattened payload',
-      namespace: 'default',
-    })
-  })
-
-  it('ignores retired workspace when namespace is present', () => {
-    const normalized = normalizeExecutionSessionBrief({
-      session_id: 'session-3',
-      goal: 'dual payload',
-      namespace: 'default',
-      workspace: 'legacy-workspace',
-    })
-    expect(normalized).toMatchObject({
-      session_id: 'session-3',
-      goal: 'dual payload',
-      namespace: 'default',
-    })
-    expect(Object.prototype.hasOwnProperty.call(normalized ?? {}, 'workspace')).toBe(false)
-  })
-})
 
 describe('normalizeExecutionQueueItem', () => {
   it('accepts keeper stopped-reaction items with runtime trust', () => {

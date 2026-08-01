@@ -136,10 +136,6 @@ function SessionMeta({ agentName }: { agentName: string }) {
     meta.push({ label: '위치', value: brief.where })
   }
 
-  if (brief?.related_session_id) {
-    meta.push({ label: '세션', value: brief.related_session_id })
-  }
-
   if (timeline?.summary?.active_duration_minutes) {
     const mins = Math.round(timeline.summary.active_duration_minutes)
     meta.push({ label: '활동 시간', value: `${mins}분` })

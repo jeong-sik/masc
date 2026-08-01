@@ -83,7 +83,7 @@ check_rule "R2-loopback-literal" 1 \
 # SSOT-R4 — config filename literal.
 # Tracked: #8414. Helper to be added (Config_filenames) in the fix.
 # No exclusion — every site should eventually route through the helper.
-check_rule "R4-config-filename" 2 \
+check_rule "R4-config-filename" 0 \
   "Config_filenames.<name> (add helper per #8414)" \
   '"(runtime\.json|keeper_runtime\.toml|tool_policy\.toml)"' \
   '' \
@@ -101,11 +101,10 @@ check_rule "R5-health-path" 0 \
 # SSOT-R6 — no home-anchored MASC runtime root. Runtime state must resolve
 # from an explicit base path and then append .masc.
 #
-# The baseline count of 3 is intentional: all matches are in docs that
+# The baseline count of 1 is intentional: the match is in documentation that
 # explicitly warn against bare home-anchored .masc roots (e.g. tilde or
-# HOME env expansion). See KEEPER-USER-MANUAL.md and
-# BOOT-ENV-STATE-INVENTORY.md. No code or script uses such a root.
-check_rule "R6-home-masc-root" 3 \
+# HOME env expansion). See KEEPER-USER-MANUAL.md. No code or script uses such a root.
+check_rule "R6-home-masc-root" 1 \
   "<base-path>/.masc with explicit MASC_BASE_PATH or --base-path" \
   '(\$HOME|\$\{HOME[^}]*\}|~)/[^[:space:]`'\''"]*\.masc([/[:space:]`'\''".,)]|$)' \
   '' \

@@ -2,7 +2,6 @@ open Operator_pending_confirm
 open Result.Syntax
 
 include Operator_digest_types
-(* Operator_digest_session removed — team session cleanup *)
 open Operator_digest_guidance
 
 (* Retained from Operator_digest_session — used for workspace-level attention health *)

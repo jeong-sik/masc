@@ -5,7 +5,6 @@ type t =
   | Broadcast
   | Namespace_pause
   | Namespace_resume
-  | Social_sweep
   | Keeper_message
   | Keeper_probe
   | Keeper_recover

@@ -121,13 +121,6 @@ val dashboard_briefing_http_json :
   Httpun.Request.t ->
   Yojson.Safe.t
 
-val dashboard_session_http_json :
-  state:Mcp_server.server_state ->
-  sw:Eio.Switch.t ->
-  clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  Httpun.Request.t ->
-  Yojson.Safe.t
-
 val dashboard_briefing_sections_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->

@@ -4,7 +4,6 @@ import { html } from 'htm/preact'
 import { CollapsibleSection } from './common/collapsible'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
-import { CopyIdButton } from './common/copy-id-button'
 import { workerBriefForAgent } from './agent-detail-state'
 import { trimText } from '../lib/truncate'
 
@@ -37,13 +36,6 @@ export function AgentWorkerBrief({ agentName }: { agentName: string }) {
           <${WorkerInfoRow}>
             <${DetailLabel}>출력</${DetailLabel}>
             <span class="agent-worker-brief__preview">${trimText(worker.recent_output_preview, 200)}</span>
-          </${WorkerInfoRow}>
-        ` : null}
-        ${worker.related_session_id ? html`
-          <${WorkerInfoRow}>
-            <${DetailLabel}>세션</${DetailLabel}>
-            <span class="font-mono truncate text-[var(--fs-11)]" title=${worker.related_session_id}>${worker.related_session_id}</span>
-            <${CopyIdButton} value=${worker.related_session_id} label="session_id" size=${10} />
           </${WorkerInfoRow}>
         ` : null}
         ${worker.last_signal_at ? html`

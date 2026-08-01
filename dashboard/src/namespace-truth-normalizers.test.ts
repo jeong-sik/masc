@@ -15,7 +15,6 @@ describe('normalizeNamespaceTruth', () => {
     expect(result.root.status).toBeNull()
     expect(result.root.configured_keepers).toBeUndefined()
     expect(result.execution?.summary).toBeNull()
-    expect(result.command?.active_operations).toBeUndefined()
     expect(result.operator?.pending_confirm_summary).toBeNull()
     expect(result.focus).toBeNull()
   })
@@ -55,7 +54,6 @@ describe('normalizeNamespaceTruth', () => {
         workspace_path: '/Users/dancer/me',
         shell_input: '/api/v1/dashboard/shell',
         execution_input: '/api/v1/dashboard/execution',
-        command_input: 'command_summary_json',
         cache_policy: 'proactive_execution_cache_last_good_shell_fallback',
       },
     })
@@ -248,33 +246,6 @@ describe('normalizeNamespaceTruth', () => {
     expect(result.execution?.provenance).toBe('runtime')
     expect(result.execution?.summary).toBeNull()
     expect(result.execution?.top_queue).toBeNull()
-  })
-
-  // ── command block ──
-
-  it('extracts command block numeric fields', () => {
-    const result = normalizeNamespaceTruth({
-      command: {
-        active_operations: 3,
-        active_detachments: 1,
-        pending_approvals: 5,
-        bad_alerts: 2,
-        warn_alerts: 7,
-        provenance: 'alert-system',
-      },
-    })
-    expect(result.command?.active_operations).toBe(3)
-    expect(result.command?.active_detachments).toBe(1)
-    expect(result.command?.pending_approvals).toBe(5)
-    expect(result.command?.bad_alerts).toBe(2)
-    expect(result.command?.warn_alerts).toBe(7)
-    expect(result.command?.provenance).toBe('alert-system')
-  })
-
-  it('defaults command fields to undefined', () => {
-    const result = normalizeNamespaceTruth({})
-    expect(result.command?.active_operations).toBeUndefined()
-    expect(result.command?.provenance).toBeNull()
   })
 
   // ── operator block ──
@@ -486,10 +457,6 @@ describe('normalizeNamespaceTruth', () => {
       execution: {
         provenance: 'runtime',
       },
-      command: {
-        active_operations: 1,
-        bad_alerts: 0,
-      },
       operator: {
         provenance: 'operator',
       },
@@ -499,7 +466,6 @@ describe('normalizeNamespaceTruth', () => {
     expect(result.root.counts?.agents).toBe(3)
     expect(result.root.configured_keepers).toBe(4)
     expect(result.execution?.provenance).toBe('runtime')
-    expect(result.command?.active_operations).toBe(1)
     expect(result.operator?.provenance).toBe('operator')
     expect(result.focus).toBeNull()
   })

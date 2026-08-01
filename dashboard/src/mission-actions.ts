@@ -7,15 +7,11 @@ import {
   missionBriefing,
   missionBriefingLoading,
   missionBriefingError,
-  missionSessionDetail,
-  missionSessionDetailLoading,
-  missionSessionDetailError,
   clearMissionBriefingPoll,
   scheduleMissionBriefingPoll,
 } from './mission-signals'
 import {
   normalizeMission,
-  normalizeMissionSessionDetail,
   normalizeMissionBriefing,
 } from './mission-normalizers'
 import type { DashboardMissionResponse } from './types'
@@ -32,7 +28,6 @@ interface MissionRefreshOptions {
 function isMissionInitializingPayload(value: DashboardMissionResponse): boolean {
   return (
     value.summary.workspace_health === 'initializing'
-    && value.sessions.length === 0
     && value.agent_briefs.length === 0
     && value.keeper_briefs.length === 0
     && value.attention_queue.length === 0
@@ -68,33 +63,6 @@ export async function refreshMissionSnapshot(
     }
   })()
   return inflightMissionSnapshotRefresh
-}
-
-export async function refreshMissionSessionDetail(
-  sessionId: string | null | undefined,
-  opts?: { signal?: AbortSignal },
-): Promise<void> {
-  if (!sessionId) {
-    missionSessionDetail.value = null
-    missionSessionDetailError.value = null
-    missionSessionDetailLoading.value = false
-    return
-  }
-  missionSessionDetailLoading.value = true
-  missionSessionDetailError.value = null
-  try {
-    const { fetchDashboardMissionSession } = await import('./api/dashboard-mission')
-    const raw = await fetchDashboardMissionSession(sessionId, { signal: opts?.signal })
-    if (opts?.signal?.aborted) return
-    missionSessionDetail.value = normalizeMissionSessionDetail(raw)
-  } catch (err) {
-    if (isAbortError(err)) return
-    missionSessionDetailError.value = errorMessageOr(err, 'Failed to load session detail')
-  } finally {
-    if (!opts?.signal?.aborted) {
-      missionSessionDetailLoading.value = false
-    }
-  }
 }
 
 export async function refreshMissionBriefing(

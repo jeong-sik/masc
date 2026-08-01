@@ -1,4 +1,4 @@
-include Dashboard_execution_sessions
+include Dashboard_execution_helpers
 
 (** Keeper lifecycle phase — deterministic from status, context ratio,
     and activity timestamps. Serialized to string at JSON boundary only. *)
@@ -84,7 +84,6 @@ let worker_state_of_agent
     ~(now_ts : float)
     ~(messages_by_agent : (string, float * Masc_domain.message) Hashtbl.t)
     ~(tasks : Masc_domain.task list)
-    ?related_session_id ?related_operation_id
     (agent : Masc_domain.agent) : worker_context =
   let key = String.lowercase_ascii (String.trim agent.name) in
   let message_opt = Hashtbl.find_opt messages_by_agent key in
@@ -172,7 +171,6 @@ let worker_state_of_agent
   {
     tone_rank = Dashboard_utils.tone_rank tone;
     last_signal_ts;
-    related_session_id;
     json =
       `Assoc
         [
@@ -196,8 +194,6 @@ let worker_state_of_agent
           ("signal_truth", `String signal_truth);
           ("evidence_source", `String evidence_source);
           ("active_task_count", `Int active_task_count);
-          ("related_session_id", Json_util.string_opt_to_json related_session_id);
-          ("related_operation_id", Json_util.string_opt_to_json related_operation_id);
           ("emoji", `String profile.emoji);
           ("koreanName", `String profile.korean_name);
           ("model", `Null);
@@ -206,8 +202,7 @@ let worker_state_of_agent
         ];
   }
 
-let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
-    continuity_context =
+let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
   let name = string_field "name" keeper in
   let agent = member_assoc "agent" keeper in
   let status = string_field "status" keeper in
@@ -250,7 +245,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   let turn_count = int_field_default "turn_count" keeper in
   let generation = int_field_default "generation" keeper in
   let goal_count = List.length (list_field "active_goal_ids" keeper) in
-  (* The control plane publishes a pause override in the same [status] field as
+  (* Operator observation publishes a pause override in the same [status] field as
      the surface status, so this classifies the published vocabulary rather than
      the surface subset. A paused keeper is neither offline nor running: it is
      not failing, and it is also not going to make progress, so it carries its
@@ -344,7 +339,6 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   {
     tone_rank = Dashboard_utils.tone_rank tone;
     last_signal_ts;
-    related_session_id;
     json =
       `Assoc
         ([
@@ -364,7 +358,6 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
            ("context_metrics_unavailable", context_metrics_unavailable);
            ("continuity", `String continuity);
            ("lifecycle", `String (keeper_lifecycle_to_string lifecycle));
-           ("related_session_id", Json_util.string_opt_to_json related_session_id);
            ("recent_input_preview", Json_util.string_opt_to_json recent_input_preview);
            ("recent_output_preview", Json_util.string_opt_to_json recent_output_preview);
            ("recent_tool_names", Json_util.json_string_list recent_tool_names);
@@ -416,14 +409,11 @@ let task_operation_updated_at (task : Masc_domain.task) =
   | Masc_domain.Claimed { claimed_at; _ } -> claimed_at
   | Masc_domain.Todo -> task.created_at
 
-let task_operation_links (task : Masc_domain.task) =
-  match task.contract with
-  | Some contract -> contract.links
-  | None -> { Masc_domain.operation_id = None; session_id = None }
-
 let task_operation_id (task : Masc_domain.task) =
-  let links = task_operation_links task in
-  match String_util.trim_to_option (Option.value ~default:"" links.operation_id) with
+  let operation_id =
+    Option.bind task.contract (fun contract -> contract.links.operation_id)
+  in
+  match String_util.trim_to_option (Option.value ~default:"" operation_id) with
   | Some operation_id -> operation_id
   | None -> task.id
 
@@ -433,13 +423,9 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
          match task_operation_status task with
          | None -> None
          | Some status ->
-           let links = task_operation_links task in
            let operation_id = task_operation_id task in
            let updated_at = task_operation_updated_at task in
            let severity = task_operation_severity task in
-           let linked_session_id =
-             Option.bind links.session_id (fun value -> String_util.trim_to_option value)
-           in
            let last_seen_ts =
              Dashboard_utils.parse_iso_opt (Some updated_at) |> Option.value ~default:0.0
            in
@@ -448,8 +434,6 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
                operation_id;
                severity;
                last_seen_ts;
-               linked_session_id;
-               linked_detachment_id = None;
                json =
                  `Assoc
                    [
@@ -461,8 +445,6 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
                      ("source", `String "task_contract");
                      ("task_id", `String task.id);
                      ("severity", `String (Dashboard_utils.string_of_tone severity));
-                     ("linked_session_id", Json_util.string_opt_to_json linked_session_id);
-                     ("linked_detachment_id", `Null);
                      ( "handoff",
                        handoff_json ~surface:"dashboard_execution"
                          ?operation_id:(Some operation_id)
@@ -479,58 +461,23 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
          else Float.compare right.last_seen_ts left.last_seen_ts)
 
 let build_worker_support_briefs ~(now_ts : float) ~(tasks : Masc_domain.task list)
-    ~(agents : Masc_domain.agent list) ~(messages : Masc_domain.message list) session_contexts :
+    ~(agents : Masc_domain.agent list) ~(messages : Masc_domain.message list) :
     worker_context list =
   let messages_by_agent = last_message_map messages in
   agents
-  |> List.map (fun (agent : Masc_domain.agent) ->
-         let related =
-           related_session_for_member session_contexts agent.name
-         in
-         let related_session_id =
-           match related with
-           | Some session -> Some session.session_id
-           | None -> None
-         in
-         let related_operation_id =
-           match related with
-           | Some session -> session.linked_operation_id
-           | None -> None
-         in
-         worker_state_of_agent ~now_ts ~messages_by_agent ~tasks ?related_session_id
-           ?related_operation_id agent)
-  |> List.filter (fun (row : worker_context) ->
-         row.related_session_id <> None || string_field "tone" row.json <> "ok")
+  |> List.map (worker_state_of_agent ~now_ts ~messages_by_agent ~tasks)
+  |> List.filter (fun (row : worker_context) -> string_field "tone" row.json <> "ok")
   |> List.sort (fun (left : worker_context) (right : worker_context) ->
          let by_tone = Int.compare right.tone_rank left.tone_rank in
          if by_tone <> 0 then by_tone
          else Float.compare right.last_signal_ts left.last_signal_ts)
 
-let build_continuity_briefs ~(now_ts : float) keepers session_contexts :
-    continuity_context list =
+let build_continuity_briefs ~(now_ts : float) keepers : continuity_context list =
   keepers
   |> List.filter_map (fun keeper ->
          let name = string_field "name" keeper in
          if name = "" then None
-         else
-           let related_session =
-             related_session_for_member session_contexts name
-           in
-           let related_session_id =
-             match related_session with
-             | Some session -> Some session.session_id
-             | None -> (
-                 match String_util.trim_to_option (string_field "agent_name" keeper) with
-                 | Some agent_name -> (
-                     match related_session_for_member session_contexts agent_name with
-                     | Some session -> Some session.session_id
-                     | None -> None)
-                 | None -> None)
-           in
-           let row =
-             continuity_row_of_keeper ~now_ts ?related_session_id keeper
-           in
-           Some row)
+         else Some (continuity_row_of_keeper ~now_ts keeper))
   |> List.sort (fun (left : continuity_context) (right : continuity_context) ->
          let by_tone = Int.compare right.tone_rank left.tone_rank in
          if by_tone <> 0 then by_tone

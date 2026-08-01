@@ -1,38 +1,18 @@
 # Integrated Benchmark Runbook
 
-이 문서는 merged 기준 `masc`를 한 번에 검증할 때 쓰는 상위 runbook이다.
+`scripts/harness_integrated_benchmark.sh` is the current one-shot wrapper for
+Keeper fleet runtime evidence.
 
-핵심 원칙:
-
-- 새 benchmark substrate를 추가하지 않는다.
-- 이미 mainline에 들어간 harness를 순차 실행해서 layer별 regression만 분리해 읽는다.
-- default control lane은 keeper fleet benchmark proof다.
-- removed `swarm` / `team session` lanes는 이 runbook에 포함하지 않는다.
-- removed Command Plane search-fabric lane은 이 runbook에 포함하지 않는다.
-
-## Layer Map
-
-- `control`
-  - 18+ keeper runtime evidence proof
-  - harness: `./scripts/harness/workload/agent_swarm_live.sh`
-## One-Shot Entrypoint
+## Run
 
 ```bash
 ./scripts/harness_integrated_benchmark.sh
 ```
 
-기본 phase:
+The wrapper currently accepts one phase, `control`, backed by
+`scripts/harness/workload/agent_swarm_live.sh`.
 
-- `control`
-- `search`
-
-phase를 직접 고를 수도 있다:
-
-```bash
-INTEGRATED_BENCH_PHASES=control ./scripts/harness_integrated_benchmark.sh
-```
-
-## Dry Run
+To inspect the planned command and output paths without starting the workload:
 
 ```bash
 INTEGRATED_BENCH_DRY_RUN=true \
@@ -40,12 +20,14 @@ INTEGRATED_BENCH_PHASES=control \
 ./scripts/harness_integrated_benchmark.sh
 ```
 
-## Reading Failures
+The generated `summary.json` records the phase, script, log path, status, exit
+code, timestamps, and aggregate result. A failed phase makes the wrapper exit
+non-zero.
 
-- `control` fail
-  - keeper fleet runtime evidence가 부족한 상태다.
-  - observed keeper count, per-keeper successful provider turns, receipt/checkpoint
-    links, memory-bank rows, tool-call log links를 먼저 본다.
-## Related Docs
+## Failure Reading
 
-- [BENCHMARK-RUNBOOK.md](./BENCHMARK-RUNBOOK.md)
+For a failed `control` phase, inspect its log for observed Keeper count,
+successful provider turns, receipt/checkpoint links, and tool-call evidence.
+
+For tool-selection and recovery quality, run
+`scripts/harness_tool_call_quality.sh` separately.

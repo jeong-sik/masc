@@ -137,7 +137,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~(clock : [> float Eio.Time.cl
       (* Reuse the same lightweight summary shape as the operator/mission
          dashboard surfaces. The briefing only needs session status/events;
          keeper metadata can come from briefing_json. Pulling keepers,
-         command-plane, and message payloads here duplicates the heaviest
+         operator, and message payloads here duplicates the heaviest
          snapshot path and can spike memory on workspaces with many keepers. *)
       (!operator_snapshot_json_ref).snapshot ~actor:actor_name ~view:"summary"
         ~include_messages:false ~include_keepers:false

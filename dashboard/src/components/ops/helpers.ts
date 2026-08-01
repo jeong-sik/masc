@@ -166,8 +166,6 @@ export async function executeAction(input: {
 export function formatMessageContent(content: string): string {
   if (!content) return ''
   return content
-    .replace(/\[team-session:ts-\d+-\w+\.\.\./g, '[session ')
-    .replace(/\[team-session:([^\]]{0,20})[^\]]*\]/g, '[session $1]')
     .replace(/ts-\d{13,}-[a-f0-9]{4,8}/g, (match) => {
       const ts = match.match(/ts-(\d{13,})/)
       const tsValue = ts?.[1]

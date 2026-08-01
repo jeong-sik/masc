@@ -24,7 +24,6 @@ import {
 import {
   refreshAfterRuntimeAction,
   keeperNeedsDiagnosticAttention,
-  runSocialSweep,
 } from './keeper-detail-helpers'
 import {
   useKeeperCompositeEvidence,
@@ -396,7 +395,6 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
           onClearReasonInput=${setClearReason}
           onPreserveToggle=${setPreserveSystemPrompt}
           onClearSubmit=${submitClearContext}
-          onSocialSweep=${() => { void runSocialSweep() }}
           onOpenRuntimeConfig=${() => openKeeperConfig()}
         />
       <//>

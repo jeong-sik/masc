@@ -8,12 +8,8 @@ export {
   missionBriefing,
   missionBriefingLoading,
   missionBriefingError,
-  missionSessionDetail,
-  missionSessionDetailLoading,
-  missionSessionDetailError,
 } from './mission-signals'
 export {
   refreshMissionSnapshot,
-  refreshMissionSessionDetail,
   refreshMissionBriefing,
 } from './mission-actions'

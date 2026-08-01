@@ -18,7 +18,7 @@ import {
 import type {
   Agent, Task, Message, ServerStatus,
   DashboardExecutionSummary, DashboardExecutionHandoff,
-  DashboardExecutionQueueItem, DashboardExecutionSessionBrief,
+  DashboardExecutionQueueItem,
   DashboardExecutionWorkerSupportBrief,
   DashboardExecutionContinuityBrief,
   DashboardConfigResolution,
@@ -207,7 +207,7 @@ export function normalizeExecutionQueueItem(raw: unknown): DashboardExecutionQue
   const summary = asString(raw.summary)
   const targetType = asString(raw.target_type)
   const targetId = asString(raw.target_id)
-  if (!id || !summary || !targetType || !targetId || (kind !== 'session' && kind !== 'operation' && kind !== 'keeper')) {
+  if (!id || !summary || !targetType || !targetId || (kind !== 'operation' && kind !== 'keeper')) {
     return null
   }
   const runtimeTrust = normalizeKeeperTrust(raw.runtime_trust ?? raw.trust)
@@ -222,7 +222,6 @@ export function normalizeExecutionQueueItem(raw: unknown): DashboardExecutionQue
     summary,
     target_type: targetType,
     target_id: targetId,
-    linked_session_id: asString(raw.linked_session_id) ?? null,
     linked_operation_id: asString(raw.linked_operation_id) ?? null,
     last_seen_at: asString(raw.last_seen_at) ?? null,
     attention_reason: asString(raw.attention_reason) ?? null,
@@ -245,38 +244,6 @@ export function normalizeExecutionQueueItem(raw: unknown): DashboardExecutionQue
     command_handoff: normalizeExecutionHandoff(raw.command_handoff),
   }
 }
-
-export function normalizeExecutionSessionBrief(raw: unknown): DashboardExecutionSessionBrief | null {
-  if (!isRecord(raw)) return null
-  const sessionId = asString(raw.session_id)
-  const goal = asString(raw.goal)
-  if (!sessionId || !goal) return null
-  const namespace = asString(raw.namespace) ?? null
-  return {
-    session_id: sessionId,
-    goal,
-    namespace,
-    status: asString(raw.status),
-    health: asString(raw.health),
-    member_names: asStringArray(raw.member_names),
-    linked_operation_id: asString(raw.linked_operation_id) ?? null,
-    linked_detachment_id: asString(raw.linked_detachment_id) ?? null,
-    runtime_blocker: asString(raw.runtime_blocker) ?? null,
-    worker_gap_summary: asString(raw.worker_gap_summary) ?? null,
-    last_activity_at: asString(raw.last_activity_at) ?? null,
-    last_activity_summary: asString(raw.last_activity_summary) ?? null,
-    communication_summary: asString(raw.communication_summary) ?? null,
-    active_count: asNumber(raw.active_count),
-    seen_count: asNumber(raw.seen_count),
-    planned_count: asNumber(raw.planned_count),
-    required_count: asNumber(raw.required_count),
-    counts_basis: asString(raw.counts_basis) ?? null,
-    top_handoff: normalizeExecutionHandoff(raw.top_handoff),
-    intervene_handoff: normalizeExecutionHandoff(raw.intervene_handoff),
-    command_handoff: normalizeExecutionHandoff(raw.command_handoff),
-  }
-}
-
 
 export function normalizeExecutionWorkerSupportBrief(raw: unknown): DashboardExecutionWorkerSupportBrief | null {
   if (!isRecord(raw)) return null
@@ -304,8 +271,6 @@ export function normalizeExecutionWorkerSupportBrief(raw: unknown): DashboardExe
     signal_truth: signalTruth,
     evidence_source: evidenceSource,
     active_task_count: asNumber(raw.active_task_count),
-    related_session_id: asString(raw.related_session_id) ?? null,
-    related_operation_id: asString(raw.related_operation_id) ?? null,
     emoji: asString(raw.emoji),
     korean_name: asString(raw.korean_name),
     model: asString(raw.model) ?? null,
@@ -339,7 +304,6 @@ export function normalizeExecutionContinuityBrief(raw: unknown): DashboardExecut
     context_ratio: asNumber(raw.context_ratio) ?? null,
     continuity: asString(raw.continuity) ?? null,
     lifecycle: asString(raw.lifecycle) ?? null,
-    related_session_id: asString(raw.related_session_id) ?? null,
     model: asString(raw.model) ?? null,
     emoji: asString(raw.emoji),
     korean_name: asString(raw.korean_name),

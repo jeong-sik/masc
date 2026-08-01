@@ -212,7 +212,7 @@ masc_claim_next()
 - keeper runtime front door: `masc_keeper_list`, `masc_keeper_status`, `masc_keeper_up`, `masc_keeper_down`
 - keeper async invocation: `masc_keeper_delegate` (advanced/callable, hidden from default `tools/list`)
 
-retired orchestration surfaces are historical only. 새 사용자는 repo workspace collaboration과 keeper runtime에서 시작하고, read visibility가 필요할 때만 dashboard/operator surface로 내려간다.
+새 사용자는 repo workspace collaboration과 keeper runtime에서 시작하고, read visibility가 필요할 때 dashboard/operator surface를 사용한다.
 
 ## 6. Tool Surface
 
@@ -348,14 +348,13 @@ active root 기준: `MASC_CONFIG_DIR`가 있으면 그 값, 없으면 `/srv/masc
 
 상세: `docs/KEEPER-USER-MANUAL.md`
 
-Boot/path/state inventory: `docs/BOOT-ENV-STATE-INVENTORY.md`
+Environment and path contract: `docs/ENV-CONTRACT.md`
 
 호환성 참고:
 - 전체 부트스트랩 단축 경로 없이 에이전트만 연결하려는 경우에도 명시적 join 흐름을 계속 지원한다: `masc_bind(agent_name="codex")`
 
 ## References
 
-- `docs/COMMAND-PLANE-RUNBOOK.md` — retired managed-operation reference
 - `docs/BENCHMARK-RUNBOOK.md` — benchmark recipes
 - `docs/INTEGRATED-BENCHMARK-RUNBOOK.md` — control/search wrapper
 - `docs/SUPERVISOR-MODE.md` — supervised execution path

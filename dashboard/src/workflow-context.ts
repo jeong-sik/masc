@@ -229,8 +229,6 @@ export function workflowActionLabel(actionType?: string | null): string {
       return 'Resume Namespace'
     case 'task_inject':
       return 'Inject Task'
-    case 'social_sweep':
-      return 'Social Sweep'
     case 'team_turn':
       return 'Session Update'
     case 'team_note':

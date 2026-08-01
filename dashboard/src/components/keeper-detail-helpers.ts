@@ -1,25 +1,7 @@
-import { currentDashboardActor, runOperatorAction } from '../api'
-import { invalidateDashboardCache, refreshDashboard, refreshKeeperRuntimeStatus } from '../store'
+import { refreshKeeperRuntimeStatus } from '../store'
 import { showToast } from './common/toast'
 import { keeperRuntimeBlockerHint, normalizeKeeperBlockerText } from '../lib/keeper-runtime-display'
 import type { Keeper } from '../types'
-
-export async function runSocialSweep(): Promise<void> {
-  try {
-    await runOperatorAction({
-      actor: currentDashboardActor(),
-      action_type: 'social_sweep',
-      target_type: 'root',
-      payload: {},
-    })
-    invalidateDashboardCache()
-    await refreshDashboard({ force: true })
-    showToast('소셜 스위프 완료', 'success')
-  } catch (err) {
-    const message = err instanceof Error ? err.message : '소셜 스위프 실행 실패'
-    showToast(message, 'error')
-  }
-}
 
 export async function refreshAfterRuntimeAction(): Promise<void> {
   // Keeper runtime actions (boot/shutdown/resume/wakeup/pause from the rail,

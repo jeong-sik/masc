@@ -70,7 +70,7 @@ The rubric is applied two ways:
 | Label | `root-cause:VAR` |
 | Color | `#006633` |
 | Marker | A `match` uses `| _ -> fallback` where the wildcard collapses a constructor added later; or a schema enum hand-rolled drifts from a Variant type |
-| Example | `tool_operator view` enum missed `Sessions` constructor (`#8471`) |
+| Example | A schema enum is maintained separately from its typed variant and omits a constructor |
 | Issue body triggers | "variant miss", "match wildcard", "schema enum drift", "exhaustive", "new constructor" |
 
 ### STR — Naive String Matching

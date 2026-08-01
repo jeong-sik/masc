@@ -23,7 +23,6 @@ consumer → MASC (workspace collaboration/orchestration) → OAS (agent runtime
 - Keeper 실행의 규범 계약은
   `docs/KEEPER-FULL-FEATURE-GOAL.md`다. 이 문서는 경계 요약이다.
 - `docs/spec/13-oas-integration.md`는 구현 세부와 open issue ledger를 유지한다.
-- `docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md`는 시점별 health snapshot이다.
 - `docs/qa/OAS-OBSERVABILITY-TRUTH-AUDIT-2026-04-15.md`는 OAS observability producer -> bridge -> durable store -> dashboard consumer chain과 fixed gaps를 기록한다.
 - `docs/KEEPER-STATE-OWNERSHIP.md`는 checkpoint, lane, domain receipt의 상태 소유권을 정의한다.
 

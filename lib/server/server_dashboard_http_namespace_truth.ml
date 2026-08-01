@@ -133,7 +133,6 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
            stays on the proactive cache to keep project-snapshot off the cold path. *)
         let shell_ref = ref (`Assoc []) in
         let execution_ref = ref (`Assoc []) in
-        let command_ref = ref (`Assoc []) in
         (* Namespace-truth fiber timeouts.  Cold start uses higher defaults to
            allow shell/namespace reads to warm up.  Constants used to be
            tunable via [MASC_NAMESPACE_TRUTH_*_TIMEOUT_S] but Step 4 retires
@@ -180,7 +179,6 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
             (fun () -> dashboard_shell_http_json ~clock config)
             shell_fallback;
         execution_ref := cached_surface_json Execution_surfaces.execution_cache;
-        command_ref := `Assoc [];
         let shell_json = !shell_ref in
         (* Update last-known-good shell on success. *)
         if shell_json <> `Assoc [] && shell_json <> shell_fallback then
@@ -188,7 +186,6 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
         if (not (Atomic.get shell_warmed)) && shell_json <> `Assoc [] then
           Atomic.set shell_warmed true;
         let execution_json = !execution_ref in
-        let command_summary_json = !command_ref in
         let parallel_ms = (Time_compat.now () -. t0) *. 1000.0 in
         if parallel_ms >= 100.0 then
           Log.Dashboard.info "project-snapshot fetch: %.0fms" parallel_ms
@@ -200,7 +197,6 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
         in
         Namespace_truth_support.compose_namespace_truth_snapshot ~config
           ~initialized:(Workspace.is_initialized config) ~shell_json ~execution_json
-          ~command_summary_json
         |> with_projection_diagnostics ~surface:"namespace_truth" ~started_at
              ~extra:
                [
@@ -221,7 +217,6 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
       Namespace_truth_support.compose_namespace_truth_snapshot ~config
         ~initialized:(Workspace.is_initialized config)
         ~shell_json ~execution_json
-        ~command_summary_json:(`Assoc [])
       |> with_projection_diagnostics ~surface:"namespace_truth" ~started_at
            ~extra:
              [
@@ -261,11 +256,9 @@ let namespace_truth_snapshot_from_caches (state : Mcp_server.server_state) :
          where clients render cache_state/stale_age_ms. *)
       Server_dashboard_http_execution_surfaces.execution_cache.json
     in
-    let command_summary_json = `Assoc [] in
     Some
       (Namespace_truth_support.compose_namespace_truth_snapshot ~config
-         ~initialized:(Workspace.is_initialized config) ~shell_json ~execution_json
-         ~command_summary_json)
+         ~initialized:(Workspace.is_initialized config) ~shell_json ~execution_json)
 
 let last_namespace_truth_snapshot_hash : Digestif.SHA256.t option ref =
   ref None

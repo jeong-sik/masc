@@ -166,11 +166,8 @@ let test_dashboard_briefing_projection () =
         (internal_signals
          |> List.exists (fun row ->
               contains (row |> member "summary" |> to_string) "pending confirmation"));
-      (* workspace broadcast actions require microarch signal tones "warn"/"bad",
-         which need non-empty command-plane operations. In a clean test
-         fixture all 9 signals default to "ok", so workspace_recommendations
-         returns []. Verify internal_signals carries the pending-confirm
-         incident instead — that is the reachable workspace-level signal. *)
+      (* The clean fixture has no workspace recommendation. Verify that
+         internal_signals still carries the reachable pending-confirm incident. *)
       check bool "internal signals are workspace-scoped" true
         (internal_signals
          |> List.for_all (fun row ->
@@ -409,7 +406,7 @@ let test_dashboard_keeper_unknown_context_is_informational () =
          |> to_string);
       let continuity =
         Dashboard_execution_builders.build_continuity_briefs
-          ~now_ts [ unknown ] []
+          ~now_ts [ unknown ]
         |> List.hd
       in
       check string "missing context does not downgrade healthy activity" "healthy"

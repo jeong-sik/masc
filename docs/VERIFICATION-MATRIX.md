@@ -95,4 +95,4 @@ make test-contract
 그리고 이번 변경에서 **필수로 올리지 않는 것**은:
 
 - PostgreSQL/live network/viewer/local llama runtime 의존 검증
-- benchmark/team-session workload 실험
+- benchmark workload 실험

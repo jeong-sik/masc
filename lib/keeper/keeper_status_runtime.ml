@@ -474,7 +474,7 @@ let augment_keeper_diagnostic_json
    align step, the server row patcher, and the dashboard pressure ranker. Close
    it into a sum so the producer builds it exhaustively and those consumers
    match it via [surface_status_of_string_opt] instead of comparing literals.
-   "paused" is NOT part of this domain — it is a control-plane override
+   "paused" is NOT part of this domain — it is an operator override
    (meta.paused) applied one layer above, at operator_control_snapshot. *)
 type surface_status =
   | Surface_active

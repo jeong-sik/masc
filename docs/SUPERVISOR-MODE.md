@@ -8,11 +8,8 @@ code_refs:
 
 # Supervisor Mode
 
-Supervisor Mode is the reduced operator workflow for guiding a namespace through
+Supervisor Mode is the operator workflow for observing and guiding a workspace through
 `/mcp/operator`.
-
-The old `swarm` and `team session` lanes are removed. This runbook covers only
-the surviving control loop:
 
 ```text
 snapshot -> diagnose -> preview -> human confirm -> execute -> re-check
@@ -38,12 +35,6 @@ Supervisor Mode is for:
 - reading namespace and keeper state at low cost
 - previewing disruptive actions before a human confirms them
 - issuing namespace broadcasts, pause/resume, keeper probes, and keeper recovery
-
-Supervisor Mode is not for:
-
-- starting team sessions
-- running swarm-style worker orchestration
-- relying on retired `masc_team_session_*` tool families
 
 ## Golden Loop
 

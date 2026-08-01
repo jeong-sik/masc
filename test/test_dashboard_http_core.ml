@@ -2629,7 +2629,6 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
            ; "status", `String "offline"
            ; "state", `String "critical"
            ; "lifecycle", `String "offline"
-           ; "related_session_id", `String "session-exact"
            ]
        in
        let patched =
@@ -2665,10 +2664,6 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
          "brief state is rebuilt from patched keeper"
          "healthy"
          (patched_brief |> member "state" |> to_string);
-       check string
-         "brief keeps exact related session"
-         "session-exact"
-         (patched_brief |> member "related_session_id" |> to_string);
        let unrelated_surface =
          `Assoc
            [ ( "keepers"

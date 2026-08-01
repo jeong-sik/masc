@@ -596,7 +596,6 @@ type KeeperQuietReason =
 
 type KeeperNextActionPath =
   | 'direct_message'
-  | 'manual_social_sweep'
   | 'probe'
   | 'recover'
 

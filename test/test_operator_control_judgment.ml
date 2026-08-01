@@ -300,9 +300,6 @@ let test_confirm_consumes_pending_token_before_delegated_action_fails () =
       in
       Alcotest.(check int) "pending confirm consumed" 0 (List.length pending_confirms))
 
-(* test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn
-   removed: depended on team session start/update which is no longer available. *)
-
 let tests =
   [
     Alcotest.test_case "digest prefers fresh operator judgment" `Quick

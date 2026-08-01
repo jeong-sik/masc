@@ -277,7 +277,7 @@ export function AgentDetailOverlay() {
                 : null}
               ${lastSeenAt ? html`<span class="bg-[var(--color-bg-elevated)] px-3 py-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)]">마지막 확인: <span class="text-[var(--color-fg-primary)]"><${TimeAgo} timestamp=${lastSeenAt} /></span></span>` : null}
             </div>
-            ${keeper || missionBrief?.related_session_id
+            ${keeper
               ? html`
                   <div class="mt-1 flex gap-3 flex-wrap text-[var(--color-fg-secondary)] text-sm font-medium">
                     ${keeper
@@ -293,7 +293,6 @@ export function AgentDetailOverlay() {
                           ${keeperIdentity ? html`<span class="text-[var(--color-fg-secondary)] text-xs"><span aria-hidden="true">· </span>${keeperIdentity}</span>` : ''}
                         </span>`
                       : null}
-                    ${missionBrief?.related_session_id ? html`<span class="flex items-center gap-1.5">세션: <strong class="font-mono text-[var(--color-fg-primary)] text-xs bg-[var(--color-bg-elevated)] px-1.5 rounded-[var(--r-1)]">${missionBrief.related_session_id}</strong></span>` : null}
                   </div>
                 `
               : null}

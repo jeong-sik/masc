@@ -192,7 +192,7 @@ let test_update_plan_full_context_syncs_deliverable () =
     {|# Planning Context: update-plan-full-context
 
 ## Task Plan (PDCA: Plan)
-- Fix owned/current drift in the MASC task control plane.
+- Fix owned/current drift in MASC task state.
 
 ## Notes & Observations (PDCA: Do)
 _No notes yet_
@@ -218,7 +218,7 @@ In progress. Do not treat task-163 as completed.
   | Error e -> fail (Printf.sprintf "Full context update failed: %s" e)
   | Ok ctx ->
       check string "task_plan extracted"
-        "- Fix owned/current drift in the MASC task control plane."
+        "- Fix owned/current drift in MASC task state."
         ctx.task_plan;
       check string "deliverable synced"
         "In progress. Do not treat task-163 as completed."

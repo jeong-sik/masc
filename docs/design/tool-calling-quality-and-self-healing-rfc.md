@@ -16,9 +16,6 @@ code_refs:
 ## Related Documents
 
 - `../BENCHMARK-RUNBOOK.md`
-- `../COMMAND-PLANE-RUNBOOK.md`
-- `./contract-driven-agent-loop-rfc.md`
-- `./contract-driven-agent-loop-rfc-review.md`
 - Local code references:
   - `/Users/dancer/me/workspace/yousleepwhen/oas/lib/structured.ml`
   - `/Users/dancer/me/workspace/yousleepwhen/oas/lib/agent/agent_tools.ml`

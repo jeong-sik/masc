@@ -8,8 +8,7 @@
 
     Precedence: process env > TOML > hardcoded default below.
 
-    See [docs/BOOT-ENV-STATE-INVENTORY.md] section 1.3 for the full
-    TOML schema and section mapping. *)
+    See [docs/ENV-CONTRACT.md] for the environment contract. *)
 
 open Env_config_core
 

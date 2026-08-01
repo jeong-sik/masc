@@ -766,11 +766,6 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             let json = dashboard_briefing_http_json ~state ~sw ~clock httpun_request in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
-      | `GET, "/api/v1/dashboard/session" ->
-          with_h2_public_read h2_reqd (fun state ->
-            let json = dashboard_session_http_json ~state ~sw ~clock httpun_request in
-            h2_respond_json_value h2_reqd json ~extra_headers:cors)
-
       | `GET, "/api/v1/dashboard/briefing/sections" ->
           with_h2_public_read h2_reqd (fun state ->
             let json =
@@ -805,9 +800,6 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             h2_respond_json_value h2_reqd json
               ~extra_headers:cors)
 
-      | `GET, p when String.starts_with ~prefix:"/api/v1/command-plane" p ->
-          h2_respond_removed_surface h2_reqd ~surface:"command_plane" ~extra_headers:cors
-
       | `GET, "/api/v1/status" ->
           with_server_state h2_reqd (fun state ->
             let config = (Mcp_server.workspace_config state) in
@@ -839,9 +831,6 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
       | `POST, "/api/v1/namespace/current"
       | `POST, "/api/v1/workspace/current" ->
           h2_respond_removed_surface h2_reqd ~surface:"namespace" ~extra_headers:cors
-
-      | `POST, p when String.starts_with ~prefix:"/api/v1/command-plane" p ->
-          h2_respond_removed_surface h2_reqd ~surface:"command_plane" ~extra_headers:cors
 
       | `GET, "/api/v1/board/reactions/catalog" ->
           with_h2_public_read h2_reqd (fun _state ->

@@ -430,7 +430,7 @@ let int_field key json =
 let workspace_id_from_config (_config : Workspace.config) = "default"
 
 let cluster_summary_json (_config : Workspace.config) =
-  (* Transport health should stay metrics-only and avoid command-plane/Workspace I/O. *)
+  (* Transport health should stay metrics-only and avoid Workspace I/O. *)
   None
 ;;
 

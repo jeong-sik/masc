@@ -3,7 +3,6 @@ import { MISSION_BRIEFING_POLL_DELAY_MS } from './config/constants'
 import type {
   DashboardMissionBriefingResponse,
   DashboardMissionResponse,
-  DashboardMissionSessionDetailResponse,
   DashboardMissionAgentBrief,
   DashboardMissionKeeperBrief,
 } from './types'
@@ -23,10 +22,6 @@ export const missionError = signal<string | null>(null)
 export const missionBriefing = signal<DashboardMissionBriefingResponse | null>(null)
 export const missionBriefingLoading = signal(false)
 export const missionBriefingError = signal<string | null>(null)
-export const missionSessionDetail = signal<DashboardMissionSessionDetailResponse | null>(null)
-export const missionSessionDetailLoading = signal(false)
-export const missionSessionDetailError = signal<string | null>(null)
-
 let missionBriefingPollTimer: number | null = null
 
 export function clearMissionBriefingPoll(): void {

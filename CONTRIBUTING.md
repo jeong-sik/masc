@@ -154,7 +154,7 @@ Every new issue should end with:
 Current label groups:
 
 - `type:bug`, `type:friction`, `type:feature`, `type:architecture`, `type:docs`
-- `area:workspace collaboration`, `area:team-session`, `area:dashboard`, `area:operator`, `area:transport`, `area:config`, `area:ci`, `area:docs`, `area:experimental`
+- `area:workspace collaboration`, `area:keeper`, `area:dashboard`, `area:operator`, `area:transport`, `area:config`, `area:ci`, `area:docs`, `area:experimental`
 - `target:now`, `target:next`, `target:later`
 
 Triage defaults:

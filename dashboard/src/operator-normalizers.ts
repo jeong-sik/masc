@@ -25,7 +25,6 @@ import type {
   OperatorKeeperSnapshot,
   OperatorReviewDecision,
   OperatorRecommendedAction,
-  OperatorSessionSnapshot,
   OperatorSnapshot,
   OperatorNamespaceSnapshot,
   PendingConfirmation,
@@ -54,17 +53,6 @@ function normalizeNamespace(raw: unknown): OperatorNamespaceSnapshot {
     paused_by: asString(raw.paused_by) ?? null,
     paused_at: asString(raw.paused_at) ?? null,
   }
-}
-
-function normalizeStringRecord(raw: unknown): Record<string, string> | undefined {
-  if (!isRecord(raw)) return undefined
-  const entries = Object.entries(raw)
-    .map(([key, value]) => {
-      const text = asString(value)
-      return text ? [key, text] : null
-    })
-    .filter((entry): entry is [string, string] => entry !== null)
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined
 }
 
 function normalizeInferenceInflight(raw: unknown): InferenceInflightSnapshot | null {
@@ -188,40 +176,6 @@ export function normalizeOperatorDigest(raw: unknown): OperatorDigest {
   }
 }
 
-function normalizeSession(raw: unknown): OperatorSessionSnapshot | null {
-  if (!isRecord(raw)) return null
-  const statusBlock = isRecord(raw.status) ? raw.status : undefined
-  const summary = isRecord(raw.summary) ? raw.summary : isRecord(statusBlock?.summary) ? statusBlock.summary : undefined
-  const session = isRecord(raw.session) ? raw.session : isRecord(statusBlock?.session) ? statusBlock.session : undefined
-  const sessionId =
-    asString(raw.session_id)
-    ?? asString(summary?.session_id)
-    ?? asString(session?.session_id)
-  if (!sessionId) return null
-
-  const reportPaths = normalizeStringRecord(raw.report_paths)
-    ?? normalizeStringRecord(statusBlock?.report_paths)
-  const recentEvents = extractArray(raw.recent_events, ['events'])
-    .filter(isRecord)
-
-  return {
-    session_id: sessionId,
-    status: asString(raw.status) ?? asString(summary?.status) ?? asString(session?.status),
-    progress_pct: asNumber(raw.progress_pct) ?? asNumber(summary?.progress_pct),
-    elapsed_sec: asNumber(raw.elapsed_sec) ?? asNumber(summary?.elapsed_sec),
-    remaining_sec: asNumber(raw.remaining_sec) ?? asNumber(summary?.remaining_sec),
-    done_delta_total: asNumber(raw.done_delta_total) ?? asNumber(summary?.done_delta_total),
-    summary,
-    team_health: isRecord(raw.team_health) ? raw.team_health : isRecord(statusBlock?.team_health) ? statusBlock.team_health : undefined,
-    communication_metrics: isRecord(raw.communication_metrics) ? raw.communication_metrics : isRecord(statusBlock?.communication_metrics) ? statusBlock.communication_metrics : undefined,
-    orchestration_state: isRecord(raw.orchestration_state) ? raw.orchestration_state : isRecord(statusBlock?.orchestration_state) ? statusBlock.orchestration_state : undefined,
-    runtime_metrics: isRecord(raw.runtime_metrics) ? raw.runtime_metrics : isRecord(statusBlock?.runtime_metrics) ? statusBlock.runtime_metrics : undefined,
-    report_paths: reportPaths,
-    session,
-    recent_events: recentEvents,
-  }
-}
-
 function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
   if (!isRecord(raw)) return null
   const name = asString(raw.name)
@@ -264,9 +218,6 @@ export function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
   const pendingConfirmEnvelope = normalizePendingConfirmEnvelope(root.pending_confirm_envelope)
   return {
     root: normalizeNamespace(root.root),
-    sessions: extractArray(root.sessions, ['items', 'sessions'])
-      .map(normalizeSession)
-      .filter((item): item is OperatorSessionSnapshot => item !== null),
     keepers: extractArray(root.keepers, ['items', 'keepers'])
       .map(normalizeKeeper)
       .filter((item): item is OperatorKeeperSnapshot => item !== null),

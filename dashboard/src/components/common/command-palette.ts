@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { navigate, route } from '../../router'
 import { requestConfirm } from './confirm-dialog'
 import { runGarbageCollection } from '../flow-control/flow-control-state'
-import { missionSnapshot, missionAgentBriefs, missionKeeperBriefs } from '../../mission-signals'
+import { missionAgentBriefs, missionKeeperBriefs } from '../../mission-signals'
 import { formatCommandTargetSection, formatCommandTargetSummary } from '../../runtime-counts'
 
 interface CommandPaletteAction {
@@ -140,11 +140,9 @@ export function CommandPalette({ openOnMount = false }: CommandPaletteProps = {}
     // Add Agents dynamically
     const agents = missionAgentBriefs.value || []
     const keepers = missionKeeperBriefs.value || []
-    const sessions = missionSnapshot.value?.sessions ?? []
     const commandTargetSummary = formatCommandTargetSummary({
       agents: agents.length,
       keepers: keepers.length,
-      sessions: sessions.length,
     })
     const agentActions: CommandPaletteAction[] = agents.map(agent => ({
       id: `nav-agent-${agent.agent_name}`,
@@ -163,18 +161,9 @@ export function CommandPalette({ openOnMount = false }: CommandPaletteProps = {}
       handler: () => navigate('monitoring', { section: 'agents', keeper: keeper.name })
     }))
 
-    // Add Sessions dynamically
-    const sessionActions: CommandPaletteAction[] = sessions.map(s => ({
-      id: `nav-session-${s.session_id}`,
-      title: `세션 확인: ${s.goal || s.session_id}`,
-      section: formatCommandTargetSection('session', sessions.length),
-      keywords: `task run command target mission ${commandTargetSummary} ${s.status || ''}`,
-      handler: () => navigate('monitoring', { section: 'fleet-health', view: 'event-log', session_id: s.session_id })
-    }))
+    ref.current.data = [...baseActions, ...agentActions, ...keeperActions]
 
-    ref.current.data = [...baseActions, ...agentActions, ...keeperActions, ...sessionActions]
-
-  }, [ready, route.value, missionSnapshot.value, missionAgentBriefs.value, missionKeeperBriefs.value])
+  }, [ready, route.value, missionAgentBriefs.value, missionKeeperBriefs.value])
 
   useEffect(() => {
     if (!ready || !openOnMount) return

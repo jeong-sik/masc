@@ -13,7 +13,7 @@ code_refs:
 > Last Updated: 2026-07-03
 > Snapshot baseline: `dune-project` version `0.21.2`
 
-MASC (Multi-Agent Shared Context)는 OCaml 5.x / Eio 기반 MCP 서버로, 여러 Keeper/MCP client가 동일 workspace에서 작업할 때 필요한 조율과 관찰성을 제공한다. Workspace 기반 세션 관리, Task 할당, Heartbeat 모니터링, Keeper turn, dashboard/operator read visibility를 제공하며, MCP JSON-RPC 프로토콜을 통해 주요 AI IDE/CLI와 통합된다. Retired orchestration surfaces and internal references remain only as migration context.
+MASC (Multi-Agent Shared Context)는 OCaml 5.x / Eio 기반 MCP 서버로, 여러 Keeper/MCP client가 동일 workspace에서 Goal, Task, Board, Schedule을 통해 작업하고 현재 실행 상태를 관찰·조정할 수 있게 한다. Keeper turn과 dashboard/operator visibility를 제공하며 MCP JSON-RPC 프로토콜을 통해 주요 AI IDE/CLI와 통합된다.
 
 ## Snapshot Metadata
 
@@ -42,8 +42,8 @@ graph TB
     L6["Layer 6: Integration<br/>OAS bridge, research loop"]
     L5["Layer 5: Surface<br/>dashboard, operator, TUI, web"]
     L4["Layer 4: Protocol<br/>MCP server, HTTP transport, gRPC, SSE"]
-    L3["Layer 3: Engine<br/>chain, keeper, swarm"]
-    L2["Layer 2: Domain<br/>workspace, board"]
+    L3["Layer 3: Engine<br/>keeper, scheduling, execution"]
+    L2["Layer 2: Domain<br/>workspace, goal, task, board"]
     L1["Layer 1: Storage<br/>backend, dated_jsonl, memory"]
     L0["Layer 0: Primitives<br/>types, core, log, time_compat, fs_compat"]
 
@@ -65,7 +65,6 @@ graph TB
 | `03-workspace-state collaboration.md` | Workspace State | Workspace 생명주기, session 관리, agent join/leave | Draft |
 | `04-turn-lifecycle.md` | Turn Lifecycle | Keeper turn 시작/종료, heartbeat/polling/waiting, direct msg, FSM, receipt | Draft |
 | `05-keeper-agent.md` | Keeper Engine | 자율 에이전트 루프, succession, context 관리 | Draft |
-| `06-command-plane.md` | Command Plane v2 | Internal command-plane reference and migration context | Historical |
 | `09-server-transport.md` | Server and Transport | HTTP transport, SSE, JSON-RPC dispatch, routing | Draft |
 | `10-dashboard.md` | Dashboard | Web UI, API endpoints, SSE real-time updates | Draft |
 | `11-board.md` | Board System | Posts, comments, votes, filesystem/JSONL backend | Draft |
@@ -76,13 +75,8 @@ graph TB
 | `16-root-cause-rubric.md` | Root-Cause Rubric | 7-category taxonomy (SSOT/TEL/BND/SIL/VAR/STR/DET) for issue triage and Keeper benchmark | Reference |
 | `17-keeper-behavioral-regime.md` | Keeper Behavioral Regime | 7th FSM axis rules, `tool_aggregate` semantics, snapshot invariants | Reference |
 | `18-log-severity-taxonomy.md` | Log Severity Taxonomy | 4-level contract for `Log.{debug,info,warn,error}` callsites + anti-pattern catalog + lint rules | Reference |
-| `A-existing-doc-index.md` | Existing Doc Index | 현재 문서 inventory와 cleanup ledger | Draft |
-| `B-migration-targets.md` | Migration Targets | OAS 이관 대상 모듈, deprecation 일정 | Draft |
-| `C-implementation-status.md` | Implementation Status | 구현 상태와 coverage snapshot | Draft |
 
 ## Active Design Documents
-
-`06-command-plane.md`는 retained code/inventory를 설명하는 internal reference다. Supported front-door contract나 새 caller onboarding SSOT로 읽지 않는다.
 
 이 spec suite 외에 `docs/design/`와 `docs/rfc/`에 위치한 활성 설계 문서들:
 
@@ -116,8 +110,6 @@ graph TB
 | `INV-WORKSPACE` | Workspace lifecycle |
 | `INV-TASK` | Task state machine |
 | `INV-KPR` | Keeper engine |
-| `INV-CHAIN` | Chain execution |
-| `INV-CP` | Command Plane |
 | `INV-SRV` | Server/transport |
 | `INV-DASH` | Dashboard |
 | `INV-BRD` | Board |

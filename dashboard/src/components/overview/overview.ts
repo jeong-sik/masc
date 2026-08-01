@@ -27,10 +27,6 @@ import type {
   FusionRunRecord,
 } from '../../api/dashboard'
 import { SYSTEM_ACTOR_NAME } from '../../types/core'
-import type {
-  DashboardMissionResponse,
-  DashboardMissionSessionCard,
-} from '../../types/dashboard-mission'
 import { useNowSecondsTicker } from '../../lib/now-signal'
 import { keeperDisplayRuntime, keeperDisplayStatus, keeperRuntimeBlockerLabel } from '../../lib/keeper-runtime-display'
 import { isKeeperPaused } from '../../lib/keeper-predicates'
@@ -878,7 +874,7 @@ export interface FunnelCounts {
   target: number | null
 }
 
-export function computeFunnelCounts(taskList: readonly Task[], active: DashboardMissionSessionCard | null, nowMs = Date.now()): FunnelCounts {
+export function computeFunnelCounts(taskList: readonly Task[], nowMs = Date.now()): FunnelCounts {
   const todayMs = startOfTodayMs(nowMs)
   let created = 0
   let inProgress = 0
@@ -902,11 +898,7 @@ export function computeFunnelCounts(taskList: readonly Task[], active: Dashboard
       }
     }
   }
-  const target =
-    typeof active?.required_count === 'number' && active.required_count > 0
-      ? active.required_count
-      : null
-  return { created, inProgress, awaiting, completed, target }
+  return { created, inProgress, awaiting, completed, target: null }
 }
 
 function startOfTodayMs(nowMs: number): number {
@@ -927,16 +919,6 @@ export function formatTargetRatio(counts: FunnelCounts): string {
   return `${counts.completed}/${counts.target} (${pct}%)`
 }
 
-// ─── Mission Party ────────────────────────────────────────────────────────────
-
-export function progressPct(session: DashboardMissionSessionCard | null): number | null {
-  if (!session) return null
-  const req = session.required_count ?? 0
-  if (req <= 0) return null
-  const cur = session.seen_count ?? session.active_count ?? 0
-  return Math.min(100, Math.round((cur / req) * 100))
-}
-
 // ─── Keeper Strip ────────────────────────────────────────────────────────────
 
 export function pickActiveKeepers(keeperList: readonly Keeper[], max = 3): Keeper[] {
@@ -949,12 +931,6 @@ export function pickActiveKeepers(keeperList: readonly Keeper[], max = 3): Keepe
       return tsB + pausedB - (tsA + pausedA)
     })
     .slice(0, max)
-}
-
-export function pickActiveSession(snap: DashboardMissionResponse | null): DashboardMissionSessionCard | null {
-  if (snap === null) return null
-  const running = snap.sessions.find(s => s.status === 'running' || s.status === 'active' || s.status === 'busy')
-  return running ?? snap.sessions[0] ?? null
 }
 
 // ─── Surface Readiness Summary ───────────────────────────────────────────────

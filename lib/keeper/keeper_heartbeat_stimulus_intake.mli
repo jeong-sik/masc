@@ -124,7 +124,7 @@ val reconcile_spent_selection
 (** [heartbeat_event_intake ~ctx ~meta_after_triage
      ~pending_board_events]
     peeks at most one ready Event-Layer stimulus (per RFC-0020 §3 Rule 4).
-    A pending [Manual_compaction_requested] is the sole control-plane
+    A pending [Manual_compaction_requested] is the sole runtime
     exception: it is selected ahead of data-plane stimuli so an in-flight
     source checkpoint can yield, compact, and then resume from the unchanged
     durable queue. The selected observation is merged with the

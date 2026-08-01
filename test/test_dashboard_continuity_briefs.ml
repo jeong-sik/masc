@@ -45,7 +45,7 @@ let note_of row =
   Yojson.Safe.Util.(row.json |> member "note" |> to_string)
 
 let build_one k =
-  List.hd (build_continuity_briefs ~now_ts:1_000_000_000.0 [ k ] [])
+  List.hd (build_continuity_briefs ~now_ts:1_000_000_000.0 [ k ])
 
 let test_offline_without_signal_is_critical () =
   let row = build_one (keeper ()) in

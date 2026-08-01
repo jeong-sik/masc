@@ -468,7 +468,6 @@ let build_keeper_execution_queue keepers =
                 ; "summary", `String summary
                 ; "target_type", `String "keeper"
                 ; "target_id", `String keeper_name
-                ; "linked_session_id", `Null
                 ; "linked_operation_id", `Null
                 ; "last_seen_at", Json_util.string_opt_to_json last_seen_at
                 ; "attention_reason", member_assoc "attention_reason" trust
@@ -480,15 +479,6 @@ let build_keeper_execution_queue keepers =
                 ; "command_handoff", command_handoff
                 ]
           }))
-;;
-
-let merge_execution_queue left right =
-  left @ right
-  |> List.sort (fun left right ->
-    let by_severity = Int.compare right.severity_rank left.severity_rank in
-    if by_severity <> 0
-    then by_severity
-    else Float.compare right.last_seen_ts left.last_seen_ts)
 ;;
 
 let model_map_of_keeper_rows keepers =
@@ -723,8 +713,6 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
        canonical goal_id per task from it (registry is SSOT for the linkage). *)
     let goal_task_index = Workspace_goal_index.build_task_goal_index_for_config config in
     let operation_contexts = build_operation_contexts ~tasks in
-    let session_contexts = [] in
-    let execution_queue = build_execution_queue session_contexts operation_contexts in
     t_after_operations := Some (Time_compat.now ());
     let keepers =
       member_assoc "keepers" snapshot_json
@@ -756,9 +744,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
     in
     t_after_enrich := Some (Time_compat.now ());
     n_keepers_emitted := List.length keepers;
-    let execution_queue =
-      merge_execution_queue execution_queue (build_keeper_execution_queue keepers)
-    in
+    let execution_queue = build_keeper_execution_queue keepers in
     Eio.Fiber.yield ();
     (* Load tasks/agents/messages — needed for worker_support_briefs.
          In light mode, tasks and messages are NOT serialized in the
@@ -769,14 +755,14 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
     t_after_data_load := Some (Time_compat.now ());
     let now_ts = Time_compat.now () in
     let worker_rows =
-      build_worker_support_briefs ~now_ts ~tasks ~agents ~messages session_contexts
+      build_worker_support_briefs ~now_ts ~tasks ~agents ~messages
     in
     let offline_worker_briefs, worker_support_briefs =
       List.partition
         (fun (row : worker_context) -> string_field "state" row.json = "offline")
         worker_rows
     in
-    let continuity_rows = build_continuity_briefs ~now_ts keepers session_contexts in
+    let continuity_rows = build_continuity_briefs ~now_ts keepers in
     (* Operations: only active/paused, max 20 *)
     let active_ops =
       List.filter

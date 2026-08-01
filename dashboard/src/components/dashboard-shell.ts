@@ -941,11 +941,6 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
     ? dashboardWsConnected.value || dashboardWsSseFallbackActive.value
     : connected.value
   const snap = missionSnapshot.value
-  const sessions = snap?.sessions ?? []
-  let blockers = 0
-  for (let i = 0; i < sessions.length; i++) {
-    if (sessions[i]?.blocker_summary) blockers++
-  }
   const attentionQueue = snap?.attention_queue ?? []
   const attentionCount = attentionQueue.length
 
@@ -958,10 +953,9 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   } else if (!snap) {
     dotClass = 'bg-[var(--color-fg-muted)]'
     label = missionLoading.value ? 'Mission loading' : 'Mission idle'
-  } else if (blockers > 0 || attentionCount > 0) {
+  } else if (attentionCount > 0) {
     dotClass = 'bg-[var(--color-status-warn)]'
-    const total = blockers + attentionCount
-    label = `Mission attention ${total}`
+    label = `Mission attention ${attentionCount}`
   } else {
     dotClass = 'bg-[var(--color-status-ok)]'
     label = 'Mission healthy'

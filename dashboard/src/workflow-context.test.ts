@@ -259,10 +259,6 @@ describe('workflowActionLabel', () => {
     expect(workflowActionLabel('task_inject')).toBe('Inject Task')
   })
 
-  it('returns "Social Sweep" for social_sweep', () => {
-    expect(workflowActionLabel('social_sweep')).toBe('Social Sweep')
-  })
-
   it('returns "Session Update" for team_turn', () => {
     expect(workflowActionLabel('team_turn')).toBe('Session Update')
   })

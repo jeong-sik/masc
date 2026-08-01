@@ -57,7 +57,7 @@ val keeper_health_state :
   keeper_health
 
 (** Keeper display status derived from (keeper_health x agent_status). Closed so
-    consumers that classify it match exhaustively. "paused" is a control-plane
+    consumers that classify it match exhaustively. "paused" is an operator
     override applied above this layer, not a member of this domain. *)
 type surface_status =
   | Surface_active
@@ -73,7 +73,7 @@ val surface_status_to_string : surface_status -> string
     value is outside the six labels (e.g. "paused" or drift). *)
 val surface_status_of_string_opt : string -> surface_status option
 
-(** The [status] field the operator control plane actually publishes: a
+(** The [status] field the operator snapshot publishes: a
     {!surface_status}, or the pause override that replaces it. Producers render
     through {!control_plane_status_to_string} and consumers parse through
     {!control_plane_status_of_string_opt} so neither side carries the "paused"

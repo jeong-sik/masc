@@ -4,8 +4,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   computeFunnelCounts,
   formatTargetRatio,
-  pickActiveSession,
-  progressPct,
   pickActiveKeepers,
   severityToneClass,
   deriveAgentAlerts,
@@ -48,10 +46,6 @@ function segPct(counts: FunnelCounts, key: 'created' | 'inProgress' | 'awaiting'
   return total > 0 ? (counts[key] / total) * 100 : 0
 }
 import type { Agent, Task, Keeper, Message, BoardPost } from '../../types/core'
-import type {
-  DashboardMissionResponse,
-  DashboardMissionSessionCard,
-} from '../../types/dashboard-mission'
 
 const FIXED_NOW = new Date(2026, 3, 18, 10, 0, 0, 0).getTime()
 
@@ -65,19 +59,6 @@ function localIsoAt(
   d.setDate(d.getDate() + dayOffset)
   d.setHours(hour, minute, second, 0)
   return d.toISOString()
-}
-
-function makeSession(partial: Partial<DashboardMissionSessionCard>): DashboardMissionSessionCard {
-  return {
-    session_id: 's-1',
-    goal: 'default goal',
-    member_names: [],
-    related_attention_count: 0,
-    member_previews: [],
-    operation_badges: [],
-    keeper_refs: [],
-    ...partial,
-  }
 }
 
 function makeTask(partial: Partial<Task>): Task {
@@ -208,7 +189,7 @@ describe('computeFunnelCounts', () => {
       makeTask({ id: 'b', created_at: localIsoAt(9, 59), status: 'in_progress' }),
       makeTask({ id: 'c', created_at: localIsoAt(23, 59, 59, -1), status: 'todo' }),
     ]
-    const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
+    const counts = computeFunnelCounts(tasks, FIXED_NOW)
     expect(counts.created).toBe(2)
   })
 
@@ -218,7 +199,7 @@ describe('computeFunnelCounts', () => {
       makeTask({ id: 'b', status: 'in_progress' }),
       makeTask({ id: 'c', status: 'todo' }),
     ]
-    const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
+    const counts = computeFunnelCounts(tasks, FIXED_NOW)
     expect(counts.inProgress).toBe(2)
   })
 
@@ -227,7 +208,7 @@ describe('computeFunnelCounts', () => {
       makeTask({ id: 'a', status: 'awaiting_verification' }),
       makeTask({ id: 'b', status: 'done', completed_at: localIsoAt(5) }),
     ]
-    const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
+    const counts = computeFunnelCounts(tasks, FIXED_NOW)
     expect(counts.awaiting).toBe(1)
     expect(counts.completed).toBe(1)
   })
@@ -238,20 +219,12 @@ describe('computeFunnelCounts', () => {
       makeTask({ id: 'b', status: 'done', completed_at: localIsoAt(23, 0, 0, -1) }),
       makeTask({ id: 'c', status: 'done' }),
     ]
-    const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
+    const counts = computeFunnelCounts(tasks, FIXED_NOW)
     expect(counts.completed).toBe(1)
   })
 
-  it('takes target from active session required_count when positive', () => {
-    const active = makeSession({ required_count: 12 })
-    const counts = computeFunnelCounts([], active, FIXED_NOW)
-    expect(counts.target).toBe(12)
-  })
-
-  it('returns null target when required_count is 0 or missing', () => {
-    expect(computeFunnelCounts([], makeSession({ required_count: 0 }), FIXED_NOW).target).toBeNull()
-    expect(computeFunnelCounts([], makeSession({}), FIXED_NOW).target).toBeNull()
-    expect(computeFunnelCounts([], null, FIXED_NOW).target).toBeNull()
+  it('has no synthetic target', () => {
+    expect(computeFunnelCounts([], FIXED_NOW).target).toBeNull()
   })
 
   it('ignores invalid ISO timestamps', () => {
@@ -259,7 +232,7 @@ describe('computeFunnelCounts', () => {
       makeTask({ id: 'a', created_at: 'not-a-date', status: 'todo' }),
       makeTask({ id: 'b', created_at: '', status: 'done', completed_at: 'nope' }),
     ]
-    const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
+    const counts = computeFunnelCounts(tasks, FIXED_NOW)
     expect(counts.created).toBe(0)
     expect(counts.completed).toBe(0)
   })
@@ -270,7 +243,7 @@ describe('computeFunnelCounts', () => {
       makeTask({ id: 'b', created_at: localIsoAt(2), status: 'awaiting_verification' }),
       makeTask({ id: 'c', created_at: localIsoAt(3), status: 'done', completed_at: localIsoAt(4) }),
     ]
-    const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
+    const counts = computeFunnelCounts(tasks, FIXED_NOW)
     const total = counts.created + counts.inProgress + counts.awaiting + counts.completed
     const pcts = [counts.inProgress, counts.awaiting, counts.completed, counts.created]
       .map(n => total > 0 ? (n / total) * 100 : 0)
@@ -279,7 +252,7 @@ describe('computeFunnelCounts', () => {
   })
 
   it('bar-seg ratio returns 0 when funnel is empty', () => {
-    const counts = computeFunnelCounts([], null, FIXED_NOW)
+    const counts = computeFunnelCounts([], FIXED_NOW)
     expect(segPct(counts, 'created')).toBe(0)
     expect(segPct(counts, 'completed')).toBe(0)
   })
@@ -304,56 +277,6 @@ describe('formatTargetRatio', () => {
 
   it('caps percentage at 100 when completed exceeds target', () => {
     expect(formatTargetRatio({ ...base, completed: 20, target: 5 })).toBe('20/5 (100%)')
-  })
-})
-
-describe('pickActiveSession', () => {
-  it('returns null for null snapshot', () => {
-    expect(pickActiveSession(null)).toBeNull()
-  })
-
-  it('returns null for empty sessions', () => {
-    const snap = { sessions: [] } as unknown as DashboardMissionResponse
-    expect(pickActiveSession(snap)).toBeNull()
-  })
-
-  it('prefers first session with active/running/busy status', () => {
-    const a = makeSession({ session_id: 'a', status: 'paused' })
-    const b = makeSession({ session_id: 'b', status: 'running' })
-    const c = makeSession({ session_id: 'c', status: 'active' })
-    const snap = { sessions: [a, b, c] } as unknown as DashboardMissionResponse
-    expect(pickActiveSession(snap)?.session_id).toBe('b')
-  })
-
-  it('falls back to first session when none are active', () => {
-    const a = makeSession({ session_id: 'a', status: 'paused' })
-    const b = makeSession({ session_id: 'b', status: 'paused' })
-    const snap = { sessions: [a, b] } as unknown as DashboardMissionResponse
-    expect(pickActiveSession(snap)?.session_id).toBe('a')
-  })
-})
-
-describe('progressPct', () => {
-  it('returns null when no active session', () => {
-    expect(progressPct(null)).toBeNull()
-  })
-
-  it('returns null when required_count is missing or zero', () => {
-    expect(progressPct(makeSession({}))).toBeNull()
-    expect(progressPct(makeSession({ required_count: 0 }))).toBeNull()
-  })
-
-  it('computes seen/required rounded-[var(--r-1)] percentage', () => {
-    expect(progressPct(makeSession({ required_count: 10, seen_count: 3 }))).toBe(30)
-    expect(progressPct(makeSession({ required_count: 4, seen_count: 1 }))).toBe(25)
-  })
-
-  it('falls back to active_count when seen_count is missing', () => {
-    expect(progressPct(makeSession({ required_count: 10, active_count: 4 }))).toBe(40)
-  })
-
-  it('caps percentage at 100', () => {
-    expect(progressPct(makeSession({ required_count: 3, seen_count: 10 }))).toBe(100)
   })
 })
 

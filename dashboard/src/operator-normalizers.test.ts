@@ -147,7 +147,6 @@ describe('normalizeOperatorSnapshot', () => {
   it('returns safe defaults for null', () => {
     const result = normalizeOperatorSnapshot(null)
     expect(result.root).toEqual({})
-    expect(result.sessions).toEqual([])
     expect(result.keepers).toEqual([])
     expect(result.persistent_agents).toEqual([])
     expect(result.inference_inflight).toBeNull()
@@ -158,13 +157,7 @@ describe('normalizeOperatorSnapshot', () => {
 
   it('returns safe defaults for undefined', () => {
     const result = normalizeOperatorSnapshot(undefined)
-    expect(result.sessions).toEqual([])
     expect(result.keepers).toEqual([])
-  })
-
-  it('returns safe defaults for string input', () => {
-    const result = normalizeOperatorSnapshot('invalid')
-    expect(result.sessions).toEqual([])
   })
 
   it('extracts root namespace', () => {
@@ -173,38 +166,6 @@ describe('normalizeOperatorSnapshot', () => {
     })
     expect(result.root.project).toBe('masc')
     expect(result.root.paused).toBe(false)
-  })
-
-  it('extracts sessions with valid session_id', () => {
-    const result = normalizeOperatorSnapshot({
-      sessions: [
-        { session_id: 'sess-1', status: 'running' },
-        { session_id: 'sess-2' },
-      ],
-    })
-    expect(result.sessions).toHaveLength(2)
-    expect(result.sessions[0]!.session_id).toBe('sess-1')
-  })
-
-  it('filters sessions without session_id', () => {
-    const result = normalizeOperatorSnapshot({
-      sessions: [
-        { status: 'running' }, // no session_id
-      ],
-    })
-    expect(result.sessions).toEqual([])
-  })
-
-  it('extracts sessions from nested structure', () => {
-    const result = normalizeOperatorSnapshot({
-      sessions: {
-        sessions: [
-          { session_id: 'nested-1' },
-        ],
-      },
-    })
-    expect(result.sessions).toHaveLength(1)
-    expect(result.sessions[0]!.session_id).toBe('nested-1')
   })
 
   it('extracts keepers with valid name', () => {

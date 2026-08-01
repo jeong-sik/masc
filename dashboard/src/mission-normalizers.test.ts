@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
   normalizeMission,
-  normalizeMissionSessionDetail,
   normalizeMissionBriefing,
 } from './mission-normalizers'
 
@@ -16,7 +15,6 @@ describe('normalizeMission', () => {
     expect(result.summary).toBeDefined()
     expect(result.incidents).toEqual([])
     expect(result.recommended_actions).toEqual([])
-    expect(result.sessions).toEqual([])
     expect(result.agent_briefs).toEqual([])
     expect(result.keeper_briefs).toEqual([])
     expect(result.internal_signals).toEqual([])
@@ -32,7 +30,6 @@ describe('normalizeMission', () => {
   it('returns safe defaults for string input', () => {
     const result = normalizeMission('not an object')
     expect(result.summary).toBeDefined()
-    expect(result.sessions).toEqual([])
   })
 
   it('extracts generated_at', () => {
@@ -215,69 +212,6 @@ describe('normalizeMission', () => {
       grounded_verdict: JSON.stringify(grounded),
     })
     expect(result.attention_queue[0]!.grounded_verdict).toEqual(grounded)
-  })
-})
-
-// ================================================================
-// normalizeMissionSessionDetail
-// ================================================================
-
-describe('normalizeMissionSessionDetail', () => {
-  it('returns safe defaults for null', () => {
-    const result = normalizeMissionSessionDetail(null)
-    expect(result.generated_at).toBeUndefined()
-    expect(result.session_id).toBe('')
-    expect(result.timeline).toEqual([])
-    expect(result.participants).toEqual([])
-    expect(result.operations).toEqual([])
-    expect(result.keepers).toEqual([])
-    expect(result.error).toBeNull()
-  })
-
-  it('returns safe defaults for string input', () => {
-    const result = normalizeMissionSessionDetail('invalid')
-    expect(result.session_id).toBe('')
-    expect(result.timeline).toEqual([])
-  })
-
-  it('extracts session_id', () => {
-    const result = normalizeMissionSessionDetail({ session_id: 'sess-123' })
-    expect(result.session_id).toBe('sess-123')
-  })
-
-  it('extracts generated_at', () => {
-    const result = normalizeMissionSessionDetail({ generated_at: '2026-04-17' })
-    expect(result.generated_at).toBe('2026-04-17')
-  })
-
-  it('extracts error string', () => {
-    const result = normalizeMissionSessionDetail({ error: 'Connection failed' })
-    expect(result.error).toBe('Connection failed')
-  })
-
-  it('defaults error to null', () => {
-    const result = normalizeMissionSessionDetail({})
-    expect(result.error).toBeNull()
-  })
-
-  it('extracts worker_runs when valid', () => {
-    const result = normalizeMissionSessionDetail({
-      worker_runs: {
-        requested_count: 5,
-        completed_success_count: 3,
-        completed_failed_count: 1,
-      },
-    })
-    expect(result.worker_runs).not.toBeNull()
-    expect(result.worker_runs!.requested_count).toBe(5)
-    expect(result.worker_runs!.completed_success_count).toBe(3)
-  })
-
-  it('returns null worker_runs for invalid input', () => {
-    const result = normalizeMissionSessionDetail({
-      worker_runs: 'invalid',
-    })
-    expect(result.worker_runs).toBeNull()
   })
 })
 

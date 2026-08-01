@@ -13,10 +13,7 @@ code_refs:
 > Latest changelog entry: v0.21.2 (2026-07-20)
 > Latest published GitHub release: v0.21.1 (2026-07-20)
 > Updated: 2026-07-03
-> Release line: pre-1.0 (`0.y.z`); legacy `v2.*` tags are frozen history
-
-Execution companion for capsule-only workspace collaboration hardening:
-[design/masc-capsule-execution-plan.md](design/masc-capsule-execution-plan.md)
+> Release line: pre-1.0 (`0.y.z`)
 
 ## Product Scope
 
@@ -32,13 +29,13 @@ Scope stack:
 2. Keeper runtime and supervised delivery
 3. Dashboard and operator visibility
 
-The front-door promise is level 1. Levels 2-3 are supported surfaces. Retired surfaces and proposal-only research material are deletion targets, not product promises.
+The front-door promise is level 1. Levels 2-3 are supported surfaces.
 
 ## Capability Posture
 
 | Capability | Current status | Promise level | Evidence | Main gap | Next action |
 |-----------|----------------|---------------|----------|----------|-------------|
-| Workspace and task hygiene | Done | Front door | `docs/spec/C-implementation-status.md`, `README.md` | docs were too spread out | keep as default entry path |
+| Workspace and task hygiene | Done | Front door | `README.md`, `docs/spec/01-system-overview.md` | docs were too spread out | keep as default entry path |
 | Worktree and collision control | Done | Front door | README, workspace/tool coverage, live usage | onboarding clarity | keep in front-door docs |
 | Supervised execution + Supervisor | Working | Advanced | `docs/SUPERVISOR-MODE.md` | still not the safest starting path | present as advanced flow |
 | Keeper continuity | Working | Advanced | `docs/KEEPER-STATE-OWNERSHIP.md`, `docs/KEEPER-CONTINUITY-VALIDATION.md` | live restore and independent-lane evidence must remain observable | validate typed checkpoint restore and domain receipts with the runbook |
@@ -49,7 +46,6 @@ The front-door promise is level 1. Levels 2-3 are supported surfaces. Retired su
 | Config introspection | Working but split | Supporting | `masc_config`, `/api/v1/dashboard/config`, open issues `#3364`, `#3365`, `#3363` | read contract is duplicated and not yet centralized enough to promise as SSOT | centralize config and expose one canonical read-only snapshot |
 | Release evidence and local proof | Working | Front door | `docs/RELEASE-EVIDENCE.md`, `scripts/release-evidence.sh`, release workflow artifact | deployment-specific proof is still env-gated | keep release/main evidence bundle attached to artifacts |
 | Release and doc truth | Working | Front door | doc truth lane + version truth + OAS pin doc sync | release/doc changes previously bypassed runtime gates | keep build/lint/health tied to release/doc/version changes |
-| Research and legacy residue | Cleanup target | Not part of product promise | implementation appendix, deletion ledger | merged surface area is wider than product promise | remove unused residue and keep remaining history explicitly marked |
 
 Status legend:
 

@@ -4,9 +4,7 @@
     dashboard pipeline.
 
     {b Runtime chain}: 3 sister modules
-    ({!Dashboard_execution_fixture},
-    {!Dashboard_execution_sessions},
-    {!Dashboard_execution}) do
+    ({!Dashboard_execution_fixture}, {!Dashboard_execution}) do
     [include Dashboard_execution_helpers] in their .ml +
     .mli, so this boundary's surface flows through to
     every dashboard execution consumer.  Plus dotted
@@ -14,8 +12,8 @@
     [server_dashboard_http_core] +
     [server_routes_http_routes_workspace]).
 
-    External surface (36 entries — 7 records + 29
-    helpers).
+    External surface is limited to the records and helpers consumed by the
+    current execution projection.
 
     Internal helpers stay private at this boundary
     ([all_agent_statuses] / [valid_agent_status_strings]
@@ -26,8 +24,7 @@
     accumulator helpers consumed only inside
     [load_persona_profile] / [extract_persona_name] /
     [merge_profiles] / [lookup_neo4j_profile] /
-    [is_keeper_offline] / [is_health_at_risk] /
-    [is_session_terminal] / [option_or_else] /
+    [is_keeper_offline] / [is_health_at_risk] / [option_or_else] /
     [string_list_json] / [latest_iso_timestamp] /
     [cap_string_list] / [execution_tool_preview_limit] /
     [string_list_of_field]). *)
@@ -53,57 +50,22 @@ type queue_context = {
   json : Yojson.Safe.t;
 }
 
-type session_seed = {
-  session_id : string;
-  goal : string;
-  namespace : string option;
-  status : string option;
-  health : string;
-  member_names : string list;
-  last_activity_at : string option;
-  last_activity_ts : float;
-  last_activity_summary : string;
-  communication_summary : string;
-  active_count : int;
-  seen_count : int;
-  planned_count : int;
-  required_count : int;
-  counts_basis : string;
-  runtime_blocker : string option;
-  worker_gap_summary : string option;
-  top_attention : Yojson.Safe.t option;
-  top_recommendation : Yojson.Safe.t option;
-}
-
-type session_context = {
-  session_id : string;
-  severity : tone;
-  last_seen_ts : float;
-  linked_operation_id : string option;
-  member_names : string list;
-  json : Yojson.Safe.t;
-}
-
 type operation_context = {
   operation_id : string;
   severity : tone;
   last_seen_ts : float;
-  linked_session_id : string option;
-  linked_detachment_id : string option;
   json : Yojson.Safe.t;
 }
 
 type worker_context = {
   tone_rank : int;
   last_signal_ts : float;
-  related_session_id : string option;
   json : Yojson.Safe.t;
 }
 
 type continuity_context = {
   tone_rank : int;
   last_signal_ts : float;
-  related_session_id : string option;
   json : Yojson.Safe.t;
 }
 
@@ -137,14 +99,6 @@ val take : int -> 'a list -> 'a list
 val latest_iso_timestamp : string option list -> string option
 val compact_text : ?max_len:int -> string -> string
 val dedup_strings : string list -> string list
-val session_payload_json : Yojson.Safe.t -> Yojson.Safe.t
-val session_meta_json : Yojson.Safe.t -> Yojson.Safe.t
-val session_summary_json : Yojson.Safe.t -> Yojson.Safe.t
-val session_team_health_json : Yojson.Safe.t -> Yojson.Safe.t
-val session_communication_json : Yojson.Safe.t -> Yojson.Safe.t
-val session_status_opt : Yojson.Safe.t -> string option
-val session_recent_events : Yojson.Safe.t -> Yojson.Safe.t list
-val event_detail_json : Yojson.Safe.t -> Yojson.Safe.t
 val severity_rank : string -> int
 val dashboard_fixture_name : ?fixture:string -> unit -> string option
 val execution_tool_preview_limit : int

@@ -133,8 +133,9 @@ val find_access_credential :
 (** Resolve a valid current OAuth access token to the existing credential
     projection consumed by all MASC permission gates. [Ok None] means the
     token is not owned by the OAuth store; callers may try static bearer
-    resolution. *)
+    resolution. An owned OAuth token is accepted only inside
+    [with_expected_resource] with an exact resource match. *)
 
-val reset_process_state_for_tests : unit -> unit
-(** Clear only process-local authorization codes. Durable clients and token
-    files are untouched. *)
+val with_expected_resource : string -> (unit -> 'a) -> 'a
+(** Bind the exact admitted MCP resource for credential verification in the
+    current request fiber. OAuth access tokens fail closed outside this scope. *)

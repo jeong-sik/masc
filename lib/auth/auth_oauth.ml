@@ -96,18 +96,15 @@ let pkce_s256 verifier =
   |> Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
 ;;
 
-let constant_time_string_equal left right =
-  let left_len = String.length left in
-  let right_len = String.length right in
-  let max_len = max left_len right_len in
-  let diff = ref (left_len lxor right_len) in
-  for index = 0 to max_len - 1 do
-    let left_byte = if index < left_len then Char.code left.[index] else 0 in
-    let right_byte = if index < right_len then Char.code right.[index] else 0 in
-    diff := !diff lor (left_byte lxor right_byte)
-  done;
-  !diff = 0
+let constant_time_string_equal = Auth_credential_base.constant_time_string_equal
+
+let expected_resource_key : string Eio.Fiber.key = Eio.Fiber.create_key ()
+
+let with_expected_resource resource f =
+  Eio.Fiber.with_binding expected_resource_key resource f
 ;;
+
+let expected_resource () = Eio.Fiber.get expected_resource_key
 
 let is_pkce_char = function
   | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '-' | '.' | '_' | '~' -> true
@@ -239,6 +236,7 @@ type family_record =
   ; current_access_hash : string
   ; current_refresh_hash : string
   ; updated_at_unix : float
+  ; revoked_at_unix : float option
   }
 
 type token_pair =
@@ -495,6 +493,10 @@ let family_to_yojson (family : family_record) =
     ; "current_access_hash", `String family.current_access_hash
     ; "current_refresh_hash", `String family.current_refresh_hash
     ; "updated_at_unix", `Float family.updated_at_unix
+    ; ( "revoked_at_unix"
+      , match family.revoked_at_unix with
+        | None -> `Null
+        | Some value -> `Float value )
     ]
 ;;
 
@@ -504,7 +506,20 @@ let family_of_yojson = function
     let* current_access_hash = json_string fields "current_access_hash" in
     let* current_refresh_hash = json_string fields "current_refresh_hash" in
     let* updated_at_unix = json_float fields "updated_at_unix" in
-    Ok { family_id; current_access_hash; current_refresh_hash; updated_at_unix }
+    let* revoked_at_unix =
+      match List.assoc_opt "revoked_at_unix" fields with
+      | None | Some `Null -> Ok None
+      | Some (`Float value) -> Ok (Some value)
+      | Some (`Int value) -> Ok (Some (float_of_int value))
+      | Some _ -> Error (Store_error "invalid OAuth store field revoked_at_unix")
+    in
+    Ok
+      { family_id
+      ; current_access_hash
+      ; current_refresh_hash
+      ; updated_at_unix
+      ; revoked_at_unix
+      }
   | _ -> Error (Store_error "invalid OAuth token family record")
 ;;
 
@@ -709,6 +724,7 @@ let mint_pair_locked
     ; current_access_hash = access_hash
     ; current_refresh_hash = refresh_hash
     ; updated_at_unix = issued_at_unix
+    ; revoked_at_unix = None
     }
   in
   let access_json =
@@ -791,24 +807,15 @@ let exchange_authorization_code
     in
     let* grant = claimed_grant in
     let family_id = "mof_" ^ Auth_credential_base.generate_token () in
-    let minted =
-      with_store_io (fun () ->
-        mint_pair_locked
-          ~base_path
-          ~family_id
-          ~client_id:grant.request.client_id
-          ~agent_name:grant.agent_name
-          ~role:grant.role
-          ~scopes:grant.request.scopes
-          ~resource:grant.request.resource)
-    in
-    (match minted with
-     | Ok _ as success -> success
-     | Error _ as error ->
-       Stdlib.Mutex.protect pending_mutex (fun () ->
-         if grant.expires_at_unix > now () && not (Hashtbl.mem pending_codes hash)
-         then Hashtbl.add pending_codes hash grant);
-       error)
+    with_store_io (fun () ->
+      mint_pair_locked
+        ~base_path
+        ~family_id
+        ~client_id:grant.request.client_id
+        ~agent_name:grant.agent_name
+        ~role:grant.role
+        ~scopes:grant.request.scopes
+        ~resource:grant.request.resource)
 ;;
 
 let rotate_refresh_token
@@ -839,14 +846,28 @@ let rotate_refresh_token
       match family with
       | None -> Error Invalid_grant
       | Some family
+        when Option.is_some family.revoked_at_unix ->
+        Error Invalid_grant
+      | Some family
+        when not
+               (constant_time_string_equal
+                  family.current_refresh_hash
+                  refresh_hash) ->
+        let revoked_family =
+          { family with revoked_at_unix = Some current; updated_at_unix = current }
+        in
+        let* () =
+          save_json_private
+            (family_path base_path family.family_id)
+            (family_to_yojson revoked_family)
+        in
+        Log.Auth.warn "oauth: refresh token replay revoked token family";
+        Error Invalid_grant
+      | Some _
         when record.expires_at_unix <= current
              || not (String.equal record.client_id client_id)
              || not (String.equal record.resource expected_resource)
-             || not (String.equal record.resource requested_resource)
-             || not
-                  (constant_time_string_equal
-                     family.current_refresh_hash
-                     refresh_hash) ->
+             || not (String.equal record.resource requested_resource) ->
         Error Invalid_grant
       | Some _ ->
         mint_pair_locked
@@ -875,21 +896,13 @@ let find_access_credential ~base_path ~token =
         (match family with
          | None -> Error (Store_error "OAuth access token family is missing")
          | Some family ->
-           let configured_resource =
-             match Sys.getenv_opt Env_config_core.mcp_url_env_key with
-             | Some value when not (String.equal (String.trim value) "") ->
-               Ok (String.trim value)
-             | Some _ | None ->
-               Result.map
-                 (fun base_url -> base_url ^ "/mcp")
-                 (Env_config_core.masc_http_base_url_result ())
-           in
-           let* configured_resource =
-             Result.map_error (fun detail -> Store_error detail) configured_resource
-           in
            if
              record.expires_at_unix <= now ()
-             || not (String.equal record.resource configured_resource)
+             || Option.is_some family.revoked_at_unix
+             || not
+                  (match expected_resource () with
+                   | Some expected -> String.equal record.resource expected
+                   | None -> false)
              || not
                   (constant_time_string_equal
                      record.token_hash
@@ -920,8 +933,4 @@ let find_access_credential ~base_path ~token =
         (Auth
            (Auth_error.InvalidToken
               ("OAuth access token rejected: " ^ protocol_error_code error)))
-;;
-
-let reset_process_state_for_tests () =
-  Stdlib.Mutex.protect pending_mutex (fun () -> Hashtbl.reset pending_codes)
 ;;

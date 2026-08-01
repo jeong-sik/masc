@@ -1238,10 +1238,18 @@ let test_resolution_is_durable_and_origin_scoped () =
          |> Yojson.Safe.from_string
        in
        Alcotest.(check string)
-         "provider-only projection rehydrates the exact replay output"
-         replay_output
-         Yojson.Safe.Util.(
-           replay_evidence |> member "untrusted_tool_output" |> to_string);
+         "provider-only projection preserves the exact replay artifact identity"
+         replay_output_ref.sha256
+         (match
+            replay_evidence
+            |> Yojson.Safe.Util.member "untrusted_tool_output_ref"
+            |> Tool_output.normalized_artifact_ref_of_json
+          with
+          | Tool_output.Decoded_normalized_artifact_ref decoded -> decoded.sha256
+          | Tool_output.Not_normalized_artifact_ref ->
+            Alcotest.fail "provider replay evidence lost its artifact reference"
+          | Tool_output.Invalid_normalized_artifact_ref { detail } ->
+            Alcotest.fail detail);
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
@@ -1391,7 +1399,8 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         | Gate.Keeper_always_allow -> ()
         | Gate.One_shot_resolution _
         | Gate.Exact_always_rule _
-        | Gate.Workspace_always_allow ->
+        | Gate.Workspace_always_allow
+        | Gate.Confined_sandbox ->
           Alcotest.fail "different exact input consumed the grant");
        (match
           Gate.decide
@@ -1407,7 +1416,8 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
           Alcotest.(check string) "exact approval id" approval_id actual_id
         | Gate.Exact_always_rule _
         | Gate.Keeper_always_allow
-        | Gate.Workspace_always_allow ->
+        | Gate.Workspace_always_allow
+        | Gate.Confined_sandbox ->
           Alcotest.fail "exact effect did not consume its one-shot grant");
        (match
           Gate.decide
@@ -1419,7 +1429,8 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         | Gate.Keeper_always_allow -> ()
         | Gate.One_shot_resolution _
         | Gate.Exact_always_rule _
-        | Gate.Workspace_always_allow ->
+        | Gate.Workspace_always_allow
+        | Gate.Confined_sandbox ->
           Alcotest.fail "one-shot grant was consumed more than once");
        AQ.For_testing.reset_runtime_state ();
        let _ = install_exn ~base_path in

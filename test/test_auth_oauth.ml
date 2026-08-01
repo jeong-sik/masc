@@ -87,6 +87,18 @@ let test_dual_auth_code_and_refresh_lifecycle () =
                 ~redirect_uris:[ redirect_uri ]
               |> oauth_ok
             in
+            let client_file =
+              Filename.concat
+                base_path
+                (".masc/auth/oauth/clients/"
+                 ^ Digestif.SHA256.(digest_string client.client_id |> to_hex)
+                 ^ ".json")
+            in
+            check
+              int
+              "OAuth records are private at creation"
+              0o600
+              ((Unix.stat client_file).st_perm land 0o777);
             let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk" in
             let request =
               authorization_request

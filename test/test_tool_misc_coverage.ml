@@ -252,20 +252,29 @@ let () = test "parse_bing_rss_items" (fun () ->
       <link>https://example.com/hello?a=1&amp;b=2</link>
       <description><![CDATA[Snippet with <b>markup</b> &amp; detail]]></description>
     </item>
+    <search:item xmlns:search="urn:search">
+      <search:title>Namespaced Result</search:title>
+      <search:link>https://example.com/namespaced</search:link>
+      <search:description>Namespace-safe item</search:description>
+    </search:item>
   </channel>
 </rss>|}
   in
   let items = Tool_misc.parse_bing_rss_items payload in
-  assert (List.length items = 2);
+  assert (List.length items = 3);
   match items with
-  | (title1, url1, snippet1) :: (title2, url2, snippet2) :: _ ->
+  | (title1, url1, snippet1) :: (title2, url2, snippet2)
+    :: (title3, url3, snippet3) :: _ ->
       assert (title1 = "OpenAI & ChatGPT");
       assert (url1 = "https://openai.com/");
       assert (snippet1 = "OpenAI's latest updates.");
       assert (title2 = "Example Result");
       assert (url2 = "https://example.com/hello?a=1&b=2");
-      assert (snippet2 = "Snippet with markup & detail")
-  | _ -> failwith "expected two parsed items"
+      assert (snippet2 = "Snippet with markup & detail");
+      assert (title3 = "Namespaced Result");
+      assert (url3 = "https://example.com/namespaced");
+      assert (snippet3 = "Namespace-safe item")
+  | _ -> failwith "expected three parsed items"
 )
 
 let () = test "looks_like_rss_payload" (fun () ->
@@ -293,8 +302,8 @@ let () = test "parse_bing_rss_items_drops_non_http_links" (fun () ->
 let () = test "parse_ddg_html" (fun () ->
   let payload =
     {|<html><body>
-      <a rel="nofollow" class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.com%2Falpha">Alpha <b>Result</b></a>
-      <a class="result__snippet">Alpha <b>snippet</b></a>
+      <a rel="nofollow" class="result__a&#x9;extra" href="/l/?uddg=https%3A%2F%2Fexample.com%2Falpha">Alpha <b>Result</b></a>
+      <a class="extra&#xC;result__snippet">Alpha <b>snippet</b></a>
       <a rel="nofollow" class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.com%2Fbeta">Beta</a>
       <a class="result__snippet">Beta summary</a>
     </body></html>|}
@@ -438,6 +447,7 @@ let () = test "dispatch_web_search_include_content_enriches_results" (fun () ->
     <article>
       <h1>Result Page</h1>
       <p>Readable <b>page</b> content &amp; proof.</p>
+      <a title="1 > 0" href="https://example.com/standards">Standards &copy;</a>
     </article>
   </body>
 </html>|}
@@ -483,6 +493,9 @@ let () = test "dispatch_web_search_include_content_enriches_results" (fun () ->
               assert (str_contains content_text "Snippet: Snippet");
               assert (str_contains content_text "Content status: ok (http=200");
               assert (str_contains content_text "Readable page content & proof.");
+              assert
+                (str_contains content_text
+                   "[Standards ©](https://example.com/standards)");
               assert (hit |> member "page_content_status" |> to_string = "ok");
               assert (hit |> member "page_content_http_status" |> to_int = 200);
               assert (hit |> member "page_content_truncated" |> to_bool = false);

@@ -47,99 +47,14 @@ type simulated_provider_outcome =
   ]
 
 let whitespace_re = Re.Pcre.re "[ \t\r\n]+" |> Re.compile
-let html_tag_re = Re.Pcre.re "<[^>]+>" |> Re.compile
-let cdata_start_re = Re.str "<![CDATA[" |> Re.compile
-let cdata_end_re = Re.str "]]>" |> Re.compile
-let rss_re = Re.Pcre.re "<rss\\b" |> Re.compile
-let channel_re = Re.Pcre.re "<channel\\b" |> Re.compile
-let item_re = Re.Pcre.re "<item\\b[^>]*>([\\s\\S]*?)</item>" |> Re.compile
-let title_re = Re.Pcre.re "<title>([\\s\\S]*?)</title>" |> Re.compile
-let link_re = Re.Pcre.re "<link>([\\s\\S]*?)</link>" |> Re.compile
-let description_re = Re.Pcre.re "<description>([\\s\\S]*?)</description>" |> Re.compile
-
-let ddg_result_re = Re.Pcre.re
-  {|<a rel="nofollow" class="result__a" href="[^"]*uddg=([^&"]+)[^"]*">([^<]*(?:<b>[^<]*</b>[^<]*)*)</a>|}
-  |> Re.compile
-
-let ddg_snippet_re = Re.Pcre.re
-  {|<a class="result__snippet"[^>]*>([^<]*(?:<b>[^<]*</b>[^<]*)*)</a>|}
-  |> Re.compile
-
-let html_entity_replacements =
-  [
-    ("&amp;", "&");
-    ("&lt;", "<");
-    ("&gt;", ">");
-    ("&quot;", "\"");
-    ("&#39;", "'");
-    ("&#039;", "'");
-    ("&nbsp;", " ");
-  ]
-  |> List.map (fun (entity, replacement) ->
-         (Re.str entity |> Re.compile, replacement))
-
 let normalize_spaces text =
   text |> Re.replace_string whitespace_re ~by:" " |> String.trim
 
-let strip_html_tags text =
-  Re.replace_string html_tag_re ~by:"" text
-
-let strip_cdata text =
-  text
-  |> Re.replace_string cdata_start_re ~by:""
-  |> Re.replace_string cdata_end_re ~by:""
-
-let decode_html_entities text =
-  let basic =
-    html_entity_replacements
-    |> List.fold_left
-         (fun acc (entity_re, replacement) ->
-           Re.replace_string entity_re ~by:replacement acc)
-         text
-  in
-  let len = String.length basic in
-  let buf = Buffer.create len in
-  let decode_numeric entity =
-    let body = String.sub entity 2 (String.length entity - 3) in
-    let maybe_n =
-      if String.length body > 1
-         && (Char.equal body.[0] 'x' || Char.equal body.[0] 'X')
-      then Stdlib.int_of_string_opt ("0" ^ body)
-      else Stdlib.int_of_string_opt body
-    in
-    match maybe_n with
-    | Some n -> Stdlib.Uchar.of_int n |> Stdlib.Buffer.add_utf_8_uchar buf; Some ""
-    | None -> None
-  in
-  let rec loop index =
-    if index >= len then
-      Buffer.contents buf
-    else if not (Char.equal basic.[index] '&') then (
-      Buffer.add_char buf basic.[index];
-      loop (index + 1))
-    else
-      match String.index_from_opt basic index ';' with
-      | None ->
-          Buffer.add_char buf basic.[index];
-          loop (index + 1)
-      | Some semi ->
-          let entity = String.sub basic index (semi - index + 1) in
-          if String.length entity >= 4
-             && String.starts_with ~prefix:"&#" entity
-          then (
-            match decode_numeric entity with
-            | Some _ -> loop (semi + 1)
-            | None ->
-                Buffer.add_string buf entity;
-                loop (semi + 1))
-          else (
-            Buffer.add_string buf entity;
-            loop (semi + 1))
-  in
-  loop 0
-
 let clean_search_text text =
-  text |> strip_cdata |> strip_html_tags |> decode_html_entities |> normalize_spaces
+  Markup_document.parse_html text
+  |> List.map Markup_document.text_content
+  |> String.concat ""
+  |> normalize_spaces
 
 
 let valid_search_result_url url =
@@ -152,19 +67,24 @@ let valid_search_result_url url =
     | Some "http" | Some "https" -> true
     | _ -> false
 
-let search_field field_re block =
-  match Re.exec_opt field_re block with
-  | None -> None
-  | Some groups -> Some (Re.Group.get groups 1 |> clean_search_text)
+let child_text name = function
+  | Markup_document.Text _ -> None
+  | Markup_document.Element { children; _ } ->
+    Markup_document.first_element_named name children
+    |> Option.map (fun node ->
+           Markup_document.text_content node |> normalize_spaces)
 
 let parse_bing_rss_items payload =
-  Re.all item_re payload
-  |> List.filter_map (fun groups ->
-         let block = Re.Group.get groups 1 in
+  Markup_document.parse_xml payload
+  |> Markup_document.elements_named "item"
+  |> List.filter_map (fun item ->
+         let description =
+           child_text "description" item |> Option.map clean_search_text
+         in
          match
-           search_field title_re block,
-           search_field link_re block,
-           search_field description_re block
+           child_text "title" item,
+           child_text "link" item,
+           description
          with
          | Some title, Some url, Some snippet
            when not (String.equal title "") && valid_search_result_url url ->
@@ -175,21 +95,36 @@ let parse_bing_rss_items payload =
          | _ -> None)
 
 let parse_ddg_html payload =
-  let results = Re.all ddg_result_re payload in
-  let snippets = Re.all ddg_snippet_re payload in
-  List.mapi (fun i groups ->
-    let url_encoded = Re.Group.get groups 1 in
-    let title_raw = Re.Group.get groups 2 in
-    let url = Uri.pct_decode url_encoded in
-    let title = clean_search_text title_raw in
-    let snippet =
-      match List.nth_opt snippets i with
-      | Some sg -> clean_search_text (Re.Group.get sg 1)
-      | None -> ""
-    in
-    (title, url, snippet)
-  ) results
-  |> List.filter (fun (title, url, _snippet) -> not (String.equal title "") && valid_search_result_url url)
+  let nodes = Markup_document.parse_html payload in
+  let anchors = Markup_document.elements_named "a" nodes in
+  let has_class class_name node =
+    Markup_document.attribute "class" node
+    |> Option.exists (fun classes ->
+           classes |> Markup_document.html_space_tokens
+           |> List.exists (String.equal class_name))
+  in
+  let results = List.filter (has_class "result__a") anchors in
+  let snippets = List.filter (has_class "result__snippet") anchors in
+  List.mapi
+    (fun index node ->
+      let url =
+        Option.bind
+          (Markup_document.attribute "href" node)
+          (fun href ->
+             Uri.of_string href |> fun uri -> Uri.get_query_param uri "uddg")
+      in
+      let title = Markup_document.text_content node |> normalize_spaces in
+      let snippet =
+        match List.nth_opt snippets index with
+        | Some snippet ->
+          Markup_document.text_content snippet |> normalize_spaces
+        | None -> ""
+      in
+      Option.map (fun url -> title, url, snippet) url)
+    results
+  |> List.filter_map Fun.id
+  |> List.filter (fun (title, url, _snippet) ->
+         not (String.equal title "") && valid_search_result_url url)
 
 let parse_json_search_results ~results_path ~title_field ~snippet_field payload =
   let str_of item key =
@@ -242,9 +177,9 @@ let parse_bing_search_json payload =
     ~title_field:"name" ~snippet_field:"snippet" payload
 
 let looks_like_rss_payload payload =
-  let normalized = String.lowercase_ascii payload in
-  String.contains normalized '<'
-  && (Re.execp rss_re normalized || Re.execp channel_re normalized)
+  let nodes = Markup_document.parse_xml payload in
+  Option.is_some (Markup_document.first_element_named "rss" nodes)
+  || Option.is_some (Markup_document.first_element_named "channel" nodes)
 
 let provider_to_string = function
   | Searxng -> "searxng"

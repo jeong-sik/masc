@@ -11,14 +11,10 @@
     \[provider_response] / \[cache_entry] (cache + provider data
     types kept internal so callers cannot construct half-formed
     state),
-    9 pre-compiled regex constants (\[whitespace_re], \[html_tag_re],
-    \[cdata_*_re], \[rss_re], \[channel_re], \[item_re],
-    \[title_re], \[link_re], \[description_re], \[ddg_result_re],
-    \[ddg_snippet_re]), \[html_entity_replacements] data table,
+    the pre-compiled whitespace normalizer,
     JSON envelope helpers (\[json_error], \[json_ok]), text
-    cleaning helpers (\[normalize_spaces], \[strip_html_tags],
-    \[strip_cdata], \[decode_html_entities],
-    \[clean_search_text], \[trim_nonempty]),
+    cleaning helpers (\[normalize_spaces], \[clean_search_text],
+    \[trim_nonempty]),
     \[valid_search_result_url], \[search_field],
     \[parse_json_search_results] (the generic JSON parser
     behind the per-provider parsers), \[provider_to_string] /
@@ -81,15 +77,14 @@ val redact_transport_error_detail : string -> string
     without an HTTP roundtrip. *)
 
 val looks_like_rss_payload : string -> bool
-(** [looks_like_rss_payload payload] is [true] iff [payload]
-    contains a [<] character AND matches either an [<rss]
-    or [<channel] tag (case-insensitive).  Used by the Bing
+(** [looks_like_rss_payload payload] parses XML and is [true] iff the document
+    contains an [rss] or [channel] element.  Used by the Bing
     fetcher to dispatch between {!parse_bing_rss_items} and
     {!parse_bing_search_json}. *)
 
 val parse_bing_rss_items : string -> (string * string * string) list
 (** Parse Bing RSS feed items.  Reads [<item>], [<title>],
-    [<link>], [<description>] tags via pre-compiled regex. *)
+    [<link>], and [<description>] elements through the shared XML parser. *)
 
 val parse_ddg_html : string -> (string * string * string) list
 (** Parse DuckDuckGo HTML lite results.  Decodes URL-encoded

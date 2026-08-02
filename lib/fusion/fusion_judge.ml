@@ -3,23 +3,18 @@
 
    일반 에이전트 실행(Fusion_oas) + Fusion_judge_parse(LLM-facing JSON). *)
 
-(* 질문·패널 답변은 신뢰 불가(모델/사용자 생성)다. XML 메타문자를 escape하고
-   <question>/<panel_answers> 태그로 감싸, 패널이 가짜 judge 지시나 JSON을 답변에
-   섞어 심판 프롬프트 구조를 탈취(prompt injection)하는 것을 방어한다. escape 순서는
-   '&'를 먼저 — 그래야 뒤이은 "&lt;" 등이 이중 이스케이프되지 않는다. *)
-let escape_xml (s : string) : string =
-  s
-  |> String.split_on_char '&' |> String.concat "&amp;"
-  |> String.split_on_char '<' |> String.concat "&lt;"
-  |> String.split_on_char '>' |> String.concat "&gt;"
-  |> String.split_on_char '"' |> String.concat "&quot;"
+(* 질문·패널 답변은 신뢰 불가(모델/사용자 생성)다. XML 메타문자를
+   [String_util.escape_xml]로 escape하고 <question>/<panel_answers> 태그로 감싸,
+   패널이 가짜 judge 지시나 JSON을 답변에 섞어 심판 프롬프트 구조를 탈취(prompt
+   injection)하는 것을 방어한다. *)
 
 let compose_prompt ~question ~panel =
   let answers =
     Fusion_types.answered_of panel
     |> List.map (fun (a : Fusion_types.panel_answer) ->
-           Printf.sprintf "<panel model=\"%s\">%s</panel>" (escape_xml a.model)
-             (escape_xml a.answer))
+           Printf.sprintf "<panel model=\"%s\">%s</panel>"
+             (String_util.escape_xml a.model)
+             (String_util.escape_xml a.answer))
     |> String.concat "\n"
   in
   Printf.sprintf
@@ -32,7 +27,7 @@ let compose_prompt ~question ~panel =
 </panel_answers>
 
 %s|}
-    (escape_xml question) answers Fusion_judge_parse.expected_json_doc
+    (String_util.escape_xml question) answers Fusion_judge_parse.expected_json_doc
 
 (* REFINE 위상의 2차 심판 프롬프트. [compose_prompt]와 동일한 untrusted-content 방어
    (escape + <question>/<panel_answers> 태그)에 더해, 1차 심판 종합을 <prior_synthesis>
@@ -44,8 +39,9 @@ let compose_refine_prompt ~question ~panel ~prior =
   let answers =
     Fusion_types.answered_of panel
     |> List.map (fun (a : Fusion_types.panel_answer) ->
-           Printf.sprintf "<panel model=\"%s\">%s</panel>" (escape_xml a.model)
-             (escape_xml a.answer))
+           Printf.sprintf "<panel model=\"%s\">%s</panel>"
+             (String_util.escape_xml a.model)
+             (String_util.escape_xml a.answer))
     |> String.concat "\n"
   in
   Printf.sprintf
@@ -62,8 +58,8 @@ let compose_refine_prompt ~question ~panel ~prior =
 </prior_synthesis>
 
 %s|}
-    (escape_xml question) answers
-    (escape_xml (Fusion_types.render_prior_synthesis prior))
+    (String_util.escape_xml question) answers
+    (String_util.escape_xml (Fusion_types.render_prior_synthesis prior))
     Fusion_judge_parse.expected_json_doc
 
 (* JOJ(judge-of-judges, RFC-0283) meta 심판 프롬프트. [compose_refine_prompt]와 동형이되
@@ -75,15 +71,17 @@ let compose_meta_prompt ~question ~panel ~priors =
   let answers =
     Fusion_types.answered_of panel
     |> List.map (fun (a : Fusion_types.panel_answer) ->
-           Printf.sprintf "<panel model=\"%s\">%s</panel>" (escape_xml a.model)
-             (escape_xml a.answer))
+           Printf.sprintf "<panel model=\"%s\">%s</panel>"
+             (String_util.escape_xml a.model)
+             (String_util.escape_xml a.answer))
     |> String.concat "\n"
   in
   let judge_blocks =
     priors
     |> List.map (fun (judge_id, synthesis) ->
-           Printf.sprintf "<judge id=\"%s\">\n%s\n</judge>" (escape_xml judge_id)
-             (escape_xml (Fusion_types.render_prior_synthesis synthesis)))
+           Printf.sprintf "<judge id=\"%s\">\n%s\n</judge>"
+             (String_util.escape_xml judge_id)
+             (String_util.escape_xml (Fusion_types.render_prior_synthesis synthesis)))
     |> String.concat "\n"
   in
   Printf.sprintf
@@ -100,7 +98,8 @@ let compose_meta_prompt ~question ~panel ~priors =
 </judge_syntheses>
 
 %s|}
-    (escape_xml question) answers judge_blocks Fusion_judge_parse.expected_json_doc
+    (String_util.escape_xml question) answers judge_blocks
+    Fusion_judge_parse.expected_json_doc
 
 (* 심판이 응답을 생성한 뒤의 파싱 결과(성공/실패)에 그 호출이 소비한 [usage]를
    양 분기 모두에 묶는다. 파싱 실패 시 usage를 버리면 orchestrator의 refine degrade

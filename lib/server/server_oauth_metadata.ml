@@ -57,17 +57,20 @@ let authorization_server_json authority =
 ;;
 
 let loopback_authority authority =
-  let host = Server_request_authority.host authority |> String.lowercase_ascii in
-  if String.equal host "localhost"
-  then true
-  else
-    match Ipaddr.of_string host with
-    | Ok (Ipaddr.V4 address) ->
-      let octets = Ipaddr.V4.to_octets address in
-      String.length octets = 4 && Char.code octets.[0] = 127
-    | Ok (Ipaddr.V6 address) ->
-      Ipaddr.V6.compare address Ipaddr.V6.localhost = 0
-    | Error _ -> false
+  match Server_request_authority.trust_class authority with
+  | Explicit_trusted_host -> false
+  | Configured_bind ->
+    let host = Server_request_authority.host authority |> String.lowercase_ascii in
+    if String.equal host "localhost"
+    then true
+    else
+      match Ipaddr.of_string host with
+      | Ok (Ipaddr.V4 address) ->
+        let octets = Ipaddr.V4.to_octets address in
+        String.length octets = 4 && Char.code octets.[0] = 127
+      | Ok (Ipaddr.V6 address) ->
+        Ipaddr.V6.compare address Ipaddr.V6.localhost = 0
+      | Error _ -> false
 ;;
 
 let challenge_for_authority authority =

@@ -134,14 +134,17 @@ a validated exchange attempt consumes it before token minting begins. If the
 durable store fails, the client must start a fresh authorization flow; the code
 is never restored for retry.
 
-The refresh grant rotates both access and refresh tokens. Replaying any known
-older refresh token revokes the entire token family, including the current
-access and refresh tokens, and fails with `invalid_grant`.
+The refresh grant rotates both access and refresh tokens. The refresh token
+carries its opaque family ID and random secret. The family record stores only
+the hash of the current complete token, so presenting any older token for that
+family revokes the current access and refresh tokens and fails with
+`invalid_grant` without retaining per-rotation tombstone records.
 
-Access and refresh token records store SHA-256 hashes only. An access-token
-record contains the authoritative agent, effective role, resource, scope set,
-client ID, issue time, and expiry. Token files use the hash as the lookup key, so
-resource authentication is an exact O(1) lookup rather than a directory scan.
+An access-token record stores its SHA-256 hash, family ID, issue time, and
+expiry. The family is the single authority for agent, effective role, resource,
+scope set, client ID, live bootstrap-credential hash, and current token hashes.
+Access files use the hash as the lookup key, so resource authentication is an
+exact O(1) lookup rather than a directory scan.
 
 ## 5. Typed authorization convergence
 
@@ -181,7 +184,6 @@ OAuth scopes can only reduce privilege:
 .masc/auth/oauth/
   clients/<sha256(client-id)>.json
   access_tokens/<sha256(raw-access-token)>.json
-  refresh_tokens/<sha256(raw-refresh-token)>.json
   families/<sha256(family-id)>.json
   .store.lock
 ```
@@ -198,10 +200,7 @@ Configuration lives in one typed module and is re-read at request boundaries:
 | `MASC_OAUTH_CODE_TTL_SEC` | authorization-code lifetime |
 | `MASC_OAUTH_ACCESS_TOKEN_TTL_SEC` | access-token lifetime |
 | `MASC_OAUTH_REFRESH_TOKEN_TTL_SEC` | refresh-token lifetime |
-| `MASC_OAUTH_CLIENT_REGISTRATION_TTL_SEC` | lifetime of an unapproved dynamic-client registration |
 | `MASC_OAUTH_MAX_PENDING_CODES` | hard bound on process-local grants |
-| `MASC_OAUTH_MAX_CLIENTS` | hard bound on durable dynamic clients |
-| `MASC_OAUTH_MAX_TOKEN_RECORDS` | hard bound on durable access and refresh records |
 
 Defaults are named policy values in the typed configuration module, not literals
 distributed through handlers or stores.
@@ -222,11 +221,11 @@ commit.
 | token leak at rest | only SHA-256 hashes are persisted; files are mode 0600 |
 | cross-resource token use | authorization and token requests bind the exact resource derived from admitted request authority; MCP credential lookup requires that same fiber-local resource context |
 | privilege escalation | requested scope intersects downward with bootstrap role; it never upgrades role |
-| host-header injection | issuer/resource URLs derive only from admitted `Server_request_authority`, never raw headers |
+| host-header injection | issuer/resource URLs derive only from admitted `Server_request_authority`; OAuth routes additionally require a loopback `Configured_bind` authority, so an explicit loopback Host cannot expose them on a public listener |
 | CSRF/form injection | browser POST requires same-origin checks; every reflected value is HTML escaped |
-| malicious DCR | only bounded metadata and exact loopback redirect URIs are accepted; exact retries are idempotent, active clients are never evicted, and expired records are reclaimed |
-| state exhaustion | pending grants and durable token records have configured hard capacities; expired, revoked, superseded, and unpublished records are reclaimed |
-| concurrent writers | one stable store lock serializes read-modify-publish across processes sharing a base path and fails closed after a bounded wait |
+| malicious DCR | only bounded metadata and exact loopback redirect URIs are accepted; exact retries are idempotent and OAuth is available only on the actual loopback listener |
+| state exhaustion | pending grants are bounded; rotation overwrites one family SSOT and removes the superseded access record instead of accumulating generation records |
+| concurrent writers | one blocking process mutex and one blocking OS store lock serialize read-modify-publish across processes sharing a base path |
 | credential ambiguity | static and OAuth stores use typed lookup outcomes; no error-string fallback |
 
 OAuth endpoints return protocol error codes (`invalid_request`,
@@ -267,7 +266,8 @@ Focused tests must prove:
 - a valid code exchanges once and replay fails;
 - wrong verifier does not mint a token;
 - refresh rotates once; replay fails and revokes the current token family;
-- durable client and token capacities remain recoverable and bounded;
+- registration retries are idempotent and distinct valid clients remain durable;
+- repeated refresh rotation retains one family SSOT and one current access record;
 - expired/revoked/wrong-resource OAuth access tokens fail closed;
 - deletion, rotation, expiry, or role demotion of the bootstrap credential fails closed;
 - Worker bootstrap cannot obtain admin scope;

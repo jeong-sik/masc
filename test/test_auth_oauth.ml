@@ -476,9 +476,8 @@ let test_live_bootstrap_credential_remains_authoritative () =
 
 let test_code_exchange_rechecks_live_bootstrap () =
   with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
-    with_env "MASC_OAUTH_CLIENT_REGISTRATION_TTL_SEC" "1" (fun () ->
-      with_workspace (fun base_path ->
-        Eio_main.run (fun env ->
+    with_workspace (fun base_path ->
+      Eio_main.run (fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
         Eio_guard.enable ();
         Fun.protect
@@ -519,14 +518,6 @@ let test_code_exchange_rechecks_live_bootstrap () =
                 ~bootstrap_credential
               |> oauth_ok
             in
-            Eio.Time.sleep (Eio.Stdenv.clock env) 1.1;
-            check
-              bool
-              "approved client survives registration lease expiry"
-              true
-              (Auth_oauth.find_client ~base_path ~client_id:client.client_id
-               |> oauth_ok
-               |> Option.is_some);
             Auth.delete_credential base_path "revoked-before-exchange";
             check
               bool
@@ -543,7 +534,7 @@ let test_code_exchange_rechecks_live_bootstrap () =
                    ~code_verifier:verifier
                with
                | Error Auth_oauth.Invalid_grant -> true
-               | Ok _ | Error _ -> false))))))
+               | Ok _ | Error _ -> false)))))
 ;;
 
 let test_registration_rejects_non_loopback_redirect () =
@@ -590,12 +581,10 @@ let test_registration_rejects_non_loopback_redirect () =
               retry.client_id))))
 ;;
 
-let test_registration_capacity_is_recoverable () =
+let test_registration_is_idempotent_without_lease_or_capacity_policy () =
   with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
-    with_env "MASC_OAUTH_MAX_CLIENTS" "1" (fun () ->
-      with_env "MASC_OAUTH_CLIENT_REGISTRATION_TTL_SEC" "1" (fun () ->
-        with_workspace (fun base_path ->
-          Eio_main.run (fun env ->
+    with_workspace (fun base_path ->
+      Eio_main.run (fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             Eio_guard.enable ();
             Fun.protect
@@ -622,20 +611,7 @@ let test_registration_capacity_is_recoverable () =
                   "exact DCR retry is idempotent"
                   first.client_id
                   repeated.client_id;
-                check
-                  bool
-                  "an active client is not evicted at capacity"
-                  true
-                  (match
-                     Auth_oauth.register_client
-                       ~base_path
-                       ~client_name:(Some "Codex replacement")
-                       ~redirect_uris:[ "http://127.0.0.1:43128/callback/second" ]
-                   with
-                   | Error Auth_oauth.Temporarily_unavailable -> true
-                   | Ok _ | Error _ -> false);
-                Eio.Time.sleep (Eio.Stdenv.clock env) 1.1;
-                let replacement =
+                let second =
                   Auth_oauth.register_client
                     ~base_path
                     ~client_name:(Some "Codex replacement")
@@ -644,25 +620,29 @@ let test_registration_capacity_is_recoverable () =
                 in
                 check
                   bool
-                  "expired client is reclaimed at capacity"
+                  "a distinct valid registration is admitted without an invented cap"
+                  true
+                  (not (String.equal first.client_id second.client_id));
+                check
+                  bool
+                  "the first registration remains durable"
                   true
                   (Auth_oauth.find_client ~base_path ~client_id:first.client_id
                    |> oauth_ok
-                   |> Option.is_none);
+                   |> Option.is_some);
                 check
                   bool
-                  "new registration succeeds after expiry recovery"
+                  "the second registration remains durable"
                   true
-                  (Auth_oauth.find_client ~base_path ~client_id:replacement.client_id
+                  (Auth_oauth.find_client ~base_path ~client_id:second.client_id
                    |> oauth_ok
-                   |> Option.is_some)))))))
+                   |> Option.is_some)))))
 ;;
 
-let test_durable_token_store_is_bounded () =
+let test_rotation_keeps_one_current_access_record () =
   with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
-    with_env "MASC_OAUTH_MAX_TOKEN_RECORDS" "4" (fun () ->
-      with_workspace (fun base_path ->
-        Eio_main.run (fun env ->
+    with_workspace (fun base_path ->
+      Eio_main.run (fun env ->
           Fs_compat.set_fs (Eio.Stdenv.fs env);
           Eio_guard.enable ();
           Fun.protect
@@ -686,29 +666,20 @@ let test_durable_token_store_is_bounded () =
                   ~resource
                   ~scope:"mcp:tools"
               in
-              let second =
-                Auth_oauth.rotate_refresh_token
-                  ~base_path
-                  ~expected_resource:resource
-                  ~refresh_token:first.refresh_token
-                  ~client_id:client.client_id
-                  ~resource:(Some resource)
-                |> oauth_ok
+              let rec rotate remaining pair =
+                if remaining = 0
+                then pair
+                else
+                  Auth_oauth.rotate_refresh_token
+                    ~base_path
+                    ~expected_resource:resource
+                    ~refresh_token:pair.Auth_oauth.refresh_token
+                    ~client_id:client.client_id
+                    ~resource:(Some resource)
+                  |> oauth_ok
+                  |> rotate (remaining - 1)
               in
-              check
-                bool
-                "capacity rejects further durable growth"
-                true
-                (match
-                   Auth_oauth.rotate_refresh_token
-                     ~base_path
-                     ~expected_resource:resource
-                     ~refresh_token:second.refresh_token
-                     ~client_id:client.client_id
-                     ~resource:(Some resource)
-                 with
-                 | Error Auth_oauth.Temporarily_unavailable -> true
-                 | Ok _ | Error _ -> false);
+              ignore (rotate 8 first);
               let oauth_store = Filename.concat base_path ".masc/auth/oauth" in
               let count dir =
                 Sys.readdir (Filename.concat oauth_store dir)
@@ -716,12 +687,51 @@ let test_durable_token_store_is_bounded () =
                 |> List.filter (fun path -> Filename.check_suffix path ".json")
                 |> List.length
               in
+              check int "rotation retains one access record" 1 (count "access_tokens");
+              check int "rotation retains one family SSOT" 1 (count "families");
+              let family_file =
+                Sys.readdir (Filename.concat oauth_store "families").(0)
+              in
+              let family_json =
+                Filename.concat (Filename.concat oauth_store "families") family_file
+                |> Fs_compat.load_file
+                |> Yojson.Safe.from_string
+              in
+              let family_fields = Yojson.Safe.Util.to_assoc family_json in
+              let stored_bootstrap_hash =
+                Yojson.Safe.Util.member "bootstrap_token_hash" family_json
+                |> Yojson.Safe.Util.to_string
+              in
               check
                 bool
-                "token record count stays within configured bound"
+                "family never persists the raw bootstrap bearer"
                 true
-                (count "access_tokens" + count "refresh_tokens"
-                 <= Auth_oauth.max_token_records ()))))))
+                (not
+                   (String.equal
+                      stored_bootstrap_hash
+                      bootstrap_credential.token));
+              List.iter
+                (fun field ->
+                  check
+                    bool
+                    (field ^ " is absent from the current store contract")
+                    false
+                    (List.mem_assoc field family_fields))
+                [ "generation"; "updated_at_unix" ];
+              check
+                bool
+                "refresh tokens have no per-generation record directory"
+                false
+                (Sys.file_exists (Filename.concat oauth_store "refresh_tokens"))))))
+;;
+
+let test_unbound_resource_context_fails_closed_without_raising () =
+  with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
+    with_workspace (fun base_path ->
+      match Auth_oauth.find_access_credential ~base_path ~token:"not-an-oauth-token" with
+      | Ok None -> ()
+      | Ok (Some _) -> fail "an unknown token resolved without a resource context"
+      | Error error -> fail (Masc_domain.show_masc_error error)))
 ;;
 
 let () =
@@ -751,13 +761,17 @@ let () =
             `Quick
             test_code_exchange_rechecks_live_bootstrap
         ; test_case
-            "registration capacity is recoverable"
+            "registration is idempotent without lease or capacity policy"
             `Quick
-            test_registration_capacity_is_recoverable
+            test_registration_is_idempotent_without_lease_or_capacity_policy
         ; test_case
-            "durable token store is bounded"
+            "rotation keeps one current access record"
             `Quick
-            test_durable_token_store_is_bounded
+            test_rotation_keeps_one_current_access_record
+        ; test_case
+            "unbound resource context fails closed without raising"
+            `Quick
+            test_unbound_resource_context_fails_closed_without_raising
         ] )
     ]
 ;;

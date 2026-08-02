@@ -20,4 +20,7 @@ val authorization_server_json :
   Server_request_authority.authority -> Yojson.Safe.t
 
 val loopback_authority : Server_request_authority.authority -> bool
-(** Built-in OAuth authorization is intentionally available only on loopback. *)
+(** Built-in OAuth authorization is available only when the admitted authority
+    is the actual configured listener and that listener is loopback. An
+    explicit trusted Host cannot turn a public listener into a loopback OAuth
+    endpoint. *)

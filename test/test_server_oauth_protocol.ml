@@ -58,6 +58,35 @@ let test_codex_discovery_contract () =
        |> List.mem_assoc "resource_documentation"))
 ;;
 
+let test_public_listener_cannot_admit_loopback_oauth_by_host () =
+  let trust_policy =
+    match
+      Server_request_authority.make_trust_policy
+        ~bind_host:"0.0.0.0"
+        ~bind_port:8935
+        ~explicit_base_url:(Some "http://127.0.0.1:8935")
+    with
+    | Ok policy -> policy
+    | Error error ->
+      fail (Server_request_authority.trust_policy_error_to_string error)
+  in
+  let request =
+    Httpun.Request.create
+      ~headers:(Httpun.Headers.of_list [ "host", "127.0.0.1:8935" ])
+      `GET
+      "/.well-known/oauth-authorization-server"
+  in
+  match Server_request_authority.classify_http1_request ~trust_policy request with
+  | Single authority ->
+    check
+      bool
+      "explicit loopback Host does not expose OAuth on a public listener"
+      false
+      (Server_oauth_metadata.loopback_authority authority)
+  | Missing | Multiple | Malformed | Untrusted ->
+    fail "explicit loopback authority should be classified before OAuth admission"
+;;
+
 let registration_request ?origin () =
   let headers =
     ("host", "127.0.0.1:8935")
@@ -102,13 +131,13 @@ let test_form_parser_rejects_ambiguity () =
     bool
     "duplicate parameter rejected"
     true
-    (Result.is_error (Server_oauth_http.parse_form "client_id=a&client_id=b"));
+    (Result.is_error (Server_oauth_service.parse_form "client_id=a&client_id=b"));
   check
     (list (pair string string))
     "single values parsed"
     [ "grant_type", "refresh_token"; "client_id", "codex" ]
     (match
-       Server_oauth_http.parse_form "grant_type=refresh_token&client_id=codex"
+       Server_oauth_service.parse_form "grant_type=refresh_token&client_id=codex"
      with
      | Ok values -> values
      | Error error -> fail (Auth_oauth.show_error error))
@@ -119,7 +148,7 @@ let test_html_escape () =
     string
     "attribute and text escaping"
     "&lt;&amp;&gt;&quot;&#39;"
-    (Server_oauth_http.html_escape "<&>\"'")
+    (Server_oauth_service.html_escape "<&>\"'")
 ;;
 
 let contains haystack needle =
@@ -146,7 +175,7 @@ let test_admin_consent_is_visible_and_explicit () =
     ; code_challenge = String.make 43 'a'
     }
   in
-  let html = Server_oauth_http.render_authorization_form request in
+  let html = Server_oauth_service.render_authorization_form request in
   check bool "verified client name is visible and escaped" true (contains html "Codex &lt;Admin&gt;");
   check bool "admin scope is visible" true (contains html "mcp:admin");
   check
@@ -160,7 +189,7 @@ let grant_types values = [ "grant_types", `List (List.map (fun v -> `String v) v
 let supported_grant_types = [ "authorization_code"; "refresh_token" ]
 
 let ensure_grant_types values =
-  Server_oauth_http.ensure_optional_string_subset
+  Server_oauth_service.ensure_optional_string_subset
     (grant_types values)
     "grant_types"
     supported_grant_types
@@ -195,7 +224,7 @@ let test_string_subset_accepts_documented_default () =
     "omitting the field registers"
     true
     (Result.is_ok
-       (Server_oauth_http.ensure_optional_string_subset
+       (Server_oauth_service.ensure_optional_string_subset
           []
           "grant_types"
           supported_grant_types))
@@ -206,6 +235,10 @@ let () =
     "server_oauth_protocol"
     [ ( "protocol"
       , [ test_case "Codex discovery contract" `Quick test_codex_discovery_contract
+        ; test_case
+            "public listener rejects loopback OAuth Host"
+            `Quick
+            test_public_listener_cannot_admit_loopback_oauth_by_host
         ; test_case
             "registration browser origin boundary"
             `Quick

@@ -44,18 +44,12 @@ module Policy = struct
   let code_ttl_env = "MASC_OAUTH_CODE_TTL_SEC"
   let access_token_ttl_env = "MASC_OAUTH_ACCESS_TOKEN_TTL_SEC"
   let refresh_token_ttl_env = "MASC_OAUTH_REFRESH_TOKEN_TTL_SEC"
-  let client_registration_ttl_env = "MASC_OAUTH_CLIENT_REGISTRATION_TTL_SEC"
   let max_pending_codes_env = "MASC_OAUTH_MAX_PENDING_CODES"
-  let max_clients_env = "MASC_OAUTH_MAX_CLIENTS"
-  let max_token_records_env = "MASC_OAUTH_MAX_TOKEN_RECORDS"
 
   let default_code_ttl_sec = 300
   let default_access_token_ttl_sec = 3600
   let default_refresh_token_ttl_sec = 2_592_000
-  let default_client_registration_ttl_sec = 600
   let default_max_pending_codes = 128
-  let default_max_clients = 32
-  let default_max_token_records = 4096
   let max_redirect_uris = 8
   let max_uri_bytes = 2048
   let max_client_name_bytes = 200
@@ -94,26 +88,10 @@ let refresh_token_ttl_sec () =
     Policy.refresh_token_ttl_env
 ;;
 
-let client_registration_ttl_sec () =
-  positive_config
-    ~default:Policy.default_client_registration_ttl_sec
-    Policy.client_registration_ttl_env
-;;
-
 let max_pending_codes () =
   positive_config
     ~default:Policy.default_max_pending_codes
     Policy.max_pending_codes_env
-;;
-
-let max_clients () =
-  positive_config ~default:Policy.default_max_clients Policy.max_clients_env
-;;
-
-let max_token_records () =
-  positive_config
-    ~default:Policy.default_max_token_records
-    Policy.max_token_records_env
 ;;
 
 let pkce_s256 verifier =
@@ -130,7 +108,11 @@ let with_expected_resource resource f =
   Eio.Fiber.with_binding expected_resource_key resource f
 ;;
 
-let expected_resource () = Eio.Fiber.get expected_resource_key
+let expected_resource () =
+  match Eio.Fiber.get expected_resource_key with
+  | value -> value
+  | exception Effect.Unhandled _ -> None
+;;
 
 let is_pkce_char = function
   | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '-' | '.' | '_' | '~' -> true
@@ -213,8 +195,6 @@ type client =
   ; client_name : string option
   ; redirect_uris : string list
   ; created_at_unix : float
-  ; registration_expires_at_unix : float
-  ; activated_at_unix : float option
   }
 
 type authorization_request =
@@ -240,37 +220,21 @@ type pending_grant =
 type access_record =
   { token_hash : string
   ; family_id : string
-  ; generation : int
-  ; client_id : string
-  ; agent_name : string
-  ; bootstrap_token_hash : string
-  ; role : agent_role
-  ; scopes : scope list
-  ; resource : string
-  ; issued_at_unix : float
-  ; expires_at_unix : float
-  }
-
-type refresh_record =
-  { token_hash : string
-  ; family_id : string
-  ; generation : int
-  ; client_id : string
-  ; agent_name : string
-  ; bootstrap_token_hash : string
-  ; role : agent_role
-  ; scopes : scope list
-  ; resource : string
   ; issued_at_unix : float
   ; expires_at_unix : float
   }
 
 type family_record =
   { family_id : string
-  ; generation : int
+  ; client_id : string
+  ; agent_name : string
+  ; bootstrap_token_hash : string
+  ; role : agent_role
+  ; scopes : scope list
+  ; resource : string
   ; current_access_hash : string
   ; current_refresh_hash : string
-  ; updated_at_unix : float
+  ; refresh_expires_at_unix : float
   ; revoked_at_unix : float option
   }
 
@@ -293,7 +257,6 @@ let token_hash = Auth_credential_base.sha256_hash
 let oauth_dir base_path = Filename.concat (Auth_credential_base.auth_dir base_path) "oauth"
 let clients_dir base_path = Filename.concat (oauth_dir base_path) "clients"
 let access_tokens_dir base_path = Filename.concat (oauth_dir base_path) "access_tokens"
-let refresh_tokens_dir base_path = Filename.concat (oauth_dir base_path) "refresh_tokens"
 let families_dir base_path = Filename.concat (oauth_dir base_path) "families"
 
 let client_path base_path client_id =
@@ -302,10 +265,6 @@ let client_path base_path client_id =
 
 let access_path base_path hash =
   Filename.concat (access_tokens_dir base_path) (hash ^ ".json")
-;;
-
-let refresh_path base_path hash =
-  Filename.concat (refresh_tokens_dir base_path) (hash ^ ".json")
 ;;
 
 let family_path base_path family_id =
@@ -319,7 +278,6 @@ let ensure_oauth_dirs base_path =
     [ oauth_dir base_path
     ; clients_dir base_path
     ; access_tokens_dir base_path
-    ; refresh_tokens_dir base_path
     ; families_dir base_path
     ]
 ;;
@@ -344,42 +302,16 @@ let load_json_opt path =
     | Sys_error msg | Yojson.Json_error msg -> Error (Store_error msg)
 ;;
 
-let store_lock_max_attempts = 100
-let store_lock_retry_interval_sec = 0.01
-
-let wait_before_store_lock_retry () =
-  ignore (Unix.select [] [] [] store_lock_retry_interval_sec)
-;;
-
-let rec lock_store ~attempts_left fd =
-  match Unix.lockf fd Unix.F_TLOCK 0 with
+let rec lock_store fd =
+  match Unix.lockf fd Unix.F_LOCK 0 with
   | () -> Ok ()
-  | exception Unix.Unix_error (Unix.EINTR, _, _) -> lock_store ~attempts_left fd
-  | exception Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _)
-    when attempts_left > 1 ->
-    wait_before_store_lock_retry ();
-    lock_store ~attempts_left:(attempts_left - 1) fd
-  | exception Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) ->
-    Log.Auth.warn "oauth: durable store lock timed out";
-    Error Temporarily_unavailable
-;;
-
-let rec with_store_mutex ~attempts_left f =
-  if Stdlib.Mutex.try_lock store_mutex
-  then Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock store_mutex) f
-  else if attempts_left > 1
-  then (
-    wait_before_store_lock_retry ();
-    with_store_mutex ~attempts_left:(attempts_left - 1) f)
-  else (
-    Log.Auth.warn "oauth: process store mutex timed out";
-    Error Temporarily_unavailable)
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> lock_store fd
 ;;
 
 let with_store_io ~base_path f =
   try
     Auth_credential_base.run_blocking_io (fun () ->
-      with_store_mutex ~attempts_left:store_lock_max_attempts (fun () ->
+      Stdlib.Mutex.protect store_mutex (fun () ->
         ensure_oauth_dirs base_path;
         let lock_path = Filename.concat (oauth_dir base_path) ".store.lock" in
         let fd =
@@ -393,7 +325,7 @@ let with_store_io ~base_path f =
             (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
             Unix.close fd)
           (fun () ->
-            let* () = lock_store ~attempts_left:store_lock_max_attempts fd in
+            let* () = lock_store fd in
             f ())))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -460,11 +392,6 @@ let client_to_yojson (client : client) =
     ; "client_name", (match client.client_name with None -> `Null | Some v -> `String v)
     ; "redirect_uris", `List (List.map (fun v -> `String v) client.redirect_uris)
     ; "created_at_unix", `Float client.created_at_unix
-    ; "registration_expires_at_unix", `Float client.registration_expires_at_unix
-    ; ( "activated_at_unix"
-      , match client.activated_at_unix with
-        | None -> `Null
-        | Some value -> `Float value )
     ]
 ;;
 
@@ -474,50 +401,19 @@ let client_of_yojson = function
     let* client_name = json_optional_string fields "client_name" in
     let* redirect_uris = json_string_list fields "redirect_uris" in
     let* created_at_unix = json_float fields "created_at_unix" in
-    let* registration_expires_at_unix =
-      json_float fields "registration_expires_at_unix"
-    in
-    let* activated_at_unix =
-      match List.assoc_opt "activated_at_unix" fields with
-      | None | Some `Null -> Ok None
-      | Some (`Float value) -> Ok (Some value)
-      | Some (`Int value) -> Ok (Some (float_of_int value))
-      | Some _ -> Error (Store_error "invalid OAuth store field activated_at_unix")
-    in
-    Ok
-      { client_id
-      ; client_name
-      ; redirect_uris
-      ; created_at_unix
-      ; registration_expires_at_unix
-      ; activated_at_unix
-      }
+    Ok { client_id; client_name; redirect_uris; created_at_unix }
   | _ -> Error (Store_error "invalid OAuth client record")
 ;;
 
 let token_record_to_yojson
     ~token_hash:hash
     ~family_id
-    ~generation
-    ~client_id
-    ~agent_name
-    ~bootstrap_token_hash
-    ~role
-    ~scopes
-    ~resource
     ~issued_at_unix
     ~expires_at_unix
   =
   `Assoc
     [ "token_hash", `String hash
     ; "family_id", `String family_id
-    ; "generation", `Int generation
-    ; "client_id", `String client_id
-    ; "agent_name", `String agent_name
-    ; "bootstrap_token_hash", `String bootstrap_token_hash
-    ; "role", `String (agent_role_to_string role)
-    ; "scopes", `List (List.map (fun scope -> `String (scope_to_string scope)) scopes)
-    ; "resource", `String resource
     ; "issued_at_unix", `Float issued_at_unix
     ; "expires_at_unix", `Float expires_at_unix
     ]
@@ -527,87 +423,20 @@ let token_record_fields = function
   | `Assoc fields ->
     let* token_hash = json_string fields "token_hash" in
     let* family_id = json_string fields "family_id" in
-    let* generation = json_nonnegative_int fields "generation" in
-    let* client_id = json_string fields "client_id" in
-    let* agent_name = json_string fields "agent_name" in
-    let* bootstrap_token_hash = json_string fields "bootstrap_token_hash" in
-    let* role_name = json_string fields "role" in
-    let* role = role_of_string role_name in
-    let* scope_names = json_string_list fields "scopes" in
-    let* scopes = scopes_of_strings scope_names in
-    let* resource = json_string fields "resource" in
     let* issued_at_unix = json_float fields "issued_at_unix" in
     let* expires_at_unix = json_float fields "expires_at_unix" in
-    Ok
-      ( token_hash
-      , family_id
-      , generation
-      , client_id
-      , agent_name
-      , bootstrap_token_hash
-      , role
-      , scopes
-      , resource
-      , issued_at_unix
-      , expires_at_unix )
+    Ok (token_hash, family_id, issued_at_unix, expires_at_unix)
   | _ -> Error (Store_error "invalid OAuth token record")
 ;;
 
 let access_record_of_yojson json =
   let*
-    ( token_hash
-    , family_id
-    , generation
-    , client_id
-    , agent_name
-    , bootstrap_token_hash
-    , role
-    , scopes
-    , resource
-    , issued_at_unix
-    , expires_at_unix )
+    (token_hash, family_id, issued_at_unix, expires_at_unix)
     = token_record_fields json
   in
   Ok
     { token_hash
     ; family_id
-    ; generation
-    ; client_id
-    ; agent_name
-    ; bootstrap_token_hash
-    ; role
-    ; scopes
-    ; resource
-    ; issued_at_unix
-    ; expires_at_unix
-    }
-;;
-
-let refresh_record_of_yojson json =
-  let*
-    ( token_hash
-    , family_id
-    , generation
-    , client_id
-    , agent_name
-    , bootstrap_token_hash
-    , role
-    , scopes
-    , resource
-    , issued_at_unix
-    , expires_at_unix )
-    = token_record_fields json
-  in
-  Ok
-    { token_hash
-    ; family_id
-    ; generation
-    ; client_id
-    ; agent_name
-    ; bootstrap_token_hash
-    ; role
-    ; scopes
-    ; resource
     ; issued_at_unix
     ; expires_at_unix
     }
@@ -616,10 +445,15 @@ let refresh_record_of_yojson json =
 let family_to_yojson (family : family_record) =
   `Assoc
     [ "family_id", `String family.family_id
-    ; "generation", `Int family.generation
+    ; "client_id", `String family.client_id
+    ; "agent_name", `String family.agent_name
+    ; "bootstrap_token_hash", `String family.bootstrap_token_hash
+    ; "role", `String (agent_role_to_string family.role)
+    ; "scopes", `List (List.map (fun scope -> `String (scope_to_string scope)) family.scopes)
+    ; "resource", `String family.resource
     ; "current_access_hash", `String family.current_access_hash
     ; "current_refresh_hash", `String family.current_refresh_hash
-    ; "updated_at_unix", `Float family.updated_at_unix
+    ; "refresh_expires_at_unix", `Float family.refresh_expires_at_unix
     ; ( "revoked_at_unix"
       , match family.revoked_at_unix with
         | None -> `Null
@@ -630,10 +464,17 @@ let family_to_yojson (family : family_record) =
 let family_of_yojson = function
   | `Assoc fields ->
     let* family_id = json_string fields "family_id" in
-    let* generation = json_nonnegative_int fields "generation" in
+    let* client_id = json_string fields "client_id" in
+    let* agent_name = json_string fields "agent_name" in
+    let* bootstrap_token_hash = json_string fields "bootstrap_token_hash" in
+    let* role_name = json_string fields "role" in
+    let* role = role_of_string role_name in
+    let* scope_names = json_string_list fields "scopes" in
+    let* scopes = scopes_of_strings scope_names in
+    let* resource = json_string fields "resource" in
     let* current_access_hash = json_string fields "current_access_hash" in
     let* current_refresh_hash = json_string fields "current_refresh_hash" in
-    let* updated_at_unix = json_float fields "updated_at_unix" in
+    let* refresh_expires_at_unix = json_float fields "refresh_expires_at_unix" in
     let* revoked_at_unix =
       match List.assoc_opt "revoked_at_unix" fields with
       | None | Some `Null -> Ok None
@@ -643,10 +484,15 @@ let family_of_yojson = function
     in
     Ok
       { family_id
-      ; generation
+      ; client_id
+      ; agent_name
+      ; bootstrap_token_hash
+      ; role
+      ; scopes
+      ; resource
       ; current_access_hash
       ; current_refresh_hash
-      ; updated_at_unix
+      ; refresh_expires_at_unix
       ; revoked_at_unix
       }
   | _ -> Error (Store_error "invalid OAuth token family record")
@@ -679,9 +525,6 @@ let register_client ~base_path ~client_name ~redirect_uris =
       ; client_name
       ; redirect_uris
       ; created_at_unix
-      ; registration_expires_at_unix =
-          created_at_unix +. float_of_int (client_registration_ttl_sec ())
-      ; activated_at_unix = None
       }
     in
     with_store_io ~base_path (fun () ->
@@ -702,15 +545,6 @@ let register_client ~base_path ~client_name ~redirect_uris =
              load_clients ((path, stored) :: acc) rest)
       in
       let* stored_clients = load_clients [] entries in
-      let current = now () in
-      let active_clients, expired_clients =
-        List.partition
-          (fun (_, (stored : client)) ->
-            Option.is_some stored.activated_at_unix
-            || stored.registration_expires_at_unix > current)
-          stored_clients
-      in
-      List.iter (fun (path, _) -> Sys.remove path) expired_clients;
       match
         List.find_opt
           (fun (_, (stored : client)) ->
@@ -719,15 +553,10 @@ let register_client ~base_path ~client_name ~redirect_uris =
                  String.equal
                  (List.sort String.compare stored.redirect_uris)
                  (List.sort String.compare redirect_uris))
-          active_clients
+          stored_clients
       with
       | Some (_, stored) -> Ok stored
       | None ->
-        let* () =
-          if List.length active_clients < max_clients ()
-          then Ok ()
-          else Error Temporarily_unavailable
-        in
         let* () =
           save_json_private
             (client_path base_path client.client_id)
@@ -743,13 +572,7 @@ let find_client ~base_path ~client_id =
     | None -> Ok None
     | Some json ->
       let* client = client_of_yojson json in
-      if
-        Option.is_none client.activated_at_unix
-        && client.registration_expires_at_unix <= now ()
-      then (
-        Sys.remove (client_path base_path client_id);
-        Ok None)
-      else if constant_time_string_equal client.client_id client_id
+      if constant_time_string_equal client.client_id client_id
       then Ok (Some client)
       else Error (Store_error "OAuth client file integrity mismatch"))
 ;;
@@ -763,20 +586,7 @@ let activate_client_locked ~base_path ~client_id =
     let* client = client_of_yojson json in
     if not (constant_time_string_equal client.client_id client_id)
     then Error (Store_error "OAuth client file integrity mismatch")
-    else if
-      Option.is_none client.activated_at_unix
-      && client.registration_expires_at_unix <= now ()
-    then (
-      Sys.remove path;
-      Error Invalid_client)
-    else
-      let activated =
-        match client.activated_at_unix with
-        | Some _ -> client
-        | None -> { client with activated_at_unix = Some (now ()) }
-      in
-      let* () = save_json_private path (client_to_yojson activated) in
-      Ok ()
+    else Ok ()
 ;;
 
 let require_nonempty name = function
@@ -863,7 +673,7 @@ let issue_authorization_code
     { base_path
     ; request
     ; agent_name = bootstrap_credential.agent_name
-    ; bootstrap_token_hash = bootstrap_credential.token
+    ; bootstrap_token_hash = token_hash bootstrap_credential.token
     ; role
     ; issued_at_unix
     ; expires_at_unix = issued_at_unix +. float_of_int (code_ttl_sec ())
@@ -911,7 +721,7 @@ let live_bootstrap_allows
         String.compare (iso8601_of_unix_seconds (now ())) expires_at <= 0
     in
     not_expired
-    && constant_time_string_equal credential.token bootstrap_token_hash
+    && constant_time_string_equal (token_hash credential.token) bootstrap_token_hash
     && live_role_allows ~granted_role credential.role
 ;;
 
@@ -919,9 +729,7 @@ let revoke_family_locked ~base_path ~current family =
   match family.revoked_at_unix with
   | Some _ -> Ok ()
   | None ->
-    let revoked_family =
-      { family with revoked_at_unix = Some current; updated_at_unix = current }
-    in
+    let revoked_family = { family with revoked_at_unix = Some current } in
     save_json_private
       (family_path base_path family.family_id)
       (family_to_yojson revoked_family)
@@ -962,29 +770,6 @@ let cleanup_token_store_locked ~base_path ~current =
       if removable then remove_file_if_exists path;
       Ok ()
   in
-  let cleanup_refresh entry =
-    let path = Filename.concat (refresh_tokens_dir base_path) entry in
-    let* json = load_json_opt path in
-    match json with
-    | None -> Ok ()
-    | Some json ->
-      let* record = refresh_record_of_yojson json in
-      let* family = load_family base_path record.family_id in
-      let removable =
-        record.expires_at_unix <= current
-        || match family with
-           | None -> true
-           | Some family ->
-             Option.is_some family.revoked_at_unix
-             || (not
-                   (constant_time_string_equal
-                      family.current_refresh_hash
-                      record.token_hash)
-                 && record.generation > family.generation)
-      in
-      if removable then remove_file_if_exists path;
-      Ok ()
-  in
   let rec iter f = function
     | [] -> Ok ()
     | entry :: rest ->
@@ -992,7 +777,6 @@ let cleanup_token_store_locked ~base_path ~current =
       iter f rest
   in
   let* () = iter cleanup_access (json_entries (access_tokens_dir base_path)) in
-  let* () = iter cleanup_refresh (json_entries (refresh_tokens_dir base_path)) in
   let cleanup_family entry =
     let path = Filename.concat (families_dir base_path) entry in
     let* json = load_json_opt path in
@@ -1002,27 +786,32 @@ let cleanup_token_store_locked ~base_path ~current =
       let* family = family_of_yojson json in
       if
         Option.is_some family.revoked_at_unix
-        || (not (Sys.file_exists (access_path base_path family.current_access_hash))
-            && not (Sys.file_exists (refresh_path base_path family.current_refresh_hash)))
+        || (family.refresh_expires_at_unix <= current
+            && not (Sys.file_exists (access_path base_path family.current_access_hash)))
       then remove_file_if_exists path;
       Ok ()
   in
   iter cleanup_family (json_entries (families_dir base_path))
 ;;
 
-let ensure_token_capacity_locked ~base_path =
-  let* () = cleanup_token_store_locked ~base_path ~current:(now ()) in
-  let count =
-    List.length (json_entries (access_tokens_dir base_path))
-    + List.length (json_entries (refresh_tokens_dir base_path))
-  in
-  if count + 2 > max_token_records () then Error Temporarily_unavailable else Ok ()
+let refresh_token_for_family family_id =
+  "mrt_" ^ family_id ^ "." ^ Auth_credential_base.generate_token ()
+;;
+
+let refresh_token_family_id token =
+  let prefix = "mrt_" in
+  if not (String.starts_with ~prefix token)
+  then None
+  else
+    match String.split_on_char '.' (String.sub token (String.length prefix) (String.length token - String.length prefix)) with
+    | [ family_id; secret ] when not (String.equal family_id "" || String.equal secret "") ->
+      Some family_id
+    | _ -> None
 ;;
 
 let mint_pair_locked
     ~base_path
     ~family_id
-    ~generation
     ~client_id
     ~agent_name
     ~bootstrap_token_hash
@@ -1031,46 +820,31 @@ let mint_pair_locked
     ~resource
   =
   ensure_oauth_dirs base_path;
-  let* () = ensure_token_capacity_locked ~base_path in
+  let* () = cleanup_token_store_locked ~base_path ~current:(now ()) in
   let issued_at_unix = now () in
   let access_token = "mat_" ^ Auth_credential_base.generate_token () in
-  let refresh_token = "mrt_" ^ Auth_credential_base.generate_token () in
+  let refresh_token = refresh_token_for_family family_id in
   let access_hash = token_hash access_token in
   let refresh_hash = token_hash refresh_token in
   let access =
     { token_hash = access_hash
     ; family_id
-    ; generation
-    ; client_id
-    ; agent_name
-    ; bootstrap_token_hash
-    ; role
-    ; scopes
-    ; resource
     ; issued_at_unix
     ; expires_at_unix = issued_at_unix +. float_of_int (access_token_ttl_sec ())
     }
   in
-  let refresh =
-    { token_hash = refresh_hash
-    ; family_id
-    ; generation
+  let family =
+    { family_id
     ; client_id
     ; agent_name
     ; bootstrap_token_hash
     ; role
     ; scopes
     ; resource
-    ; issued_at_unix
-    ; expires_at_unix = issued_at_unix +. float_of_int (refresh_token_ttl_sec ())
-    }
-  in
-  let family =
-    { family_id
-    ; generation
     ; current_access_hash = access_hash
     ; current_refresh_hash = refresh_hash
-    ; updated_at_unix = issued_at_unix
+    ; refresh_expires_at_unix =
+        issued_at_unix +. float_of_int (refresh_token_ttl_sec ())
     ; revoked_at_unix = None
     }
   in
@@ -1078,32 +852,10 @@ let mint_pair_locked
     token_record_to_yojson
       ~token_hash:access.token_hash
       ~family_id:access.family_id
-      ~generation:access.generation
-      ~client_id:access.client_id
-      ~agent_name:access.agent_name
-      ~bootstrap_token_hash:access.bootstrap_token_hash
-      ~role:access.role
-      ~scopes:access.scopes
-      ~resource:access.resource
       ~issued_at_unix:access.issued_at_unix
       ~expires_at_unix:access.expires_at_unix
   in
-  let refresh_json =
-    token_record_to_yojson
-      ~token_hash:refresh.token_hash
-      ~family_id:refresh.family_id
-      ~generation:refresh.generation
-      ~client_id:refresh.client_id
-      ~agent_name:refresh.agent_name
-      ~bootstrap_token_hash:refresh.bootstrap_token_hash
-      ~role:refresh.role
-      ~scopes:refresh.scopes
-      ~resource:refresh.resource
-      ~issued_at_unix:refresh.issued_at_unix
-      ~expires_at_unix:refresh.expires_at_unix
-  in
   let* () = save_json_private (access_path base_path access_hash) access_json in
-  let* () = save_json_private (refresh_path base_path refresh_hash) refresh_json in
   let* () = save_json_private (family_path base_path family_id) (family_to_yojson family) in
   Ok
     { access_token
@@ -1169,7 +921,6 @@ let exchange_authorization_code
         mint_pair_locked
           ~base_path
           ~family_id
-          ~generation:0
           ~client_id:grant.request.client_id
           ~agent_name:grant.agent_name
           ~bootstrap_token_hash:grant.bootstrap_token_hash
@@ -1190,20 +941,14 @@ let rotate_refresh_token
   then Error OAuth_disabled
   else
     let refresh_hash = token_hash refresh_token in
+    let* family_id =
+      match refresh_token_family_id refresh_token with
+      | Some family_id -> Ok family_id
+      | None -> Error Invalid_grant
+    in
     with_store_io ~base_path (fun () ->
-      let* json = load_json_opt (refresh_path base_path refresh_hash) in
-      let* record =
-        match json with
-        | None -> Error Invalid_grant
-        | Some json -> refresh_record_of_yojson json
-      in
-      let* family = load_family base_path record.family_id in
+      let* family = load_family base_path family_id in
       let current = now () in
-      let requested_resource =
-        match resource with
-        | Some resource -> resource
-        | None -> record.resource
-      in
       match family with
       | None -> Error Invalid_grant
       | Some family
@@ -1221,31 +966,33 @@ let rotate_refresh_token
         when not
                (live_bootstrap_allows
                   ~base_path
-                  ~agent_name:record.agent_name
-                  ~bootstrap_token_hash:record.bootstrap_token_hash
-                  ~granted_role:record.role) ->
+                  ~agent_name:family.agent_name
+                  ~bootstrap_token_hash:family.bootstrap_token_hash
+                  ~granted_role:family.role) ->
         let* () = revoke_family_locked ~base_path ~current family in
         Log.Auth.warn "oauth: live bootstrap credential revoked token family";
         Error Invalid_grant
-      | Some _
-        when record.expires_at_unix <= current
-             || not (String.equal record.client_id client_id)
-             || not (String.equal record.resource expected_resource)
-             || not (String.equal record.resource requested_resource) ->
+      | Some family
+        when family.refresh_expires_at_unix <= current
+             || not (String.equal family.client_id client_id)
+             || not (String.equal family.resource expected_resource)
+             || not
+                  (match resource with
+                   | None -> true
+                   | Some requested -> String.equal family.resource requested) ->
         Error Invalid_grant
       | Some family ->
         let old_access_path = access_path base_path family.current_access_hash in
         let* pair =
           mint_pair_locked
             ~base_path
-            ~family_id:record.family_id
-            ~generation:(family.generation + 1)
-            ~client_id:record.client_id
-            ~agent_name:record.agent_name
-            ~bootstrap_token_hash:record.bootstrap_token_hash
-            ~role:record.role
-            ~scopes:record.scopes
-            ~resource:record.resource
+            ~family_id:family.family_id
+            ~client_id:family.client_id
+            ~agent_name:family.agent_name
+            ~bootstrap_token_hash:family.bootstrap_token_hash
+            ~role:family.role
+            ~scopes:family.scopes
+            ~resource:family.resource
         in
         (match remove_file_if_exists old_access_path with
          | () -> ()
@@ -1276,9 +1023,9 @@ let find_access_credential ~base_path ~token =
            let live_bootstrap =
              live_bootstrap_allows
                ~base_path
-               ~agent_name:record.agent_name
-               ~bootstrap_token_hash:record.bootstrap_token_hash
-               ~granted_role:record.role
+               ~agent_name:family.agent_name
+               ~bootstrap_token_hash:family.bootstrap_token_hash
+               ~granted_role:family.role
            in
            if not live_bootstrap
            then
@@ -1289,7 +1036,7 @@ let find_access_credential ~base_path ~token =
              || Option.is_some family.revoked_at_unix
              || not
                   (match request_resource with
-                   | Some expected -> String.equal record.resource expected
+                   | Some expected -> String.equal family.resource expected
                    | None -> false)
              || not
                   (constant_time_string_equal
@@ -1305,9 +1052,9 @@ let find_access_credential ~base_path ~token =
                (Some
                   { id = None
                   ; agent_id = None
-                  ; agent_name = record.agent_name
+                  ; agent_name = family.agent_name
                   ; token = record.token_hash
-                  ; role = record.role
+                  ; role = family.role
                   ; created_at = iso8601_of_unix_seconds record.issued_at_unix
                   ; expires_at = Some (iso8601_of_unix_seconds record.expires_at_unix)
                   })))
@@ -1317,10 +1064,7 @@ let find_access_credential ~base_path ~token =
     | Error (Store_error detail) ->
       Error (System (System_error.IoError ("OAuth credential store: " ^ detail)))
     | Error Temporarily_unavailable ->
-      Error
-        (System
-           (System_error.LockContention
-              { key = "oauth-credential-store"; attempts = store_lock_max_attempts }))
+      Error (System (System_error.IoError "OAuth credential store unavailable"))
     | Error error ->
       Error
         (Auth

@@ -33,10 +33,7 @@ val enabled : unit -> bool
 val code_ttl_sec : unit -> int
 val access_token_ttl_sec : unit -> int
 val refresh_token_ttl_sec : unit -> int
-val client_registration_ttl_sec : unit -> int
 val max_pending_codes : unit -> int
-val max_clients : unit -> int
-val max_token_records : unit -> int
 
 val pkce_s256 : string -> string
 (** RFC 7636 S256 transform using unpadded base64url. *)
@@ -61,8 +58,6 @@ type client = {
   client_name : string option;
   redirect_uris : string list;
   created_at_unix : float;
-  registration_expires_at_unix : float;
-  activated_at_unix : float option;
 }
 
 val register_client :

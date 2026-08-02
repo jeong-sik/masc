@@ -2,11 +2,6 @@
 
 module Http = Http_server_eio
 
-let parse_form = Server_oauth_service.parse_form
-let html_escape = Server_oauth_service.html_escape
-let render_authorization_form = Server_oauth_service.render_authorization_form
-let ensure_optional_string_subset = Server_oauth_service.ensure_optional_string_subset
-
 let respond_oauth_error request reqd error =
   Log.Misc.warn
     "oauth_http: request rejected error=%s"

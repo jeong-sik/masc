@@ -191,7 +191,7 @@ let requests_json ~base_path ?task_id ?limit () : Yojson.Safe.t =
   let all = load_requests ~base_path () in
   requests_json_of_requests ?task_id ~limit all
 
-let summary_json ~base_path ?recent:_ () : Yojson.Safe.t =
+let summary_json ~base_path () : Yojson.Safe.t =
   let all = load_requests ~base_path () in
   `Assoc
     ([ ("updated_at", `String (Masc_domain.now_iso ()))
@@ -206,7 +206,7 @@ let summary_json ~base_path ?recent:_ () : Yojson.Safe.t =
    the historic proof handler scanned the verification store twice
    per refresh.  This helper performs one scan and folds the two
    projections from the shared list. *)
-let proof_compose ~base_path ?recent:_ ?limit () : Yojson.Safe.t * Yojson.Safe.t =
+let proof_compose ~base_path ?limit () : Yojson.Safe.t * Yojson.Safe.t =
   let limit = clamp_limit limit in
   let all = load_requests ~base_path () in
   let summary =

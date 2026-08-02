@@ -828,6 +828,16 @@ jobs:
       # still compiles every test target; the authoritative runtime, operator,
       # transport, SSE, and contract suites below remain executable gates.
 
+      - name: Run dashboard behavior contracts
+        id: dashboard_behavior_contracts
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-dashboard-http-behavior-contracts"
+
       - name: Run OAS pin behavior suite
         id: oas_pin_behavior_suite
         if: ${{ always() && steps.build_step.outcome == 'success' && needs.changes.outputs.oas_pin == 'true' }}

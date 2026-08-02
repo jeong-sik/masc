@@ -25,7 +25,6 @@
   masc.masc_tool_dispatch
   masc.otel_metric_store
   masc.tool_types
-  time_compat
-  uri)
+  time_compat)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

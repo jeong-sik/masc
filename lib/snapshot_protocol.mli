@@ -13,8 +13,4 @@ val respond : revision:string -> if_revision:string option -> Yojson.Safe.t -> r
 
 val to_yojson : response -> Yojson.Safe.t
 
-val revision_of_backlog_version : int -> string
-
-val revision_of_board_cursor : float * string option -> string
-
 val revision_of_json : namespace:string -> Yojson.Safe.t -> string

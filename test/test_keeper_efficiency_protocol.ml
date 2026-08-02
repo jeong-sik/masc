@@ -56,64 +56,9 @@ let test_snapshot_protocol () =
    | Ok _ -> Alcotest.fail "blank if_revision was accepted")
 ;;
 
-let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_
-    ~cwd:_
-  =
-  Unix.WEXITED 0, "", ""
-;;
-
-let test_effect_classification () =
-  let docker =
-    Masc_exec.Sandbox_target.docker
-      ~image:
-        "ubuntu:24.04@sha256:cdb5fd928fced577cfecf12c8966e830fcdf42ee481fb0b91904eeddc2fe5eff"
-      ~runner:mock_runner
-      ()
-  in
-  let classify = Masc.Keeper_execution_effect.classify in
-  Alcotest.(check string)
-    "confined docker network-none"
-    "confined"
-    (Masc.Keeper_execution_effect.to_string
-       (classify
-          ~sandbox_profile:Keeper_types_profile_sandbox.Docker
-          ~network_mode:Keeper_types_profile_sandbox.Network_none
-          ~target:docker));
-  Alcotest.(check string)
-    "docker with inherited network remains external"
-    "external"
-    (Masc.Keeper_execution_effect.to_string
-       (classify
-          ~sandbox_profile:Keeper_types_profile_sandbox.Docker
-          ~network_mode:Keeper_types_profile_sandbox.Network_inherit
-          ~target:docker));
-  let unpinned_docker =
-    Masc_exec.Sandbox_target.docker ~image:"ubuntu:24.04" ~runner:mock_runner ()
-  in
-  Alcotest.(check string)
-    "untagged docker remains external"
-    "external"
-    (Masc.Keeper_execution_effect.to_string
-       (classify
-          ~sandbox_profile:Keeper_types_profile_sandbox.Docker
-          ~network_mode:Keeper_types_profile_sandbox.Network_none
-          ~target:unpinned_docker));
-  Alcotest.(check string)
-    "host remains external"
-    "external"
-    (Masc.Keeper_execution_effect.to_string
-       (classify
-          ~sandbox_profile:Keeper_types_profile_sandbox.Local
-          ~network_mode:Keeper_types_profile_sandbox.Network_inherit
-          ~target:(Masc_exec.Sandbox_target.host ())));
-;;
-
 let () =
   Alcotest.run
     "keeper efficiency protocol"
     [ ( "snapshot protocol"
-      , [ Alcotest.test_case "snapshot and unchanged" `Quick test_snapshot_protocol ] )
-    ; ( "execution effect"
-      , [ Alcotest.test_case "closed effect classification" `Quick test_effect_classification ] )
-    ]
+      , [ Alcotest.test_case "snapshot and unchanged" `Quick test_snapshot_protocol ] ) ]
 ;;

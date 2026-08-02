@@ -206,12 +206,11 @@ let handle_tool_execute_typed
         let cmd = typed_input_command_text input in
         let timeout_sec = typed_input_timeout_sec input in
         let input = input_with_cwd cwd input in
-        (* This location check is only the explicit local-fallback policy. It is
-           not authorization evidence: the cwd has already passed the typed
-           containment resolver above, and execution classification below must
-           not consume a lexical boolean as a Gate-bypass proof. *)
+        (* This location check only selects the explicit local-fallback route.
+           It is not authorization evidence. The outer Keeper Gate remains the
+           sole authorization boundary for every Execute request. *)
         let in_playground = Keeper_tool_execute_path.in_playground ~root ~cwd ~meta in
-        let sandbox_profile, sandbox_network_mode =
+        let sandbox_profile, _ =
           Keeper_sandbox_runner.effective_sandbox_profile ~meta
         in
         let local_dispatch_sandbox ?(extra_fields = []) () =
@@ -344,26 +343,13 @@ let handle_tool_execute_typed
           ; continuation_channel
           }
         in
-        let execution_effect =
-          Keeper_execution_effect.classify
-            ~sandbox_profile
-            ~network_mode:sandbox_network_mode
-            ~target:dispatch_sandbox
-        in
         let gate_decision =
-          match execution_effect with
-          | Keeper_execution_effect.Confined ->
-            (* The target is already a digest-pinned, network-none Docker sandbox whose
-               path proof passed. Do not create a durable approval row for this
-               local effect; the closed effect type is the authority. *)
-            Keeper_gate.admit_confined gate_request
-          | Keeper_execution_effect.External ->
-            Keeper_gate.decide
-              ?cycle_grant:gate_grant
-              (* NDT-OK: this typed, caller-owned policy input is consumed only
-                 at the external-effect authorization boundary. *)
-              ~keeper_always_allow:(Option.value ~default:false meta.always_allow)
-              gate_request
+          Keeper_gate.decide
+            ?cycle_grant:gate_grant
+            (* NDT-OK: this typed, caller-owned policy input is consumed only
+               at the external-effect authorization boundary. *)
+            ~keeper_always_allow:(Option.value ~default:false meta.always_allow)
+            gate_request
         in
         (match
            gate_decision
@@ -387,8 +373,7 @@ let handle_tool_execute_typed
          | Keeper_gate.Allow authorization ->
           Log.Keeper.info
             ~keeper_name:meta.name
-            "execute effect admitted effect=%s operation=tool_execute source=%s"
-            (Keeper_execution_effect.to_string execution_effect)
+            "external effect authorized operation=tool_execute source=%s"
             (Keeper_gate.authorization_source_to_string authorization.source);
           (* NDT-OK: wall clock is used only for elapsed telemetry, never for
              dispatch branching or policy decisions. *)

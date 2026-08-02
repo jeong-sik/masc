@@ -105,7 +105,7 @@ let credential_state (ctx : context) ~actual_name =
    Yojson.Json_error _] (the *more common* read-side failure class —
    missing file, malformed JSON) returned the default silently while
    only the rare [exn] catch-all logged. Operators saw the loud path
-   but missed the common one. The five [safe_*] wrappers below now
+   but missed the common one. The three [safe_*] wrappers below now
    share the single-warn-arm shape; [Eio.Cancel.Cancelled] is re-raised
    explicitly so cancellation propagation is preserved across all of
    them. *)
@@ -143,14 +143,6 @@ let safe_get_agents (ctx : context) =
   | exn ->
     Log.Workspace.warn "get_active_agents failed: %s" (Stdlib.Printexc.to_string exn);
     []
-;;
-
-let safe_read_backlog (ctx : context) =
-  try Workspace.read_backlog ctx.config with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Log.Workspace.warn "read_backlog failed: %s" (Stdlib.Printexc.to_string exn);
-    { Masc_domain.tasks = []; last_updated = Masc_domain.now_iso (); version = 1 }
 ;;
 
 let todo_task_has_completed_deliverable_conflict (ctx : context) (task : Masc_domain.task)
@@ -255,7 +247,10 @@ let planning_context_state
 let status_summary_string (ctx : context) =
   Workspace.ensure_initialized ctx.config;
   let state = Workspace.read_state ctx.config in
-  let backlog = safe_read_backlog ctx in
+  match Workspace.read_backlog_r ctx.config with
+  | Error error ->
+    Error (Printf.sprintf "status snapshot unavailable: backlog read failed: %s" error)
+  | Ok backlog ->
   let session_bound =
     (* status_summary_string is read-only on the workspace file; a missing
        or malformed file is treated as "session not bound" because that's the
@@ -437,27 +432,28 @@ let status_summary_string (ctx : context) =
         ]
     else items
   in
-  Workspace_status_rendering.status_summary_string
-    ~ctx
-    ~bound:session_bound
-    ~actual_name
-    ~credential_state
-    ~credential_blocked
-    ~current_task
-    ~effective_cluster_name
-    ~agents
-    ~active_tasks
-    ~todo_count
-    ~claimed_count
-    ~in_progress_count
-    ~done_count
-    ~cancelled_count
-    ~todo_conflict_task_ids
-    ~binding
-    ~planning_state
-    ~attention_items
-    ~state
-    ~backlog
+  Ok
+    (Workspace_status_rendering.status_summary_string
+       ~ctx
+       ~bound:session_bound
+       ~actual_name
+       ~credential_state
+       ~credential_blocked
+       ~current_task
+       ~effective_cluster_name
+       ~agents
+       ~active_tasks
+       ~todo_count
+       ~claimed_count
+       ~in_progress_count
+       ~done_count
+       ~cancelled_count
+       ~todo_conflict_task_ids
+       ~binding
+       ~planning_state
+       ~attention_items
+       ~state
+       ~backlog)
 ;;
 
 let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
@@ -473,25 +469,33 @@ let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
   let task_list_name =
     Tool_capability_projection.task_list_name task_list_projection
   in
-  let snapshot = status_summary_string ctx in
-  let revision =
-    Snapshot_protocol.revision_of_json
-      ~namespace:"status"
-      (`Assoc
-        [ "task_list_name", `String task_list_name
-        ; "snapshot", `String snapshot
-        ])
-  in
-  Tool_result.make_ok
-    ~tool_name
-    ~start_time
-    ~data:
-      (Snapshot_protocol.to_yojson
-         (Snapshot_protocol.respond
-            ~revision
-            ~if_revision
-            (`String snapshot)))
-    ()
+  (match status_summary_string ctx with
+   | Error message ->
+     Tool_result.make_err
+       ~tool_name
+       ~class_:Tool_result.Runtime_failure
+       ~start_time
+       ~data:(`Assoc [ "error", `String "status_unavailable"; "detail", `String message ])
+       message
+   | Ok snapshot ->
+     let revision =
+       Snapshot_protocol.revision_of_json
+         ~namespace:"status"
+         (`Assoc
+           [ "task_list_name", `String task_list_name
+           ; "snapshot", `String snapshot
+           ])
+     in
+     Tool_result.make_ok
+       ~tool_name
+       ~start_time
+       ~data:
+         (Snapshot_protocol.to_yojson
+            (Snapshot_protocol.respond
+               ~revision
+               ~if_revision
+               (`String snapshot)))
+       ())
 ;;
 
 let handle_reset ~tool_name ~start_time ctx args =

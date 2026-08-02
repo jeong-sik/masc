@@ -1399,8 +1399,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         | Gate.Keeper_always_allow -> ()
         | Gate.One_shot_resolution _
         | Gate.Exact_always_rule _
-        | Gate.Workspace_always_allow
-        | Gate.Confined_sandbox ->
+        | Gate.Workspace_always_allow ->
           Alcotest.fail "different exact input consumed the grant");
        (match
           Gate.decide
@@ -1416,8 +1415,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
           Alcotest.(check string) "exact approval id" approval_id actual_id
         | Gate.Exact_always_rule _
         | Gate.Keeper_always_allow
-        | Gate.Workspace_always_allow
-        | Gate.Confined_sandbox ->
+        | Gate.Workspace_always_allow ->
           Alcotest.fail "exact effect did not consume its one-shot grant");
        (match
           Gate.decide
@@ -1429,8 +1427,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         | Gate.Keeper_always_allow -> ()
         | Gate.One_shot_resolution _
         | Gate.Exact_always_rule _
-        | Gate.Workspace_always_allow
-        | Gate.Confined_sandbox ->
+        | Gate.Workspace_always_allow ->
           Alcotest.fail "one-shot grant was consumed more than once");
        AQ.For_testing.reset_runtime_state ();
        let _ = install_exn ~base_path in

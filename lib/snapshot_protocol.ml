@@ -41,17 +41,6 @@ let to_yojson = function
       ]
 ;;
 
-let revision_of_backlog_version version = Printf.sprintf "backlog:%d" version
-
-let revision_of_board_cursor (timestamp, post_id) =
-  let cursor =
-    match post_id with
-    | None -> "none"
-    | Some id -> id
-  in
-  Printf.sprintf "board:%.17g:%s" timestamp cursor
-;;
-
 let rec canonical_json = function
   | `Assoc fields ->
     `Assoc

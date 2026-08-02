@@ -99,18 +99,25 @@ let submitted_evidence_item_to_yojson = function
       ; "truncated", `Bool truncated
       ; "content_sha256", `String content_sha256
       ]
-  | Evidence_artifact_unreadable
-      { reference = _; reason = Evidence_invalid_reference } ->
-    `Assoc
-      [ "kind", `String "artifact_unreadable"
-      ; "reason", `String (evidence_read_failure_code Evidence_invalid_reference)
-      ]
   | Evidence_artifact_unreadable { reference; reason } ->
-    `Assoc
-      [ "kind", `String "artifact_unreadable"
-      ; "reference", `String reference
-      ; "reason", `String (evidence_read_failure_to_string reason)
-      ]
+    (match reason with
+     | Evidence_invalid_reference ->
+       `Assoc
+         [ "kind", `String "artifact_unreadable"
+         ; "reason", `String (evidence_read_failure_code reason)
+         ]
+     | ( Evidence_missing
+       | Evidence_not_regular_file
+       | Evidence_outside_worker_playground
+       | Evidence_invalid_utf8
+       | Evidence_symbolic_link
+       | Evidence_changed_during_read
+       | Evidence_read_error _ ) ->
+       `Assoc
+         [ "kind", `String "artifact_unreadable"
+         ; "reference", `String reference
+         ; "reason", `String (evidence_read_failure_to_string reason)
+         ])
 
 let request_header_to_yojson request =
   `Assoc

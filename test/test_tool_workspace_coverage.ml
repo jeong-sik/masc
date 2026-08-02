@@ -8,6 +8,7 @@ module Planning_eio = Masc.Task.Planning_eio
 
 let () = Random.self_init ()
 let () = Mirage_crypto_rng_unix.use_default ()
+let () = Workspace_metric_hooks.install ()
 
 let str_contains s sub =
   let len_s = String.length s in
@@ -44,6 +45,17 @@ let set_current_task_ok config ~task_id =
   | Error msg -> failwith msg
 ;;
 
+let verification_id_for_task config task_id =
+  match
+    Workspace.get_tasks_raw config
+    |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+  with
+  | Some
+      { task_status = Masc_domain.AwaitingVerification { verification_id; _ }; _ } ->
+    verification_id
+  | Some _ -> failwith (Printf.sprintf "task %s is not awaiting verification" task_id)
+  | None -> failwith (Printf.sprintf "task %s not found" task_id)
+
 let complete_task config ~agent_name ~task_id ~notes =
   match
     Workspace.transition_task_r config ~agent_name ~task_id
@@ -58,6 +70,7 @@ let complete_task config ~agent_name ~task_id ~notes =
          ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
          ~verdict:Masc_domain.Verdict_approved
          ~task_id
+         ~verification_id:(verification_id_for_task config task_id)
          ~notes:("verified: " ^ notes)
          ()
      with

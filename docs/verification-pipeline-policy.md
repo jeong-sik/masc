@@ -1,71 +1,70 @@
 # Verification Pipeline Policy
 
 ## Purpose
-Prevent rubber-stamp approvals and uninformed rejections by requiring evidence inspection before approve/reject decisions in the MASC verification pipeline.
 
-## 1. Evidence Submission Gate (Submitter)
+Prevent rubber-stamp completion by giving the application-owned system LLM
+agent one immutable, typed submit-time snapshot to review. This authority is
+not a Keeper and is not another Keeper performing verification. A Keeper may
+produce the work and submit evidence, but it never claims or approves the
+pending obligation.
 
-Before a task enters `awaiting_verification`, the submitter MUST provide at least one of the following:
+## 1. Evidence submission contract
 
-| Evidence Type | Format | Example |
+Before `submit_for_verification` commits `awaiting_verification`, the request
+must preserve the producer's submitted evidence without semantic inference:
+
+| Kind | Wire form | Meaning |
 |---|---|---|
-| PR URL | `https://github.com/owner/repo/pull/N` | `https://github.com/jeong-sik/masc/pull/23489` |
-| File path(s) | `file://<sandbox-relative-path>` | `file://repos/masc/lib/mcp_tool_runtime_board.ml` |
-| Commit hash + branch | `<sha> on <branch>` | `61e67ac95 on task-1862-enforce-identity` |
-| Board post (research/policy) | `p-<hex>` | `p-507a61bc` |
+| Artifact | `artifact:<producer-root-relative-path>` | bounded UTF-8 snapshot read from the producer sandbox |
+| Narrative | `note:<text>` | submitter narrative context, not an independently inspected artifact |
 
-**Rule:** `masc_transition submit_for_verification` MUST reject submissions with zero resolvable evidence references.
+The task contract's `required_evidence` and `verify_gate_evidence` are
+requirements, not submitted evidence. They are persisted separately as
+`required_artifacts`; the two lists must never be merged.
 
-## 2. Evidence Inspection Gate (Verifier)
+Completion `notes` and handoff `summary` are persisted as explicit `note:`
+items. A bare path, absolute host path, URL, commit, or board id is not an
+artifact. The system LLM lane does not fetch those references. If one is
+required as proof, the producer must materialize the relevant content as an
+`artifact:` snapshot. Invalid, unreadable, and truncated items remain typed
+and visible; they are not silently treated as proof.
 
-Before calling `masc_transition approve` or `masc_transition reject`, the verifier MUST:
+## 2. System LLM review contract
 
-1. **Read the submitted evidence** — open the PR diff, read the file changes, or inspect the board post
-2. **Post a review comment** to the verification board post with specific findings
-3. **Reference specific lines/files** — not just "looks good" or "can't inspect"
+Before it emits a verdict, the application-owned system LLM agent receives:
 
-### Acceptable review comments:
-- ✅ "Approved: function `enforce_caller_identity` at `mcp_tool_runtime_board.ml:142` now covers all 11 board operations per test at `test_board_author_identity.ml:87`"
-- ✅ "Rejected: PR #23489 has a race condition at `board_dispatch.ml:203` where `check_identity()` is called after `apply_effect()`"
+1. the persisted verification request;
+2. the persisted `required_artifacts` requirements; and
+3. the typed `submitted_evidence` snapshot captured at submission time.
 
-### Unacceptable review comments:
-- ❌ "Looks good to me" — no evidence of inspection
-- ❌ "Rejected because I can't read files" — verifier should not have been routed this task
-- ❌ "Approved, tests pass" — no specific test output referenced
+It may emit only the structured `report_review_verdict` result. It does not
+enter Keeper registration, Keeper claims, Keeper lanes, or Keeper task
+actions. `Workspace.commit_verdict_r` is the only task mutation boundary.
 
-## 3. Verification Routing
+The agent must not approve from an unavailable or truncated artifact, or from
+a narrative claim that a URL/file/commit was inspected. A rejection must carry
+a specific reason. Missing or malformed model output is an unavailable review,
+not an invented verdict.
 
-Code-task verification requests MUST be routed to keepers with Read/Execute access to the relevant repo:
+The verdict is projected to the internal verification Board post, task
+activity, transition subscription, audit log, and SSE. Projection failure is
+logged with the typed boundary outcome; it cannot rewrite the task verdict.
 
-| Keeper | Has Repo Access? | Suitable For |
-|---|---|---|
-| verifier | Yes | Code verification |
-| executor | Yes | Code verification |
-| mad-improver | Yes | Code verification |
-| nick0cave | Yes | Code verification |
-| base | No (empty repos/) | Policy/research verification only |
-| taskmaster | No (coordination role) | Process verification only |
+## 3. HITL and producer routing
 
-**Rule:** If no suitable verifier is available, the task MUST remain in `awaiting_verification` rather than getting a rubber-stamp or uninformed rejection.
+The authenticated operator route uses `Human_operator` and is independent of
+the system LLM lane. A rejected verdict wakes or durably queues only the
+producer Keeper. The rejection payload retains the typed authority,
+`task_id`, `verification_id`, and reason. No other Keeper is assigned the
+verification obligation.
 
-## 4. Rejection Quality Standard
-
-A rejection MUST include at least one specific, actionable finding about the code/evidence:
-
-| Quality | Example |
-|---|---|
-| ✅ Acceptable | "Rejected: function `X` at `file.ml:42` has a race condition because `lock()` is released before `write()` completes" |
-| ❌ Unacceptable | "Rejected because I can't read files" |
-| ❌ Unacceptable | "Rejected, not enough context" |
-
-## 5. Enforcement
-
-This policy is enforced at three levels:
-
-1. **Tool-level** (recommended): `masc_transition` should validate evidence refs before accepting `submit_for_verification`, `approve`, or `reject` actions
-2. **Board-level**: Verification board posts should include a checklist of required evidence
-3. **Review-level**: Any keeper can call out a policy violation in a verification thread
+If the system LLM runtime is unavailable or produces no structured verdict,
+the task remains `awaiting_verification` and the reason is observable. The
+runtime must not substitute a Keeper, a name-based role, a timer, or a local
+string classifier.
 
 ## Revision History
 
+- 2026-08-02: aligned the policy with the system-LLM authority and typed
+  immutable evidence snapshot contract.
 - 2026-07-08: Initial policy (task-1880, base)

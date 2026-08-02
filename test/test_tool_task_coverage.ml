@@ -7,6 +7,7 @@ module Planning_eio = Masc.Task.Planning_eio
 
 let () = Random.self_init ()
 let () = Mirage_crypto_rng_unix.use_default ()
+let () = Workspace_metric_hooks.install ()
 let () = Keeper_task_owner_backend.install_hooks ()
 
 (* The completion-review path renders the registry prompt
@@ -98,7 +99,7 @@ let install_test_hooks () =
     (Filename.concat (repo_root ()) "config/prompts");
   Atomic.set Workspace_hooks.get_default_runtime_id_fn Runtime.get_default_runtime_id;
   Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
-    (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
        Ok (Some Task.Anti_rationalization.Approve))
 
 let with_env name value_opt f =
@@ -307,6 +308,17 @@ let only_task ctx =
   | tasks ->
       failwith
         (Printf.sprintf "expected exactly one task, got %d" (List.length tasks))
+
+let verification_id_for_task ctx task_id =
+  match
+    Workspace.get_tasks_raw ctx.Task.Tool.config
+    |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+  with
+  | Some
+      { task_status = Masc_domain.AwaitingVerification { verification_id; _ }; _ } ->
+    verification_id
+  | Some _ -> failwith (Printf.sprintf "task %s is not awaiting verification" task_id)
+  | None -> failwith (Printf.sprintf "task %s not found" task_id)
 
 let assert_task_todo ctx =
   match (only_task ctx).Masc_domain.task_status with
@@ -1387,7 +1399,7 @@ let () = test "handle_transition_force_is_not_a_done_action" (fun () ->
             String.equal agent_name "admin-agent");
        let reviewer_called = ref false in
        Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
-         (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+         (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
             reviewer_called := true;
             Ok (Some Task.Anti_rationalization.Approve));
        let result =
@@ -1493,6 +1505,7 @@ let () = test "agent verdict verbs remain refused after terminal completion" (fu
       ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
       ~verdict:Masc_domain.Verdict_approved
       ~task_id:"task-001"
+      ~verification_id:(verification_id_for_task ctx "task-001")
       ~notes:"complete"
       ()
   in
@@ -1567,6 +1580,7 @@ let () = test "operator verdict path replaces verifier agent actions" (fun () ->
         ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
         ~verdict:Masc_domain.Verdict_approved
         ~task_id:"task-001"
+        ~verification_id:(verification_id_for_task worker_ctx "task-001")
         ~notes:"evidence verified"
         ()
     in
@@ -1616,6 +1630,7 @@ let () =
              (Masc_domain.Human_operator { operator_id = "operator-test" })
            ~verdict:Masc_domain.Verdict_approved
            ~task_id:"task-001"
+           ~verification_id:(verification_id_for_task worker_ctx "task-001")
            ~notes:"evidence verified"
            ()
        in
@@ -2399,6 +2414,7 @@ let () = test "handle_done_already_done_guidance" (fun () ->
       ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
       ~verdict:Masc_domain.Verdict_approved
       ~task_id:"task-001"
+      ~verification_id:(verification_id_for_task ctx "task-001")
       ~notes:"done"
       ()
   in
@@ -2658,6 +2674,7 @@ let () =
             ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
             ~verdict:Masc_domain.Verdict_approved
             ~task_id:"task-001"
+            ~verification_id:(verification_id_for_task ctx "task-001")
             ~notes:"tests and evidence verified"
             ()
         in

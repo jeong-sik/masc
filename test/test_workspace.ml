@@ -69,6 +69,17 @@ let contains_warning result =
 
 let contains_error = contains_problem_result
 
+let verification_id_for_task config task_id =
+  match
+    Workspace.get_tasks_raw config
+    |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+  with
+  | Some
+      { task_status = Masc_domain.AwaitingVerification { verification_id; _ }; _ } ->
+    verification_id
+  | Some _ -> Alcotest.failf "task %s is not awaiting verification" task_id
+  | None -> Alcotest.failf "task %s not found" task_id
+
 let transition_done_r config ~agent_name ~task_id ~notes =
   let evidence_notes =
     if String.equal (String.trim notes) ""
@@ -96,6 +107,7 @@ let transition_done_r config ~agent_name ~task_id ~notes =
          ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
          ~verdict:Masc_domain.Verdict_approved
          ~task_id
+         ~verification_id:(verification_id_for_task config task_id)
          ~notes:("verified: " ^ evidence_notes)
          ()
        |> Result.map (fun (o : Workspace.transition_outcome) -> o.Workspace.message))
@@ -1145,6 +1157,7 @@ let test_approve_completion_credits_assignee () =
           ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
           ~verdict:Masc_domain.Verdict_approved
           ~task_id:"task-001"
+          ~verification_id:(verification_id_for_task config "task-001")
           ~notes:"verified submitted evidence"
           ()
       in
@@ -1203,6 +1216,7 @@ let test_operator_rejection_rebinds_producer () =
         ~verdict:
           (Masc_domain.Verdict_rejected { reason = "missing focused test" })
         ~task_id:"task-001"
+        ~verification_id:(verification_id_for_task config "task-001")
         ()
     in
     Alcotest.(check bool)
@@ -1340,6 +1354,7 @@ let test_verdict_rejects_blank_rejection_reason () =
         ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
         ~verdict:(Masc_domain.Verdict_rejected { reason = "   " })
         ~task_id:"task-001"
+        ~verification_id:(verification_id_for_task config "task-001")
         ()
     in
     Alcotest.(check bool) "blank rejection reason refused before commit" false

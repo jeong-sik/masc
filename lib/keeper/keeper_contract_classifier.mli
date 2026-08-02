@@ -2,10 +2,11 @@
 
 type actionable_signal =
   | Has_unclaimed_tasks
+  | Has_completion_authority_rejection
   | Has_board_activity
   | No_actionable_signal
-      (** Caller observed neither tasks nor board activity in the structured
-          world snapshot. *)
+      (** Caller observed neither claimable tasks, completion-authority
+          decisions, nor Board activity in the structured world snapshot. *)
 
 val actionable_signal_label : actionable_signal -> string
 
@@ -22,6 +23,9 @@ type world_observation = {
       (** Count of fresh board entries the keeper has not yet
           processed. Mirrors the count rendered after
           ["### Board Activity"]. *)
+  completion_authority_rejection_count : int;
+      (** Count of typed rejection decisions from the system LLM completion
+          authority. This is separate from [board_activity_count]. *)
 }
 
 (** Project the full keeper heartbeat observation into the compact advisory
@@ -32,7 +36,7 @@ val of_keeper_world_observation :
 
 (** [classify_actionable_signal o] returns the most-specific
     actionable signal observed in [o], following the precedence
-    [unclaimed_tasks > board_activity].
+    [unclaimed_tasks > completion_authority_rejection > board_activity].
 
     The precedence reflects the action ladder a keeper should
     descend: a claimable task is the highest-leverage move; engaging

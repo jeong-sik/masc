@@ -1,3 +1,5 @@
+open Result.Syntax
+
 type request_header = {
   id : string;
   task_id : string;
@@ -219,37 +221,47 @@ let request_path base_path req_id =
 
 let request_header_of_yojson = function
   | `Assoc fields ->
-      let get_string key =
+      let required_field key =
         match List.assoc_opt key fields with
-        | Some (`String s) -> Some s
-        | _ -> None
+        | Some value -> Ok value
+        | None ->
+          Error
+            (Printf.sprintf
+               "verification request missing required field %s (object had keys: [%s])"
+               key
+               (String.concat ", " (List.map fst fields)))
       in
-      let get_float key =
-        match List.assoc_opt key fields with
-        | Some (`Float f) -> Some f
-        | Some (`Int n) -> Some (Float.of_int n)
-        | _ -> None
+      let required_string key =
+        let* value = required_field key in
+        match value with
+        | `String value when not (String.equal (String.trim value) "") -> Ok value
+        | `String _ -> Error (Printf.sprintf "verification request field %s is blank" key)
+        | other ->
+          Error
+            (Printf.sprintf
+               "verification request field %s must be a non-empty string, got %s"
+               key
+               (Json_util.excerpt other))
       in
-      (match get_string "id", get_string "task_id", get_string "worker" with
-       | Some id, Some task_id, Some worker ->
-           let created_at =
-             match get_float "created_at" with
-             | Some f -> f
-             | None -> Time_compat.now ()
-           in
-           Ok { id; task_id; worker; created_at }
-       | id_opt, task_opt, worker_opt ->
-           let missing =
-             List.filter_map
-               (fun (name, opt) -> if Option.is_none opt then Some name else None)
-               [ "id", id_opt; "task_id", task_opt; "worker", worker_opt ]
-           in
-           Error
-             (Printf.sprintf
-                "verification request missing required string field(s) \
-                 [%s] (object had keys: [%s])"
-                (String.concat ", " missing)
-                (String.concat ", " (List.map fst fields))))
+      let* id = required_string "id" in
+      let* task_id = required_string "task_id" in
+      let* worker = required_string "worker" in
+      let* created_at = required_field "created_at" in
+      let* created_at =
+        match created_at with
+        | `Float value -> Ok value
+        | `Int value -> Ok (Float.of_int value)
+        | other ->
+          Error
+            (Printf.sprintf
+               "verification request field created_at must be a number, got %s"
+               (Json_util.excerpt other))
+      in
+      (match classify_float created_at with
+       | FP_nan | FP_infinite ->
+         Error "verification request field created_at must be finite"
+       | FP_normal | FP_subnormal | FP_zero ->
+         Ok { id; task_id; worker; created_at })
   | other ->
       Error
         (Printf.sprintf

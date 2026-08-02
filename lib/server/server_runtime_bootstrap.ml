@@ -1403,6 +1403,13 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       (match mark_owner_state_ready state with
        | Ok () -> ()
        | Error error -> raise (Owner_initialization_failed error));
+      (* Completion verdicts are produced by the application-owned system LLM
+         agent. This lane is independent from Keeper registration and starts
+         with an immutable backlog scan so a restart does not strand an
+         AwaitingVerification obligation. *)
+      Completion_authority_agent.start
+        ~sw
+        ~config:(Mcp_server.workspace_config state);
       let path_diagnostics = activated_owner.path_diagnostics in
       let resolved_base, masc_dir =
         Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state

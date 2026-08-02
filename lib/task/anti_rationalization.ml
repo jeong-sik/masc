@@ -32,12 +32,13 @@ let outcome_observer_fn
   = Atomic.make (fun ~outcome:_ ~runtime:_ -> ())
 
 let run_llm_reviewer_fn
-  : (?sw:Eio.Switch.t ->
+  : (base_path:string ->
+     ?sw:Eio.Switch.t ->
      evaluator_runtime:string ->
      prompt:string ->
      report_tool_schema:Types_core.tool_schema ->
      unit -> (verdict option, Agent_sdk.Error.sdk_error) result) Atomic.t
-  = Atomic.make (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+  = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
       Error (Agent_sdk.Error.Internal "Workspace_hooks: run_llm_reviewer_fn not connected"))
 
 (** Issue #8436: schema enum used to be hand-rolled as a 2-element
@@ -91,13 +92,13 @@ let contract_section = function
       (items |> List.mapi render_item |> String.concat "\n")
 ;;
 
-(* required_evidence + verify_gate_evidence are the artifacts the task
-   contract demands the completion notes provide.  task-1664: previously only
-   [completion_contract] reached the LLM prompt, so a task with
-   required_evidence=["PR link"] could be approved on narrative notes with no
-   artifact.  Surface them as a distinct checklist the evaluator judges
-   item-by-item.  Order-preserving dedup keeps an artifact listed in both
-   source lists from appearing twice. *)
+(* required_evidence + verify_gate_evidence are requirements from the task
+   contract, not evidence fetched by this reviewer.  Surface them as a
+   distinct checklist the evaluator judges item-by-item against the immutable
+   typed submit-time snapshot.  A URL, host path, commit, or board reference
+   remains only a requirement unless its relevant contents were materialized
+   as an [artifact:] snapshot.  Order-preserving dedup keeps a requirement
+   listed in both source lists from appearing twice. *)
 let evidence_section ~required_evidence ~verify_gate_evidence =
   let items =
     List.fold_left
@@ -116,12 +117,13 @@ let evidence_section ~required_evidence ~verify_gate_evidence =
     sprintf
       "\n\
        <required_evidence>\n\
-       The task contract requires the completion notes to supply or reference \
-       each evidence artifact listed below. Judge every item independently: \
-       decide whether the notes provide concrete, verifiable evidence for it (an \
-       actual reference, link, path, or command output — not a restatement of the \
-       requirement or a promise to produce it later). Reject if any item is \
-       missing, a placeholder, or unsubstantiated.\n\
+       The task contract requires support for every item listed below. Judge each \
+       item independently against the typed submit-time snapshot: only available, \
+       non-truncated [artifact:] content is inspectable proof. A URL, host path, \
+       commit, board reference, command claim, or narrative note is not proof that \
+       this system agent fetched or executed anything. Reject if the required \
+       support is missing, unavailable, truncated, a placeholder, or \
+       unsubstantiated.\n\
        %s\n\
        </required_evidence>\n"
       (items |> List.mapi render_item |> String.concat "\n")
@@ -211,10 +213,9 @@ let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) re
     match verdict_str with
     | "APPROVE" -> Ok Approve
     | "REJECT" ->
-      let r =
-        if reason = "" then "completion notes did not address the task" else reason
-      in
-      Ok (Reject r)
+      if String.equal (String.trim reason) ""
+      then Error "REJECT verdict requires a non-empty reason"
+      else Ok (Reject reason)
     | other -> Error (sprintf "unexpected review verdict value: %s" other)
   with
   | Yojson.Safe.Util.Type_error (msg, _) -> Error (sprintf "review verdict JSON type error: %s" msg)
@@ -285,6 +286,7 @@ let review
       ?(on_verdict : review_result -> unit = fun _ -> ())
       ?(few_shot_block = "")
       ?(sw : Eio.Switch.t option = None)
+      ~base_path
       (req : review_request)
   : review_result
   =
@@ -349,6 +351,7 @@ let review
        let reviewer_result =
          try
            (Atomic.get run_llm_reviewer_fn)
+             ~base_path
              ?sw
              ~evaluator_runtime
              ~prompt

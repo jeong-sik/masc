@@ -1,6 +1,8 @@
 open Alcotest
 open Masc
 
+let () = Workspace_metric_hooks.install ()
+
 let make_config () =
   let dir =
     Filename.concat (Filename.get_temp_dir_name ())

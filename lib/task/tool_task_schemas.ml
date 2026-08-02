@@ -29,7 +29,9 @@ let handoff_context_description =
      actions (submit_for_verification / done / release / cancel). On \
      action='submit_for_verification', every 'evidence_refs' entry must use \
      'artifact:<producer-root-relative-path>' for a bounded file snapshot or \
-     'note:<text>' for narrative/commit/trace/URL evidence. Bare relative paths \
+     'note:<text>' for narrative evidence. URLs, commits, and traces are not \
+     fetched by the system LLM lane; materialize their relevant contents as an \
+     artifact when they are required proof. Bare relative paths \
      and absolute host paths are persisted as typed invalid references. The \
      list itself is optional. Example: {\"summary\": \"tests green, local proof saved\", \
      \"evidence_refs\": [\"artifact:artifacts/proof.json\"]}."
@@ -40,8 +42,8 @@ let schemas : Masc_domain.tool_schema list = [
     description = Printf.sprintf
       "Add a new task to the backlog for agents to claim. \
 Tasks default to an advisory verification contract with completion/evidence requirements. \
-Only tasks with contract.strict=true must be submitted for an out-of-band completion-authority verdict; advisory/default tasks may complete directly. \
-submit_for_verification creates an asynchronous review state that no agent or Keeper can claim. An authenticated human operator or typed auto judge reads the submitted evidence and commits the verdict. \
+Only tasks with contract.strict=true must be submitted for an out-of-band system LLM completion-authority verdict; advisory/default tasks may complete directly. \
+submit_for_verification creates an asynchronous review state that no agent or Keeper can claim. The application-owned system LLM agent reads the immutable submitted-evidence snapshot and commits the typed verdict; an authenticated human operator is the separate HITL path. \
 To re-run completed work, create a new task with predecessor_task_id instead of touching the done one. \
 Priority 1=urgent, 5=low (default 3). \
 Returns task-XXX ID for tracking. \

@@ -161,6 +161,8 @@ let board_event_kind_label = function
   | Keeper_world_observation.Goal_assigned -> "goal_assigned"
   | Keeper_world_observation.Goal_reconciliation_ready ->
     "goal_reconciliation_ready"
+  | Keeper_world_observation.Completion_authority_rejected _ ->
+    "completion_authority_rejected"
 ;;
 
 let quote_prompt_field value =
@@ -199,7 +201,8 @@ let board_event_note = function
   | Keeper_world_observation.Bg_completed
   | Keeper_world_observation.Schedule_due
   | Keeper_world_observation.Goal_assigned
-  | Keeper_world_observation.Goal_reconciliation_ready -> ""
+  | Keeper_world_observation.Goal_reconciliation_ready
+  | Keeper_world_observation.Completion_authority_rejected _ -> ""
 ;;
 
 let format_board_event_text
@@ -321,6 +324,49 @@ let format_scheduled_wake_observations
       events;
     Buffer.add_char ubuf '\n';
     Some (Buffer.contents ubuf))
+;;
+
+let format_completion_authority_rejection_observations
+    (events : Keeper_world_observation.pending_board_event list) =
+  let rows =
+    List.filter_map
+      (fun (event : Keeper_world_observation.pending_board_event) ->
+         match event.event_kind with
+         | Keeper_world_observation.Completion_authority_rejected rejection ->
+           Some
+             (Printf.sprintf
+                "- post_id=%s task_id=%s verification_id=%s authority_kind=%s authority_actor=%s reason=%s\n"
+                event.post_id
+                rejection.Keeper_event_queue.car_task_id
+                rejection.car_verification_id
+                (Masc_domain.completion_authority_kind rejection.car_authority)
+                (Masc_domain.completion_authority_actor rejection.car_authority)
+                (quote_prompt_field rejection.car_reason))
+         | Keeper_world_observation.Board_post_created
+         | Keeper_world_observation.Board_comment_added
+         | Keeper_world_observation.Board_reaction_changed _
+         | Keeper_world_observation.Fusion_completed
+         | Keeper_world_observation.Bg_completed
+         | Keeper_world_observation.Schedule_due
+         | Keeper_world_observation.External_attention
+         | Keeper_world_observation.Goal_assigned
+         | Keeper_world_observation.Goal_reconciliation_ready -> None)
+      events
+  in
+  match rows with
+  | [] -> None
+  | _ ->
+    Some
+      ("### Completion Authority Decisions ("
+       ^ string_of_int (List.length rows)
+       ^ ")\n"
+       ^ "Rows below are typed decisions from the completion-authority boundary. "
+       ^ "system_llm_agent is the system LLM agent and human_operator is HITL; neither "
+       ^ "is a Keeper, and this record grants no tool or task authority by itself. "
+       ^ "Re-read the current Task and verification state before choosing a "
+       ^ "follow-up action.\n"
+       ^ String.concat "" rows
+       ^ "\n")
 ;;
 
 let combine_prompt_sections sections =
@@ -695,10 +741,16 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path
         [ format_scheduled_automation_summary observation.scheduled_automation
         ; format_scheduled_wake_observations
             (List.filter
-               (fun event ->
-                  not (Keeper_world_observation.is_board_activity_event event))
+               Keeper_world_observation.is_scheduled_automation_event
                observation.pending_board_events)
         ]
+    (* 5b. Completion-authority decisions — a distinct system LLM boundary.
+       These rows are not Board activity and must not be routed through the
+       scheduled-work renderer merely because they share the historical
+       pending-event carrier. *)
+    | Keeper_context_layers.Completion_authority ->
+      format_completion_authority_rejection_observations
+        observation.pending_board_events
     (* Pending message rows are rendered once in exact source order. Mention and
        scope remain typed for wake metrics, but splitting them into two prompt
        sections would reorder interleaved arrivals. *)

@@ -10,7 +10,8 @@ instructions = """
 권한 경계:
 - task 완료 판정은 하지 않는다. masc_transition의 approve/reject는 agent action이 아니며 호출하지 않는다.
 - awaiting_verification task를 claim하지 않는다.
-- 완료 판정은 인증된 human operator 또는 typed auto judge 경계가 내린다.
+- 완료 판정은 인증된 human operator 또는 application-owned system LLM agent
+  경계가 내린다. system LLM agent는 Keeper가 아니다.
 - 리뷰 finding은 board comment로 남기고, 후속 수정이 필요하면 task를 만든다.
 
 리뷰 절차:

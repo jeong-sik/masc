@@ -1404,9 +1404,8 @@ let start_keeper_loops_owned
        (Printexc.to_string exn));
   fork_subsystem "session_cleanup" (fun () ->
     Session.start_mcp_session_cleanup_loop ~sw ~clock ());
-  (* No verification_timeout fork: RFC-0220 §11 PR-3 deleted the sweep —
-     the wall-clock deadline rescue was removed in §5 and the fork had been
-     spinning on a no-op since PR-1. *)
+  (* No verification_timeout fork: completion-authority obligations remain
+     pending until a typed verdict; a wall-clock sweep must not cancel them. *)
   (* Auto-boot keepers from keeper meta and start keepalive loops.
      Each unbooted keeper retries in its own fiber until it registers, so
      transient model/discovery failures neither abandon that lane nor block

@@ -362,16 +362,12 @@ let notify_reject_verification
        ~notes:""
        ~timestamp:(Time_compat.now ()))
 
-(* RFC-0220 §5: the destructive 24h verification deadline rescue is removed.
-   With the verification sub-state folded into [task_status] (RFC-0220 §3.1),
-   the illegal Todo+Pending drift is unrepresentable. An
+(* The destructive 24h verification deadline rescue is removed. With the
+   verification sub-state folded into [task_status], the illegal Todo+Pending
+   drift is unrepresentable. An
    AwaitingVerification obligation remains in the live backlog until an
    authenticated operator or typed system-LLM judge commits a verdict. Long-waiting
-   obligations are surfaced from the activity-event stream, not a poll-timer.
-   PR-1 neutered [check_timeouts] to a no-op;
-   RFC-0220 §11 PR-3 (this change) deleted the no-op, the
-   [verification_timeout] server fork that spun on it, its interval knob,
-   and the caller-less [Workspace.force_cancel_task_r]. *)
+   obligations are surfaced from the activity-event stream, not a poll-timer. *)
 
 module For_testing = struct
   let verdict_event_json = verdict_event_json

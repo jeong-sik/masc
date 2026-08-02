@@ -2281,9 +2281,9 @@ let gc_backdate_message config ~content =
   path
 ;;
 
-(* RFC-0220: an old AwaitingVerification obligation must survive GC in the live
-   backlog — masc_transition and dashboard verification read the live backlog
-   only, so archiving strands its approve/reject path (task-1537 incident). *)
+(* An old AwaitingVerification obligation must survive GC in the live backlog:
+   verdict commit and dashboard verification read the live backlog only, so
+   archiving strands its resolution path (task-1537 incident). *)
 let test_gc_preserves_awaiting_verification () =
   with_test_env (fun config ->
     let task =

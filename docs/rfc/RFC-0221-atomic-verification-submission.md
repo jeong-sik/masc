@@ -2,8 +2,8 @@
 rfc: "0221"
 title: "Atomic verification submission — task_status as the sole outcome authority"
 status: Implemented (steps 1-3 merged #20613/#20617; steps 4-5 measured then dropped, §3.3/§3.4)
-supersedes: "RFC-0220 §8 (the every-boot reconciler)"
-relates: "RFC-0220 (verification/scheduling decouple)"
+supersedes: "Withdrawn RFC-0220 startup-reconciler proposal"
+relates: "RFC-0220 (withdrawn cross-Keeper verification scheduling)"
 date: 2026-06-09
 ---
 
@@ -23,14 +23,16 @@ pre-write `let* ()` guard, and only if they return `Ok` does `write_backlog`
 commit the status (`workspace_task_transitions.ml:212-363` then `:444`).
 
 A partial failure — `write_backlog` raising, or a crash between the two writes —
-leaves the stores disagreeing. This is RFC-0220 §1.1's "illegal pair": a
+leaves the stores disagreeing. The withdrawn RFC-0220 called this the
+"illegal pair": a
 non-terminal record whose task is not `AwaitingVerification` (the empirical
 task-628 / task-629 case: `Pending` record, `Todo` task).
 
-PR-1 (RFC-0220) made `task_status` the **scheduling** authority and deleted the
-cross-store join, so a record-without-status is now *inert* — ignored by
-scheduling, the task is a normal claimable `Todo`, the fleet is not stuck. But
-RFC-0220 §8 proposed an **every-boot startup reconciler** to repair the pair.
+The first implementation step made `task_status` the **scheduling** authority
+and deleted the cross-store join, so a record-without-status is now *inert* —
+ignored by scheduling, the task is a normal claimable `Todo`, and the fleet is
+not stuck. The withdrawn design proposed an **every-boot startup reconciler**
+to repair the pair.
 That is repair-on-read (CLAUDE.md "Repair / Sanitize on read" workaround
 signature): it makes the symptom non-fatal on each boot without removing the
 root — the two-write submission that can still drift.
@@ -42,12 +44,12 @@ transaction. `task_status` is the single authority for the task **outcome**; the
 record's role differs per transition:
 
 - **Submit.** The outcome (`AwaitingVerification`) **requires the record's
-  content** — `output` / `criteria` are what a verifier reads to do the work.
+  content** — `output` / `criteria` are what the completion authority reviews.
   So the record must exist before the outcome is observable. Order: write record
   → commit status. Guarantee wanted: `AwaitingVerification ⟹ record exists`.
 - **Approve / Reject.** The outcome (`Done` / `InProgress`) **does not require
   the record** — the verdict is already in `task_status` (`decide` writes
-  `Done { notes = "Approved by <verifier> (vrf:<id>)" }`). The record is audit
+  `Done { notes = "Approved by <authority> (vrf:<id>)" }`). The record is audit
   (verdict history, dashboard attribution). Order: commit status → write record
   verdict best-effort. A record-write failure can neither block nor contradict
   the committed outcome.
@@ -63,7 +65,7 @@ content-vs-audit argument: **approve has no clean compensation.** Submit
 `Completed`). If approve went record-first, a `write_backlog` failure would need
 to revert `Completed → Pending`; the only inverse available is the `delete_request`
 from §3.1, which would erase the **submission** record entirely — destroying the
-`output` / `criteria` the verifier must read after the task bounces back to
+`output` / `criteria` the completion authority needs after the task returns to
 `AwaitingVerification`. That revert is not a transition the `Verification` state
 machine offers. No clean compensation exists, so approve/reject *cannot* be made
 record-first-with-compensation the way submit is — status-first is the only
@@ -133,9 +135,10 @@ workspace joined every non-terminal (`Pending`/`Assigned`) record against
 | record + matching `AwaitingVerification` (healthy) | 0 | — |
 
 The migration's *only* candidates are the 2 `Todo` cases — and restoring them is
-**the wrong treatment**: both submissions are 10 days old with `verifier = None`,
-and resurrecting them into a verifier queue from a stale record is exactly the
-"act on a `Pending` record to mutate `task_status`" pattern RFC-0220 removed. A
+**the wrong treatment**: both submissions are 10 days old with no recorded
+authority, and resurrecting them as live obligations from a stale record is
+exactly the "act on a `Pending` record to mutate `task_status`" pattern the
+single-authority change removed. A
 `Todo` task is already claimable; if the work still matters it is re-submitted
 through the normal flow, which produces a fresh, real obligation. So migration is
 **dropped** — there is no record for which restore-to-`AwaitingVerification` is

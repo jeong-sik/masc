@@ -26,18 +26,18 @@ let active_verifications_dir base_path =
 let legacy_verifications_dir base_path =
   Filename.concat base_path "verifications"
 
-let rec rm_rf path =
-  if Sys.file_exists path then
-    if Sys.is_directory path then begin
-      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
-      Unix.rmdir path
-    end else
-      Sys.remove path
+(** Use a temporary directory for each test.
 
-(** Use a temporary directory for each test *)
+    Cleanup goes through [Masc_test_deps.cleanup_test_workspace], which stats
+    with [Unix.lstat]. The previous local [rm_rf] tested [Sys.file_exists],
+    which resolves symlinks: a dangling link read as absent, was skipped, and
+    left its parent non-empty, so [Unix.rmdir] raised [ENOTEMPTY] out of the
+    [Fun.protect] finally and masked the test result. *)
 let with_temp_dir f =
   let dir = Filename.temp_dir "masc_verify_test" "" in
-  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+  Fun.protect
+    ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace dir)
+    (fun () -> f dir)
 
 let with_eio_temp_dir f =
   Eio_main.run @@ fun env ->

@@ -364,17 +364,16 @@ let test_system_llm_rejection_prefers_registered_producer_binding () =
                 "task-registered-producer"
                 rejection.car_task_id
             | _ -> Alcotest.fail "registered producer rejection was not queued");
-         match
-           Keeper_event_queue_persistence.load_result
-             ~base_path
-             ~keeper_name:"executor-agent"
-         with
-         | Error detail -> Alcotest.fail detail
-         | Ok queue ->
-           Alcotest.(check int)
-             "legacy derived queue remains unused"
-             0
-             (Keeper_event_queue.length queue))
+         let discovery =
+           Keeper_event_queue_persistence.discover_keeper_names_with_snapshots ~base_path
+         in
+         (match discovery.read_error with
+          | Some detail -> Alcotest.fail detail
+          | None ->
+            Alcotest.(check (list string))
+              "durable rejection has only the registered Keeper snapshot"
+              [ keeper_name ]
+              discovery.keeper_names))
   )
 
 let test_system_llm_rejection_does_not_derive_unregistered_keeper () =

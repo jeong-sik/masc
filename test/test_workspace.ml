@@ -807,7 +807,7 @@ let test_workspace_bootstrap_ignores_invalid_workspace_id_in_flat_mode () =
       (Workspace.is_initialized config)
   )
 
-let test_read_backlog_r_recovers_from_last_good_snapshot () =
+let test_read_backlog_r_rejects_non_authoritative_recovery () =
   with_test_env (fun config ->
     let expected =
       {
@@ -823,13 +823,21 @@ let test_read_backlog_r_recovers_from_last_good_snapshot () =
     in
     Out_channel.with_open_text (Workspace.backlog_path config) (fun oc ->
       output_string oc "{\n  \"tasks\": [\n");
-    match Workspace.read_backlog_r config with
-    | Ok backlog ->
-        Alcotest.(check int) "recovered backlog version" committed_revision backlog.version
-    | Error msg -> Alcotest.failf "expected recovery, got error: %s" msg
+    (match Workspace.read_backlog_r config with
+     | Ok _ -> Alcotest.fail "strict backlog read accepted recovery as authoritative"
+     | Error msg ->
+       Alcotest.(check bool)
+         "strict error identifies non-authoritative recovery"
+         true
+         (str_contains msg "non-authoritative for mutation"));
+    let backlog = Workspace.read_backlog config in
+    Alcotest.(check int)
+      "tolerant read exposes recovered revision"
+      committed_revision
+      backlog.version
   )
 
-let test_read_backlog_r_recovers_from_invalid_primary_revision () =
+let test_read_backlog_r_rejects_recovery_after_invalid_primary_revision () =
   with_test_env (fun config ->
     let expected =
       {
@@ -851,13 +859,19 @@ let test_read_backlog_r_recovers_from_invalid_primary_revision () =
         ; "last_updated", `String (Masc_domain.now_iso ())
         ; "version", `Int 0
         ]);
-    match Workspace.read_backlog_r config with
-    | Ok backlog ->
-      Alcotest.(check int)
-        "decode corruption recovers committed revision"
-        committed_revision
-        backlog.version
-    | Error msg -> Alcotest.failf "expected decode recovery, got error: %s" msg)
+    (match Workspace.read_backlog_r config with
+     | Ok _ ->
+       Alcotest.fail "strict backlog read accepted decode recovery as authoritative"
+     | Error msg ->
+       Alcotest.(check bool)
+         "decode recovery is explicitly non-authoritative"
+         true
+         (str_contains msg "non-authoritative for mutation"));
+    let backlog = Workspace.read_backlog config in
+    Alcotest.(check int)
+      "tolerant decode recovery exposes committed revision"
+      committed_revision
+      backlog.version)
 
 let test_read_backlog_r_reports_parse_error_when_recovery_is_also_invalid () =
   with_test_env (fun config ->
@@ -2006,10 +2020,10 @@ let () =
       Alcotest.test_case "nonexistent agent" `Quick test_heartbeat_nonexistent_agent;
       Alcotest.test_case "backend bootstrap preserves workspace state" `Quick test_workspace_bootstrap_preserves_backend_state;
       Alcotest.test_case "bootstrap ignores invalid workspace id in flat mode" `Quick test_workspace_bootstrap_ignores_invalid_workspace_id_in_flat_mode;
-      Alcotest.test_case "read_backlog_r recovers from last good snapshot" `Quick
-        test_read_backlog_r_recovers_from_last_good_snapshot;
-      Alcotest.test_case "read_backlog_r recovers from invalid primary revision" `Quick
-        test_read_backlog_r_recovers_from_invalid_primary_revision;
+      Alcotest.test_case "read_backlog_r rejects non-authoritative recovery" `Quick
+        test_read_backlog_r_rejects_non_authoritative_recovery;
+      Alcotest.test_case "read_backlog_r rejects invalid-revision recovery" `Quick
+        test_read_backlog_r_rejects_recovery_after_invalid_primary_revision;
       Alcotest.test_case "read_backlog_r reports parse error when recovery also invalid" `Quick
         test_read_backlog_r_reports_parse_error_when_recovery_is_also_invalid;
       Alcotest.test_case "fd pressure exn is not broken JSON" `Quick test_fd_pressure_exn_classification;

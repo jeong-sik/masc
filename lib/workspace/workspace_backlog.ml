@@ -41,7 +41,7 @@ let file_stat_opt path =
 let clear_backlog_cache_for path =
   Stdlib.Mutex.protect backlog_cache_mu (fun () -> Hashtbl.remove backlog_cache path)
 
-let read_backlog_r config =
+let read_backlog_with_source_r config =
   let path = backlog_path config in
   let recover primary_msg =
     let recovery_path = backlog_recovery_path config in
@@ -53,7 +53,7 @@ let read_backlog_r config =
            "read_backlog: primary backlog unreadable, recovered from %s (%s)"
            recovery_path
            primary_msg;
-         Ok backlog
+         Ok (`Recovered (backlog, primary_msg, recovery_path))
        | Error recovery_msg ->
          Error
            (Printf.sprintf
@@ -81,7 +81,7 @@ let read_backlog_r config =
                 else None))
   in
   match cached with
-  | Some backlog -> Ok backlog
+  | Some backlog -> Ok (`Primary backlog)
   | None -> (
       match read_json_result config path with
       | Ok json ->
@@ -94,13 +94,25 @@ let read_backlog_r config =
                       Hashtbl.replace backlog_cache path
                         { mtime = st.Unix.st_mtime; size = st.Unix.st_size; backlog })
               | None -> ());
-              Ok backlog
+              Ok (`Primary backlog)
           | Error primary_msg -> recover primary_msg)
       | Error primary_msg -> recover primary_msg)
 
+let read_backlog_r config =
+  match read_backlog_with_source_r config with
+  | Ok (`Primary backlog) -> Ok backlog
+  | Ok (`Recovered (backlog, primary_msg, recovery_path)) ->
+    Error
+      (Printf.sprintf
+         "%s; recovery snapshot at %s revision=%d is available but non-authoritative for mutation"
+         primary_msg
+         recovery_path
+         backlog.version)
+  | Error _ as error -> error
+
 let read_backlog config =
-  match read_backlog_r config with
-  | Ok backlog -> backlog
+  match read_backlog_with_source_r config with
+  | Ok (`Primary backlog | `Recovered (backlog, _, _)) -> backlog
   | Error msg ->
       Log.Misc.error "%s" msg;
       { tasks = []; last_updated = now_iso (); version = 1 }

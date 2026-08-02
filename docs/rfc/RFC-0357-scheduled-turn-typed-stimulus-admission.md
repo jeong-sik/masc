@@ -52,28 +52,41 @@ should_run =
 
 ### 3.2 Level이 아니라 edge인 이유
 
-`claimable_task_count > 0`·`failed_task_count > 0` 같은 **pool 수치(level)는 admission 입력에서 제외**한다 (모델에게 주는 관측으로는 유지). level로 admit하면 모델이 "할 일 아님"이라고 판단해도 pool이 비지 않는 한 30초마다 재소집된다 — 오늘의 낭비가 정확히 이 형태고, #26487(96개 고착 claimable)이 극단 사례다. `backlog_updated_since_last_scheduled_autonomous`는 이미 존재하는 durable edge다(`keeper_world_observation_inputs.ml:8` — `backlog.last_updated > proactive_rt.last_ts`): 백로그 **변화당 1턴**만 소집하고, 정적 백로그는 0턴이다.
+`claimable_task_count > 0`·`failed_task_count > 0` 같은 **pool 수치(level)는 admission 입력에서 제외**한다 (모델에게 주는 관측으로는 유지). level로 admit하면 모델이 "할 일 아님"이라고 판단해도 pool이 비지 않는 한 30초마다 재소집된다 — 오늘의 낭비가 정확히 이 형태고, #26487(96개 고착 claimable)이 극단 사례다. `backlog_updated_since_last_scheduled_autonomous`는 이미 존재하는 durable edge다(`lib/keeper/keeper_world_observation_inputs.ml:8` — `backlog.last_updated > proactive_rt.last_ts`): 백로그 **변화당 1턴**만 소집하고, 정적 백로그는 0턴이다.
 
 같은 파일의 self-authored-todo 제외(taskmaster가 자기가 만든 367개 태스크로 자기 루프를 돈 실증에 대한 수리)가 이 방향의 선례다: 신호는 수치가 아니라 사건이다.
 
-### 3.3 `proactive_rt.last_ts` — edge의 소비 기록으로 재정의
+**edge의 비교 축은 시각이 아니라 revision이다.** 현행 비교(`lib/keeper/keeper_world_observation_inputs.ml:8-20`)는 `backlog.last_updated`(string)를 ISO8601 **파싱해 얻은** float를 벽시계 `last_ts`와 엄격 부등호로 비교한다. 이를 admission에 승격하지 않는다 — 결함 넷:
 
-현재 last_ts는 **턴 종료 시**, scheduled 턴뿐 아니라 **meaningful한 board/mention reactive 턴에서도** 기록된다(`keeper_unified_metrics_result.ml:111-117`). edge admission 하에서 두 성질이 각각 문제다:
+1. **동률 붕괴**: stamp는 턴 시작, durable 변경은 턴 중이라 두 값이 구조적으로 가깝다. 초 단위 눈금에서 빠른 턴(claim 후 즉시 전이)의 변경이 stamp와 같은 눈금에 들어가면 엄격 `>`가 거짓 — 이 RFC가 지키려는 멀티턴 연속성이 정확히 빠른 턴에서 깨진다.
+2. **시계 역행**: NTP 보정으로 벽시계가 뒤로 가면 edge가 소실되거나 영구 생존한다.
+3. **영점의 level 강등**: `last_ts <= 0.0` arm은 `backlog.tasks <> []`로 판정한다 — 기준점 없는 keeper(최초 기동·리셋)는 백로그가 비지 않는 한 매 주기 admit되는, 정확히 본 RFC가 없애려는 level admission이다. revision 비교에선 이 특수 arm이 자연 소멸한다(`0 < current_revision`은 최초 1회 참, 소비 후 거짓).
+4. **파싱 Silent Failure**: `parse_iso8601_opt` 실패 시 `| None -> false` — 그 keeper는 백로그 변경으로 영원히 깨어나지 않고 진단도 남지 않는다. revision 비교에선 파싱 단계 자체가 없다.
 
-1. **종료 기록**: 자기 턴 중의 durable 변경(claim·전이·진행 기록)이 stamp보다 앞서게 되어 다음 턴을 재소집하지 못한다 — 멀티턴 작업의 연속성 단절.
-2. **reactive 겸용 기록**(`:114-115`): 메시지 응답 턴이 그 backlog를 처리했다는 보장 없이 backlog edge를 소비한다 — typed 신호의 침묵 소거.
+저장소 선례: board cursor는 float 단독이 아니라 타이브레이커를 동반하고(`lib/board/board_core.mli:321` `float * string option`), event queue는 단조 int64 revision을 노출한다(`lib/keeper_runtime/keeper_event_queue_state.mli:88`) — float 한 눈금이 유일하지 않음을 이 코드베이스가 이미 인정하고 해결했다.
+
+계약: **backlog 저장소는 커밋마다 단조 증가하는 int64 revision을 노출**하고(벽시계 파생 금지), edge 판정은 `backlog_revision > last_consumed_revision`이다. 동률·해상도·역행 문제가 정의상 소멸한다. 기존 bool 필드명(`backlog_updated_since_last_scheduled_autonomous`)은 유지하되 계산이 revision 비교로 바뀐다. `proactive_rt.last_ts`는 텔레메트리로 존속하고, admission 소비 기록은 `last_consumed_backlog_revision`(int64)이 맡는다.
+
+**구현 반경의 정직한 기술 — revision은 선행 슬라이스다.** 실측: backlog 관련 파일에 revision 0건, `last_updated` 타입이 두 모듈에서 갈림(`lib/types_core.mli:291` string vs `lib/workspace/workspace_eio.mli:31` float). 따라서 revision 도입은 durable 커밋 경로·직렬화·스키마에 닿는 독립 작업이며, **admission 교체보다 앞서는 별도 슬라이스(PR-0)로 분리**한다. PR-0은 `last_updated` 타입 이원화 정리를 함께 수행하고, revision 부재 파일의 처리 정책(fail-closed 원칙 하의 스키마 승격)을 자체 설계로 명시한다 — 본 RFC는 그 계약("커밋당 단조 int64")만 고정한다.
+
+### 3.3 edge 소비 기록 — 시점과 주체의 재정의
+
+현재 시각 기반 기준점(last_ts)은 **턴 종료 시**, scheduled 턴뿐 아니라 **meaningful한 board/mention reactive 턴에서도** 기록된다(`lib/keeper/keeper_unified_metrics_result.ml:111-117`). edge admission 하에서 두 성질이 각각 문제다:
+
+1. **종료 기록**: 자기 턴 중의 durable 변경(claim·전이·진행 기록)이 소비 기준점보다 앞서게 되어 다음 턴을 재소집하지 못한다 — 멀티턴 작업의 연속성 단절.
+2. **reactive 겸용 기록**(`lib/keeper/keeper_unified_metrics_result.ml:114-115`): 메시지 응답 턴이 그 backlog를 처리했다는 보장 없이 backlog edge를 소비한다 — typed 신호의 침묵 소거.
 
 결정 두 가지:
 
-- **stamp 주체는 scheduled-autonomous 턴뿐이다.** reactive arm은 edge 시계에서 제거한다(ProactiveOutcome 카운터 등 텔레메트리는 불변). reactive 턴이 backlog를 변경하면 그 변경이 edge를 재무장하므로 autonomous 후속 정찰 1턴이 자연히 따라온다.
-- **2단계 기록**: admission 시점에 in-memory stamp, durable 영속은 기존 post-turn meta 쓰기 경로 그대로. 실패 매트릭스:
+- **소비 기록 주체는 scheduled-autonomous 턴뿐이다.** reactive arm은 edge 시계에서 제거한다(ProactiveOutcome 카운터 등 텔레메트리는 불변). reactive 턴이 backlog를 변경하면 그 변경이 revision을 올려 edge를 재무장하므로 autonomous 후속 정찰 1턴이 자연히 따라온다.
+- **2단계 기록**: admission 시점에 관측한 `backlog_revision`을 `last_consumed_backlog_revision`으로 in-memory 기록, durable 영속은 기존 post-turn meta 쓰기 경로 그대로. 실패 매트릭스:
 
 | 시나리오 | 결과 |
 |---|---|
-| 정상 완료, 턴 중 durable 변경 있음 | 변경 ts > stamp → 다음 턴 admit (연속) |
+| 정상 완료, 턴 중 durable 변경 있음 | 변경 revision > 소비 revision → 다음 턴 admit (연속) |
 | 정상 완료, 무변경 | edge 소멸 → 침묵 (자기제한) |
-| 프로세스 크래시 (post-turn 영속 전) | durable last_ts = 이전 값 → 재기동 시 edge 생존 → 재소집 (at-least-once) |
-| 턴 실패, 프로세스 생존 | in-memory stamp 유지 → 같은 edge로 재소집 없음 |
+| 프로세스 크래시 (post-turn 영속 전) | durable 소비 revision = 이전 값 → 재기동 시 edge 생존 → 재소집 (at-least-once) |
+| 턴 실패, 프로세스 생존 | in-memory 소비 revision 유지 → 같은 edge로 재소집 없음 |
 
 마지막 행은 의도된 결정이다: 실패 턴의 stamp를 롤백하면 지속 실패(429 등)가 30초마다 같은 edge로 재admit되는 무한 재시도가 된다 — 2026-07-31 컴팩션 807회 루프와 같은 형태다. transient 실패의 재시도는 턴 내부 runtime 슬롯 failover 소관이며, admission은 재시도 기관이 아니다. 소비된 edge의 일은 다음 durable 변화 또는 message/schedule disjunct가 다시 연다.
 
@@ -100,14 +113,15 @@ RFC-0303이 기각한 것은 **출력 품질 휴리스틱**이다: `made_progres
 ## 7. Blast radius
 
 - `lib/keeper/keeper_world_observation.ml` — scheduled_autonomous_decision 교체, `No_actionable_stimulus` skip reason 추가(verdict reason variant + to_string), `actionable_signal_present`와 admission의 단일화.
-- `lib/keeper/keeper_unified_metrics_result.ml:111-117` — last_ts 조건에서 reactive arm 제거, stamp를 admission 시점 in-memory로 이동(§3.3). 카운터(count_total, visible_count_total, ProactiveOutcome)는 불변.
+- `lib/keeper/keeper_unified_metrics_result.ml:111-117` — reactive arm을 edge 소비에서 제거, 소비 기록을 admission 시점 in-memory `last_consumed_backlog_revision`(int64)으로 이동(§3.3). `last_ts`와 카운터(count_total, visible_count_total, ProactiveOutcome)는 텔레메트리로 불변.
+- backlog 저장소 — 커밋당 단조 int64 revision 노출은 **선행 슬라이스 PR-0**(§3.2: durable 스키마·직렬화·`last_updated` string/float 이원화 정리 포함). admission 슬라이스는 그 위에서 `keeper_world_observation_inputs.ml:8-20`의 시각 비교(영점 level arm·파싱 None arm 포함)를 revision 비교로 교체.
 - 소비자: verdict reason 문자열은 로그·decision ledger로 흐른다. dashboard/src에 skip reason 문자열 union 소비자는 rg로 0건 확인(#26557류 zod 파괴 없음) — 구현 시 재확인.
 - 테스트: `test_keeper_raw_task_signal_wake.ml`, `test_keeper_wake_turn_context.ml`, `test_heartbeat_integration.ml` 확장.
 - 문서: RFC-0303 supersession 주석, `docs/product/KEEPER-FULL-LIFECYCLE-BEHAVIOR.md` B10(bounded cadence)와 정합 — B10의 기대가 이 RFC로 충족된다.
 
 ## 8. 검증
 
-- 단위: 빈 observation + gate on → `Skip No_actionable_stimulus`. 각 disjunct 단독 → `Run`. bootstrap은 generation당 1회. §3.3 매트릭스 4행 각각: 연속(변경→재admit)·자기제한(무변경→skip)·크래시 재기동 재소집(durable last_ts 이전 값 유지 확인)·실패 턴 비재소집. reactive 턴이 backlog edge를 소비하지 않음(mention 턴 후 미처리 backlog 변경 → scheduled 채널 admit 유지).
+- 단위: 빈 observation + gate on → `Skip No_actionable_stimulus`. 각 disjunct 단독 → `Run`. bootstrap은 generation당 1회. §3.3 매트릭스 4행 각각: 연속(변경→재admit)·자기제한(무변경→skip)·크래시 재기동 재소집(durable 소비 revision 이전 값 유지 확인)·실패 턴 비재소집. reactive 턴이 backlog edge를 소비하지 않음(mention 턴 후 미처리 backlog 변경 → scheduled 채널 admit 유지). **빠른 턴 연속성**: admission과 같은 눈금(동일 시각)에 일어난 변경도 revision 증가만으로 재admit — 시각 동률에 의존하는 테스트 금지.
 - 라이브 (감사 Phase 4 완료 기준 그대로): 신호 없는 10분간 provider call 0, heartbeat row는 계속 기록. direct message는 즉시 reactive 턴. 정적 백로그 keeper(#26487의 full-cycle-probe 형태)는 부트 후 autonomous 턴 1회 이하.
 - 비용: 신호 없는 날의 scheduled 채널 provider 비용 ≈ $0 (오늘 $78.77의 대조 실측을 병합 후 기록).
 

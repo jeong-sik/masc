@@ -35,6 +35,12 @@ let check_status label expected actual =
   check string label (schedule_status_to_string expected) (schedule_status_to_string actual)
 ;;
 
+let timestamp value =
+  match Ptime.of_rfc3339 value with
+  | Ok (time, _, _) -> Ptime.to_float_s time
+  | Error _ -> fail ("invalid test timestamp: " ^ value)
+;;
+
 let test_request_starts_scheduled () =
   let req = request () in
   check_status "status" Scheduled req.status
@@ -168,6 +174,33 @@ let test_cron_recurrence_rejects_invalid_expression () =
   | Ok _ -> fail "expected invalid cron rejection"
   | Error msg ->
     check string "cron error" "recurrence.cron.minute step must be positive" msg
+;;
+
+let test_cron_recurrence_finds_occurrence_beyond_five_years () =
+  let req =
+    request
+      ~recurrence:(Cron { expression = "0 9 29 2 *"; timezone = "UTC" })
+      ()
+  in
+  let now = timestamp "2096-03-01T00:00:00Z" in
+  match next_due_after ~now req with
+  | None -> fail "expected the 2104 leap-day occurrence"
+  | Some due_at ->
+    check (float 0.001) "next leap day has no five-year horizon"
+      (timestamp "2104-02-29T09:00:00Z") due_at
+;;
+
+let test_cron_recurrence_rejects_impossible_calendar_date () =
+  match
+    create_request ~schedule_id:"sched-1" ~requested_by:(human "requester")
+      ~scheduled_by:(human "scheduler") ~requested_at:100.0 ~due_at:200.0
+      ~payload:(payload_json ()) ~source:Operator_request
+      ~recurrence:(Cron { expression = "0 9 31 2 *"; timezone = "UTC" })
+      ()
+  with
+  | Ok _ -> fail "expected impossible cron date rejection"
+  | Error msg ->
+    check string "cron error" "recurrence.cron has no possible calendar date" msg
 ;;
 
 let test_schedule_roundtrip () =
@@ -308,6 +341,10 @@ let () =
             test_cron_recurrence_supports_steps_ranges_and_sunday_alias;
           test_case "cron recurrence rejects invalid expression" `Quick
             test_cron_recurrence_rejects_invalid_expression;
+          test_case "cron recurrence finds occurrence beyond five years" `Quick
+            test_cron_recurrence_finds_occurrence_beyond_five_years;
+          test_case "cron recurrence rejects impossible calendar date" `Quick
+            test_cron_recurrence_rejects_impossible_calendar_date;
         ] );
       ( "codec",
         [

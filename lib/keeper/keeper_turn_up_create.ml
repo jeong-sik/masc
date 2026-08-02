@@ -226,6 +226,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_reason = "";
             last_preview = "";
             consecutive_noop_count = 0;
+            last_consumed_backlog_revision = 0;
           };
           nonce;
           trace_id = trace_id_t;

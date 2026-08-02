@@ -24,18 +24,21 @@ val backlog_updated_since_last_scheduled_autonomous
   :  meta:keeper_meta
   -> backlog:Masc_domain.backlog
   -> bool
+(** RFC-0357 §3.2 backlog edge:
+    [backlog.version > meta.runtime.proactive_rt.last_consumed_backlog_revision].
+    A monotonic revision compare — wall clocks, ISO8601 parsing, and the
+    zero-point special case of the previous implementation are gone by
+    construction. *)
 
 val read_backlog_counts
   :  config:Workspace.config
   -> meta:keeper_meta
   -> int * int * int * bool * int option
-(** [(unclaimed, claimable, failed, backlog_changed, observed_revision)].
-    Uses the source-preserving observation contract. [observed_revision] is
-    [Some backlog.version] only after a valid primary read and [None] when the
-    primary is unreadable, including when a recovery snapshot is available.
-    Counts are zero on the latter path, so stale recovery data cannot drive a
-    wake or appear claimable. The typed revision absence preserves the degraded
-    observation instead of fabricating an empty authoritative backlog. *)
+(** [(unclaimed, claimable, failed, backlog_edge, observed_revision)].
+    [observed_revision] is [Some backlog.version] on a successful read and
+    [None] when the read failed — admission records only actually observed
+    revisions, so a failed read can neither fire the edge nor move the
+    consumption clock. *)
 
 (** [task_is_self_authored_todo ~meta task] is true when an unclaimed [Todo]
     was authored by the keeper's own stable handle ([meta.name]).

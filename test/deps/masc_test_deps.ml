@@ -107,6 +107,7 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         | Schema.Board_reactive_turn_count
         | Schema.Mention_reactive_turn_count
         | Schema.Noop_turn_count
+        | Schema.Last_consumed_backlog_revision
         | Schema.Meta_version -> `Int 0
         | Schema.Total_cost_usd
         | Schema.Last_turn_ts

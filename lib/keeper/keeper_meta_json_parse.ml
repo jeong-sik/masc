@@ -36,6 +36,22 @@ let int_field fields name =
   | other -> invalidf "field %s must be an integer, got %s" name (Json_util.kind_name other)
 ;;
 
+(* RFC-0357 §3.3: absence-tolerated only for fields listed in
+   [Keeper_meta_json_current_schema.genesis_defaulted_field_names]. An absent
+   field is a pre-RFC meta and decodes as the genesis value; a PRESENT
+   malformed or negative value still fails the decode — corruption must not
+   silently rewind an edge clock. *)
+let genesis_int_field fields name ~genesis =
+  match List.assoc_opt name fields with
+  | None -> Ok genesis
+  | Some (`Int value) ->
+    if value >= 0
+    then Ok value
+    else invalidf "field %s must be nonnegative, got %d" name value
+  | Some other ->
+    invalidf "field %s must be an integer, got %s" name (Json_util.kind_name other)
+;;
+
 let float_field fields name =
   let* value = required_field fields name in
   let parsed =
@@ -338,6 +354,9 @@ let decode_current_meta fields =
   let* last_proactive_reason = string_field fields "last_proactive_reason" in
   let* last_proactive_preview = string_field fields "last_proactive_preview" in
   let* consecutive_noop_count = int_field fields "consecutive_noop_count" in
+  let* last_consumed_backlog_revision =
+    genesis_int_field fields "last_consumed_backlog_revision" ~genesis:0
+  in
   let* last_compaction_check_ts = float_field fields "last_compaction_check_ts" in
   let* last_compaction_decision_raw = string_field fields "last_compaction_decision" in
   let* active_goal_ids = string_list_field fields "active_goal_ids" in
@@ -413,6 +432,7 @@ let decode_current_meta fields =
       ; last_reason = last_proactive_reason
       ; last_preview = last_proactive_preview
       ; consecutive_noop_count
+      ; last_consumed_backlog_revision
       }
     in
     let runtime : agent_runtime_state =

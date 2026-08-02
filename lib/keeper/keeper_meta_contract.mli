@@ -79,6 +79,15 @@ type proactive_runtime = {
           [effective_scheduled_autonomous_cooldown] for
           exponential backoff: cooldown *= 2^min(n, 2),
           capping at 4x.  Resets on any productive cycle. *)
+  last_consumed_backlog_revision : int;
+      (** RFC-0357 §3.3 scheduled-autonomous edge clock: highest
+          [backlog.version] observed at the admission of a scheduled
+          turn. The backlog edge is
+          [backlog.version > last_consumed_backlog_revision]. Recorded
+          in-memory at turn start; persisted by the post-turn meta
+          write. Only scheduled-autonomous turns consume it — reactive
+          turns never advance it. 0 is the genesis (never consumed).
+          [last_ts] remains telemetry, not an admission input. *)
 }
 
 type usage_metrics = {

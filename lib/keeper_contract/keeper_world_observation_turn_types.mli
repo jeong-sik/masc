@@ -42,6 +42,10 @@ type skip_reason =
   | Keeper_paused
   | Scheduled_autonomous_disabled
   | Reactive_disabled
+  | No_actionable_stimulus
+      (** RFC-0357 §3.1: gate on, but no typed stimulus — no pending
+          message/board event, no backlog revision edge, no due schedule,
+          already bootstrapped. Designed silence, recorded as a skip. *)
 
 type turn_verdict =
   | Run of { reasons : turn_reason * turn_reason list }

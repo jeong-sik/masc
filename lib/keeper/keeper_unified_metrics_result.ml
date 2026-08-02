@@ -179,6 +179,13 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
              then rt.proactive_rt.consecutive_noop_count + 1
              else 0
            else rt.proactive_rt.consecutive_noop_count);
+        (* RFC-0357 §3.3: pass-through, deliberately not stamped here. The
+           consumption record is written in-memory at admission (heartbeat
+           loop) so a failed turn keeps it; this post-turn write only makes
+           it durable. Reactive cycles flow through unchanged — they never
+           consume the backlog edge. *)
+        last_consumed_backlog_revision =
+          rt.proactive_rt.last_consumed_backlog_revision;
       };
       (* Autonomous action tracking from tool calls *)
       autonomous_action_count =

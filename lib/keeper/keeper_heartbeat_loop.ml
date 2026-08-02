@@ -697,6 +697,37 @@ let run_keepalive_unified_turn
              admitted. The four prior inline pressure gates here were removed: they
              ran AFTER intake had already consumed the stimulus, forcing a
              consume/requeue churn loop, and logged only at DEBUG (a silent skip). *)
+          (* RFC-0357 §3.3: consume the backlog edge at admission, before the
+             turn runs. Only the scheduled-autonomous channel consumes it — a
+             reactive turn must not silence a typed backlog signal it never
+             promised to handle. The stamp is monotonic (a failed backlog
+             read observed no revision and cannot rewind the clock) and lives
+             on the meta the cycle carries, so a failed turn keeps it
+             in-memory and is not re-admitted on the same edge every
+             heartbeat; durable persistence rides the existing post-turn meta
+             write (a crash before that write re-arms the edge —
+             at-least-once). *)
+          let meta_after_triage =
+            match turn_decision.channel with
+            | Keeper_world_observation.Reactive -> meta_after_triage
+            | Keeper_world_observation.Scheduled_autonomous ->
+              (match obs.backlog_revision with
+               | None -> meta_after_triage
+               | Some observed ->
+                 let proactive_rt = meta_after_triage.runtime.proactive_rt in
+                 if observed > proactive_rt.last_consumed_backlog_revision
+                 then
+                   { meta_after_triage with
+                     runtime =
+                       { meta_after_triage.runtime with
+                         proactive_rt =
+                           { proactive_rt with
+                             last_consumed_backlog_revision = observed
+                           }
+                       }
+                   }
+                 else meta_after_triage)
+          in
           record_replay_owned_turn_started_reactions
             ~ctx
             ~keeper_name:meta_after_triage.name

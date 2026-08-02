@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
-readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.11"
+readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.12"
 # v0.231.0 is a hard-cut wave: checkpoint schema is v9 only (v1-v8
 # rejected; #2867), provider_config.output_schema is removed in favor of
 # response_format = JsonSchema as the single structured-output request state
@@ -66,12 +66,21 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.11"
 # non-conventional (oas#2922 tracks enforcing titles); the tag contains both.
 # Previous pin: main@92e3eea36 (post-v0.231.10); before that v0.231.10
 # (1fa612519).
-readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.11"
+# v0.231.12 carries three streaming-boundary changes: #2916 preserves Ollama
+# NDJSON outcome kinds as a typed 3-way result (breaking:
+# parse_ollama_ndjson_chunk returns ollama_ndjson_parse_result), #2919
+# quarantines streaming connections after transport EOF, and #2926 classifies
+# malformed SSE discriminators (introduces the NDJSONError family). MASC main
+# already consumes NDJSONError (#26636) — this bump restores pin-consumer
+# atomicity and repairs the main CI red at 7914f2c6ad (Unbound constructor
+# Agent_sdk.Types.NDJSONError under the 0.231.11 pin).
+# Previous pin: v0.231.11 (6ab2e84e1).
+readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.12"
 # TRACK_REF consumed by check-oas-pin.sh / oas-drift-check.sh /
 # sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584). Use main
 # for merge-ready pins. A blocked Draft cross-repo PR may temporarily declare
 # the exact refs/pull/<number>/head review ref; CI rejects that ref once the PR
 # is no longer both Draft and blocked-on-oas.
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="6ab2e84e1d3a7728e0cac0e727f2d4872cd3f99e"
-readonly OAS_AGENT_SDK_MIN_VERSION="0.231.11"
+readonly OAS_AGENT_SDK_SHA="966cd3f61cd5e9e21c8390513dfa27894aeb6230"
+readonly OAS_AGENT_SDK_MIN_VERSION="0.231.12"

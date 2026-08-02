@@ -26,6 +26,7 @@ val write_backlog :
     Non-transition callers (GC, init, query) omit the callback.
     Raises [Backlog_write_failed] only when the primary SSOT did not commit. *)
 
+exception Backlog_read_failed of string
 exception Backlog_write_failed of string
 
 type write_backlog_outcome =

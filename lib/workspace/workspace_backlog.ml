@@ -103,6 +103,7 @@ let read_backlog config =
       Log.Misc.error "%s" msg;
       { tasks = []; last_updated = now_iso (); version = 1 }
 
+exception Backlog_read_failed of string
 exception Backlog_write_failed of string
 
 type write_backlog_outcome =

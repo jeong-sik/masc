@@ -15,7 +15,11 @@ let update_priority config ~task_id ~priority =
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     try
-      let backlog = read_backlog config in
+      let backlog =
+        match read_backlog_r config with
+        | Ok backlog -> backlog
+        | Error message -> raise (Backlog_read_failed message)
+      in
 
       let task_opt = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
 

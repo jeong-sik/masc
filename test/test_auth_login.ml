@@ -137,6 +137,26 @@ let test_login_long_lived_passes_env_var_through () =
          |> Yojson.Safe.Util.member "token_env_var"
          |> Yojson.Safe.Util.to_string)
 
+let test_login_url_uses_uri_components () =
+  with_temp_dir "auth-login-uri" @@ fun base_path ->
+  match
+    Auth_login.mint ~base_path ~host:"::1" ~port:8935
+      ~agent_name:"agent +&" ~role:Masc_domain.Worker
+      ~token_env_var:"MASC_TOKEN" ~token_lifetime:Auth_login.With_expiry ()
+  with
+  | Error err ->
+    failf "login mint failed: %s" (Masc_domain.masc_error_to_string err)
+  | Ok report ->
+    let dashboard = Uri.of_string report.dashboard_url in
+    check (option string) "IPv6 host" (Some "::1") (Uri.host dashboard);
+    check (option int) "port" (Some 8935) (Uri.port dashboard);
+    check string "dashboard path" "/dashboard" (Uri.path dashboard);
+    check (option string) "agent query round-trip" (Some "agent +&")
+      (Uri.get_query_param dashboard "agent");
+    let mcp = Uri.of_string report.mcp_url in
+    check (option string) "MCP IPv6 host" (Some "::1") (Uri.host mcp);
+    check string "MCP path" "/mcp" (Uri.path mcp)
+
 let () =
   run "auth_login"
     [
@@ -146,5 +166,7 @@ let () =
             test_login_with_expiry_uses_caller_env_var;
           test_case "long-lived honors caller env var + no expires_at"
             `Quick test_login_long_lived_passes_env_var_through;
+          test_case "URL uses URI components" `Quick
+            test_login_url_uses_uri_components;
         ] );
     ]

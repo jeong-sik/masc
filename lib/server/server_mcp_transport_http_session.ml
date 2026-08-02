@@ -442,15 +442,10 @@ let protocol_version_from_body body_str =
   Mcp_transport_protocol.protocol_version_from_body body_str
 
 let get_session_id_query target =
-  match String.split_on_char '?' target with
-  | [ _; query ] ->
-      query
-      |> String.split_on_char '&'
-      |> List.find_map (fun param ->
-             match String.split_on_char '=' param with
-             | [ "session_id"; v ] | [ "sessionId"; v ] -> Some v
-             | _ -> None)
-  | _ -> None
+  let uri = Uri.of_string target in
+  match Uri.get_query_param uri "session_id" with
+  | Some _ as value -> value
+  | None -> Uri.get_query_param uri "sessionId"
 
 let capitalize_ascii (s : string) =
   if s = "" then
@@ -482,16 +477,13 @@ let get_cookie_value (request : Httpun.Request.t) cookie_name =
   match get_header_any_case request.headers "cookie" with
   | None -> None
   | Some raw ->
-      raw
-      |> String.split_on_char ';'
-      |> List.find_map (fun part ->
-             match String.split_on_char '=' (String.trim part) with
-             | key :: value_parts
-               when String.lowercase_ascii (String.trim key)
-                    = String.lowercase_ascii cookie_name ->
-                 let value = String.concat "=" value_parts |> String.trim in
-                 if value = "" then None else Some value
-             | _ -> None)
+      Cohttp.Header.init_with "cookie" raw
+      |> Cohttp.Cookie.Cookie_hdr.extract
+      |> List.find_map (fun (name, value) ->
+             if String.equal name cookie_name then
+               let value = String.trim value in
+               if String.equal value "" then None else Some value
+             else None)
 
 let get_session_id_any (request : Httpun.Request.t) =
   match get_session_id_query request.target with

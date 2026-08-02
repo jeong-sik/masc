@@ -30,17 +30,6 @@ let auth_change_to_string = function
 let normalize_base_path path =
   Env_config_core.normalize_masc_base_path_input path
 
-let url_encode value =
-  let buf = Buffer.create (String.length value) in
-  String.iter
-    (function
-      | ('A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '-' | '_' | '.' | '~') as c
-        ->
-          Buffer.add_char buf c
-      | c -> Printf.bprintf buf "%%%02X" (Char.code c))
-    value;
-  Buffer.contents buf
-
 let single_quote_shell value =
   "'" ^ String.concat "'\\''" (String.split_on_char '\'' value) ^ "'"
 
@@ -89,13 +78,16 @@ let mint ~base_path ~host ~port ~agent_name ~role ~token_env_var
           let raw_token_file =
             persist_raw_token ~base_path ~agent_name bearer_token
           in
-          let agent_param = url_encode agent_name in
-          let token_param = url_encode bearer_token in
           let dashboard_url =
-            Printf.sprintf "http://%s:%d/dashboard?agent=%s&token=%s"
-              host port agent_param token_param
+            Uri.make ~scheme:"http" ~host ~port ~path:"/dashboard"
+              ~query:[ ("agent", [ agent_name ]); ("token", [ bearer_token ]) ]
+              ()
+            |> Uri.to_string
           in
-          let mcp_url = Printf.sprintf "http://%s:%d/mcp" host port in
+          let mcp_url =
+            Uri.make ~scheme:"http" ~host ~port ~path:"/mcp" ()
+            |> Uri.to_string
+          in
           Ok
             {
               base_path;

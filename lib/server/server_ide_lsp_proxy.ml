@@ -466,34 +466,14 @@ let extract_uri params =
   | _ -> None
 ;;
 
-(** Decode percent-encoded URI component (e.g. [%20] -> [ ]). *)
-let pct_decode s =
-  let len = String.length s in
-  let buf = Buffer.create len in
-  let i = ref 0 in
-  while !i < len do
-    let c = String.get s !i in
-    if c = '%' && !i + 2 < len then begin
-      let hex = String.sub s (!i + 1) 2 in
-      (match int_of_string_opt ("0x" ^ String.uppercase_ascii hex) with
-       | Some byte -> Buffer.add_char buf (Char.chr byte); i := !i + 3
-       | None -> Buffer.add_char buf c; incr i)
-    end else begin
-      Buffer.add_char buf c;
-      incr i
-    end
-  done;
-  Buffer.contents buf
-
 let path_of_file_uri uri =
-  let prefix = "file://" in
-  if String.starts_with ~prefix uri
-  then (
-    let raw =
-      String.sub uri (String.length prefix) (String.length uri - String.length prefix)
-    in
-    pct_decode raw)
-  else uri
+  let parsed = Uri.of_string uri in
+  match Uri.scheme parsed with
+  | Some "file" ->
+    (match Uri.host parsed with
+     | None | Some "" | Some "localhost" -> Uri.path parsed |> Uri.pct_decode
+     | Some _ -> uri)
+  | _ -> uri
 ;;
 
 (** [fpath_within ~base path] is [Some rel] when the normalized absolute

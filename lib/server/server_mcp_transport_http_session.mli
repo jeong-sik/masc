@@ -177,7 +177,7 @@ val get_cookie_value :
   Httpun.Request.t -> string -> string option
 (** [get_cookie_value request cookie_name] parses the [Cookie:]
     header and returns the value for [cookie_name]
-    (case-insensitive cookie name match, value trimmed).
+    (RFC case-sensitive cookie name match, value trimmed).
     [None] when absent or blank. *)
 
 val get_session_id_any : Httpun.Request.t -> string option

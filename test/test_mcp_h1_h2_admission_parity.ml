@@ -284,6 +284,24 @@ let test_shared_protocol_and_delete_matrix () =
   check (option string) "DELETE without session has no admission id" None
     (Transport.get_session_id_any (request ~meth:`DELETE "/mcp"))
 
+let test_session_id_parsing_uses_uri_and_cookie_contracts () =
+  check (option string) "percent-decoded query value" (Some "a&b=c")
+    (Transport.get_session_id_query "/mcp?session_id=a%26b%3Dc");
+  check (option string) "first duplicate query value" (Some "first")
+    (Transport.get_session_id_query
+       "/mcp?session_id=first&session_id=second");
+  check (option string) "legacy camel-case query key" (Some "legacy")
+    (Transport.get_session_id_query "/mcp?sessionId=legacy");
+  let cookie_request =
+    request ~headers:[ ("cookie", "mcp-session-id=exact=value; Other=x") ]
+      "/mcp"
+  in
+  check (option string) "cookie parser preserves equals in value"
+    (Some "exact=value")
+    (Transport.get_cookie_value cookie_request "mcp-session-id");
+  check (option string) "cookie name is case-sensitive" None
+    (Transport.get_cookie_value cookie_request "Mcp-Session-Id")
+
 let test_sse_backing_session_bridge_requires_known_transport_session () =
   let transport_session_id = "h1-h2-parity-sse-transport-session" in
   let sse_session_id = "presence:" ^ transport_session_id in
@@ -570,6 +588,8 @@ let () =
             test_shared_post_admission_matrix;
           test_case "protocol and DELETE predicate matrix" `Quick
             test_shared_protocol_and_delete_matrix;
+          test_case "session URI and cookie parsing contracts" `Quick
+            test_session_id_parsing_uses_uri_and_cookie_contracts;
           test_case "SSE backing session bridge requires known transport session"
             `Quick
             test_sse_backing_session_bridge_requires_known_transport_session;

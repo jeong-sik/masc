@@ -85,7 +85,18 @@ let test_file_uri_resolution_is_workspace_scoped () =
     (option string)
     "encoded traversal is rejected after decode"
     None
-    (Lsp.resolve_relative ~base "file:///workspace/masc/sub%2F..%2F..%2Fetc/passwd")
+    (Lsp.resolve_relative ~base "file:///workspace/masc/sub%2F..%2F..%2Fetc/passwd");
+  check
+    (option string)
+    "localhost file authority is local"
+    (Some "lib/server.ml")
+    (Lsp.resolve_relative ~base
+       "file://localhost/workspace/masc/lib/server.ml");
+  check
+    (option string)
+    "remote file authority is rejected"
+    None
+    (Lsp.resolve_relative ~base "file://remote/workspace/masc/lib/server.ml")
 ;;
 
 let test_file_uri_resolution_rejects_symlink_escape () =

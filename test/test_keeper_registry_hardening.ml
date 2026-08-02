@@ -665,7 +665,8 @@ let test_goal_reconciliation_enqueues_once_after_last_terminal_task () =
        | None -> fail "Goal disappeared")
 ;;
 
-let test_goal_reconciliation_prefers_authoritative_assignment () =
+let test_goal_reconciliation_prefers_authoritative_assignment
+      ?(assigned_paused = false) () =
   let dir = temp_dir "registry_goal_reconciliation_assignment" in
   Fun.protect
     ~finally:(fun () ->
@@ -678,6 +679,9 @@ let test_goal_reconciliation_prefers_authoritative_assignment () =
        let config = Masc.Workspace.default_config dir in
        let completing_agent_name = "keeper-executor-agent-agent" in
        ignore (Masc.Workspace.init config ~agent_name:(Some completing_agent_name));
+       let producer_meta =
+         { (make_meta "producer") with agent_name = completing_agent_name }
+       in
        let goal, _ =
          match
            Goal_store.upsert_goal
@@ -722,8 +726,16 @@ let test_goal_reconciliation_prefers_authoritative_assignment () =
        in
        finish "task-001";
        finish "task-002";
+       ignore
+         (KR.register_offline
+            ~base_path:config.base_path
+            producer_meta.name
+            producer_meta);
        let assigned_meta =
-         { (make_goal_reconciler_meta ()) with active_goal_ids = [ goal.id ] }
+         { (make_goal_reconciler_meta ()) with
+           active_goal_ids = [ goal.id ]
+         ; paused = assigned_paused
+         }
        in
        ignore
          (KR.register_offline
@@ -739,9 +751,12 @@ let test_goal_reconciliation_prefers_authoritative_assignment () =
         | Masc.Keeper_goal_reconciliation_wake.Enqueued { keeper_name } ->
           check string
             "assigned Keeper owns reconciliation wake"
-            assigned_meta.name
-            keeper_name
+           assigned_meta.name
+           keeper_name
         | _ -> fail "authoritative Goal assignment did not produce a durable wake");
+       check int "producer does not receive an assignment-owned wake" 0
+         (registry_snapshot ~base_path:config.base_path producer_meta.name
+          |> Keeper_event_queue.length);
        let discovery =
          Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
            ~base_path:config.base_path
@@ -754,6 +769,12 @@ let test_goal_reconciliation_prefers_authoritative_assignment () =
            "only the assigned canonical Keeper receives the wake"
            [ assigned_meta.name ]
            discovery.keeper_names)
+;;
+
+let test_goal_reconciliation_keeps_paused_assignment_authoritative () =
+  test_goal_reconciliation_prefers_authoritative_assignment
+    ~assigned_paused:true
+    ()
 ;;
 
 let test_goal_reconciliation_restart_scan_retries_missed_delivery () =
@@ -1366,6 +1387,10 @@ let () =
             "goal reconciliation prefers authoritative assignment"
             `Quick
             test_goal_reconciliation_prefers_authoritative_assignment
+        ; test_case
+            "paused Goal assignment remains authoritative"
+            `Quick
+            test_goal_reconciliation_keeps_paused_assignment_authoritative
         ; test_case
             "restart scan retries missed reconciliation exactly once"
             `Quick

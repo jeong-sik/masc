@@ -27,10 +27,7 @@ type durable_assignment_scan = {
 let registered_assigned_keepers ~base_path goal_id =
   Keeper_registry.all ~base_path ()
   |> List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
-       if
-         (not entry.meta.paused)
-         && List.mem goal_id entry.meta.active_goal_ids
-       then Some entry.name
+       if List.mem goal_id entry.meta.active_goal_ids then Some entry.name
        else None)
   |> List.sort_uniq String.compare
 ;;
@@ -50,9 +47,7 @@ let durable_assigned_keepers config goal_id =
            rest
        | Ok None -> collect keeper_names errors rest
        | Ok (Some (canonical_keeper_name, meta)) ->
-         if
-           (not meta.Keeper_meta_contract.paused)
-           && List.mem goal_id meta.active_goal_ids
+         if List.mem goal_id meta.active_goal_ids
          then collect (canonical_keeper_name :: keeper_names) errors rest
          else collect keeper_names errors rest)
   in

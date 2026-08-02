@@ -869,17 +869,10 @@ let respond_auth_error request reqd err =
   let status = http_status_of_auth_error err in
   let origin = get_origin request in
   let body = auth_error_json err in
-  let auth_headers =
-    match status with
-    | `Unauthorized ->
-      let authority = Server_request_authority.current_exn () in
-      [ "www-authenticate", Server_oauth_metadata.challenge_for_authority authority ]
-    | _ -> []
-  in
   let headers =
     Httpun.Headers.of_list
       (("content-length", string_of_int (String.length body))
-       :: auth_headers @ cors_headers origin)
+       :: cors_headers origin)
   in
   let response = Httpun.Response.create ~headers (status :> Httpun.Status.t) in
   Httpun.Reqd.respond_with_string reqd response body

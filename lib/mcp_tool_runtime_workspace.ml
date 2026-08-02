@@ -227,6 +227,7 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
                  ~data:
                    (`Assoc
                      [ ("task_id", `String task_id)
+                     ; ("primary_result", `String add_result)
                      ; ( "effect_disposition"
                        , `String
                            (Tool_result.failure_effect_disposition_to_string

@@ -123,7 +123,11 @@ let test_masc_start_surfaces_claim_failure_after_task_commit () =
         Yojson.Safe.Util.(data |> member "effect_disposition" |> to_string);
       Alcotest.(check string) "task id is returned"
         "task-002"
-        Yojson.Safe.Util.(data |> member "task_id" |> to_string))
+        Yojson.Safe.Util.(data |> member "task_id" |> to_string);
+      Alcotest.(check bool) "committed task result is preserved" true
+        (contains_substring
+           Yojson.Safe.Util.(data |> member "primary_result" |> to_string)
+           "Added task-002"))
 ;;
 
 let test_health_aggregate_sum_rejects_overflow () =

@@ -56,12 +56,6 @@ let test_polling_floor () =
     true
     (KB.keeper_listener_retry_interval_sec >= 0.05)
 
-let test_smoke_call_sites_compile () =
-  let _ = KB.lazy_startup_poll_interval_sec in
-  let _ = KB.keeper_listener_retry_interval_sec in
-  let _ = KB.post_startup_settle_sec in
-  check bool "all three accessors are reachable" true true
-
 let test_autoboot_warmup_jitter_is_bounded_not_linear () =
   let names =
     [
@@ -233,11 +227,6 @@ let () =
         [
           test_case ">= 0.05s floor on both polling intervals" `Quick
             test_polling_floor;
-        ] );
-      ( "API surface",
-        [
-          test_case "all three accessors reachable" `Quick
-            test_smoke_call_sites_compile;
         ] );
       ( "autoboot warmup fairness",
         [

@@ -76,15 +76,6 @@ let test_render_exceeds_shell () =
     true
     (D.render_timeout_sec > D.shell_timeout_sec)
 
-(* --- 4. API surface compile guard ----------------------------- *)
-
-let test_smoke_call_sites_compile () =
-  let _ = D.briefing_timeout_sec in
-  let _ = D.shell_timeout_sec in
-  let _ = D.shell_light_timeout_sec in
-  let _ = D.render_timeout_sec in
-  check bool "all four accessors are reachable" true true
-
 let () =
   run "env_config_dashboard_compute_timeouts"
     [
@@ -104,10 +95,5 @@ let () =
         [
           test_case "render > mission" `Quick test_render_exceeds_mission;
           test_case "render > shell" `Quick test_render_exceeds_shell;
-        ] );
-      ( "API surface",
-        [
-          test_case "all four accessors reachable" `Quick
-            test_smoke_call_sites_compile;
         ] );
     ]

@@ -291,6 +291,3 @@ let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event ~on_ambient
     in
     drive ()
 
-module For_testing = struct
-  let reader_should_continue_after_input = reader_should_continue_after_input
-end

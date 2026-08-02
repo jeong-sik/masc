@@ -45,11 +45,6 @@ let test_trust_strictly_less_than_execution () =
     true
     (D.execution_trust_timeout_sec < D.execution_timeout_sec)
 
-let test_smoke_call_sites_compile () =
-  let _ = D.execution_timeout_sec in
-  let _ = D.execution_trust_timeout_sec in
-  check bool "both accessors are reachable" true true
-
 let () =
   run "env_config_dashboard_execution_timeouts"
     [
@@ -63,10 +58,5 @@ let () =
         [
           test_case "execution_trust < execution" `Quick
             test_trust_strictly_less_than_execution;
-        ] );
-      ( "API surface",
-        [
-          test_case "both accessors reachable" `Quick
-            test_smoke_call_sites_compile;
         ] );
     ]

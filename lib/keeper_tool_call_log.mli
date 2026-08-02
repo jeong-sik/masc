@@ -228,6 +228,3 @@ val reset_for_testing : unit -> unit
 val queued_count_for_testing : unit -> int
 (** Number of queued asynchronous append records. For unit tests only. *)
 
-val dropped_count_for_testing : unit -> int
-(** Number of records dropped because the asynchronous append queue was full.
-    For unit tests only. *)

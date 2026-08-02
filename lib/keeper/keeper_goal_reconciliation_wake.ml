@@ -13,34 +13,116 @@ type reconciliation_summary = {
   failed_count : int;
 }
 
-let registered_assigned_keepers goal_id =
-  Keeper_registry.all ()
+type keeper_target_resolution =
+  | Assigned_keeper of string
+  | No_assigned_keeper
+  | Ambiguous_assigned_keepers of string list
+  | Assigned_keeper_lookup_failed of string
+
+type durable_assignment_scan = {
+  keeper_names : string list;
+  errors : string list;
+}
+
+let registered_assigned_keepers ~base_path goal_id =
+  Keeper_registry.all ~base_path ()
   |> List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
-       if List.mem goal_id entry.meta.active_goal_ids then Some entry.name else None)
+       if
+         (not entry.meta.paused)
+         && List.mem goal_id entry.meta.active_goal_ids
+       then Some entry.name
+       else None)
+  |> List.sort_uniq String.compare
 ;;
 
 let durable_assigned_keepers config goal_id =
-  Keeper_meta_store.keepalive_keeper_names config
-  |> List.filter_map (fun keeper_name ->
-       match Keeper_meta_store.read_effective_meta config keeper_name with
-       | Ok (Some meta)
-         when not meta.Keeper_meta_contract.paused
-              && List.mem goal_id meta.active_goal_ids ->
-         Some meta.name
-       | Ok (Some _) | Ok None | Error _ -> None)
+  let rec collect keeper_names errors = function
+    | [] ->
+      { keeper_names = List.sort_uniq String.compare keeper_names
+      ; errors = List.rev errors
+      }
+    | keeper_name :: rest ->
+      (match Keeper_meta_store.read_effective_meta_resolved config keeper_name with
+       | Error detail ->
+         collect
+           keeper_names
+           (Printf.sprintf "keeper=%s: %s" keeper_name detail :: errors)
+           rest
+       | Ok None -> collect keeper_names errors rest
+       | Ok (Some (canonical_keeper_name, meta)) ->
+         if
+           (not meta.Keeper_meta_contract.paused)
+           && List.mem goal_id meta.active_goal_ids
+         then collect (canonical_keeper_name :: keeper_names) errors rest
+         else collect keeper_names errors rest)
+  in
+  match Keeper_meta_store.persisted_keeper_names_result config with
+  | Error detail -> { keeper_names = []; errors = [ detail ] }
+  | Ok keeper_names -> collect [] [] keeper_names
 ;;
 
-let sole_assigned_keeper ~config goal_id =
-  registered_assigned_keepers goal_id @ durable_assigned_keepers config goal_id
-  |> List.sort_uniq String.compare
-  |> function
-  | [ keeper_name ] -> Some keeper_name
-  | [] | _ :: _ :: _ -> None
+let assigned_keeper_resolution ~(config : Workspace.config) goal_id =
+  let registered =
+    registered_assigned_keepers ~base_path:config.Workspace.base_path goal_id
+  in
+  let durable = durable_assigned_keepers config goal_id in
+  if durable.errors <> []
+  then
+    Log.Keeper.error
+      "goal reconciliation Keeper assignment scan incomplete goal_id=%s errors=%s"
+      goal_id
+      (String.concat "; " durable.errors);
+  match List.sort_uniq String.compare (registered @ durable.keeper_names) with
+  | [ keeper_name ] -> Assigned_keeper keeper_name
+  | [] when durable.errors <> [] ->
+    Assigned_keeper_lookup_failed (String.concat "; " durable.errors)
+  | [] -> No_assigned_keeper
+  | keeper_names -> Ambiguous_assigned_keepers keeper_names
+;;
+
+let exact_producer_keeper_name ~config ~completing_agent_name =
+  match
+    Keeper_identity_binding.resolve
+      ~config
+      ~agent_name:completing_agent_name
+  with
+  | Keeper_identity_binding.Not_found -> Ok None
+  | Keeper_identity_binding.Unique keeper_name -> Ok (Some keeper_name)
+  | Keeper_identity_binding.Ambiguous keeper_names ->
+    Error
+      (Printf.sprintf
+         "multiple registered or persisted Keepers share agent_name=%s: %s"
+         completing_agent_name
+         (String.concat "," keeper_names))
+  | Keeper_identity_binding.Lookup_failed detail -> Error detail
+;;
 
 let target_keeper_name ~config ~completing_agent_name ~goal_id =
-  match Keeper_identity.canonical_keeper_name_from_agent_name completing_agent_name with
-  | Some keeper_name -> Some keeper_name
-  | None -> sole_assigned_keeper ~config goal_id
+  match assigned_keeper_resolution ~config goal_id with
+  | Assigned_keeper keeper_name -> Some keeper_name
+  | Ambiguous_assigned_keepers keeper_names ->
+    Log.Keeper.error
+      "goal reconciliation has ambiguous active Goal assignment goal_id=%s keepers=%s"
+      goal_id
+      (String.concat "," keeper_names);
+    None
+  | Assigned_keeper_lookup_failed detail ->
+    Log.Keeper.error
+      "goal reconciliation Keeper assignment lookup failed goal_id=%s detail=%s"
+      goal_id
+      detail;
+    None
+  | No_assigned_keeper ->
+    (match exact_producer_keeper_name ~config ~completing_agent_name with
+     | Ok (Some keeper_name) -> Some keeper_name
+     | Ok None -> None
+     | Error detail ->
+       Log.Keeper.error
+         "goal reconciliation producer identity lookup failed goal_id=%s producer=%s detail=%s"
+         goal_id
+         completing_agent_name
+         detail;
+       None)
 
 let wake_keeper ~base_path keeper_name goal_id =
   match

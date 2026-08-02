@@ -16,37 +16,20 @@ type delivery =
     }
   | Durable_queue_failed of { keeper_name : string; detail : string }
 
-let registered_keeper_name_for_agent ~base_path producer =
-  let matching_keeper_names =
-    Keeper_registry.all ~base_path ()
-    |> List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
-         if String.equal entry.meta.agent_name producer
-         then Some entry.name
-         else None)
-    |> List.sort String.compare
-  in
-  match matching_keeper_names with
-  | [] -> Ok None
-  | [keeper_name] -> Ok (Some keeper_name)
-  | keeper_names ->
-    Error
-      (Printf.sprintf
-         "multiple registered Keepers share agent_name=%s: %s"
-         producer
-         (String.concat "," keeper_names))
-;;
-
 let producer_keeper_name
       ~(config : Workspace_utils_backend_setup.config)
       producer
   =
-  match registered_keeper_name_for_agent ~base_path:config.base_path producer with
-  | Error _ as error -> error
-  | Ok (Some keeper_name) -> Ok (Some keeper_name)
-  | Ok None ->
-    Keeper_meta_store.persisted_keeper_name_for_agent_name
-      config
-      ~agent_name:producer
+  match Keeper_identity_binding.resolve ~config ~agent_name:producer with
+  | Keeper_identity_binding.Not_found -> Ok None
+  | Keeper_identity_binding.Unique keeper_name -> Ok (Some keeper_name)
+  | Keeper_identity_binding.Ambiguous keeper_names ->
+    Error
+      (Printf.sprintf
+         "multiple registered or persisted Keepers share agent_name=%s: %s"
+         producer
+         (String.concat "," keeper_names))
+  | Keeper_identity_binding.Lookup_failed detail -> Error detail
 ;;
 
 let wake_rejected_producer

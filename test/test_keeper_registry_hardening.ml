@@ -27,7 +27,6 @@ let make_meta name =
       (`Assoc
         [
           ("name", `String name);
-          ("agent_name", `String ("agent-" ^ name));
           ("trace_id", `String ("trace-" ^ name));
           ("allowed_paths", `List [ `String "*" ]);
           ("autoboot_enabled", `Bool false);
@@ -666,6 +665,97 @@ let test_goal_reconciliation_enqueues_once_after_last_terminal_task () =
        | None -> fail "Goal disappeared")
 ;;
 
+let test_goal_reconciliation_prefers_authoritative_assignment () =
+  let dir = temp_dir "registry_goal_reconciliation_assignment" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.For_testing.clear ();
+      cleanup_dir dir)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       KR.For_testing.clear ();
+       let config = Masc.Workspace.default_config dir in
+       let completing_agent_name = "keeper-executor-agent-agent" in
+       ignore (Masc.Workspace.init config ~agent_name:(Some completing_agent_name));
+       let goal, _ =
+         match
+           Goal_store.upsert_goal
+             config
+             ~id:"goal-reconciliation-assignment"
+             ~title:"Use the assigned Keeper"
+             ()
+         with
+         | Ok result -> result
+         | Error detail -> fail detail
+       in
+       ignore
+         (Workspace_task.add_task
+            ~goal_id:goal.id
+            config
+            ~title:"first assigned task"
+            ~priority:2
+            ~description:"first linked task");
+       ignore
+         (Workspace_task.add_task
+            ~goal_id:goal.id
+            config
+            ~title:"second assigned task"
+            ~priority:2
+            ~description:"second linked task");
+       let transition task_id action =
+         match
+           Masc.Workspace.transition_task_r
+             config
+             ~agent_name:completing_agent_name
+             ~task_id
+             ~action
+             ()
+         with
+         | Ok _ -> ()
+         | Error error -> fail (Masc_domain.masc_error_to_string error)
+       in
+       let finish task_id =
+         transition task_id Masc_domain.Claim;
+         transition task_id Masc_domain.Start;
+         transition task_id Masc_domain.Cancel
+       in
+       finish "task-001";
+       finish "task-002";
+       let assigned_meta =
+         { (make_goal_reconciler_meta ()) with active_goal_ids = [ goal.id ] }
+       in
+       ignore
+         (KR.register_offline
+            ~base_path:config.base_path
+            assigned_meta.name
+            assigned_meta);
+       (match
+          Masc.Keeper_goal_reconciliation_wake.enqueue_if_ready
+            ~config
+            ~completing_agent_name
+            ~task_id:"task-002"
+        with
+        | Masc.Keeper_goal_reconciliation_wake.Enqueued { keeper_name } ->
+          check string
+            "assigned Keeper owns reconciliation wake"
+            assigned_meta.name
+            keeper_name
+        | _ -> fail "authoritative Goal assignment did not produce a durable wake");
+       let discovery =
+         Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
+           ~base_path:config.base_path
+       in
+       match discovery.read_error with
+       | Some detail -> fail detail
+       | None ->
+         check
+           (list string)
+           "only the assigned canonical Keeper receives the wake"
+           [ assigned_meta.name ]
+           discovery.keeper_names)
+;;
+
 let test_goal_reconciliation_restart_scan_retries_missed_delivery () =
   let dir = temp_dir "registry_goal_reconciliation_restart" in
   let previous_hook = Atomic.get Workspace_hooks.task_terminal_committed_fn in
@@ -681,6 +771,7 @@ let test_goal_reconciliation_restart_scan_retries_missed_delivery () =
        let config = Masc.Workspace.default_config dir in
        let meta = make_goal_reconciler_meta () in
        ignore (Masc.Workspace.init config ~agent_name:(Some meta.agent_name));
+       ignore (KR.register_offline ~base_path:config.base_path meta.name meta);
        Atomic.set Workspace_hooks.task_terminal_committed_fn
          (fun _config ~agent_name:_ ~task_id:_ ->
             Workspace_hooks.Task_terminal_delivered);
@@ -1271,6 +1362,10 @@ let () =
             "goal reconciliation persists once after last terminal task"
             `Quick
             test_goal_reconciliation_enqueues_once_after_last_terminal_task
+        ; test_case
+            "goal reconciliation prefers authoritative assignment"
+            `Quick
+            test_goal_reconciliation_prefers_authoritative_assignment
         ; test_case
             "restart scan retries missed reconciliation exactly once"
             `Quick

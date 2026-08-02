@@ -791,6 +791,17 @@ let start_keepalive
   (m : keeper_meta)
   : start_keepalive_outcome
   =
+  (* A Keeper lane is server-owned, even when its creation or restart is
+     requested by a tool running inside another Keeper's turn.  In production
+     the root switch is installed once by server bootstrap.  A standalone/test
+     runtime without that global binding makes [ctx.sw] the explicit owner and
+     must therefore pass a switch that outlives the lane; a turn- or lane-scoped
+     context is not a valid launch owner. *)
+  let lane_parent_sw =
+    match Eio_context.get_root_switch_opt () with
+    | Some root_sw -> root_sw
+    | None -> ctx.sw
+  in
   let lifecycle_state =
     Keeper_lifecycle_admission.state
       ~paused:m.paused
@@ -1151,7 +1162,7 @@ let start_keepalive
         publish_keeper_started ~live_meta;
         (match
            Keeper_lane.fork
-             ~sw:ctx.sw
+             ~sw:lane_parent_sw
              reg.lane
              ~run:(fun lane_sw ->
         let ctx = { ctx with sw = lane_sw } in

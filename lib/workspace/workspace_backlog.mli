@@ -17,6 +17,10 @@ val write_backlog :
   Masc_domain.backlog ->
   unit
 (** [write_backlog ?after_commit config backlog] commits the primary SSOT,
+    stamping [version] to [backlog.version + 1] and [last_updated] to the
+    commit time. Callers pass the snapshot they read with only its payload
+    mutated; they must not pre-increment either stamp.
+
     then attempts the recovery copy. Recovery-copy failure is logged and does
     not turn a committed primary mutation into a reported failure.
     Non-transition callers (GC, init, query) omit the callback.
@@ -36,5 +40,7 @@ val write_backlog_result :
   Masc_domain.backlog ->
   (write_backlog_outcome, string) result
 (** Result-returning variant of {!write_backlog}. [Error] means the primary
-    SSOT did not commit. Failures after a primary commit are returned in the
-    corresponding [Ok] fields and logged explicitly. *)
+    SSOT did not commit. It applies the same single-commit-point stamping
+    contract: [version] becomes the input snapshot's version plus one and
+    [last_updated] becomes the commit time. Failures after a primary commit
+    are returned in the corresponding [Ok] fields and logged explicitly. *)

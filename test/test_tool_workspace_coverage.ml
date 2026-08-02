@@ -214,7 +214,7 @@ let force_claim_task config ~agent_name ~task_id =
         else task)
       backlog.tasks
   in
-  Workspace.write_backlog config { backlog with tasks; version = backlog.version + 1 }
+  Workspace.write_backlog config { backlog with tasks }
 ;;
 
 (* Test dispatch returns None for unknown tool *)

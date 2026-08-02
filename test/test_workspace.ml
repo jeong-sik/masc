@@ -1509,9 +1509,7 @@ let assert_prefixed_identity_does_not_claim_membership ~assignee ~active_name =
            else task)
         backlog.tasks
     in
-    Workspace.write_backlog
-      config
-      { backlog with tasks; version = backlog.version + 1 };
+    Workspace.write_backlog config { backlog with tasks };
     let state = Workspace.read_state config in
     Workspace.write_state
       config

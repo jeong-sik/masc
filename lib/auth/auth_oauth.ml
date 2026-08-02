@@ -1008,66 +1008,69 @@ let find_access_credential ~base_path ~token =
   then Ok None
   else
     let hash = token_hash token in
-    let request_resource = expected_resource () in
-    let result =
-      with_store_io ~base_path (fun () ->
-      let* json = load_json_opt (access_path base_path hash) in
-      match json with
-      | None -> Ok None
-      | Some json ->
-        let* record = access_record_of_yojson json in
-        let* family = load_family base_path record.family_id in
-        (match family with
-         | None -> Error (Store_error "OAuth access token family is missing")
-         | Some family ->
-           let live_bootstrap =
-             live_bootstrap_allows
-               ~base_path
-               ~agent_name:family.agent_name
-               ~bootstrap_token_hash:family.bootstrap_token_hash
-               ~granted_role:family.role
-           in
-           if not live_bootstrap
-           then
-             let* () = revoke_family_locked ~base_path ~current:(now ()) family in
-             Error Invalid_grant
-           else if
-             record.expires_at_unix <= now ()
-             || Option.is_some family.revoked_at_unix
-             || not
-                  (match request_resource with
-                   | Some expected -> String.equal family.resource expected
-                   | None -> false)
-             || not
-                  (constant_time_string_equal
-                     record.token_hash
-                     hash)
-             || not
-                  (constant_time_string_equal
-                     family.current_access_hash
-                     hash)
-           then Error Invalid_grant
-           else
-             Ok
-               (Some
-                  { id = None
-                  ; agent_id = None
-                  ; agent_name = family.agent_name
-                  ; token = record.token_hash
-                  ; role = family.role
-                  ; created_at = iso8601_of_unix_seconds record.issued_at_unix
-                  ; expires_at = Some (iso8601_of_unix_seconds record.expires_at_unix)
-                  })))
-    in
-    match result with
-    | Ok value -> Ok value
-    | Error (Store_error detail) ->
-      Error (System (System_error.IoError ("OAuth credential store: " ^ detail)))
-    | Error Temporarily_unavailable ->
-      Error (System (System_error.IoError "OAuth credential store unavailable"))
-    | Error error ->
-      Error
-        (Auth
-           (Auth_error.InvalidToken
-              ("OAuth access token rejected: " ^ protocol_error_code error)))
+    let path = access_path base_path hash in
+    if not (Sys.file_exists path)
+    then Ok None
+    else
+      let request_resource = expected_resource () in
+      let result =
+        with_store_io ~base_path (fun () ->
+          let* json = load_json_opt path in
+          match json with
+          | None -> Ok None
+          | Some json ->
+            let* record = access_record_of_yojson json in
+            let* family = load_family base_path record.family_id in
+            (match family with
+             | None -> Error (Store_error "OAuth access token family is missing")
+             | Some family ->
+               let live_bootstrap =
+                 live_bootstrap_allows
+                   ~base_path
+                   ~agent_name:family.agent_name
+                   ~bootstrap_token_hash:family.bootstrap_token_hash
+                   ~granted_role:family.role
+               in
+               if not live_bootstrap
+               then
+                 let* () =
+                   revoke_family_locked ~base_path ~current:(now ()) family
+                 in
+                 Error Invalid_grant
+               else if
+                 record.expires_at_unix <= now ()
+                 || Option.is_some family.revoked_at_unix
+                 || not
+                      (match request_resource with
+                       | Some expected -> String.equal family.resource expected
+                       | None -> false)
+                 || not (constant_time_string_equal record.token_hash hash)
+                 || not
+                      (constant_time_string_equal family.current_access_hash hash)
+               then Error Invalid_grant
+               else
+                 Ok
+                   (Some
+                      { id = None
+                      ; agent_id = None
+                      ; agent_name = family.agent_name
+                      ; token = record.token_hash
+                      ; role = family.role
+                      ; created_at =
+                          iso8601_of_unix_seconds record.issued_at_unix
+                      ; expires_at =
+                          Some (iso8601_of_unix_seconds record.expires_at_unix)
+                      })))
+      in
+      match result with
+      | Ok value -> Ok value
+      | Error (Store_error detail) ->
+        Error (System (System_error.IoError ("OAuth credential store: " ^ detail)))
+      | Error Temporarily_unavailable ->
+        Error (System (System_error.IoError "OAuth credential store unavailable"))
+      | Error error ->
+        Error
+          (Auth
+             (Auth_error.InvalidToken
+                ("OAuth access token rejected: " ^ protocol_error_code error)))
 ;;

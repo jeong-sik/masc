@@ -213,7 +213,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
      onto runtime.sw, both outside that extent, so read it here and carry the
      value. *)
   let expected_resource =
-    Server_oauth_metadata.resource (Server_request_authority.current_exn ())
+    Server_oauth_metadata.resource request_authority
   in
   let session_id_opt = get_session_id_any request in
   let session_id =
@@ -629,8 +629,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           ensure_sse_backing_session_for_known_transport_session
             ~transport_session_id:session_id ~sse_session_id:session_id;
           let expected_resource =
-            Server_request_authority.current_exn ()
-            |> Server_oauth_metadata.resource
+            Server_oauth_metadata.resource request_authority
           in
           (match
              Auth_oauth.with_expected_resource expected_resource (fun () ->

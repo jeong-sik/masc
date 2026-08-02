@@ -728,8 +728,11 @@ let test_rotation_keeps_one_current_access_record () =
 let test_unbound_resource_context_fails_closed_without_raising () =
   with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
     with_workspace (fun base_path ->
+      let oauth_store = Filename.concat base_path ".masc/auth/oauth" in
       match Auth_oauth.find_access_credential ~base_path ~token:"not-an-oauth-token" with
-      | Ok None -> ()
+      | Ok None ->
+        check bool "unknown static token does not initialize OAuth storage" false
+          (Sys.file_exists oauth_store)
       | Ok (Some _) -> fail "an unknown token resolved without a resource context"
       | Error error -> fail (Masc_domain.show_masc_error error)))
 ;;

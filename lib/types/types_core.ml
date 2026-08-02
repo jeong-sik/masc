@@ -883,14 +883,12 @@ let backlog_of_yojson json =
       Json_util.get_string_with_default json ~key:"last_updated" ~default:""
     in
     let version_result =
-      (* An absent member is the only tolerated gap: a pre-revision-era file
-         is genesis (1) by definition. A PRESENT but malformed or
-         non-positive value is corruption of the CAS/edge token and fails
-         the decode — silently mapping it to 1 would rewind the revision
-         clock below every consumer's [last_consumed_revision] and freeze
-         the RFC-0357 edge until the counter re-climbed. *)
+      (* [version] is the current CAS/edge contract. Missing, malformed, or
+         non-positive values are corruption and fail the decode; accepting an
+         absent field as an old-format genesis value would reintroduce a
+         legacy compatibility path and could rewind the revision clock. *)
       match Json_util.assoc_member_opt "version" json with
-      | None -> Ok 1
+      | None -> Error "backlog.version missing"
       | Some (`Int n) when n >= 1 -> Ok n
       | Some (`Intlit s) ->
         (match int_of_string_opt s with

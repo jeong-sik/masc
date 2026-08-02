@@ -761,14 +761,14 @@ let test_backlog_version_monotonic_per_commit () =
   Alcotest.(check int) "task creation commits exactly one revision" (v2 + 1) v3
 ;;
 
-(* Decoder contract: absent version = genesis by definition; a present but
-   malformed or non-positive version is corruption of the CAS/edge token and
-   must fail the decode instead of silently rewinding the clock to 1. *)
+(* Decoder contract: [version] is required. An absent, malformed, or
+   non-positive value is corruption of the CAS/edge token and must fail the
+   decode instead of silently rewinding the clock to 1. *)
 let test_backlog_version_decode_contract () =
   let decode s = Masc_domain.backlog_of_yojson (Yojson.Safe.from_string s) in
   (match decode {|{"tasks": []}|} with
-   | Ok b -> Alcotest.(check int) "absent version decodes as genesis" 1 b.version
-   | Error e -> Alcotest.failf "absent version must decode: %s" e);
+   | Ok b -> Alcotest.failf "absent version must fail, decoded %d" b.version
+   | Error _ -> ());
   (match decode {|{"tasks": [], "version": 899}|} with
    | Ok b -> Alcotest.(check int) "present version round-trips" 899 b.version
    | Error e -> Alcotest.failf "valid version must decode: %s" e);
@@ -2952,7 +2952,7 @@ let () =
             `Quick
             test_backlog_version_monotonic_per_commit
         ; Alcotest.test_case
-            "decode: absent is genesis, corruption fails closed"
+            "decode: missing or corrupt version fails closed"
             `Quick
             test_backlog_version_decode_contract
         ] )

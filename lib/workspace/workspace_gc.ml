@@ -97,11 +97,8 @@ let gc config ~days () =
   (* Backlog first: on a crash before the archive is rewritten below, the
      restored task survives in both stores and the next GC pass dedups it. *)
   if !stale_count > 0 || restore_count > 0 then begin
-    let new_backlog = {
-      tasks = live_tasks_after_gc;
-      last_updated = now_iso ();
-      version = backlog.version + 1;
-    } in
+    (* [write_backlog] stamps version/last_updated at the commit point. *)
+    let new_backlog = { backlog with tasks = live_tasks_after_gc } in
     write_backlog config new_backlog
   end;
   if !stale_count > 0 then append_archive_tasks config (List.rev !archived_tasks);

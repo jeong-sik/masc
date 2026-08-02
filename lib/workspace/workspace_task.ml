@@ -135,11 +135,13 @@ let recover_owned_task_to_todo_r
            else candidate)
         backlog.tasks
     in
+    (* [write_backlog_result] stamps the committed revision to the read
+       snapshot's version + 1; this is that value, for the result/log. *)
     let backlog_version = backlog.version + 1 in
     let* persistence =
       write_backlog_result
         config
-        { tasks; last_updated = now_iso (); version = backlog_version }
+        { backlog with tasks }
       |> Result.map_error (fun message ->
         Masc_domain.System (Masc_domain.System_error.IoError message))
     in
@@ -293,12 +295,9 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
                       else t)
                    backlog.tasks
                in
-               let new_backlog =
-                 { tasks = new_tasks
-                 ; last_updated = now_iso ()
-                 ; version = backlog.version + 1
-                 }
-               in
+               (* [write_backlog] stamps version/last_updated at the commit
+                  point. *)
+               let new_backlog = { backlog with tasks = new_tasks } in
                write_backlog
                  ~after_commit:(fun () ->
                    Task_cache_invariant.clear_stale_agent_task config
@@ -454,12 +453,9 @@ let link_task_execution_artifacts_r
                     else candidate)
                  backlog.tasks
              in
-             let new_backlog =
-               { tasks = new_tasks
-               ; last_updated = now_iso ()
-               ; version = backlog.version + 1
-               }
-             in
+             (* [write_backlog] stamps version/last_updated at the commit
+                point. *)
+             let new_backlog = { backlog with tasks = new_tasks } in
              write_backlog config new_backlog;
              let execution_link_fields =
                (match trim_opt session_id with

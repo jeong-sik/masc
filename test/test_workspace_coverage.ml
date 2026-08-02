@@ -735,11 +735,30 @@ let test_release_hard_stop_allows_direct_todo_reclaim () =
 ;;
 
 let write_tasks config tasks =
+  (* [write_backlog] stamps version/last_updated at the commit point. *)
   let backlog = Workspace.read_backlog config in
-  let updated : Masc_domain.backlog =
-    { tasks; last_updated = Masc_domain.now_iso (); version = backlog.version + 1 }
+  Workspace.write_backlog config { backlog with tasks }
+;;
+
+(* RFC-0357 §3.2 — the backlog revision is the scheduled-turn edge clock, so
+   every commit must advance [version] by exactly one, stamped at the single
+   commit point rather than by caller convention. A caller that kept a manual
+   bump would surface here as a +2 jump. *)
+let test_backlog_version_monotonic_per_commit () =
+  with_test_env
+  @@ fun config ->
+  let v0 = (Workspace.read_backlog config).version in
+  write_tasks config [];
+  let v1 = (Workspace.read_backlog config).version in
+  Alcotest.(check int) "first commit bumps by exactly one" (v0 + 1) v1;
+  write_tasks config [];
+  let v2 = (Workspace.read_backlog config).version in
+  Alcotest.(check int) "second commit bumps by exactly one" (v1 + 1) v2;
+  let _ =
+    Workspace.batch_add_tasks config [ ("revision probe", 1, "edge clock", None) ]
   in
-  Workspace.write_backlog config updated
+  let v3 = (Workspace.read_backlog config).version in
+  Alcotest.(check int) "task creation commits exactly one revision" (v2 + 1) v3
 ;;
 
 let task_by_id config task_id =
@@ -2899,6 +2918,12 @@ let () =
         ] )
     ; (* === Archive === *)
       "archive", [ Alcotest.test_case "append tasks" `Quick test_append_archive_tasks ]
+    ; ( "revision"
+      , [ Alcotest.test_case
+            "version bumps exactly once per commit"
+            `Quick
+            test_backlog_version_monotonic_per_commit
+        ] )
     ; (* === RFC-0323 W2: predecessor_task_id === *)
       ( "predecessor"
       , [ Alcotest.test_case "unknown rejected" `Quick test_predecessor_unknown_rejected

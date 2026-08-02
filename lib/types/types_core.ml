@@ -868,15 +868,17 @@ let backlog_of_yojson json =
     let tasks = List.filter_map (fun j ->
       match task_of_yojson j with Ok t -> Some t | Error _ -> None
     ) tasks_json in
-    (* [last_updated] and [version] are display metadata; writers may
-       omit them (observed in live basepath [<base-path>/.masc/tasks/backlog.json]
-       where the top-level is just [{"tasks": [...]}]).  Strict
-       [to_string]/[to_int] decoders rejected such payloads as
-       [Type_error("Expected string, got null")], forcing every reader
-       onto the [read_backlog] empty fallback and wiping every claim
-       from the reader's view (hundreds of [read_backlog backlog decode
-       failed] entries/day driven [stale-claims] GC to skip mutation,
-       so claims never transitioned).  Tolerate missing/null fields. *)
+    (* [version] is the backlog's monotonic commit revision: stamped +1 by
+       [Workspace_backlog.write_backlog_result] at the single commit point,
+       consumed as the optimistic-concurrency token (transition
+       [expected_version] CAS, shutdown settlement) and as the RFC-0357
+       scheduled-turn edge clock. [last_updated] is stamped at the same
+       point. Decoding stays tolerant for pre-revision-era files (observed
+       live as bare [{"tasks": [...]}]): an absent [version] decodes as 1 —
+       by definition the genesis revision, not a permissive fallback. A
+       strict decoder here once rejected such files wholesale, wiping every
+       claim from the reader's view (hundreds of decode failures/day drove
+       [stale-claims] GC to skip mutation). *)
     let last_updated =
       Json_util.get_string_with_default json ~key:"last_updated" ~default:""
     in

@@ -286,6 +286,16 @@ val default_tempo_config : tempo_config
 val tempo_config_to_yojson : tempo_config -> Yojson.Safe.t
 val tempo_config_of_yojson : Yojson.Safe.t -> (tempo_config, string) result
 
+(** Task backlog snapshot. [version] is the monotonic commit revision —
+    stamped +1 per commit by [Workspace_backlog.write_backlog_result] (the
+    single commit point; callers never hand-bump). It is the
+    optimistic-concurrency token for task transitions and the RFC-0357
+    scheduled-turn edge clock ([backlog_revision > last_consumed_revision]).
+    OCaml's 63-bit [int] serves as the RFC's monotonic integer. An absent
+    field in a pre-revision-era file decodes as 1, the genesis revision.
+    [last_updated] is stamped at the same commit point; display only —
+    never an ordering or edge input (RFC-0357 §3.2: tie/NTP/parse
+    failure modes). *)
 type backlog =
   { tasks : task list
   ; last_updated : string

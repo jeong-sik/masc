@@ -176,12 +176,8 @@ let claim_task_r config ~agent_name ~task_id ()
            let claimed_task =
              List.find (fun (t : Masc_domain.task) -> String.equal t.id task_id) new_tasks
            in
-           let new_backlog =
-             { tasks = new_tasks
-             ; last_updated = now_iso ()
-             ; version = backlog.version + 1
-             }
-           in
+           (* [write_backlog] stamps version/last_updated at the commit point. *)
+           let new_backlog = { backlog with tasks = new_tasks } in
            write_backlog
              ~after_commit:(fun () ->
                Task_cache_invariant.clear_stale_agent_task config

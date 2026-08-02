@@ -29,11 +29,8 @@ let update_priority config ~task_id ~priority =
             else t
           ) backlog.tasks in
 
-          let new_backlog = {
-            tasks = new_tasks;
-            last_updated = now_iso ();
-            version = backlog.version + 1;
-          } in
+          (* [write_backlog] stamps version/last_updated at the commit point. *)
+          let new_backlog = { backlog with tasks = new_tasks } in
           write_backlog config new_backlog;
 
           log_event config (`Assoc [

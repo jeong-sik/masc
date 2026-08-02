@@ -73,11 +73,8 @@ let build_backlog_update ~backlog ~task_id ~action ~new_status ~handoff_context 
   let persisted_handoff_context =
     if action_persists_handoff_context action then handoff_context else None
   in
-  { backlog =
-      { tasks
-      ; last_updated = now_iso ()
-      ; version = backlog.version + 1
-      }
+  (* [write_backlog] stamps version/last_updated at the commit point. *)
+  { backlog = { backlog with tasks }
   ; persisted_handoff_context
   }
 ;;

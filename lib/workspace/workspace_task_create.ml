@@ -172,12 +172,8 @@ let add_task_with_result
              ; do_not_reclaim_reason = None
              }
            in
-           let new_backlog =
-             { tasks = backlog.tasks @ [ new_task ]
-             ; last_updated = now_iso ()
-             ; version = backlog.version + 1
-             }
-           in
+           (* [write_backlog] stamps version/last_updated at the commit point. *)
+           let new_backlog = { backlog with tasks = backlog.tasks @ [ new_task ] } in
            (match
               match goal_id with
               | None -> Ok ()
@@ -302,12 +298,8 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
              tasks
          in
          let added_tasks = List.map fst added_tasks_with_goal_ids in
-         let new_backlog =
-           { tasks = backlog.tasks @ added_tasks
-           ; last_updated = now_iso ()
-           ; version = backlog.version + 1
-           }
-         in
+         (* [write_backlog] stamps version/last_updated at the commit point. *)
+         let new_backlog = { backlog with tasks = backlog.tasks @ added_tasks } in
          (match
             Workspace_goal_index.link_tasks_to_goals_result
               config

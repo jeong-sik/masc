@@ -113,8 +113,18 @@ type write_backlog_outcome =
 
 (** Result-returning variant with the primary backlog as the commit point.
     Once the primary write succeeds, recovery-copy failure is returned as an
-    explicit committed outcome rather than a false mutation failure. *)
+    explicit committed outcome rather than a false mutation failure.
+
+    Commits the NEXT revision of the given snapshot: [version] is stamped to
+    [backlog.version + 1] and [last_updated] to now at this single commit
+    point (RFC-0357 §3.2 — the backlog revision is the scheduled-turn edge
+    clock, so monotonicity is structural here instead of a convention spread
+    across every caller). Callers pass the snapshot they read, with mutated
+    [tasks], and never hand-bump. *)
 let write_backlog_result ?after_commit config backlog =
+  let backlog =
+    { backlog with version = backlog.version + 1; last_updated = now_iso () }
+  in
   let json = backlog_to_yojson backlog in
   let primary_path = backlog_path config in
   let recovery_path = backlog_recovery_path config in

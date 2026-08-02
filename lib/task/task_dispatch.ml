@@ -113,13 +113,8 @@ let delete_task config ~task_id =
         let new_tasks =
           List.filter (fun (t : task) -> t.id <> task_id) backlog.tasks
         in
-        let new_backlog =
-          {
-            tasks = new_tasks;
-            last_updated = now_iso ();
-            version = backlog.version + 1;
-          }
-        in
+        (* [write_backlog] stamps version/last_updated at the commit point. *)
+        let new_backlog = { backlog with tasks = new_tasks } in
         let status_for_clear =
           match task_opt with
           | Some t -> t.task_status

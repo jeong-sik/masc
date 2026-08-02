@@ -780,17 +780,17 @@ let commit_verdict_r
            let producer = decided.Workspace_task_lifecycle.producer in
            let verification_id = decided.Workspace_task_lifecycle.verification_id in
            let new_backlog =
-             { tasks =
+             { backlog with
+               tasks =
                  List.map
                    (fun (t : task) ->
                       if String.equal t.id task_id
                       then { t with task_status = new_status }
                       else t)
                    backlog.tasks
-             ; last_updated = now
-             ; version = backlog.version + 1
              }
            in
+           (* [write_backlog] stamps version/last_updated at the commit point. *)
            write_backlog config new_backlog;
            let run_post_commit label f =
              try f () with

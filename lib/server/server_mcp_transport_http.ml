@@ -202,10 +202,19 @@ let body_with_canonical_http_actor ~base_path ~auth_token request body_str =
   Server_mcp_actor_injection.reduce ~actor ~auth_token body_str
 
 let handle_post_mcp ~deps ?(profile = Full) request reqd =
+  let request_authority = Server_request_authority.current_exn () in
   (* Readiness gate: reject before session/auth if server state is not ready *)
   if not (deps.is_ready ()) then
     respond_not_ready ~deps request reqd
   else
+  (* The admitted authority is a fiber-local binding whose dynamic extent is the
+     router dispatch (bin/main_eio.ml for HTTP/1.1, server_h2_gateway for h2c).
+     Everything below runs from the async body callback and from a fiber forked
+     onto runtime.sw, both outside that extent, so read it here and carry the
+     value. *)
+  let expected_resource =
+    Server_oauth_metadata.resource request_authority
+  in
   let session_id_opt = get_session_id_any request in
   let session_id =
     match session_id_opt with
@@ -269,8 +278,8 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
       match auth_result with
       | Ok () -> Ok ()
       | Error msg ->
-          respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd ~session_id
-            ~protocol_version msg;
+          respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps ~request_authority
+            request reqd ~session_id ~protocol_version msg;
           Error ()
     in
     let otel_transport_context =
@@ -366,8 +375,8 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
         match request_runtime_result deps with
         | Ok r -> Ok r
         | Error msg ->
-            respond_mcp_error ~code:Mcp_error_code.Internal_error ~deps request reqd
-              ~session_id ~protocol_version msg;
+            respond_mcp_error ~code:Mcp_error_code.Internal_error ~deps
+              ~request_authority request reqd ~session_id ~protocol_version msg;
             Error ()
       in
       let sw = runtime.sw in
@@ -398,20 +407,22 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                 in
                                 inline_sse := Some info;
                                 spawn_post_sse_keepalive ~sw ~clock info);
-                              let body_with_agent =
-                                body_with_canonical_http_actor ~base_path
-                                  ~auth_token request body_str
-                              in
-                              let internal_keeper_runtime =
-                                Server_auth.is_verified_internal_keeper_request
-                                  ~base_path request
-                              in
                               let response_json =
-                                runtime.handle_request ?auth_token ~profile
-                                  ~mcp_session_id:session_id
-                                  ~otel_mcp_protocol_version:protocol_version
-                                  ~otel_transport_context
-                                  ~internal_keeper_runtime body_with_agent
+                                Auth_oauth.with_expected_resource expected_resource
+                                  (fun () ->
+                                    let body_with_agent =
+                                      body_with_canonical_http_actor ~base_path
+                                        ~auth_token request body_str
+                                    in
+                                    let internal_keeper_runtime =
+                                      Server_auth.is_verified_internal_keeper_request
+                                        ~base_path request
+                                    in
+                                    runtime.handle_request ?auth_token ~profile
+                                      ~mcp_session_id:session_id
+                                      ~otel_mcp_protocol_version:protocol_version
+                                      ~otel_transport_context
+                                      ~internal_keeper_runtime body_with_agent)
                               in
                               remember_protocol_version_if_initialize_succeeded
                                 ~otel_transport_context
@@ -539,13 +550,15 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                       get_protocol_version_for_session ~session_id
                                         request
                                     in
-                                    respond_mcp_error ~code:Mcp_error_code.Internal_error ~deps request reqd
-                                      ~session_id ~protocol_version
+                                    respond_mcp_error ~code:Mcp_error_code.Internal_error
+                                      ~deps ~request_authority request reqd ~session_id
+                                      ~protocol_version
                                       ("Internal error: "
                                      ^ Printexc.to_string exn))))))))
 
 let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
     request reqd =
+  let request_authority = Server_request_authority.current_exn () in
   if not (deps.is_ready ()) then
     respond_not_ready ~deps request reqd
   else
@@ -590,8 +603,8 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
       | Ok () ->
       (match auth_result with
       | Error msg ->
-          respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd ~session_id
-            ~protocol_version msg
+          respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps ~request_authority
+            request reqd ~session_id ~protocol_version msg
       | Ok () ->
       let otel_transport_context =
         Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
@@ -615,10 +628,15 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
             Transport_metrics.inc_sse_reconnect ();
           ensure_sse_backing_session_for_known_transport_session
             ~transport_session_id:session_id ~sse_session_id:session_id;
+          let expected_resource =
+            Server_oauth_metadata.resource request_authority
+          in
           (match
-             Sse.register ~kind:sse_kind ~auth session_id
-               ~last_event_id:(Option.value ~default:0 last_event_id)
-               ~on_disconnect:(fun () -> stop_sse_session session_id)
+             Auth_oauth.with_expected_resource expected_resource (fun () ->
+               Sse.register ~kind:sse_kind ~auth session_id
+                 (* DET-OK: unchanged from main; the authority wrapper only re-indented it. *)
+                 ~last_event_id:(Option.value ~default:0 last_event_id)
+                 ~on_disconnect:(fun () -> stop_sse_session session_id))
            with
            | Error reg_err ->
                let msg = Sse.registration_error_to_string reg_err in
@@ -720,17 +738,19 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
 
 
 let handle_get_operator_mcp ~deps request reqd =
+  let request_authority = Server_request_authority.current_exn () in
   let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
   let protocol_version = get_protocol_version_for_session ~session_id request in
   let base_path = deps.get_base_path () in
   match deps.verify_operator_mcp_auth ~base_path request with
   | Error msg ->
-      respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd ~session_id ~protocol_version
-        msg
+      respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps ~request_authority
+        request reqd ~session_id ~protocol_version msg
   | Ok () ->
       handle_get_mcp ~deps ~profile:Operator_remote request reqd
 
 let handle_delete_mcp ~deps ?(profile = Full) request reqd =
+  let request_authority = Server_request_authority.current_exn () in
   if not (deps.is_ready ()) then
     respond_not_ready ~deps request reqd
   else
@@ -746,8 +766,8 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
   | Error msg ->
       let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
       let protocol_version = get_protocol_version_for_session ~session_id request in
-      respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd ~session_id ~protocol_version
-        msg
+      respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps ~request_authority
+        request reqd ~session_id ~protocol_version msg
   | Ok () -> (
       match get_session_id_any request with
       | Some session_id -> (

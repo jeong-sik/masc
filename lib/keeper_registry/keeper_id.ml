@@ -26,8 +26,7 @@ let is_valid_trace_id s =
 
 (* Bounded preview for id validation error messages — these ids
    originate from external requests / config / JSON; full dump risks
-   log spam on bad input. 32 bytes matches the pattern from iter#83
-   [decode_global_id] (#16903) and iter#84 [Ids.Trace_id]. *)
+   log spam on bad input. 32 bytes matches [Ids.Trace_id.preview]. *)
 let preview_id s =
   if String.length s <= 32 then s
   else Printf.sprintf "%s… (%d bytes total)" (String.sub s 0 32) (String.length s)

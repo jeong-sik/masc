@@ -21,5 +21,5 @@
  (public_name masc.briefing_compactors)
  (wrapped false)
  (flags
-  (:standard -w +4))
+  (:standard -w +4 -w +32))
  (libraries yojson masc_core masc.masc_types masc.dashboard_utils))

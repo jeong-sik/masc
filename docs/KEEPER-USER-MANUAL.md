@@ -260,9 +260,11 @@ spawn 시 인자로 직접 설정하는 필드.
 | `sandbox_profile` | string | `local` | 실행 샌드박스 프로필 (`local`, `docker`). hard mode에서는 `docker`만 허용된다. | `masc_keeper_up`의 `sandbox_profile` 인자 |
 | `active_goal_ids` | string[] | 없음 | Goal Store 엔티티와 Keeper의 목표 연결. 설정 시 `keeper_task_claim`이 goal-linked task만 claim한다. scoped pool에 현재 capability로 claim 가능한 task가 없으면 claim을 멈춘다. | `masc_keeper_up`, keeper config API 또는 `keeper.toml` |
 
-`network_mode`는 `masc_keeper_up` 인자가 아니다. Keeper TOML 또는 profile
-기본값에서만 설정하며, `masc_keeper_up`에는 격리 경계인 `sandbox_profile`만
-전달한다.
+`network_mode`는 `masc_keeper_up` 인자가 아니다. 지속 설정은 Keeper TOML 또는
+profile 기본값이 소유하며, `masc_keeper_up`에는 격리 경계인
+`sandbox_profile`만 전달한다. Managed container를 직접 시작할 때는
+`masc_keeper_sandbox_start`의 선택적 `network_mode` 인자로 그 시작에만 적용할
+값을 지정할 수 있고, 생략하면 Keeper의 지속 설정을 사용한다.
 
 ### 3.1.1 Sandbox Core V1 사용법
 

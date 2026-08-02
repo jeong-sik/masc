@@ -5,9 +5,9 @@
  (public_name masc.ag_ui)
  (modules ag_ui)
  (wrapped false)
- ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
+ ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
-  (:standard -w +4))
+  (:standard -w +4 -w +32))
  (libraries time_compat yojson masc_core)
  (preprocess
   (pps ppx_deriving.show ppx_deriving.eq)))

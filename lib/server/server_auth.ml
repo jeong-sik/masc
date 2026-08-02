@@ -219,8 +219,15 @@ let resolve_agent_name_for_auth_raw ~base_path request ~token :
       | Some raw when String.trim raw <> "" -> Ok (Some (String.trim raw))
       | _ -> Ok None)
 
+(** Bind OAuth credential lookup to the resource derived from the admitted
+    request authority. Static bearer lookup is unaffected by this scope. *)
+let with_mcp_expected_resource f =
+  let authority = Server_request_authority.current_exn () in
+  Auth_oauth.with_expected_resource (Server_oauth_metadata.resource authority) f
+;;
+
 (** Verify Bearer token for MCP endpoints *)
-let verify_mcp_auth ~base_path request =
+let verify_mcp_auth_unscoped ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
   let credential = request_auth_credential_from_request request in
   let* auth_config = ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config in
@@ -259,7 +266,17 @@ let verify_mcp_auth ~base_path request =
             |> Result.map_error Masc_domain.masc_error_to_string
             |> Result.map (fun () -> None))
 
-let verify_mcp_observer_stream_auth ~base_path request =
+let verify_mcp_auth ~base_path request =
+  with_mcp_expected_resource (fun () -> verify_mcp_auth_unscoped ~base_path request)
+;;
+
+let verify_mcp_auth_for_authority ~base_path ~request_authority request =
+  Auth_oauth.with_expected_resource
+    (Server_oauth_metadata.resource request_authority)
+    (fun () -> verify_mcp_auth_unscoped ~base_path request)
+;;
+
+let verify_mcp_observer_stream_auth_unscoped ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
   let credential = observer_sse_auth_credential_from_request request in
   let* auth_config = ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config in
@@ -294,7 +311,12 @@ let verify_mcp_observer_stream_auth ~base_path request =
             |> Result.map_error Masc_domain.masc_error_to_string
             |> Result.map (fun () -> None))
 
-let verify_operator_mcp_auth ~base_path request =
+let verify_mcp_observer_stream_auth ~base_path request =
+  with_mcp_expected_resource (fun () ->
+    verify_mcp_observer_stream_auth_unscoped ~base_path request)
+;;
+
+let verify_operator_mcp_auth_unscoped ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
   let credential = request_auth_credential_from_request request in
   if not auth_config.Masc_domain.enabled then
@@ -324,6 +346,11 @@ let verify_operator_mcp_auth ~base_path request =
               ~permission:Masc_domain.CanAdmin
             |> Result.map_error Masc_domain.masc_error_to_string
             |> Result.map (fun () -> None))
+
+let verify_operator_mcp_auth ~base_path request =
+  with_mcp_expected_resource (fun () ->
+    verify_operator_mcp_auth_unscoped ~base_path request)
+;;
 
 let request_actor_hint request =
   match agent_from_request request with
@@ -688,6 +715,34 @@ let ensure_same_origin_browser_request ~request_authority request :
          (Masc_domain.Auth_error.Forbidden
             { agent = "browser"; action = "malformed Origin header" }))
 
+let ensure_same_origin_if_browser_request ~request_authority request :
+    (unit, Masc_domain.masc_error) result =
+  match classify_request_origin ~request_authority request with
+  | Missing_origin -> Ok ()
+  | Single_origin
+      { admission = (Same_origin | Allowed_dev_origin); _ } ->
+    Ok ()
+  | Single_origin { origin; admission = Rejected } ->
+    Log.Auth.debug
+      "browser-origin check failed: origin=%S scheme=%s authority=%S trust=%s"
+      origin
+      (Server_request_authority.scheme request_authority
+       |> Server_request_authority.scheme_to_string)
+      (Server_request_authority.rendered request_authority)
+      (match Server_request_authority.trust_class request_authority with
+       | Server_request_authority.Configured_bind -> "configured_bind"
+       | Server_request_authority.Explicit_trusted_host ->
+         "explicit_trusted_host");
+    Error
+      (Masc_domain.Auth
+         (Masc_domain.Auth_error.Forbidden
+            { agent = "browser"; action = "cross-origin HTTP mutation" }))
+  | Multiple_origins | Malformed_origin ->
+    Error
+      (Masc_domain.Auth
+         (Masc_domain.Auth_error.Forbidden
+            { agent = "browser"; action = "malformed Origin header" }))
+
 (* Mirrors [Masc_error.code] (the typed SSOT in lib/types/masc_error.ml).
    Previously the catch-all [_ -> `Internal_server_error] silently demoted
    [RateLimitExceeded _] to 500 (should be 429), [Task/Agent (NotFound _)]
@@ -814,10 +869,18 @@ let respond_auth_error request reqd err =
   let status = http_status_of_auth_error err in
   let origin = get_origin request in
   let body = auth_error_json err in
-  let headers = Httpun.Headers.of_list (
-    ("content-length", string_of_int (String.length body))
-    :: cors_headers origin
-  ) in
+  let auth_headers =
+    match status with
+    | `Unauthorized ->
+      let authority = Server_request_authority.current_exn () in
+      [ "www-authenticate", Server_oauth_metadata.challenge_for_authority authority ]
+    | _ -> []
+  in
+  let headers =
+    Httpun.Headers.of_list
+      (("content-length", string_of_int (String.length body))
+       :: auth_headers @ cors_headers origin)
+  in
   let response = Httpun.Response.create ~headers (status :> Httpun.Status.t) in
   Httpun.Reqd.respond_with_string reqd response body
 

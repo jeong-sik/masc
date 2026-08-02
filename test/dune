@@ -1680,6 +1680,8 @@
 (include stanzas/test_exec_policy_cwd_hint.inc)
 
 (include stanzas/test_auth_bearer_mismatch_9786.inc)
+(include stanzas/test_auth_oauth.inc)
+(include stanzas/test_server_oauth_protocol.inc)
 
 (include stanzas/test_auth_rotate_shared_tokens_10304.inc)
 

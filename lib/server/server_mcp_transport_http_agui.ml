@@ -46,6 +46,7 @@ let presence_stream_headers ~deps raw_session_id protocol_version origin =
 let presence_session_id raw_session_id = "presence:" ^ raw_session_id
 
 let handle_ag_ui_events ~deps request reqd =
+  let request_authority = Server_request_authority.current_exn () in
   let origin = deps.get_origin request in
   let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
   let protocol_version = get_protocol_version_for_session ~session_id request in
@@ -58,8 +59,8 @@ let handle_ag_ui_events ~deps request reqd =
   in
   match deps.verify_mcp_observer_stream_auth ~base_path request with
   | Error msg ->
-      respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd ~session_id
-        ~protocol_version msg
+      respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps ~request_authority
+        request reqd ~session_id ~protocol_version msg
   | Ok () ->
       let token = Server_auth.observer_sse_auth_token_from_request request in
       let auth = { Sse.config = base_path; token } in
@@ -73,10 +74,13 @@ let handle_ag_ui_events ~deps request reqd =
             Transport_metrics.inc_sse_reconnect ();
           ensure_sse_backing_session_for_known_transport_session
             ~transport_session_id:session_id ~sse_session_id:session_id;
+          let expected_resource = Server_oauth_metadata.resource request_authority in
           (match
-             Sse.register ~kind:Sse.Observer ~auth session_id
-               ~last_event_id:(Option.value ~default:0 last_event_id)
-               ~on_disconnect:(fun () -> stop_sse_session session_id)
+             Auth_oauth.with_expected_resource expected_resource (fun () ->
+               Sse.register ~kind:Sse.Observer ~auth session_id
+                 (* DET-OK: unchanged from main; the authority wrapper only re-indented it. *)
+                 ~last_event_id:(Option.value ~default:0 last_event_id)
+                 ~on_disconnect:(fun () -> stop_sse_session session_id))
            with
            | Error reg_err ->
                let msg = Sse.registration_error_to_string reg_err in
@@ -168,6 +172,7 @@ let handle_ag_ui_events ~deps request reqd =
                     session_id msg)))
 
 let handle_presence_events ~deps request reqd =
+  let request_authority = Server_request_authority.current_exn () in
   let origin = deps.get_origin request in
   let raw_session_id = Mcp_session.get_or_generate (get_session_id_any request) in
   let session_id = presence_session_id raw_session_id in
@@ -177,8 +182,8 @@ let handle_presence_events ~deps request reqd =
   let base_path = deps.get_base_path () in
   match deps.verify_mcp_observer_stream_auth ~base_path request with
   | Error msg ->
-      respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd ~session_id:raw_session_id
-        ~protocol_version msg
+      respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps ~request_authority
+        request reqd ~session_id:raw_session_id ~protocol_version msg
   | Ok () ->
       let token = Server_auth.observer_sse_auth_token_from_request request in
       let auth = { Sse.config = base_path; token } in
@@ -190,10 +195,12 @@ let handle_presence_events ~deps request reqd =
           stop_sse_session_preserve_guard session_id;
           ensure_sse_backing_session_for_known_transport_session
             ~transport_session_id:raw_session_id ~sse_session_id:session_id;
+          let expected_resource = Server_oauth_metadata.resource request_authority in
           (match
-             Sse.register ~kind:Sse.Presence ~auth session_id ~last_event_id:0
-               ~on_disconnect:(fun () ->
-                 stop_sse_session_preserve_guard session_id)
+             Auth_oauth.with_expected_resource expected_resource (fun () ->
+               Sse.register ~kind:Sse.Presence ~auth session_id ~last_event_id:0
+                 ~on_disconnect:(fun () ->
+                   stop_sse_session_preserve_guard session_id))
            with
            | Error reg_err ->
                let msg = Sse.registration_error_to_string reg_err in

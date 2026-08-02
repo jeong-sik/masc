@@ -475,7 +475,6 @@ let window_meta ~limit ~events_shown ~events_store_total
     ("has_more", `Bool (events_store_total > events_shown));
   ] @ extra)
 
-let latest_seq config = read_current_seq config
 
 let activity_events_store_path config = root_dir config
 
@@ -800,14 +799,7 @@ let span_end_classification = function
   | "keeper.autonomy_completed" -> Some ("autonomy",  Span_completed)
   | _                           -> None
 
-let span_end_kind kind =
-  Option.map fst (span_end_classification kind)
 
-let span_end_status kind =
-  match span_end_classification kind with
-  | Some (_, status) -> status
-  | None -> Span_ended  (* unreachable in practice — call sites first
-                           check [span_end_kind] / [span_end_classification] *)
 
 let agent_spans_json config ?(limit = 500) ?since_ms () =
   let events, events_store_total =

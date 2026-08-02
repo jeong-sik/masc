@@ -12,7 +12,7 @@
  (public_name masc.masc_tool_blob_store)
  (wrapped false)
  (modules tool_blob_store tool_output tool_blob_maintenance)
- ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
+ ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
-  (:standard -w +4))
+  (:standard -w +4 -w +32))
  (libraries digestif digestif.c unix yojson fs_compat masc_core))

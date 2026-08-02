@@ -1,6 +1,5 @@
 // Goal creation form — right-hand side panel in the Work surface.
 // Design reference: prototype NewGoalComposer (work.jsx ~line 437).
-// RFC-0294: no horizon; no lead keeper (live Goal type has no owner field).
 // Fields: title (required), priority (1-5).
 
 import { html } from 'htm/preact'

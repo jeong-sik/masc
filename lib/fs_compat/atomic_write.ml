@@ -657,20 +657,6 @@ let recovery_transition_failure
   }
 ;;
 
-let recovery_validation_failure recovery_phase error =
-  { recovery_phase
-  ; recovery_effect = Recovery_no_record_change
-  ; recovery_detail = Recovery_validation_failed error
-  }
-;;
-
-let recovery_lane_admission_failure error =
-  { recovery_phase = Recovery_open_store
-  ; recovery_effect = Recovery_no_record_change
-  ; recovery_detail = Recovery_lane_admission_failed error
-  }
-;;
-
 let recovery_interruption recovery_phase store_effect reason cleanup_failures =
   { recovery_phase
   ; recovery_effect = capability_recovery_effect_of_core store_effect

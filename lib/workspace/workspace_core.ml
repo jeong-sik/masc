@@ -54,15 +54,6 @@ include Workspace_gc
 (* Wire Workspace_hooks callbacks                    *)
 (* ============================================ *)
 
-let telemetry_enabled () = Env_config_core.telemetry_enabled ()
-
-let merge_detail_fields fields details =
-  match details with
-  | `Assoc extra -> `Assoc (fields @ extra)
-  | `Null -> `Assoc fields
-  | other -> `Assoc (fields @ [ "payload", other ])
-;;
-
 (* #10358 (c1): make non-Eio-context drops observable.
 
    The three try/with sites below catch [Stdlib.Effect.Unhandled] so the

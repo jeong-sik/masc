@@ -1559,15 +1559,6 @@ let rec run_unix_io ~operation f =
     Error (unix_failure ~operation error function_name argument)
 ;;
 
-let rec run_unix_value ~operation f =
-  match f () with
-  | value -> Ok value
-  | exception Unix.Unix_error (Unix.EINTR, _, _) ->
-    run_unix_value ~operation f
-  | exception Unix.Unix_error (error, function_name, argument) ->
-    Error (unix_failure ~operation error function_name argument)
-;;
-
 let rollback_durable_append ~io ~fd ~original_length =
   let truncate_result =
     run_unix_io ~operation:Rollback_truncate (fun () ->

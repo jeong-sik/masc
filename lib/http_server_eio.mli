@@ -204,6 +204,20 @@ module Request : sig
       changes. *)
   val max_body_bytes : int
 
+  type body_read_error =
+    [ `Too_large of int
+    | `Internal of exn
+    ]
+
+  val read_body_async_with_limit :
+    Httpun.Reqd.t ->
+    max_bytes:int ->
+    on_body:(string -> unit) ->
+    on_error:(body_read_error -> unit) ->
+    unit
+  (** Streaming body reader with a caller-owned allocation bound and typed
+      error callback. *)
+
   (** [read_body_async reqd callback] reads the request body
       via [schedule_read] loops; [callback body_str] fires on
       EOF.  413 / 500 errors auto-respond before [callback] is

@@ -163,8 +163,6 @@ let build_keeper_system_prompt
         let lines =
           List.map
             (fun (id, title) ->
-               (* RFC-0294: available-goals line was "- <id> [<horizon>] <title>";
-                  horizon removed, so it is now "- <id> <title>". *)
                match String.trim title with
                | "" -> Printf.sprintf "- %s" (String_util.escape_xml id)
                | title ->

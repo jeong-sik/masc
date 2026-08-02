@@ -249,9 +249,6 @@ let color_red = 0xE74C3C     (* Error *)
 (* Discord embed field value limit is 1024 characters. *)
 let embed_field_value_limit = 1024
 
-let truncate_to ~max_len s =
-  if String.length s <= max_len then s
-  else String.sub s 0 (max_len - 1) ^ "…"
 
 let link_embed ~url ~title ~description ~image =
   { title

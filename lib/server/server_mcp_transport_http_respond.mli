@@ -120,6 +120,7 @@ val respond_mcp_error :
   ?data:Yojson.Safe.t ->
   ?id:Yojson.Safe.t ->
   deps:Server_mcp_transport_http_types.deps ->
+  request_authority:Server_request_authority.authority ->
   Httpun.Request.t ->
   Httpun.Reqd.t ->
   session_id:string ->
@@ -127,7 +128,7 @@ val respond_mcp_error :
   code:Mcp_error_code.t ->
   string ->
   unit
-(** [respond_mcp_error ?extra_headers ?data ?id ~deps request reqd
+(** [respond_mcp_error ?extra_headers ?data ?id ~deps ~request_authority request reqd
     ~session_id ~protocol_version ~code msg] writes a single JSON-RPC
     2.0 error response derived from a typed {!Mcp_error_code.t}. This
     is the {b RFC-0098 SSOT} for transport-boundary error envelopes;

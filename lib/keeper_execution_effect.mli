@@ -8,7 +8,6 @@ val classify
   :  sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile
   -> network_mode:Keeper_types_profile_sandbox.network_mode
   -> target:Masc_exec.Sandbox_target.t
-  -> containment_verified:bool
   -> t
 
 val to_string : t -> string

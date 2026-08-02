@@ -16,19 +16,17 @@ let digest_pinned_image image =
     && String.for_all is_lower_hex (String.sub digest 7 64)
 ;;
 
-let classify ~sandbox_profile ~network_mode ~target ~containment_verified =
-  match sandbox_profile, network_mode, target, containment_verified with
+let classify ~sandbox_profile ~network_mode ~target =
+  match sandbox_profile, network_mode, target with
   | Keeper_types_profile_sandbox.Docker
     , Keeper_types_profile_sandbox.Network_none
     , Masc_exec.Sandbox_target.Docker { image; _ }
-    , true
     when digest_pinned_image image -> Confined
   | ( Keeper_types_profile_sandbox.Local
     | Keeper_types_profile_sandbox.Docker )
     , (Keeper_types_profile_sandbox.Network_none
       | Keeper_types_profile_sandbox.Network_inherit)
-    , (Masc_exec.Sandbox_target.Host | Masc_exec.Sandbox_target.Docker _)
-    , (false | true) -> External
+    , (Masc_exec.Sandbox_target.Host | Masc_exec.Sandbox_target.Docker _) -> External
 ;;
 
 let to_string = function

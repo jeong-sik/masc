@@ -196,8 +196,10 @@ let test_masc_status_schema () =
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
-          (* masc_status has no required parameters *)
-          Alcotest.(check int) "properties can be empty" 0 (List.length props)
+          (* masc_status has no required parameters, but accepts the optional
+             producer-owned conditional snapshot revision. *)
+          Alcotest.(check bool) "has optional if_revision" true
+            (List.mem_assoc "if_revision" props)
       | None -> Alcotest.fail "masc_status missing properties"
 
 let test_masc_broadcast_schema () =

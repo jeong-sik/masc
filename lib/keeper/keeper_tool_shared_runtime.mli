@@ -112,12 +112,19 @@ val resolve_keeper_read_cwd
   -> raw_path:string
   -> (string, string) result
 
-(** [resolve_keeper_read_cwd] for the execute/write boundary. *)
+(** [resolve_keeper_read_cwd] for the execute/write boundary. The successful
+    result retains the resolver's opaque root-capability witness until the
+    caller verifies it against an Eio directory handle. *)
 val resolve_keeper_execute_cwd_typed
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> raw_path:string
-  -> (string, Keeper_path_rejection.keeper_path_rejection) result
+  -> (Keeper_alerting_path.confined_path, Keeper_path_rejection.keeper_path_rejection) result
+
+val verify_keeper_confined_root :
+  Keeper_alerting_path.confined_path -> (unit, string) result
+(** Verify the immutable root identity captured by the path resolver against
+    the Eio directory capability that will be used by the caller. *)
 
 val resolve_keeper_execute_cwd
   :  config:Workspace.config

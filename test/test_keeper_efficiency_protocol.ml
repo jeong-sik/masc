@@ -1,5 +1,5 @@
 let check_json label expected actual =
-  Alcotest.(check string) label expected (Yojson.Safe.to_string actual)
+  Alcotest.(check bool) label true (Yojson.Safe.equal expected actual)
 ;;
 
 let test_snapshot_protocol () =
@@ -11,7 +11,11 @@ let test_snapshot_protocol () =
   in
   check_json
     "snapshot"
-    {|{"kind":"snapshot","revision":"backlog:7","snapshot":["task-1"]}|}
+    (`Assoc
+       [ "kind", `String "snapshot"
+       ; "revision", `String "backlog:7"
+       ; "snapshot", `List [ `String "task-1" ]
+       ])
     (Masc.Snapshot_protocol.to_yojson snapshot);
   let unchanged =
     Masc.Snapshot_protocol.respond
@@ -21,8 +25,27 @@ let test_snapshot_protocol () =
   in
   check_json
     "unchanged"
-    {|{"kind":"unchanged","revision":"backlog:7"}|}
+    (`Assoc [ "kind", `String "unchanged"; "revision", `String "backlog:7" ])
     (Masc.Snapshot_protocol.to_yojson unchanged);
+  (match Masc.Snapshot_protocol.if_revision `Null with
+   | Ok None -> ()
+   | Ok (Some _) -> Alcotest.fail "null arguments produced a revision"
+   | Error message -> Alcotest.fail message);
+  let revision_a =
+    Masc.Snapshot_protocol.revision_of_json
+      ~namespace:"test"
+      (`Assoc [ "b", `Int 2; "a", `Int 1 ])
+  in
+  let revision_b =
+    Masc.Snapshot_protocol.revision_of_json
+      ~namespace:"test"
+      (`Assoc [ "a", `Int 1; "b", `Int 2 ])
+  in
+  Alcotest.(check string) "object key order does not change revision" revision_a revision_b;
+  Alcotest.(check bool)
+    "revision uses sha256"
+    true
+    (String.length revision_a = String.length "test:" + 64);
   (match Masc.Snapshot_protocol.if_revision
            (`Assoc [ "if_revision", `String " " ]) with
    | Error message ->
@@ -55,17 +78,15 @@ let test_effect_classification () =
        (classify
           ~sandbox_profile:Keeper_types_profile_sandbox.Docker
           ~network_mode:Keeper_types_profile_sandbox.Network_none
-          ~target:docker
-          ~containment_verified:true));
+          ~target:docker));
   Alcotest.(check string)
-    "unverified docker remains external"
+    "docker with inherited network remains external"
     "external"
     (Masc.Keeper_execution_effect.to_string
        (classify
           ~sandbox_profile:Keeper_types_profile_sandbox.Docker
-          ~network_mode:Keeper_types_profile_sandbox.Network_none
-          ~target:docker
-          ~containment_verified:false));
+          ~network_mode:Keeper_types_profile_sandbox.Network_inherit
+          ~target:docker));
   let unpinned_docker =
     Masc_exec.Sandbox_target.docker ~image:"ubuntu:24.04" ~runner:mock_runner ()
   in
@@ -76,8 +97,7 @@ let test_effect_classification () =
        (classify
           ~sandbox_profile:Keeper_types_profile_sandbox.Docker
           ~network_mode:Keeper_types_profile_sandbox.Network_none
-          ~target:unpinned_docker
-          ~containment_verified:true));
+          ~target:unpinned_docker));
   Alcotest.(check string)
     "host remains external"
     "external"
@@ -85,8 +105,7 @@ let test_effect_classification () =
        (classify
           ~sandbox_profile:Keeper_types_profile_sandbox.Local
           ~network_mode:Keeper_types_profile_sandbox.Network_inherit
-          ~target:(Masc_exec.Sandbox_target.host ())
-          ~containment_verified:true))
+          ~target:(Masc_exec.Sandbox_target.host ())));
 ;;
 
 let () =

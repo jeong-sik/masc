@@ -467,6 +467,7 @@ let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
       ~tool_name
       ~class_:Tool_result.Policy_rejection
       ~start_time
+      ~data:(`String message)
       message
   | Ok if_revision ->
   let task_list_name =

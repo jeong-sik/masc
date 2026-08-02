@@ -206,6 +206,10 @@ let handle_tool_execute_typed
         let cmd = typed_input_command_text input in
         let timeout_sec = typed_input_timeout_sec input in
         let input = input_with_cwd cwd input in
+        (* This location check is only the explicit local-fallback policy. It is
+           not authorization evidence: the cwd has already passed the typed
+           containment resolver above, and execution classification below must
+           not consume a lexical boolean as a Gate-bypass proof. *)
         let in_playground = Keeper_tool_execute_path.in_playground ~root ~cwd ~meta in
         let sandbox_profile, sandbox_network_mode =
           Keeper_sandbox_runner.effective_sandbox_profile ~meta
@@ -345,7 +349,6 @@ let handle_tool_execute_typed
             ~sandbox_profile
             ~network_mode:sandbox_network_mode
             ~target:dispatch_sandbox
-            ~containment_verified:in_playground
         in
         let gate_decision =
           match execution_effect with

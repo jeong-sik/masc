@@ -383,13 +383,6 @@ let handle_keeper_task_tool_with_outcome
            (include_done || not (Masc_domain.task_status_is_done task.task_status))
            && not is_cancelled
        in
-       let tasks =
-         backlog.tasks
-         |> List.filter visible
-         |> List.sort (fun (left : Masc_domain.task) right ->
-           Int.compare left.priority right.priority)
-         |> List.filteri (fun index _ -> index < limit)
-       in
        let revision =
          Snapshot_protocol.revision_of_json
            ~namespace:"tasks"
@@ -400,12 +393,26 @@ let handle_keeper_task_tool_with_outcome
              ; "limit", `Int limit
              ])
        in
-       Keeper_tool_execution.success_data
-         (Snapshot_protocol.to_yojson
-            (Snapshot_protocol.respond
-               ~revision
-               ~if_revision
-               (`List (List.map Masc_domain.task_to_yojson tasks)))))
+       (match
+          Snapshot_protocol.unchanged_if_revision_matches ~revision ~if_revision
+        with
+        | Some response ->
+          Keeper_tool_execution.success_data
+            (Snapshot_protocol.to_yojson response)
+        | None ->
+          let tasks =
+            backlog.tasks
+            |> List.filter visible
+            |> List.sort (fun (left : Masc_domain.task) right ->
+              Int.compare left.priority right.priority)
+            |> List.filteri (fun index _ -> index < limit)
+          in
+          Keeper_tool_execution.success_data
+            (Snapshot_protocol.to_yojson
+               (Snapshot_protocol.respond
+                  ~revision
+                  ~if_revision
+                  (`List (List.map Masc_domain.task_to_yojson tasks))))))
     | Tasks_audit ->
     let limit = Safe_ops.json_int ~default:20 "limit" args |> max 1 |> min 50 in
     let orphans =

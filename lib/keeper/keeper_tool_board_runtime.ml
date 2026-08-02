@@ -119,21 +119,24 @@ let handle_keeper_board_tool_with_outcome
       in
       (match result.disposition with
        | Tool_result.Failed _ -> result
-       | Tool_result.Completed _ ->
-         Keeper_tool_execution.success_data
-           (Snapshot_protocol.to_yojson
-              (Snapshot_protocol.respond
-                 ~revision
-                 ~if_revision
-                 (`String result.raw_output)))
-       | Tool_result.Deferred _ ->
-         Keeper_tool_execution.deferred_data
-           (Snapshot_protocol.to_yojson
-              (Snapshot_protocol.respond
-                 ~revision
-                 ~if_revision
-                 (`String result.raw_output)))
-      )
+       | Tool_result.Completed _ | Tool_result.Deferred _ ->
+         let response =
+           Snapshot_protocol.respond
+             ~revision
+             ~if_revision
+             (`String result.raw_output)
+         in
+         (match response, result.disposition with
+          | Snapshot_protocol.Unchanged _, _ ->
+            Keeper_tool_execution.success_data
+              (Snapshot_protocol.to_yojson response)
+          | Snapshot_protocol.Snapshot _, Tool_result.Completed _ ->
+            Keeper_tool_execution.success_data
+              (Snapshot_protocol.to_yojson response)
+          | Snapshot_protocol.Snapshot _, Tool_result.Deferred _ ->
+            Keeper_tool_execution.deferred_data
+              (Snapshot_protocol.to_yojson response)
+          | _, Tool_result.Failed _ -> result))
   in
   match Keeper_tool_name.of_string name with
   | Some Keeper_tool_name.Board_post ->

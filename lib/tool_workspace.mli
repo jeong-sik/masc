@@ -12,11 +12,7 @@
     Callers can interleave these types freely with the source
     modules' types.
 
-    Internal: ~50+ helpers stay private — text-cache primitives
-    (\[text_cache] type, \[make_text_cache], \[_status_cache],
-    \[cache_ttl_seconds], \[status_cache_ttl_s],
-    \[invalidate_status_cache], \[cached_text_by_key]),
-    \[effective_cluster_name],
+    Internal: ~50+ helpers stay private — \[effective_cluster_name],
     \[unique_strings], \[credential_state],
     \[safe_resolve_agent_name] / \[safe_current_task] / \[safe_get_agents] /
     the deliverable-conflict scanners (\[todo_task_has_completed_deliverable_conflict],
@@ -88,9 +84,9 @@ val dispatchable_names : string list
     ~start_time] to every handler so callers do not need to
     supply timing data.
 
-    Status results are cached for ~2 seconds via the internal
-    text-cache to absorb repeated dashboard polls; cache
-    invalidates on workspace state mutations. *)
+    Status results are producer snapshots. Callers may pass [if_revision]
+    to receive an [unchanged] envelope when the rendered snapshot and its
+    task-list projection have not changed. *)
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.result option
 
 (** Keeper-model dispatch uses Keeper-facing semantic capability names in

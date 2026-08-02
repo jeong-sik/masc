@@ -279,13 +279,42 @@ let resolve_keeper_execute_cwd_typed
       ~endpoint:Keeper_alerting_path.Follow_referent
       ~raw_path:(String.trim raw_path)
   with
-  | Ok confined -> Ok (Keeper_alerting_path.confined_host_path confined)
+  | Ok confined -> Ok confined
   | Error rejection -> Error rejection
 ;;
 
+let verify_keeper_confined_root (confined : Keeper_alerting_path.confined_path) =
+  match Fs_compat.get_fs_opt () with
+  | None ->
+    Error
+      "filesystem capability unavailable: Eio filesystem was not installed at runtime startup"
+  | Some fs ->
+    (try
+       let anchor_root = Keeper_alerting_path.confined_anchor_root confined in
+       let root_relative_path =
+         Keeper_alerting_path.confined_root_relative_path confined
+       in
+       let verify root_dir =
+         Keeper_alerting_path.verify_confined_root_capability confined root_dir
+       in
+       Eio.Path.with_open_dir Eio.Path.(fs / anchor_root) @@ fun anchor_dir ->
+       if String.equal root_relative_path "."
+       then verify anchor_dir
+       else
+         Eio.Path.with_open_dir Eio.Path.(anchor_dir / root_relative_path)
+         @@ fun root_dir -> verify root_dir
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | Eio.Io _ as exn -> Error (Printexc.to_string exn))
+;;
+
 let resolve_keeper_execute_cwd ~config ~meta ~raw_path =
-  resolve_keeper_execute_cwd_typed ~config ~meta ~raw_path
-  |> Result.map_error Keeper_alerting_path.rejection_to_user_message
+  match resolve_keeper_execute_cwd_typed ~config ~meta ~raw_path with
+  | Error rejection -> Error (Keeper_alerting_path.rejection_to_user_message rejection)
+  | Ok confined ->
+    (match verify_keeper_confined_root confined with
+     | Ok () -> Ok (Keeper_alerting_path.confined_host_path confined)
+     | Error detail -> Error ("cwd_root_verification_failed: " ^ detail))
 ;;
 
 let keeper_agent_sender ~(meta : keeper_meta) = meta.agent_name

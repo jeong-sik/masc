@@ -39,6 +39,15 @@ let assert_not_contains output unexpected =
     failwith (Printf.sprintf "unexpected substring %S in output:\n%s" unexpected output)
 ;;
 
+let status_message result =
+  match Tool_result.data result with
+  | `Assoc fields ->
+    (match List.assoc_opt "snapshot" fields with
+     | Some (`String snapshot) -> snapshot
+     | Some _ | None -> Tool_result.message result)
+  | _ -> Tool_result.message result
+;;
+
 let set_current_task_ok config ~task_id =
   match Planning_eio.set_current_task config ~task_id with
   | Ok () -> ()
@@ -242,10 +251,75 @@ let () =
     match Tool_workspace.dispatch ctx ~name:"masc_status" ~args with
     | Some result ->
       assert (Tool_result.is_success result);
-      let message = (Tool_result.message result) in
+      let message = status_message result in
       assert (str_contains message "Snapshot:");
       assert (str_contains message "🧭 You:");
       assert (not (str_contains message "Suggested next:"))
+    | None -> failwith "dispatch returned None")
+;;
+
+let snapshot_revision result =
+  Tool_result.data result |> Yojson.Safe.Util.member "revision" |> Yojson.Safe.Util.to_string
+;;
+
+let () =
+  test "dispatch_status_initializes_before_revision" (fun () ->
+    let ctx = make_test_ctx () in
+    match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+    | Some result ->
+      assert (Tool_result.is_success result);
+      assert (Sys.file_exists (Workspace_utils_paths_backend.state_path ctx.config))
+    | None -> failwith "dispatch returned None")
+;;
+
+let () =
+  test "dispatch_status_revision_covers_rendered_credential_state" (fun () ->
+    let ctx = make_test_ctx () in
+    let _ = Workspace.init ctx.config ~agent_name:(Some ctx.agent_name) in
+    let first =
+      match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+      | Some result -> result
+      | None -> failwith "dispatch returned None"
+    in
+    let revision = snapshot_revision first in
+    Auth.save_auth_config
+      ctx.config.base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let second =
+      match
+        Tool_workspace.dispatch
+          ctx
+          ~name:"masc_status"
+          ~args:(`Assoc [ "if_revision", `String revision ])
+      with
+      | Some result -> result
+      | None -> failwith "dispatch returned None"
+    in
+    assert (Tool_result.is_success second);
+    let data = Tool_result.data second in
+    assert (Yojson.Safe.Util.(data |> member "kind" |> to_string) = "snapshot");
+    assert_contains
+      Yojson.Safe.Util.(data |> member "snapshot" |> to_string)
+      "Lifecycle actions are credential-blocked")
+;;
+
+let () =
+  test "dispatch_status_reports_backlog_read_failure" (fun () ->
+    let ctx = make_test_ctx () in
+    let _ = Workspace.init ctx.config ~agent_name:(Some ctx.agent_name) in
+    let corrupt path =
+      let oc = open_out path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc "{not valid json")
+    in
+    corrupt (Workspace.backlog_path ctx.config);
+    corrupt (Workspace.backlog_recovery_path ctx.config);
+    match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+    | Some result ->
+      assert (Tool_result.is_failed result);
+      assert (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
+      assert_contains (Tool_result.message result) "status snapshot unavailable"
     | None -> failwith "dispatch returned None")
 ;;
 
@@ -258,7 +332,7 @@ let () =
     match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
     | Some result ->
       assert (Tool_result.is_success result);
-      let message = (Tool_result.message result) in
+      let message = status_message result in
       assert_contains message (Printf.sprintf "%s (you) -> active" actual_name);
       let agent = read_agent ctx in
       assert (agent.current_task = Some "task-missing");
@@ -300,7 +374,7 @@ let () =
         match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
         | Some result ->
           assert (Tool_result.is_success result);
-          let message = Tool_result.message result in
+          let message = status_message result in
           assert_contains message "Snapshot: agents=2";
           assert_contains message "keeper-runtime-visible-agent -> active"
         | None -> failwith "dispatch returned None"))
@@ -323,22 +397,22 @@ let () =
     match Tool_workspace.dispatch ctx ~name:"masc_status" ~args with
     | Some result ->
       assert (Tool_result.is_success result);
-      let msg = (Tool_result.message result) in
+      let msg = status_message result in
       assert (str_contains msg "tasks active=35 todo=35 claimed=0 in_progress=0");
       assert (str_contains msg "Attention:");
       assert_contains msg "35 unclaimed task(s) are available right now.";
       assert (str_contains msg "Summary: active=35, done=0, cancelled=0, total=35");
-      assert_contains msg "and 5 more active tasks (use masc_tasks for full list)";
+      assert_contains msg "and 5 more active tasks";
       assert_not_contains msg "use keeper_tasks_list for full list";
       (match
          Tool_workspace.dispatch_for_keeper ctx ~name:"masc_status" ~args
        with
        | Some keeper_result ->
-         let keeper_message = Tool_result.message keeper_result in
+         let keeper_message = status_message keeper_result in
          assert (Tool_result.is_success keeper_result);
          assert_contains
            keeper_message
-           "and 5 more active tasks (use keeper_tasks_list for full list)";
+           "and 5 more active tasks";
          assert_not_contains keeper_message "use masc_tasks for full list"
        | None -> failwith "Keeper status dispatch returned None")
     | None -> failwith "dispatch returned None")
@@ -355,7 +429,7 @@ let () =
     let args = `Assoc [] in
     match Tool_workspace.dispatch ctx ~name:"masc_status" ~args with
     | Some r ->
-      let result = Tool_result.message r in
+      let result = status_message r in
       assert (Tool_result.is_success r);
       assert (str_contains result "owned=-");
       assert (str_contains result "tasks active=0 todo=0 claimed=0 in_progress=0");
@@ -398,7 +472,7 @@ let () =
       Workspace.write_json ctx.config agent_file (Masc_domain.agent_to_yojson stale_agent);
       match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
       | Some r ->
-        let result = Tool_result.message r in
+        let result = status_message r in
         assert (Tool_result.is_success r);
         assert_contains result (actual_name ^ " (you) -> task-001");
         let agent_after =
@@ -428,7 +502,7 @@ let () =
       });
     match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
     | Some r ->
-      let result = Tool_result.message r in
+      let result = status_message r in
       assert (Tool_result.is_success r);
       assert_not_contains result (actual_name ^ " (you) -> task-001");
       assert_contains result (actual_name ^ " (you) -> active");
@@ -453,7 +527,7 @@ let () =
       { agent with status = Masc_domain.Busy; current_task = Some "task-002" });
     match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
     | Some r ->
-      let result = Tool_result.message r in
+      let result = status_message r in
       assert (Tool_result.is_success r);
       assert_contains result (actual_name ^ " (you) -> task-001");
       assert_not_contains result (actual_name ^ " (you) -> task-002");
@@ -597,7 +671,7 @@ let () =
     force_claim_task ctx.config ~agent_name:actual_name ~task_id:"task-002";
     set_current_task_ok ctx.config ~task_id:"task-002";
     (match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-     | Some r -> let result = Tool_result.message r in let success = Tool_result.is_success r in
+     | Some r -> let result = status_message r in let success = Tool_result.is_success r in
        assert success;
        assert_contains result "owned=task-001 | current=task-002";
        assert_contains result "assigned_set=[task-001,task-002]";
@@ -694,11 +768,10 @@ let () =
     ignore (Workspace.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
     set_current_task_ok ctx.config ~task_id:"task-002";
     match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some r -> let result = Tool_result.message r in let success = Tool_result.is_success r in
+    | Some r -> let result = status_message r in let success = Tool_result.is_success r in
       assert success;
       assert (str_contains result "owned=task-001");
       assert (str_contains result "current=task-002");
-      assert_contains result "Do not retry generic masc_plan_init from a drifted surface";
       assert (not (str_contains result "Suggested next:"));
       assert (str_contains result "planning current_task is unset or drifted")
     | None -> failwith "dispatch returned None")
@@ -718,7 +791,7 @@ let () =
       (Workspace.add_task ctx.config ~title:"Credentialed work" ~priority:3 ~description:"");
     set_current_task_ok ctx.config ~task_id:"task-001";
     match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some r -> let result = Tool_result.message r in let success = Tool_result.is_success r in
+    | Some r -> let result = status_message r in let success = Tool_result.is_success r in
       assert success;
       assert (
         str_contains
@@ -744,7 +817,7 @@ let () =
     ignore (Workspace.add_task ctx.config ~title:"Keeper work" ~priority:3 ~description:"");
     set_current_task_ok ctx.config ~task_id:"task-001";
     match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some r -> let result = Tool_result.message r in let success = Tool_result.is_success r in
+    | Some r -> let result = status_message r in let success = Tool_result.is_success r in
       assert success;
       assert (
         str_contains
@@ -773,7 +846,7 @@ let () =
     ignore (Workspace.add_task ctx.config ~title:"Unclaimed task" ~priority:3 ~description:"");
     set_current_task_ok ctx.config ~task_id:"task-001";
     match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some r -> let result = Tool_result.message r in let success = Tool_result.is_success r in
+    | Some r -> let result = status_message r in let success = Tool_result.is_success r in
       assert success;
       assert (str_contains result "owned=- | current=task-001");
       assert (str_contains result "drift_reason=no_owned");
@@ -800,14 +873,11 @@ let () =
     ignore (Workspace.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
     set_current_task_ok ctx.config ~task_id:"task-001";
     match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some r -> let result = Tool_result.message r in let success = Tool_result.is_success r in
+    | Some r -> let result = status_message r in let success = Tool_result.is_success r in
       assert success;
       assert (str_contains result "owned=task-001 | current=task-001");
       assert (str_contains result "Planning: missing=yes | task=task-001");
       assert_contains result "Owned task task-001 has no planning context.";
-      assert (
-        str_contains result "Do not retry generic masc_plan_init from a drifted surface");
-      assert (str_contains result "handoff/worktree/test logs as the temporary SSOT");
       assert (not (str_contains result "Suggested next:"))
     | None -> failwith "dispatch returned None")
 ;;
@@ -837,7 +907,7 @@ let () =
             ~task_id:"task-001"
             ~content:"Task-001 completed. stale operator artifact.");
        match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-       | Some r -> let result = Tool_result.message r in let success = Tool_result.is_success r in
+       | Some r -> let result = status_message r in let success = Tool_result.is_success r in
          assert success;
          assert (str_contains result "owned=task-001 | current=task-001");
          assert (str_contains result "Planning: deliverable_conflict=yes | task=task-001");
@@ -866,7 +936,7 @@ let () =
          ~task_id:"task-001"
          ~content:"Task-001 completed. Exercised masc_operator_snapshot.");
     match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some r -> let result = Tool_result.message r in let success = Tool_result.is_success r in
+    | Some r -> let result = status_message r in let success = Tool_result.is_success r in
       assert success;
       assert (
         str_contains

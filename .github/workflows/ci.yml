@@ -881,6 +881,23 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_verification"
 
+      # Goal store durability: the suite drives a real workspace and asserts
+      # on-disk bytes, not source text — the read path stays lenient while a
+      # write over an undecodable store must be refused and must leave both
+      # goals.json and its .last-good mirror untouched. Compile-only under
+      # @check leaves that refusal ungated.
+      - name: Run goal store durability suite
+        id: goal_store_durability_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_goal_store"
+
       - name: Run tool blob retention suite
         id: tool_blob_retention_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}

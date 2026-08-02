@@ -27,12 +27,12 @@ let legacy_verifications_dir base_path =
   Filename.concat base_path "verifications"
 
 let rec rm_rf path =
-  if Sys.file_exists path then
-    if Sys.is_directory path then begin
-      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
-      Unix.rmdir path
-    end else
-      Sys.remove path
+  match Unix.lstat path with
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> ()
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+    Unix.rmdir path
+  | _ -> Sys.remove path
 
 (** Use a temporary directory for each test *)
 let with_temp_dir f =

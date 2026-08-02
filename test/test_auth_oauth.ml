@@ -690,7 +690,7 @@ let test_rotation_keeps_one_current_access_record () =
               check int "rotation retains one access record" 1 (count "access_tokens");
               check int "rotation retains one family SSOT" 1 (count "families");
               let family_file =
-                Sys.readdir (Filename.concat oauth_store "families").(0)
+                (Sys.readdir (Filename.concat oauth_store "families")).(0)
               in
               let family_json =
                 Filename.concat (Filename.concat oauth_store "families") family_file

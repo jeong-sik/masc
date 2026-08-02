@@ -117,6 +117,7 @@ let submitted_evidence_item_metadata_to_yojson = function
     `Assoc
       [ "kind", `String "note"
       ; "bytes", `Int (String.length note)
+      ; "content_sha256", `String (content_sha256 note)
       ]
   | Evidence_artifact { reference; bytes; truncated; content_sha256; _ } ->
     `Assoc

@@ -94,7 +94,8 @@ let review_notes
   let verdict =
     match result.Task.Anti_rationalization.verdict with
     | Some Task.Anti_rationalization.Approve -> `String "approve"
-    | Some (Task.Anti_rationalization.Reject _) -> `String "reject"
+    | Some (Task.Anti_rationalization.Reject reason) ->
+      `Assoc [ "kind", `String "reject"; "reason", `String reason ]
     | None -> `Null
   in
   let review =
@@ -117,6 +118,7 @@ let review_notes
              [ "id", `String request.id
              ; "task_id", `String request.task_id
              ; "worker", `String request.worker
+             ; "created_at", `Float request.created_at
              ; "criteria_count", `Int (List.length request.criteria)
              ] )
        ; ( "submitted_evidence_metadata"

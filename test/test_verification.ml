@@ -285,9 +285,23 @@ let test_system_llm_review_notes_are_metadata_only () =
     true
     (contains_substring notes "sha256-proof");
   Alcotest.(check bool)
+    "note hash remains observable"
+    true
+    (contains_substring
+       notes
+       (Digestif.SHA256.(digest_string "secret narrative must not be duplicated" |> to_hex)));
+  Alcotest.(check bool)
     "truncation remains observable"
     true
     (contains_substring notes "truncated");
+  Alcotest.(check bool)
+    "verification creation time remains observable"
+    true
+    (contains_substring notes "1234.5");
+  Alcotest.(check bool)
+    "rejection reason remains observable"
+    true
+    (contains_substring notes "insufficient proof");
   Alcotest.(check bool)
     "verification identity remains observable"
     true

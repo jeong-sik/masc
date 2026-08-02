@@ -242,7 +242,25 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
             match Planning_eio.set_current_task active_config ~task_id with
             | Error msg ->
               (* [Planning_eio.set_current_task] internal store failure. *)
-              Some (runtime_err_runtime ~tool_name ~start_time msg)
+              Some
+                (Tool_result.make_err
+                   ~tool_name
+                   ~class_:Tool_result.Runtime_failure
+                   ~start_time
+                   ~data:
+                     (`Assoc
+                       [ ("task_id", `String task_id)
+                       ; ("primary_result", `String add_result)
+                       ; ( "effect_disposition"
+                         , `String
+                             (Tool_result.failure_effect_disposition_to_string
+                                Tool_result.Proven_post_effect) )
+                       ; ("error", `String msg)
+                       ])
+                   (Printf.sprintf
+                      "masc_start created and claimed task %s, but setting it current failed: %s"
+                      task_id
+                      msg))
             | Ok () ->
                 Some
                   (runtime_ok ~tool_name ~start_time

@@ -403,22 +403,26 @@ let begin_shutdown ~base_path ~keeper_name ~operation_id =
 ;;
 
 let rollback_shutdown ~base_path ~keeper_name ~operation_id =
-  let slot = slot_for ~base_path ~keeper_name in
-  let result =
-    Stdlib.Mutex.protect slot.state_mu (fun () ->
-      match slot.shutdown_operation_id with
-      | None -> Shutdown_not_reserved
-      | Some existing
-        when Keeper_shutdown_types.Operation_id.equal existing operation_id ->
-        slot.shutdown_operation_id <- None;
-        Shutdown_rolled_back
-      | Some existing -> Shutdown_reserved_by_other existing)
-  in
-  (match result with
-   | Shutdown_rolled_back ->
-     notify_slot_transition slot Shutdown_rolled_back
-   | Shutdown_not_reserved | Shutdown_reserved_by_other _ -> ());
-  result
+  let base_path = Keeper_registry_types.canonical_base_path_exn base_path in
+  let key = Keeper_registry_types.registry_key ~base_path keeper_name in
+  match Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.find_opt slots key) with
+  | None -> Shutdown_not_reserved
+  | Some slot ->
+    let result =
+      Stdlib.Mutex.protect slot.state_mu (fun () ->
+        match slot.shutdown_operation_id with
+        | None -> Shutdown_not_reserved
+        | Some existing
+          when Keeper_shutdown_types.Operation_id.equal existing operation_id ->
+          slot.shutdown_operation_id <- None;
+          Shutdown_rolled_back
+        | Some existing -> Shutdown_reserved_by_other existing)
+    in
+    (match result with
+     | Shutdown_rolled_back ->
+       notify_slot_transition slot Shutdown_rolled_back
+     | Shutdown_not_reserved | Shutdown_reserved_by_other _ -> ());
+    result
 ;;
 
 let restore_shutdown ~base_path ~keeper_name ~operation_id =

@@ -225,6 +225,8 @@ val rollback_shutdown :
   keeper_name:string ->
   operation_id:Keeper_shutdown_types.Operation_id.t ->
   rollback_shutdown_result
+(** An owner with no existing admission slot returns [Shutdown_not_reserved]
+    without allocating a slot. *)
 
 (** Restore the admission owner from a durable non-terminal shutdown record
     before boot recovery or same-name registration starts. The operation id is

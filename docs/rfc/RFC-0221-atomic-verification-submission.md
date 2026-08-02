@@ -48,11 +48,12 @@ record's role differs per transition:
   So the record must exist before the outcome is observable. Order: write record
   → commit status. Guarantee wanted: `AwaitingVerification ⟹ record exists`.
 - **Approve / Reject.** The outcome (`Done` / `InProgress`) **does not require
-  the record** — the verdict is already in `task_status` (`decide` writes
-  `Done { notes = "Approved by <authority> (vrf:<id>)" }`). The record is audit
-  (verdict history, dashboard attribution). Order: commit status → write record
-  verdict best-effort. A record-write failure can neither block nor contradict
-  the committed outcome.
+  the record** — the lifecycle result is already in `task_status`; an approval
+  preserves the caller's human-readable notes in `Done`, while authority kind,
+  actor, verdict, and verification ID are emitted as structured audit fields.
+  The record supplies verdict history and dashboard attribution. Order: commit
+  status → write record verdict best-effort. A record-write failure can neither
+  block nor contradict the committed outcome.
 
 This asymmetry is principled, not incidental: the outcome's *dependency on the
 record* points the commit order. It yields atomicity-of-outcome without a

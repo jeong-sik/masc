@@ -42,7 +42,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 
 ## RFC 목록
 
-데이터 수집 시점: 2026-05-12. `Last activity` 는 해당 RFC 디렉토리 파일의 마지막 git commit. Status 컬럼은 명시적 closeout commit 이 있는 RFC 만 Implemented 로 표기한다 — RFC body 머지는 spec implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
+데이터 수집 시점: 2026-08-02. `Last activity` 는 해당 RFC 디렉토리 파일의 마지막 git commit. Status 컬럼은 명시적 closeout commit 이 있는 RFC 만 Implemented 로 표기한다 — RFC body 머지는 spec implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 
 | # | Title | Status | Last activity | Sub-docs |
 |---|---|---|---|---|

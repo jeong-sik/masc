@@ -191,12 +191,24 @@ let submitted_evidence_item_metadata_to_yojson = function
       ; "content_sha256", `String content_sha256
       ]
   | Evidence_artifact_unreadable { reference; reason } ->
-    `Assoc
-      [ "kind", `String "artifact_unreadable"
-      ; "reference", `String reference
-      ; ( "reason"
-        , `String (evidence_read_failure_code reason) )
-      ]
+    (match reason with
+     | Evidence_invalid_reference ->
+       `Assoc
+         [ "kind", `String "artifact_unreadable"
+         ; "reason", `String (evidence_read_failure_code reason)
+         ]
+     | ( Evidence_missing
+       | Evidence_not_regular_file
+       | Evidence_outside_worker_playground
+       | Evidence_invalid_utf8
+       | Evidence_symbolic_link
+       | Evidence_changed_during_read
+       | Evidence_read_error _ ) ->
+       `Assoc
+         [ "kind", `String "artifact_unreadable"
+         ; "reference", `String reference
+         ; "reason", `String (evidence_read_failure_code reason)
+         ])
 ;;
 
 let submitted_evidence_access_metadata_to_yojson = function

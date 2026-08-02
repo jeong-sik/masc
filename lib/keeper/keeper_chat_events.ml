@@ -11,6 +11,7 @@ type stream_protocol_error_kind =
   | Media_payload_too_large
   | Media_persist_failed
   | Sse_error
+  | Ndjson_error
   | Sse_parse_failed
   | Ndjson_parse_failed
   | Sse_unknown_event_type
@@ -124,6 +125,7 @@ let stream_protocol_error_kind_to_string = function
   | Media_payload_too_large -> "media_payload_too_large"
   | Media_persist_failed -> "media_persist_failed"
   | Sse_error -> "sse_error"
+  | Ndjson_error -> "ndjson_error"
   | Sse_parse_failed -> "sse_parse_failed"
   | Ndjson_parse_failed -> "ndjson_parse_failed"
   | Sse_unknown_event_type -> "sse_unknown_event_type"

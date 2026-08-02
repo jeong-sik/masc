@@ -112,6 +112,48 @@ let submitted_evidence_access_to_yojson = function
       ]
 ;;
 
+let submitted_evidence_item_metadata_to_yojson = function
+  | Evidence_note note ->
+    `Assoc
+      [ "kind", `String "note"
+      ; "bytes", `Int (String.length note)
+      ]
+  | Evidence_artifact { reference; bytes; truncated; content_sha256; _ } ->
+    `Assoc
+      [ "kind", `String "artifact"
+      ; "reference", `String reference
+      ; "bytes", `Int bytes
+      ; "truncated", `Bool truncated
+      ; "content_sha256", `String content_sha256
+      ]
+  | Evidence_artifact_unreadable { reference; reason } ->
+    `Assoc
+      [ "kind", `String "artifact_unreadable"
+      ; "reference", `String reference
+      ; ( "reason"
+        , `String (evidence_read_failure_to_string reason) )
+      ]
+;;
+
+let submitted_evidence_access_metadata_to_yojson = function
+  | Evidence_available { request; items } ->
+    `Assoc
+      [ "access", `String "available"
+      ; "request_id", `String request.id
+      ; "task_id", `String request.task_id
+      ; "worker", `String request.worker
+      ; "item_count", `Int (List.length items)
+      ; ( "items"
+        , `List (List.map submitted_evidence_item_metadata_to_yojson items) )
+      ]
+  | Evidence_unavailable { request_id; reason } ->
+    `Assoc
+      [ "access", `String "unavailable"
+      ; "request_id", `String request_id
+      ; "reason", `String reason
+      ]
+;;
+
 let submitted_evidence_item_of_yojson = function
   | `Assoc fields ->
     let string_field key =

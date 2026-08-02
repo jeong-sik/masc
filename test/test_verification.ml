@@ -216,6 +216,83 @@ let test_system_llm_authority_helpers_are_typed () =
     Alcotest.(check string) "typed rejection reason" "missing evidence" reason
   | Masc_domain.Verdict_approved -> Alcotest.fail "reject must remain a rejection"
 
+let test_system_llm_review_notes_are_metadata_only () =
+  let request : V.verification_request =
+    { id = "vrf-metadata-only"
+    ; task_id = "task-metadata-only"
+    ; output =
+        `Assoc [ "secret_output", `String "must not be duplicated" ]
+    ; criteria = [ V.Custom "secret criterion should stay in the audit store" ]
+    ; worker = "keeper-executor-agent"
+    ; created_at = 1234.5
+    }
+  in
+  let evidence_access : VS.submitted_evidence_access =
+    VS.Evidence_available
+      { request =
+          { id = request.id
+          ; task_id = request.task_id
+          ; worker = request.worker
+          ; created_at = request.created_at
+          }
+      ; items =
+          [ VS.Evidence_note "secret narrative must not be duplicated"
+          ; VS.Evidence_artifact
+              { reference = "artifact:proof.txt"
+              ; content = "secret artifact content must not be duplicated"
+              ; bytes = 42
+              ; truncated = true
+              ; content_sha256 = "sha256-proof"
+              }
+          ; VS.Evidence_artifact_unreadable
+              { reference = "artifact:missing.txt"; reason = VS.Evidence_missing }
+          ]
+      }
+  in
+  let result : Masc.Task.Anti_rationalization.review_result =
+    { verdict = Some (Masc.Task.Anti_rationalization.Reject "insufficient proof")
+    ; evaluator_runtime = "review-runtime"
+    ; generator_runtime = None
+    ; gate = Masc.Task.Anti_rationalization.Structured_tool
+    ; fallback_reason = None
+    }
+  in
+  let notes =
+    CA.For_testing.review_notes
+      ~request
+      ~evidence_access
+      ~result
+      ~authority:(Masc_domain.System_llm_agent { agent_run_id = "system-run" })
+  in
+  Alcotest.(check bool)
+    "artifact content is not duplicated into task notes"
+    false
+    (contains_substring notes "secret artifact content must not be duplicated");
+  Alcotest.(check bool)
+    "narrative content is not duplicated into task notes"
+    false
+    (contains_substring notes "secret narrative must not be duplicated");
+  Alcotest.(check bool)
+    "verification output is not duplicated into task notes"
+    false
+    (contains_substring notes "must not be duplicated");
+  Alcotest.(check bool)
+    "verification criteria are not duplicated into task notes"
+    false
+    (contains_substring notes "secret criterion should stay in the audit store");
+  Alcotest.(check bool)
+    "artifact hash remains observable"
+    true
+    (contains_substring notes "sha256-proof");
+  Alcotest.(check bool)
+    "truncation remains observable"
+    true
+    (contains_substring notes "truncated");
+  Alcotest.(check bool)
+    "verification identity remains observable"
+    true
+    (contains_substring notes "vrf-metadata-only")
+
 let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
   with_eio_temp_dir (fun base_path ->
     let config = W.default_config base_path in
@@ -1456,6 +1533,8 @@ let () =
     "completion_authority", [
       Alcotest.test_case "system LLM helpers keep typed facts" `Quick
         test_system_llm_authority_helpers_are_typed;
+      Alcotest.test_case "system LLM notes keep metadata only" `Quick
+        test_system_llm_review_notes_are_metadata_only;
       Alcotest.test_case "system LLM rejection reaches producer queue" `Quick
         test_system_llm_rejection_is_durably_delivered_to_producer_keeper;
       Alcotest.test_case "system LLM commits without Keeper verifier" `Quick

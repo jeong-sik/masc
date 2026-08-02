@@ -44,6 +44,10 @@ val request_header_of_yojson :
 
 val submitted_evidence_access_to_yojson :
   submitted_evidence_access -> Yojson.Safe.t
+
+val submitted_evidence_access_metadata_to_yojson :
+  submitted_evidence_access -> Yojson.Safe.t
+
 val evidence_read_failure_to_string : evidence_read_failure -> string
 val evidence_read_failure_of_owned_read_failure :
   Fs_compat.owned_regular_file_read_failure -> evidence_read_failure

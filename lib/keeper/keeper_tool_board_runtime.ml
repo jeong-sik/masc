@@ -109,20 +109,17 @@ let handle_keeper_board_tool_with_outcome
       let result =
         dispatch_board Tool_name.Board_name.Board_list (without_if_revision args)
       in
+      let revision =
+        Snapshot_protocol.revision_of_json
+          ~namespace:"board"
+          (`Assoc
+            [ "snapshot", `String result.raw_output
+            ; "args", without_if_revision args
+            ])
+      in
       (match result.disposition with
        | Tool_result.Failed _ -> result
        | Tool_result.Completed _ ->
-         let revision =
-           Snapshot_protocol.revision_of_json
-             ~namespace:"board"
-             (`Assoc
-               [ ( "cursor"
-                 , `String
-                     (Snapshot_protocol.revision_of_board_cursor
-                        (Board_dispatch.current_post_cursor ())) )
-               ; "args", without_if_revision args
-               ])
-         in
          Keeper_tool_execution.success_data
            (Snapshot_protocol.to_yojson
               (Snapshot_protocol.respond
@@ -130,17 +127,6 @@ let handle_keeper_board_tool_with_outcome
                  ~if_revision
                  (`String result.raw_output)))
        | Tool_result.Deferred _ ->
-         let revision =
-           Snapshot_protocol.revision_of_json
-             ~namespace:"board"
-             (`Assoc
-               [ ( "cursor"
-                 , `String
-                     (Snapshot_protocol.revision_of_board_cursor
-                        (Board_dispatch.current_post_cursor ())) )
-               ; "args", without_if_revision args
-               ])
-         in
          Keeper_tool_execution.deferred_data
            (Snapshot_protocol.to_yojson
               (Snapshot_protocol.respond

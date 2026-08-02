@@ -300,6 +300,12 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
     ()
 ;;
 
+let admit_confined request =
+  let source = Confined_sandbox in
+  audit_allow request source;
+  Allow { source }
+;;
+
 let submit request =
   Keeper_approval_queue.submit_pending
     ~keeper_name:request.keeper_name

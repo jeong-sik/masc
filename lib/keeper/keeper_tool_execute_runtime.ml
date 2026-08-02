@@ -353,7 +353,7 @@ let handle_tool_execute_typed
             (* The target is already a digest-pinned, network-none Docker sandbox whose
                path proof passed. Do not create a durable approval row for this
                local effect; the closed effect type is the authority. *)
-            Keeper_gate.Allow { source = Keeper_gate.Confined_sandbox }
+            Keeper_gate.admit_confined gate_request
           | Keeper_execution_effect.External ->
             Keeper_gate.decide
               ?cycle_grant:gate_grant

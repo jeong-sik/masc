@@ -50,6 +50,11 @@ type decision =
       }
   | Unavailable of unavailable_reason
 
+val admit_confined : request -> decision
+(** Admit an effect whose typed execution classification has already proven
+    confinement. This path never creates an approval row, but it records the
+    same [gate_allowed] audit evidence as every other authorization source. *)
+
 type auto_judge_completion_rejection =
   | Completion_not_found
   | Completion_key_mismatch

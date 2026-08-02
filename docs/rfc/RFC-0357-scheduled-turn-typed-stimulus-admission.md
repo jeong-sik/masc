@@ -52,7 +52,7 @@ should_run =
 
 ### 3.2 Level이 아니라 edge인 이유
 
-`claimable_task_count > 0`·`failed_task_count > 0` 같은 **pool 수치(level)는 admission 입력에서 제외**한다 (모델에게 주는 관측으로는 유지). level로 admit하면 모델이 "할 일 아님"이라고 판단해도 pool이 비지 않는 한 30초마다 재소집된다 — 오늘의 낭비가 정확히 이 형태고, #26487(96개 고착 claimable)이 극단 사례다. `backlog_updated_since_last_scheduled_autonomous`는 이미 존재하는 durable edge다(`keeper_world_observation_inputs.ml:8` — `backlog.last_updated > proactive_rt.last_ts`): 백로그 **변화당 1턴**만 소집하고, 정적 백로그는 0턴이다.
+`claimable_task_count > 0`·`failed_task_count > 0` 같은 **pool 수치(level)는 admission 입력에서 제외**한다 (모델에게 주는 관측으로는 유지). level로 admit하면 모델이 "할 일 아님"이라고 판단해도 pool이 비지 않는 한 30초마다 재소집된다 — 오늘의 낭비가 정확히 이 형태고, #26487(96개 고착 claimable)이 극단 사례다. `backlog_updated_since_last_scheduled_autonomous`는 이미 존재하는 durable edge다(`lib/keeper/keeper_world_observation_inputs.ml:8` — `backlog.last_updated > proactive_rt.last_ts`): 백로그 **변화당 1턴**만 소집하고, 정적 백로그는 0턴이다.
 
 같은 파일의 self-authored-todo 제외(taskmaster가 자기가 만든 367개 태스크로 자기 루프를 돈 실증에 대한 수리)가 이 방향의 선례다: 신호는 수치가 아니라 사건이다.
 
@@ -60,16 +60,16 @@ should_run =
 
 1. **동률 붕괴**: stamp는 턴 시작, durable 변경은 턴 중이라 두 값이 구조적으로 가깝다. 초 단위 눈금에서 빠른 턴(claim 후 즉시 전이)의 변경이 stamp와 같은 눈금에 들어가면 엄격 `>`가 거짓 — 이 RFC가 지키려는 멀티턴 연속성이 정확히 빠른 턴에서 깨진다.
 2. **시계 역행**: NTP 보정으로 벽시계가 뒤로 가면 edge가 소실되거나 영구 생존한다.
-3. **저장소 선례**: board cursor는 float 단독이 아니라 타이브레이커를 동반하고(`board_core.mli:321` `float * string option`), event queue는 단조 int64 revision을 노출한다(`keeper_event_queue_state.mli:88`) — float 한 눈금이 유일하지 않음을 이 코드베이스가 이미 인정하고 해결했다.
+3. **저장소 선례**: board cursor는 float 단독이 아니라 타이브레이커를 동반하고(`lib/board/board_core.mli:321` `float * string option`), event queue는 단조 int64 revision을 노출한다(`lib/keeper_runtime/keeper_event_queue_state.mli:88`) — float 한 눈금이 유일하지 않음을 이 코드베이스가 이미 인정하고 해결했다.
 
 계약: **backlog 저장소는 커밋마다 단조 증가하는 int64 revision을 노출**하고(없으면 본 RFC 구현이 추가한다 — 벽시계 파생 금지), edge 판정은 `backlog_revision > last_consumed_revision`이다. 동률·해상도·역행 문제가 정의상 소멸한다. 기존 bool 필드명(`backlog_updated_since_last_scheduled_autonomous`)은 유지하되 계산이 revision 비교로 바뀐다. `proactive_rt.last_ts`는 텔레메트리로 존속하고, admission 소비 기록은 `last_consumed_backlog_revision`(int64)이 맡는다.
 
 ### 3.3 edge 소비 기록 — 시점과 주체의 재정의
 
-현재 시각 기반 기준점(last_ts)은 **턴 종료 시**, scheduled 턴뿐 아니라 **meaningful한 board/mention reactive 턴에서도** 기록된다(`keeper_unified_metrics_result.ml:111-117`). edge admission 하에서 두 성질이 각각 문제다:
+현재 시각 기반 기준점(last_ts)은 **턴 종료 시**, scheduled 턴뿐 아니라 **meaningful한 board/mention reactive 턴에서도** 기록된다(`lib/keeper/keeper_unified_metrics_result.ml:111-117`). edge admission 하에서 두 성질이 각각 문제다:
 
 1. **종료 기록**: 자기 턴 중의 durable 변경(claim·전이·진행 기록)이 소비 기준점보다 앞서게 되어 다음 턴을 재소집하지 못한다 — 멀티턴 작업의 연속성 단절.
-2. **reactive 겸용 기록**(`:114-115`): 메시지 응답 턴이 그 backlog를 처리했다는 보장 없이 backlog edge를 소비한다 — typed 신호의 침묵 소거.
+2. **reactive 겸용 기록**(`lib/keeper/keeper_unified_metrics_result.ml:114-115`): 메시지 응답 턴이 그 backlog를 처리했다는 보장 없이 backlog edge를 소비한다 — typed 신호의 침묵 소거.
 
 결정 두 가지:
 

@@ -1,6 +1,7 @@
 type enqueue_outcome =
   | Not_ready
   | No_keeper_target of { goal_id : string }
+  | Keeper_target_lookup_failed of { goal_id : string; detail : string }
   | Enqueued of { goal_id : string; keeper_name : string }
   | Already_present of { goal_id : string; keeper_name : string }
   | Enqueue_failed of { goal_id : string; keeper_name : string; detail : string }
@@ -94,30 +95,18 @@ let exact_producer_keeper_name ~config ~completing_agent_name =
 
 let target_keeper_name ~config ~completing_agent_name ~goal_id =
   match assigned_keeper_resolution ~config goal_id with
-  | Assigned_keeper keeper_name -> Some keeper_name
+  | Assigned_keeper keeper_name -> Ok (Some keeper_name)
   | Ambiguous_assigned_keepers keeper_names ->
-    Log.Keeper.error
-      "goal reconciliation has ambiguous active Goal assignment goal_id=%s keepers=%s"
-      goal_id
-      (String.concat "," keeper_names);
-    None
-  | Assigned_keeper_lookup_failed detail ->
-    Log.Keeper.error
-      "goal reconciliation Keeper assignment lookup failed goal_id=%s detail=%s"
-      goal_id
-      detail;
-    None
+    Error
+      (Printf.sprintf
+         "ambiguous active Goal assignment goal_id=%s keepers=%s"
+         goal_id
+         (String.concat "," keeper_names))
+  | Assigned_keeper_lookup_failed detail -> Error detail
   | No_assigned_keeper ->
     (match exact_producer_keeper_name ~config ~completing_agent_name with
-     | Ok (Some keeper_name) -> Some keeper_name
-     | Ok None -> None
-     | Error detail ->
-       Log.Keeper.error
-         "goal reconciliation producer identity lookup failed goal_id=%s producer=%s detail=%s"
-         goal_id
-         completing_agent_name
-         detail;
-       None)
+     | Ok keeper_name -> Ok keeper_name
+     | Error detail -> Error detail)
 
 let wake_keeper ~base_path keeper_name goal_id =
   match
@@ -150,7 +139,16 @@ let enqueue_ready ?(wake_if_present = false) ~config ~completing_agent_name
       ({ Masc_task_handlers.Task_goal_reconciliation.goal_id; triggering_task_id } as ready_fact)
   =
   match target_keeper_name ~config ~completing_agent_name ~goal_id with
-     | None ->
+     | Error detail ->
+       Log.Keeper.error
+         "goal reconciliation Keeper target lookup failed goal_id=%s \
+          triggering_task_id=%s completing_agent=%s detail=%s"
+         goal_id
+         triggering_task_id
+         completing_agent_name
+         detail;
+       Keeper_target_lookup_failed { goal_id; detail }
+     | Ok None ->
        Log.Keeper.warn
          "goal reconciliation ready but no unambiguous Keeper target goal_id=%s \
           triggering_task_id=%s completing_agent=%s"
@@ -158,7 +156,7 @@ let enqueue_ready ?(wake_if_present = false) ~config ~completing_agent_name
          triggering_task_id
          completing_agent_name;
        No_keeper_target { goal_id }
-     | Some keeper_name ->
+     | Ok (Some keeper_name) ->
        let ready : Keeper_event_queue.goal_reconciliation_ready =
          { gr_goal_id = ready_fact.goal_id
          ; gr_triggering_task_id = ready_fact.triggering_task_id
@@ -231,6 +229,8 @@ let reconcile_startup ~config =
          }
        | No_keeper_target _ ->
          { summary with unresolved_count = summary.unresolved_count + 1 }
+       | Keeper_target_lookup_failed _ ->
+         { summary with failed_count = summary.failed_count + 1 }
        | Enqueue_failed _ ->
          { summary with failed_count = summary.failed_count + 1 })
     { ready_count = List.length ready

@@ -770,10 +770,11 @@ let test_goal_reconciliation_prefers_authoritative_assignment
               "assigned Keeper owns reconciliation wake"
               assigned_meta.name
               keeper_name
-        | Masc.Keeper_goal_reconciliation_wake.No_keeper_target { goal_id } ->
+        | Masc.Keeper_goal_reconciliation_wake.Keeper_target_lookup_failed
+            { goal_id; detail = _ } ->
           if not corrupt_persisted_assignment
-          then fail "authoritative Goal assignment did not produce a durable wake"
-          else check string "incomplete scan leaves Goal visibly unresolved" goal.id goal_id
+          then fail "authoritative Goal assignment lookup unexpectedly failed"
+          else check string "incomplete scan remains a typed failure" goal.id goal_id
         | _ -> fail "authoritative Goal assignment did not produce a durable wake");
        check int "producer does not receive an assignment-owned wake" 0
          (registry_snapshot ~base_path:config.base_path producer_meta.name
@@ -783,6 +784,13 @@ let test_goal_reconciliation_prefers_authoritative_assignment
          check int "assigned Keeper does not receive a partial-scan wake" 0
            (registry_snapshot ~base_path:config.base_path assigned_meta.name
             |> Keeper_event_queue.length);
+       if corrupt_persisted_assignment
+       then (
+         let summary =
+           Masc.Keeper_goal_reconciliation_wake.reconcile_startup ~config
+         in
+         check int "assignment scan error is classified as failed" 1 summary.failed_count;
+         check int "assignment scan error is not unresolved" 0 summary.unresolved_count);
        let discovery =
          Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
            ~base_path:config.base_path

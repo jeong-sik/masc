@@ -1,6 +1,7 @@
 type enqueue_outcome =
   | Not_ready
   | No_keeper_target of { goal_id : string }
+  | Keeper_target_lookup_failed of { goal_id : string; detail : string }
   | Enqueued of { goal_id : string; keeper_name : string }
   | Already_present of { goal_id : string; keeper_name : string }
   | Enqueue_failed of { goal_id : string; keeper_name : string; detail : string }

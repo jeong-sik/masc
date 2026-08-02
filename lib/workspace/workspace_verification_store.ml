@@ -51,6 +51,16 @@ let evidence_read_failure_to_string = function
   | Evidence_changed_during_read -> "changed_during_read"
   | Evidence_read_error detail -> "read_error:" ^ detail
 
+let evidence_read_failure_code = function
+  | Evidence_missing -> "missing"
+  | Evidence_not_regular_file -> "not_regular_file"
+  | Evidence_outside_worker_playground -> "outside_worker_playground"
+  | Evidence_invalid_reference -> "invalid_reference"
+  | Evidence_invalid_utf8 -> "invalid_utf8"
+  | Evidence_symbolic_link -> "symbolic_link"
+  | Evidence_changed_during_read -> "changed_during_read"
+  | Evidence_read_error _ -> "read_error"
+
 let evidence_read_failure_of_string = function
   | "missing" -> Ok Evidence_missing
   | "not_regular_file" -> Ok Evidence_not_regular_file
@@ -132,7 +142,7 @@ let submitted_evidence_item_metadata_to_yojson = function
       [ "kind", `String "artifact_unreadable"
       ; "reference", `String reference
       ; ( "reason"
-        , `String (evidence_read_failure_to_string reason) )
+        , `String (evidence_read_failure_code reason) )
       ]
 ;;
 
@@ -148,11 +158,11 @@ let submitted_evidence_access_metadata_to_yojson = function
       ; ( "items"
         , `List (List.map submitted_evidence_item_metadata_to_yojson items) )
       ]
-  | Evidence_unavailable { request_id; reason } ->
+  | Evidence_unavailable { request_id; reason = _ } ->
     `Assoc
       [ "access", `String "unavailable"
       ; "request_id", `String request_id
-      ; "reason", `String reason
+      ; "reason", `String "unavailable"
       ]
 ;;
 

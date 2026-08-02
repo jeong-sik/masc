@@ -180,14 +180,24 @@ let ensure_dirs config =
 let default_state () =
   { version = 1; updated_at = Masc_domain.now_iso (); goals = [] }
 
-let read_state config =
+(* A store that exists but does not decode must not license a write.  The
+   read-modify-write paths below take the file lock, read, then overwrite BOTH
+   goals.json and its .last-good mirror — so a lenient empty fallback on the read
+   turns one undecodable row into permanent loss of every goal.  [load_state]
+   separates "no store yet" (legitimately empty) from "store present, undecodable"
+   so writers can refuse while readers keep the lenient behaviour. *)
+type load_outcome =
+  | Loaded of state
+  | Undecodable of string
+
+let load_state config : load_outcome =
   ensure_dirs config;
   let path = goals_path config in
   if Workspace_utils.path_exists config path then
     match Workspace_utils.read_json_result config path with
     | Ok json ->
         (match state_of_yojson json with
-         | Ok state -> state
+         | Ok state -> Loaded state
          | Error primary_msg ->
              let recovery = goals_recovery_path config in
              if Workspace_utils.path_exists config recovery then
@@ -198,22 +208,27 @@ let read_state config =
                         Log.Misc.warn
                           "goal_store: primary goals.json corrupt (%s), recovered from %s"
                           primary_msg recovery;
-                        state
+                        Loaded state
                     | Error recovery_msg ->
                         Log.Misc.error
                           "goal_store: both primary and recovery goals.json corrupt (primary: %s, recovery: %s)"
                           primary_msg recovery_msg;
-                        default_state ())
+                        Undecodable
+                          (Printf.sprintf
+                             "primary: %s; recovery: %s" primary_msg recovery_msg))
                | Error recovery_read_msg ->
                    Log.Misc.warn
                      "goal_store: goals.json corrupt (%s), recovery read failed: %s"
                      primary_msg recovery_read_msg;
-                   default_state ()
+                   Undecodable
+                     (Printf.sprintf
+                        "primary: %s; recovery unreadable: %s"
+                        primary_msg recovery_read_msg)
              else
                (Log.Misc.warn
                   "goal_store: goals.json corrupt (%s), no .last-good available"
                   primary_msg;
-                default_state ()))
+                Undecodable primary_msg))
     | Error primary_msg ->
         let recovery = goals_recovery_path config in
         if Workspace_utils.path_exists config recovery then
@@ -224,24 +239,43 @@ let read_state config =
                    Log.Misc.warn
                      "goal_store: primary goals.json unreadable (%s), recovered from %s"
                      primary_msg recovery;
-                   state
+                   Loaded state
                | Error recovery_msg ->
                    Log.Misc.error
                      "goal_store: primary unreadable (%s), recovery corrupt (%s)"
                      primary_msg recovery_msg;
-                   default_state ())
+                   Undecodable
+                     (Printf.sprintf
+                        "primary unreadable: %s; recovery: %s" primary_msg recovery_msg))
           | Error recovery_msg ->
               Log.Misc.error
                 "goal_store: primary unreadable (%s), recovery unreadable (%s)"
                 primary_msg recovery_msg;
-              default_state ()
+              Undecodable
+                (Printf.sprintf
+                   "primary unreadable: %s; recovery unreadable: %s"
+                   primary_msg recovery_msg)
         else
           (Log.Misc.warn
              "goal_store: goals.json unreadable (%s), no .last-good available"
              primary_msg;
-           default_state ())
+           Undecodable primary_msg)
   else
-    default_state ()
+    Loaded (default_state ())
+
+(* Read-only view: an undecodable store reads as empty, unchanged from before.
+   Only the locked write paths escalate it to an error. *)
+let read_state config =
+  match load_state config with
+  | Loaded state -> state
+  | Undecodable _ -> default_state ()
+
+let undecodable_store_error config detail =
+  Printf.sprintf
+    "goal_store: refusing to write over a store that did not decode (%s); reset or \
+     repair %s before writing"
+    detail
+    (goals_path config)
 
 let write_state_result config state =
   ensure_dirs config;
@@ -280,10 +314,12 @@ let replace_goal goals updated =
 let update_state config f =
   let lock_path = goals_path config in
   Workspace_utils.with_file_lock config lock_path (fun () ->
-      let state = read_state config in
-      let next_state = f state in
-      let* () = write_state_result config next_state in
-      Ok next_state)
+      match load_state config with
+      | Undecodable detail -> Error (undecodable_store_error config detail)
+      | Loaded state ->
+        let next_state = f state in
+        let* () = write_state_result config next_state in
+        Ok next_state)
 
 let get_goal config ~goal_id =
   read_state config |> fun state -> find_goal state.goals goal_id
@@ -291,7 +327,9 @@ let get_goal config ~goal_id =
 let update_goal config ~goal_id f =
   let lock_path = goals_path config in
   Workspace_utils.with_file_lock config lock_path (fun () ->
-      let state = read_state config in
+      match load_state config with
+      | Undecodable detail -> Error (undecodable_store_error config detail)
+      | Loaded state ->
       match find_goal state.goals goal_id with
       | None -> Error "goal not found"
       | Some goal ->
@@ -322,7 +360,10 @@ let delete_goal_error_to_string = function
 let delete_goal config ~goal_id =
   let deleted =
     Workspace_utils.with_file_lock config (goals_path config) (fun () ->
-      let state = read_state config in
+      match load_state config with
+      | Undecodable detail ->
+        Error (Persistence_failed (undecodable_store_error config detail))
+      | Loaded state ->
       if not (List.exists (fun goal -> String.equal goal.id goal_id) state.goals) then
         Error (Unknown_goal "Goal not found")
       else (

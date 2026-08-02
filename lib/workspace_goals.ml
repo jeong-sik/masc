@@ -225,21 +225,26 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
       ; "rollup", Goal_store.rollup_to_yojson rollup
       ]
 ;;
-let goal_upsert_lifecycle_field_present args =
+(* "Supplied" follows this module's optional-field convention: a missing key,
+   an explicit [null], and a blank string all count as not supplied — the same
+   three shapes the removed [parse_optional_goal_status] mapped to [Ok None].
+   Anything else is a lifecycle value the caller meant to set. *)
+let goal_upsert_lifecycle_field_supplied args =
   List.find_opt
     (fun field ->
       match Json_util.assoc_member_opt field args with
       | None | Some `Null -> false
+      | Some (`String raw) -> String.trim raw <> ""
       | Some _ -> true)
     [ "phase"; "status" ]
 ;;
 
 let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result.result =
-  (* Lifecycle fields are rejected on presence, before any value validation.
-     Validating the value first answered "in_progress" with the enum message
-     "allowed: active, paused, done, dropped", which sent the caller back with
-     a value this handler also rejects — two turns to reach one verdict. *)
-  match goal_upsert_lifecycle_field_present args with
+  (* Lifecycle fields are rejected as soon as they are supplied, before any value
+     validation. Validating the value first answered "in_progress" with the enum
+     message "allowed: active, paused, done, dropped", which sent the caller back
+     with a value this handler also rejects — two turns to reach one verdict. *)
+  match goal_upsert_lifecycle_field_supplied args with
   | Some field -> goal_upsert_lifecycle_error ~tool_name ~start_time field
   | None ->
   match parse_optional_priority args "priority" with

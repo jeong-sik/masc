@@ -40,6 +40,11 @@ let iso_now () = Masc_domain.now_iso ()
 let goals_recovery_path config =
   Goal_store.goals_path config ^ ".last-good"
 
+let contains_substring haystack needle =
+  let hl = String.length haystack and nl = String.length needle in
+  let rec scan i = i + nl <= hl && (String.sub haystack i nl = needle || scan (i + 1)) in
+  nl = 0 || scan 0
+
 let make_goal id title =
   let ts = iso_now () in
   {
@@ -193,10 +198,32 @@ let test_status_field_no_longer_decodes () =
               row ~id:"dual-conflict" ~phase:"paused" ~status:"done";
             ] );
       ]);
+  let on_disk_before = In_channel.with_open_bin (Goal_store.goals_path config)
+    In_channel.input_all
+  in
   let state = Goal_store.read_state config in
-  check int "store carrying the retired status field is rejected" 0
+  check int "read of a store carrying the retired status field is empty" 0
     (List.length state.goals);
-  (* The serializer never emits it either, so a converged store round-trips. *)
+  (* Fail-closed: the lenient empty read must not license a write.  Without this
+     the next upsert would overwrite goals.json AND its .last-good mirror with the
+     empty state, turning one undecodable row into permanent loss. *)
+  (match
+     Goal_store.upsert_goal config ~title:"phase only" ~phase:Goal_phase.Paused ()
+   with
+   | Ok _ -> fail "upsert_goal wrote over an undecodable store"
+   | Error msg ->
+       check bool "refusal names the store path" true
+         (contains_substring msg (Goal_store.goals_path config)));
+  let on_disk_after = In_channel.with_open_bin (Goal_store.goals_path config)
+    In_channel.input_all
+  in
+  check string "undecodable store is left byte-identical on disk" on_disk_before
+    on_disk_after;
+  check bool "no recovery mirror was written over it" false
+    (Sys.file_exists (goals_recovery_path config))
+
+let test_serializer_omits_status () =
+  with_workspace @@ fun config ->
   match
     Goal_store.upsert_goal config ~title:"phase only" ~phase:Goal_phase.Paused ()
   with
@@ -349,6 +376,8 @@ let () =
             test_delete_goal_wraps_prune_failure_after_goal_delete;
           test_case "status field no longer decodes" `Quick
             test_status_field_no_longer_decodes;
+          test_case "serializer omits status" `Quick
+            test_serializer_omits_status;
           test_case "phase-less row no longer decodes" `Quick
             test_phaseless_row_no_longer_decodes;
           test_case "blocked phase serializes without status" `Quick

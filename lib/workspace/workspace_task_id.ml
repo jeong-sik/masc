@@ -63,8 +63,8 @@ let append_archive_tasks config (tasks : task list) =
       ] in
       write_json config arch_path archive_json)
 
-(** RFC-0220 self-healing: read the archive and return every task whose status
-    is non-terminal.  A non-terminal task in the archive is an obligation a
+(** Read the archive and return every task whose status is non-terminal. A
+    non-terminal task in the archive is an obligation a
     prior buggy GC pass stranded (masc_transition and dashboard verification
     read only the live backlog); the GC restore path splices these back into
     the backlog.  Read-only — the caller rewrites the live backlog first, then

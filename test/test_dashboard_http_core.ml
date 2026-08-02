@@ -1265,7 +1265,7 @@ let test_dashboard_shell_timeout_fallback_reports_timing_context () =
       check int "timing top is empty without an active trace" 0
         (diagnostics |> member "projection_timing_top" |> to_list |> List.length))
 
-let test_dashboard_proof_http_json_surfaces_verification_index () =
+let test_dashboard_proof_http_json_surfaces_submission_index () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let module V = Lib.Verification in
   let output =
@@ -1289,13 +1289,15 @@ let test_dashboard_proof_http_json_surfaces_verification_index () =
   let json =
     Server_dashboard_http.dashboard_proof_http_json
       ~config
-      (request "/api/v1/dashboard/proof?limit=5&recent=2")
+      (request "/api/v1/dashboard/proof?limit=5")
   in
   let open Yojson.Safe.Util in
   check int "verification total" 1
     (json |> member "summary" |> member "verification_total" |> to_int);
-  check int "pending total" 1
-    (json |> member "summary" |> member "verification_pending" |> to_int);
+  check bool "request status is not synthesized from immutable submissions" true
+    (json |> member "summary" |> member "verification_pending" = `Null);
+  check bool "rejection status is not synthesized from immutable submissions" true
+    (json |> member "summary" |> member "verification_rejected" = `Null);
   check bool "verification requests exposed" true
     (match json |> member "verification" |> member "requests" |> member "requests" with
      | `List [ _ ] -> true
@@ -1937,7 +1939,7 @@ let test_offline_keeper_composite_exposes_secret_projection () =
       Masc_test_deps.meta_of_json_fixture
         (`Assoc
            [ "name", `String keeper_name
-           ; "agent_name", `String keeper_name
+           ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name keeper_name)
            ; "trace_id", `String "offline-secret-trace"
            ])
     with
@@ -1983,7 +1985,7 @@ let keeper_state_diagram_meta ?last_runtime_attempt_provider name =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
          ([ "name", `String name
-          ; "agent_name", `String (name ^ "-agent")
+          ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name name)
           ; "trace_id", `String ("trace-" ^ name)
           ]
           @ runtime_attempt_fields))
@@ -2861,19 +2863,42 @@ let test_config_post_restarts_from_atomic_toml () =
      | None -> false);
   ignore (Masc.Keeper_keepalive.stop_keepalive_and_await ~base_path:config.base_path name)
 
-let test_config_post_requires_toml () =
+let test_config_post_materializes_missing_toml () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-no-toml" in
   prepare_config_sync_keeper config name;
-  let raw, json =
-    post_config ~sw ~clock:(Eio.Stdenv.clock env)
-      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-      ~name {|{"proactive_enabled":true}|}
-  in
-  check bool "HTTP 409" true (String.starts_with ~prefix:"HTTP/1.1 409" raw);
-  let open Yojson.Safe.Util in
-  check bool "config not applied" false (json |> member "config_applied" |> to_bool);
-  check bool "runtime not synced" false (json |> member "runtime_sync" |> to_bool)
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Masc.Keeper_keepalive.stop_keepalive_and_await
+           ~base_path:config.base_path
+           name))
+    (fun () ->
+      let raw, json =
+        post_config ~sw ~clock:(Eio.Stdenv.clock env)
+          ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+          ~name {|{"proactive_enabled":true}|}
+      in
+      check bool "HTTP 200" true (String.starts_with ~prefix:"HTTP/1.1 200" raw);
+      let open Yojson.Safe.Util in
+      check bool "runtime projection applied proactive config" true
+        (json |> member "proactive" |> member "enabled" |> to_bool);
+      let path =
+        Config_dir_resolver.keepers_dir_for_base_path
+          ~base_path:config.Workspace.base_path
+        |> fun dir -> Filename.concat dir (name ^ ".toml")
+      in
+      check bool "missing declarative TOML was materialized" true
+        (Sys.file_exists path);
+      let parsed =
+        Keeper_toml_loader.parse_toml
+          (In_channel.with_open_bin path In_channel.input_all)
+      in
+      match parsed with
+      | Error error -> fail error
+      | Ok doc ->
+        check (option bool) "materialized proactive config" (Some true)
+          (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled"))
 
 let test_config_post_reports_runtime_sync_failure () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -2962,8 +2987,6 @@ let () =
             test_operator_digest_default_route_exposes_provenance;
           test_case "shell timeout fallback reports timing context" `Quick
             test_dashboard_shell_timeout_fallback_reports_timing_context;
-          test_case "proof payload exposes verification index" `Quick
-            test_dashboard_proof_http_json_surfaces_verification_index;
           test_case "proof route registered in HTTP routers" `Quick
             test_dashboard_proof_route_registered_in_http_routers;
           test_case "Gate mode save reports recovery independently" `Quick
@@ -3016,10 +3039,6 @@ let () =
             test_telemetry_n_default_is_bounded;
           test_case "fleet-composite envelope is cached across polls" `Quick
             test_dashboard_fleet_composite_envelope_is_cached;
-          test_case "offline keeper composite exposes secret projection" `Quick
-            test_offline_keeper_composite_exposes_secret_projection;
-          test_case "state diagram runtime projection redacts live evidence" `Quick
-            test_state_diagram_runtime_projection_redacts_live_runtime_evidence;
           test_case "state diagram runtime projection stays empty without meta" `Quick
             test_state_diagram_runtime_projection_missing_meta_stays_empty;
           test_case "keeper catch-up judge route is classified" `Quick
@@ -3034,6 +3053,16 @@ let () =
             test_event_operator_uses_exact_source_refs_across_unrelated_enqueues;
           test_case "observation metadata does not override terminal contract" `Quick
             test_composite_blocked_uses_terminal_contract_not_observational_metadata;
+        ] );
+      ( "dashboard behavior contracts",
+        [ test_case "proof payload exposes submission index" `Quick
+            test_dashboard_proof_http_json_surfaces_submission_index;
+          test_case "offline keeper composite exposes secret projection" `Quick
+            test_offline_keeper_composite_exposes_secret_projection;
+          test_case "state diagram runtime projection redacts live evidence" `Quick
+            test_state_diagram_runtime_projection_redacts_live_runtime_evidence;
+          test_case "activation config materializes missing TOML" `Quick
+            test_config_post_materializes_missing_toml;
         ] );
       ( "lifecycle event classification (#22071)",
         [ test_case "typed wire lifecycle round-trips" `Quick
@@ -3060,8 +3089,6 @@ let () =
             test_context_shrink_detection;
           test_case "config POST atomically restarts runtime" `Quick
             test_config_post_restarts_from_atomic_toml;
-          test_case "activation config requires TOML" `Quick
-            test_config_post_requires_toml;
           test_case "runtime sync failure preserves commit" `Quick
             test_config_post_reports_runtime_sync_failure;
           test_case "mixed invalid request commits nothing" `Quick

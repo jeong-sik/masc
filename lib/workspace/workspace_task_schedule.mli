@@ -7,8 +7,8 @@ include module type of Workspace_state
 val task_status_label : Masc_domain.task_status -> string
 val task_is_claim_pool_candidate : Masc_domain.task -> bool
 
-(* RFC-0220 §3.2: claim-pool verification gate functions removed
-   (verification no longer gates the claim pool). *)
+(* Verification-record state does not gate the claim pool. Persisted task
+   status is the scheduling authority. *)
 
 val underscore_name : string -> string
 val hyphen_name : string -> string
@@ -76,4 +76,3 @@ val claim_next_r
            Default [false] preserves the hard scope. *)
   -> unit
   -> Masc_domain.claim_next_result
-

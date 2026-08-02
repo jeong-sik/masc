@@ -910,6 +910,23 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_goal_store"
 
+      # Keeper registry hardening: identity resolution and goal-reconciliation
+      # routing are executable behavior — the suite drives a real workspace and
+      # asserts which Keeper a durable stimulus is addressed to, never source
+      # text. It is the only suite covering
+      # [Keeper_goal_reconciliation_wake], so that routing stays ungated under
+      # @check.
+      - name: Run keeper registry hardening suite
+        id: keeper_registry_hardening_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_registry_hardening"
       - name: Run tool blob retention suite
         id: tool_blob_retention_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}

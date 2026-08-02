@@ -1,6 +1,7 @@
 type enqueue_outcome =
   | Not_ready
   | No_keeper_target of { goal_id : string }
+  | Keeper_target_lookup_failed of { goal_id : string; detail : string }
   | Enqueued of { goal_id : string; keeper_name : string }
   | Already_present of { goal_id : string; keeper_name : string }
   | Enqueue_failed of { goal_id : string; keeper_name : string; detail : string }
@@ -20,8 +21,10 @@ val enqueue_if_ready :
   enqueue_outcome
 (** Re-read canonical Goal/Task state after a terminal Task commit, durably
     enqueue one typed reconciliation stimulus, then wake its Keeper. The
-    completing Keeper is preferred; an external completion may target the sole
-    durable Keeper whose [active_goal_ids] contains the Goal. The function
+    registered or persisted Keeper assignment whose [active_goal_ids] contains
+    the Goal is authoritative. When no unambiguous assignment exists, an
+    exact live or persisted [agent_name] binding may identify the producer;
+    identity strings are never parsed to invent a Keeper name. The function
     never mutates Goal phase. *)
 
 val reconcile_startup :

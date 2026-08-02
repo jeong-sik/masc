@@ -183,10 +183,18 @@ let commit_operator_verdict ~config ~operator_id request =
           detail
       | Completion_authority_wakeup.Unroutable_producer { producer; task_id } ->
         Log.Server.error
-          "operator completion rejection has no canonical Keeper producer task_id=%s producer=%s verification_id=%s"
+          "operator completion rejection has no registered or persisted Keeper producer binding task_id=%s producer=%s verification_id=%s"
           task_id
           producer
           verification_id
+      | Completion_authority_wakeup.Producer_identity_lookup_failed
+          { producer; task_id; detail } ->
+        Log.Server.error
+          "operator completion rejection producer identity lookup failed task_id=%s producer=%s verification_id=%s detail=%s"
+          task_id
+          producer
+          verification_id
+          detail
       | Completion_authority_wakeup.Durable_queue_failed { keeper_name; detail } ->
         Log.Server.error
           "operator completion rejection durable queue failed task_id=%s verification_id=%s keeper=%s detail=%s"

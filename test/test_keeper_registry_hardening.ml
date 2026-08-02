@@ -27,7 +27,6 @@ let make_meta name =
       (`Assoc
         [
           ("name", `String name);
-          ("agent_name", `String ("agent-" ^ name));
           ("trace_id", `String ("trace-" ^ name));
           ("allowed_paths", `List [ `String "*" ]);
           ("autoboot_enabled", `Bool false);
@@ -50,6 +49,13 @@ let make_goal_reconciler_meta () =
   with
   | Ok meta -> meta
   | Error detail -> failwith ("goal reconciler meta failed: " ^ detail)
+;;
+
+let write_text_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
 ;;
 
 let register name =
@@ -666,6 +672,151 @@ let test_goal_reconciliation_enqueues_once_after_last_terminal_task () =
        | None -> fail "Goal disappeared")
 ;;
 
+let test_goal_reconciliation_prefers_authoritative_assignment
+      ?(assigned_paused = false)
+      ?(corrupt_persisted_assignment = false)
+      () =
+  let dir = temp_dir "registry_goal_reconciliation_assignment" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.For_testing.clear ();
+      cleanup_dir dir)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       KR.For_testing.clear ();
+       let config = Masc.Workspace.default_config dir in
+       let completing_agent_name = "keeper-executor-agent-agent" in
+       ignore (Masc.Workspace.init config ~agent_name:(Some completing_agent_name));
+       let producer_meta =
+         { (make_meta "producer") with agent_name = completing_agent_name }
+       in
+       let goal, _ =
+         match
+           Goal_store.upsert_goal
+             config
+             ~id:"goal-reconciliation-assignment"
+             ~title:"Use the assigned Keeper"
+             ()
+         with
+         | Ok result -> result
+         | Error detail -> fail detail
+       in
+       ignore
+         (Workspace_task.add_task
+            ~goal_id:goal.id
+            config
+            ~title:"first assigned task"
+            ~priority:2
+            ~description:"first linked task");
+       ignore
+         (Workspace_task.add_task
+            ~goal_id:goal.id
+            config
+            ~title:"second assigned task"
+            ~priority:2
+            ~description:"second linked task");
+       let transition task_id action =
+         match
+           Masc.Workspace.transition_task_r
+             config
+             ~agent_name:completing_agent_name
+             ~task_id
+             ~action
+             ()
+         with
+         | Ok _ -> ()
+         | Error error -> fail (Masc_domain.masc_error_to_string error)
+       in
+       let finish task_id =
+         transition task_id Masc_domain.Claim;
+         transition task_id Masc_domain.Start;
+         transition task_id Masc_domain.Cancel
+       in
+       finish "task-001";
+       finish "task-002";
+       ignore
+         (KR.register_offline
+            ~base_path:config.base_path
+            producer_meta.name
+            producer_meta);
+       let assigned_meta =
+         { (make_goal_reconciler_meta ()) with
+           active_goal_ids = [ goal.id ]
+         ; paused = assigned_paused
+         }
+       in
+       ignore
+         (KR.register_offline
+            ~base_path:config.base_path
+            assigned_meta.name
+            assigned_meta);
+       if corrupt_persisted_assignment
+       then
+         write_text_file
+           (Masc.Keeper_types_profile.keeper_meta_path config "corrupt-assignment")
+           "{ malformed Keeper metadata";
+       (match
+          Masc.Keeper_goal_reconciliation_wake.enqueue_if_ready
+            ~config
+            ~completing_agent_name
+            ~task_id:"task-002"
+        with
+        | Masc.Keeper_goal_reconciliation_wake.Enqueued { keeper_name } ->
+          if corrupt_persisted_assignment
+          then fail "incomplete assignment scan was treated as routable"
+          else
+            check string
+              "assigned Keeper owns reconciliation wake"
+              assigned_meta.name
+              keeper_name
+        | Masc.Keeper_goal_reconciliation_wake.Keeper_target_lookup_failed
+            { goal_id; detail = _ } ->
+          if not corrupt_persisted_assignment
+          then fail "authoritative Goal assignment lookup unexpectedly failed"
+          else check string "incomplete scan remains a typed failure" goal.id goal_id
+        | _ -> fail "authoritative Goal assignment did not produce a durable wake");
+       check int "producer does not receive an assignment-owned wake" 0
+         (registry_snapshot ~base_path:config.base_path producer_meta.name
+          |> Keeper_event_queue.length);
+       if corrupt_persisted_assignment
+       then
+         check int "assigned Keeper does not receive a partial-scan wake" 0
+           (registry_snapshot ~base_path:config.base_path assigned_meta.name
+            |> Keeper_event_queue.length);
+       if corrupt_persisted_assignment
+       then (
+         let summary =
+           Masc.Keeper_goal_reconciliation_wake.reconcile_startup ~config
+         in
+         check int "assignment scan error is classified as failed" 1 summary.failed_count;
+         check int "assignment scan error is not unresolved" 0 summary.unresolved_count);
+       let discovery =
+         Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
+           ~base_path:config.base_path
+       in
+       match discovery.read_error with
+       | Some detail -> fail detail
+       | None ->
+         check
+           (list string)
+           "only the assigned canonical Keeper receives the wake"
+           (if corrupt_persisted_assignment then [] else [ assigned_meta.name ])
+           discovery.keeper_names)
+;;
+
+let test_goal_reconciliation_keeps_paused_assignment_authoritative () =
+  test_goal_reconciliation_prefers_authoritative_assignment
+    ~assigned_paused:true
+    ()
+;;
+
+let test_goal_reconciliation_fails_closed_on_assignment_scan_error () =
+  test_goal_reconciliation_prefers_authoritative_assignment
+    ~corrupt_persisted_assignment:true
+    ()
+;;
+
 let test_goal_reconciliation_restart_scan_retries_missed_delivery () =
   let dir = temp_dir "registry_goal_reconciliation_restart" in
   let previous_hook = Atomic.get Workspace_hooks.task_terminal_committed_fn in
@@ -681,6 +832,7 @@ let test_goal_reconciliation_restart_scan_retries_missed_delivery () =
        let config = Masc.Workspace.default_config dir in
        let meta = make_goal_reconciler_meta () in
        ignore (Masc.Workspace.init config ~agent_name:(Some meta.agent_name));
+       ignore (KR.register_offline ~base_path:config.base_path meta.name meta);
        Atomic.set Workspace_hooks.task_terminal_committed_fn
          (fun _config ~agent_name:_ ~task_id:_ ->
             Workspace_hooks.Task_terminal_delivered);
@@ -1271,6 +1423,18 @@ let () =
             "goal reconciliation persists once after last terminal task"
             `Quick
             test_goal_reconciliation_enqueues_once_after_last_terminal_task
+        ; test_case
+            "goal reconciliation prefers authoritative assignment"
+            `Quick
+            test_goal_reconciliation_prefers_authoritative_assignment
+        ; test_case
+            "paused Goal assignment remains authoritative"
+            `Quick
+            test_goal_reconciliation_keeps_paused_assignment_authoritative
+        ; test_case
+            "Goal reconciliation fails closed on assignment scan error"
+            `Quick
+            test_goal_reconciliation_fails_closed_on_assignment_scan_error
         ; test_case
             "restart scan retries missed reconciliation exactly once"
             `Quick

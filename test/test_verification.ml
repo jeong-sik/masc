@@ -252,6 +252,10 @@ let test_system_llm_review_notes_are_metadata_only () =
                   VS.Evidence_read_error
                     "Unix.Unix_error(ENOENT, open, /private/producer/secret.txt)"
               }
+          ; VS.Evidence_artifact_unreadable
+              { reference = "/private/producer/invalid-reference.txt"
+              ; reason = VS.Evidence_invalid_reference
+              }
           ]
       }
   in
@@ -320,6 +324,14 @@ let test_system_llm_review_notes_are_metadata_only () =
     "stable read error code remains observable"
     true
     (contains_substring notes "read_error");
+  Alcotest.(check bool)
+    "invalid raw reference is not duplicated into task notes"
+    false
+    (contains_substring notes "/private/producer/invalid-reference.txt");
+  Alcotest.(check bool)
+    "stable invalid-reference code remains observable"
+    true
+    (contains_substring notes "invalid_reference");
   let unavailable_metadata =
     VS.submitted_evidence_access_metadata_to_yojson
       (VS.Evidence_unavailable

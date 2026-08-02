@@ -99,6 +99,12 @@ let submitted_evidence_item_to_yojson = function
       ; "truncated", `Bool truncated
       ; "content_sha256", `String content_sha256
       ]
+  | Evidence_artifact_unreadable
+      { reference = _; reason = Evidence_invalid_reference } ->
+    `Assoc
+      [ "kind", `String "artifact_unreadable"
+      ; "reason", `String (evidence_read_failure_code Evidence_invalid_reference)
+      ]
   | Evidence_artifact_unreadable { reference; reason } ->
     `Assoc
       [ "kind", `String "artifact_unreadable"

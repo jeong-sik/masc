@@ -1161,7 +1161,7 @@ let test_submit_snapshot_survives_mutation_deletion_and_authority_cwd () =
            | VS.Evidence_unavailable { request_id; reason } ->
              Alcotest.failf
                "persisted evidence snapshot unavailable: %s"
-               (VS.evidence_access_failure_to_string ~request_id reason)))
+               (VS.evidence_access_failure_to_string ~request_id reason))))
 
 let test_submit_snapshot_rejects_relative_traversal_and_symlink_escape () =
   with_eio_temp_dir (fun base_path ->

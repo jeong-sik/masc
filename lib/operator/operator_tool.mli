@@ -1,5 +1,5 @@
 
-(** Tool_operator — MCP tools for operator control plane
+(** Tool_operator — MCP tools for operator observation and intervention
     (snapshot / digest / action / confirm / judgment / surface
     audit).
 

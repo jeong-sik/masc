@@ -292,7 +292,7 @@ spawn 시 인자로 직접 설정하는 필드.
 Docker 사용 여부와 컨테이너 유지 방식은 서로 다른 결정이다.
 
 - `sandbox_profile`은 keeper config/meta에서 정해지는 boot-time policy다. `sandbox_profile=docker` keeper는 sandboxed tool 실행 시 Docker 경로를 사용한다. 이 값은 keeper LLM turn 자체를 Docker 안에서 돌린다는 뜻은 아니다.
-- 실제 컨테이너 route는 tool call 시점에 정해진다. `tool_execute`, `tool_search_files`, `tool_read_file`, `tool_edit_file`, `tool_write_file`처럼 sandboxed execution 또는 brokered GitHub access가 필요한 tool만 Docker/brokered 실행 경로를 탄다. board/task/goal 같은 control-plane tool은 서버 내부 상태 변경이라 컨테이너를 띄우지 않는다.
+- 실제 컨테이너 route는 tool call 시점에 정해진다. `tool_execute`, `tool_search_files`, `tool_read_file`, `tool_edit_file`, `tool_write_file`처럼 sandboxed execution 또는 brokered GitHub access가 필요한 tool만 Docker/brokered 실행 경로를 탄다. Board/Task/Goal처럼 서버가 직접 소유하는 상태 도구는 컨테이너를 띄우지 않는다.
 - managed container가 없으면 sandboxed tool call은 one-shot Docker container를 만들고 명령 종료 후 사라진다. 그래서 `docker ps`에 계속 보이는 컨테이너가 없어도 Docker가 사용 중일 수 있다.
 - `masc_keeper_sandbox_start`로 visible managed container를 미리 띄우면 이후 sandboxed tool call은 그 container/runtime에 붙을 수 있다. 디버깅, 연속 shell 작업, container 상태 관찰이 필요할 때 쓰는 운영 모드다.
 - `masc_keeper_sandbox_status`에서 `sandbox_profile=docker`, `effective_mode=oneshot_or_managed_inherit`, `container_count=0`이면 "Docker keeper지만 현재 prewarmed container는 없고, sandboxed tool call 때 one-shot Docker를 쓴다"는 뜻이다.
@@ -802,7 +802,7 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는
 
 Definitive source는 코드의 `canonical_keeper_toml_key_names` (`lib/keeper/keeper_types_profile.ml`)다.
 
-운영 기준 active config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리이고, 없으면 `<MASC_BASE_PATH>/.masc/config`다. `repo/config`는 체크인된 seed source이며 live root가 아니다. low-level resolver에는 추가 fallback이 있지만, 운영 기준은 `docs/BOOT-ENV-STATE-INVENTORY.md`를 따른다.
+운영 기준 active config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리이고, 없으면 `<MASC_BASE_PATH>/.masc/config`다. `repo/config`는 체크인된 seed source이며 live root가 아니다. 환경과 경로 계약은 `docs/ENV-CONTRACT.md`를 따른다.
 
 ### 8.2 Template 변경 반영
 
@@ -843,7 +843,6 @@ dir-local 실행에서 shared keeper 상태가 보이지 않는 것은 정상이
 
 | 문서 | 용도 |
 |------|------|
-| [BOOT-ENV-STATE-INVENTORY.md](./BOOT-ENV-STATE-INVENTORY.md) | boot / path / state / active config inventory |
 | [spec/00-glossary.md](./spec/00-glossary.md) | 용어 정의 |
 | [QUICK-START.md](./QUICK-START.md) | repo workspace collaboration 시작 경로 |
 | [SPEC-INDEX.md](./spec/SPEC-INDEX.md) + [01-system-overview.md](./spec/01-system-overview.md) | 아키텍처 SSOT |

@@ -752,8 +752,8 @@ let test_snapshot_has_expected_sections () =
         Yojson.Safe.Util.(root |> member "initialized" |> to_bool);
       Alcotest.(check bool) "project nonempty" true
         (String.trim Yojson.Safe.Util.(root |> member "project" |> to_string) <> "");
-      Alcotest.(check bool) "sessions present" true
-        (Yojson.Safe.Util.member "sessions" json <> `Null);
+      Alcotest.(check bool) "sessions absent" true
+        (Yojson.Safe.Util.member "sessions" json = `Null);
       Alcotest.(check bool) "keepers present" true
         (Yojson.Safe.Util.member "keepers" json <> `Null);
       Alcotest.(check bool) "recent_messages present" true
@@ -1188,8 +1188,6 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
    [Operator_control_snapshot_cache] API directly rather than the removed
    internal cache types. *)
 
-(* test_orchestra_workspace_core_shape removed (CP purge: Command_plane_orchestra deleted) *)
-
 let test_digest_workspace_exposes_pending_confirm_attention () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1307,9 +1305,6 @@ let test_operator_digest_severity_rank_supports_critical () =
   Alcotest.(check bool) "critical outranks bad" true
     (Operator_digest.severity_rank Sev_critical
     > Operator_digest.severity_rank Sev_bad)
-
-(* test_snapshot_and_digest_expose_role_runtime_census removed:
-   depended on team session start/update which is no longer available. *)
 
 let test_last_compaction_ago_s_removed_from_backend_serializers () =
   let root = Masc_test_deps.find_project_root () in

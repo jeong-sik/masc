@@ -8,7 +8,7 @@
     - per-stimulus consumption ([consume_single_heartbeat_stimulus]);
     - the top-level RFC-0020 §3 Rule 4 draining function
       ([heartbeat_event_intake]) that selects the earliest ready stimulus,
-      except for explicit owner-lane manual compaction. That control-plane
+      except for explicit owner-lane manual compaction. That runtime
       request preempts without removing or rewriting the current source. *)
 
 open Keeper_types
@@ -507,7 +507,7 @@ let heartbeat_event_intake
   =
   (* RFC-0020 §3 Rule 4 — select at most one new Event Layer stimulus per
      turn. Data-plane payloads share one lane order. Explicit manual compaction
-     is the sole control-plane exception: it can run after the current source
+     is the sole runtime exception: it can run after the current source
      checkpoints while that exact source stays pending for continuation. *)
   let base_path = ctx.config.base_path in
   let keeper_name = meta_after_triage.name in

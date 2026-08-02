@@ -33,7 +33,7 @@ let test_of_string_known () =
     (K.surface_status_of_string_opt "  OFFLINE " = Some K.Surface_offline)
 
 let test_of_string_outside_domain () =
-  (* "paused" is a control-plane override, not a surface_status; the rest are
+  (* "paused" is an operator override, not a surface_status; the rest are
      drift/garbage. All must parse to None. *)
   List.iter
     (fun s ->

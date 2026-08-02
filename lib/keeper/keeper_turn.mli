@@ -2,7 +2,7 @@
 
     Provides MCP tool handlers for keeper agent management:
     start/stop and message dispatch.
-    Internal helpers (team session dispatch, planner/executor spawn,
+    Internal helpers (planner/executor spawn,
     JSON serialization) are hidden.
 *)
 

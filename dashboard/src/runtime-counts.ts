@@ -46,7 +46,7 @@ export interface KeeperCountBreakdownInput {
   configuredKeepers: number
 }
 
-export type CommandTargetKind = 'agent' | 'keeper' | 'session'
+export type CommandTargetKind = 'agent' | 'keeper'
 
 interface ResolveRuntimeCountsOptions {
   executionLoaded: boolean
@@ -441,24 +441,19 @@ export function formatCommandTargetSection(kind: CommandTargetKind, count: numbe
       return `Mission agent targets (${normalized})`
     case 'keeper':
       return `Mission keeper targets (${normalized})`
-    case 'session':
-      return `Mission session targets (${normalized})`
   }
 }
 
 export function formatCommandTargetSummary({
   agents,
   keepers,
-  sessions,
 }: {
   agents: number
   keepers: number
-  sessions: number
 }): string {
   return [
     `명령 대상 에이전트 ${normalizeCount(agents)}`,
     `키퍼 ${normalizeCount(keepers)}`,
-    `세션 ${normalizeCount(sessions)}`,
   ].join(' / ')
 }
 

@@ -285,10 +285,9 @@ function CharacterPlate({ name }: { name: string }) {
           </div>
         ` : null}
 
-        ${keeperIdent || brief?.related_session_id ? html`
+        ${keeperIdent ? html`
           <div class="flex gap-3 flex-wrap text-sm text-[var(--color-fg-muted)]">
             ${keeperIdent ? html`<span>${keeperIdent}</span>` : null}
-            ${brief?.related_session_id ? html`<span>세션 ${brief.related_session_id}</span>` : null}
           </div>
         ` : null}
       </div>

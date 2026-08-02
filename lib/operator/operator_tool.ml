@@ -54,7 +54,7 @@ let task_recovery_tool_name =
 
    Failure: wrapped in a typed [Tool_args.error_assoc] envelope. Class is
    [Workflow_rejection] — the
-   operator control plane rejects caller-side input (unknown
+   operator surface rejects caller-side input (unknown
    action, target not found, schema violation). When
    [Operator_control] later distinguishes runtime / transient
    failures via a typed Error variant, the construction site here
@@ -82,7 +82,6 @@ let strict_action_enums =
     `String "broadcast";
     `String "namespace_pause";
     `String "namespace_resume";
-    `String "social_sweep";
     `String "task_inject";
     `String "keeper_message";
     `String "keeper_probe";
@@ -99,9 +98,9 @@ let snapshot_schema ~remote =
     name = "masc_operator_snapshot";
     description =
       if remote then
-        "Read the unified operator control-plane state. Use this when you need current namespace, keeper, message, and pending-confirm data before taking action."
+        "Read unified operator state. Use this when you need current workspace, keeper, message, and pending-confirm data before taking action."
       else
-        "Read unified operator state for the default namespace, keepers, recent messages, and pending confirmations. Use this before issuing control-plane actions.";
+        "Read unified operator state for the default workspace, keepers, recent messages, and pending confirmations before acting.";
     input_schema =
       `Assoc
         [
@@ -110,11 +109,7 @@ let snapshot_schema ~remote =
             schema_properties
               [
                 ("actor", `Assoc [ ("type", `String "string") ]);
-                (* Issue #8471: derive enum from Variant SSOT
-                   ([Operator_control_snapshot.valid_snapshot_view_strings]).
-                   Sessions was missing from the hand-written list before
-                   this fix; the parser accepted "sessions" but the
-                   schema rejected it. *)
+                (* Derive the enum from the typed snapshot-view SSOT. *)
                 ("view", `Assoc [ ("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) Operator_control_snapshot.valid_snapshot_view_strings)) ]);
                 ("include_messages", `Assoc [ ("type", `String "boolean") ]);
                 ("include_keepers", `Assoc [ ("type", `String "boolean") ]);
@@ -135,9 +130,9 @@ let digest_schema ~remote =
     name = "masc_operator_digest";
     description =
       if remote then
-        "Read an intervention-oriented operator digest. Use this when you need namespace health, attention items, command-plane search or microarch signals, worker summaries, and recommended next actions before deciding how to intervene."
+        "Read an intervention-oriented operator digest with workspace health, attention items, worker summaries, and recommended next actions."
       else
-        "Read a high-signal operator digest with intervention recommendations for the default namespace. Use this when raw snapshot data is too low-level for fast supervision and you want translated command-plane search or microarch signals.";
+        "Read a high-signal operator digest with intervention recommendations for the default workspace when raw snapshot data is too low-level.";
     input_schema =
       `Assoc
         [
@@ -332,9 +327,9 @@ let action_schema ~remote =
     name = "masc_operator_action";
     description =
       if remote then
-        "Preview or run a structured operator action. Use this when you need to broadcast, pause a namespace, or message a keeper through the remote operator surface. Use social_sweep for immediate public-square social processing."
+        "Preview or run a structured operator action. Use this when you need to broadcast, pause a namespace, inject work, or message a keeper through the remote operator surface."
       else
-        "Run a structured operator action against the namespace or a keeper. Use this when you need guided control with preview-confirm safety for disruptive actions. Use social_sweep for immediate public-square social processing.";
+        "Run a structured operator action against the namespace or a keeper. Use this when you need guided control with preview-confirm safety for disruptive actions.";
     input_schema =
       `Assoc
         [

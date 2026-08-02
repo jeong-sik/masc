@@ -8,7 +8,6 @@ type t =
   | Broadcast
   | Namespace_pause
   | Namespace_resume
-  | Social_sweep
   | Keeper_message
   | Keeper_probe
   | Keeper_recover
@@ -18,7 +17,6 @@ let to_string = function
   | Broadcast -> "broadcast"
   | Namespace_pause -> "namespace_pause"
   | Namespace_resume -> "namespace_resume"
-  | Social_sweep -> "social_sweep"
   | Keeper_message -> "keeper_message"
   | Keeper_probe -> "keeper_probe"
   | Keeper_recover -> Operator_action_constants.keeper_recover
@@ -29,7 +27,6 @@ let of_string = function
   | "broadcast" -> Some Broadcast
   | "namespace_pause" -> Some Namespace_pause
   | "namespace_resume" -> Some Namespace_resume
-  | "social_sweep" -> Some Social_sweep
   | "keeper_message" -> Some Keeper_message
   | "keeper_probe" -> Some Keeper_probe
   | action when String.equal action Operator_action_constants.keeper_recover ->
@@ -42,7 +39,6 @@ let all =
   [ Broadcast
   ; Namespace_pause
   ; Namespace_resume
-  ; Social_sweep
   ; Keeper_message
   ; Keeper_probe
   ; Keeper_recover

@@ -41,7 +41,7 @@ Morph의 agent framework 비교 글을 출발점으로 삼되, `masc`에 바로 
 
 ## Decision Summary
 
-1. `masc`는 orchestration/control plane으로 유지하고, single-agent runtime은 계속 OAS에 둔다.
+1. `masc`는 workspace coordination과 Keeper runtime을 소유하고, single-agent runtime은 계속 OAS에 둔다.
 2. 외부 비교에서 가장 먼저 가져올 패턴은 LangGraph류의 `checkpoint truth + replay discipline`이다.
 3. 두 번째는 Provider-D Agents SDK가 보여주는 `typed workflow surface + guardrail/eval-friendly tracing`이다.
 4. 세 번째는 Morph 글이 강조한 `framework보다 infra primitive가 중요하다`는 관점이다.
@@ -140,7 +140,6 @@ What to change:
 
 Primary landing:
 
-- `docs/COMMAND-PLANE-RUNBOOK.md`
 - `docs/design/contract-driven-agent-loop-rfc.md`
 - `docs/BENCHMARK-RUNBOOK.md`
 
@@ -204,7 +203,7 @@ Reason:
 
 - provider-native framework 전체를 `masc` core로 들여오지 않는다.
 - LangGraph를 orchestration engine으로 통째로 바꾸지 않는다.
-- CrewAI role-play abstraction을 keeper/team-session core로 채택하지 않는다.
+- CrewAI role-play abstraction을 Keeper core로 채택하지 않는다.
 - Smolagents식 code-exec-first runtime을 keeper default로 만들지 않는다.
 
 ## Evidence

@@ -518,17 +518,9 @@ let keepers_json
 
 let persistent_agents_json = Operator_control_snapshot_persistent_agents.persistent_agents_json
 
-let _snapshot_session_window_seconds () =
-  Dashboard_http_helpers.operator_snapshot_session_window_seconds ()
-;;
-
-let _snapshot_session_limit () = Dashboard_http_helpers.operator_snapshot_session_limit ()
-
 let _snapshot_recent_completed_limit () =
   Dashboard_http_helpers.operator_snapshot_recent_completed_limit ()
 ;;
-
-(* sessions_json removed — team session cleanup. Sessions always return []. *)
 
 let workspace_json = Operator_control_snapshot_workspace.workspace_json
 
@@ -536,7 +528,6 @@ let workspace_json = Operator_control_snapshot_workspace.workspace_json
    [Operator_control_snapshot_view] (godfile decomp). *)
 type snapshot_view = Operator_control_snapshot_view.snapshot_view =
   | Summary
-  | Sessions
   | Keepers
   | Messages
   | Full
@@ -588,7 +579,6 @@ let snapshot_json
     in
     let config = ctx.config in
     let initialized = Workspace.is_initialized config in
-    ignore (initialized, _snapshot_session_window_seconds (), _snapshot_session_limit ());
     let trace_id = trace_id "ops" in
     let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
     let view =
@@ -601,17 +591,15 @@ let snapshot_json
       &&
       match view with
       | Summary | Keepers | Full -> true
-      | Sessions | Messages -> false
+      | Messages -> false
     in
     let include_messages =
       include_messages
       &&
       match view with
       | Summary | Messages | Full -> true
-      | Sessions | Keepers -> false
+      | Keepers -> false
     in
-    (* Team sessions removed — status_cache and session digests no longer needed. *)
-    let status_cache : (string, Yojson.Safe.t) Hashtbl.t = Hashtbl.create 0 in
     let summary_fields =
       timed "summary_fields" (fun () ->
         if
@@ -620,7 +608,7 @@ let snapshot_json
           &&
           match view with
           | Summary | Full -> true
-          | Sessions | Keepers | Messages -> false
+          | Keepers | Messages -> false
         then (
           let workspace_attention =
             build_workspace_attention_items config |> List.sort compare_attention
@@ -659,50 +647,38 @@ in
          ; "workspace", workspace_json config
          ; "board_attention_quarantines", board_attention_quarantines
          ]
-         @ ((* Parallelize independent I/O: sessions, keepers, and persistent_agents. *)
-            let empty_section = `Assoc [ "count", `Int 0; "items", `List [] ] in
-            let sessions_ref = ref empty_section in
-            let keepers_ref = ref empty_section in
-            let persistent_ref = ref empty_section in
-            Eio.Fiber.all
-              [ (fun () ->
-                  (* Team sessions removed — always empty *)
-                  ignore (lightweight_summary, status_cache);
-                  sessions_ref := empty_section)
-              ; (fun () ->
-                  let keepers_json_value =
-                    timed "keepers_json" (fun () ->
-                      if initialized && include_keepers
-                      then
-                        keepers_json
-                          ~keeper_names
-                          ~lightweight:lightweight_summary
-                          ~include_recent_activity:(not lightweight_summary)
-                          config
-                      else empty_section)
+         @ (let empty_section = `Assoc [ "count", `Int 0; "items", `List [] ] in
+            let keepers_json_value =
+              timed "keepers_json" (fun () ->
+                if initialized && include_keepers
+                then
+                  keepers_json
+                    ~keeper_names
+                    ~lightweight:lightweight_summary
+                    ~include_recent_activity:(not lightweight_summary)
+                    config
+                else empty_section)
+            in
+            let persistent_agents_json_value =
+              timed "persistent_agents_json" (fun () ->
+                if initialized && include_keepers
+                then (
+                  let keeper_rows =
+                    match keepers_json_value with
+                    | `Assoc fields ->
+                      (match List.assoc_opt "items" fields with
+                       | Some (`List rows) -> rows
+                       | _ -> [])
+                    | _ -> []
                   in
-                  keepers_ref := keepers_json_value;
-                  persistent_ref
-                  := timed "persistent_agents_json" (fun () ->
-                       if initialized && include_keepers
-                       then (
-                         let keeper_rows =
-                           match keepers_json_value with
-                           | `Assoc fields ->
-                             (match List.assoc_opt "items" fields with
-                              | Some (`List rows) -> rows
-                              | _ -> [])
-                           | _ -> []
-                         in
-                         persistent_agents_json
-                           ~keeper_names:persistent_keeper_names
-                           ~keeper_rows
-                           config)
-                       else empty_section))
-              ];
-            [ "sessions", !sessions_ref
-            ; "keepers", !keepers_ref
-            ; "persistent_agents", !persistent_ref
+                  persistent_agents_json
+                    ~keeper_names:persistent_keeper_names
+                    ~keeper_rows
+                    config)
+                else empty_section)
+            in
+            [ "keepers", keepers_json_value
+            ; "persistent_agents", persistent_agents_json_value
             ])
          @ [ ( "recent_messages"
              , if initialized && include_messages && not lightweight_summary

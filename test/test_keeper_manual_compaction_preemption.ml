@@ -42,7 +42,7 @@ let test_post_tool_boundary_targets_manual_compaction () =
     (match summary.head with
      | Some selected ->
        check string
-         "yield names the control-plane source that runs next"
+         "yield names the runtime source that runs next"
          Q.manual_compaction_post_id
          selected.post_id
      | None -> fail "manual compaction yield lost its selected source");

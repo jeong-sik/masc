@@ -138,7 +138,6 @@ export function normalizeNamespaceTruth(raw: unknown): DashboardNamespaceTruthRe
   const root = isRecord(raw) ? raw : {}
   const namespaceBlock = isRecord(root.root) ? root.root : {}
   const executionBlock = isRecord(root.execution) ? root.execution : {}
-  const commandBlock = isRecord(root.command) ? root.command : {}
   const operatorBlock = isRecord(root.operator) ? root.operator : {}
   const retentionBlock = isRecord(root.retention) ? root.retention : null
   return {
@@ -154,7 +153,6 @@ export function normalizeNamespaceTruth(raw: unknown): DashboardNamespaceTruthRe
           workspace_path: asString(retentionBlock.workspace_path),
           shell_input: asString(retentionBlock.shell_input),
           execution_input: asString(retentionBlock.execution_input),
-          command_input: asString(retentionBlock.command_input),
           cache_policy: asString(retentionBlock.cache_policy),
         }
       : undefined,
@@ -176,14 +174,6 @@ export function normalizeNamespaceTruth(raw: unknown): DashboardNamespaceTruthRe
       summary: normalizeExecutionSummary(executionBlock.summary),
       top_queue: normalizeExecutionQueueItem(executionBlock.top_queue),
       provenance: asString(executionBlock.provenance) ?? null,
-    },
-    command: {
-      active_operations: asNumber(commandBlock.active_operations),
-      active_detachments: asNumber(commandBlock.active_detachments),
-      pending_approvals: asNumber(commandBlock.pending_approvals),
-      bad_alerts: asNumber(commandBlock.bad_alerts),
-      warn_alerts: asNumber(commandBlock.warn_alerts),
-      provenance: asString(commandBlock.provenance) ?? null,
     },
     operator: {
       pending_confirm_summary: normalizePendingConfirmSummary(operatorBlock.pending_confirm_summary),

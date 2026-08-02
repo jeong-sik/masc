@@ -207,45 +207,7 @@ let gc config ~days () =
    | Error e ->
        results := Printf.sprintf "Backend pubsub cleanup failed: %s" (Backend_types.show_error e) :: !results);
 
-  (* 4. Archive completed/interrupted team sessions older than N days *)
-  let session_archive_count = ref 0 in
-  let ts_root = Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "team-sessions" in
-  if Sys.file_exists ts_root && Sys.is_directory ts_root then begin
-    let archive_ts_dir = Filename.concat
-      (Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "archive") "team-sessions" in
-    Sys.readdir ts_root |> Array.iter (fun session_id ->
-        Workspace_query.safe_yield ();
-      let sdir = Filename.concat ts_root session_id in
-      if Sys.is_directory sdir then begin
-        let sjson = Filename.concat sdir "session.json" in
-        if Sys.file_exists sjson then
-          try
-            let json = read_json config sjson in
-            let status =
-              Json_util.get_string json "status"
-              |> Option.value ~default:"" in
-            let updated =
-              Json_util.get_string json "updated_at_iso"
-              |> Option.value ~default:"" in
-            if (status = "completed" || status = "interrupted" || status = "cancelled") && updated <> "" && updated < cutoff_iso then begin
-              mkdir_p archive_ts_dir;
-              let dest = Filename.concat archive_ts_dir session_id in
-              (try Unix.rename sdir dest
-               with Unix.Unix_error _ ->
-                 Log.Misc.error "failed to archive session %s" session_id);
-              incr session_archive_count
-            end
-          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-            Log.Gc.warn "session archive %s failed: %s" session_id (Printexc.to_string exn)
-      end
-    )
-  end;
-  if !session_archive_count > 0 then
-    results := Printf.sprintf "Archived %d completed/interrupted/cancelled team session(s)" !session_archive_count :: !results
-  else
-    results := "No team sessions to archive" :: !results;
-
-  (* 6. Hard-delete board artifacts (via hooks) *)
+  (* 4. Hard-delete board artifacts (via hooks) *)
   let board_artifact_count = (Atomic.get Workspace_hooks.cleanup_board_artifacts_fn) () in
   if board_artifact_count > 0 then
     results :=
@@ -261,9 +223,7 @@ let gc config ~days () =
     ("old_messages", `Int !old_msg_count);
     ("preserved", `Int !preserved_count);
     ("pubsub_cleaned", `Int !pubsub_cleanup_count);
-    ("sessions_archived", `Int !session_archive_count);
     ("board_artifacts", `Int board_artifact_count);
-    ("cp_cleanup", `Null);
     ("days", `Int days);
     ("ts", `String (now_iso ()));
   ]);

@@ -4,7 +4,6 @@
 import { get } from './core'
 import type {
   DashboardMissionResponse,
-  DashboardMissionSessionDetailResponse,
   DashboardMissionBriefingResponse,
   DashboardPlanningResponse,
 } from '../types'
@@ -15,14 +14,6 @@ export function fetchDashboardBriefing(): Promise<DashboardMissionResponse> {
 
 export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
   return fetchDashboardBriefing()
-}
-
-export function fetchDashboardMissionSession(
-  sessionId: string,
-  opts?: { signal?: AbortSignal },
-): Promise<DashboardMissionSessionDetailResponse> {
-  const query = `?session_id=${encodeURIComponent(sessionId)}`
-  return get(`/api/v1/dashboard/session${query}`, { signal: opts?.signal })
 }
 
 export function fetchDashboardMissionBriefing(

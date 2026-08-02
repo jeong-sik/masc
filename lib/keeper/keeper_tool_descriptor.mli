@@ -24,7 +24,7 @@ type sandbox =
 
 (** One explicit Keeper-model exposure choice per descriptor. Compatibility
     aliases remain routable at transport boundaries but never become a second
-    model-facing name. [Operator_only] keeps a control-plane descriptor
+    model-facing name. [Operator_only] keeps an operator descriptor
     available to trusted operator entrypoints without exposing it to the
     autonomous Keeper model. [Transport_alias] identifies a descriptor whose
     exact capability is already projected by another descriptor. *)

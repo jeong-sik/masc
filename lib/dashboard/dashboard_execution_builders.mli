@@ -1,9 +1,7 @@
 (** Dashboard_execution_builders — agent / keeper brief builders
     for the execution dashboard.
 
-    {b Runtime chain}: starts with
-    [include Dashboard_execution_sessions] (which itself includes
-    Dashboard_execution_helpers).
+    {b Runtime chain}: starts with [include Dashboard_execution_helpers].
     {!Dashboard_execution} does
     [include Dashboard_execution_builders] to make the four brief
     builders visible bare in the dashboard JSON dispatcher.
@@ -16,7 +14,7 @@
     constants" PR can reopen explicitly. *)
 
 include module type of struct
-  include Dashboard_execution_sessions
+  include Dashboard_execution_helpers
 end
 
 (** {1 Brief builders (runtime-visible)} *)
@@ -30,38 +28,34 @@ val task_assignee : Masc_domain.task -> string option
 
 val build_operation_contexts : tasks:Masc_domain.task list -> operation_context list
 (** [build_operation_contexts ~tasks] projects non-terminal tasks into
-    operation rows.  Task contracts provide operation/session links when
-    present; otherwise the task id is used as a stable operation id. *)
+    operation rows. Task contracts may provide an operation id; otherwise
+    the task id is used as the stable operation id. *)
 
 val build_worker_support_briefs :
   now_ts:float ->
   tasks:Masc_domain.task list ->
   agents:Masc_domain.agent list ->
   messages:Masc_domain.message list ->
-  session_context list ->
   worker_context list
-(** [build_worker_support_briefs ~now_ts ~tasks ~agents ~messages
-      session_contexts] returns one {!worker_context} per agent,
-    cross-referencing tasks, messages, and the resolved session
-    membership.  Used by {!Dashboard_execution}'s worker-support
+(** [build_worker_support_briefs ~now_ts ~tasks ~agents ~messages]
+    returns one {!worker_context} per agent, cross-referencing current tasks
+    and messages. Used by {!Dashboard_execution}'s worker-support
     section. *)
 
 val continuity_row_of_keeper :
   now_ts:float ->
-  ?related_session_id:string ->
   Yojson.Safe.t ->
   continuity_context
-(** [continuity_row_of_keeper ~now_ts ?related_session_id keeper] is the
+(** [continuity_row_of_keeper ~now_ts keeper] is the
     typed primitive shared by the full execution render and live keeper-row
-    reconciliation.  Callers provide the already-resolved session relation;
-    the primitive owns lifecycle, severity, and wire-field derivation. *)
+    reconciliation. The primitive owns lifecycle, severity, and wire-field
+    derivation. *)
 
 val build_continuity_briefs :
   now_ts:float ->
   Yojson.Safe.t list ->
-  session_context list ->
   continuity_context list
-(** [build_continuity_briefs ~now_ts keepers session_contexts]
+(** [build_continuity_briefs ~now_ts keepers]
     returns one {!continuity_context} per keeper, classifying its
     lifecycle / exec-state against the env-cached thresholds
     ([signal_stale_sec] / [signal_quiet_sec] / [signal_live_sec]

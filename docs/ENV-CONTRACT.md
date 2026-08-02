@@ -18,12 +18,10 @@ The core rule is simple:
   shell-level hot reload.
 - A running process only observes new env values when the process itself calls
   `Unix.putenv`, when an in-process boot override store is consulted, or when
-  the value is modeled as a separate runtime control plane such as
+  the value is modeled as separate runtime parameter state such as
   `Runtime_params`.
 
-Use this document together with
-[`BOOT-ENV-STATE-INVENTORY.md`](./BOOT-ENV-STATE-INVENTORY.md) and
-[`TOML-RELOAD-MATRIX.md`](./TOML-RELOAD-MATRIX.md).
+Use this document together with [`TOML-RELOAD-MATRIX.md`](./TOML-RELOAD-MATRIX.md).
 
 ## Reload Classes
 
@@ -75,7 +73,7 @@ Representative code paths:
 ### 2. Env-backed defaults that become runtime-dynamic through `Runtime_params`
 
 These env values still enter the system as boot inputs, but the effective
-operator control plane is `Runtime_params`, not the parent shell env.
+runtime parameter authority is `Runtime_params`, not the parent shell env.
 
 | Effective contract | Examples | Operator path |
 | --- | --- | --- |

@@ -2,16 +2,19 @@
 
 This file is the AI-friendly narrow waist for `masc`.
 
-Public MCP surface boundaries, compatibility aliases, and internal prompt-plane notes live in `docs/MCP-SURFACE-AUDIT.md`.
+Current runtime and tool guidance lives in `docs/KEEPER-USER-MANUAL.md` and the specification index.
 
 ## Goal
 
-Use namespace/task workspace collaboration as the default front door. Keepers run on the OAS-backed runtime. Team-session, operator, and command-plane lanes are legacy compatibility surfaces, not supported front-door workflows.
+Use workspace collaboration as the default front door. Keepers run on the OAS-backed runtime and actively use Goal, Task, Board, Schedule, repository, and sandbox capabilities to advance work.
 
 ## Primary entities
 
-- `namespace`: repo-root workspace collaboration scope
+- `workspace`: repo-root collaboration scope
+- `goal`: durable outcome and progress state
 - `task`: backlog work item
+- `board`: shared coordination and discovery surface
+- `schedule`: durable future action
 - `trace`: keeper/runtime lineage across turns and checkpoints
 
 ## Primary paths
@@ -38,7 +41,7 @@ Use this when long-running autonomous execution is needed:
 ## Important constraints
 
 - `claim` does not set `current_task`; call `masc_plan_set_task`.
-- Keepers use the OAS-backed runtime; do not route them through team-session or operator compatibility surfaces.
+- Keepers use the OAS-backed runtime. Use operator observations or interventions only when they help the current work proceed.
 
 ## Secondary surfaces
 
@@ -51,5 +54,4 @@ Treat these as secondary unless the task explicitly calls for them:
 
 ## Discoverability
 
-- `tools/list` may hide low-value or deprecated tools; prefer canonical replacements.
-- Retired compatibility surfaces may still exist in code or historical docs, but they are not supported front-door paths.
+- `tools/list` presents the default tool surface. Use the Keeper manual and tool help for task-specific capabilities.

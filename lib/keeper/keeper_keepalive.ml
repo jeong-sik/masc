@@ -7,8 +7,7 @@
 
     [MASC_KEEPER_*] env vars read here (compatibility counters) can also be set in
     [<resolved config root>/runtime.toml].
-    See {!Keeper_runtime_config} and [docs/BOOT-ENV-STATE-INVENTORY.md]
-    section 1.3.
+    See {!Keeper_runtime_config} and [docs/ENV-CONTRACT.md].
 
     Structure (facade decomposition):
     - [Keeper_keepalive_signal] — gRPC client refs, FSM guard identity
@@ -375,7 +374,7 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
          wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
 
-(** Apply one typed control-plane directive.  Parsing belongs to the transport
+(** Apply one typed runtime directive. Parsing belongs to the transport
     boundary; this domain path cannot receive an unknown command. *)
 let process_directive ~agent_name directive =
   match directive with

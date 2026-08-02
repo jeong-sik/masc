@@ -2,7 +2,6 @@
 
 type snapshot_view =
   | Summary
-  | Sessions
   | Keepers
   | Messages
   | Full

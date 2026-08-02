@@ -330,7 +330,7 @@ val inc_agent_stale : unit -> unit
     [Otel_metric_store.metric_value_or_zero] — never raises on missing
     metrics.  [~config] is currently used for workspace-id
     derivation; [cluster_summary_json] is intentionally [None]
-    to keep transport health metrics-only (no command-plane I/O). *)
+    to keep transport health metrics-only (no Workspace I/O). *)
 val transport_health_json : config:Workspace.config -> Yojson.Safe.t
 
 val register_webrtc_metrics :

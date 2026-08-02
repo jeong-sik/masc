@@ -94,7 +94,7 @@ let help_doc_refs name =
   | Some Policy
   | Some Observe ->
       [
-        "docs/COMMAND-PLANE-RUNBOOK.md";
+        "docs/KEEPER-USER-MANUAL.md";
         "docs/BENCHMARK-RUNBOOK.md";
       ]
   | None -> []
@@ -163,7 +163,7 @@ let manual_help_entry name =
           key_constraints = [];
           details_markdown =
             "Returns the canonical short description, visibility metadata, and detailed help for a specific tool.";
-          doc_refs = [ "docs/COMMAND-PLANE-RUNBOOK.md" ];
+          doc_refs = [ "docs/KEEPER-USER-MANUAL.md" ];
           prompt_hints = [ "Pair with prompt 'tool_help' when you want a ready-to-use explanation." ];
           examples = [ "name='keeper_task_done'"; "name='masc_plan_set_task'" ];
           alternatives = [];

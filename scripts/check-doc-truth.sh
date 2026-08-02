@@ -117,8 +117,6 @@ require_contains docs/DASHBOARD-INTEGRATION.md '- `command:intervene -> command:
 require_not_contains docs/DASHBOARD-INTEGRATION.md '- `mission`: what needs attention now'
 require_not_contains docs/DASHBOARD-INTEGRATION.md '- `intervene`: mutating operator actions'
 
-require_contains docs/spec/A-existing-doc-index.md '`docs/RELEASE-EVIDENCE.md` | Canonical'
-
 require_contains docs/spec/01-system-overview.md 'MASC의 현재 canonical front door는 3가지다.'
 require_contains docs/spec/01-system-overview.md '### 7.3 Dashboard and Operator Read Visibility'
 
@@ -150,7 +148,6 @@ docs_to_scan=(
   docs/spec/01-system-overview.md
   docs/spec/09-server-transport.md
   docs/spec/10-dashboard.md
-  docs/spec/A-existing-doc-index.md
   docs/KEEPER-USER-MANUAL.md
   docs/RELEASE-EVIDENCE.md
 )

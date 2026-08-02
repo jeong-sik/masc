@@ -82,7 +82,6 @@ val invalidate_snapshot_cache : unit -> unit
 
 type snapshot_view =
   | Summary
-  | Sessions
   | Keepers
   | Messages
   | Full
@@ -97,8 +96,7 @@ val valid_snapshot_view_strings : string list
 (** Wire forms accepted by {!snapshot_view_of_string_opt}.
     Mirrored into the [tool_operator] tool schema's
     [view] enum field via this surface so adding a
-    constructor automatically updates both the parser
-    and the schema's user-visible catalogue. *)
+    constructor automatically updates both the parser and schema. *)
 
 val snapshot_view_of_string_opt : string -> snapshot_view option
 (** Trim- and case-insensitive parser ({!Summary} ↔

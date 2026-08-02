@@ -94,5 +94,5 @@ keeper identity 매칭은 `Tool_agent_timeline.identity_matches`의 3-형태 규
 - **crash는 count-limited.** `Keeper_crash_persistence.recent_crashes`(SSOT reader) 최신 `crash_scan_max=500`행을 읽고 `ts > since` 필터. crash는 희소하므로 이 상한을 넘으면 하한값.
 - **task transition은 typed로 분류.** 문자열 매칭 대신 `Audit_log.entry_of_json_r` + typed `action` 변형으로 claim/done/release/cancel/start를 구분(워크어라운드 시그니처 2 회피). 비-task action은 catch-all 없이 전부 열거.
 - **경로는 default-cluster 가정.** keeper-local/워크스페이스 스토어 경로를 `base_path`에서 `Common.*_of_base`로 유도한다(`<base_path>/.masc/...`). 비-default `MASC_CLUSTER_NAME`이 keeper 데이터를 재배치하면 이 v1은 default 경로를 읽는다.
-- **H2 미러링 없음.** `server_h2_gateway.ml`은 `/api/v1/keepers/` 프리픽스를 미러링하지 않는다(command-plane/board/특정 dashboard 라우트만). 따라서 형제 `/chat/history`와 동일하게 `/digest`는 H1 전용이다. 전체 keeper 체인이 H1 전용인데 신규 suffix만 H2에 등록하는 건 불일치라 추가하지 않았다.
+- **H2 미러링 없음.** `server_h2_gateway.ml`은 `/api/v1/keepers/` 프리픽스를 미러링하지 않는다(board와 특정 dashboard 라우트만 등록한다). 따라서 형제 `/chat/history`와 동일하게 `/digest`는 H1 전용이다. 전체 Keeper 체인이 H1 전용인데 신규 suffix만 H2에 등록하는 건 불일치라 추가하지 않았다.
 - **동기 읽기.** digest는 chat-open 시점(저빈도, 운영자 유발)에 HTTP 도메인에서 동기로 스캔한다. 매우 긴 부재+바쁜 keeper의 activity-events 스캔은 후속으로 domain-pool offload 여지(연구 권고).

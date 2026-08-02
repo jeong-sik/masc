@@ -49,7 +49,6 @@ let execution_smoke_fixture_json () =
                 ("summary", `String "Waiting on upstream checkpoint before verify stage");
                 ("target_type", `String "operation");
                 ("target_id", `String "op-runtime-002");
-                ("linked_session_id", `Null);
                 ("linked_operation_id", `String "op-runtime-002");
                 ("last_seen_at", `String generated_at);
                 ("top_handoff", operation_handoff);
@@ -65,7 +64,6 @@ let execution_smoke_fixture_json () =
                 ("summary", `String "Runtime squad needs trace review before verify proceeds");
                 ("target_type", `String "operation");
                 ("target_id", `String "op-runtime-001");
-                ("linked_session_id", `Null);
                 ("linked_operation_id", `String "op-runtime-001");
                 ("last_seen_at", `String generated_at);
                 ("top_handoff", command_handoff);
@@ -110,8 +108,6 @@ let execution_smoke_fixture_json () =
                 ("stage", `String "verify");
                 ("assigned_unit_id", `String "squad-runtime");
                 ("assigned_unit_label", `String "Runtime Squad");
-                ("linked_session_id", `Null);
-                ("linked_detachment_id", `Null);
                 ("blocker_summary", `String "Runtime squad needs trace review before verify proceeds");
                 ("search_status", `String "blocked");
                 ("next_tool", `String "masc_operator_snapshot");
@@ -127,8 +123,6 @@ let execution_smoke_fixture_json () =
                 ("stage", `String "verify");
                 ("assigned_unit_id", `String "squad-review");
                 ("assigned_unit_label", `String "Review Squad");
-                ("linked_session_id", `Null);
-                ("linked_detachment_id", `Null);
                 ("blocker_summary", `String "Waiting on upstream checkpoint before verify stage");
                 ("search_status", `String "blocked");
                 ("next_tool", `String "masc_status");
@@ -154,8 +148,6 @@ let execution_smoke_fixture_json () =
                 ("signal_truth", `String "live");
                 ("evidence_source", `String "message");
                 ("active_task_count", `Int 1);
-                ("related_session_id", `Null);
-                ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
                 ("koreanName", `String "local-alpha");
                 ("model", `String "runtime");
@@ -176,8 +168,6 @@ let execution_smoke_fixture_json () =
                 ("signal_truth", `String "stale");
                 ("evidence_source", `String "message");
                 ("active_task_count", `Int 1);
-                ("related_session_id", `String "ts-execution-fixture-001");
-                ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
                 ("koreanName", `String "local-beta");
                 ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-claude"));
@@ -198,8 +188,6 @@ let execution_smoke_fixture_json () =
                 ("signal_truth", `String "live");
                 ("evidence_source", `String "presence");
                 ("active_task_count", `Int 0);
-                ("related_session_id", `String "ts-execution-fixture-002");
-                ("related_operation_id", `String "op-runtime-003");
                 ("emoji", `String "🤖");
                 ("koreanName", `String "local-gamma");
                 ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-model-b"));
@@ -260,7 +248,6 @@ let execution_smoke_fixture_json () =
                 ("context_ratio", `Float 0.91);
                 ("continuity", `String "Gen 2 · Turns 84 · Goals 2");
                 ("lifecycle", `String "handoff-imminent");
-                ("related_session_id", `Null);
                 ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-claude"));
                 ("emoji", `String "🤖");
                 ("koreanName", `String "dm-keeper");
@@ -291,8 +278,6 @@ let execution_smoke_fixture_json () =
                 ("signal_truth", `String "absent");
                 ("evidence_source", `String "none");
                 ("active_task_count", `Int 0);
-                ("related_session_id", `String "ts-execution-fixture-001");
-                ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
                 ("koreanName", `String "local-delta");
                 ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-model-b"));

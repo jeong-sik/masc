@@ -23,7 +23,6 @@ consumer → MASC (workspace collaboration/orchestration) → OAS (agent runtime
 - Keeper 실행의 규범 계약은
   `docs/KEEPER-FULL-FEATURE-GOAL.md`다. 이 문서는 경계 요약이다.
 - `docs/spec/13-oas-integration.md`는 구현 세부와 open issue ledger를 유지한다.
-- `docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md`는 시점별 health snapshot이다.
 - `docs/qa/OAS-OBSERVABILITY-TRUTH-AUDIT-2026-04-15.md`는 OAS observability producer -> bridge -> durable store -> dashboard consumer chain과 fixed gaps를 기록한다.
 - `docs/KEEPER-STATE-OWNERSHIP.md`는 checkpoint, lane, domain receipt의 상태 소유권을 정의한다.
 
@@ -38,7 +37,7 @@ consumer → MASC (workspace collaboration/orchestration) → OAS (agent runtime
 | ContextOverflow | provider capacity와 typed overflow 결과 | 일반 typed failure route로 처리; 자동 overflow-compaction 회복 제거 (#26546) |
 | 이벤트 전달 | `Event_bus` | 어떤 MASC 사건을 custom event로 publish할지 정의, SSE/dashboard에 연결 |
 | 장기 메모리 | 없음 | keeper memory bank, institution episodes, procedural memory, workspace/task/social semantics |
-| 조율 상태 | 없음 | workspace, tasks, board, Gate/HITL, social runtime |
+| 조율 상태 | 없음 | workspace, tasks, board, Gate/HITL |
 
 ## 의존 방향
 

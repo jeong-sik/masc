@@ -7,57 +7,22 @@ type queue_context = {
   json : Yojson.Safe.t;
 }
 
-type session_seed = {
-  session_id : string;
-  goal : string;
-  namespace : string option;
-  status : string option;
-  health : string;
-  member_names : string list;
-  last_activity_at : string option;
-  last_activity_ts : float;
-  last_activity_summary : string;
-  communication_summary : string;
-  active_count : int;
-  seen_count : int;
-  planned_count : int;
-  required_count : int;
-  counts_basis : string;
-  runtime_blocker : string option;
-  worker_gap_summary : string option;
-  top_attention : Yojson.Safe.t option;
-  top_recommendation : Yojson.Safe.t option;
-}
-
-type session_context = {
-  session_id : string;
-  severity : tone;
-  last_seen_ts : float;
-  linked_operation_id : string option;
-  member_names : string list;
-  json : Yojson.Safe.t;
-}
-
 type operation_context = {
   operation_id : string;
   severity : tone;
   last_seen_ts : float;
-  linked_session_id : string option;
-  linked_detachment_id : string option;
   json : Yojson.Safe.t;
 }
 
 type worker_context = {
   tone_rank : int;
   last_signal_ts : float;
-  related_session_id : string option;
   json : Yojson.Safe.t;
 }
 
 type continuity_context = {
   tone_rank : int;
   last_signal_ts : float;
-  related_session_id : string option;
   json : Yojson.Safe.t;
 }
 
@@ -70,16 +35,6 @@ let string_field = Dashboard_utils.string_field
 let take = List.take
 let list_field = Dashboard_utils.list_field
 let compact_text = String_util.compact_text
-let session_payload_json = Dashboard_utils.session_payload_json
-let session_meta_json = Dashboard_utils.session_meta_json
-let session_summary_json = Dashboard_utils.session_summary_json
-let session_team_health_json = Dashboard_utils.session_team_health_json
-let session_communication_json = Dashboard_utils.session_communication_json
-let session_status_opt = Dashboard_utils.session_status_opt
-let session_recent_events = Dashboard_utils.session_recent_events
-let event_detail_json = Dashboard_utils.event_detail_json
-
-
 let latest_iso_timestamp values =
   let pick_latest best candidate =
     match candidate with

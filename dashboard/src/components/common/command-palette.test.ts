@@ -8,7 +8,6 @@ const navigate = vi.fn()
 const requestConfirm = vi.fn()
 const runGarbageCollection = vi.fn().mockResolvedValue(undefined)
 const route = signal<any>({ tab: 'code', params: { section: 'ide-shell' }, postId: null })
-const missionSnapshot = signal<any>(null)
 const missionAgentBriefs = signal<any[]>([])
 const missionKeeperBriefs = signal<any[]>([])
 
@@ -20,7 +19,6 @@ async function loadPalette() {
     runGarbageCollection,
   }))
   vi.doMock('../../mission-signals', () => ({
-    missionSnapshot,
     missionAgentBriefs,
     missionKeeperBriefs,
   }))
@@ -33,7 +31,6 @@ describe('CommandPalette', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
-    missionSnapshot.value = null
     missionAgentBriefs.value = []
     missionKeeperBriefs.value = []
     route.value = { tab: 'code', params: { section: 'ide-shell' }, postId: null }
@@ -129,24 +126,6 @@ describe('CommandPalette', () => {
 
   })
 
-  it('indexes live mission sessions in the palette', async () => {
-    missionSnapshot.value = {
-      sessions: [
-        { session_id: 'sess-1', goal: 'fallback brief', status: 'running' },
-      ],
-    }
-
-    const { CommandPalette } = await loadPalette()
-    render(html`<${CommandPalette} />`, container)
-
-    await waitFor(() => {
-      const palette = container.querySelector('ninja-keys') as (HTMLElement & {
-        data?: Array<{ id: string; title: string }>
-      }) | null
-      expect(palette?.data?.some((item) => item.id === 'nav-session-sess-1')).toBe(true)
-    })
-  })
-
   it('labels mission entities as command targets, not live runtime counts', async () => {
     missionAgentBriefs.value = [
       { agent_name: 'worker-a', display_name: 'Worker A', status: 'active' },
@@ -155,12 +134,6 @@ describe('CommandPalette', () => {
       { name: 'keeper-a', status: 'paused' },
       { name: 'keeper-b', status: 'busy' },
     ]
-    missionSnapshot.value = {
-      sessions: [
-        { session_id: 'sess-1', goal: 'review', status: 'running' },
-      ],
-    }
-
     const { CommandPalette } = await loadPalette()
     render(html`<${CommandPalette} />`, container)
 
@@ -171,10 +144,8 @@ describe('CommandPalette', () => {
         .toBe('Mission agent targets (1)')
       expect(palette?.data?.find((item) => item.id === 'nav-keeper-keeper-a')?.section)
         .toBe('Mission keeper targets (2)')
-      expect(palette?.data?.find((item) => item.id === 'nav-session-sess-1')?.section)
-        .toBe('Mission session targets (1)')
       expect(palette?.data?.find((item) => item.id === 'nav-keeper-keeper-a')?.keywords)
-        .toContain('명령 대상 에이전트 1 / 키퍼 2 / 세션 1')
+        .toContain('명령 대상 에이전트 1 / 키퍼 2')
     })
 
     const palette = container.querySelector('ninja-keys') as (HTMLElement & { data?: PaletteItem[] }) | null
@@ -185,11 +156,5 @@ describe('CommandPalette', () => {
     palette?.data?.find((item) => item.id === 'nav-keeper-keeper-a')?.handler()
     expect(navigate).toHaveBeenCalledWith('monitoring', { section: 'agents', keeper: 'keeper-a' })
 
-    palette?.data?.find((item) => item.id === 'nav-session-sess-1')?.handler()
-    expect(navigate).toHaveBeenCalledWith('monitoring', {
-      section: 'fleet-health',
-      view: 'event-log',
-      session_id: 'sess-1',
-    })
   })
 })

@@ -636,9 +636,9 @@ let patched_keeper_status row ~event ~keepalive_running =
     `String (Keeper_status_runtime.control_plane_status_to_string status)
   | None when not keepalive_running -> `String "offline"
   | None ->
-    (* RFC-0089: classify the row's display status via the typed control-plane
+    (* RFC-0089: classify the row's display status via the typed operator
        SSOT. busy/active/listening/idle pass through; inactive/offline collapse
-       to "offline"; a control-plane pause survives the patch, because a running
+       to "offline"; an operator pause survives the patch, because a running
        keepalive fiber does not un-pause a keeper — collapsing it here made
        [rebuild_continuity_briefs] read the row as live. Missing or unknown
        values fail loudly instead of manufacturing an idle keeper. *)
@@ -709,28 +709,12 @@ let patch_keeper_rows ~keeper_name ~event ~keepalive_running rows =
   List.map (patch_keeper_row ~keeper_name ~event ~keepalive_running) rows
 ;;
 
-let rebuild_continuity_briefs ~now_ts ~keeper_rows ~existing_briefs =
-  let related_session_ids =
-    List.filter_map
-      (fun brief ->
-         match
-           Json_util.assoc_string_opt "name" brief,
-           Json_util.assoc_string_opt "related_session_id" brief
-         with
-         | Some name, Some related_session_id -> Some (name, related_session_id)
-         | _ -> None)
-      existing_briefs
-  in
+let rebuild_continuity_briefs ~now_ts ~keeper_rows =
   keeper_rows
   |> List.filter_map (fun keeper ->
     match Json_util.assoc_string_opt "name" keeper with
-    | Some name ->
-      let related_session_id = List.assoc_opt name related_session_ids in
-      Some
-        (Dashboard_execution_builders.continuity_row_of_keeper
-           ~now_ts
-           ?related_session_id
-           keeper)
+    | Some _ ->
+      Some (Dashboard_execution_builders.continuity_row_of_keeper ~now_ts keeper)
     | None -> None)
   |> List.sort
        (fun
@@ -754,8 +738,7 @@ let replace_keeper_rows_and_rebuild_briefs ~now_ts ~keeper_rows ~keepers_json fi
       (`List
         (rebuild_continuity_briefs
            ~now_ts
-           ~keeper_rows
-           ~existing_briefs))
+           ~keeper_rows))
       fields
   | Some _ | None -> fields
 ;;

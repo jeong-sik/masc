@@ -46,7 +46,6 @@ MASC 전용 요구가 생기면 MASC adapter/bridge로 먼저 해결하고, OAS 
 - This spec keeps the implementation map, bridge inventory, and open structural gaps.
 - `/home/runner/work/masc/masc/docs/KEEPER-STATE-OWNERSHIP.md` defines checkpoint, lane, domain-state, and receipt ownership.
 - `/home/runner/work/masc/masc/docs/design/checkpoint-truth-and-replay-rfc.md` keeps checkpoint truth hierarchy, replay semantics, and side-effect boundary language.
-- `/home/runner/work/masc/masc/docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md` is evidence, not contract.
 - `/home/runner/work/masc/masc/docs/qa/OAS-OBSERVABILITY-TRUTH-AUDIT-2026-04-15.md` records the OAS observability producer -> bridge -> durable store -> dashboard consumer chain.
 
 ---
@@ -230,11 +229,11 @@ MASC Types.tool_schema
 
 ---
 
-## 5. Worker_oas (Team Session Worker Bridge)
+## 5. Worker_oas
 
 ### 5.1 개요
 
-`worker_oas.ml`은 MASC team session의 worker를 OAS Agent로 매핑한다.
+`worker_oas.ml`은 MASC `worker_container_meta`를 OAS Agent로 매핑한다.
 
 ### 5.2 Key Mappings
 
@@ -245,7 +244,7 @@ MASC Types.tool_schema
 | `timeout_seconds` | worker-container lifecycle metadata; OAS `max_turns`와 독립 |
 | fixed `session_min` MCP surface + fixed shell surface | `Tool.t list` |
 | heartbeat | periodic callback |
-| team_session description | `Builder.with_description` metadata |
+| worker description | `Builder.with_description` metadata |
 
 ---
 
@@ -435,7 +434,6 @@ remain MASC-owned under `Masc.Memory.t` and the `Keeper_memory_*` modules.
 | Dashboard runtime counts | Complete | dashboard `counts` carries active runtimes and `configured_keepers` carries inventory |
 | Checkpoint | Partial | shared worker/runtime paths는 OAS Checkpoint를 사용한다. Public `Oas_worker` surface의 extra checkpoint JSON은 neutral `checkpoint_sidecar` 이름을 쓰지만 keeper 경로는 여전히 `lib/keeper/keeper_context_runtime.ml`의 wrapper + serialized context를 유지 |
 | Memory projection | Removed | MASC memory is not projected into OAS; runtime memory storage remains MASC-owned |
-| Team-session swarm | Partial | OAS Swarm runner 활성, bridge fidelity 불완전 |
 | Runtime config | Complete | runtime_id -> MASC runtime config/profile -> OAS Provider_registry -> Provider_config.t |
 | Verifier | Complete | configured OAS exact-output call; no local tool/effect classifier |
 | Model resolution | Complete | oas_model_resolve.ml이 Provider_Registry SSOT 사용 |
@@ -450,7 +448,6 @@ remain MASC-owned under `Masc.Memory.t` and the `Keeper_memory_*` modules.
 | keeper checkpoint nativeization | Open | keeper path still serializes MASC-owned context |
 | prose/domain-state separation | Complete for Keeper replies | model-authored prose is context only; domain transitions require typed MASC tools and receipts |
 | memory projection hooks/callbacks | Removed | memory callbacks and post-turn OAS flush paths were removed |
-| team-session bridge fidelity | Open | healthcheck still calls out projection/resource-health gaps |
 
 Checkpoint truth / replay semantics for the first three ledger items are
 further constrained by `docs/design/checkpoint-truth-and-replay-rfc.md`.
@@ -524,6 +521,5 @@ runtime.toml 기반 변수는 환경변수가 아니라 config 파일에서 관�
 
 ## 15. Future Work
 
-- Team-session swarm bridge fidelity 완성
 - keeper runtime state ownership을 OAS checkpoint/context 쪽으로 더 이동
 - marker/text leakage를 구조화된 metadata 또는 hook path로 축소

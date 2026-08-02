@@ -69,7 +69,7 @@ let lightweight_runtime_contract_json ~runtime_blocker_class ~selected_model
          by OAS."
     | false, None ->
         "Provider/model identity is owned by OAS. MASC status exposes only \
-         control-plane signals."
+         runtime signals."
   in
   `Assoc
     [ "source", `String source

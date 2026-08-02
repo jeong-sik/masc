@@ -164,8 +164,6 @@ function quietReasonLabel(reason?: string | null): string {
 
 function nextActionLabel(path: string): string {
   switch (path) {
-    case 'manual_social_sweep':
-      return '대화 동기화'
     case 'probe':
       return 'probe'
     case 'recover':
@@ -1958,11 +1956,9 @@ export function KeeperConversationPanel({
 export function KeeperRuntimeActions({
   actor,
   keeper,
-  onSocialSweep,
 }: {
   actor: string
   keeper: Keeper | null | undefined
-  onSocialSweep: () => void
 }) {
   if (!keeper) return null
   const diagnostic = effectiveDiagnostic(keeper)
@@ -2002,12 +1998,6 @@ export function KeeperRuntimeActions({
         disabled=${recovering || !canRecover || !actor.trim()}
       >
         ${recovering ? '복구 중...' : '복구'}
-      </button>
-      <button type="button"
-        class=${recommended === 'manual_social_sweep' ? activeGhostBtn : ghostBtn}
-        onClick=${onSocialSweep}
-      >
-        Social sweep
       </button>
     </div>
   `

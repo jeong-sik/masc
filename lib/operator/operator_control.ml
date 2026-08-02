@@ -65,8 +65,6 @@ let keeper_recovery_outcome after_diagnostic =
              state) )
   | None -> (false, Some "keeper recovery did not return a health_state")
 
-(* resolve_team_turn_actor and execute_team_turn removed — team session cleanup *)
-
 (** {1 Domain-specific action handlers} *)
 
 let workspace_action_result request result =
@@ -89,7 +87,7 @@ let execute_workspace_action (ctx : 'a context) (request : action_request) =
   | "namespace_pause" ->
       let* () = validate_target_type Operator_action_constants.Workspace request in
       let reason =
-        get_string request.payload "reason" "Paused by operator control plane"
+        get_string request.payload "reason" "Paused by operator action"
       in
       Workspace.pause ctx.config ~by:request.actor ~reason;
       workspace_action_result request
@@ -102,10 +100,6 @@ let execute_workspace_action (ctx : 'a context) (request : action_request) =
         | `Already_running -> "already_running"
       in
       workspace_action_result request (`Assoc [ ("status", `String status) ])
-  | "social_sweep" ->
-      workspace_action_result request
-        (`Assoc [("status", `String "removed");
-                 ("reason", `String "Social runtime removed. Keepers discover board events via proactive turns.")])
   | "task_inject" ->
       let* () = validate_target_type Operator_action_constants.Workspace request in
       let* title =
@@ -115,7 +109,7 @@ let execute_workspace_action (ctx : 'a context) (request : action_request) =
       in
       let priority = get_int request.payload "priority" 2 in
       let description =
-        get_string request.payload "description" "Injected by operator control plane"
+        get_string request.payload "description" "Injected by operator action"
       in
       let result =
         Workspace.add_task
@@ -239,16 +233,11 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
 let execute_action (ctx : 'a context) (request : action_request) :
     (Yojson.Safe.t, string) result =
   match request.action_type with
-  | "broadcast" | "namespace_pause" | "namespace_resume" | "social_sweep"
-  | "task_inject" ->
+  | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" ->
       execute_workspace_action ctx request
   | "keeper_probe" | "keeper_recover" | "keeper_message" ->
       execute_keeper_action ctx request
   | "" -> Error "action_type is required"
-  (* Issue #8394: team_* actions retired — fall through to the standard
-     "unsupported action_type" path. Previously routed to a stub that
-     returned "team session actions removed: ..." which masked the
-     legitimate validation failure as a runtime stub error. *)
   | other -> Error (Printf.sprintf "unsupported action_type: %s" other)
 
 (** All known action_types: available_actions plus hidden canonical actions. *)
@@ -258,9 +247,7 @@ let known_action_types =
       (fun (a : Operator_pending_confirm.available_action) -> a.action_type)
       Operator_pending_confirm.available_actions
   in
-  (* Issue #8394: removed [team_turn] — team session execution surface is
-     retired. *)
-  from_registry @ [ "social_sweep" ]
+  from_registry
 
 let validate_request request =
   if request.action_type = "" then Error "action_type is required"

@@ -1202,11 +1202,8 @@ let add_routes ~sw ~clock router =
              (handle_gate_rule_delete_body state request reqd))
          request reqd)
 
-  (* Operator surface restored after cp-purge (#7349): handlers existed in
-     server_dashboard_http_core/.ml but their Router.get/post registrations
-     were deleted together with the Command Plane. Dashboard SSE hydrates
-     the same caches, so this path only services HTTP fallbacks (first load
-     before SSE attaches + explicit tab-refresh). *)
+  (* Dashboard SSE hydrates the same caches, so this path services HTTP
+     fallbacks before SSE attaches and explicit tab refreshes. *)
   |> Http.Router.get "/api/v1/operator" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let cache_key =
@@ -1349,23 +1346,6 @@ let add_routes ~sw ~clock router =
            Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                dashboard_briefing_http_json ~state ~sw ~clock req))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/session" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let cache_key =
-           Server_dashboard_http_core_cache.dashboard_query_cache_key
-             (Mcp_server.workspace_config state)
-             "session"
-             [ ("actor", dashboard_actor_cache_segment state req)
-             ; ("session", Server_utils.query_param req "session_id")
-             ]
-         in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               dashboard_session_http_json ~state ~sw ~clock req))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

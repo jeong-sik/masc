@@ -59,7 +59,7 @@ CI 필수 게이트. 외부 의존성 없이 재현 가능.
 |------|----------|------|
 | 단위/통합 테스트 묶음 | `dune test --root .` / `make test` | 40+ 테스트 바이너리 |
 | SSE Storm E2E | `./_build/default/test/test_sse_storm_e2e.exe` | SSE reconnect 시나리오 |
-| Contract Harness (3종) | `make test-contract` | Streamable HTTP, Team Session, Golden Path |
+| Contract Harness | `make test-contract` | Streamable HTTP and Golden Path contracts |
 
 Contract harness는 서버가 이미 떠 있다고 가정하지 않고 hermetic bootstrap 경로로 실행된다.
 `archive/trpg/scripts/` 아래의 game-view/TRPG 계약 스크립트는 현재 active contract suite가 아니라 archive/manual 검증으로 분류한다.

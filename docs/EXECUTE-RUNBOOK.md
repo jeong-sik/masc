@@ -22,7 +22,6 @@ background task lifecycle are not part of the callable surface.
 ## Related Documents
 
 - [`ENV-CONTRACT.md`](./ENV-CONTRACT.md) §4 — authoritative flag matrix
-- [`BOOT-ENV-STATE-INVENTORY.md`](./BOOT-ENV-STATE-INVENTORY.md)
 - `planning/graceful-panda/Legendary-Execute-plan.md` — historical source plan
 
 ## Scope

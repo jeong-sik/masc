@@ -407,7 +407,6 @@ export interface DashboardNamespaceTruthRetention {
   workspace_path?: string
   shell_input?: string
   execution_input?: string
-  command_input?: string
   cache_policy?: string
 }
 
@@ -443,14 +442,6 @@ export interface DashboardNamespaceTruthResponse {
     top_queue?: DashboardExecutionQueueItem | null
     provenance?: string | null
   }
-  command?: {
-    active_operations?: number
-    active_detachments?: number
-    pending_approvals?: number
-    bad_alerts?: number
-    warn_alerts?: number
-    provenance?: string | null
-  }
   operator?: {
     pending_confirm_summary?: PendingConfirmSummary | null
     provenance?: string | null
@@ -470,7 +461,7 @@ export interface ServerBuildIdentity {
 type DashboardExecutionTone = 'ok' | 'warn' | 'bad'
 type DashboardExecutionWorkerState = 'working' | 'watching' | 'quiet' | 'offline'
 type DashboardExecutionContinuityState = 'healthy' | 'warning' | 'critical'
-type DashboardExecutionQueueKind = 'session' | 'operation' | 'keeper'
+type DashboardExecutionQueueKind = 'operation' | 'keeper'
 
 export interface DashboardExecutionSummary {
   active_sessions?: number
@@ -507,7 +498,6 @@ export interface DashboardExecutionQueueItem {
   summary: string
   target_type: string
   target_id: string
-  linked_session_id?: string | null
   linked_operation_id?: string | null
   last_seen_at?: string | null
   attention_reason?: string | null
@@ -515,30 +505,6 @@ export interface DashboardExecutionQueueItem {
   terminal_reason_code?: string | null
   stop_cause?: StopCause | null
   runtime_trust?: GoalKeeperTrustSummary | null
-  top_handoff?: DashboardExecutionHandoff | null
-  intervene_handoff?: DashboardExecutionHandoff | null
-  command_handoff?: DashboardExecutionHandoff | null
-}
-
-export interface DashboardExecutionSessionBrief {
-  session_id: string
-  goal: string
-  namespace?: string | null
-  status?: string
-  health?: string
-  member_names: string[]
-  linked_operation_id?: string | null
-  linked_detachment_id?: string | null
-  runtime_blocker?: string | null
-  worker_gap_summary?: string | null
-  last_activity_at?: string | null
-  last_activity_summary?: string | null
-  communication_summary?: string | null
-  active_count?: number
-  seen_count?: number
-  planned_count?: number
-  required_count?: number
-  counts_basis?: string | null
   top_handoff?: DashboardExecutionHandoff | null
   intervene_handoff?: DashboardExecutionHandoff | null
   command_handoff?: DashboardExecutionHandoff | null
@@ -559,8 +525,6 @@ export interface DashboardExecutionWorkerSupportBrief {
   signal_truth?: ExecutionSignalTruth
   evidence_source?: EvidenceSourceCore
   active_task_count?: number
-  related_session_id?: string | null
-  related_operation_id?: string | null
   emoji?: string
   korean_name?: string | null
   model?: string | null
@@ -584,7 +548,6 @@ export interface DashboardExecutionContinuityBrief {
   context_ratio?: number | null
   continuity?: string | null
   lifecycle?: string | null
-  related_session_id?: string | null
   model?: string | null
   emoji?: string
   korean_name?: string | null

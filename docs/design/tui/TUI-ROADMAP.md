@@ -141,7 +141,7 @@ Monitoring, Command/Operations, Workspace 세부 화면, Lab, Logs는 이 문서
 | # | 기능 | 근거 |
 |---|---|---|
 | 11 | **Task/Work Board 상세** | task claim/assign, 우선순위 |
-| 12 | **Verification Requests** | cross-agent verification |
+| 12 | **Verification Requests** | system-LLM/HITL verdict 상태 관측 |
 | 13 | **Repository List** | multi-repo cockpit |
 | 14 | **Tool Inventory** | registered MCP tools |
 | 15 | **Harness Health** | safety harness snapshot |

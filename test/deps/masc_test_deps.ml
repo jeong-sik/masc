@@ -363,12 +363,17 @@ let setup_test_workspace () =
   tmp
 
 let cleanup_test_workspace dir =
+  (* [Unix.lstat], not [Sys.is_directory]: the latter follows symlinks, so a
+     link to a directory would make [Sys.readdir] enumerate the *target* and
+     this loop delete entries outside the workspace. [S_LNK] falls through to
+     [Sys.remove], which unlinks the link itself. *)
   let rec rm_rf path =
-    if Sys.is_directory path then begin
+    match Unix.lstat path with
+    | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> ()
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
       Array.iter (fun f -> rm_rf (Filename.concat path f)) (Sys.readdir path);
       Unix.rmdir path
-    end else
-      Sys.remove path
+    | _ -> Sys.remove path
   in
   try rm_rf dir with _ -> ()
 

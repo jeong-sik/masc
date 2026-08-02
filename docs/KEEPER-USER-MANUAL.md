@@ -257,10 +257,12 @@ spawn 시 인자로 직접 설정하는 필드.
 | `name` | string | (필수) | keeper 고유 이름. `[A-Za-z0-9._-]`만 허용하며 경로 예약값 `.`/`..`는 제외 | 재생성 필요 |
 | `instructions` | string | `""` | 커스텀 시스템 프롬프트 | `masc_keeper_up`의 `instructions` 인자 |
 | `proactive_enabled` | bool | 기본 `false` | 자발적 메시지 생성 활성화 | `masc_keeper_up`의 `proactive_enabled` 인자 |
-| `verify` | bool | `false` | 저비용 모델로 action 검증 | `masc_keeper_up`의 `verify` 인자 |
 | `sandbox_profile` | string | `local` | 실행 샌드박스 프로필 (`local`, `docker`). hard mode에서는 `docker`만 허용된다. | `masc_keeper_up`의 `sandbox_profile` 인자 |
-| `network_mode` | string | `inherit` 또는 `none` | 샌드박스 네트워크 정책. `docker`는 기본 `none`이고 hard mode에서는 `none`만 허용된다. | `masc_keeper_up`의 `network_mode` 인자 |
 | `active_goal_ids` | string[] | 없음 | Goal Store 엔티티와 Keeper의 목표 연결. 설정 시 `keeper_task_claim`이 goal-linked task만 claim한다. scoped pool에 현재 capability로 claim 가능한 task가 없으면 claim을 멈춘다. | `masc_keeper_up`, keeper config API 또는 `keeper.toml` |
+
+`network_mode`는 `masc_keeper_up` 인자가 아니다. Keeper TOML 또는 profile
+기본값에서만 설정하며, `masc_keeper_up`에는 격리 경계인 `sandbox_profile`만
+전달한다.
 
 ### 3.1.1 Sandbox Core V1 사용법
 
@@ -271,8 +273,7 @@ spawn 시 인자로 직접 설정하는 필드.
   "name": "analyst",
   "active_goal_ids": ["goal-review-incoming"],
   "instructions": "Prepare safe changes and report evidence.",
-  "sandbox_profile": "docker",
-  "network_mode": "none"
+  "sandbox_profile": "docker"
 }
 ```
 

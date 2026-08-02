@@ -51,6 +51,25 @@ type consumer_dispatch_result =
       ; detail : Yojson.Safe.t
       }
 
+(** A consumer's answer about one occurrence it durably accepted.
+
+    [Work_accepted] hands ownership of an occurrence to the consumer and the
+    store keeps it [Execution_dispatched] until a correlated completion path
+    settles it. That contract assumes the consumer can still find the work. When
+    it cannot — its queue entry is gone and it holds no terminal evidence for
+    the occurrence — nothing will ever settle it, because the settlement reader
+    only runs while the occurrence is a dispatch candidate. This type lets the
+    consumer say so. *)
+type settlement_evidence =
+  | Consumer_holds_occurrence
+      (** The accepted work is still pending with the consumer. *)
+  | Consumer_settled_occurrence
+      (** The consumer has durable terminal evidence for this occurrence; its own
+          settlement path owns the store write and this one must not race it. *)
+  | Consumer_lost_occurrence of string
+      (** Neither pending work nor terminal evidence exists for this occurrence.
+          The payload is the durable reason, recorded as the failure. *)
+
 type consumer =
   { accepts : Schedule_domain.schedule_request -> (unit, string) result
   ; dispatch :
@@ -59,6 +78,15 @@ type consumer =
       wake_signal ->
       Schedule_domain.schedule_request ->
       (consumer_dispatch_result, consumer_dispatch_error) result
+  ; settlement :
+      Workspace_utils.config ->
+      Schedule_domain.schedule_request ->
+      Schedule_domain.execution_record ->
+      (settlement_evidence, string) result
+        (** Asked about one [Execution_dispatched] occurrence. Must be derived
+            from durable consumer state, never from elapsed time: a wall-clock
+            deadline would make the scheduler judge whether the consumer's
+            in-flight work is dead, which is the consumer's call. *)
   }
 
 type runner_error =
@@ -97,3 +125,32 @@ val tick :
     advances while a one-shot request becomes [Failed]. A typed retryable
     dispatch failure finishes only its current execution attempt and leaves the
     schedule [Due] for the next tick. *)
+
+type reclaim_outcome =
+  { examined : int
+  ; reclaimed : int
+  ; held : int
+  ; settled_elsewhere : int
+  ; failures : (string * string) list
+        (** occurrence id paired with the error that stopped its reclaim. *)
+  }
+
+val reclaim_lost_occurrences :
+  consumer:consumer ->
+  Workspace_utils.config ->
+  now:float ->
+  (reclaim_outcome, runner_error) result
+(** Ask the consumer about every occurrence still [Execution_dispatched], and
+    settle the ones it reports as lost through [fail_dispatched_occurrence].
+
+    This is the reverse direction of the consumer-side reconciliation that
+    already exists: that one removes a consumer's queue entry once the
+    occurrence is terminal, this one terminalizes an occurrence once the
+    consumer no longer has it. Both are needed because the two stores are
+    written under separate locks and either side can outlive the other.
+
+    Every verdict other than [Consumer_lost_occurrence] leaves the occurrence
+    untouched, and a consumer error leaves it untouched as well: an occurrence
+    is only ever settled on positive evidence that nothing else can settle it.
+    Per-occurrence errors are collected rather than aborting the sweep, so one
+    unreadable consumer cannot strand every other occurrence. *)

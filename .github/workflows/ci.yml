@@ -910,6 +910,26 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_goal_store"
 
+      # Schedule occurrence reclaim: an occurrence the consumer durably accepted
+      # is [Execution_dispatched] until a correlated completion path settles it,
+      # so nothing in the scheduler finishes it on its own. The suite drives a
+      # real workspace to that state and asserts the reclaim sweep settles it
+      # only on positive consumer evidence — a held occurrence and an unreadable
+      # consumer must both leave it untouched. Compile-only under @check leaves
+      # every one of those branches ungated, and no schedule suite ran here
+      # before (issue #26685).
+      - name: Run schedule runner suite
+        id: schedule_runner_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_schedule_runner @test/runtest-test_schedule_store"
+
       # Keeper registry hardening: identity resolution and goal-reconciliation
       # routing are executable behavior — the suite drives a real workspace and
       # asserts which Keeper a durable stimulus is addressed to, never source

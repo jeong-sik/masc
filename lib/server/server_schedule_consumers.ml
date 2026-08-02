@@ -681,4 +681,80 @@ let dispatch config ~now signal request =
        dispatch_keeper_wake config ~now signal request payload)
 ;;
 
-let consumer : Schedule_runner.consumer = { accepts; dispatch }
+let occurrence_stimulus_id (execution : Schedule_domain.execution_record) =
+  Schedule_occurrence_id.make
+    ~schedule_id:execution.schedule_id
+    ~due_at:execution.due_at
+    ~payload_digest:execution.payload_digest
+  |> Schedule_occurrence_id.to_string
+;;
+
+let queue_holds_occurrence ~base_path ~keeper_name ~occurrence_id =
+  match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+  | Error message -> Error ("keeper event queue snapshot read failed: " ^ message)
+  | Ok queue ->
+    Ok
+      (Keeper_event_queue.to_list queue
+       |> List.exists (fun (stimulus : Keeper_event_queue.stimulus) ->
+         String.equal stimulus.post_id occurrence_id))
+;;
+
+(* The reverse of [accept_keeper_wake_occurrence]: that one reads the same two
+   durable facts to decide whether a wake still needs enqueueing, this one reads
+   them to decide whether an already-accepted occurrence can still be settled by
+   anyone. Both answers come from durable state only — no elapsed-time input —
+   so the scheduler never has to guess whether a keeper's work is dead. *)
+let settlement
+      config
+      (request : Schedule_domain.schedule_request)
+      (execution : Schedule_domain.execution_record)
+  =
+  let* keeper_name =
+    match Schedule_payload_projection.dispatch_view_detailed request with
+    | Error rejection ->
+      Error (Schedule_payload_projection.dispatch_rejection_message rejection)
+    | Ok (Schedule_payload_projection.Keeper_wake, payload) -> body_keeper_name payload
+  in
+  let base_path = config.Workspace_utils.base_path in
+  let occurrence_id = occurrence_stimulus_id execution in
+  let* still_queued = queue_holds_occurrence ~base_path ~keeper_name ~occurrence_id in
+  if still_queued
+  then Ok Schedule_runner.Consumer_holds_occurrence
+  else (
+    match reaction_evidence_result ~base_path ~keeper_name ~stimulus_id:occurrence_id with
+    | Error message -> Error message
+    | Ok (Keeper_reaction_ledger.Evidence_quarantined { first_reason; _ }) ->
+      Error
+        (Printf.sprintf
+           "keeper reaction ledger evidence quarantined for occurrence %s: %s"
+           occurrence_id
+           (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason))
+    | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+      if evidence.event_queue_ack_seen || evidence.event_queue_cancelled_seen
+      then Ok Schedule_runner.Consumer_settled_occurrence
+      else if not evidence.stimulus_seen
+      then
+        (* Positive control. Enqueueing this occurrence also recorded a stimulus
+           row (:567-574), so reading the ledger back without one means we are
+           not reading the generation it was written to — the reaction ledger is
+           generation-pinned and an absent generation directory reads as an empty
+           one, which is byte-identical to "this occurrence never existed".
+           Absence of evidence is only evidence of absence once the row we know
+           we wrote comes back. *)
+        Error
+          (Printf.sprintf
+             "keeper %s reaction ledger returned no stimulus row for occurrence \
+              %s; refusing to read unreadable evidence as absent"
+             keeper_name
+             occurrence_id)
+      else
+        Ok
+          (Schedule_runner.Consumer_lost_occurrence
+             (Printf.sprintf
+                "keeper %s no longer holds scheduled wake %s and recorded no \
+                 terminal reaction for it"
+                keeper_name
+                occurrence_id)))
+;;
+
+let consumer : Schedule_runner.consumer = { accepts; dispatch; settlement }

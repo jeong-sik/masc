@@ -46,7 +46,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 
 | # | Title | Status | Last activity | Sub-docs |
 |---|---|---|---|---|
-| 0000 | MASC × OAS Consolidated Master Design (SSOT) | Draft | 55b6a7c218 2026-08-02 | - |
+| 0000 | MASC × OAS Consolidated Master Design (SSOT) | Draft | e967de6553 2026-08-02 | - |
 | 0001 | Withdraw heuristic uncertainty governance | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0002 | Keeper 11-State Machine + Det/NonDet Boundary Formalization | reference | 7b62a87d44 2026-07-13 | - |
 | 0003 | Withdraw composite lifecycle projection hierarchy | Withdrawn | 7b62a87d44 2026-07-13 | - |
@@ -63,7 +63,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0025 | Tiered Small-Model Runtime (4B → 9B → 70B+) | Draft | 70ac2a7930 2026-06-03 | - |
 | 0027 | Retired tension and meta-cognition draft | Superseded | 434a7f5a76 2026-07-10 | - |
 | 0029 | Dashboard Fiber-Batched Aggregation | Active | a7b9f1f8d0 2026-05-31 | - |
-| 0032 | Environment Knob Unification | Draft | a7296801a7 2026-06-01 | - |
+| 0032 | Environment Knob Unification | Draft | 609e220e00 2026-08-02 | - |
 | 0034 | d — release_stale_claims agent-side sync | Draft | 00a9aa0dd1 2026-06-06 | - |
 | 0035 | Cognitive IDE Master Plan Integration | Draft | 0ee897eca1 2026-06-03 | - |
 | 0036 | oas Cognitive Mapping (companion to RFC-0035) | Draft | 0ee897eca1 2026-06-03 | - |
@@ -221,8 +221,8 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0217 | Telemetry Backend Otel 단일화 (Retired Backend Purge) | Draft | d498dd810a 2026-06-06 | - |
 | 0218 | Keeper tool-surface coherence + web-tooling roadmap — phases and per-phase gates | Draft | ec5d329844 2026-06-06 | - |
 | 0219 | Remove Sandbox Repo Patrol Gates | Draft | 7e800d1231 2026-06-06 | - |
-| 0220 | Withdraw cross-Keeper verification scheduling | Withdrawn | 55b6a7c218 2026-08-02 | - |
-| 0221 | Atomic verification submission — task_status as the sole outcome authority | Implemented (steps 1-3 merged #20613/#20617; steps 4-5 measured then dropped, §3.3/§3.4) | 55b6a7c218 2026-08-02 | - |
+| 0220 | Withdraw cross-Keeper verification scheduling | Withdrawn | e967de6553 2026-08-02 | - |
+| 0221 | Atomic verification submission — task_status as the sole outcome authority | Implemented (steps 1-3 merged #20613/#20617; steps 4-5 measured then dropped, §3.3/§3.4) | e967de6553 2026-08-02 | - |
 | 0222 | Withdraw harness-owned Task completion | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0223 | Typed connector surfaces: presence in world prompt, pull-based lane context, ... | Draft | c8eb1078d2 2026-06-10 | - |
 | 0224 | Withdraw the mandatory structured completion checklist | Withdrawn | 7b62a87d44 2026-07-13 | - |
@@ -338,7 +338,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0352 | Legacy Goal: RFC-0000 §3.2 ↔ §3.15 자기모순 해소 (결정 요청) | Draft | 6952c01917 2026-07-21 | - |
 | 0353 | 실패 분류가 모듈 경계에서 소실되는 결함 (결정 요청) | Draft | e7885e013a 2026-07-30 | - |
 | 0356 | Approval owns the effect (replay the approved payload, do not require byte-id... | Draft | 4883853ace 2026-07-27 | - |
-| 0357 | Scheduled-autonomous 턴은 heartbeat가 아니라 typed stimulus의 변화로 admit한다 | Draft | 3722a9d014 2026-08-02 | - |
+| 0357 | Scheduled-autonomous 턴은 heartbeat가 아니라 typed stimulus의 변화로 admit한다 | Draft | 58e9ab2d9f 2026-08-02 | - |
 | asyn | Offload the structured-log durable append off the emitting fiber | Draft | 3ec8a423be 2026-07-21 | - |
 | chec | Immutable boot-pinned root capability for checkpoint containment | Draft | 810be9566e 2026-07-18 | - |
 | comp | Compaction must never deadlock: a deterministic structural floor, typed outco... | Draft | e7885e013a 2026-07-30 | - |

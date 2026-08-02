@@ -16,9 +16,6 @@ let keeper_board_meta ~source meta =
   `Assoc (assoc_replace "source" (`String source) fields)
 ;;
 
-let assoc_value_opt key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
 ;;
 
 let string_arg key = function

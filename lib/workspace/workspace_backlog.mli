@@ -29,7 +29,8 @@ val write_backlog :
 exception Backlog_write_failed of string
 
 type write_backlog_outcome =
-  { primary_mirror_error : string option
+  { committed_revision : int
+  ; primary_mirror_error : string option
   ; recovery_error : string option
   ; post_commit_error : string option
   }

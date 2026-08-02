@@ -135,9 +135,6 @@ let recover_owned_task_to_todo_r
            else candidate)
         backlog.tasks
     in
-    (* [write_backlog_result] stamps the committed revision to the read
-       snapshot's version + 1; this is that value, for the result/log. *)
-    let backlog_version = backlog.version + 1 in
     let* persistence =
       write_backlog_result
         config
@@ -145,6 +142,7 @@ let recover_owned_task_to_todo_r
       |> Result.map_error (fun message ->
         Masc_domain.System (Masc_domain.System_error.IoError message))
     in
+    let backlog_version = persistence.committed_revision in
     let run_post_commit label f =
       try
         f ();

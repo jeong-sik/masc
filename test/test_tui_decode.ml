@@ -244,25 +244,6 @@ let test_parse_keeper_chat_response_json_error () =
   | Ok _ -> Alcotest.fail "expected parse failure"
   | Error err -> Alcotest.(check string) "error message" "boom" err
 
-let test_decode_json_http_response_rejects_error_status () =
-  let response =
-    "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n\
-     {\"error\":\"bad confirm\"}"
-  in
-  match Tui_decode.decode_json_http_response ~allow_empty:true response with
-  | Ok _ -> Alcotest.fail "expected HTTP 400 to fail"
-  | Error err ->
-      Alcotest.(check string)
-        "http error" "HTTP 400: {\"error\":\"bad confirm\"}" err
-
-let test_decode_json_http_response_allows_empty_success_post () =
-  let response = "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n" in
-  match Tui_decode.decode_json_http_response ~allow_empty:true response with
-  | Ok (`Assoc []) -> ()
-  | Ok json ->
-      Alcotest.failf "expected empty object, got %s" (Yojson.Safe.to_string json)
-  | Error err -> Alcotest.fail err
-
 let test_decode_json_response_body_rejects_error_status () =
   match
     Tui_decode.decode_json_response_body ~allow_empty:true ~status_code:400
@@ -272,6 +253,16 @@ let test_decode_json_response_body_rejects_error_status () =
   | Error err ->
       Alcotest.(check string)
         "http error" "HTTP 400: {\"error\":\"bad confirm\"}" err
+
+let test_decode_json_response_body_allows_empty_success () =
+  match
+    Tui_decode.decode_json_response_body ~allow_empty:true ~status_code:204
+      ~body:""
+  with
+  | Ok (`Assoc []) -> ()
+  | Ok json ->
+      Alcotest.failf "expected empty object, got %s" (Yojson.Safe.to_string json)
+  | Error err -> Alcotest.fail err
 
 type parent_node = {
   node_id : string;
@@ -342,14 +333,12 @@ let () =
         Alcotest.test_case "json error" `Quick
           test_parse_keeper_chat_response_json_error;
       ] );
-    ( "http_response",
+    ( "structured_http_response",
       [
-        Alcotest.test_case "rejects error status" `Quick
-          test_decode_json_http_response_rejects_error_status;
-        Alcotest.test_case "allows empty success post" `Quick
-          test_decode_json_http_response_allows_empty_success_post;
         Alcotest.test_case "body rejects error status" `Quick
           test_decode_json_response_body_rejects_error_status;
+        Alcotest.test_case "body allows empty success" `Quick
+          test_decode_json_response_body_allows_empty_success;
       ] );
     ( "bounded_parent_depth",
       [

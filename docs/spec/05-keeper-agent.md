@@ -22,7 +22,7 @@ code_refs:
 
 ## 1. Purpose
 
-Keeper는 MASC의 자율 에이전트 하네스(harness)다. OAS `Agent.run` 위에서 동작하며, 장기 실행 루프, 컨텍스트 관리, 메모리 계층, 심의(deliberation), 승계(succession), 검증(verification)을 담당한다.
+Keeper는 MASC의 자율 에이전트 하네스(harness)다. OAS `Agent.run` 위에서 동작하며, 장기 실행 루프, 컨텍스트 관리, 메모리 계층, 심의(deliberation), 승계(succession)을 담당한다. Task verification verdict는 Keeper lifecycle 밖의 application-owned system LLM agent 또는 authenticated HITL authority가 typed completion-authority 경계에서 결정한다. Keeper는 evidence를 제출할 수 있지만 verifier가 되지 않는다.
 
 Keeper 하나는 다음을 소유한다:
 - **identity**: `keeper_meta` 레코드 (이름, persona, instructions, typed goal/task links)
@@ -53,8 +53,11 @@ graph LR
     KAR --> KHO[hooks_oas]
   end
   subgraph Decision
-    KD[deliberation] --> KV[verifier]
     KD --> KL[learning]
+  end
+  subgraph Completion Authority
+    CA[system LLM agent] --> CV[typed verdict]
+    HO[authenticated HITL] --> CV
   end
   subgraph Supervision
     KRS[supervisor] --> KKA[keepalive]
@@ -323,6 +326,13 @@ Task completion evidence is assembled by
 `lib/workspace/workspace_task_verification.ml` and persisted through the
 typed verification-request protocol. Evidence strings are observations; local
 substring classifiers do not decide completion.
+
+Task verification is not Keeper work. After a producer Keeper submits the
+typed evidence snapshot, the application-owned system LLM agent receives the
+persisted request and evidence and may emit the typed verdict. An authenticated
+HITL operator is the separate authority path. Neither authority enters Keeper
+registration, claims a Keeper lane, or becomes a Keeper; a rejection wakes only
+the producer Keeper.
 
 Model judgment belongs to the product operation that consumes it. Fusion,
 Keeper failure judgment, board attention, and Task completion review each own

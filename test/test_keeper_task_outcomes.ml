@@ -125,6 +125,72 @@ let test_tasks_list_returns_snapshot_and_unchanged () =
          (Yojson.Safe.to_string unchanged_data)
          unchanged.raw_output)
 
+let test_tasks_list_revision_covers_projected_contents () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~title:"First workspace task"
+            ~priority:1
+            ~description:"");
+       let meta = meta_with_active_goals [] in
+       let snapshot () =
+         match
+           (Task.handle_keeper_task_tool_with_outcome
+              ~config
+              ~meta
+              ~name:"keeper_tasks_list"
+              ~args:(`Assoc [])).data
+         with
+         | Some data -> data
+         | None -> fail "expected producer-owned snapshot"
+       in
+       let first = snapshot () in
+       let backlog_path = Filename.concat (Masc.Workspace.tasks_dir config) ".backlog" in
+       let rewrite_title = function
+         | `Assoc fields ->
+           `Assoc
+             (List.map
+                (function
+                  | "tasks", `List [ `Assoc task_fields ] ->
+                    ( "tasks"
+                    , `List
+                        [ `Assoc
+                            (List.map
+                               (function
+                                 | "title", _ -> "title", `String "Second workspace task"
+                                 | field -> field)
+                               task_fields)
+                        ] )
+                  | field -> field)
+                fields)
+         | other -> failf "unexpected backlog shape: %s" (Yojson.Safe.to_string other)
+       in
+       let original_backlog = Yojson.Safe.from_file backlog_path in
+       let rewritten_backlog = rewrite_title original_backlog in
+       Fs_compat.save_file backlog_path (Yojson.Safe.to_string rewritten_backlog);
+       let second = snapshot () in
+       check int
+         "fixture keeps the exact backlog revision"
+         U.(original_backlog |> member "version" |> to_int)
+         U.(rewritten_backlog |> member "version" |> to_int);
+       check string
+         "fixture changes only visible task content"
+         "Second workspace task"
+         U.(second |> member "snapshot" |> index 0 |> member "title" |> to_string);
+       check bool
+         "same counter with different visible task content changes revision"
+         true
+         (not
+            (String.equal
+               U.(first |> member "revision" |> to_string)
+               U.(second |> member "revision" |> to_string))))
+
 let test_response_finalization_keeps_visible_reply_only () =
   let finalized =
     Response_text.finalize
@@ -365,6 +431,10 @@ let () =
             "keeper_tasks_list returns snapshot and unchanged"
             `Quick
             test_tasks_list_returns_snapshot_and_unchanged
+        ; test_case
+            "keeper_tasks_list revision covers projected task contents"
+            `Quick
+            test_tasks_list_revision_covers_projected_contents
         ; test_case "response finalization keeps visible reply only" `Quick
             test_response_finalization_keeps_visible_reply_only
         ; test_case "rejected done (missing task_id) emits typed Error (D1)"

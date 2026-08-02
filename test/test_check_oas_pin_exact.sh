@@ -54,6 +54,12 @@ case "${1:-}" in
         echo 'simulated opam pin list failure' >&2
         exit 17
         ;;
+      duplicate)
+        printf 'agent_sdk.%s git git+%s (at %s)\n' \
+          "${TEST_AGENT_SDK_VERSION}" "${TEST_AGENT_SDK_URL}" "${TEST_AGENT_SDK_SHA}"
+        printf 'agent_sdk.%s git git+%s (at ffffffffffffffffffffffffffffffffffffffff)\n' \
+          "${TEST_AGENT_SDK_VERSION}" "${TEST_AGENT_SDK_URL}"
+        ;;
       exact)
         printf 'agent_sdk.%s git git+%s (at %s)\n' \
           "${TEST_AGENT_SDK_VERSION}" "${TEST_AGENT_SDK_URL}" "${TEST_AGENT_SDK_SHA}"
@@ -116,6 +122,7 @@ run_rejected_case \
   "agent_sdk pin checkout is ffffffffffffffffffffffffffffffffffffffff, expected ${OAS_AGENT_SDK_SHA}"
 run_rejected_case missing "agent_sdk is installed but not pinned"
 run_rejected_case failure "failed to read agent_sdk pin source"
+run_rejected_case duplicate "agent_sdk pin state is ambiguous"
 
 output="$(TEST_PIN_MODE=exact PATH="${test_root}/bin:${PATH}" \
   bash "${REPO_ROOT}/scripts/check-oas-pin.sh" --local-only 2>&1)"

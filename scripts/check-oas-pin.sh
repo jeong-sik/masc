@@ -295,9 +295,15 @@ if command -v opam >/dev/null 2>&1; then
     exit 1
   fi
   pin_line="$(awk '$1 ~ /^agent_sdk\./ { print }' <<<"${pin_list_output}")"
+  pin_count="$(awk '$1 ~ /^agent_sdk\./ { count += 1 } END { print count + 0 }' <<<"${pin_list_output}")"
   if [[ -z "${pin_line}" ]]; then
     echo "agent_sdk is installed but not pinned in the current opam switch" >&2
     echo "  expected pin source: ${expected_opam_pin_source}" >&2
+    echo "repair: bash scripts/opam-pin-external-deps.sh" >&2
+    exit 1
+  elif [[ "${pin_count}" -ne 1 ]]; then
+    echo "agent_sdk pin state is ambiguous: expected exactly one pin, found ${pin_count}" >&2
+    echo "  opam pin list output: ${pin_list_output}" >&2
     echo "repair: bash scripts/opam-pin-external-deps.sh" >&2
     exit 1
   else

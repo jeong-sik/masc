@@ -220,7 +220,7 @@ function KanbanCard({ task }: { task: Task }) {
 
       <div class="flex flex-wrap items-center gap-1.5 font-mono text-3xs text-[var(--color-fg-muted)]">
         ${task.status === 'awaiting_verification'
-          ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-1.5 py-0.5 text-[var(--color-accent-fg)]" title="verifier keeper의 독립 실측을 기다리는 중">검증 대기${task.updated_at ? html` <${TimeAgo} timestamp=${task.updated_at} />` : null}</span>`
+          ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-1.5 py-0.5 text-[var(--color-accent-fg)]" title="시스템 LLM agent의 판정을 기다리는 중">검증 대기${task.updated_at ? html` <${TimeAgo} timestamp=${task.updated_at} />` : null}</span>`
           : task.completed_at && task.status === 'done'
             ? html`<span class="rounded-[var(--r-0)] border border-ok/25 bg-ok/10 px-1.5 py-0.5 text-ok">완료 <${TimeAgo} timestamp=${task.completed_at} /></span>`
             : task.completed_at && task.status === 'cancelled'
@@ -438,7 +438,7 @@ export function TaskBacklog() {
         <${TaskColumn}
           title="검증 대기"
           count=${sortedAwaitingVerification.length}
-          description="verifier keeper가 completion_contract 정량 기준을 독립 실측 중인 태스크입니다."
+          description="시스템 LLM agent의 completion_contract 판정을 기다리는 태스크입니다."
           badgeClass="border border-[var(--accent-30)] bg-[var(--accent-10)] text-accent-fg"
         >
           ${sortedAwaitingVerification.length === 0

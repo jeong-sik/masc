@@ -711,7 +711,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
             ${(() => {
               const awaiting = countAwaitingVerificationTasks(node.tasks)
               return awaiting > 0 ? html`
-                <span class="rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-medium text-accent-fg" title="verifier keeper의 독립 실측을 기다리는 task">
+                <span class="rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-medium text-accent-fg" title="시스템 LLM agent의 판정을 기다리는 task">
                   Task 검증 대기 ${awaiting}
                 </span>
               ` : null

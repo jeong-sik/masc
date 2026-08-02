@@ -304,7 +304,7 @@ function ContractSection({ task }: { task: Task }) {
   const completionItems = contract.completion_contract ?? []
   const requiredEvidence = contract.required_evidence ?? []
   const isAwaitingVerification = task.status === 'awaiting_verification'
-  const verifierAssignee = isAwaitingVerification ? task.assignee : undefined
+  const submitterAssignee = isAwaitingVerification ? task.assignee : undefined
 
   return html`
     <div class="flex flex-col gap-3">
@@ -321,7 +321,7 @@ function ContractSection({ task }: { task: Task }) {
       ${isAwaitingVerification ? html`
         <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-5)] px-4 py-3">
           <div class="flex items-center justify-between gap-3 flex-wrap">
-            <div class="text-xs font-medium text-accent-fg">Verifier Keeper 검증 중</div>
+            <div class="text-xs font-medium text-accent-fg">시스템 LLM agent 판정 대기</div>
             <a
               href=${`#workspace?section=verification&task=${encodeURIComponent(task.id)}`}
               class="v2-mobile-operator-target inline-flex items-center rounded-[var(--r-1)] border border-[var(--accent-50)] bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg hover:bg-[var(--accent-20)]"
@@ -329,12 +329,12 @@ function ContractSection({ task }: { task: Task }) {
             >검증 보기 →</a>
           </div>
           <div class="mt-1 text-2xs text-text-body">
-            Submitter: <span class="font-mono">${verifierAssignee ?? '(unknown)'}</span>
+            Submitter: <span class="font-mono">${submitterAssignee ?? '(unknown)'}</span>
           </div>
           <div class="mt-0.5 text-2xs text-text-muted">
-            다른 keeper가 completion_contract의 정량 기준을 독립 실측 중입니다.
-            통과 시 approve_verification → done, 미충족 시 reject_verification → in_progress로 복귀.
-            판정 권한은 verifier phase를 claim한 Keeper에게만 있습니다.
+            시스템 LLM agent의 completion_contract 판정을 기다리는 중입니다.
+            approve_verification이면 done으로, reject_verification이면 in_progress로 복귀합니다.
+            이 상태는 Keeper 작업이 아니며 다른 Keeper가 claim하지 않습니다.
           </div>
         </div>
       ` : null}

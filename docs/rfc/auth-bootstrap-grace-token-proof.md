@@ -60,7 +60,7 @@ to keep. `verify_workspace_secret` (defined, but with zero callers before
 this change — a second, independent audit finding) compares the caller's
 hashed secret against the caller's already-loaded `auth_config.
 workspace_secret_hash` using `Auth_credential_token.constant_time_string_equal`
-(XOR-accumulated over every byte, no early exit on the first mismatch),
+(delegated to Eqaf's timing-resistant equality),
 falling back to a guarded read of the on-disk hash file only when the
 config predates the cache.
 

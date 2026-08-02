@@ -863,8 +863,9 @@ let check_agent_rate_limit request reqd =
       end
 
 (** Admin-only access - requires MASC_ADMIN_TOKEN.
-    Uses timing-safe comparison (XOR-based constant-time) to prevent
-    timing side-channel attacks that could leak token bytes. *)
+    Delegates timing-resistant comparison to Eqaf. *)
+let admin_token_equal = Eqaf.equal
+
 let with_admin_auth handler request reqd =
   match !server_state with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
@@ -879,19 +880,7 @@ let with_admin_auth handler request reqd =
           Http_server_eio.Response.json ~status:`Unauthorized
             {|{"error":"Admin token required"}|} reqd
       | Some expected, Some given ->
-          (* Constant-time comparison: always XOR max(len_a, len_b) bytes.
-             Length difference is folded into the diff accumulator so both
-             length and content mismatches cost the same wall-clock time. *)
-          let len_a = String.length expected in
-          let len_b = String.length given in
-          let max_len = max len_a len_b in
-          let diff = ref (len_a lxor len_b) in
-          for i = 0 to max_len - 1 do
-            let a = if i < len_a then Char.code expected.[i] else 0 in
-            let b = if i < len_b then Char.code given.[i] else 0 in
-            diff := !diff lor (a lxor b)
-          done;
-          if !diff = 0 then
+          if admin_token_equal expected given then
             handler state request reqd
           else
             Http_server_eio.Response.json ~status:`Forbidden
@@ -1180,3 +1169,7 @@ and with_token_permission_auth ~permission handler request reqd =
           | Ok () -> handler state agent_name request reqd
           | Error () -> ())
       | Error err -> respond_auth_error request reqd err)
+
+module For_testing = struct
+  let admin_token_equal = admin_token_equal
+end

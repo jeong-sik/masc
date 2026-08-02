@@ -246,6 +246,12 @@ let test_authenticated_owner_overrides_request_hint () =
   check (option string) "authenticated projection" (Some "credential-owner")
     (project ~base_path request)
 
+let test_admin_token_equality_truth_table () =
+  let equal = Server_auth.For_testing.admin_token_equal in
+  check bool "exact match" true (equal "admin-secret" "admin-secret");
+  check bool "same-length mismatch" false (equal "admin-secret" "admin-secrex");
+  check bool "different-length mismatch" false (equal "admin-secret" "admin-secret-long")
+
 let () =
   run "server_auth_dashboard_actor_resolution"
     [ ( "resolution"
@@ -259,5 +265,7 @@ let () =
             test_credential_source_precedence_and_observer_query_state
         ; test_case "authenticated owner is canonical" `Quick
             test_authenticated_owner_overrides_request_hint
+        ; test_case "admin token equality truth table" `Quick
+            test_admin_token_equality_truth_table
         ] )
     ]

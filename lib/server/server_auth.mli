@@ -423,3 +423,7 @@ val with_token_permission_auth :
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Like [with_permission_auth] but threads the token id into the
     handler so the handler can audit the call. *)
+
+module For_testing : sig
+  val admin_token_equal : string -> string -> bool
+end

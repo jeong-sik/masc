@@ -87,14 +87,6 @@ val existing_file : string -> bool
    function is retained file-private because [base_path] /
    [sb_path_opt] still call it internally. *)
 
-(* RFC-0085 PR-11 — Env var deprecation mechanism removed (7 entries:
-   deprecation_warned, warn_deprecated, deprecated_opt,
-   resolve_deprecated, get_float_deprecated, get_int_deprecated,
-   get_bool_deprecated).  The sole MASC_KEEPER_AUTOBOT_MAX typo
-   fallback caller is gone.  Future env
-   migrations should pick a single name and stick with it; soft
-   fallbacks accumulate via the workaround pattern from RFC-0084. *)
-
 (** {1 HTTP host + port (SSOT for issue 8352)} *)
 
 val default_http_port : string

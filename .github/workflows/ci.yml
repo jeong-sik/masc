@@ -437,6 +437,7 @@ jobs:
         run: |
           chmod +x scripts/check-oas-pin.sh
           bash test/test_oas_pin_ref.sh
+          bash test/test_check_oas_pin_exact.sh
           scripts/check-oas-pin.sh --local-only
 
       - name: Check OAS API surface source
@@ -862,6 +863,23 @@ jobs:
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_model_inference_metrics"
+
+      # Completion-authority rejection routing and verification-evidence
+      # projection are executable behavior, not implementation shape: the
+      # suite asserts routed identities and stored payloads, never source
+      # text or log wording. It stayed compile-only under @check, so
+      # regression tests added there (#26625, #26657) never ran.
+      - name: Run verification behavior suite
+        id: verification_behavior_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_verification"
 
       - name: Run tool blob retention suite
         id: tool_blob_retention_suite

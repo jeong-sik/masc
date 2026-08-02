@@ -64,61 +64,33 @@ let extract_mode_of_string raw =
 
 let default_extract_mode = Markdown
 
-(** Extract <title> from HTML *)
-let title_tag_re =
-  Re.Pcre.re ~flags:[ `CASELESS; `DOTALL ] "<title[^>]*>(.*?)</title>"
-  |> Re.compile
-
 let extract_title html =
-  match Re.exec_opt title_tag_re html with
-  | Some groups ->
-      let raw = Re.Group.get groups 1 in
-      let cleaned = Tool_misc_web_search.clean_search_text raw in
-      if String.equal cleaned "" then None else Some cleaned
-  | None -> None
+  let title =
+    Markup_document.parse_html html
+    |> Markup_document.first_element_named "title"
+    |> Option.map Markup_document.text_content
+  in
+  Option.bind title String_util.trim_nonempty
 
-(** Extract <meta name="description"> or og:description from HTML *)
-let meta_description_re =
-  Re.Pcre.re
-    ~flags:[ `CASELESS; `DOTALL ]
-    "<meta[^>]+name\\s*=\\s*['\"]description['\"][^>]+content\\s*=\\s*['\"]([^'\"]+)['\"][^>]*>"
-  |> Re.compile
-
-let meta_description_reversed_re =
-  Re.Pcre.re
-    ~flags:[ `CASELESS; `DOTALL ]
-    "<meta[^>]+content\\s*=\\s*['\"]([^'\"]+)['\"][^>]+name\\s*=\\s*['\"]description['\"][^>]*>"
-  |> Re.compile
-
-let og_description_re =
-  Re.Pcre.re
-    ~flags:[ `CASELESS; `DOTALL ]
-    "<meta[^>]+property\\s*=\\s*['\"]og:description['\"][^>]+content\\s*=\\s*['\"]([^'\"]+)['\"][^>]*>"
-  |> Re.compile
-
-let og_description_reversed_re =
-  Re.Pcre.re
-    ~flags:[ `CASELESS; `DOTALL ]
-    "<meta[^>]+content\\s*=\\s*['\"]([^'\"]+)['\"][^>]+property\\s*=\\s*['\"]og:description['\"][^>]*>"
-  |> Re.compile
-
-let first_match html pattern =
-  match Re.exec_opt pattern html with
-  | Some groups ->
-      let cleaned = Tool_misc_web_search.clean_search_text (Re.Group.get groups 1) in
-      if String.equal cleaned "" then None else Some cleaned
-  | None -> None
+let meta_content nodes attribute value =
+  Markup_document.elements_named "meta" nodes
+  |> List.find_map (fun node ->
+         match
+           Markup_document.attribute attribute node,
+           Markup_document.attribute "content" node
+         with
+         | Some actual, Some content
+           when String.equal
+                  (String.lowercase_ascii (String.trim actual))
+                  value ->
+           String_util.trim_nonempty content
+         | _ -> None)
 
 let extract_description html =
-  match first_match html og_description_re with
-  | Some _ as value -> value
-  | None -> (
-      match first_match html og_description_reversed_re with
-      | Some _ as value -> value
-      | None -> (
-          match first_match html meta_description_re with
-          | Some _ as value -> value
-          | None -> first_match html meta_description_reversed_re))
+  let nodes = Markup_document.parse_html html in
+  match meta_content nodes "property" "og:description" with
+  | Some _ as description -> description
+  | None -> meta_content nodes "name" "description"
 
 (** URL validation *)
 let valid_url url =
@@ -138,141 +110,52 @@ let ends_with ~suffix value =
        (String.sub value (value_length - suffix_length) suffix_length)
        suffix
 
-let html_block_re tag =
-  Re.Pcre.re
-    ~flags:[ `CASELESS; `DOTALL ]
-    (Printf.sprintf "<%s\\b[^>]*>[\\s\\S]*?</%s>" tag tag)
-  |> Re.compile
-
-let remove_html_noise_res =
-  List.map html_block_re
-    [ "script"; "style"; "noscript"; "svg"; "canvas"; "template"; "iframe" ]
-
-let remove_boilerplate_res =
-  List.map html_block_re [ "nav"; "footer"; "aside"; "form" ]
-
-let html_comment_re =
-  Re.Pcre.re ~flags:[ `DOTALL ] "<!--[\\s\\S]*?-->" |> Re.compile
-
-let article_re =
-  Re.Pcre.re ~flags:[ `CASELESS; `DOTALL ] "<article\\b[^>]*>([\\s\\S]*?)</article>"
-  |> Re.compile
-
-let main_re =
-  Re.Pcre.re ~flags:[ `CASELESS; `DOTALL ] "<main\\b[^>]*>([\\s\\S]*?)</main>"
-  |> Re.compile
-
-let body_re =
-  Re.Pcre.re ~flags:[ `CASELESS; `DOTALL ] "<body\\b[^>]*>([\\s\\S]*?)</body>"
-  |> Re.compile
-
-let heading_re =
-  Re.Pcre.re ~flags:[ `CASELESS; `DOTALL ] "<h([1-6])\\b[^>]*>([\\s\\S]*?)</h[1-6]>"
-  |> Re.compile
-
-let link_re =
-  Re.Pcre.re
-    ~flags:[ `CASELESS; `DOTALL ]
-    "<a\\b[^>]*href\\s*=\\s*['\"]([^'\"]+)['\"][^>]*>([\\s\\S]*?)</a>"
-  |> Re.compile
-
-let paragraph_open_re = Re.Pcre.re ~flags:[ `CASELESS ] "<p\\b[^>]*>" |> Re.compile
-let paragraph_close_re = Re.Pcre.re ~flags:[ `CASELESS ] "</p>" |> Re.compile
-let br_re = Re.Pcre.re ~flags:[ `CASELESS ] "<br\\s*/?>" |> Re.compile
-let li_open_re = Re.Pcre.re ~flags:[ `CASELESS ] "<li\\b[^>]*>" |> Re.compile
-let li_close_re = Re.Pcre.re ~flags:[ `CASELESS ] "</li>" |> Re.compile
-let block_open_re =
-  Re.Pcre.re ~flags:[ `CASELESS ] "<(div|section|tr|table|ul|ol)\\b[^>]*>"
-  |> Re.compile
-let block_close_re =
-  Re.Pcre.re ~flags:[ `CASELESS ] "</(div|section|tr|table|ul|ol)>"
-  |> Re.compile
-let residual_tag_re = Re.Pcre.re "<[^>]+>" |> Re.compile
 let horizontal_space_re = Re.Pcre.re "[ \t\r]+" |> Re.compile
 let blank_lines_re = Re.Pcre.re "\n{3,}" |> Re.compile
 
-let html_entity_replacements =
-  [
-    ("&amp;", "&");
-    ("&lt;", "<");
-    ("&gt;", ">");
-    ("&quot;", "\"");
-    ("&#39;", "'");
-    ("&#039;", "'");
-    ("&apos;", "'");
-    ("&nbsp;", " ");
-  ]
-  |> List.map (fun (entity, replacement) ->
-         (Re.str entity |> Re.compile, replacement))
-
-let decode_html_entities text =
+let longest_nonempty nodes =
   List.fold_left
-    (fun acc (entity_re, replacement) ->
-      Re.replace_string entity_re ~by:replacement acc)
-    text
-    html_entity_replacements
-
-let strip_noise html =
-  remove_html_noise_res
-  |> List.fold_left
-       (fun acc re -> Re.replace_string re ~by:"" acc)
-       (Re.replace_string html_comment_re ~by:"" html)
-
-let longest_nonempty blocks =
-  List.fold_left
-    (fun best block ->
-      let candidate = String.trim block in
+    (fun best node ->
+      let candidate = Markup_document.text_content node |> String.trim in
       if String.equal candidate "" then best
       else
         match best with
-        | None -> Some candidate
-        | Some current ->
-            if String.length candidate > String.length current then Some candidate
-            else best)
+        | None -> Some (node, String.length candidate)
+        | Some (_, current_length) ->
+          if String.length candidate > current_length
+          then Some (node, String.length candidate)
+          else best)
     None
-    blocks
+    nodes
 
-let first_group pattern html =
-  Re.all pattern html |> List.map (fun groups -> Re.Group.get groups 1)
+let ignored_elements =
+  [ "script"; "style"; "noscript"; "svg"; "canvas"; "template"; "iframe"
+  ; "nav"; "footer"; "aside"; "form"
+  ]
 
-let select_readable_html html =
-  let html = strip_noise html in
+let rec prune_node = function
+  | Markup_document.Text _ as node -> Some node
+  | Markup_document.Element element ->
+    if List.mem element.name ignored_elements then None
+    else
+      Some
+        (Markup_document.Element
+           { element with children = List.filter_map prune_node element.children })
+
+let select_readable_nodes html =
+  let document = Markup_document.parse_html html in
   let selected, source =
-    match longest_nonempty (first_group article_re html) with
-    | Some article -> (article, Article)
-    | None -> (
-        match longest_nonempty (first_group main_re html) with
-        | Some main -> (main, Main)
-        | None -> (
-            match first_group body_re html with
-            | body :: _ -> (body, Body)
-            | [] -> (html, Document)))
+    match longest_nonempty (Markup_document.elements_named "article" document) with
+    | Some (article, _) -> [ article ], Article
+    | None ->
+      (match longest_nonempty (Markup_document.elements_named "main" document) with
+       | Some (main, _) -> [ main ], Main
+       | None ->
+         (match Markup_document.first_element_named "body" document with
+          | Some body -> [ body ], Body
+          | None -> document, Document))
   in
-  ( List.fold_left
-      (fun acc re -> Re.replace_string re ~by:"" acc)
-      selected
-      remove_boilerplate_res
-  , source )
-
-let clean_inline html =
-  Tool_misc_web_search.clean_search_text html
-
-let render_links html =
-  Re.replace link_re html ~f:(fun groups ->
-      let href = Re.Group.get groups 1 |> String.trim in
-      let label = Re.Group.get groups 2 |> clean_inline in
-      if String.equal label "" then ""
-      else if valid_url href then Printf.sprintf "[%s](%s)" label href
-      else label)
-
-let render_headings html =
-  Re.replace heading_re html ~f:(fun groups ->
-      let level =
-        Re.Group.get groups 1 |> Stdlib.int_of_string_opt |> Option.value ~default:2
-      in
-      let marker = String.make (max 1 (min 6 level)) '#' in
-      let label = Re.Group.get groups 2 |> clean_inline in
-      if String.equal label "" then "\n" else "\n" ^ marker ^ " " ^ label ^ "\n")
+  List.filter_map prune_node selected, source
 
 let normalize_markdown text =
   let lines =
@@ -296,27 +179,43 @@ let normalize_markdown text =
     lines;
   Buffer.contents buf |> Re.replace_string blank_lines_re ~by:"\n\n" |> String.trim
 
-let render_markdown html =
-  html
-  |> render_links
-  |> render_headings
-  |> Re.replace_string br_re ~by:"\n"
-  |> Re.replace_string paragraph_open_re ~by:"\n"
-  |> Re.replace_string paragraph_close_re ~by:"\n"
-  |> Re.replace_string li_open_re ~by:"\n- "
-  |> Re.replace_string li_close_re ~by:"\n"
-  |> Re.replace_string block_open_re ~by:"\n"
-  |> Re.replace_string block_close_re ~by:"\n"
-  |> Re.replace_string residual_tag_re ~by:""
-  |> decode_html_entities
-  |> normalize_markdown
+let rec render_markdown_node = function
+  | Markup_document.Text value -> value
+  | Markup_document.Element element ->
+    let content =
+      element.children |> List.map render_markdown_node |> String.concat ""
+    in
+    (match element.name with
+     | "a" ->
+       let label = Tool_misc_web_search.clean_search_text content in
+       (match List.assoc_opt "href" element.attributes with
+        | Some href when valid_url href && not (String.equal label "") ->
+          Printf.sprintf "[%s](%s)" label href
+        | _ -> label)
+     | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" ->
+       let level = Char.code element.name.[1] - Char.code '0' in
+       let label = Tool_misc_web_search.clean_search_text content in
+       if String.equal label "" then "\n"
+       else "\n" ^ String.make level '#' ^ " " ^ label ^ "\n"
+     | "br" -> "\n"
+     | "li" -> "\n- " ^ content ^ "\n"
+     | "p" | "div" | "section" | "tr" | "table" | "ul" | "ol" ->
+       "\n" ^ content ^ "\n"
+     | _ -> content)
+
+let render_markdown nodes =
+  nodes |> List.map render_markdown_node |> String.concat "" |> normalize_markdown
 
 let render_extracted_text ~extract_mode html =
-  let readable, source = select_readable_html html in
+  let readable, source = select_readable_nodes html in
   let text =
     match extract_mode with
     | Markdown -> render_markdown readable
-    | Text -> Tool_misc_web_search.clean_search_text readable
+    | Text ->
+      readable
+      |> List.map Markup_document.text_content
+      |> String.concat ""
+      |> Tool_misc_web_search.clean_search_text
   in
   text, source
 

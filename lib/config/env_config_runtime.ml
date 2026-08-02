@@ -244,18 +244,6 @@ module Transport = struct
     Float.max 30.0 (Float.min 600.0 v)
 end
 
-module Verification = struct
-  (** Maximum time a task may remain AwaitingVerification before surfacing an
-      operator-visible timeout. Default: 24h. *)
-  let timeout_deadline_seconds () =
-    get_float ~default:(24.0 *. 60.0 *. 60.0) "MASC_VERIFICATION_TIMEOUT_DEADLINE_SEC"
-
-  (* MASC_VERIFICATION_TIMEOUT_CHECK_INTERVAL_SEC was deleted by RFC-0220 §11
-     PR-3 together with the [verification_timeout] server fork it paced and
-     the [Verification_protocol.check_timeouts] no-op it invoked. The knob
-     row was removed from docs/runtime-tunables.md in the same change. *)
-end
-
 (** {1 Board Configuration} *)
 
 module Board = struct

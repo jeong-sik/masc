@@ -8,12 +8,12 @@ let test_extract_html_preview_fields () =
       <html>
         <head>
           <title>Fallback Title</title>
-          <meta property="og:title" content="OG Title">
+          <meta data-note="1 > 0" content="OG &copy; Title" property="og:title">
           <meta property="og:description" content="OG description here">
           <meta property="og:site_name" content="Example Site">
           <meta property="og:image" content="/cover.png">
           <link rel="canonical" href="/entry">
-          <link rel="icon" href="/favicon.ico">
+          <link rel="shortcut&#x9;icon" href="/favicon.ico">
         </head>
       </html>
     |}
@@ -22,7 +22,7 @@ let test_extract_html_preview_fields () =
     Server_dashboard_http_link_preview.extract_html_preview_fields
       ~url:"https://example.com/blog/post" html
   in
-  check (option string) "title" (Some "OG Title") extracted.title;
+  check (option string) "title" (Some "OG © Title") extracted.title;
   check (option string) "description" (Some "OG description here")
     extracted.description;
   check (option string) "site_name" (Some "Example Site") extracted.site_name;

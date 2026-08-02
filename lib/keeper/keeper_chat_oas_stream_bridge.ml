@@ -472,6 +472,22 @@ let translate ~redact_text ~base_dir bridge_state
             Event_error
               { message = redact_text ("Provider stream error: " ^ reason) } ]
       }
+  | NDJSONError { message; error_type; raw } ->
+      let reason =
+        match error_type with
+        | None -> message
+        | Some error_type -> error_type ^ ": " ^ message
+      in
+      { bridge_state;
+        chat_events =
+          [ protocol_error ?event_type:error_type
+              ~reason:(redact_text message)
+              ~raw_bytes:(String.length raw)
+              Ndjson_error;
+            Event_error
+              { message =
+                  redact_text ("Provider NDJSON stream error: " ^ reason) } ]
+      }
   | SSEParseFailed { raw; reason } ->
       { bridge_state;
         chat_events =

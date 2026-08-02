@@ -34,7 +34,7 @@ val is_keeper_meta_file : string -> bool
 val persisted_keeper_names_result : Workspace.config -> (string list, string) result
 val persisted_keeper_names : Workspace.config -> string list
 
-(** Resolve an agent identity from current persisted Keeper metadata.
+(** Resolve a Keeper name from its current persisted [agent_name] binding.
     [Ok None] means no persisted Keeper owns [agent_name]. A metadata read
     failure or duplicate identity is returned as [Error] and is never
     collapsed into an absent Keeper. *)

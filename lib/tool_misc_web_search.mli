@@ -12,10 +12,9 @@
     types kept internal so callers cannot construct half-formed
     state),
     the pre-compiled whitespace normalizer,
-    JSON envelope helpers (\[json_error], \[json_ok]), text
-    cleaning helpers (\[normalize_spaces], \[clean_search_text],
-    \[trim_nonempty]),
-    \[valid_search_result_url], \[search_field],
+    text cleaning helpers (\[normalize_spaces],
+    \[clean_search_text], \[trim_nonempty]),
+    \[valid_search_result_url],
     \[parse_json_search_results] (the generic JSON parser
     behind the per-provider parsers), \[provider_to_string] /
     \[provider_of_string] / \[parse_provider_csv] /

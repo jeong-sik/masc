@@ -1249,6 +1249,12 @@ let test_submit_snapshot_rejects_bare_and_absolute_references () =
         ~worker:"keeper-executor-agent"
         [ "artifacts/bare.txt"; absolute_path ]
     in
+    let persisted_snapshot = Yojson.Safe.to_string snapshot in
+    Alcotest.(check bool)
+      "invalid references are absent from the persisted snapshot"
+      false
+      (contains_substring persisted_snapshot "artifacts/bare.txt"
+       || contains_substring persisted_snapshot absolute_path);
     ignore
       (match
          V.create_request

@@ -86,6 +86,8 @@ let evidence_read_failure_of_string = function
 let content_sha256 content =
   Digestif.SHA256.(digest_string content |> to_hex)
 
+let redacted_invalid_reference = "<redacted-invalid-reference>"
+
 let submitted_evidence_item_to_yojson = function
   | Evidence_note note ->
     `Assoc [ "kind", `String "note"; "content", `String note ]
@@ -290,10 +292,25 @@ let submitted_evidence_item_of_yojson = function
               })
      | Some (`String "artifact_unreadable") ->
        let open Result.Syntax in
-       let* reference = string_field "reference" in
        let* reason_raw = string_field "reason" in
        let* reason = evidence_read_failure_of_string reason_raw in
-       Ok (Evidence_artifact_unreadable { reference; reason })
+       (match reason, List.assoc_opt "reference" fields with
+        | Evidence_invalid_reference, None ->
+          Ok
+            (Evidence_artifact_unreadable
+               { reference = redacted_invalid_reference; reason })
+        | Evidence_invalid_reference, Some _ ->
+          Error
+            "invalid submitted evidence references must not persist the rejected value"
+        | ( Evidence_missing
+          | Evidence_not_regular_file
+          | Evidence_outside_worker_playground
+          | Evidence_invalid_utf8
+          | Evidence_symbolic_link
+          | Evidence_changed_during_read
+          | Evidence_read_error _ ), _ ->
+          let* reference = string_field "reference" in
+          Ok (Evidence_artifact_unreadable { reference; reason }))
      | Some (`String kind) ->
        Error (Printf.sprintf "unknown submitted evidence snapshot kind %S" kind)
      | Some value ->

@@ -62,6 +62,18 @@ type proactive_runtime =
           substantive action.  Resets to 0 on any productive cycle.
           Used by [effective_scheduled_autonomous_cooldown] for exponential
           backoff: cooldown *= 2^min(n, 2), capping at 4x. *)
+  ; last_consumed_backlog_revision : int
+    (** RFC-0357 §3.3: the scheduled-autonomous edge clock. Highest
+          [backlog.version] observed at the admission of a scheduled turn;
+          the backlog edge is [backlog.version > last_consumed_backlog_revision].
+          Recorded in-memory at turn start (a failed turn keeps its stamp so a
+          persistent failure is not re-admitted on the same edge every
+          heartbeat) and persisted by the existing post-turn meta write (a
+          crash before that write re-arms the edge — at-least-once). Only
+          scheduled-autonomous turns consume the edge; reactive turns never
+          advance it. 0 is the genesis: never consumed, so any live backlog
+          (version >= 1) admits exactly one turn. [last_ts] remains telemetry
+          and is no longer an admission input. *)
   }
 
 (* ── Structured blocker classification ──────────────────────── *)

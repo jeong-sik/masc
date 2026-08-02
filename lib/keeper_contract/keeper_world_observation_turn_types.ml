@@ -70,6 +70,12 @@ type skip_reason =
       (** RFC-0297 P0-1: the global reactive kill-switch
           (MASC_KEEPER_REACTIVE_ENABLED) is off, so a pending reactive trigger
           (mention / board event / scope message) does not open a turn. *)
+  | No_actionable_stimulus
+      (** RFC-0357 §3.1: the scheduled-autonomous gate is on but no typed
+          stimulus is present — no pending message or board event, no backlog
+          revision edge, no due schedule, and the keeper has already
+          bootstrapped. The heartbeat itself is not a wake signal; this skip
+          is a record ("designed silence"), not an absence. *)
 
 type turn_verdict =
   | Run of { reasons : turn_reason * turn_reason list }
@@ -105,6 +111,7 @@ let skip_reason_to_string = function
   | Keeper_paused -> "keeper_paused"
   | Scheduled_autonomous_disabled -> "scheduled_autonomous_disabled"
   | Reactive_disabled -> "reactive_disabled"
+  | No_actionable_stimulus -> "no_actionable_stimulus"
 ;;
 
 (* Canonical wire encoding. [Reactive] serialises as "turn" (the value the

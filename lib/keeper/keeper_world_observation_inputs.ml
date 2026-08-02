@@ -21,18 +21,21 @@ type current_task_observation =
       ; error : string
       }
 
+(* RFC-0357 §3.2: the backlog edge compares monotonic commit revisions, not
+   wall clocks. The previous ISO8601 comparison against [proactive_rt.last_ts]
+   had four defects this replacement dissolves by construction: same-second
+   ties under a strict [>], NTP rewinds, a [last_ts <= 0.0] arm that degraded
+   to the level check [backlog.tasks <> []], and a parse-failure arm that
+   silently returned [false] forever. [last_consumed_backlog_revision] starts
+   at 0 (never consumed), so a live backlog (version >= 1) admits exactly one
+    turn before the first consumption is recorded — the zero-point arm is not
+    needed. *)
 let backlog_updated_since_last_scheduled_autonomous
       ~(meta : keeper_meta)
       ~(backlog : Masc_domain.backlog)
   : bool
   =
-  let last_ts = meta.runtime.proactive_rt.last_ts in
-  if last_ts <= 0.0
-  then backlog.tasks <> []
-  else (
-    match Workspace_resilience.Time.parse_iso8601_opt backlog.last_updated with
-    | Some updated_at -> updated_at > last_ts
-    | None -> false)
+  backlog.version > meta.runtime.proactive_rt.last_consumed_backlog_revision
 ;;
 
 (* A keeper must not treat a task it authored itself as work waiting for it.
@@ -155,7 +158,11 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
         [ ("operation", Runtime_observation_query_operation.(to_label Read_backlog_counts)) ]
       ();
     Log.Keeper.warn "read_backlog_counts failed: %s" (Printexc.to_string ex);
-    raise ex
+    (* No observed revision on a failed read: the edge stays false (a read
+       failure is not a backlog change) and admission must not record a
+       fabricated revision 0 — the consumption clock only moves forward on
+       an actually observed commit. *)
+    0, 0, 0, false, None
 ;;
 
 (** Resolve the keeper's claimed task to a source-preserving observation. *)

@@ -30,6 +30,7 @@
   test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
+  test_keeper_admission_edge
   test_keeper_memory_lane
   test_keeper_connector_attention_wake
   test_keeper_raw_task_signal_wake
@@ -330,6 +331,7 @@
   test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
+  test_keeper_admission_edge
   test_keeper_memory_lane
   test_env_keeper_scrub
   test_keeper_connector_attention_wake

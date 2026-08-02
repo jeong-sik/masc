@@ -135,9 +135,17 @@ type world_observation = {
       requests ready to dispatch. *)
 
   backlog_updated_since_last_scheduled_autonomous : bool;
-  (** [true] when the backlog changed after the keeper's last scheduled
-      autonomous attempt. Lets task-triggered wakeups bypass cooldown once
-      so newly added work is not delayed behind the previous turn's timer. *)
+  (** RFC-0357 §3.2 backlog edge:
+      [backlog.version > proactive_rt.last_consumed_backlog_revision].
+      True exactly when the backlog has a commit this keeper's scheduled
+      channel has not consumed yet. This is an admission input — one turn per
+      backlog change, zero turns for a static backlog. *)
+
+  backlog_revision : int option;
+  (** The backlog commit revision this observation saw — what a
+      scheduled-autonomous admission records as consumed (RFC-0357 §3.3).
+      [None] when the backlog read failed: the edge is false and the
+      consumption clock must not move on a fabricated value. *)
 
   backlog_revision : int option;
   (** The backlog commit revision observed through the recovery-backed read.
@@ -199,6 +207,10 @@ type skip_reason =
   | Keeper_paused
   | Scheduled_autonomous_disabled
   | Reactive_disabled
+  | No_actionable_stimulus
+      (** RFC-0357 §3.1: gate on, but no typed stimulus — no pending
+          message/board event, no backlog revision edge, no due schedule,
+          already bootstrapped. Designed silence, recorded as a skip. *)
 
 (** Keeper cycle decision with non-empty reason list (NEL).
     [Run] guarantees at least one trigger reason.

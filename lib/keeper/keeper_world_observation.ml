@@ -128,6 +128,13 @@ type world_observation =
   ; scheduled_automation : scheduled_automation_observation
   ; backlog_updated_since_last_scheduled_autonomous : bool
   ; backlog_revision : int option
+    (** RFC-0357 §3.3: the backlog commit revision this observation saw —
+        what a scheduled-autonomous admission records as consumed. [None]
+        when the backlog read failed: the edge is false and the consumption
+        clock must not move on a fabricated value. *)
+  ; backlog_projection_sha256 : string option
+    (** Exact derived projection paired with [backlog_revision]. [None] on the
+        same failed-read path. *)
   ; running_keeper_fiber_count : int
   ; connected_surfaces : Gate_surface.surface_presence list
   ; connected_surface_failures : Gate_surface.presence_failure list
@@ -169,6 +176,7 @@ type skip_reason = Keeper_world_observation_turn_types.skip_reason =
   | Keeper_paused
   | Scheduled_autonomous_disabled
   | Reactive_disabled
+  | No_actionable_stimulus
 
 type turn_verdict = Keeper_world_observation_turn_types.turn_verdict =
   | Run of { reasons : turn_reason * turn_reason list }
@@ -1146,7 +1154,8 @@ let observe
       , claimable_task_count
       , failed_task_count
       , backlog_updated_since_last_scheduled_autonomous
-      , backlog_revision )
+      , backlog_revision
+      , backlog_projection_sha256 )
     =
     read_backlog_counts ~config ~meta
   in
@@ -1180,6 +1189,7 @@ let observe
   ; scheduled_automation
   ; backlog_updated_since_last_scheduled_autonomous
   ; backlog_revision
+  ; backlog_projection_sha256
   ; running_keeper_fiber_count
   ; connected_surfaces = surface_presence.surfaces
   ; connected_surface_failures = surface_presence.failures
@@ -1194,7 +1204,8 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
       , claimable_task_count
       , failed_task_count
       , backlog_updated_since_last_scheduled_autonomous
-      , backlog_revision )
+      , backlog_revision
+      , backlog_projection_sha256 )
     =
     read_backlog_counts ~config ~meta
   in
@@ -1217,6 +1228,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; scheduled_automation
   ; backlog_updated_since_last_scheduled_autonomous
   ; backlog_revision
+  ; backlog_projection_sha256
   ; running_keeper_fiber_count = count_running_keeper_fibers ~config
   ; connected_surfaces = surface_presence.surfaces
   ; connected_surface_failures = surface_presence.failures
@@ -1270,7 +1282,6 @@ let keeper_cycle_decision
   let proactive_gate_enabled =
     Keeper_lifecycle_gate_env.enabled Keeper_lifecycle_gate.Proactive meta
   in
-  let _ = reactive_wake in
   let event_queue_reactive_triggers =
     List.map turn_reason_of_event_queue_trigger event_queue_triggers
   in
@@ -1346,20 +1357,28 @@ let keeper_cycle_decision
         ; since_last_scheduled_autonomous = Some since_last_scheduled_autonomous
         }
       else (
-        (* A scheduled heartbeat is itself the wake signal. Backlog, schedule,
-           idle time, and previous-turn age remain observations for the model;
-           fixed local thresholds never suppress a Keeper cycle. *)
-        let has_actionable_tasks =
-          claimable_drives_wake observation.claimable_task_count
-          || failed_drives_wake observation.failed_task_count
+        (* RFC-0357 §3.1: a scheduled heartbeat is a clock tick, not a wake
+           signal. The channel admits only on a typed stimulus: bootstrap,
+           an unhandled message or board event, a backlog revision edge, or
+           a due schedule. Pool levels (claimable/failed counts) remain
+           observations for the model but no longer admit — a level
+           re-admits every heartbeat until the pool empties even after the
+           model judged the work not actionable (live: 86% empty turns,
+           #26487's 96 stuck claimables). All-false is a typed skip
+           ([No_actionable_stimulus]), a record of designed silence. *)
+        let is_bootstrap = since_last_scheduled_autonomous = max_int in
+        let has_pending_messages = observation.pending_messages <> [] in
+        let has_pending_board_events = observation.pending_board_events <> [] in
+        let has_backlog_edge =
+          observation.backlog_updated_since_last_scheduled_autonomous
+          && not reactive_wake
         in
         let has_actionable_schedule =
           observation.scheduled_automation.due_ready_count > 0
         in
-        let is_bootstrap = since_last_scheduled_autonomous = max_int in
         let run_reasons =
           [ (if is_bootstrap then Some Never_started else None)
-          ; (if has_actionable_tasks
+          ; (if has_backlog_edge
              then
                Some
                  (Task_backlog
@@ -1371,11 +1390,23 @@ let keeper_cycle_decision
           ]
           |> List.filter_map Fun.id
         in
-        { should_run = true
-        ; channel = Scheduled_autonomous
-        ; verdict = Run { reasons = Scheduled_autonomous_turn, run_reasons }
-        ; since_last_scheduled_autonomous = Some since_last_scheduled_autonomous
-        })
+        if is_bootstrap
+           || has_pending_messages
+           || has_pending_board_events
+           || has_backlog_edge
+           || has_actionable_schedule
+        then
+          { should_run = true
+          ; channel = Scheduled_autonomous
+          ; verdict = Run { reasons = Scheduled_autonomous_turn, run_reasons }
+          ; since_last_scheduled_autonomous = Some since_last_scheduled_autonomous
+          }
+        else
+          { should_run = false
+          ; channel = Scheduled_autonomous
+          ; verdict = Skip { reasons = No_actionable_stimulus, [] }
+          ; since_last_scheduled_autonomous = Some since_last_scheduled_autonomous
+          })
     in
     match reactive_triggers with
     | first :: rest when reactive_gate_enabled ->

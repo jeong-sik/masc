@@ -10,6 +10,12 @@ val decode_backlog : path:string ->
            Yojson.Safe.t -> (Masc_domain.backlog, string) result
 val read_backlog_r : Workspace_utils_backend_setup.config ->
            (Masc_domain.backlog, string) result
+(** Strict authoritative read for code that may make a durable decision or
+    mutation. A recovered [.last-good] snapshot is rejected. *)
+val read_backlog_observation_r : Workspace_utils_backend_setup.config ->
+           (Masc_domain.backlog, string) result
+(** Read-only observation. A valid [.last-good] snapshot remains visible when
+    the primary backlog is unreadable. *)
 val read_backlog : Workspace_utils_backend_setup.config -> Masc_domain.backlog
 val write_backlog :
   ?after_commit:(unit -> unit) ->

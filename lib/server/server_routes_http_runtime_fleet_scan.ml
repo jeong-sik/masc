@@ -1359,7 +1359,7 @@ let active_task_owner_fiber_scan config ~executable_names =
   let binding_scan = keeper_agent_bindings config in
   let agent_bindings = binding_scan.enabled_agent_bindings in
   let meta_read_errors = binding_scan.binding_read_errors in
-  match Workspace.read_backlog_r config with
+  match Workspace.read_backlog_observation_r config with
   | Error err ->
       {
         active_task_owner_without_executable_fibers = [];

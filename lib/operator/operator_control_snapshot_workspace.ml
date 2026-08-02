@@ -16,7 +16,7 @@
     Pure helper move — local-only function with no .mli surface. *)
 
 let task_ownership_json config =
-  match Workspace.read_backlog_r config with
+  match Workspace.read_backlog_observation_r config with
   | Error message ->
     `Assoc
       [ "available", `Bool false

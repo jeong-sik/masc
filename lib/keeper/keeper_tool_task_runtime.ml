@@ -343,7 +343,7 @@ let handle_keeper_task_tool_with_outcome
     let status_filter = Safe_ops.json_string_opt "status" args in
     let include_done = Safe_ops.json_bool ~default:false "include_done" args in
     let limit = Safe_ops.json_int ~default:50 "limit" args |> max 1 |> min 100 in
-    (match Workspace.read_backlog_r config with
+    (match Workspace.read_backlog_observation_r config with
      | Error message ->
        let data =
          `Assoc

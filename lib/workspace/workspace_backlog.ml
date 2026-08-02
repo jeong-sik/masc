@@ -110,6 +110,11 @@ let read_backlog_r config =
          backlog.version)
   | Error _ as error -> error
 
+let read_backlog_observation_r config =
+  match read_backlog_with_source_r config with
+  | Ok (`Primary backlog | `Recovered (backlog, _, _)) -> Ok backlog
+  | Error _ as error -> error
+
 let read_backlog config =
   match read_backlog_with_source_r config with
   | Ok (`Primary backlog | `Recovered (backlog, _, _)) -> backlog

@@ -830,6 +830,13 @@ let test_read_backlog_r_rejects_non_authoritative_recovery () =
          "strict error identifies non-authoritative recovery"
          true
          (str_contains msg "non-authoritative for mutation"));
+    (match Workspace.read_backlog_observation_r config with
+     | Error msg -> Alcotest.failf "observation read rejected recovery: %s" msg
+     | Ok backlog ->
+       Alcotest.(check int)
+         "observation read exposes recovered revision"
+         committed_revision
+         backlog.version);
     let backlog = Workspace.read_backlog config in
     Alcotest.(check int)
       "tolerant read exposes recovered revision"

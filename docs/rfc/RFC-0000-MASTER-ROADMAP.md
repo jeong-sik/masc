@@ -73,7 +73,7 @@ dependency order는 [`KEEPER-FULL-FEATURE-GOAL.md`](../KEEPER-FULL-FEATURE-GOAL.
 이 문서의 `현재 상태`·코드 참조를 7-에이전트 적대 검증 + 독립 fresh-grep으로 재확인했다(masc 워크트리 `f84ff7ea53`, oas pin `b02bc16f`). 36개 claim을 코드에 맞게 교정했다:
 
 - **존재하지 않는 심볼/파일 11** — 예: `Provider.config`는 record이고 4-variant sum은 `Provider.provider`; `Keeper_runtime_engine.guard_keeper_hot_path`·`EffectIntent`/`ContinuationRef`·`block_tokens`·`governance_pipeline.ml`·`KeeperOASAdvanced.tla`/`CancelledNeverAbsorbed` 전부 HEAD 부재(실제 TLA spec은 `specs/keeper-turn-fsm/KeeperTurnFSM.tla`, invariant `StopSignalRespected`).
-- **추출 후 stale해진 `현재 상태` 13** — fleet이 착지·삭제해 사실이 바뀐 항목: provider failover machinery(존재+테스트) · fusion wake(RFC-0266) · raw_trace 배선 · agent_timeline #23540 · keeper.tool_exec · council staged preset · FORGET machinery · verification 삭제(RFC-0220 §11) · Slack gateway(RFC-0317 PR-3) · deliverable SSOT 병합. 방향 텍스트는 유지하되 `현재 상태`를 HEAD로 갱신하고 해당 open-goal에 `[LANDED]`/`[STALE-verify]`를 표기했다.
+- **추출 후 stale해진 `현재 상태` 13** — fleet이 착지·삭제해 사실이 바뀐 항목: provider failover machinery(존재+테스트) · fusion wake(RFC-0266) · raw_trace 배선 · agent_timeline #23540 · keeper.tool_exec · council staged preset · FORGET machinery · verification timeout machinery · Slack gateway(RFC-0317 PR-3) · deliverable SSOT 병합. 방향 텍스트는 유지하되 `현재 상태`를 HEAD로 갱신했다.
 - **라인/카운트 드리프트 9** · **RFC 상태 오기 3**(RFC-0026 부재→0192 단독; RFC-0323 = Withdrawn; RFC-0334 = Superseded).
 
 방법·전체 판정 로그는 이 PR 설명을 참조한다. 이 절 자체도 확인 시점 snapshot이며, 구현 전 §3 preamble대로 fresh grep으로 재검증한다.
@@ -257,12 +257,12 @@ MASC가 소비하는 OAS(agent_sdk) 버전을 **정확한 값**과 **핀 위치*
 ### 3.3 Task
 
 - **책임:** work graph의 task 단위 + verification FSM (Done-via-verification).
-- **소유 타입:** task FSM (`AwaitingVerification` — verification sub-state가 `task_status`에 fold됨, RFC-0220 §3.1). (문서가 이전에 나열한 `MASC_VERIFICATION_DEFAULT_ON` flag·`check_timeouts`·`force_cancel_task_r`는 RFC-0220 §11 PR-3에서 **삭제** — HEAD 부재.)
-- **경계 계약:** verification 제출은 non-empty summary 필수(`tool_task_args.ml:100,138` `transition_action_requires_summary`), evidence ref는 존재 시 blank만 reject(`:126`) — **evidence ref ≥1 강제는 방향 계약이며 현재 미배선**(direction: PR URL/file:///sha+branch/board post). verifier는 evidence를 읽고 line/file finding 게시, repo Read/Execute 접근 keeper에게만 라우팅.
-- **불변식:** `AwaitingVerification` task의 장기 대기가 관측 가능해야 한다. **[LANDED, RFC-0220 §11 PR-3]** 옛 24h deadline rescue는 삭제됨 — `verification_protocol.ml:363-371`이 no-op `check_timeouts`, 그 위에 돌던 `verification_timeout` server fork, interval knob, caller-less `Workspace.force_cancel_task_r`를 모두 삭제. verification sub-state를 `task_status`에 fold(RFC-0220 §3.1)해 Todo+Pending drift를 unrepresentable로 만들고, 장기 대기 obligation은 poll-timer 아닌 **activity-event stream**에서 표면화. (문서의 옛 "check_timeouts spinning no-op / force_cancel caller 0"은 삭제 전 상태로 stale.)
-- **결정론↔LLM:** deadline scan은 결정론, 완료/reject 판정은 LLM Judge (schema-valid receipt).
-- **현재 상태:** `AwaitingVerification` FSM state는 존재하나, `MASC_VERIFICATION_DEFAULT_ON` flag는 **HEAD에 0건**(rg 확인) — 옛 "built but not ignited (default_on=false)" 서술은 stale. RFC-0220 §11이 poll-timer 경로를 삭제하고 obligation을 activity-event stream으로 옮김. verifier rework loop에 incentive 구조는 여전히 없음.
-- **open goals:** Goal 11(verifier rework loop wake incentive; long-waiting obligation의 activity-event 표면화 회귀; G-2 deterministic probe green). **[REFRAME]** 옛 "default_on=true flip + check_timeouts past-deadline scan + force_cancel"은 해당 machinery가 삭제됐으므로 폐기 — 되살리지 않는다.
+- **소유 타입:** task FSM의 `AwaitingVerification`과 `Claim_block_pending_verdict`; claim surface의 정본은 `task_claim_decision_for_status`와 `Workspace_task_lifecycle.resolve_claim`이다.
+- **경계 계약:** producer는 typed submit-time evidence snapshot을 남긴다. configured system LLM agent 또는 authenticated HITL operator만 `Workspace.commit_verdict_r`를 통해 verdict를 커밋한다. Keeper는 `AwaitingVerification`을 claim하거나 verifier authority를 얻지 않는다. 세부 계약은 `docs/verification-pipeline-policy.md`가 소유한다.
+- **불변식:** pending verdict는 Keeper fleet blocker가 아니며, wall-clock deadline이나 다른 Keeper claim으로 해소하지 않는다. 장기 대기는 activity-event 및 `completion_authority_pending_tasks` 관측값으로 드러난다.
+- **결정론↔LLM:** evidence shape·claim denial·commit transition은 결정론이고, completion verdict는 schema-valid system-LLM/HITL authority receipt다.
+- **현재 상태:** `AwaitingVerification`은 `Claim_block_pending_verdict`로 claim 불가하며 Keeper fleet health와 분리된 completion-authority pending row로 관측된다. 옛 verifier pool, default-on flag, timeout sweep는 없다.
+- **open goals:** system-LLM completion-authority 호출부터 verdict commit/rejection wake까지 exact-flow 회귀를 유지한다. verifier pool이나 timeout rescue를 되살리지 않는다.
 
 <a name="34-hitlgate"></a>
 ### 3.4 Effect Permission Boundary (generic governance 아님)
@@ -521,7 +521,7 @@ IDE/editor 관측을 흡수하는 **passive projection read model**. extraction 
 - **경계:** hermetic-required 분리(env-gated/manual green-wash 금지). #24448 stop-reason/#24442 file-write visibility fold-in(§4.13). code-hygiene(solid-js/Eio-mutex/RFC-0071)은 §4.14로 분리.
 - **touch (per-subsystem hermetic 테스트 매핑, grep 확인):**
   - Board → `test/test_board_sort.ml`·`test/test_board_author_identity_10297.ml`·`test/test_board_context_inference_resolution.ml` + status-rollup 비파괴 append 회귀
-  - Task/verification → long-waiting `AwaitingVerification` obligation의 activity-event 표면화 회귀(RFC-0220 §11; 옛 `MASC_VERIFICATION_DEFAULT_ON`/`check_timeouts` poll-timer는 삭제됨, 되살리지 않음)
+  - Task/verification → `AwaitingVerification` claim denial, system-LLM/HITL verdict commit, rejection producer wake, completion-authority pending observation 회귀
   - Scheduler → `test/test_schedule_runner.ml`·`test/test_schedule_store.ml`·`test/test_schedule_tool_wiring.ml`
   - Connector → `test/test_channel_gate.ml`·`test/test_channel_gate_metrics.ml`·`test/test_keeper_lane_mentions.ml`
   - Memory → `test/test_keeper_memory_lane.ml`; typed forget/supersession receipt는 별도 Memory-owned slice가 승격될 때 추가
@@ -530,7 +530,7 @@ IDE/editor 관측을 흡수하는 **passive projection read model**. extraction 
   - Keeper turn FSM → `test/stanzas/test_keeper_turn_fsm_tla_parity.inc`·`test/test_keeper_context_isolation.ml`; `test/test_keeper_contract_classifier_pure.ml`는 semantic classifier와 함께 삭제하고 source typed-signal acceptance test로 대체
   - Dashboard chat/observability → `test/test_tool_agent_timeline_build.ml`(#23540, Goal 12), event-bus `test/test_keeper_unified_turn_event_bus.ml`·`test/test_event_bus_subscription_contract.ml`
   - Dashboard auth(#69) → `lib/server/server_routes_http_dashboard_dev_token.ml` 강화
-- **acceptance:** 위 살아남은 subsystem 테스트가 hermetic-required tier에서 green(env-gated/manual 아님); unauth GET /dashboard/dev-token→404, unauth mutation 100%→401; long-waiting `AwaitingVerification` obligation이 activity-event stream에서 표면화(옛 `check_timeouts`/`force_cancel_task_r` poll-timer는 RFC-0220 §11에서 삭제됨, 되살리지 않음); file-write-only turn이 typed receipt에서 visible(§4.13 CF-5); orphan cap stop-reason 0(§4.13 CF-3). §4.14 항목은 별도 승격 전 이 goal의 acceptance가 아님.
+- **acceptance:** 위 살아남은 subsystem 테스트가 hermetic-required tier에서 green(env-gated/manual 아님); unauth GET /dashboard/dev-token→404, unauth mutation 100%→401; `AwaitingVerification`이 Keeper claim/fleet blocker로 들어가지 않고 completion-authority pending으로 관측되며 typed verdict만 상태를 전이; file-write-only turn이 typed receipt에서 visible(§4.13 CF-5); orphan cap stop-reason 0(§4.13 CF-3). §4.14 항목은 별도 승격 전 이 goal의 acceptance가 아님.
 - **DoD:** 살아남은 subsystem CI green, env-gated/manual 분리. Legacy Goal 회귀는 삭제.
 
 ### Goal 12 — 실제 런타임 48h As-Is/To-Be + 100% 판정
@@ -751,13 +751,11 @@ extraction에서 나온 상세 inventory다. first-class 실행 권한이 없으
 
 | Idea | 왜 밀렸나 | Blast radius | Revival 조건 |
 |------|-----------|--------------|--------------|
-| Verifier rework-loop incentive (verification obligation 표면화) | `MASC_VERIFICATION_DEFAULT_ON` flag는 HEAD 부재; RFC-0323은 `Withdrawn`("Withdraw mandatory cross-verifier completion", 문서의 "coded/landed but off"는 오기); RFC-0220 §11이 poll-timer 삭제·obligation을 activity-event로 이동 | 중(verifier loop + activity-event 표면화) | rework loop wake incentive 설계(옛 default_on flip/check_timeouts 되살리지 않음) |
 | busy-defer ("지금 바쁘니 이따 답할게") | Never started(MISSING); social spec feature 미착수. (문서의 "RFC-0334 확장"은 오인용 — RFC-0334는 `Superseded`, 주제=Board signals as durable Keeper input이지 connector busy-defer 아님) | 중(connector reply turn) | LLM-judged light defer reply turn |
 | FORGET / memory decay 축 | rg로 no decay/prune/FORGET 확인; #24071 durable-ingest CLOSED unmerged. 무한 축적 잔여 | 중(keeper_memory_os_*) | Librarian LLM-boundary explicit forget/decay pipe |
 | HITL deterministic re-execution of approved gh commands | 07-08 audit defer, MISSING confirmed; RFC-0320 W3c "re-execution" half 미착지(delivery=reply-TEXT only) | 중(Hitl_resolved wake payload) | approve가 typed re-exec work item(원본 IR/action_key) enqueue |
 | Full Durable Intelligence 12-axis × 5-ring rebuild (60 coord, W0-W5) | Plan-only(no impl/PR/task); "ρ0=retro-guess-score 안 함". 최대 deferred corpus | 매우 높음 | 새 ledger 착수 결정 |
 | Real-worktree eval harness(L4) + adversarial promotion ledger | 전 L4 unpromoted; W5 미시작; 현재 static-fixture self-grading | 높음 | blinded/order-swapped independent Judge + real live-task evidence |
-| submit_and_await production path purge | **[LANDED]** `submit_and_await`는 HEAD lib에서 0건(제거 완료), 현재 `submit_pending`(`keeper_approval_queue.mli:167`); 문서가 인용한 `governance_pipeline.ml:550`은 **파일 부재** | 높음(keeper fiber lifecycle) | 완료 — nonblocking submit_pending+wake로 수렴됨 |
 | Supervision Tree (historical OneForOne/OneForAll/RestForOne) | fan-in 0으로 삭제된 구조; implicit watchdog의 재도입 명분이 됨 | 높음 | **KILL — current lane-local typed recovery가 증명하지 못하는 새 요구가 생기기 전 revival 금지** |
 | Related/proactive board wake via LLM/Fusion judgment | deterministic stigmergy + 키워드 scoring(+5 score/50 cap) 의도적 삭제; "real LLM/Fusion boundary 나올 때까지 absent" | 중~높음 | LLM/Fusion judgment producer |
 | Additional typed schedule payload variants (masc.keeper_wake 외) | 지원 kind는 `masc.keeper_wake`뿐(`schedule_supported_kinds.ml:18`); `masc.board_post`를 포함한 나머지는 unsupported terminal(reject 회귀 `test_schedule_consumer_dispatch.ml:263`, 2026-07-20 grep — 옛 "masc.board_post만 구현"은 stale); "registry 통해서만 추가" | 중(schedule registry) | registry validator+dispatcher+dashboard+Otel kind mapping |
@@ -770,7 +768,6 @@ extraction에서 나온 상세 inventory다. first-class 실행 권한이 없으
 | RFC-OAS-024 canonical_tool.ml typed tool-call contract | 2 SIGN-OFF 미결; id_origin 제거 권고; in-repo consumer commit 전까지 spec-level(fan-in 0 dead code 회피) | 높음(tool call↔result 상관) | in-repo consumer commit |
 | RFC-OAS-029 dialect gap(GLM/MiniMax) + thinking builder 통합 | Draft; #2228이 통합 대신 양 builder에 preserve axis 추가(N-of-M); GLM-ness가 String.starts_with 'glm-' 재파생 | 높음(2×/3× drift builder) | 단일 canonical thinking_request_fields + drift test |
 | drift 결함 3종 즉시 기록 (default_capabilities N-site 재구현; Ollama host allow-list 하드코딩; 직렬화 5-backend 미추출) | "옳은 동작이나 SSOT 부재" — Issue Discovery로 기록만 | 높음(직렬화=저주) | SSOT 추출 + codemod |
-| raw_trace wiring | **[LANDED]** 이미 배선됨 — `?raw_trace`는 `keeper_turn_driver.ml:277`(문서의 :94는 오기), `call_run_named`(`keeper_agent_run.ml:599`)가 `run_named`로 전달(`:610`)하고 call site `:654`가 `raw_trace_for_dispatch ~config ~meta`(실 sink resolve + `RawTraceSinkDegraded` counter) 공급 | 낮음 | 완료 |
 | Discovery/tool-search defer_loading flag (도구 전량 front-load 대신 지연 로드) | 유일 저비용 신규 직교축이나 측정 선행 필수("55k/85%절감"은 수백 MCP 기준, MASC ~60-80 내부도구는 규모 다름) | 낮음·축복(단일 choke) | Tool_dispatch.registered_count × 평균 스키마 토큰 상한 추정 후 |
 | Layer 3-A verbatim replay + Layer 2 OAS history channel 완화 (prose echo loop) | continuity 채널만 부분 완화(`keeper_memory_policy.ml` — 문서의 :477-483은 파일이 163줄이라 out-of-range, 정확 라인 재확정 필요); Layer 3-A(finalize_response 축자 replay)+Layer 2(OAS `backend_openai_serialize.ml` 재직렬화, off-snapshot) 미완화 | 높음(finalize 경로) | 지배 채널 관측 확정 후 |
 

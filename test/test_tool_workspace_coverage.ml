@@ -249,6 +249,51 @@ let () =
     | None -> failwith "dispatch returned None")
 ;;
 
+let snapshot_revision result =
+  Tool_result.data result |> Yojson.Safe.Util.member "revision" |> Yojson.Safe.Util.to_string
+;;
+
+let () =
+  test "dispatch_status_initializes_before_revision" (fun () ->
+    let ctx = make_test_ctx () in
+    match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+    | Some result ->
+      assert (Tool_result.is_success result);
+      assert (Sys.file_exists (Workspace_utils_paths_backend.state_path ctx.config))
+    | None -> failwith "dispatch returned None")
+;;
+
+let () =
+  test "dispatch_status_revision_covers_rendered_credential_state" (fun () ->
+    let ctx = make_test_ctx () in
+    let _ = Workspace.init ctx.config ~agent_name:(Some ctx.agent_name) in
+    let first =
+      match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+      | Some result -> result
+      | None -> failwith "dispatch returned None"
+    in
+    let revision = snapshot_revision first in
+    Auth.save_auth_config
+      ctx.config.base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let second =
+      match
+        Tool_workspace.dispatch
+          ctx
+          ~name:"masc_status"
+          ~args:(`Assoc [ "if_revision", `String revision ])
+      with
+      | Some result -> result
+      | None -> failwith "dispatch returned None"
+    in
+    assert (Tool_result.is_success second);
+    let data = Tool_result.data second in
+    assert (Yojson.Safe.Util.(data |> member "kind" |> to_string) = "snapshot");
+    assert_contains
+      Yojson.Safe.Util.(data |> member "snapshot" |> to_string)
+      "Lifecycle actions are credential-blocked")
+;;
+
 let () =
   test "dispatch_status_hides_stale_current_task_without_writing" (fun () ->
     let ctx = make_test_ctx () in

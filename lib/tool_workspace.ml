@@ -42,46 +42,6 @@ let all_assertion_kinds = Workspace_assertions.all_assertion_kinds
 let valid_assertion_strings = Workspace_assertions.valid_assertion_strings
 let assertion_kind_of_string_lenient = Workspace_assertions.assertion_kind_of_string_lenient
 
-type text_cache =
-  { mutable key : string option
-  ; mutable value : string option
-  ; mutable expires_at : float
-  }
-
-let make_text_cache () = { key = None; value = None; expires_at = 0.0 }
-let status_cache = make_text_cache ()
-
-let cache_ttl_seconds env_var ~default =
-  match Sys.getenv_opt env_var with
-  | Some raw ->
-    (match Float.of_string_opt (String.trim raw) with
-     | Some value when Stdlib.Float.compare value 0.0 >= 0 -> value
-     | _ -> default)
-  | None -> default
-;;
-
-let status_cache_ttl_s () = 2.0
-
-let invalidatestatus_cache () =
-  status_cache.key <- None;
-  status_cache.value <- None;
-  status_cache.expires_at <- 0.0
-;;
-
-let cached_text_by_key cache ~key ~ttl_s compute =
-  let now = Time_compat.now () in
-  match cache.key, cache.value with
-  | Some cached_key, Some value
-    when String.equal cached_key key && Stdlib.Float.compare now cache.expires_at < 0 ->
-    value
-  | _ ->
-    let value = compute () in
-    cache.key <- Some key;
-    cache.value <- Some value;
-    cache.expires_at <- now +. ttl_s;
-    value
-;;
-
 let effective_cluster_name (config : Workspace.config) =
   match String.trim config.backend_config.Backend_types.cluster_name with
   | "" -> Env_config_core.cluster_name ()
@@ -500,17 +460,6 @@ let status_summary_string (ctx : context) =
     ~backlog
 ;;
 
-let status_revision (ctx : context) =
-  let state = Workspace.read_state ctx.config in
-  let backlog = safe_read_backlog ctx in
-  Snapshot_protocol.revision_of_json
-    ~namespace:"status"
-    (`Assoc
-      [ "workspace_state", Masc_domain.workspace_state_to_yojson state
-      ; "backlog_version", `Int backlog.version
-      ])
-;;
-
 let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
   match Snapshot_protocol.if_revision args with
   | Error message ->
@@ -523,21 +472,14 @@ let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
   let task_list_name =
     Tool_capability_projection.task_list_name task_list_projection
   in
-  let revision = status_revision ctx in
-  let cache_key =
-    Printf.sprintf
-      "%s::%s::%s::%s"
-      ctx.config.base_path
-      ctx.agent_name
-      task_list_name
-      revision
-  in
-  let snapshot =
-    cached_text_by_key
-      status_cache
-      ~key:cache_key
-      ~ttl_s:(status_cache_ttl_s ())
-      (fun () -> status_summary_string ctx)
+  let snapshot = status_summary_string ctx in
+  let revision =
+    Snapshot_protocol.revision_of_json
+      ~namespace:"status"
+      (`Assoc
+        [ "task_list_name", `String task_list_name
+        ; "snapshot", `String snapshot
+        ])
   in
   Tool_result.make_ok
     ~tool_name
@@ -563,9 +505,7 @@ let handle_reset ~tool_name ~start_time ctx args =
       ~tool_name
       ~start_time
       "This will DELETE the entire .masc/ folder!\nCall with confirm=true to proceed."
-  else (
-    invalidatestatus_cache ();
-    Tool_result.ok ~tool_name ~start_time (Workspace.reset ctx.config))
+  else Tool_result.ok ~tool_name ~start_time (Workspace.reset ctx.config)
 ;;
 
 (* ── State inspection (shared by status and check) ──────── *)

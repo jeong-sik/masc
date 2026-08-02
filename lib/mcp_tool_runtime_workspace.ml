@@ -210,16 +210,43 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
                   "masc_start partial: session bound as %s, but task creation failed: %s"
                   agent_name add_result))
         else begin
-          let _claim_msg = Workspace_task.claim_task active_config ~agent_name ~task_id in
-          match Planning_eio.set_current_task active_config ~task_id with
-          | Error msg ->
-            (* [Planning_eio.set_current_task] internal store failure. *)
-            Some (runtime_err_runtime ~tool_name ~start_time msg)
-          | Ok () ->
-              Some
-                (runtime_ok ~tool_name ~start_time
-                   (Printf.sprintf
-                      "masc_start complete: project scope set, session bound as %s, task %s created+claimed+set as current."
-                      agent_name task_id))
+          match
+            Workspace_task.claim_task_r active_config ~agent_name ~task_id ()
+          with
+          | Error error ->
+            let failure_class =
+              if Masc_domain.is_retryable error
+              then Tool_result.Transient_error
+              else Tool_result.Workflow_rejection
+            in
+            Some
+              (Tool_result.make_err
+                 ~tool_name
+                 ~class_:failure_class
+                 ~start_time
+                 ~data:
+                   (`Assoc
+                     [ ("task_id", `String task_id)
+                     ; ( "effect_disposition"
+                       , `String
+                           (Tool_result.failure_effect_disposition_to_string
+                              Tool_result.Proven_post_effect) )
+                     ; ("error", `String (Masc_domain.to_string error))
+                     ])
+                 (Printf.sprintf
+                    "masc_start created task %s but claim failed: %s"
+                    task_id
+                    (Masc_domain.to_string error)))
+          | Ok _claim_msg ->
+            match Planning_eio.set_current_task active_config ~task_id with
+            | Error msg ->
+              (* [Planning_eio.set_current_task] internal store failure. *)
+              Some (runtime_err_runtime ~tool_name ~start_time msg)
+            | Ok () ->
+                Some
+                  (runtime_ok ~tool_name ~start_time
+                     (Printf.sprintf
+                        "masc_start complete: project scope set, session bound as %s, task %s created+claimed+set as current."
+                        agent_name task_id))
         end
       end

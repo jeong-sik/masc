@@ -288,9 +288,19 @@ if command -v opam >/dev/null 2>&1; then
   fi
   verify_agent_sdk_switch_artifacts
 
-  pin_list_output="$(OPAMCOLOR=never opam pin list 2>/dev/null || true)"
+  if ! pin_list_output="$(OPAMCOLOR=never opam pin list 2>&1)"; then
+    echo "failed to read agent_sdk pin source from the current opam switch" >&2
+    echo "  opam pin list output: ${pin_list_output:-<empty>}" >&2
+    echo "repair: bash scripts/opam-pin-external-deps.sh" >&2
+    exit 1
+  fi
   pin_line="$(awk '$1 ~ /^agent_sdk\./ { print }' <<<"${pin_list_output}")"
-  if [[ -n "${pin_line}" ]]; then
+  if [[ -z "${pin_line}" ]]; then
+    echo "agent_sdk is installed but not pinned in the current opam switch" >&2
+    echo "  expected pin source: ${expected_opam_pin_source}" >&2
+    echo "repair: bash scripts/opam-pin-external-deps.sh" >&2
+    exit 1
+  else
     installed_pin_source="$(extract_opam_pin_source "${pin_line}")"
     installed_pin_ref="$(
       sed -nE 's/.*\(at ([0-9a-f]{40})\).*/\1/p' <<<"${pin_line}"
@@ -327,8 +337,6 @@ if command -v opam >/dev/null 2>&1; then
         exit 1
         ;;
     esac
-  elif [[ "${LOCAL_ONLY}" -eq 0 ]]; then
-    echo "WARN: could not read agent_sdk pin source from opam; installed version ${installed_version} satisfies floor ${OAS_AGENT_SDK_MIN_VERSION}" >&2
   fi
 fi
 

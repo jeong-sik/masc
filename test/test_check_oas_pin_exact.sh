@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Regression test: a descendant agent_sdk commit is not necessarily API-compatible.
-# The local preflight must require the repository's exact SSOT pin before Dune.
+# Regression test: the local preflight must require the repository's exact
+# SSOT pin before Dune, including when opam cannot report a pin.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+source "${REPO_ROOT}/scripts/oas-agent-sdk-pin.sh"
+export TEST_AGENT_SDK_VERSION="${OAS_AGENT_SDK_MIN_VERSION}"
+export TEST_AGENT_SDK_SHA="${OAS_AGENT_SDK_SHA}"
+export TEST_AGENT_SDK_URL="${OAS_AGENT_SDK_URL}"
 
 test_root="$(mktemp -d -t check-oas-pin-exact.XXXXXX)"
 trap 'rm -rf "${test_root}"' EXIT
@@ -33,13 +37,31 @@ case "${1:-}" in
   env)
     ;;
   list)
-    printf '%s\n' 'agent_sdk 0.231.11'
+    printf 'agent_sdk %s\n' "${TEST_AGENT_SDK_VERSION}"
     ;;
   show)
-    printf '%s\n' '0.231.11'
+    printf '%s\n' "${TEST_AGENT_SDK_VERSION}"
     ;;
   pin)
-    printf '%s\n' 'agent_sdk.0.231.11 git git+https://github.com/jeong-sik/oas.git (at ffffffffffffffffffffffffffffffffffffffff)'
+    case "${TEST_PIN_MODE:-mismatch}" in
+      mismatch)
+        printf 'agent_sdk.%s git git+%s (at ffffffffffffffffffffffffffffffffffffffff)\n' \
+          "${TEST_AGENT_SDK_VERSION}" "${TEST_AGENT_SDK_URL}"
+        ;;
+      missing)
+        ;;
+      failure)
+        echo 'simulated opam pin list failure' >&2
+        exit 17
+        ;;
+      exact)
+        printf 'agent_sdk.%s git git+%s (at %s)\n' \
+          "${TEST_AGENT_SDK_VERSION}" "${TEST_AGENT_SDK_URL}" "${TEST_AGENT_SDK_SHA}"
+        ;;
+      *)
+        exit 2
+        ;;
+    esac
     ;;
   *)
     exit 2
@@ -66,23 +88,40 @@ esac
 EOF
 chmod +x "${test_root}/bin/ocamlfind"
 
-set +e
-output="$(PATH="${test_root}/bin:${PATH}" \
-  bash "${REPO_ROOT}/scripts/check-oas-pin.sh" --local-only 2>&1)"
-status=$?
-set -e
+run_rejected_case() {
+  local mode="$1"
+  local expected_diagnostic="$2"
+  local output
+  local status
 
-if [[ ${status} -eq 0 ]]; then
-  echo "FAIL: mismatched descendant pin was accepted" >&2
-  exit 1
-fi
-if [[ "${output}" != *"agent_sdk pin checkout is ffffffffffffffffffffffffffffffffffffffff, expected"* ]]; then
-  echo "FAIL: exact-pin rejection diagnostic missing" >&2
+  set +e
+  output="$(TEST_PIN_MODE="${mode}" PATH="${test_root}/bin:${PATH}" \
+    bash "${REPO_ROOT}/scripts/check-oas-pin.sh" --local-only 2>&1)"
+  status=$?
+  set -e
+
+  if [[ ${status} -eq 0 ]]; then
+    echo "FAIL: ${mode} pin state was accepted" >&2
+    exit 1
+  fi
+  if [[ "${output}" != *"${expected_diagnostic}"* ]]; then
+    echo "FAIL: ${mode} rejection diagnostic missing" >&2
+    printf '%s\n' "${output}" >&2
+    exit 1
+  fi
+}
+
+run_rejected_case \
+  mismatch \
+  "agent_sdk pin checkout is ffffffffffffffffffffffffffffffffffffffff, expected ${OAS_AGENT_SDK_SHA}"
+run_rejected_case missing "agent_sdk is installed but not pinned"
+run_rejected_case failure "failed to read agent_sdk pin source"
+
+output="$(TEST_PIN_MODE=exact PATH="${test_root}/bin:${PATH}" \
+  bash "${REPO_ROOT}/scripts/check-oas-pin.sh" --local-only 2>&1)"
+if [[ "${output}" != *"OAS pin verified: ${OAS_AGENT_SDK_TRACK_REF}@${OAS_AGENT_SDK_SHA}"* ]]; then
+  echo "FAIL: exact SSOT pin was not accepted" >&2
   printf '%s\n' "${output}" >&2
-  exit 1
-fi
-if [[ "${output}" == *"accepting"* ]]; then
-  echo "FAIL: forward-drift acceptance path is still reachable" >&2
   exit 1
 fi
 

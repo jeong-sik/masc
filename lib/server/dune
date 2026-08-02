@@ -13,6 +13,7 @@
  (flags :standard -open Masc)
  (libraries
   masc
+  masc.markup_document
   masc.dashboard
   masc.fd_accountant
   masc.event_bus_slots

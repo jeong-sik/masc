@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name masc_markup_document)
+ (public_name masc.markup_document)
+ (wrapped false)
+ (modules markup_document)
+ (libraries markup))

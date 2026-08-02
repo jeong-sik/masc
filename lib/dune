@@ -23,6 +23,7 @@
   re.str
   str
   re.pcre
+  masc.markup_document
   mirage-crypto
   mirage-crypto-ec
   mirage-crypto-rng

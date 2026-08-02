@@ -9,7 +9,22 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 test_root="$(mktemp -d -t check-oas-pin-exact.XXXXXX)"
 trap 'rm -rf "${test_root}"' EXIT
-mkdir -p "${test_root}/bin"
+agent_sdk_dir="${test_root}/findlib/agent_sdk"
+llm_provider_dir="${test_root}/findlib/llm_provider"
+mkdir -p "${test_root}/bin" "${agent_sdk_dir}" "${llm_provider_dir}"
+
+for artifact in agent_sdk.cmi agent_sdk.cmxa agent_sdk.a agent_sdk__Checkpoint.cmi; do
+  touch "${agent_sdk_dir}/${artifact}"
+done
+for artifact in \
+  llm_provider.cmi \
+  llm_provider.cmxa \
+  llm_provider.a \
+  llm_provider__Provider_config.cmi \
+  llm_provider__Provider_kind.cmi
+do
+  touch "${llm_provider_dir}/${artifact}"
+done
 
 cat >"${test_root}/bin/opam" <<'EOF'
 #!/usr/bin/env bash
@@ -32,6 +47,24 @@ case "${1:-}" in
 esac
 EOF
 chmod +x "${test_root}/bin/opam"
+
+cat >"${test_root}/bin/ocamlfind" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "\${1:-}" == "query" ]] || exit 2
+case "\${2:-}" in
+  agent_sdk)
+    printf '%s\\n' '${agent_sdk_dir}'
+    ;;
+  agent_sdk.llm_provider)
+    printf '%s\\n' '${llm_provider_dir}'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+EOF
+chmod +x "${test_root}/bin/ocamlfind"
 
 set +e
 output="$(PATH="${test_root}/bin:${PATH}" \

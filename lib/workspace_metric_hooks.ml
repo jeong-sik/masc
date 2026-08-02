@@ -451,6 +451,12 @@ let install () =
        | Keeper_goal_reconciliation_wake.No_keeper_target { goal_id } ->
          Workspace_hooks.Task_terminal_delivery_degraded
            { kind = "no_keeper_target"; detail = "goal_id=" ^ goal_id }
+       | Keeper_goal_reconciliation_wake.Keeper_target_lookup_failed
+           { goal_id; detail } ->
+         Workspace_hooks.Task_terminal_delivery_degraded
+           { kind = "keeper_target_lookup_failed"
+           ; detail = Printf.sprintf "goal_id=%s: %s" goal_id detail
+           }
        | Keeper_goal_reconciliation_wake.Enqueue_failed
            { goal_id; keeper_name; detail } ->
          Workspace_hooks.Task_terminal_delivery_degraded

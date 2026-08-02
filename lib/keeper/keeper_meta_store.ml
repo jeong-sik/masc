@@ -80,6 +80,33 @@ let persisted_keeper_names config =
     []
 ;;
 
+let persisted_keeper_name_for_agent_name config ~agent_name =
+  let rec collect_matches matches = function
+    | [] -> Ok (List.rev matches)
+    | keeper_name :: rest ->
+      (match read_meta_file_path (keeper_meta_path config keeper_name) with
+       | Error detail -> Error detail
+       | Ok None -> collect_matches matches rest
+       | Ok (Some meta) ->
+         if String.equal meta.agent_name agent_name
+         then collect_matches (keeper_name :: matches) rest
+         else collect_matches matches rest)
+  in
+  match persisted_keeper_names_result config with
+  | Error _ as error -> error
+  | Ok keeper_names ->
+    (match collect_matches [] keeper_names with
+     | Error _ as error -> error
+     | Ok [] -> Ok None
+     | Ok [keeper_name] -> Ok (Some keeper_name)
+     | Ok keeper_names ->
+       Error
+         (Printf.sprintf
+            "multiple persisted Keepers share agent_name=%s: %s"
+            agent_name
+            (String.concat "," keeper_names)))
+;;
+
 let configured_keeper_names config =
   Keeper_types_profile.discover_keepers_toml
     (Config_dir_resolver.keepers_dir_for_base_path

@@ -407,10 +407,18 @@ let process_task_once
                     detail
                 | Completion_authority_wakeup.Unroutable_producer { producer; task_id } ->
                   Log.Misc.error
-                    "completion authority rejection has no canonical Keeper producer task_id=%s producer=%s verification_id=%s"
+                    "completion authority rejection has no registered or persisted Keeper producer binding task_id=%s producer=%s verification_id=%s"
                     task_id
                     producer
                     verification_id
+                | Completion_authority_wakeup.Producer_identity_lookup_failed
+                    { producer; task_id; detail } ->
+                  Log.Misc.error
+                    "completion authority rejection producer identity lookup failed task_id=%s producer=%s verification_id=%s detail=%s"
+                    task_id
+                    producer
+                    verification_id
+                    detail
                 | Completion_authority_wakeup.Durable_queue_failed
                     { keeper_name; detail } ->
                   Log.Misc.error

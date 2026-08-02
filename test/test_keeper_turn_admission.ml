@@ -750,6 +750,32 @@ let test_shutdown_reservation_restores_durable_owner () =
     check "registration cannot cross restored fence" false
 ;;
 
+let test_unknown_rollback_does_not_create_admission_slot () =
+  reset ();
+  Printf.printf "Test 13: rollback of an unknown owner does not create a ghost slot\n%!";
+  let owner = "owner-without-admission-slot" in
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  (match
+     Keeper_turn_admission.rollback_shutdown
+       ~base_path
+       ~keeper_name:owner
+       ~operation_id
+   with
+   | Keeper_turn_admission.Shutdown_not_reserved ->
+     check "unknown owner returns not reserved" true
+   | Keeper_turn_admission.Shutdown_rolled_back
+   | Keeper_turn_admission.Shutdown_reserved_by_other _ ->
+     check "unknown owner returns not reserved" false);
+  let snapshot = Keeper_turn_admission.snapshot_for ~base_path ~keeper_name:owner in
+  check "unknown rollback leaves no admission slot" (not snapshot.snapshot_slot_created);
+  let health =
+    Keeper_turn_admission.fleet_health_json ~base_path ~keeper_names:[]
+  in
+  let open Yojson.Safe.Util in
+  let names = health |> member "keeper_names" |> to_list |> List.map to_string in
+  check "unknown rollback does not enter fleet health" (not (List.mem owner names))
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   test_autonomous_admits_when_chat_persistence_is_not_configured ();
@@ -771,6 +797,7 @@ let () =
   test_pending_receipt_is_not_an_admission_authority ();
   test_shutdown_reservation_fences_and_rolls_back ();
   test_shutdown_reservation_restores_durable_owner ();
+  test_unknown_rollback_does_not_create_admission_slot ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

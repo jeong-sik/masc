@@ -247,22 +247,6 @@ let rec step t ~now_mono input =
       | Envelope_received _ | Envelope_parse_error _ | Wss_closed _ | Backoff_elapsed ) ) ->
     (t, log `Warn "slack gateway: input unexpected in current state")
 
-and input_label = function
-  | Connect_requested -> "connect_requested"
-  | Apps_connections_open_succeeded _ -> "apps_connections_open_succeeded"
-  | Apps_connections_open_failed _ -> "apps_connections_open_failed"
-  | Envelope_received _ -> "envelope_received"
-  | Envelope_parse_error _ -> "envelope_parse_error"
-  | Wss_closed _ -> "wss_closed"
-  | Backoff_elapsed -> "backoff_elapsed"
-
-and state_label = function
-  | Disconnected -> "disconnected"
-  | Awaiting_hello -> "awaiting_hello"
-  | Connected -> "connected"
-  | Reconnect_pending _ -> "reconnect_pending"
-  | Failed msg -> "failed"
-;;
 
 (* ---- JSON parsing ---- *)
 

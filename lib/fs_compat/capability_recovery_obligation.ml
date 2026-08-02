@@ -418,11 +418,9 @@ let locator_target_leaf (locator : locator) =
   Capability_leaf.to_string locator.target_leaf
 ;;
 
-let locator_initial_target (locator : locator) = locator.initial_target
 let prepared_owner (prepared : prepared) = prepared.owner
 let prepared_operation_id (prepared : prepared) = prepared.operation_id
 let prepared_locator (prepared : prepared) = prepared.locator
-let prepared_permissions (prepared : prepared) = prepared.permissions
 let bound_prepared (bound : bound) = bound.prepared
 let bound_stage_identity (bound : bound) = bound.stage_identity
 let bound_stage_name (bound : bound) = stage_name bound.prepared.operation_id

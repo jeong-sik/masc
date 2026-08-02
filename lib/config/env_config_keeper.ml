@@ -167,7 +167,6 @@ module KeeperMemoryOs = struct
     | Invalid
 
   let get_int_logged = Env_config_memory.get_int_logged
-  let get_float_positive_logged = Env_config_memory.get_float_positive_logged
 
   let recall_enabled_default = true
   let librarian_enabled_default = true
@@ -541,7 +540,12 @@ module KeeperKeepalive = struct
       Env: [MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC]. Default: 120. Range: [10, 600].
       @category Timeouts
       @ops_class operator *)
-  let cli_subprocess_idle_sec =
+  (* No OCaml caller: the live read is [Keeper_runtime_resolved.cli_subprocess_idle_sec],
+     which re-reads the env var per turn. This binding is the knob's declaration for
+     [bin/env_knob_catalog.ml], which line-scans lib/config/env_config_*.ml to generate
+     docs/runtime-tunables.md. Deleting it drops a live tunable from the operator
+     catalog, so the unused-value warning is suppressed here rather than obeyed. *)
+  let[@warning "-32"] cli_subprocess_idle_sec =
     Float.max
       10.0
       (Float.min 600.0 (get_float ~default:120.0 "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC"))

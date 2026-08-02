@@ -22,7 +22,7 @@
   atomic_orphan_size_class)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
  (flags
-  (:standard -w +4))
+  (:standard -w +4 -w +32))
  (libraries eio eio.unix unix yojson uuidm digestif optint cstruct)
  (foreign_stubs
   (language c)

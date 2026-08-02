@@ -107,6 +107,7 @@ let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
   | Agent_sdk.Types.MessageStop -> Some "sse_message_stop"
   | Agent_sdk.Types.Ping -> None
   | Agent_sdk.Types.SSEError _ -> Some "sse_error"
+  | Agent_sdk.Types.NDJSONError _ -> Some "ndjson_error"
   | Agent_sdk.Types.SSEParseFailed _ -> Some "sse_parse_failed"
   | Agent_sdk.Types.NDJSONParseFailed _ -> Some "ndjson_parse_failed"
   | Agent_sdk.Types.SSEUnknownEventType _ -> Some "sse_unknown_event_type"

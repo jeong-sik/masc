@@ -1457,6 +1457,15 @@ let test_sse_event_progress_kind_classifies_known_deltas () =
     (Some "sse_text_delta")
     (kind (ContentBlockDelta { index = 0; delta = TextDelta "visible" }));
   Alcotest.(check (option string))
+    "NDJSON provider error"
+    (Some "ndjson_error")
+    (kind
+       (NDJSONError
+          { message = "request rejected"
+          ; error_type = Some "rate_limit_exceeded"
+          ; raw = "{}"
+          }));
+  Alcotest.(check (option string))
     "thinking delta"
     (Some "sse_thinking_delta")
     (kind (ContentBlockDelta { index = 0; delta = ThinkingDelta "hidden" }));

@@ -1929,6 +1929,35 @@ let test_keeper_stream_bridge_preserves_ndjson_parse_failure () =
         message
   | _ -> fail "expected NDJSON parse failure to remain a typed visible error"
 
+let test_keeper_stream_bridge_preserves_ndjson_provider_error () =
+  let open Agent_sdk.Types in
+  let message = "request rejected" in
+  let raw = "{\"error\":\"request rejected\"}" in
+  let events =
+    translate_oas_stream_events
+      [ NDJSONError
+          { message; error_type = Some "rate_limit_exceeded"; raw } ]
+  in
+  match events with
+  | [ Keeper_chat_events.Oas_stream_protocol_error
+        { kind
+        ; event_type = Some actual_error_type
+        ; reason = Some actual_reason
+        ; raw_bytes = Some actual_bytes
+        ; _
+        }
+    ; Keeper_chat_events.Event_error { message = actual_message } ] ->
+      check string "NDJSON provider error kind" "ndjson_error"
+        (Keeper_chat_events.stream_protocol_error_kind_to_string kind);
+      check string "NDJSON provider error type" "rate_limit_exceeded"
+        actual_error_type;
+      check string "NDJSON provider error reason" message actual_reason;
+      check int "NDJSON provider error raw bytes" (String.length raw) actual_bytes;
+      check string "NDJSON provider visible error"
+        "Provider NDJSON stream error: rate_limit_exceeded: request rejected"
+        actual_message
+  | _ -> fail "expected NDJSON provider error to remain typed and visible"
+
 let test_keeper_chat_history_persists_attachment_refs_not_raw_media () =
   let base_dir = temp_base_path "gate-keeper-media-history" in
   Fun.protect
@@ -2934,6 +2963,8 @@ let () =
             test_keeper_stream_bridge_surfaces_unknown_and_incomplete_events;
           test_case "stream bridge preserves NDJSON parse failure" `Quick
             test_keeper_stream_bridge_preserves_ndjson_parse_failure;
+          test_case "stream bridge preserves NDJSON provider error" `Quick
+            test_keeper_stream_bridge_preserves_ndjson_provider_error;
           test_case "chat history persists attachment refs not raw media" `Quick
             test_keeper_chat_history_persists_attachment_refs_not_raw_media;
           test_case "user-only chat history persists attachment refs not raw media" `Quick

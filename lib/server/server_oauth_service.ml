@@ -79,6 +79,14 @@ let hidden_input name value =
     (html_escape value)
 ;;
 
+let admin_scope_requested scopes =
+  List.exists
+    (function
+      | Auth_oauth.Mcp_admin -> true
+      | Auth_oauth.Mcp_tools -> false)
+    scopes
+;;
+
 let render_authorization_form ?error (request : Auth_oauth.authorization_request) =
   let error_html =
     match error with
@@ -91,6 +99,26 @@ let render_authorization_form ?error (request : Auth_oauth.authorization_request
     | None -> ""
     | Some value -> hidden_input "state" value
   in
+  let client_label =
+    match request.client_name with
+    | Some name ->
+      Printf.sprintf
+        {|<strong>%s</strong> (<code>%s</code>)|}
+        (html_escape name)
+        (html_escape request.client_id)
+    | None -> Printf.sprintf {|<code>%s</code>|} (html_escape request.client_id)
+  in
+  let scopes = Auth_oauth.scopes_to_string request.scopes |> html_escape in
+  let admin_confirmation =
+    if admin_scope_requested request.scopes
+    then
+      String.concat
+        ""
+        [ {|<p class="warning"><strong>Administrative access requested.</strong> This client will receive the <code>mcp:admin</code> scope.</p>|}
+        ; {|<label><input name="confirm_admin" type="checkbox" value="yes" required> I explicitly approve administrative access.</label>|}
+        ]
+    else ""
+  in
   String.concat
     ""
     [ {|<!doctype html><html lang="en"><head><meta charset="utf-8">|}
@@ -100,9 +128,14 @@ let render_authorization_form ?error (request : Auth_oauth.authorization_request
     ; {|label,input,button{display:block;width:100%;box-sizing:border-box}input,button{padding:.75rem;margin-top:.5rem}.error{color:#b42318}</style>|}
     ; {|</head><body><h1>Authorize MCP access</h1>|}
     ; Printf.sprintf
-        {|<p>Client <code>%s</code> will receive the callback at <code>%s</code>.</p>|}
-        (html_escape request.client_id)
+        {|<p>Client %s will receive the callback at <code>%s</code>.</p>|}
+        client_label
         (html_escape request.redirect_uri)
+    ; Printf.sprintf
+        {|<p>Requested scope: <code>%s</code>. Access tokens last up to %d seconds; refresh tokens last up to %d seconds.</p>|}
+        scopes
+        (Auth_oauth.access_token_ttl_sec ())
+        (Auth_oauth.refresh_token_ttl_sec ())
     ; {|<p>Enter an existing MASC bearer once to bind this OAuth session to its agent identity.</p>|}
     ; error_html
     ; {|<form method="post" action="/oauth/authorize">|}
@@ -116,6 +149,7 @@ let render_authorization_form ?error (request : Auth_oauth.authorization_request
     ; hidden_input "code_challenge_method" "S256"
     ; {|<label for="bootstrap_token">MASC bearer</label>|}
     ; {|<input id="bootstrap_token" name="bootstrap_token" type="password" autocomplete="off" required>|}
+    ; admin_confirmation
     ; {|<button type="submit">Authorize</button></form></body></html>|}
     ]
 ;;
@@ -170,31 +204,42 @@ type authorization_post_outcome =
 let authorize_post ~base_path ~authority ~body =
   let* params = parse_form body in
   let* request = authorization_request_of_params ~base_path ~authority params in
-  match param params "bootstrap_token" with
-  | None ->
+  if
+    admin_scope_requested request.scopes
+    && not (Option.equal String.equal (param params "confirm_admin") (Some "yes"))
+  then
     Ok
       (Authorization_form_error
-         { status = `Unauthorized
-         ; message = "A MASC bearer is required."
+         { status = `Bad_request
+         ; message = "Administrative access requires explicit confirmation."
          ; request
          })
-  | Some bootstrap_token ->
-    (match Auth.find_static_credential_by_token base_path ~token:bootstrap_token with
-     | Error _ ->
-       Ok
-         (Authorization_form_error
-            { status = `Unauthorized
-            ; message = "The MASC bearer was not accepted."
-            ; request
-            })
-     | Ok bootstrap_credential ->
-       let* code =
-         Auth_oauth.issue_authorization_code
-           ~base_path
-           ~request
-           ~bootstrap_credential
-       in
-       Ok (Authorization_redirect (redirect_with_code request code)))
+  else
+    match param params "bootstrap_token" with
+    | None ->
+      Ok
+        (Authorization_form_error
+           { status = `Unauthorized
+           ; message = "A MASC bearer is required."
+           ; request
+           })
+    | Some bootstrap_token ->
+      (match Auth.find_static_credential_by_token base_path ~token:bootstrap_token with
+       | Error _ ->
+         Ok
+           (Authorization_form_error
+              { status = `Unauthorized
+              ; message = "The MASC bearer was not accepted."
+              ; request
+              })
+       | Ok bootstrap_credential ->
+         let* code =
+           Auth_oauth.issue_authorization_code
+             ~base_path
+             ~request
+             ~bootstrap_credential
+         in
+         Ok (Authorization_redirect (redirect_with_code request code)))
 ;;
 
 let string_field fields name =

@@ -182,6 +182,8 @@ OAuth scopes can only reduce privilege:
   clients/<sha256(client-id)>.json
   access_tokens/<sha256(raw-access-token)>.json
   refresh_tokens/<sha256(raw-refresh-token)>.json
+  families/<sha256(family-id)>.json
+  .store.lock
 ```
 
 Authorization codes and pending browser approvals are process-local bounded
@@ -196,8 +198,10 @@ Configuration lives in one typed module and is re-read at request boundaries:
 | `MASC_OAUTH_CODE_TTL_SEC` | authorization-code lifetime |
 | `MASC_OAUTH_ACCESS_TOKEN_TTL_SEC` | access-token lifetime |
 | `MASC_OAUTH_REFRESH_TOKEN_TTL_SEC` | refresh-token lifetime |
+| `MASC_OAUTH_CLIENT_REGISTRATION_TTL_SEC` | lifetime of an unapproved dynamic-client registration |
 | `MASC_OAUTH_MAX_PENDING_CODES` | hard bound on process-local grants |
 | `MASC_OAUTH_MAX_CLIENTS` | hard bound on durable dynamic clients |
+| `MASC_OAUTH_MAX_TOKEN_RECORDS` | hard bound on durable access and refresh records |
 
 Defaults are named policy values in the typed configuration module, not literals
 distributed through handlers or stores.
@@ -214,13 +218,15 @@ commit.
 | redirect theft | redirect URI is exact-match registered and loopback-only |
 | code replay | a validated exchange attempt consumes one code before minting; store failure does not restore it |
 | refresh replay | replay of a known old refresh token revokes the entire token family atomically |
+| bootstrap revocation | deleting, rotating, expiring, or demoting the bound static credential revokes the derived OAuth family |
 | token leak at rest | only SHA-256 hashes are persisted; files are mode 0600 |
 | cross-resource token use | authorization and token requests bind the exact resource derived from admitted request authority; MCP credential lookup requires that same fiber-local resource context |
 | privilege escalation | requested scope intersects downward with bootstrap role; it never upgrades role |
 | host-header injection | issuer/resource URLs derive only from admitted `Server_request_authority`, never raw headers |
 | CSRF/form injection | browser POST requires same-origin checks; every reflected value is HTML escaped |
-| malicious DCR | only bounded metadata and exact loopback redirect URIs are accepted |
-| state exhaustion | pending grants have TTL and a configured hard capacity |
+| malicious DCR | only bounded metadata and exact loopback redirect URIs are accepted; exact retries are idempotent, active clients are never evicted, and expired records are reclaimed |
+| state exhaustion | pending grants and durable token records have configured hard capacities; expired, revoked, superseded, and unpublished records are reclaimed |
+| concurrent writers | one stable store lock serializes read-modify-publish across processes sharing a base path and fails closed after a bounded wait |
 | credential ambiguity | static and OAuth stores use typed lookup outcomes; no error-string fallback |
 
 OAuth endpoints return protocol error codes (`invalid_request`,
@@ -261,7 +267,9 @@ Focused tests must prove:
 - a valid code exchanges once and replay fails;
 - wrong verifier does not mint a token;
 - refresh rotates once; replay fails and revokes the current token family;
+- durable client and token capacities remain recoverable and bounded;
 - expired/revoked/wrong-resource OAuth access tokens fail closed;
+- deletion, rotation, expiry, or role demotion of the bootstrap credential fails closed;
 - Worker bootstrap cannot obtain admin scope;
 - Admin bootstrap receives admin only when explicitly requested;
 - both credential kinds produce the same canonical MCP actor;

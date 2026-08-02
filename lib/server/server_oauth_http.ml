@@ -19,6 +19,21 @@ let respond_oauth_error request reqd error =
     reqd
 ;;
 
+let read_oauth_body request reqd callback =
+  Http.Request.read_body_async_with_limit
+    reqd
+    ~max_bytes:Server_oauth_service.max_request_body_bytes
+    ~on_body:callback
+    ~on_error:(function
+      | `Too_large _ ->
+        respond_oauth_error
+          request
+          reqd
+          (Auth_oauth.Invalid_request "request body is too large")
+      | `Internal exn ->
+        respond_oauth_error request reqd (Auth_oauth.Store_error (Printexc.to_string exn)))
+;;
+
 let respond_redirect location reqd =
   let response =
     Httpun.Response.create
@@ -84,7 +99,7 @@ let handle_authorize_post request reqd =
     | Error error -> Server_auth.respond_auth_error request reqd error
     | Ok () ->
       with_base_path request reqd (fun base_path ->
-        Http.Request.read_body_async reqd (fun body ->
+        read_oauth_body request reqd (fun body ->
           match Server_oauth_service.authorize_post ~base_path ~authority ~body with
           | Error error -> respond_oauth_error request reqd error
           | Ok (Server_oauth_service.Authorization_redirect location) ->
@@ -109,7 +124,7 @@ let handle_register request reqd =
     | Error error -> Server_auth.respond_auth_error request reqd error
     | Ok () ->
       with_base_path request reqd (fun base_path ->
-        Http.Request.read_body_async reqd (fun body ->
+        read_oauth_body request reqd (fun body ->
           match Server_oauth_service.register_client ~base_path body with
           | Error error -> respond_oauth_error request reqd error
           | Ok client ->
@@ -132,7 +147,7 @@ let handle_token request reqd =
     | Error error -> Server_auth.respond_auth_error request reqd error
     | Ok () ->
       with_base_path request reqd (fun base_path ->
-        Http.Request.read_body_async reqd (fun body ->
+        read_oauth_body request reqd (fun body ->
           match Server_oauth_service.token ~base_path ~authority ~body with
           | Error error -> respond_oauth_error request reqd error
           | Ok pair ->

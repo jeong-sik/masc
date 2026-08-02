@@ -10,6 +10,11 @@ val parse_form : string -> ((string * string) list, Auth_oauth.error) result
 val html_escape : string -> string
 (** Escape an untrusted value for an HTML text or quoted attribute context. *)
 
+val render_authorization_form :
+  ?error:string -> Auth_oauth.authorization_request -> string
+(** Render the authorization decision form. Exposed for focused protocol
+    tests that lock visible client and scope consent. *)
+
 val ensure_optional_string_subset :
   (string * Yojson.Safe.t) list ->
   string ->

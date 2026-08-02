@@ -122,6 +122,40 @@ let test_html_escape () =
     (Server_oauth_http.html_escape "<&>\"'")
 ;;
 
+let contains haystack needle =
+  let haystack_length = String.length haystack in
+  let needle_length = String.length needle in
+  let rec loop offset =
+    if offset + needle_length > haystack_length
+    then false
+    else if String.sub haystack offset needle_length = needle
+    then true
+    else loop (offset + 1)
+  in
+  needle_length = 0 || loop 0
+;;
+
+let test_admin_consent_is_visible_and_explicit () =
+  let request : Auth_oauth.authorization_request =
+    { client_id = "masc_client"
+    ; client_name = Some "Codex <Admin>"
+    ; redirect_uri = "http://127.0.0.1:43123/callback"
+    ; resource = "http://127.0.0.1:8935/mcp"
+    ; scopes = [ Auth_oauth.Mcp_admin ]
+    ; state = Some "state"
+    ; code_challenge = String.make 43 'a'
+    }
+  in
+  let html = Server_oauth_http.render_authorization_form request in
+  check bool "verified client name is visible and escaped" true (contains html "Codex &lt;Admin&gt;");
+  check bool "admin scope is visible" true (contains html "mcp:admin");
+  check
+    bool
+    "admin approval requires a separate checkbox"
+    true
+    (contains html {|name="confirm_admin" type="checkbox" value="yes" required|})
+;;
+
 let grant_types values = [ "grant_types", `List (List.map (fun v -> `String v) values) ]
 let supported_grant_types = [ "authorization_code"; "refresh_token" ]
 
@@ -178,6 +212,10 @@ let () =
             test_registration_browser_origin_boundary
         ; test_case "form ambiguity" `Quick test_form_parser_rejects_ambiguity
         ; test_case "HTML escaping" `Quick test_html_escape
+        ; test_case
+            "admin consent is visible and explicit"
+            `Quick
+            test_admin_consent_is_visible_and_explicit
         ; test_case
             "string subset rejects duplicates"
             `Quick

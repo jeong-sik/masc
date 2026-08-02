@@ -132,9 +132,12 @@ let run_cmd cli_base_path =
        "[FATAL] stdio readiness publication failed before MCP publication: %s"
        (Server_runtime_bootstrap.owner_initialization_error_to_string error);
      exit 1);
-  Server_runtime_bootstrap.start_completion_authority ~sw state;
   ignore
-    (Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state);
+    (Server_runtime_bootstrap.start_post_ready_owner_lanes
+       ~sw
+       ~clock
+       ~env
+       state);
   Fun.protect
     ~finally:(fun () ->
       (try Board_dispatch.flush () with

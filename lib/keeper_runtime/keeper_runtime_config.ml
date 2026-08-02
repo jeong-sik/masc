@@ -10,7 +10,6 @@ let key_to_env =
     "bootstrap.enabled",                "MASC_KEEPER_BOOTSTRAP_ENABLED";
     "bootstrap.stale_turn_sec",         "MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC";
     "bootstrap.max_scan",               "MASC_KEEPER_BOOTSTRAP_MAX_SCAN";
-    "bootstrap.autoboot_max",           "MASC_KEEPER_AUTOBOOT_MAX";
     (* [autonomous] *)
     (* RFC-0297 P0-1: global lifecycle kill-switches. Without these mappings
        the [reactive]/[proactive]/[autonomous] enabled keys were silently

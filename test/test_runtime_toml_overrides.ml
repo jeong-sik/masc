@@ -68,9 +68,7 @@ let test_missing_file_returns_zero () =
 
 let test_applies_sleep_and_throttle_overrides () =
   let doc = parse_or_fail
-    "[bootstrap]\n\
-     autoboot_max = 6\n\
-     [autonomous]\n\
+    "[autonomous]\n\
      fairness_cooldown_sec = 3\n\
      [heartbeat]\n\
      sleep_chunk_sec = 1.5\n\
@@ -82,10 +80,7 @@ let test_applies_sleep_and_throttle_overrides () =
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied sleep/throttle overrides" 6 count;
-  check (option string) "autoboot max canonical env"
-    (Some "6")
-    (List.assoc_opt "MASC_KEEPER_AUTOBOOT_MAX" overrides);
+  check int "applied sleep/throttle overrides" 5 count;
   check (option string) "autonomous fairness cooldown"
     (Some "3")
     (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC" overrides);

@@ -77,6 +77,10 @@ let result_after_activity_projection
            operation
            detail)
 
+module For_testing = struct
+  let result_after_activity_projection = result_after_activity_projection
+end
+
 let extract_board_post_id (message : string) =
   match String.index_opt message '{' with
   | None -> None

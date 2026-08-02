@@ -219,7 +219,9 @@ val begin_shutdown :
   begin_shutdown_result
 
 (** Re-open admission only when [operation_id] still owns the reservation.
-    Used when durable prepare fails before cancellation begins. *)
+    Used when durable prepare fails before cancellation begins. An owner with
+    no existing admission slot returns [Shutdown_not_reserved] without
+    allocating a slot. *)
 val rollback_shutdown :
   base_path:string ->
   keeper_name:string ->

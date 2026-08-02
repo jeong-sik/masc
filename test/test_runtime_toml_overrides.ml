@@ -159,17 +159,6 @@ let test_applies_lifecycle_enabled_overrides () =
     (Some "true")
     (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_ENABLED" overrides)
 
-let test_deprecated_autoboot_env_does_not_preempt_toml () =
-  let doc = parse_or_fail "[bootstrap]\nautoboot_max = 12\n" in
-  let fake_env = env_with [("MASC_KEEPER_AUTOBOT_MAX", "2")] in
-  let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:fake_env doc
-  in
-  check int "applied canonical TOML" 1 count;
-  check (option string) "deprecated typo env ignored"
-    (Some "12")
-    (List.assoc_opt "MASC_KEEPER_AUTOBOOT_MAX" overrides)
-
 let test_parse_error_returns_error () =
   with_base_path @@ fun base_path ->
   write_toml base_path "this is not valid TOML [[[\n";
@@ -410,10 +399,6 @@ let () =
         ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
         ; test_case "applies health overrides" `Quick test_applies_health_overrides
         ; test_case "applies lifecycle enabled overrides (RFC-0297 P0-1)" `Quick test_applies_lifecycle_enabled_overrides
-        ; test_case
-            "deprecated autoboot env does not preempt TOML"
-            `Quick
-            test_deprecated_autoboot_env_does_not_preempt_toml
         ; test_case "parse error returns Error" `Quick test_parse_error_returns_error
         ; test_case "load_and_apply records boot override" `Quick test_load_and_apply_records_boot_override
         ; test_case "explicit MASC_CONFIG_DIR wins over base path" `Quick test_explicit_config_dir_wins_over_base_path

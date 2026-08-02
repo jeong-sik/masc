@@ -81,31 +81,12 @@ read, (3) 관련 `.mli`/문서/RFC/PR 인용, (4) `git log --since`로 최근 �
 
 | 클레임 | 실제 | 분류 |
 |--------|------|------|
-| `let autonomous_sem = Eio.Semaphore.create 14` `let turn_sem = Eio.Semaphore.create 1` | `lib/keeper/keeper_turn_slot.ml:43`: `let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit` (default **32**, env `MASC_KEEPER_AUTOBOOT_MAX`, min_v=1, max_v=max_int) | **D** |
-| 14 keeper가 1 turn slot 경쟁 → 36배 더 심각 | 1 → 32 (env-tunable) → typo cap `max_v:20` 명시적으로 제거됨 (line 32-33 commit comment: "forced operator raise-cycles every time the fleet grew. Removed.") | **D** |
-
-`keeper_turn_slot.ml:27-41` 인용:
-
-```
-(* Global turn slot cap across autonomous + reactive pools.
-
-   Sized for the observed 14-keeper fleet plus burst headroom. Operators
-   running larger fleets raise [MASC_KEEPER_AUTOBOOT_MAX] explicitly; the
-   only enforced floor is [min_v:1] (0 = deadlock). The previous [max_v:20]
-   cap was a typo-defence boilerplate, not an architectural ceiling, and
-   forced operator raise-cycles every time the fleet grew. Removed. *)
-let keeper_turn_throttle_limit =
-  int_of_env_default_with_deprecated
-    ~primary:"MASC_KEEPER_AUTOBOOT_MAX"
-    ~deprecated:"MASC_KEEPER_AUTOBOT_MAX"
-    ~default:32
-    ~min_v:1
-    ~max_v:max_int
-```
+| `let autonomous_sem = Eio.Semaphore.create 14` `let turn_sem = Eio.Semaphore.create 1` | The historical global autoboot cap no longer has a runtime consumer. | **D** |
+| 14 keeper가 1 turn slot 경쟁 → 36배 더 심각 | Current concurrency is governed by the active turn-capacity surfaces, not an autoboot-specific knob. | **D** |
 
 **§1-1 결과**: audit 표현 자체가 source code와 일치하지 않음. 18-permit /
-36-permit / K-permit 변경은 한 줄 env knob (또는 default 변경) 수준이며,
-"근본 재설계"가 아닙니다.
+현재 turn-capacity 계약을 기준으로 다시 측정해야 하며, 제거된 autoboot knob를
+운영 해법으로 제시해서는 안 됩니다.
 
 ### §1-2 Dashboard Snapshot: O(K × N) 폭발
 

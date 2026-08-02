@@ -1,7 +1,7 @@
 (** Pure Task lifecycle transition helper. Producers submit completion evidence
-    for verification; the terminal verdict is issued by a
-    [Masc_domain.completion_authority] through {!decide_verdict}, never by an
-    agent action. *)
+    for verification; the terminal verdict is issued by the configured system
+    LLM agent at the [Masc_domain.completion_authority] boundary (or by an
+    authenticated HITL operator), never by a Keeper action. *)
 
 type invalid =
   | Verification_submission_required
@@ -38,20 +38,29 @@ type claim_resolution =
   | Held_pending_verdict of { verification_id : string }
 
 let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
-  match task.task_status with
-  | Masc_domain.Todo ->
+  match Masc_domain.task_claim_decision_for_status task.task_status with
+  | Masc_domain.Claim_available Masc_domain.Claim_ready ->
     Worker_claim (Masc_domain.Claimed { assignee = agent_name; claimed_at = now })
-  | Masc_domain.AwaitingVerification { verification_id; _ } ->
+  | Masc_domain.Claim_unavailable
+      (Masc_domain.Claim_block_pending_verdict { verification_id }) ->
     (* No agent claims a pending obligation. The previous behaviour bound the
        claiming agent as its verifier, which is exactly how a Keeper acquired
        approval authority: claim was the authority-granting operation. The
        verdict now comes from a [completion_authority] out of band, so the
        obligation has no assignable satisfier and no keeper is offered it. *)
     Held_pending_verdict { verification_id }
-  | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ } ->
-    if same_actor assignee then Self_owned else Held_by_other assignee
-  | Masc_domain.Done _ -> Held_terminal task.task_status
-  | Masc_domain.Cancelled { cancelled_by; _ } -> Held_by_other cancelled_by
+  | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo task_status) ->
+    (match task_status with
+     | Masc_domain.Claimed { assignee; _ }
+     | Masc_domain.InProgress { assignee; _ } ->
+       if same_actor assignee then Self_owned else Held_by_other assignee
+     | Masc_domain.Done _ -> Held_terminal task_status
+     | Masc_domain.Cancelled { cancelled_by; _ } -> Held_by_other cancelled_by
+     | Masc_domain.Todo | Masc_domain.AwaitingVerification _ ->
+       (* These constructors are not produced by the status-level decision for
+          this branch. Keep the match exhaustive so a future status addition
+          cannot silently widen claim admission. *)
+       Held_terminal task_status)
 ;;
 
 let decide
@@ -67,20 +76,27 @@ let decide
       ~reason
   =
   match action, task_status with
-  | Masc_domain.Claim, Masc_domain.Todo ->
-    ok
-      ~set_current:task_id
-      (Masc_domain.Claimed { assignee = agent_name; claimed_at = now })
-  | ( Masc_domain.Claim
-    , (Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _}) ) ->
-    if same_agent assignee then ok task_status else Error Invalid_transition
-  | Masc_domain.Claim, Masc_domain.Done _ -> ok task_status
-  | Masc_domain.Claim, Masc_domain.AwaitingVerification _ ->
-    (* Claiming an obligation used to bind the claimant as its verifier, so the
-       claim race decided who held approval authority. There is no such binding
-       now: the verdict comes from a [completion_authority] out of band. *)
-    Error Verification_pending_verdict
-  | Masc_domain.Claim, Masc_domain.Cancelled _ -> Error Invalid_transition
+  | Masc_domain.Claim, task_status ->
+    (match Masc_domain.task_claim_decision_for_status task_status with
+     | Masc_domain.Claim_available Masc_domain.Claim_ready ->
+       ok
+         ~set_current:task_id
+         (Masc_domain.Claimed { assignee = agent_name; claimed_at = now })
+     | Masc_domain.Claim_unavailable
+         (Masc_domain.Claim_block_pending_verdict _) ->
+       (* The completion authority is the system LLM boundary (or HITL), not
+          a Keeper that wins a claim race. *)
+       Error Verification_pending_verdict
+     | Masc_domain.Claim_unavailable
+         (Masc_domain.Claim_block_not_todo status) ->
+       (match status with
+        | Masc_domain.Claimed { assignee; _ }
+        | Masc_domain.InProgress { assignee; _ } ->
+          if same_agent assignee then ok status else Error Invalid_transition
+        | Masc_domain.Done _ -> ok status
+        | Masc_domain.Cancelled _ -> Error Invalid_transition
+        | Masc_domain.Todo | Masc_domain.AwaitingVerification _ ->
+          Error Invalid_transition))
   | Masc_domain.Start, Masc_domain.Claimed { assignee; _ } ->
     if same_agent assignee
     then

@@ -362,27 +362,6 @@ let notify_reject_verification
        ~notes:""
        ~timestamp:(Time_compat.now ()))
 
-let awaiting_verification_deadline
-      ~(submitted_at : string)
-      ~(deadline : string option)
-  =
-  match deadline with
-  | Some deadline ->
-    (match Masc_domain.parse_iso8601_opt deadline with
-     | Some deadline_ts -> Some ("deadline", deadline, deadline_ts)
-     | None -> None)
-  | None ->
-    (match Masc_domain.parse_iso8601_opt submitted_at with
-     | Some submitted_ts ->
-       let deadline_ts =
-         submitted_ts +. Env_config_runtime.Verification.timeout_deadline_seconds ()
-       in
-       Some
-         ( "submitted_at_fallback"
-         , Masc_domain.iso8601_of_unix_seconds deadline_ts
-         , deadline_ts )
-     | None -> None)
-
 (* RFC-0220 §5: the destructive 24h verification deadline rescue is removed.
    With the verification sub-state folded into [task_status] (RFC-0220 §3.1),
    the illegal Todo+Pending drift is unrepresentable. An

@@ -1414,6 +1414,9 @@ let test_task_reclaim_gate_ignores_free_text_without_policy () =
   } in
   match Masc_domain.task_claim_decision t with
   | Masc_domain.Claim_available Masc_domain.Claim_ready -> ()
+  | Masc_domain.Claim_unavailable
+      (Masc_domain.Claim_block_pending_verdict _) ->
+    fail "todo task must not be blocked by a pending verdict"
   | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo _) ->
     fail "do_not_reclaim_reason should not influence claim readiness"
 
@@ -1436,8 +1439,55 @@ let test_task_reclaim_gate_blocks_only_typed_policy () =
   } in
   match Masc_domain.task_claim_decision t with
   | Masc_domain.Claim_available Masc_domain.Claim_ready -> ()
+  | Masc_domain.Claim_unavailable
+      (Masc_domain.Claim_block_pending_verdict _) ->
+    fail "todo task must not be blocked by a pending verdict"
   | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo _) ->
     fail "claim-ready task must stay claimable regardless of reclaim policy"
+
+let test_task_claim_awaiting_verification_is_pending_verdict () =
+  let t : Masc_domain.task = {
+    id = "task-006";
+    title = "Pending verdict";
+    description = "";
+    task_status = Masc_domain.AwaitingVerification {
+      assignee = "producer";
+      submitted_at = "2026-07-13T00:00:00Z";
+      verification_id = "vrf-006";
+    };
+    priority = 1;
+    files = [];
+    created_at = "2026-07-13T00:00:00Z";
+    created_by = None;
+    predecessor_task_id = None;
+    contract = None;
+    handoff_context = None;
+    cycle_count = 0;
+    reclaim_policy = None;
+    do_not_reclaim_reason = None;
+  } in
+  (match Masc_domain.task_claim_decision t with
+   | Masc_domain.Claim_unavailable
+       (Masc_domain.Claim_block_pending_verdict { verification_id }) ->
+     check string "verification id" "vrf-006" verification_id
+   | Masc_domain.Claim_available _
+   | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo _) ->
+     fail "awaiting_verification must be blocked by its pending verdict");
+  check bool
+    "awaiting_verification is not claim-ready"
+    false
+    (Masc_domain.task_claim_decision_is_available t);
+  match Masc_domain.task_claim_next_action t with
+  | Masc_domain.Skip_claim
+      (Masc_domain.Claim_block_pending_verdict { verification_id }) ->
+    check string "next action verification id" "vrf-006" verification_id;
+    check bool
+      "awaiting_verification is not claimable"
+      false
+      (Masc_domain.task_claim_next_action_is_claimable t)
+  | Masc_domain.Claim_now
+  | Masc_domain.Skip_claim (Masc_domain.Claim_block_not_todo _) ->
+    fail "awaiting_verification must not enter the claim action"
 
 
 
@@ -1467,6 +1517,9 @@ let test_task_claim_next_action_todo_policy_block_still_claims () =
   match Masc_domain.task_claim_next_action t with
   | Masc_domain.Claim_now ->
     check bool "claimable" true (Masc_domain.task_claim_next_action_is_claimable t)
+  | Masc_domain.Skip_claim
+      (Masc_domain.Claim_block_pending_verdict _) ->
+    fail "todo task should not be classified as pending verdict"
   | Masc_domain.Skip_claim (Masc_domain.Claim_block_not_todo _) ->
     fail "todo task should not be classified as not-todo"
 
@@ -1726,5 +1779,9 @@ let () =
       test_case "of_yojson error" `Quick test_task_of_yojson_error;
       test_case "claim next action: todo stays claimable under policy block" `Quick
         test_task_claim_next_action_todo_policy_block_still_claims;
+    ];
+    "task_claim", [
+      test_case "awaiting verification waits for verdict" `Quick
+        test_task_claim_awaiting_verification_is_pending_verdict;
     ];
   ]

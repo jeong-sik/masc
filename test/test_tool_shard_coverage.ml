@@ -165,6 +165,32 @@ let test_board_tools () =
     ]
 ;;
 
+let test_taskboard_verification_claim_contract () =
+  let list_schema =
+    schema_by_name "keeper_tasks_list" Tool_shard_types.taskboard_tools
+  in
+  let claim_schema =
+    schema_by_name "keeper_task_claim" Tool_shard_types.taskboard_tools
+  in
+  let descriptions = list_schema.description ^ "\n" ^ claim_schema.description in
+  Alcotest.(check bool)
+    "awaiting verification is described as pending"
+    true
+    (contains descriptions "pending a verdict from the system LLM agent");
+  Alcotest.(check bool)
+    "awaiting verification is described as not claimable"
+    true
+    (contains descriptions "not claimable");
+  Alcotest.(check bool)
+    "obsolete verifier-by-claiming affordance absent"
+    false
+    (contains descriptions "may issue the verdict");
+  Alcotest.(check bool)
+    "obsolete awaiting claim-pool affordance absent"
+    false
+    (contains descriptions "unclaimed todo or awaiting_verification task")
+;;
+
 let test_keeper_board_post_schema_supports_judgment () =
   let schema = schema_by_name "keeper_board_post" Tool_shard.board_tools in
   match get_json_assoc "properties" schema.input_schema with
@@ -248,6 +274,10 @@ let () =
             `Quick
             test_context_status_description_matches_current_output
         ; Alcotest.test_case "board tools" `Quick test_board_tools
+        ; Alcotest.test_case
+            "taskboard verification claim contract"
+            `Quick
+            test_taskboard_verification_claim_contract
         ; Alcotest.test_case
             "board post judgment"
             `Quick

@@ -221,7 +221,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0217 | Telemetry Backend Otel 단일화 (Retired Backend Purge) | Draft | 03d5feaf25 2026-07-08 | - |
 | 0218 | Keeper tool-surface coherence + web-tooling roadmap — phases and per-phase gates | Draft | 03d5feaf25 2026-07-08 | - |
 | 0219 | Remove Sandbox Repo Patrol Gates | Draft | 03d5feaf25 2026-07-08 | - |
-| 0220 | Decouple keeper liveness from verification state + guaranteed satisfier for e... | Draft | 03d5feaf25 2026-07-08 | - |
+| 0220 | Decouple keeper liveness from verification state + guaranteed satisfier for e... | Withdrawn | 03d5feaf25 2026-07-08 | - |
 | 0221 | Atomic verification submission — task_status as the sole outcome authority | Implemented (steps 1-3 merged #20613/#20617; steps 4-5 measured then dropped, §3.3/§3.4) | 03d5feaf25 2026-07-08 | - |
 | 0222 | Withdraw harness-owned Task completion | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0223 | Typed connector surfaces: presence in world prompt, pull-based lane context, ... | Draft | 03d5feaf25 2026-07-08 | - |

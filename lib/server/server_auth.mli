@@ -98,6 +98,15 @@ val verify_mcp_auth :
   base_path:string -> Httpun.Request.t -> ('a option, string) result
 (** Bearer token check for the [/mcp] endpoint. *)
 
+val verify_mcp_auth_for_authority :
+  base_path:string ->
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  ('a option, string) result
+(** Bearer token check using an explicitly admitted authority.  Entry points
+    that already carry the typed authority should use this instead of
+    rebuilding a fiber-local dependency. *)
+
 val verify_mcp_observer_stream_auth :
   base_path:string -> Httpun.Request.t -> ('a option, string) result
 (** Variant for the observer SSE stream (allows query token). *)
@@ -209,6 +218,13 @@ val ensure_same_origin_browser_request :
   (unit, Masc_domain.masc_error) result
 (** Reject mutations from off-origin browsers; allows the loopback dev
     allowlist. *)
+
+val ensure_same_origin_if_browser_request :
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  (unit, Masc_domain.masc_error) result
+(** Reject an explicit cross-origin browser request while allowing native
+    clients that do not send browser provenance headers. *)
 
 (** {1 Auth-error wire format} *)
 

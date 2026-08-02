@@ -7,6 +7,9 @@
  (private_modules auth_credential_base auth_metric_store)
  (libraries
   yojson
+  base64
+  uri
+  ipaddr
   unix
   logs
   masc.masc_core
@@ -22,7 +25,6 @@
   masc.masc_tool_dispatch
   masc.otel_metric_store
   masc.tool_types
-  time_compat
-  uri)
+  time_compat)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

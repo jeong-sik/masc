@@ -752,9 +752,6 @@ let awaiting_hello_timeout_seconds = 30.0
    Adding a new [input] constructor is a compile-time error (-w +4)
    until this match is updated — that is the point. *)
 
-let pending t phase =
-  let msg = Printf.sprintf "Discord_gateway_state.step: %s pending" phase in
-  ({ t with state = Failed msg }, [ Log { level = `Error; message = msg } ])
 
 let log_warn t msg = (t, [ Log { level = `Warn; message = msg } ])
 let log_info t msg = (t, [ Log { level = `Info; message = msg } ])

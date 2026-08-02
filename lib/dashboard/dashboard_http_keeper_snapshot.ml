@@ -67,7 +67,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
         List.filter_map
           (fun goal_id ->
              match Goal_store.get_goal config ~goal_id with
-             (* RFC-0294: active_goals tuple dropped its horizon element. *)
              | Some { Goal_store.id; title; _ } ->
                  Some (id, title)
                | None -> None)

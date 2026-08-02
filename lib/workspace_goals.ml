@@ -63,8 +63,6 @@ let validation_error_result
     (Yojson.Safe.to_string data)
 ;;
 
-let goal_status_strings = [ "active"; "paused"; "done"; "dropped" ]
-
 (* RFC-0089: derive the accepted-value sets from the Goal_phase ADT (the goal
    lifecycle SSOT) instead of hand-rolling them here, so the validator, the MCP
    schema enum, and the type can never drift apart. *)
@@ -90,32 +88,6 @@ let make_type_field_error ~field ~constraint_violated ~expected ~received =
   ; expected = Some expected
   ; received = Some received
   }
-;;
-
-(* RFC-0294: parse_optional_horizon removed with the workspace-goal horizon.
-   The masc_goal_* schemas no longer advertise a horizon arg; rejection of an
-   unexpected horizon key is governed by the schema's additionalProperties
-   policy, not a hand-written substring guard. *)
-
-let parse_optional_goal_status args field =
-  (* The typed goal_status is gone (RFC-0352 slice 1); the arg survives only
-     so an explicit "status" input keeps its two-stage rejection: enum
-     validation first, then the lifecycle-arg rejection in the handler. *)
-  match Json_util.assoc_member_opt field args with
-  | None | Some `Null -> Ok None
-  | Some (`String raw) when String.trim raw = "" -> Ok None
-  | Some (`String raw) ->
-    let normalized = String.lowercase_ascii (String.trim raw) in
-    if List.mem normalized goal_status_strings
-    then Ok (Some normalized)
-    else Error (make_enum_field_error ~field ~allowed:goal_status_strings ~received:raw)
-  | Some json ->
-    Error
-      (make_type_field_error
-         ~field
-         ~constraint_violated:Type_string
-         ~expected:"string"
-         ~received:(Yojson.Safe.to_string json))
 ;;
 
 let parse_optional_goal_phase args field =
@@ -253,26 +225,38 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
       ; "rollup", Goal_store.rollup_to_yojson rollup
       ]
 ;;
+(* "Supplied" follows this module's optional-field convention: a missing key,
+   an explicit [null], and a blank string all count as not supplied — the same
+   three shapes the removed [parse_optional_goal_status] mapped to [Ok None].
+   Anything else is a lifecycle value the caller meant to set. *)
+let goal_upsert_lifecycle_field_supplied args =
+  List.find_opt
+    (fun field ->
+      match Json_util.assoc_member_opt field args with
+      | None | Some `Null -> false
+      | Some (`String raw) -> String.trim raw <> ""
+      | Some _ -> true)
+    [ "phase"; "status" ]
+;;
+
 let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result.result =
-  match
-    ( parse_optional_goal_status args "status"
-    , parse_optional_goal_phase args "phase"
-    , parse_optional_priority args "priority" )
-  with
-  | Error err, _, _ | _, Error err, _ | _, _, Error err ->
-    validation_error_result ~tool_name ~start_time [ err ]
-  | Ok status, Ok phase, Ok priority ->
+  (* Lifecycle fields are rejected as soon as they are supplied, before any value
+     validation. Validating the value first answered "in_progress" with the enum
+     message "allowed: active, paused, done, dropped", which sent the caller back
+     with a value this handler also rejects — two turns to reach one verdict. *)
+  match goal_upsert_lifecycle_field_supplied args with
+  | Some field -> goal_upsert_lifecycle_error ~tool_name ~start_time field
+  | None ->
+  match parse_optional_priority args "priority" with
+  | Error err -> validation_error_result ~tool_name ~start_time [ err ]
+  | Ok priority ->
     let id = get_string_opt args "id" in
     let title = get_string_opt args "title" in
     let metric = get_string_opt args "metric" in
     let target_value = get_string_opt args "target_value" in
     let due_date = get_string_opt args "due_date" in
     let parent_goal_id = get_string_opt args "parent_goal_id" in
-    (match phase, status with
-     | Some _, _ -> goal_upsert_lifecycle_error ~tool_name ~start_time "phase"
-     | _, Some _ -> goal_upsert_lifecycle_error ~tool_name ~start_time "status"
-     | _ ->
-       (match
+    (match
           Goal_store.upsert_goal
             ctx.config
             ?id
@@ -281,7 +265,6 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             ?target_value
             ?due_date
             ?priority
-            ?phase
             ?parent_goal_id
             ()
         with
@@ -309,7 +292,7 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             ; "task_link_mode", `String "structured_goal_id"
             ; ( "linked_task_title_example"
               , `String (Printf.sprintf "[child] %s" goal.title) )
-            ]))
+            ])
 ;;
 
 let handle_goal_transition ~tool_name ~start_time (ctx : context) args

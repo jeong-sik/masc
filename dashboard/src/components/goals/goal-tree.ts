@@ -75,7 +75,7 @@ const TREE_NODE_CARD_ACTIVE = `${TREE_NODE_CARD_BASE} border-[var(--color-state-
  *
  * Case-insensitive substring match on `node.title` and on `task.title` for
  * any task attached to the node. Ancestors of matching nodes are preserved
- * so the operator retains context (parent goal, horizon) — the tree shape
+ * so the operator retains context (parent goal) — the tree shape
  * is never broken by the filter.
  */
 function filterGoalTree(

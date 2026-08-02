@@ -40,6 +40,11 @@ let iso_now () = Masc_domain.now_iso ()
 let goals_recovery_path config =
   Goal_store.goals_path config ^ ".last-good"
 
+let contains_substring haystack needle =
+  let hl = String.length haystack and nl = String.length needle in
+  let rec scan i = i + nl <= hl && (String.sub haystack i nl = needle || scan (i + 1)) in
+  nl = 0 || scan 0
+
 let make_goal id title =
   let ts = iso_now () in
   {
@@ -158,11 +163,11 @@ let test_delete_goal_wraps_prune_failure_after_goal_delete () =
     false
     (List.exists (fun goal -> String.equal goal.Goal_store.id "g-1") goals)
 
-let test_status_field_accepted_and_ignored () =
+let test_status_field_no_longer_decodes () =
   with_workspace @@ fun config ->
-  (* Transition-window contract (RFC-0352 slice 1): rows written before the
-     status duplicate was removed still carry a "status" member; the decoder
-     accepts and ignores it, and the serializer never writes it back. *)
+  (* Hard cut: "status" is not an accepted Goal field. A row still carrying the
+     retired duplicate is a decode error, so read_state applies the corrupt-store
+     policy rather than accepting a row with two lifecycle representations. *)
   let row ~id ~phase ~status =
     `Assoc
       [
@@ -190,27 +195,44 @@ let test_status_field_accepted_and_ignored () =
           `List
             [
               row ~id:"dual-active" ~phase:"executing" ~status:"active";
-              (* A contradictory status must not influence the decoded phase. *)
               row ~id:"dual-conflict" ~phase:"paused" ~status:"done";
             ] );
       ]);
-  let state = Goal_store.read_state config in
-  check int "both rows decode" 2 (List.length state.goals);
-  let by_id id =
-    List.find_opt
-      (fun (goal : Goal_store.goal) -> String.equal goal.id id)
-      state.goals
+  let on_disk_before = In_channel.with_open_bin (Goal_store.goals_path config)
+    In_channel.input_all
   in
-  (match by_id "dual-conflict" with
-  | None -> fail "missing dual-conflict"
-  | Some goal ->
-      check string "phase wins over stale status" "paused"
-        (Goal_phase.to_string goal.phase);
-      (match Goal_store.goal_to_yojson goal with
+  let state = Goal_store.read_state config in
+  check int "read of a store carrying the retired status field is empty" 0
+    (List.length state.goals);
+  (* Fail-closed: the lenient empty read must not license a write.  Without this
+     the next upsert would overwrite goals.json AND its .last-good mirror with the
+     empty state, turning one undecodable row into permanent loss. *)
+  (match
+     Goal_store.upsert_goal config ~title:"phase only" ~phase:Goal_phase.Paused ()
+   with
+   | Ok _ -> fail "upsert_goal wrote over an undecodable store"
+   | Error msg ->
+       check bool "refusal names the store path" true
+         (contains_substring msg (Goal_store.goals_path config)));
+  let on_disk_after = In_channel.with_open_bin (Goal_store.goals_path config)
+    In_channel.input_all
+  in
+  check string "undecodable store is left byte-identical on disk" on_disk_before
+    on_disk_after;
+  check bool "no recovery mirror was written over it" false
+    (Sys.file_exists (goals_recovery_path config))
+
+let test_serializer_omits_status () =
+  with_workspace @@ fun config ->
+  match
+    Goal_store.upsert_goal config ~title:"phase only" ~phase:Goal_phase.Paused ()
+  with
+  | Error msg -> fail msg
+  | Ok (goal, _) -> (
+      match Goal_store.goal_to_yojson goal with
       | `Assoc fields ->
-          check bool "serializer omits status" false
-            (List.mem_assoc "status" fields)
-      | _ -> fail "goal_to_yojson: expected object"))
+          check bool "serializer omits status" false (List.mem_assoc "status" fields)
+      | _ -> fail "goal_to_yojson: expected object")
 
 let test_phaseless_row_no_longer_decodes () =
   with_workspace @@ fun config ->
@@ -352,8 +374,10 @@ let () =
             test_delete_goal_prunes_goal_task_links;
           test_case "prune failure reports partial delete" `Quick
             test_delete_goal_wraps_prune_failure_after_goal_delete;
-          test_case "status field accepted and ignored" `Quick
-            test_status_field_accepted_and_ignored;
+          test_case "status field no longer decodes" `Quick
+            test_status_field_no_longer_decodes;
+          test_case "serializer omits status" `Quick
+            test_serializer_omits_status;
           test_case "phase-less row no longer decodes" `Quick
             test_phaseless_row_no_longer_decodes;
           test_case "blocked phase serializes without status" `Quick

@@ -5,7 +5,7 @@
  (public_name masc.masc_workspace)
  (wrapped false)
  (flags
-  (:standard -w +4))
+  (:standard -w +4 -w +32))
  (modules
   workspace_core
   telemetry_observe

@@ -7,9 +7,9 @@
  (name masc_exec)
  (public_name masc.masc_exec)
  (wrapped true)
- ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
+ ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on. + unused-value ratchet (warning 32)
  (flags
-  (:standard -w +4))
+  (:standard -w +4 -w +32))
  (libraries
   masc_process
   masc_core

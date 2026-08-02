@@ -40,8 +40,6 @@ let configured_write_path env_name ~default =
 let status_path () =
   configured_write_path "MASC_IMESSAGE_STATUS_PATH" ~default:default_status_path
 
-let status_write_path () =
-  configured_write_path "MASC_IMESSAGE_STATUS_PATH" ~default:default_status_path
 
 let binding_store_path () =
   configured_write_path "MASC_IMESSAGE_BINDING_STORE_PATH"

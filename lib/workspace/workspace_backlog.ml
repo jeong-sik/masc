@@ -43,6 +43,31 @@ let clear_backlog_cache_for path =
 
 let read_backlog_r config =
   let path = backlog_path config in
+  let recover primary_msg =
+    let recovery_path = backlog_recovery_path config in
+    match read_json_result config recovery_path with
+    | Ok json ->
+      (match decode_backlog ~path:recovery_path json with
+       | Ok backlog ->
+         Log.Misc.warn
+           "read_backlog: primary backlog unreadable, recovered from %s (%s)"
+           recovery_path
+           primary_msg;
+         Ok backlog
+       | Error recovery_msg ->
+         Error
+           (Printf.sprintf
+              "%s; recovery failed: %s"
+              primary_msg
+              recovery_msg))
+    | Error recovery_msg ->
+      Error
+        (Printf.sprintf
+           "%s; recovery read failed for %s: %s"
+           primary_msg
+           recovery_path
+           recovery_msg)
+  in
   let cached =
     Stdlib.Mutex.protect backlog_cache_mu (fun () ->
         match Hashtbl.find_opt backlog_cache path with
@@ -70,31 +95,8 @@ let read_backlog_r config =
                         { mtime = st.Unix.st_mtime; size = st.Unix.st_size; backlog })
               | None -> ());
               Ok backlog
-          | Error _ as e -> e)
-      | Error primary_msg ->
-          let recovery_path = backlog_recovery_path config in
-          (match read_json_result config recovery_path with
-           | Ok json ->
-               (match decode_backlog ~path:recovery_path json with
-                | Ok backlog ->
-                    Log.Misc.warn
-                      "read_backlog: primary backlog unreadable, recovered from %s (%s)"
-                      recovery_path
-                      primary_msg;
-                    Ok backlog
-                | Error recovery_msg ->
-                    Error
-                      (Printf.sprintf
-                         "%s; recovery failed: %s"
-                         primary_msg
-                         recovery_msg))
-           | Error recovery_msg ->
-               Error
-                 (Printf.sprintf
-                    "%s; recovery read failed for %s: %s"
-                    primary_msg
-                    recovery_path
-                    recovery_msg)))
+          | Error primary_msg -> recover primary_msg)
+      | Error primary_msg -> recover primary_msg)
 
 let read_backlog config =
   match read_backlog_r config with

@@ -601,61 +601,45 @@ let test_backlog_of_yojson_with_task () =
   | Ok b -> check int "has 1 task" 1 (List.length b.tasks)
   | Error e -> fail ("expected Ok, got: " ^ e)
 
-let test_backlog_of_yojson_error () =
-  let json = `String "not an object" in
+let expect_backlog_decode_error label json =
   match Masc_domain.backlog_of_yojson json with
-  | Ok b ->
-    check int "tasks empty" 0 (List.length b.tasks);
-    check string "last_updated defaults to empty" "" b.last_updated;
-    check int "version defaults to 1" 1 b.version
-  | Error e -> fail ("expected tolerant default, got: " ^ e)
+  | Error _ -> ()
+  | Ok _ -> fail ("expected backlog decode error: " ^ label)
 
-let test_backlog_of_yojson_version_0_sentinel () =
-  (* version=0 is a sentinel value indicating an uninitialised backlog.
-     The decoder should preserve it, not reject. *)
+let test_backlog_of_yojson_rejects_string () =
+  let json = `String "not an object" in
+  expect_backlog_decode_error "string document" json
+
+let test_backlog_of_yojson_rejects_zero_version () =
   let json = `Assoc [
     ("tasks", `List []);
     ("last_updated", `String "2024-01-15T12:00:00Z");
     ("version", `Int 0);
   ] in
-  match Masc_domain.backlog_of_yojson json with
-  | Ok b ->
-    check int "version preserved as 0" 0 b.version;
-    check int "tasks empty" 0 (List.length b.tasks)
-  | Error e -> fail ("expected Ok for version=0, got: " ^ e)
+  expect_backlog_decode_error "zero revision" json
 
-let test_backlog_of_yojson_version_negative () =
-  (* Version -1 or negative is invalid; decoder should still pass it through
-     as-is since the Yojson int decoder accepts any integer. *)
+let test_backlog_of_yojson_rejects_negative_version () =
   let json = `Assoc [
     ("tasks", `List []);
     ("last_updated", `String "2024-01-15T12:00:00Z");
     ("version", `Int (-1));
   ] in
-  match Masc_domain.backlog_of_yojson json with
-  | Ok b -> check int "version preserved as -1" (-1) b.version
-  | Error e -> fail ("expected Ok for version=-1, got: " ^ e)
+  expect_backlog_decode_error "negative revision" json
 
-let test_backlog_of_yojson_missing_version () =
-  (* Missing version field should default to 1 *)
+let test_backlog_of_yojson_requires_version () =
   let json = `Assoc [
     ("tasks", `List []);
     ("last_updated", `String "2024-01-15T12:00:00Z");
   ] in
-  match Masc_domain.backlog_of_yojson json with
-  | Ok b -> check int "version defaults to 1" 1 b.version
-  | Error e -> fail ("expected Ok for missing version, got: " ^ e)
+  expect_backlog_decode_error "missing revision" json
 
-let test_backlog_of_yojson_null_version () =
-  (* Null version should default to 1 (same path as missing) *)
+let test_backlog_of_yojson_rejects_null_version () =
   let json = `Assoc [
     ("tasks", `List []);
     ("last_updated", `String "2024-01-15T12:00:00Z");
     ("version", `Null);
   ] in
-  match Masc_domain.backlog_of_yojson json with
-  | Ok b -> check int "version defaults to 1" 1 b.version
-  | Error e -> fail ("expected Ok for null version, got: " ^ e)
+  expect_backlog_decode_error "null revision" json
 
 let test_backlog_of_yojson_missing_last_updated () =
   (* Missing last_updated should default to "" *)
@@ -669,18 +653,11 @@ let test_backlog_of_yojson_missing_last_updated () =
     check int "version preserved" 1 b.version
   | Error e -> fail ("expected Ok for missing last_updated, got: " ^ e)
 
-let test_backlog_of_yojson_bare_tasks () =
-  (* Backlog may be just {"tasks": [...]} with no metadata fields at all.
-     This is the observed live format in .masc/tasks/backlog.json. *)
+let test_backlog_of_yojson_rejects_tasks_without_revision () =
   let json = `Assoc [
     ("tasks", `List []);
   ] in
-  match Masc_domain.backlog_of_yojson json with
-  | Ok b ->
-    check int "tasks empty" 0 (List.length b.tasks);
-    check string "last_updated defaults to empty" "" b.last_updated;
-    check int "version defaults to 1" 1 b.version
-  | Error e -> fail ("expected Ok for bare tasks, got: " ^ e)
+  expect_backlog_decode_error "tasks without revision" json
 
 let test_backlog_of_yojson_truncated_tasks () =
   (* A valid object with "tasks" missing (truncated JSON).
@@ -693,16 +670,9 @@ let test_backlog_of_yojson_truncated_tasks () =
   | Ok b -> check int "tasks empty when missing" 0 (List.length b.tasks)
   | Error e -> fail ("expected Ok for missing tasks key, got: " ^ e)
 
-let test_backlog_of_yojson_wrong_type () =
-  (* Non-object input is treated like an empty object. Readers prefer a
-     conservative empty backlog over failing back to a separate fallback path. *)
+let test_backlog_of_yojson_rejects_integer () =
   let json = `Int 42 in
-  match Masc_domain.backlog_of_yojson json with
-  | Ok b ->
-    check int "tasks empty" 0 (List.length b.tasks);
-    check string "last_updated defaults to empty" "" b.last_updated;
-    check int "version defaults to 1" 1 b.version
-  | Error e -> fail ("expected tolerant default, got: " ^ e)
+  expect_backlog_decode_error "integer document" json
 
 let test_backlog_of_yojson_nested_list () =
   (* Degenerate input: tasks is a non-list value. The decoder's
@@ -1657,15 +1627,15 @@ let () =
     "backlog_of_yojson", [
       test_case "ok" `Quick test_backlog_of_yojson_ok;
       test_case "with task" `Quick test_backlog_of_yojson_with_task;
-      test_case "error" `Quick test_backlog_of_yojson_error;
-      test_case "version 0 sentinel" `Quick test_backlog_of_yojson_version_0_sentinel;
-      test_case "version negative" `Quick test_backlog_of_yojson_version_negative;
-      test_case "missing version" `Quick test_backlog_of_yojson_missing_version;
-      test_case "null version" `Quick test_backlog_of_yojson_null_version;
+      test_case "rejects string document" `Quick test_backlog_of_yojson_rejects_string;
+      test_case "rejects zero revision" `Quick test_backlog_of_yojson_rejects_zero_version;
+      test_case "rejects negative revision" `Quick test_backlog_of_yojson_rejects_negative_version;
+      test_case "requires revision" `Quick test_backlog_of_yojson_requires_version;
+      test_case "rejects null revision" `Quick test_backlog_of_yojson_rejects_null_version;
       test_case "missing last_updated" `Quick test_backlog_of_yojson_missing_last_updated;
-      test_case "bare tasks only" `Quick test_backlog_of_yojson_bare_tasks;
+      test_case "rejects tasks without revision" `Quick test_backlog_of_yojson_rejects_tasks_without_revision;
       test_case "truncated tasks" `Quick test_backlog_of_yojson_truncated_tasks;
-      test_case "wrong type" `Quick test_backlog_of_yojson_wrong_type;
+      test_case "rejects integer document" `Quick test_backlog_of_yojson_rejects_integer;
       test_case "nested list" `Quick test_backlog_of_yojson_nested_list;
       test_case "corrupt task entries" `Quick test_backlog_of_yojson_corrupt_task_entries;
     ];

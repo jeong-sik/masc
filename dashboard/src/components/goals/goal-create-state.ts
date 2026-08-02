@@ -1,7 +1,6 @@
 // Goal creation state and async action — mirrors task-manage-state.ts idiom.
-// RFC-0294 removed horizon from the live Goal contract. Keep this payload
-// aligned with masc_goal_upsert's accepted schema; do not collect or stage
-// fields the backend cannot persist.
+// Keep this payload aligned with masc_goal_upsert's accepted schema; do not
+// collect or stage fields the backend cannot persist.
 
 import { signal } from '@preact/signals'
 import { callMcpTool } from '../../api/mcp'

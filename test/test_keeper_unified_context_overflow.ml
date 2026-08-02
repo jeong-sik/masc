@@ -65,13 +65,19 @@ let test_is_context_overflow_only_for_overflow_errors () =
     (EC.is_context_overflow rendered_only);
   check bool "rendered internal text is not auto-recoverable" false
     (EC.is_auto_recoverable_turn_error rendered_only);
+  (* The SDK maps every overflow stop-reason token to the typed
+     [ContextWindowExceeded] variant (llm_provider/types.ml stop_reason_of_string),
+     and [UnrecognizedStopReason] is built only from [Unknown]
+     (pipeline.ml) — so an overflow token can never arrive on this
+     constructor. What does arrive is an unmodeled provider token, and that is
+     not a context overflow. *)
   let unrecognized_stop_reason =
     Agent_sdk.Error.Agent
-      (UnrecognizedStopReason { reason = "model_context_window_exceeded" })
+      (UnrecognizedStopReason { reason = "provider_specific_halt" })
   in
-  check bool "exact typed unrecognized stop reason matches" true
+  check bool "unmodeled stop reason is not a context overflow" false
     (EC.is_context_overflow unrecognized_stop_reason);
-  check bool "exact typed unrecognized stop reason is not auto-recoverable"
+  check bool "unmodeled stop reason is not auto-recoverable"
     false
     (EC.is_auto_recoverable_turn_error unrecognized_stop_reason)
 ;;

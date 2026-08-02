@@ -343,7 +343,7 @@ describe('Work', () => {
       expect(screen.getByText('Job one')).toBeTruthy()
     })
 
-    it('renders all goals in a flat list regardless of any legacy horizon field', () => {
+    it('renders goals as a flat priority-sorted list', () => {
       goals.value = [
         { id: 'G-X', title: 'Goal visible in flat list', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
@@ -646,11 +646,9 @@ describe('Work', () => {
           title: 'SLO 400ms 회복',
           priority: expect.any(Number),
         }))
-        // No horizon field: extract args from the first call via toHaveBeenCalledWith
+        // masc_goal_upsert rejects lifecycle fields; the form must not send them.
         const rawCalls = callMcpToolMock.mock.calls as unknown as [string, Record<string, unknown>][]
         const callArgs = rawCalls[0]?.[1] ?? {}
-        expect(callArgs).not.toHaveProperty('horizon')
-        expect(callArgs).not.toHaveProperty('lead_keeper')
         expect(callArgs).not.toHaveProperty('status')
         expect(callArgs).not.toHaveProperty('phase')
       })

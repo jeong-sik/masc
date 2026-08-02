@@ -772,15 +772,16 @@ let is_invalid_request_error : Agent_sdk.Error.sdk_error -> bool = function
   | Agent_sdk.Error.Api (InvalidRequest _) -> true
   | _ -> false
 
-(** [true] when a structured error indicates context overflow. *)
+(** [true] when a structured error indicates context overflow.
+
+    The overflow stop-reason tokens ("model_context_window_exceeded" and its
+    siblings) are mapped to the typed [ContextWindowExceeded] variant inside the
+    SDK, so [UnrecognizedStopReason] can never carry one. Matching on that
+    literal here classified an input the pinned SDK cannot construct. *)
 let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (ContextOverflow _) -> true
   | Agent_sdk.Error.Api (InputCapacity _) -> false
-  | Agent_sdk.Error.Agent
-      (UnrecognizedStopReason
-         { reason = "model_context_window_exceeded"; _ }) ->
-      true
   | _ -> false
 
 (* Invariant for this predicate: the exemption gate is

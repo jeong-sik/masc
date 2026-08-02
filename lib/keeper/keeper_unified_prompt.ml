@@ -432,11 +432,7 @@ let turn_intent_fallback_block =
       "";
       "Tool calls, typed task/goal transitions, and the runtime checkpoint are \
        the authoritative record of your action. Do not invent a second state \
-       protocol in prose.";
-      "";
-      "For an explicit completion or progress claim, add the optional evidence \
-       headers CLAIM_KIND, CLAIM_SUBJECT, CLAIM_TASK_ID (when applicable), and \
-       EVIDENCE_REFS. Emit them only for a concrete claim the system should audit."
+       protocol in prose."
     ]
 
 let contains_template_placeholder text =

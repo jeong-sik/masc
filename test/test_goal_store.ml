@@ -158,11 +158,11 @@ let test_delete_goal_wraps_prune_failure_after_goal_delete () =
     false
     (List.exists (fun goal -> String.equal goal.Goal_store.id "g-1") goals)
 
-let test_status_field_accepted_and_ignored () =
+let test_status_field_no_longer_decodes () =
   with_workspace @@ fun config ->
-  (* Transition-window contract (RFC-0352 slice 1): rows written before the
-     status duplicate was removed still carry a "status" member; the decoder
-     accepts and ignores it, and the serializer never writes it back. *)
+  (* Hard cut: "status" is not an accepted Goal field. A row still carrying the
+     retired duplicate is a decode error, so read_state applies the corrupt-store
+     policy rather than accepting a row with two lifecycle representations. *)
   let row ~id ~phase ~status =
     `Assoc
       [
@@ -190,27 +190,22 @@ let test_status_field_accepted_and_ignored () =
           `List
             [
               row ~id:"dual-active" ~phase:"executing" ~status:"active";
-              (* A contradictory status must not influence the decoded phase. *)
               row ~id:"dual-conflict" ~phase:"paused" ~status:"done";
             ] );
       ]);
   let state = Goal_store.read_state config in
-  check int "both rows decode" 2 (List.length state.goals);
-  let by_id id =
-    List.find_opt
-      (fun (goal : Goal_store.goal) -> String.equal goal.id id)
-      state.goals
-  in
-  (match by_id "dual-conflict" with
-  | None -> fail "missing dual-conflict"
-  | Some goal ->
-      check string "phase wins over stale status" "paused"
-        (Goal_phase.to_string goal.phase);
-      (match Goal_store.goal_to_yojson goal with
+  check int "store carrying the retired status field is rejected" 0
+    (List.length state.goals);
+  (* The serializer never emits it either, so a converged store round-trips. *)
+  match
+    Goal_store.upsert_goal config ~title:"phase only" ~phase:Goal_phase.Paused ()
+  with
+  | Error msg -> fail msg
+  | Ok (goal, _) -> (
+      match Goal_store.goal_to_yojson goal with
       | `Assoc fields ->
-          check bool "serializer omits status" false
-            (List.mem_assoc "status" fields)
-      | _ -> fail "goal_to_yojson: expected object"))
+          check bool "serializer omits status" false (List.mem_assoc "status" fields)
+      | _ -> fail "goal_to_yojson: expected object")
 
 let test_phaseless_row_no_longer_decodes () =
   with_workspace @@ fun config ->
@@ -352,8 +347,8 @@ let () =
             test_delete_goal_prunes_goal_task_links;
           test_case "prune failure reports partial delete" `Quick
             test_delete_goal_wraps_prune_failure_after_goal_delete;
-          test_case "status field accepted and ignored" `Quick
-            test_status_field_accepted_and_ignored;
+          test_case "status field no longer decodes" `Quick
+            test_status_field_no_longer_decodes;
           test_case "phase-less row no longer decodes" `Quick
             test_phaseless_row_no_longer_decodes;
           test_case "blocked phase serializes without status" `Quick

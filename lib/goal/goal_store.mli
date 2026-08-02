@@ -22,14 +22,6 @@
     and access record fields ([.id], [.phase],
     [.updated_at], [.title], …) directly.
 
-    RFC-0294 removed the workspace-goal [horizon] and its dead
-    refresh/snapshot scheduler ([refresh_mode], [snapshot_mode],
-    [snapshot], [refresh_result], [refresh], [parse_refresh_mode],
-    [parse_snapshot_mode], [snapshot_mode_of_refresh_mode],
-    [should_refresh_goal], [reprioritize], [has_scheduler_state],
-    [scheduler_state_path], [snapshots_dir], [parse_yyyy_mm_dd],
-    [days_until]).
-
     Internal helpers that stay private: [normalize_lower], [now_ms],
     [gen_goal_id], [find_goal], [replace_goal], [update_state],
     [sort_goals], [active_goals], [ensure_dirs],

@@ -1,17 +1,7 @@
 (* Goal store — shared planning goals with a dedicated lifecycle phase.
-   [phase] is the only persisted lifecycle representation (RFC-0352 slice 1).
-   The legacy [status] duplicate was removed after a live-store measurement
-   found zero rows without a [phase] field; during the transition window the
-   decoder still accepts and ignores an incoming "status" field, and the
-   full-file save converges the store to phase-only on first write. *)
+   [phase] is the only persisted lifecycle representation. *)
 
 let ( let* ) = Result.bind
-
-(* RFC-0294: the workspace-goal [horizon] (short/mid/long) and its dead
-   refresh/snapshot scheduler ([refresh_mode], [snapshot_mode], and their
-   yojson codecs) were removed. The cadence had no live caller; the only
-   surviving horizon consumer (dashboard stagnation threshold) was re-based
-   onto a single policy constant. *)
 
 let clamp_priority p =
   max 1 (min 5 p)
@@ -91,9 +81,6 @@ and goal_of_yojson = function
         ; "target_value"
         ; "due_date"
         ; "priority"
-        ; "status" (* accepted and ignored during the phase-only transition:
-                        rows written before RFC-0352 slice 1 still carry the
-                        derived duplicate until the first full-file save *)
         ; "phase"
         ; "parent_goal_id"
         ; "last_review_note"
@@ -118,18 +105,13 @@ and goal_of_yojson = function
                field)
       | None, Some (`String id), Some (`String title) ->
           let phase =
-            (* Phase is required. The status->phase read inference for
-               pre-phase rows was removed in RFC-0352 slice 1 after a live
-               measurement found zero phase-less rows; a row without [phase]
-               is now a decode error rather than a silent Active default
-               (the silent default already caused main red #23901 once). *)
+            (* Phase is required: a row without [phase] is a decode error, not
+               a silent Active default. The silent default caused main red
+               #23901 once. *)
             match Json_util.assoc_member_opt "phase" json with
             | None | Some `Null ->
                 Error
-                  (Printf.sprintf
-                     "goal_of_yojson: goal %S has no phase field (legacy \
-                      status-only rows no longer decode; RFC-0352 slice 1)"
-                     id)
+                  (Printf.sprintf "goal_of_yojson: goal %S has no phase field" id)
             | Some phase_json -> Goal_phase.of_yojson phase_json
           in
           let created_at =
@@ -381,8 +363,7 @@ let delete_goal config ~goal_id =
        Ok (Deleted_with_orphaned_links warning))
 
 let sort_goals goals =
-  (* RFC-0294: sort key was [(horizon, priority, updated_at desc)]; with horizon
-     removed it collapses to [(priority asc, updated_at desc)]. *)
+  (* Sort key is [(priority asc, updated_at desc)]. *)
   List.sort
     (fun left right ->
       let by_priority = compare left.priority right.priority in
@@ -554,11 +535,6 @@ let compute_rollup goals =
     done_count = count (fun goal -> goal.phase = Goal_phase.Completed);
     dropped_count = count (fun goal -> goal.phase = Goal_phase.Dropped);
   }
-
-(* RFC-0294: the horizon-driven refresh/snapshot scheduler ([snapshot],
-   [parse_yyyy_mm_dd], [days_until], [should_refresh_goal], [reprioritize],
-   [refresh], [has_scheduler_state]) was removed. It had no live caller and its
-   cohort selector keyed on the now-deleted [horizon]. *)
 
 let active_goals config =
   list_goals config ~phase:Goal_phase.Executing ()

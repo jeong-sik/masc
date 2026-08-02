@@ -48,6 +48,16 @@ val enforce_caller_identity :
     [_comment_vote]).  Prefer {!ensure_board_post_author} for the
     [masc_board_post]/[author] specialisation. *)
 
+module For_testing : sig
+  val result_after_activity_projection :
+    tool_name:string ->
+    start_time:float ->
+    primary_result:Tool_result.result ->
+    operation:string ->
+    (unit -> (unit, string) result) ->
+    Tool_result.result
+end
+
 (** {1 MCP runtime fallback} *)
 
 val dispatch :

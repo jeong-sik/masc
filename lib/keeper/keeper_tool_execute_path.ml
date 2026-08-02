@@ -11,11 +11,13 @@ type execute_cwd_resolution_error =
   | Cwd_missing of { cwd : string }
   | Cwd_not_directory of { cwd : string }
   | Cwd_rejected of Keeper_path_rejection.keeper_path_rejection
+  | Cwd_root_verification_failed of { detail : string }
 
 let execute_cwd_resolution_error_code = function
   | Cwd_missing _ -> "cwd_missing"
   | Cwd_not_directory _ -> "cwd_not_directory"
   | Cwd_rejected (Outside_sandbox _) -> "cwd_outside_sandbox"
+  | Cwd_root_verification_failed _ -> "cwd_root_verification_failed"
   | Cwd_rejected
       ( Path_required
       | Invalid_lexical_endpoint
@@ -27,6 +29,8 @@ let execute_cwd_resolution_error_public_message = function
   | Cwd_missing _ -> "Requested cwd does not exist in the Keeper-visible workspace."
   | Cwd_not_directory _ -> "Requested cwd is not a directory."
   | Cwd_rejected (Outside_sandbox _) -> "Requested cwd is outside the Keeper sandbox."
+  | Cwd_root_verification_failed _ ->
+    "Requested cwd containment could not be verified."
   | Cwd_rejected
       ( Path_required
       | Invalid_lexical_endpoint
@@ -39,6 +43,8 @@ let execute_cwd_resolution_error_private_message = function
     Printf.sprintf "cwd_not_directory: %s (directory does not exist)" cwd
   | Cwd_not_directory { cwd } ->
     Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd
+  | Cwd_root_verification_failed { detail } ->
+    Printf.sprintf "cwd_root_verification_failed: %s" detail
   | Cwd_rejected rejection ->
     Keeper_path_rejection.rejection_to_user_message rejection
 
@@ -74,18 +80,20 @@ let requested_tool_execute_cwd ~config ~meta ~write_enabled ~args =
 
 let resolve_tool_execute_cwd_typed ~config ~meta ~write_enabled ~args =
   let raw_path = requested_tool_execute_cwd ~config ~meta ~write_enabled ~args in
-  let raw_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in
   let resolved =
-    if raw_cwd = ""
-    then Ok raw_path
-    else
-      resolve_keeper_execute_cwd_typed ~config ~meta ~raw_path
-      |> Result.map_error (fun rejection -> Cwd_rejected rejection)
+    resolve_keeper_execute_cwd_typed ~config ~meta ~raw_path
+    |> Result.map_error (fun rejection -> Cwd_rejected rejection)
   in
   match resolved with
   | Error _ as err -> err
-  | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd -> Ok cwd
-  | Ok cwd ->
+  | Ok confined when
+      let cwd = Keeper_alerting_path.confined_host_path confined in
+      Fs_compat.file_exists cwd && Sys.is_directory cwd ->
+    (match Keeper_tool_shared_runtime.verify_keeper_confined_root confined with
+     | Ok () -> Ok (Keeper_alerting_path.confined_host_path confined)
+     | Error detail -> Error (Cwd_root_verification_failed { detail }))
+  | Ok confined ->
+    let cwd = Keeper_alerting_path.confined_host_path confined in
     if not (Fs_compat.file_exists cwd)
     then Error (Cwd_missing { cwd })
     else Error (Cwd_not_directory { cwd })

@@ -710,9 +710,10 @@ let pending_board_event_of_completion_authority_rejection
       short_preview
         ~max_len:fusion_result_preview_max_len
         (Printf.sprintf
-           "Task %s verification %s was rejected by the system completion authority. Follow-up reason: %s"
+           "Task %s verification %s was rejected by %s. Follow-up reason: %s"
            rejection.car_task_id
            rejection.car_verification_id
+           (Masc_domain.completion_authority_kind rejection.car_authority)
            rejection.car_reason)
   ; hearth = None
   ; post_kind = Board.System_post

@@ -343,7 +343,13 @@ let handle_keeper_task_tool_with_outcome
     let status_filter = Safe_ops.json_string_opt "status" args in
     let include_done = Safe_ops.json_bool ~default:false "include_done" args in
     let limit = Safe_ops.json_int ~default:50 "limit" args |> max 1 |> min 100 in
-    (match Workspace.read_backlog_observation_r config with
+    (match Snapshot_protocol.if_revision args with
+     | Error message ->
+       Keeper_tool_execution.failure
+         ~class_:Tool_result.Policy_rejection
+         (validation_error_json message)
+     | Ok if_revision ->
+       match Workspace.read_backlog_observation_r config with
      | Error message ->
        let data =
          `Assoc
@@ -384,8 +390,30 @@ let handle_keeper_task_tool_with_outcome
            Int.compare left.priority right.priority)
          |> List.filteri (fun index _ -> index < limit)
        in
-       Keeper_tool_execution.success_data
-         (`List (List.map Masc_domain.task_to_yojson tasks)))
+       let tasks_json = `List (List.map Masc_domain.task_to_yojson tasks) in
+       let revision =
+         Snapshot_protocol.revision_of_json
+           ~namespace:"tasks"
+           (`Assoc
+             [ "status", Option.fold ~none:`Null ~some:(fun value -> `String value) status_filter
+             ; "include_done", `Bool include_done
+             ; "limit", `Int limit
+             ; "snapshot", tasks_json
+             ])
+       in
+       (match
+          Snapshot_protocol.unchanged_if_revision_matches ~revision ~if_revision
+        with
+        | Some response ->
+          Keeper_tool_execution.success_data
+            (Snapshot_protocol.to_yojson response)
+        | None ->
+          Keeper_tool_execution.success_data
+            (Snapshot_protocol.to_yojson
+               (Snapshot_protocol.respond
+                  ~revision
+                  ~if_revision
+                  tasks_json))))
     | Tasks_audit ->
     let limit = Safe_ops.json_int ~default:20 "limit" args |> max 1 |> min 50 in
     let orphans =

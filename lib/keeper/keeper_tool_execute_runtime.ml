@@ -206,8 +206,11 @@ let handle_tool_execute_typed
         let cmd = typed_input_command_text input in
         let timeout_sec = typed_input_timeout_sec input in
         let input = input_with_cwd cwd input in
+        (* This location check only selects the explicit local-fallback route.
+           It is not authorization evidence. The outer Keeper Gate remains the
+           sole authorization boundary for every Execute request. *)
         let in_playground = Keeper_tool_execute_path.in_playground ~root ~cwd ~meta in
-        let sandbox_profile, _sandbox_network_mode =
+        let sandbox_profile, _ =
           Keeper_sandbox_runner.effective_sandbox_profile ~meta
         in
         let local_dispatch_sandbox ?(extra_fields = []) () =
@@ -340,11 +343,16 @@ let handle_tool_execute_typed
           ; continuation_channel
           }
         in
+        let gate_decision =
+          Keeper_gate.decide
+            ?cycle_grant:gate_grant
+            (* NDT-OK: this typed, caller-owned policy input is consumed only
+               at the external-effect authorization boundary. *)
+            ~keeper_always_allow:(Option.value ~default:false meta.always_allow)
+            gate_request
+        in
         (match
-           Keeper_gate.decide
-             ?cycle_grant:gate_grant
-             ~keeper_always_allow:(Option.value ~default:false meta.always_allow)
-             gate_request
+           gate_decision
          with
          | Keeper_gate.Deferred { approval_id; reason } ->
            Keeper_gate_deferred_payload.create

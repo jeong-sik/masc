@@ -258,7 +258,7 @@ for each selected attempt. OAS provider registry and capability manifests are
 generic execution contracts; they are not the MASC runtime plane.
 
 ```
-runtime_id (e.g. "keeper", "verifier", "context_router")
+runtime_id (e.g. "keeper", a configured completion-authority evaluator route, "context_router")
   -> config/runtime.toml [routes] / profile lookup
   -> MASC runtime labels
   -> MASC/OAS adapter resolves labels against OAS Provider_registry
@@ -392,7 +392,8 @@ MASC typed request
 ```
 
 Fusion, Keeper failure judgment, board attention, Task completion review는 서로 다른
-도메인 계약이다. 공통 문자열 verdict, hidden budget, caller registry로 이들을
+도메인 계약이다. Task completion review의 system LLM completion-authority lane은
+Keeper가 아니며, 공통 문자열 verdict, hidden budget, caller registry로 이들을
 하나의 verifier policy에 합치지 않는다.
 
 ### 9.1 Keeper and Worker Guardrails
@@ -435,7 +436,7 @@ remain MASC-owned under `Masc.Memory.t` and the `Keeper_memory_*` modules.
 | Checkpoint | Partial | shared worker/runtime paths는 OAS Checkpoint를 사용한다. Public `Oas_worker` surface의 extra checkpoint JSON은 neutral `checkpoint_sidecar` 이름을 쓰지만 keeper 경로는 여전히 `lib/keeper/keeper_context_runtime.ml`의 wrapper + serialized context를 유지 |
 | Memory projection | Removed | MASC memory is not projected into OAS; runtime memory storage remains MASC-owned |
 | Runtime config | Complete | runtime_id -> MASC runtime config/profile -> OAS Provider_registry -> Provider_config.t |
-| Verifier | Complete | configured OAS exact-output call; no local tool/effect classifier |
+| System LLM completion authority | Complete | configured OAS exact-output call; no Keeper registration/lifecycle and no local tool/effect classifier |
 | Model resolution | Complete | oas_model_resolve.ml이 Provider_Registry SSOT 사용 |
 | Tool bridge | Complete | MASC tool_schema -> OAS Tool.t 변환 |
 
@@ -500,7 +501,7 @@ Validation steps live in `docs/KEEPER-CONTINUITY-VALIDATION.md`.
 3. **Message 타입은 공유한다**: `Agent_sdk.Types.message`가 MASC와 OAS 모두의 메시지 타입이다. 변환 레이어 없음.
 4. **Runtime name이 model을 추상화한다**: MASC policy code에 구체적 provider/model 이름이 하드코딩되지 않는다. runtime_id -> runtime.toml runtime config -> Provider_registry 체인.
 5. **Event_bus prefix는 `masc:`이다**: MASC 이벤트는 반드시 이 prefix를 사용한다. SSE bridge가 이 prefix로 필터링한다.
-6. **Verifier는 도구 이름으로 건너뛰지 않는다**: read/grep/search/status 같은 이름이나 로컬 effect label은 MODEL 호출을 생략하거나 Pass를 만들 권한이 없다.
+6. **Completion-authority model call은 도구 이름으로 건너뛰지 않는다**: read/grep/search/status 같은 이름이나 로컬 effect label은 MODEL 호출을 생략하거나 Pass를 만들 권한이 없다.
 7. **Checkpoint는 session_id로 네임스페이스된다**: 동일 agent의 다른 세션 checkpoint와 충돌하지 않는다.
 8. **OAS API 확장 제안 전에 adapter를 먼저 시도한다**: MASC-specific 개념을 OAS public contract에 밀어넣지 않는다.
 

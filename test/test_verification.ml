@@ -216,11 +216,181 @@ let test_system_llm_authority_helpers_are_typed () =
     Alcotest.(check string) "typed rejection reason" "missing evidence" reason
   | Masc_domain.Verdict_approved -> Alcotest.fail "reject must remain a rejection"
 
+let test_system_llm_review_notes_are_metadata_only () =
+  let request : V.verification_request =
+    { id = "vrf-metadata-only"
+    ; task_id = "task-metadata-only"
+    ; output =
+        `Assoc [ "secret_output", `String "must not be duplicated" ]
+    ; criteria = [ V.Custom "secret criterion should stay in the audit store" ]
+    ; worker = "keeper-executor-agent"
+    ; created_at = 1234.5
+    }
+  in
+  let evidence_access : VS.submitted_evidence_access =
+    VS.Evidence_available
+      { request =
+          { id = request.id
+          ; task_id = request.task_id
+          ; worker = request.worker
+          ; created_at = request.created_at
+          }
+      ; items =
+          [ VS.Evidence_note "secret narrative must not be duplicated"
+          ; VS.Evidence_artifact
+              { reference = "artifact:proof.txt"
+              ; content = "secret artifact content must not be duplicated"
+              ; bytes = 42
+              ; truncated = true
+              ; content_sha256 = "sha256-proof"
+              }
+          ; VS.Evidence_artifact_unreadable
+              { reference = "artifact:missing.txt"; reason = VS.Evidence_missing }
+          ; VS.Evidence_artifact_unreadable
+              { reference = "artifact:unreadable.txt"
+              ; reason =
+                  VS.Evidence_read_error
+                    "Unix.Unix_error(ENOENT, open, /private/producer/secret.txt)"
+              }
+          ; VS.Evidence_artifact_unreadable
+              { reference = "/private/producer/invalid-reference.txt"
+              ; reason = VS.Evidence_invalid_reference
+              }
+          ]
+      }
+  in
+  let result : Masc.Task.Anti_rationalization.review_result =
+    { verdict = Some (Masc.Task.Anti_rationalization.Reject "insufficient proof")
+    ; evaluator_runtime = "review-runtime"
+    ; generator_runtime = None
+    ; gate = Masc.Task.Anti_rationalization.Structured_tool
+    ; fallback_reason = None
+    }
+  in
+  let notes =
+    CA.For_testing.review_notes
+      ~request
+      ~evidence_access
+      ~result
+      ~authority:(Masc_domain.System_llm_agent { agent_run_id = "system-run" })
+  in
+  Alcotest.(check bool)
+    "artifact content is not duplicated into task notes"
+    false
+    (contains_substring notes "secret artifact content must not be duplicated");
+  Alcotest.(check bool)
+    "narrative content is not duplicated into task notes"
+    false
+    (contains_substring notes "secret narrative must not be duplicated");
+  Alcotest.(check bool)
+    "verification output is not duplicated into task notes"
+    false
+    (contains_substring notes "must not be duplicated");
+  Alcotest.(check bool)
+    "verification criteria are not duplicated into task notes"
+    false
+    (contains_substring notes "secret criterion should stay in the audit store");
+  Alcotest.(check bool)
+    "artifact hash remains observable"
+    true
+    (contains_substring notes "sha256-proof");
+  Alcotest.(check bool)
+    "note hash remains observable"
+    true
+    (contains_substring
+       notes
+       (Digestif.SHA256.(digest_string "secret narrative must not be duplicated" |> to_hex)));
+  Alcotest.(check bool)
+    "truncation remains observable"
+    true
+    (contains_substring notes "truncated");
+  Alcotest.(check bool)
+    "verification creation time remains observable"
+    true
+    (contains_substring notes "1234.5");
+  Alcotest.(check bool)
+    "rejection reason remains observable"
+    true
+    (contains_substring notes "insufficient proof");
+  Alcotest.(check bool)
+    "verification identity remains observable"
+    true
+    (contains_substring notes "vrf-metadata-only");
+  Alcotest.(check bool)
+    "read error detail is not duplicated into task notes"
+    false
+    (contains_substring notes "/private/producer/secret.txt");
+  Alcotest.(check bool)
+    "stable read error code remains observable"
+    true
+    (contains_substring notes "read_error");
+  Alcotest.(check bool)
+    "invalid raw reference is not duplicated into task notes"
+    false
+    (contains_substring notes "/private/producer/invalid-reference.txt");
+  Alcotest.(check bool)
+    "stable invalid-reference code remains observable"
+    true
+    (contains_substring notes "invalid_reference");
+  let unavailable_metadata =
+    VS.submitted_evidence_access_metadata_to_yojson
+      (VS.Evidence_unavailable
+         { request_id = request.id
+         ; reason =
+             VS.Request_load_error "failed to read /private/producer/request.json"
+         })
+    |> Yojson.Safe.to_string
+  in
+  Alcotest.(check bool)
+    "unavailable detail is not duplicated into metadata"
+    false
+    (contains_substring unavailable_metadata "/private/producer/request.json")
+  ; Alcotest.(check bool)
+      "unavailable reason code remains observable"
+      true
+      (contains_substring unavailable_metadata "request_load_error")
+  ; let unavailable_audit =
+      VS.submitted_evidence_access_to_yojson
+        (VS.Evidence_unavailable
+           { request_id = request.id
+           ; reason =
+               VS.Request_load_error "failed to read /private/producer/request.json"
+           })
+      |> Yojson.Safe.to_string
+    in
+    Alcotest.(check bool)
+      "full audit keeps the unavailable detail"
+      true
+      (contains_substring unavailable_audit "/private/producer/request.json")
+
 let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
   with_eio_temp_dir (fun base_path ->
     let config = W.default_config base_path in
     let producer = "keeper-verification-rejection-producer-agent" in
-    let keeper_name = "verification-rejection-producer" in
+    let keeper_name = "persisted-canonical-producer" in
+    let meta_json =
+      `Assoc
+        (* The filename is the durable queue identity. The metadata carries a
+           valid Keeper name for the same agent identity, but the two names
+           intentionally differ to ensure routing uses the canonical path. *)
+        [ "name", `String "verification-rejection-producer"
+        ; "agent_name", `String producer
+        ; "trace_id", `String "trace-persisted-producer"
+        ]
+    in
+    let meta =
+      match Masc_test_deps.meta_of_json_fixture meta_json with
+      | Ok meta -> meta
+      | Error detail -> Alcotest.fail detail
+    in
+    (match
+       Masc.Keeper_meta_store.persist_meta
+         config
+         (Masc.Keeper_types_profile.keeper_meta_path config keeper_name)
+         meta
+     with
+     | Ok () -> ()
+     | Error detail -> Alcotest.fail detail);
     let delivery =
       Masc.Completion_authority_wakeup.wake_rejected_producer
         ~config
@@ -247,6 +417,8 @@ let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
      | Masc.Completion_authority_wakeup.Durable_wake_failed { detail; _ }
      | Masc.Completion_authority_wakeup.Durable_queue_failed { detail; _ } ->
        Alcotest.fail detail
+     | Masc.Completion_authority_wakeup.Producer_identity_lookup_failed { detail; _ } ->
+       Alcotest.fail detail
      | Masc.Completion_authority_wakeup.Unroutable_producer { producer; _ } ->
        Alcotest.failf "producer was unexpectedly unroutable: %s" producer);
     match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name with
@@ -271,6 +443,119 @@ let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
            "system-agent-test"
            (Masc_domain.completion_authority_actor rejection.car_authority)
        | _ -> Alcotest.fail "system rejection was not durably queued")
+  )
+
+let test_system_llm_rejection_prefers_registered_producer_binding () =
+  with_eio_temp_dir (fun base_path ->
+    let config = W.default_config base_path in
+    let keeper_name = "keeper-executor-agent" in
+    let producer = "keeper-executor-agent-agent" in
+    let meta_json =
+      `Assoc
+        [ "name", `String keeper_name
+        ; "agent_name", `String producer
+        ; "trace_id", `String "trace-registered-producer"
+        ]
+    in
+    let meta =
+      match Masc_test_deps.meta_of_json_fixture meta_json with
+      | Ok meta -> meta
+      | Error detail -> Alcotest.fail detail
+    in
+    Masc.Keeper_registry.For_testing.clear ();
+    Fun.protect
+      ~finally:Masc.Keeper_registry.For_testing.clear
+      (fun () ->
+         ignore
+           (Masc.Keeper_registry.For_testing.register
+              ~base_path
+              keeper_name
+              meta);
+         let delivery =
+           Masc.Completion_authority_wakeup.wake_rejected_producer
+             ~config
+             ~producer
+             ~task_id:"task-registered-producer"
+             ~verification_id:"vrf-registered-producer"
+             ~reason:"registered binding must own the rejection queue"
+             ~authority:
+               (Masc_domain.System_llm_agent
+                  { agent_run_id = "system-agent-registered" })
+         in
+         (match delivery with
+          | Masc.Completion_authority_wakeup.Signaled { keeper_name = actual }
+          | Masc.Completion_authority_wakeup.Durable_deferred
+              { keeper_name = actual; _ } ->
+            Alcotest.(check string)
+              "registered agent binding selects the registry keeper"
+              keeper_name
+              actual
+          | Masc.Completion_authority_wakeup.Durable_wake_failed { detail; _ }
+          | Masc.Completion_authority_wakeup.Durable_queue_failed { detail; _ } ->
+            Alcotest.fail detail
+          | Masc.Completion_authority_wakeup.Producer_identity_lookup_failed { detail; _ } ->
+            Alcotest.fail detail
+          | Masc.Completion_authority_wakeup.Unroutable_producer { producer; _ } ->
+            Alcotest.failf "registered producer was unexpectedly unroutable: %s" producer);
+         match
+           Keeper_event_queue_persistence.load_result
+             ~base_path
+             ~keeper_name
+         with
+         | Error detail -> Alcotest.fail detail
+         | Ok queue ->
+           (match Keeper_event_queue.to_list queue with
+            | [ { payload = Completion_authority_rejected rejection; _ } ] ->
+              Alcotest.(check string)
+                "registered queue preserves task identity"
+                "task-registered-producer"
+                rejection.car_task_id
+            | _ -> Alcotest.fail "registered producer rejection was not queued");
+         let discovery =
+           Keeper_event_queue_persistence.discover_keeper_names_with_snapshots ~base_path
+         in
+         (match discovery.read_error with
+          | Some detail -> Alcotest.fail detail
+          | None ->
+            Alcotest.(check (list string))
+              "durable rejection has only the registered Keeper snapshot"
+              [ keeper_name ]
+              discovery.keeper_names))
+  )
+
+let test_system_llm_rejection_does_not_derive_unregistered_keeper () =
+  with_eio_temp_dir (fun base_path ->
+    let config = W.default_config base_path in
+    let producer = "keeper-executor-agent-agent" in
+    Masc.Keeper_registry.For_testing.clear ();
+    Fun.protect
+      ~finally:Masc.Keeper_registry.For_testing.clear
+      (fun () ->
+         match
+           Masc.Completion_authority_wakeup.wake_rejected_producer
+             ~config
+             ~producer
+             ~task_id:"task-unregistered-producer"
+             ~verification_id:"vrf-unregistered-producer"
+             ~reason:"unregistered producer must remain unroutable"
+             ~authority:
+               (Masc_domain.System_llm_agent
+                  { agent_run_id = "system-agent-unregistered" })
+         with
+         | Masc.Completion_authority_wakeup.Unroutable_producer
+             { producer = actual; task_id } ->
+           Alcotest.(check string) "unroutable producer identity" producer actual;
+           Alcotest.(check string)
+             "unroutable task identity"
+             "task-unregistered-producer"
+             task_id
+         | Masc.Completion_authority_wakeup.Producer_identity_lookup_failed { detail; _ } ->
+           Alcotest.fail detail
+         | Masc.Completion_authority_wakeup.Signaled _
+         | Masc.Completion_authority_wakeup.Durable_deferred _
+         | Masc.Completion_authority_wakeup.Durable_wake_failed _
+         | Masc.Completion_authority_wakeup.Durable_queue_failed _ ->
+           Alcotest.fail "unregistered producer must not derive or enqueue a Keeper name")
   )
 
 let test_system_llm_agent_commits_without_a_keeper_verifier () =
@@ -946,8 +1231,10 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
          Alcotest.failf
            "expected explicit artifact and note snapshot, got %d items"
            (List.length items)
-       | VS.Evidence_unavailable { reason; _ } ->
-         Alcotest.failf "persisted evidence snapshot unavailable: %s" reason))
+       | VS.Evidence_unavailable { request_id; reason } ->
+         Alcotest.failf
+           "persisted evidence snapshot unavailable: %s"
+           (VS.evidence_access_failure_to_string ~request_id reason)))
 
 let test_submit_snapshot_survives_mutation_deletion_and_authority_cwd () =
   with_eio_temp_dir (fun base_path ->
@@ -1016,8 +1303,10 @@ let test_submit_snapshot_survives_mutation_deletion_and_authority_cwd () =
              Alcotest.failf
                "expected one immutable artifact snapshot, got %d items"
                (List.length items)
-           | VS.Evidence_unavailable { reason; _ } ->
-             Alcotest.failf "persisted evidence snapshot unavailable: %s" reason)))
+           | VS.Evidence_unavailable { request_id; reason } ->
+             Alcotest.failf
+               "persisted evidence snapshot unavailable: %s"
+               (VS.evidence_access_failure_to_string ~request_id reason))))
 
 let test_submit_snapshot_rejects_relative_traversal_and_symlink_escape () =
   with_eio_temp_dir (fun base_path ->
@@ -1093,6 +1382,12 @@ let test_submit_snapshot_rejects_bare_and_absolute_references () =
         ~worker:"keeper-executor-agent"
         [ "artifacts/bare.txt"; absolute_path ]
     in
+    let persisted_snapshot = Yojson.Safe.to_string snapshot in
+    Alcotest.(check bool)
+      "invalid references are absent from the persisted snapshot"
+      false
+      (contains_substring persisted_snapshot "artifacts/bare.txt"
+       || contains_substring persisted_snapshot absolute_path);
     ignore
       (match
          V.create_request
@@ -1449,8 +1744,14 @@ let () =
     "completion_authority", [
       Alcotest.test_case "system LLM helpers keep typed facts" `Quick
         test_system_llm_authority_helpers_are_typed;
+      Alcotest.test_case "system LLM notes keep metadata only" `Quick
+        test_system_llm_review_notes_are_metadata_only;
       Alcotest.test_case "system LLM rejection reaches producer queue" `Quick
         test_system_llm_rejection_is_durably_delivered_to_producer_keeper;
+      Alcotest.test_case "system LLM rejection uses registry producer binding" `Quick
+        test_system_llm_rejection_prefers_registered_producer_binding;
+      Alcotest.test_case "system LLM rejection does not derive unregistered Keeper" `Quick
+        test_system_llm_rejection_does_not_derive_unregistered_keeper;
       Alcotest.test_case "system LLM commits without Keeper verifier" `Quick
         test_system_llm_agent_commits_without_a_keeper_verifier;
       Alcotest.test_case "system LLM uses persisted request contract" `Quick

@@ -1,6 +1,10 @@
 (** Durable delivery after a completion authority (system LLM or HITL) rejects
     submitted evidence. A live wake is only an acceleration hint; the typed
-    rejection is committed to the producer Keeper's queue first. *)
+    rejection is committed to the producer Keeper's queue first. When a live
+    registry entry exists, its exact [agent_name] binding is authoritative. A
+    stopped producer is resolved from the same [agent_name] field in persisted
+    Keeper metadata; an absent or ambiguous binding remains an explicit typed
+    delivery failure. *)
 
 type delivery =
   | Signaled of { keeper_name : string }
@@ -10,6 +14,11 @@ type delivery =
     }
   | Durable_wake_failed of { keeper_name : string; detail : string }
   | Unroutable_producer of { producer : string; task_id : string }
+  | Producer_identity_lookup_failed of {
+      producer : string;
+      task_id : string;
+      detail : string;
+    }
   | Durable_queue_failed of { keeper_name : string; detail : string }
 
 val wake_rejected_producer :

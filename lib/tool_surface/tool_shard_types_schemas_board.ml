@@ -183,6 +183,13 @@ let board_tools : Masc_domain.tool_schema list =
                             "Exclude posts by author name (case-insensitive substring \
                              match). Pass your own keeper name to avoid self-referential \
                              loops when reading the board." )
+                  ] )
+                ; ( "if_revision"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Optional producer revision from the previous keeper_board_list snapshot; matching revisions return unchanged." )
                       ] )
                 ] )
           ; "additionalProperties", `Bool false

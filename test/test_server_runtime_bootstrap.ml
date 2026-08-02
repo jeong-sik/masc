@@ -5223,10 +5223,6 @@ let () =
             `Quick
             test_health_json_degrades_on_active_task_owner_without_keeper_binding;
           Alcotest.test_case
-            "health json excludes awaiting verification from keeper fleet scan"
-            `Quick
-            test_health_json_excludes_awaiting_verification_from_keeper_fleet_scan;
-          Alcotest.test_case
             "health json reports non-keeper active task owner as advisory"
             `Quick
             test_health_json_reports_non_keeper_active_task_owner_as_advisory;

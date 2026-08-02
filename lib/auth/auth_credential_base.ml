@@ -8,10 +8,7 @@ open Masc_domain
 
 (** Generate a cryptographically random token (hex string) *)
 let generate_token () =
-  let random_bytes = Crypto_rng.generate 32 in
-  let hex = Buffer.create 64 in
-  String.iter (fun c -> Printf.bprintf hex "%02x" (Char.code c)) random_bytes;
-  Buffer.contents hex
+  Random_id.hex ~bytes:32
 ;;
 
 (** SHA256 hash of a string using Digestif *)

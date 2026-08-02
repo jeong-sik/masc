@@ -19,3 +19,16 @@ val hex : bytes:int -> string
 val prefixed : prefix:string -> bytes:int -> string
 (** [prefixed ~prefix ~bytes:n] is [prefix ^ hex ~bytes:n].
     Convenience for the common ["kind-" ^ hex] shape. *)
+
+val uuid_v7 : unit -> string
+(** [uuid_v7 ()] returns a canonical lowercase UUIDv7. Calls serialized in
+    one process are monotonic within the same millisecond. This is an opaque
+    correlation identifier, not an authentication secret. *)
+
+val parse_uuid_v7 : string -> (string, string) result
+(** [parse_uuid_v7 value] validates the complete canonical UUID shape,
+    RFC 9562 variant, and version 7, then returns lowercase canonical text. *)
+
+module For_testing : sig
+  val logical_ms_clock : (unit -> int64) -> (unit -> int64) * (unit -> unit)
+end

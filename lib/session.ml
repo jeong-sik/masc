@@ -577,22 +577,12 @@ module McpSessionStore = struct
   let process_msg state msg =
     match msg with
     | Generate_id p ->
-        let bytes = Crypto_rng.generate 16 in
-        let buf = Buffer.create 32 in
-        for i = 0 to String.length bytes - 1 do
-          Printf.bprintf buf "%02x" (Char.code (String.get bytes i))
-        done;
-        let id = Printf.sprintf "mcp_%s" (Buffer.contents buf) in
+        let id = Random_id.prefixed ~prefix:"mcp_" ~bytes:16 in
         Eio.Promise.resolve p id;
         state
 
     | Create (agent_name, now, p) ->
-        let bytes = Crypto_rng.generate 16 in
-        let buf = Buffer.create 32 in
-        for i = 0 to String.length bytes - 1 do
-          Printf.bprintf buf "%02x" (Char.code (String.get bytes i))
-        done;
-        let id = Printf.sprintf "mcp_%s" (Buffer.contents buf) in
+        let id = Random_id.prefixed ~prefix:"mcp_" ~bytes:16 in
         let session = {
           id;
           created_at = now;

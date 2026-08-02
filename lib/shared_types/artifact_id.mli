@@ -17,14 +17,12 @@ type t = private string
 (** Private string. The only constructors are {!generate} and {!of_string}. *)
 
 val generate : unit -> t
-(** Generate a fresh UUID v7. Side-effecting: reads current wall-clock
-    time and the OCaml [Random] state. The first call seeds [Random]
-    via [Random.self_init] if not already seeded by the caller. *)
+(** Generate a fresh UUID v7 through the shared Uuidm-backed generator.
+    Calls in one process are monotonic within the same millisecond. *)
 
 val of_string : string -> (t, string) result
-(** Parse a 36-character UUID string. Validates dashes at positions
-    8/13/18/23, version digit (must be ['7']), and variant nibble
-    (must be one of [{8,9,a,b}]). Returns [Error] for malformed input. *)
+(** Parse a complete UUID string through Uuidm and require RFC 9562 variant
+    and version 7. Returns [Error] for malformed input. *)
 
 val to_string : t -> string
 

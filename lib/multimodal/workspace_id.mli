@@ -32,8 +32,7 @@
 
     {!compare} and {!equal} delegate to the underlying string. Two
     {!t} values produced by independent {!generate} calls are
-    statistically guaranteed to differ (122-bit randomness in the
-    UUID v7 tail).
+    differ. UUIDv7 has 74 random/counter bits after its timestamp.
 
     @stability Evolving
     @since 0.18.11 *)
@@ -42,8 +41,9 @@ type t = private string
 (** Private string. The only constructors are {!generate} and {!of_string}. *)
 
 val generate : unit -> t
-(** Generate a fresh workspace id (UUID v7). Side-effecting: reads
-    the current wall-clock time and the OCaml [Random] state. *)
+(** Generate a fresh workspace id through the shared Uuidm-backed UUIDv7
+    generator. Calls in one process are monotonic within the same
+    millisecond. *)
 
 val of_string : string -> (t, string) result
 (** Parse and validate a workspace id string.
@@ -51,9 +51,7 @@ val of_string : string -> (t, string) result
     Validation:
     - non-empty (rejects [""]),
     - length ≤ 64 (defensive ceiling, see module preamble),
-    - structurally a UUID v7 — dashes at positions 8/13/18/23,
-      version digit ['7'] at index 14, variant nibble in
-      [\{8,9,a,b\}] at index 19, hex elsewhere.
+    - a complete RFC 9562 UUID with version 7 and the RFC variant.
 
     The output is normalised to lowercase. *)
 

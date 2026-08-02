@@ -23,6 +23,17 @@ let test_generate_session_key () =
   check bool "keys are different" true (key1 <> key2);
   check bool "key length >= 32" true (String.length key1 >= 32)
 
+let test_generate_uuid_is_uuid_v7 () =
+  let uuid = Client_identity.generate_uuid ~agent_name:"display-only" in
+  check int "canonical length" 36 (String.length uuid);
+  check char "version 7" '7' uuid.[14];
+  match Uuidm.of_string uuid with
+  | Some parsed ->
+    check int "Uuidm version" 7 (Uuidm.version parsed);
+    check bool "RFC variant" true
+      (Uuidm.variant parsed >= 8 && Uuidm.variant parsed <= 11)
+  | None -> fail "expected Uuidm to parse generated UUID"
+
 let test_from_mcp_params () =
   let params = `Assoc [
     ("_agent_name", `String "mcp-agent-001");
@@ -42,6 +53,12 @@ let test_from_mcp_params_minimal () =
   check bool "agent_name starts with agent-" true 
     (String.sub identity.agent_name 0 6 = "agent-");
   check bool "session_key generated" true (String.length identity.session_key > 0)
+
+let test_generated_fallback_agent_names_are_distinct () =
+  let first = Client_identity.from_mcp_params (`Assoc []) in
+  let second = Client_identity.from_mcp_params (`Assoc []) in
+  check bool "fallback names do not share a timestamp prefix" true
+    (first.agent_name <> second.agent_name)
 
 let test_from_mcp_params_empty_session_key () =
   let params = `Assoc [("_session_key", `String "")] in
@@ -283,8 +300,11 @@ let () =
   run "Client_identity" [
     "basics", [
       test_case "generate_session_key" `Quick test_generate_session_key;
+      test_case "generate_uuid is UUIDv7" `Quick test_generate_uuid_is_uuid_v7;
       test_case "from_mcp_params" `Quick test_from_mcp_params;
       test_case "from_mcp_params_minimal" `Quick test_from_mcp_params_minimal;
+      test_case "generated fallback names are distinct" `Quick
+        test_generated_fallback_agent_names_are_distinct;
       test_case "from_mcp_params_empty_session_key" `Quick test_from_mcp_params_empty_session_key;
       test_case "from_mcp_params_blank_session_key" `Quick test_from_mcp_params_blank_session_key;
       test_case "from_mcp_params_short_session_key" `Quick test_from_mcp_params_short_session_key;

@@ -91,8 +91,8 @@ val session_of_json : Yojson.Safe.t -> session
 (** {1 Lifecycle} *)
 
 val create : config_path:string -> t
-(** Initialises an empty manager. Calls [Random.self_init ()] for
-    {!generate_session_id}. Does not load existing sessions from
+(** Initialises an empty manager. Session identifiers use the shared
+    cryptographic [Random_id] boundary. Does not load existing sessions from
     disk — call {!restore} for that. *)
 
 val start_session :

@@ -13,8 +13,7 @@ let test_generate_is_lowercase () =
   assert (s = String.lowercase_ascii s)
 
 let test_generate_two_distinct () =
-  (* 122-bit randomness in the v7 tail; collisions are statistical
-     non-events. *)
+  (* UUIDv7 carries 74 random/counter bits after its timestamp. *)
   let a = W.generate () in
   let b = W.generate () in
   assert (not (W.equal a b))

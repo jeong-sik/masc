@@ -135,6 +135,32 @@ let test_artifact_id_time_ordering () =
   let cmp = A.compare a b in
   check bool "earlier-generated sorts first" true (cmp < 0)
 
+let test_artifact_id_burst_is_monotonic () =
+  let generated = List.init 100 (fun _ -> A.generate ()) in
+  let rec strictly_increasing = function
+    | [] | [ _ ] -> true
+    | first :: (second :: _ as rest) ->
+      A.compare first second < 0 && strictly_increasing rest
+  in
+  check bool "serialized generation is monotonic" true
+    (strictly_increasing generated)
+
+let test_uuid_v7_clock_clamps_wall_clock_rollback () =
+  let observations = ref [ 1_000L; 999L; 1_000L; 1_001L ] in
+  let raw_now_ms () =
+    match !observations with
+    | value :: rest ->
+      observations := rest;
+      value
+    | [] -> fail "clock fixture exhausted"
+  in
+  let now_ms, advance = Random_id.For_testing.logical_ms_clock raw_now_ms in
+  check int64 "first observation" 1_000L (now_ms ());
+  check int64 "rollback clamps to last timestamp" 1_000L (now_ms ());
+  advance ();
+  check int64 "counter exhaustion advances logical time" 1_001L (now_ms ());
+  check int64 "wall time resumes without regression" 1_001L (now_ms ())
+
 (* ──────────────────────────────────────────────────────────── *)
 (* Suite                                                         *)
 (* ──────────────────────────────────────────────────────────── *)
@@ -167,5 +193,8 @@ let () =
       test_case "of_string missing dash" `Quick test_artifact_id_of_string_missing_dash;
       test_case "of_string invalid variant" `Quick test_artifact_id_of_string_invalid_variant;
       test_case "time ordering" `Quick test_artifact_id_time_ordering;
+      test_case "burst is monotonic" `Quick test_artifact_id_burst_is_monotonic;
+      test_case "wall-clock rollback is clamped" `Quick
+        test_uuid_v7_clock_clamps_wall_clock_rollback;
     ];
   ]

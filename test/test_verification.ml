@@ -220,10 +220,13 @@ let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
   with_eio_temp_dir (fun base_path ->
     let config = W.default_config base_path in
     let producer = "keeper-verification-rejection-producer-agent" in
-    let keeper_name = "verification-rejection-producer" in
+    let keeper_name = "persisted-canonical-producer" in
     let meta_json =
       `Assoc
-        [ "name", `String keeper_name
+        (* The filename is the durable queue identity. The metadata carries a
+           valid Keeper name for the same agent identity, but the two names
+           intentionally differ to ensure routing uses the canonical path. *)
+        [ "name", `String "verification-rejection-producer"
         ; "agent_name", `String producer
         ; "trace_id", `String "trace-persisted-producer"
         ]

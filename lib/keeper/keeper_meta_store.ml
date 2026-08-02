@@ -89,7 +89,7 @@ let persisted_keeper_name_for_agent_name config ~agent_name =
        | Ok None -> collect_matches matches rest
        | Ok (Some meta) ->
          if String.equal meta.agent_name agent_name
-         then collect_matches (meta.name :: matches) rest
+         then collect_matches (keeper_name :: matches) rest
          else collect_matches matches rest)
   in
   match persisted_keeper_names_result config with

@@ -41,8 +41,7 @@ val default_config : config
 
 (** {1 Request handler type} *)
 
-(** Standard httpun request handler shape.  Used by
-    {!Router.t} and {!make_request_handler}. *)
+(** Standard httpun request handler shape.  Used by {!Router.t}. *)
 type request_handler = Httpun.Request.t -> Httpun.Reqd.t -> unit
 
 (** {1 Response helpers} *)

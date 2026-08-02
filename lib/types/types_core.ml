@@ -868,25 +868,18 @@ let backlog_of_yojson json =
     let tasks = List.filter_map (fun j ->
       match task_of_yojson j with Ok t -> Some t | Error _ -> None
     ) tasks_json in
-    (* [version] is the backlog's monotonic commit revision: stamped +1 by
-       [Workspace_backlog.write_backlog_result] at the single commit point,
-       consumed as the optimistic-concurrency token (transition
+    (* [version] is the backlog's required monotonic commit revision: stamped
+       +1 by [Workspace_backlog.write_backlog_result] at the single commit
+       point, consumed as the optimistic-concurrency token (transition
        [expected_version] CAS, shutdown settlement) and as the RFC-0357
        scheduled-turn edge clock. [last_updated] is stamped at the same
-       point. Decoding stays tolerant for pre-revision-era files (observed
-       live as bare [{"tasks": [...]}]): an absent [version] decodes as 1 —
-       by definition the genesis revision, not a permissive fallback. A
-       strict decoder here once rejected such files wholesale, wiping every
-       claim from the reader's view (hundreds of decode failures/day drove
-       [stale-claims] GC to skip mutation). *)
+       commit point. *)
     let last_updated =
       Json_util.get_string_with_default json ~key:"last_updated" ~default:""
     in
     let version_result =
-      (* [version] is the current CAS/edge contract. Missing, malformed, or
-         non-positive values are corruption and fail the decode; accepting an
-         absent field as an old-format genesis value would reintroduce a
-         legacy compatibility path and could rewind the revision clock. *)
+      (* Missing, malformed, or non-positive revisions are corruption and
+         fail the decode; they must never rewind the CAS/edge clock. *)
       match Json_util.assoc_member_opt "version" json with
       | None -> Error "backlog.version missing"
       | Some (`Int n) when n >= 1 -> Ok n

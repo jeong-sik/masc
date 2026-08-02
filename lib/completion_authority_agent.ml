@@ -240,8 +240,13 @@ let prepare_review
         ~authority
     in
     match evidence_access with
-    | Workspace_verification_store.Evidence_unavailable { reason; _ } ->
-      Error (Printf.sprintf "submitted evidence unavailable: %s" reason)
+    | Workspace_verification_store.Evidence_unavailable { request_id; reason } ->
+      Error
+        (Printf.sprintf
+           "submitted evidence unavailable: %s"
+           (Workspace_verification_store.evidence_access_failure_to_string
+              ~request_id
+              reason))
     | Workspace_verification_store.Evidence_available { request = header; _ } ->
       if not (String.equal header.id verification_id)
       then

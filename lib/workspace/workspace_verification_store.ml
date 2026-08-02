@@ -31,6 +31,14 @@ type submitted_evidence_item =
       ; reason : evidence_read_failure
       }
 
+type evidence_access_failure =
+  | Completion_authority_identity_missing
+  | Request_not_found
+  | Request_header_invalid of string
+  | Evidence_snapshot_invalid of string
+  | Request_load_error of string
+  | Request_scope_mismatch
+
 type submitted_evidence_access =
   | Evidence_available of
       { request : request_header
@@ -38,7 +46,7 @@ type submitted_evidence_access =
       }
   | Evidence_unavailable of
       { request_id : string
-      ; reason : string
+      ; reason : evidence_access_failure
       }
 
 let evidence_read_failure_to_string = function
@@ -107,6 +115,36 @@ let request_header_to_yojson request =
     ]
 ;;
 
+let evidence_access_failure_code = function
+  | Completion_authority_identity_missing ->
+    "completion_authority_identity_missing"
+  | Request_not_found -> "request_not_found"
+  | Request_header_invalid _ -> "request_header_invalid"
+  | Evidence_snapshot_invalid _ -> "evidence_snapshot_invalid"
+  | Request_load_error _ -> "request_load_error"
+  | Request_scope_mismatch -> "request_scope_mismatch"
+
+let evidence_access_failure_to_string ~request_id = function
+  | Completion_authority_identity_missing -> "completion authority identity is empty"
+  | Request_not_found -> Printf.sprintf "Verification %s not found" request_id
+  | Request_header_invalid detail ->
+    Printf.sprintf
+      "Failed to decode verification %s request header: %s"
+      request_id
+      detail
+  | Evidence_snapshot_invalid detail ->
+    Printf.sprintf
+      "Failed to decode verification %s evidence snapshot: %s"
+      request_id
+      detail
+  | Request_load_error detail ->
+    Printf.sprintf
+      "Failed to load verification %s evidence: %s"
+      request_id
+      detail
+  | Request_scope_mismatch ->
+    "verification request does not match the awaiting task and producer"
+
 let submitted_evidence_access_to_yojson = function
   | Evidence_available { request; items } ->
     `Assoc
@@ -118,7 +156,7 @@ let submitted_evidence_access_to_yojson = function
     `Assoc
       [ "access", `String "unavailable"
       ; "request_id", `String request_id
-      ; "reason", `String reason
+      ; "reason", `String (evidence_access_failure_to_string ~request_id reason)
       ]
 ;;
 
@@ -158,11 +196,11 @@ let submitted_evidence_access_metadata_to_yojson = function
       ; ( "items"
         , `List (List.map submitted_evidence_item_metadata_to_yojson items) )
       ]
-  | Evidence_unavailable { request_id; reason = _ } ->
+  | Evidence_unavailable { request_id; reason } ->
     `Assoc
       [ "access", `String "unavailable"
       ; "request_id", `String request_id
-      ; "reason", `String "unavailable"
+      ; "reason_code", `String (evidence_access_failure_code reason)
       ]
 ;;
 
@@ -373,24 +411,20 @@ let submitted_evidence_snapshot_of_request_json = function
 let load_request_for_evidence base_path req_id =
   let path = request_path base_path req_id in
   if not (Sys.file_exists path) then
-    Error (Printf.sprintf "Verification %s not found" req_id)
+    Error Request_not_found
   else
     try
       let json = Safe_ops.read_json_eio path in
       match request_header_of_yojson json with
-      | Error detail -> Error detail
+      | Error detail -> Error (Request_header_invalid detail)
       | Ok request ->
         (match submitted_evidence_snapshot_of_request_json json with
-         | Error detail -> Error detail
+         | Error detail -> Error (Evidence_snapshot_invalid detail)
          | Ok snapshot -> Ok (request, snapshot))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      Error
-        (Printf.sprintf
-           "Failed to load verification %s evidence: %s"
-           req_id
-           (Printexc.to_string exn))
+      Error (Request_load_error (Printexc.to_string exn))
 
 let verification_evidence_max_bytes = 20_000
 
@@ -544,7 +578,7 @@ let inspect_submitted_evidence_for_authority ~base_path ~request_id ~task_id
   if not (Masc_domain.completion_authority_has_identity authority)
   then
     Evidence_unavailable
-      { request_id; reason = "completion authority identity is empty" }
+      { request_id; reason = Completion_authority_identity_missing }
   else
     match load_request_for_evidence base_path request_id with
     | Error reason -> Evidence_unavailable { request_id; reason }
@@ -556,8 +590,7 @@ let inspect_submitted_evidence_for_authority ~base_path ~request_id ~task_id
       else
         Evidence_unavailable
           { request_id
-          ; reason =
-              "verification request does not match the awaiting task and producer"
+          ; reason = Request_scope_mismatch
           }
 ;;
 

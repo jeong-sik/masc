@@ -324,7 +324,8 @@ let test_system_llm_review_notes_are_metadata_only () =
     VS.submitted_evidence_access_metadata_to_yojson
       (VS.Evidence_unavailable
          { request_id = request.id
-         ; reason = "failed to read /private/producer/request.json"
+         ; reason =
+             VS.Request_load_error "failed to read /private/producer/request.json"
          })
     |> Yojson.Safe.to_string
   in
@@ -332,6 +333,23 @@ let test_system_llm_review_notes_are_metadata_only () =
     "unavailable detail is not duplicated into metadata"
     false
     (contains_substring unavailable_metadata "/private/producer/request.json")
+  ; Alcotest.(check bool)
+      "unavailable reason code remains observable"
+      true
+      (contains_substring unavailable_metadata "request_load_error")
+  ; let unavailable_audit =
+      VS.submitted_evidence_access_to_yojson
+        (VS.Evidence_unavailable
+           { request_id = request.id
+           ; reason =
+               VS.Request_load_error "failed to read /private/producer/request.json"
+           })
+      |> Yojson.Safe.to_string
+    in
+    Alcotest.(check bool)
+      "full audit keeps the unavailable detail"
+      true
+      (contains_substring unavailable_audit "/private/producer/request.json")
 
 let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
   with_eio_temp_dir (fun base_path ->
@@ -1068,8 +1086,10 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
          Alcotest.failf
            "expected explicit artifact and note snapshot, got %d items"
            (List.length items)
-       | VS.Evidence_unavailable { reason; _ } ->
-         Alcotest.failf "persisted evidence snapshot unavailable: %s" reason))
+       | VS.Evidence_unavailable { request_id; reason } ->
+         Alcotest.failf
+           "persisted evidence snapshot unavailable: %s"
+           (VS.evidence_access_failure_to_string ~request_id reason)))
 
 let test_submit_snapshot_survives_mutation_deletion_and_authority_cwd () =
   with_eio_temp_dir (fun base_path ->
@@ -1138,8 +1158,10 @@ let test_submit_snapshot_survives_mutation_deletion_and_authority_cwd () =
              Alcotest.failf
                "expected one immutable artifact snapshot, got %d items"
                (List.length items)
-           | VS.Evidence_unavailable { reason; _ } ->
-             Alcotest.failf "persisted evidence snapshot unavailable: %s" reason)))
+           | VS.Evidence_unavailable { request_id; reason } ->
+             Alcotest.failf
+               "persisted evidence snapshot unavailable: %s"
+               (VS.evidence_access_failure_to_string ~request_id reason)))
 
 let test_submit_snapshot_rejects_relative_traversal_and_symlink_escape () =
   with_eio_temp_dir (fun base_path ->

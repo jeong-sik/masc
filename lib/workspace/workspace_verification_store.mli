@@ -29,6 +29,14 @@ type submitted_evidence_item =
       ; reason : evidence_read_failure
       }
 
+type evidence_access_failure =
+  | Completion_authority_identity_missing
+  | Request_not_found
+  | Request_header_invalid of string
+  | Evidence_snapshot_invalid of string
+  | Request_load_error of string
+  | Request_scope_mismatch
+
 type submitted_evidence_access =
   | Evidence_available of
       { request : request_header
@@ -36,7 +44,7 @@ type submitted_evidence_access =
       }
   | Evidence_unavailable of
       { request_id : string
-      ; reason : string
+      ; reason : evidence_access_failure
       }
 
 val request_header_of_yojson :
@@ -49,6 +57,8 @@ val submitted_evidence_access_metadata_to_yojson :
   submitted_evidence_access -> Yojson.Safe.t
 
 val evidence_read_failure_to_string : evidence_read_failure -> string
+val evidence_access_failure_to_string :
+  request_id:string -> evidence_access_failure -> string
 val evidence_read_failure_of_owned_read_failure :
   Fs_compat.owned_regular_file_read_failure -> evidence_read_failure
 val snapshot_submitted_evidence_json :

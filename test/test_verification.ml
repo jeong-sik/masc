@@ -273,6 +273,83 @@ let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
        | _ -> Alcotest.fail "system rejection was not durably queued")
   )
 
+let test_system_llm_rejection_prefers_registered_producer_binding () =
+  with_eio_temp_dir (fun base_path ->
+    let config = W.default_config base_path in
+    let keeper_name = "keeper-executor-agent" in
+    let producer = "keeper-executor-agent-agent" in
+    let meta_json =
+      `Assoc
+        [ "name", `String keeper_name
+        ; "agent_name", `String producer
+        ; "trace_id", `String "trace-registered-producer"
+        ]
+    in
+    let meta =
+      match Masc_test_deps.meta_of_json_fixture meta_json with
+      | Ok meta -> meta
+      | Error detail -> Alcotest.fail detail
+    in
+    Masc.Keeper_registry.For_testing.clear ();
+    Fun.protect
+      ~finally:Masc.Keeper_registry.For_testing.clear
+      (fun () ->
+         ignore
+           (Masc.Keeper_registry.For_testing.register
+              ~base_path
+              keeper_name
+              meta);
+         let delivery =
+           Masc.Completion_authority_wakeup.wake_rejected_producer
+             ~config
+             ~producer
+             ~task_id:"task-registered-producer"
+             ~verification_id:"vrf-registered-producer"
+             ~reason:"registered binding must own the rejection queue"
+             ~authority:
+               (Masc_domain.System_llm_agent
+                  { agent_run_id = "system-agent-registered" })
+         in
+         (match delivery with
+          | Masc.Completion_authority_wakeup.Signaled { keeper_name = actual }
+          | Masc.Completion_authority_wakeup.Durable_deferred
+              { keeper_name = actual; _ } ->
+            Alcotest.(check string)
+              "registered agent binding selects the registry keeper"
+              keeper_name
+              actual
+          | Masc.Completion_authority_wakeup.Durable_wake_failed { detail; _ }
+          | Masc.Completion_authority_wakeup.Durable_queue_failed { detail; _ } ->
+            Alcotest.fail detail
+          | Masc.Completion_authority_wakeup.Unroutable_producer { producer; _ } ->
+            Alcotest.failf "registered producer was unexpectedly unroutable: %s" producer);
+         match
+           Keeper_event_queue_persistence.load_result
+             ~base_path
+             ~keeper_name
+         with
+         | Error detail -> Alcotest.fail detail
+         | Ok queue ->
+           (match Keeper_event_queue.to_list queue with
+            | [ { payload = Completion_authority_rejected rejection; _ } ] ->
+              Alcotest.(check string)
+                "registered queue preserves task identity"
+                "task-registered-producer"
+                rejection.car_task_id
+            | _ -> Alcotest.fail "registered producer rejection was not queued");
+         match
+           Keeper_event_queue_persistence.load_result
+             ~base_path
+             ~keeper_name:"executor-agent"
+         with
+         | Error detail -> Alcotest.fail detail
+         | Ok queue ->
+           Alcotest.(check int)
+             "legacy derived queue remains unused"
+             0
+             (Keeper_event_queue.length queue))
+  )
+
 let test_system_llm_agent_commits_without_a_keeper_verifier () =
   with_eio_temp_dir (fun base_path ->
     Masc.Workspace_metric_hooks.install ();
@@ -1458,6 +1535,8 @@ let () =
         test_system_llm_authority_helpers_are_typed;
       Alcotest.test_case "system LLM rejection reaches producer queue" `Quick
         test_system_llm_rejection_is_durably_delivered_to_producer_keeper;
+      Alcotest.test_case "system LLM rejection uses registry producer binding" `Quick
+        test_system_llm_rejection_prefers_registered_producer_binding;
       Alcotest.test_case "system LLM commits without Keeper verifier" `Quick
         test_system_llm_agent_commits_without_a_keeper_verifier;
       Alcotest.test_case "system LLM uses persisted request contract" `Quick

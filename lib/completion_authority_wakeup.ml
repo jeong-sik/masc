@@ -11,6 +11,20 @@ type delivery =
   | Unroutable_producer of { producer : string; task_id : string }
   | Durable_queue_failed of { keeper_name : string; detail : string }
 
+let registered_keeper_name_for_agent ~base_path producer =
+  Keeper_registry.all ~base_path ()
+  |> List.find_map (fun (entry : Keeper_registry.registry_entry) ->
+       if String.equal entry.meta.agent_name producer
+       then Some entry.name
+       else None)
+;;
+
+let producer_keeper_name ~base_path producer =
+  match registered_keeper_name_for_agent ~base_path producer with
+  | Some keeper_name -> Some keeper_name
+  | None -> Keeper_identity.canonical_keeper_name_from_agent_name producer
+;;
+
 let wake_rejected_producer
       ~(config : Workspace_utils_backend_setup.config)
       ~producer
@@ -19,7 +33,7 @@ let wake_rejected_producer
       ~reason
       ~authority
   =
-  match Keeper_identity.canonical_keeper_name_from_agent_name producer with
+  match producer_keeper_name ~base_path:config.base_path producer with
   | None ->
     Unroutable_producer { producer; task_id }
   | Some keeper_name ->

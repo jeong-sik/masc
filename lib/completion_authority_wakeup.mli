@@ -1,6 +1,8 @@
 (** Durable delivery after a completion authority (system LLM or HITL) rejects
     submitted evidence. A live wake is only an acceleration hint; the typed
-    rejection is committed to the producer Keeper's queue first. *)
+    rejection is committed to the producer Keeper's queue first. When a live
+    registry entry exists, its exact [agent_name] binding is authoritative;
+    structural identity parsing is only the deferred/unregistered fallback. *)
 
 type delivery =
   | Signaled of { keeper_name : string }

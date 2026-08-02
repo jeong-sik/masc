@@ -66,6 +66,133 @@ let test_masc_start_tilde_rejects_empty_initial_home () =
         (contains_substring message "HOME is required to expand '~'"))
 ;;
 
+let test_masc_start_surfaces_claim_failure_after_task_commit () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let base_path = Cases.temp_dir "mcp-start-claim-failure-" in
+  Fun.protect
+    ~finally:(fun () -> Cases.cleanup_dir base_path)
+    (fun () ->
+      let fixture =
+        Cases.make_fixture
+          sw
+          ~proc_mgr:(Eio.Stdenv.process_mgr env)
+          ~fs:(Eio.Stdenv.fs env)
+          ~net:(Eio.Stdenv.net env)
+          ~mono_clock:(Eio.Stdenv.mono_clock env)
+          (Eio.Stdenv.clock env)
+          ~base_path
+          Cases.Fresh
+      in
+      Cases.ensure_bound fixture;
+      let config = Mcp_server.workspace_config fixture.state in
+      ignore
+        (Masc.Workspace.add_task
+           config
+           ~title:"already owned"
+           ~priority:3
+           ~description:"");
+      ignore
+        (Masc.Workspace.claim_task
+           config
+           ~agent_name:fixture.agent_name
+           ~task_id:"task-001");
+      let result =
+        Cases.execute_tool
+          fixture
+          ~name:"masc_start"
+          ~arguments:
+            (`Assoc
+              [ ("path", `String base_path)
+              ; ("task_title", `String "must remain visible")
+              ])
+      in
+      Alcotest.(check bool) "claim failure is not success" false
+        (Tool_result.is_success result);
+      Alcotest.(check (option string)) "claim conflict is workflow rejection"
+        (Some "workflow_rejection")
+        (Tool_result.failure_class result
+         |> Option.map Tool_result.tool_failure_class_to_string);
+      Alcotest.(check bool) "claim failure is explicit" true
+        (contains_substring (Tool_result.message result) "claim failed");
+      let data = Tool_result.data result in
+      Alcotest.(check string) "created task remains a post-effect"
+        "proven_post_effect"
+        Yojson.Safe.Util.(data |> member "effect_disposition" |> to_string);
+      Alcotest.(check string) "task id is returned"
+        "task-002"
+        Yojson.Safe.Util.(data |> member "task_id" |> to_string);
+      Alcotest.(check bool) "committed task result is preserved" true
+      (contains_substring
+           Yojson.Safe.Util.(data |> member "primary_result" |> to_string)
+           "Added task-002"))
+;;
+
+let test_masc_start_surfaces_current_task_failure_after_claim_commit () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let base_path = Cases.temp_dir "mcp-start-current-task-failure-" in
+  Fun.protect
+    ~finally:(fun () -> Cases.cleanup_dir base_path)
+    (fun () ->
+      let fixture =
+        Cases.make_fixture
+          sw
+          ~proc_mgr:(Eio.Stdenv.process_mgr env)
+          ~fs:(Eio.Stdenv.fs env)
+          ~net:(Eio.Stdenv.net env)
+          ~mono_clock:(Eio.Stdenv.mono_clock env)
+          (Eio.Stdenv.clock env)
+          ~base_path
+          Cases.Fresh
+      in
+      Cases.ensure_bound fixture;
+      let config = Mcp_server.workspace_config fixture.state in
+      let masc_dir = Workspace_utils.masc_dir config in
+      let current_task_path = Filename.concat masc_dir "current_task" in
+      let trash_path = Filename.concat masc_dir "_trash" in
+      Unix.mkdir current_task_path 0o755;
+      Fs_compat.save_file
+        (Filename.concat current_task_path "forensics.txt")
+        "kept";
+      Fs_compat.mkdir_p trash_path;
+      Unix.chmod trash_path 0o555;
+      Fun.protect
+        ~finally:(fun () -> Unix.chmod trash_path 0o755)
+        (fun () ->
+          let result =
+            Cases.execute_tool
+              fixture
+              ~name:"masc_start"
+              ~arguments:
+                (`Assoc
+                  [ ("path", `String base_path)
+                  ; ("task_title", `String "must remain claimed")
+                  ])
+          in
+          Alcotest.(check bool) "current-task failure is not success" false
+            (Tool_result.is_success result);
+          Alcotest.(check (option string)) "store failure is runtime failure"
+            (Some "runtime_failure")
+            (Tool_result.failure_class result
+             |> Option.map Tool_result.tool_failure_class_to_string);
+          let data = Tool_result.data result in
+          Alcotest.(check string) "created and claimed task is a post-effect"
+            "proven_post_effect"
+            Yojson.Safe.Util.(data |> member "effect_disposition" |> to_string);
+          Alcotest.(check string) "task id is returned"
+            "task-001"
+            Yojson.Safe.Util.(data |> member "task_id" |> to_string);
+          Alcotest.(check bool) "committed task result is preserved" true
+            (contains_substring
+               Yojson.Safe.Util.(data |> member "primary_result" |> to_string)
+               "Added task-001")))
+;;
+
 let test_health_aggregate_sum_rejects_overflow () =
   (match
      Mcp_server.For_testing.publication_recovery_health_count_sum
@@ -507,6 +634,14 @@ let () =
             "rejects tilde expansion when initial HOME is empty"
             `Quick
             test_masc_start_tilde_rejects_empty_initial_home
+        ; Alcotest.test_case
+            "surfaces claim failure after task commit"
+            `Quick
+            test_masc_start_surfaces_claim_failure_after_task_commit
+        ; Alcotest.test_case
+            "surfaces current-task failure after claim commit"
+            `Quick
+            test_masc_start_surfaces_current_task_failure_after_claim_commit
         ; Alcotest.test_case
             "checks aggregate health count overflow"
             `Quick

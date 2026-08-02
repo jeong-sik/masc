@@ -696,11 +696,42 @@ let test_post_create_data_is_structured () =
      Alcotest.(check bool) "structured data carries post id" true
        (List.mem_assoc "id" fields)
    | `String _ ->
-     Alcotest.fail
+       Alcotest.fail
        "board_post data is a raw `String (double-encoded JSON); expected structured `Assoc"
    | other ->
      Alcotest.failf "unexpected board_post data shape: %s"
        (Yojson.Safe.to_string other))
+
+let test_activity_projection_failure_preserves_primary_effect () =
+  let primary_result =
+    Tool_result.make_ok
+      ~tool_name:"masc_board_post"
+      ~start_time:0.0
+      ~data:(`Assoc [ ("id", `String "post-1") ])
+      ()
+  in
+  let result =
+    Mcp_tool_runtime_board.For_testing.result_after_activity_projection
+      ~tool_name:"masc_board_post"
+      ~start_time:0.0
+      ~primary_result
+      ~operation:"posted"
+      (fun () -> Error "activity graph unavailable")
+  in
+  Alcotest.(check bool) "projection failure is not success" false
+    (Tool_result.is_success result);
+  Alcotest.(check (option string)) "projection failure is runtime failure"
+    (Some "runtime_failure")
+    (Tool_result.failure_class result
+     |> Option.map Tool_result.tool_failure_class_to_string);
+  let data = Tool_result.data result in
+  Alcotest.(check string) "committed primary effect is explicit"
+    "proven_post_effect"
+    Yojson.Safe.Util.(data |> member "effect_disposition" |> to_string);
+  Alcotest.(check string) "operation is explicit" "posted"
+    Yojson.Safe.Util.(data |> member "projection" |> to_string);
+  Alcotest.(check string) "primary result is preserved" "post-1"
+    Yojson.Safe.Util.(data |> member "primary_result" |> member "id" |> to_string)
 
 let test_post_create_judgment_roundtrip () =
   with_eio @@ fun env ->
@@ -1971,6 +2002,8 @@ let () =
             test_post_create_metadata_payload;
           Alcotest.test_case "create data is structured not double-encoded" `Quick
             test_post_create_data_is_structured;
+          Alcotest.test_case "projection failure preserves primary effect" `Quick
+            test_activity_projection_failure_preserves_primary_effect;
           Alcotest.test_case "create judgment roundtrip" `Quick
             test_post_create_judgment_roundtrip;
           Alcotest.test_case "create judgment list roundtrip (#16300)" `Quick

@@ -437,6 +437,7 @@ jobs:
         run: |
           chmod +x scripts/check-oas-pin.sh
           bash test/test_oas_pin_ref.sh
+          bash test/test_check_oas_pin_exact.sh
           scripts/check-oas-pin.sh --local-only
 
       - name: Check OAS API surface source

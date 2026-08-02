@@ -288,63 +288,44 @@ if command -v opam >/dev/null 2>&1; then
   fi
   verify_agent_sdk_switch_artifacts
 
-  pin_list_output="$(OPAMCOLOR=never opam pin list 2>/dev/null || true)"
+  if ! pin_list_output="$(OPAMCOLOR=never opam pin list 2>&1)"; then
+    echo "failed to read agent_sdk pin source from the current opam switch" >&2
+    echo "  opam pin list output: ${pin_list_output:-<empty>}" >&2
+    echo "repair: bash scripts/opam-pin-external-deps.sh" >&2
+    exit 1
+  fi
   pin_line="$(awk '$1 ~ /^agent_sdk\./ { print }' <<<"${pin_list_output}")"
-  if [[ -n "${pin_line}" ]]; then
+  pin_count="$(awk '$1 ~ /^agent_sdk\./ { count += 1 } END { print count + 0 }' <<<"${pin_list_output}")"
+  if [[ -z "${pin_line}" ]]; then
+    echo "agent_sdk is installed but not pinned in the current opam switch" >&2
+    echo "  expected pin source: ${expected_opam_pin_source}" >&2
+    echo "repair: bash scripts/opam-pin-external-deps.sh" >&2
+    exit 1
+  elif [[ "${pin_count}" -ne 1 ]]; then
+    echo "agent_sdk pin state is ambiguous: expected exactly one pin, found ${pin_count}" >&2
+    echo "  opam pin list output: ${pin_list_output}" >&2
+    echo "repair: bash scripts/opam-pin-external-deps.sh" >&2
+    exit 1
+  else
     installed_pin_source="$(extract_opam_pin_source "${pin_line}")"
     installed_pin_ref="$(
       sed -nE 's/.*\(at ([0-9a-f]{40})\).*/\1/p' <<<"${pin_line}"
     )"
-    # Forward-drift acceptance: concurrent sessions share one opam switch,
-    # and opam-pin-external-deps.sh already ratchets the pin forward via the
-    # recorded floor.  When the installed canonical pin moved strictly ahead
-    # of this checkout's recorded SSOT SHA, requiring exact equality would
-    # hard-block every local build (including Keeper Execute builds) until a
-    # repin — a downgrade the floor guard itself refuses.  Accept the drift
-    # only with exact ancestry proof (EXPECTED is an ancestor of INSTALLED on
-    # TRACK_REF); backward or divergent drift still fails closed.  The
-    # ancestry remote prefers an explicitly configured local checkout and
-    # otherwise fetches upstream — this runs only on the drift path, never on
-    # the matching fast path, and an unreachable remote fails closed exactly
-    # as before.
-    pin_forward_remote() {
-      if [[ -n "${local_oas_checkout}" ]] \
-        && git -C "${local_oas_checkout}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        printf '%s' "${local_oas_checkout}"
-      else
-        printf '%s' "${OAS_AGENT_SDK_URL}"
-      fi
-    }
-
-    accept_forward_pin_drift() {
-      local candidate_sha="$1"
-      if bash "${SCRIPT_DIR}/check-oas-pin-forward.sh" \
-           "${OAS_AGENT_SDK_SHA}" "${candidate_sha}" \
-           "$(pin_forward_remote)" "${OAS_AGENT_SDK_TRACK_REF}"; then
-        echo "agent_sdk pin moved forward: installed ${candidate_sha}, expected ${OAS_AGENT_SDK_SHA} (proven descendant on ${OAS_AGENT_SDK_TRACK_REF}) — accepting"
-        return 0
-      fi
-      return 1
-    }
-
     case "${installed_pin_source}" in
       "${expected_opam_pin_source}")
         ;;
       "git+${OAS_AGENT_SDK_URL}"#*)
-        installed_fragment_sha="${installed_pin_source##*#}"
-        if ! accept_forward_pin_drift "${installed_fragment_sha}"; then
-          echo "agent_sdk pin source is ${installed_pin_source}, expected ${expected_opam_pin_source}" >&2
-          echo "repair: bash scripts/opam-pin-external-deps.sh" >&2
-          exit 1
-        fi
+        echo "agent_sdk pin source is ${installed_pin_source}, expected ${expected_opam_pin_source}" >&2
+        echo "  commit ancestry does not prove public-interface compatibility" >&2
+        echo "repair: bash scripts/opam-pin-external-deps.sh" >&2
+        exit 1
         ;;
       "git+${OAS_AGENT_SDK_URL}")
         if [[ "${installed_pin_ref}" != "${OAS_AGENT_SDK_SHA}" ]]; then
-          if ! accept_forward_pin_drift "${installed_pin_ref}"; then
-            echo "agent_sdk pin checkout is ${installed_pin_ref:-unknown}, expected ${OAS_AGENT_SDK_SHA}" >&2
-            echo "repair: bash scripts/opam-pin-external-deps.sh" >&2
-            exit 1
-          fi
+          echo "agent_sdk pin checkout is ${installed_pin_ref:-unknown}, expected ${OAS_AGENT_SDK_SHA}" >&2
+          echo "  commit ancestry does not prove public-interface compatibility" >&2
+          echo "repair: bash scripts/opam-pin-external-deps.sh" >&2
+          exit 1
         fi
         ;;
       git+file://*|file://*)
@@ -362,8 +343,6 @@ if command -v opam >/dev/null 2>&1; then
         exit 1
         ;;
     esac
-  elif [[ "${LOCAL_ONLY}" -eq 0 ]]; then
-    echo "WARN: could not read agent_sdk pin source from opam; installed version ${installed_version} satisfies floor ${OAS_AGENT_SDK_MIN_VERSION}" >&2
   fi
 fi
 

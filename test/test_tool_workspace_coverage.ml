@@ -304,6 +304,27 @@ let () =
 ;;
 
 let () =
+  test "dispatch_status_observes_recovered_backlog" (fun () ->
+    let ctx = make_test_ctx () in
+    let _ = Workspace.init ctx.config ~agent_name:(Some ctx.agent_name) in
+    ignore
+      (Workspace.add_task
+         ctx.config
+         ~title:"Recovered status task"
+         ~priority:2
+         ~description:"");
+    let oc = open_out (Workspace.backlog_path ctx.config) in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc "{not valid json");
+    match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+    | Some result ->
+      assert (Tool_result.is_success result);
+      assert_contains (status_message result) "Recovered status task"
+    | None -> failwith "dispatch returned None")
+;;
+
+let () =
   test "dispatch_status_reports_backlog_read_failure" (fun () ->
     let ctx = make_test_ctx () in
     let _ = Workspace.init ctx.config ~agent_name:(Some ctx.agent_name) in

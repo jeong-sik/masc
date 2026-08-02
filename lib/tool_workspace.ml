@@ -247,7 +247,7 @@ let planning_context_state
 let status_summary_string (ctx : context) =
   Workspace.ensure_initialized ctx.config;
   let state = Workspace.read_state ctx.config in
-  match Workspace.read_backlog_r ctx.config with
+  match Workspace.read_backlog_observation_r ctx.config with
   | Error error ->
     Error (Printf.sprintf "status snapshot unavailable: backlog read failed: %s" error)
   | Ok backlog ->

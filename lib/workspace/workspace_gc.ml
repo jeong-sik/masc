@@ -69,43 +69,51 @@ let gc config ~days () =
   in
   let cutoff_iso = Masc_domain.iso8601_of_unix_seconds cutoff_time in
 
-  let backlog = read_backlog config in
   let stale_count = ref 0 in
   let archived_tasks = ref [] in
-  let kept_tasks = List.filter (fun task ->
-    let is_terminal = Masc_domain.task_status_is_terminal task.task_status in
-    let is_old = task.created_at < cutoff_iso in
-    if is_old && is_terminal then begin
-      incr stale_count;
-      archived_tasks := task :: !archived_tasks;
-      false  (* Archive: terminal and older than the cutoff. *)
-    end else
-      true   (* Keep: recent, or non-terminal at any age. *)
-  ) backlog.tasks in
+  let live_tasks_after_gc, orphaned, restored, restore_count =
+    let backlog_lock_path = Filename.concat (tasks_dir config) ".backlog" in
+    with_file_lock config backlog_lock_path (fun () ->
+      let backlog = read_backlog config in
+      let kept_tasks = List.filter (fun task ->
+        let is_terminal = Masc_domain.task_status_is_terminal task.task_status in
+        let is_old = task.created_at < cutoff_iso in
+        if is_old && is_terminal then begin
+          incr stale_count;
+          archived_tasks := task :: !archived_tasks;
+          false  (* Archive: terminal and older than the cutoff. *)
+        end else
+          true   (* Keep: recent, or non-terminal at any age. *)
+      ) backlog.tasks in
 
-  (* Self-healing restore: recover non-terminal obligations a prior pass
-     mis-archived.  Restore only ids not already live so a crash between the
-     backlog write and the archive drop below cannot duplicate a task. *)
-  let orphaned = read_orphaned_nonterminal_tasks config in
-  let live_ids = List.map (fun (t : task) -> t.id) kept_tasks in
-  let restored =
-    List.filter (fun (t : task) -> not (List.mem t.id live_ids)) orphaned
+      (* Self-healing restore: recover non-terminal obligations a prior pass
+         mis-archived. Restore only ids not already live so a crash between the
+         backlog write and the archive drop below cannot duplicate a task. *)
+      let orphaned = read_orphaned_nonterminal_tasks config in
+      let live_ids = List.map (fun (t : task) -> t.id) kept_tasks in
+      let restored =
+        List.filter (fun (t : task) -> not (List.mem t.id live_ids)) orphaned
+      in
+      let restore_count = List.length restored in
+      let live_tasks_after_gc = kept_tasks @ restored in
+
+      (* Backlog first: on a crash before the archive is rewritten below, the
+         restored task survives in both stores and the next GC pass dedups it.
+         The shared backlog lock keeps this read-modify-write on the same
+         revision lineage as task creation and transitions. *)
+      if !stale_count > 0 || restore_count > 0 then begin
+        (* [write_backlog] stamps version/last_updated at the commit point. *)
+        let new_backlog = { backlog with tasks = live_tasks_after_gc } in
+        write_backlog config new_backlog
+      end;
+      if !stale_count > 0 then
+        append_archive_tasks config (List.rev !archived_tasks);
+      (* Drop every orphaned non-terminal entry from the archive, including any
+         that was already live (a pure duplicate). *)
+      if orphaned <> [] then
+        drop_archive_tasks config ~ids:(List.map (fun (t : task) -> t.id) orphaned);
+      live_tasks_after_gc, orphaned, restored, restore_count)
   in
-  let restore_count = List.length restored in
-  let live_tasks_after_gc = kept_tasks @ restored in
-
-  (* Backlog first: on a crash before the archive is rewritten below, the
-     restored task survives in both stores and the next GC pass dedups it. *)
-  if !stale_count > 0 || restore_count > 0 then begin
-    (* [write_backlog] stamps version/last_updated at the commit point. *)
-    let new_backlog = { backlog with tasks = live_tasks_after_gc } in
-    write_backlog config new_backlog
-  end;
-  if !stale_count > 0 then append_archive_tasks config (List.rev !archived_tasks);
-  (* Drop every orphaned non-terminal entry from the archive, including any that
-     was already live (a pure duplicate). *)
-  if orphaned <> [] then
-    drop_archive_tasks config ~ids:(List.map (fun (t : task) -> t.id) orphaned);
   List.iter (fun (t : task) ->
     let status = Masc_domain.task_status_to_string t.task_status in
     log_event config (`Assoc [

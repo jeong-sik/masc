@@ -882,10 +882,29 @@ let backlog_of_yojson json =
     let last_updated =
       Json_util.get_string_with_default json ~key:"last_updated" ~default:""
     in
-    let version =
-      Json_util.get_int json "version" |> Option.value ~default:1
+    let version_result =
+      (* An absent member is the only tolerated gap: a pre-revision-era file
+         is genesis (1) by definition. A PRESENT but malformed or
+         non-positive value is corruption of the CAS/edge token and fails
+         the decode — silently mapping it to 1 would rewind the revision
+         clock below every consumer's [last_consumed_revision] and freeze
+         the RFC-0357 edge until the counter re-climbed. *)
+      match Json_util.assoc_member_opt "version" json with
+      | None -> Ok 1
+      | Some (`Int n) when n >= 1 -> Ok n
+      | Some (`Intlit s) ->
+        (match int_of_string_opt s with
+         | Some n when n >= 1 -> Ok n
+         | _ -> Error (Printf.sprintf "backlog.version corrupt: %s" s))
+      | Some other ->
+        Error
+          (Printf.sprintf
+             "backlog.version corrupt: %s"
+             (Yojson.Safe.to_string other))
     in
-    Ok { tasks; last_updated; version }
+    (match version_result with
+     | Ok version -> Ok { tasks; last_updated; version }
+     | Error _ as error -> error)
   with e -> Error (Printexc.to_string e)
 
 (** SSE Session info (for tracking connected agents) *)

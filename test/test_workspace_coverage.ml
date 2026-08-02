@@ -761,6 +761,34 @@ let test_backlog_version_monotonic_per_commit () =
   Alcotest.(check int) "task creation commits exactly one revision" (v2 + 1) v3
 ;;
 
+(* Decoder contract: absent version = genesis by definition; a present but
+   malformed or non-positive version is corruption of the CAS/edge token and
+   must fail the decode instead of silently rewinding the clock to 1. *)
+let test_backlog_version_decode_contract () =
+  let decode s = Masc_domain.backlog_of_yojson (Yojson.Safe.from_string s) in
+  (match decode {|{"tasks": []}|} with
+   | Ok b -> Alcotest.(check int) "absent version decodes as genesis" 1 b.version
+   | Error e -> Alcotest.failf "absent version must decode: %s" e);
+  (match decode {|{"tasks": [], "version": 899}|} with
+   | Ok b -> Alcotest.(check int) "present version round-trips" 899 b.version
+   | Error e -> Alcotest.failf "valid version must decode: %s" e);
+  (match decode {|{"tasks": [], "version": "899"}|} with
+   | Ok b -> Alcotest.failf "string version must fail, decoded %d" b.version
+   | Error _ -> ());
+  (match decode {|{"tasks": [], "version": 899.0}|} with
+   | Ok b -> Alcotest.failf "float version must fail, decoded %d" b.version
+   | Error _ -> ());
+  (match decode {|{"tasks": [], "version": null}|} with
+   | Ok b -> Alcotest.failf "explicit null version must fail, decoded %d" b.version
+   | Error _ -> ());
+  List.iter
+    (fun value ->
+       match decode (Printf.sprintf {|{"tasks": [], "version": %d}|} value) with
+       | Ok b -> Alcotest.failf "non-positive version must fail, decoded %d" b.version
+       | Error _ -> ())
+    [ 0; -5 ]
+;;
+
 let task_by_id config task_id =
   match
     List.find_opt
@@ -2923,6 +2951,10 @@ let () =
             "version bumps exactly once per commit"
             `Quick
             test_backlog_version_monotonic_per_commit
+        ; Alcotest.test_case
+            "decode: absent is genesis, corruption fails closed"
+            `Quick
+            test_backlog_version_decode_contract
         ] )
     ; (* === RFC-0323 W2: predecessor_task_id === *)
       ( "predecessor"

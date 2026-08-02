@@ -4,11 +4,12 @@
     Legacy substring classifiers that rejected empty or analysis-only
     submissions at the transition layer are retired.
 
-    Evidence refs are now collected by typed concat from contract metadata,
-    handoff context, and non-empty source strings. They are forwarded to
-    [Verification_protocol.create_submit_request]
-    as observability metadata only. Completion judgment belongs to the LLM
-    reviewer at the Task boundary. *)
+    Evidence refs are collected from the producer's typed handoff refs.
+    Narrative summaries are represented explicitly as [note:] evidence so the
+    persisted snapshot cannot confuse a completion note with an artifact.
+    Contract requirements are projected separately by
+    [Verification_protocol.create_submit_request]. Completion judgment belongs
+    to the system LLM reviewer at the Task boundary. *)
 
 open Masc_domain
 include Workspace_state
@@ -17,12 +18,15 @@ let flatten_lock_result = function
   | Ok result -> result
   | Error e -> Error e
 
+let note_evidence_ref value =
+  let trimmed = String.trim value in
+  if String.equal trimmed ""
+  then None
+  else if String.starts_with ~prefix:"note:" trimmed
+  then Some trimmed
+  else Some ("note:" ^ trimmed)
+
 let verification_submission_evidence_refs task ~notes handoff_context =
-  let contract_refs =
-    match task.contract with
-    | Some c -> c.verify_gate_evidence @ c.required_evidence
-    | None -> []
-  in
   let handoff_refs, summary_refs =
     match
       match handoff_context with
@@ -31,14 +35,11 @@ let verification_submission_evidence_refs task ~notes handoff_context =
     with
     | Some (hc : Masc_domain.task_handoff_context) ->
       let summary_trimmed = String.trim hc.summary in
-      let summary_keep =
-        if String.equal summary_trimmed "" then [] else [ summary_trimmed ]
-      in
+      let summary_keep = Option.to_list (note_evidence_ref summary_trimmed) in
       (hc.evidence_refs, summary_keep)
     | None -> ([], [])
   in
   let notes_refs =
-    let trimmed = String.trim notes in
-    if String.equal trimmed "" then [] else [ trimmed ]
+    Option.to_list (note_evidence_ref notes)
   in
-  Workspace_state.normalized_string_list (contract_refs @ handoff_refs @ summary_refs @ notes_refs)
+  Workspace_state.normalized_string_list (handoff_refs @ summary_refs @ notes_refs)

@@ -161,7 +161,8 @@ let is_manual_compaction_payload = function
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
   | Keeper_event_queue.Goal_assigned _
-  | Keeper_event_queue.Goal_reconciliation_ready _ ->
+  | Keeper_event_queue.Goal_reconciliation_ready _
+  | Keeper_event_queue.Completion_authority_rejected _ ->
     false
 ;;
 

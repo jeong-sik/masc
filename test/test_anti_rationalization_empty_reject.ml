@@ -19,7 +19,30 @@ let with_reviewer reviewer f =
        f ())
 ;;
 
-let review () = AR.review ~evaluator_runtime:"task-reviewer" request
+let review () =
+  AR.review
+    ~evaluator_runtime:"task-reviewer"
+    ~base_path:(Filename.get_temp_dir_name ())
+    request
+
+let test_explicit_base_path_reaches_reviewer () =
+  let expected =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-review-base-%d" (Unix.getpid ()))
+  in
+  let received = ref None in
+  with_reviewer
+    (fun ~base_path ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+       received := Some base_path;
+       Ok None)
+    (fun () ->
+       ignore (AR.review ~evaluator_runtime:"task-reviewer" ~base_path:expected request);
+       match !received with
+       | Some actual ->
+         Alcotest.(check string) "review uses the caller BasePath" expected actual
+       | None -> Alcotest.fail "reviewer callback was not called")
+;;
 
 let configure_prompt_registry () =
   Prompt_registry.set_markdown_dir
@@ -28,7 +51,7 @@ let configure_prompt_registry () =
 
 let test_structured_tool_is_the_only_semantic_verdict () =
   with_reviewer
-    (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
        Ok (Some AR.Approve))
     (fun () ->
        let result = review () in
@@ -44,7 +67,7 @@ let test_structured_tool_is_the_only_semantic_verdict () =
 
 let test_response_text_is_never_parsed_as_verdict () =
   with_reviewer
-    (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
        Ok None)
     (fun () ->
        let result = review () in
@@ -57,7 +80,7 @@ let test_response_text_is_never_parsed_as_verdict () =
 
 let test_evaluator_failure_is_unavailable_not_reject () =
   with_reviewer
-    (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
        Error (Agent_sdk.Error.Internal "review transport unavailable"))
     (fun () ->
        let result = review () in
@@ -66,6 +89,37 @@ let test_evaluator_failure_is_unavailable_not_reject () =
          "evaluator_unavailable"
          (AR.gate_to_string result.gate);
        Alcotest.(check bool) "no fabricated reject" true (Option.is_none result.verdict))
+;;
+
+let test_reject_without_reason_is_malformed () =
+  let malformed =
+    [ `Assoc [ "verdict", `String "REJECT" ]
+    ; `Assoc [ "verdict", `String "REJECT"; "reason", `String "   " ]
+    ; `Assoc [ "verdict", `String "REJECT"; "reason", `Null ]
+    ]
+  in
+  List.iter
+    (fun args ->
+       match AR.parse_review_verdict_from_json args with
+       | Error _ -> ()
+       | Ok AR.Approve -> Alcotest.fail "malformed REJECT became APPROVE"
+       | Ok (AR.Reject reason) ->
+         Alcotest.failf "malformed REJECT fabricated a reason: %s" reason)
+    malformed
+;;
+
+let test_reject_reason_is_preserved () =
+  match
+    AR.parse_review_verdict_from_json
+      (`Assoc
+          [ "verdict", `String "REJECT"
+          ; "reason", `String " evidence is incomplete "
+          ])
+  with
+  | Ok (AR.Reject reason) ->
+    Alcotest.(check string) "rejection reason is not rewritten" " evidence is incomplete " reason
+  | Ok AR.Approve -> Alcotest.fail "REJECT became APPROVE"
+  | Error detail -> Alcotest.fail detail
 ;;
 
 let test_evidence_text_is_not_classified_before_llm_review () =
@@ -86,6 +140,10 @@ let () =
             `Quick
             test_structured_tool_is_the_only_semantic_verdict
         ; Alcotest.test_case
+            "explicit BasePath reaches reviewer"
+            `Quick
+            test_explicit_base_path_reaches_reviewer
+        ; Alcotest.test_case
             "response text ignored"
             `Quick
             test_response_text_is_never_parsed_as_verdict
@@ -93,6 +151,14 @@ let () =
             "provider failure unavailable"
             `Quick
             test_evaluator_failure_is_unavailable_not_reject
+        ; Alcotest.test_case
+            "reject without reason is malformed"
+            `Quick
+            test_reject_without_reason_is_malformed
+        ; Alcotest.test_case
+            "reject reason is preserved"
+            `Quick
+            test_reject_reason_is_preserved
         ; Alcotest.test_case
             "evidence meaning stays with reviewer"
             `Quick

@@ -223,75 +223,144 @@ let on_submit_for_verification ~(config : Workspace.config)
     notify_submit_for_verification ~config ~task ~assignee ~verification_id ~evidence_refs;
     Ok ()
 
-let notify_approve_verification ~task_id ~verifier ~verification_id ~notes =
-  let meta_json = `Assoc [
-    ("type", `String "verification_verdict");
-    ("task_id", `String task_id);
-    ("verification_id", `String verification_id);
-    ("verdict", `String "approved");
-  ] in
-  let () =
-    match Board_dispatch.create_post
-      ~author:verifier
-      ~content:(Printf.sprintf "Approved task %s (vrf:%s)%s"
-        task_id verification_id
-        (if notes = "" then "" else " — " ^ notes))
-      ~post_kind:Board.System_post
-      ~meta_json
-      ~visibility:Board.Internal
-      ~hearth:"verification"
-      ()
-    with
-    | Ok _ -> ()
-    | Error e ->
-      Log.Task.error
-        ~keeper_name:task_id
-        "board post failed (task=%s vrf=%s): %s"
-        task_id verification_id (Board_types.show_board_error e)
-  in
-  Subscriptions.push_event_to_sessions (`Assoc [
-    ("type", `String "masc/verification/verdict");
-    ("task_id", `String task_id);
-    ("verification_id", `String verification_id);
-    ("verifier", `String verifier);
-    ("verdict", `String "approved");
-    ("notes", `String notes);
-    ("timestamp", `Float (Time_compat.now ()));
-  ])
+let completion_authority_fields (authority : Masc_domain.completion_authority) =
+  [ ( "authority_kind"
+    , `String (Masc_domain.completion_authority_kind authority) )
+  ; ( "authority_actor"
+    , `String (Masc_domain.completion_authority_actor authority) )
+  ]
 
-let notify_reject_verification ~task_id ~verifier ~verification_id ~reason =
-  let meta_json = `Assoc [
-    ("type", `String "verification_verdict");
-    ("task_id", `String task_id);
-    ("verification_id", `String verification_id);
-    ("verdict", `String "rejected");
-  ] in
-  let () =
-    match Board_dispatch.create_post
-      ~author:verifier
-      ~content:(Printf.sprintf "Rejected task %s (vrf:%s): %s"
-        task_id verification_id reason)
+let verification_verdict_fields
+      ~event_type
+      ~(authority : Masc_domain.completion_authority)
+      ~task_id
+      ~verification_id
+      ~(verdict : Masc_domain.completion_verdict)
+  =
+  let verdict_name =
+    match verdict with
+    | Masc_domain.Verdict_approved -> "approved"
+    | Masc_domain.Verdict_rejected _ -> "rejected"
+  in
+  [ ("type", `String event_type)
+  ; ("task_id", `String task_id)
+  ; ("verification_id", `String verification_id)
+  ]
+  @ completion_authority_fields authority
+  @ [ "verdict", `String verdict_name ]
+
+let verification_verdict_metadata
+      ~(authority : Masc_domain.completion_authority)
+      ~task_id
+      ~verification_id
+      ~(verdict : Masc_domain.completion_verdict)
+  =
+  `Assoc
+    (verification_verdict_fields
+       ~event_type:"verification_verdict"
+       ~authority
+       ~task_id
+       ~verification_id
+       ~verdict)
+
+let verdict_event_json
+      ~(authority : Masc_domain.completion_authority)
+      ~task_id
+      ~verification_id
+      ~(verdict : Masc_domain.completion_verdict)
+      ~notes
+      ~timestamp
+  =
+  let event_type =
+    match verdict with
+    | Masc_domain.Verdict_approved -> "masc/verification/verdict"
+    | Masc_domain.Verdict_rejected _ -> "masc/verification/rejected"
+  in
+  let detail_fields =
+    match verdict with
+    | Masc_domain.Verdict_approved -> [ "notes", `String notes ]
+    | Masc_domain.Verdict_rejected { reason } -> [ "reason", `String reason ]
+  in
+  `Assoc
+    (verification_verdict_fields
+       ~event_type
+       ~authority
+       ~task_id
+       ~verification_id
+       ~verdict
+     @ detail_fields
+     @ [ "timestamp", `Float timestamp ])
+
+let post_verdict_board
+      ~(authority : Masc_domain.completion_authority)
+      ~task_id
+      ~verification_id
+      ~(verdict : Masc_domain.completion_verdict)
+      ~content
+  =
+  match
+    Board_dispatch.create_post
+      ~author:(Masc_domain.completion_authority_actor authority)
+      ~content
       ~post_kind:Board.System_post
-      ~meta_json
+      ~meta_json:(verification_verdict_metadata ~authority ~task_id ~verification_id ~verdict)
       ~visibility:Board.Internal
       ~hearth:"verification"
       ()
-    with
-    | Ok _ -> ()
-    | Error e ->
-      Log.Task.error
-        ~keeper_name:task_id
-        "board post failed (task=%s vrf=%s): %s"
-        task_id verification_id (Board_types.show_board_error e)
-  in
-  Subscriptions.push_event_to_sessions (`Assoc [
-    ("type", `String "masc/verification/rejected");
-    ("task_id", `String task_id);
-    ("verification_id", `String verification_id);
-    ("verifier", `String verifier);
-    ("reason", `String reason);
-    ("timestamp", `Float (Time_compat.now ()));
-  ])
+  with
+  | Ok _ -> ()
+  | Error e ->
+    Log.Task.error
+      ~keeper_name:task_id
+      "board post failed (task=%s vrf=%s): %s"
+      task_id verification_id (Board_types.show_board_error e)
+
+let notify_approve_verification
+      ~task_id
+      ~(authority : Masc_domain.completion_authority)
+      ~verification_id
+      ~notes
+  =
+  post_verdict_board
+    ~authority
+    ~task_id
+    ~verification_id
+    ~verdict:Masc_domain.Verdict_approved
+    ~content:(Printf.sprintf "Approved task %s (vrf:%s)%s"
+                task_id
+                verification_id
+                (if notes = "" then "" else " — " ^ notes));
+  Subscriptions.push_event_to_sessions
+    (verdict_event_json
+       ~authority
+       ~task_id
+       ~verification_id
+       ~verdict:Masc_domain.Verdict_approved
+       ~notes
+       ~timestamp:(Time_compat.now ()))
+
+let notify_reject_verification
+      ~task_id
+      ~(authority : Masc_domain.completion_authority)
+      ~verification_id
+      ~reason
+  =
+  let verdict = Masc_domain.Verdict_rejected { reason } in
+  post_verdict_board
+    ~authority
+    ~task_id
+    ~verification_id
+    ~verdict
+    ~content:(Printf.sprintf "Rejected task %s (vrf:%s): %s"
+                task_id verification_id reason);
+  Subscriptions.push_event_to_sessions
+    (verdict_event_json
+       ~authority
+       ~task_id
+       ~verification_id
+       ~verdict
+       ~notes:""
+       ~timestamp:(Time_compat.now ()))
 
 let awaiting_verification_deadline
       ~(submitted_at : string)
@@ -318,9 +387,13 @@ let awaiting_verification_deadline
    With the verification sub-state folded into [task_status] (RFC-0220 §3.1),
    the illegal Todo+Pending drift is unrepresentable. An
    AwaitingVerification obligation remains in the live backlog until an
-   authenticated operator or typed judge commits a verdict. Long-waiting
+   authenticated operator or typed system-LLM judge commits a verdict. Long-waiting
    obligations are surfaced from the activity-event stream, not a poll-timer.
    PR-1 neutered [check_timeouts] to a no-op;
    RFC-0220 §11 PR-3 (this change) deleted the no-op, the
    [verification_timeout] server fork that spun on it, its interval knob,
    and the caller-less [Workspace.force_cancel_task_r]. *)
+
+module For_testing = struct
+  let verdict_event_json = verdict_event_json
+end

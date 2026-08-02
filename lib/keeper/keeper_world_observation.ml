@@ -28,6 +28,7 @@ type pending_board_event_kind =
   | External_attention
   | Goal_assigned
   | Goal_reconciliation_ready
+  | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
 
 type pending_board_event =
   { event_kind : pending_board_event_kind
@@ -61,6 +62,35 @@ let is_board_activity_event (event : pending_board_event) =
      event to the Scheduled Automation renderer and drop it from
      [board_activity_count]. *)
   | Goal_reconciliation_ready -> true
+  | Completion_authority_rejected _ -> false
+;;
+
+let is_scheduled_automation_event (event : pending_board_event) =
+  match event.event_kind with
+  | Schedule_due -> true
+  | Board_post_created
+  | Board_comment_added
+  | Board_reaction_changed _
+  | Fusion_completed
+  | Bg_completed
+  | External_attention
+  | Goal_assigned
+  | Goal_reconciliation_ready
+  | Completion_authority_rejected _ -> false
+;;
+
+let is_completion_authority_rejection_event (event : pending_board_event) =
+  match event.event_kind with
+  | Completion_authority_rejected _ -> true
+  | Board_post_created
+  | Board_comment_added
+  | Board_reaction_changed _
+  | Fusion_completed
+  | Bg_completed
+  | Schedule_due
+  | External_attention
+  | Goal_assigned
+  | Goal_reconciliation_ready -> false
 ;;
 
 type scheduled_automation_item =
@@ -114,6 +144,7 @@ type event_queue_trigger =
   | Scheduled_automation_stimulus
   | Connector_attention_stimulus
   | Hitl_resolved_stimulus
+  | Completion_authority_rejection_stimulus
   | Manual_compaction_stimulus
 
 type turn_reason = Keeper_world_observation_turn_types.turn_reason =
@@ -123,6 +154,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Bootstrap_stimulus_pending
   | Connector_attention_pending
   | Hitl_resolved_pending
+  | Completion_authority_rejection_pending
   | Manual_compaction_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
@@ -647,7 +679,7 @@ let pending_board_event_of_goal_reconciliation_ready
       short_preview
         ~max_len:fusion_result_preview_max_len
         (Printf.sprintf
-           "Task %s made every linked Task terminal for goal %s."
+           "Task %s made every linked Task terminal for goal %s. Re-read Goal and Task SSOT before choosing completion, blocking, or follow-up work."
            ready.gr_triggering_task_id
            ready.gr_goal_id)
   ; hearth = None
@@ -659,6 +691,39 @@ let pending_board_event_of_goal_reconciliation_ready
   ; new_external_since = 0
   ; latest_external_author = None
   ; latest_external_preview = None
+  }
+;;
+
+let pending_board_event_of_completion_authority_rejection
+      ~(arrived_at : float)
+      (rejection : Keeper_event_queue.completion_authority_rejection)
+  : pending_board_event
+  =
+  { event_kind = Completion_authority_rejected rejection
+  ; post_id = Keeper_event_queue.completion_authority_rejection_post_id rejection
+  ; author = Masc_domain.completion_authority_actor rejection.car_authority
+  ; title =
+      Printf.sprintf
+        "Completion evidence rejected for task %s"
+        rejection.car_task_id
+  ; preview =
+      short_preview
+        ~max_len:fusion_result_preview_max_len
+        (Printf.sprintf
+           "Task %s verification %s was rejected by the system completion authority. Follow-up reason: %s"
+           rejection.car_task_id
+           rejection.car_verification_id
+           rejection.car_reason)
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 1
+  ; latest_external_author =
+      Some (Masc_domain.completion_authority_actor rejection.car_authority)
+  ; latest_external_preview = Some (short_preview ~max_len:80 rejection.car_reason)
   }
 ;;
 
@@ -712,6 +777,12 @@ let pending_board_event_of_stimulus
             ~meta
             ~arrived_at:stimulus.arrived_at
             ready))
+  | Keeper_event_queue.Completion_authority_rejected rejection ->
+    Ok
+      (Some
+         (pending_board_event_of_completion_authority_rejection
+            ~arrived_at:stimulus.arrived_at
+            rejection))
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
@@ -1167,6 +1238,13 @@ let actionable_signal_present (observation : world_observation) =
 
 let has_pending_board_activity (observation : world_observation) =
   List.exists is_board_activity_event observation.pending_board_events
+
+let has_pending_completion_authority_rejection
+      (observation : world_observation)
+  =
+  List.exists
+    is_completion_authority_rejection_event
+    observation.pending_board_events
 ;;
 
 let keeper_cycle_decision
@@ -1204,6 +1282,26 @@ let keeper_cycle_decision
     ]
     |> List.filter_map Fun.id
     |> fun triggers -> triggers @ event_queue_reactive_triggers
+    |> fun triggers ->
+    if has_pending_completion_authority_rejection observation
+       && not
+            (List.exists
+               (function
+                 | Completion_authority_rejection_pending -> true
+                 | Mention_pending
+                 | Board_event_pending
+                 | Scope_message_pending
+                 | Bootstrap_stimulus_pending
+                 | Connector_attention_pending
+                 | Hitl_resolved_pending
+                 | Manual_compaction_pending
+                 | Scheduled_autonomous_turn
+                 | Scheduled_automation_due
+                 | Task_backlog _
+                 | Never_started -> false)
+               triggers)
+    then triggers @ [ Completion_authority_rejection_pending ]
+    else triggers
   in
   let blocked_channel =
     match reactive_triggers with

@@ -9,6 +9,7 @@ type invalid =
       (** An [AwaitingVerification] obligation is not claimable by any agent. *)
   | Verdict_authority_identity_required
   | Verdict_rejection_reason_required
+  | Verification_id_mismatch of { expected : string; actual : string }
   | Invalid_transition
 
 type decision =
@@ -46,24 +47,29 @@ val decide
   -> reason:string
   -> (decision, invalid) result
 
-(** A verdict decision plus the authority provenance the caller records. The
-    provenance is returned rather than embedded in [Done.notes], which is a
-    human-readable field no code parses. *)
+(** A verdict decision plus the typed authority provenance the caller records.
+    The authority is returned as a sum rather than reconstructed from a
+    free-form string, so a system-LLM judge or HITL operator cannot be
+    projected as a Keeper/verifier. The producer and verification id are
+    returned from the same [AwaitingVerification] snapshot, so downstream
+    projections do not need an empty-value fallback. *)
 type verdict_decision =
   { decision : decision
-  ; authority_kind : string
-  ; authority_actor : string
+  ; authority : Masc_domain.completion_authority
+  ; producer : string
+  ; verification_id : string
   }
 
 (** Terminal verdict on an [AwaitingVerification] obligation.
 
     [authority] carries provenance from a caller that authenticated an operator
-    or accepted a typed judge result. The type separates verdicts from agent
-    actions; it does not perform authentication itself. *)
+    or accepted a typed system-LLM judge result. The type separates verdicts
+    from Keeper actions; it does not perform authentication itself. *)
 val decide_verdict
   :  authority:Masc_domain.completion_authority
   -> verdict:Masc_domain.completion_verdict
   -> task_id:string
+  -> verification_id:string
   -> task_status:Masc_domain.task_status
   -> now:string
   -> notes:string

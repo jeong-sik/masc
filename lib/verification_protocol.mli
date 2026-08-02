@@ -53,20 +53,35 @@ val on_submit_for_verification :
 
 val notify_approve_verification :
   task_id:string ->
-  verifier:string ->
+  authority:Masc_domain.completion_authority ->
   verification_id:string ->
   notes:string ->
   unit
 (** [notify_approve_verification ...] emits the SSE
-    [masc/verification/verdict] event with [type=approved].
+    [masc/verification/verdict] event with [verdict=approved]. The [type]
+    field carries the event name, and [authority_kind]/[authority_actor]
+    carry typed provenance.
     State-free — no FSM mutation, no journal write. *)
 
 val notify_reject_verification :
   task_id:string ->
-  verifier:string ->
+  authority:Masc_domain.completion_authority ->
   verification_id:string ->
   reason:string ->
   unit
 (** [notify_reject_verification ...] emits the SSE
-    [masc/verification/verdict] event with [type=rejected].
+    [masc/verification/rejected] event with [verdict=rejected]. The [type]
+    field carries the event name, and [authority_kind]/[authority_actor]
+    carry typed provenance.
     State-free. *)
+
+module For_testing : sig
+  val verdict_event_json :
+    authority:Masc_domain.completion_authority ->
+    task_id:string ->
+    verification_id:string ->
+    verdict:Masc_domain.completion_verdict ->
+    notes:string ->
+    timestamp:float ->
+    Yojson.Safe.t
+end

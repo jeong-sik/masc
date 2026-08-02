@@ -87,51 +87,54 @@ let request_to_yojson req =
 
 let request_of_yojson = function
   | `Assoc fields ->
-      let get_string key =
-        match List.assoc_opt key fields with
-        | Some (`String s) -> Some s
-        | _ -> None
+      let* header =
+        Workspace_verification_store.request_header_of_yojson (`Assoc fields)
       in
-      let get_float key =
+      let required_field key =
         match List.assoc_opt key fields with
-        | Some (`Float f) -> Some f
-        | Some (`Int n) -> Some (Float.of_int n)
-        | _ -> None
+        | Some value -> Ok value
+        | None ->
+          Error
+            (Printf.sprintf
+               "verification request missing required field %s (object had keys: [%s])"
+               key
+               (String.concat ", " (List.map fst fields)))
       in
-      (match get_string "id", get_string "task_id", get_string "worker" with
-       | Some id, Some task_id, Some worker ->
-           let output = match List.assoc_opt "output" fields with
-             | Some j -> j
-             | None -> `Null
-           in
-           let criteria = match List.assoc_opt "criteria" fields with
-             | Some (`List l) ->
-                 List.filter_map (fun j ->
-                   match criterion_of_yojson j with
-                   | Ok c -> Some c
-                   | Error msg ->
-                     Log.Misc.warn "[Verification] dropping invalid criterion: %s" msg;
-                     None
-                 ) l
-             | _ -> []
-           in
-           let created_at = match get_float "created_at" with
-             | Some f -> f
-             | None -> Time_compat.now ()
-           in
-           Ok { id; task_id; output; criteria; worker; created_at }
-       | id_opt, task_opt, worker_opt ->
-           let missing =
-             List.filter_map
-               (fun (name, opt) -> if Option.is_none opt then Some name else None)
-               [ "id", id_opt; "task_id", task_opt; "worker", worker_opt ]
-           in
-           Error
-             (Printf.sprintf
-                "verification request missing required string field(s) \
-                 [%s] (object had keys: [%s])"
-                (String.concat ", " missing)
-                (String.concat ", " (List.map fst fields))))
+      let required_criteria () =
+        let* value = required_field "criteria" in
+        match value with
+        | `List values ->
+          let rec parse index = function
+            | [] -> Ok []
+            | value :: rest ->
+              let* criterion =
+                criterion_of_yojson value
+                |> Result.map_error (fun detail ->
+                       Printf.sprintf "criteria[%d]: %s" index detail)
+              in
+              let* criteria = parse (index + 1) rest in
+              Ok (criterion :: criteria)
+          in
+          (match parse 0 values with
+           | Ok criteria -> Ok criteria
+           | Error detail ->
+             Error (Printf.sprintf "verification request criteria: %s" detail))
+        | other ->
+          Error
+            (Printf.sprintf
+               "verification request field criteria must be a JSON array, got %s"
+               (Json_util.excerpt other))
+      in
+      let* output = required_field "output" in
+      let* criteria = required_criteria () in
+      Ok
+        { id = header.id
+        ; task_id = header.task_id
+        ; output
+        ; criteria
+        ; worker = header.worker
+        ; created_at = header.created_at
+        }
   | other ->
       Error
         (Printf.sprintf

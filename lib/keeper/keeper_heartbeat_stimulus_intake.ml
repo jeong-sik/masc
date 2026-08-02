@@ -65,7 +65,8 @@ let pending_board_event_of_stimulus ~meta_after_triage stim =
   | Keeper_event_queue.Hitl_resolved _
   | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Goal_assigned _
-  | Keeper_event_queue.Goal_reconciliation_ready _ ->
+  | Keeper_event_queue.Goal_reconciliation_ready _
+  | Keeper_event_queue.Completion_authority_rejected _ ->
     Keeper_world_observation.pending_board_event_of_stimulus
       ~meta:meta_after_triage
       stim
@@ -212,6 +213,8 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
        stimulus itself forces the keeper to re-run its cycle and proceed on its
        own state. *)
     None
+  | Keeper_event_queue.Completion_authority_rejected _ ->
+    Some Keeper_world_observation.Completion_authority_rejection_stimulus
 ;;
 
 let consume_single_heartbeat_stimulus
@@ -273,6 +276,14 @@ let consume_single_heartbeat_stimulus
          (keeper=%s)"
         ready.gr_goal_id
         ready.gr_triggering_task_id
+        meta_after_triage.name;
+      pending_board_events_of_stimulus_result ~meta_after_triage stim
+    | Keeper_event_queue.Completion_authority_rejected rejection ->
+      Log.Keeper.info
+        "turn entry: completion authority rejection delivered task_id=%s \
+         verification_id=%s (keeper=%s)"
+        rejection.car_task_id
+        rejection.car_verification_id
         meta_after_triage.name;
       pending_board_events_of_stimulus_result ~meta_after_triage stim
     | Keeper_event_queue.Manual_compaction_requested ->
@@ -361,7 +372,8 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Goal_assigned _
-  | Keeper_event_queue.Goal_reconciliation_ready _ ->
+  | Keeper_event_queue.Goal_reconciliation_ready _
+  | Keeper_event_queue.Completion_authority_rejected _ ->
     true
 ;;
 
@@ -483,7 +495,8 @@ let reconcile_spent_selection
   | Connector_attention _
   | Manual_compaction_requested
   | Goal_assigned _
-  | Goal_reconciliation_ready _ ->
+  | Goal_reconciliation_ready _
+  | Completion_authority_rejected _ ->
     Ok Selection_actionable
 ;;
 
@@ -517,7 +530,8 @@ let heartbeat_event_intake
       | Keeper_event_queue.Connector_attention _
       | Keeper_event_queue.Hitl_resolved _
       | Keeper_event_queue.Goal_assigned _
-      | Keeper_event_queue.Goal_reconciliation_ready _ ->
+      | Keeper_event_queue.Goal_reconciliation_ready _
+      | Keeper_event_queue.Completion_authority_rejected _ ->
         false
     in
     match select_pending_matching manual_compaction_ready with
@@ -601,7 +615,8 @@ let heartbeat_event_intake
             | Keeper_world_observation.Bg_completed
             | Keeper_world_observation.External_attention
             | Keeper_world_observation.Goal_assigned
-            | Keeper_world_observation.Goal_reconciliation_ready ->
+            | Keeper_world_observation.Goal_reconciliation_ready
+            | Keeper_world_observation.Completion_authority_rejected _ ->
               Log.Keeper.info
                 "turn entry: promoted queued observation post_id=%s keeper=%s"
                 event.Keeper_world_observation.post_id

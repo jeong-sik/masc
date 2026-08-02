@@ -31,6 +31,7 @@
   masc.config
   masc.keeper_registry
   masc.keeper_toml
+  masc.masc_types
   masc.tool_types
   masc.config_dir_resolver
   masc.fs_compat

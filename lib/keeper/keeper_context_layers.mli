@@ -19,6 +19,7 @@ type layer_id =
   | Namespace_state
   | Autonomous_trigger
   | Scheduled_automation
+  | Completion_authority
   | Pending_mentions
   | Scope_messages
   | Own_board_posts

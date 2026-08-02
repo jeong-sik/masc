@@ -1,14 +1,8 @@
 (* RFC-0109 Phase E regression guard.
 
-   Before Phase E, task-state verification applied a substring
-   classifier (`/pull/` / `commit:` / `branch:` / `file:` ...
-   token matching) inside the transition layer's
-   [verification_submission_evidence_refs]. Analysis-only tasks (no
-   contract, no handoff_context, plain prose notes) had no way to pass.
-
-   Phase E retired the substring filter. The Task LLM boundary now receives
-   every non-empty source value and decides whether prose is meaningful;
-   local placeholder vocabulary is not execution authority. *)
+   The transition layer does not decide whether evidence is sufficient. It
+   preserves explicitly typed producer refs and represents completion prose as
+   [note:] evidence; contract requirements are projected separately. *)
 
 module V = Workspace_task_verification
 
@@ -30,15 +24,14 @@ let dummy_task ?contract ?handoff_context () : Masc_domain.task =
   }
 
 let test_analysis_only_with_plain_notes_keeps_notes () =
-  (* Pre Phase-E: empty result because notes had no substring tokens.
-     Current: all non-empty notes reach the configured LLM. *)
+  (* Non-empty notes reach the configured LLM as an explicit narrative item. *)
   let task = dummy_task () in
   let refs =
     V.verification_submission_evidence_refs task ~notes:"investigated 24h log audit" None
   in
   Alcotest.(check (list string))
-    "plain prose notes survive Phase E"
-    [ "investigated 24h log audit" ]
+    "plain prose notes become typed narrative evidence"
+    [ "note:investigated 24h log audit" ]
     refs
 
 let test_analysis_only_with_empty_notes_returns_empty () =
@@ -49,11 +42,11 @@ let test_analysis_only_with_empty_notes_returns_empty () =
 let test_placeholder_like_notes_reach_llm_evidence () =
   let task = dummy_task () in
   let refs = V.verification_submission_evidence_refs task ~notes:"tbd" None in
-  Alcotest.(check (list string)) "tbd is preserved for LLM judgment" [ "tbd" ] refs;
+  Alcotest.(check (list string)) "tbd is preserved for LLM judgment" [ "note:tbd" ] refs;
   let refs2 = V.verification_submission_evidence_refs task ~notes:"  DRAFT  " None in
-  Alcotest.(check (list string)) "source whitespace is normalized only" [ "DRAFT" ] refs2
+  Alcotest.(check (list string)) "source whitespace is normalized only" [ "note:DRAFT" ] refs2
 
-let test_contracted_task_includes_contract_refs () =
+let test_contracted_task_keeps_requirements_out_of_submitted_refs () =
   let contract : Masc_domain.task_contract =
     { strict = false
     ; completion_contract = []
@@ -65,17 +58,13 @@ let test_contracted_task_includes_contract_refs () =
   in
   let task = dummy_task ~contract () in
   let refs = V.verification_submission_evidence_refs task ~notes:"" None in
-  Alcotest.(check bool)
-    "verify_gate_evidence included"
-    true
-    (List.mem "PR #18810 merged" refs);
-  Alcotest.(check bool)
-    "required_evidence included"
-    true
-    (List.mem "test_keeper_lifecycle PASS" refs)
+  Alcotest.(check (list string))
+    "contract requirements are not submitted evidence"
+    []
+    refs
 
-let test_handoff_context_evidence_refs_survive_plain_string () =
-  (* Every non-empty source value is preserved; the configured LLM judges its
+let test_handoff_context_evidence_refs_survive_typed () =
+  (* Typed producer refs are preserved; the configured LLM judges their
      evidentiary value. *)
   let handoff_context : Masc_domain.task_handoff_context =
     { summary = "investigated repeat failure"
@@ -83,7 +72,7 @@ let test_handoff_context_evidence_refs_survive_plain_string () =
     ; next_step = None
     ; failure_mode = None
     ; reclaim_policy = None
-    ; evidence_refs = [ "see retro"; "n/a"; "  " ]
+    ; evidence_refs = [ "note:see retro"; "note:n/a"; "  " ]
     ; updated_at = None
     ; updated_by = None
     }
@@ -91,14 +80,14 @@ let test_handoff_context_evidence_refs_survive_plain_string () =
   let task = dummy_task ~handoff_context () in
   let refs = V.verification_submission_evidence_refs task ~notes:"" None in
   Alcotest.(check bool)
-    "plain handoff evidence_ref survives" true
-    (List.mem "see retro" refs);
+    "typed handoff evidence_ref survives" true
+    (List.mem "note:see retro" refs);
   Alcotest.(check bool)
     "n/a preserved for LLM judgment" true
-    (List.mem "n/a" refs);
+    (List.mem "note:n/a" refs);
   Alcotest.(check bool)
     "non-empty summary survives" true
-    (List.mem "investigated repeat failure" refs)
+    (List.mem "note:investigated repeat failure" refs)
 
 let () =
   Alcotest.run
@@ -110,9 +99,9 @@ let () =
             test_analysis_only_with_empty_notes_returns_empty
         ; Alcotest.test_case "placeholder-like values reach LLM" `Quick
             test_placeholder_like_notes_reach_llm_evidence
-        ; Alcotest.test_case "contract refs included" `Quick
-            test_contracted_task_includes_contract_refs
-        ; Alcotest.test_case "handoff plain string survives" `Quick
-            test_handoff_context_evidence_refs_survive_plain_string
+        ; Alcotest.test_case "contract refs stay requirements" `Quick
+            test_contracted_task_keeps_requirements_out_of_submitted_refs
+        ; Alcotest.test_case "handoff typed evidence survives" `Quick
+            test_handoff_context_evidence_refs_survive_typed
         ] )
     ]

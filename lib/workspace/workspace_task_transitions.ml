@@ -16,6 +16,13 @@ type transition_outcome =
   ; noop : bool
   }
 
+type verification_submission =
+  { task : Masc_domain.task
+  ; assignee : string
+  ; verification_id : string
+  ; evidence_refs : string list
+  }
+
 let transition_task_outcome_r
       config
       ~agent_name
@@ -30,6 +37,61 @@ let transition_task_outcome_r
       ()
   : transition_outcome Masc_domain.masc_result
   =
+  (* The workspace API owns the task FSM, while persistence of the
+     verification request remains behind the neutral hook registry.  The
+     caller may provide an explicit adapter, but omitting it must still use
+     the installed runtime adapter; otherwise the FSM would create an
+     [AwaitingVerification] state with no request for the system LLM authority
+     to inspect. *)
+  let prepare_verification_request =
+    match prepare_verification_request with
+    | Some prepare -> Some prepare
+    | None ->
+      (match action with
+       | Masc_domain.Submit_for_verification ->
+         Some
+           (fun ~task ~assignee ~verification_id ~evidence_refs ->
+              (Atomic.get Workspace_hooks.verification_submit_request_fn)
+                config
+                ~task
+                ~assignee
+                ~verification_id
+                ~evidence_refs)
+       | Masc_domain.Claim
+       | Masc_domain.Start
+       | Masc_domain.Done_action
+       | Masc_domain.Cancel
+       | Masc_domain.Release -> None)
+  in
+  (* Compensation has the same defaulting rule.  Its result type is [unit],
+     so a failed cleanup is logged by the adapter but cannot hide the original
+     commit failure. *)
+  let compensate_verification_request =
+    match compensate_verification_request with
+    | Some compensate -> Some compensate
+    | None ->
+      (match action with
+       | Masc_domain.Submit_for_verification ->
+         Some
+           (fun ~verification_id ->
+              match
+                (Atomic.get Workspace_hooks.verification_delete_request_fn)
+                  config
+                  ~verification_id
+              with
+              | Ok () -> ()
+              | Error detail ->
+                Log.TaskState.error
+                  "verification request compensation degraded task_id=%s verification_id=%s detail=%s"
+                  task_id
+                  verification_id
+                  detail)
+       | Masc_domain.Claim
+       | Masc_domain.Start
+       | Masc_domain.Done_action
+       | Masc_domain.Cancel
+       | Masc_domain.Release -> None)
+  in
   let open Result.Syntax in
   let* () =
     if not (is_initialized config)
@@ -43,7 +105,9 @@ let transition_task_outcome_r
     | Ok _, Ok _ -> Ok ()
   in
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  with_file_lock_r config backlog_path (fun () ->
+  let committed_verification_submission = ref None in
+  let result =
+    with_file_lock_r config backlog_path (fun () ->
     try
       match read_backlog_r config with
       | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
@@ -136,6 +200,17 @@ let transition_task_outcome_r
                  (Masc_domain.Task_error.InvalidState
                     "a completion verdict requires a non-empty authenticated \
                      authority identity"))
+          | Error
+              (Workspace_task_lifecycle.Verification_id_mismatch
+                 { expected; actual }) ->
+            Error
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    (Printf.sprintf
+                       "Task %s verification id mismatch (expected=%s current=%s)"
+                       task_id
+                       expected
+                       actual)))
           | Error Workspace_task_lifecycle.Invalid_transition ->
             let assignee_hint =
               match task_assignee_of_status task.task_status with
@@ -166,6 +241,19 @@ let transition_task_outcome_r
         in
         let new_status = decision.Workspace_task_lifecycle.new_status in
         let set_current = decision.set_current in
+        let verification_submission_evidence_refs =
+          match action with
+          | Masc_domain.Submit_for_verification ->
+            Workspace_task_verification.verification_submission_evidence_refs
+              task
+              ~notes
+              handoff_context
+          | Masc_domain.Claim
+          | Masc_domain.Start
+          | Masc_domain.Done_action
+          | Masc_domain.Cancel
+          | Masc_domain.Release -> []
+        in
         let* () =
           match action with
           | Masc_domain.Submit_for_verification
@@ -192,13 +280,16 @@ let transition_task_outcome_r
             (* Collect evidence refs as observability metadata for
                the verifier request output. Empty list is valid for
                analysis-only and no-contract tasks. *)
-            let evidence_refs =
-              Workspace_task_verification.verification_submission_evidence_refs task ~notes handoff_context
-            in
             (match prepare_opt with
              | None -> Ok ()
              | Some prepare ->
-               (match prepare ~task ~assignee ~verification_id ~evidence_refs with
+               (match
+                  prepare
+                    ~task
+                    ~assignee
+                    ~verification_id
+                    ~evidence_refs:verification_submission_evidence_refs
+                with
                 | Ok () -> Ok ()
                 | Error e ->
                   Error
@@ -305,6 +396,28 @@ let transition_task_outcome_r
                  | Masc_domain.Cancel
                  | Masc_domain.Release -> ()));
              raise exn);
+          (match action, new_status with
+           | ( Masc_domain.Submit_for_verification
+             , Masc_domain.AwaitingVerification { assignee; verification_id; _ } ) ->
+             committed_verification_submission :=
+               Some
+                 { task = { task with task_status = new_status }
+                 ; assignee
+                 ; verification_id
+                 ; evidence_refs = verification_submission_evidence_refs
+                 }
+           | ( ( Masc_domain.Claim
+               | Masc_domain.Start
+               | Masc_domain.Done_action
+               | Masc_domain.Cancel
+               | Masc_domain.Release
+               | Masc_domain.Submit_for_verification )
+             , ( Masc_domain.Todo
+               | Masc_domain.Claimed _
+               | Masc_domain.InProgress _
+               | Masc_domain.Done _
+               | Masc_domain.AwaitingVerification _
+               | Masc_domain.Cancelled _ ) ) -> ());
           (* RFC-0221 §3.3: clear stale agent task-cache entries AFTER the
              commit so agents that cache the task don't emit stale broadcasts
              referencing the old status. *)
@@ -390,6 +503,28 @@ let transition_task_outcome_r
                ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Submit_for_verification)
                ~payload);
+             (match new_status with
+              | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
+                (try
+                   (Atomic.get Workspace_hooks.verification_submitted_fn)
+                     config
+                     ~task:{ task with task_status = new_status }
+                     ~assignee
+                     ~verification_id
+                 with
+                 | Eio.Cancel.Cancelled _ as exn -> raise exn
+                 | exn ->
+                   Log.TaskState.error
+                     "verification authority scheduling degraded after submit commit \
+                      task_id=%s verification_id=%s detail=%s"
+                     task_id
+                     verification_id
+                     (Printexc.to_string exn))
+              | Masc_domain.Todo
+              | Masc_domain.Claimed _
+              | Masc_domain.InProgress _
+              | Masc_domain.Done _
+              | Masc_domain.Cancelled _ -> ());
           (* RFC-0323 G-3: completion side effects key off the RESULT (Done), not
              the action — a verdict-produced completion arrives through
              [decide_verdict] and never as an agent action, so keying off the
@@ -492,7 +627,27 @@ let transition_task_outcome_r
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
       Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e))))
-  |> Workspace_task_verification.flatten_lock_result
+    |> Workspace_task_verification.flatten_lock_result
+  in
+  (match !committed_verification_submission with
+   | None -> ()
+   | Some { task; assignee; verification_id; evidence_refs } ->
+     (try
+        (Atomic.get Workspace_hooks.verification_notify_submit_fn)
+          config
+          ~task
+          ~assignee
+          ~verification_id
+          ~evidence_refs
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Log.TaskState.error
+          "verification submit notification degraded after commit task_id=%s verification_id=%s detail=%s"
+          task_id
+          verification_id
+          (Printexc.to_string exn)));
+  result
 ;;
 
 let transition_task_r
@@ -538,6 +693,7 @@ let commit_verdict_r
       ~(authority : Masc_domain.completion_authority)
       ~(verdict : Masc_domain.completion_verdict)
       ~task_id
+      ~verification_id
       ?(notes = "")
       ()
   : transition_outcome Masc_domain.masc_result
@@ -571,6 +727,7 @@ let commit_verdict_r
                  ~authority
                  ~verdict
                  ~task_id
+                 ~verification_id
                  ~task_status:task.task_status
                  ~now
                  ~notes
@@ -586,8 +743,19 @@ let commit_verdict_r
                Error
                  (Masc_domain.Task
                     (Masc_domain.Task_error.InvalidState
-                       "a completion verdict requires a non-empty authenticated \
+                        "a completion verdict requires a non-empty authenticated \
                         authority identity"))
+             | Error
+                 (Workspace_task_lifecycle.Verification_id_mismatch
+                    { expected; actual }) ->
+               Error
+                 (Masc_domain.Task
+                    (Masc_domain.Task_error.InvalidState
+                       (Printf.sprintf
+                          "Task %s verification id mismatch (expected=%s current=%s)"
+                          task_id
+                          expected
+                          actual)))
              | Error Workspace_task_lifecycle.Verification_pending_verdict
              | Error Workspace_task_lifecycle.Verification_submission_required
              | Error Workspace_task_lifecycle.Invalid_transition ->
@@ -601,20 +769,16 @@ let commit_verdict_r
                           (task_status_to_string task.task_status))))
            in
            let new_status = decided.Workspace_task_lifecycle.decision.new_status in
-           let producer, verification_id =
-             match task.task_status with
-             | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
-               assignee, verification_id
-             | Masc_domain.Todo
-             | Masc_domain.Claimed _
-             | Masc_domain.InProgress _
-             | Masc_domain.Done _
-             | Masc_domain.Cancelled _ ->
-               (* Unreachable: [decide_verdict] admits only AwaitingVerification.
-                  Kept exhaustive so a new status constructor forces a decision
-                  here instead of falling into a default. *)
-               "", ""
+           let authority = decided.Workspace_task_lifecycle.authority in
+           let authority_kind = Masc_domain.completion_authority_kind authority in
+           let authority_actor = Masc_domain.completion_authority_actor authority in
+           let authority_actor_kind =
+             match authority with
+             | Masc_domain.Human_operator _ -> Workspace_task_classify.Operator
+             | Masc_domain.System_llm_agent _ -> Workspace_task_classify.System
            in
+           let producer = decided.Workspace_task_lifecycle.producer in
+           let verification_id = decided.Workspace_task_lifecycle.verification_id in
            let new_backlog =
              { tasks =
                  List.map
@@ -636,7 +800,7 @@ let commit_verdict_r
                  "completion verdict committed but post-commit projection failed \
                   task_id=%s authority=%s label=%s detail=%s"
                  task_id
-                 decided.Workspace_task_lifecycle.authority_actor
+                 authority_actor
                  label
                  (Printexc.to_string exn)
            in
@@ -710,19 +874,33 @@ let commit_verdict_r
            in
            let authority_fields =
              [ "task_id", `String task_id
-             ; "authority_kind", `String decided.Workspace_task_lifecycle.authority_kind
-             ; "authority_actor", `String decided.Workspace_task_lifecycle.authority_actor
+             ; "authority_kind", `String authority_kind
+             ; "authority_actor", `String authority_actor
              ; "producer", `String producer
              ; "verification_id", `String verification_id
              ]
            in
+           (* The task status deliberately stays a small lifecycle sum: a
+              rejection returns the producer to [InProgress]. Keep the
+              verdict and its reason in every durable/observable projection so
+              a failed Board, SSE, or producer-wake projection cannot erase
+              what the completion authority decided. *)
+           let verdict_fields =
+             match verdict with
+             | Masc_domain.Verdict_approved ->
+               [ "verdict", `String "approved" ]
+             | Masc_domain.Verdict_rejected { reason } ->
+               [ "verdict", `String "rejected"; "reason", `String reason ]
+           in
+           let completion_verdict_fields = authority_fields @ verdict_fields in
            run_post_commit "task_activity" (fun () ->
              emit_task_activity
                config
-               ~agent_name:decided.Workspace_task_lifecycle.authority_actor
+               ~actor_kind:authority_actor_kind
+               ~agent_name:authority_actor
                ~task_id
                ~kind:(Event_kind.Task.to_string event_kind)
-               ~payload:(`Assoc authority_fields));
+               ~payload:(`Assoc completion_verdict_fields));
            run_post_commit "verification_notification" (fun () ->
              let decision =
                match verdict with
@@ -731,18 +909,20 @@ let commit_verdict_r
              in
              (Atomic.get Workspace_hooks.verification_notify_verdict_fn)
                ~task_id
-               ~verifier:decided.Workspace_task_lifecycle.authority_actor
+               ~authority
                ~verification_id
                ~decision);
            run_post_commit "task_transition_subscription" (fun () ->
              (Atomic.get Workspace_hooks.push_task_event_fn)
                ~event_type:"masc/task_transition"
                ~details:
-                 [ "task_id", `String task_id
-                 ; "action", `String "completion_verdict"
-                 ; ( "authority_actor"
-                   , `String decided.Workspace_task_lifecycle.authority_actor )
-                 ]);
+                 ([ "task_id", `String task_id
+                  ; "action", `String "completion_verdict"
+                  ; "authority_kind", `String authority_kind
+                  ; "authority_actor", `String authority_actor
+                  ; "verification_id", `String verification_id
+                  ]
+                  @ verdict_fields));
            (* Authority provenance is recorded here as structured fields. It is
               deliberately NOT written into [Done.notes]: the previous code put
               "Verified by <keeper> (vrf:<id>)" in that human-readable string,
@@ -755,7 +935,7 @@ let commit_verdict_r
                   :: ("from_status", `String (task_status_to_string task.task_status))
                   :: ("to_status", `String (task_status_to_string new_status))
                   :: ("ts", `String now)
-                  :: authority_fields)));
+                  :: completion_verdict_fields)));
            Ok
              { message =
                  Printf.sprintf
@@ -763,7 +943,7 @@ let commit_verdict_r
                    task_id
                    (task_status_to_string task.task_status)
                    (task_status_to_string new_status)
-                   decided.Workspace_task_lifecycle.authority_kind
+                   authority_kind
              ; noop = false
              })
     with

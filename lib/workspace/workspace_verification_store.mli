@@ -39,6 +39,9 @@ type submitted_evidence_access =
       ; reason : string
       }
 
+val request_header_of_yojson :
+  Yojson.Safe.t -> (request_header, string) result
+
 val submitted_evidence_access_to_yojson :
   submitted_evidence_access -> Yojson.Safe.t
 val evidence_read_failure_to_string : evidence_read_failure -> string

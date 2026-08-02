@@ -16,6 +16,7 @@ type stimulus_kind =
   | Goal_assigned
       (* RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
   | Goal_reconciliation_ready
+  | Completion_authority_rejected
 
 type reaction_kind =
   | Turn_started
@@ -43,6 +44,7 @@ let stimulus_kind_to_string = function
   | Manual_compaction -> "manual_compaction"
   | Goal_assigned -> "goal_assigned"
   | Goal_reconciliation_ready -> "goal_reconciliation_ready"
+  | Completion_authority_rejected -> "completion_authority_rejected"
 ;;
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
@@ -60,6 +62,7 @@ let stimulus_kind_of_string = function
   | "manual_compaction" -> Some Manual_compaction
   | "goal_assigned" -> Some Goal_assigned
   | "goal_reconciliation_ready" -> Some Goal_reconciliation_ready
+  | "completion_authority_rejected" -> Some Completion_authority_rejected
   | _ -> None
 ;;
 
@@ -102,6 +105,8 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Goal_assigned _ -> Goal_assigned
   | Keeper_event_queue.Goal_reconciliation_ready _ ->
     Goal_reconciliation_ready
+  | Keeper_event_queue.Completion_authority_rejected _ ->
+    Completion_authority_rejected
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -111,6 +116,8 @@ let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Board_signal _, Board_signal ->
     board_stimulus_id ~post_id:stimulus.post_id
   | Keeper_event_queue.Schedule_due _, Schedule_due -> stimulus.post_id
+  | Keeper_event_queue.Completion_authority_rejected _, Completion_authority_rejected ->
+    stimulus.post_id
   | _, kind ->
     digest_id
       "stimulus"
@@ -212,6 +219,11 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "goal_reconciliation_ready goal_id=%s triggering_task_id=%s"
       ready.gr_goal_id
       ready.gr_triggering_task_id
+  | Keeper_event_queue.Completion_authority_rejected rejection ->
+    Printf.sprintf
+      "completion_authority_rejected task_id=%s verification_id=%s"
+      rejection.car_task_id
+      rejection.car_verification_id
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
@@ -231,6 +243,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Manual_compaction_requested
     | Keeper_event_queue.Goal_assigned _
     | Keeper_event_queue.Goal_reconciliation_ready _ -> None
+    | Keeper_event_queue.Completion_authority_rejected _ -> None
   in
   `Assoc
     (base_fields
@@ -945,7 +958,10 @@ let decode_current_row ~keeper_name row =
       | Board_signal, (Some _ | None)
       | ( Bootstrap | Fusion_completed | Bg_completed | Schedule_due
         | Connector_attention | Hitl_resolved
-        | Manual_compaction | Goal_assigned | Goal_reconciliation_ready ),
+        | Manual_compaction
+        | Goal_assigned
+        | Goal_reconciliation_ready
+        | Completion_authority_rejected ),
         _ -> Ok ()
     in
     let expected_event_id = digest_id "krl" (stimulus_id ^ "|stimulus") in
@@ -1330,7 +1346,10 @@ let board_stimulus_token metadata stimulus_kind =
     Option.map (fun timestamp -> timestamp, post_id) updated_at
   | Bootstrap | Fusion_completed | Bg_completed | Schedule_due
   | Connector_attention | Hitl_resolved
-  | Manual_compaction | Goal_assigned | Goal_reconciliation_ready -> None
+  | Manual_compaction
+  | Goal_assigned
+  | Goal_reconciliation_ready
+  | Completion_authority_rejected -> None
 ;;
 
 let summarize_rows ~keeper_name ~limit rows =

@@ -16,6 +16,9 @@ type event_queue_trigger =
           waited on; when the original turn already ended, the wake has no live
           tool call to resume and must steer the keeper back to the originating
           conversation. *)
+  | Completion_authority_rejection_stimulus
+      (** A system LLM completion authority rejected evidence submitted by this
+          Keeper; this is a distinct reactive input, not Board activity. *)
   | Manual_compaction_stimulus
 
 type turn_reason =
@@ -25,6 +28,7 @@ type turn_reason =
   | Bootstrap_stimulus_pending
   | Connector_attention_pending
   | Hitl_resolved_pending
+  | Completion_authority_rejection_pending
   | Manual_compaction_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due

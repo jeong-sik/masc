@@ -32,8 +32,9 @@ You have access to MASC MCP tools via mcp__masc__* prefix.
    - action: "submit_for_verification"
    - notes: completion summary
 
-   An authenticated human operator or typed auto judge then issues the verdict
-   outside the agent task-action surface. No agent claims or approves the
+   An authenticated human operator or the application-owned system LLM agent
+   then issues the verdict outside the agent task-action surface. No Keeper
+   claims or approves the
    pending obligation. Strict-contract tasks reject direct completion; only
    non-strict tasks may use action: "done".
 

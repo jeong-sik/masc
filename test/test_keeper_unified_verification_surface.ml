@@ -50,6 +50,25 @@ let sample_scheduled_wake : WO.pending_board_event =
   }
 ;;
 
+let sample_completion_authority_rejection : WO.pending_board_event =
+  let rejection : Keeper_event_queue.completion_authority_rejection =
+    { car_task_id = "task-rejected"
+    ; car_verification_id = "verification-rejected"
+    ; car_reason = "evidence omitted the required deployment proof"
+    ; car_authority = Masc_domain.System_llm_agent { agent_run_id = "system-agent-test" }
+    }
+  in
+  { sample_board_event with
+    event_kind = WO.Completion_authority_rejected rejection
+  ; post_id = "completion-authority-rejected:task-rejected:verification-rejected"
+  ; author = "system-agent-test"
+  ; title = "Completion evidence rejected for task task-rejected"
+  ; preview =
+      "Task task-rejected verification verification-rejected was rejected by the system completion authority"
+  ; post_kind = Masc.Board.System_post
+  }
+;;
+
 let scheduled_automation_observation : WO.scheduled_automation_observation =
   { active_count = 1
   ; due_ready_count = 1
@@ -400,6 +419,41 @@ let test_scheduled_wake_preserves_complete_message () =
   check string "scheduled work message is not truncated" exact_message event.preview
 ;;
 
+let test_completion_authority_rejection_has_own_prompt_layer () =
+  Masc_test_deps.init_keeper_tool_registry ();
+  init_runtime_default_for_tests ();
+  let obs =
+    { base_observation with
+      pending_board_events =
+        [ sample_board_event; sample_completion_authority_rejection ]
+    }
+  in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    build_prompt ~meta:minimal_meta obs
+  in
+  check bool "system authority section is present" true
+    (contains_sub "### Completion Authority Decisions (1)" world_state);
+  check bool "typed rejection reason is preserved" true
+    (contains_sub "evidence omitted the required deployment proof" world_state);
+  check bool "system LLM provenance is preserved" true
+    (contains_sub "authority_kind=system_llm_agent" world_state);
+  check bool "rejection is not rendered as Board activity" false
+    (contains_sub
+       sample_completion_authority_rejection.post_id
+       (match
+          String.split_on_char '#' world_state
+          |> List.find_opt (contains_sub "Board Activity")
+        with
+        | Some section -> section
+        | None -> ""));
+  check bool "rejection is not rendered as scheduled work" false
+    (contains_sub "### Scheduled Wake" world_state);
+  check bool "rejection does not count as Board activity" false
+    (WO.has_pending_board_activity
+       { base_observation with
+         pending_board_events = [ sample_completion_authority_rejection ] })
+;;
+
 (* Feedback-loop invariant (#25193): the observation frame must ride the
    ephemeral [world_state] channel, never the persisted [user_message].
    Under the pre-split behaviour (frame concatenated into the user message)
@@ -566,6 +620,9 @@ let () =
           test_case
             "prompt: scheduled wake preserves complete message"
             `Quick test_scheduled_wake_preserves_complete_message;
+          test_case
+            "prompt: completion authority rejection has its own layer"
+            `Quick test_completion_authority_rejection_has_own_prompt_layer;
           test_case
             "prompt: own recent board posts render as neutral observation rows"
             `Quick test_own_recent_board_posts_render_in_world_state;

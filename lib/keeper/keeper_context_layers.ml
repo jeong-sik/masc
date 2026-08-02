@@ -7,6 +7,7 @@ type layer_id =
   | Namespace_state
   | Autonomous_trigger
   | Scheduled_automation
+  | Completion_authority
   | Pending_mentions
   | Scope_messages
   | Own_board_posts
@@ -26,6 +27,7 @@ let ordered =
   ; Namespace_state
   ; Autonomous_trigger
   ; Scheduled_automation
+  ; Completion_authority
   ; Pending_mentions
   ; Scope_messages
   ; Own_board_posts
@@ -43,10 +45,11 @@ let order_index = function
   | Namespace_state -> 3
   | Autonomous_trigger -> 4
   | Scheduled_automation -> 5
-  | Pending_mentions -> 6
-  | Scope_messages -> 7
-  | Own_board_posts -> 8
-  | Board_activity -> 9
+  | Completion_authority -> 6
+  | Pending_mentions -> 7
+  | Scope_messages -> 8
+  | Own_board_posts -> 9
+  | Board_activity -> 10
 ;;
 
 let assemble ~content_of =

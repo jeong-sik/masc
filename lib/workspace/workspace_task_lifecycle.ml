@@ -9,6 +9,7 @@ type invalid =
       (** An [AwaitingVerification] obligation is not claimable by any agent. *)
   | Verdict_authority_identity_required
   | Verdict_rejection_reason_required
+  | Verification_id_mismatch of { expected : string; actual : string }
   | Invalid_transition
 
 type decision =
@@ -143,54 +144,69 @@ let decide
     Error Invalid_transition
 ;;
 
-(** A verdict decision plus the authority provenance its caller must record.
-    Returning the provenance keeps it out of [Done.notes]: the previous code
-    wrote ["Verified by <keeper> (vrf:<id>)"] into the notes string, which made a
-    human-readable field the only record of who approved — and nothing parsed
-    it. *)
+(** A verdict decision plus the typed authority provenance its caller must
+    record. Keeping the sum here prevents a system-LLM or HITL authority from
+    being reconstructed later from a free-form Keeper/verifier string. The
+    producer and verification id come from the same awaiting snapshot. *)
 type verdict_decision =
   { decision : decision
-  ; authority_kind : string
-  ; authority_actor : string
+  ; authority : Masc_domain.completion_authority
+  ; producer : string
+  ; verification_id : string
   }
 
 (** Terminal verdict on an [AwaitingVerification] obligation.
 
     Deliberately not an arm of {!decide}: a verdict is not an agent action. The
     [authority] parameter carries provenance from an authenticated operator or
-    typed judge boundary. The sum keeps verdicts out of the agent action FSM;
+    typed system-LLM judge boundary. The sum keeps verdicts out of the Keeper
+    action FSM;
     authentication remains the caller's responsibility. *)
 let decide_verdict
       ~(authority : Masc_domain.completion_authority)
       ~(verdict : Masc_domain.completion_verdict)
       ~task_id
+      ~verification_id:expected_verification_id
       ~(task_status : Masc_domain.task_status)
       ~now
       ~notes
   =
-  let provenance decision =
+  let provenance ~producer ~verification_id decision =
     if not (Masc_domain.completion_authority_has_identity authority)
     then Error Verdict_authority_identity_required
     else
       Ok
         { decision
-        ; authority_kind = Masc_domain.completion_authority_kind authority
-        ; authority_actor = Masc_domain.completion_authority_actor authority
+        ; authority
+        ; producer
+        ; verification_id
         }
   in
   match task_status with
-  | Masc_domain.AwaitingVerification { assignee; _ } ->
-    (match verdict with
-     | Masc_domain.Verdict_approved ->
-       provenance { new_status = done_status ~assignee ~now ~notes; set_current = None }
-     | Masc_domain.Verdict_rejected { reason } ->
-       if String.equal (String.trim reason) ""
-       then Error Verdict_rejection_reason_required
-       else
+  | Masc_domain.AwaitingVerification
+      { assignee; verification_id = actual_verification_id; _ } ->
+    if not (String.equal expected_verification_id actual_verification_id)
+    then
+      Error
+        (Verification_id_mismatch
+           { expected = expected_verification_id; actual = actual_verification_id })
+    else
+      (match verdict with
+       | Masc_domain.Verdict_approved ->
          provenance
-           { new_status = Masc_domain.InProgress { assignee; started_at = now }
-           ; set_current = Some task_id
-           })
+           ~producer:assignee
+           ~verification_id:actual_verification_id
+           { new_status = done_status ~assignee ~now ~notes; set_current = None }
+       | Masc_domain.Verdict_rejected { reason } ->
+         if String.equal (String.trim reason) ""
+         then Error Verdict_rejection_reason_required
+         else
+           provenance
+             ~producer:assignee
+             ~verification_id:actual_verification_id
+             { new_status = Masc_domain.InProgress { assignee; started_at = now }
+             ; set_current = Some task_id
+             })
   | Masc_domain.Todo
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _

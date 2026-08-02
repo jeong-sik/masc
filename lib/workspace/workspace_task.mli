@@ -56,6 +56,7 @@ val commit_verdict_r :
   authority:Masc_domain.completion_authority ->
   verdict:Masc_domain.completion_verdict ->
   task_id:string ->
+  verification_id:string ->
   ?notes:string ->
   unit ->
   transition_outcome Masc_domain.masc_result

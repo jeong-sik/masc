@@ -6,7 +6,9 @@
 
     @since Unified Keeper Loop *)
 
-(** Structured board activity delivered to keepers without routing heuristics. *)
+(** Structured event observations delivered to keepers without routing
+    heuristics. The historical carrier includes Board, schedule, goal, and
+    completion-authority records; typed partition helpers decide placement. *)
 type board_reaction_event = {
   target_type : Board_types.reaction_target_type;
   target_id : string;
@@ -29,6 +31,8 @@ type pending_board_event_kind =
   | Goal_reconciliation_ready
       (** All linked Tasks are terminal; the Keeper must re-read SSOT and
           choose completion, blocking, or follow-up work. *)
+  | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
+      (** A system LLM completion authority rejected this Keeper's evidence. *)
 
 type pending_board_event = {
   event_kind : pending_board_event_kind;
@@ -51,16 +55,16 @@ type pending_board_event = {
   (** Preview of the most recent external comment content. *)
 }
 
-(** [false] only for a scheduled-work carrier that shares the historical
-    observation container but must not be projected as Board activity.
+(** [false] for a scheduled-work or system-authority carrier that shares the
+    historical observation container but must not be projected as Board activity.
 
     This partition decides prompt placement, contributes to turn admission,
-    and feeds the classifier. {!Keeper_unified_prompt} renders the [false]
-    events under Scheduled Automation and the [true] events under Board
-    Activity. {!Keeper_contract_classifier} counts only the [true] ones into
-    [board_activity_count]; classifying one event [false] yields
-    [No_actionable_signal] only when there is no claimable task or other
-    [true] board event.
+    and feeds the classifier. {!Keeper_unified_prompt} renders only
+    [is_scheduled_automation_event] events under Scheduled Automation,
+    [is_completion_authority_rejection_event] events under their own completion
+    authority layer, and the [true] events under Board Activity.
+    {!Keeper_contract_classifier} counts only the [true] ones into
+    [board_activity_count].
 
     Admission depends on the event kind. A consumed [Schedule_due] stimulus
     carries its own trigger:
@@ -73,9 +77,12 @@ type pending_board_event = {
     removes [Board_event_pending] and suppresses its intended reactive turn.
 
     A new event kind placed on the wrong side compiles cleanly and fails
-    silently. Classify by whether the event carries scheduled-work dispatch,
-    and pin the answer in a test. *)
+    silently. Classify by its source contract and pin the answer in a test. *)
 val is_board_activity_event : pending_board_event -> bool
+
+val is_scheduled_automation_event : pending_board_event -> bool
+
+val is_completion_authority_rejection_event : pending_board_event -> bool
 
 (** Read-only projection of one schedule row that needs keeper attention. *)
 type scheduled_automation_item = {
@@ -103,7 +110,9 @@ type world_observation = {
   (** Unacknowledged mention/scope rows in durable source order. *)
 
   pending_board_events : pending_board_event list;
-  (** Structured board events needing triage. *)
+  (** Structured event observations needing triage. The field name is retained
+      as the existing world-observation carrier; event kinds remain typed and
+      are partitioned before prompt rendering. *)
 
   idle_seconds : int;
   (** Seconds since last keeper activity (turn or scheduled autonomous cycle). *)
@@ -160,6 +169,7 @@ type event_queue_trigger =
   | Scheduled_automation_stimulus
   | Connector_attention_stimulus
   | Hitl_resolved_stimulus
+  | Completion_authority_rejection_stimulus
   | Manual_compaction_stimulus
 
 (** Typed reason for running a keeper cycle. Each variant corresponds to
@@ -171,6 +181,7 @@ type turn_reason =
   | Bootstrap_stimulus_pending
   | Connector_attention_pending
   | Hitl_resolved_pending
+  | Completion_authority_rejection_pending
   | Manual_compaction_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due

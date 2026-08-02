@@ -75,10 +75,12 @@ val all_task_actions : task_action list
 val valid_task_action_strings : string list
 
 (** Verdict provenance. Constructors do not authenticate their string payload;
-    a trusted operator or judge boundary must construct the value. *)
+    a trusted operator or the system LLM agent boundary must construct the
+    value. The system LLM agent is not a Keeper and does not participate in
+    the Keeper task-action or lifecycle surfaces. *)
 type completion_authority =
   | Human_operator of { operator_id : string }
-  | Auto_judge of { judge_run_id : string }
+  | System_llm_agent of { agent_run_id : string }
 [@@deriving show]
 
 type completion_verdict =

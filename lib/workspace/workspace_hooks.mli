@@ -144,6 +144,9 @@ val task_terminal_committed_fn :
    task_id:string ->
    task_terminal_delivery) Atomic.t
 
+(** Persists the immutable verification request used by the system LLM
+    completion-authority lane. The default returns an explicit not-installed
+    error until the runtime fills it at boot. *)
 val verification_submit_request_fn :
   (Workspace_utils_backend_setup.config ->
    task:Masc_domain.task ->
@@ -154,12 +157,15 @@ val verification_submit_request_fn :
 
 (** RFC-0221 §3.1: compensation hook — delete a verification record whose
     task_status commit failed, so the record store and [task_status] never
-    disagree. Default no-op until the runtime fills it at boot. *)
+    disagree. The default returns an explicit not-installed error until the
+    runtime fills it at boot. *)
 val verification_delete_request_fn :
   (Workspace_utils_backend_setup.config ->
    verification_id:string ->
    (unit, string) result) Atomic.t
 
+(** Publishes the submitted-verification notification after persistence. A
+    missing runtime adapter is logged explicitly by the default. *)
 val verification_notify_submit_fn :
   (Workspace_utils_backend_setup.config ->
    task:Masc_domain.task ->
@@ -168,9 +174,22 @@ val verification_notify_submit_fn :
    evidence_refs:string list ->
    unit) Atomic.t
 
+(** Notify the system LLM completion-authority lane after the task status and
+    verification request have both committed. The callback must not be a
+    Keeper wake-up or a Keeper task action; it only schedules the typed
+    out-of-band authority review. *)
+val verification_submitted_fn :
+  (Workspace_utils_backend_setup.config ->
+   task:Masc_domain.task ->
+   assignee:string ->
+   verification_id:string ->
+   unit) Atomic.t
+
+(** Publishes the completion-verdict notification after the task status
+    commit. A missing runtime adapter is logged explicitly by the default. *)
 val verification_notify_verdict_fn :
   (task_id:string ->
-   verifier:string ->
+   authority:Masc_domain.completion_authority ->
    verification_id:string ->
    decision:[ `Approve of string | `Reject of string ] ->
    unit) Atomic.t

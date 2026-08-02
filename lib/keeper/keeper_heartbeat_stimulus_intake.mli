@@ -58,6 +58,12 @@ type event_queue_intake_error =
   | Transient_board_read of
       Keeper_world_observation_board_signal.board_unavailable
 
+(** Map one durable event-queue payload to its typed turn trigger. A payload
+    with no dedicated trigger returns [None]; completion-authority rejection
+    has its own trigger and turn reason. *)
+val event_queue_trigger_of_stimulus :
+  Keeper_event_queue.stimulus -> Keeper_world_observation.event_queue_trigger option
+
 val event_queue_intake_error_to_string : event_queue_intake_error -> string
 val event_queue_intake_error_reason_label : event_queue_intake_error -> string
 

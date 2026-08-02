@@ -336,7 +336,7 @@ let install () =
 
   Atomic.set Task.Anti_rationalization.outcome_observer_fn record_anti_rationalization_outcome;
 
-  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ?sw ~evaluator_runtime ~prompt ~report_tool_schema () ->
+  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path ?sw ~evaluator_runtime ~prompt ~report_tool_schema () ->
     let verdict_ref = ref None in
     let protocol_error_ref = ref None in
     let dispatch ~name ~args =
@@ -380,7 +380,6 @@ let install () =
     in
     match
       Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Anti_rationalization (fun () ->
-        let base_path = Env_config_core.base_path () in
         Keeper_turn_driver_wrappers.run_named_with_masc_tools
           ~runtime_id:evaluator_runtime
           ~base_path
@@ -487,18 +486,18 @@ let install () =
          ~evidence_refs);
 
   Atomic.set Workspace_hooks.verification_notify_verdict_fn
-    (fun ~task_id ~verifier ~verification_id ~decision ->
+    (fun ~task_id ~authority ~verification_id ~decision ->
        match decision with
        | `Approve notes ->
          Verification_protocol.notify_approve_verification
            ~task_id
-           ~verifier
+           ~authority
            ~verification_id
            ~notes
        | `Reject reason ->
          Verification_protocol.notify_reject_verification
            ~task_id
-           ~verifier
+           ~authority
            ~verification_id
            ~reason);
 

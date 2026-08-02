@@ -418,30 +418,13 @@ and handle_transition ~tool_name ~start_time ctx args =
   (match result with
    | Ok _ ->
         (* Notification harness: push task transition to all active sessions *)
-        (Atomic.get Workspace_hooks.push_task_event_fn)
+       (Atomic.get Workspace_hooks.push_task_event_fn)
           ~event_type:"masc/task_transition"
           ~details:[
             ("task_id", `String task_id);
             ("action", `String action_s);
             ("agent_name", `String ctx.agent_name);
           ];
-       (match action with
-        | Masc_domain.Submit_for_verification ->
-          let tasks = Workspace.get_tasks_raw ctx.config in
-          (match List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks with
-           | Some task ->
-             let evidence_refs = verification_evidence_refs_for_task task in
-             (match task.task_status with
-             | Masc_domain.AwaitingVerification { verification_id; assignee; _ } ->
-                (Atomic.get Workspace_hooks.verification_notify_submit_fn)
-                  ctx.config ~task ~assignee ~verification_id ~evidence_refs
-              | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
-              | Masc_domain.Done _ | Masc_domain.Cancelled _ -> ())
-           | None -> ())
-        (* No verdict notification from this path: a verdict is not an agent
-           action, so the agent transition surface has no approve/reject to
-           report. The authority-side verdict notifier is wired separately. *)
-        | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel | Masc_domain.Release -> ())
    | Error err ->
        log_task_transition_failed ~agent_name:ctx.agent_name err);
   (* Record metrics *)

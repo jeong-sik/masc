@@ -675,6 +675,116 @@ let () =
          { prompt_event with
            event_kind = Masc.Keeper_world_observation.Schedule_due
          }));
+
+  (* A completion-authority rejection is a system LLM result delivered to the
+     producer Keeper. It is neither a Keeper identity nor a generic Board
+     signal, so its typed task/verification/reason fields must survive the
+     queue codec and prompt projection unchanged. *)
+  let rejection : completion_authority_rejection =
+    { car_task_id = "task-rejected"
+    ; car_verification_id = "vrf-rejected"
+    ; car_reason = "Evidence did not demonstrate the required invariant."
+    ; car_authority = Masc_domain.System_llm_agent { agent_run_id = "judge-rejected" }
+    }
+  in
+  let rejection_stimulus : stimulus =
+    { post_id = completion_authority_rejection_post_id rejection
+    ; urgency = Immediate
+    ; arrived_at = 10.0
+    ; payload = Completion_authority_rejected rejection
+    }
+  in
+  assert (
+    String.equal
+      (payload_kind_label rejection_stimulus.payload)
+      "completion_authority_rejected");
+  assert (
+    String.equal
+      rejection_stimulus.post_id
+      "completion-authority-rejected:task-rejected:vrf-rejected");
+  (match stimulus_of_yojson (stimulus_to_yojson rejection_stimulus) with
+   | Ok
+       { payload =
+           Completion_authority_rejected
+             { car_task_id; car_verification_id; car_reason; car_authority }
+       ; _
+       } ->
+     assert (String.equal car_task_id "task-rejected");
+     assert (String.equal car_verification_id "vrf-rejected");
+     assert (String.equal car_reason rejection.car_reason);
+     assert (car_authority = rejection.car_authority)
+   | Ok _ -> Alcotest.fail "completion rejection codec changed payload shape"
+   | Error msg ->
+     Alcotest.fail ("completion rejection codec failed: " ^ msg));
+  let operator_rejection_stimulus =
+    { rejection_stimulus with
+      payload =
+        Completion_authority_rejected
+          { rejection with
+            car_authority =
+              Masc_domain.Human_operator { operator_id = "operator-rejected" }
+          }
+    }
+  in
+  (match stimulus_of_yojson (stimulus_to_yojson operator_rejection_stimulus) with
+   | Ok
+       { payload =
+           Completion_authority_rejected
+             { car_authority = Masc_domain.Human_operator { operator_id }; _ }
+       ; _
+       } ->
+     assert (String.equal operator_id "operator-rejected")
+   | Ok _ -> Alcotest.fail "operator rejection codec changed authority provenance"
+   | Error msg ->
+     Alcotest.fail ("operator rejection codec failed: " ^ msg));
+  let rejection_event =
+    match
+      Masc.Keeper_world_observation.pending_board_event_of_stimulus
+        ~meta:(event_queue_test_meta "producer" "trace-producer")
+        rejection_stimulus
+    with
+    | Ok (Some event) -> event
+    | Ok None -> Alcotest.fail "completion rejection produced no prompt event"
+    | Error _ -> Alcotest.fail "completion rejection prompt projection failed"
+  in
+  assert (
+    match rejection_event.event_kind with
+    | Masc.Keeper_world_observation.Completion_authority_rejected decoded ->
+      decoded = rejection
+    | _ -> false);
+  assert (String.equal rejection_event.post_id rejection_stimulus.post_id);
+  assert (contains_substring ~needle:rejection.car_reason rejection_event.preview);
+  assert (
+    not (Masc.Keeper_world_observation.is_board_activity_event rejection_event));
+  assert (
+    not
+      (Masc.Keeper_world_observation.is_scheduled_automation_event rejection_event));
+  assert (
+    Masc.Keeper_world_observation.is_completion_authority_rejection_event
+      rejection_event);
+  assert (
+    match
+      Masc.Keeper_heartbeat_stimulus_intake.event_queue_trigger_of_stimulus
+        rejection_stimulus
+    with
+    | Some
+        Masc.Keeper_world_observation.Completion_authority_rejection_stimulus ->
+      true
+    | _ -> false);
+  assert (
+    stimulus_identity_equal
+      rejection_stimulus
+      { rejection_stimulus with arrived_at = 11.0 });
+  assert (
+    not
+      (stimulus_identity_equal
+         rejection_stimulus
+         { rejection_stimulus with
+           payload =
+             Completion_authority_rejected
+               { rejection with car_reason = "different reason" }
+         }));
+
   (* Producer diff is edge-only: additions wake, removals and unchanged ids
      never do. *)
   assert (

@@ -347,13 +347,17 @@ let load_json_opt path =
 let store_lock_max_attempts = 100
 let store_lock_retry_interval_sec = 0.01
 
+let wait_before_store_lock_retry () =
+  ignore (Unix.select [] [] [] store_lock_retry_interval_sec)
+;;
+
 let rec lock_store ~attempts_left fd =
   match Unix.lockf fd Unix.F_TLOCK 0 with
   | () -> Ok ()
   | exception Unix.Unix_error (Unix.EINTR, _, _) -> lock_store ~attempts_left fd
   | exception Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _)
     when attempts_left > 1 ->
-    Unix.sleepf store_lock_retry_interval_sec;
+    wait_before_store_lock_retry ();
     lock_store ~attempts_left:(attempts_left - 1) fd
   | exception Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) ->
     Log.Auth.warn "oauth: durable store lock timed out";
@@ -365,7 +369,7 @@ let rec with_store_mutex ~attempts_left f =
   then Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock store_mutex) f
   else if attempts_left > 1
   then (
-    Unix.sleepf store_lock_retry_interval_sec;
+    wait_before_store_lock_retry ();
     with_store_mutex ~attempts_left:(attempts_left - 1) f)
   else (
     Log.Auth.warn "oauth: process store mutex timed out";

@@ -2867,31 +2867,38 @@ let test_config_post_materializes_missing_toml () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-no-toml" in
   prepare_config_sync_keeper config name;
-  Eio.Switch.on_release sw (fun () ->
-    Masc.Keeper_keepalive.stop_keepalive ~base_path:config.base_path name);
-  let raw, json =
-    post_config ~sw ~clock:(Eio.Stdenv.clock env)
-      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-      ~name {|{"proactive_enabled":true}|}
-  in
-  check bool "HTTP 200" true (String.starts_with ~prefix:"HTTP/1.1 200" raw);
-  let open Yojson.Safe.Util in
-  check bool "runtime projection applied proactive config" true
-    (json |> member "proactive" |> member "enabled" |> to_bool);
-  let path =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
-    |> fun dir -> Filename.concat dir (name ^ ".toml")
-  in
-  check bool "missing declarative TOML was materialized" true (Sys.file_exists path);
-  let parsed =
-    Keeper_toml_loader.parse_toml (In_channel.with_open_bin path In_channel.input_all)
-  in
-  (match parsed with
-   | Error error -> fail error
-   | Ok doc ->
-     check (option bool) "materialized proactive config" (Some true)
-       (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled"));
-  ignore (Masc.Keeper_keepalive.stop_keepalive_and_await ~base_path:config.base_path name)
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Masc.Keeper_keepalive.stop_keepalive_and_await
+           ~base_path:config.base_path
+           name))
+    (fun () ->
+      let raw, json =
+        post_config ~sw ~clock:(Eio.Stdenv.clock env)
+          ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+          ~name {|{"proactive_enabled":true}|}
+      in
+      check bool "HTTP 200" true (String.starts_with ~prefix:"HTTP/1.1 200" raw);
+      let open Yojson.Safe.Util in
+      check bool "runtime projection applied proactive config" true
+        (json |> member "proactive" |> member "enabled" |> to_bool);
+      let path =
+        Config_dir_resolver.keepers_dir_for_base_path
+          ~base_path:config.Workspace.base_path
+        |> fun dir -> Filename.concat dir (name ^ ".toml")
+      in
+      check bool "missing declarative TOML was materialized" true
+        (Sys.file_exists path);
+      let parsed =
+        Keeper_toml_loader.parse_toml
+          (In_channel.with_open_bin path In_channel.input_all)
+      in
+      match parsed with
+      | Error error -> fail error
+      | Ok doc ->
+        check (option bool) "materialized proactive config" (Some true)
+          (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled"))
 
 let test_config_post_reports_runtime_sync_failure () =
   with_test_env @@ fun ~env ~sw ~config ->

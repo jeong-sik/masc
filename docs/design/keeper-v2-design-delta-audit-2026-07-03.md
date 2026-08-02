@@ -43,7 +43,7 @@ Baseline: `docs/design/keeper-v2-standalone-gap-current.md` (2026-06-21) + vendo
 ## Defer (백엔드 계약 선행 필요 — 대표)
 
 - Settings account/lifecycle/sandbox 섹션 (auth 세션/lifecycle knob/namespace 기본값 저장소 부재).
-- Prompt Book full-text/치환 뷰 (주입 스냅샷 API), keeper effort 세그 mutation, persona 편집, 알림 엔진 wiring, 압축 3열 diff, autoboot_max·컴팩션 임계치 (raw TOML 외 scalar patch 경로 없음 — UX상 전용 patch 권장).
+- Prompt Book full-text/치환 뷰 (주입 스냅샷 API), keeper effort 세그 mutation, persona 편집, 알림 엔진 wiring, 압축 3열 diff, 컴팩션 임계치 (raw TOML 외 scalar patch 경로 없음 — UX상 전용 patch 권장).
 
 ## 디자인 측 정정 필요 (역피드백)
 

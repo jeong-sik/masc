@@ -3,23 +3,18 @@
 
     Sister module to {!Http_server_h2} (cycle 164, the H2
     wrapper).  Conflict-free with [httpun-ws-eio] (no cohttp 6.x
-    dependency).  Includes built-in routes for [/health],
-    [/ready], plus the streamable MCP endpoint.
+    dependency).
 
-    Internal: helpers stay private — exception
-    \[Shutdown] (graceful-shutdown signaling), the 5 built-in
-    handlers ([health_handler], [ready_handler],
-    [mcp_post_handler], [mcp_get_handler]),
-    \[default_routes] (the route table assembled from those
-    handlers), \[with_streamable_mcp_request_handler],
-    \[make_request_handler] (router → request_handler
-    converter), and \[error_handler] (httpun connection error
-    handler).  The server accept loop lives in the
+    This module carries no routes and no handlers: it exposes
+    {!config}, the {!request_handler} type, and the
+    {!Response} / {!Late_response} / {!Request} / {!Router}
+    building blocks.  Concrete routes, the server accept loop,
+    and connection error handling live in the
     [Server_bootstrap_*] facade modules; the [Eio_main] entry
     point (with signal handlers) lives in the executable
     [bin/main_eio.ml] (and sibling [bin/*_eio.ml] binaries).
-    External callers reach the server through the facade modules
-    instead of these internals.
+
+    Internal: \[safe_respond_with_string] stays private.
 
     @see <https://github.com/anmonteiro/httpun> httpun
     documentation *)
@@ -46,8 +41,7 @@ val default_config : config
 
 (** {1 Request handler type} *)
 
-(** Standard httpun request handler shape.  Used by
-    {!Router.t} and {!make_request_handler}. *)
+(** Standard httpun request handler shape.  Used by {!Router.t}. *)
 type request_handler = Httpun.Request.t -> Httpun.Reqd.t -> unit
 
 (** {1 Response helpers} *)

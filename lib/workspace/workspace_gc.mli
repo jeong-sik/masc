@@ -29,8 +29,8 @@ val heartbeat :
     {- archive backlog tasks in a terminal state ([Done]/[Cancelled]) older
        than [days] days.
        Non-terminal tasks — including [AwaitingVerification] obligations — are
-       never archived (RFC-0220: an obligation must stay claimable by a
-       verifier)}
+       never archived; a completion authority must still be able to commit a
+       verdict against the live task}
     {- self-heal: restore any non-terminal task a prior buggy pass stranded in
        [tasks-archive.json] back into the live backlog}}
 

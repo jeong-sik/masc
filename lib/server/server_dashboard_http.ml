@@ -252,22 +252,20 @@ let dashboard_gate_tool_events_http_json request ~base_path : Yojson.Safe.t =
 ;;
 
 (* /api/v1/dashboard/proof was measured at 28-60s (timeout) under
-   live load.  The compute calls [Dashboard_verification.summary_json]
-   and [Dashboard_verification.requests_json] back-to-back; each
-   walks the on-disk verification request store, so the work runs
-   inline on the Eio main domain and starves other HTTP fibers.
+   live load. The verification projection walks the on-disk request store, so
+   an uncached computation must not run on the Eio main domain.
 
    Same fix pattern as PR #18991 / #18993 / #18994: wrap in
    [Dashboard_cache.get_or_compute] for stale-while-revalidate and
    push the compute through [Domain_pool_ref.submit_io_or_inline]
    so the main domain keeps serving requests during refresh. *)
-let dashboard_proof_compute ~config ~limit ~recent () : Yojson.Safe.t =
+let dashboard_proof_compute ~config ~limit () : Yojson.Safe.t =
   let base_path = config.Workspace.base_path in
   (* Single disk scan via [proof_compose]; the historical
      [summary_json] + [requests_json] sequence walked the verification
      store twice per refresh. *)
   let verification_summary, verification_requests =
-    Dashboard_verification.proof_compose ~base_path ~recent ~limit ()
+    Dashboard_verification.proof_compose ~base_path ~limit ()
   in
   let proof_source ~id ~label ~route =
     `Assoc [ "id", `String id; "label", `String label; "route", `String route ]
@@ -275,7 +273,7 @@ let dashboard_proof_compute ~config ~limit ~recent () : Yojson.Safe.t =
   let proof_sources =
     [
       proof_source ~id:"verification_summary"
-        ~label:"Verification status buckets"
+        ~label:"Verification submission summary"
         ~route:"/api/v1/verification/summary";
       proof_source ~id:"verification_requests"
         ~label:"Verification request evidence"
@@ -291,19 +289,6 @@ let dashboard_proof_compute ~config ~limit ~recent () : Yojson.Safe.t =
         ~route:"/api/v1/dashboard/execution-trust";
     ]
   in
-  let by_status =
-    match verification_summary with
-    | `Assoc fields -> (
-        match List.assoc_opt "by_status" fields with
-        | Some (`Assoc status_fields) -> status_fields
-        | _ -> [])
-    | _ -> []
-  in
-  let status_int key =
-    match List.assoc_opt key by_status with
-    | Some (`Int n) -> n
-    | _ -> 0
-  in
   `Assoc
     [
       "generated_at", `String (Masc_domain.now_iso ());
@@ -317,8 +302,6 @@ let dashboard_proof_compute ~config ~limit ~recent () : Yojson.Safe.t =
                  | Some (`Int n) -> `Int n
                  | _ -> `Int 0)
              | _ -> `Int 0);
-            "verification_pending", `Int (status_int "pending");
-            "verification_rejected", `Int (status_int "rejected");
             "proof_source_count", `Int (List.length proof_sources);
           ] );
       ( "verification",
@@ -333,15 +316,12 @@ let dashboard_proof_compute ~config ~limit ~recent () : Yojson.Safe.t =
 
 let dashboard_proof_http_json ~config request : Yojson.Safe.t =
   let limit = int_query_param request "limit" ~default:25 |> clamp ~min_v:1 ~max_v:100 in
-  let recent =
-    int_query_param request "recent" ~default:5 |> clamp ~min_v:0 ~max_v:20
-  in
   let key =
-    Printf.sprintf "dashboard.proof:%s;%d;%d" config.Workspace.base_path limit recent
+    Printf.sprintf "dashboard.proof:%s;%d" config.Workspace.base_path limit
   in
   Dashboard_cache.get_or_compute key ~ttl:dashboard_projection_cache_ttl_s (fun () ->
     Domain_pool_ref.submit_io_or_inline (fun () ->
-      dashboard_proof_compute ~config ~limit ~recent ()))
+      dashboard_proof_compute ~config ~limit ()))
 ;;
 
 type approval_resolve_http_error =

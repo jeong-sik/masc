@@ -62,17 +62,17 @@ let assigned_keeper_resolution ~(config : Workspace.config) goal_id =
   in
   let durable = durable_assigned_keepers config goal_id in
   if durable.errors <> []
-  then
+  then (
     Log.Keeper.error
       "goal reconciliation Keeper assignment scan incomplete goal_id=%s errors=%s"
       goal_id
       (String.concat "; " durable.errors);
-  match List.sort_uniq String.compare (registered @ durable.keeper_names) with
-  | [ keeper_name ] -> Assigned_keeper keeper_name
-  | [] when durable.errors <> [] ->
-    Assigned_keeper_lookup_failed (String.concat "; " durable.errors)
-  | [] -> No_assigned_keeper
-  | keeper_names -> Ambiguous_assigned_keepers keeper_names
+    Assigned_keeper_lookup_failed (String.concat "; " durable.errors))
+  else
+    match List.sort_uniq String.compare (registered @ durable.keeper_names) with
+    | [ keeper_name ] -> Assigned_keeper keeper_name
+    | [] -> No_assigned_keeper
+    | keeper_names -> Ambiguous_assigned_keepers keeper_names
 ;;
 
 let exact_producer_keeper_name ~config ~completing_agent_name =

@@ -51,6 +51,13 @@ let make_goal_reconciler_meta () =
   | Error detail -> failwith ("goal reconciler meta failed: " ^ detail)
 ;;
 
+let write_text_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+;;
+
 let register name =
   let meta = make_meta name in
   KR.For_testing.register ~base_path meta.name meta
@@ -666,7 +673,9 @@ let test_goal_reconciliation_enqueues_once_after_last_terminal_task () =
 ;;
 
 let test_goal_reconciliation_prefers_authoritative_assignment
-      ?(assigned_paused = false) () =
+      ?(assigned_paused = false)
+      ?(corrupt_persisted_assignment = false)
+      () =
   let dir = temp_dir "registry_goal_reconciliation_assignment" in
   Fun.protect
     ~finally:(fun () ->
@@ -742,6 +751,11 @@ let test_goal_reconciliation_prefers_authoritative_assignment
             ~base_path:config.base_path
             assigned_meta.name
             assigned_meta);
+       if corrupt_persisted_assignment
+       then
+         write_text_file
+           (Masc.Keeper_types_profile.keeper_meta_path config "corrupt-assignment")
+           "{ malformed Keeper metadata";
        (match
           Masc.Keeper_goal_reconciliation_wake.enqueue_if_ready
             ~config
@@ -749,14 +763,26 @@ let test_goal_reconciliation_prefers_authoritative_assignment
             ~task_id:"task-002"
         with
         | Masc.Keeper_goal_reconciliation_wake.Enqueued { keeper_name } ->
-          check string
-            "assigned Keeper owns reconciliation wake"
-           assigned_meta.name
-           keeper_name
+          if corrupt_persisted_assignment
+          then fail "incomplete assignment scan was treated as routable"
+          else
+            check string
+              "assigned Keeper owns reconciliation wake"
+              assigned_meta.name
+              keeper_name
+        | Masc.Keeper_goal_reconciliation_wake.No_keeper_target { goal_id } ->
+          if not corrupt_persisted_assignment
+          then fail "authoritative Goal assignment did not produce a durable wake"
+          else check string "incomplete scan leaves Goal visibly unresolved" goal.id goal_id
         | _ -> fail "authoritative Goal assignment did not produce a durable wake");
        check int "producer does not receive an assignment-owned wake" 0
          (registry_snapshot ~base_path:config.base_path producer_meta.name
           |> Keeper_event_queue.length);
+       if corrupt_persisted_assignment
+       then
+         check int "assigned Keeper does not receive a partial-scan wake" 0
+           (registry_snapshot ~base_path:config.base_path assigned_meta.name
+            |> Keeper_event_queue.length);
        let discovery =
          Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
            ~base_path:config.base_path
@@ -767,13 +793,19 @@ let test_goal_reconciliation_prefers_authoritative_assignment
          check
            (list string)
            "only the assigned canonical Keeper receives the wake"
-           [ assigned_meta.name ]
+           (if corrupt_persisted_assignment then [] else [ assigned_meta.name ])
            discovery.keeper_names)
 ;;
 
 let test_goal_reconciliation_keeps_paused_assignment_authoritative () =
   test_goal_reconciliation_prefers_authoritative_assignment
     ~assigned_paused:true
+    ()
+;;
+
+let test_goal_reconciliation_fails_closed_on_assignment_scan_error () =
+  test_goal_reconciliation_prefers_authoritative_assignment
+    ~corrupt_persisted_assignment:true
     ()
 ;;
 
@@ -1391,6 +1423,10 @@ let () =
             "paused Goal assignment remains authoritative"
             `Quick
             test_goal_reconciliation_keeps_paused_assignment_authoritative
+        ; test_case
+            "Goal reconciliation fails closed on assignment scan error"
+            `Quick
+            test_goal_reconciliation_fails_closed_on_assignment_scan_error
         ; test_case
             "restart scan retries missed reconciliation exactly once"
             `Quick

@@ -34,6 +34,13 @@ val is_keeper_meta_file : string -> bool
 val persisted_keeper_names_result : Workspace.config -> (string list, string) result
 val persisted_keeper_names : Workspace.config -> string list
 
+(** Resolve an agent identity from current persisted Keeper metadata.
+    [Ok None] means no persisted Keeper owns [agent_name]. A metadata read
+    failure or duplicate identity is returned as [Error] and is never
+    collapsed into an absent Keeper. *)
+val persisted_keeper_name_for_agent_name :
+  Workspace.config -> agent_name:string -> (string option, string) result
+
 (** List keeper names declared in TOML config (overlay sources). *)
 val configured_keeper_names : Workspace.config -> string list
 

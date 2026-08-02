@@ -9,20 +9,44 @@ type delivery =
     }
   | Durable_wake_failed of { keeper_name : string; detail : string }
   | Unroutable_producer of { producer : string; task_id : string }
+  | Producer_identity_lookup_failed of {
+      producer : string;
+      task_id : string;
+      detail : string;
+    }
   | Durable_queue_failed of { keeper_name : string; detail : string }
 
 let registered_keeper_name_for_agent ~base_path producer =
-  Keeper_registry.all ~base_path ()
-  |> List.find_map (fun (entry : Keeper_registry.registry_entry) ->
-       if String.equal entry.meta.agent_name producer
-       then Some entry.name
-       else None)
+  let matching_keeper_names =
+    Keeper_registry.all ~base_path ()
+    |> List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
+         if String.equal entry.meta.agent_name producer
+         then Some entry.name
+         else None)
+    |> List.sort String.compare
+  in
+  match matching_keeper_names with
+  | [] -> Ok None
+  | [keeper_name] -> Ok (Some keeper_name)
+  | keeper_names ->
+    Error
+      (Printf.sprintf
+         "multiple registered Keepers share agent_name=%s: %s"
+         producer
+         (String.concat "," keeper_names))
 ;;
 
-let producer_keeper_name ~base_path producer =
-  match registered_keeper_name_for_agent ~base_path producer with
-  | Some keeper_name -> Some keeper_name
-  | None -> Keeper_identity.canonical_keeper_name_from_agent_name producer
+let producer_keeper_name
+      ~(config : Workspace_utils_backend_setup.config)
+      producer
+  =
+  match registered_keeper_name_for_agent ~base_path:config.base_path producer with
+  | Error _ as error -> error
+  | Ok (Some keeper_name) -> Ok (Some keeper_name)
+  | Ok None ->
+    Keeper_meta_store.persisted_keeper_name_for_agent_name
+      config
+      ~agent_name:producer
 ;;
 
 let wake_rejected_producer
@@ -33,10 +57,12 @@ let wake_rejected_producer
       ~reason
       ~authority
   =
-  match producer_keeper_name ~base_path:config.base_path producer with
-  | None ->
+  match producer_keeper_name ~config producer with
+  | Error detail ->
+    Producer_identity_lookup_failed { producer; task_id; detail }
+  | Ok None ->
     Unroutable_producer { producer; task_id }
-  | Some keeper_name ->
+  | Ok (Some keeper_name) ->
     let rejection : Keeper_event_queue.completion_authority_rejection =
       { car_task_id = task_id
       ; car_verification_id = verification_id

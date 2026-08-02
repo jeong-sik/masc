@@ -21,6 +21,7 @@ type stream_protocol_error_kind =
   | Media_payload_too_large
   | Media_persist_failed
   | Sse_error
+  | Ndjson_error
   | Sse_parse_failed
   | Ndjson_parse_failed
   | Sse_unknown_event_type

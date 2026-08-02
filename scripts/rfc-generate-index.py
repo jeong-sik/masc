@@ -6,6 +6,7 @@ Usage:
   scripts/rfc-generate-index.py --check       # exit 1 if stale
   scripts/rfc-generate-index.py --update      # overwrite README table
 """
+
 from __future__ import annotations
 
 import re
@@ -16,8 +17,8 @@ from pathlib import Path
 
 RFC_DIR = Path("docs/rfc")
 README = RFC_DIR / "README.md"
-TABLE_HEADER = "| # | Title | Status | Last activity | Sub-docs |"
-TABLE_SEP = "|---|---|---|---|---|"
+TABLE_HEADER = "| # | Title | Status | Sub-docs |"
+TABLE_SEP = "|---|---|---|---|"
 
 
 @dataclass
@@ -25,7 +26,6 @@ class RfcEntry:
     number: str
     title: str = "(untitled)"
     status: str = "Draft"
-    last_activity: str = "-"
     sub_docs: list[str] = field(default_factory=list)
 
 
@@ -44,17 +44,6 @@ def extract_frontmatter(filepath: Path) -> dict[str, str]:
             key, _, value = stripped.partition(":")
             result[key.strip()] = value.strip().strip('"')
     return result
-
-
-def last_git_activity(filepath: Path) -> str:
-    try:
-        result = subprocess.run(
-            ["git", "log", "-1", "--format=%h %cs", "--", str(filepath)],
-            capture_output=True, text=True, check=False,
-        )
-        return result.stdout.strip() or "(untracked)"
-    except Exception:
-        return "-"
 
 
 def collect_entries() -> dict[str, RfcEntry]:
@@ -85,7 +74,6 @@ def collect_entries() -> dict[str, RfcEntry]:
             number=num,
             title=title,
             status=fm.get("status", "Draft"),
-            last_activity=last_git_activity(fpath),
             sub_docs=sub_docs.get(num, []),
         )
 
@@ -100,7 +88,7 @@ def generate_table(entries: dict[str, RfcEntry]) -> str:
         if len(title) > 80:
             title = title[:77] + "..."
         subs = ", ".join(e.sub_docs) if e.sub_docs else "-"
-        lines.append(f"| {num} | {title} | {e.status} | {e.last_activity} | {subs} |")
+        lines.append(f"| {num} | {title} | {e.status} | {subs} |")
     return "\n".join(lines)
 
 
@@ -117,10 +105,12 @@ def check_mode(table: str) -> int:
     if existing == table:
         print("OK: RFC index table is up to date")
         return 0
-    print("MISMATCH: RFC index table is stale. Run: scripts/rfc-generate-index.py --update")
+    print(
+        "MISMATCH: RFC index table is stale. Run: scripts/rfc-generate-index.py --update"
+    )
     for i, (a, b) in enumerate(zip(existing.splitlines(), table.splitlines())):
         if a != b:
-            print(f"  line {i+1}: {a!r} != {b!r}")
+            print(f"  line {i + 1}: {a!r} != {b!r}")
     return 1
 
 
@@ -142,9 +132,15 @@ def update_mode(table: str) -> int:
 
 def main() -> int:
     import os
-    os.chdir(subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                            capture_output=True, text=True, check=True
-                            ).stdout.strip())
+
+    os.chdir(
+        subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    )
     entries = collect_entries()
     table = generate_table(entries)
 

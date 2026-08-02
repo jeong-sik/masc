@@ -178,6 +178,10 @@ val rotate_shared_tokens_for_agents :
 val find_credential_by_token :
   string -> token:string -> (agent_credential, masc_error) result
 
+val find_static_credential_by_token :
+  string -> token:string -> (agent_credential, masc_error) result
+(** Static bearer-only lookup for the OAuth authorization bootstrap. *)
+
 (** Structured description of which credential fields differ between two
     credentials that share the same token hash. *)
 type credential_field_diff =

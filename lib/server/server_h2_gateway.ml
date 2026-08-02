@@ -100,6 +100,65 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
         ~status:(status :> H2.Status.t)
         ~extra_headers:cors
     in
+    let h2_respond_oauth_error error =
+      Log.Misc.warn
+        "oauth_http: request rejected error=%s"
+        (Auth_oauth.protocol_error_code error);
+      h2_respond_json_value
+        h2_reqd
+        (Server_oauth_service.oauth_error_json error)
+        ~status:(Server_oauth_service.oauth_error_status error :> H2.Status.t)
+        ~extra_headers:[ "cache-control", "no-store"; "pragma", "no-cache" ]
+    in
+    let with_h2_oauth f =
+      if Auth_oauth.enabled () && Server_oauth_metadata.loopback_authority request_authority
+      then f ()
+      else h2_respond_text h2_reqd "Not Found" ~status:`Not_found
+    in
+    let with_h2_oauth_base_path f =
+      with_h2_oauth (fun () ->
+        match get_server_state_result () with
+        | Ok state -> f (Mcp_server.workspace_config state).base_path
+        | Error _ -> h2_respond_oauth_error Auth_oauth.Temporarily_unavailable)
+    in
+    let h2_respond_oauth_form ?(status = `OK) ?error authorization_request =
+      h2_respond_html
+        h2_reqd
+        (Server_oauth_service.render_authorization_form ?error authorization_request)
+        ~status
+        ~extra_headers:Server_oauth_service.authorization_form_headers
+    in
+    let h2_respond_oauth_redirect location =
+      h2_respond_empty
+        h2_reqd
+        ~status:`Found
+        ~extra_headers:
+          [ "location", location; "cache-control", "no-store" ]
+    in
+    let h2_read_oauth_body callback =
+      let body = H2.Reqd.request_body h2_reqd in
+      let buffer = Http_body_buffer.create 4096 in
+      let bytes_read = ref 0 in
+      let stopped = ref false in
+      let rec read_loop () =
+        H2.Body.Reader.schedule_read
+          body
+          ~on_eof:(fun () ->
+            if not !stopped then callback (Http_body_buffer.contents buffer))
+          ~on_read:(fun bigstring ~off ~len ->
+            bytes_read := !bytes_read + len;
+            if !bytes_read > Server_oauth_service.max_request_body_bytes
+            then (
+              stopped := true;
+              H2.Body.Reader.close body;
+              h2_respond_oauth_error
+                (Auth_oauth.Invalid_request "request body is too large"))
+            else (
+              Http_body_buffer.add_bigstring buffer bigstring ~off ~len;
+              read_loop ()))
+      in
+      read_loop ()
+    in
     let h2_respond_agent_rate_limited h2_reqd ~rl_key =
       h2_respond_json h2_reqd
         (Rate_limit.too_many_agent_requests_body ())
@@ -239,6 +298,107 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                ~request_authority
                httpun_request)
             ~extra_headers:cors
+
+      | `GET,
+        ( "/.well-known/oauth-protected-resource"
+        | "/.well-known/oauth-protected-resource/mcp"
+        | "/mcp/.well-known/oauth-protected-resource" ) ->
+          with_h2_oauth (fun () ->
+            h2_respond_json_value
+              h2_reqd
+              (Server_oauth_metadata.protected_resource_json request_authority)
+              ~extra_headers:[ "cache-control", "no-store" ])
+
+      | `GET, "/.well-known/oauth-authorization-server" ->
+          with_h2_oauth (fun () ->
+            h2_respond_json_value
+              h2_reqd
+              (Server_oauth_metadata.authorization_server_json request_authority)
+              ~extra_headers:[ "cache-control", "no-store" ])
+
+      | `GET, "/oauth/authorize" ->
+          with_h2_oauth_base_path (fun base_path ->
+            match
+              Server_oauth_service.authorize_get
+                ~base_path
+                ~authority:request_authority
+                ~target:httpun_request.Httpun.Request.target
+            with
+            | Error error -> h2_respond_oauth_error error
+            | Ok authorization_request ->
+              h2_respond_oauth_form authorization_request)
+
+      | `POST, "/oauth/authorize" ->
+          with_h2_oauth_base_path (fun base_path ->
+            match
+              ensure_same_origin_browser_request
+                ~request_authority
+                httpun_request
+            with
+            | Error error -> h2_respond_auth_error h2_reqd error
+            | Ok () ->
+              h2_read_oauth_body (fun body ->
+                match
+                  Server_oauth_service.authorize_post
+                    ~base_path
+                    ~authority:request_authority
+                    ~body
+                with
+                | Error error -> h2_respond_oauth_error error
+                | Ok
+                    (Server_oauth_service.Authorization_form_error
+                      { status; message; request = authorization_request }) ->
+                  h2_respond_oauth_form
+                    ~status:(status :> H2.Status.t)
+                    ~error:message
+                    authorization_request
+                | Ok (Server_oauth_service.Authorization_redirect location) ->
+                  h2_respond_oauth_redirect location))
+
+      | `POST, "/oauth/register" ->
+          with_h2_oauth_base_path (fun base_path ->
+            match
+              ensure_same_origin_if_browser_request
+                ~request_authority
+                httpun_request
+            with
+            | Error error -> h2_respond_auth_error h2_reqd error
+            | Ok () ->
+              h2_read_oauth_body (fun body ->
+                match Server_oauth_service.register_client ~base_path body with
+                | Error error -> h2_respond_oauth_error error
+                | Ok client ->
+                  Log.Misc.info "oauth_http: dynamic client registered";
+                  h2_respond_json_value
+                    h2_reqd
+                    (Server_oauth_service.registered_client_json client)
+                    ~status:`Created
+                    ~extra_headers:[ "cache-control", "no-store" ]))
+
+      | `POST, "/oauth/token" ->
+          with_h2_oauth_base_path (fun base_path ->
+            match
+              ensure_same_origin_if_browser_request
+                ~request_authority
+                httpun_request
+            with
+            | Error error -> h2_respond_auth_error h2_reqd error
+            | Ok () ->
+              h2_read_oauth_body (fun body ->
+                match
+                  Server_oauth_service.token
+                    ~base_path
+                    ~authority:request_authority
+                    ~body
+                with
+                | Error error -> h2_respond_oauth_error error
+                | Ok pair ->
+                  Log.Misc.info "oauth_http: token grant completed";
+                  h2_respond_json_value
+                    h2_reqd
+                    (Server_oauth_service.token_pair_json pair)
+                    ~extra_headers:
+                      [ "cache-control", "no-store"; "pragma", "no-cache" ]))
 
       | `GET, "/ws" ->
           let json =
@@ -386,7 +546,12 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                     (match auth_result with
                      | Error msg ->
                          let body = json_rpc_error Mcp_error_code.Auth_error msg in
-                         h2_respond_json h2_reqd body ~status:`Unauthorized ~extra_headers:(("www-authenticate", "Bearer") :: cors)
+                         h2_respond_json h2_reqd body ~status:`Unauthorized
+                           ~extra_headers:
+                             (( "www-authenticate"
+                              , Server_oauth_metadata.challenge_for_authority
+                                  request_authority )
+                              :: cors)
                      | Ok _cred_opt ->
                          let otel_transport_context =
                            Otel_dispatch_hook.http_transport_context
@@ -447,26 +612,32 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                                    let profile =
                                      mcp_eio_profile_of_transport_profile profile
                                    in
-                                   let body_with_agent =
-                                     Server_mcp_transport_http.body_with_canonical_http_actor
-                                       ~base_path ~auth_token httpun_request
-                                       post_context.body_str
-                                   in
-                                   let internal_keeper_runtime =
-                                     Server_auth.is_verified_internal_keeper_request
-                                       ~base_path httpun_request
-                                   in
                                    let response_json =
                                      let otel_transport_context =
                                        Otel_dispatch_hook.http_transport_context
                                          ~protocol_version:"2"
                                      in
-                                     Mcp_eio.handle_request ~clock ~sw ~profile
-                                       ~mcp_session_id:session_id ?auth_token
-                                       ~otel_mcp_protocol_version:protocol_version
-                                       ~otel_transport_context
-                                       ~internal_keeper_runtime state
-                                       body_with_agent
+                                     let expected_resource =
+                                       Server_oauth_metadata.resource request_authority
+                                     in
+                                     Auth_oauth.with_expected_resource
+                                       expected_resource
+                                       (fun () ->
+                                         let body_with_agent =
+                                           Server_mcp_transport_http.body_with_canonical_http_actor
+                                             ~base_path ~auth_token httpun_request
+                                             post_context.body_str
+                                         in
+                                         let internal_keeper_runtime =
+                                           Server_auth.is_verified_internal_keeper_request
+                                             ~base_path httpun_request
+                                         in
+                                         Mcp_eio.handle_request ~clock ~sw ~profile
+                                           ~mcp_session_id:session_id ?auth_token
+                                           ~otel_mcp_protocol_version:protocol_version
+                                           ~otel_transport_context
+                                           ~internal_keeper_runtime state
+                                           body_with_agent)
                                    in
                                    let otel_transport_context =
                                      Otel_dispatch_hook.http_transport_context
@@ -519,7 +690,11 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
            | Error msg ->
                let body = json_rpc_error Mcp_error_code.Auth_error msg in
                h2_respond_json h2_reqd body ~status:`Unauthorized
-                 ~extra_headers:(("www-authenticate", "Bearer") :: cors)
+                 ~extra_headers:
+                   (( "www-authenticate"
+                    , Server_oauth_metadata.challenge_for_authority
+                        request_authority )
+                    :: cors)
            | Ok _ ->
                (match session_id_opt with
                 | Some session_id -> (

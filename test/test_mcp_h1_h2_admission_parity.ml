@@ -42,6 +42,9 @@ let contains ~needle haystack =
 let assert_contains label ~needle source =
   check bool label true (contains ~needle source)
 
+let assert_not_contains label ~needle source =
+  check bool label false (contains ~needle source)
+
 let assert_order label ~before ~after source =
   let before_idx = Str.search_forward (Str.regexp_string before) source 0 in
   let after_idx = Str.search_forward (Str.regexp_string after) source 0 in
@@ -468,6 +471,33 @@ let test_h1_h2_delete_route_wiring_parity () =
       ("forgets session after termination", "forget_mcp_session session_id");
     ]
 
+let test_h2_oauth_route_and_authority_lifetime () =
+  let h2 = source_file "lib/server/server_h2_gateway.ml" in
+  List.iter
+    (fun path ->
+      assert_contains
+        ("H2 exposes OAuth route " ^ path)
+        ~needle:(Printf.sprintf "%S" path)
+        h2)
+    [ "/.well-known/oauth-protected-resource"
+    ; "/.well-known/oauth-authorization-server"
+    ; "/oauth/authorize"
+    ; "/oauth/register"
+    ; "/oauth/token"
+    ];
+  assert_contains
+    "H2 derives the OAuth resource from the lexically admitted authority"
+    ~needle:"Server_oauth_metadata.resource request_authority"
+    h2;
+  assert_not_contains
+    "H2 callbacks do not re-read expired fiber-local authority"
+    ~needle:"Server_request_authority.current_exn ()"
+    h2;
+  assert_not_contains
+    "H2 does not call the HTTP/1 OAuth facade"
+    ~needle:"Server_oauth_http"
+    h2
+
 (* /ws upgrade admission — token-or-same-origin gate parity with the /mcp
    POST chain.  A base_path with no auth config resolves to
    [default_auth_config], which is strict (enabled + require_token), so the
@@ -606,6 +636,8 @@ let () =
             test_h1_h2_post_route_wiring_parity;
           test_case "H1/H2 DELETE route uses the same admission gates" `Quick
             test_h1_h2_delete_route_wiring_parity;
+          test_case "H2 OAuth routes preserve admitted authority" `Quick
+            test_h2_oauth_route_and_authority_lifetime;
         ] );
       ( "ws-upgrade-admission",
         [

@@ -299,7 +299,12 @@ module Request = struct
     in
     respond_error reqd `Internal_server_error body
 
-  let read_body_async_with_limit reqd ~on_body ~on_error =
+  type body_read_error =
+    [ `Too_large of int
+    | `Internal of exn
+    ]
+
+  let read_body_async_with_limit reqd ~max_bytes ~on_body ~on_error =
     let request = Httpun.Reqd.request reqd in
     let content_length =
       match Httpun.Headers.get request.headers "content-length" with
@@ -318,13 +323,13 @@ module Request = struct
       end
     in
     (match content_length with
-     | Some len when len > max_body_bytes ->
+     | Some len when len > max_bytes ->
          stop ();
-         on_error (`Too_large max_body_bytes)
+         on_error (`Too_large max_bytes)
      | _ ->
          let initial_capacity =
            match content_length with
-           | Some len when len > 0 && len < max_body_bytes -> len
+           | Some len when len > 0 && len < max_bytes -> len
            | _ -> 1024
          in
          let buf = Http_body_buffer.create initial_capacity in
@@ -340,9 +345,9 @@ module Request = struct
                if !stopped then ()
                else
                  let next_bytes = Http_body_buffer.length buf + len in
-                 if next_bytes > max_body_bytes then begin
+                 if next_bytes > max_bytes then begin
                    stop ();
-                   on_error (`Too_large max_body_bytes)
+                   on_error (`Too_large max_bytes)
                  end else begin
                    Http_body_buffer.add_bigstring buf buffer ~off ~len;
                    read_loop ()
@@ -352,6 +357,7 @@ module Request = struct
 
   let read_body_async reqd callback =
     read_body_async_with_limit reqd
+      ~max_bytes:max_body_bytes
       ~on_body:callback
       ~on_error:(function
         | `Too_large max_bytes -> respond_too_large reqd max_bytes
@@ -368,6 +374,7 @@ module Request = struct
     in
 
     read_body_async_with_limit reqd
+      ~max_bytes:max_body_bytes
       ~on_body:(fun body_str ->
         resolve_once (Ok body_str))
       ~on_error:(function

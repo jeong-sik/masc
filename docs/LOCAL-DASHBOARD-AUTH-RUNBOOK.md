@@ -91,11 +91,19 @@ MASC_BASE_PATH="$BASE_PATH" ./_build/default/bin/main_eio.exe login --json \
   | jq '{status,codex_mcp:{token_status:.codex_mcp.token_status,config:.codex_mcp.config},warnings,next_actions}'
 ```
 
-## 4. Agent-Code MCP Bearer Login
+## 4. Agent-Code MCP Bearer or OAuth Login
 
-`masc` uses bearer-token MCP auth. It does not expose an OAuth
-authorization endpoint, so `agent-code mcp login masc` is expected to fail with
-`No authorization support detected`.
+MASC supports two MCP authentication modes on the same loopback server:
+
+- static bearer remains the default and uses `bearer_token_env_var`;
+- OAuth 2.1 authorization code + PKCE is opt-in with
+  `MASC_OAUTH_ENABLED=1`.
+
+OAuth discovery, dynamic client registration, browser authorization, and token
+refresh are exposed only when OAuth is enabled and the admitted request
+authority is loopback. The browser approval form asks for an existing MASC
+bearer once to bind the OAuth grant to that bearer’s agent identity. The
+bootstrap bearer is not stored in OAuth state.
 
 For the Agent-Code MCP server, the local startup path maintains a private
 non-expiring worker bearer at
@@ -125,16 +133,49 @@ URL: http://127.0.0.1:8935/mcp
 Bearer Token Env Var: MASC_TOKEN
 ```
 
-If Agent-Code still reports that `masc` is not logged in, check the pipeline
-projection instead of retrying OAuth login:
+If Agent-Code still reports that `masc` is not logged in while using static
+bearer mode, check the pipeline projection:
 
 ```bash
 MASC_BASE_PATH="$BASE_PATH" ./_build/default/bin/main_eio.exe login --json \
   | jq '.codex_mcp.config.stages'
 ```
 
-Every required config stage should be `pass`; `codex_oauth_login` is expected
-to be `skip` because MASC uses bearer-token auth.
+Every required static-bearer config stage should be `pass`.
+
+### OAuth mode
+
+Start MASC with an exact public MCP resource identity:
+
+```bash
+export MASC_OAUTH_ENABLED=1
+export MASC_HTTP_BASE_URL=http://127.0.0.1:8935
+export MASC_URL=http://127.0.0.1:8935/mcp
+./_build/default/bin/main_eio.exe start --host 127.0.0.1 --port 8935 \
+  --base-path "$BASE_PATH"
+```
+
+The Agent-Code server entry needs only the URL when OAuth is the selected
+client mode:
+
+```toml
+[mcp_servers.masc]
+url = "http://127.0.0.1:8935/mcp"
+```
+
+Then log in and request the least-privileged scope:
+
+```bash
+codex mcp login masc --scopes mcp:tools
+```
+
+Use `mcp:admin` only with an admin bootstrap bearer. A worker bootstrap cannot
+be elevated by requesting the admin scope.
+
+If `bearer_token_env_var` is also configured and resolves to a value,
+Codex uses that static bearer for MCP calls. Remove that client-side field
+when OAuth should be the active mode. MASC itself continues accepting both
+credential kinds concurrently.
 
 ### Agent-Code Config Drift and Authorization Header Hardening
 

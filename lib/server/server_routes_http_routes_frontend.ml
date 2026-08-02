@@ -102,7 +102,7 @@ let websocket_auth_error message =
        { reason = Masc_domain.Auth_error.Generic; message })
 
 let websocket_upgrade_authorized ~base_path ~request_authority request =
-  match verify_mcp_auth ~base_path request with
+  match verify_mcp_auth_for_authority ~base_path ~request_authority request with
   | Ok _ -> Ok ()
   | Error token_error ->
     (match ensure_same_origin_browser_request ~request_authority request with

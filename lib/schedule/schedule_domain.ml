@@ -434,6 +434,28 @@ let parse_cron_expression expression =
       "recurrence.cron.expression must be a 5-field cron expression: minute hour day-of-month month day-of-week"
 ;;
 
+let max_possible_day_of_month = function
+  | 2 -> Some 29
+  | 4 | 6 | 9 | 11 -> Some 30
+  | 1 | 3 | 5 | 7 | 8 | 10 | 12 -> Some 31
+  | _ -> None
+;;
+
+let cron_has_possible_date spec =
+  (* Vixie cron uses OR when both DOM and DOW are restricted. A restricted DOW
+     therefore always supplies future dates. When DOW is unrestricted, at
+     least one selected month must admit one selected DOM; February 29 is
+     possible because Gregorian leap years recur. The parser guarantees every
+     field is non-empty, so this invariant makes calendar-day search total. *)
+  (not spec.dow.any)
+  || List.exists
+       (fun month ->
+          match max_possible_day_of_month month with
+          | None -> false
+          | Some max_day -> List.exists (fun day -> day <= max_day) spec.dom.values)
+       spec.month.values
+;;
+
 let validate_cron ~expression ~timezone =
   let* expression = nonempty "recurrence.cron.expression" expression in
   let* timezone = nonempty "recurrence.timezone" timezone in
@@ -442,8 +464,10 @@ let validate_cron ~expression ~timezone =
     Error
       "recurrence.timezone must be UTC, Asia/Seoul, KST, or a fixed offset like +09:00; DST-aware IANA zones are not supported"
   | Some _ ->
-    let* _ = parse_cron_expression expression in
-    Ok (Cron { expression; timezone })
+    let* spec = parse_cron_expression expression in
+    if cron_has_possible_date spec
+    then Ok (Cron { expression; timezone })
+    else Error "recurrence.cron has no possible calendar date"
 ;;
 
 let validate_recurrence = function
@@ -588,33 +612,50 @@ let cron_day_matches spec tm =
   | false, false -> dom_matches || dow_matches
 ;;
 
-let cron_matches spec tm =
-  field_matches spec.minute tm.Unix.tm_min
-  && field_matches spec.hour tm.Unix.tm_hour
-  && field_matches spec.month (tm.Unix.tm_mon + 1)
-  && cron_day_matches spec tm
+let cron_date_matches spec tm =
+  field_matches spec.month (tm.Unix.tm_mon + 1) && cron_day_matches spec tm
+;;
+
+let cron_slots spec =
+  List.concat_map
+    (fun hour -> List.map (fun minute -> (hour * 60) + minute) spec.minute.values)
+    spec.hour.values
 ;;
 
 let next_cron_due_after ~expression ~timezone ~now =
   match parse_cron_expression expression, timezone_offset_seconds timezone with
   | Error _, _ | _, None -> None
   | Ok spec, Some offset ->
-    let first_candidate =
-      ((floor (now /. 60.0) *. 60.0) +. 60.0) |> int_of_float
-    in
-    let offset = float_of_int offset in
-    let max_minutes = 5 * 366 * 24 * 60 in
-    let rec loop remaining candidate =
-      if remaining <= 0
-      then None
-      else (
-        let local_ts = float_of_int candidate +. offset in
-        let tm = Unix.gmtime local_ts in
-        if cron_matches spec tm
-        then Some (float_of_int candidate)
-        else loop (remaining - 1) (candidate + 60))
-    in
-    loop max_minutes first_candidate
+    if not (cron_has_possible_date spec) || not (Float.is_finite now)
+    then None
+    else (
+      let offset = float_of_int offset in
+      let first_local = (floor (now /. 60.0) *. 60.0) +. 60.0 +. offset in
+      let first_day = floor (first_local /. seconds_per_day) *. seconds_per_day in
+      let first_slot = int_of_float ((first_local -. first_day) /. 60.0) in
+      let slots = cron_slots spec in
+      (* [cron_has_possible_date] plus non-empty parsed hour/minute fields
+         proves that some future day and slot exists. Search advances by
+         calendar day, so a sparse valid recurrence has no arbitrary time
+         horizon and cannot be confused with no occurrence. *)
+      let rec loop local_day not_before_slot =
+        let tm = Unix.gmtime local_day in
+        let slot =
+          if cron_date_matches spec tm
+          then List.find_opt (fun slot -> slot >= not_before_slot) slots
+          else None
+        in
+        match slot with
+        | Some slot ->
+          let candidate = local_day +. float_of_int (slot * 60) -. offset in
+          if candidate > now then Some candidate else None
+        | None ->
+          let next_day = local_day +. seconds_per_day in
+          if Float.is_finite next_day && next_day > local_day
+          then loop next_day 0
+          else None
+      in
+      loop first_day first_slot)
 ;;
 
 let first_due_after ~now = function

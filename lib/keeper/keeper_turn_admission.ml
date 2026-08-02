@@ -403,7 +403,6 @@ let begin_shutdown ~base_path ~keeper_name ~operation_id =
 ;;
 
 let rollback_shutdown ~base_path ~keeper_name ~operation_id =
-  let base_path = Keeper_registry_types.canonical_base_path_exn base_path in
   let key = Keeper_registry_types.registry_key ~base_path keeper_name in
   match Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.find_opt slots key) with
   | None -> Shutdown_not_reserved

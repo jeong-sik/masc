@@ -24,12 +24,12 @@
   nickname_words
   playground_paths)
  (wrapped false)
- ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
+ ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on. + unused-value ratchet (warning 32)
  ; Closed-variant fragile sites fixed in this PR: the two Shell_timeout.bucket
  ; matches in env_config_sandbox.ml (now routed through
  ; Shell_timeout.is_floor_bucket, itself an exhaustive match). The remaining
  ; catch-all (env_config_runtime.ml string scrutinee) is open-type and warning
  ; 4 ignores it.
  (flags
-  (:standard -w +4))
+  (:standard -w +4 -w +32))
  (libraries masc_core masc_log yojson otoml uri ipaddr unix))

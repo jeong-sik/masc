@@ -1519,8 +1519,8 @@ let test_registered_hook_goal_list_rejects_status_filter () =
   Alcotest.(check bool) "blocked" true (Option.is_some blocked)
 
 let test_registered_hook_goal_list_preserves_invalid_enum_for_handler () =
-  (* RFC-0294: horizon removed; phase is the surviving optional enum. An invalid
-     enum value must pass the hook so the handler performs the rejection. *)
+  (* An invalid enum value must pass the hook so the handler performs the
+     rejection. *)
   let args = `Assoc [("phase", `String "notaphase")] in
   let blocked, forwarded =
     run_registered_hook

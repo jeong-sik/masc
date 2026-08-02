@@ -301,7 +301,7 @@ export function Planning() {
         </div>
         ${hasGoals ? html`
           <div class="flex flex-col gap-2 p-3">
-            ${/* RFC-0294: flat priority-sorted list replaces horizon grouping */
+            ${/* flat priority-sorted list */
             [...goals.value]
               .sort((a, b) => (a.priority ?? 4) - (b.priority ?? 4) || (b.updated_at ?? b.created_at ?? '').localeCompare(a.updated_at ?? a.created_at ?? ''))
               .map(g => {

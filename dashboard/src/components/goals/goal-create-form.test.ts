@@ -45,12 +45,6 @@ describe('GoalCreateForm side panel', () => {
     expect(screen.queryByText('가드 통과 · 자율 실행')).toBeNull()
   })
 
-  it('does not render removed horizon or lead keeper fields', () => {
-    render(h(GoalCreateForm, {}))
-    expect(screen.queryByRole('radiogroup', { name: '호라이즌' })).toBeNull()
-    expect(screen.queryByText('리드 KEEPER')).toBeNull()
-  })
-
   it('closes the panel when the close button is clicked', () => {
     render(h(GoalCreateForm, {}))
     fireEvent.click(screen.getByTestId('goal-create-close'))

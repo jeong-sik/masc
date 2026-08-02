@@ -17,7 +17,6 @@ let annotations_file_for ~base_dir partition =
   Filename.concat (partition_dir ~base_dir partition) "annotations.jsonl"
 ;;
 
-let annotations_file ~base_dir = annotations_file_for ~base_dir Ide_paths.Legacy_default
 
 let tombstone_key = "__tombstone"
 let compact_key = "__compact"

@@ -1517,7 +1517,7 @@ function WorkSurfaceV2() {
           ` : null}
 
           ${view === 'list'
-            ? /* RFC-0294: flat priority-sorted list replaces horizon grouping */
+            ? /* flat priority-sorted list */
               displayGoals.length > 0 ? html`
                 <div class="wk-list" data-testid="work-goal-list">
                   ${[...displayGoals]

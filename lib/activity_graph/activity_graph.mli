@@ -32,9 +32,8 @@
     [write_current_seq], [append_line], [parse_event_line],
     [collect_event_files], [read_all_events],
     [matches_filters], [list_events_with_total],
-    [window_meta], [latest_seq], [span_start_kind],
-    [span_end_classification], [span_end_kind],
-    [span_end_status], [StringMap]). *)
+    [window_meta], [span_start_kind],
+    [span_end_classification], [StringMap]). *)
 
 include module type of struct
   include Activity_graph_types

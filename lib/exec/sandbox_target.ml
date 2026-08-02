@@ -52,6 +52,3 @@ let host () : t = Host
 
 let docker ~image ~runner ?pipeline_runner () : t = Docker { image; runner; pipeline_runner }
 
-let pp fmt = function
-  | Host -> Format.pp_print_string fmt "host"
-  | Docker { image } -> Format.fprintf fmt "docker(%s)" image

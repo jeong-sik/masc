@@ -103,7 +103,7 @@ export const COCKPIT_MODE_TARGETS: Record<CockpitMode, CockpitRouteTarget> = {
 export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
   {
     mode: 'work',
-    aliases: ['goal-horizon'],
+    aliases: ['goal-tree'],
     target: { tab: 'workspace', params: { section: 'planning', view: 'goal-tree' } },
     coverage: 'covered',
   },

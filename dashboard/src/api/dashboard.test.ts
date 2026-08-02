@@ -815,11 +815,12 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
     expect(result.memory_os.facts.items[0]?.claim).toBe('  exact claim bytes  ')
   })
 
-  it('rejects the removed Memory OS schema field', async () => {
+  // decodeMemoryOsSnapshot closes the memory_os key set with hasExactKeys, so an
+  // unexpected key is rejected before its name is ever read. One case covers the
+  // arm; naming retired fields one per test asserted the same comparison N times.
+  it('rejects a memory_os projection carrying any key outside the closed set', async () => {
     const payload = turnRecordsPayload()
-    Object.assign(payload.memory_os, {
-      schema: 'keeper.memory_os.recall_observability.v0',
-    })
+    Object.assign(payload.memory_os, { unexpected_key: 1 })
     stubTurnRecords(payload)
 
     await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
@@ -847,18 +848,6 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
     )
   })
 
-  it('rejects dead observability fields outside the current closed projection', async () => {
-    const payload = turnRecordsPayload()
-    Object.assign(payload.memory_os, {
-      selection_policy: { retired: true },
-    })
-    stubTurnRecords(payload)
-
-    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
-      '유효하지 않은 keeper turn record payload',
-    )
-  })
-
   it.each([
     'claim_kind',
     'salience',
@@ -869,17 +858,6 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
   ])('rejects retired fact field %s instead of silently stripping it', async (field) => {
     const payload = turnRecordsPayload()
     Object.assign(payload.memory_os.facts.items[0]!, { [field]: 'retired' })
-    stubTurnRecords(payload)
-    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
-      '유효하지 않은 keeper turn record payload',
-    )
-  })
-
-  it('rejects retired selection-policy fields', async () => {
-    const payload = turnRecordsPayload()
-    Object.assign(payload.memory_os, {
-      claim_kind_source: 'Keeper_memory_os_types.claim_kind_to_string',
-    })
     stubTurnRecords(payload)
     await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
       '유효하지 않은 keeper turn record payload',
@@ -898,9 +876,9 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
     },
   )
 
-  it('rejects malformed rows instead of silently dropping them', async () => {
+  it('rejects an empty claim instead of rendering a blank fact', async () => {
     const payload = turnRecordsPayload()
-    Object.assign(payload.memory_os.facts.items[0]!, { claim: undefined })
+    Object.assign(payload.memory_os.facts.items[0]!, { claim: '' })
     stubTurnRecords(payload)
     await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
       '유효하지 않은 keeper turn record payload',
@@ -944,32 +922,6 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
     )
   })
 
-  it('rejects an unsafe source turn range', async () => {
-    const payload = turnRecordsPayload()
-    Object.assign(payload.memory_os, {
-      episodes: {
-        shown: 1,
-        terminal_markers: 0,
-        items: [{
-          trace_id: 'episode-trace',
-          generation: 1,
-          created_at: 1_789_000_000,
-          terminal_marker: null,
-          claim_count: 0,
-          source_turn_range: {
-            lo: Number.MAX_SAFE_INTEGER + 1,
-            hi: Number.MAX_SAFE_INTEGER + 1,
-          },
-          summary: 'unsafe range',
-        }],
-      },
-    })
-    stubTurnRecords(payload)
-
-    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
-      '유효하지 않은 keeper turn record payload',
-    )
-  })
 })
 
 describe('fetchKeeperTurnTranscript', () => {

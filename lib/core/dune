@@ -4,7 +4,7 @@
  (name masc_core)
  (public_name masc.masc_core)
  (wrapped false)
- ; RFC-0071 §3.4 Phase 5 bootstrap: warning 4 (fragile pattern match) on.
+ ; RFC-0071 §3.4 Phase 5 bootstrap: warning 4 (fragile pattern match) on. + unused-value ratchet (warning 32)
  ; All 13 catch-all sites in this sublib match Yojson.Safe.t (poly variant),
  ; which warning 4 ignores by design — so flipping +4 here is a no-op for
  ; existing code but locks in the type-level guarantee for any future closed

@@ -531,6 +531,18 @@ module KeeperKeepalive = struct
     | None -> None
   ;;
 
+  (* [@warning "-32"] below: this binding has no OCaml caller — the live read is
+     [Keeper_runtime_resolved.cli_subprocess_idle_sec], which re-reads the env var
+     per turn. It survives as the knob's declaration for [bin/env_knob_catalog.ml],
+     which line-scans lib/config/env_config_*.ml to generate docs/runtime-tunables.md;
+     deleting it drops a live tunable from the operator catalog.
+
+     This note must stay ABOVE the odoc block, not between it and the [let]:
+     [env_knob_catalog.ml]'s [doc_above] walks back to the nearest comment
+     terminator and then expects a doc-comment opener, so an interposed plain
+     comment blanks the knob's @category / @ops_class / description in the
+     generated catalog. *)
+
   (** Stdout-idle timeout for CLI subprocess transports (Anthropic CLI today;
       other CLI providers need an OAS upstream change to expose
       [stdout_idle_timeout_s] in their transport configs).
@@ -540,11 +552,6 @@ module KeeperKeepalive = struct
       Env: [MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC]. Default: 120. Range: [10, 600].
       @category Timeouts
       @ops_class operator *)
-  (* No OCaml caller: the live read is [Keeper_runtime_resolved.cli_subprocess_idle_sec],
-     which re-reads the env var per turn. This binding is the knob's declaration for
-     [bin/env_knob_catalog.ml], which line-scans lib/config/env_config_*.ml to generate
-     docs/runtime-tunables.md. Deleting it drops a live tunable from the operator
-     catalog, so the unused-value warning is suppressed here rather than obeyed. *)
   let[@warning "-32"] cli_subprocess_idle_sec =
     Float.max
       10.0

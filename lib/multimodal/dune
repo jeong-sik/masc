@@ -3,7 +3,7 @@
 (library
  (name multimodal)
  (public_name masc.multimodal)
- ; RFC-0071 Phase 5 ratchet (warning 4)
+ ; RFC-0071 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
   (:standard -w +4 -w +32))
  (libraries shared_types unix yojson fs_compat digestif eio masc_random_id)

@@ -4,7 +4,7 @@
  (name masc_ide)
  (public_name masc.ide)
  (wrapped false)
- ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
+ ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on. + unused-value ratchet (warning 32)
  (flags
   (:standard -w +4 -w +32))
  (modules

@@ -7,11 +7,11 @@
 
     - a {!Goal_phase.t} (canonical lifecycle: [Executing] / [Blocked] /
       [Completed] / [Paused] / [Dropped]) — the only persisted
-      lifecycle representation.  The legacy [status] duplicate was
-      removed in RFC-0352 slice 1 after a live-store measurement
-      found zero phase-less rows; the decoder still accepts and
-      ignores an incoming ["status"] field during the transition
-      window.
+      lifecycle representation.  ["status"] is not an accepted field:
+      a row carrying it fails to decode, and {!read_state} then applies
+      the corrupt-store policy (recovery mirror if usable, otherwise an
+      empty state plus a warning).  A store written before the field was
+      dropped must be reset rather than loaded.
 
     Every type is exposed concretely because external
     callers ([test/test_dashboard_goals],
@@ -96,7 +96,7 @@ val read_state : Workspace_utils.config -> state
 (** Reads {!goals_path}; returns an empty default state on
     missing file or parse failure.  Goals loaded from disk
     are passed through the internal normaliser ([priority]
-    clamp + phase/status reconciliation). *)
+    clamp). *)
 
 val write_state : Workspace_utils.config -> state -> unit
 (** Direct overwrite of {!goals_path} with the supplied state.
@@ -181,7 +181,4 @@ val upsert_goal :
 
     Errors:
     - [title] required for new goals (omit / empty string
-      on a new goal id).
-    - [phase] and legacy [status] disagree (when both are
-      supplied and {!phase_of_goal_status} of [status] does
-      not equal [phase]). *)
+      on a new goal id). *)

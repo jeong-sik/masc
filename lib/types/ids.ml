@@ -264,8 +264,8 @@ end = struct
 
     (* Bounded preview for error messages — trace_id inputs originate
        from external requests / config files; full dump risks log
-       spam on bad input. 32 bytes matches the pattern from iter#83
-       [decode_global_id] (#16903). *)
+       spam on bad input. 32 bytes is enough to identify the shape
+       (prefix, length class) without echoing a full payload. *)
     let preview s =
       if String.length s <= 32 then s
       else Printf.sprintf "%s… (%d bytes total)" (String.sub s 0 32) (String.length s)

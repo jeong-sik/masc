@@ -774,10 +774,19 @@ let is_invalid_request_error : Agent_sdk.Error.sdk_error -> bool = function
 
 (** [true] when a structured error indicates context overflow.
 
-    The overflow stop-reason tokens ("model_context_window_exceeded" and its
-    siblings) are mapped to the typed [ContextWindowExceeded] variant inside the
-    SDK, so [UnrecognizedStopReason] can never carry one. Matching on that
-    literal here classified an input the pinned SDK cannot construct. *)
+    The [UnrecognizedStopReason { reason = "model_context_window_exceeded" }] arm
+    was removed. Not because the SDK cannot construct that value — it can: only
+    [Types.stop_reason_of_string] maps the overflow tokens to the typed
+    [ContextWindowExceeded]; the Ollama backend, the Ollama NDJSON terminal
+    chunk, and the OpenAI Responses decoder each build [Types.Unknown <raw>]
+    without consulting it, and [pipeline.ml] turns [Unknown] into
+    [UnrecognizedStopReason]. It was removed because classifying an
+    [Error.Agent _] as a context overflow here is a string classifier standing in
+    for a typed provider signal, and no production caller consumed the result:
+    the live classifiers ([Keeper_turn_runtime_budget.capacity_transition_of_error],
+    [Keeper_turn_driver_try_runtime]) already treat every [Error.Agent _] as
+    not-overflow. Routing an Ollama-dialect overflow belongs in OAS, at the
+    decoders that bypass [stop_reason_of_string]. *)
 let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (ContextOverflow _) -> true

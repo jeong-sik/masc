@@ -65,21 +65,29 @@ let test_is_context_overflow_only_for_overflow_errors () =
     (EC.is_context_overflow rendered_only);
   check bool "rendered internal text is not auto-recoverable" false
     (EC.is_auto_recoverable_turn_error rendered_only);
-  (* The SDK maps every overflow stop-reason token to the typed
-     [ContextWindowExceeded] variant (llm_provider/types.ml stop_reason_of_string),
-     and [UnrecognizedStopReason] is built only from [Unknown]
-     (pipeline.ml) — so an overflow token can never arrive on this
-     constructor. What does arrive is an unmodeled provider token, and that is
-     not a context overflow. *)
-  let unrecognized_stop_reason =
+  (* [Error.Agent (UnrecognizedStopReason _)] is never a context overflow here,
+     whatever token it carries. Both an unmodeled provider token and an overflow
+     token are asserted, because the SDK CAN deliver the latter: only
+     [Types.stop_reason_of_string] maps overflow tokens to the typed
+     [ContextWindowExceeded], and the Ollama / Ollama-NDJSON / OpenAI-Responses
+     decoders build [Types.Unknown <raw>] without it. Classifying that here would
+     be a string classifier standing in for a typed provider signal. *)
+  let unmodeled_stop_reason =
     Agent_sdk.Error.Agent
       (UnrecognizedStopReason { reason = "provider_specific_halt" })
   in
   check bool "unmodeled stop reason is not a context overflow" false
-    (EC.is_context_overflow unrecognized_stop_reason);
+    (EC.is_context_overflow unmodeled_stop_reason);
   check bool "unmodeled stop reason is not auto-recoverable"
     false
-    (EC.is_auto_recoverable_turn_error unrecognized_stop_reason)
+    (EC.is_auto_recoverable_turn_error unmodeled_stop_reason);
+  let overflow_token_stop_reason =
+    Agent_sdk.Error.Agent
+      (UnrecognizedStopReason { reason = "model_context_window_exceeded" })
+  in
+  check bool "overflow token on an agent stop reason is still not classified here"
+    false
+    (EC.is_context_overflow overflow_token_stop_reason)
 ;;
 
 let test_input_capacity_is_not_context_overflow () =

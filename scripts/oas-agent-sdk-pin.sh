@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
-readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.11"
+readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.12"
 # v0.231.0 is a hard-cut wave: checkpoint schema is v9 only (v1-v8
 # rejected; #2867), provider_config.output_schema is removed in favor of
 # response_format = JsonSchema as the single structured-output request state
@@ -66,12 +66,22 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.11"
 # non-conventional (oas#2922 tracks enforcing titles); the tag contains both.
 # Previous pin: main@92e3eea36 (post-v0.231.10); before that v0.231.10
 # (1fa612519).
-readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.11"
+# v0.231.12 is required, not optional: #26636 consumes
+# [Agent_sdk.Types.NDJSONError], added upstream by #2916, which v0.231.11 does
+# not define. main at 577af4ceb8 fails to compile with "Unbound constructor
+# Agent_sdk.Types.NDJSONError" until this pin advances.
+# The tag also carries #2919 (streaming connections are quarantined after
+# transport EOF) and #2926 (malformed SSE discriminators are classified as
+# wire errors rather than parse failures). MASC does not call the one breaking
+# signature in the range — [Streaming.parse_ollama_ndjson_chunk] moved from
+# [ollama_chunk option] to a typed result — so the change is additive here.
+# Previous pin: v0.231.11 (6ab2e84e1).
+readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.12"
 # TRACK_REF consumed by check-oas-pin.sh / oas-drift-check.sh /
 # sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584). Use main
 # for merge-ready pins. A blocked Draft cross-repo PR may temporarily declare
 # the exact refs/pull/<number>/head review ref; CI rejects that ref once the PR
 # is no longer both Draft and blocked-on-oas.
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="6ab2e84e1d3a7728e0cac0e727f2d4872cd3f99e"
-readonly OAS_AGENT_SDK_MIN_VERSION="0.231.11"
+readonly OAS_AGENT_SDK_SHA="966cd3f61cd5e9e21c8390513dfa27894aeb6230"
+readonly OAS_AGENT_SDK_MIN_VERSION="0.231.12"

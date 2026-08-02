@@ -27,6 +27,18 @@ let without_if_revision = function
   | other -> other
 ;;
 
+let snapshot_execution_of_response result response =
+  let data = Snapshot_protocol.to_yojson response in
+  match result.Keeper_tool_execution.disposition with
+  | Tool_result.Completed _ -> Keeper_tool_execution.success_data data
+  | Tool_result.Deferred _ -> Keeper_tool_execution.deferred_data data
+  | Tool_result.Failed _ -> result
+;;
+
+module For_testing = struct
+  let snapshot_execution_of_response = snapshot_execution_of_response
+end
+
 let string_arg key = function
   | `Assoc fields ->
     (match List.assoc_opt key fields with
@@ -126,17 +138,7 @@ let handle_keeper_board_tool_with_outcome
              ~if_revision
              (`String result.raw_output)
          in
-         (match response, result.disposition with
-          | Snapshot_protocol.Unchanged _, _ ->
-            Keeper_tool_execution.success_data
-              (Snapshot_protocol.to_yojson response)
-          | Snapshot_protocol.Snapshot _, Tool_result.Completed _ ->
-            Keeper_tool_execution.success_data
-              (Snapshot_protocol.to_yojson response)
-          | Snapshot_protocol.Snapshot _, Tool_result.Deferred _ ->
-            Keeper_tool_execution.deferred_data
-              (Snapshot_protocol.to_yojson response)
-          | _, Tool_result.Failed _ -> result))
+         snapshot_execution_of_response result response)
   in
   match Keeper_tool_name.of_string name with
   | Some Keeper_tool_name.Board_post ->

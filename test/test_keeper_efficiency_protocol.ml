@@ -56,9 +56,37 @@ let test_snapshot_protocol () =
    | Ok _ -> Alcotest.fail "blank if_revision was accepted")
 ;;
 
+let test_unchanged_snapshot_preserves_deferred_disposition () =
+  let result =
+    Masc.Keeper_tool_execution.deferred_data (`String "approval required")
+  in
+  let response = Masc.Snapshot_protocol.Unchanged { revision = "board:7" } in
+  let projected =
+    Masc.Keeper_tool_board_runtime.For_testing.snapshot_execution_of_response
+      result
+      response
+  in
+  (match projected.disposition with
+   | Tool_result.Deferred () -> ()
+   | Tool_result.Completed () -> Alcotest.fail "unchanged response completed a deferral"
+   | Tool_result.Failed _ -> Alcotest.fail "unchanged response replaced the deferral");
+  match projected.data with
+  | Some data ->
+    check_json
+      "unchanged deferred payload"
+      (`Assoc [ "kind", `String "unchanged"; "revision", `String "board:7" ])
+      data
+  | None -> Alcotest.fail "unchanged deferred response lost its payload"
+;;
+
 let () =
   Alcotest.run
     "keeper efficiency protocol"
     [ ( "snapshot protocol"
-      , [ Alcotest.test_case "snapshot and unchanged" `Quick test_snapshot_protocol ] ) ]
+      , [ Alcotest.test_case "snapshot and unchanged" `Quick test_snapshot_protocol
+        ; Alcotest.test_case
+            "unchanged preserves deferred disposition"
+            `Quick
+            test_unchanged_snapshot_preserves_deferred_disposition
+        ] ) ]
 ;;

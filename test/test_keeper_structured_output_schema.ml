@@ -133,7 +133,7 @@ let test_fusion_judge_schema_uses_parser_wire_contract () =
     |> schema_items
     |> schema_property Fusion_judge_parse.wire_field_stance
   in
-  check bool "fusion schema exposes parser wire fields" true true
+  ()
 ;;
 
 let test_compaction_plan_schema_uses_codec_ssot () =
@@ -159,7 +159,7 @@ let test_compaction_plan_schema_uses_codec_ssot () =
       Keeper_structured_output_schema.compaction_plan_field_keep_from_unit_index
       schema
   in
-  check bool "compaction boundary schema exposes codec fields" true true
+  ()
 ;;
 
 let test_librarian_claim_schema_is_closed () =

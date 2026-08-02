@@ -470,8 +470,6 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
         ~implementer_b_token ~supervisor_nickname ~planner_nickname
         ~implementer_a_nickname ~implementer_b_nickname)
 
-let _test_operator_mcp_supervision_impl () =
-  Alcotest.skip ()
 
 let test_mcp_requires_auth_when_bound_non_loopback () =
   with_server ~host:"0.0.0.0" ~enable_auth:false

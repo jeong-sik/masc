@@ -236,9 +236,9 @@ let test_board_authors_share_one_neutral_observation_boundary () =
     (contains_sub "external effects cross the Gate" peer_msg
      && contains_sub "external effects cross the Gate" human_msg);
   check bool "automation post kind remains context" true
-    (contains_sub "post_kind=automation" peer_msg);
+    (contains_sub "post_kind=\"automation\"" peer_msg);
   check bool "human post kind remains context" true
-    (contains_sub "post_kind=direct" human_msg);
+    (contains_sub "post_kind=\"direct\"" human_msg);
   check bool "exact mention remains context" true
     (contains_sub "[mentions test-keeper]" peer_msg)
 ;;
@@ -266,11 +266,11 @@ let test_board_reaction_event_renders_reaction_context () =
     build_prompt ~meta:minimal_meta obs
   in
   check bool "prompt labels reaction board event" true
-    (contains_sub "event=reaction_changed" user_msg);
+    (contains_sub "event=\"reaction_changed\"" user_msg);
   check bool "prompt includes reaction target" true
-    (contains_sub "target=comment:comment-1" user_msg);
+    (contains_sub "target=\"comment:comment-1\"" user_msg);
   check bool "prompt includes reaction actor" true
-    (contains_sub "user=reactor" user_msg);
+    (contains_sub "user=\"reactor\"" user_msg);
   check bool "prompt includes reaction emoji" true
     (contains_sub "emoji=\"👏\"" user_msg)
 ;;
@@ -679,7 +679,7 @@ let test_completion_authority_rejection_preserves_human_provenance () =
       { base_observation with pending_board_events = [ event ] }
   in
   check bool "human authority kind is preserved" true
-    (contains_sub "authority_kind=human_operator" world_state);
+    (contains_sub "authority_kind=\"human_operator\"" world_state);
   check bool "human rejection is not relabeled as system authority" false
     (contains_sub "system completion authority" world_state)
 ;;

@@ -357,7 +357,6 @@ let handle_create ~tool_name ~start_time ctx args =
     let schedule_id = string_opt args "schedule_id" in
     let expires_at = optional_float args "expires_at_unix" in
     let create_request () =
-      let* () = validate_keeper_wake_target ctx ~keeper_wake_target args in
       Schedule_service.create
           ctx.config
           ?schedule_id
@@ -371,6 +370,7 @@ let handle_create ~tool_name ~start_time ctx args =
           ~recurrence
           ()
     in
+    let* () = validate_keeper_wake_target ctx ~keeper_wake_target args in
     (match keeper_wake_target with
      | None -> create_request ()
      | Some keeper_name ->

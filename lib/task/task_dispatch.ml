@@ -90,14 +90,11 @@ let list_tasks config ?(include_done=false) ?(include_cancelled=false) () =
          in
          Ok tasks)
 
-let backlog_lock_path config =
-  Filename.concat (Workspace.tasks_dir config) ".backlog"
-
 let with_locked_backlog
     config
     (f : backlog -> ('a, Masc_error.t) result)
     : ('a, Masc_error.t) result =
-  Workspace.with_file_lock config (backlog_lock_path config) (fun () ->
+  Workspace.with_file_lock config (Workspace.backlog_lock_path config) (fun () ->
     match Workspace.read_backlog_r config with
     | Error msg -> Error (System (System_error.IoError msg))
     | Ok backlog -> f backlog)

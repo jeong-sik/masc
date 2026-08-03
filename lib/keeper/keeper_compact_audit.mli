@@ -29,7 +29,7 @@ val parse_trigger : string -> trigger
 val trigger_to_string : trigger -> string
 
 type start_record = {
-  compaction_id : string;   (** Synthesized: ulid-like per-start *)
+  compaction_id : string;   (** Caller-supplied; the key a Complete row pairs on *)
   ts_unix : float;
   keeper_name : string;
   trigger : trigger;

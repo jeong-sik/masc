@@ -353,10 +353,10 @@ let format_scheduled_wake_observations
     Buffer.add_string ubuf
       "Rows below are scheduled work requests, not Board posts. The \
        occurrence_id is correlation metadata only: never pass it to a Board \
-       tool. Pass schedule_id, due_at_unix, and payload_digest from the row to \
-       masc_schedule_get. The tool returns the request only when that exact \
-       occurrence is still current; a recurring or updated schedule may already \
-       point at another occurrence. External effects still cross the Gate.\n";
+       tool. Pass schedule_id to masc_schedule_get. The tool returns the current \
+       durable request; a recurring schedule may already point at its next \
+       occurrence. The row's message is the exact wake message. External effects \
+       still cross the Gate.\n";
     List.iter
       (fun (event : Keeper_world_observation.pending_board_event) ->
          match event.event_kind with

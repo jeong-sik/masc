@@ -46,7 +46,7 @@ run_gate() {
   local runtime_root="$BASE_PATH/.masc"
   local schedules_path="$runtime_root/schedules.json"
   local keepers_root="$runtime_root/keepers"
-  local dispatched_count=0
+  local unsettled_count=0
   local queue_count=0
   local queue_path
   local pending_count
@@ -68,14 +68,14 @@ run_gate() {
           or .status == "failed"))
     ' "$schedules_path" >/dev/null \
       || fail "schedule ledger shape is invalid: $schedules_path"
-    dispatched_count="$(jq '[.executions[] | select(.status == "dispatched")] | length' "$schedules_path")"
-    if [[ "$dispatched_count" -ne 0 ]]; then
+    unsettled_count="$(jq '[.executions[] | select(.status == "running" or .status == "dispatched")] | length' "$schedules_path")"
+    if [[ "$unsettled_count" -ne 0 ]]; then
       jq -r '
         .executions[]
-        | select(.status == "dispatched")
-        | "  execution_id=\(.execution_id // "<missing>") schedule_id=\(.schedule_id // "<missing>")"
+        | select(.status == "running" or .status == "dispatched")
+        | "  execution_id=\(.execution_id // "<missing>") schedule_id=\(.schedule_id // "<missing>") status=\(.status)"
       ' "$schedules_path" >&2
-      fail "schedule ledger still has $dispatched_count dispatched execution(s)"
+      fail "schedule ledger still has $unsettled_count unsettled execution(s)"
     fi
     jq -e '
       all(.schedules[];
@@ -111,7 +111,7 @@ run_gate() {
     done < <(find "$keepers_root" -name 'event-queue-v14.json' -print0)
   fi
 
-  printf '[event-queue-v15-cutover] OK: base_path=%s v14_owners=%d dispatched=0\n' \
+  printf '[event-queue-v15-cutover] OK: base_path=%s v14_owners=%d unsettled=0\n' \
     "$BASE_PATH" "$queue_count"
 }
 
@@ -169,6 +169,11 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   write_schedules "$dispatched_root" dispatched
   write_queue "$dispatched_root" 0 0 0
   expect_failure dispatched_execution "$dispatched_root"
+
+  running_root="$fixture_root/running"
+  write_schedules "$running_root" running
+  write_queue "$running_root" 0 0 0
+  expect_failure running_execution "$running_root"
 
   pending_root="$fixture_root/pending"
   write_schedules "$pending_root" none

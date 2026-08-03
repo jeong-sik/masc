@@ -708,11 +708,11 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path
     (* 3. Namespace state — usually lower churn than inbox/board detail. *)
     | Keeper_context_layers.Namespace_state ->
       let backlog_source =
-        match observation.backlog_source with
-        | Keeper_world_observation_inputs.Primary -> None
+        match observation.backlog_edge with
+        | Keeper_world_observation_inputs.Observed_backlog _ -> None
         | source ->
           Some
-            (Keeper_world_observation_inputs.backlog_observation_source_to_string
+            (Keeper_world_observation_inputs.backlog_edge_observation_to_string
                source)
       in
       if

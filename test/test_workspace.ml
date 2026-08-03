@@ -1669,7 +1669,7 @@ let test_read_backlog_counts_excludes_self_owned_orphan () =
     (* Remove the agent file to simulate a keeper with no active registry record. *)
     let _ = Workspace.end_session config ~agent_name:keeper in
     let meta = keeper_meta_for_self_filter keeper in
-    let _, _, failed, _, _, _, _ =
+    let _, _, failed, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int) "keeper's own orphan excluded from failed count" 0 failed
@@ -1683,7 +1683,7 @@ let test_read_backlog_counts_falls_back_to_unscoped_claimable_task () =
         ~priority:1 ~description:""
     in
     let meta = keeper_meta_for_goal_filter keeper [ "goal-a" ] in
-    let _, claimable, _, _, _, _, _ =
+    let _, claimable, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -1709,58 +1709,19 @@ let test_read_backlog_counts_preserves_unreadable_observation () =
         output_string channel "{\"tasks\":\"not-current\"}")
     in
     write_corrupt (Workspace.backlog_path config);
-    (match
-       Keeper_world_observation_inputs.read_current_task
-         ~config
-         ~meta:current_task_meta
-     with
-     | Keeper_world_observation_inputs.Recovered_current_task { task; recovery = _ } ->
-       Alcotest.(check string) "recovered task id" "task-001" task.id
-     | Keeper_world_observation_inputs.No_current_task
-     | Keeper_world_observation_inputs.Current_task _
-     | Keeper_world_observation_inputs.Current_task_missing _
-    | Keeper_world_observation_inputs.Current_task_unavailable _ ->
-      Alcotest.fail "valid recovery source was not preserved");
-    let meta = keeper_meta_for_self_filter "keeper-backlog-recovery-agent" in
-    let _unclaimed, _claimable, _failed, changed, revision, projection, source =
-      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
-    in
-    Alcotest.(check bool) "recovery cannot report a backlog edge" false changed;
-    Alcotest.(check (option int))
-      "recovery has no authoritative revision"
-      None
-      revision;
-    Alcotest.(check (option string))
-      "recovery has no authoritative projection"
-      None
-      projection;
-    (match source with
-     | Keeper_world_observation_inputs.Recovery _ -> ()
-     | Keeper_world_observation_inputs.Primary
-     | Keeper_world_observation_inputs.Unavailable _ ->
-       Alcotest.fail "valid recovery source was not preserved");
     write_corrupt (Workspace.backlog_recovery_path config);
     let meta = keeper_meta_for_self_filter "keeper-backlog-failure-agent" in
-    let unclaimed, claimable, failed, changed, revision, projection_sha256, source =
+    let unclaimed, claimable, failed, edge =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int) "unreadable unclaimed count is inert" 0 unclaimed;
     Alcotest.(check int) "unreadable claimable count is inert" 0 claimable;
     Alcotest.(check int) "unreadable failed count is inert" 0 failed;
-    Alcotest.(check bool) "unreadable backlog cannot report an edge" false changed;
-    Alcotest.(check (option int))
-      "unreadable backlog has no fabricated revision"
-      None
-      revision;
-    Alcotest.(check (option string))
-      "unreadable backlog has no fabricated projection"
-      None
-      projection_sha256;
-    (match source with
-     | Keeper_world_observation_inputs.Unavailable _ -> ()
-     | Keeper_world_observation_inputs.Primary
-     | Keeper_world_observation_inputs.Recovery _ ->
-       Alcotest.fail "unreadable backlog must expose an unavailable source");
+    (match edge with
+     | Keeper_world_observation_inputs.Backlog_read_unavailable _ -> ()
+     | Keeper_world_observation_inputs.Recovery_backlog _
+     | Keeper_world_observation_inputs.Observed_backlog _ ->
+       Alcotest.fail "unreadable backlog must expose an unavailable edge");
     let board_event : Keeper_world_observation.pending_board_event =
       { event_kind = Board_post_created
       ; post_id = "post-backlog-unreadable"
@@ -1788,12 +1749,44 @@ let test_read_backlog_counts_preserves_unreadable_observation () =
       "world observation preserves unreadable backlog"
       true
       (match observation.backlog_edge with
-       | Keeper_world_observation_inputs.Backlog_read_unavailable -> true
+       | Keeper_world_observation_inputs.Backlog_read_unavailable _ -> true
+       | Keeper_world_observation_inputs.Recovery_backlog _
        | Keeper_world_observation_inputs.Observed_backlog _ -> false);
     Alcotest.(check int)
       "independent board stimulus survives unreadable backlog"
       1
       (List.length observation.pending_board_events))
+
+let test_read_backlog_counts_marks_recovery_non_authoritative () =
+  with_test_env (fun config ->
+    let backlog =
+      { Masc_domain.tasks = []
+      ; last_updated = Masc_domain.now_iso ()
+      ; version = 7
+      }
+    in
+    (match Workspace.write_backlog_result config backlog with
+     | Ok _ -> ()
+     | Error msg -> Alcotest.failf "failed to write recovery fixture: %s" msg);
+    Out_channel.with_open_text (Workspace.backlog_path config) (fun channel ->
+      output_string channel "{\"tasks\":\"not-current\"}");
+    let meta = keeper_meta_for_self_filter "keeper-recovered-backlog-agent" in
+    let unclaimed, claimable, failed, edge =
+      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    in
+    Alcotest.(check int) "recovered unclaimed count remains observable" 0 unclaimed;
+    Alcotest.(check int) "recovered claimable count remains observable" 0 claimable;
+    Alcotest.(check int) "recovered failed count remains observable" 0 failed;
+    match edge with
+    | Keeper_world_observation_inputs.Recovery_backlog
+        { revision; projection_sha256; _ } ->
+      Alcotest.(check int) "recovered revision remains observable" 8 revision;
+      Alcotest.(check bool) "recovery projection is nonempty" true
+        (String.length projection_sha256 = 64)
+    | Keeper_world_observation_inputs.Backlog_read_unavailable _
+    | Keeper_world_observation_inputs.Observed_backlog _ ->
+      Alcotest.fail "valid recovery must remain explicitly marked as recovery")
+
 
 let test_read_current_task_preserves_unavailable_and_missing () =
   with_test_env (fun config ->
@@ -1815,6 +1808,22 @@ let test_read_current_task_preserves_unavailable_and_missing () =
      | Keeper_world_observation_inputs.Current_task_unavailable _ ->
        Alcotest.fail "existing task was not observed");
     let backlog = Workspace.read_backlog config in
+    let corrupt_primary path =
+      Out_channel.with_open_text path (fun channel ->
+        output_string channel "{\"tasks\":\"not-current\"}")
+    in
+    corrupt_primary (Workspace.backlog_path config);
+    (match Keeper_world_observation_inputs.read_current_task ~config ~meta with
+     | Keeper_world_observation_inputs.Recovered_current_task { task; recovery = _ } ->
+       Alcotest.(check string) "recovered task id" "task-001" task.id
+     | Keeper_world_observation_inputs.No_current_task
+     | Keeper_world_observation_inputs.Current_task _
+     | Keeper_world_observation_inputs.Current_task_missing _
+     | Keeper_world_observation_inputs.Current_task_unavailable _ ->
+       Alcotest.fail "valid recovery source was not preserved");
+    (match Workspace.write_backlog_result config backlog with
+     | Ok _ -> ()
+     | Error message -> Alcotest.fail message);
     let without_task = { backlog with tasks = [] } in
     (match Workspace.write_backlog_result config without_task with
      | Ok _ -> ()
@@ -1854,41 +1863,6 @@ let test_read_current_task_preserves_unavailable_and_missing () =
     | Keeper_world_observation_inputs.Current_task_missing _ ->
       Alcotest.fail "unreadable backlog did not remain explicitly unavailable")
 
-let test_read_backlog_counts_marks_recovery_non_authoritative () =
-  with_test_env (fun config ->
-    let backlog =
-      { Masc_domain.tasks = []
-      ; last_updated = Masc_domain.now_iso ()
-      ; version = 7
-      }
-    in
-    (match Workspace.write_backlog_result config backlog with
-     | Ok _ -> ()
-     | Error msg -> Alcotest.failf "failed to write recovery fixture: %s" msg);
-    Out_channel.with_open_text (Workspace.backlog_path config) (fun channel ->
-      output_string channel "{\"tasks\":\"not-current\"}");
-    let meta = keeper_meta_for_self_filter "keeper-recovered-backlog-agent" in
-    let unclaimed, claimable, failed, changed, revision, projection, source =
-      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
-    in
-    Alcotest.(check int) "recovered unclaimed count remains observable" 0 unclaimed;
-    Alcotest.(check int) "recovered claimable count remains observable" 0 claimable;
-    Alcotest.(check int) "recovered failed count remains observable" 0 failed;
-    Alcotest.(check bool) "recovery cannot report an authoritative edge" false changed;
-    Alcotest.(check (option int))
-      "recovery cannot expose an authoritative revision"
-      None
-      revision;
-    Alcotest.(check (option string))
-      "recovery cannot expose an authoritative projection"
-      None
-      projection;
-    match source with
-    | Keeper_world_observation_inputs.Recovery _ -> ()
-    | Keeper_world_observation_inputs.Primary
-    | Keeper_world_observation_inputs.Unavailable _ ->
-      Alcotest.fail "valid recovery must remain explicitly marked as recovery")
-
 let test_self_authored_scoped_task_does_not_hide_peer_work () =
   with_test_env (fun config ->
     let keeper = "keeper-goal-filter-agent" in
@@ -1901,7 +1875,7 @@ let test_self_authored_scoped_task_does_not_hide_peer_work () =
       Workspace.add_task config ~goal_id:"goal-b" ~created_by:"peer-keeper"
         ~title:"Peer work outside active goal" ~priority:1 ~description:""
     in
-    let _, claimable, _, _, _, _, _ =
+    let _, claimable, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -1916,17 +1890,27 @@ let test_self_authored_scoped_task_does_not_hide_peer_work () =
    compared against a baseline because the fixture seeds its own tasks. *)
 let test_read_backlog_counts_excludes_self_authored_task () =
   with_test_env (fun config ->
+    let projection_of_edge = function
+      | Keeper_world_observation_inputs.Observed_backlog
+          { projection_sha256; _ }
+      | Keeper_world_observation_inputs.Recovery_backlog
+          { projection_sha256; _ } ->
+        Some projection_sha256
+      | Keeper_world_observation_inputs.Backlog_read_unavailable _ -> None
+    in
     let meta = keeper_meta_for_self_filter "keeper-self-filter-agent" in
-    let _, claimable_before, _, _, _, projection_before, _ =
+    let _, claimable_before, _, edge_before =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
+    let projection_before = projection_of_edge edge_before in
     let _ =
       Workspace.add_task config ~created_by:meta.name
         ~title:"self-authored routing task" ~priority:3 ~description:""
     in
-    let unclaimed_after_self, claimable_after_self, _, _, _, projection_after_self, _ =
+    let unclaimed_after_self, claimable_after_self, _, edge_after_self =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
+    let projection_after_self = projection_of_edge edge_after_self in
     Alcotest.(check int)
       "a keeper's own task is not offered back to it as claimable"
       claimable_before claimable_after_self;
@@ -1938,9 +1922,10 @@ let test_read_backlog_counts_excludes_self_authored_task () =
       Workspace.add_task config ~created_by:"peer-keeper"
         ~title:"peer authored task" ~priority:3 ~description:""
     in
-    let unclaimed_after_peer, claimable_after_peer, _, _, _, projection_after_peer, _ =
+    let unclaimed_after_peer, claimable_after_peer, _, edge_after_peer =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
+    let projection_after_peer = projection_of_edge edge_after_peer in
     Alcotest.(check int)
       "a peer-authored task is still claimable"
       (claimable_before + 1) claimable_after_peer;
@@ -2375,10 +2360,10 @@ let () =
         test_read_backlog_counts_falls_back_to_unscoped_claimable_task;
       Alcotest.test_case "read backlog counts preserves unreadable observation" `Quick
         test_read_backlog_counts_preserves_unreadable_observation;
-      Alcotest.test_case "read current task preserves unavailable and missing" `Quick
-        test_read_current_task_preserves_unavailable_and_missing;
       Alcotest.test_case "read backlog counts marks recovery non-authoritative" `Quick
         test_read_backlog_counts_marks_recovery_non_authoritative;
+      Alcotest.test_case "read current task preserves unavailable and missing" `Quick
+        test_read_current_task_preserves_unavailable_and_missing;
       Alcotest.test_case "self-authored scoped task does not hide peer work"
         `Quick
         test_self_authored_scoped_task_does_not_hide_peer_work;

@@ -1,5 +1,7 @@
 module Persistence = Keeper_event_queue_persistence
 
+open Masc
+
 let with_temp_dir prefix f =
   let base_path = Filename.temp_dir prefix "" in
   Fun.protect

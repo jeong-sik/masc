@@ -270,14 +270,17 @@ let test_current_task_missing_is_explicit () =
     (contains ~needle:"Do not infer or invent task details" world_state)
 
 let test_recovered_current_task_is_non_authoritative () =
-  let task = make_task ~task_status:Masc_domain.Todo () in
+  let recovered_task : Masc_domain.task =
+    make_task ~task_status:(Masc_domain.Todo : Masc_domain.task_status) ()
+  in
   let decision = WO.keeper_cycle_decision ~meta base_observation in
   let recovery : Masc.Workspace.backlog_recovery =
     { recovery_path = "/tmp/backlog.last-good"; primary_error = "decode failed" }
   in
   let { Prompt.world_state; _ } =
     Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~turn_decision:decision
-      ~current_task:(Inputs.Recovered_current_task { task; recovery })
+      ~current_task:
+        (Inputs.Recovered_current_task { task = recovered_task; recovery })
       ~observation:base_observation ()
   in
   check bool "recovery is not asserted as held authority" false

@@ -171,14 +171,6 @@ let reconcile_all_agent_current_tasks_with_backlog
   | Sys_error msg -> Log.Misc.error "agent state reconcile scan failed: %s" msg
 ;;
 
-let reconcile_all_agent_current_tasks_with_fresh_backlog ?(touch_last_seen = true) config =
-  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  with_file_lock config backlog_path (fun () ->
-    let backlog = read_backlog config in
-    reconcile_all_agent_current_tasks_with_backlog config ~touch_last_seen backlog;
-    backlog)
-;;
-
 (** Claim next highest priority unclaimed task.
     Optional [exclude_task_ids] prevents re-claiming known bad tasks in the
     same loop run.  Optional [task_filter] lets callers scope eligible work
@@ -200,7 +192,7 @@ let claim_next_r
   =
   let exception Existing_claim of claim_next_result in
   ensure_initialized config;
-  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  let lock_path = backlog_lock_path config in
   let claim_under_lock () =
     try
       match read_backlog_r config with
@@ -385,12 +377,8 @@ let claim_next_r
                   else t)
                working_tasks
            in
-           let new_backlog =
-             { tasks = new_tasks
-             ; last_updated = now_iso ()
-             ; version = backlog.version + 1
-             }
-           in
+           (* [write_backlog] stamps version/last_updated at the commit point. *)
+           let new_backlog = { backlog with tasks = new_tasks } in
            write_backlog
              ~after_commit:(fun () ->
                Task_cache_invariant.clear_stale_agent_task config
@@ -456,7 +444,7 @@ let claim_next_r
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e -> Claim_next_error (Printexc.to_string e), None
   in
-  match with_file_lock_r config backlog_path claim_under_lock with
+  match with_file_lock_r config lock_path claim_under_lock with
   | Ok (result, _) -> result
   | Error err -> Claim_next_error (Masc_domain.masc_error_to_string err)
 ;;

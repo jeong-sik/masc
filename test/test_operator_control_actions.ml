@@ -15,6 +15,64 @@ let claim_and_start config ~agent_name ~task_id =
   | Ok _ -> ()
   | Error err -> Alcotest.fail (Masc_domain.show_masc_error err)
 
+let write_text path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let test_snapshot_preserves_backlog_failure_contract () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let ctx = operator_ctx env sw config "operator" in
+      let backlog_path = Workspace.backlog_path config in
+      write_text backlog_path "{not-json";
+      write_text (backlog_path ^ ".last-good") "{not-json";
+      let snapshot = Operator_control.snapshot_json ~actor:"operator" ctx in
+      let workspace = Yojson.Safe.Util.(snapshot |> member "workspace") in
+      let ownership = Yojson.Safe.Util.(workspace |> member "task_ownership") in
+      Alcotest.(check bool) "snapshot remains available" true
+        Yojson.Safe.Util.(workspace |> member "initialized" |> to_bool);
+      Alcotest.(check string) "unavailable task count is explicit" "null"
+        (Yojson.Safe.to_string (Yojson.Safe.Util.member "task_count" workspace));
+      Alcotest.(check bool) "task count availability is explicit" false
+        Yojson.Safe.Util.(workspace |> member "task_count_available" |> to_bool);
+      Alcotest.(check bool) "ownership availability is explicit" false
+        Yojson.Safe.Util.(ownership |> member "available" |> to_bool);
+      Alcotest.(check bool) "ownership authority is explicit" false
+        Yojson.Safe.Util.(ownership |> member "authoritative" |> to_bool))
+
+let test_snapshot_marks_recovery_as_non_authoritative () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let ctx = operator_ctx env sw config "operator" in
+      write_text (Workspace.backlog_path config) "{not-json";
+      let snapshot = Operator_control.snapshot_json ~actor:"operator" ctx in
+      let workspace = Yojson.Safe.Util.(snapshot |> member "workspace") in
+      let ownership = Yojson.Safe.Util.(workspace |> member "task_ownership") in
+      Alcotest.(check bool) "recovered task count is available" true
+        Yojson.Safe.Util.(workspace |> member "task_count_available" |> to_bool);
+      Alcotest.(check bool) "recovered task count is non-authoritative" false
+        Yojson.Safe.Util.(workspace |> member "task_count_authoritative" |> to_bool);
+      Alcotest.(check bool) "recovered ownership is non-authoritative" false
+        Yojson.Safe.Util.(ownership |> member "authoritative" |> to_bool);
+      Alcotest.(check bool) "recovery path is exposed" true
+        (Yojson.Safe.Util.member "recovery_path" ownership <> `Null))
+
 let test_task_inject_executes_after_confirmation () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -298,6 +356,14 @@ let () =
             "task inject executes after confirmation"
             `Quick
             test_task_inject_executes_after_confirmation
+        ; Alcotest.test_case
+            "snapshot preserves backlog failure contract"
+            `Quick
+            test_snapshot_preserves_backlog_failure_contract
+        ; Alcotest.test_case
+            "snapshot marks recovery as non-authoritative"
+            `Quick
+            test_snapshot_marks_recovery_as_non_authoritative
         ; Alcotest.test_case
             "digest defaults to workspace target"
             `Quick

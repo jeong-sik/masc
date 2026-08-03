@@ -861,30 +861,55 @@ let backlog_to_yojson b =
     ("version", `Int b.version);
   ]
 
-let backlog_of_yojson json =
-  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
-  try
-    let tasks_json = match m "tasks" with `List l -> l | _ -> [] in
-    let tasks = List.filter_map (fun j ->
-      match task_of_yojson j with Ok t -> Some t | Error _ -> None
-    ) tasks_json in
-    (* [last_updated] and [version] are display metadata; writers may
-       omit them (observed in live basepath [<base-path>/.masc/tasks/backlog.json]
-       where the top-level is just [{"tasks": [...]}]).  Strict
-       [to_string]/[to_int] decoders rejected such payloads as
-       [Type_error("Expected string, got null")], forcing every reader
-       onto the [read_backlog] empty fallback and wiping every claim
-       from the reader's view (hundreds of [read_backlog backlog decode
-       failed] entries/day driven [stale-claims] GC to skip mutation,
-       so claims never transitioned).  Tolerate missing/null fields. *)
-    let last_updated =
-      Json_util.get_string_with_default json ~key:"last_updated" ~default:""
+let backlog_of_yojson = function
+  | `Assoc fields ->
+    let fields =
+      List.sort (fun (left, _) (right, _) -> String.compare left right) fields
     in
-    let version =
-      Json_util.get_int json "version" |> Option.value ~default:1
-    in
-    Ok { tasks; last_updated; version }
-  with e -> Error (Printexc.to_string e)
+    (match fields with
+     | [ "last_updated", `String last_updated
+       ; "tasks", `List task_values
+       ; "version", version_json
+       ] when not (String.equal (String.trim last_updated) "") ->
+       let rec decode_tasks index acc = function
+         | [] -> Ok (List.rev acc)
+         | task_json :: rest ->
+           (match task_of_yojson task_json with
+            | Ok task -> decode_tasks (index + 1) (task :: acc) rest
+            | Error message ->
+              Error
+                (Printf.sprintf
+                   "backlog.tasks[%d] corrupt: %s"
+                   index
+                   message))
+       in
+       let version_result =
+         match version_json with
+         | `Int value when value >= 1 -> Ok value
+         | `Intlit raw ->
+           (match int_of_string_opt raw with
+            | Some value when value >= 1 -> Ok value
+            | Some _ | None ->
+              Error (Printf.sprintf "backlog.version corrupt: %s" raw))
+         | other ->
+           Error
+             (Printf.sprintf
+                "backlog.version corrupt: %s"
+                (Yojson.Safe.to_string other))
+       in
+       (match decode_tasks 0 [] task_values, version_result with
+        | Ok tasks, Ok version -> Ok { tasks; last_updated; version }
+        | Error _ as error, _ | _, (Error _ as error) -> error)
+     | [ "last_updated", `String _; "tasks", `List _; "version", _ ] ->
+       Error "backlog.last_updated must be a non-blank string"
+     | _ ->
+       Error
+         "backlog must contain exactly one tasks list, last_updated string, and positive version")
+  | other ->
+    Error
+      (Printf.sprintf
+         "backlog must be an object, got %s"
+         (Yojson.Safe.to_string other))
 
 (** SSE Session info (for tracking connected agents) *)
 type sse_session = {

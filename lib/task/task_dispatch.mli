@@ -72,9 +72,10 @@ val get_task :
   (Masc_domain.task option, Masc_error.t) result
 (** [get_task config ~task_id] reads the JSONL backlog and returns
     [Ok (Some task)] when a task with the given id exists,
-    [Ok None] otherwise.  Linear scan over the backlog —
-    callers running this in tight loops should batch through
-    {!list_tasks} instead. *)
+    [Ok None] otherwise. A primary/recovery read failure is returned as a
+    structured [System_error.IoError], never raised through this result API.
+    Linear scan over the backlog — callers running this in tight loops should
+    batch through {!list_tasks} instead. *)
 
 val list_tasks :
   Workspace.config ->
@@ -88,7 +89,9 @@ val list_tasks :
     only the active queue.
 
     Active states ([Todo] / [Claimed] / [InProgress] /
-    [AwaitingVerification]) always pass through. *)
+    [AwaitingVerification]) always pass through. A primary/recovery read
+    failure is returned as a structured [System_error.IoError], never raised
+    through this result API. *)
 
 (* [validate_transition] / [update_status] were retired by RFC-0323 G-7:
    a direct status writer with its own 2-state terminal check bypassed the

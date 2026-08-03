@@ -82,6 +82,20 @@ let test_codex_discovery_contract () =
        |> List.mem_assoc "resource_documentation"))
 ;;
 
+let test_generic_bearer_challenge () =
+  let cors = [ "vary", "Origin" ] in
+  check
+    (list (pair string string))
+    "generic 401 advertises plain Bearer and preserves CORS"
+    [ "www-authenticate", "Bearer"; "vary", "Origin" ]
+    (Server_auth.auth_error_headers ~status:`Unauthorized ~cors);
+  check
+    (list (pair string string))
+    "generic 403 preserves CORS without a challenge"
+    cors
+    (Server_auth.auth_error_headers ~status:`Forbidden ~cors)
+;;
+
 let test_public_listener_cannot_admit_loopback_oauth_by_host () =
   let trust_policy =
     match
@@ -313,6 +327,7 @@ let () =
     "server_oauth_protocol"
     [ ( "protocol"
       , [ test_case "Codex discovery contract" `Quick test_codex_discovery_contract
+        ; test_case "generic Bearer challenge" `Quick test_generic_bearer_challenge
         ; test_case
             "public listener rejects loopback OAuth Host"
             `Quick

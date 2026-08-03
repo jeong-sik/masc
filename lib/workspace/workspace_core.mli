@@ -5,25 +5,21 @@
 
 (** {1 Included sub-modules} *)
 
-include module type of Workspace_utils
-include module type of Workspace_backlog
-include module type of Workspace_bootstrap
-include module type of Workspace_identity
-include module type of Workspace_task_id
-include module type of Workspace_state
-include module type of Workspace_bootstrap
-include module type of Workspace_identity
-include module type of Workspace_task_id
-include module type of Workspace_backlog
-include module type of Workspace_broadcast
-include module type of Workspace_lifecycle
-include module type of Workspace_init
-include module type of Workspace_status
-include module type of Workspace_task
-include module type of Workspace_task_schedule
-include module type of Workspace_query
-include module type of Workspace_gc
-include module type of Workspace_agent
+include module type of struct include Workspace_utils end
+include module type of struct include Workspace_backlog end
+include module type of struct include Workspace_bootstrap end
+include module type of struct include Workspace_identity end
+include module type of struct include Workspace_task_id end
+include module type of struct include Workspace_state end
+include module type of struct include Workspace_broadcast end
+include module type of struct include Workspace_lifecycle end
+include module type of struct include Workspace_init end
+include module type of struct include Workspace_status end
+include module type of struct include Workspace_task end
+include module type of struct include Workspace_task_schedule end
+include module type of struct include Workspace_query end
+include module type of struct include Workspace_gc end
+include module type of struct include Workspace_agent end
 (** {1 Workspace lifecycle (overrides)} *)
 
 (** Initialize MASC workspace with optional session binding.
@@ -45,5 +41,4 @@ module For_testing : sig
       label wire format is unchanged ([family_to_wire] / [kind_to_wire]
       are byte-for-byte compatible with the prior free-string values). *)
 end
-
 

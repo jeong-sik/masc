@@ -104,10 +104,10 @@ let transition_task_outcome_r
     | _, Error e -> Error e
     | Ok _, Ok _ -> Ok ()
   in
-  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  let lock_path = backlog_lock_path config in
   let committed_verification_submission = ref None in
   let result =
-    with_file_lock_r config backlog_path (fun () ->
+    with_file_lock_r config lock_path (fun () ->
     try
       match read_backlog_r config with
       | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
@@ -709,8 +709,8 @@ let commit_verdict_r
     | Error e -> Error e
     | Ok _ -> Ok ()
   in
-  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  with_file_lock_r config backlog_path (fun () ->
+  let lock_path = backlog_lock_path config in
+  with_file_lock_r config lock_path (fun () ->
     try
       match read_backlog_r config with
       | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
@@ -780,17 +780,17 @@ let commit_verdict_r
            let producer = decided.Workspace_task_lifecycle.producer in
            let verification_id = decided.Workspace_task_lifecycle.verification_id in
            let new_backlog =
-             { tasks =
+             { backlog with
+               tasks =
                  List.map
                    (fun (t : task) ->
                       if String.equal t.id task_id
                       then { t with task_status = new_status }
                       else t)
                    backlog.tasks
-             ; last_updated = now
-             ; version = backlog.version + 1
              }
            in
+           (* [write_backlog] stamps version/last_updated at the commit point. *)
            write_backlog config new_backlog;
            let run_post_commit label f =
              try f () with

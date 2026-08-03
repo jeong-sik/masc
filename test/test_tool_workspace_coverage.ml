@@ -223,7 +223,7 @@ let force_claim_task config ~agent_name ~task_id =
         else task)
       backlog.tasks
   in
-  Workspace.write_backlog config { backlog with tasks; version = backlog.version + 1 }
+  Workspace.write_backlog config { backlog with tasks }
 ;;
 
 (* Test dispatch returns None for unknown tool *)
@@ -301,6 +301,45 @@ let () =
     assert_contains
       Yojson.Safe.Util.(data |> member "snapshot" |> to_string)
       "Lifecycle actions are credential-blocked")
+;;
+
+let () =
+  test "dispatch_status_observes_recovered_backlog" (fun () ->
+    let ctx = make_test_ctx () in
+    let _ = Workspace.init ctx.config ~agent_name:(Some ctx.agent_name) in
+    ignore
+      (Workspace.add_task
+         ctx.config
+         ~title:"Recovered status task"
+         ~priority:2
+         ~description:"");
+    let oc = open_out (Workspace.backlog_path ctx.config) in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc "{not valid json");
+    match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+    | Some result ->
+      assert (Tool_result.is_success result);
+      let data = Tool_result.data result in
+      assert_contains (status_message result) "Recovered status task";
+      assert_contains (status_message result) "recovery-backed and non-authoritative";
+      assert (Yojson.Safe.Util.(data |> member "degraded" |> to_bool));
+      assert
+        (Yojson.Safe.Util.(data |> member "backlog_authority" |> to_string)
+         = "recovery_non_authoritative");
+      let revision = Yojson.Safe.Util.(data |> member "revision" |> to_string) in
+      (match
+         Tool_workspace.dispatch
+           ctx
+           ~name:"masc_status"
+           ~args:(`Assoc [ "if_revision", `String revision ])
+       with
+       | Some repeated ->
+         assert
+           (Yojson.Safe.Util.(Tool_result.data repeated |> member "kind" |> to_string)
+            = "snapshot")
+       | None -> failwith "repeated status dispatch returned None")
+    | None -> failwith "dispatch returned None")
 ;;
 
 let () =

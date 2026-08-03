@@ -872,6 +872,19 @@ let test_goal_reconciliation_restart_scan_retries_missed_delivery () =
        check int "missed hook left no queue item" 0
          (registry_snapshot ~base_path:config.base_path meta.name
           |> Keeper_event_queue.length);
+       let backlog_path = Masc.Workspace.backlog_path config in
+       let authoritative_backlog = Fs_compat.load_file backlog_path in
+       write_text_file backlog_path "{ malformed current backlog";
+       let degraded =
+         Masc.Keeper_goal_reconciliation_wake.reconcile_startup ~config
+       in
+       check int "recovery-only startup scan is failed" 1 degraded.failed_count;
+       check int "recovery-only startup scan enqueues nothing" 0
+         (registry_snapshot ~base_path:config.base_path meta.name
+          |> Keeper_event_queue.length);
+       (match Fs_compat.save_file_atomic backlog_path authoritative_backlog with
+        | Ok () -> ()
+        | Error detail -> fail detail);
        let queue_path =
          Filename.concat
            (Filename.concat

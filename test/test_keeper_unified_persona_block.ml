@@ -42,6 +42,7 @@ let base_observation : WO.world_observation =
     failed_task_count = 0;
     scheduled_automation = WO.empty_scheduled_automation_observation;
     backlog_updated_since_last_scheduled_autonomous = false;
+    backlog_revision = Some 1;
     running_keeper_fiber_count = 0;
     connected_surfaces = [];
     connected_surface_failures = [];
@@ -66,6 +67,7 @@ let build_prompt meta =
     ~meta
     ~base_path:"/tmp"
     ~turn_decision
+    ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
     ~observation:base_observation
     ()
 ;;

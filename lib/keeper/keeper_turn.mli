@@ -43,7 +43,7 @@ module For_testing : sig
     string
 
   val direct_turn_dynamic_context :
-    current_task:Masc_domain.task option ->
+    current_task:Keeper_world_observation_inputs.current_task_observation ->
     recent_direct_conversation_text:string ->
     worktree_text:string ->
     telemetry_feedback_text:string ->

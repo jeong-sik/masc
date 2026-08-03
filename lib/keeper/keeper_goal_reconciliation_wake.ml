@@ -1,5 +1,6 @@
 type enqueue_outcome =
   | Not_ready
+  | Backlog_read_failed of { detail : string }
   | No_keeper_target of { goal_id : string }
   | Keeper_target_lookup_failed of { goal_id : string; detail : string }
   | Enqueued of { goal_id : string; keeper_name : string }
@@ -199,15 +200,23 @@ let enqueue_if_ready ~config ~completing_agent_name ~task_id =
       ~config
       ~task_id
   with
-  | None -> Not_ready
-  | Some ready -> enqueue_ready ~config ~completing_agent_name ready
+  | Error detail -> Backlog_read_failed { detail }
+  | Ok None -> Not_ready
+  | Ok (Some ready) -> enqueue_ready ~config ~completing_agent_name ready
 ;;
 
 let reconcile_startup ~config =
-  let ready =
-    Masc_task_handlers.Task_goal_reconciliation.ready_executing_goals ~config
-  in
-  List.fold_left
+  match Masc_task_handlers.Task_goal_reconciliation.ready_executing_goals ~config with
+  | Error detail ->
+    Log.Keeper.error "goal reconciliation startup backlog read failed: %s" detail;
+    { ready_count = 0
+    ; enqueued_count = 0
+    ; already_present_count = 0
+    ; unresolved_count = 0
+    ; failed_count = 1
+    }
+  | Ok ready ->
+    List.fold_left
     (fun
        summary
        (candidate :
@@ -221,6 +230,8 @@ let reconcile_startup ~config =
        in
        match outcome with
        | Not_ready -> summary
+       | Backlog_read_failed _ ->
+         { summary with failed_count = summary.failed_count + 1 }
        | Enqueued _ ->
          { summary with enqueued_count = summary.enqueued_count + 1 }
        | Already_present _ ->

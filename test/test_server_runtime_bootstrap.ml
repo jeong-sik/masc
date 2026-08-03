@@ -2380,6 +2380,65 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
           false
           (fleet_safety |> member "operator_action_required" |> to_bool)))
 
+let test_health_json_degrades_recovery_backed_owner_scan () =
+  with_temp_dir "health-recovery-backed-owner-scan" (fun dir ->
+    let previous_state = !Server_auth.server_state in
+    Fun.protect
+      ~finally:(fun () -> Server_auth.server_state := previous_state)
+      (fun () ->
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        Workspace.write_backlog config
+          {
+            Types.tasks = [];
+            last_updated = "2026-08-03T00:00:00Z";
+            version = 1;
+          };
+        write_file (Workspace.backlog_path config) "{ invalid backlog";
+        let phase_counts :
+            Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
+          { running = 0; failing = 0; recovering = 0 }
+        in
+        let execution_snapshot :
+            Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot =
+          { owners = []; executable_names = [] }
+        in
+        let fleet_safety =
+          Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+            ~bootable_names:[]
+            ~autoboot_scan:
+              Server_routes_http_runtime_fleet_scan.empty_autoboot_keeper_scan
+            ~execution_snapshot
+            ~phase_counts
+            ~paused_keepers_json:(`Assoc [ ("count", `Int 0) ])
+            ()
+        in
+        let open Yojson.Safe.Util in
+        Alcotest.(check string)
+          "recovery-backed observation degrades fleet health"
+          "degraded"
+          (fleet_safety |> member "status" |> to_string);
+        Alcotest.(check int)
+          "recovery-backed observation records one scan error"
+          1
+          (fleet_safety |> member "active_task_owner_scan_error_count" |> to_int);
+        let errors =
+          fleet_safety |> member "active_task_owner_scan_errors" |> to_list
+        in
+        Alcotest.(check (list string))
+          "recovery provenance identifies backlog"
+          [ "backlog" ]
+          (List.map (fun row -> row |> member "source" |> to_string) errors);
+        Alcotest.(check bool)
+          "recovery provenance names the snapshot"
+          true
+          (errors
+           |> List.hd
+           |> member "error"
+           |> to_string
+           |> fun error -> contains_substring error "observing recovery snapshot")))
+
 let test_health_json_reuses_canonical_owner_execution_snapshot () =
   with_temp_dir "health-canonical-owner-execution-snapshot" (fun dir ->
     let config_root = make_config_root dir in
@@ -5230,6 +5289,9 @@ let () =
             "health json preserves active task owner meta read error"
             `Quick
             test_health_json_preserves_active_task_owner_meta_read_error;
+          Alcotest.test_case
+            "health json degrades recovery-backed owner scan"
+            `Quick test_health_json_degrades_recovery_backed_owner_scan;
           Alcotest.test_case
             "health json reuses canonical owner execution snapshot"
             `Quick

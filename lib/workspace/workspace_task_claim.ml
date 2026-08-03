@@ -68,9 +68,9 @@ let claim_task_r config ~agent_name ~task_id ()
     | _, Error e -> Error e
     | Ok _, Ok _ -> Ok ()
   in
-  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  let lock_path = backlog_lock_path config in
   let claim_result =
-    with_file_lock config backlog_path (fun () ->
+    with_file_lock config lock_path (fun () ->
     match read_backlog_r config with
     | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
     | Ok backlog ->
@@ -176,12 +176,8 @@ let claim_task_r config ~agent_name ~task_id ()
            let claimed_task =
              List.find (fun (t : Masc_domain.task) -> String.equal t.id task_id) new_tasks
            in
-           let new_backlog =
-             { tasks = new_tasks
-             ; last_updated = now_iso ()
-             ; version = backlog.version + 1
-             }
-           in
+           (* [write_backlog] stamps version/last_updated at the commit point. *)
+           let new_backlog = { backlog with tasks = new_tasks } in
            write_backlog
              ~after_commit:(fun () ->
                Task_cache_invariant.clear_stale_agent_task config

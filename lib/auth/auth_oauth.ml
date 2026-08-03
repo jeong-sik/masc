@@ -87,10 +87,17 @@ let add_scope_once acc scope =
   if List.exists (equal_scope scope) acc then acc else acc @ [ scope ]
 ;;
 
+let add_scope_with_implications acc = function
+  | Mcp_tools -> add_scope_once acc Mcp_tools
+  | Mcp_admin ->
+    let acc = add_scope_once acc Mcp_tools in
+    add_scope_once acc Mcp_admin
+;;
+
 let parse_scopes raw =
   let values =
     match raw with
-    | None -> []
+    | None -> [ scope_to_string Mcp_tools ]
     | Some value ->
       value
       |> String.split_on_char ' '
@@ -98,14 +105,15 @@ let parse_scopes raw =
         let item = String.trim item in
         if String.equal item "" then None else Some item)
   in
-  let values = if values = [] then [ scope_to_string Mcp_tools ] else values in
   let rec parse acc = function
     | [] -> Ok acc
-    | "mcp:tools" :: rest -> parse (add_scope_once acc Mcp_tools) rest
-    | "mcp:admin" :: rest -> parse (add_scope_once acc Mcp_admin) rest
+    | "mcp:tools" :: rest -> parse (add_scope_with_implications acc Mcp_tools) rest
+    | "mcp:admin" :: rest -> parse (add_scope_with_implications acc Mcp_admin) rest
     | _ :: _ -> Error Invalid_scope
   in
-  parse [] values
+  match values with
+  | [] -> Error Invalid_scope
+  | _ -> parse [] values
 ;;
 
 let effective_role ~bootstrap_role scopes =
@@ -337,12 +345,17 @@ let role_of_string = function
 
 let scopes_of_strings values =
   let rec parse acc = function
-    | [] -> Ok (List.rev acc)
-    | "mcp:tools" :: rest -> parse (Mcp_tools :: acc) rest
-    | "mcp:admin" :: rest -> parse (Mcp_admin :: acc) rest
+    | [] -> Ok acc
+    | "mcp:tools" :: rest -> parse (add_scope_once acc Mcp_tools) rest
+    | "mcp:admin" :: rest -> parse (add_scope_once acc Mcp_admin) rest
     | _ :: _ -> Error (Store_error "invalid OAuth scope")
   in
-  parse [] values
+  let* scopes = parse [] values in
+  if
+    List.exists (equal_scope Mcp_admin) scopes
+    && not (List.exists (equal_scope Mcp_tools) scopes)
+  then Error (Store_error "invalid OAuth scope closure: mcp:admin requires mcp:tools")
+  else Ok scopes
 ;;
 
 let client_to_yojson (client : client) =
@@ -951,6 +964,7 @@ let rotate_refresh_token
         let* scopes =
           match scope with
           | None -> Ok family.scopes
+          | Some raw when String.equal (String.trim raw) "" -> Error Invalid_scope
           | Some raw ->
             let* requested = parse_scopes (Some raw) in
             let granted requested_scope =

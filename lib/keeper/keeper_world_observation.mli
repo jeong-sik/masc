@@ -146,6 +146,12 @@ type world_observation = {
       autonomous attempt. Lets task-triggered wakeups bypass cooldown once
       so newly added work is not delayed behind the previous turn's timer. *)
 
+  backlog_revision : int option;
+  (** The backlog commit revision observed through the recovery-backed read.
+      [None] means neither primary nor recovery was a valid current backlog;
+      callers must not interpret the accompanying zero counts as an observed
+      empty backlog. *)
+
   running_keeper_fiber_count : int;
   (** Number of live keeper fibers for this workspace base path. *)
 

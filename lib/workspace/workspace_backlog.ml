@@ -7,6 +7,9 @@ open Workspace_utils
 
 let backlog_path = Workspace_utils.backlog_path
 
+let backlog_lock_path config =
+  Filename.concat (Filename.dirname (backlog_path config)) ".backlog"
+
 let backlog_recovery_path config =
   backlog_path config ^ ".last-good"
 
@@ -41,8 +44,47 @@ let file_stat_opt path =
 let clear_backlog_cache_for path =
   Stdlib.Mutex.protect backlog_cache_mu (fun () -> Hashtbl.remove backlog_cache path)
 
-let read_backlog_r config =
+type backlog_recovery = {
+  primary_error : string;
+  recovery_path : string;
+}
+
+type backlog_observation = {
+  observed_backlog : backlog;
+  recovered_from : backlog_recovery option;
+}
+
+let read_backlog_with_source_r config =
   let path = backlog_path config in
+  let recover primary_msg =
+    let recovery_path = backlog_recovery_path config in
+    match read_json_result config recovery_path with
+    | Ok json ->
+      (match decode_backlog ~path:recovery_path json with
+       | Ok backlog ->
+         Log.Misc.warn
+           "read_backlog: primary backlog unreadable, recovered from %s (%s)"
+           recovery_path
+           primary_msg;
+         Ok
+           {
+             observed_backlog = backlog;
+             recovered_from = Some { primary_error = primary_msg; recovery_path };
+           }
+       | Error recovery_msg ->
+         Error
+           (Printf.sprintf
+              "%s; recovery failed: %s"
+              primary_msg
+              recovery_msg))
+    | Error recovery_msg ->
+      Error
+        (Printf.sprintf
+           "%s; recovery read failed for %s: %s"
+           primary_msg
+           recovery_path
+           recovery_msg)
+  in
   let cached =
     Stdlib.Mutex.protect backlog_cache_mu (fun () ->
         match Hashtbl.find_opt backlog_cache path with
@@ -56,7 +98,8 @@ let read_backlog_r config =
                 else None))
   in
   match cached with
-  | Some backlog -> Ok backlog
+  | Some backlog ->
+    Ok { observed_backlog = backlog; recovered_from = None }
   | None -> (
       match read_json_result config path with
       | Ok json ->
@@ -69,52 +112,70 @@ let read_backlog_r config =
                       Hashtbl.replace backlog_cache path
                         { mtime = st.Unix.st_mtime; size = st.Unix.st_size; backlog })
               | None -> ());
-              Ok backlog
-          | Error _ as e -> e)
-      | Error primary_msg ->
-          let recovery_path = backlog_recovery_path config in
-          (match read_json_result config recovery_path with
-           | Ok json ->
-               (match decode_backlog ~path:recovery_path json with
-                | Ok backlog ->
-                    Log.Misc.warn
-                      "read_backlog: primary backlog unreadable, recovered from %s (%s)"
-                      recovery_path
-                      primary_msg;
-                    Ok backlog
-                | Error recovery_msg ->
-                    Error
-                      (Printf.sprintf
-                         "%s; recovery failed: %s"
-                         primary_msg
-                         recovery_msg))
-           | Error recovery_msg ->
-               Error
-                 (Printf.sprintf
-                    "%s; recovery read failed for %s: %s"
-                    primary_msg
-                    recovery_path
-                    recovery_msg)))
+              Ok { observed_backlog = backlog; recovered_from = None }
+          | Error primary_msg -> recover primary_msg)
+      | Error primary_msg -> recover primary_msg)
 
-let read_backlog config =
-  match read_backlog_r config with
-  | Ok backlog -> backlog
-  | Error msg ->
-      Log.Misc.error "%s" msg;
-      { tasks = []; last_updated = now_iso (); version = 1 }
+let read_backlog_r config =
+  match read_backlog_with_source_r config with
+  | Ok { observed_backlog; recovered_from = None } -> Ok observed_backlog
+  | Ok
+      {
+        observed_backlog;
+        recovered_from = Some { primary_error; recovery_path };
+      } ->
+    Error
+      (Printf.sprintf
+         "%s; recovery snapshot at %s revision=%d is available but non-authoritative for mutation"
+         primary_error
+         recovery_path
+         observed_backlog.version)
+  | Error _ as error -> error
 
+let read_backlog_observation_with_source_r = read_backlog_with_source_r
+
+let read_backlog_observation_r config =
+  match read_backlog_with_source_r config with
+  | Ok { observed_backlog; _ } -> Ok observed_backlog
+  | Error _ as error -> error
+
+exception Backlog_read_failed of string
 exception Backlog_write_failed of string
 
+let read_backlog config =
+  match read_backlog_with_source_r config with
+  | Ok { observed_backlog; _ } -> observed_backlog
+  | Error msg ->
+    Log.Misc.error "%s" msg;
+    raise (Backlog_read_failed msg)
+
 type write_backlog_outcome =
-  { primary_mirror_error : string option
+  { committed_revision : int
+  ; primary_mirror_error : string option
   ; recovery_error : string option
   ; post_commit_error : string option
   }
 
 (** Result-returning variant with the primary backlog as the commit point.
     Once the primary write succeeds, recovery-copy failure is returned as an
-    explicit committed outcome rather than a false mutation failure. *)
+    explicit committed outcome rather than a false mutation failure.
+
+    Commits the NEXT revision of the given snapshot: [version] is stamped to
+    [backlog.version + 1] and [last_updated] to now at this single commit
+    point (RFC-0357 §3.2 — the backlog revision is the scheduled-turn edge
+    clock, so monotonicity is structural here instead of a convention spread
+    across every caller). Callers pass the snapshot they read, with mutated
+    [tasks], and never hand-bump. *)
 let write_backlog_result ?after_commit config backlog =
+  if backlog.version = max_int then
+    Error
+      (Printf.sprintf
+         "[write_backlog] revision exhausted at %d; refusing to wrap"
+         backlog.version)
+  else
+  let backlog =
+    { backlog with version = backlog.version + 1; last_updated = now_iso () }
+  in
   let json = backlog_to_yojson backlog in
   let primary_path = backlog_path config in
   let recovery_path = backlog_recovery_path config in
@@ -166,7 +227,8 @@ let write_backlog_result ?after_commit config backlog =
            Some message)
     in
     Ok
-      { primary_mirror_error = primary_commit.mirror_error
+      { committed_revision = backlog.version
+      ; primary_mirror_error = primary_commit.mirror_error
       ; recovery_error
       ; post_commit_error
       }

@@ -38,9 +38,25 @@ let sample_board_event : WO.pending_board_event =
     latest_external_preview = None;
   }
 
+(* The wake this observation projects. [schedule_id] is deliberately unlike the
+   [sched-ready] row in [scheduled_automation_observation] below: that row
+   renders "schedule_id=sched-ready" into the Scheduled Automation block of the
+   same prompt, so a whole-prompt substring assertion would pass even when the
+   Scheduled Wake block carries no pointer at all. [title] is [Some] because
+   that is the path where the pointer used to vanish. *)
+let sample_wake : Keeper_event_queue.scheduled_wake =
+  { schedule_id = "sched-wake-pointer"
+  ; due_at = 200.0
+  ; payload_digest = "digest-hourly-research"
+  ; title = Some "Hourly research"
+  ; message =
+      "Search the web for the latest OCaml release notes, then write a cited summary."
+  }
+;;
+
 let sample_scheduled_wake : WO.pending_board_event =
   { sample_board_event with
-    event_kind = WO.Schedule_due
+    event_kind = WO.Schedule_due sample_wake
   ; post_id = "schedule-occurrence:2026-07-28T06:22:07+09:00"
   ; author = "scheduled_automation"
   ; title = "Hourly research"
@@ -419,6 +435,86 @@ let test_scheduled_wake_preserves_complete_message () =
   check string "scheduled work message is not truncated" exact_message event.preview
 ;;
 
+(* Extract the body of the Scheduled Wake block. The assertions below MUST be
+   scoped to it: [test_scheduled_automation_items_render] pins
+   "schedule_id=sched-ready" in the Scheduled Automation block of the same
+   prompt, so a whole-prompt substring check for "schedule_id=" passes even
+   when the wake block carries no pointer. *)
+let scheduled_wake_block world_state =
+  match
+    String.split_on_char '#' world_state
+    |> List.find_opt (contains_sub "Scheduled Wake")
+  with
+  | Some section -> section
+  | None -> fail "expected Scheduled Wake section"
+;;
+
+let test_scheduled_wake_renders_schedule_pointer () =
+  Masc_test_deps.init_keeper_tool_registry ();
+  init_runtime_default_for_tests ();
+  let obs =
+    { base_observation with pending_board_events = [ sample_scheduled_wake ] }
+  in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    build_prompt ~meta:minimal_meta obs
+  in
+  let block = scheduled_wake_block world_state in
+  (* The durable pointer. Without it the Keeper holds only [occurrence_id],
+     which is a SHA-256 of (schedule_id, due_at, payload_digest) and therefore
+     one-way — no tool accepts it and the request cannot be read back. *)
+  check bool "wake row carries the schedule_id pointer" true
+    (contains_sub "schedule_id=sched-wake-pointer" block);
+  check bool "wake row still carries the occurrence id" true
+    (contains_sub sample_scheduled_wake.post_id block);
+  (* The two ids are different things and the prompt must say which is which,
+     otherwise a Keeper reaches for the wrong one. *)
+  check bool "block names the dereference tool" true
+    (contains_sub "masc_schedule_get" block);
+  check bool "block still marks occurrence_id as correlation-only" true
+    (contains_sub "never pass it to a Board tool" block)
+;;
+
+let test_untitled_wake_keeps_pointer_out_of_prose () =
+  let wake : Keeper_event_queue.scheduled_wake =
+    { schedule_id = "sched-untitled"
+    ; due_at = 200.0
+    ; payload_digest = "digest-untitled"
+    ; title = None
+    ; message = "Run the untitled maintenance sweep."
+    }
+  in
+  let event =
+    WO.pending_board_event_of_scheduled_wake
+      ~meta:minimal_meta
+      ~post_id:"schedule-occurrence:untitled"
+      ~arrived_at:200.0
+      wake
+  in
+  (* The untitled fallback used to read
+     "Scheduled keeper wake due (schedule %s)". That was the only path on which
+     the pointer survived, and it survived as prose. Now that [event_kind]
+     carries the wake, the pointer has exactly one home and the title is a
+     plain label. *)
+  check string "untitled fallback is a plain label" "Scheduled keeper wake due"
+    event.title;
+  check bool "schedule id is not smuggled into the title" false
+    (contains_sub wake.schedule_id event.title);
+  match event.event_kind with
+  | WO.Schedule_due carried ->
+    check string "typed pointer survives the projection" wake.schedule_id
+      carried.Keeper_event_queue.schedule_id
+  | WO.Board_post_created
+  | WO.Board_comment_added
+  | WO.Board_reaction_changed _
+  | WO.Fusion_completed
+  | WO.Bg_completed
+  | WO.External_attention
+  | WO.Goal_assigned
+  | WO.Goal_reconciliation_ready
+  | WO.Completion_authority_rejected _ ->
+    fail "scheduled wake must project to Schedule_due"
+;;
+
 let test_completion_authority_rejection_has_own_prompt_layer () =
   Masc_test_deps.init_keeper_tool_registry ();
   init_runtime_default_for_tests ();
@@ -654,6 +750,12 @@ let () =
           test_case
             "prompt: scheduled wake preserves complete message"
             `Quick test_scheduled_wake_preserves_complete_message;
+          test_case
+            "prompt: scheduled wake renders the schedule_id pointer"
+            `Quick test_scheduled_wake_renders_schedule_pointer;
+          test_case
+            "prompt: untitled wake keeps the pointer out of prose"
+            `Quick test_untitled_wake_keeps_pointer_out_of_prose;
           test_case
             "prompt: completion authority rejection has its own layer"
             `Quick test_completion_authority_rejection_has_own_prompt_layer;

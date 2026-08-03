@@ -156,7 +156,7 @@ let board_event_kind_label = function
   | Keeper_world_observation.Board_reaction_changed _ -> "reaction_changed"
   | Keeper_world_observation.Fusion_completed -> "fusion_completed"
   | Keeper_world_observation.Bg_completed -> "bg_completed"
-  | Keeper_world_observation.Schedule_due -> "schedule_due"
+  | Keeper_world_observation.Schedule_due _ -> "schedule_due"
   | Keeper_world_observation.External_attention -> "external_attention"
   | Keeper_world_observation.Goal_assigned -> "goal_assigned"
   | Keeper_world_observation.Goal_reconciliation_ready ->
@@ -199,7 +199,7 @@ let board_event_note = function
   | Keeper_world_observation.Board_comment_added
   | Keeper_world_observation.Fusion_completed
   | Keeper_world_observation.Bg_completed
-  | Keeper_world_observation.Schedule_due
+  | Keeper_world_observation.Schedule_due _
   | Keeper_world_observation.Goal_assigned
   | Keeper_world_observation.Goal_reconciliation_ready
   | Keeper_world_observation.Completion_authority_rejected _ -> ""
@@ -312,15 +312,34 @@ let format_scheduled_wake_observations
     Buffer.add_string ubuf
       "Rows below are scheduled work requests, not Board posts. The \
        occurrence_id is correlation metadata only: never pass it to a Board \
-       tool. External effects still cross the Gate.\n";
+       tool. The schedule_id is the durable pointer: pass it to \
+       masc_schedule_get to read the full request, including the payload body, \
+       recurrence, owner, and execution history. External effects still cross \
+       the Gate.\n";
     List.iter
       (fun (event : Keeper_world_observation.pending_board_event) ->
-         Buffer.add_string ubuf
-           (Printf.sprintf
-              "- occurrence_id=%s title=%s message=%s\n"
-              event.post_id
-              (quote_prompt_field event.title)
-              (quote_prompt_field event.preview)))
+         match event.event_kind with
+         | Keeper_world_observation.Schedule_due wake ->
+           Buffer.add_string ubuf
+             (Printf.sprintf
+                "- schedule_id=%s occurrence_id=%s title=%s message=%s\n"
+                wake.Keeper_event_queue.schedule_id
+                event.post_id
+                (quote_prompt_field event.title)
+                (quote_prompt_field event.preview))
+         (* [events] is pre-filtered by [is_scheduled_automation_event], so the
+            arms below are unreachable. They are enumerated rather than folded
+            into a catch-all so that an eleventh constructor fails to compile
+            here instead of being silently dropped from the block. *)
+         | Keeper_world_observation.Board_post_created
+         | Keeper_world_observation.Board_comment_added
+         | Keeper_world_observation.Board_reaction_changed _
+         | Keeper_world_observation.Fusion_completed
+         | Keeper_world_observation.Bg_completed
+         | Keeper_world_observation.External_attention
+         | Keeper_world_observation.Goal_assigned
+         | Keeper_world_observation.Goal_reconciliation_ready
+         | Keeper_world_observation.Completion_authority_rejected _ -> ())
       events;
     Buffer.add_char ubuf '\n';
     Some (Buffer.contents ubuf))
@@ -347,7 +366,7 @@ let format_completion_authority_rejection_observations
          | Keeper_world_observation.Board_reaction_changed _
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.Bg_completed
-         | Keeper_world_observation.Schedule_due
+         | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention
          | Keeper_world_observation.Goal_assigned
          | Keeper_world_observation.Goal_reconciliation_ready -> None)

@@ -24,7 +24,7 @@ type pending_board_event_kind =
   | Board_reaction_changed of board_reaction_event
   | Fusion_completed
   | Bg_completed
-  | Schedule_due
+  | Schedule_due of Keeper_event_queue.scheduled_wake
   | External_attention
   | Goal_assigned
   | Goal_reconciliation_ready
@@ -49,7 +49,7 @@ type pending_board_event =
 
 let is_board_activity_event (event : pending_board_event) =
   match event.event_kind with
-  | Schedule_due -> false
+  | Schedule_due _ -> false
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed _
@@ -67,7 +67,7 @@ let is_board_activity_event (event : pending_board_event) =
 
 let is_scheduled_automation_event (event : pending_board_event) =
   match event.event_kind with
-  | Schedule_due -> true
+  | Schedule_due _ -> true
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed _
@@ -87,7 +87,7 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Board_reaction_changed _
   | Fusion_completed
   | Bg_completed
-  | Schedule_due
+  | Schedule_due _
   | External_attention
   | Goal_assigned
   | Goal_reconciliation_ready -> false
@@ -562,12 +562,16 @@ let pending_board_event_of_scheduled_wake
       (sw : Keeper_event_queue.scheduled_wake)
   : pending_board_event
   =
+  (* [schedule_id] rides in [event_kind] as a typed pointer, so the fallback
+     title no longer smuggles it into prose. That string form only survived on
+     the untitled path, which left the pointer unreachable whenever the request
+     set a title. *)
   let title =
     match sw.title with
     | Some title -> title
-    | None -> Printf.sprintf "Scheduled keeper wake due (schedule %s)" sw.schedule_id
+    | None -> "Scheduled keeper wake due"
   in
-  { event_kind = Schedule_due
+  { event_kind = Schedule_due sw
   ; post_id
   ; author = scheduled_automation_actor
   ; title

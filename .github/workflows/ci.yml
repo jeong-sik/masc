@@ -927,6 +927,26 @@ jobs:
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_registry_hardening"
+
+      # Keeper unified prompt surface: asserts what a Keeper is actually handed
+      # on a turn. The schedule wake row carries two ids with different
+      # meanings — occurrence_id is a one-way SHA-256 that no tool accepts, and
+      # schedule_id is the durable pointer resolved with masc_schedule_get — so
+      # a projection that drops the pointer is a silent capability loss with no
+      # compile-time signal. @check cannot see it: the wake type still compiles
+      # either way.
+      - name: Run keeper unified prompt surface suite
+        id: keeper_unified_prompt_surface_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_unified_verification_surface"
+
       - name: Run tool blob retention suite
         id: tool_blob_retention_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}

@@ -20,6 +20,7 @@ README = RFC_DIR / "README.md"
 TABLE_HEADER = "| # | Title | Status | Sub-docs |"
 TABLE_SEP = "|---|---|---|---|"
 RFC_FILE_RE = re.compile(r"^RFC-(\d{4})-.+\.md$")
+RFC_PHASE_FILE_RE = re.compile(r"^RFC-(\d{4})-phase-.+\.md$")
 
 
 @dataclass(frozen=True)
@@ -60,11 +61,15 @@ def collect_entries() -> dict[str, RfcEntry]:
         name = fpath.name
         match = RFC_FILE_RE.fullmatch(name)
         if match is None:
+            print(
+                f"WARN: skipped noncanonical RFC filename: {name}",
+                file=sys.stderr,
+            )
             continue
         num = match.group(1)
         entry = entries.setdefault(num, RfcEntry(number=num))
 
-        if "-phase-" in name:
+        if RFC_PHASE_FILE_RE.fullmatch(name) is not None:
             entry.sub_docs.append(name)
             continue
 

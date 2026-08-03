@@ -137,6 +137,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0112 | Typed JSON parse boundary — eliminate silent-drop fallback across read sites | Implemented | - |
 | 0113 | Withdraw KeeperReactionLiveness runtime hierarchy | Withdrawn | - |
 | 0114 | Withdraw compact-retry and lifecycle guard model | Withdrawn | - |
+| 0115 | KTC turn_phase spec ← runtime parity — backfill spec for Turn_routing / Turn_... | Implemented | - |
 | 0116 | Withdraw fallback-count cap | Withdrawn | - |
 | 0117 | Withdraw runtime health cooldown hierarchy | Withdrawn | - |
 | 0118 | Withdraw terminal runtime projection contract | Withdrawn | - |
@@ -152,6 +153,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0129 | Runtime attempt idle-cap: kill the reserve_fraction band-aid | Implemented | - |
 | 0131 | Withdraw policy-bearing shell command facade | Withdrawn | - |
 | 0132 | Redaction SSOT — `runtime` boundary-label private type | Implemented | - |
+| 0133 | Keeper Phase Casing SSOT Consolidation | Implemented | - |
 | 0134 | Persistence read-drop root fix (recovery story for RFC-0044) | Active | - |
 | 0135 | Supersede dashboard-derived Keeper disposition | Superseded | - |
 | 0136 | Keeper Unified Turn — Stage Decomposition of run_keeper_cycle | Implemented | RFC-0136-phase-4-retry-loop.md |

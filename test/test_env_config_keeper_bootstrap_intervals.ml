@@ -1,11 +1,9 @@
-(** Pin the {!Env_config_keeper.KeeperBootstrap} polling/settle
-    interval contract. Three values were extracted from inline
+(** Pin the {!Env_config_keeper.KeeperBootstrap} polling
+    interval contract. Two values were extracted from inline
     literals at [server_bootstrap_loops.ml]:
 
     - line 157  0.25  → lazy_startup_poll_interval_sec
     - line 240  0.25  → keeper_listener_retry_interval_sec
-    - line 482  5.0   → post_startup_settle_sec
-
     The two [0.25] values shared a literal but encode *different*
     intents (lazy-startup polling vs. listener-retry backoff). The
     SSOT keeps them as separate knobs so future operator overrides
@@ -18,8 +16,8 @@
        clock or burn CPU on busy-poll).
     2. Polling intervals have a >= 0.05s floor (50ms) so an operator
        typo doesn't accidentally turn the loop into a CPU sink.
-    3. [post_startup_settle_sec] allows 0 (no settle) but caps at
-       no upper bound — operators on slow machines may raise. *)
+    3. Keeper bootstrap starts as soon as lazy startup completes; there is no
+       artificial settle delay. *)
 
 open Alcotest
 
@@ -38,11 +36,6 @@ let test_default_listener_retry () =
   check approx
     "keeper_listener_retry_interval_sec default (was inline 0.25)"
     0.25 KB.keeper_listener_retry_interval_sec
-
-let test_default_post_startup_settle () =
-  check approx
-    "post_startup_settle_sec default (was inline 5.0)"
-    5.0 KB.post_startup_settle_sec
 
 let test_polling_floor () =
   check bool
@@ -220,8 +213,6 @@ let () =
             test_default_lazy_startup_poll;
           test_case "listener_retry = 0.25" `Quick
             test_default_listener_retry;
-          test_case "post_startup_settle = 5.0" `Quick
-            test_default_post_startup_settle;
         ] );
       ( "polling floors",
         [

@@ -846,24 +846,10 @@ let collect_board_events_with_cursor_policy
       if cursor_ts > 0.0
       then Some (cursor_ts, cursor_post_id)
       else (
-        let initial_cursor = Board_dispatch.current_post_cursor () in
-        if advance_cursor
-        then (
-          let ts, post_id = initial_cursor in
-          Keeper_registry.set_board_cursor ~base_path meta.name ts post_id;
-          (match post_id with
-           | Some post_id ->
-             Log.Keeper.info
-               "board cursor initialized at current head for %s: (%f, %s)"
-               meta.name
-               ts
-               post_id
-           | None ->
-             Log.Keeper.info
-               "board cursor initialized at empty current head for %s: (%f, no post)"
-               meta.name
-               ts));
-        None)
+        Log.Keeper.info
+          "board cursor initialized at beginning for %s; existing Board history is actionable"
+          meta.name;
+        Some (0.0, None))
     in
     let posts =
       match base_cursor with
@@ -1277,7 +1263,6 @@ let has_pending_completion_authority_rejection
 ;;
 
 let keeper_cycle_decision
-      ?(reactive_wake = false)
       ?(event_queue_triggers = [])
       ~(meta : keeper_meta)
       (observation : world_observation)

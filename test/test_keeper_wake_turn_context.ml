@@ -356,7 +356,7 @@ let test_direct_and_autonomous_share_system_prompt () =
   let { Prompt.system_prompt = autonomous_system_prompt; _ } =
     Prompt.build_prompt
       ~meta
-      ~base_path:"/tmp/unused"
+      ~config:(Masc.Workspace.default_config "/tmp/unused")
       ~turn_decision:decision
       ~current_task:Inputs.No_current_task
       ~observation:base_observation
@@ -402,7 +402,7 @@ let test_unresolved_goal_keeps_one_stable_safety_contract () =
   let { Prompt.system_prompt = autonomous_system_prompt; _ } =
     Prompt.build_prompt
       ~meta:meta_with_goal
-      ~base_path:"/tmp/unused"
+      ~config
       ~active_goal_summaries
       ~turn_decision:decision
       ~current_task:Inputs.No_current_task

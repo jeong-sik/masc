@@ -484,24 +484,10 @@ let test_list_posts_with_sort () =
   let all_same = List.for_all (fun c -> c = List.hd counts) counts in
   Alcotest.(check bool) "all sort orders return same count" true all_same
 
-let board_observation_meta name =
-  match
-    Keeper_meta_json_parse.meta_of_json
-      (`Assoc
-        [ "name", `String name
-        ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
-        ; "trace_id", `String ("trace-" ^ name)
-        ; "sandbox_profile", `String "local"
-        ; "network_mode", `String "inherit"
-        ])
-  with
-  | Ok meta -> meta
-  | Error message -> Alcotest.failf "board observation meta failed: %s" message
-
-let test_first_board_observation_starts_at_current_head () =
+let test_first_board_observation_replays_history () =
   let base_path = Sys.getenv "MASC_BASE_PATH" in
   let keeper_name = "cursor-bootstrap" in
-  let meta = board_observation_meta keeper_name in
+  let meta = keeper_meta keeper_name in
   ignore (Keeper_registry.For_testing.register ~base_path keeper_name meta);
   Fun.protect
     ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
@@ -510,7 +496,7 @@ let test_first_board_observation_starts_at_current_head () =
          match
            Board_dispatch.create_post
              ~author:"external-author"
-             ~content:("@" ^ keeper_name ^ " historical post must not replay")
+             ~content:("@" ^ keeper_name ^ " historical post must replay")
              ~post_kind:Board.Human_post
              ()
          with
@@ -520,21 +506,18 @@ let test_first_board_observation_starts_at_current_head () =
        let events, new_count, mention_count =
          Keeper_world_observation.collect_board_events ~base_path ~meta
        in
-       Alcotest.(check int)
-         "historical events are not replayed"
-         0
-         (List.length events);
-       Alcotest.(check int) "historical post is not counted as new" 0 new_count;
-       Alcotest.(check int) "historical mention is not counted" 0 mention_count;
+       Alcotest.(check int) "historical event is replayed" 1 (List.length events);
+       Alcotest.(check int) "historical post is counted as new" 1 new_count;
+       Alcotest.(check int) "historical mention is counted" 1 mention_count;
        let cursor_ts, cursor_post_id =
          Keeper_registry.get_board_cursor ~base_path keeper_name
        in
        Alcotest.(check (float 0.0))
-         "cursor starts at exact current Board head"
+         "cursor advances from the beginning"
          old_post.updated_at
          cursor_ts;
        Alcotest.(check (option string))
-         "cursor records current head post id"
+         "cursor records the historical post id"
          (Some (Board.Post_id.to_string old_post.id))
          cursor_post_id;
        Unix.sleepf 0.01;
@@ -566,7 +549,7 @@ let test_first_board_observation_starts_at_current_head () =
 let test_dashboard_projection_does_not_produce_attention_candidate () =
   let base_path = Sys.getenv "MASC_BASE_PATH" in
   let keeper_name = "projection-read-only" in
-  let meta = board_observation_meta keeper_name in
+  let meta = keeper_meta keeper_name in
   let entry = Keeper_registry.For_testing.register ~base_path keeper_name meta in
   Fun.protect
     ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
@@ -2128,9 +2111,9 @@ let () =
         (with_eio test_list_posts_negative_limit_returns_empty);
       Alcotest.test_case "sort orders" `Quick (with_eio test_list_posts_with_sort);
       Alcotest.test_case
-        "first observation starts at current head"
+        "first observation replays history"
         `Quick
-        (with_eio test_first_board_observation_starts_at_current_head);
+        (with_eio test_first_board_observation_replays_history);
       Alcotest.test_case
         "dashboard projection does not produce attention candidate"
         `Quick

@@ -52,17 +52,6 @@ module KeeperBootstrap = struct
       (get_float ~default:0.25 "MASC_KEEPER_BOOTSTRAP_LISTENER_RETRY_INTERVAL_SEC")
   ;;
 
-  (** Settle delay (seconds) between lazy-startup completion and the
-      keeper bootstrap fan-out. The autoboot fiber sleeps for this
-      duration so SSE/board/orchestrator subsystems get a chance to
-      finish their first tick before keeper boot competes for them.
-      Default 5.0s preserves the inline literal at
-      [server_bootstrap_loops.ml:482]. Operators on cold-start machines
-      may raise this; setting to 0 is allowed (no settle) but unwise
-      under load. *)
-  let post_startup_settle_sec =
-    Float.max 0.0 (get_float ~default:5.0 "MASC_KEEPER_BOOTSTRAP_POST_STARTUP_SETTLE_SEC")
-  ;;
 end
 
 (** {1 Keeper Metrics Rotation Configuration} *)

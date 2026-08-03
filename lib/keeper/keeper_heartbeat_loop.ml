@@ -433,10 +433,8 @@ let run_keepalive_unified_turn
           Keeper_turn_driver.deferred_runtime_lane -> unit)
   : keepalive_turn_outcome
   =
-  if not proactive_warmup_elapsed
-  then { meta = meta_after_triage; cycle_status = Turn_cycle_completed }
-  else
-    match
+  let _ = proactive_warmup_elapsed in
+  match
       Keeper_turn_admission.run_if_free_with_token
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
@@ -550,7 +548,6 @@ let run_keepalive_unified_turn
       in
       let scheduling =
         decide_keepalive_scheduling
-          ~reactive_wake
           ~event_queue_triggers:event_intake.event_queue_triggers
           ~stop
           ~meta:meta_after_triage
@@ -1266,9 +1263,8 @@ let run_heartbeat_loop
                pre/post guards mirror the spec's [turn_state] transition
                "running" -> "idle". *)
             turn_running := true;
-            (* [Woken] => this cycle was triggered by an external broadcast, not
-               the keeper's own cadence; suppress global-backlog-driven turns to
-               avoid the all-keeper stampede. *)
+            (* [Woken] records that this cycle was triggered by an external
+               broadcast rather than the keeper's own cadence. *)
             let reactive_wake =
               match !last_wake_source with
               | Keeper_keepalive_signal.Woken -> true
@@ -1356,7 +1352,6 @@ let run_heartbeat_loop
                refresh_work_as_heartbeat
                  ~ctx
                  ~meta_after_proactive
-                 ~proactive_warmup_elapsed
                  ~work_as_hb
                  ~last_successful_heartbeat_ts
                  ~consecutive_failures

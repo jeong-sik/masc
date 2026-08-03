@@ -276,7 +276,7 @@ let sandbox_root_for profile =
   let { Prompt.system_prompt; _ } =
     Prompt.build_prompt
       ~meta
-      ~base_path
+      ~config
       ~turn_decision
       ~current_task:Inputs.No_current_task
       ~observation:base_observation

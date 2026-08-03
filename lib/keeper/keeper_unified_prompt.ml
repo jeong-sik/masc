@@ -580,7 +580,8 @@ let active_goal_summaries
     meta.active_goal_ids
 ;;
 
-let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)
+let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
+    ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ?(active_goal_summaries : (string * string) list option)
     ()
@@ -597,7 +598,6 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path :
       ~default:(List.map (fun goal_id -> (goal_id, "")) meta.active_goal_ids)
       active_goal_summaries
   in
-  let config = Workspace.default_config base_path in
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt
       ~instructions
@@ -614,7 +614,8 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path :
   system_prompt
 ;;
 
-let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)
+let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
+    ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
     ~(current_task : Keeper_world_observation_inputs.current_task_observation)
@@ -625,7 +626,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path
   let system_prompt =
     build_system_prompt
       ~meta
-      ~base_path
+      ~config
       ?profile_defaults
       ?active_goal_summaries
       ()
@@ -898,7 +899,7 @@ let emit_prompt_metrics
 
 let build_prompt
       ~meta
-      ~base_path
+      ~config
       ?profile_defaults
       ~turn_decision
       ~current_task
@@ -909,7 +910,7 @@ let build_prompt
   let prompt =
     build_prompt_internal
       ~meta
-      ~base_path
+      ~config
       ?profile_defaults
       ~turn_decision:(Some turn_decision)
       ~current_task
@@ -923,7 +924,7 @@ let build_prompt
 
 let build_prompt_preview
       ~meta
-      ~base_path
+      ~config
       ?profile_defaults
       ~current_task
       ?active_goal_summaries
@@ -932,7 +933,7 @@ let build_prompt_preview
   =
   build_prompt_internal
     ~meta
-    ~base_path
+    ~config
     ?profile_defaults
     ~turn_decision:None
     ~current_task

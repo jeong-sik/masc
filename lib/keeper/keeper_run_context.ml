@@ -35,7 +35,7 @@ let build_base_system_prompt
   in
   Keeper_unified_prompt.build_system_prompt
     ~meta
-    ~base_path:config.base_path
+    ~config
     ~profile_defaults
     ~active_goal_summaries
     ()

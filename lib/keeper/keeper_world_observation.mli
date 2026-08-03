@@ -377,14 +377,10 @@ val actionable_signal_present : world_observation -> bool
 val has_pending_board_activity : world_observation -> bool
 
 val keeper_cycle_decision :
-  ?reactive_wake:bool ->
   ?event_queue_triggers:event_queue_trigger list ->
   meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
-(** [reactive_wake] (default [false]) marks evaluations triggered by an external
-    broadcast wakeup rather than the keeper's own cadence timer. When set, a
-    GLOBAL task backlog alone does not drive a turn — this prevents the
-    all-keeper stampede on each task release/add. Per-keeper Reactive triggers
-    and time-based liveness reasons are unaffected. *)
+(** External wake attribution is carried by the keepalive wake reason; it does
+    not alter cycle admission. *)
 
 val should_run_keeper_cycle :
   meta:Keeper_meta_contract.keeper_meta -> world_observation -> bool

@@ -190,11 +190,10 @@ let allow_unregistered_keeper_of_args args =
   | Some _ -> Error "allow_unregistered_keeper must be a boolean"
 ;;
 
-let validate_keeper_wake_target ctx ~payload args =
-  match Schedule_payload_projection.creation_keeper_wake_target ~payload with
-  | Error msg -> Error msg
-  | Ok None -> Ok ()
-  | Ok (Some keeper_name) ->
+let validate_keeper_wake_target ctx ~keeper_wake_target args =
+  match keeper_wake_target with
+  | None -> Ok ()
+  | Some keeper_name ->
     let* allow_unregistered = allow_unregistered_keeper_of_args args in
     if allow_unregistered
     then Ok ()
@@ -330,7 +329,10 @@ let handle_create ~tool_name ~start_time ctx args =
   let result =
     let* payload = payload_from_args args in
     let* () = validate_known_payload_request ~payload in
-    let* () = validate_keeper_wake_target ctx ~payload args in
+    let* keeper_wake_target =
+      Schedule_payload_projection.creation_keeper_wake_target ~payload
+    in
+    let* () = validate_keeper_wake_target ctx ~keeper_wake_target args in
     let* source = source_of_arg args in
     let* recurrence = recurrence_of_arg args in
     let requested_at =
@@ -349,9 +351,27 @@ let handle_create ~tool_name ~start_time ctx args =
     in
     let schedule_id = string_opt args "schedule_id" in
     let expires_at = optional_float args "expires_at_unix" in
-    Schedule_service.create ctx.config ?schedule_id ~requested_at ?expires_at
-      ~requested_by ~scheduled_by ~due_at ~payload ~source ~recurrence ()
-    |> Result.map_error Schedule_service.service_error_to_string
+    let create_request () =
+      Schedule_service.create ctx.config ?schedule_id ~requested_at ?expires_at
+        ~requested_by ~scheduled_by ~due_at ~payload ~source ~recurrence ()
+      |> Result.map_error Schedule_service.service_error_to_string
+    in
+    match keeper_wake_target with
+     | None -> create_request ()
+     | Some keeper_name ->
+       (match
+          Keeper_turn_admission.run_durable_intake_if_open
+            ~base_path:ctx.config.base_path
+            ~keeper_name
+            (fun _intake_token -> create_request ())
+        with
+        | Keeper_turn_admission.Intake_committed result -> result
+        | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+          Error
+            (Printf.sprintf
+               "schedule creation rejected by Keeper shutdown fence keeper=%s operation=%s"
+               keeper_name
+               (Keeper_shutdown_types.Operation_id.to_string operation_id)))
   in
   match result with
   | Error msg -> workflow_error ~tool_name ~start_time msg

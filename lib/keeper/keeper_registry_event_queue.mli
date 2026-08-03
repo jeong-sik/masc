@@ -143,11 +143,15 @@ val terminalize_pending_turn_attempt_result :
 (** Enqueue a stimulus on the keeper's event queue. When the keeper is not
     registered yet, persist the stimulus to the durable snapshot so later
     registration can replay it instead of dropping the wake at the
-    restart/register boundary. *)
-val enqueue : base_path:string -> string -> Keeper_event_queue.stimulus -> unit
+    restart/register boundary. A surrounding durable-intake fence supplies
+    [intake_token]; otherwise this function acquires the Keeper fence itself. *)
+val enqueue :
+  ?intake_token:Keeper_turn_admission.intake_token ->
+  base_path:string -> string -> Keeper_event_queue.stimulus -> unit
 
 val enqueue_durable_result :
-  base_path:string
+  ?intake_token:Keeper_turn_admission.intake_token
+  -> base_path:string
   -> string
   -> Keeper_event_queue.stimulus
   -> (unit, string) result
@@ -165,7 +169,8 @@ type enqueue_if_missing_durable_result =
   | Storage_error of string
 
 val enqueue_if_missing_durable_result :
-  base_path:string
+  ?intake_token:Keeper_turn_admission.intake_token
+  -> base_path:string
   -> event_id:string
   -> string
   -> Keeper_event_queue.stimulus
@@ -203,7 +208,8 @@ type transfer_projection_result =
   | Transfer_projection_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
 val enqueue_stimulus_durable_result :
-  base_path:string
+  ?intake_token:Keeper_turn_admission.intake_token
+  -> base_path:string
   -> string
   -> Keeper_event_queue.stimulus
   -> enqueue_stimulus_durable_result

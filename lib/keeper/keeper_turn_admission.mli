@@ -84,6 +84,10 @@ type 'a durable_intake_result =
   | Intake_committed of 'a
   | Intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
+type intake_token
+(** Opaque authority for one currently admitted durable intake. The token is
+    valid only inside the callback passed to [run_durable_intake_if_open]. *)
+
 type slot_snapshot =
   { snapshot_keeper_name : string
   ; snapshot_slot_created : bool
@@ -271,8 +275,15 @@ val commit_registration_if_open :
 val run_durable_intake_if_open :
   base_path:string ->
   keeper_name:string ->
-  (unit -> 'a) ->
+  (intake_token -> 'a) ->
   'a durable_intake_result
+
+val intake_token_matches :
+  intake_token ->
+  base_path:string ->
+  keeper_name:string ->
+  bool
+(** [true] only for a live token belonging to the requested Keeper. *)
 
 (** Join the current turn holder and any durable external intake after
     admission has been closed. This waits without an invented timeout, then

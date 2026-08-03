@@ -119,7 +119,40 @@ let enqueue_external_decision queue stimulus =
          stimulus.post_id)
 ;;
 
-let enqueue ~base_path name stimulus =
+let durable_intake_shutdown_detail operation_id =
+  Printf.sprintf
+    "keeper durable intake rejected by shutdown operation=%s"
+    (Keeper_shutdown_types.Operation_id.to_string operation_id)
+;;
+
+let with_durable_intake
+      ?intake_token
+      ~base_path
+      ~keeper_name
+      operation
+  =
+  match intake_token with
+  | Some token ->
+    if
+      Keeper_turn_admission.intake_token_matches
+        token
+        ~base_path
+        ~keeper_name
+    then Ok (operation ())
+    else Error "durable intake token is not live for this Keeper"
+  | None ->
+    (match
+       Keeper_turn_admission.run_durable_intake_if_open
+         ~base_path
+         ~keeper_name
+         (fun _intake_token -> operation ())
+     with
+     | Keeper_turn_admission.Intake_committed result -> Ok result
+     | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+       Error (durable_intake_shutdown_detail operation_id))
+;;
+
+let enqueue_unfenced ~base_path name stimulus =
   if Option.is_none (Keeper_registry.get ~base_path name)
   then
     Log.Keeper.warn
@@ -140,8 +173,20 @@ let enqueue ~base_path name stimulus =
          committed_pending := Some pending;
          Ok pending)
   with
-  | Ok () -> ()
-  | Error message ->
+  | Ok () -> Ok ()
+  | Error message -> Error message
+;;
+
+let enqueue ?intake_token ~base_path name stimulus =
+  match
+    with_durable_intake
+      ?intake_token
+      ~base_path
+      ~keeper_name:name
+      (fun () -> enqueue_unfenced ~base_path name stimulus)
+  with
+  | Ok (Ok ()) -> ()
+  | Ok (Error message) | Error message ->
     Log.Keeper.error
       "registry: durable enqueue failed name=%s base_path=%s post_id=%s: %s"
       name
@@ -150,7 +195,7 @@ let enqueue ~base_path name stimulus =
       message
 ;;
 
-let enqueue_durable_result ~base_path name stimulus =
+let enqueue_durable_result_unfenced ~base_path name stimulus =
   (* Commit the identity-deduplicated durable row before exposing a successful
      delivery result. This path is intentionally separate from [enqueue]: most
      stimuli already have an upstream replay source, while HITL resolution is
@@ -169,6 +214,18 @@ let enqueue_durable_result ~base_path name stimulus =
        | Ok pending ->
          committed_pending := Some pending;
          Ok pending)
+;;
+
+let enqueue_durable_result ?intake_token ~base_path name stimulus =
+  match
+    with_durable_intake
+      ?intake_token
+      ~base_path
+      ~keeper_name:name
+      (fun () -> enqueue_durable_result_unfenced ~base_path name stimulus)
+  with
+  | Ok result -> result
+  | Error detail -> Error detail
 ;;
 
 type enqueue_if_missing_durable_result =
@@ -205,7 +262,7 @@ let stimulus_with_board_attention_event_id queue event_id =
   loop (Keeper_event_queue.to_list queue)
 ;;
 
-let enqueue_if_missing_durable_result ~base_path ~event_id name stimulus =
+let enqueue_if_missing_durable_result_unfenced ~base_path ~event_id name stimulus =
   match board_attention_event_id stimulus with
   | None ->
     Identity_conflict
@@ -258,6 +315,29 @@ let enqueue_if_missing_durable_result ~base_path ~event_id name stimulus =
         | None -> Storage_error detail))
 ;;
 
+let enqueue_if_missing_durable_result
+      ?intake_token
+      ~base_path
+      ~event_id
+      name
+      stimulus
+  =
+  match
+    with_durable_intake
+      ?intake_token
+      ~base_path
+      ~keeper_name:name
+      (fun () ->
+         enqueue_if_missing_durable_result_unfenced
+           ~base_path
+           ~event_id
+           name
+           stimulus)
+  with
+  | Ok result -> result
+  | Error detail -> Storage_error detail
+;;
+
 type enqueue_stimulus_durable_result =
   | Stimulus_enqueued
   | Stimulus_already_present
@@ -300,7 +380,7 @@ type transfer_projection_result =
   | Transfer_projection_target_unavailable of transfer_target_error
   | Transfer_projection_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
-let enqueue_stimulus_durable_result ~base_path name stimulus =
+let enqueue_stimulus_durable_result_unfenced ~base_path name stimulus =
   match
     Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
       ~base_path
@@ -310,6 +390,23 @@ let enqueue_stimulus_durable_result ~base_path name stimulus =
   with
   | Ok Keeper_event_queue_persistence.Enqueued -> Stimulus_enqueued
   | Ok Keeper_event_queue_persistence.Already_present -> Stimulus_already_present
+  | Error detail -> Stimulus_storage_error detail
+;;
+
+let enqueue_stimulus_durable_result
+      ?intake_token
+      ~base_path
+      name
+      stimulus
+  =
+  match
+    with_durable_intake
+      ?intake_token
+      ~base_path
+      ~keeper_name:name
+      (fun () -> enqueue_stimulus_durable_result_unfenced ~base_path name stimulus)
+  with
+  | Ok result -> result
   | Error detail -> Stimulus_storage_error detail
 ;;
 
@@ -339,7 +436,7 @@ let project_accepted_transfer_durable_result ~base_path name ~transfer =
     Keeper_turn_admission.run_durable_intake_if_open
       ~base_path
       ~keeper_name:name
-      (fun () ->
+      (fun _intake_token ->
          Keeper_event_queue_persistence.project_accepted_transfer_guarded_result
            ~authorize_first_projection:validate_target_identity
            ~base_path
@@ -501,7 +598,7 @@ let transfer_pending_accepted_result
     Keeper_turn_admission.run_durable_intake_if_open
       ~base_path
       ~keeper_name:name
-      (fun () ->
+      (fun _intake_token ->
          Keeper_event_queue_persistence.transfer_pending_accepted_result
            ~base_path
            ~keeper_name:name

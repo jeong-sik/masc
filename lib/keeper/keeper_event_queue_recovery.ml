@@ -227,7 +227,7 @@ let project_transfer_target_result ~base_path (entry : Persistence.outbox_entry)
 let project_claimed_owner owner =
   let base_path = Persistence.owner_identity_base_path owner in
   let keeper_name = Persistence.owner_identity_keeper_name owner in
-  let project_open_owner () =
+  let project_open_owner _intake_token =
     match Persistence.load_state_result ~base_path ~keeper_name with
     | Error detail -> Error (Outbox_unavailable detail)
     | Ok state ->

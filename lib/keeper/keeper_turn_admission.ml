@@ -135,6 +135,11 @@ type slot =
   ; mutable shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
   }
 
+type intake_token =
+  { intake_slot : slot
+  ; mutable intake_active : bool
+  }
+
 type token =
   { slot : slot
   ; mutable active : bool
@@ -461,13 +466,21 @@ let run_durable_intake_if_open ~base_path ~keeper_name intake =
     release ();
     Intake_shutdown_reserved operation_id
   | None ->
-    (match intake () with
+    let intake_token = { intake_slot = slot; intake_active = true } in
+    (match intake intake_token with
      | value ->
+       intake_token.intake_active <- false;
        release ();
        Intake_committed value
      | exception exn ->
+       intake_token.intake_active <- false;
        release ();
        raise exn)
+;;
+
+let intake_token_matches token ~base_path ~keeper_name =
+  token.intake_active
+  && token.intake_slot == slot_for ~base_path ~keeper_name
 ;;
 
 let await_idle_after_shutdown ~base_path ~keeper_name =

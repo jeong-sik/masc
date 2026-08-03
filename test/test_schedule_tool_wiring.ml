@@ -93,7 +93,12 @@ let dispatch_exn config action args =
   | None -> fail ("schedule dispatch returned None: " ^ name)
 ;;
 
-let create_args ?schedule_id ?(message = "scheduled keeper wake") () =
+let create_args
+      ?schedule_id
+      ?(allow_unregistered_keeper = false)
+      ?(message = "scheduled keeper wake")
+      ()
+  =
   `Assoc
     ([ "due_at_unix", `Float 200.0
      ; "payload_kind", `String Schedule_supported_kinds.keeper_wake
@@ -105,6 +110,10 @@ let create_args ?schedule_id ?(message = "scheduled keeper wake") () =
      ; "requested_by_id", `String "operator"
      ; "scheduled_by_id", `String "scheduler-agent"
      ]
+     @
+     if allow_unregistered_keeper
+     then [ "allow_unregistered_keeper", `Bool true ]
+     else []
      @
      match schedule_id with
      | None -> []
@@ -473,6 +482,49 @@ let test_schedule_store_error_is_explicit () =
        "schedule store read failed")
 ;;
 
+let test_keeper_wake_creation_respects_shutdown_fence () =
+  with_config
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace.base_path in
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  (match
+     Keeper_turn_admission.begin_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id
+   with
+   | Keeper_turn_admission.Shutdown_reserved _ -> ()
+   | Keeper_turn_admission.Shutdown_already_reserved _ ->
+     fail "fresh shutdown fence was already reserved");
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Keeper_turn_admission.rollback_shutdown
+           ~base_path
+           ~keeper_name
+           ~operation_id
+         : Keeper_turn_admission.rollback_shutdown_result))
+    (fun () ->
+       let result =
+         dispatch_exn config Tool_schemas_schedule.Create_request
+           (create_args
+              ~schedule_id:"sched-shutdown-fenced"
+              ~allow_unregistered_keeper:true
+              ())
+       in
+       check bool "shutdown-fenced schedule creation fails" false
+         (Tool_result.is_success result);
+       check string "shutdown fence failure is explicit"
+         (Printf.sprintf
+            "schedule creation rejected by Keeper shutdown fence keeper=%s operation=%s"
+            keeper_name
+            (Keeper_shutdown_types.Operation_id.to_string operation_id))
+         (Tool_result.message result);
+       check int "shutdown-fenced schedule is not persisted" 0
+         (List.length (Schedule_store.read_state config).schedules))
+;;
+
 let () =
   run "Schedule_tool_wiring"
     [ ( "wiring"
@@ -494,6 +546,8 @@ let () =
             test_due_signal_and_dashboard_projection
         ; test_case "schedule store error is explicit" `Quick
             test_schedule_store_error_is_explicit
+        ; test_case "Keeper wake creation respects shutdown fence" `Quick
+            test_keeper_wake_creation_respects_shutdown_fence
         ] )
     ]
 ;;

@@ -1128,7 +1128,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
              ~config
              ~keeper_name:meta.name
              operation_id
-             (fun () ->
+             (fun _intake_token ->
                 Eio.Promise.resolve holder_locked_r ();
                 Eio.Promise.await release_holder_p)
          with
@@ -2694,7 +2694,7 @@ let test_keeper_dormant_shutdown_join_cancel_rolls_back_fence () =
            Masc.Keeper_turn_admission.run_durable_intake_if_open
              ~base_path:config.base_path
              ~keeper_name:name
-             (fun () ->
+             (fun _intake_token ->
                 Eio.Promise.resolve intake_started_u ();
                 Eio.Promise.await release_intake)
          with

@@ -814,6 +814,7 @@ let resolve_keeper_wake_occurrence ~base_path ~keeper_name ~stimulus_id =
 ;;
 
 let accept_keeper_wake_occurrence
+      ?intake_token
       ~base_path
       ~keeper_name
       ~expected_owner
@@ -893,6 +894,7 @@ let accept_keeper_wake_occurrence
   | Ok (Absent_at _) ->
     (match
        Keeper_registry_event_queue.enqueue_stimulus_durable_result
+         ?intake_token
          ~base_path
          keeper_name
          stimulus
@@ -956,9 +958,10 @@ let dispatch_keeper_wake
     | Error detail -> retryable_dispatch_failure detail
   in
   let intake_owner = resolved_occurrence_owner initial_disposition in
-  let dispatch_while_fenced () =
+  let dispatch_while_fenced intake_token =
     let* acceptance =
       accept_keeper_wake_occurrence
+        ~intake_token
         ~base_path
         ~keeper_name
         ~expected_owner:intake_owner

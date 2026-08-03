@@ -1443,6 +1443,72 @@ let test_shutdown_fence_rejects_schedule_intake_before_enqueue () =
        | None -> fail "shutdown-fenced schedule disappeared")
 ;;
 
+let test_shutdown_fence_covers_direct_durable_queue_producers () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "direct-queue-producer-fenced" in
+  let base_path = config.Workspace_utils.base_path in
+  let stimulus : Keeper_event_queue.stimulus =
+    { post_id = "direct-queue-producer-fenced-stimulus"
+    ; urgency = Keeper_event_queue.Normal
+    ; arrived_at = 201.0
+    ; payload = Keeper_event_queue.Bootstrap
+    }
+  in
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  (match
+     Keeper_turn_admission.begin_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id
+   with
+   | Keeper_turn_admission.Shutdown_reserved _ -> ()
+   | Keeper_turn_admission.Shutdown_already_reserved _ ->
+     fail "fresh direct-producer shutdown fence was already reserved");
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Keeper_turn_admission.rollback_shutdown
+           ~base_path
+           ~keeper_name
+           ~operation_id
+         : Keeper_turn_admission.rollback_shutdown_result))
+    (fun () ->
+       let expected_rejection =
+         Printf.sprintf
+           "keeper durable intake rejected by shutdown operation=%s"
+           (Keeper_shutdown_types.Operation_id.to_string operation_id)
+       in
+       (match
+          Keeper_registry_event_queue.enqueue_durable_result
+            ~base_path
+            keeper_name
+            stimulus
+        with
+        | Error detail ->
+          check string "direct durable enqueue reports shutdown fence"
+            expected_rejection
+            detail
+        | Ok () -> fail "direct durable enqueue bypassed shutdown fence");
+       (match
+          Keeper_registry_event_queue.enqueue_stimulus_durable_result
+            ~base_path
+            keeper_name
+            stimulus
+        with
+        | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+          check string "direct stimulus enqueue reports shutdown fence"
+            expected_rejection
+            detail
+        | Keeper_registry_event_queue.Stimulus_enqueued
+        | Keeper_registry_event_queue.Stimulus_already_present ->
+          fail "direct stimulus enqueue bypassed shutdown fence");
+       Keeper_registry_event_queue.enqueue ~base_path keeper_name stimulus;
+       check int "direct enqueue writes no queue entry" 0
+         (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+          |> Keeper_event_queue.length))
+;;
+
 let test_transferred_retry_uses_resolved_owner_shutdown_fence () =
   with_workspace
   @@ fun config ->
@@ -2686,6 +2752,8 @@ let () =
             test_keeper_purge_follows_terminal_transfer_redirect
         ; test_case "shutdown fence rejects schedule intake before enqueue" `Quick
             test_shutdown_fence_rejects_schedule_intake_before_enqueue
+        ; test_case "shutdown fence covers direct durable queue producers" `Quick
+            test_shutdown_fence_covers_direct_durable_queue_producers
         ; test_case "transferred retry uses resolved owner shutdown fence" `Quick
             test_transferred_retry_uses_resolved_owner_shutdown_fence
         ; test_case "shutdown join waits for in-flight schedule intake" `Quick

@@ -464,12 +464,18 @@ let test_scheduled_wake_renders_schedule_pointer () =
      one-way — no tool accepts it and the request cannot be read back. *)
   check bool "wake row carries the schedule_id pointer" true
     (contains_sub "schedule_id=sched-wake-pointer" block);
+  check bool "wake row carries the exact due_at" true
+    (contains_sub "due_at=200" block);
+  check bool "wake row carries the exact payload digest" true
+    (contains_sub "payload_digest=digest-hourly-research" block);
   check bool "wake row still carries the occurrence id" true
     (contains_sub sample_scheduled_wake.post_id block);
   (* The two ids are different things and the prompt must say which is which,
      otherwise a Keeper reaches for the wrong one. *)
   check bool "block names the dereference tool" true
     (contains_sub "masc_schedule_get" block);
+  check bool "block rejects a different current occurrence" true
+    (contains_sub "exactly match this wake row" block);
   check bool "block still marks occurrence_id as correlation-only" true
     (contains_sub "never pass it to a Board tool" block)
 ;;

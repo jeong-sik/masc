@@ -312,18 +312,22 @@ let format_scheduled_wake_observations
     Buffer.add_string ubuf
       "Rows below are scheduled work requests, not Board posts. The \
        occurrence_id is correlation metadata only: never pass it to a Board \
-       tool. The schedule_id is the durable pointer: pass it to \
-       masc_schedule_get to read the full request, including the payload body, \
-       recurrence, owner, and execution history. External effects still cross \
-       the Gate.\n";
+       tool. Pass schedule_id to masc_schedule_get to read the current request, \
+       including its payload body, recurrence, owner, and latest execution. \
+       Before acting on that response, require its due_at and payload_digest to \
+       exactly match this wake row; a recurring or updated schedule may already \
+       point at another occurrence. External effects still cross the Gate.\n";
     List.iter
       (fun (event : Keeper_world_observation.pending_board_event) ->
          match event.event_kind with
          | Keeper_world_observation.Schedule_due wake ->
            Buffer.add_string ubuf
              (Printf.sprintf
-                "- schedule_id=%s occurrence_id=%s title=%s message=%s\n"
+                "- schedule_id=%s due_at=%.17g payload_digest=%s \
+                 occurrence_id=%s title=%s message=%s\n"
                 wake.Keeper_event_queue.schedule_id
+                wake.due_at
+                wake.payload_digest
                 event.post_id
                 (quote_prompt_field event.title)
                 (quote_prompt_field event.preview))

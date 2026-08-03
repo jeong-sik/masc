@@ -24,11 +24,11 @@ type pending_board_event_kind =
   | Fusion_completed
   | Bg_completed
   | Schedule_due of Keeper_event_queue.scheduled_wake
-      (** The consumed wake, kept typed. [schedule_id] is the durable pointer
-          into the schedule store and is what a Keeper passes to
-          [masc_schedule_get] to read the full request; the flat [title] and
-          [preview] fields of {!pending_board_event} are a rendering of it, not
-          its only copy. Carrying the record mirrors
+      (** The consumed wake, kept typed. The exact occurrence key is
+          [(schedule_id, due_at, payload_digest)]; [schedule_id] alone can point
+          at a later recurring or updated request. The flat [title] and
+          [preview] fields of {!pending_board_event} are a rendering of the
+          wake, not its only copy. Carrying the record mirrors
           {!Keeper_event_queue.Connector_attention}'s pointer discipline and
           {!Completion_authority_rejected}'s payload-carrying shape below. *)
   | External_attention

@@ -448,6 +448,7 @@ let run_keepalive_unified_turn
       ref None
     in
     let cycle_outcome_ref = ref None in
+    let admitted_meta = ref meta_after_triage in
     let selection_acked = ref false in
     let event_queue_failed = ref false in
     let record_event_queue_failure message =
@@ -721,6 +722,7 @@ let run_keepalive_unified_turn
                  invalid_arg
                    "keeper backlog observation revision/projection pair is incomplete")
           in
+          admitted_meta := meta_after_triage;
           record_replay_owned_turn_started_reactions
             ~ctx
             ~keeper_name:meta_after_triage.name
@@ -998,7 +1000,7 @@ let run_keepalive_unified_turn
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
         exn;
-      { meta = meta_after_triage; cycle_status = Turn_cycle_crashed })
+      { meta = !admitted_meta; cycle_status = Turn_cycle_crashed })
   with
   | `Ran outcome -> outcome
   | `Busy block ->

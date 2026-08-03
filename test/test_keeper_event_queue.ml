@@ -133,7 +133,7 @@ let event_queue_test_meta keeper_name trace_id =
 let persist_event_queue_test_meta ~base_path keeper_name =
   let meta = event_queue_test_meta keeper_name ("trace-" ^ keeper_name) in
   (match
-     Masc.Keeper_meta_store.write_meta (Workspace.default_config base_path) meta
+     Masc.Keeper_meta_store.write_meta (Masc.Workspace.default_config base_path) meta
    with
    | Ok () -> ()
    | Error detail -> Alcotest.fail detail);
@@ -1143,7 +1143,7 @@ let () =
         ~source:board_stim
         ~owner_nonce:29
         ~operation_id:"post-purge-transfer-recovery";
-      let config = Workspace.default_config base_path in
+      let config = Masc.Workspace.default_config base_path in
       let target_meta =
         match Masc.Keeper_meta_store.read_meta config to_keeper with
         | Ok (Some meta) -> meta

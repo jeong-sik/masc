@@ -31,16 +31,6 @@ let write_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  let rec loop index =
-    if index + needle_len > haystack_len then false
-    else if String.sub haystack index needle_len = needle then true
-    else loop (index + 1)
-  in
-  String.equal needle "" || loop 0
-
 let trim_cr s =
   let n = String.length s in
   if n > 0 && s.[n - 1] = '\r' then String.sub s 0 (n - 1) else s
@@ -717,10 +707,21 @@ let test_dashboard_dev_token_cannot_reset_workspace () =
       ()
   in
   check_status "dashboard Worker reset request completed as MCP rejection" 200 result;
-  check bool
+  let response =
+    match Yojson.Safe.from_string result.body with
+    | json -> json
+    | exception Yojson.Json_error message ->
+      failf "reset denial response is invalid JSON: %s" message
+  in
+  check string
     "reset denial is typed"
-    true
-    (contains_substring ~needle:"\"auth_error_code\":\"insufficient_role\"" result.body);
+    "insufficient_role"
+    Yojson.Safe.Util.
+      (response
+       |> member "result"
+       |> member "structuredContent"
+       |> member "auth_error_code"
+       |> to_string);
   check bool "workspace sentinel survives denied reset" true (Sys.file_exists sentinel);
   check string "workspace sentinel content survives" "must-survive" (read_file sentinel)
 let test_ag_ui_rejects_reconnect_then_recovers () =

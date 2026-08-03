@@ -15,7 +15,9 @@ val resolve_tool_execute_cwd :
 (** Resolve typed Execute cwd. Uses the keeper write boundary default
     for omitted cwd only when write execution is enabled; read-only
     Execute uses the no-create playground root. Explicit cwd resolution
-    never creates directories or changes repo/worktree state. *)
+    never creates directories or changes repo/worktree state. A successful
+    resolution also verifies the immutable allowed-root identity before
+    returning the host path. *)
 
 type execute_cwd_resolution_error
 

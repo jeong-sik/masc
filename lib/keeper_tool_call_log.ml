@@ -83,7 +83,6 @@ let with_append_queue_lock f =
 let queued_count_for_testing () =
   with_append_queue_lock (fun () -> Stdlib.Queue.length append_queue)
 
-let dropped_count_for_testing () = Atomic.get append_queue_dropped
 
 (* RFC-0162 §3.3: default retention. The earlier opt-in policy
    (None unless env explicitly set positive) let `.masc/tool_calls/`

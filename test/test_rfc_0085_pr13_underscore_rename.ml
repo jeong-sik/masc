@@ -6,13 +6,12 @@ open Alcotest
        - config_dir_resolver._cached_resolution
        - keeper_tool_surface_ops._keeper_list_cache
        - board_tool_cache._board_list_cache  (module since deleted)
-       - tool_workspace._status_cache
     All renamed (drop _ prefix), callers in same file updated.
 
-    The board_tool_cache row is gone from the table below because the module
-    itself was deleted along with the masc_board_list TTL cache. A row here
-    asserts the new name is *present* in the file, so keeping it would pin a
-    deleted file into existence.
+    The board_tool_cache and tool_workspace rows are gone from the table below
+    because their caches were deleted. A row here asserts the new name is
+    *present* in the file, so keeping it would pin a deleted binding into
+    existence.
 
     Original test scanned [count_string_literals], which examines only
     [Pconst_string] nodes — identifiers are NOT string literals, so the
@@ -23,7 +22,6 @@ open Alcotest
 let renamed_identifiers =
   [ "lib/config_dir_resolver/config_dir_resolver.ml", "_cached_resolution", "cached_resolution"
   ; "lib/keeper/keeper_tool_surface_ops.ml", "_keeper_list_cache", "keeper_list_cache"
-  ; "lib/tool_workspace.ml", "_status_cache", "status_cache"
   ]
 ;;
 

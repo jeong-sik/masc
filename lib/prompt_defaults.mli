@@ -65,9 +65,6 @@ val sync_prompt_assets :
     [Eio.Cancel.Cancelled] propagates; per-file [Sys_error] is recorded in
     [failed] without aborting the pass. *)
 
-val init : unit -> unit
-(** Initialise prompt defaults from the environment.
-    Idempotent — safe to call multiple times. *)
 
 val bootstrap_runtime :
   workspace_path:string ->

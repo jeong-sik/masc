@@ -86,7 +86,11 @@ let completion_verdict_of_review = function
     Masc_domain.Verdict_rejected { reason }
 ;;
 
-let review_notes ~request ~evidence_access ~result ~authority =
+let review_notes
+    ~(request : Verification.verification_request)
+    ~evidence_access
+    ~result
+    ~authority =
   let verdict =
     match result.Task.Anti_rationalization.verdict with
     | Some Task.Anti_rationalization.Approve -> `String "approve"
@@ -109,9 +113,16 @@ let review_notes ~request ~evidence_access ~result ~authority =
   in
   Yojson.Safe.pretty_to_string
     (`Assoc
-       [ "verification_request", Verification.request_to_yojson request
-       ; ( "submitted_evidence_access"
-         , Workspace_verification_store.submitted_evidence_access_to_yojson
+       [ ( "verification_request"
+         , `Assoc
+             [ "id", `String request.id
+             ; "task_id", `String request.task_id
+             ; "worker", `String request.worker
+             ; "created_at", `Float request.created_at
+             ; "criteria_count", `Int (List.length request.criteria)
+             ] )
+       ; ( "submitted_evidence_metadata"
+         , Workspace_verification_store.submitted_evidence_access_metadata_to_yojson
              evidence_access )
        ; "review", review
        ])
@@ -229,8 +240,13 @@ let prepare_review
         ~authority
     in
     match evidence_access with
-    | Workspace_verification_store.Evidence_unavailable { reason; _ } ->
-      Error (Printf.sprintf "submitted evidence unavailable: %s" reason)
+    | Workspace_verification_store.Evidence_unavailable { request_id; reason } ->
+      Error
+        (Printf.sprintf
+           "submitted evidence unavailable: %s"
+           (Workspace_verification_store.evidence_access_failure_to_string
+              ~request_id
+              reason))
     | Workspace_verification_store.Evidence_available { request = header; _ } ->
       if not (String.equal header.id verification_id)
       then
@@ -560,4 +576,5 @@ let start ~sw ~(config : Workspace_utils_backend_setup.config) =
 module For_testing = struct
   let evidence_refs_of_output = evidence_refs_of_output
   let completion_verdict_of_review = completion_verdict_of_review
+  let review_notes = review_notes
 end

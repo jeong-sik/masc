@@ -36,12 +36,50 @@ let emit_activity config ~kind ~actor ?subject ?(tags = []) ~payload () =
     ignore
       (Activity_graph.emit config
          ~actor:(Server_utils.board_actor_entity actor)
-         ?subject ~kind ~payload ~tags ())
+         ?subject ~kind ~payload ~tags ());
+    Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-      Log.Misc.warn "activity emit failed (%s): %s" kind
-        (Stdlib.Printexc.to_string exn)
+      let detail = Stdlib.Printexc.to_string exn in
+      Log.Misc.warn "activity emit failed (%s): %s" kind detail;
+      Error detail
+
+let result_after_activity_projection
+      ~tool_name
+      ~start_time
+      ~(primary_result : Tool_result.result)
+      ~operation
+      emit
+  =
+  if not (Tool_result.is_success primary_result)
+  then primary_result
+  else
+    match emit () with
+    | Ok () -> primary_result
+    | Error detail ->
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Runtime_failure
+        ~start_time
+        ~data:
+          (`Assoc
+            [ ("primary_result", Tool_result.data primary_result)
+            ; ( "effect_disposition"
+              , `String
+                  (Tool_result.failure_effect_disposition_to_string
+                     Tool_result.Proven_post_effect) )
+            ; ("projection", `String operation)
+            ; ("error", `String detail)
+            ])
+        (Printf.sprintf
+           "%s committed, but activity projection failed: %s"
+           operation
+           detail)
+
+module For_testing = struct
+  let result_after_activity_projection = result_after_activity_projection
+end
 
 let extract_board_post_id (message : string) =
   match String.index_opt message '{' with
@@ -242,7 +280,8 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   match (name : string) with
   | "masc_board_post" ->
       let result_tr = Board_tool.handle_tool name arguments in
-      if Tool_result.is_success result_tr then begin
+      let result_tr =
+        if Tool_result.is_success result_tr then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
         let post_id = extract_board_post_id (Tool_result.message result_tr) in
@@ -275,17 +314,26 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           ("timestamp", `String (Masc_domain.now_iso ()));
         ] in
         Mcp_server.sse_broadcast state notification;
-        emit_activity config ~kind:(Event_kind.Board.to_string Event_kind.Board.Posted) ~actor:author
-          ?subject:
-            (Option.map (Activity_graph.entity ~kind:"post") post_id)
-          ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Posted ]
-          ~payload:
-            (`Assoc
-              [
-                ("content", `String content);
-                ( "post_id", Json_util.string_opt_to_json post_id );
-              ])
-          ();
+        let projected_result =
+          result_after_activity_projection
+            ~tool_name:name
+            ~start_time
+            ~primary_result:result_tr
+            ~operation:(Event_kind.Board.to_string Event_kind.Board.Posted)
+            (fun () ->
+               emit_activity
+                 config
+                 ~kind:(Event_kind.Board.to_string Event_kind.Board.Posted)
+                 ~actor:author
+                 ?subject:(Option.map (Activity_graph.entity ~kind:"post") post_id)
+                 ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Posted ]
+                 ~payload:
+                   (`Assoc
+                     [ ("content", `String content)
+                     ; ("post_id", Json_util.string_opt_to_json post_id)
+                     ])
+                 ())
+        in
         (* Mention processing — mirror masc_broadcast pattern *)
         let mention = Mention.extract content in
         (match mention with
@@ -293,12 +341,16 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
              Notify.notify_mention ~from_agent:author
                ~target_agent:target ~message:content ()
          | None -> ())
-      end;
+        ; projected_result
+        end
+        else result_tr
+      in
       Some result_tr
 
   | "masc_board_comment" ->
       let result_tr = Board_tool.handle_tool name arguments in
-      if Tool_result.is_success result_tr then begin
+      let result_tr =
+        if Tool_result.is_success result_tr then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
         let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
@@ -330,16 +382,26 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           ("timestamp", `String (Masc_domain.now_iso ()));
         ] in
         Mcp_server.sse_broadcast state notification;
-        emit_activity config ~kind:(Event_kind.Board.to_string Event_kind.Board.Commented) ~actor:author
-          ~subject:(Activity_graph.entity ~kind:"post" post_id)
-          ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Commented ]
-          ~payload:
-            (`Assoc
-              [
-                ("post_id", `String post_id);
-                ("content", `String content);
-              ])
-          ();
+        let projected_result =
+          result_after_activity_projection
+            ~tool_name:name
+            ~start_time
+            ~primary_result:result_tr
+            ~operation:(Event_kind.Board.to_string Event_kind.Board.Commented)
+            (fun () ->
+               emit_activity
+                 config
+                 ~kind:(Event_kind.Board.to_string Event_kind.Board.Commented)
+                 ~actor:author
+                 ~subject:(Activity_graph.entity ~kind:"post" post_id)
+                 ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Commented ]
+                 ~payload:(
+                   `Assoc
+                     [ ("post_id", `String post_id)
+                     ; ("content", `String content)
+                     ])
+                 ())
+        in
         (* Mention processing — mirror masc_broadcast pattern *)
         let mention = Mention.extract content in
         (match mention with
@@ -347,13 +409,17 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
              Notify.notify_mention ~from_agent:author
                ~target_agent:target ~message:content ()
          | None -> ())
-      end;
+        ; projected_result
+        end
+        else result_tr
+      in
       Some result_tr
 
   | "masc_board_vote" | "masc_board_comment_vote" ->
       let result_tr = Board_tool.handle_tool name arguments in
       (* Record vote activity as a fitness metric (Issue #1861). *)
-      if Tool_result.is_success result_tr then begin
+      let result_tr =
+        if Tool_result.is_success result_tr then begin
         let voter = Safe_ops.json_string ~default:"anonymous" "voter" arguments in
         let target_id =
           if String.equal name "masc_board_vote" then
@@ -382,22 +448,33 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
         let subject_kind =
           if String.equal name "masc_board_vote" then "post" else "comment"
         in
-        emit_activity config ~kind:(Event_kind.Board.to_string Event_kind.Board.Voted) ~actor:voter
-          ~subject:(Activity_graph.entity ~kind:subject_kind target_id)
-          ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Voted ]
-          ~payload:
-            (`Assoc
-              [
-                ("target_id", `String target_id);
-                ("target_kind", `String subject_kind);
-              ])
-          ()
-      end;
+        result_after_activity_projection
+          ~tool_name:name
+          ~start_time
+          ~primary_result:result_tr
+          ~operation:(Event_kind.Board.to_string Event_kind.Board.Voted)
+          (fun () ->
+             emit_activity
+               config
+               ~kind:(Event_kind.Board.to_string Event_kind.Board.Voted)
+               ~actor:voter
+               ~subject:(Activity_graph.entity ~kind:subject_kind target_id)
+               ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Voted ]
+               ~payload:(
+                 `Assoc
+                   [ ("target_id", `String target_id)
+                   ; ("target_kind", `String subject_kind)
+                   ])
+               ())
+        end
+        else result_tr
+      in
       Some result_tr
 
   | "masc_board_delete" ->
       let result_tr = Board_tool.handle_tool name arguments in
-      if Tool_result.is_success result_tr then begin
+      let result_tr =
+        if Tool_result.is_success result_tr then begin
         let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
         let notification = `Assoc [
           ("type", `String "masc/board_delete");
@@ -405,12 +482,23 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           ("timestamp", `String (Masc_domain.now_iso ()));
         ] in
         Mcp_server.sse_broadcast state notification;
-        emit_activity config ~kind:(Event_kind.Board.to_string Event_kind.Board.Deleted) ~actor:agent_name
-          ~subject:(Activity_graph.entity ~kind:"post" post_id)
-          ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Deleted ]
-          ~payload:(`Assoc [ ("post_id", `String post_id) ])
-          ()
-      end;
+        result_after_activity_projection
+          ~tool_name:name
+          ~start_time
+          ~primary_result:result_tr
+          ~operation:(Event_kind.Board.to_string Event_kind.Board.Deleted)
+          (fun () ->
+             emit_activity
+               config
+               ~kind:(Event_kind.Board.to_string Event_kind.Board.Deleted)
+               ~actor:agent_name
+               ~subject:(Activity_graph.entity ~kind:"post" post_id)
+               ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Deleted ]
+               ~payload:(`Assoc [ ("post_id", `String post_id) ])
+               ())
+        end
+        else result_tr
+      in
       Some result_tr
 
   | "masc_board_list" | "masc_board_post_get"

@@ -7,6 +7,8 @@
 (include_subdirs no)
 
 (library
+ (flags
+  (:standard -w +32))
  (name masc_tool_catalog_surfaces)
  (public_name masc.tool_catalog_surfaces)
  (wrapped false)

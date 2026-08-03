@@ -16,10 +16,25 @@ let keeper_board_meta ~source meta =
   `Assoc (assoc_replace "source" (`String source) fields)
 ;;
 
-let assoc_value_opt key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
 ;;
+
+let without_if_revision = function
+  | `Assoc fields ->
+    `Assoc (List.filter (fun (key, _) -> key <> "if_revision") fields)
+  | other -> other
+;;
+
+let snapshot_execution_of_response result response =
+  let data = Snapshot_protocol.to_yojson response in
+  match result.Keeper_tool_execution.disposition with
+  | Tool_result.Completed _ -> Keeper_tool_execution.success_data data
+  | Tool_result.Deferred _ -> Keeper_tool_execution.deferred_data data
+  | Tool_result.Failed _ -> result
+;;
+
+module For_testing = struct
+  let snapshot_execution_of_response = snapshot_execution_of_response
+end
 
 let string_arg key = function
   | `Assoc fields ->
@@ -93,6 +108,35 @@ let handle_keeper_board_tool_with_outcome
   let dispatch_board (tool : Tool_name.Board_name.t) tool_args =
     dispatch (Tool_name.Board_name.to_string tool) tool_args
   in
+  let dispatch_board_list args =
+    match Snapshot_protocol.if_revision args with
+    | Error message ->
+      Keeper_tool_execution.failure
+        ~class_:Tool_result.Policy_rejection
+        (error_json message)
+    | Ok if_revision ->
+      let result =
+        dispatch_board Tool_name.Board_name.Board_list (without_if_revision args)
+      in
+      let revision =
+        Snapshot_protocol.revision_of_json
+          ~namespace:"board"
+          (`Assoc
+            [ "snapshot", `String result.raw_output
+            ; "args", without_if_revision args
+            ])
+      in
+      (match result.disposition with
+       | Tool_result.Failed _ -> result
+       | Tool_result.Completed _ | Tool_result.Deferred _ ->
+         let response =
+           Snapshot_protocol.respond
+             ~revision
+             ~if_revision
+             (`String result.raw_output)
+         in
+         snapshot_execution_of_response result response)
+  in
   match Keeper_tool_name.of_string name with
   | Some Keeper_tool_name.Board_post ->
     let author = meta.name in
@@ -136,7 +180,10 @@ let handle_keeper_board_tool_with_outcome
             "keeper_board_post_get requires post_id (format: p-xxxx). \
              You sent empty or missing post_id."))
   | Some keeper_tool ->
-    (match Keeper_tool_name.masc_board_name_of_keeper_tool keeper_tool with
+    (match keeper_tool with
+     | Keeper_tool_name.Board_list -> dispatch_board_list args
+     | _ ->
+       match Keeper_tool_name.masc_board_name_of_keeper_tool keeper_tool with
      | Some board_name ->
        dispatch_board
          board_name

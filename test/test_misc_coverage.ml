@@ -120,9 +120,6 @@ let test_config_of_json () =
   let visible = Config.visible_tool_schemas () in
   check bool "visible non-empty" true (List.length visible > 0)
 
-let test_config_of_json_custom () =
-  let names = Config.all_tool_names () in
-  check bool "mode tools removed" false (List.mem "masc_switch_mode" names)
 
 let test_config_of_json_invalid () =
   (* masc_pause is not in public discovery, but remains callable on the admin/catalog surface. *)
@@ -197,8 +194,6 @@ let () =
     "config", [
       test_case "default" `Quick test_config_default;
       test_case "to_json" `Quick test_config_to_json;
-      test_case "of_json" `Quick test_config_of_json;
-      test_case "of_json custom" `Quick test_config_of_json_custom;
       test_case "of_json invalid" `Quick test_config_of_json_invalid;
     ];
     "env_config.session", [

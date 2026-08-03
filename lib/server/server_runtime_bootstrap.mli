@@ -206,6 +206,16 @@ val mark_owner_state_ready
 (** Publish and verify readiness after the transport has installed every
     surface required by its own serving contract. *)
 
+val start_post_ready_owner_lanes :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Time.clock ->
+  env:Eio_unix.Stdenv.base ->
+  Mcp_server.server_state ->
+  string * string
+(** Start the transport-neutral post-readiness lanes in their required order:
+    the application-owned system-LLM completion authority, then background
+    maintenance. Both HTTP and stdio use this sequence. *)
+
 (** {1 Main Entry Point} *)
 
 val run :

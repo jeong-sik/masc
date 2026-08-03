@@ -208,9 +208,6 @@ val record_runtime :
     via {!record_runtime_audit}.  Non-blocking — the
     caller does not wait for the actor to drain. *)
 
-val reset_runtime_counters_for_test : unit -> unit
-(** Posts a reset message onto the stream.  Test-only
-    isolator; no-op outside the actor's lifetime. *)
 
 (** {1 JSON projections (runtime-include consumers)} *)
 

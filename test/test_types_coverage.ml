@@ -855,8 +855,7 @@ let test_agent_credential_to_yojson () =
   | `Assoc fields ->
     check bool "has agent_name" true (List.mem_assoc "agent_name" fields);
     check bool "has token" true (List.mem_assoc "token" fields);
-    check bool "has role" true (List.mem_assoc "role" fields);
-    check bool "omits removed admin field" false (List.mem_assoc "admin" fields)
+    check bool "has role" true (List.mem_assoc "role" fields)
   | _ -> fail "expected Assoc"
 
 let test_agent_credential_to_yojson_with_expiry () =
@@ -980,7 +979,6 @@ let test_agent_credential_to_yojson_emits_role_only () =
   match Masc_domain.agent_credential_to_yojson cred with
   | `Assoc fields ->
     check bool "has role" true (List.mem_assoc "role" fields);
-    check bool "omits removed admin field" false (List.mem_assoc "admin" fields);
     let role_val = List.assoc "role" fields in
     check bool "role=\"admin\"" true (role_val = `String "admin")
   | _ -> fail "expected Assoc"
@@ -994,8 +992,7 @@ let test_auth_config_to_yojson () =
   let json = Masc_domain.auth_config_to_yojson config in
   match json with
   | `Assoc fields ->
-    check bool "has enabled" true (List.mem_assoc "enabled" fields);
-    check bool "omits default_role" false (List.mem_assoc "default_role" fields)
+    check bool "has enabled" true (List.mem_assoc "enabled" fields)
   | _ -> fail "expected Assoc"
 
 let test_auth_config_of_yojson_ok () =

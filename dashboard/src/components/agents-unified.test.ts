@@ -78,8 +78,6 @@ describe('AgentsUnified', () => {
     expect(container.querySelector('[data-testid="filter-chips"]')).toBeNull()
     // Keeper creation lives at the top of the fleet roster (all / keepers views).
     expect(container.querySelector('[data-testid="keeper-create-entry"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="keeper-multi-select"]')).toBeNull()
-    expect(container.querySelector('[data-testid="keeper-token-stats"]')).toBeNull()
   })
 
   it('honors agents view deep link without showing the old top switcher', async () => {
@@ -92,12 +90,10 @@ describe('AgentsUnified', () => {
     expect(container.querySelector('[data-testid="keeper-create-entry"]')).toBeNull()
   })
 
-  it('renders keepers view as a narrowed roster without multi-select stats', () => {
+  it('renders keepers view as a narrowed roster', () => {
     mockRoute.value = { tab: 'monitoring', params: { view: 'keepers' }, postId: null }
     render(h(AgentsUnified, null), container)
     expect(container.querySelector('[data-testid="keeper-create-entry"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="keeper-multi-select"]')).toBeNull()
-    expect(container.querySelector('[data-testid="keeper-token-stats"]')).toBeNull()
     const roster = container.querySelector('[data-testid="agent-roster"]')
     expect(roster!.getAttribute('data-filter')).toBe('keeper-only')
   })

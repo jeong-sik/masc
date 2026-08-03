@@ -44,11 +44,6 @@ let test_http_exceeds_audio_test_tone () =
     true
     (V.http_request_timeout_sec > V.audio_test_tone_timeout_sec)
 
-let test_smoke_call_sites_compile () =
-  let _ = V.http_request_timeout_sec in
-  let _ = V.audio_test_tone_timeout_sec in
-  check bool "both accessors are reachable" true true
-
 let () =
   run "env_config_voice_bridge_timeouts"
     [
@@ -62,10 +57,5 @@ let () =
         [
           test_case "http_request > audio_test_tone" `Quick
             test_http_exceeds_audio_test_tone;
-        ] );
-      ( "API surface",
-        [
-          test_case "both accessors reachable" `Quick
-            test_smoke_call_sites_compile;
         ] );
     ]

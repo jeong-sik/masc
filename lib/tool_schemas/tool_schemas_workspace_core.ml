@@ -25,7 +25,12 @@ Use when you need a snapshot of who is online and what tasks are available. \
 Call after masc_start to orient yourself. Pair with masc_tasks for detailed backlog.";
     input_schema = `Assoc [
       ("type", `String "object");
-      ("properties", `Assoc []);
+      ("properties", `Assoc [
+        ("if_revision", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional producer revision from the previous snapshot; matching revisions return unchanged.");
+        ]);
+      ]);
       ("additionalProperties", `Bool false);
     ];
   };

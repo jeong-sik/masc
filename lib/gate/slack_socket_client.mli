@@ -60,7 +60,3 @@ val connection_state : unit -> connection_state
     written only by [run], safe to read from any fiber. Feeds connector presence
     ([Channel_gate_slack_state]). *)
 
-module For_testing : sig
-  val reader_should_continue_after_input :
-    Slack_gateway_state.input -> bool
-end

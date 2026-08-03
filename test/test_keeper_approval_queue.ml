@@ -1238,10 +1238,18 @@ let test_resolution_is_durable_and_origin_scoped () =
          |> Yojson.Safe.from_string
        in
        Alcotest.(check string)
-         "provider-only projection rehydrates the exact replay output"
-         replay_output
-         Yojson.Safe.Util.(
-           replay_evidence |> member "untrusted_tool_output" |> to_string);
+         "provider-only projection preserves the exact replay artifact identity"
+         replay_output_ref.sha256
+         (match
+            replay_evidence
+            |> Yojson.Safe.Util.member "untrusted_tool_output_ref"
+            |> Tool_output.normalized_artifact_ref_of_json
+          with
+          | Tool_output.Decoded_normalized_artifact_ref decoded -> decoded.sha256
+          | Tool_output.Not_normalized_artifact_ref ->
+            Alcotest.fail "provider replay evidence lost its artifact reference"
+          | Tool_output.Invalid_normalized_artifact_ref { detail } ->
+            Alcotest.fail detail);
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 

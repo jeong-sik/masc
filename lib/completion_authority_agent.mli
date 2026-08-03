@@ -13,4 +13,11 @@ module For_testing : sig
 
   val completion_verdict_of_review :
     Task.Anti_rationalization.verdict -> Masc_domain.completion_verdict
+
+  val review_notes :
+    request:Verification.verification_request ->
+    evidence_access:Workspace_verification_store.submitted_evidence_access ->
+    result:Task.Anti_rationalization.review_result ->
+    authority:Masc_domain.completion_authority ->
+    string
 end

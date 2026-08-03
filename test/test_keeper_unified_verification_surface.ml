@@ -454,6 +454,40 @@ let test_completion_authority_rejection_has_own_prompt_layer () =
          pending_board_events = [ sample_completion_authority_rejection ] })
 ;;
 
+let test_completion_authority_rejection_preserves_human_provenance () =
+  Masc_test_deps.init_keeper_tool_registry ();
+  init_runtime_default_for_tests ();
+  let rejection : Keeper_event_queue.completion_authority_rejection =
+    { car_task_id = "task-human-rejected"
+    ; car_verification_id = "verification-human-rejected"
+    ; car_reason = "operator requires another artifact"
+    ; car_authority = Masc_domain.Human_operator { operator_id = "operator-test" }
+    }
+  in
+  let stimulus : Keeper_event_queue.stimulus =
+    { post_id = Keeper_event_queue.completion_authority_rejection_post_id rejection
+    ; urgency = Keeper_event_queue.Immediate
+    ; arrived_at = 42.0
+    ; payload = Keeper_event_queue.Completion_authority_rejected rejection
+    }
+  in
+  let event =
+    match WO.pending_board_event_of_stimulus ~meta:minimal_meta stimulus with
+    | Ok (Some event) -> event
+    | Ok None -> fail "completion authority rejection must produce an event"
+    | Error _ -> fail "completion authority rejection must not read Board state"
+  in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    build_prompt
+      ~meta:minimal_meta
+      { base_observation with pending_board_events = [ event ] }
+  in
+  check bool "human authority kind is preserved" true
+    (contains_sub "authority_kind=human_operator" world_state);
+  check bool "human rejection is not relabeled as system authority" false
+    (contains_sub "system completion authority" world_state)
+;;
+
 (* Feedback-loop invariant (#25193): the observation frame must ride the
    ephemeral [world_state] channel, never the persisted [user_message].
    Under the pre-split behaviour (frame concatenated into the user message)
@@ -623,6 +657,9 @@ let () =
           test_case
             "prompt: completion authority rejection has its own layer"
             `Quick test_completion_authority_rejection_has_own_prompt_layer;
+          test_case
+            "prompt: completion authority rejection preserves human provenance"
+            `Quick test_completion_authority_rejection_preserves_human_provenance;
           test_case
             "prompt: own recent board posts render as neutral observation rows"
             `Quick test_own_recent_board_posts_render_in_world_state;

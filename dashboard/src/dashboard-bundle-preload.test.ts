@@ -117,9 +117,16 @@ describe('dashboard production bundle preloads', () => {
     const initialModuleIds = staticChunkClosure(chunks, entryChunk)
       .flatMap(chunk => Object.keys(chunk.modules))
       .map(moduleId => moduleId.replaceAll('\\', '/'))
+    const allModuleIds = chunks
+      .flatMap(chunk => Object.keys(chunk.modules))
+      .map(moduleId => moduleId.replaceAll('\\', '/'))
+    const missingSchemas = LAZY_SCHEMA_MODULE_SUFFIXES.filter(suffix => (
+      !allModuleIds.some(moduleId => moduleId.endsWith(suffix))
+    ))
     const eagerSchemas = LAZY_SCHEMA_MODULE_SUFFIXES.filter(suffix => (
       initialModuleIds.some(moduleId => moduleId.endsWith(suffix))
     ))
+    expect(missingSchemas).toEqual([])
     expect(eagerSchemas).toEqual([])
   }, 120_000)
 

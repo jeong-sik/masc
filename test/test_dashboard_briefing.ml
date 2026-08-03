@@ -141,6 +141,8 @@ let test_dashboard_briefing_projection () =
          assertion has moved to internal_signals (see below). *)
       check bool "attention_queue is public-only (empty in clean fixture)" true
         (attention_queue = []);
+      check bool "mission summary retains workspace health" true
+        (summary |> member "workspace_health" <> `Null);
       check bool "mission summary omits paused" true
         (summary |> member "paused" = `Null);
       check bool "mission summary omits active_agents" true

@@ -264,14 +264,25 @@ let read_state config =
 let write_state_result config state =
   ensure_dirs config;
   let json = state_to_yojson state in
-  let* () = Workspace_utils.write_json_result config (goals_path config) json in
-  (match Workspace_utils.write_json_result config (goals_recovery_path config) json with
-   | Ok () -> ()
-   | Error msg ->
-     Log.Misc.warn
-       "goal_store: primary goals.json committed; recovery mirror write failed for %s: %s"
-       (goals_recovery_path config)
-       msg);
+  (* Snapshot the current primary to .last-good BEFORE overwriting,
+     so .last-good holds the previous good state, not a copy of the
+     current write.  This makes the recovery path meaningful: if the
+     new primary write fails or produces corrupt data, .last-good
+     still contains the last known-good state. *)
+  let primary = goals_path config in
+  let recovery = goals_recovery_path config in
+  (match Workspace_utils.read_json_result config primary with
+   | Ok prev_json ->
+     (match Workspace_utils.write_json_result config recovery prev_json with
+      | Ok () -> ()
+      | Error msg ->
+        Log.Misc.warn
+          "goal_store: pre-write snapshot to %s failed (non-fatal): %s"
+          recovery msg)
+   | Error _ ->
+     (* No existing primary to snapshot — first write or already gone. *)
+     ());
+  let* () = Workspace_utils.write_json_result config primary json in
   Ok ()
 
 let write_state config state =

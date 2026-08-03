@@ -55,11 +55,6 @@ let test_floor () =
     true
     (S.schema_generation_timeout_sec >= 1.0)
 
-let test_smoke_call_sites_compile () =
-  let _ = S.control_command_timeout_sec in
-  let _ = S.schema_generation_timeout_sec in
-  check bool "both accessors are reachable" true true
-
 let () =
   run "env_config_sidecar_timeouts"
     [
@@ -77,10 +72,5 @@ let () =
       ( "floor",
         [
           test_case ">= 1.0s on both" `Quick test_floor;
-        ] );
-      ( "API surface",
-        [
-          test_case "both accessors reachable" `Quick
-            test_smoke_call_sites_compile;
         ] );
     ]

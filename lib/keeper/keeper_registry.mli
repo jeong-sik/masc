@@ -18,13 +18,6 @@ open Keeper_types_profile
     [Keeper_registry.packed_turn_phase] etc. unchanged. *)
 include module type of Keeper_registry_types
 
-(** [validate_turn_phase_transition] stays in Keeper_registry because its
-    implementation depends on [Keeper_fsm_guard_runtime], not a pure type-level
-    dependency. *)
-val validate_turn_phase_transition
-  :  from:packed_turn_phase
-  -> to_:packed_turn_phase
-  -> unit
 
 
 (** Register a fresh keeper before its first keepalive fiber launch.

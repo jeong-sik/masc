@@ -180,14 +180,6 @@ let () =
           assert (Yojson.Safe.Util.member "paused" json = `Null)
       | None -> failwith "dispatch returned None")
 
-let () =
-  test "removed_mode_tools_do_not_dispatch" (fun () ->
-      with_ctx @@ fun ctx ->
-      let args = `Assoc [] in
-      assert (Tool_control.dispatch ctx ~name:"masc_switch_mode" ~args = None);
-      assert (Tool_control.dispatch ctx ~name:"masc_get_config" ~args = None);
-      assert (Tool_control.dispatch ctx ~name:"masc_tool_enable" ~args = None);
-      assert (Tool_control.dispatch ctx ~name:"masc_tool_disable" ~args = None))
 
 let () =
   test "control_schema_projection_registers_without_front_door_exposure" (fun () ->

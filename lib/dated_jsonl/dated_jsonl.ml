@@ -1260,11 +1260,6 @@ module For_testing = struct
     let cell = mutex_for_base_dir ~base_dir in
     Atomic.get cell
 
-  let registry_size () =
-    Stdlib.Mutex.protect mutex_registry_mu (fun () ->
-      Hashtbl.length mutex_registry)
-
-  let reset_append_guard () = Atomic.set append_guard default_append_guard
 end
 
 (* Duplicate count_entries removed — canonical definition at line 225 *)

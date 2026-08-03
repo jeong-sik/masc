@@ -8,24 +8,23 @@ let require_ok label = function
   | Error error -> failf "%s: %s" label error
 ;;
 
-let test_single_resume_requires_exact_fences () =
+let test_single_resume_requires_operation_id () =
   let action_only = `Assoc [ "action", `String "resume" ] in
   (match Surface.parse_resume_request action_only with
    | Error _ -> ()
-   | Ok _ -> fail "action-only resume was accepted");
+   | Ok _ -> fail "resume without operation ID was accepted");
   let parsed =
     Surface.parse_resume_request
       (`Assoc
          [ "action", `String "resume"
-         ; "owner_nonce", `Int 7
          ; "operator_operation_id", `String "dashboard-resume-7"
          ])
-    |> require_ok "parse exact Resume_owner"
+    |> require_ok "parse resume operation ID"
   in
-  check (pair int string) "exact fences" (7, "dashboard-resume-7") parsed
+  check string "operation ID" "dashboard-resume-7" parsed
 ;;
 
-let test_bulk_resume_requires_per_owner_targets () =
+let test_bulk_resume_requires_operation_ids () =
   let names_only =
     `Assoc
       [ "action", `String "resume"
@@ -34,7 +33,7 @@ let test_bulk_resume_requires_per_owner_targets () =
   in
   (match Surface.parse_bulk_resume_requests names_only with
    | Error _ -> ()
-   | Ok _ -> fail "names-only bulk resume was accepted");
+   | Ok _ -> fail "bulk resume without targets was accepted");
   let parsed =
     Surface.parse_bulk_resume_requests
       (`Assoc
@@ -43,12 +42,10 @@ let test_bulk_resume_requires_per_owner_targets () =
            , `List
                [ `Assoc
                    [ "name", `String "rondo"
-                   ; "owner_nonce", `Int 3
                    ; "operator_operation_id", `String "resume-rondo-1"
                    ]
                ; `Assoc
                    [ "name", `String "qa-king"
-                   ; "owner_nonce", `Int 5
                    ; "operator_operation_id", `String "resume-qa-1"
                    ]
                ] )
@@ -56,9 +53,9 @@ let test_bulk_resume_requires_per_owner_targets () =
     |> require_ok "parse bulk Resume_owner"
   in
   check
-    (list (triple string int string))
-    "per-owner fences"
-    [ "rondo", 3, "resume-rondo-1"; "qa-king", 5, "resume-qa-1" ]
+    (list (pair string string))
+    "resume operation IDs"
+    [ "rondo", "resume-rondo-1"; "qa-king", "resume-qa-1" ]
     parsed
 ;;
 
@@ -67,13 +64,13 @@ let () =
     "keeper paused-work resume surface"
     [ ( "resume request contract"
       , [ test_case
-            "single requires generation and operation id"
+            "single requires operation id"
             `Quick
-            test_single_resume_requires_exact_fences
+            test_single_resume_requires_operation_id
         ; test_case
-            "bulk requires per-owner targets"
+            "bulk requires operation IDs"
             `Quick
-            test_bulk_resume_requires_per_owner_targets
+            test_bulk_resume_requires_operation_ids
         ] )
     ]
 ;;

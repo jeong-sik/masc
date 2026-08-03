@@ -236,7 +236,6 @@ let recover_projected_durable_demand_owner
         | Keeper_activation_readiness.Recoverable ->
           let owner_ctx = { ctx with agent_name = meta.agent_name } in
           Keeper_supervisor.supervise_keepalive
-            ~proactive_warmup_sec:0
             owner_ctx
             meta
         | Keeper_activation_readiness.Unknown detail ->

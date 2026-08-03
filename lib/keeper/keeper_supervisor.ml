@@ -300,7 +300,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
               ~restart_count:attempt
               ~last_restart_ts:now
               ~crash_log:(keep_last_n 5 (now, crash_msg) old_crash_log);
-            (match launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta reg with
+            (match launch_supervised_fiber ctx meta reg with
              | Error _ ->
                (* Launch gate aborted fail-closed (no fiber; done resolved and
                   Crashed published by the gate). Announcing Restarted/Running

@@ -53,24 +53,6 @@ let keeper_board_own_recent_max_rp =
     ~description:"Own recent board posts injected into the world observation per turn (0 = disable)" ()
 let keeper_board_own_recent_max () : int =
   Runtime_params.get keeper_board_own_recent_max_rp
-let keeper_bootstrap_proactive_warmup_sec_rp =
-  _rp_int ~key:"keeper.proactive.warmup_sec"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_PROACTIVE_WARMUP_SEC"
-                          ~default:60 ~min_v:0 ~max_v:two_days_seconds_int)
-    ~min_v:0 ~max_v:two_days_seconds_int
-    ~description:"Bootstrap proactive warmup delay (seconds)" ()
-let keeper_bootstrap_proactive_warmup_sec () : int =
-  Runtime_params.get keeper_bootstrap_proactive_warmup_sec_rp
-
-let keeper_bootstrap_stagger_step_sec_rp =
-  _rp_int ~key:"keeper.proactive.stagger_step_sec"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_STAGGER_STEP_SEC"
-                          ~default:15 ~min_v:0 ~max_v:120)
-    ~min_v:0 ~max_v:120
-    ~description:"Bootstrap warmup deterministic jitter window (seconds)" ()
-let keeper_bootstrap_stagger_step_sec () : int =
-  Runtime_params.get keeper_bootstrap_stagger_step_sec_rp
-
 let keeper_bootstrap_retry_interval_sec_rp =
   _rp_int ~key:"keeper.bootstrap.retry_interval_sec"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_RETRY_INTERVAL_SEC"

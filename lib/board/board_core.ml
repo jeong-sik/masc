@@ -160,6 +160,9 @@ let list_posts store ?(visibility_filter = None) ?hearth ?(limit = 50) () : post
     take limit filtered)
 ;;
 
+(** Returns the post with the greatest [(updated_at, post_id)] cursor token,
+    or [None] when the board is empty. The fold runs under the board lock and
+    does not allocate or sort the complete post history. *)
 let current_post_cursor store =
   maybe_sweep store;
   with_lock store (fun () ->

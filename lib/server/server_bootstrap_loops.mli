@@ -149,13 +149,10 @@ module For_testing : sig
     agent_name : string;
   }
 
-  val autoboot_proactive_warmup_sec :
-    base_warmup:int -> stagger_window_sec:int -> keeper_name:string -> int
-
   val board_sse_event_params : Board_dispatch.board_sse_event -> Yojson.Safe.t
 
   val broadcast_mention_wakeup_action :
-    string option -> [ `Suppress_no_target | `Wake_keeper of string ]
+    string option -> [ `No_keeper_target | `Wake_keeper of string ]
 
   val queued_chat_projection :
     Keeper_chat_queue.queued_message -> queued_chat_projection

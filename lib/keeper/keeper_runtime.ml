@@ -579,7 +579,6 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
     { scanned = 0; started = 0; stale = 0; recovering = 0 }
   else
     let now_ts = Time_compat.now () in
-    let proactive_warmup_sec = keeper_bootstrap_proactive_warmup_sec () in
     let stale_turn_sec =
       max 0.0 Env_config.KeeperBootstrap.stale_turn_seconds
     in
@@ -613,7 +612,7 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
                 else if already_running then false
                 else (
                   Keeper_supervisor.supervise_keepalive
-                    ~proactive_warmup_sec ctx m;
+                    ctx m;
                   Keeper_registry.is_running
                     ~base_path:ctx.config.base_path m.name
                 )

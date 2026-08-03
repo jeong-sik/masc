@@ -174,9 +174,9 @@ export function keeperActionVisibility(keeper: Keeper): KeeperActionVisibility {
   const isPaused = isKeeperPaused(keeper)
   const isOffline = isKeeperOffline(keeper)
   const isRunning = isKeeperRunningExcludingRestarting(keeper)
-  // A paused directive can outlive its process. The durable owner generation
-  // remains the Resume_owner fencing token after the live lane exits, so a
-  // paused keeper must resume before an offline lane is booted.
+  // A paused directive can outlive its process. Resume resolves the current
+  // durable state on the server, so a paused keeper must resume before an
+  // offline lane is booted.
 
   return {
     canPause:    isRunning && !isPaused,

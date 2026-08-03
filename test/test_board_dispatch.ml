@@ -486,13 +486,11 @@ let test_list_posts_with_sort () =
 
 let board_observation_meta name =
   match
-    Keeper_meta_json_parse.meta_of_json
+    Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [ "name", `String name
         ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
         ; "trace_id", `String ("trace-" ^ name)
-        ; "sandbox_profile", `String "local"
-        ; "network_mode", `String "inherit"
         ])
   with
   | Ok meta -> meta

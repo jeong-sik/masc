@@ -427,14 +427,6 @@ let surfaces =
       ];
     };
     {
-      id = "keeper_proactive";
-      description = "Keeper proactive turn scheduling and bootstrap timing";
-      param_keys = [
-        "keeper.proactive.warmup_sec";
-        "keeper.proactive.stagger_step_sec";
-      ];
-    };
-    {
       id = "dashboard";
       description = "Dashboard rendering — truncation lengths, row limits, borders, status thresholds";
       param_keys = [

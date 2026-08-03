@@ -715,7 +715,7 @@ let test_reconcile_materializes_configured_keeper_without_meta () =
   let materialized = ref [] in
   let supervised = ref [] in
   let publish_lifecycle ~event:_ _name _detail () = () in
-  let supervise_keepalive ~proactive_warmup_sec:_ _ctx
+  let supervise_keepalive _ctx
       (meta : Keeper_meta_contract.keeper_meta) =
     supervised := meta.name :: !supervised
   in
@@ -751,7 +751,7 @@ let test_reconcile_does_not_double_start_materialized_keeper () =
   let materialized = ref [] in
   let supervised = ref [] in
   let publish_lifecycle ~event:_ _name _detail () = () in
-  let supervise_keepalive ~proactive_warmup_sec:_ _ctx
+  let supervise_keepalive _ctx
       (meta : Keeper_meta_contract.keeper_meta) =
     supervised := meta.name :: !supervised
   in
@@ -802,7 +802,7 @@ let test_reconcile_does_not_double_start_materialized_keeper () =
    | Ok () -> ()
    | Error err -> fail err);
   let publish_lifecycle ~event:_ _name _detail () = () in
-  let supervise_keepalive ~proactive_warmup_sec:_ _ctx _meta = () in
+  let supervise_keepalive _ctx _meta = () in
   KSR.reconcile_keepalive_keepers
     ~publish_lifecycle
     ~supervise_keepalive
@@ -846,7 +846,7 @@ let test_reconcile_materialize_failure_continues_with_metric () =
   let metric = Keeper_metrics.(to_string KeeperMaterializationFailures) in
   let before = Masc.Otel_metric_store.metric_total metric in
   let publish_lifecycle ~event:_ _name _detail () = () in
-  let supervise_keepalive ~proactive_warmup_sec:_ _ctx
+  let supervise_keepalive _ctx
       (meta : Keeper_meta_contract.keeper_meta) =
     supervised := meta.name :: !supervised
   in
@@ -886,7 +886,7 @@ let test_reconcile_supervise_exception_continues () =
   let metric = Keeper_metrics.(to_string ReconcileFailures) in
   let before = Masc.Otel_metric_store.metric_total metric in
   let publish_lifecycle ~event:_ _name _detail () = () in
-  let supervise_keepalive ~proactive_warmup_sec:_ _ctx
+  let supervise_keepalive _ctx
       (meta : Keeper_meta_contract.keeper_meta) =
     if String.equal meta.name failing
     then raise (Failure "fixture supervise failure")
@@ -921,7 +921,6 @@ let test_supervise_keepalive_retains_sweep_owned_entries () =
   let launched = ref [] in
   let publish_lifecycle ~event:_ _name _detail () = () in
   let launch_supervised_fiber
-        ~proactive_warmup_sec:_
         _ctx
         _meta
         (entry : Reg.registry_entry)
@@ -950,7 +949,6 @@ let test_supervise_keepalive_retains_sweep_owned_entries () =
   KSS.supervise_keepalive
     ~publish_lifecycle
     ~launch_supervised_fiber
-    ~proactive_warmup_sec:0
     ctx
     stopped_meta;
   let crashed_name = "recoverable-crashed-owner" in
@@ -975,7 +973,6 @@ let test_supervise_keepalive_retains_sweep_owned_entries () =
   KSS.supervise_keepalive
     ~publish_lifecycle
     ~launch_supervised_fiber
-    ~proactive_warmup_sec:0
     ctx
     crashed_meta;
   check
@@ -1601,8 +1598,7 @@ let test_launch_rejected_terminal_state_does_not_announce_running () =
       in
       Sup.with_restart_launch_noop_for_test (fun () ->
         match
-          Masc.Keeper_supervisor_launch.launch_supervised_fiber
-            ~proactive_warmup_sec:0 ctx meta reg
+          Masc.Keeper_supervisor_launch.launch_supervised_fiber ctx meta reg
         with
         | Ok () -> fail "expected Fiber_started to be rejected in terminal state"
         | Error _ -> ());
@@ -1652,7 +1648,6 @@ let test_supervised_stop_joins_board_attention_worker () =
       in
       (match
          Masc.Keeper_supervisor_launch.launch_supervised_fiber
-           ~proactive_warmup_sec:0
            ctx
            meta
            reg
@@ -1727,8 +1722,7 @@ let test_launch_fork_rejection_does_not_announce_running () =
         }
       in
       (match
-         Masc.Keeper_supervisor_launch.launch_supervised_fiber
-           ~proactive_warmup_sec:0 ctx meta reg
+         Masc.Keeper_supervisor_launch.launch_supervised_fiber ctx meta reg
        with
        | Ok () -> fail "expected lane fork rejection to propagate as Error"
        | Error _ -> ());
@@ -1778,8 +1772,7 @@ let test_fork_rejection_preserves_replacement_lane () =
         }
       in
       (match
-         Masc.Keeper_supervisor_launch.launch_supervised_fiber_body
-           ~proactive_warmup_sec:0 ctx meta rejected
+         Masc.Keeper_supervisor_launch.launch_supervised_fiber_body ctx meta rejected
        with
        | Ok () -> fail "expected rejected lane to propagate as Error"
        | Error _ -> ());
@@ -1831,8 +1824,7 @@ let test_fork_rejection_unregisters_non_terminalizable_owner () =
         }
       in
       (match
-         Masc.Keeper_supervisor_launch.launch_supervised_fiber_body
-           ~proactive_warmup_sec:0 ctx meta rejected
+         Masc.Keeper_supervisor_launch.launch_supervised_fiber_body ctx meta rejected
        with
        | Ok () -> fail "expected rejected terminal lane to propagate as Error"
        | Error _ -> ());

@@ -32,7 +32,6 @@ val sync_keeper_presence :
 val collect_keepalive_board_events :
   ctx:'a context ->
   meta_current:keeper_meta ->
-  proactive_warmup_elapsed:bool ->
   Keeper_world_observation.pending_board_event list * keeper_meta
 
 val in_turn_liveness_pulse_interval_sec : unit -> float
@@ -95,7 +94,6 @@ type keepalive_scheduling_decision = {
 }
 
 val decide_keepalive_scheduling :
-  ?reactive_wake:bool ->
   ?event_queue_triggers:Keeper_world_observation.event_queue_trigger list ->
   stop:bool Atomic.t ->
   meta:keeper_meta ->
@@ -181,7 +179,6 @@ val run_keepalive_unified_turn :
   meta_after_triage:keeper_meta ->
   pending_board_events:Keeper_world_observation.pending_board_event list ->
   stop:bool Atomic.t ->
-  proactive_warmup_elapsed:bool ->
   reactive_wake:bool ->
   shared_context:Agent_sdk.Context.t ->
   deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
@@ -193,7 +190,6 @@ val run_keepalive_unified_turn :
 val refresh_work_as_heartbeat :
   ctx:'a context ->
   meta_after_proactive:keeper_meta ->
-  proactive_warmup_elapsed:bool ->
   work_as_hb:(unit -> bool) ->
   last_successful_heartbeat_ts:float ref ->
   consecutive_failures:int ref ->
@@ -227,7 +223,7 @@ val record_keepalive_stage_timing :
 (** The heartbeat loop body, extracted for reuse by the supervisor.
     Runs synchronously in the calling fiber until [stop] becomes true. *)
 val run_heartbeat_loop :
-  proactive_warmup_sec:int -> 'a context -> keeper_meta -> bool Atomic.t ->
+  'a context -> keeper_meta -> bool Atomic.t ->
   wakeup:bool Atomic.t -> unit
 
 module For_testing : sig

@@ -108,8 +108,6 @@ val normalize_prompt_text : max_bytes:int -> string -> string
     keeper's own latest posts the world observation carries per turn. *)
 val keeper_board_own_recent_max : unit -> int
 
-val keeper_bootstrap_proactive_warmup_sec : unit -> int
-val keeper_bootstrap_stagger_step_sec : unit -> int
 val keeper_bootstrap_retry_interval_sec : unit -> int
 
 val keeper_batch_limit : unit -> int

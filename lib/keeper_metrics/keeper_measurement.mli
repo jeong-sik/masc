@@ -30,7 +30,6 @@ type timing_measurement = {
   now_ts : float;
   idle_seconds : int;
   since_last_compaction_sec : float;
-  proactive_warmup_elapsed : bool;
 }
 
 type failure_measurement = {
@@ -73,7 +72,6 @@ val capture :
   now_ts:float ->
   idle_seconds:int ->
   since_last_compaction_sec:float ->
-  proactive_warmup_elapsed:bool ->
   consecutive_hb_failures:int ->
   consecutive_turn_failures:int ->
   unit ->

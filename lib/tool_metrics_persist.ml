@@ -48,24 +48,17 @@ type persisted_record = {
 
 type parsed_record =
   | Current_record of persisted_record
-  | Legacy_success_record
 
 let parse_record (json : Yojson.Safe.t)
   : (parsed_record, string) Result.t =
   let tool_name = Safe_ops.json_string_opt "tool_name" json in
   let disposition = Safe_ops.json_string_opt "disposition" json in
-  let legacy_success = Safe_ops.json_bool_opt "success" json in
   let duration_ms = Safe_ops.json_float_opt "duration_ms" json in
-  match tool_name, disposition, legacy_success, duration_ms with
-  | Some tool_name, Some disposition, _, Some duration_ms ->
+  match tool_name, disposition, duration_ms with
+  | Some tool_name, Some disposition, Some duration_ms ->
     Tool_result.unit_disposition_of_string disposition
     |> Result.map (fun disposition ->
       Current_record { tool_name; disposition; duration_ms })
-  | Some _, None, Some _, Some _ ->
-    (* The legacy success bit cannot distinguish the current Deferred and
-       Failed dispositions. Keep the execution-disposition SSOT intact while
-       classifying these rows separately from malformed data. *)
-    Ok Legacy_success_record
   | _ ->
     let missing =
       [ ("tool_name", Option.is_none tool_name)
@@ -215,7 +208,6 @@ let start_flush_fiber ~sw ~clock ~base_path =
 let restore ~base_path : int =
   let store = get_or_create_store ~base_path in
   let count = ref 0 in
-  let legacy = ref 0 in
   let skipped = ref 0 in
   let first_skip_reason = ref None in
   (try
@@ -249,15 +241,10 @@ let restore ~base_path : int =
          in
          Tool_metrics.record result;
          Stdlib.incr count
-       | Ok Legacy_success_record -> Stdlib.incr legacy
        | Error reason ->
          Stdlib.incr skipped;
          if Option.is_none !first_skip_reason then
            first_skip_reason := Some reason);
-     if !legacy > 0 then
-       Log.Metrics.info
-         "tool_metrics_persist: ignored %d legacy success-only record(s); boolean success cannot reconstruct completed/deferred/failed disposition"
-         !legacy;
      if !skipped > 0 then
        Log.Metrics.warn
          "tool_metrics_persist: skipped %d malformed restore record(s)%s"

@@ -8,12 +8,10 @@ val supervise_keepalive :
      unit ->
      unit) ->
   launch_supervised_fiber:
-    (proactive_warmup_sec:int ->
-     'a Keeper_types_profile.context ->
+    ('a Keeper_types_profile.context ->
      Keeper_meta_contract.keeper_meta ->
      Keeper_registry.registry_entry ->
      (unit, Keeper_state_machine.transition_error) result) ->
-  proactive_warmup_sec:int ->
   'a Keeper_types_profile.context ->
   Keeper_meta_contract.keeper_meta ->
   unit

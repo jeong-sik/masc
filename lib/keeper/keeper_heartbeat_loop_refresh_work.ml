@@ -3,10 +3,9 @@
 
     [refresh_work_as_heartbeat] is the keepalive cycle's
     "implicit heartbeat" path: when the keeper just finished a
-    productive turn (`work_as_hb () = true`) and the proactive warmup
-    has elapsed, we count any successful Workspace.heartbeat against any
-    session-bound workspace as evidence that the keeper is alive — and reset the
-    consecutive-failure counter accordingly.
+    productive turn (`work_as_hb () = true`), we count any successful
+    Workspace.heartbeat against any session-bound workspace as evidence that
+    the keeper is alive — and reset the consecutive-failure counter accordingly.
 
     Per-workspace failure logging is at DEBUG (not WARN) because the
     *any-success* aggregation policy means a single live workspace is
@@ -26,13 +25,12 @@ open Keeper_types_profile
 let refresh_work_as_heartbeat
       ~(ctx : _ context)
       ~(meta_after_proactive : keeper_meta)
-      ~(proactive_warmup_elapsed : bool)
       ~(work_as_hb : unit -> bool)
       ~(last_successful_heartbeat_ts : float ref)
       ~(consecutive_failures : int ref)
   : unit
   =
-  if work_as_hb () && proactive_warmup_elapsed
+  if work_as_hb ()
   then (
     let hb_ok =
       try

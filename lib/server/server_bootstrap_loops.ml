@@ -3,40 +3,6 @@
     Extracted from Server_runtime_bootstrap to isolate the large
     subsystem-spawning functions into a focused module. *)
 
-(* Stable djb2-style hash for the autoboot warmup jitter.
-
-   Post-#13119 follow-up: the previous implementation used native
-   [int] arithmetic with a final [land 0x3FFF_FFFF] mask.  That is
-   NOT actually platform-stable: on 31-bit OCaml the intermediate
-   [acc lsl 5] overflow wraps differently than on 63-bit OCaml
-   before the mask is applied, so the same keeper name can hash to
-   different buckets depending on architecture.
-
-   Fix: do all arithmetic in [Int32], whose wrap-around behavior is
-   identical on every supported runtime.  Mask to 30 bits and convert
-   back to [int].  30 bits ≈ 1G distinct buckets, far more than any
-   realistic [stagger_window_sec]. *)
-let stable_keeper_name_hash_mask_i32 = 0x3FFF_FFFFl
-
-let stable_keeper_name_hash name =
-  let acc = ref 5381l in
-  String.iter
-    (fun ch ->
-       let shifted = Int32.shift_left !acc 5 in
-       let summed = Int32.add (Int32.add shifted !acc) (Int32.of_int (Char.code ch)) in
-       acc := Int32.logand summed stable_keeper_name_hash_mask_i32)
-    name;
-  Int32.to_int !acc
-;;
-
-let autoboot_proactive_warmup_sec ~base_warmup ~stagger_window_sec ~keeper_name =
-  let base_warmup = max 0 base_warmup in
-  let stagger_window_sec = max 0 stagger_window_sec in
-  if stagger_window_sec = 0
-  then base_warmup
-  else base_warmup + (stable_keeper_name_hash keeper_name mod (stagger_window_sec + 1))
-;;
-
 let keeper_agent_status_of_phase = function
   | Keeper_state_machine.Running -> Masc_domain.Active
   | Keeper_state_machine.Paused -> Masc_domain.Listening
@@ -230,7 +196,7 @@ let discord_bot_token_opt () = trimmed_env_opt "DISCORD_BOT_TOKEN"
 
 let broadcast_mention_wakeup_action = function
   | Some target when String.trim target <> "" -> `Wake_keeper target
-  | Some _ | None -> `Suppress_no_target
+  | Some _ | None -> `No_keeper_target
 
 module Projection_for_testing = struct
   type queued_chat_projection = {
@@ -241,7 +207,6 @@ module Projection_for_testing = struct
     agent_name : string;
   }
 
-  let autoboot_proactive_warmup_sec = autoboot_proactive_warmup_sec
   let board_sse_event_params = board_sse_event_params
   let broadcast_mention_wakeup_action = broadcast_mention_wakeup_action
 
@@ -1385,9 +1350,9 @@ let start_keeper_loops_owned
     | `Wake_keeper target ->
       Keeper_keepalive.wakeup_keeper ~base_path:(Mcp_server.workspace_config state).base_path target;
       Log.Keeper.info "broadcast mention → wakeup keeper %s" target
-    | `Suppress_no_target ->
+    | `No_keeper_target ->
       Log.Keeper.info
-        "broadcast without mention -> keeper wakeup suppressed (passive fanout)"
+        "broadcast without mention -> passive fanout (no keeper target)"
   in
   Workspace_broadcast.on_broadcast_mention := broadcast_mention_handler;
   (* Orchestrator needs synchronous registration for shutdown hook *)
@@ -1416,8 +1381,6 @@ let start_keeper_loops_owned
     else (
       wait_for_lazy_startup ();
       Log.Keeper.info "autoboot: lazy startup complete; keeper bootstrap will start last";
-      (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
-      Eio.Time.sleep clock Env_config_keeper.KeeperBootstrap.post_startup_settle_sec;
       let masc_root = Workspace.masc_root_dir config in
       let keeper_dir = Keeper_fs.keeper_dir config in
       let shutdown_blocked_names =
@@ -1484,8 +1447,6 @@ let start_keeper_loops_owned
           "autoboot: excluded %d configured keeper(s): [%s]"
           (List.length exclusions)
           rendered);
-      let base_warmup = Keeper_config.keeper_bootstrap_proactive_warmup_sec () in
-      let stagger_window = Keeper_config.keeper_bootstrap_stagger_step_sec () in
       (* Attempt to boot a single keeper. Returns true if started. *)
       let try_boot_one ?(log_prefix = "autoboot") _idx name =
         try
@@ -1504,17 +1465,10 @@ let start_keeper_loops_owned
                 (if materialized then " (materialized from TOML)" else "");
               true)
             else (
-              let warmup =
-                autoboot_proactive_warmup_sec
-                  ~base_warmup
-                  ~stagger_window_sec:stagger_window
-                  ~keeper_name:name
-              in
               Log.Keeper.info
-                "%s: calling start_keepalive for %s (warmup=%ds)"
+                "%s: calling start_keepalive for %s"
                 log_prefix
-                name
-                warmup;
+                name;
               let ctx : _ Keeper_types_profile.context =
                 { config
                 ; agent_name = m.agent_name
@@ -1528,7 +1482,6 @@ let start_keeper_loops_owned
               in
               let launch_outcome =
                 Keeper_keepalive.start_keepalive
-                  ~proactive_warmup_sec:warmup
                   ctx
                   m
               in
@@ -1544,13 +1497,10 @@ let start_keeper_loops_owned
               (* start_keepalive registers the keeper synchronously via
                  register_offline and then forks the keepalive fiber.  The
                  fiber flips the registry to running asynchronously on the
-                 next Eio tick, so querying is_running here is a race that
-                 keepers with a larger proactive-warmup idx lose
-                 deterministically (verdict=165s / sojin=150s / sangsu=135s
-                 produced the bulk of the false-positive "not in registry"
-                 WARNs).  Check the synchronous is_registered predicate
-                 instead — the running transition is observed later by the
-                 retry loop.  See #7889. *)
+                 next Eio tick, so querying is_running here races that
+                 transition.  Check the synchronous is_registered predicate
+                 instead; the retry loop observes the running transition
+                 later.  See #7889. *)
               let registered =
                 Keeper_registry.is_registered ~base_path:config.base_path m.name
               in

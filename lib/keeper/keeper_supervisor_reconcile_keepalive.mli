@@ -8,8 +8,7 @@ val reconcile_keepalive_keepers :
      unit ->
      unit) ->
   supervise_keepalive:
-    (proactive_warmup_sec:int ->
-     'a Keeper_types_profile.context ->
+    ('a Keeper_types_profile.context ->
      Keeper_meta_contract.keeper_meta ->
      unit) ->
   load_or_materialize_keeper_meta:

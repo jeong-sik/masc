@@ -448,8 +448,9 @@ let format_event ?id ?event_type data =
      produced.  A single [Buffer] accumulator with primitive
      [string_of_int] sidesteps the format interpreter entirely and
      emits exactly the bytes the SSE wire format requires (id-line +
-     optional event-line + data-line + blank).  The output string is
-     byte-for-byte identical to what [Printf.sprintf] produced. *)
+     optional event-line + one [data:] line per logical data line + blank).
+     Single-line payloads remain byte-for-byte identical to the previous
+     output. *)
   let buf = Buffer.create 64 in
   Buffer.add_string buf "id: ";
   Buffer.add_string buf (string_of_int effective_id);
@@ -460,9 +461,12 @@ let format_event ?id ?event_type data =
        Buffer.add_string buf e;
        Buffer.add_char buf '\n'
    | None -> ());
-  Buffer.add_string buf "data: ";
-  Buffer.add_string buf data;
-  Buffer.add_string buf "\n\n";
+  String.split_on_char '\n' data
+  |> List.iter (fun line ->
+       Buffer.add_string buf "data: ";
+       Buffer.add_string buf line;
+       Buffer.add_char buf '\n');
+  Buffer.add_char buf '\n';
   Buffer.contents buf
 
 (** Format SSE event from a [Yojson.Safe.t] value without the intermediate

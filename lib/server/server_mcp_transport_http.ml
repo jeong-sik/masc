@@ -606,6 +606,13 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps ~request_authority
             request reqd ~session_id ~protocol_version msg
       | Ok () ->
+          (match last_event_id with
+          | Error error ->
+              respond_mcp_error ~code:Mcp_error_code.Invalid_request ~deps
+                ~request_authority request reqd ~session_id ~protocol_version
+                (Server_mcp_transport_http_headers.last_event_id_error_to_string
+                   error)
+          | Ok last_event_id ->
       let otel_transport_context =
         Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
       in
@@ -741,8 +748,8 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                 session_id msg);
           let client_count = Sse.client_count () in
           if client_count > Sse.max_clients / 2 then
-            Log.Server.info "SSE connected: %s (active: %d/%d)"
-              session_id client_count Sse.max_clients))))
+              Log.Server.info "SSE connected: %s (active: %d/%d)"
+              session_id client_count Sse.max_clients)))))
 
 
 let handle_get_operator_mcp ~deps request reqd =

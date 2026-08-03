@@ -211,11 +211,19 @@ let sse_comment_with_retry ~comment =
 
 let sse_ping_interval_s = 30.0
 
+type last_event_id_error = Malformed_last_event_id
+
+let last_event_id_error_to_string = function
+  | Malformed_last_event_id ->
+      "Last-Event-ID must be an integer when supplied"
+
 let get_last_event_id (request : Httpun.Request.t) =
   match Httpun.Headers.get request.headers "last-event-id" with
   | Some id -> (
-      int_of_string_opt (id))
-  | None -> None
+      match int_of_string_opt id with
+      | Some event_id -> Ok (Some event_id)
+      | None -> Error Malformed_last_event_id)
+  | None -> Ok None
 
 let mcp_headers session_id protocol_version =
   if Mcp_transport_protocol.is_stateless_protocol_version protocol_version then

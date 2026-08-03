@@ -682,6 +682,44 @@ let test_ag_ui_rejects_reconnect_then_recovers () =
   let third = run_curl ~headers ~max_time:1.5 ~port ~path:"/ag-ui/events?workspace=default" () in
   check_status "cooldown /ag-ui/events reconnect recovers" 200 third
 
+let check_invalid_request_response label result =
+  check_status label 400 result;
+  match Yojson.Safe.from_string result.body with
+  | `Assoc fields ->
+      (match List.assoc_opt "error" fields with
+       | Some (`Assoc error_fields) ->
+           (match List.assoc_opt "code" error_fields with
+            | Some (`Int (-32600)) -> ()
+            | _ ->
+                fail
+                  (Printf.sprintf
+                     "%s returned wrong error code: %s" label result.body))
+       | _ ->
+           fail
+             (Printf.sprintf "%s returned no JSON-RPC error: %s" label result.body))
+  | exception Yojson.Json_error message ->
+      fail
+        (Printf.sprintf "%s returned invalid JSON: %s body=%s" label message
+           result.body)
+  | _ ->
+      fail
+        (Printf.sprintf "%s returned a non-object body: %s" label result.body)
+
+let test_sse_endpoints_reject_malformed_last_event_id () =
+  with_server @@ fun ~port ~auth_token ->
+  let sid = initialize_mcp_session ~port ~auth_token in
+  let headers =
+    [ ("Accept", "text/event-stream")
+    ; ("Authorization", "Bearer " ^ auth_token)
+    ; ("Mcp-Session-Id", sid)
+    ; ("Last-Event-ID", "not-an-integer")
+    ]
+  in
+  check_invalid_request_response "malformed /mcp cursor rejected"
+    (run_curl ~headers ~max_time:2.0 ~port ~path:"/mcp" ());
+  check_invalid_request_response "malformed /ag-ui/events cursor rejected"
+    (run_curl ~headers ~max_time:2.0 ~port ~path:"/ag-ui/events" ())
+
 let () =
   Random.self_init ();
   run "sse_storm_e2e"
@@ -690,6 +728,8 @@ let () =
       ("ag_ui",
        [
          test_case "reconnect cooldown + recovery" `Slow test_ag_ui_rejects_reconnect_then_recovers;
+         test_case "malformed Last-Event-ID is rejected" `Slow
+           test_sse_endpoints_reject_malformed_last_event_id;
          test_case "frames are AG-UI wire encoded" `Slow test_ag_ui_frames_are_wire_encoded;
        ]);
     ]

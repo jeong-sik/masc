@@ -140,6 +140,8 @@ val data_payload_of_frame : string -> (string, data_payload_error) result
     field is rejected; bare JSON is not an SSE frame. *)
 
 val format_event : ?id:int -> ?event_type:string -> string -> string
+(** [format_event] prefixes every logical line of [data] with [data:] so
+    embedded newlines cannot escape the SSE field framing. *)
 val next_id : unit -> int
 val current_id : unit -> int
 

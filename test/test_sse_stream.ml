@@ -26,6 +26,12 @@ let test_data_payload_of_frame () =
      | Error Sse.Missing_data_payload -> true
      | Ok _ -> false)
 
+let test_format_event_preserves_multiline_data () =
+  match Sse.data_payload_of_frame (Sse.format_event ~id:7 "first\nsecond") with
+  | Ok payload -> Alcotest.(check string) "multiline data payload" "first\nsecond" payload
+  | Error Sse.Missing_data_payload ->
+      Alcotest.fail "format_event emitted a frame without a data field"
+
 let register_exn ~auth ?kind session_id ~last_event_id =
   (* Pre-create the MCP session so registration validates an existing
      session rather than auto-bootstrapping one (security/sse-auth-validation). *)
@@ -278,6 +284,8 @@ let () =
             [
               Alcotest.test_case "data payload" `Quick
                 test_data_payload_of_frame;
+              Alcotest.test_case "multiline data framing" `Quick
+                test_format_event_preserves_multiline_data;
             ] );
           ( "try_pop",
             [

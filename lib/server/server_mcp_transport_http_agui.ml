@@ -65,136 +65,138 @@ let handle_ag_ui_events ~deps request reqd =
   let protocol_version = get_protocol_version_for_session ~session_id request in
   let base_path = deps.get_base_path () in
   (* workspace query param ignored — namespace retired *)
-  let last_event_id =
-    match Httpun.Headers.get (request : Httpun.Request.t).headers "last-event-id" with
-    | Some id -> (int_of_string_opt (id))
-    | None -> None
-  in
+  let last_event_id = Server_mcp_transport_http_headers.get_last_event_id request in
   match deps.verify_mcp_observer_stream_auth ~base_path request with
   | Error msg ->
       respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps ~request_authority
         request reqd ~session_id ~protocol_version msg
   | Ok () ->
-      let token = Server_auth.observer_sse_auth_token_from_request request in
-      let auth = { Sse.config = base_path; token } in
-      (match check_sse_connect_guard session_id with
-      | Error (reason, retry_after_s) ->
-          respond_sse_rate_limited ~deps ~origin ~session_id ~protocol_version
-            ~reason ~retry_after_s reqd
-      | Ok () ->
-          stop_sse_session_preserve_guard session_id;
-          if Option.is_some last_event_id then
-            Transport_metrics.inc_sse_reconnect ();
-          ensure_sse_backing_session_for_known_transport_session
-            ~transport_session_id:session_id ~sse_session_id:session_id;
-          let expected_resource = Server_oauth_metadata.resource request_authority in
-          (match
-             Auth_oauth.with_expected_resource expected_resource (fun () ->
-               Sse.register ~kind:Sse.Observer ~auth session_id
-                 (* DET-OK: unchanged from main; the authority wrapper only re-indented it. *)
-                 ~last_event_id:(Option.value ~default:0 last_event_id)
-                 ~on_disconnect:(fun () -> stop_sse_session session_id))
-           with
-           | Error reg_err ->
-               let msg = Sse.registration_error_to_string reg_err in
-               Log.Server.warn "%s" msg;
-               respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
-           | Ok (client_id, event_stream, evicted) ->
-              let headers =
-                Httpun.Headers.of_list
-                  (sse_stream_headers ~deps session_id protocol_version origin)
-              in
-              let response = Httpun.Response.create ~headers `OK in
-              let writer = Httpun.Reqd.respond_with_streaming reqd response in
-              let mutex = Eio.Mutex.create () in
-              let info_ref : sse_conn_info option ref = ref None in
-              (match evicted with
-              | Some evicted_sid ->
-                  (* RFC-0099 PR-3: cap-exceeded eviction publishes typed
-                     close frame + Evict/Close event pair. *)
-                  stop_sse_session_evict evicted_sid
-                    ~reason:Session_lifecycle_event.Cap_exceeded
-              | None -> ());
-              let info = make_sse_conn ~session_id ~client_id ~writer ~mutex () in
-              info_ref := Some info;
-              register_sse_conn ~session_id ~info;
-              let prime =
-                Ag_ui.(
-                  make_event ~thread_id:default_thread_id ~run_id:(Some session_id) Run_started
-                  |> event_to_sse)
-              in
-              if not (send_raw info prime) then
-                Log.Server.debug "ag-ui prime send failed for session %s" info.session_id;
-              let replayed =
-                match last_event_id with
-                | Some last_id ->
-                  Sse.get_events_after_for_kind Sse.Observer last_id
-                  |> List.filter (fun delivery ->
-                    if send_raw info (ag_ui_event_of_masc_event delivery)
-                    then true
-                    else (
-                      Log.Server.debug
-                        "ag-ui replay send failed for session %s"
-                        info.session_id;
-                      false))
-                | None -> []
-              in
-              let replay_handoff = Sse.create_replay_handoff replayed in
-              (match deps.get_runtime_result () with
-              | Ok runtime ->
-                  let sw = runtime.sw in
-                  let clock = runtime.clock in
-                  run_sse_pumps ~sw ~stop_promise:info.stop_promise
-                    ~drain:(fun () ->
-                      let rec drain () =
-                        let delivery = Eio.Stream.take event_stream in
-                        (try
-                          if not (Atomic.get info.closed || (Atomic.get info.stop)) then
-                            if Sse.accept_live_delivery replay_handoff delivery
-                               && not
-                                    (send_raw
-                                       info
-                                       (ag_ui_event_of_masc_event delivery))
-                            then
-                              Log.Server.debug "ag-ui drain send failed for session %s"
-                                info.session_id
-                        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-                          Log.Server.error "ag-ui drain write error: %s"
-                            (Printexc.to_string exn);
-                          stop_sse_session_preserve_guard info.session_id);
-                        if not (Atomic.get info.stop) then drain ()
-                      in
-                      try drain ()
-                      with Eio.Cancel.Cancelled _ as e -> raise e
-                         | exn ->
-                           Log.Server.error "ag-ui drain loop error: %s"
-                             (Printexc.to_string exn))
-                    ~ping:(fun () ->
-                      let rec loop () =
-                        if not (Atomic.get info.stop) then (
-                          (try Eio.Time.sleep clock sse_ping_interval_s
-                           with Eio.Cancel.Cancelled _ as exn -> raise exn
-                              | exn -> Log.Server.debug "SSE ping sleep interrupted: %s" (Printexc.to_string exn));
-                          (try
-                             if Atomic.get info.closed then
-                               stop_sse_session_preserve_guard info.session_id
-                             else if not (Atomic.get info.stop) then
-                               if not (send_raw info ": ping\n\n") then
-                                 Log.Server.debug "ag-ui ping send failed for session %s"
-                                   info.session_id
-                           with Eio.Cancel.Cancelled _ as exn -> raise exn
-                              | exn ->
-                                  Log.Server.warn "SSE ping send failed for session %s: %s" info.session_id (Printexc.to_string exn);
-                                  stop_sse_session_preserve_guard info.session_id);
-                          loop ())
-                      in
-                      try loop () with Eio.Cancel.Cancelled _ as exn -> raise exn
-                        | exn ->
-                            Log.Server.error "SSE ping loop exited for session %s: %s" info.session_id (Printexc.to_string exn);
-                            stop_sse_session_preserve_guard info.session_id)
-              | Error msg ->
-                  Log.Server.debug "ag-ui SSE runtime unavailable for session %s: %s"
-                    session_id msg)))
+      (match last_event_id with
+      | Error error ->
+          respond_mcp_error ~code:Mcp_error_code.Invalid_request ~deps
+            ~request_authority request reqd ~session_id ~protocol_version
+            (Server_mcp_transport_http_headers.last_event_id_error_to_string error)
+      | Ok last_event_id ->
+          let token = Server_auth.observer_sse_auth_token_from_request request in
+          let auth = { Sse.config = base_path; token } in
+          (match check_sse_connect_guard session_id with
+          | Error (reason, retry_after_s) ->
+              respond_sse_rate_limited ~deps ~origin ~session_id ~protocol_version
+                ~reason ~retry_after_s reqd
+          | Ok () ->
+              stop_sse_session_preserve_guard session_id;
+              if Option.is_some last_event_id then
+                Transport_metrics.inc_sse_reconnect ();
+              ensure_sse_backing_session_for_known_transport_session
+                ~transport_session_id:session_id ~sse_session_id:session_id;
+              let expected_resource = Server_oauth_metadata.resource request_authority in
+              (match
+                 Auth_oauth.with_expected_resource expected_resource (fun () ->
+                   Sse.register ~kind:Sse.Observer ~auth session_id
+                     (* DET-OK: unchanged from main; the authority wrapper only re-indented it. *)
+                     ~last_event_id:(Option.value ~default:0 last_event_id)
+                     ~on_disconnect:(fun () -> stop_sse_session session_id))
+               with
+               | Error reg_err ->
+                   let msg = Sse.registration_error_to_string reg_err in
+                   Log.Server.warn "%s" msg;
+                   respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
+               | Ok (client_id, event_stream, evicted) ->
+                  let headers =
+                    Httpun.Headers.of_list
+                      (sse_stream_headers ~deps session_id protocol_version origin)
+                  in
+                  let response = Httpun.Response.create ~headers `OK in
+                  let writer = Httpun.Reqd.respond_with_streaming reqd response in
+                  let mutex = Eio.Mutex.create () in
+                  let info_ref : sse_conn_info option ref = ref None in
+                  (match evicted with
+                  | Some evicted_sid ->
+                      (* RFC-0099 PR-3: cap-exceeded eviction publishes typed
+                         close frame + Evict/Close event pair. *)
+                      stop_sse_session_evict evicted_sid
+                        ~reason:Session_lifecycle_event.Cap_exceeded
+                  | None -> ());
+                  let info = make_sse_conn ~session_id ~client_id ~writer ~mutex () in
+                  info_ref := Some info;
+                  register_sse_conn ~session_id ~info;
+                  let prime =
+                    Ag_ui.(
+                      make_event ~thread_id:default_thread_id ~run_id:(Some session_id) Run_started
+                      |> event_to_sse)
+                  in
+                  if not (send_raw info prime) then
+                    Log.Server.debug "ag-ui prime send failed for session %s" info.session_id;
+                  let replayed =
+                    match last_event_id with
+                    | Some last_id ->
+                      Sse.get_events_after_for_kind Sse.Observer last_id
+                      |> List.filter (fun delivery ->
+                        if send_raw info (ag_ui_event_of_masc_event delivery)
+                        then true
+                        else (
+                          Log.Server.debug
+                            "ag-ui replay send failed for session %s"
+                            info.session_id;
+                          false))
+                    | None -> []
+                  in
+                  let replay_handoff = Sse.create_replay_handoff replayed in
+                  (match deps.get_runtime_result () with
+                  | Ok runtime ->
+                      let sw = runtime.sw in
+                      let clock = runtime.clock in
+                      run_sse_pumps ~sw ~stop_promise:info.stop_promise
+                        ~drain:(fun () ->
+                          let rec drain () =
+                            let delivery = Eio.Stream.take event_stream in
+                            (try
+                              if not (Atomic.get info.closed || (Atomic.get info.stop)) then
+                                if Sse.accept_live_delivery replay_handoff delivery
+                                   && not
+                                        (send_raw
+                                           info
+                                           (ag_ui_event_of_masc_event delivery))
+                                then
+                                  Log.Server.debug "ag-ui drain send failed for session %s"
+                                    info.session_id
+                            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+                              Log.Server.error "ag-ui drain write error: %s"
+                                (Printexc.to_string exn);
+                              stop_sse_session_preserve_guard info.session_id);
+                            if not (Atomic.get info.stop) then drain ()
+                          in
+                          try drain ()
+                          with Eio.Cancel.Cancelled _ as e -> raise e
+                             | exn ->
+                               Log.Server.error "ag-ui drain loop error: %s"
+                                 (Printexc.to_string exn))
+                        ~ping:(fun () ->
+                          let rec loop () =
+                            if not (Atomic.get info.stop) then (
+                              (try Eio.Time.sleep clock sse_ping_interval_s
+                               with Eio.Cancel.Cancelled _ as exn -> raise exn
+                                  | exn -> Log.Server.debug "SSE ping sleep interrupted: %s" (Printexc.to_string exn));
+                              (try
+                                 if Atomic.get info.closed then
+                                   stop_sse_session_preserve_guard info.session_id
+                                 else if not (Atomic.get info.stop) then
+                                   if not (send_raw info ": ping\n\n") then
+                                     Log.Server.debug "ag-ui ping send failed for session %s"
+                                       info.session_id
+                               with Eio.Cancel.Cancelled _ as exn -> raise exn
+                                  | exn ->
+                                      Log.Server.warn "SSE ping send failed for session %s: %s" info.session_id (Printexc.to_string exn);
+                                      stop_sse_session_preserve_guard info.session_id);
+                              loop ())
+                          in
+                          try loop () with Eio.Cancel.Cancelled _ as exn -> raise exn
+                            | exn ->
+                                Log.Server.error "SSE ping loop exited for session %s: %s" info.session_id (Printexc.to_string exn);
+                                stop_sse_session_preserve_guard info.session_id)
+                  | Error msg ->
+                      Log.Server.debug "ag-ui SSE runtime unavailable for session %s: %s"
+                        session_id msg))))
 
 let handle_presence_events ~deps request reqd =
   let request_authority = Server_request_authority.current_exn () in

@@ -954,7 +954,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          quarantine_targets="@test/runtest-test_keeper_event_queue_orphan_quarantine @test/runtest-test_server_runtime_bootstrap"
+          quarantine_targets="@test/runtest-test_keeper_event_queue_orphan_quarantine"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${quarantine_targets}"
 
       - name: Run tool blob retention suite

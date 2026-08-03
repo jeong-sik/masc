@@ -41,6 +41,44 @@ let quarantine_root ~base_path =
     ".orphaned-event-queues"
 ;;
 
+let make_keeper_meta ?(paused = false) ?(name = "sangsu")
+    ?(trace_id = "trace-sangsu-live")
+    ?(updated_at = "2026-03-29T10:36:57Z") () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ ("name", `String name)
+        ; ("agent_name", `String ("keeper-" ^ name ^ "-agent"))
+        ; ("trace_id", `String trace_id)
+        ; ("updated_at", `String updated_at)
+        ])
+  with
+  | Ok meta -> { meta with paused }
+  | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
+;;
+
+let write_keeper_meta_exn config meta =
+  match Keeper_meta_store.write_meta config meta with
+  | Ok () -> ()
+  | Error err -> Alcotest.fail ("keeper meta write failed: " ^ err)
+;;
+
+let write_basepath_keeper_toml base_path name =
+  let keepers_dir =
+    Filename.concat
+      (Filename.concat (Filename.concat base_path Common.masc_dirname) "config")
+      "keepers"
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  Fs_compat.save_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+instructions = "example"
+proactive_enabled = false
+autoboot_enabled = true
+|}
+;;
+
 let quarantine_absent_owner ~base_path ~keeper_name =
   match
     Persistence.quarantine_orphaned_owner_result
@@ -119,6 +157,52 @@ let test_reappeared_owner_fences_quarantine () =
     (Sys.file_exists (snapshot_path ~base_path ~keeper_name))
 ;;
 
+let test_exact_owner_presence_requires_exact_authority () =
+  with_temp_dir "durable-queue-owner-presence-" @@ fun base_path ->
+  let config = Workspace.default_config base_path in
+  let module Recovery = Server_bootstrap_maintenance.Recovery_for_testing in
+  let presence keeper_name =
+    match Recovery.exact_owner_presence config keeper_name with
+    | Ok presence -> presence
+    | Error detail -> Alcotest.fail detail
+  in
+  (match presence "absent-owner" with
+   | Recovery.Owner_absent -> ()
+   | _ -> Alcotest.fail "owner without exact authority was retained");
+  write_basepath_keeper_toml base_path "declared-owner";
+  (match presence "declared-owner" with
+   | Recovery.Owner_not_materialized -> ()
+   | _ -> Alcotest.fail "exact TOML owner was classified as orphaned");
+  let persisted_meta =
+    make_keeper_meta
+      ~name:"persisted-owner"
+      ~trace_id:"trace-persisted-owner"
+      ()
+  in
+  write_keeper_meta_exn config persisted_meta;
+  (match presence persisted_meta.name with
+   | Recovery.Owner_present -> ()
+   | _ -> Alcotest.fail "exact persisted owner was not authoritative");
+  let registered_meta =
+    make_keeper_meta
+      ~name:"registered-owner"
+      ~trace_id:"trace-registered-owner"
+      ()
+  in
+  ignore
+    (Keeper_registry.For_testing.register
+       ~base_path
+       registered_meta.name
+       registered_meta);
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.unregister ~base_path registered_meta.name)
+    (fun () ->
+      match presence registered_meta.name with
+      | Recovery.Owner_present -> ()
+      | _ -> Alcotest.fail "exact registered owner was not authoritative")
+;;
+
 let () =
   Alcotest.run
     "Keeper_event_queue_orphan_quarantine"
@@ -135,6 +219,10 @@ let () =
             "reused owner name gets a distinct quarantine"
             `Quick
             test_reused_owner_name_gets_distinct_quarantine
+        ; Alcotest.test_case
+            "exact owner presence requires exact authority"
+            `Quick
+            test_exact_owner_presence_requires_exact_authority
         ] )
     ]
 ;;

@@ -731,11 +731,17 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
         }
       in
       seed_keeper_sandbox_profile ~base_dir keeper_name;
+      Masc.Keeper_reaction_ledger.record_board_cursor_ack
+        ~base_path:config.base_path
+        ~keeper_name
+        ~cursor_ts:0.0
+        ~post_id:None
+        ();
       (match Masc.Keeper_keepalive.start_keepalive ctx meta with
        | Masc.Keeper_keepalive.Keepalive_started _ -> ()
        | outcome ->
          fail
-           ("direct keepalive did not materialize its Board cursor: "
+           ("direct keepalive did not restore its Board cursor: "
             ^ Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome));
       (match
          Masc.Keeper_reaction_ledger.latest_board_cursor_result
@@ -768,6 +774,62 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
          | Some (`Crashed reason) ->
            fail ("expected stopped promise, got crashed: " ^ reason)
          | None -> fail "expected done_p to resolve on stop"))
+
+let test_existing_keeper_without_cursor_fails_closed () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  R.For_testing.clear ();
+  let base_dir = temp_dir "existing-keeper-missing-cursor" in
+  let keeper_name = "existing-missing-cursor" in
+  Fun.protect
+    ~finally:(fun () ->
+      R.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      ensure_default_runtime ();
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
+      let meta = make_meta keeper_name in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      seed_keeper_sandbox_profile ~base_dir keeper_name;
+      Eio.Switch.run @@ fun sw ->
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = "tester"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
+        }
+      in
+      (match Masc.Keeper_keepalive.start_keepalive ctx meta with
+       | Masc.Keeper_keepalive.Keepalive_registration_rejected
+           (Masc.Keeper_registry.Registration_board_cursor_unavailable
+              { keeper_name = rejected_keeper
+              ; reason = Masc.Keeper_registry.Board_cursor_missing
+              }) ->
+         check string "missing cursor owner" keeper_name rejected_keeper
+       | outcome ->
+         fail
+           ("existing Keeper without a cursor did not fail closed: "
+            ^ Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome));
+      check bool "missing cursor installs no registry entry" true
+        (Option.is_none (R.get ~base_path:config.base_path keeper_name));
+      match
+        Masc.Keeper_reaction_ledger.latest_board_cursor_result
+          ~base_path:config.base_path
+          ~keeper_name
+      with
+      | Ok None -> ()
+      | Ok (Some _) -> fail "existing Keeper was silently rebased to the current Board head"
+      | Error error ->
+        fail
+          (Masc.Keeper_reaction_ledger.board_cursor_restore_error_to_string error))
 
 let test_keeper_lane_join_waits_for_children_and_cleanup () =
   Eio_main.run @@ fun _env ->
@@ -4247,6 +4309,8 @@ let () =
     "direct_keepalive", [
       test_case "stop resolves done after lane exit" `Quick
         test_direct_start_keepalive_resolves_done_on_stop;
+      test_case "existing Keeper missing cursor fails closed" `Quick
+        test_existing_keeper_without_cursor_fails_closed;
       test_case "lane join waits for children and cleanup" `Quick
         test_keeper_lane_join_waits_for_children_and_cleanup;
       test_case "lane join surfaces cleanup failure" `Quick

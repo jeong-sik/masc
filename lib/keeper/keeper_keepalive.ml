@@ -703,7 +703,6 @@ type start_keepalive_outcome =
   | Keepalive_already_registered of Keeper_registry.registry_entry
   | Keepalive_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
   | Keepalive_identity_unrepairable
-  | Keepalive_board_cursor_genesis_failed of Keeper_board_cursor_genesis.error
   | Keepalive_registration_rejected of Keeper_registry.registration_error
   | Keepalive_fiber_start_rejected of Keeper_state_machine.transition_error
   | Keepalive_lane_ownership_lost
@@ -720,8 +719,6 @@ let start_keepalive_outcome_to_string = function
   | Keepalive_lifecycle_denied denial ->
     Keeper_lifecycle_admission.autonomous_denial_to_wire denial
   | Keepalive_identity_unrepairable -> "keeper identity drift could not be repaired"
-  | Keepalive_board_cursor_genesis_failed error ->
-    Keeper_board_cursor_genesis.error_to_string error
   | Keepalive_registration_rejected
       (Keeper_registry.Registration_shutdown_reserved operation_id) ->
     Printf.sprintf
@@ -897,36 +894,20 @@ let start_keepalive
         (Printf.sprintf "start_keepalive: skipped %s (already registered)" m.name);
       Keepalive_already_registered registered
     | None ->
-      (* Establish the durable subscription head before the registry lane can
-         become visible. *)
       (match
-         Keeper_board_cursor_genesis.ensure
-           ?lifecycle_token
-           ~base_path:ctx.config.base_path
-           ~keeper_name:m.name
-           ()
+         match lifecycle_token with
+         | None ->
+           Keeper_registry.register_offline_if_admitted
+             ~base_path:ctx.config.base_path
+             m.name
+             m
+         | Some token ->
+           Keeper_registry.register_offline_if_admitted_for_lifecycle
+             token
+             ~base_path:ctx.config.base_path
+             m.name
+             m
        with
-       | Error error ->
-         Log.Keeper.error
-           "start_keepalive: Board cursor genesis failed keeper=%s: %s"
-           m.name
-           (Keeper_board_cursor_genesis.error_to_string error);
-         Keepalive_board_cursor_genesis_failed error
-       | Ok () ->
-         (match
-            match lifecycle_token with
-            | None ->
-              Keeper_registry.register_offline_if_admitted
-                ~base_path:ctx.config.base_path
-                m.name
-                m
-            | Some token ->
-              Keeper_registry.register_offline_if_admitted_for_lifecycle
-                token
-                ~base_path:ctx.config.base_path
-                m.name
-                m
-          with
        | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
          Log.Keeper.warn
            "start_keepalive: skipped %s because shutdown operation %s owns admission"
@@ -1219,7 +1200,7 @@ let start_keepalive
              ~base_path:ctx.config.base_path
              ~keeper_name:live_meta.name
              ~failure_reason:(Keeper_registry.Exception detail);
-          Keepalive_fork_rejected error)))
+          Keepalive_fork_rejected error))
         )
 ;;
 

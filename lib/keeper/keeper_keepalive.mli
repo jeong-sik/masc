@@ -85,7 +85,6 @@ type start_keepalive_outcome =
   | Keepalive_already_registered of Keeper_registry.registry_entry
   | Keepalive_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
   | Keepalive_identity_unrepairable
-  | Keepalive_board_cursor_genesis_failed of Keeper_board_cursor_genesis.error
   | Keepalive_registration_rejected of Keeper_registry.registration_error
   | Keepalive_fiber_start_rejected of Keeper_state_machine.transition_error
   | Keepalive_lane_ownership_lost

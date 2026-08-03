@@ -1165,6 +1165,7 @@ let test_keeper_purge_rejects_unsettled_transfer_redirect () =
       ~keeper_name:source_keeper
   in
   ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
+  let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
   let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
   let transfer : Keeper_registry_event_queue.accepted_transfer =
     { source = selection.source
@@ -1229,7 +1230,6 @@ let test_keeper_purge_follows_terminal_transfer_redirect () =
       ~keeper_name:source_keeper
   in
   ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
   let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
   let transfer : Keeper_registry_event_queue.accepted_transfer =
     { source = selection.source
@@ -1362,22 +1362,45 @@ let test_shutdown_join_waits_for_inflight_schedule_intake () =
   let keeper_name = "schedule-keeper" in
   let base_path = config.Workspace_utils.base_path in
   let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  let request = create_keeper_wake_schedule config in
+  let signal =
+    match Schedule_runner.tick config ~now:201.0 with
+    | Ok { emitted = [ signal ]; _ } -> signal
+    | Ok _ -> fail "expected one durable schedule signal"
+    | Error error -> fail (Schedule_runner.runner_error_to_string error)
+  in
+  let running =
+    match
+      Schedule_store.start_due_candidate
+        config
+        ~now:201.5
+        ~schedule_id:request.schedule_id
+    with
+    | Ok running -> running
+    | Error error -> fail (Schedule_store.store_error_to_string error)
+  in
   let intake_started, intake_started_u = Eio.Promise.create () in
   let release_intake, release_intake_u = Eio.Promise.create () in
   let join_completed, join_completed_u = Eio.Promise.create () in
   Eio.Fiber.both
     (fun () ->
        match
-         Keeper_turn_admission.run_durable_intake_if_open
-           ~base_path
-           ~keeper_name
-           (fun () ->
-              Eio.Promise.resolve intake_started_u ();
-              Eio.Promise.await release_intake)
+         Server_schedule_consumers.consumer.dispatch
+           config
+           ~now:202.0
+           signal
+           running
+           ~commit_acceptance:(fun _detail ->
+             Eio.Promise.resolve intake_started_u ();
+             Eio.Promise.await release_intake;
+             Error
+               (Schedule_runner.Retryable_dispatch_failure
+                  "test releases schedule acceptance"))
        with
-       | Keeper_turn_admission.Intake_committed () -> ()
-       | Keeper_turn_admission.Intake_shutdown_reserved _ ->
-         fail "intake lost before shutdown reservation")
+       | Error (Schedule_runner.Retryable_dispatch_failure _) -> ()
+       | Error (Schedule_runner.Terminal_dispatch_rejection detail) ->
+         fail ("schedule intake became terminal: " ^ detail)
+       | Ok _ -> fail "test acceptance unexpectedly committed")
     (fun () ->
        Eio.Promise.await intake_started;
        (match
@@ -1487,9 +1510,21 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
         | Error err -> fail (Schedule_store.store_error_to_string err)
       in
       Atomic.set entry.fiber_wakeup false;
-      (match Server_schedule_consumers.consumer.dispatch config ~now:202.0 signal running with
+      (match
+         Server_schedule_consumers.consumer.dispatch
+           config
+           ~now:202.0
+           signal
+           running
+           ~commit_acceptance:(fun _detail ->
+             Error
+               (Schedule_runner.Retryable_dispatch_failure
+                  "simulate crash before schedule acceptance"))
+       with
        | Ok _ -> ()
-       | Error _ -> fail "initial schedule occurrence dispatch failed");
+       | Error (Schedule_runner.Retryable_dispatch_failure _) -> ()
+       | Error (Schedule_runner.Terminal_dispatch_rejection detail) ->
+         fail ("initial schedule occurrence dispatch was terminal: " ^ detail));
       check bool "initial cancelled dispatch wakes lane" true
         (Atomic.get entry.fiber_wakeup);
       let pending_state =

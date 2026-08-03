@@ -166,11 +166,30 @@ let test_monotonic_usage_counters_on_cas_retry () =
     let with_usage (m : Keeper_meta_contract.keeper_meta) usage =
       { m with runtime = { m.runtime with usage } }
     in
+    let with_consumption
+          (m : Keeper_meta_contract.keeper_meta)
+          ~revision
+          ~projection_sha256
+      =
+      { m with
+        runtime =
+          { m.runtime with
+            proactive_rt =
+              { m.runtime.proactive_rt with
+                last_consumed_backlog_revision = revision
+              ; last_consumed_backlog_projection_sha256 = projection_sha256
+              }
+          }
+      }
+    in
+    let projection_a = String.make 64 'a' in
+    let projection_b = String.make 64 'b' in
     (* Concurrent writer advances cumulative counters on disk. *)
     let racing =
       with_usage caller_view
         { caller_view.runtime.usage with
           total_turns = 10; total_tokens = 1000 }
+      |> with_consumption ~revision:10 ~projection_sha256:projection_b
     in
     (match Keeper_meta_store.write_meta config racing with
      | Ok () -> ()
@@ -180,6 +199,7 @@ let test_monotonic_usage_counters_on_cas_retry () =
       with_usage caller_view
         { caller_view.runtime.usage with
           total_turns = 3; total_tokens = 200; last_latency_ms = 777 }
+      |> with_consumption ~revision:3 ~projection_sha256:projection_a
     in
     (match
        Keeper_meta_store.write_meta_with_merge
@@ -196,7 +216,11 @@ let test_monotonic_usage_counters_on_cas_retry () =
     check int "total_tokens keeps the larger disk value" 1000
       final.runtime.usage.total_tokens;
     check int "last_* observation stays with the caller" 777
-      final.runtime.usage.last_latency_ms)
+      final.runtime.usage.last_latency_ms;
+    check int "consumption revision never rewinds" 10
+      final.runtime.proactive_rt.last_consumed_backlog_revision;
+    check string "projection stays paired with winning revision" projection_b
+      final.runtime.proactive_rt.last_consumed_backlog_projection_sha256)
 
 let test_operator_pause_survives_stale_heartbeat_retry () =
   Eio_main.run @@ fun env ->

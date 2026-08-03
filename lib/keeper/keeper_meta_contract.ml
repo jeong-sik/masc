@@ -74,6 +74,13 @@ type proactive_runtime =
           advance it. 0 is the genesis: never consumed, so any live backlog
           (version >= 1) admits exactly one turn. [last_ts] remains telemetry
           and is no longer an admission input. *)
+  ; last_consumed_backlog_projection_sha256 : string
+    (** Exact digest of the non-self-authored task projection consumed with
+          [last_consumed_backlog_revision]. The empty string is the genesis
+          value for a newly-created current-schema meta; persisted post-turn
+          values are lowercase SHA-256. Pairing the revision with this derived
+          projection prevents a keeper's own Todo writes from re-arming its
+          scheduled turn while preserving peer task changes. *)
   }
 
 (* ── Structured blocker classification ──────────────────────── *)

@@ -16,19 +16,13 @@
       "failed turn keeps its in-memory stamp"), an unconsumed edge
       (version > consumed) admits (continuity; also the shape of
       "crash before the durable write re-arms the edge")
-    - fast-turn continuity: the edge is a revision compare only — no
-      wall-clock input anywhere, so a change landing in the same second as
-      the previous admission still re-admits (asserted by using a
-      freshly-stamped meta and only bumping the revision)
-    - meta JSON: [last_consumed_backlog_revision] round-trips; an ABSENT
-      field decodes as genesis 0 (pre-RFC metas must not invalidate); a
-      PRESENT malformed or negative value fails the decode (fail-closed).
+    - fast-turn continuity: the revision/projection pair has no wall-clock
+      input, so a relevant change landing in the same second still re-admits
+    - meta JSON: both consumed fields round-trip; every current field is
+      required, and malformed or negative values fail closed.
 
-    Not covered here (stated, not hidden): the in-memory stamp write in
-    [keeper_heartbeat_loop] and the [update_metrics_from_result]
-    pass-through are integration surfaces exercised by the heartbeat suites;
-    building a [Keeper_agent_run.run_result] fixture is out of scope for
-    this unit file. *)
+    The scheduled-admission stamp helper is exercised directly here; the
+    post-turn pass-through and CAS merge are covered by their focused suites. *)
 
 open Alcotest
 module WO = Masc.Keeper_world_observation
@@ -49,7 +43,14 @@ let make_meta name =
 
 (* A keeper that has already bootstrapped (a scheduled turn ran before) and
    whose consumption clock sits at [last_consumed]. *)
-let bootstrapped_meta ?(last_consumed = 1) () =
+let projection_a = String.make 64 'a'
+let projection_b = String.make 64 'b'
+
+let bootstrapped_meta
+      ?(last_consumed = 1)
+      ?(last_projection = projection_a)
+      ()
+  =
   let meta = make_meta "admission" in
   let now = Time_compat.now () in
   { meta with
@@ -61,6 +62,7 @@ let bootstrapped_meta ?(last_consumed = 1) () =
           { meta.runtime.proactive_rt with
             last_ts = now -. 120.0
           ; last_consumed_backlog_revision = last_consumed
+          ; last_consumed_backlog_projection_sha256 = last_projection
           }
       }
   }
@@ -92,6 +94,7 @@ let base_obs : WO.world_observation =
   ; scheduled_automation = WO.empty_scheduled_automation_observation
   ; backlog_updated_since_last_scheduled_autonomous = false
   ; backlog_revision = Some 1
+  ; backlog_projection_sha256 = Some projection_a
   ; running_keeper_fiber_count = 1
   ; connected_surfaces = []
   ; connected_surface_failures = []
@@ -103,6 +106,7 @@ let backlog_edge_obs =
   { base_obs with
     backlog_updated_since_last_scheduled_autonomous = true
   ; backlog_revision = Some 2
+  ; backlog_projection_sha256 = Some projection_b
   ; claimable_task_count = 1
   ; unclaimed_task_count = 1
   }
@@ -218,6 +222,17 @@ let test_backlog_edge_admits () =
        (run_reasons d))
 ;;
 
+let test_external_wake_does_not_admit_backlog_only () =
+  without_overrides @@ fun () ->
+  let d =
+    WO.keeper_cycle_decision
+      ~reactive_wake:true
+      ~meta:(bootstrapped_meta ())
+      backlog_edge_obs
+  in
+  check bool "broadcast wake does not fan out backlog turn" false d.WO.should_run
+;;
+
 let test_due_schedule_admits () =
   without_overrides @@ fun () ->
   let d = decide ~meta:(bootstrapped_meta ()) due_schedule_obs in
@@ -261,6 +276,39 @@ let test_consumed_edge_stays_silent () =
     (List.exists (( = ) WO.No_actionable_stimulus) (skip_reasons d))
 ;;
 
+let test_scheduled_admission_records_exact_pair () =
+  let before = bootstrapped_meta () in
+  match WO.record_scheduled_backlog_consumption ~meta:before backlog_edge_obs with
+  | Error _ -> Alcotest.fail "complete backlog observation was rejected"
+  | Ok after ->
+    check int "observed revision is recorded" 2
+      after.runtime.proactive_rt.last_consumed_backlog_revision;
+    check string "projection stays paired with revision" projection_b
+      after.runtime.proactive_rt.last_consumed_backlog_projection_sha256
+;;
+
+let test_unreadable_admission_does_not_move_pair () =
+  let before = bootstrapped_meta () in
+  let unreadable =
+    { base_obs with backlog_revision = None; backlog_projection_sha256 = None }
+  in
+  match WO.record_scheduled_backlog_consumption ~meta:before unreadable with
+  | Error _ -> Alcotest.fail "complete absent pair was rejected"
+  | Ok after ->
+    check int "revision stays put" 1
+      after.runtime.proactive_rt.last_consumed_backlog_revision;
+    check string "projection stays put" projection_a
+      after.runtime.proactive_rt.last_consumed_backlog_projection_sha256
+;;
+
+let test_partial_backlog_pair_is_typed_error () =
+  let before = bootstrapped_meta () in
+  let incomplete = { base_obs with backlog_projection_sha256 = None } in
+  match WO.record_scheduled_backlog_consumption ~meta:before incomplete with
+  | Error WO.Incomplete_backlog_observation -> ()
+  | Ok _ -> Alcotest.fail "partial backlog observation was accepted"
+;;
+
 (* ==== read failure is not designed silence ==== *)
 
 (* [backlog_revision = None] models a failed backlog read (the inputs layer
@@ -270,7 +318,12 @@ let test_consumed_edge_stays_silent () =
 let test_unreadable_backlog_skips_as_unreadable () =
   without_overrides @@ fun () ->
   let d =
-    decide ~meta:(bootstrapped_meta ()) { base_obs with backlog_revision = None }
+    decide
+      ~meta:(bootstrapped_meta ())
+      { base_obs with
+        backlog_revision = None
+      ; backlog_projection_sha256 = None
+      }
   in
   check bool "no turn on a blind observation" false d.WO.should_run;
   check bool "skip reason is backlog_unreadable" true
@@ -284,7 +337,12 @@ let test_unreadable_backlog_skips_as_unreadable () =
 let test_unreadable_backlog_does_not_silence_other_stimuli () =
   with_flag "MASC_KEEPER_REACTIVE_ENABLED" "false" @@ fun () ->
   let d =
-    decide ~meta:(bootstrapped_meta ()) { mention_obs with backlog_revision = None }
+    decide
+      ~meta:(bootstrapped_meta ())
+      { mention_obs with
+        backlog_revision = None
+      ; backlog_projection_sha256 = None
+      }
   in
   check bool "message still admits" true d.WO.should_run;
   check bool "scope_message_pending in reasons" true
@@ -293,27 +351,96 @@ let test_unreadable_backlog_does_not_silence_other_stimuli () =
 
 (* ==== §3.2: the edge is a revision compare, no clock anywhere ==== *)
 
-let edge ~last_consumed ~version =
-  let meta = bootstrapped_meta ~last_consumed () in
+let edge ~last_consumed ~last_projection ~version ~projection =
+  let meta = bootstrapped_meta ~last_consumed ~last_projection () in
   let backlog : Masc_domain.backlog =
     { tasks = []; last_updated = "not-a-timestamp"; version }
   in
-  Inputs.backlog_updated_since_last_scheduled_autonomous ~meta ~backlog
+  Inputs.backlog_updated_since_last_scheduled_autonomous
+    ~meta
+    ~backlog
+    ~projection_sha256:projection
 ;;
 
 let test_edge_is_pure_revision_compare () =
   (* genesis: never consumed, any live backlog is one pending edge *)
-  check bool "0 < 1 edges" true (edge ~last_consumed:0 ~version:1);
+  check bool "0 < 1 and changed projection edges" true
+    (edge
+       ~last_consumed:0
+       ~last_projection:""
+       ~version:1
+       ~projection:projection_a);
   (* consumed exactly: silent *)
-  check bool "5 = 5 silent" false (edge ~last_consumed:5 ~version:5);
+  check bool "5 = 5 silent" false
+    (edge
+       ~last_consumed:5
+       ~last_projection:projection_a
+       ~version:5
+       ~projection:projection_b);
+  check bool "new revision with unchanged projection is silent" false
+    (edge
+       ~last_consumed:5
+       ~last_projection:projection_a
+       ~version:6
+       ~projection:projection_a);
   (* fast-turn continuity: a commit in the same wall-clock instant as the
      stamp still edges, because only the revision moved. [last_updated] is
      deliberately unparseable — proof the clock and the ISO field are not
      inputs (the old implementation returned [false] forever on a parse
      failure). *)
-  check bool "5 < 6 edges" true (edge ~last_consumed:5 ~version:6);
-  check bool "6 = 6 silent after stamp" false (edge ~last_consumed:6 ~version:6);
-  check bool "6 < 7 re-edges" true (edge ~last_consumed:6 ~version:7)
+  check bool "5 < 6 edges" true
+    (edge
+       ~last_consumed:5
+       ~last_projection:projection_a
+       ~version:6
+       ~projection:projection_b);
+  check bool "6 = 6 silent after stamp" false
+    (edge
+       ~last_consumed:6
+       ~last_projection:projection_b
+       ~version:6
+       ~projection:projection_b);
+  check bool "6 < 7 re-edges on another projection" true
+    (edge
+       ~last_consumed:6
+       ~last_projection:projection_b
+       ~version:7
+       ~projection:projection_a)
+;;
+
+let make_todo ~id ~created_by : Masc_domain.task =
+  { id
+  ; title = "Task " ^ id
+  ; description = ""
+  ; task_status = Masc_domain.Todo
+  ; priority = 3
+  ; files = []
+  ; created_at = "2026-08-03T00:00:00Z"
+  ; created_by
+  ; predecessor_task_id = None
+  ; contract = None
+  ; handoff_context = None
+  ; cycle_count = 0
+  ; reclaim_policy = None
+  ; do_not_reclaim_reason = None
+  }
+;;
+
+let test_self_authored_todo_does_not_change_projection () =
+  let meta = bootstrapped_meta () in
+  let empty = Inputs.relevant_backlog_projection_sha256 ~meta [] in
+  let self =
+    Inputs.relevant_backlog_projection_sha256
+      ~meta
+      [ make_todo ~id:"self" ~created_by:(Some meta.name) ]
+  in
+  let peer =
+    Inputs.relevant_backlog_projection_sha256
+      ~meta
+      [ make_todo ~id:"peer" ~created_by:(Some "peer") ]
+  in
+  check string "self-authored Todo is outside projection" empty self;
+  check bool "peer Todo changes projection" true (not (String.equal empty peer))
 ;;
 
 (* ==== meta JSON: durable consumption clock ==== *)
@@ -331,10 +458,12 @@ let test_meta_json_roundtrip () =
   | Error e -> Alcotest.fail ("roundtrip decode failed: " ^ e)
   | Ok decoded ->
     check int "consumption clock survives the roundtrip" 42
-      decoded.runtime.proactive_rt.last_consumed_backlog_revision
+      decoded.runtime.proactive_rt.last_consumed_backlog_revision;
+    check string "projection survives the roundtrip" projection_a
+      decoded.runtime.proactive_rt.last_consumed_backlog_projection_sha256
 ;;
 
-let test_meta_json_absent_is_genesis () =
+let test_meta_json_missing_current_field_fails () =
   let meta = bootstrapped_meta ~last_consumed:42 () in
   let json =
     json_with_field meta ~f:(fun fields ->
@@ -343,10 +472,8 @@ let test_meta_json_absent_is_genesis () =
         fields)
   in
   match Masc.Keeper_meta_json_parse.meta_of_json json with
-  | Error e -> Alcotest.fail ("absent field must decode (pre-RFC meta): " ^ e)
-  | Ok decoded ->
-    check int "absent decodes as genesis 0" 0
-      decoded.runtime.proactive_rt.last_consumed_backlog_revision
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "missing current field must fail the decode"
 ;;
 
 let test_meta_json_malformed_fails_closed () =
@@ -368,6 +495,20 @@ let test_meta_json_malformed_fails_closed () =
       (json_with_field meta ~f:(replace (`Int (-3))))
   with
   | Ok _ -> Alcotest.fail "negative revision must fail the decode"
+  | Error _ -> ();
+  let malformed_projection fields =
+    List.map
+      (fun (key, value) ->
+         if String.equal key "last_consumed_backlog_projection_sha256"
+         then key, `String "not-a-sha256"
+         else key, value)
+      fields
+  in
+  match
+    Masc.Keeper_meta_json_parse.meta_of_json
+      (json_with_field meta ~f:malformed_projection)
+  with
+  | Ok _ -> Alcotest.fail "malformed projection digest must fail the decode"
   | Error _ -> ()
 ;;
 
@@ -378,6 +519,10 @@ let () =
       , [ test_case "empty observation skips" `Quick test_empty_observation_skips
         ; test_case "bootstrap admits" `Quick test_bootstrap_admits
         ; test_case "backlog edge admits" `Quick test_backlog_edge_admits
+        ; test_case
+            "external wake suppresses backlog-only admission"
+            `Quick
+            test_external_wake_does_not_admit_backlog_only
         ; test_case "due schedule admits" `Quick test_due_schedule_admits
         ; test_case
             "pending message admits scheduled when reactive off"
@@ -389,6 +534,18 @@ let () =
             test_pending_board_event_admits_scheduled_when_reactive_off
         ; test_case "consumed edge stays silent" `Quick test_consumed_edge_stays_silent
         ; test_case
+            "scheduled admission records exact pair"
+            `Quick
+            test_scheduled_admission_records_exact_pair
+        ; test_case
+            "unreadable admission does not move pair"
+            `Quick
+            test_unreadable_admission_does_not_move_pair
+        ; test_case
+            "partial backlog pair is typed error"
+            `Quick
+            test_partial_backlog_pair_is_typed_error
+        ; test_case
             "unreadable backlog skips as unreadable"
             `Quick
             test_unreadable_backlog_skips_as_unreadable
@@ -398,10 +555,18 @@ let () =
             test_unreadable_backlog_does_not_silence_other_stimuli
         ] )
     ; ( "edge_compare"
-      , [ test_case "pure revision compare" `Quick test_edge_is_pure_revision_compare ] )
+      , [ test_case "revision and projection pair" `Quick test_edge_is_pure_revision_compare
+        ; test_case
+            "self-authored Todo does not change projection"
+            `Quick
+            test_self_authored_todo_does_not_change_projection
+        ] )
     ; ( "meta_json"
       , [ test_case "roundtrip" `Quick test_meta_json_roundtrip
-        ; test_case "absent is genesis" `Quick test_meta_json_absent_is_genesis
+        ; test_case
+            "missing current field fails"
+            `Quick
+            test_meta_json_missing_current_field_fails
         ; test_case "malformed fails closed" `Quick test_meta_json_malformed_fails_closed
         ] )
     ]

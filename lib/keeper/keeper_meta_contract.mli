@@ -88,6 +88,11 @@ type proactive_runtime = {
           write. Only scheduled-autonomous turns consume it — reactive
           turns never advance it. 0 is the genesis (never consumed).
           [last_ts] remains telemetry, not an admission input. *)
+  last_consumed_backlog_projection_sha256 : string;
+      (** Exact digest paired with [last_consumed_backlog_revision]. The
+          empty string is genesis for a newly-created current meta; consumed
+          values are lowercase SHA-256 of the non-self-authored task
+          projection. *)
 }
 
 type usage_metrics = {

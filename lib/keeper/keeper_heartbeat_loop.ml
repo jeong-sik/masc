@@ -711,22 +711,15 @@ let run_keepalive_unified_turn
             match turn_decision.channel with
             | Keeper_world_observation.Reactive -> meta_after_triage
             | Keeper_world_observation.Scheduled_autonomous ->
-              (match obs.backlog_revision with
-               | None -> meta_after_triage
-               | Some observed ->
-                 let proactive_rt = meta_after_triage.runtime.proactive_rt in
-                 if observed > proactive_rt.last_consumed_backlog_revision
-                 then
-                   { meta_after_triage with
-                     runtime =
-                       { meta_after_triage.runtime with
-                         proactive_rt =
-                           { proactive_rt with
-                             last_consumed_backlog_revision = observed
-                           }
-                       }
-                   }
-                 else meta_after_triage)
+              (match
+                 Keeper_world_observation.record_scheduled_backlog_consumption
+                   ~meta:meta_after_triage
+                   obs
+               with
+               | Ok meta -> meta
+               | Error Keeper_world_observation.Incomplete_backlog_observation ->
+                 invalid_arg
+                   "keeper backlog observation revision/projection pair is incomplete")
           in
           record_replay_owned_turn_started_reactions
             ~ctx

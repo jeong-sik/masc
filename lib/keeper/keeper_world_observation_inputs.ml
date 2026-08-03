@@ -33,9 +33,15 @@ type current_task_observation =
 let backlog_updated_since_last_scheduled_autonomous
       ~(meta : keeper_meta)
       ~(backlog : Masc_domain.backlog)
+      ~(projection_sha256 : string)
   : bool
   =
-  backlog.version > meta.runtime.proactive_rt.last_consumed_backlog_revision
+  let proactive_rt = meta.runtime.proactive_rt in
+  backlog.version > proactive_rt.last_consumed_backlog_revision
+  && not
+       (String.equal
+          projection_sha256
+          proactive_rt.last_consumed_backlog_projection_sha256)
 ;;
 
 (* A keeper must not treat a task it authored itself as work waiting for it.
@@ -61,6 +67,21 @@ let task_is_self_authored_todo ~(meta : keeper_meta) (task : Masc_domain.task) =
     false
 ;;
 
+let relevant_backlog_projection_sha256
+      ~(meta : keeper_meta)
+      (tasks : Masc_domain.task list)
+  =
+  tasks
+  |> List.filter (fun task -> not (task_is_self_authored_todo ~meta task))
+  |> List.map Masc_domain.task_to_yojson
+  |> List.map (fun json -> Yojson.Safe.to_string json, json)
+  |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+  |> List.map snd
+  |> fun sorted -> Yojson.Safe.to_string (`List sorted)
+  |> Digestif.SHA256.digest_string
+  |> Digestif.SHA256.to_hex
+;;
+
 let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(tasks : Masc_domain.task list) () =
   (* [read_backlog_counts] already loaded [tasks]. Reuse them to get the same
@@ -81,7 +102,7 @@ let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta)
 
 (** Read workspace backlog counts. *)
 let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
-  : int * int * int * bool * int option
+  : int * int * int * bool * int option * string option
   =
   try
     match Workspace.read_backlog_observation_with_source_r config with
@@ -94,7 +115,7 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
           ]
         ();
       Log.Keeper.warn "read_backlog_counts: backlog read failed: %s" message;
-      0, 0, 0, false, None
+      0, 0, 0, false, None, None
     | Ok { Workspace.recovered_from = Some recovery; _ } ->
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ObservationQueryFailures)
@@ -106,7 +127,7 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
       Log.Keeper.warn
         "read_backlog_counts: recovery snapshot is non-authoritative: %s"
         recovery.primary_error;
-      0, 0, 0, false, None
+      0, 0, 0, false, None, None
     | Ok { Workspace.observed_backlog = backlog; recovered_from = None } ->
     let unclaimed_tasks =
       List.filter
@@ -141,14 +162,21 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
       |> List.filter claim_scope_filter
       |> List.length
     in
+    let projection_sha256 =
+      relevant_backlog_projection_sha256 ~meta backlog.tasks
+    in
     let backlog_updated_since_last_scheduled_autonomous =
-      backlog_updated_since_last_scheduled_autonomous ~meta ~backlog
+      backlog_updated_since_last_scheduled_autonomous
+        ~meta
+        ~backlog
+        ~projection_sha256
     in
     ( unclaimed
     , claimable
     , failed
     , backlog_updated_since_last_scheduled_autonomous
-    , Some backlog.version )
+    , Some backlog.version
+    , Some projection_sha256 )
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
@@ -162,7 +190,7 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
        failure is not a backlog change) and admission must not record a
        fabricated revision 0 — the consumption clock only moves forward on
        an actually observed commit. *)
-    0, 0, 0, false, None
+    0, 0, 0, false, None, None
 ;;
 
 (** Resolve the keeper's claimed task to a source-preserving observation. *)

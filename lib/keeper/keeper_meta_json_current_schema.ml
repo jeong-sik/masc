@@ -49,6 +49,7 @@ type field =
   | Last_proactive_preview
   | Consecutive_noop_count
   | Last_consumed_backlog_revision
+  | Last_consumed_backlog_projection_sha256
   | Last_compaction_check_ts
   | Last_compaction_decision
   | Active_goal_ids
@@ -105,6 +106,7 @@ let all_fields =
   ; Last_proactive_preview
   ; Consecutive_noop_count
   ; Last_consumed_backlog_revision
+  ; Last_consumed_backlog_projection_sha256
   ; Last_compaction_check_ts
   ; Last_compaction_decision
   ; Active_goal_ids
@@ -162,6 +164,8 @@ let field_name = function
   | Last_proactive_preview -> "last_proactive_preview"
   | Consecutive_noop_count -> "consecutive_noop_count"
   | Last_consumed_backlog_revision -> "last_consumed_backlog_revision"
+  | Last_consumed_backlog_projection_sha256 ->
+    "last_consumed_backlog_projection_sha256"
   | Last_compaction_check_ts -> "last_compaction_check_ts"
   | Last_compaction_decision -> "last_compaction_decision"
   | Active_goal_ids -> "active_goal_ids"
@@ -185,19 +189,6 @@ let field_name = function
 ;;
 
 let current_field_names = List.map field_name all_fields
-
-(* RFC-0357 §3.3: [Last_consumed_backlog_revision] shipped after live keeper
-   metas were written. An ABSENT field decodes as genesis 0 (never consumed;
-   the decoder owns that default) instead of invalidating the whole meta —
-   the 2026-07-30 schema removal invalidated every live meta at once, and a
-   fleet-wide "runtime reset required" is not an acceptable side effect of an
-   admission change. A PRESENT malformed value still fails the decode.
-   Exactly this field is absence-tolerated; everything else stays required.
-   Removal is tracked, not aspirational: once every live meta carries the
-   field (one post-turn write per keeper), issue #26697 shrinks this list
-   back to empty — target is within a week of the introducing PR's merge,
-   before the list can acquire a second resident. *)
-let genesis_defaulted_field_names = [ field_name Last_consumed_backlog_revision ]
 
 let object_of_field_values field_values =
   let supplied = List.map fst field_values in
@@ -236,9 +227,7 @@ let validate_current_object (json : Yojson.Safe.t) =
        in
        let missing =
          List.filter
-           (fun key ->
-              (not (List.mem key present))
-              && not (List.mem key genesis_defaulted_field_names))
+           (fun key -> not (List.mem key present))
            current_field_names
        in
        if outside_current <> []

@@ -186,6 +186,8 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
            consume the backlog edge. *)
         last_consumed_backlog_revision =
           rt.proactive_rt.last_consumed_backlog_revision;
+        last_consumed_backlog_projection_sha256 =
+          rt.proactive_rt.last_consumed_backlog_projection_sha256;
       };
       (* Autonomous action tracking from tool calls *)
       autonomous_action_count =

@@ -470,7 +470,10 @@ let publish_masc_broadcast ~port ~auth_token ~session_id =
           , `Assoc
               [ "name", `String "masc_broadcast"
               ; ( "arguments"
-                , `Assoc [ "message", `String "sse-ag-ui-wire-encoding" ] )
+                , `Assoc
+                    [ "agent_name", `String "dashboard"
+                    ; "message", `String "sse-ag-ui-wire-encoding"
+                    ] )
               ] )
         ])
   in
@@ -492,12 +495,36 @@ let publish_masc_broadcast ~port ~auth_token ~session_id =
   in
   check_status "observer source broadcast accepted" 200 result;
   match Yojson.Safe.from_string result.body with
-  | `Assoc fields when List.mem_assoc "result" fields -> ()
-  | `Assoc fields when List.mem_assoc "error" fields ->
-      fail
-        (Printf.sprintf
-           "observer source broadcast returned an MCP error: %s"
-           result.body)
+  | `Assoc fields ->
+      (match List.assoc_opt "result" fields with
+       | Some (`Assoc result_fields) ->
+           (match List.assoc_opt "isError" result_fields with
+            | Some (`Bool false) -> ()
+            | Some (`Bool true) ->
+                fail
+                  (Printf.sprintf
+                     "observer source broadcast returned a tool error: %s"
+                     result.body)
+            | Some _ | None ->
+                fail
+                  (Printf.sprintf
+                     "observer source broadcast result omitted boolean isError: %s"
+                     result.body))
+       | Some _ ->
+           fail
+             (Printf.sprintf
+                "observer source broadcast returned a non-object result: %s"
+                result.body)
+       | None when List.mem_assoc "error" fields ->
+           fail
+             (Printf.sprintf
+                "observer source broadcast returned an MCP error: %s"
+                result.body)
+       | None ->
+           fail
+             (Printf.sprintf
+                "observer source broadcast returned an invalid MCP response: %s"
+                result.body))
   | _ ->
       fail
         (Printf.sprintf

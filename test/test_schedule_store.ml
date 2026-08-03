@@ -914,6 +914,74 @@ let test_last_good_is_parseable_after_good_write () =
   | Error msg -> fail (".last-good is not parseable: " ^ msg)
 ;;
 
+let store_ok label = function
+  | Ok value -> value
+  | Error err -> fail (label ^ ": " ^ store_error_to_string err)
+;;
+
+(* Reproduces the live shape: a recurring request advances past an occurrence at
+   accept_running, the occurrence stays Execution_dispatched, and the request is
+   then cancelled from Scheduled. The request is terminal; the work is not. *)
+let cancelled_request_with_outstanding_occurrence config ~schedule_id =
+  let request =
+    make_request ~schedule_id ~recurrence:(Interval { interval_sec = 3600 }) ()
+  in
+  let stored = insert_ok config request in
+  ignore (store_ok "refresh_due" (refresh_due config ~now:201.0));
+  ignore
+    (store_ok "start_due_candidate"
+       (start_due_candidate config ~now:202.0 ~schedule_id:stored.schedule_id));
+  let advanced =
+    store_ok "accept_running" (accept_running config ~now:203.0 ~schedule_id:stored.schedule_id ())
+  in
+  check string "recurring request advanced past the occurrence" "scheduled"
+    (schedule_status_to_string advanced.status);
+  let cancelled =
+    store_ok "cancel_request" (cancel_request config ~schedule_id:stored.schedule_id)
+  in
+  check string "request is terminal" "cancelled"
+    (schedule_status_to_string cancelled.status);
+  stored
+;;
+
+let test_prune_keeps_terminal_request_with_unsettled_occurrence () =
+  with_workspace
+  @@ fun config ->
+  let stored =
+    cancelled_request_with_outstanding_occurrence config ~schedule_id:"prune-outstanding"
+  in
+  let state, pruned = store_ok "prune_completed" (prune_completed config) in
+  check int "outstanding occurrence keeps its request" 0 pruned;
+  check int "request row retained" 1 (List.length state.schedules);
+  check int "execution evidence retained" 1 (List.length state.executions);
+  (* The settlement path still resolves, which is the point of retaining it. *)
+  match
+    complete_dispatched_occurrence config ~now:400.0 ~schedule_id:stored.schedule_id
+      ~due_at:stored.due_at
+      ~payload_digest:(Schedule_domain.payload_digest stored.payload) ()
+  with
+  | Ok _ -> ()
+  | Error err -> fail ("settlement after prune failed: " ^ store_error_to_string err)
+;;
+
+let test_prune_deletes_terminal_request_once_settled () =
+  with_workspace
+  @@ fun config ->
+  let stored =
+    cancelled_request_with_outstanding_occurrence config ~schedule_id:"prune-settled"
+  in
+  ignore
+    (store_ok "fail_dispatched_occurrence"
+       (fail_dispatched_occurrence config ~now:300.0 ~schedule_id:stored.schedule_id
+          ~due_at:stored.due_at
+          ~payload_digest:(Schedule_domain.payload_digest stored.payload)
+          ~error:"consumer lost it"));
+  let state, pruned = store_ok "prune_completed" (prune_completed config) in
+  check int "settled terminal request is pruned" 1 pruned;
+  check int "request row removed" 0 (List.length state.schedules);
+  check int "execution rows removed with it" 0 (List.length state.executions)
+;;
+
 let () =
   run "Schedule_store"
     [
@@ -992,6 +1060,10 @@ let () =
             test_fail_due_candidate_records_failed_execution;
           test_case "recurring occurrences remain dispatchable" `Quick
             test_recurring_occurrences_remain_dispatchable;
+          test_case "prune keeps a terminal request with an unsettled occurrence"
+            `Quick test_prune_keeps_terminal_request_with_unsettled_occurrence;
+          test_case "prune deletes a terminal request once settled" `Quick
+            test_prune_deletes_terminal_request_once_settled;
         ] );
     ]
 ;;

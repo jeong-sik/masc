@@ -486,6 +486,50 @@ let test_schedule_store_error_is_explicit () =
        "schedule store read failed")
 ;;
 
+let test_keeper_wake_target_validation_is_inside_creation_fence () =
+  with_config
+  @@ fun config ->
+  let fence_active = ref false in
+  let validation_saw_fence = ref false in
+  let registered_target_check =
+    Atomic.get Workspace_hooks.schedule_wake_target_registered_fn
+  in
+  Atomic.set Workspace_hooks.schedule_wake_target_registered_fn
+    (fun config keeper_name ->
+       if !fence_active then validation_saw_fence := true;
+       registered_target_check config keeper_name);
+  let admit_keeper_wake_creation config ~keeper_name create =
+    Keeper_schedule_creation_admission.run config ~keeper_name (fun () ->
+      fence_active := true;
+      Fun.protect ~finally:(fun () -> fence_active := false) create)
+  in
+  let ctx : Tool_schedule.context =
+    { config
+    ; agent_name = "scheduler-agent"
+    ; admit_keeper_wake_creation
+    }
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.schedule_wake_target_registered_fn
+        registered_target_check)
+    (fun () ->
+       let result =
+         match
+           Tool_schedule.dispatch
+             ctx
+             ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
+             ~args:(create_args ~schedule_id:"sched-fenced-validation" ())
+         with
+         | Some result -> result
+         | None -> fail "schedule dispatch returned None"
+       in
+       check bool "fenced schedule creation succeeds" true
+         (Tool_result.is_success result);
+       check bool "target validation ran inside creation fence" true
+         !validation_saw_fence)
+;;
+
 let test_keeper_wake_creation_respects_shutdown_fence () =
   with_config
   @@ fun config ->
@@ -550,6 +594,8 @@ let () =
             test_due_signal_and_dashboard_projection
         ; test_case "schedule store error is explicit" `Quick
             test_schedule_store_error_is_explicit
+        ; test_case "Keeper wake target validation is fenced" `Quick
+            test_keeper_wake_target_validation_is_inside_creation_fence
         ; test_case "Keeper wake creation respects shutdown fence" `Quick
             test_keeper_wake_creation_respects_shutdown_fence
         ] )

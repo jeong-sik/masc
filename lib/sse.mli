@@ -21,10 +21,18 @@ type broadcast_target =
   | Agent_streams
   | Presence_only
 
+type delivery =
+  { event_id : int
+  ; frame : string
+  ; emitted_at : float
+  }
+(** Canonical occurrence shared by the replay store and live queues.
+    Its id, wire frame, and producer timestamp are allocated once. *)
+
 type client = {
   id : int;
   kind : session_kind;
-  event_stream : string Eio.Stream.t;
+  event_stream : delivery Eio.Stream.t;
   last_event_id : int Atomic.t;
   created_at : float;
   last_seen_at : float Atomic.t;
@@ -78,7 +86,7 @@ val registration_error_to_string : registration_error -> string
 val register :
   ?kind:session_kind -> ?on_disconnect:(unit -> unit) ->
   auth:registration_auth -> string -> last_event_id:int ->
-  (int * string Eio.Stream.t * string option, registration_error) result
+  (int * delivery Eio.Stream.t * string option, registration_error) result
 (** [register ~auth session_id ~last_event_id] validates the supplied
     bearer token and MCP session pair before admitting the client.
 
@@ -131,18 +139,6 @@ val data_payload_of_frame : string -> (string, data_payload_error) result
     LF/CRLF line endings emitted on the wire.  A frame without a [data:]
     field is rejected; bare JSON is not an SSE frame. *)
 
-type parsed_frame =
-  { event_id : int option
-  ; data_payload : string
-  }
-
-type frame_parse_error =
-  | Frame_missing_data_payload
-  | Frame_invalid_event_id
-
-val parse_frame : string -> (parsed_frame, frame_parse_error) result
-(** Parse one internal SSE frame without discarding its resumability cursor. *)
-
 val format_event : ?id:int -> ?event_type:string -> string -> string
 val next_id : unit -> int
 val current_id : unit -> int
@@ -169,17 +165,24 @@ val remove_external_subscribers : string list -> string list * int
 (** {1 Event Buffer} *)
 
 val clients : client_registry_state Atomic.t
-type buffered_event = int * string * float
-
-val buffer_event : int -> string -> unit
-val get_events_after : int -> string list
-val get_events_after_for_kind : session_kind -> int -> string list
+val buffer_event : delivery -> unit
+val get_events_after : int -> delivery list
+val get_events_after_for_kind : session_kind -> int -> delivery list
 (** Replay-buffer lookup filtered for the target session kind. Agent_stream
     replay only returns JSON-RPC messages; observer replay keeps all durable
     events; presence replay is empty. *)
+
+type replay_handoff
+
+val create_replay_handoff : delivery list -> replay_handoff
+val accept_live_delivery : replay_handoff -> delivery -> bool
+(** [accept_live_delivery handoff delivery] returns [false] exactly once for
+    each delivery already sent from the replay snapshot. This closes the
+    register/replay/live overlap without assuming event ids commit in order. *)
+
 val cleanup_expired_events : unit -> int
-val event_buffer_events_for_test : unit -> buffered_event list
-val set_event_buffer_for_test : buffered_event list -> unit
+val event_buffer_events_for_test : unit -> delivery list
+val set_event_buffer_for_test : delivery list -> unit
 val rewrite_event_buffer_for_test : unit -> unit
 
 (** {1 Snapshots} *)

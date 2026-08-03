@@ -663,15 +663,21 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           register_sse_conn ~session_id ~info;
           if not (send_raw info (sse_prime_event ())) then
             Log.Server.debug "SSE prime send failed for session %s" info.session_id;
-          (match last_event_id with
-          | Some last_id ->
-              let missed = Sse.get_events_after_for_kind sse_kind last_id in
-              List.iter (fun ev ->
-                if not (send_raw info ev) then
-                  Log.Server.debug "SSE replay send failed for session %s"
-                    info.session_id
-              ) missed
-          | None -> ());
+          let replayed =
+            match last_event_id with
+            | Some last_id ->
+              Sse.get_events_after_for_kind sse_kind last_id
+              |> List.filter (fun delivery ->
+                if send_raw info delivery.Sse.frame
+                then true
+                else (
+                  Log.Server.debug
+                    "SSE replay send failed for session %s"
+                    info.session_id;
+                  false))
+            | None -> []
+          in
+          let replay_handoff = Sse.create_replay_handoff replayed in
           (match deps.get_runtime_result () with
           | Ok runtime ->
               let sw = runtime.sw in
@@ -679,10 +685,12 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
               run_sse_pumps ~sw ~stop_promise:info.stop_promise
                 ~drain:(fun () ->
                   let rec drain () =
-                    let event = Eio.Stream.take event_stream in
+                    let delivery = Eio.Stream.take event_stream in
                     (try
                       if not (Atomic.get info.closed || (Atomic.get info.stop)) then
-                        if not (send_raw info event) then
+                        if Sse.accept_live_delivery replay_handoff delivery
+                           && not (send_raw info delivery.Sse.frame)
+                        then
                           Log.Server.debug "SSE drain send failed for session %s"
                             info.session_id
                     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->

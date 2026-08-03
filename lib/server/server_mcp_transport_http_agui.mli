@@ -35,10 +35,11 @@ val handle_ag_ui_events :
     7. Send a synthetic AG-UI [Run_started] prime event so the client
        can observe the connection has settled.
     8. If [last-event-id] was present, replay missed observer events via
-       {!Sse.get_events_after_for_kind}, each converted to the AG-UI wire
-       format.
+       {!Sse.get_events_after_for_kind}, each converted from its canonical
+       typed delivery to the AG-UI wire format. Replay/live overlap is removed
+       by exact event id.
     9. Spawn two fibers under the runtime switch:
-       - drain: pulls from per-session stream, converts each frame to the
+       - drain: pulls typed deliveries from the per-session stream, converts each frame to the
          AG-UI wire format, writes to client, self-terminates on send
          failure.  A missing or malformed [data:] payload is projected to a
          schema-valid AG-UI [CUSTOM] event named [MASC_EVENT_ENCODING_ERROR]
@@ -75,10 +76,6 @@ val handle_ag_ui_events :
     while this handler uses a local shadow to keep the AG-UI fiber
     independent of header-module evolution.  A future "let's unify"
     refactor must touch the duplicate explicitly. *)
-
-module For_testing : sig
-  val ag_ui_event_of_masc_event : string -> string
-end
 
 val handle_presence_events :
   deps:Server_mcp_transport_http_types.deps ->

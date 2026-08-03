@@ -8,41 +8,38 @@ let sse_stream_headers = Server_mcp_transport_http_headers.sse_stream_headers
 
 type ag_ui_encoding_error =
   | Missing_data_payload
-  | Invalid_event_id
   | Invalid_json_payload
 
 let ag_ui_encoding_error_to_string = function
   | Missing_data_payload -> "missing_data_payload"
-  | Invalid_event_id -> "invalid_event_id"
   | Invalid_json_payload -> "invalid_json_payload"
 
-let ag_ui_encoding_error ?id kind =
+let ag_ui_encoding_error (delivery : Sse.delivery) kind =
   Ag_ui.of_custom
+    ~timestamp:delivery.emitted_at
     ~name:"MASC_EVENT_ENCODING_ERROR"
     (`Assoc [ "kind", `String (ag_ui_encoding_error_to_string kind) ])
-  |> Ag_ui.event_to_sse ?id
+  |> Ag_ui.event_to_sse ~id:delivery.event_id
 ;;
 
-let ag_ui_event_of_masc_event event =
-  match Sse.parse_frame event with
-  | Error Sse.Frame_missing_data_payload ->
+let ag_ui_event_of_masc_event (delivery : Sse.delivery) =
+  match Sse.data_payload_of_frame delivery.frame with
+  | Error Sse.Missing_data_payload ->
       Log.Transport.warn "ag_ui_event_of_masc_event: frame has no data payload";
-      ag_ui_encoding_error Missing_data_payload
-  | Error Sse.Frame_invalid_event_id ->
-      Log.Transport.warn "ag_ui_event_of_masc_event: frame has invalid event id";
-      ag_ui_encoding_error Invalid_event_id
-  | Ok { event_id; data_payload } ->
+      ag_ui_encoding_error delivery Missing_data_payload
+  | Ok data_payload ->
       (match Yojson.Safe.from_string data_payload with
       | json ->
-        let ag_event = Ag_ui.of_custom ~name:"MASC_EVENT" json in
-        Ag_ui.event_to_sse ?id:event_id ag_event
+        let ag_event =
+          Ag_ui.of_custom
+            ~timestamp:delivery.emitted_at
+            ~name:"MASC_EVENT"
+            json
+        in
+        Ag_ui.event_to_sse ~id:delivery.event_id ag_event
       | exception Yojson.Json_error msg ->
           Log.Transport.warn "ag_ui_event_of_masc_event: non-JSON data payload: %s" msg;
-          ag_ui_encoding_error ?id:event_id Invalid_json_payload)
-
-module For_testing = struct
-  let ag_ui_event_of_masc_event = ag_ui_event_of_masc_event
-end
+          ag_ui_encoding_error delivery Invalid_json_payload)
 
 let sse_ping_interval_s = 30.0
 
@@ -128,14 +125,21 @@ let handle_ag_ui_events ~deps request reqd =
               in
               if not (send_raw info prime) then
                 Log.Server.debug "ag-ui prime send failed for session %s" info.session_id;
-              (match last_event_id with
-              | Some last_id ->
-                  let missed = Sse.get_events_after_for_kind Sse.Observer last_id in
-                  List.iter (fun ev ->
-                    if not (send_raw info (ag_ui_event_of_masc_event ev)) then
-                      Log.Server.debug "ag-ui replay send failed for session %s" info.session_id
-                  ) missed
-              | None -> ());
+              let replayed =
+                match last_event_id with
+                | Some last_id ->
+                  Sse.get_events_after_for_kind Sse.Observer last_id
+                  |> List.filter (fun delivery ->
+                    if send_raw info (ag_ui_event_of_masc_event delivery)
+                    then true
+                    else (
+                      Log.Server.debug
+                        "ag-ui replay send failed for session %s"
+                        info.session_id;
+                      false))
+                | None -> []
+              in
+              let replay_handoff = Sse.create_replay_handoff replayed in
               (match deps.get_runtime_result () with
               | Ok runtime ->
                   let sw = runtime.sw in
@@ -143,10 +147,15 @@ let handle_ag_ui_events ~deps request reqd =
                   run_sse_pumps ~sw ~stop_promise:info.stop_promise
                     ~drain:(fun () ->
                       let rec drain () =
-                        let event = Eio.Stream.take event_stream in
+                        let delivery = Eio.Stream.take event_stream in
                         (try
                           if not (Atomic.get info.closed || (Atomic.get info.stop)) then
-                            if not (send_raw info (ag_ui_event_of_masc_event event)) then
+                            if Sse.accept_live_delivery replay_handoff delivery
+                               && not
+                                    (send_raw
+                                       info
+                                       (ag_ui_event_of_masc_event delivery))
+                            then
                               Log.Server.debug "ag-ui drain send failed for session %s"
                                 info.session_id
                         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
@@ -253,10 +262,10 @@ let handle_presence_events ~deps request reqd =
               run_sse_pumps ~sw ~stop_promise:info.stop_promise
                 ~drain:(fun () ->
                   let rec drain () =
-                    let event = Eio.Stream.take event_stream in
+                    let delivery = Eio.Stream.take event_stream in
                     (try
                        if not (Atomic.get info.closed || (Atomic.get info.stop)) then
-                         if not (send_raw info event) then
+                         if not (send_raw info delivery.Sse.frame) then
                            Log.Server.debug
                              "presence drain send failed for session %s"
                              info.session_id

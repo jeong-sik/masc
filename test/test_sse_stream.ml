@@ -26,20 +26,6 @@ let test_data_payload_of_frame () =
      | Error Sse.Missing_data_payload -> true
      | Ok _ -> false)
 
-let test_parse_frame_preserves_cursor () =
-  Alcotest.(check bool)
-    "cursor and joined payload"
-    true
-    (match Sse.parse_frame "id: 7\r\ndata:first\r\ndata: second\r\n\r\n" with
-     | Ok { event_id = Some 7; data_payload = "first\nsecond" } -> true
-     | Ok _ | Error _ -> false);
-  Alcotest.(check bool)
-    "invalid cursor rejected"
-    true
-    (match Sse.parse_frame "id: nope\ndata: {}\n\n" with
-     | Error Sse.Frame_invalid_event_id -> true
-     | Ok _ | Error Sse.Frame_missing_data_payload -> false)
-
 let register_exn ~auth ?kind session_id ~last_event_id =
   (* Pre-create the MCP session so registration validates an existing
      session rather than auto-bootstrapping one (security/sse-auth-validation). *)
@@ -241,8 +227,8 @@ let test_broadcast_presence_is_live_only ~auth () =
                 (String.equal "event: presence")
                 (String.split_on_char '\n' event))
        | None -> Alcotest.fail "expected presence event");
-      Alcotest.(check (list string)) "presence not replay buffered" []
-        (Sse.get_events_after before_id))
+      Alcotest.(check int) "presence not replay buffered" 0
+        (List.length (Sse.get_events_after before_id)))
 
 let test_non_jsonrpc_broadcast_does_not_reach_agent_streams ~auth () =
   reset ();
@@ -257,10 +243,10 @@ let test_non_jsonrpc_broadcast_does_not_reach_agent_streams ~auth () =
     (got_workspace = None);
   Alcotest.(check int) "observer replay keeps dashboard event" 1
     (List.length (Sse.get_events_after_for_kind Observer before_id));
-  Alcotest.(check (list string))
+  Alcotest.(check int)
     "agent_stream replay skips non-JSON-RPC"
-    []
-    (Sse.get_events_after_for_kind Agent_stream before_id);
+    0
+    (List.length (Sse.get_events_after_for_kind Agent_stream before_id));
   Sse.unregister "s-nonjson-obs";
   Sse.unregister "s-nonjson-workspace"
 
@@ -292,8 +278,6 @@ let () =
             [
               Alcotest.test_case "data payload" `Quick
                 test_data_payload_of_frame;
-              Alcotest.test_case "preserves cursor" `Quick
-                test_parse_frame_preserves_cursor;
             ] );
           ( "try_pop",
             [

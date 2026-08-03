@@ -15,6 +15,10 @@ open Alcotest
 let jsonrpc_notification method_name =
   `Assoc [ ("jsonrpc", `String "2.0"); ("method", `String method_name) ]
 
+let delivery ?(emitted_at = Unix.gettimeofday ()) event_id frame : Masc.Sse.delivery =
+  { event_id; frame; emitted_at }
+;;
+
 module Sse = Masc.Sse
 module Session = Masc.Session
 
@@ -266,35 +270,34 @@ let test_unregister_if_current_replacement_count () =
 
 let test_buffer_event_and_retrieve () =
   let base_id = Sse.current_id () in
-  Sse.buffer_event (base_id + 1000) "test event 1";
+  Sse.buffer_event (delivery (base_id + 1000) "test event 1");
   let events = Sse.get_events_after (base_id + 999) in
   check bool "has event" true (List.length events >= 1)
 
-let test_buffer_event_timestamps_successful_commit_after_retry () =
+let test_buffer_event_preserves_producer_timestamp_after_retry () =
   let original_buffer = Sse.event_buffer_events_for_test () in
   let original_hook = Atomic.get Sse.buffer_commit_test_hook in
   let forced_retry = Atomic.make false in
-  let retry_barrier = ref 0.0 in
+  let emitted_at = Unix.gettimeofday () in
   Fun.protect
     ~finally:(fun () ->
       Atomic.set Sse.buffer_commit_test_hook original_hook;
       Sse.set_event_buffer_for_test original_buffer)
     (fun () ->
-      Sse.set_event_buffer_for_test [ (777_000, "marker", Unix.gettimeofday ()) ];
+      Sse.set_event_buffer_for_test [ delivery 777_000 "marker" ];
       Atomic.set Sse.buffer_commit_test_hook
         (Some (fun () ->
            if Atomic.compare_and_set forced_retry false true then begin
              Sse.rewrite_event_buffer_for_test ();
              ignore (Unix.select [] [] [] 0.02);
-             retry_barrier := Unix.gettimeofday ()
            end));
-      Sse.buffer_event 777_001 "fresh";
+      Sse.buffer_event (delivery ~emitted_at 777_001 "fresh");
       check bool "forced retry triggered" true (Atomic.get forced_retry);
       match Sse.event_buffer_events_for_test () with
-      | (event_id, _event, ts) :: _ ->
-          check int "new event inserted at head" 777_001 event_id;
-          check bool "timestamp captured after retry barrier" true
-            (ts >= !retry_barrier)
+      | (fresh : Sse.delivery) :: _ ->
+          check int "new event inserted at head" 777_001 fresh.event_id;
+          check (float 0.0) "producer timestamp survives CAS retry"
+            emitted_at fresh.emitted_at
       | [] ->
           fail "buffer should contain the fresh event")
 
@@ -304,10 +307,10 @@ let test_get_events_after_filters () =
     ~finally:(fun () -> Sse.set_event_buffer_for_test original_buffer)
     (fun () ->
       Sse.set_event_buffer_for_test [];
-      Sse.buffer_event 802_000 "event A";
-      Sse.buffer_event 802_001 "event B";
+      Sse.buffer_event (delivery 802_000 "event A");
+      Sse.buffer_event (delivery 802_001 "event B");
       check (list string) "filtered exact replay" [ "event B" ]
-        (Sse.get_events_after 802_000))
+        (Sse.get_events_after 802_000 |> List.map (fun event -> event.Sse.frame)))
 
 let test_get_events_after_preserves_oldest_first_order () =
   let original_buffer = Sse.event_buffer_events_for_test () in
@@ -315,14 +318,14 @@ let test_get_events_after_preserves_oldest_first_order () =
     ~finally:(fun () -> Sse.set_event_buffer_for_test original_buffer)
     (fun () ->
       Sse.set_event_buffer_for_test [];
-      Sse.buffer_event 803_000 "event A";
-      Sse.buffer_event 803_001 "event B";
-      Sse.buffer_event 803_002 "event C";
+      Sse.buffer_event (delivery 803_000 "event A");
+      Sse.buffer_event (delivery 803_001 "event B");
+      Sse.buffer_event (delivery 803_002 "event C");
       check (list string) "all replayed oldest-first"
         [ "event A"; "event B"; "event C" ]
-        (Sse.get_events_after 802_999);
+        (Sse.get_events_after 802_999 |> List.map (fun event -> event.Sse.frame));
       check (list string) "tail replayed oldest-first" [ "event B"; "event C" ]
-        (Sse.get_events_after 803_000))
+        (Sse.get_events_after 803_000 |> List.map (fun event -> event.Sse.frame)))
 
 let test_buffer_event_caps_replay_buffer () =
   let original_buffer = Sse.event_buffer_events_for_test () in
@@ -332,7 +335,8 @@ let test_buffer_event_caps_replay_buffer () =
       Sse.set_event_buffer_for_test [];
       let base = Sse.current_id () + Sse.max_buffer_size + 1 in
       for index = 0 to Sse.max_buffer_size + 4 do
-        Sse.buffer_event (base + index) (Printf.sprintf "event-%d" index)
+        Sse.buffer_event
+          (delivery (base + index) (Printf.sprintf "event-%d" index))
       done;
       let buffered = Sse.event_buffer_events_for_test () in
       let expected_newest_first_indexes =
@@ -347,18 +351,32 @@ let test_buffer_event_caps_replay_buffer () =
       check int "buffer capped" Sse.max_buffer_size (List.length buffered);
       check (list int) "retained ids newest-first"
         (List.map (fun index -> base + index) expected_newest_first_indexes)
-        (List.map (fun (event_id, _, _) -> event_id) buffered);
+        (List.map (fun (event : Sse.delivery) -> event.event_id) buffered);
       check (list string) "retained event contents newest-first"
         expected_newest_first_events
-        (List.map (fun (_, event, _) -> event) buffered);
+        (List.map (fun (event : Sse.delivery) -> event.frame) buffered);
       check (list string) "replay retained events oldest-first"
         (List.rev expected_newest_first_events)
-        (Sse.get_events_after (base - 1)))
+        (Sse.get_events_after (base - 1)
+         |> List.map (fun event -> event.Sse.frame)))
 
 let test_get_events_after_empty () =
   let future_id = Sse.current_id () + 100000 in
   let events = Sse.get_events_after future_id in
   check int "empty for future id" 0 (List.length events)
+
+let test_replay_handoff_deduplicates_exact_ids_only () =
+  let replayed = [ delivery 910_010 "ten"; delivery 910_030 "thirty" ] in
+  let handoff = Sse.create_replay_handoff replayed in
+  check bool "replayed high id skipped once" false
+    (Sse.accept_live_delivery handoff (delivery 910_030 "thirty"));
+  check bool "unreplayed middle id is not lost" true
+    (Sse.accept_live_delivery handoff (delivery 910_020 "twenty"));
+  check bool "replayed low id skipped despite interleaving" false
+    (Sse.accept_live_delivery handoff (delivery 910_010 "ten"));
+  check bool "same id is accepted after overlap drains" true
+    (Sse.accept_live_delivery handoff (delivery 910_010 "ten-again"))
+;;
 
 let test_cleanup_expired_events_exact_under_domain_contention () =
   let original_buffer = Sse.event_buffer_events_for_test () in
@@ -366,8 +384,10 @@ let test_cleanup_expired_events_exact_under_domain_contention () =
   let expired_count = 32 in
   let expired_items =
     List.init expired_count (fun index ->
-      (900_000 + index, Printf.sprintf "expired-%d" index,
-       now -. Sse.buffer_ttl_seconds -. 10.0))
+      delivery
+        ~emitted_at:(now -. Sse.buffer_ttl_seconds -. 10.0)
+        (900_000 + index)
+        (Printf.sprintf "expired-%d" index))
   in
   Fun.protect
     ~finally:(fun () -> Sse.set_event_buffer_for_test original_buffer)
@@ -561,12 +581,14 @@ let () =
     "event_buffer", [
       test_case "buffer and retrieve" `Quick test_buffer_event_and_retrieve;
       test_case "buffer retry timestamps on successful commit" `Quick
-        test_buffer_event_timestamps_successful_commit_after_retry;
+        test_buffer_event_preserves_producer_timestamp_after_retry;
       test_case "filters" `Quick test_get_events_after_filters;
       test_case "preserves oldest-first order" `Quick
         test_get_events_after_preserves_oldest_first_order;
       test_case "caps replay buffer" `Quick test_buffer_event_caps_replay_buffer;
       test_case "empty for future" `Quick test_get_events_after_empty;
+      test_case "replay handoff deduplicates exact ids" `Quick
+        test_replay_handoff_deduplicates_exact_ids_only;
       test_case "cleanup exact under domain contention" `Quick
         test_cleanup_expired_events_exact_under_domain_contention;
     ];

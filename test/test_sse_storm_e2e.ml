@@ -543,6 +543,31 @@ let sse_data_jsons body =
       try Some (Yojson.Safe.from_string payload) with Yojson.Json_error _ -> None
     else None)
 
+let sse_id_data_jsons body =
+  let rec collect current_id acc = function
+    | [] -> List.rev acc
+    | line :: rest when String.starts_with ~prefix:"id:" line ->
+      let raw =
+        String.sub line 3 (String.length line - 3) |> String.trim
+      in
+      collect (int_of_string_opt raw) acc rest
+    | line :: rest when String.starts_with ~prefix:"data:" line ->
+      let payload =
+        String.sub line 5 (String.length line - 5) |> String.trim
+      in
+      let acc =
+        match current_id with
+        | None -> acc
+        | Some event_id ->
+          (match Yojson.Safe.from_string payload with
+           | json -> (event_id, json) :: acc
+           | exception Yojson.Json_error _ -> acc)
+      in
+      collect None acc rest
+    | _ :: rest -> collect current_id acc rest
+  in
+  collect None [] (String.split_on_char '\n' body)
+
 let has_numeric_sse_id body =
   String.split_on_char '\n' body
   |> List.exists (fun line ->
@@ -590,7 +615,41 @@ let test_ag_ui_frames_are_wire_encoded () =
          res.body);
   if not (has_numeric_sse_id res.body) then
     fail
-      (Printf.sprintf "/ag-ui/events discarded every SSE cursor: %S" res.body)
+      (Printf.sprintf "/ag-ui/events discarded every SSE cursor: %S" res.body);
+  let first_masc_events =
+    sse_id_data_jsons res.body
+    |> List.filter (fun (_event_id, json) -> is_masc_event json)
+  in
+  let second_sid = initialize_mcp_session ~port ~auth_token in
+  let second_headers =
+    [ ("Accept", "text/event-stream")
+    ; ("Authorization", "Bearer " ^ auth_token)
+    ; ("Mcp-Session-Id", second_sid)
+    ; ("Last-Event-ID", "0")
+    ]
+  in
+  let second =
+    run_curl ~headers:second_headers ~max_time:1.0 ~port ~path:"/ag-ui/events" ()
+  in
+  check_status "second /ag-ui/events replay accepted" 200 second;
+  let second_by_id = sse_id_data_jsons second.body in
+  List.iter
+    (fun (event_id, expected_json) ->
+       match List.assoc_opt event_id second_by_id with
+       | Some actual_json ->
+         if actual_json <> expected_json then
+           fail
+             (Printf.sprintf
+                "AG-UI replay changed payload for SSE id %d\nfirst=%s\nsecond=%s"
+                event_id
+                (Yojson.Safe.to_string expected_json)
+                (Yojson.Safe.to_string actual_json))
+       | None ->
+         fail
+           (Printf.sprintf
+              "second AG-UI replay omitted prior SSE id %d"
+              event_id))
+    first_masc_events
 
 let test_ag_ui_rejects_reconnect_then_recovers () =
   with_server @@ fun ~port ~auth_token ->

@@ -77,7 +77,7 @@ type event = {
 }
 
 (** Create an event with defaults *)
-let make_event ?(run_id=None) ?(message_id=None) ?(role=None)
+let make_event ?(timestamp = Time_compat.now ()) ?(run_id=None) ?(message_id=None) ?(role=None)
     ?(delta=None) ?(step_name=None) ?(tool_call_id=None)
     ?(tool_call_name=None) ?(snapshot=None)
     ?(message=None) ?(code=None)
@@ -126,7 +126,7 @@ let make_event ?(run_id=None) ?(message_id=None) ?(role=None)
     code;
     custom_name;
     custom_value;
-    timestamp = Time_compat.now ();
+    timestamp;
   }
 
 let run_error ~thread_id ?run_id ~message ?code () =
@@ -189,8 +189,8 @@ let event_to_sse ?id (e : event) : string =
 let default_thread_id = "default"
 
 (** Map any MASC-specific event to AG-UI CUSTOM *)
-let of_custom ~name (value : Yojson.Safe.t) : event =
-  make_event ~thread_id:default_thread_id
+let of_custom ?timestamp ~name (value : Yojson.Safe.t) : event =
+  make_event ?timestamp ~thread_id:default_thread_id
     ~custom_name:(Some name)
     ~custom_value:(Some value)
     Custom

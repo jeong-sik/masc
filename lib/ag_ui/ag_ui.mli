@@ -62,6 +62,7 @@ type event = private {
 }
 
 val make_event :
+  ?timestamp:float ->
   ?run_id:string option ->
   ?message_id:string option ->
   ?role:role option ->
@@ -77,7 +78,7 @@ val make_event :
   thread_id:string ->
   event_type ->
   event
-(** Construct an [event] with sensible defaults. [timestamp] is set to
+(** Construct an [event] with sensible defaults. [timestamp] defaults to
     [Time_compat.now ()] at call time.
 
     [Run_error] requires a non-empty [message]. [message] and [code] are
@@ -108,7 +109,7 @@ val event_to_sse : ?id:int -> event -> string
 val default_thread_id : string
 (** Thread ID used by the single-namespace MASC bridge (["default"]). *)
 
-val of_custom : name:string -> Yojson.Safe.t -> event
+val of_custom : ?timestamp:float -> name:string -> Yojson.Safe.t -> event
 (** Wrap any MASC event in [Custom] with the given [name]/[value]. *)
 
 (** {1 Protocol Metadata} *)

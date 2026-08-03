@@ -261,9 +261,4 @@ val prune_completed :
     durable record of work a consumer accepted, and both
     [complete_dispatched_occurrence] and [fail_dispatched_occurrence] return
     [Schedule_not_found] without the request row — so pruning the pair would
-    both erase the evidence and make the occurrence unsettleable.
-
-    An occurrence whose consumer evidence is indeterminate is therefore
-    retained without a time bound until #26695 assigns that class a terminal
-    disposition. Without that disposition, retired ledger generations can
-    accumulate retained request/execution pairs. *)
+    both erase the evidence and make the occurrence unsettleable. *)

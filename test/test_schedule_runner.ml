@@ -767,6 +767,31 @@ let test_reclaim_projects_consumer_completion () =
     (settled.status = Execution_succeeded)
 ;;
 
+let test_reclaim_then_prune_removes_settled_terminal_request () =
+  with_workspace
+  @@ fun config ->
+  let request = accepted_recurring_occurrence config ~schedule_id:"reclaim-prune" in
+  (match cancel config ~schedule_id:request.schedule_id with
+   | Ok _ -> ()
+   | Error error -> fail (service_error_to_string error));
+  let calls = ref [] in
+  let completed_consumer =
+    accepting_consumer
+      ~settlement:(fun _config _execution -> Ok Consumer_completed_occurrence)
+      calls
+  in
+  let outcome = reclaim_ok ~consumer:completed_consumer config ~now:400.0 in
+  check int "terminal request occurrence settled" 1 outcome.settled_elsewhere;
+  let state, pruned =
+    match Schedule_store.prune_completed config with
+    | Ok result -> result
+    | Error error -> fail (Schedule_store.store_error_to_string error)
+  in
+  check int "settled terminal request pruned" 1 pruned;
+  check int "request removed after exact settlement" 0 (List.length state.schedules);
+  check int "execution removed with request" 0 (List.length state.executions)
+;;
+
 let test_reclaim_projects_consumer_cancellation () =
   with_workspace
   @@ fun config ->
@@ -847,6 +872,8 @@ let () =
             test_reclaim_leaves_held_occurrence_alone
         ; test_case "projects consumer completion to schedule execution" `Quick
             test_reclaim_projects_consumer_completion
+        ; test_case "reclaim then prune removes settled terminal request" `Quick
+            test_reclaim_then_prune_removes_settled_terminal_request
         ; test_case "projects consumer cancellation to schedule execution" `Quick
             test_reclaim_projects_consumer_cancellation
         ; test_case "leaves an occurrence when the consumer cannot answer" `Quick

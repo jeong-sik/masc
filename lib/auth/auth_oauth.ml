@@ -634,8 +634,9 @@ let register_client ~base_path ~client_name ~redirect_uris =
             in
             let reclaimable =
               stored_clients
-              |> List.filter (fun (_, stored) -> not (protected stored.client_id))
-              |> List.sort (fun (_, left) (_, right) ->
+              |> List.filter (fun (_, (stored : client)) ->
+                not (protected stored.client_id))
+              |> List.sort (fun (_, (left : client)) (_, (right : client)) ->
                 let by_created = Float.compare left.created_at_unix right.created_at_unix in
                 if by_created <> 0
                 then by_created

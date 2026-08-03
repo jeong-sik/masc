@@ -998,6 +998,7 @@ let test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing () =
      check bool "missing snapshot provenance is explicit" true
        (String_util.contains_substring detail "event queue snapshot is missing")
    | [ Schedule_runner.Settlement_batch_cardinality_mismatch _ ]
+   | [ Schedule_runner.Settlement_batch_consumer_failure _ ]
    | []
    | _ :: _ :: _ -> fail "expected one missing-snapshot reclaim failure");
   match

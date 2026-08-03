@@ -196,7 +196,7 @@ let discord_bot_token_opt () = trimmed_env_opt "DISCORD_BOT_TOKEN"
 
 let broadcast_mention_wakeup_action = function
   | Some target when String.trim target <> "" -> `Wake_keeper target
-  | Some _ | None -> `Wake_all_keepers
+  | Some _ | None -> `Suppress_no_target
 
 module Projection_for_testing = struct
   type queued_chat_projection = {
@@ -1340,27 +1340,19 @@ let start_keeper_loops_owned
         "board: Activity_graph.emit kind=%s failed: %s"
         activity_kind
         (Printexc.to_string exn));
-  (* Wire every broadcast to Keeper wakeup. Explicit mentions target one lane;
-     a broadcast without a target is still actionable workspace input and
-     wakes every registered lane. Lifecycle admission remains authoritative:
-     operator-paused or non-running lanes retain the input without being
-     forced through a wake signal. *)
+  (* Wire broadcast -> keeper wakeup. Explicit mentions wake the target
+     keeper immediately; unmentioned broadcasts remain passive SSE/message
+     fanout so one broad announcement cannot create a fleet-wide turn storm.
+     Board signals have their own capped keeper wake path above. *)
   let broadcast_mention_handler =
     fun mention ->
     match broadcast_mention_wakeup_action mention with
     | `Wake_keeper target ->
       Keeper_keepalive.wakeup_keeper ~base_path:(Mcp_server.workspace_config state).base_path target;
       Log.Keeper.info "broadcast mention → wakeup keeper %s" target
-    | `Wake_all_keepers ->
-      let base_path = (Mcp_server.workspace_config state).base_path in
-      let entries = Keeper_registry.all ~base_path () in
-      List.iter
-        (fun (entry : Keeper_registry.registry_entry) ->
-           Keeper_keepalive.wakeup_keeper ~base_path entry.name)
-        entries;
+    | `Suppress_no_target ->
       Log.Keeper.info
-        "broadcast without mention → wakeup all registered keepers count=%d"
-        (List.length entries)
+        "broadcast without mention -> keeper wakeup suppressed (passive fanout)"
   in
   Workspace_broadcast.on_broadcast_mention := broadcast_mention_handler;
   (* Orchestrator needs synchronous registration for shutdown hook *)

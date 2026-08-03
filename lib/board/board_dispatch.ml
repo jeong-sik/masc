@@ -530,6 +530,10 @@ let list_recent_posts_matching_author ~author_matches ~limit () =
       ~limit:(max 0 limit)
 ;;
 
+let current_post_cursor () =
+  match backend () with
+  | Jsonl store -> Board.current_post_cursor store
+
 let get_comments ~post_id =
   match backend () with
   | Jsonl store -> Board.get_comments store ~post_id

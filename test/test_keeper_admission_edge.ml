@@ -173,7 +173,7 @@ let without_overrides f =
   Fun.protect ~finally:(fun () -> Config_boot_overrides.reset_for_tests ()) f
 ;;
 
-let decide ~meta obs = WO.keeper_cycle_decision ~reactive_wake:false ~meta obs
+let decide ~meta obs = WO.keeper_cycle_decision ~meta obs
 
 let skip_reasons d =
   match d.WO.verdict with
@@ -226,17 +226,6 @@ let test_backlog_edge_admits () =
          | WO.Task_backlog _ -> true
          | _ -> false)
        (run_reasons d))
-;;
-
-let test_external_wake_does_not_admit_backlog_only () =
-  without_overrides @@ fun () ->
-  let d =
-    WO.keeper_cycle_decision
-      ~reactive_wake:true
-      ~meta:(bootstrapped_meta ())
-      backlog_edge_obs
-  in
-  check bool "broadcast wake does not fan out backlog turn" false d.WO.should_run
 ;;
 
 let test_due_schedule_admits () =
@@ -608,10 +597,6 @@ let () =
       , [ test_case "empty observation skips" `Quick test_empty_observation_skips
         ; test_case "bootstrap admits" `Quick test_bootstrap_admits
         ; test_case "backlog edge admits" `Quick test_backlog_edge_admits
-        ; test_case
-            "external wake suppresses backlog-only admission"
-            `Quick
-            test_external_wake_does_not_admit_backlog_only
         ; test_case "due schedule admits" `Quick test_due_schedule_admits
         ; test_case
             "pending message admits scheduled when reactive off"

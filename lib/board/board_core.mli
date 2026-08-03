@@ -315,6 +315,10 @@ val list_posts
   -> unit
   -> post list
 
+(** Returns the post with the greatest [(updated_at, post_id)] cursor token,
+    or [None] when the board is empty. The fold runs under the board lock and
+    does not allocate or sort the complete post history. *)
+val current_post_cursor : store -> float * string option
 (** Atomic high-water mark for Board observation.
 
     When the Board is empty, the timestamp is captured while holding the same

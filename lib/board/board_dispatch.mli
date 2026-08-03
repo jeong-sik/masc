@@ -210,6 +210,9 @@ val list_recent_posts_matching_author :
     canonical identity ownership without routing through the public
     substring-based author search. *)
 
+val current_post_cursor : unit -> float * string option
+(** Atomic high-water mark for initializing a Board observation cursor. *)
+
 val delete_post : post_id:string -> (unit, Board.board_error) Result.t
 
 val set_thread_id :

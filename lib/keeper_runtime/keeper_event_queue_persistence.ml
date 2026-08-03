@@ -518,7 +518,11 @@ let quarantine_orphaned_owner_unlocked owner ~confirm_owner_presence =
   let quarantine_root =
     Filename.concat keepers_dir ".orphaned-event-queues"
   in
-  let quarantine_path = Filename.concat quarantine_root keeper_name in
+  let quarantine_path =
+    Filename.concat
+      quarantine_root
+      (Printf.sprintf "%s-%s" keeper_name (Random_id.uuid_v7 ()))
+  in
   let ( let* ) = Result.bind in
   let* snapshot_exists = path_exists_result snapshot_path in
   if not snapshot_exists

@@ -177,8 +177,10 @@ val quarantine_orphaned_owner_result :
     after [confirm_owner_presence] rechecks, under the same durable owner lock,
     that no registry, metadata, or declarative config authority exists. The
     snapshot, transition WAL, and sibling runtime evidence move together into
-    [.masc/keepers/.orphaned-event-queues/<keeper>]. Both source and target
-    parents are fsynced. Existing quarantine data is never overwritten. *)
+    [.masc/keepers/.orphaned-event-queues/<keeper>-<operation-uuid>]. A fresh
+    UUID permits a later orphan generation with the same Keeper name to
+    converge without overwriting earlier evidence. Both source and target
+    parents are fsynced. *)
 
 val cancel_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->

@@ -1,19 +1,10 @@
 module Persistence = Keeper_event_queue_persistence
 
-let rec remove_tree path =
-  if Sys.file_exists path
-  then
-    if Sys.is_directory path
-    then (
-      Sys.readdir path
-      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
-      Unix.rmdir path)
-    else Unix.unlink path
-;;
-
 let with_temp_dir prefix f =
   let base_path = Filename.temp_dir prefix "" in
-  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () -> f base_path)
+  Fun.protect
+    ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () -> f base_path)
 ;;
 
 let stimulus : Keeper_event_queue.stimulus =
@@ -44,32 +35,33 @@ let snapshot_path ~base_path ~keeper_name =
     "event-queue-v14.json"
 ;;
 
-let quarantine_path ~base_path ~keeper_name =
+let quarantine_root ~base_path =
   Filename.concat
-    (Filename.concat
-       (Common.keepers_runtime_dir_of_base ~base_path)
-       ".orphaned-event-queues")
-    keeper_name
+    (Common.keepers_runtime_dir_of_base ~base_path)
+    ".orphaned-event-queues"
+;;
+
+let quarantine_absent_owner ~base_path ~keeper_name =
+  match
+    Persistence.quarantine_orphaned_owner_result
+      ~base_path
+      ~keeper_name
+      ~confirm_owner_presence:(fun () -> Ok Persistence.Orphan_owner_absent)
+  with
+  | Ok (Persistence.Orphan_quarantined { quarantine_path }) -> quarantine_path
+  | Ok _ -> Alcotest.fail "orphan queue did not enter quarantine"
+  | Error detail -> Alcotest.fail detail
 ;;
 
 let test_absent_owner_moves_full_runtime_directory () =
   with_temp_dir "event-queue-orphan-quarantine-" @@ fun base_path ->
   let keeper_name = "orphan-owner" in
   seed ~base_path ~keeper_name;
-  let quarantine_path = quarantine_path ~base_path ~keeper_name in
-  (match
-     Persistence.quarantine_orphaned_owner_result
-       ~base_path
-       ~keeper_name
-       ~confirm_owner_presence:(fun () -> Ok Persistence.Orphan_owner_absent)
-   with
-   | Ok (Persistence.Orphan_quarantined result) ->
-     Alcotest.(check string)
-       "typed quarantine path"
-       quarantine_path
-       result.quarantine_path
-   | Ok _ -> Alcotest.fail "orphan queue did not enter quarantine"
-   | Error detail -> Alcotest.fail detail);
+  let quarantine_path = quarantine_absent_owner ~base_path ~keeper_name in
+  Alcotest.(check string)
+    "quarantine remains under the dedicated root"
+    (quarantine_root ~base_path)
+    (Filename.dirname quarantine_path);
   Alcotest.(check bool)
     "active snapshot moved"
     false
@@ -82,6 +74,30 @@ let test_absent_owner_moves_full_runtime_directory () =
     "quarantined owner leaves discovery"
     []
     (Persistence.discover_keeper_names_with_snapshots ~base_path).keeper_names
+;;
+
+let test_reused_owner_name_gets_distinct_quarantine () =
+  with_temp_dir "event-queue-reused-orphan-quarantine-" @@ fun base_path ->
+  let keeper_name = "reused-orphan-owner" in
+  seed ~base_path ~keeper_name;
+  let first_path = quarantine_absent_owner ~base_path ~keeper_name in
+  seed ~base_path ~keeper_name;
+  let second_path = quarantine_absent_owner ~base_path ~keeper_name in
+  Alcotest.(check bool)
+    "reused owner name preserves both quarantine generations"
+    true
+    (not (String.equal first_path second_path));
+  List.iter
+    (fun path ->
+       Alcotest.(check bool)
+         "quarantined snapshot preserved"
+         true
+         (Sys.file_exists (Filename.concat path "event-queue-v14.json")))
+    [ first_path; second_path ];
+  Alcotest.(check bool)
+    "second active snapshot moved"
+    false
+    (Sys.file_exists (snapshot_path ~base_path ~keeper_name))
 ;;
 
 let test_reappeared_owner_fences_quarantine () =
@@ -115,6 +131,10 @@ let () =
             "reappeared owner fences quarantine"
             `Quick
             test_reappeared_owner_fences_quarantine
+        ; Alcotest.test_case
+            "reused owner name gets a distinct quarantine"
+            `Quick
+            test_reused_owner_name_gets_distinct_quarantine
         ] )
     ]
 ;;

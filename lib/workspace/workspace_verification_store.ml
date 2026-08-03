@@ -11,7 +11,6 @@ type evidence_read_failure =
   | Evidence_missing
   | Evidence_not_regular_file
   | Evidence_outside_worker_playground
-  | Evidence_invalid_reference
   | Evidence_invalid_utf8
   | Evidence_symbolic_link
   | Evidence_changed_during_read
@@ -26,6 +25,7 @@ type submitted_evidence_item =
       ; truncated : bool
       ; content_sha256 : string
       }
+  | Evidence_invalid_reference
   | Evidence_artifact_unreadable of
       { reference : string
       ; reason : evidence_read_failure
@@ -53,7 +53,6 @@ let evidence_read_failure_to_string = function
   | Evidence_missing -> "missing"
   | Evidence_not_regular_file -> "not_regular_file"
   | Evidence_outside_worker_playground -> "outside_worker_playground"
-  | Evidence_invalid_reference -> "invalid_reference"
   | Evidence_invalid_utf8 -> "invalid_utf8"
   | Evidence_symbolic_link -> "symbolic_link"
   | Evidence_changed_during_read -> "changed_during_read"
@@ -63,30 +62,40 @@ let evidence_read_failure_code = function
   | Evidence_missing -> "missing"
   | Evidence_not_regular_file -> "not_regular_file"
   | Evidence_outside_worker_playground -> "outside_worker_playground"
-  | Evidence_invalid_reference -> "invalid_reference"
   | Evidence_invalid_utf8 -> "invalid_utf8"
   | Evidence_symbolic_link -> "symbolic_link"
   | Evidence_changed_during_read -> "changed_during_read"
   | Evidence_read_error _ -> "read_error"
 
-let evidence_read_failure_of_string = function
-  | "missing" -> Ok Evidence_missing
-  | "not_regular_file" -> Ok Evidence_not_regular_file
-  | "outside_worker_playground" -> Ok Evidence_outside_worker_playground
-  | "invalid_reference" -> Ok Evidence_invalid_reference
-  | "invalid_utf8" -> Ok Evidence_invalid_utf8
-  | "symbolic_link" -> Ok Evidence_symbolic_link
-  | "changed_during_read" -> Ok Evidence_changed_during_read
-  | raw when String.starts_with ~prefix:"read_error:" raw ->
-    Ok
-      (Evidence_read_error
-         (String.sub raw 11 (String.length raw - 11)))
-  | raw -> Error (Printf.sprintf "unknown evidence read failure %S" raw)
+let evidence_read_failure_to_yojson reason =
+  match reason with
+  | Evidence_read_error detail ->
+    `Assoc [ "code", `String "read_error"; "detail", `String detail ]
+  | ( Evidence_missing
+    | Evidence_not_regular_file
+    | Evidence_outside_worker_playground
+    | Evidence_invalid_utf8
+    | Evidence_symbolic_link
+    | Evidence_changed_during_read ) ->
+    `Assoc [ "code", `String (evidence_read_failure_code reason) ]
+
+let evidence_read_failure_of_yojson = function
+  | `Assoc fields ->
+    (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
+     | [ "code", `String "missing" ] -> Ok Evidence_missing
+     | [ "code", `String "not_regular_file" ] -> Ok Evidence_not_regular_file
+     | [ "code", `String "outside_worker_playground" ] ->
+       Ok Evidence_outside_worker_playground
+     | [ "code", `String "invalid_utf8" ] -> Ok Evidence_invalid_utf8
+     | [ "code", `String "symbolic_link" ] -> Ok Evidence_symbolic_link
+     | [ "code", `String "changed_during_read" ] -> Ok Evidence_changed_during_read
+     | [ "code", `String "read_error"; "detail", `String detail ] ->
+       Ok (Evidence_read_error detail)
+     | _ -> Error "submitted evidence snapshot has an invalid unreadable reason")
+  | _ -> Error "submitted evidence snapshot unreadable reason must be an object"
 
 let content_sha256 content =
   Digestif.SHA256.(digest_string content |> to_hex)
-
-let redacted_invalid_reference = "<redacted-invalid-reference>"
 
 let submitted_evidence_item_to_yojson = function
   | Evidence_note note ->
@@ -101,25 +110,17 @@ let submitted_evidence_item_to_yojson = function
       ; "truncated", `Bool truncated
       ; "content_sha256", `String content_sha256
       ]
+  | Evidence_invalid_reference ->
+    `Assoc
+      [ "kind", `String "artifact_unreadable"
+      ; "reason", `Assoc [ "code", `String "invalid_reference" ]
+      ]
   | Evidence_artifact_unreadable { reference; reason } ->
-    (match reason with
-     | Evidence_invalid_reference ->
-       `Assoc
-         [ "kind", `String "artifact_unreadable"
-         ; "reason", `String (evidence_read_failure_code reason)
-         ]
-     | ( Evidence_missing
-       | Evidence_not_regular_file
-       | Evidence_outside_worker_playground
-       | Evidence_invalid_utf8
-       | Evidence_symbolic_link
-       | Evidence_changed_during_read
-       | Evidence_read_error _ ) ->
-       `Assoc
-         [ "kind", `String "artifact_unreadable"
-         ; "reference", `String reference
-         ; "reason", `String (evidence_read_failure_to_string reason)
-         ])
+    `Assoc
+      [ "kind", `String "artifact_unreadable"
+      ; "reference", `String reference
+      ; "reason", evidence_read_failure_to_yojson reason
+      ]
 
 let request_header_to_yojson request =
   `Assoc
@@ -190,25 +191,17 @@ let submitted_evidence_item_metadata_to_yojson = function
       ; "truncated", `Bool truncated
       ; "content_sha256", `String content_sha256
       ]
+  | Evidence_invalid_reference ->
+    `Assoc
+      [ "kind", `String "artifact_unreadable"
+      ; "reason", `String "invalid_reference"
+      ]
   | Evidence_artifact_unreadable { reference; reason } ->
-    (match reason with
-     | Evidence_invalid_reference ->
-       `Assoc
-         [ "kind", `String "artifact_unreadable"
-         ; "reason", `String (evidence_read_failure_code reason)
-         ]
-     | ( Evidence_missing
-       | Evidence_not_regular_file
-       | Evidence_outside_worker_playground
-       | Evidence_invalid_utf8
-       | Evidence_symbolic_link
-       | Evidence_changed_during_read
-       | Evidence_read_error _ ) ->
-       `Assoc
-         [ "kind", `String "artifact_unreadable"
-         ; "reference", `String reference
-         ; "reason", `String (evidence_read_failure_code reason)
-         ])
+    `Assoc
+      [ "kind", `String "artifact_unreadable"
+      ; "reference", `String reference
+      ; "reason", `String (evidence_read_failure_code reason)
+      ]
 ;;
 
 let submitted_evidence_access_metadata_to_yojson = function
@@ -304,23 +297,18 @@ let submitted_evidence_item_of_yojson = function
               })
      | Some (`String "artifact_unreadable") ->
        let open Result.Syntax in
-       let* reason_raw = string_field "reason" in
-       let* reason = evidence_read_failure_of_string reason_raw in
-       (match reason, List.assoc_opt "reference" fields with
-        | Evidence_invalid_reference, None ->
-          Ok
-            (Evidence_artifact_unreadable
-               { reference = redacted_invalid_reference; reason })
-        | Evidence_invalid_reference, Some _ ->
-          Error
-            "invalid submitted evidence references must not persist the rejected value"
-        | ( Evidence_missing
-          | Evidence_not_regular_file
-          | Evidence_outside_worker_playground
-          | Evidence_invalid_utf8
-          | Evidence_symbolic_link
-          | Evidence_changed_during_read
-          | Evidence_read_error _ ), _ ->
+       let* reason_json =
+         match List.assoc_opt "reason" fields with
+         | Some reason -> Ok reason
+         | None -> Error "submitted evidence snapshot is missing unreadable reason"
+       in
+       (match reason_json, List.assoc_opt "reference" fields with
+        | `Assoc [ "code", `String "invalid_reference" ], None ->
+          Ok Evidence_invalid_reference
+        | `Assoc [ "code", `String "invalid_reference" ], Some _ ->
+          Error "invalid submitted evidence references must not persist the rejected value"
+        | reason_json, _ ->
+          let* reason = evidence_read_failure_of_yojson reason_json in
           let* reference = string_field "reference" in
           Ok (Evidence_artifact_unreadable { reference; reason }))
      | Some (`String kind) ->
@@ -569,7 +557,7 @@ let valid_producer_relative_path path =
 
 let inspect_producer_relative_artifact ~base_path ~worker ~reference relative_path =
   if not (valid_producer_relative_path relative_path)
-  then Evidence_artifact_unreadable { reference; reason = Evidence_invalid_reference }
+  then Evidence_invalid_reference
   else
     let project_root = project_root_of_base_path base_path in
     let ownership_root =
@@ -603,9 +591,7 @@ let snapshot_submitted_evidence_item ~base_path ~worker reference =
     (match strip_prefix ~prefix:note_reference_prefix reference with
      | Some note when not (String.equal (String.trim note) "") ->
        Evidence_note note
-     | Some _ | None ->
-       Evidence_artifact_unreadable
-         { reference; reason = Evidence_invalid_reference })
+     | Some _ | None -> Evidence_invalid_reference)
 
 let snapshot_submitted_evidence_json ~base_path ~worker references =
   `List

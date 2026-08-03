@@ -252,10 +252,7 @@ let test_system_llm_review_notes_are_metadata_only () =
                   VS.Evidence_read_error
                     "Unix.Unix_error(ENOENT, open, /private/producer/secret.txt)"
               }
-          ; VS.Evidence_artifact_unreadable
-              { reference = "/private/producer/invalid-reference.txt"
-              ; reason = VS.Evidence_invalid_reference
-              }
+          ; VS.Evidence_invalid_reference
           ]
       }
   in
@@ -362,6 +359,47 @@ let test_system_llm_review_notes_are_metadata_only () =
       "full audit keeps the unavailable detail"
       true
       (contains_substring unavailable_audit "/private/producer/request.json")
+
+let test_unreadable_evidence_uses_structured_current_contract () =
+  let request : VS.request_header =
+    { id = "vrf-structured-reason"
+    ; task_id = "task-structured-reason"
+    ; worker = "keeper-executor-agent"
+    ; created_at = 1.0
+    }
+  in
+  let json =
+    VS.submitted_evidence_access_to_yojson
+      (VS.Evidence_available
+         { request
+         ; items =
+             [ VS.Evidence_artifact_unreadable
+                 { reference = "artifact:proof.txt"
+                 ; reason = VS.Evidence_read_error "permission denied"
+                 }
+             ; VS.Evidence_invalid_reference
+             ]
+         })
+  in
+  match Yojson.Safe.Util.member "items" json |> Yojson.Safe.Util.to_list with
+  | [ readable; invalid ] ->
+    Alcotest.(check (list (pair string string)))
+      "read error payload is structured"
+      [ "code", "read_error"; "detail", "permission denied" ]
+      (Yojson.Safe.Util.member "reason" readable
+       |> Yojson.Safe.Util.to_assoc
+       |> List.map (fun (key, value) -> key, Yojson.Safe.Util.to_string value));
+    Alcotest.(check bool)
+      "invalid references persist no payload"
+      false
+      (Yojson.Safe.Util.to_assoc invalid |> List.mem_assoc "reference");
+    Alcotest.(check string)
+      "invalid reference remains typed"
+      "invalid_reference"
+      (Yojson.Safe.Util.member "reason" invalid
+       |> Yojson.Safe.Util.member "code"
+       |> Yojson.Safe.Util.to_string)
+  | _ -> Alcotest.fail "expected one readable failure and one invalid reference"
 
 let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
   with_eio_temp_dir (fun base_path ->
@@ -1354,8 +1392,7 @@ let test_submit_snapshot_rejects_relative_traversal_and_symlink_escape () =
         with
         | VS.Evidence_available
             { items =
-                VS.Evidence_artifact_unreadable
-                  { reason = VS.Evidence_invalid_reference; _ }
+                VS.Evidence_invalid_reference
                 :: VS.Evidence_artifact_unreadable
                      { reason = VS.Evidence_symbolic_link; _ }
                 :: []
@@ -1414,10 +1451,8 @@ let test_submit_snapshot_rejects_bare_and_absolute_references () =
     with
     | VS.Evidence_available
         { items =
-            VS.Evidence_artifact_unreadable
-              { reason = VS.Evidence_invalid_reference; _ }
-            :: VS.Evidence_artifact_unreadable
-                 { reason = VS.Evidence_invalid_reference; _ }
+            VS.Evidence_invalid_reference
+            :: VS.Evidence_invalid_reference
             :: []
         ; _
         } ->
@@ -1446,8 +1481,7 @@ let test_submitted_evidence_inspection_rejects_cross_playground_path () =
     with
     | VS.Evidence_available
         { items =
-            VS.Evidence_artifact_unreadable
-              { reason = VS.Evidence_invalid_reference; _ }
+            VS.Evidence_invalid_reference
             :: _
         ; _
         } ->
@@ -1753,6 +1787,8 @@ let () =
         test_system_llm_authority_helpers_are_typed;
       Alcotest.test_case "system LLM notes keep metadata only" `Quick
         test_system_llm_review_notes_are_metadata_only;
+      Alcotest.test_case "unreadable evidence uses structured current contract" `Quick
+        test_unreadable_evidence_uses_structured_current_contract;
       Alcotest.test_case "system LLM rejection reaches producer queue" `Quick
         test_system_llm_rejection_is_durably_delivered_to_producer_keeper;
       Alcotest.test_case "system LLM rejection uses registry producer binding" `Quick

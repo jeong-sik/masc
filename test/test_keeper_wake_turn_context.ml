@@ -192,7 +192,8 @@ let user_message ?turn_decision ?current_task ?active_goal_summaries observation
     | None -> Inputs.No_current_task
   in
   let { Prompt.world_state = user; _ } =
-    Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~turn_decision
+    Prompt.build_prompt ~meta ~config:(Masc.Workspace.default_config "/tmp/unused")
+      ~turn_decision
       ~current_task ?active_goal_summaries ~observation ()
   in
   user
@@ -492,7 +493,7 @@ let test_preview_does_not_invent_wake_reason () =
   let { Prompt.world_state; _ } =
     Prompt.build_prompt_preview
       ~meta:preview_meta
-      ~base_path:"/tmp/unused"
+      ~config:(Masc.Workspace.default_config "/tmp/unused")
       ~current_task:Inputs.No_current_task
       ~observation:base_observation
       ()
@@ -559,7 +560,8 @@ let test_goal_holder_gets_self_direction_directive () =
     WO.keeper_cycle_decision ~meta:meta_with_goal base_observation
   in
   let { Prompt.system_prompt = system; _ } =
-    Prompt.build_prompt ~meta:meta_with_goal ~base_path:"/tmp/unused"
+    Prompt.build_prompt ~meta:meta_with_goal
+      ~config:(Masc.Workspace.default_config "/tmp/unused")
       ~turn_decision:goal_turn_decision ~current_task:Inputs.No_current_task
       ~observation:base_observation ()
   in
@@ -571,7 +573,8 @@ let test_goal_holder_gets_self_direction_directive () =
     WO.keeper_cycle_decision ~meta base_observation
   in
   let { Prompt.system_prompt = no_goal_system; _ } =
-    Prompt.build_prompt ~meta ~base_path:"/tmp/unused"
+    Prompt.build_prompt ~meta
+      ~config:(Masc.Workspace.default_config "/tmp/unused")
       ~turn_decision:no_goal_turn_decision ~current_task:Inputs.No_current_task
       ~observation:base_observation ()
   in

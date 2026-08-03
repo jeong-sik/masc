@@ -150,7 +150,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
           let current_task =
             Keeper_world_observation_inputs.read_current_task ~config ~meta:m
           in
-          Keeper_unified_prompt.build_prompt_preview ~meta:m ~base_path:config.base_path
+          Keeper_unified_prompt.build_prompt_preview ~meta:m ~config
             ~profile_defaults:defaults ~current_task ~active_goal_summaries ~observation ()
         in
         (* Match what a turn actually sends: the observation frame rides the

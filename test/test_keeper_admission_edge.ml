@@ -27,6 +27,7 @@
 open Alcotest
 module WO = Masc.Keeper_world_observation
 module Inputs = Masc.Keeper_world_observation_inputs
+module Workspace = Masc.Workspace
 
 let make_meta name =
   let json =

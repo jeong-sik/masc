@@ -9,7 +9,6 @@ type evidence_read_failure =
   | Evidence_missing
   | Evidence_not_regular_file
   | Evidence_outside_worker_playground
-  | Evidence_invalid_reference
   | Evidence_invalid_utf8
   | Evidence_symbolic_link
   | Evidence_changed_during_read
@@ -24,6 +23,7 @@ type submitted_evidence_item =
       ; truncated : bool
       ; content_sha256 : string
       }
+  | Evidence_invalid_reference
   | Evidence_artifact_unreadable of
       { reference : string
       ; reason : evidence_read_failure
@@ -56,7 +56,9 @@ val submitted_evidence_access_to_yojson :
 val submitted_evidence_access_metadata_to_yojson :
   submitted_evidence_access -> Yojson.Safe.t
 
-val evidence_read_failure_to_string : evidence_read_failure -> string
+val evidence_read_failure_code : evidence_read_failure -> string
+(** Stable bounded code for diagnostics and metadata. Error detail is carried
+    only by the structured durable reason object. *)
 val evidence_access_failure_to_string :
   request_id:string -> evidence_access_failure -> string
 val evidence_read_failure_of_owned_read_failure :
@@ -71,7 +73,7 @@ val snapshot_submitted_evidence_json :
     ["note:<text>"] preserves non-file evidence explicitly.
     [content_sha256] covers the bounded UTF-8 content persisted in the
     snapshot, not bytes omitted beyond the projection cap. Bare and absolute
-    references are persisted as typed invalid references. *)
+    references are persisted as a payload-free typed invalid-reference item. *)
 val inspect_submitted_evidence_for_authority :
   base_path:string ->
   request_id:string ->

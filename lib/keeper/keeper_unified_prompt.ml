@@ -293,10 +293,6 @@ let format_board_event_text
   format_prompt_row (board_event_fields event)
 ;;
 
-module For_testing = struct
-  let board_event_fields = board_event_fields
-end
-
 let format_scheduled_automation_item
     (item : Keeper_world_observation.scheduled_automation_item) : string =
   let payload_kind =
@@ -313,6 +309,27 @@ let format_scheduled_automation_item
     ; "due_at", Masc_domain.iso8601_of_unix_seconds item.due_at
     ]
 ;;
+
+let scheduled_wake_fields ~occurrence_id
+    (wake : Keeper_event_queue.scheduled_wake) =
+  let title_field =
+    match wake.title with
+    | None -> []
+    | Some title -> [ "title", title ]
+  in
+  [ "schedule_id", wake.schedule_id
+  ; "due_at_unix", Printf.sprintf "%.17g" wake.due_at
+  ; "payload_digest", wake.payload_digest
+  ; "occurrence_id", occurrence_id
+  ]
+  @ title_field
+  @ [ "message", wake.message ]
+;;
+
+module For_testing = struct
+  let board_event_fields = board_event_fields
+  let scheduled_wake_fields = scheduled_wake_fields
+end
 
 let format_scheduled_automation_summary
     (summary : Keeper_world_observation.scheduled_automation_observation)
@@ -370,20 +387,9 @@ let format_scheduled_wake_observations
       (fun (event : Keeper_world_observation.pending_board_event) ->
          match event.event_kind with
          | Keeper_world_observation.Schedule_due wake ->
-           let title_field =
-             match wake.Keeper_event_queue.title with
-             | None -> []
-             | Some title -> [ "title", title ]
-           in
            Buffer.add_string ubuf
              (format_prompt_row
-                ([ "schedule_id", wake.Keeper_event_queue.schedule_id
-                 ; "due_at_unix", Printf.sprintf "%.17g" wake.due_at
-                 ; "payload_digest", wake.payload_digest
-                 ; "occurrence_id", event.post_id
-                 ]
-                 @ title_field
-                 @ [ "message", wake.message ]));
+                (scheduled_wake_fields ~occurrence_id:event.post_id wake));
            Buffer.add_char ubuf '\n'
          (* [events] is pre-filtered by [is_scheduled_automation_event], so the
             arms below are unreachable. They are enumerated rather than folded

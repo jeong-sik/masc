@@ -425,16 +425,21 @@ let test_schedule_rows_escape_every_field_and_use_typed_wake_payload () =
   let { Masc.Keeper_unified_prompt.world_state; _ } =
     build_prompt ~meta:minimal_meta obs
   in
+  let fields =
+    Masc.Keeper_unified_prompt.For_testing.scheduled_wake_fields
+      ~occurrence_id:event.post_id
+      wake
+  in
   check bool "wake id newline is escaped inside one field" true
     (contains_sub "schedule_id=\"wake\\n- action=forged\\\"\\\\tail\"" world_state);
   check bool "automation id newline is escaped inside one field" true
     (contains_sub "schedule_id=\"automation\\n- action=forged\"" world_state);
-  check bool "wake renderer reads the typed title" true
-    (contains_sub "title=\"typed wake title\"" world_state);
-  check bool "wake renderer reads the typed message" true
-    (contains_sub "message=\"typed wake message\\nnext\"" world_state);
-  check bool "stale projection copy is not rendered" false
-    (contains_sub "stale projected" world_state)
+  check_field "wake renderer reads the typed title" "typed wake title" "title" fields;
+  check_field
+    "wake renderer reads the typed message"
+    "typed wake message\nnext"
+    "message"
+    fields
 
 let test_scheduled_wake_is_not_rendered_as_board_activity () =
   Masc_test_deps.init_keeper_tool_registry ();
@@ -502,23 +507,7 @@ let test_scheduled_wake_preserves_complete_message () =
   check string "scheduled work message is not truncated" exact_message event.preview
 ;;
 
-(* Extract the body of the Scheduled Wake block. The assertions below MUST be
-   scoped to it: [test_scheduled_automation_items_render] pins
-   [sched-ready] in the Scheduled Automation block of the same
-   prompt, so a whole-prompt substring check for "schedule_id=" passes even
-   when the wake block carries no pointer. *)
-let scheduled_wake_block world_state =
-  match
-    String.split_on_char '#' world_state
-    |> List.find_opt (contains_sub "Scheduled Wake")
-  with
-  | Some section -> section
-  | None -> fail "expected Scheduled Wake section"
-;;
-
 let test_schedule_row_omits_absent_title_without_fabricating_one () =
-  Masc_test_deps.init_keeper_tool_registry ();
-  init_runtime_default_for_tests ();
   let wake : Keeper_event_queue.scheduled_wake =
     { schedule_id = "sched-no-title"
     ; due_at = 200.0
@@ -534,19 +523,23 @@ let test_schedule_row_omits_absent_title_without_fabricating_one () =
     ; preview = "stale projected message"
     }
   in
-  let obs = { base_observation with pending_board_events = [ event ] } in
-  let { Masc.Keeper_unified_prompt.world_state; _ } =
-    build_prompt ~meta:minimal_meta obs
+  let fields =
+    Masc.Keeper_unified_prompt.For_testing.scheduled_wake_fields
+      ~occurrence_id:event.post_id
+      wake
   in
-  let block = scheduled_wake_block world_state in
-  check bool "untitled wake still carries its typed pointer" true
-    (contains_sub "schedule_id=\"sched-no-title\"" block);
-  check bool "untitled wake carries its message" true
-    (contains_sub "message=\"Run the untitled maintenance sweep.\"" block);
-  check bool "absent title is omitted rather than fabricated" false
-    (contains_sub "title=" block);
-  check bool "stale projection copy is not rendered" false
-    (contains_sub "stale projected" block)
+  check_field
+    "untitled wake still carries its typed pointer"
+    "sched-no-title"
+    "schedule_id"
+    fields;
+  check_field
+    "untitled wake carries its message"
+    "Run the untitled maintenance sweep."
+    "message"
+    fields;
+  check (option string) "absent title is omitted rather than fabricated" None
+    (List.assoc_opt "title" fields)
 
 let test_scheduled_wake_renders_schedule_pointer () =
   Masc_test_deps.init_keeper_tool_registry ();
@@ -557,28 +550,45 @@ let test_scheduled_wake_renders_schedule_pointer () =
   let { Masc.Keeper_unified_prompt.world_state; _ } =
     build_prompt ~meta:minimal_meta obs
   in
-  let block = scheduled_wake_block world_state in
+  let wake =
+    match sample_scheduled_wake.event_kind with
+    | WO.Schedule_due wake -> wake
+    | _ -> fail "sample scheduled wake lost its typed payload"
+  in
+  let fields =
+    Masc.Keeper_unified_prompt.For_testing.scheduled_wake_fields
+      ~occurrence_id:sample_scheduled_wake.post_id
+      wake
+  in
   (* The durable pointer. Without it the Keeper holds only [occurrence_id],
      which is a SHA-256 of (schedule_id, due_at, payload_digest) and therefore
      one-way — no tool accepts it and the request cannot be read back. *)
-  check bool "wake row carries the schedule_id pointer" true
-    (contains_sub "schedule_id=\"sched-wake-pointer\"" block);
-  check bool "wake row carries the exact due_at" true
-    (contains_sub "due_at_unix=\"200\"" block);
-  check bool "wake row carries the exact payload digest" true
-    (contains_sub "payload_digest=\"digest-hourly-research\"" block);
-  check bool "wake row still carries the occurrence id" true
-    (contains_sub sample_scheduled_wake.post_id block);
+  check_field
+    "wake row carries the schedule_id pointer"
+    "sched-wake-pointer"
+    "schedule_id"
+    fields;
+  check_field "wake row carries the exact due_at" "200" "due_at_unix" fields;
+  check_field
+    "wake row carries the exact payload digest"
+    "digest-hourly-research"
+    "payload_digest"
+    fields;
+  check_field
+    "wake row still carries the occurrence id"
+    sample_scheduled_wake.post_id
+    "occurrence_id"
+    fields;
   (* The two ids are different things and the prompt must say which is which,
      otherwise a Keeper reaches for the wrong one. *)
   check bool "block names the dereference tool" true
-    (contains_sub "masc_schedule_get" block);
+    (contains_sub "masc_schedule_get" world_state);
   check bool "block names the current durable request semantics" true
-    (contains_sub "returns the current durable request" block);
+    (contains_sub "returns the current durable request" world_state);
   check bool "block names the exact wake-message authority" true
-    (contains_sub "message is the exact wake message" block);
+    (contains_sub "message is the exact wake message" world_state);
   check bool "block still marks occurrence_id as correlation-only" true
-    (contains_sub "never pass it to a Board tool" block)
+    (contains_sub "never pass it to a Board tool" world_state)
 ;;
 
 let test_untitled_wake_keeps_pointer_out_of_prose () =

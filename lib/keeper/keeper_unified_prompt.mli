@@ -113,4 +113,11 @@ module For_testing : sig
   val board_event_fields :
     Keeper_world_observation.pending_board_event -> (string * string) list
   (** Structured Board observation immediately before prompt-field quoting. *)
+
+  val scheduled_wake_fields :
+    occurrence_id:string ->
+    Keeper_event_queue.scheduled_wake ->
+    (string * string) list
+  (** Structured scheduled-wake observation immediately before prompt-field
+      quoting. *)
 end

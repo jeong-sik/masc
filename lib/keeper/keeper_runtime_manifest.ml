@@ -448,18 +448,6 @@ let decision_child_scope scope key =
   then Compaction_evidence
   else scope
 
-(* Retired-field rejection on the read path was removed in #17512
-   (91e1fd59df, "Remove retired-field rejection from of_json
-   (backward-compatible)"), which deleted the [of_json] call sites and the
-   covering tests in the same commit.  The rewritten definitions it left
-   behind had no caller from that point on and are removed here.
-
-   Do not re-introduce a read-path rejection without an RFC: persisted rows
-   written before the allowlist narrowed would stop decoding.  The public
-   filtering guarantee lives in {!public_to_json} /
-   {!public_projection_of_decision}, which are wired
-   (server_dashboard_http_keeper_api_types.ml). *)
-
 let rec public_projection_of_decision decision =
   let rec project scope path = function
     | `Assoc fields ->

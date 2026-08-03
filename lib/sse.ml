@@ -60,6 +60,15 @@ let registration_error_to_string = function
 
 type data_payload_error = Missing_data_payload
 
+type parsed_frame =
+  { event_id : int option
+  ; data_payload : string
+  }
+
+type frame_parse_error =
+  | Frame_missing_data_payload
+  | Frame_invalid_event_id
+
 let data_payload_line line =
   let line_len = String.length line in
   let line_len =
@@ -87,6 +96,36 @@ let data_payload_of_frame frame =
   with
   | [] -> Error Missing_data_payload
   | payload_lines -> Ok (String.concat "\n" payload_lines)
+
+let event_id_line line =
+  let line =
+    if String.ends_with ~suffix:"\r" line
+    then String.sub line 0 (String.length line - 1)
+    else line
+  in
+  let prefix = "id:" in
+  if String.starts_with ~prefix line
+  then
+    let value =
+      String.sub line (String.length prefix) (String.length line - String.length prefix)
+      |> String.trim
+    in
+    Some value
+  else None
+
+let parse_frame frame =
+  let lines = String.split_on_char '\n' frame in
+  let event_ids = List.filter_map event_id_line lines in
+  match data_payload_of_frame frame with
+  | Error Missing_data_payload -> Error Frame_missing_data_payload
+  | Ok data_payload ->
+    (match event_ids with
+     | [] -> Ok { event_id = None; data_payload }
+     | [ value ] ->
+       (match int_of_string_opt value with
+        | Some id when id >= 0 -> Ok { event_id = Some id; data_payload }
+        | Some _ | None -> Error Frame_invalid_event_id)
+     | _ :: _ :: _ -> Error Frame_invalid_event_id)
 
 (** Classification of an SSE session's traffic role. *)
 module SMap = Set_util.StringMap

@@ -131,6 +131,18 @@ val data_payload_of_frame : string -> (string, data_payload_error) result
     LF/CRLF line endings emitted on the wire.  A frame without a [data:]
     field is rejected; bare JSON is not an SSE frame. *)
 
+type parsed_frame =
+  { event_id : int option
+  ; data_payload : string
+  }
+
+type frame_parse_error =
+  | Frame_missing_data_payload
+  | Frame_invalid_event_id
+
+val parse_frame : string -> (parsed_frame, frame_parse_error) result
+(** Parse one internal SSE frame without discarding its resumability cursor. *)
+
 val format_event : ?id:int -> ?event_type:string -> string -> string
 val next_id : unit -> int
 val current_id : unit -> int

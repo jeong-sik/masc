@@ -26,6 +26,20 @@ let test_data_payload_of_frame () =
      | Error Sse.Missing_data_payload -> true
      | Ok _ -> false)
 
+let test_parse_frame_preserves_cursor () =
+  Alcotest.(check bool)
+    "cursor and joined payload"
+    true
+    (match Sse.parse_frame "id: 7\r\ndata:first\r\ndata: second\r\n\r\n" with
+     | Ok { event_id = Some 7; data_payload = "first\nsecond" } -> true
+     | Ok _ | Error _ -> false);
+  Alcotest.(check bool)
+    "invalid cursor rejected"
+    true
+    (match Sse.parse_frame "id: nope\ndata: {}\n\n" with
+     | Error Sse.Frame_invalid_event_id -> true
+     | Ok _ | Error Sse.Frame_missing_data_payload -> false)
+
 let register_exn ~auth ?kind session_id ~last_event_id =
   (* Pre-create the MCP session so registration validates an existing
      session rather than auto-bootstrapping one (security/sse-auth-validation). *)
@@ -278,6 +292,8 @@ let () =
             [
               Alcotest.test_case "data payload" `Quick
                 test_data_payload_of_frame;
+              Alcotest.test_case "preserves cursor" `Quick
+                test_parse_frame_preserves_cursor;
             ] );
           ( "try_pop",
             [

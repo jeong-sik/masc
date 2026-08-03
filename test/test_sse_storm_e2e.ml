@@ -481,6 +481,36 @@ let body_contains needle body =
   let rec scan i = i + nl <= bl && (String.sub body i nl = needle || scan (i + 1)) in
   nl > 0 && scan 0
 
+let sse_data_jsons body =
+  String.split_on_char '\n' body
+  |> List.filter_map (fun line ->
+    let prefix = "data:" in
+    if String.starts_with ~prefix line then
+      let payload =
+        String.sub line (String.length prefix) (String.length line - String.length prefix)
+        |> String.trim
+      in
+      try Some (Yojson.Safe.from_string payload) with Yojson.Json_error _ -> None
+    else None)
+
+let has_numeric_sse_id body =
+  String.split_on_char '\n' body
+  |> List.exists (fun line ->
+    let prefix = "id:" in
+    if String.starts_with ~prefix line then
+      let raw =
+        String.sub line (String.length prefix) (String.length line - String.length prefix)
+        |> String.trim
+      in
+      Option.is_some (int_of_string_opt raw)
+    else false)
+
+let is_masc_event = function
+  | `Assoc fields ->
+    List.assoc_opt "name" fields = Some (`String "MASC_EVENT")
+    && List.assoc_opt "value" fields <> None
+  | _ -> false
+
 (* Guards that /ag-ui/events actually applies the MASC -> AG-UI encoder to the
    frames it ships, rather than forwarding raw MASC SSE frames.
 
@@ -491,8 +521,9 @@ let body_contains needle body =
      - only the replay call site reverted -> pass
      - both call sites reverted           -> fail
    So the frames this test observes arrive on the drain (live) path, and that is
-   the path it pins.  [Last-Event-ID] additionally exercises the replay branch,
-   but replay is not what makes the assertion fire. *)
+   the path it pins.  The exact Custom name check prevents the encoding-error
+   envelope from creating a substring false positive.  The numeric [id:] check
+   pins the resumability cursor carried by transformed live/replay frames. *)
 let test_ag_ui_frames_are_wire_encoded () =
   with_server @@ fun ~port ~auth_token ->
   let sid = initialize_mcp_session ~port ~auth_token in
@@ -506,13 +537,15 @@ let test_ag_ui_frames_are_wire_encoded () =
   in
   let res = run_curl ~headers ~max_time:1.0 ~port ~path:"/ag-ui/events" () in
   check_status "/ag-ui/events connect accepted" 200 res;
-  (* [Ag_ui.of_custom ~name:"MASC_EVENT"] is what the encoder wraps every replayed
-     MASC frame in.  A raw frame would not carry that name. *)
-  if not (body_contains "MASC_EVENT" res.body) then
+  let events = sse_data_jsons res.body in
+  if not (List.exists is_masc_event events) then
     fail
       (Printf.sprintf
-         "/ag-ui/events frames are not AG-UI encoded (no MASC_EVENT envelope): %S"
-         res.body)
+         "/ag-ui/events frames are not AG-UI encoded (no exact MASC_EVENT envelope): %S"
+         res.body);
+  if not (has_numeric_sse_id res.body) then
+    fail
+      (Printf.sprintf "/ag-ui/events discarded every SSE cursor: %S" res.body)
 
 let test_ag_ui_rejects_reconnect_then_recovers () =
   with_server @@ fun ~port ~auth_token ->

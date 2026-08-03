@@ -549,6 +549,8 @@ let test_replay_after_source_ack_projects_target () =
       ; operator_operation_id = request.operator_operation_id
       ; from_keeper
       ; to_keeper
+      ; target_generation = request.target_generation
+      ; target_trace_id = target_meta.runtime.trace_id
       }
     in
     (* The source ACK is only a fixture precondition here. *)
@@ -609,6 +611,8 @@ let test_generic_recovery_preserves_receipted_target_identity () =
     ; operator_operation_id = request.operator_operation_id
     ; from_keeper
     ; to_keeper
+    ; target_generation = request.target_generation
+    ; target_trace_id = target_meta.runtime.trace_id
     }
   in
   ignore

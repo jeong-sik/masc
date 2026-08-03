@@ -186,6 +186,12 @@ let project_generic_transfer_target_result
     Error
       (Target_transfer_projection_failed
          { target_keeper = transfer.to_keeper; detail })
+  | Keeper_registry_event_queue.Transfer_projection_target_unavailable error ->
+    Error
+      (Target_transfer_projection_failed
+         { target_keeper = transfer.to_keeper
+         ; detail = Keeper_registry_event_queue.transfer_target_error_to_string error
+         })
   | Keeper_registry_event_queue.Transfer_projection_shutdown_reserved operation_id ->
     Error
       (Target_transfer_projection_failed

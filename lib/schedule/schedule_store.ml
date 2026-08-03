@@ -762,13 +762,32 @@ let settle_dispatched_occurrence_in_state ~now state settlement =
     Ok ({ state with schedules; executions }, updated, true)
 ;;
 
-let settlement_executions_for_occurrence state ~schedule_id ~due_at ~payload_digest =
-  let matches =
+let settlement_executions_for_occurrence
+      state
+      ~schedule_id
+      ~due_at
+      ~payload_digest
+      ~outcome
+  =
+  let occurrence_matches =
     List.filter
       (execution_matches_occurrence ~schedule_id ~due_at ~payload_digest)
       state.executions
   in
+  let agrees_with_outcome (execution : execution_record) =
+    match execution.status, outcome with
+    | (Execution_running | Execution_dispatched), _ -> true
+    | Execution_succeeded, Dispatched_occurrence_succeeded -> true
+    | Execution_failed, Dispatched_occurrence_failed _ -> true
+    | Execution_succeeded, Dispatched_occurrence_failed _
+    | Execution_failed, Dispatched_occurrence_succeeded -> false
+  in
+  let matches = List.filter agrees_with_outcome occurrence_matches in
   match matches with
+  | [] when occurrence_matches <> [] ->
+    Error
+      (Invalid_status_transition
+         "schedule occurrence has only executions with a conflicting terminal outcome")
   | [] ->
     Error
       (Invalid_status_transition
@@ -792,6 +811,7 @@ let settle_dispatched_occurrence
         ~schedule_id
         ~due_at
         ~payload_digest
+        ~outcome
     in
     let settle_execution next_state execution =
       settle_dispatched_occurrence_in_state
@@ -860,7 +880,12 @@ let fail_dispatched_occurrence
     ~outcome:(Dispatched_occurrence_failed error)
 ;;
 
-let settle_dispatched_occurrences config ~now settlements =
+let settle_dispatched_occurrences_and_cancel_matching
+      config
+      ~now
+      ~settlements
+      ~should_cancel
+  =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     let rec settle next_state changed = function
@@ -871,16 +896,42 @@ let settle_dispatched_occurrences config ~now settlements =
         in
         settle next_state (changed || settlement_changed) rest
     in
-    let* next_state, changed = settle state false settlements in
+    let* next_state, settlement_changed = settle state false settlements in
+    let rec cancel schedules changed = function
+      | [] -> Ok (List.rev schedules, changed)
+      | (request : schedule_request) :: rest when not (should_cancel request) ->
+        cancel (request :: schedules) changed rest
+      | ({ status = (Scheduled | Due); _ } as request) :: rest ->
+        cancel ({ request with status = Cancelled } :: schedules) true rest
+      | ({ status = Running; _ } as request) :: _ ->
+        Error
+          (Invalid_status_transition
+             (Printf.sprintf
+                "cannot cancel running schedule %s while retiring its consumer"
+                request.schedule_id))
+      | request :: rest -> cancel (request :: schedules) changed rest
+    in
+    let* schedules, cancellation_changed =
+      cancel [] false next_state.schedules
+    in
+    let changed = settlement_changed || cancellation_changed in
     if changed
     then
       write_state
         config
         (bump_state
            state
-           ~schedules:next_state.schedules
+           ~schedules
            ~executions:next_state.executions)
     else Ok ())
+;;
+
+let settle_dispatched_occurrences config ~now settlements =
+  settle_dispatched_occurrences_and_cancel_matching
+    config
+    ~now
+    ~settlements
+    ~should_cancel:(Fun.const false)
 ;;
 
 let fail_running config ~now ~schedule_id ~error =

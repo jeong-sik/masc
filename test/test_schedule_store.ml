@@ -739,6 +739,66 @@ let test_recurring_dispatched_completion_settles_duplicate_executions () =
       (execution_status_to_string execution.status))
 ;;
 
+let test_recurring_completion_ignores_failed_prior_attempt () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    make_request
+      ~schedule_id:"accepted-recurring-failed-prior"
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  ignore (insert_ok config request);
+  ignore (refresh_due config ~now:201.0);
+  ignore (start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id);
+  ignore (accept_running config ~now:203.0 ~schedule_id:request.schedule_id ());
+  let digest = payload_digest request.payload in
+  ignore
+    (store_ok
+       "fail first occurrence attempt"
+       (fail_dispatched_occurrence
+          config
+          ~now:204.0
+          ~schedule_id:request.schedule_id
+          ~due_at:request.due_at
+          ~payload_digest:digest
+          ~error:"acceptance follow-up failed"));
+  (match
+     update_request
+       config
+       ~schedule_id:request.schedule_id
+       ~due_at:request.due_at
+       ~expires_at:request.expires_at
+       ~payload:request.payload
+   with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  ignore (refresh_due config ~now:205.0);
+  ignore (start_due_candidate config ~now:206.0 ~schedule_id:request.schedule_id);
+  ignore (accept_running config ~now:207.0 ~schedule_id:request.schedule_id ());
+  (match
+     complete_dispatched_occurrence
+       config
+       ~now:208.0
+       ~schedule_id:request.schedule_id
+       ~due_at:request.due_at
+       ~payload_digest:digest
+       ()
+   with
+   | Ok stored ->
+     check_status "recurring remains scheduled" Scheduled stored.status;
+     check (float 0.001) "next occurrence retained" 260.0 stored.due_at
+   | Error err -> fail (store_error_to_string err));
+  let statuses =
+    executions_for_schedule (read_state config) ~schedule_id:request.schedule_id
+    |> List.map (fun (execution : execution_record) -> execution.status)
+  in
+  check int "failed history remains terminal" 1
+    (List.length (List.filter (( = ) Execution_failed) statuses));
+  check int "current duplicate succeeds" 1
+    (List.length (List.filter (( = ) Execution_succeeded) statuses))
+;;
+
 let test_completion_before_acceptance_is_idempotent () =
   with_workspace
   @@ fun config ->
@@ -1105,6 +1165,8 @@ let () =
             test_recurring_dispatched_completion_preserves_next_occurrence;
           test_case "recurring completion settles duplicate executions" `Quick
             test_recurring_dispatched_completion_settles_duplicate_executions;
+          test_case "recurring completion ignores a failed prior attempt" `Quick
+            test_recurring_completion_ignores_failed_prior_attempt;
           test_case "completion before acceptance is idempotent" `Quick
             test_completion_before_acceptance_is_idempotent;
           test_case "accepted one-shot failure is terminal" `Quick

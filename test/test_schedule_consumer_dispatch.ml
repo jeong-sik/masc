@@ -125,7 +125,7 @@ let keeper_meta_for_name keeper_name =
   | Error msg -> fail ("keeper meta parse failed: " ^ msg)
 ;;
 
-let register_keeper ?proactive_enabled config keeper_name =
+let persist_keeper_meta ?proactive_enabled config keeper_name =
   let meta =
     let meta = keeper_meta_for_name keeper_name in
     match proactive_enabled with
@@ -139,6 +139,11 @@ let register_keeper ?proactive_enabled config keeper_name =
   (match Keeper_meta_store.write_meta config meta with
    | Ok () -> ()
    | Error detail -> fail ("keeper meta write failed: " ^ detail));
+  meta
+;;
+
+let register_keeper ?proactive_enabled config keeper_name =
+  let meta = persist_keeper_meta ?proactive_enabled config keeper_name in
   Keeper_registry.For_testing.register
     ~base_path:config.Workspace_utils.base_path
     keeper_name
@@ -675,6 +680,7 @@ let test_reclaim_follows_transfer_durable_state () =
   ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
   let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
   let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
+  let target_meta = persist_keeper_meta config target_keeper in
   let transfer : Keeper_registry_event_queue.accepted_transfer =
     { source = selection.source
     ; source_incarnation = selection.admitted_revision
@@ -682,6 +688,8 @@ let test_reclaim_follows_transfer_durable_state () =
     ; operator_operation_id = "transfer-scheduled-occurrence"
     ; from_keeper = source_keeper
     ; to_keeper = target_keeper
+    ; target_generation = target_meta.runtime.nonce
+    ; target_trace_id = target_meta.runtime.trace_id
     }
   in
   (match
@@ -800,6 +808,8 @@ let test_reclaim_resolves_current_incarnation_after_transfer_back () =
   in
   ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
   let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
+  let meta_a = persist_keeper_meta config keeper_a in
+  let meta_b = persist_keeper_meta config keeper_b in
   let transfer ~from_keeper ~to_keeper ~owner_nonce ~operation_id ~applied_at =
     let selection = pending_selection_exn ~base_path ~keeper_name:from_keeper in
     let accepted : Keeper_registry_event_queue.accepted_transfer =
@@ -809,6 +819,10 @@ let test_reclaim_resolves_current_incarnation_after_transfer_back () =
       ; operator_operation_id = operation_id
       ; from_keeper
       ; to_keeper
+      ; target_generation =
+          (if String.equal to_keeper keeper_a then meta_a else meta_b).runtime.nonce
+      ; target_trace_id =
+          (if String.equal to_keeper keeper_a then meta_a else meta_b).runtime.trace_id
       }
     in
     (match
@@ -888,6 +902,7 @@ let test_reclaim_revalidates_cached_transfer_target_absence () =
   ignore (tick_ok config ~now:202.0 : Schedule_runner.tick_result);
   let execution_y = latest_execution_exn config ~schedule_id:request_y.schedule_id in
   let selection = pending_selection_exn ~base_path ~keeper_name:keeper_a in
+  let target_meta = persist_keeper_meta config keeper_b in
   let transfer : Keeper_registry_event_queue.accepted_transfer =
     { source = selection.source
     ; source_incarnation = selection.admitted_revision
@@ -895,6 +910,8 @@ let test_reclaim_revalidates_cached_transfer_target_absence () =
     ; operator_operation_id = "cached-a-to-b"
     ; from_keeper = keeper_a
     ; to_keeper = keeper_b
+    ; target_generation = target_meta.runtime.nonce
+    ; target_trace_id = target_meta.runtime.trace_id
     }
   in
   (match
@@ -1055,6 +1072,65 @@ let test_keeper_purge_settles_owned_occurrence_before_queue_delete () =
       (Schedule_domain.execution_status_to_string execution.status)
 ;;
 
+let test_keeper_purge_cancels_future_schedule_intent () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let create ~schedule_id ?recurrence () =
+    match
+      Schedule_service.create
+        config
+        ~schedule_id
+        ~requested_at:100.0
+        ~requested_by:(human "operator")
+        ~scheduled_by:(automated "scheduler-agent")
+        ~due_at:400.0
+        ~payload:(keeper_wake_payload_for keeper_name)
+        ~source:Schedule_domain.Operator_request
+        ?recurrence
+        ()
+    with
+    | Ok request -> request
+    | Error error ->
+      fail ("create failed: " ^ Schedule_service.service_error_to_string error)
+  in
+  let one_shot = create ~schedule_id:"purge-future-one-shot" () in
+  let recurring =
+    create
+      ~schedule_id:"purge-future-recurring"
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+      ()
+  in
+  ignore
+    (create_named_keeper_wake_schedule
+       config
+       ~schedule_id:"purge-other-keeper"
+       ~keeper_name:"other-keeper"
+     : Schedule_domain.schedule_request);
+  (match
+     Server_schedule_consumers.settle_keeper_purge_occurrences
+       config
+       ~keeper_name
+       ~operation_id:"purge-future-op"
+       ~now:202.0
+   with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  List.iter
+    (fun request ->
+       match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+       | Some stored ->
+         check string "future target intent is cancelled" "cancelled"
+           (Schedule_domain.schedule_status_to_string stored.status)
+       | None -> fail "future target schedule disappeared")
+    [ one_shot; recurring ];
+  match Schedule_store.get_schedule config ~schedule_id:"purge-other-keeper" with
+  | Some stored ->
+    check string "unrelated target remains scheduled" "scheduled"
+      (Schedule_domain.schedule_status_to_string stored.status)
+  | None -> fail "unrelated target schedule disappeared"
+;;
+
 let test_keeper_purge_rejects_missing_owned_snapshot () =
   with_workspace
   @@ fun config ->
@@ -1170,6 +1246,7 @@ let test_keeper_purge_rejects_unsettled_transfer_redirect () =
   in
   ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
   let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
+  let target_meta = persist_keeper_meta config target_keeper in
   let transfer : Keeper_registry_event_queue.accepted_transfer =
     { source = selection.source
     ; source_incarnation = selection.admitted_revision
@@ -1177,6 +1254,8 @@ let test_keeper_purge_rejects_unsettled_transfer_redirect () =
     ; operator_operation_id = "purge-transfer-op"
     ; from_keeper = source_keeper
     ; to_keeper = target_keeper
+    ; target_generation = target_meta.runtime.nonce
+    ; target_trace_id = target_meta.runtime.trace_id
     }
   in
   (match
@@ -1235,6 +1314,7 @@ let test_keeper_purge_follows_terminal_transfer_redirect () =
   in
   ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
   let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
+  let target_meta = persist_keeper_meta config target_keeper in
   let transfer : Keeper_registry_event_queue.accepted_transfer =
     { source = selection.source
     ; source_incarnation = selection.admitted_revision
@@ -1242,6 +1322,8 @@ let test_keeper_purge_follows_terminal_transfer_redirect () =
     ; operator_operation_id = "purge-terminal-transfer-op"
     ; from_keeper = source_keeper
     ; to_keeper = target_keeper
+    ; target_generation = target_meta.runtime.nonce
+    ; target_trace_id = target_meta.runtime.trace_id
     }
   in
   (match
@@ -1382,6 +1464,7 @@ let test_transferred_retry_uses_resolved_owner_shutdown_fence () =
   Sys.remove source_ledger;
   mkdir_p source_ledger;
   let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
+  let target_meta = persist_keeper_meta config target_keeper in
   let transfer : Keeper_registry_event_queue.accepted_transfer =
     { source = selection.source
     ; source_incarnation = selection.admitted_revision
@@ -1389,6 +1472,8 @@ let test_transferred_retry_uses_resolved_owner_shutdown_fence () =
     ; operator_operation_id = "resolved-owner-fence-transfer"
     ; from_keeper = source_keeper
     ; to_keeper = target_keeper
+    ; target_generation = target_meta.runtime.nonce
+    ; target_trace_id = target_meta.runtime.trace_id
     }
   in
   (match
@@ -2589,6 +2674,8 @@ let () =
         ; test_case "keeper purge settles owned occurrence before queue deletion"
             `Quick
             test_keeper_purge_settles_owned_occurrence_before_queue_delete
+        ; test_case "keeper purge cancels future schedule intent" `Quick
+            test_keeper_purge_cancels_future_schedule_intent
         ; test_case "keeper purge rejects missing owned snapshot" `Quick
             test_keeper_purge_rejects_missing_owned_snapshot
         ; test_case "keeper purge preflights the whole batch" `Quick

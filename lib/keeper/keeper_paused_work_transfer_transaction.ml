@@ -290,6 +290,8 @@ let accepted_transfer receipt
   ; operator_operation_id = receipt.operator_operation_id
   ; from_keeper = transfer.from_keeper
   ; to_keeper = transfer.to_keeper
+  ; target_generation = transfer.target_generation
+  ; target_trace_id = transfer.target_trace_id
   }
 ;;
 
@@ -361,20 +363,7 @@ let ack_source config receipt transfer =
             }))
 ;;
 
-let validate_committed_target config transfer =
-  let* meta = read_meta config transfer.Keeper_paused_work_disposition_receipt.to_keeper in
-  if not (Int.equal meta.runtime.nonce transfer.target_generation)
-  then
-    Error
-      (Target_owner_nonce_changed
-         { expected = transfer.target_generation; actual = meta.runtime.nonce })
-  else if not (Keeper_id.Trace_id.equal meta.runtime.trace_id transfer.target_trace_id)
-  then Error Target_owner_identity_changed
-  else Ok ()
-;;
-
 let target_enqueue config receipt transfer =
-  let* () = validate_committed_target config transfer in
   let causal = accepted_transfer receipt transfer in
   match
     Keeper_registry_event_queue.project_accepted_transfer_durable_result
@@ -387,6 +376,19 @@ let target_enqueue config receipt transfer =
     Ok Already_present
   | Keeper_registry_event_queue.Transfer_projection_storage_error detail ->
     Error (Committed_projection_failed { stage = Target_enqueue; detail })
+  | Keeper_registry_event_queue.Transfer_projection_target_unavailable
+      (Keeper_registry_event_queue.Transfer_target_generation_changed
+         { expected; actual }) ->
+    Error (Target_owner_nonce_changed { expected; actual })
+  | Keeper_registry_event_queue.Transfer_projection_target_unavailable
+      Keeper_registry_event_queue.Transfer_target_trace_changed ->
+    Error Target_owner_identity_changed
+  | Keeper_registry_event_queue.Transfer_projection_target_unavailable error ->
+    Error
+      (Committed_projection_failed
+         { stage = Target_enqueue
+         ; detail = Keeper_registry_event_queue.transfer_target_error_to_string error
+         })
   | Keeper_registry_event_queue.Transfer_projection_shutdown_reserved operation_id ->
     Error
       (Committed_projection_failed
@@ -408,6 +410,8 @@ let receipt_matches_accepted_transfer
   && String.equal receipt.operator_operation_id accepted.operator_operation_id
   && String.equal receipt_transfer.from_keeper accepted.from_keeper
   && String.equal receipt_transfer.to_keeper accepted.to_keeper
+  && Int.equal receipt_transfer.target_generation accepted.target_generation
+  && Keeper_id.Trace_id.equal receipt_transfer.target_trace_id accepted.target_trace_id
   && receipt_transfer.source = accepted.source
   && Int64.equal receipt_transfer.source_incarnation accepted.source_incarnation
 ;;

@@ -48,6 +48,8 @@ type accepted_transfer = Keeper_event_queue_state.accepted_transfer =
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
+  ; target_generation : int
+  ; target_trace_id : Keeper_id.Trace_id.t
   }
 
 type source_terminal_receipt = Keeper_event_queue_state.source_terminal_receipt =

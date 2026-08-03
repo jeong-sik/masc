@@ -28,6 +28,8 @@ type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
+  ; target_generation : int
+  ; target_trace_id : Keeper_id.Trace_id.t
   }
 
 type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_receipt =
@@ -261,10 +263,41 @@ type enqueue_stimulus_durable_result =
   | Stimulus_already_present
   | Stimulus_storage_error of string
 
+type transfer_target_error =
+  | Transfer_target_name_mismatch of
+      { expected : string
+      ; actual : string
+      }
+  | Transfer_target_metadata_read_failed of string
+  | Transfer_target_metadata_absent
+  | Transfer_target_generation_changed of
+      { expected : int
+      ; actual : int
+      }
+  | Transfer_target_trace_changed
+
+let transfer_target_error_to_string = function
+  | Transfer_target_name_mismatch { expected; actual } ->
+    Printf.sprintf
+      "transfer target Keeper mismatch: expected=%s actual=%s"
+      expected
+      actual
+  | Transfer_target_metadata_read_failed detail ->
+    "target Keeper metadata read failed: " ^ detail
+  | Transfer_target_metadata_absent -> "target Keeper metadata is absent"
+  | Transfer_target_generation_changed { expected; actual } ->
+    Printf.sprintf
+      "target Keeper generation changed: expected=%d actual=%d"
+      expected
+      actual
+  | Transfer_target_trace_changed -> "target Keeper trace identity changed"
+;;
+
 type transfer_projection_result =
   | Transfer_projection_committed
   | Transfer_projection_already_committed
   | Transfer_projection_storage_error of string
+  | Transfer_projection_target_unavailable of transfer_target_error
   | Transfer_projection_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
 let enqueue_stimulus_durable_result ~base_path name stimulus =
@@ -281,20 +314,47 @@ let enqueue_stimulus_durable_result ~base_path name stimulus =
 ;;
 
 let project_accepted_transfer_durable_result ~base_path name ~transfer =
+  let validate_target_identity () =
+    let config = Workspace.default_config base_path in
+    if not (String.equal name transfer.to_keeper)
+    then
+      Error
+        (Transfer_target_name_mismatch
+           { expected = transfer.to_keeper; actual = name })
+    else
+      match Keeper_meta_store.read_meta config name with
+    | Error detail -> Error (Transfer_target_metadata_read_failed detail)
+    | Ok None -> Error Transfer_target_metadata_absent
+    | Ok (Some meta)
+      when not (Int.equal meta.runtime.nonce transfer.target_generation) ->
+      Error
+        (Transfer_target_generation_changed
+           { expected = transfer.target_generation; actual = meta.runtime.nonce })
+    | Ok (Some meta)
+      when not (Keeper_id.Trace_id.equal meta.runtime.trace_id transfer.target_trace_id) ->
+      Error Transfer_target_trace_changed
+    | Ok (Some _) -> Ok ()
+  in
   match
     Keeper_turn_admission.run_durable_intake_if_open
       ~base_path
       ~keeper_name:name
       (fun () ->
-         Keeper_event_queue_persistence.project_accepted_transfer_result
-           ~base_path
-           ~keeper_name:name
-           ~after_commit:(publish_pending ~base_path name)
-           ~transfer)
+         match validate_target_identity () with
+         | Error detail -> `Target_unavailable detail
+         | Ok () ->
+           `Projection
+             (Keeper_event_queue_persistence.project_accepted_transfer_result
+                ~base_path
+                ~keeper_name:name
+                ~after_commit:(publish_pending ~base_path name)
+                ~transfer))
   with
   | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
     Transfer_projection_shutdown_reserved operation_id
-  | Keeper_turn_admission.Intake_committed result ->
+  | Keeper_turn_admission.Intake_committed (`Target_unavailable detail) ->
+    Transfer_projection_target_unavailable detail
+  | Keeper_turn_admission.Intake_committed (`Projection result) ->
     (match result with
      | Ok Keeper_event_queue_persistence.Transfer_projected ->
        Transfer_projection_committed

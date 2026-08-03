@@ -39,6 +39,8 @@ type accepted_transfer = State.accepted_transfer =
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
+  ; target_generation : int
+  ; target_trace_id : Keeper_id.Trace_id.t
   }
 
 type source_terminal_receipt = State.source_terminal_receipt =

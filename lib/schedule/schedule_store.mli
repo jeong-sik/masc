@@ -270,6 +270,17 @@ val unsettled_dispatched_occurrences :
     is consumer territory. Orphan executions are returned rather than silently
     omitted; a later terminal write will surface [Schedule_not_found]. *)
 
+val settle_dispatched_occurrences_and_cancel_matching :
+  Workspace_utils.config ->
+  now:float ->
+  settlements:dispatched_occurrence_settlement list ->
+  should_cancel:(Schedule_domain.schedule_request -> bool) ->
+  (unit, store_error) result
+(** Atomically settles the supplied accepted occurrences and cancels every
+    currently [Scheduled] or [Due] request selected by [should_cancel]. A
+    selected [Running] request fails closed because cancelling it could orphan
+    a consumer effect that has not committed its acceptance yet. *)
+
 val prune_completed :
   Workspace_utils.config ->
   (state * int, store_error) result

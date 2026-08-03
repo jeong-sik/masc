@@ -1282,7 +1282,19 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
          else preflight settlements rest)
   in
   let* settlements = preflight [] executions in
-  Schedule_store.settle_dispatched_occurrences config ~now settlements
+  let should_cancel (request : Schedule_domain.schedule_request) =
+    match Schedule_payload_projection.dispatch_view_detailed request with
+    | Ok (Schedule_payload_projection.Keeper_wake, payload) ->
+      (match body_keeper_name payload with
+       | Ok target -> String.equal target keeper_name
+       | Error _ -> false)
+    | Error _ -> false
+  in
+  Schedule_store.settle_dispatched_occurrences_and_cancel_matching
+    config
+    ~now
+    ~settlements
+    ~should_cancel
   |> Result.map_error Schedule_store.store_error_to_string
 ;;
 

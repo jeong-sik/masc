@@ -160,6 +160,7 @@ let fresh_transfer_for_request
       ~source_incarnation
       ~operator_operation_id
       ~target_keeper
+      ~(target_meta : Keeper_meta_contract.keeper_meta)
   =
   let* selection =
     Keeper_event_queue_state.resolve_pending_selection
@@ -174,6 +175,8 @@ let fresh_transfer_for_request
     ; operator_operation_id
     ; from_keeper = keeper_name
     ; to_keeper = target_keeper
+    ; target_generation = target_meta.runtime.nonce
+    ; target_trace_id = target_meta.runtime.trace_id
     }
   in
   Ok { transfer; applied_at = Time_compat.now () }
@@ -236,6 +239,12 @@ let execute_transfer ~base_path ~keeper_name prepared =
        Ok
          ( transfer.source
          , target_projection_failure_json source_result detail )
+     | Keeper_registry_event_queue.Transfer_projection_target_unavailable error ->
+       Ok
+         ( transfer.source
+         , target_projection_failure_json
+             source_result
+             (Keeper_registry_event_queue.transfer_target_error_to_string error) )
      | Keeper_registry_event_queue.Transfer_projection_shutdown_reserved operation_id ->
        let detail =
          Printf.sprintf
@@ -284,15 +293,8 @@ let validate_fresh_transfer_target config target_keeper =
   match Keeper_meta_store.read_meta config target_keeper with
   | Error detail ->
     Error ("target keeper metadata is unavailable: " ^ detail)
-  | Ok (Some _) -> Ok ()
-  | Ok None ->
-    let configured =
-      Keeper_meta_store.configured_keeper_names config
-      |> List.exists (String.equal target_keeper)
-    in
-    if configured
-    then Ok ()
-    else Error ("target keeper does not exist: " ^ target_keeper)
+  | Ok (Some meta) -> Ok meta
+  | Ok None -> Error ("target keeper does not exist: " ^ target_keeper)
 ;;
 
 let replay_committed_request ~base_path ~keeper_name request =
@@ -411,7 +413,7 @@ let run_admitted_request
         match prior with
         | Some prepared -> Ok prepared
         | None ->
-          let* () = validate_fresh_transfer_target config target_keeper in
+          let* target_meta = validate_fresh_transfer_target config target_keeper in
           fresh_transfer_for_request
             ~queue_state
             ~keeper_name
@@ -420,6 +422,7 @@ let run_admitted_request
             ~source_incarnation
             ~operator_operation_id
             ~target_keeper
+            ~target_meta
       in
       execute_transfer ~base_path ~keeper_name prepared
   | Reprioritize { source_ref; source_incarnation; urgency } ->

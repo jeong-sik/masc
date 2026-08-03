@@ -21,6 +21,8 @@ type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
+  ; target_generation : int
+  ; target_trace_id : Keeper_id.Trace_id.t
   }
 
 type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_receipt =
@@ -178,10 +180,26 @@ type enqueue_stimulus_durable_result =
   | Stimulus_already_present
   | Stimulus_storage_error of string
 
+type transfer_target_error =
+  | Transfer_target_name_mismatch of
+      { expected : string
+      ; actual : string
+      }
+  | Transfer_target_metadata_read_failed of string
+  | Transfer_target_metadata_absent
+  | Transfer_target_generation_changed of
+      { expected : int
+      ; actual : int
+      }
+  | Transfer_target_trace_changed
+
+val transfer_target_error_to_string : transfer_target_error -> string
+
 type transfer_projection_result =
   | Transfer_projection_committed
   | Transfer_projection_already_committed
   | Transfer_projection_storage_error of string
+  | Transfer_projection_target_unavailable of transfer_target_error
   | Transfer_projection_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
 val enqueue_stimulus_durable_result :
@@ -204,7 +222,8 @@ val project_accepted_transfer_durable_result :
 (** Strict target transfer projection. The exact source and operation identity
     are durably accounted in the target queue state before the pending
     projection becomes visible. Accounting survives consumption. A target
-    shutdown reservation rejects the projection before any durable mutation. *)
+    shutdown reservation or target generation/trace mismatch rejects the
+    projection before any durable mutation. *)
 
 val enqueue_hitl_resolution_durable_result :
   base_path:string

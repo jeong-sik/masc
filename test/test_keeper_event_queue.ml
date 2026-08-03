@@ -130,6 +130,15 @@ let event_queue_test_meta keeper_name trace_id =
   | Ok meta -> meta
   | Error detail -> Alcotest.fail detail
 
+let persist_event_queue_test_meta ~base_path keeper_name =
+  let meta = event_queue_test_meta keeper_name ("trace-" ^ keeper_name) in
+  (match
+     Keeper_meta_store.write_meta (Workspace.default_config base_path) meta
+   with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  meta
+
 let with_strict_executor f =
   Eio_main.run
   @@ fun env ->
@@ -165,6 +174,7 @@ let load_queue_state ~base_path ~keeper_name =
   | Error detail -> Alcotest.fail detail
 
 let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~owner_nonce ~operation_id =
+  let target_meta = persist_event_queue_test_meta ~base_path to_keeper in
   (match
      Masc.Keeper_registry_event_queue.enqueue_stimulus_durable_result
        ~base_path
@@ -188,6 +198,8 @@ let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~owner_nonce ~oper
     ; operator_operation_id = operation_id
     ; from_keeper
     ; to_keeper
+    ; target_generation = target_meta.runtime.nonce
+    ; target_trace_id = target_meta.runtime.trace_id
     }
   in
   (match
@@ -1115,6 +1127,85 @@ let () =
              (Keeper_event_queue_state.accepted_transfer_projections target_state
               |> List.length)));
 
+  (* A committed source outbox must not recreate a target after purge releases
+     its in-memory fence. The persisted transfer authority is bound to the
+     exact target generation/trace, so absent metadata fails before enqueue. *)
+  let base_path = temp_dir "keeper-event-queue-post-purge-transfer-recovery" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let from_keeper = "keeper-post-purge-transfer-source" in
+      let to_keeper = "keeper-post-purge-transfer-target" in
+      stage_transfer
+        ~base_path
+        ~from_keeper
+        ~to_keeper
+        ~source:board_stim
+        ~owner_nonce:29
+        ~operation_id:"post-purge-transfer-recovery";
+      let config = Workspace.default_config base_path in
+      let target_meta =
+        match Keeper_meta_store.read_meta config to_keeper with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "target metadata fixture disappeared"
+        | Error detail -> Alcotest.fail detail
+      in
+      let shutdown_operation_id =
+        Masc.Keeper_shutdown_types.Operation_id.generate ()
+      in
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path
+           ~keeper_name:to_keeper
+           ~operation_id:shutdown_operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         Alcotest.fail "fresh post-purge target was already reserved");
+      (match
+         Keeper_meta_store.remove_meta_if_identity
+           config
+           ~name:to_keeper
+           ~trace_id:target_meta.runtime.trace_id
+           ~generation:target_meta.runtime.nonce
+       with
+       | Ok () -> ()
+       | Error error ->
+         Alcotest.fail (Keeper_meta_store.identity_remove_error_to_string error));
+      (match
+         Masc.Keeper_turn_admission.rollback_shutdown
+           ~base_path
+           ~keeper_name:to_keeper
+           ~operation_id:shutdown_operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_rolled_back -> ()
+       | Masc.Keeper_turn_admission.Shutdown_not_reserved
+       | Masc.Keeper_turn_admission.Shutdown_reserved_by_other _ ->
+         Alcotest.fail "post-purge target fence was not released");
+      (match
+         with_strict_executor
+         @@ fun () ->
+         Masc.Keeper_event_queue_recovery.project_owner_result
+           ~base_path
+           ~keeper_name:from_keeper
+       with
+       | Error
+           (Masc.Keeper_event_queue_recovery.Target_transfer_projection_failed
+              { target_keeper; detail }) ->
+         Alcotest.(check string) "post-purge failure target" to_keeper target_keeper;
+         Alcotest.(check bool)
+           "post-purge failure names missing metadata"
+           true
+           (contains_substring ~needle:"metadata is absent" detail)
+       | Error error ->
+         Alcotest.fail
+           (Masc.Keeper_event_queue_recovery.projection_error_to_string error)
+       | Ok _ -> Alcotest.fail "post-purge recovery recreated the target queue");
+      Alcotest.(check bool)
+        "post-purge recovery writes no target snapshot"
+        false
+        (Sys.file_exists (snapshot_path ~base_path ~keeper_name:to_keeper)));
+
   (* Source ownership changes use the same durable-intake authority as schedule
      retry repair. A shutdown reservation is the observable proof that a source
      transfer cannot bypass that authority. *)
@@ -1142,12 +1233,15 @@ let () =
         | _ -> Alcotest.fail "source transfer fixture did not contain one pending item"
       in
       let transfer : Masc.Keeper_registry_event_queue.accepted_transfer =
+        let target_meta = event_queue_test_meta to_keeper ("trace-" ^ to_keeper) in
         { source = selection.source
         ; source_incarnation = selection.admitted_revision
         ; owner_nonce = 31
         ; operator_operation_id = "source-transfer-during-shutdown"
         ; from_keeper
         ; to_keeper
+        ; target_generation = target_meta.runtime.nonce
+        ; target_trace_id = target_meta.runtime.trace_id
         }
       in
       let shutdown_operation_id =

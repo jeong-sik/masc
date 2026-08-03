@@ -712,14 +712,19 @@ let test_recurring_dispatched_completion_settles_duplicate_executions () =
    with
    | Ok _ -> ()
    | Error err -> fail (store_error_to_string err));
-  ignore (refresh_due config ~now:204.0);
-  ignore (start_due_candidate config ~now:205.0 ~schedule_id:request.schedule_id);
-  ignore (accept_running config ~now:206.0 ~schedule_id:request.schedule_id ());
+  ignore (refresh_due config ~now:201.0);
+  ignore (start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id);
+  ignore (accept_running config ~now:203.0 ~schedule_id:request.schedule_id ());
   let digest = payload_digest request.payload in
   let executions =
     executions_for_schedule (read_state config) ~schedule_id:request.schedule_id
   in
   check int "duplicate occurrence execution count" 2 (List.length executions);
+  check int "duplicate occurrence execution ids are unique" 2
+    (executions
+     |> List.map (fun (execution : execution_record) -> execution.execution_id)
+     |> List.sort_uniq String.compare
+     |> List.length);
   List.iter
     (fun (execution : execution_record) ->
        check string "duplicate occurrence is dispatched" "dispatched"
@@ -802,6 +807,57 @@ let test_recurring_completion_ignores_failed_prior_attempt () =
     (List.length (List.filter (( = ) Execution_failed) statuses));
   check int "current duplicate succeeds" 1
     (List.length (List.filter (( = ) Execution_succeeded) statuses))
+;;
+
+let test_batch_settlement_finishes_orphan_execution () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    make_request
+      ~schedule_id:"orphan-dispatched-execution"
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  ignore (insert_ok config request);
+  ignore (store_ok "refresh_due" (refresh_due config ~now:201.0));
+  ignore
+    (store_ok "start_due_candidate"
+       (start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id));
+  ignore
+    (store_ok "accept_running"
+       (accept_running config ~now:203.0 ~schedule_id:request.schedule_id ()));
+  let state = read_state config in
+  let execution =
+    match last_execution_for_schedule state ~schedule_id:request.schedule_id with
+    | Some execution -> execution
+    | None -> fail "orphan settlement precondition has no execution"
+  in
+  let orphan_state = { state with schedules = [] } in
+  Workspace_core.write_text
+    config
+    (schedules_path config)
+    (Yojson.Safe.to_string (state_to_yojson orphan_state));
+  let settlement =
+    { execution_id = execution.execution_id
+    ; schedule_id = execution.schedule_id
+    ; due_at = execution.due_at
+    ; payload_digest = execution.payload_digest
+    ; outcome = Dispatched_occurrence_failed "consumer no longer owns work"
+    }
+  in
+  ignore
+    (store_ok "settle orphan execution"
+       (settle_dispatched_occurrences config ~now:300.0 [ settlement ]));
+  let settled = read_state config in
+  check int "orphan settlement does not recreate schedule" 0
+    (List.length settled.schedules);
+  match last_execution_for_schedule settled ~schedule_id:request.schedule_id with
+  | Some execution ->
+    check string "orphan execution becomes terminal" "failed"
+      (execution_status_to_string execution.status);
+    check (option string) "orphan failure reason is durable"
+      (Some "consumer no longer owns work") execution.error
+  | None -> fail "orphan execution evidence disappeared"
 ;;
 
 let test_completion_before_acceptance_is_idempotent () =
@@ -1167,6 +1223,8 @@ let () =
             test_recurring_dispatched_completion_settles_duplicate_executions;
           test_case "recurring completion ignores a failed prior attempt" `Quick
             test_recurring_completion_ignores_failed_prior_attempt;
+          test_case "batch settlement finishes an orphan execution" `Quick
+            test_batch_settlement_finishes_orphan_execution;
           test_case "completion before acceptance is idempotent" `Quick
             test_completion_before_acceptance_is_idempotent;
           test_case "accepted one-shot failure is terminal" `Quick

@@ -911,7 +911,7 @@ let test_reclaim_settles_duplicate_occurrence_executions_by_id () =
   let _ =
     tick_ok
       config
-      ~now:202.0
+      ~now:201.0
       ~consumer:(accepting_consumer ~accepted_detail calls)
   in
   let before =
@@ -920,6 +920,11 @@ let test_reclaim_settles_duplicate_occurrence_executions_by_id () =
       ~schedule_id
   in
   check int "duplicate occurrence has two executions" 2 (List.length before);
+  check int "duplicate occurrence has two execution ids" 2
+    (before
+     |> List.map (fun (execution : execution_record) -> execution.execution_id)
+     |> List.sort_uniq String.compare
+     |> List.length);
   List.iter
     (fun (execution : execution_record) ->
        check bool "both duplicate executions are dispatched" true

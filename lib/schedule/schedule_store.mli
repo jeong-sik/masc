@@ -268,7 +268,8 @@ val unsettled_dispatched_occurrences :
     store cannot decide whether the consumer still owns one: that requires
     decoding the consumer-owned dispatch detail to learn where it went, which
     is consumer territory. Orphan executions are returned rather than silently
-    omitted; a later terminal write will surface [Schedule_not_found]. *)
+    omitted; an exact batch settlement can finish their execution evidence even
+    after the schedule request row is absent. *)
 
 val settle_dispatched_occurrences_and_cancel_matching :
   Workspace_utils.config ->
@@ -278,7 +279,9 @@ val settle_dispatched_occurrences_and_cancel_matching :
   (unit, store_error) result
 (** Atomically settles the supplied accepted occurrences and cancels every
     currently [Scheduled] or [Due] request selected by [should_cancel]. A
-    selected [Running] request fails closed because cancelling it could orphan
+    settlement still finishes that exact execution when its schedule request
+    does not exist; cancellation only applies to present rows.
+    A selected [Running] request fails closed because cancelling it could orphan
     a consumer effect that has not committed its acceptance yet. *)
 
 val prune_completed :
@@ -292,7 +295,5 @@ val prune_completed :
     describes the request's intent, not the work: a recurring request advances
     past an occurrence at [accept_running] and can be cancelled afterwards while
     that occurrence is still outstanding. The execution row is then the only
-    durable record of work a consumer accepted, and both
-    [complete_dispatched_occurrence] and [fail_dispatched_occurrence] return
-    [Schedule_not_found] without the request row — so pruning the pair would
-    both erase the evidence and make the occurrence unsettleable. *)
+    durable record of work a consumer accepted. Pruning the pair would erase
+    the evidence required by exact batch settlement. *)

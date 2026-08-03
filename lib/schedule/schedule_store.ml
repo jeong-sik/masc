@@ -313,25 +313,8 @@ let list_schedules config = (read_state config).schedules
 
 let get_schedule config ~schedule_id = find_schedule (read_state config) schedule_id
 
-let stable_float value = Printf.sprintf "%.17g" value
-
-let sha256_string value = Digestif.SHA256.(digest_string value |> to_hex)
-
-let execution_id ~now (request : schedule_request) =
-  String.concat
-    "|"
-    [ "schedule_execution"
-    ; request.schedule_id
-    ; stable_float request.due_at
-    ; stable_float now
-    ; Schedule_domain.payload_digest request.payload
-    ]
-  |> sha256_string
-  |> Printf.sprintf "exec-%s"
-;;
-
 let make_execution_record ~now (request : schedule_request) =
-  { execution_id = execution_id ~now request
+  { execution_id = "exec-" ^ Random_id.uuid_v7 ()
   ; schedule_id = request.schedule_id
   ; started_at = now
   ; finished_at = None
@@ -689,13 +672,12 @@ let advance_current_recurring_occurrence
 
 let settle_dispatched_occurrence_in_state ~now state settlement =
   let { execution_id; schedule_id; due_at; payload_digest; outcome } = settlement in
-  match find_schedule state schedule_id, execution_by_id state ~execution_id with
-  | None, _ -> Error Schedule_not_found
-  | Some _, None ->
+  match execution_by_id state ~execution_id with
+  | None ->
     Error
       (Invalid_status_transition
          "schedule settlement has no matching execution id")
-  | Some _, Some execution
+  | Some execution
     when not
            (execution_matches_occurrence
               ~schedule_id
@@ -705,41 +687,48 @@ let settle_dispatched_occurrence_in_state ~now state settlement =
     Error
       (Invalid_status_transition
          "schedule settlement execution id does not match occurrence identity")
-  | Some request, Some { status = Execution_succeeded; _ } ->
+  | Some { status = Execution_succeeded; _ } ->
     (match outcome with
-     | Dispatched_occurrence_succeeded -> Ok (state, request, false)
+     | Dispatched_occurrence_succeeded ->
+       Ok (state, find_schedule state schedule_id, false)
      | Dispatched_occurrence_failed _ ->
        Error
          (Invalid_status_transition
             "succeeded schedule occurrence cannot become failed"))
-  | Some request, Some { status = Execution_failed; _ } ->
+  | Some { status = Execution_failed; _ } ->
     (match outcome with
-     | Dispatched_occurrence_failed _ -> Ok (state, request, false)
+     | Dispatched_occurrence_failed _ ->
+       Ok (state, find_schedule state schedule_id, false)
      | Dispatched_occurrence_succeeded ->
        Error
          (Invalid_status_transition
             "failed schedule occurrence cannot become succeeded"))
-  | Some request, Some { status = (Execution_running | Execution_dispatched); _ } ->
+  | Some { status = (Execution_running | Execution_dispatched); _ } ->
     let terminal_status =
       match outcome with
       | Dispatched_occurrence_succeeded -> Succeeded
       | Dispatched_occurrence_failed _ -> Failed
     in
-    let updated =
-      match request.recurrence with
-      | One_shot
-        when request.status = Running
-             && request_matches_occurrence request ~due_at ~payload_digest ->
-        { request with status = terminal_status }
-      | One_shot -> request
-      | Interval _ | Daily _ | Cron _ ->
-        advance_current_recurring_occurrence
-          ~now
-          request
-          ~due_at
-          ~payload_digest
+    let schedules, updated =
+      match find_schedule state schedule_id with
+      | None -> state.schedules, None
+      | Some request ->
+        let updated =
+          match request.recurrence with
+          | One_shot
+            when request.status = Running
+                 && request_matches_occurrence request ~due_at ~payload_digest ->
+            { request with status = terminal_status }
+          | One_shot -> request
+          | Interval _ | Daily _ | Cron _ ->
+            advance_current_recurring_occurrence
+              ~now
+              request
+              ~due_at
+              ~payload_digest
+        in
+        replace_schedule state.schedules updated, Some updated
     in
-    let schedules = replace_schedule state.schedules updated in
     let* executions =
       update_execution_by_id
         state.executions
@@ -805,6 +794,11 @@ let settle_dispatched_occurrence
   =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
+    let* () =
+      match find_schedule state schedule_id with
+      | Some _ -> Ok ()
+      | None -> Error Schedule_not_found
+    in
     let* execution, rest =
       settlement_executions_for_occurrence
         state
@@ -834,6 +828,14 @@ let settle_dispatched_occurrence
         settle next_state updated (changed || execution_changed) rest
     in
     let* next_state, updated, changed = settle next_state updated changed rest in
+    let* updated =
+      match updated with
+      | Some request -> Ok request
+      | None ->
+        Error
+          (Invalid_status_transition
+             "schedule settlement lost its matching schedule")
+    in
     let* () =
       if changed
       then

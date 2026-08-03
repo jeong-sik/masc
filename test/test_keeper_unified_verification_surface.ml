@@ -505,6 +505,38 @@ let scheduled_wake_block world_state =
   | None -> fail "expected Scheduled Wake section"
 ;;
 
+let test_schedule_row_omits_absent_title_without_fabricating_one () =
+  Masc_test_deps.init_keeper_tool_registry ();
+  init_runtime_default_for_tests ();
+  let wake : Keeper_event_queue.scheduled_wake =
+    { schedule_id = "sched-no-title"
+    ; due_at = 200.0
+    ; payload_digest = "digest-no-title"
+    ; title = None
+    ; message = "Run the untitled maintenance sweep."
+    }
+  in
+  let event : WO.pending_board_event =
+    { sample_scheduled_wake with
+      event_kind = WO.Schedule_due wake
+    ; title = "stale projected title"
+    ; preview = "stale projected message"
+    }
+  in
+  let obs = { base_observation with pending_board_events = [ event ] } in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    build_prompt ~meta:minimal_meta obs
+  in
+  let block = scheduled_wake_block world_state in
+  check bool "untitled wake still carries its typed pointer" true
+    (contains_sub "schedule_id=\"sched-no-title\"" block);
+  check bool "untitled wake carries its message" true
+    (contains_sub "message=\"Run the untitled maintenance sweep.\"" block);
+  check bool "absent title is omitted rather than fabricated" false
+    (contains_sub "title=" block);
+  check bool "stale projection copy is not rendered" false
+    (contains_sub "stale projected" block)
+
 let test_scheduled_wake_renders_schedule_pointer () =
   Masc_test_deps.init_keeper_tool_registry ();
   init_runtime_default_for_tests ();
@@ -809,6 +841,9 @@ let () =
           test_case
             "prompt: schedule rows escape fields and use typed wake payload"
             `Quick test_schedule_rows_escape_every_field_and_use_typed_wake_payload;
+          test_case
+            "prompt: absent wake title is not fabricated"
+            `Quick test_schedule_row_omits_absent_title_without_fabricating_one;
           test_case
             "prompt: scheduled wake is not rendered as board activity"
             `Quick test_scheduled_wake_is_not_rendered_as_board_activity;

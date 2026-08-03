@@ -356,16 +356,20 @@ let format_scheduled_wake_observations
       (fun (event : Keeper_world_observation.pending_board_event) ->
          match event.event_kind with
          | Keeper_world_observation.Schedule_due wake ->
+           let title_field =
+             match wake.Keeper_event_queue.title with
+             | None -> []
+             | Some title -> [ "title", title ]
+           in
            Buffer.add_string ubuf
              (format_prompt_row
-                [ "schedule_id", wake.Keeper_event_queue.schedule_id
-                ; "due_at_unix", Printf.sprintf "%.17g" wake.due_at
-                ; "payload_digest", wake.payload_digest
-                ; "occurrence_id", event.post_id
-                ; ( "title"
-                  , Option.value wake.title ~default:"Scheduled keeper wake due" )
-                ; "message", wake.message
-                ]);
+                ([ "schedule_id", wake.Keeper_event_queue.schedule_id
+                 ; "due_at_unix", Printf.sprintf "%.17g" wake.due_at
+                 ; "payload_digest", wake.payload_digest
+                 ; "occurrence_id", event.post_id
+                 ]
+                 @ title_field
+                 @ [ "message", wake.message ]));
            Buffer.add_char ubuf '\n'
          (* [events] is pre-filtered by [is_scheduled_automation_event], so the
             arms below are unreachable. They are enumerated rather than folded

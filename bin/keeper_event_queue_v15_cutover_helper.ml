@@ -263,23 +263,12 @@ let write_prepared_file path =
     let descriptor =
       Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
     in
+    let output = Unix.out_channel_of_descr descriptor in
     Fun.protect
-      ~finally:(fun () -> Unix.close descriptor)
+      ~finally:(fun () -> close_out_noerr output)
       (fun () ->
-         let payload = "prepared\n" in
-         let rec write offset =
-           if offset < String.length payload
-           then
-             let written =
-               Unix.write_substring
-                 descriptor
-                 payload
-                 offset
-                 (String.length payload - offset)
-             in
-             write (offset + written)
-         in
-         write 0;
+         output_string output "prepared\n";
+         flush output;
          Unix.fsync descriptor);
     Ok ()
   with

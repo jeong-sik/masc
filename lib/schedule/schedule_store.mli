@@ -183,6 +183,7 @@ val accept_running :
 val complete_dispatched_occurrence :
   Workspace_utils.config ->
   now:float ->
+  occurrence_id:Schedule_occurrence_id.t ->
   schedule_id:string ->
   due_at:float ->
   payload_digest:string ->
@@ -192,11 +193,14 @@ val complete_dispatched_occurrence :
     succeeded. Idempotent when that occurrence is already succeeded. A one-shot
     request becomes [Succeeded]; an already-advanced recurring request keeps
     its next due row. The original dispatch receipt in the execution detail is
-    preserved. *)
+    preserved. [occurrence_id] must match the current schedule creation's
+    persisted [requested_at], so stale consumer work cannot settle a recreated
+    schedule with the same id, due time, and payload. *)
 
 val fail_dispatched_occurrence :
   Workspace_utils.config ->
   now:float ->
+  occurrence_id:Schedule_occurrence_id.t ->
   schedule_id:string ->
   due_at:float ->
   payload_digest:string ->

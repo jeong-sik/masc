@@ -412,6 +412,7 @@ let dispatch_candidate
              Schedule_store.complete_dispatched_occurrence
                config
                ~now
+               ~occurrence_id:signal.occurrence_id
                ~schedule_id
                ~due_at:signal.due_at
                ~payload_digest:signal.payload_digest
@@ -433,6 +434,7 @@ let dispatch_candidate
              Schedule_store.fail_dispatched_occurrence
                config
                ~now
+               ~occurrence_id:signal.occurrence_id
                ~schedule_id
                ~due_at:signal.due_at
                ~payload_digest:signal.payload_digest

@@ -787,6 +787,7 @@ let settlement_executions_for_occurrence
 let settle_dispatched_occurrence
       config
       ~now
+      ~occurrence_id
       ~schedule_id
       ~due_at
       ~payload_digest
@@ -796,7 +797,20 @@ let settle_dispatched_occurrence
     let* state = load_for_mutation config in
     let* () =
       match find_schedule state schedule_id with
-      | Some _ -> Ok ()
+      | Some request ->
+        let current_occurrence_id =
+          Schedule_occurrence_id.make
+            ~schedule_id
+            ~requested_at:request.requested_at
+            ~due_at
+            ~payload_digest
+        in
+        if Schedule_occurrence_id.equal current_occurrence_id occurrence_id
+        then Ok ()
+        else
+          Error
+            (Invalid_status_transition
+               "schedule occurrence id does not match current schedule creation")
       | None -> Error Schedule_not_found
     in
     let* execution, rest =
@@ -853,6 +867,7 @@ let settle_dispatched_occurrence
 let complete_dispatched_occurrence
       config
       ~now
+      ~occurrence_id
       ~schedule_id
       ~due_at
       ~payload_digest
@@ -860,6 +875,7 @@ let complete_dispatched_occurrence
   settle_dispatched_occurrence
     config
     ~now
+    ~occurrence_id
     ~schedule_id
     ~due_at
     ~payload_digest
@@ -869,6 +885,7 @@ let complete_dispatched_occurrence
 let fail_dispatched_occurrence
       config
       ~now
+      ~occurrence_id
       ~schedule_id
       ~due_at
       ~payload_digest
@@ -876,6 +893,7 @@ let fail_dispatched_occurrence
   settle_dispatched_occurrence
     config
     ~now
+    ~occurrence_id
     ~schedule_id
     ~due_at
     ~payload_digest

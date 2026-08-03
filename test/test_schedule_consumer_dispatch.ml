@@ -331,6 +331,14 @@ let create_named_keeper_wake_schedule
     fail ("create failed: " ^ Schedule_service.service_error_to_string error)
 ;;
 
+let schedule_occurrence_id (request : Schedule_domain.schedule_request) =
+  Schedule_occurrence_id.make
+    ~schedule_id:request.schedule_id
+    ~requested_at:request.requested_at
+    ~due_at:request.due_at
+    ~payload_digest:(Schedule_domain.payload_digest request.payload)
+;;
+
 let create_unsupported_schedule config =
   match
     Schedule_service.create config ~schedule_id:"unsupported-live-sched"
@@ -591,6 +599,7 @@ let test_keeper_wake_consumer_records_dispatch_without_work_success () =
        Schedule_store.complete_dispatched_occurrence
          config
          ~now:202.0
+         ~occurrence_id:(schedule_occurrence_id request)
          ~schedule_id:request.schedule_id
          ~due_at:request.due_at
          ~payload_digest:(Schedule_domain.payload_digest request.payload)
@@ -681,6 +690,7 @@ let test_reused_schedule_id_does_not_match_pruned_terminal_receipt () =
      Schedule_store.complete_dispatched_occurrence
        config
        ~now:203.0
+       ~occurrence_id:(schedule_occurrence_id first)
        ~schedule_id:first.schedule_id
        ~due_at:first.due_at
        ~payload_digest:(Schedule_domain.payload_digest first.payload)

@@ -179,6 +179,27 @@ if [ ! -d "$RUNTIME_ROOT" ] || [ -L "$RUNTIME_ROOT" ]; then
 fi
 mkdir -p "$LOG_DIR"
 
+HANDOFF_DIR="$(mktemp -d "$RUNTIME_ROOT/deploy-handoff.XXXXXX")"
+PREPARED_FILE="$HANDOFF_DIR/prepared"
+HANDOFF_ACTIVE=true
+
+cleanup_incomplete_handoff() {
+    if [ "$HANDOFF_ACTIVE" = true ] && [ -n "${PROD_PID:-}" ]; then
+        kill "$PROD_PID" 2>/dev/null || true
+        wait "$PROD_PID" 2>/dev/null || true
+        if [ -f "$PID_FILE" ] && [ "$(cat "$PID_FILE")" = "$PROD_PID" ]; then
+            rm -f "$PID_FILE"
+        fi
+    fi
+    rm -f "$PREPARED_FILE"
+    rmdir "$HANDOFF_DIR" 2>/dev/null || true
+}
+
+trap cleanup_incomplete_handoff EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+MASC_BASE_PATH="$BASE_PATH" \
 MASC_ORCHESTRATOR_ENABLED=0 \
 MASC_CONFIG_DIR="${MASC_CONFIG_DIR:-$BASE_PATH/.masc/config}" \
 MASC_EVENT_QUEUE_V15_CUTOVER_HELPER="$BUILD_CUTOVER_HELPER" \
@@ -188,6 +209,7 @@ MASC_EVENT_QUEUE_V15_CUTOVER_HELPER="$BUILD_CUTOVER_HELPER" \
         --next-executable "$RELEASE_EXE" \
         --next-argument="--port=$PROD_PORT" \
         --next-argument="--base-path=$BASE_PATH" \
+        --prepared-file "$PREPARED_FILE" \
         -- \
         "$SCRIPT_DIR/deploy.sh" \
         --skip-build \
@@ -198,6 +220,25 @@ MASC_EVENT_QUEUE_V15_CUTOVER_HELPER="$BUILD_CUTOVER_HELPER" \
 PROD_PID=$!
 echo "$PROD_PID" > "$PID_FILE"
 echo "    Handoff started with PID $PROD_PID" >&2
+
+# Validation and installation are intentionally unbounded: the health deadline
+# starts only after the helper proves preparation completed. A failed helper is
+# reaped here, and the EXIT trap terminates its preparation child if interrupted.
+echo "==> Waiting for cutover preparation..." >&2
+while [ ! -f "$PREPARED_FILE" ]; do
+    if ! kill -0 "$PROD_PID" 2>/dev/null; then
+        if wait "$PROD_PID"; then
+            HANDOFF_STATUS=0
+        else
+            HANDOFF_STATUS=$?
+        fi
+        echo "Error: Cutover preparation exited with status $HANDOFF_STATUS" >&2
+        exit 1
+    fi
+    sleep 0.1
+done
+rm -f "$PREPARED_FILE"
+rmdir "$HANDOFF_DIR"
 
 # --- 5. Health check ---
 echo "==> Health check..." >&2
@@ -211,13 +252,13 @@ for _ in $(seq 1 15); do
 done
 
 if [ "$HEALTH_OK" = true ]; then
+    HANDOFF_ACTIVE=false
+    trap - EXIT INT TERM
     echo "    Prod healthy on :$PROD_PORT" >&2
 else
     echo "Error: Prod failed health check on :$PROD_PORT" >&2
     echo "    Logs: $LOG_DIR/masc-prod.err.log" >&2
 
-    kill "$PROD_PID" 2>/dev/null || true
-    rm -f "$PID_FILE"
     echo "    Previous binary remains at $BACKUP_EXE; it was not restarted across the hard cut." >&2
     exit 1
 fi

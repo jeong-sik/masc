@@ -77,6 +77,72 @@ let validate_current_queue path =
     errorf "current event queue JSON is malformed path=%s: %s" path detail
 ;;
 
+let validate_schedule_ledger path =
+  try
+    let json = Yojson.Safe.from_file path in
+    let* state =
+      Schedule_store.state_of_yojson json
+      |> Result.map_error (fun detail ->
+        `Msg
+          (Printf.sprintf
+             "schedule ledger contract rejected path=%s: %s"
+             path
+             detail))
+    in
+    let nonempty field value =
+      if String.equal (String.trim value) ""
+      then errorf "schedule ledger has an empty %s path=%s" field path
+      else Ok ()
+    in
+    let* () =
+      List.fold_left
+        (fun result (schedule : Schedule_domain.schedule_request) ->
+           let* () = result in
+           nonempty "schedule.schedule_instance_id" schedule.schedule_instance_id)
+        (Ok ())
+        state.schedules
+    in
+    let* () =
+      List.fold_left
+        (fun result (execution : Schedule_domain.execution_record) ->
+           let* () = result in
+           nonempty "execution.schedule_instance_id" execution.schedule_instance_id)
+        (Ok ())
+        state.executions
+    in
+    let unsettled =
+      List.filter
+        (fun (execution : Schedule_domain.execution_record) ->
+           match execution.status with
+           | Schedule_domain.Execution_running
+           | Schedule_domain.Execution_dispatched -> true
+           | Schedule_domain.Execution_succeeded
+           | Schedule_domain.Execution_failed -> false)
+        state.executions
+    in
+    let execution_json (execution : Schedule_domain.execution_record) =
+      `Assoc
+        [ "execution_id", `String execution.execution_id
+        ; "schedule_id", `String execution.schedule_id
+        ; "status", `String (Schedule_domain.execution_status_to_string execution.status)
+        ]
+    in
+    Yojson.Safe.to_channel
+      stdout
+      (`Assoc
+         [ "unsettled_count", `Int (List.length unsettled)
+         ; "unsettled", `List (List.map execution_json unsettled)
+         ]);
+    output_char stdout '\n';
+    flush stdout;
+    Ok ()
+  with
+  | Sys_error detail ->
+    errorf "schedule ledger file is unreadable path=%s: %s" path detail
+  | Yojson.Json_error detail ->
+    errorf "schedule ledger JSON is malformed path=%s: %s" path detail
+;;
+
 let child_exit_code = function
   | Unix.WEXITED code -> code
   | Unix.WSIGNALED signal | Unix.WSTOPPED signal -> 128 + signal
@@ -99,21 +165,61 @@ let environment_for_lease_child () =
   |> Array.of_list
 ;;
 
+let rec waitpid_nointr pid =
+  try Unix.waitpid [] pid |> snd with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid
+;;
+
 let run_child command environment =
   match command with
   | [] -> errorf "lease command is empty"
   | executable :: _ ->
     (try
-       let pid =
-         Unix.create_process_env
-           executable
-           (Array.of_list command)
-           environment
-           Unix.stdin
-           Unix.stdout
-           Unix.stderr
+       let arguments = Array.of_list command in
+       let pid = Unix.fork () in
+       if pid = 0
+       then (
+         try
+           ignore (Unix.setsid ());
+           Unix.execvpe executable arguments environment
+         with
+         | exn ->
+           Printf.eprintf
+             "cutover command failed to start executable=%s: %s\n%!"
+             executable
+             (Printexc.to_string exn);
+           Unix._exit 127);
+       let forwarded_signal = ref None in
+       let signal_process_group signal =
+         try Unix.kill (-pid) signal with
+         | Unix.Unix_error (Unix.ESRCH, _, _) ->
+           (try Unix.kill pid signal with
+            | Unix.Unix_error (Unix.ESRCH, _, _) -> ())
        in
-       Ok (Unix.waitpid [] pid |> snd)
+       let forward signal =
+         forwarded_signal := Some signal;
+         signal_process_group signal
+       in
+       let previous_sigterm =
+         Sys.signal Sys.sigterm (Sys.Signal_handle forward)
+       in
+       let previous_sigint =
+         Sys.signal Sys.sigint (Sys.Signal_handle forward)
+       in
+       Fun.protect
+         ~finally:(fun () ->
+           Sys.set_signal Sys.sigterm previous_sigterm;
+           Sys.set_signal Sys.sigint previous_sigint;
+           match !forwarded_signal with
+           | Some _ ->
+             (try Unix.kill (-pid) Sys.sigkill with
+              | Unix.Unix_error (Unix.ESRCH, _, _) -> ())
+           | None -> ())
+         (fun () ->
+            let status = waitpid_nointr pid in
+            match !forwarded_signal with
+            | Some signal -> Ok (Unix.WSIGNALED signal)
+            | None -> Ok status)
      with
      | Unix.Unix_error (error, syscall, argument) ->
        errorf
@@ -121,6 +227,68 @@ let run_child command environment =
          syscall
          argument
          (Unix.error_message error))
+;;
+
+let verify_base_path_lease_owner base_path owner_pid =
+  if owner_pid <= 0
+  then errorf "lease owner PID must be positive"
+  else
+    let run_dir = (Host_config.host ()).run_dir in
+    match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+    | Server_startup_takeover.Base_path_already_owned { pid = Some actual_pid }
+      when actual_pid = owner_pid -> Ok ()
+    | Server_startup_takeover.Base_path_already_owned { pid } ->
+      errorf
+        "workspace writer lease owner mismatch base_path=%s expected_pid=%d actual_pid=%s"
+        base_path
+        owner_pid
+        (match pid with
+         | Some value -> string_of_int value
+         | None -> "unknown")
+    | Server_startup_takeover.Base_path_rejected rejection ->
+      errorf
+        "workspace writer lease verification rejected base_path=%s: %s"
+        base_path
+        (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+    | Server_startup_takeover.Base_path_acquired lease ->
+      Server_startup_takeover.release_base_path_lease lease;
+      errorf
+        "workspace writer lease is not held by the expected process base_path=%s expected_pid=%d"
+        base_path
+        owner_pid
+;;
+
+let write_prepared_file path =
+  try
+    let descriptor =
+      Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
+    in
+    Fun.protect
+      ~finally:(fun () -> Unix.close descriptor)
+      (fun () ->
+         let payload = "prepared\n" in
+         let rec write offset =
+           if offset < String.length payload
+           then
+             let written =
+               Unix.write_substring
+                 descriptor
+                 payload
+                 offset
+                 (String.length payload - offset)
+             in
+             write (offset + written)
+         in
+         write 0;
+         Unix.fsync descriptor);
+    Ok ()
+  with
+  | Unix.Unix_error (error, syscall, argument) ->
+    errorf
+      "cutover preparation marker failed syscall=%s argument=%s: %s"
+      syscall
+      argument
+      (Unix.error_message error)
 ;;
 
 let run_under_base_path_lease base_path command =
@@ -152,7 +320,13 @@ let run_under_base_path_lease base_path command =
        Stdlib.exit (child_exit_code status))
 ;;
 
-let handoff_base_path_lease base_path next_executable next_arguments prepare_command =
+let handoff_base_path_lease
+      base_path
+      next_executable
+      next_arguments
+      prepared_file
+      prepare_command
+  =
   match prepare_command with
   | [] -> errorf "lease-handoff requires a preparation command"
   | _ ->
@@ -184,24 +358,33 @@ let handoff_base_path_lease base_path next_executable next_arguments prepare_com
             Stdlib.exit prepare_exit_code)
           else (
             match
-              Server_startup_takeover.prepare_base_path_lease_exec_handoff lease
+              match prepared_file with
+              | None -> Ok ()
+              | Some path -> write_prepared_file path
             with
-            | Error rejection ->
+            | Error _ as error ->
               release ();
-              errorf
-                "workspace writer lease handoff rejected base_path=%s: %s"
-                base_path
-                (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+              error
             | Ok () ->
-              let arguments = Array.of_list (next_executable :: next_arguments) in
-              let environment = environment_without_lease_owner () |> Array.of_list in
-              (try Unix.execve next_executable arguments environment with
-               | exn ->
+              (match
+                 Server_startup_takeover.prepare_base_path_lease_exec_handoff lease
+               with
+               | Error rejection ->
                  release ();
                  errorf
-                   "cutover runtime handoff failed executable=%s: %s"
-                   next_executable
-                   (Printexc.to_string exn)))))
+                   "workspace writer lease handoff rejected base_path=%s: %s"
+                   base_path
+                   (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+               | Ok () ->
+                 let arguments = Array.of_list (next_executable :: next_arguments) in
+                 let environment = environment_without_lease_owner () |> Array.of_list in
+                 (try Unix.execve next_executable arguments environment with
+                  | exn ->
+                    release ();
+                    errorf
+                      "cutover runtime handoff failed executable=%s: %s"
+                      next_executable
+                      (Printexc.to_string exn))))))
 ;;
 
 let signal_files =
@@ -232,6 +415,22 @@ let validate_current_queue_cmd =
          $ current_queue_file))
 ;;
 
+let schedule_ledger_file =
+  let doc = "Validate one current schedule ledger." in
+  Arg.(required & pos 0 (some file) None & info [] ~docv:"SCHEDULE_LEDGER" ~doc)
+;;
+
+let validate_schedule_ledger_cmd =
+  let doc = "validate one schedule ledger with the production decoder" in
+  Cmd.v
+    (Cmd.info "validate-schedule-ledger" ~doc)
+    Term.(
+      ret
+        (const
+           (fun path -> cmdliner_result (validate_schedule_ledger path))
+         $ schedule_ledger_file))
+;;
+
 let base_path =
   let doc = "Workspace BasePath whose process-lifetime writer lease must be free." in
   Arg.(required & opt (some dir) None & info [ "base-path" ] ~docv:"PATH" ~doc)
@@ -255,6 +454,24 @@ let lease_run_cmd =
          $ command))
 ;;
 
+let owner_pid =
+  let doc = "Expected process ID of the current BasePath lease owner." in
+  Arg.(required & opt (some int) None & info [ "owner-pid" ] ~docv:"PID" ~doc)
+;;
+
+let verify_lease_owner_cmd =
+  let doc = "verify the exact process that owns the canonical BasePath lease" in
+  Cmd.v
+    (Cmd.info "verify-lease-owner" ~doc)
+    Term.(
+      ret
+        (const
+           (fun base_path owner_pid ->
+              cmdliner_result (verify_base_path_lease_owner base_path owner_pid))
+         $ base_path
+         $ owner_pid))
+;;
+
 let next_executable =
   let doc = "Runtime executable that replaces the lease owner after preparation." in
   Arg.(required & opt (some string) None & info [ "next-executable" ] ~docv:"PATH" ~doc)
@@ -265,6 +482,11 @@ let next_arguments =
   Arg.(value & opt_all string [] & info [ "next-argument" ] ~docv:"ARG" ~doc)
 ;;
 
+let prepared_file =
+  let doc = "Exclusive marker created after preparation succeeds and before exec." in
+  Arg.(value & opt (some string) None & info [ "prepared-file" ] ~docv:"PATH" ~doc)
+;;
+
 let lease_handoff_cmd =
   let doc = "prepare a cutover under lease, then atomically exec the new runtime" in
   Cmd.v
@@ -272,16 +494,18 @@ let lease_handoff_cmd =
     Term.(
       ret
         (const
-           (fun base_path next_executable next_arguments command ->
+           (fun base_path next_executable next_arguments prepared_file command ->
               cmdliner_result
                 (handoff_base_path_lease
                    base_path
                    next_executable
                    next_arguments
+                   prepared_file
                    command))
          $ base_path
          $ next_executable
          $ next_arguments
+         $ prepared_file
          $ command))
 ;;
 
@@ -293,7 +517,9 @@ let () =
           (Cmd.info "masc-keeper-event-queue-v15-cutover-helper" ~doc)
           [ lease_run_cmd
           ; lease_handoff_cmd
+          ; verify_lease_owner_cmd
           ; validate_current_queue_cmd
+          ; validate_schedule_ledger_cmd
           ; validate_signals_cmd
           ]))
 ;;

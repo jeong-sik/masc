@@ -80,6 +80,7 @@ run_gate() {
   local signals_root="$runtime_root/schedules/signals"
   local schedule_ledger_count=0
   local schedules_path
+  local schedule_report
   local signal_file_count=0
   local signal_row_count=0
   local signal_path
@@ -153,38 +154,19 @@ run_gate() {
     schedule_ledger_count=$((schedule_ledger_count + 1))
     [[ -f "$schedules_path" && ! -L "$schedules_path" ]] \
       || fail "schedule ledger is not an exact regular file: $schedules_path"
-    jq -e '
-      type == "object"
-      and (.schedules | type == "array")
-      and (.executions | type == "array")
-      and all(.executions[];
-        type == "object"
-        and (.status == "running"
-          or .status == "dispatched"
-          or .status == "succeeded"
-          or .status == "failed"))
-    ' "$schedules_path" >/dev/null \
-      || fail "schedule ledger shape is invalid: $schedules_path"
+    schedule_report="$("$CUTOVER_HELPER" validate-schedule-ledger "$schedules_path")" \
+      || fail "schedule ledger contract is invalid: $schedules_path"
     local unsettled_count
-    unsettled_count="$(jq '[.executions[] | select(.status == "running" or .status == "dispatched")] | length' "$schedules_path")"
+    unsettled_count="$(jq -er '.unsettled_count' <<<"$schedule_report")" \
+      || fail "typed schedule validator returned an invalid result: $schedules_path"
     unsettled_count_total=$((unsettled_count_total + unsettled_count))
     if [[ "$cutover_required" -eq 1 && "$unsettled_count" -ne 0 ]]; then
       jq -r '
-        .executions[]
-        | select(.status == "running" or .status == "dispatched")
-        | "  execution_id=\(.execution_id // "<missing>") schedule_id=\(.schedule_id // "<missing>") status=\(.status)"
-      ' "$schedules_path" >&2
+        .unsettled[]
+        | "  execution_id=\(.execution_id) schedule_id=\(.schedule_id) status=\(.status)"
+      ' <<<"$schedule_report" >&2
       fail "schedule ledger still has $unsettled_count unsettled execution(s)"
     fi
-    jq -e '
-      all(.schedules[];
-        type == "object"
-        and (.schedule_instance_id | type == "string" and length > 0))
-      and all(.executions[];
-        type == "object"
-        and (.schedule_instance_id | type == "string" and length > 0))
-    ' "$schedules_path" >/dev/null \
-      || fail "schedule ledger contains pre-cut rows without a current schedule instance id: $schedules_path"
   done
 
   if [[ -e "$signals_root" || -L "$signals_root" ]]; then
@@ -241,17 +223,19 @@ run_gate() {
 
 if [[ "$SELF_TEST" -eq 1 ]]; then
   fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/event-queue-v15-cutover.XXXXXX")"
-  trap 'if [[ -n "${handoff_pid:-}" ]]; then kill "$handoff_pid" 2>/dev/null || true; fi; rm -rf "$fixture_root"' EXIT
+  trap 'if [[ -n "${handoff_pid:-}" ]]; then kill "$handoff_pid" 2>/dev/null || true; fi; if [[ -n "${cancel_handoff_pid:-}" ]]; then kill "$cancel_handoff_pid" 2>/dev/null || true; fi; rm -rf "$fixture_root"' EXIT
 
   write_schedules() {
     local target_root="$1"
     local status="$2"
     mkdir -p "$target_root/.masc"
     jq -n --arg status "$status" '
-      {version: 1, schedules: [], executions:
+      {version: 1, updated_at: 1, schedules: [], executions:
         (if $status == "none" then []
          else [{execution_id: "exec-fixture", schedule_instance_id: "instance-fixture",
-                schedule_id: "schedule-fixture", status: $status}]
+                schedule_id: "schedule-fixture", started_at: 1, finished_at: null,
+                due_at: 1, payload_digest: "digest-fixture", status: $status,
+                detail: null, error: null}]
          end)}
     ' >"$target_root/.masc/schedules.json"
   }
@@ -324,6 +308,19 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     "$safe_root/.masc/schedules.json.last-good"
   write_queue "$safe_root" 0 0 0
   "$0" --base-path "$safe_root" >/dev/null
+  # Expansion belongs to the nested shell.
+  # shellcheck disable=SC2016
+  "$CUTOVER_HELPER" \
+    lease-run \
+    --base-path "$safe_root" \
+    -- \
+    /bin/sh -c '"$1" --base-path "$2"' nested-lease-check "$0" "$safe_root" \
+    >/dev/null
+  if MASC_EVENT_QUEUE_V15_CUTOVER_LEASE_OWNER_PID="$$" \
+      "$0" --base-path "$safe_root" >/dev/null 2>&1
+  then
+    fail "self-test accepted a forged BasePath lease owner without a held lease"
+  fi
   if "$CUTOVER_HELPER" \
       lease-run \
       --base-path "$safe_root" \
@@ -386,6 +383,12 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   printf '{not-json\n' >"$malformed_root/.masc/schedules.json"
   expect_failure malformed_ledger "$malformed_root"
 
+  incomplete_contract_root="$fixture_root/incomplete-contract"
+  mkdir -p "$incomplete_contract_root/.masc"
+  jq -n '{version: 1, schedules: [], executions: []}' \
+    >"$incomplete_contract_root/.masc/schedules.json"
+  expect_failure incomplete_schedule_contract "$incomplete_contract_root"
+
   malformed_queue_root="$fixture_root/malformed-queue"
   write_schedules "$malformed_queue_root" none
   mkdir -p "$malformed_queue_root/.masc/keepers/fixture"
@@ -404,7 +407,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   pre_cut_root="$fixture_root/pre-cut-schedule"
   mkdir -p "$pre_cut_root/.masc"
   jq -n '
-    {version: 1,
+    {version: 1, updated_at: 1,
      schedules: [{schedule_id: "legacy-schedule"}],
      executions: []}
   ' >"$pre_cut_root/.masc/schedules.json"
@@ -413,7 +416,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   pre_cut_recovery_root="$fixture_root/pre-cut-recovery"
   write_schedules "$pre_cut_recovery_root" succeeded
   jq -n '
-    {version: 1,
+    {version: 1, updated_at: 1,
      schedules: [{schedule_id: "pre-cut-schedule"}],
      executions: []}
   ' >"$pre_cut_recovery_root/.masc/schedules.json.last-good"
@@ -502,8 +505,68 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     /usr/bin/true \
     >/dev/null
 
+  cancel_handoff_root="$fixture_root/cancel-handoff"
+  cancel_child_file="$fixture_root/cancel-child-pid"
+  cancel_grandchild_file="$fixture_root/cancel-grandchild-pid"
+  cancel_prepare="$fixture_root/cancel-prepare.sh"
+  mkdir -p "$cancel_handoff_root"
+  # Expansion belongs to the generated script.
+  # shellcheck disable=SC2016
+  printf '%s\n' \
+    '#!/bin/sh' \
+    'printf "%s\n" "$$" >"$MASC_CUTOVER_CHILD_PID"' \
+    'trap "exit 143" TERM INT' \
+    'sleep 30 &' \
+    'printf "%s\n" "$!" >"$MASC_CUTOVER_GRANDCHILD_PID"' \
+    'wait' \
+    >"$cancel_prepare"
+  chmod 700 "$cancel_prepare"
+  MASC_CUTOVER_CHILD_PID="$cancel_child_file" \
+  MASC_CUTOVER_GRANDCHILD_PID="$cancel_grandchild_file" \
+    "$CUTOVER_HELPER" \
+      lease-handoff \
+      --base-path "$cancel_handoff_root" \
+      --next-executable /usr/bin/true \
+      -- \
+      "$cancel_prepare" \
+      >/dev/null 2>&1 &
+  cancel_handoff_pid=$!
+  for _ in $(seq 1 50); do
+    [[ -e "$cancel_child_file" && -e "$cancel_grandchild_file" ]] && break
+    kill -0 "$cancel_handoff_pid" 2>/dev/null \
+      || fail "self-test cancellable preparation exited before starting"
+    sleep 0.02
+  done
+  [[ -e "$cancel_child_file" && -e "$cancel_grandchild_file" ]] \
+    || fail "self-test cancellable preparation did not start"
+  cancel_child_pid="$(cat "$cancel_child_file")"
+  cancel_grandchild_pid="$(cat "$cancel_grandchild_file")"
+  kill "$cancel_handoff_pid"
+  wait "$cancel_handoff_pid" 2>/dev/null || true
+  cancel_handoff_pid=""
+  for _ in $(seq 1 50); do
+    if ! kill -0 "$cancel_child_pid" 2>/dev/null \
+        && ! kill -0 "$cancel_grandchild_pid" 2>/dev/null; then
+      break
+    fi
+    sleep 0.02
+  done
+  if kill -0 "$cancel_child_pid" 2>/dev/null; then
+    fail "self-test preparation child survived lease-helper termination"
+  fi
+  if kill -0 "$cancel_grandchild_pid" 2>/dev/null; then
+    fail "self-test preparation grandchild survived lease-helper termination"
+  fi
+  "$CUTOVER_HELPER" \
+    lease-run \
+    --base-path "$cancel_handoff_root" \
+    -- \
+    /usr/bin/true \
+    >/dev/null
+
   handoff_root="$fixture_root/handoff"
   handoff_ready="$fixture_root/handoff-ready"
+  handoff_prepared="$fixture_root/handoff-prepared"
   handoff_next="$fixture_root/handoff-next.sh"
   mkdir -p "$handoff_root"
   # Expansion belongs to the generated script.
@@ -524,18 +587,21 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
       --next-argument="$handoff_root" \
       --next-argument=-- \
       --next-argument="$handoff_next" \
+      --prepared-file "$handoff_prepared" \
       -- \
       /usr/bin/true \
       >/dev/null 2>&1 &
   handoff_pid=$!
   for _ in $(seq 1 50); do
-    [[ -e "$handoff_ready" ]] && break
+    [[ -e "$handoff_prepared" && -e "$handoff_ready" ]] && break
     kill -0 "$handoff_pid" 2>/dev/null \
       || fail "self-test handoff runtime exited before becoming ready"
     sleep 0.02
   done
   [[ -e "$handoff_ready" ]] \
     || fail "self-test handoff runtime did not become ready"
+  [[ -e "$handoff_prepared" ]] \
+    || fail "self-test handoff did not publish preparation completion"
   if "$CUTOVER_HELPER" \
       lease-run \
       --base-path "$handoff_root" \
@@ -553,7 +619,13 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   exit 0
 fi
 
-if [[ "${MASC_EVENT_QUEUE_V15_CUTOVER_LEASE_OWNER_PID:-}" != "$PPID" ]]; then
+if [[ -n "${MASC_EVENT_QUEUE_V15_CUTOVER_LEASE_OWNER_PID:-}" ]]; then
+  "$CUTOVER_HELPER" \
+    verify-lease-owner \
+    --base-path "$BASE_PATH" \
+    --owner-pid "$MASC_EVENT_QUEUE_V15_CUTOVER_LEASE_OWNER_PID" \
+    || fail "inherited BasePath lease proof is invalid"
+else
   runtime_root="$BASE_PATH/.masc"
   runtime_absent_before_lease=0
   if [[ ! -e "$runtime_root" && ! -L "$runtime_root" ]]; then

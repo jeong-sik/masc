@@ -155,6 +155,31 @@ val load_state_result :
     unprojected source-bearing row remains authoritative until the reaction
     projector records and retires it. *)
 
+type orphan_owner_presence =
+  | Orphan_owner_absent
+  | Orphan_owner_present
+
+type orphan_quarantine_result =
+  | Orphan_quarantined of { quarantine_path : string }
+  | Orphan_quarantine_visible_sync_unconfirmed of
+      { quarantine_path : string
+      ; detail : string
+      }
+  | Orphan_snapshot_absent
+  | Orphan_owner_reappeared
+
+val quarantine_orphaned_owner_result :
+  base_path:string ->
+  keeper_name:string ->
+  confirm_owner_presence:(unit -> (orphan_owner_presence, string) result) ->
+  (orphan_quarantine_result, string) result
+(** Move one exact owner runtime directory out of active event-queue discovery
+    after [confirm_owner_presence] rechecks, under the same durable owner lock,
+    that no registry, metadata, or declarative config authority exists. The
+    snapshot, transition WAL, and sibling runtime evidence move together into
+    [.masc/keepers/.orphaned-event-queues/<keeper>]. Both source and target
+    parents are fsynced. Existing quarantine data is never overwritten. *)
+
 val cancel_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->

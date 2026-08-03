@@ -5155,6 +5155,52 @@ let test_transition_projection_cursor_commits_before_isolated_owner_recovery () 
     (List.rev !processed)
 ;;
 
+let test_durable_queue_owner_presence_requires_exact_authority () =
+  with_temp_dir "durable-queue-owner-presence-" @@ fun base_path ->
+  let config = Workspace.default_config base_path in
+  let module Recovery = Server_bootstrap_maintenance.Recovery_for_testing in
+  let presence keeper_name =
+    match Recovery.exact_owner_presence config keeper_name with
+    | Ok presence -> presence
+    | Error detail -> Alcotest.fail detail
+  in
+  (match presence "absent-owner" with
+   | Recovery.Owner_absent -> ()
+   | _ -> Alcotest.fail "owner without exact authority was retained");
+  write_basepath_keeper_toml base_path "declared-owner";
+  (match presence "declared-owner" with
+   | Recovery.Owner_not_materialized -> ()
+   | _ -> Alcotest.fail "exact TOML owner was classified as orphaned");
+  let persisted_meta =
+    make_keeper_meta
+      ~name:"persisted-owner"
+      ~trace_id:"trace-persisted-owner"
+      ()
+  in
+  write_keeper_meta_exn config persisted_meta;
+  (match presence persisted_meta.name with
+   | Recovery.Owner_present -> ()
+   | _ -> Alcotest.fail "exact persisted owner was not authoritative");
+  let registered_meta =
+    make_keeper_meta
+      ~name:"registered-owner"
+      ~trace_id:"trace-registered-owner"
+      ()
+  in
+  ignore
+    (Keeper_registry.For_testing.register
+       ~base_path
+       registered_meta.name
+       registered_meta);
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.unregister ~base_path registered_meta.name)
+    (fun () ->
+      match presence registered_meta.name with
+      | Recovery.Owner_present -> ()
+      | _ -> Alcotest.fail "exact registered owner was not authoritative")
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -5167,6 +5213,10 @@ let () =
             "transition projection cursor commits before isolated owner recovery"
             `Quick
             test_transition_projection_cursor_commits_before_isolated_owner_recovery;
+          Alcotest.test_case
+            "durable queue owner presence requires exact authority"
+            `Quick
+            test_durable_queue_owner_presence_requires_exact_authority;
           Alcotest.test_case
             "gRPC tool arguments fail closed before dispatch"
             `Quick

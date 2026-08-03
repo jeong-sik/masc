@@ -642,6 +642,11 @@
  (libraries alcotest masc_test_deps masc.keeper_checkpoint_ref))
 
 (test
+ (name test_keeper_event_queue_orphan_quarantine)
+ (modules test_keeper_event_queue_orphan_quarantine)
+ (libraries alcotest masc_test_deps))
+
+(test
  (name test_keeper_checkpoint_purge)
  (modules test_keeper_checkpoint_purge)
  (libraries alcotest masc_test_deps))

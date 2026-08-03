@@ -13,6 +13,14 @@ val start_background_maintenance :
   Mcp_server.server_state -> string * string
 
 module Recovery_for_testing : sig
+  type exact_owner_presence =
+    | Owner_present
+    | Owner_not_materialized
+    | Owner_absent
+
+  val exact_owner_presence :
+    Workspace.config -> string -> (exact_owner_presence, string) result
+
   val consume_owner_projection_batch :
     commit_cursor:(unit -> unit) ->
     keeper_name:('a -> string) ->

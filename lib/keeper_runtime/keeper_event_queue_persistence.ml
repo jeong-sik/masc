@@ -462,6 +462,143 @@ let load_state_result ~base_path ~keeper_name =
             (Printexc.to_string exn)))
 ;;
 
+type orphan_owner_presence =
+  | Orphan_owner_absent
+  | Orphan_owner_present
+
+type orphan_quarantine_result =
+  | Orphan_quarantined of { quarantine_path : string }
+  | Orphan_quarantine_visible_sync_unconfirmed of
+      { quarantine_path : string
+      ; detail : string
+      }
+  | Orphan_snapshot_absent
+  | Orphan_owner_reappeared
+
+let fsync_directory path =
+  let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close fd)
+    (fun () -> Unix.fsync fd)
+;;
+
+let require_directory path =
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_DIR; _ } -> Ok ()
+  | _ -> Error (Printf.sprintf "event queue quarantine path is not a directory: %s" path)
+  | exception Unix.Unix_error (error, operation, argument) ->
+    Error
+      (Printf.sprintf
+         "failed to inspect event queue quarantine directory path=%s operation=%s argument=%s: %s"
+         path
+         operation
+         argument
+         (Unix.error_message error))
+;;
+
+let path_exists_result path =
+  match Unix.lstat path with
+  | _ -> Ok true
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  | exception Unix.Unix_error (error, operation, argument) ->
+    Error
+      (Printf.sprintf
+         "failed to inspect event queue quarantine path=%s operation=%s argument=%s: %s"
+         path
+         operation
+         argument
+         (Unix.error_message error))
+;;
+
+let quarantine_orphaned_owner_unlocked owner ~confirm_owner_presence =
+  let keeper_name = keeper_name_of_owner owner in
+  let owner_dir = keeper_runtime_dir_of_owner owner in
+  let snapshot_path = snapshot_path_of_owner owner in
+  let keepers_dir = Filename.dirname owner_dir in
+  let quarantine_root =
+    Filename.concat keepers_dir ".orphaned-event-queues"
+  in
+  let quarantine_path = Filename.concat quarantine_root keeper_name in
+  let ( let* ) = Result.bind in
+  let* snapshot_exists = path_exists_result snapshot_path in
+  if not snapshot_exists
+  then Ok Orphan_snapshot_absent
+  else
+    let* () = require_directory owner_dir in
+    let* () =
+      try
+        Fs_compat.mkdir_p quarantine_root;
+        require_directory quarantine_root
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Error
+          (Printf.sprintf
+             "failed to prepare event queue quarantine root path=%s: %s"
+             quarantine_root
+             (Printexc.to_string exn))
+    in
+    let* quarantine_exists = path_exists_result quarantine_path in
+    if quarantine_exists
+    then
+      Error
+        (Printf.sprintf
+           "event queue quarantine already exists; refusing to overwrite keeper=%s path=%s"
+           keeper_name
+           quarantine_path)
+    else
+      let* owner_presence = confirm_owner_presence () in
+      match owner_presence with
+      | Orphan_owner_present -> Ok Orphan_owner_reappeared
+      | Orphan_owner_absent ->
+        let renamed = ref false in
+        (try
+           Unix.rename owner_dir quarantine_path;
+           renamed := true;
+           fsync_directory quarantine_root;
+           fsync_directory keepers_dir;
+           Ok (Orphan_quarantined { quarantine_path })
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+           let detail =
+             Printf.sprintf
+               "event queue orphan quarantine failed keeper=%s source=%s target=%s: %s"
+               keeper_name
+               owner_dir
+               quarantine_path
+               (Printexc.to_string exn)
+           in
+           if !renamed
+           then
+             Ok
+               (Orphan_quarantine_visible_sync_unconfirmed
+                  { quarantine_path; detail })
+           else Error detail)
+;;
+
+let quarantine_orphaned_owner_result
+      ~base_path
+      ~keeper_name
+      ~confirm_owner_presence
+  =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         quarantine_orphaned_owner_unlocked owner ~confirm_owner_presence)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue orphan quarantine raised keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            (snapshot_path_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
 
 let queue_of_stimuli stimuli =
   List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty stimuli

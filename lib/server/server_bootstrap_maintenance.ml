@@ -147,7 +147,81 @@ let owner_has_durable_demand state =
   || Keeper_event_queue_state.transition_outbox state <> []
 ;;
 
-let load_durable_demand_meta ~base_path ~config ~keeper_name =
+type exact_durable_owner =
+  | Exact_owner of Keeper_meta_contract.keeper_meta
+  | Exact_owner_not_materialized
+  | Exact_owner_absent
+
+let exact_keeper_config_declared_result
+      (config : Workspace.config)
+      keeper_name
+  =
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.base_path
+  in
+  let expected_file = keeper_name ^ ".toml" in
+  match Unix.lstat keepers_dir with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  | exception Unix.Unix_error (error, operation, argument) ->
+    Error
+      (Printf.sprintf
+         "failed to inspect Keeper config directory path=%s operation=%s argument=%s: %s"
+         keepers_dir
+         operation
+         argument
+         (Unix.error_message error))
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    (match Safe_ops.list_dir_safe keepers_dir with
+     | Error detail ->
+       Error
+         (Printf.sprintf
+            "failed to list Keeper config directory path=%s: %s"
+            keepers_dir
+            detail)
+     | Ok files -> Ok (List.exists (String.equal expected_file) files))
+  | _ ->
+    Error
+      (Printf.sprintf
+         "Keeper config path is not a directory: %s"
+         keepers_dir)
+;;
+
+let exact_durable_owner_result config keeper_name =
+  match Keeper_registry.get ~base_path:config.Workspace.base_path keeper_name with
+  | Some entry when String.equal entry.meta.name keeper_name ->
+    Ok (Exact_owner entry.meta)
+  | Some entry ->
+    Error
+      (Printf.sprintf
+         "registry Keeper identity mismatch lookup=%s meta.name=%s"
+         keeper_name
+         entry.meta.name)
+  | None ->
+    (match Keeper_meta_store.read_effective_meta config keeper_name with
+     | Error _ as error -> error
+     | Ok (Some meta) when String.equal meta.name keeper_name ->
+       Ok (Exact_owner meta)
+     | Ok (Some meta) ->
+       Error
+         (Printf.sprintf
+            "persisted Keeper identity mismatch path_owner=%s meta.name=%s"
+            keeper_name
+            meta.name)
+     | Ok None ->
+       (match exact_keeper_config_declared_result config keeper_name with
+        | Error _ as error -> error
+        | Ok true -> Ok Exact_owner_not_materialized
+        | Ok false -> Ok Exact_owner_absent))
+;;
+
+type durable_demand_owner =
+  | No_durable_demand
+  | Durable_owner of Keeper_meta_contract.keeper_meta
+  | Durable_owner_not_materialized
+  | Durable_owner_absent
+
+let load_durable_demand_owner ~base_path ~config ~keeper_name =
   match
     Executor_pool_ref.submit_strict (fun () ->
       match
@@ -156,17 +230,46 @@ let load_durable_demand_meta ~base_path ~config ~keeper_name =
           ~keeper_name
       with
       | Error detail -> Error (`Demand_unknown detail)
-      | Ok state when not (owner_has_durable_demand state) -> Ok None
+      | Ok state when not (owner_has_durable_demand state) ->
+        Ok No_durable_demand
       | Ok _state ->
-        (match Keeper_meta_store.read_effective_meta config keeper_name with
+        (match exact_durable_owner_result config keeper_name with
          | Error detail -> Error (`Owner_unknown detail)
-         | Ok None -> Error (`Owner_unknown "durable_keeper_metadata_missing")
-         | Ok (Some meta) -> Ok (Some meta)))
+         | Ok (Exact_owner meta) -> Ok (Durable_owner meta)
+         | Ok Exact_owner_not_materialized ->
+           Ok Durable_owner_not_materialized
+         | Ok Exact_owner_absent -> Ok Durable_owner_absent))
   with
   | Ok outcome -> outcome
   | Error (Executor_pool_ref.Work_failed failure) ->
     Error (`Demand_execution_failed failure)
   | Error error -> Error (`Executor_unavailable error)
+;;
+
+type orphan_quarantine_attempt_error =
+  | Quarantine_failed of string
+  | Quarantine_executor_unavailable of Executor_pool_ref.strict_submit_error
+  | Quarantine_execution_failed of exn * Printexc.raw_backtrace
+
+let quarantine_absent_durable_owner ~base_path ~config ~keeper_name =
+  match
+    Executor_pool_ref.submit_strict (fun () ->
+      Keeper_event_queue_persistence.quarantine_orphaned_owner_result
+        ~base_path
+        ~keeper_name
+        ~confirm_owner_presence:(fun () ->
+          match exact_durable_owner_result config keeper_name with
+          | Error _ as error -> error
+          | Ok (Exact_owner _ | Exact_owner_not_materialized) ->
+            Ok Keeper_event_queue_persistence.Orphan_owner_present
+          | Ok Exact_owner_absent ->
+            Ok Keeper_event_queue_persistence.Orphan_owner_absent))
+  with
+  | Ok (Ok outcome) -> Ok outcome
+  | Ok (Error detail) -> Error (Quarantine_failed detail)
+  | Error (Executor_pool_ref.Work_failed (exn, backtrace)) ->
+    Error (Quarantine_execution_failed (exn, backtrace))
+  | Error error -> Error (Quarantine_executor_unavailable error)
 ;;
 
 let recover_projected_durable_demand_owner
@@ -189,7 +292,7 @@ let recover_projected_durable_demand_owner
       ( Keeper_event_queue_recovery.No_pending_transition
       | Keeper_event_queue_recovery.Transition_converged ) ->
     (match
-       load_durable_demand_meta
+       load_durable_demand_owner
          ~base_path
          ~config:ctx.config
          ~keeper_name
@@ -215,8 +318,56 @@ let recover_projected_durable_demand_owner
          keeper_name
          (Printexc.to_string exn)
          (Printexc.raw_backtrace_to_string backtrace)
-     | Ok None -> ()
-     | Ok (Some meta) ->
+     | Ok No_durable_demand -> ()
+     | Ok Durable_owner_not_materialized ->
+       Log.Server.info
+         "keeper durable demand recovery retained keeper=%s reason=owner_not_materialized"
+         keeper_name
+     | Ok Durable_owner_absent ->
+       (match
+          quarantine_absent_durable_owner
+            ~base_path
+            ~config:ctx.config
+            ~keeper_name
+        with
+        | Ok (Keeper_event_queue_persistence.Orphan_quarantined { quarantine_path }) ->
+          Log.Server.warn
+            "keeper durable demand recovery quarantined keeper=%s reason=owner_absent path=%s"
+            keeper_name
+            quarantine_path
+        | Ok
+            (Keeper_event_queue_persistence.Orphan_quarantine_visible_sync_unconfirmed
+              { quarantine_path; detail }) ->
+          Log.Server.error
+            "keeper durable demand recovery quarantined keeper=%s reason=owner_absent_sync_unconfirmed path=%s detail=%s"
+            keeper_name
+            quarantine_path
+            detail
+        | Ok Keeper_event_queue_persistence.Orphan_snapshot_absent ->
+          Log.Server.info
+            "keeper durable demand recovery converged keeper=%s reason=orphan_snapshot_absent"
+            keeper_name
+        | Ok Keeper_event_queue_persistence.Orphan_owner_reappeared ->
+          Log.Server.info
+            "keeper durable demand recovery retained keeper=%s reason=owner_reappeared"
+            keeper_name
+        | Error (Quarantine_failed detail) ->
+          Log.Server.error
+            "keeper durable demand recovery retained keeper=%s reason=orphan_quarantine_failed detail=%s"
+            keeper_name
+            detail
+        | Error (Quarantine_executor_unavailable error) ->
+          Log.Server.error
+            "keeper durable demand recovery retained keeper=%s reason=orphan_quarantine_executor_unavailable detail=%s"
+            keeper_name
+            (Executor_pool_ref.strict_submit_error_to_string error)
+        | Error (Quarantine_execution_failed (exn, backtrace)) ->
+          Log.Server.error
+            "keeper durable demand recovery retained keeper=%s reason=orphan_quarantine_execution_failed detail=%s\n%s"
+            keeper_name
+            (Printexc.to_string exn)
+            (Printexc.raw_backtrace_to_string backtrace))
+     | Ok (Durable_owner meta) ->
        let admission =
          Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
        in
@@ -302,6 +453,19 @@ let recover_keeper_durable_demand_owners
 ;;
 
 module Recovery_for_testing = struct
+  type exact_owner_presence =
+    | Owner_present
+    | Owner_not_materialized
+    | Owner_absent
+
+  let exact_owner_presence config keeper_name =
+    exact_durable_owner_result config keeper_name
+    |> Result.map (function
+      | Exact_owner _ -> Owner_present
+      | Exact_owner_not_materialized -> Owner_not_materialized
+      | Exact_owner_absent -> Owner_absent)
+  ;;
+
   let consume_owner_projection_batch = consume_owner_projection_batch
 end
 

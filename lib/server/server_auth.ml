@@ -938,7 +938,9 @@ let with_admin_auth handler request reqd =
           Http_server_eio.Response.json ~status:`Forbidden
             {|{"error":"MASC_ADMIN_TOKEN not configured"}|} reqd
       | Some _, None ->
-          Http_server_eio.Response.json ~status:`Unauthorized
+          Http_server_eio.Response.json
+            ~status:`Unauthorized
+            ~extra_headers:(auth_error_headers ~status:`Unauthorized ~cors:[])
             {|{"error":"Admin token required"}|} reqd
       | Some expected, Some given ->
           if admin_token_equal expected given then
@@ -1152,6 +1154,7 @@ and with_observer_sse_read_auth handler request reqd =
        | Error msg ->
          Http_server_eio.Response.json
            ~status:`Unauthorized
+           ~extra_headers:(auth_error_headers ~status:`Unauthorized ~cors:[])
            (Yojson.Safe.to_string (`Assoc [ "error", `String msg ]))
            reqd)
   else

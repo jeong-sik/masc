@@ -5,6 +5,22 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
 
+type current_task_observation =
+  | No_current_task
+  | Current_task of Masc_domain.task
+  | Recovered_current_task of
+      { task : Masc_domain.task
+      ; recovery : Workspace.backlog_recovery
+      }
+  | Current_task_missing of
+      { task_id : Keeper_id.Task_id.t
+      ; recovery : Workspace.backlog_recovery option
+      }
+  | Current_task_unavailable of
+      { task_id : Keeper_id.Task_id.t
+      ; error : string
+      }
+
 let backlog_updated_since_last_scheduled_autonomous
       ~(meta : keeper_meta)
       ~(backlog : Masc_domain.backlog)
@@ -130,36 +146,58 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
     raise ex
 ;;
 
-(** Resolve the keeper's claimed task to its backlog record (RFC-0315). *)
+(** Resolve the keeper's claimed task to a source-preserving observation. *)
 let read_current_task ~(config : Workspace.config) ~(meta : keeper_meta)
-  : Masc_domain.task option
+  : current_task_observation
   =
   match meta.current_task_id with
-  | None -> None
+  | None -> No_current_task
   | Some task_id ->
-    let task_id = Keeper_id.Task_id.to_string task_id in
-    (try
-       let backlog =
-         match Workspace.read_backlog_observation_r config with
-         | Ok backlog -> backlog
-         | Error message -> raise (Workspace.Backlog_read_failed message)
-       in
-       List.find_opt
-         (fun (t : Masc_domain.task) -> String.equal t.id task_id)
-         backlog.tasks
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | ex ->
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string ObservationQueryFailures)
-         ~labels:
-           [ ( "operation"
-             , Runtime_observation_query_operation.(to_label Read_current_task)
-             )
-           ]
-         ();
-       Log.Keeper.warn "read_current_task failed: %s" (Printexc.to_string ex);
-       raise ex)
+    let record_unavailable error =
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string ObservationQueryFailures)
+        ~labels:
+          [ ( "operation"
+            , Runtime_observation_query_operation.(to_label Read_current_task) )
+          ]
+        ();
+      Log.Keeper.warn
+        "read_current_task unavailable task_id=%s: %s"
+        (Keeper_id.Task_id.to_string task_id)
+        error
+    in
+    try
+      match Workspace.read_backlog_observation_with_source_r config with
+      | Error message ->
+        record_unavailable message;
+        Current_task_unavailable { task_id; error = message }
+      | Ok { Workspace.observed_backlog = backlog; recovered_from = None } ->
+        let task_id_string = Keeper_id.Task_id.to_string task_id in
+        (match
+           List.find_opt
+             (fun (t : Masc_domain.task) -> String.equal t.id task_id_string)
+             backlog.tasks
+         with
+         | Some task -> Current_task task
+         | None -> Current_task_missing { task_id; recovery = None })
+      | Ok
+          { Workspace.observed_backlog = backlog
+          ; recovered_from = Some recovery
+          } ->
+        let task_id_string = Keeper_id.Task_id.to_string task_id in
+        (match
+           List.find_opt
+             (fun (t : Masc_domain.task) -> String.equal t.id task_id_string)
+             backlog.tasks
+         with
+         | Some task -> Recovered_current_task { task; recovery }
+         | None -> Current_task_missing { task_id; recovery = Some recovery })
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | ex ->
+      let rendered = Printexc.to_string ex in
+      record_unavailable rendered;
+      Current_task_unavailable { task_id; error = rendered }
 ;;
 
 (** Count live keeper fibers for keeper world state.

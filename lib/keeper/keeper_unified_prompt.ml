@@ -179,6 +179,36 @@ let quote_prompt_field value =
     value;
   Buffer.add_char buf '"';
   Buffer.contents buf
+
+let format_current_task_observation = function
+  | Keeper_world_observation_inputs.No_current_task -> None
+  | Keeper_world_observation_inputs.Current_task task -> Some (format_current_task task)
+  | Keeper_world_observation_inputs.Recovered_current_task { task; recovery } ->
+    Some
+      (format_current_task task
+       ^ Printf.sprintf
+           "### Current Task Observation Source\n- This task came from the recovery snapshot %s; it is non-authoritative because the primary backlog failed: %s\n\n"
+           recovery.recovery_path
+           recovery.primary_error)
+  | Keeper_world_observation_inputs.Current_task_missing { task_id; recovery = None } ->
+    Some
+      (Printf.sprintf
+         "### Current Task\n- Keeper metadata references %s, but that task is absent from the authoritative backlog. Do not infer or invent task details.\n\n"
+         (Keeper_id.Task_id.to_string task_id))
+  | Keeper_world_observation_inputs.Current_task_missing
+      { task_id; recovery = Some recovery } ->
+    Some
+      (Printf.sprintf
+         "### Current Task\n- Keeper metadata references %s, but it was not found in the recovery snapshot %s. The primary backlog is unavailable, so absence is not authoritative: %s\n\n"
+         (Keeper_id.Task_id.to_string task_id)
+         recovery.recovery_path
+         recovery.primary_error)
+  | Keeper_world_observation_inputs.Current_task_unavailable { task_id; error } ->
+    Some
+      (Printf.sprintf
+         "### Current Task\n- Task %s could not be observed because the backlog is unavailable. This does not mean the task is absent; preserve its ownership state.\n- Observation error: %s\n\n"
+         (Keeper_id.Task_id.to_string task_id)
+         error)
 ;;
 
 let board_reaction_note (reaction : Keeper_world_observation.board_reaction_event) =
@@ -588,7 +618,7 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path :
 let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
-    ?(current_task : Masc_domain.task option)
+    ~(current_task : Keeper_world_observation_inputs.current_task_observation)
     ?(active_goal_summaries : (string * string) list option)
     ~(observation : Keeper_world_observation.world_observation)
     () : turn_prompt_parts
@@ -649,7 +679,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path
     (* 1b. Current task — the claim that admitted this turn (RFC-0315).
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->
-      Option.map format_current_task current_task
+      format_current_task_observation current_task
     (* 2. Connected surfaces — connector presence, changes only on bind/unbind
        or transport flaps (RFC-0223 P2). Omitted when only the implicit
        dashboard is attached: every keeper has the dashboard, so dashboard-only
@@ -854,7 +884,7 @@ let build_prompt
       ~base_path
       ?profile_defaults
       ~turn_decision
-      ?current_task
+      ~current_task
       ?active_goal_summaries
       ~observation
       ()
@@ -865,7 +895,7 @@ let build_prompt
       ~base_path
       ?profile_defaults
       ~turn_decision:(Some turn_decision)
-      ?current_task
+      ~current_task
       ?active_goal_summaries
       ~observation
       ()
@@ -878,7 +908,7 @@ let build_prompt_preview
       ~meta
       ~base_path
       ?profile_defaults
-      ?current_task
+      ~current_task
       ?active_goal_summaries
       ~observation
       ()
@@ -888,7 +918,7 @@ let build_prompt_preview
     ~base_path
     ?profile_defaults
     ~turn_decision:None
-    ?current_task
+    ~current_task
     ?active_goal_summaries
     ~observation
     ()

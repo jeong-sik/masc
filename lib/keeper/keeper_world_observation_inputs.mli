@@ -4,6 +4,22 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+type current_task_observation =
+  | No_current_task
+  | Current_task of Masc_domain.task
+  | Recovered_current_task of
+      { task : Masc_domain.task
+      ; recovery : Workspace.backlog_recovery
+      }
+  | Current_task_missing of
+      { task_id : Keeper_id.Task_id.t
+      ; recovery : Workspace.backlog_recovery option
+      }
+  | Current_task_unavailable of
+      { task_id : Keeper_id.Task_id.t
+      ; error : string
+      }
+
 val backlog_updated_since_last_scheduled_autonomous
   :  meta:keeper_meta
   -> backlog:Masc_domain.backlog
@@ -36,11 +52,13 @@ val task_is_self_authored_todo : meta:keeper_meta -> Masc_domain.task -> bool
 val read_current_task
   :  config:Workspace.config
   -> meta:keeper_meta
-  -> Masc_domain.task option
-(** Resolve [meta.current_task_id] to its backlog record (RFC-0315). [None]
-    only when the keeper holds no task or the id is absent from the observed
-    backlog. A failed primary and recovery read is logged, counted, and raised
-    as {!Workspace.Backlog_read_failed}. *)
+  -> current_task_observation
+(** Resolve [meta.current_task_id] without collapsing absence, recovery, and
+    unreadability. A primary task is authoritative; a recovery task is
+    explicitly non-authoritative; a missing task id remains visible; and a
+    failed read is counted and returned as [Current_task_unavailable] so an
+    observation failure cannot crash the Keeper cycle. Cancellation is
+    re-raised; its boundary remains observable. *)
 
 val count_running_keeper_fibers : config:Workspace.config -> int
 (** Count live keeper fibers for [config.base_path].

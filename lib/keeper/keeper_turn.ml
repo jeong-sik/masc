@@ -89,13 +89,15 @@ let direct_turn_observation ~(config : Workspace.config) (meta : keeper_meta) :
     ~config
     ~meta
 
-let direct_turn_task_context ~(current_task : Masc_domain.task option) : string =
-  match current_task with
-  | Some task -> Keeper_unified_prompt.format_current_task task
-  | None -> ""
+let direct_turn_task_context
+      ~(current_task : Keeper_world_observation_inputs.current_task_observation)
+  : string
+  =
+  Keeper_unified_prompt.format_current_task_observation current_task
+  |> Option.value ~default:""
 
 let direct_turn_dynamic_context
-      ~(current_task : Masc_domain.task option)
+      ~(current_task : Keeper_world_observation_inputs.current_task_observation)
       ~(recent_direct_conversation_text : string)
       ~(worktree_text : string)
       ~(telemetry_feedback_text : string)

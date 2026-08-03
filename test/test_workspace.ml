@@ -1699,6 +1699,14 @@ let test_read_backlog_counts_preserves_unreadable_observation () =
         output_string channel "{\"tasks\":\"not-current\"}")
     in
     write_corrupt (Workspace.backlog_path config);
+    (match Keeper_world_observation_inputs.read_current_task ~config ~meta with
+     | Keeper_world_observation_inputs.Recovered_current_task { task; recovery = _ } ->
+       Alcotest.(check string) "recovered task id" "task-001" task.id
+     | Keeper_world_observation_inputs.No_current_task
+     | Keeper_world_observation_inputs.Current_task _
+     | Keeper_world_observation_inputs.Current_task_missing _
+     | Keeper_world_observation_inputs.Current_task_unavailable _ ->
+       Alcotest.fail "valid recovery source was not preserved");
     write_corrupt (Workspace.backlog_recovery_path config);
     let meta = keeper_meta_for_self_filter "keeper-backlog-failure-agent" in
     let unclaimed, claimable, failed, changed, revision =
@@ -1743,6 +1751,63 @@ let test_read_backlog_counts_preserves_unreadable_observation () =
       "independent board stimulus survives unreadable backlog"
       1
       (List.length observation.pending_board_events))
+
+let test_read_current_task_preserves_unavailable_and_missing () =
+  with_test_env (fun config ->
+    let task_id =
+      match Keeper_id.Task_id.of_string "task-001" with
+      | Ok task_id -> task_id
+      | Error message -> Alcotest.fail message
+    in
+    let meta =
+      { (keeper_meta_for_self_filter "keeper-current-task-observation") with
+        current_task_id = Some task_id
+      }
+    in
+    (match Keeper_world_observation_inputs.read_current_task ~config ~meta with
+     | Keeper_world_observation_inputs.Current_task _ -> ()
+     | Keeper_world_observation_inputs.No_current_task
+     | Keeper_world_observation_inputs.Recovered_current_task _
+     | Keeper_world_observation_inputs.Current_task_missing _
+     | Keeper_world_observation_inputs.Current_task_unavailable _ ->
+       Alcotest.fail "existing task was not observed");
+    let backlog = Workspace.read_backlog config in
+    let without_task = { backlog with tasks = [] } in
+    (match Workspace.write_backlog_result config without_task with
+     | Ok _ -> ()
+     | Error message -> Alcotest.fail message);
+    (match Keeper_world_observation_inputs.read_current_task ~config ~meta with
+     | Keeper_world_observation_inputs.Current_task_missing { task_id = missing; recovery = None } ->
+       Alcotest.(check string)
+         "missing task id"
+         "task-001"
+         (Keeper_id.Task_id.to_string missing)
+     | Keeper_world_observation_inputs.No_current_task
+     | Keeper_world_observation_inputs.Current_task _
+     | Keeper_world_observation_inputs.Recovered_current_task _
+     | Keeper_world_observation_inputs.Current_task_unavailable _ ->
+       Alcotest.fail "missing task was not distinguished from unavailable");
+    let write_corrupt path =
+      Out_channel.with_open_text path (fun channel ->
+        output_string channel "{\"tasks\":\"not-current\"}")
+    in
+    write_corrupt (Workspace.backlog_path config);
+    write_corrupt (Workspace.backlog_recovery_path config);
+    match Keeper_world_observation_inputs.read_current_task ~config ~meta with
+    | Keeper_world_observation_inputs.Current_task_unavailable { task_id = unavailable; error } ->
+      Alcotest.(check string)
+        "unavailable task id"
+        "task-001"
+        (Keeper_id.Task_id.to_string unavailable);
+      Alcotest.(check bool)
+        "unavailable error remains visible"
+        true
+        (String.length error > 0)
+    | Keeper_world_observation_inputs.No_current_task
+    | Keeper_world_observation_inputs.Current_task _
+    | Keeper_world_observation_inputs.Recovered_current_task _
+    | Keeper_world_observation_inputs.Current_task_missing _ ->
+      Alcotest.fail "unreadable backlog did not remain explicitly unavailable")
 
 let test_self_authored_scoped_task_does_not_hide_peer_work () =
   with_test_env (fun config ->
@@ -2222,6 +2287,8 @@ let () =
         test_read_backlog_counts_falls_back_to_unscoped_claimable_task;
       Alcotest.test_case "read backlog counts preserves unreadable observation" `Quick
         test_read_backlog_counts_preserves_unreadable_observation;
+      Alcotest.test_case "read current task preserves unavailable and missing" `Quick
+        test_read_current_task_preserves_unavailable_and_missing;
       Alcotest.test_case "self-authored scoped task does not hide peer work"
         `Quick
         test_self_authored_scoped_task_does_not_hide_peer_work;

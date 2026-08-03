@@ -2,7 +2,7 @@
 
    Pins the three prompt additions that let a woken keeper resume instead of
    acting lost:
-   1. [?current_task] renders a "Current Task" layer for the task whose claim
+   1. [current_task] renders a "Current Task" layer for the task whose claim
       admitted the turn (before: current_task_id only suppressed guidance).
    2. [turn_decision] threads the scheduler's real cycle decision into the
       wake-reason section, so stimulus-driven wakes render their reason.
@@ -15,6 +15,7 @@ open Alcotest
 module WO = Masc.Keeper_world_observation
 module Prompt = Masc.Keeper_unified_prompt
 module Turn = Masc.Keeper_turn
+module Inputs = Masc.Keeper_world_observation_inputs
 
 let has_repo_prompts root =
   Sys.file_exists (Filename.concat root "config/prompts/keeper.core_behavior.md")
@@ -181,9 +182,14 @@ let user_message ?turn_decision ?current_task ?active_goal_summaries observation
       turn_decision
       ~default:(WO.keeper_cycle_decision ~meta observation)
   in
+  let current_task =
+    match current_task with
+    | Some task -> Inputs.Current_task task
+    | None -> Inputs.No_current_task
+  in
   let { Prompt.world_state = user; _ } =
     Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~turn_decision
-      ?current_task ?active_goal_summaries ~observation ()
+      ~current_task ?active_goal_summaries ~observation ()
   in
   user
 
@@ -228,6 +234,41 @@ let test_current_task_section_absent_without_task () =
   check bool "no section without current task" false
     (contains ~needle:"### Current Task" user)
 
+let task_id_exn value =
+  match Masc.Keeper_id.Task_id.of_string value with
+  | Ok task_id -> task_id
+  | Error message -> fail message
+
+let test_current_task_unavailable_is_explicit () =
+  let task_id = task_id_exn "task-42" in
+  let decision = WO.keeper_cycle_decision ~meta base_observation in
+  let { Prompt.world_state; _ } =
+    Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~turn_decision:decision
+      ~current_task:
+        (Inputs.Current_task_unavailable
+           { task_id; error = "primary and recovery backlog decode failed" })
+      ~observation:base_observation ()
+  in
+  check bool "task id remains visible" true
+    (contains ~needle:"Task task-42 could not be observed" world_state);
+  check bool "unavailable is not rendered as absent" true
+    (contains ~needle:"does not mean the task is absent" world_state);
+  check bool "unavailable error remains visible" true
+    (contains ~needle:"primary and recovery backlog decode failed" world_state)
+
+let test_current_task_missing_is_explicit () =
+  let task_id = task_id_exn "task-42" in
+  let decision = WO.keeper_cycle_decision ~meta base_observation in
+  let { Prompt.world_state; _ } =
+    Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~turn_decision:decision
+      ~current_task:(Inputs.Current_task_missing { task_id; recovery = None })
+      ~observation:base_observation ()
+  in
+  check bool "dangling id remains visible" true
+    (contains ~needle:"references task-42" world_state);
+  check bool "missing record forbids invented details" true
+    (contains ~needle:"Do not infer or invent task details" world_state)
+
 let test_direct_turn_reuses_current_task_context () =
   let task =
     make_task
@@ -250,7 +291,7 @@ let test_direct_turn_reuses_current_task_context () =
   in
   let context =
     Turn.For_testing.direct_turn_dynamic_context
-      ~current_task:(Some task)
+      ~current_task:(Inputs.Current_task task)
       ~recent_direct_conversation_text:"recent owner message"
       ~worktree_text:"worktree state"
       ~telemetry_feedback_text:"telemetry state"
@@ -270,7 +311,7 @@ let test_direct_turn_reuses_current_task_context () =
 let test_direct_turn_has_no_synthetic_task_context () =
   let context =
     Turn.For_testing.direct_turn_dynamic_context
-      ~current_task:None
+      ~current_task:Inputs.No_current_task
       ~recent_direct_conversation_text:"recent owner message"
       ~worktree_text:""
       ~telemetry_feedback_text:""
@@ -288,6 +329,7 @@ let test_direct_and_autonomous_share_system_prompt () =
       ~meta
       ~base_path:"/tmp/unused"
       ~turn_decision:decision
+      ~current_task:Inputs.No_current_task
       ~observation:base_observation
       ()
   in
@@ -334,6 +376,7 @@ let test_unresolved_goal_keeps_one_stable_safety_contract () =
       ~base_path:"/tmp/unused"
       ~active_goal_summaries
       ~turn_decision:decision
+      ~current_task:Inputs.No_current_task
       ~observation:base_observation
       ()
   in
@@ -421,6 +464,7 @@ let test_preview_does_not_invent_wake_reason () =
     Prompt.build_prompt_preview
       ~meta:preview_meta
       ~base_path:"/tmp/unused"
+      ~current_task:Inputs.No_current_task
       ~observation:base_observation
       ()
   in
@@ -487,7 +531,8 @@ let test_goal_holder_gets_self_direction_directive () =
   in
   let { Prompt.system_prompt = system; _ } =
     Prompt.build_prompt ~meta:meta_with_goal ~base_path:"/tmp/unused"
-      ~turn_decision:goal_turn_decision ~observation:base_observation ()
+      ~turn_decision:goal_turn_decision ~current_task:Inputs.No_current_task
+      ~observation:base_observation ()
   in
   check bool "goal-holder directive present" true
     (contains ~needle:"advance one of your active" system);
@@ -498,7 +543,8 @@ let test_goal_holder_gets_self_direction_directive () =
   in
   let { Prompt.system_prompt = no_goal_system; _ } =
     Prompt.build_prompt ~meta ~base_path:"/tmp/unused"
-      ~turn_decision:no_goal_turn_decision ~observation:base_observation ()
+      ~turn_decision:no_goal_turn_decision ~current_task:Inputs.No_current_task
+      ~observation:base_observation ()
   in
   check bool "no-goal branch keeps its own directive" true
     (contains ~needle:"You have no active goal" no_goal_system);
@@ -516,6 +562,10 @@ let () =
             test_current_task_section_renders;
           test_case "absent without a held task" `Quick
             test_current_task_section_absent_without_task;
+          test_case "unavailable backlog remains explicit" `Quick
+            test_current_task_unavailable_is_explicit;
+          test_case "dangling task id remains explicit" `Quick
+            test_current_task_missing_is_explicit;
           test_case "direct reply receives the held task and handoff" `Quick
             test_direct_turn_reuses_current_task_context;
           test_case "direct reply invents no task when none is held" `Quick

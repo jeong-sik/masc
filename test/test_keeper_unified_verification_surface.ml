@@ -108,6 +108,7 @@ let build_prompt ~meta observation =
     ~meta
     ~base_path:"/tmp"
     ~turn_decision
+    ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
     ~observation
     ()
 ;;

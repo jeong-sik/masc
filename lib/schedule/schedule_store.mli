@@ -240,5 +240,15 @@ val due_execution_candidates :
 val prune_completed :
   Workspace_utils.config ->
   (state * int, store_error) result
-(** Deletes all terminal (succeeded, failed, cancelled, expired) schedule
-    requests and their associated execution records. *)
+(** Deletes terminal (succeeded, failed, cancelled, expired) schedule requests
+    and their associated execution records.
+
+    A terminal request is retained while any of its executions is still
+    unsettled ([Execution_running] or [Execution_dispatched]). Terminal here
+    describes the request's intent, not the work: a recurring request advances
+    past an occurrence at [accept_running] and can be cancelled afterwards while
+    that occurrence is still outstanding. The execution row is then the only
+    durable record of work a consumer accepted, and both
+    [complete_dispatched_occurrence] and [fail_dispatched_occurrence] return
+    [Schedule_not_found] without the request row — so pruning the pair would
+    both erase the evidence and make the occurrence unsettleable. *)

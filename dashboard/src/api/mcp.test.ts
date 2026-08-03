@@ -48,8 +48,8 @@ vi.mock('./core', () => ({
 vi.mock('./tool-host-failure', () => ({ reportToolHostFailure }))
 vi.mock('../components/common/toast', () => ({ showActionToast: vi.fn() }))
 
-const okToolResponse = () =>
-  new Response('data: {"result":{"content":[{"type":"text","text":"ok"}]}}\n', {
+const okToolResponse = (text = 'ok') =>
+  new Response(`data: ${JSON.stringify({ result: { content: [{ type: 'text', text }] } })}\n`, {
     status: 200,
   })
 
@@ -255,5 +255,23 @@ describe('MCP 2026-07-28 dashboard client', () => {
     })
     expect(fetchWithTimeout.mock.calls.map(call => call[0]))
       .toEqual(['/api/v1/dashboard/dev-token', '/mcp'])
+  })
+
+  it('uses distinct platform UUIDs for consecutive tool request identities', async () => {
+    fetchWithTimeout
+      .mockResolvedValueOnce(okToolResponse('first'))
+      .mockResolvedValueOnce(okToolResponse('second'))
+
+    const { callMcpTool } = await import('./mcp')
+    await expect(callMcpTool('masc_status', {})).resolves.toBe('first')
+    await expect(callMcpTool('masc_status', {})).resolves.toBe('second')
+
+    const requestIds = callsByMethod('tools/call').map(([, init]) => {
+      const body = JSON.parse(init.body as string) as { id: unknown }
+      return body.id
+    })
+    expect(requestIds).toHaveLength(2)
+    expect(requestIds.every(id => typeof id === 'string')).toBe(true)
+    expect(requestIds[0]).not.toBe(requestIds[1])
   })
 })

@@ -246,7 +246,7 @@ async function callMcpToolInternal(
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<string> {
-  const requestId = String(Math.floor(Date.now() % 1000000))
+  const requestId = crypto.randomUUID()
   synchronizeMcpAuthRevision()
   try {
     const binding = await ensureBinding()
@@ -263,7 +263,7 @@ async function callMcpToolInternal(
         name: toolName,
         arguments: toolArgs,
       },
-      id: Number.parseInt(requestId, 10),
+      id: requestId,
     }, binding, DEFAULT_MCP_TIMEOUT_MS, actor)
     const parsed = parseMcpHttpResponse(text)
     return extractMcpText(parsed)

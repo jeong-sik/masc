@@ -707,11 +707,20 @@ let test_dashboard_dev_token_cannot_reset_workspace () =
       ()
   in
   check_status "dashboard Worker reset request completed as MCP rejection" 200 result;
+  check (option string)
+    "reset denial uses negotiated SSE framing"
+    (Some "text/event-stream")
+    (header_value result "content-type");
+  let response_body =
+    match Sse_jsonrpc_filter.event_data_payload result.body with
+    | Some body -> body
+    | None -> fail "reset denial response has no SSE data payload"
+  in
   let response =
-    match Yojson.Safe.from_string result.body with
+    match Yojson.Safe.from_string response_body with
     | json -> json
     | exception Yojson.Json_error message ->
-      failf "reset denial response is invalid JSON: %s" message
+      failf "reset denial SSE data is invalid JSON: %s" message
   in
   check string
     "reset denial is typed"

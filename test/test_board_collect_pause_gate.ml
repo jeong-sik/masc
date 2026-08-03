@@ -29,8 +29,8 @@ let test_warm_paused_skips () =
   check bool "warmed + PAUSED keeper must not collect (cursor stays put)" false
     (gate ~warm:true ~paused:true ())
 
-let test_cold_unpaused_skips () =
-  check bool "not-yet-warmed keeper does not collect" false
+let test_cold_unpaused_collects () =
+  check bool "cold + unpaused keeper collects board events" true
     (gate ~warm:false ~paused:false ())
 
 let test_cold_paused_skips () =
@@ -85,7 +85,7 @@ let () =
         [
           test_case "warm + unpaused -> collect" `Quick test_warm_unpaused_collects;
           test_case "warm + paused -> skip" `Quick test_warm_paused_skips;
-          test_case "cold + unpaused -> skip" `Quick test_cold_unpaused_skips;
+          test_case "cold + unpaused -> collect" `Quick test_cold_unpaused_collects;
           test_case "cold + paused -> skip" `Quick test_cold_paused_skips;
           test_case "collection failure health degrades and clears" `Quick
             test_collection_failure_health_degrades_and_clears;

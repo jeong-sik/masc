@@ -57,7 +57,7 @@ val active_goal_summaries :
 
 val build_system_prompt :
   meta:Keeper_meta_contract.keeper_meta ->
-  base_path:string ->
+  config:Workspace.config ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   ?active_goal_summaries:(string * string) list ->
   unit ->
@@ -72,7 +72,7 @@ val build_system_prompt :
     @param observation Current world snapshot *)
 val build_prompt :
   meta:Keeper_meta_contract.keeper_meta ->
-  base_path:string ->
+  config:Workspace.config ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   turn_decision:Keeper_world_observation.keeper_cycle_decision ->
   ?current_task:Masc_domain.task ->
@@ -95,7 +95,7 @@ val build_prompt :
 
 val build_prompt_preview :
   meta:Keeper_meta_contract.keeper_meta ->
-  base_path:string ->
+  config:Workspace.config ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   ?current_task:Masc_domain.task ->
   ?active_goal_summaries:(string * string) list ->

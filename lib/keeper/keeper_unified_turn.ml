@@ -538,7 +538,7 @@ let run_keeper_cycle
                let { Keeper_unified_prompt.system_prompt; world_state; user_message } =
                  Keeper_unified_prompt.build_prompt
                    ~meta
-                   ~base_path:config.base_path
+                   ~config
                    ~profile_defaults
                    ~turn_decision
                    ?current_task

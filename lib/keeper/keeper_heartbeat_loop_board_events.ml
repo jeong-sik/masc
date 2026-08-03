@@ -121,10 +121,10 @@ let fleet_health_json ~base_path ~keeper_names =
 ;;
 
 (* Pure lifecycle gate: a keeper may consume board events — and thereby
-   advance its cursor — after warmup while it is explicitly active. Provider
-   availability is handled at the call boundary and cannot withhold intake. *)
-let should_collect_board_events ~proactive_warmup_elapsed ~paused =
-  proactive_warmup_elapsed && not paused
+   advance its cursor — while it is explicitly active. Provider availability
+   is handled at the call boundary and cannot withhold intake. *)
+let should_collect_board_events ~proactive_warmup_elapsed:_ ~paused =
+  not paused
 ;;
 
 let collect_keepalive_board_events

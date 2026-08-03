@@ -64,7 +64,7 @@ let build_prompt meta =
   let turn_decision = WO.keeper_cycle_decision ~meta base_observation in
   Masc.Keeper_unified_prompt.build_prompt
     ~meta
-    ~base_path:"/tmp"
+    ~config:(Masc.Workspace.default_config "/tmp")
     ~turn_decision
     ~observation:base_observation
     ()

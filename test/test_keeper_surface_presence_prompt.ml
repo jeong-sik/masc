@@ -133,14 +133,16 @@ let init_prompt_config_for_tests () =
 let user_message observation =
   let turn_decision = WO.keeper_cycle_decision ~meta observation in
   let { Prompt.world_state = user; _ } =
-    Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~turn_decision ~observation ()
+    Prompt.build_prompt ~meta ~config:(Masc.Workspace.default_config "/tmp/unused")
+      ~turn_decision ~observation ()
   in
   user
 
 let system_prompt ?profile_defaults observation =
   let turn_decision = WO.keeper_cycle_decision ~meta observation in
   let { Prompt.system_prompt = system; _ } =
-    Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ?profile_defaults
+    Prompt.build_prompt ~meta ~config:(Masc.Workspace.default_config "/tmp/unused")
+      ?profile_defaults
       ~turn_decision ~observation ()
   in
   system
@@ -269,7 +271,7 @@ let sandbox_root_for profile =
   let { Prompt.system_prompt; _ } =
     Prompt.build_prompt
       ~meta
-      ~base_path
+      ~config
       ~turn_decision
       ~observation:base_observation
       ()

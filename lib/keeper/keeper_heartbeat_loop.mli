@@ -95,7 +95,6 @@ type keepalive_scheduling_decision = {
 }
 
 val decide_keepalive_scheduling :
-  ?reactive_wake:bool ->
   ?event_queue_triggers:Keeper_world_observation.event_queue_trigger list ->
   stop:bool Atomic.t ->
   meta:keeper_meta ->
@@ -193,7 +192,6 @@ val run_keepalive_unified_turn :
 val refresh_work_as_heartbeat :
   ctx:'a context ->
   meta_after_proactive:keeper_meta ->
-  proactive_warmup_elapsed:bool ->
   work_as_hb:(unit -> bool) ->
   last_successful_heartbeat_ts:float ref ->
   consecutive_failures:int ref ->

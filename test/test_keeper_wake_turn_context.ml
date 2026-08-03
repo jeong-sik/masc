@@ -181,7 +181,8 @@ let user_message ?turn_decision ?current_task ?active_goal_summaries observation
       ~default:(WO.keeper_cycle_decision ~meta observation)
   in
   let { Prompt.world_state = user; _ } =
-    Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~turn_decision
+    Prompt.build_prompt ~meta ~config:(Masc.Workspace.default_config "/tmp/unused")
+      ~turn_decision
       ?current_task ?active_goal_summaries ~observation ()
   in
   user
@@ -285,7 +286,7 @@ let test_direct_and_autonomous_share_system_prompt () =
   let { Prompt.system_prompt = autonomous_system_prompt; _ } =
     Prompt.build_prompt
       ~meta
-      ~base_path:"/tmp/unused"
+      ~config:(Masc.Workspace.default_config "/tmp/unused")
       ~turn_decision:decision
       ~observation:base_observation
       ()
@@ -330,7 +331,7 @@ let test_unresolved_goal_keeps_one_stable_safety_contract () =
   let { Prompt.system_prompt = autonomous_system_prompt; _ } =
     Prompt.build_prompt
       ~meta:meta_with_goal
-      ~base_path:"/tmp/unused"
+      ~config
       ~active_goal_summaries
       ~turn_decision:decision
       ~observation:base_observation
@@ -419,7 +420,7 @@ let test_preview_does_not_invent_wake_reason () =
   let { Prompt.world_state; _ } =
     Prompt.build_prompt_preview
       ~meta:preview_meta
-      ~base_path:"/tmp/unused"
+      ~config:(Masc.Workspace.default_config "/tmp/unused")
       ~observation:base_observation
       ()
   in
@@ -485,7 +486,8 @@ let test_goal_holder_gets_self_direction_directive () =
     WO.keeper_cycle_decision ~meta:meta_with_goal base_observation
   in
   let { Prompt.system_prompt = system; _ } =
-    Prompt.build_prompt ~meta:meta_with_goal ~base_path:"/tmp/unused"
+    Prompt.build_prompt ~meta:meta_with_goal
+      ~config:(Masc.Workspace.default_config "/tmp/unused")
       ~turn_decision:goal_turn_decision ~observation:base_observation ()
   in
   check bool "goal-holder directive present" true
@@ -496,7 +498,7 @@ let test_goal_holder_gets_self_direction_directive () =
     WO.keeper_cycle_decision ~meta base_observation
   in
   let { Prompt.system_prompt = no_goal_system; _ } =
-    Prompt.build_prompt ~meta ~base_path:"/tmp/unused"
+    Prompt.build_prompt ~meta ~config:(Masc.Workspace.default_config "/tmp/unused")
       ~turn_decision:no_goal_turn_decision ~observation:base_observation ()
   in
   check bool "no-goal branch keeps its own directive" true

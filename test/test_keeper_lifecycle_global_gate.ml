@@ -149,7 +149,6 @@ let without_overrides f =
 
 let decide ~meta obs =
   WO.keeper_cycle_decision
-    ~reactive_wake:false
     ~meta
     obs
 ;;

@@ -345,11 +345,16 @@ let role_of_string = function
 let scopes_of_strings values =
   let rec parse acc = function
     | [] -> Ok acc
-    | "mcp:tools" :: rest -> parse (add_scope_with_implications acc Mcp_tools) rest
-    | "mcp:admin" :: rest -> parse (add_scope_with_implications acc Mcp_admin) rest
+    | "mcp:tools" :: rest -> parse (add_scope_once acc Mcp_tools) rest
+    | "mcp:admin" :: rest -> parse (add_scope_once acc Mcp_admin) rest
     | _ :: _ -> Error (Store_error "invalid OAuth scope")
   in
-  parse [] values
+  let* scopes = parse [] values in
+  if
+    List.exists (equal_scope Mcp_admin) scopes
+    && not (List.exists (equal_scope Mcp_tools) scopes)
+  then Error (Store_error "invalid OAuth scope closure: mcp:admin requires mcp:tools")
+  else Ok scopes
 ;;
 
 let client_to_yojson (client : client) =

@@ -94,6 +94,18 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         ("ts", `String (now_iso ()));
         ("ts_unix", `Float now_ts);
         ("channel", `String (Keeper_world_observation.channel_to_string channel));
+        ( "backlog_source",
+          `String
+            (Keeper_world_observation_inputs.backlog_observation_source_to_string
+               observation.backlog_source) );
+        ( "backlog_revision",
+          match observation.backlog_revision with
+          | Some revision -> `Int revision
+          | None -> `Null );
+        ( "backlog_projection_sha256",
+          match observation.backlog_projection_sha256 with
+          | Some projection -> `String projection
+          | None -> `Null );
         ("name", `String meta.name);
         ("agent_name", `String meta.agent_name);
         ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));

@@ -130,11 +130,16 @@ type world_observation =
   ; backlog_revision : int option
     (** RFC-0357 §3.3: the backlog commit revision this observation saw —
         what a scheduled-autonomous admission records as consumed. [None]
-        when the backlog read failed: the edge is false and the consumption
-        clock must not move on a fabricated value. *)
+        when the primary backlog was unavailable or only a recovery snapshot
+        was readable: the edge is false and the consumption clock must not
+        move on a non-authoritative value. *)
   ; backlog_projection_sha256 : string option
-    (** Exact derived projection paired with [backlog_revision]. [None] on the
-        same failed-read path. *)
+    (** Exact derived projection paired with [backlog_revision]. [None] when
+        the primary backlog was unavailable or only recovery was readable. *)
+  ; backlog_source : Keeper_world_observation_inputs.backlog_observation_source
+    (** Provenance of the backlog facts. Recovery data remains visible as
+        read-only observation but cannot become an authoritative edge; an
+        unavailable source is explicit rather than an empty-backlog inference. *)
   ; running_keeper_fiber_count : int
   ; connected_surfaces : Gate_surface.surface_presence list
   ; connected_surface_failures : Gate_surface.presence_failure list
@@ -1183,7 +1188,8 @@ let observe
       , failed_task_count
       , backlog_updated_since_last_scheduled_autonomous
       , backlog_revision
-      , backlog_projection_sha256 )
+      , backlog_projection_sha256
+      , backlog_source )
     =
     read_backlog_counts ~config ~meta
   in
@@ -1218,6 +1224,7 @@ let observe
   ; backlog_updated_since_last_scheduled_autonomous
   ; backlog_revision
   ; backlog_projection_sha256
+  ; backlog_source
   ; running_keeper_fiber_count
   ; connected_surfaces = surface_presence.surfaces
   ; connected_surface_failures = surface_presence.failures
@@ -1233,7 +1240,8 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
       , failed_task_count
       , backlog_updated_since_last_scheduled_autonomous
       , backlog_revision
-      , backlog_projection_sha256 )
+      , backlog_projection_sha256
+      , backlog_source )
     =
     read_backlog_counts ~config ~meta
   in
@@ -1257,6 +1265,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; backlog_updated_since_last_scheduled_autonomous
   ; backlog_revision
   ; backlog_projection_sha256
+  ; backlog_source
   ; running_keeper_fiber_count = count_running_keeper_fibers ~config
   ; connected_surfaces = surface_presence.surfaces
   ; connected_surface_failures = surface_presence.failures

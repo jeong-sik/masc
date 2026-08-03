@@ -707,12 +707,21 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path
       else None
     (* 3. Namespace state — usually lower churn than inbox/board detail. *)
     | Keeper_context_layers.Namespace_state ->
+      let backlog_source =
+        match observation.backlog_source with
+        | Keeper_world_observation_inputs.Primary -> None
+        | source ->
+          Some
+            (Keeper_world_observation_inputs.backlog_observation_source_to_string
+               source)
+      in
       if
         observation.unclaimed_task_count > 0
         || observation.claimable_task_count > 0
         || observation.failed_task_count > 0
         || Option.is_none observation.backlog_revision
         || observation.running_keeper_fiber_count > 0
+        || Option.is_some backlog_source
       then (
         let ubuf = Buffer.create 256 in
         Buffer.add_string ubuf "### Namespace State\n";
@@ -747,6 +756,11 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path
             (Printf.sprintf
                "- Failed tasks: %d\n"
                observation.failed_task_count);
+        Option.iter
+          (fun source ->
+             Buffer.add_string ubuf
+               (Printf.sprintf "- Backlog observation source: %s\n" source))
+          backlog_source;
         Buffer.add_string ubuf
           (Printf.sprintf
              "- Running keeper fibers: %d\n"

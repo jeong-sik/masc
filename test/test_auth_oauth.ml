@@ -242,6 +242,7 @@ let test_dual_auth_code_and_refresh_lifecycle () =
                 ~expected_resource:resource
                 ~refresh_token:first_pair.refresh_token
                 ~client_id:client.client_id
+                ~scope:None
                 ~resource:None
               |> oauth_ok
             in
@@ -281,6 +282,7 @@ let test_dual_auth_code_and_refresh_lifecycle () =
                     ~expected_resource:resource
                     ~refresh_token:first_pair.refresh_token
                     ~client_id:client.client_id
+                    ~scope:None
                     ~resource:None));
             check
               bool
@@ -450,6 +452,7 @@ let test_live_bootstrap_credential_remains_authoritative () =
                     ~expected_resource:resource
                     ~refresh_token:admin_pair.refresh_token
                     ~client_id:admin_client.client_id
+                    ~scope:None
                     ~resource:(Some resource)));
             let worker_token, worker_credential =
               Auth.create_token base_path ~agent_name:"codex" ~role:Masc_domain.Worker
@@ -581,10 +584,11 @@ let test_registration_rejects_non_loopback_redirect () =
               retry.client_id))))
 ;;
 
-let test_registration_is_idempotent_without_lease_or_capacity_policy () =
+let test_registration_rejects_distinct_client_at_capacity () =
   with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
-    with_workspace (fun base_path ->
-      Eio_main.run (fun env ->
+    with_env "MASC_OAUTH_MAX_CLIENTS" "1" (fun () ->
+      with_workspace (fun base_path ->
+        Eio_main.run (fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             Eio_guard.enable ();
             Fun.protect
@@ -611,32 +615,167 @@ let test_registration_is_idempotent_without_lease_or_capacity_policy () =
                   "exact DCR retry is idempotent"
                   first.client_id
                   repeated.client_id;
-                let second =
-                  Auth_oauth.register_client
-                    ~base_path
-                    ~client_name:(Some "Codex replacement")
-                    ~redirect_uris:[ "http://127.0.0.1:43128/callback/second" ]
-                  |> oauth_ok
-                in
                 check
                   bool
-                  "a distinct valid registration is admitted without an invented cap"
+                  "a distinct registration is rejected at capacity"
                   true
-                  (not (String.equal first.client_id second.client_id));
+                  (match
+                     Auth_oauth.register_client
+                       ~base_path
+                       ~client_name:(Some "Codex replacement")
+                       ~redirect_uris:[ "http://127.0.0.1:43128/callback/second" ]
+                   with
+                   | Error Auth_oauth.Temporarily_unavailable -> true
+                   | Ok _ | Error _ -> false);
                 check
                   bool
-                  "the first registration remains durable"
+                  "capacity pressure preserves the existing registration"
                   true
                   (Auth_oauth.find_client ~base_path ~client_id:first.client_id
                    |> oauth_ok
                    |> Option.is_some);
                 check
-                  bool
-                  "the second registration remains durable"
-                  true
-                  (Auth_oauth.find_client ~base_path ~client_id:second.client_id
-                   |> oauth_ok
-                   |> Option.is_some)))))
+                  string
+                  "an exact retry remains admitted at capacity"
+                  first.client_id
+                  (let retry =
+                     Auth_oauth.register_client
+                       ~base_path
+                       ~client_name:(Some "Codex")
+                       ~redirect_uris:[ "http://127.0.0.1:43127/callback/first" ]
+                     |> oauth_ok
+                   in
+                   retry.client_id))))))
+;;
+
+let test_registration_preserves_live_client_at_capacity () =
+  with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
+    with_env "MASC_OAUTH_MAX_CLIENTS" "1" (fun () ->
+      with_workspace (fun base_path ->
+        Eio_main.run (fun env ->
+          Fs_compat.set_fs (Eio.Stdenv.fs env);
+          Eio_guard.enable ();
+          Fun.protect
+            ~finally:(fun () ->
+              Eio_guard.disable ();
+              Fs_compat.clear_fs ())
+            (fun () ->
+              let _, bootstrap_credential =
+                Auth.create_token
+                  base_path
+                  ~agent_name:"capacity-codex"
+                  ~role:Masc_domain.Worker
+                |> auth_ok
+              in
+              let client, _ =
+                issue_pair
+                  ~base_path
+                  ~bootstrap_credential
+                  ~redirect_uri:"http://127.0.0.1:43129/callback/live"
+                  ~resource:"http://127.0.0.1:8935/mcp"
+                  ~scope:"mcp:tools"
+              in
+              check
+                bool
+                "capacity cannot evict a client with a live token family"
+                true
+                (match
+                   Auth_oauth.register_client
+                     ~base_path
+                     ~client_name:(Some "Blocked client")
+                     ~redirect_uris:[ "http://127.0.0.1:43130/callback/blocked" ]
+                 with
+                 | Error Auth_oauth.Temporarily_unavailable -> true
+                 | Ok _ | Error _ -> false);
+              check
+                bool
+                "the live client remains registered"
+                true
+                (Auth_oauth.find_client ~base_path ~client_id:client.client_id
+                 |> oauth_ok
+                 |> Option.is_some))))))
+;;
+
+let test_refresh_scope_can_reduce_but_not_expand () =
+  with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
+    with_workspace (fun base_path ->
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        Eio_guard.enable ();
+        Fun.protect
+          ~finally:(fun () ->
+            Eio_guard.disable ();
+            Fs_compat.clear_fs ())
+          (fun () ->
+            let _, bootstrap_credential =
+              Auth.create_token base_path ~agent_name:"scope-codex" ~role:Masc_domain.Admin
+              |> auth_ok
+            in
+            let resource = "http://127.0.0.1:8935/mcp" in
+            let admin_only_client, admin_only_pair =
+              issue_pair
+                ~base_path
+                ~bootstrap_credential
+                ~redirect_uri:"http://127.0.0.1:43131/callback/admin-only"
+                ~resource
+                ~scope:"mcp:admin"
+            in
+            check
+              bool
+              "refresh cannot substitute a scope that was never granted"
+              true
+              (match
+                 Auth_oauth.rotate_refresh_token
+                   ~base_path
+                   ~expected_resource:resource
+                   ~refresh_token:admin_only_pair.refresh_token
+                   ~client_id:admin_only_client.client_id
+                   ~scope:(Some "mcp:tools")
+                   ~resource:(Some resource)
+               with
+               | Error Auth_oauth.Invalid_scope -> true
+               | Ok _ | Error _ -> false);
+            let client, admin_pair =
+              issue_pair
+                ~base_path
+                ~bootstrap_credential
+                ~redirect_uri:"http://127.0.0.1:43131/callback/scope"
+                ~resource
+                ~scope:"mcp:tools mcp:admin"
+            in
+            let worker_pair =
+              Auth_oauth.rotate_refresh_token
+                ~base_path
+                ~expected_resource:resource
+                ~refresh_token:admin_pair.refresh_token
+                ~client_id:client.client_id
+                ~scope:(Some "mcp:tools")
+                ~resource:(Some resource)
+              |> oauth_ok
+            in
+            check string "refresh response reports reduced scope" "mcp:tools" worker_pair.scope;
+            let credential =
+              Auth_oauth.with_expected_resource resource (fun () ->
+                Auth.find_credential_by_token base_path ~token:worker_pair.access_token)
+              |> auth_ok
+            in
+            check bool "refresh reduction lowers the effective role" true
+              (Masc_domain.Worker = credential.role);
+            check
+              bool
+              "a reduced family cannot expand back to admin"
+              true
+              (match
+                 Auth_oauth.rotate_refresh_token
+                   ~base_path
+                   ~expected_resource:resource
+                   ~refresh_token:worker_pair.refresh_token
+                   ~client_id:client.client_id
+                   ~scope:(Some "mcp:admin")
+                   ~resource:(Some resource)
+               with
+               | Error Auth_oauth.Invalid_scope -> true
+               | Ok _ | Error _ -> false)))))
 ;;
 
 let test_rotation_keeps_one_current_access_record () =
@@ -675,6 +814,7 @@ let test_rotation_keeps_one_current_access_record () =
                     ~expected_resource:resource
                     ~refresh_token:pair.Auth_oauth.refresh_token
                     ~client_id:client.client_id
+                    ~scope:None
                     ~resource:(Some resource)
                   |> oauth_ok
                   |> rotate (remaining - 1)
@@ -764,9 +904,17 @@ let () =
             `Quick
             test_code_exchange_rechecks_live_bootstrap
         ; test_case
-            "registration is idempotent without lease or capacity policy"
+            "registration rejects distinct client at capacity"
             `Quick
-            test_registration_is_idempotent_without_lease_or_capacity_policy
+            test_registration_rejects_distinct_client_at_capacity
+        ; test_case
+            "registration preserves live client at capacity"
+            `Quick
+            test_registration_preserves_live_client_at_capacity
+        ; test_case
+            "refresh scope can reduce but not expand"
+            `Quick
+            test_refresh_scope_can_reduce_but_not_expand
         ; test_case
             "rotation keeps one current access record"
             `Quick

@@ -47,12 +47,12 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 commit 이 있는 RFC 만 Implemented 로 표기한다 — RFC body 머지는 spec
 implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 
-| # | Title | Status | Sub-docs |
+| RFC | Title | Status | Sub-docs |
 |---|---|---|---|
 | 0000 | MASC × OAS Consolidated Master Design (SSOT) | Draft | - |
 | 0001 | Withdraw heuristic uncertainty governance | Withdrawn | - |
 | 0002 | Keeper 11-State Machine + Det/NonDet Boundary Formalization | reference | - |
-| 0003 | Withdraw composite lifecycle projection hierarchy | Withdrawn | RFC-0003-phase-2-turn-observation-lifecycle.md |
+| 0003 | Withdraw composite lifecycle projection hierarchy | Withdrawn | Phase 2: Turn-Scoped Observation Lifecycle (`RFC-0003-phase-2-turn-observation-lifecycle.md`, reference) |
 | 0004 | OCaml ↔ TypeScript shared contract — SSE + gRPC-web | Active | - |
 | 0005 | Withdraw the typed command-policy substrate | Withdrawn | - |
 | 0006 | Keeper Surface And Sandbox | Draft | - |
@@ -71,7 +71,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0035 | Cognitive IDE Master Plan Integration | Draft | - |
 | 0036 | Multi-Keeper Docker Orchestration & Lifecycle Cleanup (`RFC-0036-multi-keeper-docker-orchestration.md`)<br>oas Cognitive Mapping (companion to RFC-0035) (`RFC-0036-oas-cognitive-mapping.md`) | Draft<br>Draft | - |
 | 0037 | Board Multimedia & Vision — Eio/File-Based Adaptation (`RFC-0037-board-multimedia-vision-adapted.md`)<br>Local-first Keeper Enablement: Harness/User Boundary (`RFC-0037-local-first-keeper-enablement-boundary.md`) | Draft<br>Draft | - |
-| 0038 | Opaque Identifier Types for Provider, Runtime, Model (`RFC-0038-opaque-identifier-types.md`)<br>Withdraw MASC capability-routing plan (`RFC-0038-runtime-routing-intent-preservation.md`) | Draft<br>Withdrawn | RFC-0038-phase-2-keeper-identity-canonical.md |
+| 0038 | Opaque Identifier Types for Provider, Runtime, Model (`RFC-0038-opaque-identifier-types.md`)<br>Withdraw MASC capability-routing plan (`RFC-0038-runtime-routing-intent-preservation.md`) | Draft<br>Withdrawn | Withdraw identity-alias migration (`RFC-0038-phase-2-keeper-identity-canonical.md`, Withdrawn) |
 | 0041 | Withdraw runtime group/item hierarchy | Withdrawn | - |
 | 0042 | Withdraw Keeper terminal-reason hierarchy | Withdrawn | - |
 | 0043 | Distribute legacy metrics backend metric ownership to domain modules | Active | - |
@@ -87,7 +87,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0054 | Withdraw code generation for command-policy GADTs | Withdrawn | - |
 | 0056 | Incremental Sub-Library Extraction from Flat masc Library | Active | - |
 | 0057 | Tool Descriptor Codegen — `[@@deriving tool]` via Build-Time Generation | Draft | - |
-| 0058 | Withdraw terminal capability hierarchy | Withdrawn | RFC-0058-phase-5-erase-provider-variant.md |
+| 0058 | Withdraw terminal capability hierarchy | Withdrawn | Withdraw provider-variant migration plan (`RFC-0058-phase-5-erase-provider-variant.md`, Withdrawn) |
 | 0062 | Typed `Tool_result.t` + Typed `Sdk_*` Blocker Class (Reverse-Engineered Initi... | Draft | - |
 | 0063 | Telemetry Feedback Loop & Cooperative Scheduling Safety | Draft | - |
 | 0064 | Capacity Probe Adapter (`RFC-0064-capacity-probe-adapter.md`)<br>Descriptor-Owned Tool Surface (`RFC-0064-two-surface-tool-alias.md`) | Active<br>Superseded | - |
@@ -129,7 +129,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0104 | Withdraw Task-to-repository authorization | Withdrawn | - |
 | 0105 | OpenAI-compat boundary: Agent_sdk.Error.t → HTTP status + typed envelope | Implemented | - |
 | 0106 | Cancel-safe try-with discipline (Eio.Cancel.Cancelled propagation) | Active | - |
-| 0107 | Phase C.0 — `Eio_context.get_switch_opt` global access audit (`RFC-0107-eio-context-switch-audit.md`)<br>Outbound HTTP stack consolidation — pooled keep-alive, scoped Switch, Docker ... (`RFC-0107-outbound-http-stack-consolidation.md`) | Evidence<br>Active | RFC-0107-phase-d-pool-design.md |
+| 0107 | Outbound HTTP stack consolidation — pooled keep-alive, scoped Switch, Docker ... | Active | Phase C.0 — `Eio_context.get_switch_opt` global access audit (`RFC-0107-eio-context-switch-audit.md`, Evidence)<br>Phase D — Connection pool design (interface-first) (`RFC-0107-phase-d-pool-design.md`, Active) |
 | 0108 | Atomic JSONL Append (in-process) (`RFC-0108-atomic-jsonl-append.md`)<br>PR / Worktree Operation Safety Gates (`RFC-0108-pr-worktree-operation-safety-gates.md`) | Active<br>Implemented | - |
 | 0109 | CDAL x Goal Integration Contract | Withdrawn | - |
 | 0110 | Tool-pair atomicity at write boundary — sunset compaction repair fabrication | Superseded | - |
@@ -156,7 +156,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0133 | Keeper Phase Casing SSOT Consolidation | Implemented | - |
 | 0134 | Persistence read-drop root fix (recovery story for RFC-0044) | Active | - |
 | 0135 | Supersede dashboard-derived Keeper disposition | Superseded | - |
-| 0136 | Keeper Unified Turn — Stage Decomposition of run_keeper_cycle | Implemented | RFC-0136-phase-4-retry-loop.md |
+| 0136 | Keeper Unified Turn — Stage Decomposition of run_keeper_cycle | Implemented | Keeper Unified Turn — Phase 4: Retry Loop Body Decomposition (`RFC-0136-phase-4-retry-loop.md`, Active) |
 | 0137 | Host FD pressure observation — retired Keeper-pause proposal | Retired | - |
 | 0138 | Dashboard Snapshot Lock-Free Immutable Architecture | Implemented | - |
 | 0139 | Withdraw parallel agent and judge status hierarchies | Withdrawn | - |
@@ -249,7 +249,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0243 | Memory OS confidence mutability via write-side fact upsert | Draft | - |
 | 0244 | Memory OS recall: turn-seeded deterministic lexical retrieval, with provenanc... | Superseded | - |
 | 0245 | Exempt goalless tasks from the per-goal WIP claim cap | Withdrawn | - |
-| 0247 | Memory OS as a brain: typed associative graph, spreading-activation recall, s... (`RFC-0247-memory-os-associative-graph-forgetting-brain.md`)<br>Memory OS purge + LLM-judgment rebuild — implementation plan (phase of RFC-0247) (`RFC-0247-purge-implementation-plan.md`) | Draft<br>Draft | - |
+| 0247 | Memory OS as a brain: typed associative graph, spreading-activation recall, s... | Draft | Memory OS purge + LLM-judgment rebuild — implementation plan (phase of RFC-0247) (`RFC-0247-purge-implementation-plan.md`, Draft) |
 | 0248 | Board context without local authority classification | Draft | - |
 | 0249 | Remove the dead `stale_factor` field (execute RFC-0239/0243/0244/0247) | Draft | - |
 | 0251 | Memory OS: record well, do not value — remove the scoring layer | Draft | - |
@@ -344,6 +344,23 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0353 | 실패 분류가 모듈 경계에서 소실되는 결함 (결정 요청) | Draft | - |
 | 0356 | Approval owns the effect (replay the approved payload, do not require byte-id... | Draft | - |
 | 0357 | Scheduled-autonomous 턴은 heartbeat가 아니라 typed stimulus의 변화로 admit한다 | Draft | - |
+| RFC-0034d-stale-agent-sync | d — release_stale_claims agent-side sync | Draft | - |
+| RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
+| RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |
+| RFC-compaction-deterministic-floor | Compaction must never deadlock: a deterministic structural floor, typed outco... | Draft | - |
+| RFC-connector-ambient-attention-wake | Connector ambient attention wake: drive an idle keeper turn from external-att... | Draft | - |
+| RFC-connector-deferred-reply-via-chat-queue | Durable Keeper chat receipts and connector delivery settlement | Active | - |
+| RFC-eliminate-substring-destructive-classifier | Withdrawn command-policy classification experiment | Withdrawn | - |
+| RFC-keeper-conversation-hitl-flow | # RFC: Keeper conversation and non-blocking HITL | Draft | - |
+| RFC-keeper-media-degrade-floor | # RFC: Withdraw silent media degradation | Draft | - |
+| RFC-keeper-memory-bank-write-reduction | Keeper memory-bank near-dup accumulation — write reduction, not write-boundar... | Superseded | - |
+| RFC-keeper-memory-consolidation | Keeper durable memory consolidation — deprecate memory_bank into Memory OS | Implemented | - |
+| RFC-keeper-memory-panel-real-data | Keeper memory panel: real-data backing (no fabrication, no score resurrection) | Superseded | - |
+| RFC-keeper-runtime-context-observation-phase0 | Keeper runtime context observation Phase 0 | Draft | - |
+| RFC-keeper-vision-delegation-tool | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | - |
+| RFC-memory-os-bounded-context-and-librarian-curator | # RFC: Memory OS 2.0 — bounded working set 전송 계약과 librarian curator 계약 | Draft | - |
+| RFC-runtime-note-field-and-dashboard-surfacing | Per-runtime note field & dashboard surfacing | Draft | - |
+| RFC-typed-egress-resource-capability | Withdraw product-specific egress effect classification | Withdrawn | - |
 
 ### 신규 RFC
 

@@ -17,10 +17,24 @@ from pathlib import Path
 
 RFC_DIR = Path("docs/rfc")
 README = RFC_DIR / "README.md"
-TABLE_HEADER = "| # | Title | Status | Sub-docs |"
+TABLE_HEADER = "| RFC | Title | Status | Sub-docs |"
 TABLE_SEP = "|---|---|---|---|"
-RFC_FILE_RE = re.compile(r"^RFC-(\d{4})-.+\.md$")
-RFC_PHASE_FILE_RE = re.compile(r"^RFC-(\d{4})-phase-.+\.md$")
+RFC_NUMBERED_FILE_RE = re.compile(
+    r"^RFC-(?P<number>\d{4})-(?P<slug>.+)\.md$"
+)
+RFC_PHASE_FILE_RE = re.compile(
+    r"^RFC-(?P<number>\d{4})-phase-(?P<phase>[A-Za-z0-9]+)-"
+    r"(?P<slug>.+)\.md$"
+)
+RFC_SLUG_FILE_RE = re.compile(
+    r"^RFC-(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)\.md$"
+)
+RFC_REFERENCE_RE = re.compile(
+    r"^(?:RFC-)?(?P<number>\d{4})(?:-phase-(?P<phase>[A-Za-z0-9]+))?$"
+)
+RFC_REFERENCE_SLUG_RE = re.compile(
+    r"^(?:RFC-)?(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)$"
+)
 
 
 @dataclass(frozen=True)
@@ -32,9 +46,27 @@ class RfcDocument:
 
 @dataclass
 class RfcEntry:
-    number: str
+    key: str
+    display_key: str
+    is_numeric: bool
     documents: list[RfcDocument] = field(default_factory=list)
-    sub_docs: list[str] = field(default_factory=list)
+    sub_docs: list[RfcDocument] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RfcReference:
+    number: str | None
+    slug: str | None
+    phase: str | None
+
+
+@dataclass(frozen=True)
+class FileIdentity:
+    key: str
+    display_key: str
+    number: str | None
+    slug: str | None
+    phase: str | None
 
 
 def extract_frontmatter(filepath: Path) -> dict[str, str]:
@@ -54,53 +86,186 @@ def extract_frontmatter(filepath: Path) -> dict[str, str]:
     return result
 
 
-def collect_entries() -> dict[str, RfcEntry]:
+def parse_reference(raw: str) -> RfcReference | None:
+    value = raw.strip().strip('"').strip("'")
+    numeric = RFC_REFERENCE_RE.fullmatch(value)
+    if numeric is not None:
+        return RfcReference(
+            number=numeric.group("number"),
+            slug=None,
+            phase=numeric.group("phase"),
+        )
+    slug = RFC_REFERENCE_SLUG_RE.fullmatch(value)
+    if slug is not None:
+        return RfcReference(number=None, slug=slug.group("slug"), phase=None)
+    return None
+
+
+def parse_file_identity(name: str) -> FileIdentity:
+    phase = RFC_PHASE_FILE_RE.fullmatch(name)
+    if phase is not None:
+        number = phase.group("number")
+        return FileIdentity(
+            key=f"number:{number}",
+            display_key=number,
+            number=number,
+            slug=None,
+            phase=phase.group("phase"),
+        )
+
+    numbered = RFC_NUMBERED_FILE_RE.fullmatch(name)
+    if numbered is not None:
+        number = numbered.group("number")
+        return FileIdentity(
+            key=f"number:{number}",
+            display_key=number,
+            number=number,
+            slug=None,
+            phase=None,
+        )
+
+    slug = RFC_SLUG_FILE_RE.fullmatch(name)
+    if slug is not None:
+        value = slug.group("slug")
+        return FileIdentity(
+            key=f"slug:{value}",
+            display_key=f"RFC-{value}",
+            number=None,
+            slug=value,
+            phase=None,
+        )
+
+    # Existing RFC files predate the current filename contract. Keep their
+    # exact filename visible instead of dropping or reinterpreting it.
+    stem = name.removeprefix("RFC-").removesuffix(".md")
+    return FileIdentity(
+        key=f"legacy:{stem}", display_key=stem, number=None, slug=None, phase=None
+    )
+
+
+def relation_parent(
+    identity: FileIdentity, frontmatter: dict[str, str], filename: str
+) -> tuple[str | None, list[str]]:
+    issues: list[str] = []
+    parents: set[str] = set()
+
+    raw_rfc = frontmatter.get("rfc")
+    if raw_rfc is not None:
+        reference = parse_reference(raw_rfc)
+        if reference is None:
+            issues.append(f"{filename}: invalid frontmatter rfc: {raw_rfc!r}")
+        elif identity.number is not None:
+            if reference.number != identity.number:
+                issues.append(
+                    f"{filename}: frontmatter rfc {raw_rfc!r} does not match "
+                    f"filename RFC-{identity.number}"
+                )
+        elif identity.slug is None or reference.slug != identity.slug:
+            issues.append(
+                f"{filename}: frontmatter rfc {raw_rfc!r} does not match "
+                f"filename {identity.display_key}"
+            )
+        if reference is not None:
+            if reference.number is not None and reference.phase is not None:
+                parents.add(reference.number)
+
+    for field_name in ("extends", "supplement_of"):
+        raw_parent = frontmatter.get(field_name)
+        if raw_parent is None:
+            continue
+        reference = parse_reference(raw_parent)
+        if reference is None or reference.number is None:
+            issues.append(
+                f"{filename}: {field_name} must name a numbered RFC: {raw_parent!r}"
+            )
+        else:
+            parents.add(reference.number)
+
+    if identity.number is not None and identity.phase is not None:
+        parents.add(identity.number)
+
+    if len(parents) > 1:
+        issues.append(f"{filename}: conflicting sub-document parents: {sorted(parents)}")
+    parent = next(iter(parents), None)
+    if parent is not None and identity.number != parent:
+        issues.append(
+            f"{filename}: sub-document parent RFC-{parent} does not match "
+            f"filename identity {identity.display_key}"
+        )
+    return parent, issues
+
+
+def document_for(filepath: Path, frontmatter: dict[str, str]) -> RfcDocument:
+    title = frontmatter.get("title", "")
+    if not title:
+        first_line = ""
+        lines = filepath.read_text(encoding="utf-8").splitlines()
+        in_frontmatter = bool(lines and lines[0].strip() == "---")
+        for index, line in enumerate(lines):
+            if index > 0 and line.strip() == "---" and in_frontmatter:
+                in_frontmatter = False
+                continue
+            if in_frontmatter:
+                continue
+            if line.startswith("# "):
+                first_line = line
+                break
+        title = re.sub(r"^# RFC[- ]*\d+[.: —–-]*\s*", "", first_line)
+        if not title:
+            title = "(untitled)"
+
+    return RfcDocument(
+        filename=filepath.name,
+        title=title,
+        status=frontmatter.get("status", "Draft"),
+    )
+
+
+def collect_entries() -> tuple[dict[str, RfcEntry], list[str]]:
     entries: dict[str, RfcEntry] = {}
+    issues: list[str] = []
 
     for fpath in sorted(RFC_DIR.glob("RFC-*.md")):
         name = fpath.name
-        match = RFC_FILE_RE.fullmatch(name)
-        if match is None:
-            print(
-                f"WARN: skipped noncanonical RFC filename: {name}",
-                file=sys.stderr,
-            )
-            continue
-        num = match.group(1)
-        entry = entries.setdefault(num, RfcEntry(number=num))
-
-        if RFC_PHASE_FILE_RE.fullmatch(name) is not None:
-            entry.sub_docs.append(name)
-            continue
-
         fm = extract_frontmatter(fpath)
-        title = fm.get("title", "")
-        if not title:
-            first_line = ""
-            for line in fpath.read_text(encoding="utf-8").splitlines():
-                if line.startswith("# "):
-                    first_line = line
-                    break
-            title = re.sub(r"^# RFC[- ]*\d+[.: —–-]*\s*", "", first_line)
-            if not title:
-                title = "(untitled)"
-
-        entry.documents.append(
-            RfcDocument(
-                filename=name,
-                title=title,
-                status=fm.get("status", "Draft"),
-            )
+        identity = parse_file_identity(name)
+        parent, relation_issues = relation_parent(identity, fm, name)
+        issues.extend(relation_issues)
+        entry_key = f"number:{parent}" if parent is not None else identity.key
+        entry = entries.setdefault(
+            entry_key,
+            RfcEntry(
+                key=entry_key,
+                display_key=identity.display_key if parent is None else parent,
+                is_numeric=identity.number is not None or parent is not None,
+            ),
         )
+        document = document_for(fpath, fm)
 
-    return entries
+        if parent is not None:
+            entry.sub_docs.append(document)
+            continue
+
+        entry.documents.append(document)
+
+    for entry in entries.values():
+        entry.documents.sort(key=lambda document: document.filename)
+        entry.sub_docs.sort(key=lambda document: document.filename)
+
+    return entries, issues
 
 
 def generate_table(entries: dict[str, RfcEntry]) -> str:
     lines = [TABLE_HEADER, TABLE_SEP]
-    for num in sorted(entries):
-        e = entries[num]
+    ordered_entries = sorted(
+        entries.values(), key=lambda entry: (not entry.is_numeric, entry.key)
+    )
+    for e in ordered_entries:
         if not e.documents:
+            title = "(missing main document)"
+            status = "Invalid"
+            subs = ", ".join(document.filename for document in e.sub_docs) or "-"
+            lines.append(f"| {e.display_key} | {title} | {status} | {subs} |")
             continue
 
         duplicate_number = len(e.documents) > 1
@@ -115,8 +280,16 @@ def generate_table(entries: dict[str, RfcEntry]) -> str:
 
         title = "<br>".join(rendered_titles)
         status = "<br>".join(document.status for document in e.documents)
-        subs = ", ".join(e.sub_docs) if e.sub_docs else "-"
-        lines.append(f"| {num} | {title} | {status} | {subs} |")
+        rendered_sub_docs: list[str] = []
+        for document in e.sub_docs:
+            sub_title = document.title
+            if len(sub_title) > 80:
+                sub_title = sub_title[:77] + "..."
+            rendered_sub_docs.append(
+                f"{sub_title} (`{document.filename}`, {document.status})"
+            )
+        subs = "<br>".join(rendered_sub_docs) if rendered_sub_docs else "-"
+        lines.append(f"| {e.display_key} | {title} | {status} | {subs} |")
     return "\n".join(lines)
 
 
@@ -169,7 +342,11 @@ def main() -> int:
             check=True,
         ).stdout.strip()
     )
-    entries = collect_entries()
+    entries, issues = collect_entries()
+    if issues:
+        for issue in issues:
+            print(f"ERROR: {issue}", file=sys.stderr)
+        return 1
     table = generate_table(entries)
 
     if "--check" in sys.argv:

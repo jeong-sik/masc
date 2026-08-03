@@ -1378,7 +1378,6 @@ let keeper_cycle_decision
            | Keeper_world_observation_inputs.Observed_backlog
                { updated_since_last_scheduled_autonomous; _ } ->
              updated_since_last_scheduled_autonomous)
-          && not reactive_wake
         in
         let has_actionable_schedule =
           observation.scheduled_automation.due_ready_count > 0

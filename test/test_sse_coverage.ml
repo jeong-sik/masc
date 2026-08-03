@@ -401,6 +401,45 @@ let test_cleanup_expired_events_exact_under_domain_contention () =
       check int "buffer emptied once" 0
         (List.length (Sse.event_buffer_events_for_test ())))
 
+let test_concurrent_broadcast_preserves_replay_and_live_cursor_order () =
+  let original_buffer = Sse.event_buffer_events_for_test () in
+  let original_hook = Atomic.get Sse.buffer_commit_test_hook in
+  let session_id = "test_concurrent_cursor_" ^ string_of_int (Random.bits ()) in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Sse.buffer_commit_test_hook original_hook;
+      Sse.unregister session_id;
+      Sse.set_event_buffer_for_test original_buffer)
+    (fun () ->
+      Sse.set_event_buffer_for_test [];
+      let (_client_id, event_stream, _) =
+        register_exn ~kind:Sse.Observer session_id ~last_event_id:0
+      in
+      let base_id = Sse.current_id () in
+      let delayed_first_commit = Atomic.make false in
+      Atomic.set Sse.buffer_commit_test_hook
+        (Some (fun () ->
+           if Atomic.compare_and_set delayed_first_commit false true then
+             ignore (Unix.select [] [] [] 0.05)));
+      run_domains_together 2 (fun index ->
+        Sse.broadcast_to Sse.Observers
+          (`Assoc [ "concurrent_sequence", `Int index ]));
+      Atomic.set Sse.buffer_commit_test_hook None;
+      let buffered_ids =
+        Sse.get_events_after base_id
+        |> List.map (fun (event : Sse.delivery) -> event.event_id)
+      in
+      let rec drain acc =
+        match Eio.Stream.take_nonblocking event_stream with
+        | None -> List.rev acc
+        | Some (event : Sse.delivery) -> drain (event.event_id :: acc)
+      in
+      let live_ids = drain [] in
+      check int "both concurrent events are replayable" 2
+        (List.length buffered_ids);
+      check (list int) "live delivery follows durable cursor order"
+        buffered_ids live_ids)
+
 (* ============================================================
    client Type Tests
    ============================================================ *)
@@ -591,6 +630,8 @@ let () =
         test_replay_handoff_deduplicates_exact_ids_only;
       test_case "cleanup exact under domain contention" `Quick
         test_cleanup_expired_events_exact_under_domain_contention;
+      test_case "concurrent broadcast preserves replay/live cursor order" `Quick
+        test_concurrent_broadcast_preserves_replay_and_live_cursor_order;
     ];
     "broadcast", [
       test_case "sends to clients" `Quick test_broadcast_sends_to_clients;

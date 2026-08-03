@@ -149,9 +149,9 @@ val sse_retry_ms : int
 
 val sse_prime_event : unit -> string
 (** [sse_prime_event ()] returns the SSE prime frame
-    [["retry: <sse_retry_ms>\nid: <next>\n\n"]] with a fresh id
-    from {!Sse.next_id}.  The trailing double-newline is the SSE
-    frame terminator — required by the spec. *)
+    [["retry: <sse_retry_ms>\n\n"]]. It deliberately carries no [id]: a
+    transport-only prime is absent from the replay store and therefore cannot
+    advance the client's durable replay cursor. *)
 
 val sse_comment_with_retry : comment:string -> string
 (** [sse_comment_with_retry ~comment] returns an SSE comment frame

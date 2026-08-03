@@ -288,6 +288,11 @@ let client_id_counter = Atomic.make 0
 (** Global event counter for resumability *)
 let event_counter = Atomic.make 0
 
+(* Event id allocation, replay-buffer commit, and per-client enqueue are one
+   ordered publication boundary. Producers may run on different domains, so
+   the short non-yielding critical section uses a standard-library mutex. *)
+let delivery_fanout_mutex = Stdlib.Mutex.create ()
+
 (** Event buffer for resumability stores canonical deliveries.
 
     [event_buffer] is written by every [broadcast_impl] / [send_to] and
@@ -971,8 +976,10 @@ let reap_dead_external_subscribers () =
 
 (** Internal broadcast implementation shared by [broadcast] and [broadcast_to].
     Pushes the canonical delivery into each matching client's
-    [event_stream].  The registry snapshot is immutable; the per-stream
-    [Eio.Stream.add] calls happen outside any global lock.
+    [event_stream].  Event-id allocation, replay-buffer commit, and live
+    enqueue are serialized so every client observes the same cursor order.
+    Logging, disconnect hooks, snapshots, and external callbacks stay outside
+    that short publication boundary.
 
     [Eio.Stream.add] on a bounded (capacity 64) stream returns
     immediately as long as the stream is not full.  The per-client drain
@@ -987,6 +994,14 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
   let jsonrpc_payload =
     Sse_jsonrpc_filter.jsonrpc_message_for_agent_stream json
   in
+  let target_label = match target with
+    | All -> "all"
+    | Observers -> "observers"
+    | Agent_streams -> "agent_streams"
+    | Presence_only -> "presence"
+  in
+  let delivery, failed =
+    Stdlib.Mutex.protect delivery_fanout_mutex (fun () ->
   (* Atomically allocate the event id so two concurrent broadcasts
      cannot observe the same peeked counter value and emit duplicates. *)
   let current_event_id = next_id () in
@@ -1006,22 +1021,15 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
      subscribe/unsubscribe), so we iterate it directly with [SMap.iter].
      Skipping the [(k, v) :: acc] fold trims one tuple + cons cell per
      client per broadcast on this hot fan-out path. *)
-  let target_label = match target with
-    | All -> "all"
-    | Observers -> "observers"
-    | Agent_streams -> "agent_streams"
-    | Presence_only -> "presence"
-  in
   let clients_entries = (Atomic.get clients).entries in
   let failed = ref [] in
   SMap.iter (fun session_id client ->
     if client_matches_target target ~jsonrpc_payload client
        && current_event_id > Atomic.get client.last_event_id then begin
       (* Pre-check stream capacity to avoid blocking broadcast.
-         No TOCTOU risk: single-domain Eio cooperative scheduling has no
-         yield point between Stream.length and Stream.add, so no other
-         fiber can modify the stream in between.  try/catch kept as
-         defense-in-depth for unexpected failures.
+         No producer can fill the stream between [length] and [add] because
+         all producers share [delivery_fanout_mutex]; consumers only reduce
+         its length.  try/catch is retained as defense-in-depth.
          See TLA+ SSEBroadcastBlock spec. *)
       (let queue_len = Eio.Stream.length client.event_stream in
        if queue_len >= stream_capacity then begin
@@ -1039,11 +1047,7 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
             saw "WS events stop arriving" with no error indication and
             had to manually refresh.  See plan
             [planning/claude-plans/me-workspace-yousleepwhen-masc-radiant-piglet.md]. *)
-         Transport_metrics.inc_broadcast_failure ~target:target_label ();
-         Log.Server.warn
-           "Broadcast skip: session %s stream full (%d/%d) — disconnecting"
-           session_id queue_len stream_capacity;
-         failed := session_id :: !failed
+         failed := (session_id, `Full queue_len) :: !failed
        end else
          try
            Eio.Stream.add client.event_stream delivery;
@@ -1052,15 +1056,25 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | e ->
-             (* Same P1 fix on the unexpected-exception defense path. *)
-             Transport_metrics.inc_broadcast_failure ~target:target_label ();
-             Log.Server.error "Broadcast enqueue failed for session %s: %s"
-               session_id (Printexc.to_string e);
-             failed := session_id :: !failed)
+             failed := (session_id, `Raised e) :: !failed)
     end
   ) clients_entries;
+  delivery, !failed)
+  in
+  List.iter
+    (fun (session_id, failure) ->
+       Transport_metrics.inc_broadcast_failure ~target:target_label ();
+       match failure with
+       | `Full queue_len ->
+         Log.Server.warn
+           "Broadcast skip: session %s stream full (%d/%d) — disconnecting"
+           session_id queue_len stream_capacity
+       | `Raised e ->
+         Log.Server.error "Broadcast enqueue failed for session %s: %s"
+           session_id (Printexc.to_string e))
+    failed;
   (* Remove failed connections *)
-  List.iter (fun sid -> unregister sid) !failed;
+  List.iter (fun (session_id, _) -> unregister session_id) failed;
   (* Record broadcast duration for transport observability *)
   let elapsed = Time_compat.now () -. t0 in
   Transport_metrics.observe_broadcast_duration ~target:target_label elapsed;
@@ -1095,28 +1109,46 @@ let send_to session_id json =
       "Dropping non-JSON-RPC payload sent via Sse.send_to for session %s"
       session_id
   else
-  let current_event_id = next_id () in
-  let delivery =
-    { event_id = current_event_id
-    ; frame = format_event_yojson ~id:current_event_id ~event_type:"message" json
-    ; emitted_at = Time_compat.now ()
-    }
+  let outcome =
+    Stdlib.Mutex.protect delivery_fanout_mutex (fun () ->
+      let current_event_id = next_id () in
+      let delivery =
+        { event_id = current_event_id
+        ; frame = format_event_yojson ~id:current_event_id ~event_type:"message" json
+        ; emitted_at = Time_compat.now ()
+        }
+      in
+      buffer_event delivery;
+      match SMap.find_opt session_id (Atomic.get clients).entries with
+      | None -> `Absent
+      | Some client ->
+          let queue_len = Eio.Stream.length client.event_stream in
+          if queue_len >= stream_capacity then
+            `Full queue_len
+          else
+            try
+              Eio.Stream.add client.event_stream delivery;
+              Atomic.set client.last_event_id current_event_id;
+              mark_seen client;
+              `Enqueued
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | e -> `Raised e)
   in
-  buffer_event delivery;
-  let client_opt = SMap.find_opt session_id (Atomic.get clients).entries in
-  match client_opt with
-  | None -> ()
-  | Some client ->
-      (try
-        Eio.Stream.add client.event_stream delivery;
-        Atomic.set client.last_event_id current_event_id;
-        mark_seen client;
-        sync_transport_snapshot ()
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e ->
-          Log.Server.error "Enqueue to %s failed: %s"
-            session_id (Printexc.to_string e))
+  match outcome with
+  | `Absent -> ()
+  | `Enqueued -> sync_transport_snapshot ()
+  | `Full queue_len ->
+      Transport_metrics.inc_broadcast_failure ~target:"send_to" ();
+      Log.Server.warn
+        "Targeted enqueue skip: session %s stream full (%d/%d) — disconnecting"
+        session_id queue_len stream_capacity;
+      unregister session_id
+  | `Raised e ->
+      Transport_metrics.inc_broadcast_failure ~target:"send_to" ();
+      Log.Server.error "Enqueue to %s failed: %s — disconnecting"
+        session_id (Printexc.to_string e);
+      unregister session_id
 
 (** Pop the next event from a client's stream.
     Blocks the calling fiber until an event is available.

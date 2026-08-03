@@ -199,8 +199,7 @@ let force_json_response = env_flag "MASC_FORCE_JSON_RESPONSE"
 let sse_retry_ms = 3000
 
 let sse_prime_event () =
-  let id = Sse.next_id () in
-  Printf.sprintf "retry: %d\nid: %d\n\n" sse_retry_ms id
+  Printf.sprintf "retry: %d\n\n" sse_retry_ms
 
 (* RFC-0089: SSE comment line + reconnect [retry:] directive, sourced from the
    [sse_retry_ms] SSOT. Stream priming sites (presence, activity) used to inline

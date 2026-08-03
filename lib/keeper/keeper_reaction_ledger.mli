@@ -140,14 +140,14 @@ val event_queue_turn_started_seen_for_source_result :
 val record_board_cursor_ack :
   base_path:string ->
   keeper_name:string ->
-  ?stimulus_id:string ->
   cursor_ts:float ->
   post_id:string option ->
   unit ->
   unit
-(** Append a durable cursor acknowledgement. Callers should write this before
-    advancing the in-memory board cursor so every cursor advance has a replayable
-    ack row. *)
+(** Append a durable cursor acknowledgement. Stimulus identity is derived here
+    from [post_id], or from the cursor timestamp when no post exists. Callers
+    should write this before advancing the in-memory board cursor so every cursor
+    advance has a replayable ack row. *)
 
 val summary_for_keeper :
   base_path:string -> keeper_name:string -> limit:int -> Yojson.Safe.t

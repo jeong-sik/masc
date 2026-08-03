@@ -13,8 +13,6 @@
 
 module KeeperBootstrap : sig
   val enabled : bool
-  val stale_turn_seconds : float
-  val max_scan : int
   val lazy_startup_poll_interval_sec : float
   val keeper_listener_retry_interval_sec : float
   val post_startup_settle_sec : float

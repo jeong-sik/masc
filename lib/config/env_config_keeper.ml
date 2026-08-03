@@ -18,14 +18,6 @@ module KeeperBootstrap = struct
   (** Enable startup keeper bootstrap scan *)
   let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_BOOTSTRAP_ENABLED"
 
-  (** Keeper considered stale when last turn exceeds this threshold (seconds) *)
-  let stale_turn_seconds =
-    get_float_nonneg ~default:3600.0 "MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC"
-  ;;
-
-  (** Max keeper meta files to scan during bootstrap *)
-  let max_scan = get_int_nonneg ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_SCAN"
-
   (** Polling interval (seconds) for the lazy-startup wait loop in
       [server_bootstrap_loops.ml]. The autoboot fiber wakes up every
       [lazy_startup_poll_interval_sec] to re-check whether all

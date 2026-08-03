@@ -280,6 +280,9 @@ let prepare_dormant
   | Keeper_turn_admission.Shutdown_already_reserved reservation ->
     Error (Existing_operation reservation.operation_id)
   | Keeper_turn_admission.Shutdown_reserved _ ->
+    Keeper_turn_admission.await_idle_after_shutdown
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:meta.name;
     let durable_prepare_committed = Atomic.make false in
     Fun.protect
       ~finally:(fun () ->

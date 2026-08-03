@@ -921,7 +921,24 @@ let dispatch_keeper_wake
   let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
   let base_path = config.Workspace_utils.base_path in
   let* acceptance =
-    accept_keeper_wake_occurrence ~base_path ~keeper_name ~stimulus_id stimulus
+    match
+      Keeper_turn_admission.run_durable_intake_if_open
+        ~base_path
+        ~keeper_name
+        (fun () ->
+           accept_keeper_wake_occurrence
+             ~base_path
+             ~keeper_name
+             ~stimulus_id
+             stimulus)
+    with
+    | Keeper_turn_admission.Intake_committed result -> result
+    | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+      retryable_dispatch_failure
+        (Printf.sprintf
+           "scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"
+           keeper_name
+           (Keeper_shutdown_types.Operation_id.to_string operation_id))
   in
   let occurrence_status =
     match acceptance with
@@ -1084,42 +1101,69 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
       operation_id
       keeper_name
   in
-  let settle_execution (execution : Schedule_domain.execution_record) disposition =
-    let schedule_id = execution.schedule_id in
-    let due_at = execution.due_at in
-    let payload_digest = execution.payload_digest in
-    let store_result = function
-      | Ok _ -> Ok ()
-      | Error error -> Error (Schedule_store.store_error_to_string error)
+  let transfer_state_cache = Hashtbl.create 8 in
+  let settlement_of_resolved_disposition
+        (execution : Schedule_domain.execution_record)
+        occurrence_id
+        =
+    let settlement outcome : Schedule_store.dispatched_occurrence_settlement =
+      { schedule_id = execution.schedule_id
+      ; due_at = execution.due_at
+      ; payload_digest = execution.payload_digest
+      ; outcome
+      }
+    in
+    function
+    | Terminal_completed_at _ ->
+      Ok (settlement Schedule_store.Dispatched_occurrence_succeeded)
+    | Terminal_failed_at (_, _, reason, _)
+    | Terminal_cancelled_at (_, _, reason, _) ->
+      Ok (settlement (Schedule_store.Dispatched_occurrence_failed reason))
+    | Pending_at (owner, _) ->
+      Error
+        (Printf.sprintf
+           "dashboard Keeper purge blocked by pending transferred schedule occurrence source=%s owner=%s occurrence=%s"
+           keeper_name
+           owner
+           occurrence_id)
+    | Transfer_projecting_at (owner, target) ->
+      Error
+        (Printf.sprintf
+           "dashboard Keeper purge blocked by projecting transferred schedule occurrence source=%s owner=%s target=%s occurrence=%s"
+           keeper_name
+           owner
+           target
+           occurrence_id)
+    | Absent_at owner ->
+      Error
+        (Printf.sprintf
+           "dashboard Keeper purge missing transferred schedule evidence source=%s owner=%s occurrence=%s"
+           keeper_name
+           owner
+           occurrence_id)
+  in
+  let settlement_of_execution
+        (execution : Schedule_domain.execution_record)
+        disposition
+    =
+    let settlement outcome : Schedule_store.dispatched_occurrence_settlement =
+      { schedule_id = execution.schedule_id
+      ; due_at = execution.due_at
+      ; payload_digest = execution.payload_digest
+      ; outcome
+      }
     in
     match disposition.state with
     | Pending ->
-      Schedule_store.fail_dispatched_occurrence
-        config
-        ~now
-        ~schedule_id
-        ~due_at
-        ~payload_digest
-        ~error:purge_reason
-      |> store_result
+      Ok
+        (settlement
+           (Schedule_store.Dispatched_occurrence_failed purge_reason))
     | Terminally_completed _ ->
-      Schedule_store.complete_dispatched_occurrence
-        config
-        ~now
-        ~schedule_id
-        ~due_at
-        ~payload_digest
-        ()
-      |> store_result
+      Ok (settlement Schedule_store.Dispatched_occurrence_succeeded)
     | Terminally_failed (reason, _) | Cancelled (reason, _) ->
-      Schedule_store.fail_dispatched_occurrence
-        config
-        ~now
-        ~schedule_id
-        ~due_at
-        ~payload_digest
-        ~error:reason
-      |> store_result
+      Ok
+        (settlement
+           (Schedule_store.Dispatched_occurrence_failed reason))
     | Transfer_projecting_to target ->
       Error
         (Printf.sprintf
@@ -1127,21 +1171,39 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
            keeper_name
            target
            (occurrence_stimulus_id execution))
-    | Transferred_to _ -> Ok ()
+    | Transferred_to target ->
+      let occurrence_id = occurrence_stimulus_id execution in
+      let* resolved =
+        resolve_durable_occurrence
+          transfer_state_cache
+          ~read_state:Keeper_registry_event_queue.existing_durable_state_result
+          ~base_path
+          ~occurrence_id
+          ~visited:[ keeper_name ]
+          target
+        |> Result.map_error (fun detail ->
+          Printf.sprintf
+            "dashboard Keeper purge cannot resolve transferred schedule occurrence source=%s target=%s occurrence=%s: %s"
+            keeper_name
+            target
+            occurrence_id
+            detail)
+      in
+      settlement_of_resolved_disposition execution occurrence_id resolved
   in
-  let rec settle = function
-    | [] -> Ok ()
+  let rec preflight settlements = function
+    | [] -> Ok (List.rev settlements)
     | (execution : Schedule_domain.execution_record) :: rest ->
       let occurrence_id = occurrence_stimulus_id execution in
       (match Hashtbl.find_opt occurrence_index occurrence_id with
        | Some disposition ->
-         let* () =
+         let* settlement =
            match disposition.source.payload with
            | Keeper_event_queue.Schedule_due wake
              when String.equal wake.schedule_id execution.schedule_id
                   && Float.equal wake.due_at execution.due_at
                   && String.equal wake.payload_digest execution.payload_digest ->
-             settle_execution execution disposition
+             settlement_of_execution execution disposition
            | Keeper_event_queue.Schedule_due _ ->
              Error
                (Printf.sprintf
@@ -1155,7 +1217,7 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
                   occurrence_id
                   keeper_name)
          in
-         settle rest
+         preflight (settlement :: settlements) rest
        | None ->
          let* original_keeper = execution_keeper_name execution in
          if String.equal original_keeper keeper_name
@@ -1165,9 +1227,11 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
                 "dashboard Keeper purge missing durable schedule evidence keeper=%s occurrence=%s"
                 keeper_name
                 occurrence_id)
-         else settle rest)
+         else preflight settlements rest)
   in
-  settle executions
+  let* settlements = preflight [] executions in
+  Schedule_store.settle_dispatched_occurrences config ~now settlements
+  |> Result.map_error Schedule_store.store_error_to_string
 ;;
 
 let consumer : Schedule_runner.consumer = { accepts; dispatch; settlements }

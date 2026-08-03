@@ -80,6 +80,10 @@ type 'a registration_commit_result =
   | Registration_committed of 'a
   | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
+type 'a durable_intake_result =
+  | Intake_committed of 'a
+  | Intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+
 type slot_snapshot =
   { snapshot_keeper_name : string
   ; snapshot_slot_created : bool
@@ -260,9 +264,20 @@ val commit_registration_if_open :
   (unit -> 'a) ->
   'a registration_commit_result
 
-(** Join the current turn holder after admission has been closed. This waits
-    without an invented timeout, then immediately releases the slot. Never
-    call from the same admitted turn. *)
+(** Serialize one suspending durable intake effect with shutdown join. The
+    shutdown fence is checked after the intake mutex is acquired: intake that
+    wins commits before [await_idle_after_shutdown] returns, while a shutdown
+    that wins prevents the effect from starting. *)
+val run_durable_intake_if_open :
+  base_path:string ->
+  keeper_name:string ->
+  (unit -> 'a) ->
+  'a durable_intake_result
+
+(** Join the current turn holder and any durable external intake after
+    admission has been closed. This waits without an invented timeout, then
+    immediately releases both slots. Never call from the same admitted turn
+    or intake. *)
 val await_idle_after_shutdown : base_path:string -> keeper_name:string -> unit
 
 val snapshot_for : base_path:string -> keeper_name:string -> slot_snapshot

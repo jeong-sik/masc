@@ -122,6 +122,9 @@ type slot =
        fiber-cooperative, hence Eio.Mutex. Manipulated with raw
        lock/try_lock/unlock — [use_rw] would poison the slot when a turn
        raises, deadlocking the keeper forever. *)
+  ; intake_mu : Eio.Mutex.t
+    (* Serializes durable external intake with shutdown join. Unlike
+       [state_mu], callers may suspend while holding this cooperative mutex. *)
   ; state_mu : Stdlib.Mutex.t
     (* Guards [info]/[waiting]. Critical sections never yield, so the
        non-cooperative mutex is the right choice here. *)
@@ -199,6 +202,7 @@ let slot_for ~base_path ~keeper_name =
         { base_path
         ; keeper_name
         ; turn_mu = Eio.Mutex.create ()
+        ; intake_mu = Eio.Mutex.create ()
         ; state_mu = Stdlib.Mutex.create ()
         ; info = None
         ; waiting = 0
@@ -444,10 +448,34 @@ let commit_registration_if_open ~base_path ~keeper_name commit =
     | None -> Registration_committed (commit ()))
 ;;
 
+type 'a durable_intake_result =
+  | Intake_committed of 'a
+  | Intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+
+let run_durable_intake_if_open ~base_path ~keeper_name intake =
+  let slot = slot_for ~base_path ~keeper_name in
+  Eio.Mutex.lock slot.intake_mu;
+  let release () = Eio.Mutex.unlock slot.intake_mu in
+  match peek_shutdown slot with
+  | Some operation_id ->
+    release ();
+    Intake_shutdown_reserved operation_id
+  | None ->
+    (match intake () with
+     | value ->
+       release ();
+       Intake_committed value
+     | exception exn ->
+       release ();
+       raise exn)
+;;
+
 let await_idle_after_shutdown ~base_path ~keeper_name =
   let slot = slot_for ~base_path ~keeper_name in
   Eio.Mutex.lock slot.turn_mu;
-  Eio.Mutex.unlock slot.turn_mu
+  Eio.Mutex.unlock slot.turn_mu;
+  Eio.Mutex.lock slot.intake_mu;
+  Eio.Mutex.unlock slot.intake_mu
 ;;
 
 let chat_waiting ~base_path ~keeper_name =

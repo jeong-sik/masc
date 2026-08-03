@@ -30,6 +30,17 @@ type running_recovery_reason =
   | Retryable_dispatch_failure of string
   | Interrupted_by_process_restart
 
+type dispatched_occurrence_outcome =
+  | Dispatched_occurrence_succeeded
+  | Dispatched_occurrence_failed of string
+
+type dispatched_occurrence_settlement =
+  { schedule_id : string
+  ; due_at : float
+  ; payload_digest : string
+  ; outcome : dispatched_occurrence_outcome
+  }
+
 val running_recovery_reason_to_string : running_recovery_reason -> string
 
 val store_error_to_string : store_error -> string
@@ -192,6 +203,14 @@ val fail_dispatched_occurrence :
 (** Marks one exact running/dispatched occurrence failed. Idempotent when that
     occurrence is already failed. A recurring schedule continues at its
     already-computed next occurrence. *)
+
+val settle_dispatched_occurrences :
+  Workspace_utils.config ->
+  now:float ->
+  dispatched_occurrence_settlement list ->
+  (unit, store_error) result
+(** Validate and settle an exact batch under one schedule-ledger lock and one
+    durable write. Any invalid occurrence leaves the entire batch unchanged. *)
 
 val fail_running :
   Workspace_utils.config ->

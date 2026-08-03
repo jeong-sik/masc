@@ -1081,6 +1081,338 @@ let test_keeper_purge_rejects_missing_owned_snapshot () =
     (Schedule_domain.execution_status_to_string execution.status)
 ;;
 
+let test_keeper_purge_preflights_whole_batch () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  ignore
+    (create_named_keeper_wake_schedule
+       config
+       ~schedule_id:"purge-batch-a"
+       ~keeper_name
+     : Schedule_domain.schedule_request);
+  ignore
+    (create_named_keeper_wake_schedule
+       config
+       ~schedule_id:"purge-batch-b"
+       ~keeper_name
+     : Schedule_domain.schedule_request);
+  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
+  let executions =
+    Schedule_store.read_state config
+    |> Schedule_store.unsettled_dispatched_occurrences
+  in
+  let first, second =
+    match executions with
+    | [ first; second ] -> first, second
+    | rows -> failf "expected two dispatched occurrences, got %d" (List.length rows)
+  in
+  let missing_occurrence =
+    Schedule_occurrence_id.make
+      ~schedule_id:second.schedule_id
+      ~due_at:second.due_at
+      ~payload_digest:second.payload_digest
+    |> Schedule_occurrence_id.to_string
+  in
+  (match
+     Keeper_registry_event_queue.drop_by_post_id
+       ~base_path
+       keeper_name
+       ~post_id:missing_occurrence
+   with
+   | Ok [ _ ] -> ()
+   | Ok removed -> failf "expected one removed occurrence, got %d" (List.length removed)
+   | Error detail -> fail detail);
+  (match
+     Server_schedule_consumers.settle_keeper_purge_occurrences
+       config
+       ~keeper_name
+       ~operation_id:"purge-op-batch"
+       ~now:202.0
+   with
+   | Ok () -> fail "purge accepted a partially invalid evidence batch"
+   | Error detail ->
+     check bool "later missing evidence blocks whole batch" true
+       (String_util.contains_substring detail "missing durable schedule evidence"));
+  let state = Schedule_store.read_state config in
+  List.iter
+    (fun (execution : Schedule_domain.execution_record) ->
+       match
+         Schedule_store.execution_for_occurrence
+           state
+           ~schedule_id:execution.schedule_id
+           ~due_at:execution.due_at
+           ~payload_digest:execution.payload_digest
+       with
+       | Some retained ->
+         check string "preflight failure leaves every occurrence dispatched"
+           "dispatched"
+           (Schedule_domain.execution_status_to_string retained.status)
+       | None -> fail "preflight failure removed an execution")
+    [ first; second ]
+;;
+
+let test_keeper_purge_rejects_unsettled_transfer_redirect () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace_utils.base_path in
+  let source_keeper = "purge-transfer-source" in
+  let target_keeper = "purge-transfer-target" in
+  let request =
+    create_named_keeper_wake_schedule
+      config
+      ~schedule_id:"purge-transfer-schedule"
+      ~keeper_name:source_keeper
+  in
+  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
+  let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
+  let transfer : Keeper_registry_event_queue.accepted_transfer =
+    { source = selection.source
+    ; source_incarnation = selection.admitted_revision
+    ; owner_nonce = 41
+    ; operator_operation_id = "purge-transfer-op"
+    ; from_keeper = source_keeper
+    ; to_keeper = target_keeper
+    }
+  in
+  (match
+     Keeper_registry_event_queue.transfer_pending_accepted_result
+       ~base_path
+       source_keeper
+       ~current_owner_nonce:41
+       ~applied_at:202.0
+       ~transfer
+   with
+   | Ok (Keeper_registry_event_queue.Transition_applied _) -> ()
+   | Ok (Keeper_registry_event_queue.Transition_already_applied _) ->
+     fail "first purge transfer was already applied"
+   | Ok
+       (Keeper_registry_event_queue.Transition_committed_followup_failed
+          { detail; _ }) ->
+     fail detail
+   | Error detail -> fail detail);
+  (match
+     Keeper_event_queue_recovery.project_owner_result
+       ~base_path
+       ~keeper_name:source_keeper
+   with
+   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
+   | Ok _ -> fail "purge transfer projection did not converge"
+   | Error error ->
+     fail (Keeper_event_queue_recovery.projection_error_to_string error));
+  (match
+     Server_schedule_consumers.settle_keeper_purge_occurrences
+       config
+       ~keeper_name:source_keeper
+       ~operation_id:"purge-source"
+       ~now:203.0
+   with
+   | Ok () -> fail "purge discarded an unsettled transfer redirect"
+   | Error detail ->
+     check bool "unsettled redirect blocks source purge" true
+       (String_util.contains_substring detail "unsettled transferred"));
+  let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
+  check string "blocked source purge preserves dispatched execution" "dispatched"
+    (Schedule_domain.execution_status_to_string execution.status)
+;;
+
+let test_keeper_purge_follows_terminal_transfer_redirect () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace_utils.base_path in
+  let source_keeper = "purge-terminal-source" in
+  let target_keeper = "purge-terminal-target" in
+  let request =
+    create_named_keeper_wake_schedule
+      config
+      ~schedule_id:"purge-terminal-transfer-schedule"
+      ~keeper_name:source_keeper
+  in
+  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
+  let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
+  let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
+  let transfer : Keeper_registry_event_queue.accepted_transfer =
+    { source = selection.source
+    ; source_incarnation = selection.admitted_revision
+    ; owner_nonce = 43
+    ; operator_operation_id = "purge-terminal-transfer-op"
+    ; from_keeper = source_keeper
+    ; to_keeper = target_keeper
+    }
+  in
+  (match
+     Keeper_registry_event_queue.transfer_pending_accepted_result
+       ~base_path
+       source_keeper
+       ~current_owner_nonce:43
+       ~applied_at:202.0
+       ~transfer
+   with
+   | Ok (Keeper_registry_event_queue.Transition_applied _) -> ()
+   | Ok (Keeper_registry_event_queue.Transition_already_applied _) ->
+     fail "terminal purge transfer was already applied"
+   | Ok
+       (Keeper_registry_event_queue.Transition_committed_followup_failed
+          { detail; _ }) ->
+     fail detail
+   | Error detail -> fail detail);
+  (match
+     Keeper_event_queue_recovery.project_owner_result
+       ~base_path
+       ~keeper_name:source_keeper
+   with
+   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
+   | Ok _ -> fail "terminal purge transfer projection did not converge"
+   | Error error ->
+     fail (Keeper_event_queue_recovery.projection_error_to_string error));
+  let target_selection =
+    pending_selection_exn ~base_path ~keeper_name:target_keeper
+  in
+  (match
+     Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
+       ~base_path
+       target_keeper
+       ~current_owner_nonce:47
+       ~applied_at:203.0
+       ~selection:target_selection
+       ~detail:"scheduled occurrence failed at target"
+   with
+   | Ok (Keeper_registry_event_queue.Acked _)
+   | Ok (Keeper_registry_event_queue.Already_acked _) -> ()
+   | Ok
+       (Keeper_registry_event_queue.Ack_committed_followup_failed
+          { detail; _ }) ->
+     fail detail
+   | Error detail -> fail detail);
+  (match
+     Keeper_event_queue_recovery.project_owner_result
+       ~base_path
+       ~keeper_name:target_keeper
+   with
+   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
+   | Ok _ -> fail "terminal target projection did not converge"
+   | Error error ->
+     fail (Keeper_event_queue_recovery.projection_error_to_string error));
+  (match
+     Server_schedule_consumers.settle_keeper_purge_occurrences
+       config
+       ~keeper_name:source_keeper
+       ~operation_id:"purge-terminal-source"
+       ~now:204.0
+   with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  match latest_execution_exn config ~schedule_id:request.schedule_id with
+  | { status = Schedule_domain.Execution_failed
+    ; error = Some detail
+    ; _ } ->
+    check string "purge follows terminal transfer failure"
+      "scheduled occurrence failed at target"
+      detail
+  | execution ->
+    failf
+      "terminal transferred occurrence stayed %s"
+      (Schedule_domain.execution_status_to_string execution.status)
+;;
+
+let test_shutdown_fence_rejects_schedule_intake_before_enqueue () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  (match
+     Keeper_turn_admission.begin_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id
+   with
+   | Keeper_turn_admission.Shutdown_reserved _ -> ()
+   | Keeper_turn_admission.Shutdown_already_reserved _ ->
+     fail "fresh shutdown fence was already reserved");
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Keeper_turn_admission.rollback_shutdown
+           ~base_path
+           ~keeper_name
+           ~operation_id
+         : Keeper_turn_admission.rollback_shutdown_result))
+    (fun () ->
+       let request = create_keeper_wake_schedule config in
+       let result = tick_ok config ~now:201.0 in
+       (match result.dispatches with
+        | [ { status = Schedule_runner.Dispatch_failed; error = Some detail; _ } ] ->
+          check bool "dispatch reports exact shutdown fence" true
+            (String_util.contains_substring detail "rejected by shutdown fence")
+        | _ -> fail "shutdown-fenced dispatch did not remain retryable");
+       check int "shutdown-fenced dispatch writes no queue entry" 0
+         (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+          |> Keeper_event_queue.length);
+       match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+       | Some stored ->
+         check string "shutdown-fenced schedule remains due" "due"
+           (Schedule_domain.schedule_status_to_string stored.status)
+       | None -> fail "shutdown-fenced schedule disappeared")
+;;
+
+let test_shutdown_join_waits_for_inflight_schedule_intake () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  let intake_started, intake_started_u = Eio.Promise.create () in
+  let release_intake, release_intake_u = Eio.Promise.create () in
+  let join_completed, join_completed_u = Eio.Promise.create () in
+  Eio.Fiber.both
+    (fun () ->
+       match
+         Keeper_turn_admission.run_durable_intake_if_open
+           ~base_path
+           ~keeper_name
+           (fun () ->
+              Eio.Promise.resolve intake_started_u ();
+              Eio.Promise.await release_intake)
+       with
+       | Keeper_turn_admission.Intake_committed () -> ()
+       | Keeper_turn_admission.Intake_shutdown_reserved _ ->
+         fail "intake lost before shutdown reservation")
+    (fun () ->
+       Eio.Promise.await intake_started;
+       (match
+          Keeper_turn_admission.begin_shutdown
+            ~base_path
+            ~keeper_name
+            ~operation_id
+        with
+        | Keeper_turn_admission.Shutdown_reserved _ -> ()
+        | Keeper_turn_admission.Shutdown_already_reserved _ ->
+          fail "fresh shutdown fence was already reserved");
+       Fun.protect
+         ~finally:(fun () ->
+           ignore
+             (Keeper_turn_admission.rollback_shutdown
+                ~base_path
+                ~keeper_name
+                ~operation_id
+              : Keeper_turn_admission.rollback_shutdown_result))
+         (fun () ->
+            Eio.Fiber.both
+              (fun () ->
+                 Keeper_turn_admission.await_idle_after_shutdown
+                   ~base_path
+                   ~keeper_name;
+                 Eio.Promise.resolve join_completed_u ())
+              (fun () ->
+                 Eio.Fiber.yield ();
+                 check bool "shutdown join waits for durable intake" true
+                   (Option.is_none (Eio.Promise.peek join_completed));
+                 Eio.Promise.resolve release_intake_u ();
+                 Eio.Promise.await join_completed)))
+;;
+
 let test_keeper_wake_durable_state_failure_retries_same_occurrence () =
   with_workspace
   @@ fun config ->
@@ -2053,6 +2385,16 @@ let () =
             test_keeper_purge_settles_owned_occurrence_before_queue_delete
         ; test_case "keeper purge rejects missing owned snapshot" `Quick
             test_keeper_purge_rejects_missing_owned_snapshot
+        ; test_case "keeper purge preflights the whole batch" `Quick
+            test_keeper_purge_preflights_whole_batch
+        ; test_case "keeper purge rejects unsettled transfer redirects" `Quick
+            test_keeper_purge_rejects_unsettled_transfer_redirect
+        ; test_case "keeper purge follows terminal transfer redirects" `Quick
+            test_keeper_purge_follows_terminal_transfer_redirect
+        ; test_case "shutdown fence rejects schedule intake before enqueue" `Quick
+            test_shutdown_fence_rejects_schedule_intake_before_enqueue
+        ; test_case "shutdown join waits for in-flight schedule intake" `Quick
+            test_shutdown_join_waits_for_inflight_schedule_intake
         ; test_case "keeper wake durable state failure retries same occurrence" `Quick
             test_keeper_wake_durable_state_failure_retries_same_occurrence
         ; test_case "cancelled occurrence recovery does not enqueue again"

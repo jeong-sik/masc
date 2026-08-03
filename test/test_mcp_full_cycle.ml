@@ -12,24 +12,6 @@ module Mcp_server = Masc.Mcp_server
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
-let temp_dir () =
-  let path = Filename.temp_file "masc_full_cycle_probe_" "" in
-  Unix.unlink path;
-  Unix.mkdir path 0o755;
-  path
-
-let cleanup_dir root =
-  let rec remove path =
-    if Sys.is_directory path then begin
-      Array.iter
-        (fun name -> remove (Filename.concat path name))
-        (Sys.readdir path);
-      Unix.rmdir path
-    end else
-      Unix.unlink path
-  in
-  try remove root with Sys_error _ -> ()
-
 let request ~id ~method_ params =
   Yojson.Safe.to_string
     (`Assoc
@@ -83,6 +65,18 @@ let check_tool_success label response =
   | _ -> failf "%s omitted result.isError: %s" label
            (Yojson.Safe.to_string response)
 
+let structured_content_exn label response =
+  let fields = result_fields_exn label response in
+  match List.assoc_opt "structuredContent" fields with
+  | Some structured_content -> structured_content
+  | None ->
+    failf "%s omitted result.structuredContent: %s" label
+      (Yojson.Safe.to_string response)
+
+let status_snapshot_exn response =
+  let open Yojson.Safe.Util in
+  structured_content_exn "masc_status" response |> member "snapshot" |> to_string
+
 let task_exn config =
   match Masc.Workspace.get_tasks_raw config with
   | [ task ] -> task
@@ -95,9 +89,9 @@ let test_one_shot_protocol_to_durable_outcome () =
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
-  let base_path = temp_dir () in
+  let base_path = Filename.temp_dir "masc_full_cycle_probe_" "" in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
+    ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
       let state = Mcp_eio.For_testing.create_state ~base_path () in
       let session_id = "full-cycle-probe-session" in
@@ -128,10 +122,20 @@ let test_one_shot_protocol_to_durable_outcome () =
         (Some claimed_task.id)
         (Masc.Task.Planning_eio.get_current_task config);
 
-      call
-        (tool_request ~id:3 ~name:"masc_status"
-           (`Assoc [ ("_agent_name", `String "full-cycle-probe") ]))
-      |> check_tool_success "masc_status";
+      let status_response =
+        call (tool_request ~id:3 ~name:"masc_status" (`Assoc []))
+      in
+      check_tool_success "masc_status" status_response;
+      let expected_identity_line =
+        Printf.sprintf
+          "🧭 You: agent=full-cycle-probe | bound=yes | owned=%s | current=%s"
+          claimed_task.id
+          claimed_task.id
+      in
+      check bool "status projects session-bound identity and claimed task" true
+        (status_snapshot_exn status_response
+         |> String.split_on_char '\n'
+         |> List.exists (String.equal expected_identity_line));
 
       call
         (tool_request ~id:4 ~name:"masc_transition"
@@ -140,7 +144,6 @@ let test_one_shot_protocol_to_durable_outcome () =
              ; ("task_id", `String claimed_task.id)
              ; ("action", `String "done")
              ; ("notes", `String "Synthetic full-cycle proof completed")
-             ; ("_agent_name", `String "full-cycle-probe")
              ]))
       |> check_tool_success "masc_transition done";
 

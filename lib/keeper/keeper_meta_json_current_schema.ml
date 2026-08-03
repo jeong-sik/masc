@@ -193,8 +193,10 @@ let current_field_names = List.map field_name all_fields
    fleet-wide "runtime reset required" is not an acceptable side effect of an
    admission change. A PRESENT malformed value still fails the decode.
    Exactly this field is absence-tolerated; everything else stays required.
-   Once every live meta has been rewritten by a post-turn write, this list
-   can shrink back to empty. *)
+   Removal is tracked, not aspirational: once every live meta carries the
+   field (one post-turn write per keeper), issue #26697 shrinks this list
+   back to empty — target is within a week of the introducing PR's merge,
+   before the list can acquire a second resident. *)
 let genesis_defaulted_field_names = [ field_name Last_consumed_backlog_revision ]
 
 let object_of_field_values field_values =

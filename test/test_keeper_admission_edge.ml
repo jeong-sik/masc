@@ -5,7 +5,12 @@
 
     - empty observation + gate on -> [Skip No_actionable_stimulus]
     - each disjunct alone -> [Run]: bootstrap, pending message, pending board
-      event, backlog revision edge, due schedule
+      event, backlog revision edge, due schedule — each carrying its own
+      typed reason (the reason list is the predicate; nameless admission is
+      unrepresentable)
+    - a blind observation (failed backlog read, revision [None]) skips as
+      [Backlog_unreadable], never as [No_actionable_stimulus], and does not
+      silence the other disjuncts
     - failure-matrix rows at the decision level: a consumed edge
       (version = consumed) stays silent (self-limiting; also the shape of
       "failed turn keeps its in-memory stamp"), an unconsumed edge
@@ -229,14 +234,18 @@ let test_pending_message_admits_scheduled_when_reactive_off () =
   with_flag "MASC_KEEPER_REACTIVE_ENABLED" "false" @@ fun () ->
   let d = decide ~meta:(bootstrapped_meta ()) mention_obs in
   check bool "pending message admits" true d.WO.should_run;
-  check bool "scheduled channel" true (is_scheduled d)
+  check bool "scheduled channel" true (is_scheduled d);
+  check bool "scope_message_pending in reasons" true
+    (List.exists (( = ) WO.Scope_message_pending) (run_reasons d))
 ;;
 
 let test_pending_board_event_admits_scheduled_when_reactive_off () =
   with_flag "MASC_KEEPER_REACTIVE_ENABLED" "false" @@ fun () ->
   let d = decide ~meta:(bootstrapped_meta ()) board_event_obs in
   check bool "pending board event admits" true d.WO.should_run;
-  check bool "scheduled channel" true (is_scheduled d)
+  check bool "scheduled channel" true (is_scheduled d);
+  check bool "board_event_pending in reasons" true
+    (List.exists (( = ) WO.Board_event_pending) (run_reasons d))
 ;;
 
 (* ==== §3.3 matrix at the decision level ==== *)
@@ -250,6 +259,36 @@ let test_consumed_edge_stays_silent () =
   check bool "consumed edge -> silent" false d.WO.should_run;
   check bool "skip reason is no_actionable_stimulus" true
     (List.exists (( = ) WO.No_actionable_stimulus) (skip_reasons d))
+;;
+
+(* ==== read failure is not designed silence ==== *)
+
+(* [backlog_revision = None] models a failed backlog read (the inputs layer
+   maps [read_backlog_r]'s [Error] to [None]). With no other stimulus the
+   skip must say so — recording it as [No_actionable_stimulus] would present
+   a blind observation as a considered "nothing to do". *)
+let test_unreadable_backlog_skips_as_unreadable () =
+  without_overrides @@ fun () ->
+  let d =
+    decide ~meta:(bootstrapped_meta ()) { base_obs with backlog_revision = None }
+  in
+  check bool "no turn on a blind observation" false d.WO.should_run;
+  check bool "skip reason is backlog_unreadable" true
+    (List.exists (( = ) WO.Backlog_unreadable) (skip_reasons d));
+  check bool "not recorded as designed silence" false
+    (List.exists (( = ) WO.No_actionable_stimulus) (skip_reasons d))
+;;
+
+(* A failed backlog read must not silence the other disjuncts: a pending
+   message is a complete stimulus on its own. *)
+let test_unreadable_backlog_does_not_silence_other_stimuli () =
+  with_flag "MASC_KEEPER_REACTIVE_ENABLED" "false" @@ fun () ->
+  let d =
+    decide ~meta:(bootstrapped_meta ()) { mention_obs with backlog_revision = None }
+  in
+  check bool "message still admits" true d.WO.should_run;
+  check bool "scope_message_pending in reasons" true
+    (List.exists (( = ) WO.Scope_message_pending) (run_reasons d))
 ;;
 
 (* ==== §3.2: the edge is a revision compare, no clock anywhere ==== *)
@@ -349,6 +388,14 @@ let () =
             `Quick
             test_pending_board_event_admits_scheduled_when_reactive_off
         ; test_case "consumed edge stays silent" `Quick test_consumed_edge_stays_silent
+        ; test_case
+            "unreadable backlog skips as unreadable"
+            `Quick
+            test_unreadable_backlog_skips_as_unreadable
+        ; test_case
+            "unreadable backlog does not silence other stimuli"
+            `Quick
+            test_unreadable_backlog_does_not_silence_other_stimuli
         ] )
     ; ( "edge_compare"
       , [ test_case "pure revision compare" `Quick test_edge_is_pure_revision_compare ] )

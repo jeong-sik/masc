@@ -46,6 +46,9 @@ type skip_reason =
       (** RFC-0357 §3.1: gate on, but no typed stimulus — no pending
           message/board event, no backlog revision edge, no due schedule,
           already bootstrapped. Designed silence, recorded as a skip. *)
+  | Backlog_unreadable
+      (** RFC-0357: gate on, no other stimulus, and the backlog read failed —
+          the edge disjunct had no real input. Not designed silence. *)
 
 type turn_verdict =
   | Run of { reasons : turn_reason * turn_reason list }

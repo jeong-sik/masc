@@ -210,7 +210,16 @@ type skip_reason =
   | No_actionable_stimulus
       (** RFC-0357 §3.1: gate on, but no typed stimulus — no pending
           message/board event, no backlog revision edge, no due schedule,
-          already bootstrapped. Designed silence, recorded as a skip. *)
+          already bootstrapped. Designed silence, recorded as a skip.
+
+          A stimulus this predicate does not cover: claimable work that
+          predates the last consumed revision. That is the level→edge
+          contract — work nobody touches does not re-admit the keeper every
+          tick; any mutation (claim, add, verdict) bumps the backlog revision
+          and re-admits. *)
+  | Backlog_unreadable
+      (** RFC-0357: gate on, no other stimulus, and the backlog read failed —
+          the edge disjunct had no real input. Not designed silence. *)
 
 (** Keeper cycle decision with non-empty reason list (NEL).
     [Run] guarantees at least one trigger reason.

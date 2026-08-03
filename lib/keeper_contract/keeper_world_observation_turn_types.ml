@@ -76,6 +76,12 @@ type skip_reason =
           revision edge, no due schedule, and the keeper has already
           bootstrapped. The heartbeat itself is not a wake signal; this skip
           is a record ("designed silence"), not an absence. *)
+  | Backlog_unreadable
+      (** RFC-0357: gate on, no other stimulus, and the backlog read failed
+          (the observation carries no revision) — the edge disjunct had no
+          real input. Kept distinct from [No_actionable_stimulus] because a
+          read failure is not designed silence; folding the two would record
+          a blind observation as a considered "nothing to do". *)
 
 type turn_verdict =
   | Run of { reasons : turn_reason * turn_reason list }
@@ -112,6 +118,7 @@ let skip_reason_to_string = function
   | Scheduled_autonomous_disabled -> "scheduled_autonomous_disabled"
   | Reactive_disabled -> "reactive_disabled"
   | No_actionable_stimulus -> "no_actionable_stimulus"
+  | Backlog_unreadable -> "backlog_unreadable"
 ;;
 
 (* Canonical wire encoding. [Reactive] serialises as "turn" (the value the

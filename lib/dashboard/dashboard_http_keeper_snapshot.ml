@@ -147,8 +147,11 @@ let keeper_config_json (config : Workspace.config) (name : string)
           let active_goal_summaries =
             Keeper_unified_prompt.active_goal_summaries ~config ~meta:m
           in
+          let current_task =
+            Keeper_world_observation_inputs.read_current_task ~config ~meta:m
+          in
           Keeper_unified_prompt.build_prompt_preview ~meta:m ~base_path:config.base_path
-            ~profile_defaults:defaults ~active_goal_summaries ~observation ()
+            ~profile_defaults:defaults ~current_task ~active_goal_summaries ~observation ()
         in
         (* Match what a turn actually sends: the observation frame rides the
            per-turn dynamic context (system side), and the persisted user

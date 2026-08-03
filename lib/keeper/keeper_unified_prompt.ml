@@ -74,7 +74,7 @@ let format_goal_summaries_for_active_goals
     The scheduled cycle always runs when proactive lifecycle is enabled, and
     the model must see the work it is holding: id, title, status, and the prior
     owner's handoff summary when one exists. *)
-let format_current_task (task : Masc_domain.task) : string =
+let format_current_task_with_heading ~heading (task : Masc_domain.task) : string =
   let status_line =
     match task.Masc_domain.task_status with
     | Masc_domain.Claimed { assignee; claimed_at } ->
@@ -88,7 +88,7 @@ let format_current_task (task : Masc_domain.task) : string =
     | Masc_domain.Cancelled _ -> "cancelled"
   in
   let buf = Buffer.create 256 in
-  Buffer.add_string buf "### Current Task (held by you)\n";
+  Buffer.add_string buf ("### " ^ heading ^ "\n");
   Buffer.add_string buf
     (Printf.sprintf "- %s — %s [%s]\n" task.Masc_domain.id
        task.Masc_domain.title status_line);
@@ -105,6 +105,9 @@ let format_current_task (task : Masc_domain.task) : string =
   Buffer.add_string buf
     "\n";
   Buffer.contents buf
+
+let format_current_task task =
+  format_current_task_with_heading ~heading:"Current Task (held by you)" task
 
 (** Format one conversation endpoint presence line. *)
 let format_surface_presence (p : Gate_surface.surface_presence) : string =
@@ -179,6 +182,32 @@ let quote_prompt_field value =
     value;
   Buffer.add_char buf '"';
   Buffer.contents buf
+
+let format_current_task_observation = function
+  | Keeper_world_observation_inputs.No_current_task -> None
+  | Keeper_world_observation_inputs.Current_task task -> Some (format_current_task task)
+  | Keeper_world_observation_inputs.Recovered_current_task { task; recovery = _ } ->
+    Some
+      (format_current_task_with_heading
+         ~heading:"Current Task (recovery observation; non-authoritative)"
+         task
+       ^ "- The primary backlog is unavailable. Do not use this recovery observation as mutation authority.\n\n")
+  | Keeper_world_observation_inputs.Current_task_missing { task_id; recovery = None } ->
+    Some
+      (Printf.sprintf
+         "### Current Task\n- Keeper metadata references %s, but that task is absent from the authoritative backlog. Do not infer or invent task details.\n\n"
+         (Keeper_id.Task_id.to_string task_id))
+  | Keeper_world_observation_inputs.Current_task_missing
+      { task_id; recovery = Some _ } ->
+    Some
+      (Printf.sprintf
+         "### Current Task\n- Keeper metadata references %s, but it was not found in the recovery snapshot. The primary backlog is unavailable, so absence is not authoritative.\n\n"
+         (Keeper_id.Task_id.to_string task_id))
+  | Keeper_world_observation_inputs.Current_task_unavailable { task_id; error = _ } ->
+    Some
+      (Printf.sprintf
+         "### Current Task\n- Task %s could not be observed because the backlog is unavailable. This does not mean the task is absent; preserve its ownership state.\n\n"
+         (Keeper_id.Task_id.to_string task_id))
 ;;
 
 let board_reaction_note (reaction : Keeper_world_observation.board_reaction_event) =
@@ -588,7 +617,7 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path :
 let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
-    ?(current_task : Masc_domain.task option)
+    ~(current_task : Keeper_world_observation_inputs.current_task_observation)
     ?(active_goal_summaries : (string * string) list option)
     ~(observation : Keeper_world_observation.world_observation)
     () : turn_prompt_parts
@@ -649,7 +678,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path
     (* 1b. Current task — the claim that admitted this turn (RFC-0315).
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->
-      Option.map format_current_task current_task
+      format_current_task_observation current_task
     (* 2. Connected surfaces — connector presence, changes only on bind/unbind
        or transport flaps (RFC-0223 P2). Omitted when only the implicit
        dashboard is attached: every keeper has the dashboard, so dashboard-only
@@ -682,10 +711,14 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path
         observation.unclaimed_task_count > 0
         || observation.claimable_task_count > 0
         || observation.failed_task_count > 0
+        || Option.is_none observation.backlog_revision
         || observation.running_keeper_fiber_count > 0
       then (
         let ubuf = Buffer.create 256 in
         Buffer.add_string ubuf "### Namespace State\n";
+        if Option.is_none observation.backlog_revision then
+          Buffer.add_string ubuf
+            "- Task backlog: unavailable or recovery-only; task counts are non-authoritative and cannot drive task actions.\n";
         if observation.unclaimed_task_count > 0 then
           Buffer.add_string ubuf
             (Printf.sprintf "- Unclaimed tasks: %d\n"
@@ -854,7 +887,7 @@ let build_prompt
       ~base_path
       ?profile_defaults
       ~turn_decision
-      ?current_task
+      ~current_task
       ?active_goal_summaries
       ~observation
       ()
@@ -865,7 +898,7 @@ let build_prompt
       ~base_path
       ?profile_defaults
       ~turn_decision:(Some turn_decision)
-      ?current_task
+      ~current_task
       ?active_goal_summaries
       ~observation
       ()
@@ -878,7 +911,7 @@ let build_prompt_preview
       ~meta
       ~base_path
       ?profile_defaults
-      ?current_task
+      ~current_task
       ?active_goal_summaries
       ~observation
       ()
@@ -888,7 +921,7 @@ let build_prompt_preview
     ~base_path
     ?profile_defaults
     ~turn_decision:None
-    ?current_task
+    ~current_task
     ?active_goal_summaries
     ~observation
     ()

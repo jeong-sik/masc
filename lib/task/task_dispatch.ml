@@ -64,32 +64,37 @@ let add_task config ~title ~priority ~description =
 let get_task config ~task_id =
   match backend () with
   | Jsonl ->
-      let backlog = Workspace.read_backlog config in
-      Ok (List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks)
+      (match Workspace.read_backlog_observation_r config with
+       | Error message -> Error (System (System_error.IoError message))
+       | Ok backlog ->
+         Ok (List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks))
 
 (** List tasks *)
 let list_tasks config ?(include_done=false) ?(include_cancelled=false) () =
   match backend () with
   | Jsonl ->
-      let backlog = Workspace.read_backlog config in
-      let tasks = List.filter (fun (t : task) ->
-        let dominated = match t.task_status with
-          | Done _ -> not include_done
-          | Cancelled _ -> not include_cancelled
-          | Todo | Claimed _ | InProgress _ | AwaitingVerification _ -> false
-        in
-        not dominated
-      ) backlog.tasks in
-      Ok tasks
-
-let backlog_lock_path config =
-  Filename.concat (Workspace.tasks_dir config) ".backlog"
+      (match Workspace.read_backlog_observation_r config with
+       | Error message -> Error (System (System_error.IoError message))
+       | Ok backlog ->
+         let tasks =
+           List.filter
+             (fun (t : task) ->
+                let dominated =
+                  match t.task_status with
+                  | Done _ -> not include_done
+                  | Cancelled _ -> not include_cancelled
+                  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ -> false
+                in
+                not dominated)
+             backlog.tasks
+         in
+         Ok tasks)
 
 let with_locked_backlog
     config
     (f : backlog -> ('a, Masc_error.t) result)
     : ('a, Masc_error.t) result =
-  Workspace.with_file_lock config (backlog_lock_path config) (fun () ->
+  Workspace.with_file_lock config (Workspace.backlog_lock_path config) (fun () ->
     match Workspace.read_backlog_r config with
     | Error msg -> Error (System (System_error.IoError msg))
     | Ok backlog -> f backlog)
@@ -113,13 +118,8 @@ let delete_task config ~task_id =
         let new_tasks =
           List.filter (fun (t : task) -> t.id <> task_id) backlog.tasks
         in
-        let new_backlog =
-          {
-            tasks = new_tasks;
-            last_updated = now_iso ();
-            version = backlog.version + 1;
-          }
-        in
+        (* [write_backlog] stamps version/last_updated at the commit point. *)
+        let new_backlog = { backlog with tasks = new_tasks } in
         let status_for_clear =
           match task_opt with
           | Some t -> t.task_status

@@ -526,9 +526,10 @@ let run_keeper_cycle
          (keeper_keepalive.ml), not injected into prompt (#6814). *)
                (* RFC-0315: resolve the claimed task and goal titles here (the
                   turn runner owns config), so the prompt can render what the
-                  keeper holds and why it woke. Both reads are total: a failed
-                  backlog read yields None, an unknown goal id remains a bare
-                  id instead of disappearing from the prompt. *)
+                  keeper holds and why it woke. Task absence, a dangling id,
+                  and an unavailable backlog remain distinct typed prompt
+                  inputs; observation failure must not crash the turn or imply
+                  that the keeper holds no task. *)
                let current_task =
                  Keeper_world_observation_inputs.read_current_task ~config ~meta
                in
@@ -541,7 +542,7 @@ let run_keeper_cycle
                    ~base_path:config.base_path
                    ~profile_defaults
                    ~turn_decision
-                   ?current_task
+                   ~current_task
                    ~active_goal_summaries
                    ~observation
                    ()

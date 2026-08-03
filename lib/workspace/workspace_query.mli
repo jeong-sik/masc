@@ -11,8 +11,28 @@ include module type of Workspace_state
 
 (** {1 Task Priority} *)
 
-(** Update a task's priority.  Returns a human-readable status string. *)
-val update_priority : config -> task_id:string -> priority:int -> string
+type update_priority_outcome =
+  | Updated of
+      { task_id : string
+      ; old_priority : int
+      ; new_priority : int
+      }
+  | Not_found of { task_id : string }
+
+type update_priority_error =
+  | Not_initialized
+  | Backlog_read_error of string
+  | Backlog_write_error of string
+  | Lock_error of Masc_domain.masc_error
+  | Unexpected_error of string
+
+(** Update a task's priority without collapsing storage or lock failures into a
+    successful string response. *)
+val update_priority :
+  config ->
+  task_id:string ->
+  priority:int ->
+  (update_priority_outcome, update_priority_error) result
 
 (** {1 Raw Data Retrieval} *)
 

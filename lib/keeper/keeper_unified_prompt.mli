@@ -35,9 +35,14 @@ val autonomous_wake_marker : string
     {!turn_prompt_parts.world_state}, not in the message history. *)
 
 val format_current_task : Masc_domain.task -> string
+
+val format_current_task_observation
+  :  Keeper_world_observation_inputs.current_task_observation
+  -> string option
 (** Render one held task as per-turn observation context. The direct-message
-    lane reuses this renderer so it sees the same task identity, status, and
-    handoff as an autonomous wake without persisting that context. *)
+    lane reuses this renderer so it sees the same task identity, status,
+    provenance, and handoff as an autonomous wake without persisting that
+    context. Storage error text is not model-facing content. *)
 
 val effective_instructions :
   meta:Keeper_meta_contract.keeper_meta ->
@@ -75,7 +80,7 @@ val build_prompt :
   base_path:string ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   turn_decision:Keeper_world_observation.keeper_cycle_decision ->
-  ?current_task:Masc_domain.task ->
+  current_task:Keeper_world_observation_inputs.current_task_observation ->
   ?active_goal_summaries:(string * string) list ->
   observation:Keeper_world_observation.world_observation ->
   unit ->
@@ -87,9 +92,8 @@ val build_prompt :
     RFC-0315 wake-turn self-description:
     - [turn_decision]: the scheduler's actual cycle decision, required so the
       rendered wake reason matches the decision that fired the turn.
-    - [?current_task]: renders a "Current Task" layer for the task the keeper
-      holds ([meta.current_task_id] admits scheduled-autonomous turns, so the
-      turn must see the work that admitted it). Omitted: layer absent.
+    - [current_task] renders the held task or its explicit missing/unavailable
+      state. [No_current_task] omits the layer.
     - [?active_goal_summaries]: renders goal titles next to ids in the Active
       Goals layer. Omitted or empty: bare ids. *)
 
@@ -97,7 +101,7 @@ val build_prompt_preview :
   meta:Keeper_meta_contract.keeper_meta ->
   base_path:string ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
-  ?current_task:Masc_domain.task ->
+  current_task:Keeper_world_observation_inputs.current_task_observation ->
   ?active_goal_summaries:(string * string) list ->
   observation:Keeper_world_observation.world_observation ->
   unit ->

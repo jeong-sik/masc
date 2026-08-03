@@ -294,9 +294,8 @@ let set_only_task_do_not_reclaim_reason ctx reason =
   match backlog.Masc_domain.tasks with
   | [ task ] ->
       Workspace.write_backlog config
-        { Masc_domain.tasks = [ { task with do_not_reclaim_reason = Some reason } ];
-          last_updated = Masc_domain.now_iso ();
-          version = backlog.version + 1;
+        { backlog with
+          tasks = [ { task with do_not_reclaim_reason = Some reason } ];
         }
   | tasks ->
       failwith
@@ -343,11 +342,7 @@ let set_only_task_contract ctx contract =
   match backlog.Masc_domain.tasks with
   | [ task ] ->
       Workspace.write_backlog config
-        {
-          Masc_domain.tasks = [ { task with contract } ];
-          last_updated = Masc_domain.now_iso ();
-          version = backlog.version + 1;
-        }
+        { backlog with tasks = [ { task with contract } ] }
   | tasks ->
       failwith
         (Printf.sprintf "expected exactly one task, got %d" (List.length tasks))

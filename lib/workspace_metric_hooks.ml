@@ -448,6 +448,9 @@ let install () =
        | Keeper_goal_reconciliation_wake.Enqueued _
        | Keeper_goal_reconciliation_wake.Already_present _ ->
          Workspace_hooks.Task_terminal_delivered
+       | Keeper_goal_reconciliation_wake.Backlog_read_failed { detail } ->
+         Workspace_hooks.Task_terminal_delivery_degraded
+           { kind = "backlog_read_failed"; detail }
        | Keeper_goal_reconciliation_wake.No_keeper_target { goal_id } ->
          Workspace_hooks.Task_terminal_delivery_degraded
            { kind = "no_keeper_target"; detail = "goal_id=" ^ goal_id }

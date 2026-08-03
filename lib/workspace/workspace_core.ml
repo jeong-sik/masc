@@ -10,10 +10,6 @@ include Workspace_bootstrap
 include Workspace_identity
 include Workspace_task_id
 include Workspace_state
-include Workspace_bootstrap
-include Workspace_identity
-include Workspace_task_id
-include Workspace_backlog
 include Workspace_broadcast
 
 (* Agent session binding lifecycle *)
@@ -227,9 +223,6 @@ let () =
 
 
 
-
-(* Agent status, capability registration, discovery *)
-include Workspace_agent
 
 (* Workspace_multi removed — operational namespace is always "default" *)
 (* Workspace_vote, Workspace_tempo removed — dead prod code (Epic #7261 Step 5 audit). *)

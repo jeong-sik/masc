@@ -735,11 +735,61 @@ let test_release_hard_stop_allows_direct_todo_reclaim () =
 ;;
 
 let write_tasks config tasks =
+  (* [write_backlog] stamps version/last_updated at the commit point. *)
   let backlog = Workspace.read_backlog config in
-  let updated : Masc_domain.backlog =
-    { tasks; last_updated = Masc_domain.now_iso (); version = backlog.version + 1 }
+  Workspace.write_backlog config { backlog with tasks }
+;;
+
+(* RFC-0357 §3.2 — the backlog revision is the scheduled-turn edge clock, so
+   every commit must advance [version] by exactly one, stamped at the single
+   commit point rather than by caller convention. A caller that kept a manual
+   bump would surface here as a +2 jump. *)
+let test_backlog_version_monotonic_per_commit () =
+  with_test_env
+  @@ fun config ->
+  let v0 = (Workspace.read_backlog config).version in
+  write_tasks config [];
+  let v1 = (Workspace.read_backlog config).version in
+  Alcotest.(check int) "first commit bumps by exactly one" (v0 + 1) v1;
+  write_tasks config [];
+  let v2 = (Workspace.read_backlog config).version in
+  Alcotest.(check int) "second commit bumps by exactly one" (v1 + 1) v2;
+  let _ =
+    Workspace.batch_add_tasks config [ ("revision probe", 1, "edge clock", None) ]
   in
-  Workspace.write_backlog config updated
+  let v3 = (Workspace.read_backlog config).version in
+  Alcotest.(check int) "task creation commits exactly one revision" (v2 + 1) v3
+;;
+
+(* Decoder contract: [version] is required. An absent, malformed, or
+   non-positive value is corruption of the CAS/edge token and must fail the
+   decode instead of silently rewinding the clock to 1. *)
+let test_backlog_version_decode_contract () =
+  let decode s = Masc_domain.backlog_of_yojson (Yojson.Safe.from_string s) in
+  (match decode {|{"tasks": []}|} with
+   | Ok b -> Alcotest.failf "absent version must fail, decoded %d" b.version
+   | Error _ -> ());
+  (match
+     decode
+       {|{"tasks": [], "last_updated": "2026-08-03T00:00:00Z", "version": 899}|}
+   with
+   | Ok b -> Alcotest.(check int) "present version round-trips" 899 b.version
+   | Error e -> Alcotest.failf "valid version must decode: %s" e);
+  (match decode {|{"tasks": [], "version": "899"}|} with
+   | Ok b -> Alcotest.failf "string version must fail, decoded %d" b.version
+   | Error _ -> ());
+  (match decode {|{"tasks": [], "version": 899.0}|} with
+   | Ok b -> Alcotest.failf "float version must fail, decoded %d" b.version
+   | Error _ -> ());
+  (match decode {|{"tasks": [], "version": null}|} with
+   | Ok b -> Alcotest.failf "explicit null version must fail, decoded %d" b.version
+   | Error _ -> ());
+  List.iter
+    (fun value ->
+       match decode (Printf.sprintf {|{"tasks": [], "version": %d}|} value) with
+       | Ok b -> Alcotest.failf "non-positive version must fail, decoded %d" b.version
+       | Error _ -> ())
+    [ 0; -5 ]
 ;;
 
 let task_by_id config task_id =
@@ -1016,24 +1066,41 @@ let test_update_priority () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:5 ~description:"" in
     let result = Workspace.update_priority config ~task_id:"task-001" ~priority:1 in
-    Alcotest.(check bool) "priority updated" true (contains_check result);
-    Alcotest.(check bool)
-      "shows old and new"
-      true
-      (str_contains result "P5" && str_contains result "P1"))
+    match result with
+    | Ok (Workspace.Updated { old_priority; new_priority; _ }) ->
+      Alcotest.(check int) "old priority" 5 old_priority;
+      Alcotest.(check int) "new priority" 1 new_priority
+    | Ok (Workspace.Not_found _) -> Alcotest.fail "updated task was reported missing"
+    | Error _ -> Alcotest.fail "priority update failed")
 ;;
 
 let test_update_priority_nonexistent () =
   with_test_env (fun config ->
     let result = Workspace.update_priority config ~task_id:"task-999" ~priority:1 in
-    Alcotest.(check bool) "task not found" true (contains_error result))
+    match result with
+    | Ok (Workspace.Not_found { task_id }) -> Alcotest.(check string) "task id" "task-999" task_id
+    | Ok (Workspace.Updated _) -> Alcotest.fail "missing task was reported updated"
+    | Error _ -> Alcotest.fail "missing task returned a storage error")
 ;;
 
 let test_update_priority_negative () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:5 ~description:"" in
     let result = Workspace.update_priority config ~task_id:"task-001" ~priority:(-1) in
-    Alcotest.(check bool) "negative priority allowed" true (contains_check result))
+    match result with
+    | Ok (Workspace.Updated { new_priority; _ }) ->
+      Alcotest.(check int) "negative priority preserved" (-1) new_priority
+    | Ok (Workspace.Not_found _) -> Alcotest.fail "updated task was reported missing"
+    | Error _ -> Alcotest.fail "negative priority update failed")
+;;
+
+let test_update_priority_corrupt_backlog_is_error () =
+  with_test_env (fun config ->
+    Workspace.write_json config (Workspace.backlog_path config) (`String "corrupt");
+    match Workspace.update_priority config ~task_id:"task-001" ~priority:1 with
+    | Error (Workspace.Backlog_read_error _) -> ()
+    | Ok _ -> Alcotest.fail "corrupt backlog was reported as a successful update"
+    | Error _ -> Alcotest.fail "corrupt backlog returned the wrong typed error")
 ;;
 
 (* ============================================================ *)
@@ -2741,6 +2808,10 @@ let () =
       , [ Alcotest.test_case "basic" `Quick test_update_priority
         ; Alcotest.test_case "nonexistent" `Quick test_update_priority_nonexistent
         ; Alcotest.test_case "negative" `Quick test_update_priority_negative
+        ; Alcotest.test_case
+            "corrupt backlog is an error"
+            `Quick
+            test_update_priority_corrupt_backlog_is_error
         ] )
     ; (* === Cancel Task === *)
       ( "cancel"
@@ -2899,6 +2970,16 @@ let () =
         ] )
     ; (* === Archive === *)
       "archive", [ Alcotest.test_case "append tasks" `Quick test_append_archive_tasks ]
+    ; ( "revision"
+      , [ Alcotest.test_case
+            "version bumps exactly once per commit"
+            `Quick
+            test_backlog_version_monotonic_per_commit
+        ; Alcotest.test_case
+            "decode: missing or corrupt version fails closed"
+            `Quick
+            test_backlog_version_decode_contract
+        ] )
     ; (* === RFC-0323 W2: predecessor_task_id === *)
       ( "predecessor"
       , [ Alcotest.test_case "unknown rejected" `Quick test_predecessor_unknown_rejected

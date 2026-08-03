@@ -247,10 +247,10 @@ let planning_context_state
 let status_summary_string (ctx : context) =
   Workspace.ensure_initialized ctx.config;
   let state = Workspace.read_state ctx.config in
-  match Workspace.read_backlog_r ctx.config with
+  match Workspace.read_backlog_observation_with_source_r ctx.config with
   | Error error ->
     Error (Printf.sprintf "status snapshot unavailable: backlog read failed: %s" error)
-  | Ok backlog ->
+  | Ok { Workspace.observed_backlog = backlog; recovered_from } ->
   let session_bound =
     (* status_summary_string is read-only on the workspace file; a missing
        or malformed file is treated as "session not bound" because that's the
@@ -432,8 +432,8 @@ let status_summary_string (ctx : context) =
         ]
     else items
   in
-  Ok
-    (Workspace_status_rendering.status_summary_string
+  let snapshot =
+    Workspace_status_rendering.status_summary_string
        ~ctx
        ~bound:session_bound
        ~actual_name
@@ -453,7 +453,16 @@ let status_summary_string (ctx : context) =
        ~planning_state
        ~attention_items
        ~state
-       ~backlog)
+       ~backlog
+  in
+  let snapshot =
+    match recovered_from with
+    | None -> snapshot
+    | Some _ ->
+      "⚠ Backlog observation is recovery-backed and non-authoritative. Recheck the primary backlog before mutation.\n"
+      ^ snapshot
+  in
+  Ok (snapshot, recovered_from)
 ;;
 
 let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
@@ -477,24 +486,42 @@ let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
        ~start_time
        ~data:(`Assoc [ "error", `String "status_unavailable"; "detail", `String message ])
        message
-   | Ok snapshot ->
+   | Ok (snapshot, recovered_from) ->
      let revision =
        Snapshot_protocol.revision_of_json
          ~namespace:"status"
          (`Assoc
            [ "task_list_name", `String task_list_name
+           ; ( "backlog_authority"
+             , `String
+                 (if Option.is_none recovered_from
+                  then "primary"
+                  else "recovery_non_authoritative") )
            ; "snapshot", `String snapshot
            ])
+     in
+     let response =
+       match recovered_from with
+       | None -> Snapshot_protocol.respond ~revision ~if_revision (`String snapshot)
+       | Some _ -> Snapshot_protocol.Snapshot { revision; value = `String snapshot }
+     in
+     let data =
+       match Snapshot_protocol.to_yojson response with
+       | `Assoc fields ->
+         `Assoc
+           (( "backlog_authority"
+            , `String
+                (if Option.is_none recovered_from
+                 then "primary"
+                 else "recovery_non_authoritative") )
+            :: ("degraded", `Bool (Option.is_some recovered_from))
+            :: fields)
+       | payload -> payload
      in
      Tool_result.make_ok
        ~tool_name
        ~start_time
-       ~data:
-         (Snapshot_protocol.to_yojson
-            (Snapshot_protocol.respond
-               ~revision
-               ~if_revision
-               (`String snapshot)))
+       ~data
        ())
 ;;
 

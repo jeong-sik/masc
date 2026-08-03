@@ -67,8 +67,8 @@ let recover_owned_task_to_todo_r
            (Masc_domain.System_error.ValidationError
               "reason must be non-empty without surrounding whitespace"))
   in
-  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  with_file_lock_r config backlog_path (fun () ->
+  let lock_path = backlog_lock_path config in
+  with_file_lock_r config lock_path (fun () ->
     let open Result.Syntax in
     let* backlog =
       read_backlog_r config
@@ -135,14 +135,14 @@ let recover_owned_task_to_todo_r
            else candidate)
         backlog.tasks
     in
-    let backlog_version = backlog.version + 1 in
     let* persistence =
       write_backlog_result
         config
-        { tasks; last_updated = now_iso (); version = backlog_version }
+        { backlog with tasks }
       |> Result.map_error (fun message ->
         Masc_domain.System (Masc_domain.System_error.IoError message))
     in
+    let backlog_version = persistence.committed_revision in
     let run_post_commit label f =
       try
         f ();
@@ -239,9 +239,9 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
   if not (is_initialized config)
   then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)
   else (
-    let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+    let lock_path = backlog_lock_path config in
     let result =
-      with_file_lock_r config backlog_path (fun () ->
+      with_file_lock_r config lock_path (fun () ->
       try
         match read_backlog_r config with
         | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
@@ -293,12 +293,9 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
                       else t)
                    backlog.tasks
                in
-               let new_backlog =
-                 { tasks = new_tasks
-                 ; last_updated = now_iso ()
-                 ; version = backlog.version + 1
-                 }
-               in
+               (* [write_backlog] stamps version/last_updated at the commit
+                  point. *)
+               let new_backlog = { backlog with tasks = new_tasks } in
                write_backlog
                  ~after_commit:(fun () ->
                    Task_cache_invariant.clear_stale_agent_task config
@@ -418,9 +415,9 @@ let link_task_execution_artifacts_r
   if not (is_initialized config)
   then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)
   else (
-    let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+    let lock_path = backlog_lock_path config in
     let result =
-      with_file_lock_r config backlog_path (fun () ->
+      with_file_lock_r config lock_path (fun () ->
       try
         match read_backlog_r config with
         | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
@@ -454,12 +451,9 @@ let link_task_execution_artifacts_r
                     else candidate)
                  backlog.tasks
              in
-             let new_backlog =
-               { tasks = new_tasks
-               ; last_updated = now_iso ()
-               ; version = backlog.version + 1
-               }
-             in
+             (* [write_backlog] stamps version/last_updated at the commit
+                point. *)
+             let new_backlog = { backlog with tasks = new_tasks } in
              write_backlog config new_backlog;
              let execution_link_fields =
                (match trim_opt session_id with

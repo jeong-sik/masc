@@ -810,12 +810,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
                  else task)
               backlog.tasks
           in
-          W.write_backlog
-            config
-            { tasks
-            ; last_updated = Masc_domain.now_iso ()
-            ; version = backlog.version + 1
-            };
+          W.write_backlog config { backlog with tasks };
           CA.start ~sw ~config;
           Eio.Promise.await reviewer_called;
           Eio.Promise.await verdict_committed;
@@ -874,7 +869,7 @@ let test_rejected_verdict_audit_preserves_reason () =
            else task)
         backlog.tasks
     in
-    W.write_backlog config { backlog with tasks; version = backlog.version + 1 };
+    W.write_backlog config { backlog with tasks };
     (match
        W.commit_verdict_r
          config
@@ -1751,9 +1746,7 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
            })
         backlog.tasks
     in
-    W.write_backlog
-      config
-      { backlog with tasks; version = backlog.version + 1 };
+    W.write_backlog config { backlog with tasks };
     let projection = W.list_tasks config in
     Alcotest.(check bool)
       "row identifies the completion-authority wait"

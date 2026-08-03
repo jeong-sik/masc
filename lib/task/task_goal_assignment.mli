@@ -11,6 +11,7 @@
     the domain-boundary ratchet rejects. *)
 
 type set_task_goal_error =
+  | Backlog_read_failed of string
   | Unknown_task of string
   | Unknown_goal of string
   | Already_assigned of
@@ -30,6 +31,8 @@ val set_task_goal :
     goalless task to an existing goal.
 
     - [Error (Unknown_task _)] — no task with [task_id] in the backlog.
+    - [Error (Backlog_read_failed _)] — the authoritative backlog cannot be
+      read; a recovery snapshot is never used to authorize this mutation.
     - [Error (Unknown_goal _)] — no goal with [goal_id] in the goal store.
     - [Error (Already_assigned _)] — the task already carries one or more
       goal links; reassignment/unlink is out of scope (RFC-0267 §4, which

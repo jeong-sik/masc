@@ -123,7 +123,48 @@ let test_tasks_list_returns_snapshot_and_unchanged () =
        check string
          "raw rendering derives from unchanged response"
          (Yojson.Safe.to_string unchanged_data)
-         unchanged.raw_output)
+       unchanged.raw_output)
+
+let test_tasks_list_recovery_is_degraded_and_never_unchanged () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~title:"Recovery-only task snapshot"
+            ~priority:2
+            ~description:"");
+       Out_channel.with_open_text (Masc.Workspace.backlog_path config) (fun oc ->
+         output_string oc "{not valid json");
+       let meta = meta_with_active_goals [] in
+       let execute args =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_tasks_list"
+           ~args
+       in
+       let first_data = Option.get (execute (`Assoc [])).data in
+       check string
+         "recovery authority is explicit"
+         "recovery_non_authoritative"
+         U.(first_data |> member "backlog_authority" |> to_string);
+       check bool
+         "recovery snapshot is degraded"
+         true
+         U.(first_data |> member "degraded" |> to_bool);
+       let revision = U.(first_data |> member "revision" |> to_string) in
+       let repeated_data =
+         Option.get (execute (`Assoc [ "if_revision", `String revision ])).data
+       in
+       check string
+         "recovery cannot collapse to unchanged"
+         "snapshot"
+         U.(repeated_data |> member "kind" |> to_string))
 
 let test_tasks_list_revision_covers_projected_contents () =
   let base_path = temp_dir () in
@@ -435,6 +476,10 @@ let () =
             "keeper_tasks_list revision covers projected task contents"
             `Quick
             test_tasks_list_revision_covers_projected_contents
+        ; test_case
+            "keeper_tasks_list recovery is degraded and never unchanged"
+            `Quick
+            test_tasks_list_recovery_is_degraded_and_never_unchanged
         ; test_case "response finalization keeps visible reply only" `Quick
             test_response_finalization_keeps_visible_reply_only
         ; test_case "rejected done (missing task_id) emits typed Error (D1)"

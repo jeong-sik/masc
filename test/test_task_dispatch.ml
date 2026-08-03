@@ -99,6 +99,26 @@ let test_delete_returns_error_when_backlog_unreadable () =
       Alcotest.(check string)
         "primary backlog not rewritten via empty fallback" "{not-json" primary)
 
+let test_reads_return_error_when_backlog_unreadable () =
+  with_temp_config (fun config ->
+      ignore (Workspace.init config ~agent_name:(Some "tester"));
+      Task.Dispatch.reset_for_test ();
+      Task.Dispatch.init_jsonl ();
+      let backlog_path = Filename.concat (Workspace.tasks_dir config) "backlog.json" in
+      write_string backlog_path "{not-json";
+      write_string (backlog_path ^ ".last-good") "{not-json";
+      let expect_io_error label = function
+        | Error (Masc_domain.System (Masc_domain.System_error.IoError _)) -> ()
+        | Ok _ -> Alcotest.failf "%s unexpectedly succeeded" label
+        | Error e ->
+            Alcotest.failf "%s returned unexpected error: %s" label
+              (Masc_domain.show_masc_error e)
+      in
+      expect_io_error "get_task"
+        (Task.Dispatch.get_task config ~task_id:"missing");
+      expect_io_error "list_tasks"
+        (Task.Dispatch.list_tasks config ()))
+
 let test_task_dispatch_source_pins_backlog_lock () =
   let candidates =
     [
@@ -157,6 +177,8 @@ let () =
             test_delete_uses_locked_jsonl_path;
           Alcotest.test_case "delete fails on unreadable backlog" `Quick
             test_delete_returns_error_when_backlog_unreadable;
+          Alcotest.test_case "reads fail structurally on unreadable backlog" `Quick
+            test_reads_return_error_when_backlog_unreadable;
           Alcotest.test_case "source pins backlog lock" `Quick
             test_task_dispatch_source_pins_backlog_lock;
         ] );

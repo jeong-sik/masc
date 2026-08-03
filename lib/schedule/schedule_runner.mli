@@ -49,6 +49,12 @@ type acceptance_commit
 
 type consumer_dispatch_result =
   | Work_completed of Yojson.Safe.t
+  | Work_completed_after_acceptance of
+      { detail : Yojson.Safe.t
+      ; acceptance_commit : acceptance_commit
+      }
+      (** The consumer found terminal success evidence and committed the
+          schedule acceptance while still holding its producer fence. *)
   | Work_accepted of
       { detail : Yojson.Safe.t
       ; acceptance_commit : acceptance_commit
@@ -57,6 +63,13 @@ type consumer_dispatch_result =
       { error : string
       ; detail : Yojson.Safe.t
       }
+  | Work_failed_after_acceptance of
+      { error : string
+      ; detail : Yojson.Safe.t
+      ; acceptance_commit : acceptance_commit
+      }
+      (** The consumer found terminal failure evidence and committed the
+          schedule acceptance while still holding its producer fence. *)
 
 (** A consumer's answer about one occurrence it durably accepted.
 

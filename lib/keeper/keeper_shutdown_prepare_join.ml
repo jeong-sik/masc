@@ -280,15 +280,15 @@ let prepare_dormant
   | Keeper_turn_admission.Shutdown_already_reserved reservation ->
     Error (Existing_operation reservation.operation_id)
   | Keeper_turn_admission.Shutdown_reserved _ ->
-    Keeper_turn_admission.await_idle_after_shutdown
-      ~base_path:config.Workspace.base_path
-      ~keeper_name:meta.name;
     let durable_prepare_committed = Atomic.make false in
     Fun.protect
       ~finally:(fun () ->
         if not (Atomic.get durable_prepare_committed)
         then rollback_reservation ~config ~keeper_name:meta.name operation_id)
       (fun () ->
+         Keeper_turn_admission.await_idle_after_shutdown
+           ~base_path:config.Workspace.base_path
+           ~keeper_name:meta.name;
          match Keeper_registry.get ~base_path:config.base_path meta.name with
          | Some _ -> Error Dormant_registry_lane_present
          | None ->

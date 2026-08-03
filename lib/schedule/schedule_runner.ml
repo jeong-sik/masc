@@ -44,6 +44,10 @@ type acceptance_commit = Acceptance_committed
 
 type consumer_dispatch_result =
   | Work_completed of Yojson.Safe.t
+  | Work_completed_after_acceptance of
+      { detail : Yojson.Safe.t
+      ; acceptance_commit : acceptance_commit
+      }
   | Work_accepted of
       { detail : Yojson.Safe.t
       ; acceptance_commit : acceptance_commit
@@ -51,6 +55,11 @@ type consumer_dispatch_result =
   | Work_failed of
       { error : string
       ; detail : Yojson.Safe.t
+      }
+  | Work_failed_after_acceptance of
+      { error : string
+      ; detail : Yojson.Safe.t
+      ; acceptance_commit : acceptance_commit
       }
 
 type settlement_evidence =
@@ -396,9 +405,30 @@ let dispatch_candidate
              dispatch_result ~detail
                ~error:(Schedule_store.store_error_to_string err)
                occurrence_id schedule_id Dispatch_failed)
+        | Ok
+            (Work_completed_after_acceptance
+               { detail; acceptance_commit = Acceptance_committed }) ->
+          (match
+             Schedule_store.complete_dispatched_occurrence
+               config
+               ~now
+               ~schedule_id
+               ~due_at:signal.due_at
+               ~payload_digest:signal.payload_digest
+               ()
+           with
+           | Ok _ ->
+             dispatch_result ~detail occurrence_id schedule_id Dispatch_succeeded
+           | Error err ->
+             dispatch_result ~detail
+               ~error:(Schedule_store.store_error_to_string err)
+               occurrence_id schedule_id Dispatch_failed)
         | Ok (Work_accepted { detail; acceptance_commit = Acceptance_committed }) ->
           dispatch_result ~detail occurrence_id schedule_id Dispatch_succeeded
-        | Ok (Work_failed { error; detail }) ->
+        | Ok (Work_failed { error; detail })
+        | Ok
+            (Work_failed_after_acceptance
+               { error; detail; acceptance_commit = Acceptance_committed }) ->
           (match
              Schedule_store.fail_dispatched_occurrence
                config

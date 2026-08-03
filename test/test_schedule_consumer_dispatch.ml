@@ -1356,6 +1356,99 @@ let test_shutdown_fence_rejects_schedule_intake_before_enqueue () =
        | None -> fail "shutdown-fenced schedule disappeared")
 ;;
 
+let test_transferred_retry_uses_resolved_owner_shutdown_fence () =
+  with_workspace
+  @@ fun config ->
+  let source_keeper = "schedule-transfer-source" in
+  let target_keeper = "schedule-transfer-target" in
+  let base_path = config.Workspace_utils.base_path in
+  let source_ledger = reaction_ledger_dir ~base_path ~keeper_name:source_keeper in
+  mkdir_p (Filename.dirname source_ledger);
+  write_empty_file source_ledger;
+  let request =
+    create_named_keeper_wake_schedule
+      config
+      ~schedule_id:"resolved-owner-fence"
+      ~keeper_name:source_keeper
+  in
+  let first = tick_ok config ~now:201.0 in
+  check string "first dispatch remains retryable" "failed"
+    (Schedule_runner.dispatch_status_to_string (List.hd first.dispatches).status);
+  Sys.remove source_ledger;
+  mkdir_p source_ledger;
+  let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
+  let transfer : Keeper_registry_event_queue.accepted_transfer =
+    { source = selection.source
+    ; source_incarnation = selection.admitted_revision
+    ; owner_nonce = 53
+    ; operator_operation_id = "resolved-owner-fence-transfer"
+    ; from_keeper = source_keeper
+    ; to_keeper = target_keeper
+    }
+  in
+  (match
+     Keeper_registry_event_queue.transfer_pending_accepted_result
+       ~base_path
+       source_keeper
+       ~current_owner_nonce:53
+       ~applied_at:201.5
+       ~transfer
+   with
+   | Ok (Keeper_registry_event_queue.Transition_applied _) -> ()
+   | Ok (Keeper_registry_event_queue.Transition_already_applied _) ->
+     fail "first resolved-owner transfer was already applied"
+   | Ok
+       (Keeper_registry_event_queue.Transition_committed_followup_failed
+          { detail; _ }) ->
+     fail detail
+   | Error detail -> fail detail);
+  (match
+     Keeper_event_queue_recovery.project_owner_result
+       ~base_path
+       ~keeper_name:source_keeper
+   with
+   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
+   | Ok _ -> fail "resolved-owner transfer projection did not converge"
+   | Error error ->
+     fail (Keeper_event_queue_recovery.projection_error_to_string error));
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  (match
+     Keeper_turn_admission.begin_shutdown
+       ~base_path
+       ~keeper_name:target_keeper
+       ~operation_id
+   with
+   | Keeper_turn_admission.Shutdown_reserved _ -> ()
+   | Keeper_turn_admission.Shutdown_already_reserved _ ->
+     fail "fresh target shutdown fence was already reserved");
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Keeper_turn_admission.rollback_shutdown
+           ~base_path
+           ~keeper_name:target_keeper
+           ~operation_id
+         : Keeper_turn_admission.rollback_shutdown_result))
+    (fun () ->
+       let retried = tick_ok config ~now:202.0 in
+       (match retried.dispatches with
+        | [ { status = Schedule_runner.Dispatch_failed
+            ; error = Some detail
+            ; _
+            } ] ->
+          check bool "retry reports the resolved owner fence" true
+            (String_util.contains_substring detail ("keeper=" ^ target_keeper))
+        | _ -> fail "transferred retry bypassed the resolved owner fence");
+       check int "target occurrence remains durable" 1
+         (Keeper_registry_event_queue.snapshot ~base_path target_keeper
+          |> Keeper_event_queue.length);
+       match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+       | Some stored ->
+         check string "resolved-owner fence leaves retry due" "due"
+           (Schedule_domain.schedule_status_to_string stored.status)
+       | None -> fail "resolved-owner schedule disappeared")
+;;
+
 let test_shutdown_join_waits_for_inflight_schedule_intake () =
   with_workspace
   @@ fun config ->
@@ -1800,6 +1893,79 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
   | Error error ->
     fail
       (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+;;
+
+let test_terminal_retry_requires_acceptance_commit () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "terminal-acceptance-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let ledger_path = reaction_ledger_dir ~base_path ~keeper_name in
+  mkdir_p (Filename.dirname ledger_path);
+  write_empty_file ledger_path;
+  let request =
+    create_named_keeper_wake_schedule
+      config
+      ~schedule_id:"terminal-acceptance-commit"
+      ~keeper_name
+  in
+  let first = tick_ok config ~now:201.0 in
+  let signal =
+    match first.emitted with
+    | [ signal ] -> signal
+    | signals -> failf "expected one terminal retry signal, got %d" (List.length signals)
+  in
+  Sys.remove ledger_path;
+  mkdir_p ledger_path;
+  let selection = pending_selection_exn ~base_path ~keeper_name in
+  (match
+     Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
+       ~base_path
+       keeper_name
+       ~current_owner_nonce:97
+       ~applied_at:201.5
+       ~selection
+       ~detail:"terminal acceptance evidence"
+   with
+   | Ok (Keeper_registry_event_queue.Acked _)
+   | Ok (Keeper_registry_event_queue.Already_acked _) -> ()
+   | Ok
+       (Keeper_registry_event_queue.Ack_committed_followup_failed
+          { detail; _ }) ->
+     fail detail
+   | Error detail -> fail detail);
+  let running =
+    match
+      Schedule_store.start_due_candidate
+        config
+        ~now:202.0
+        ~schedule_id:request.schedule_id
+    with
+    | Ok running -> running
+    | Error error -> fail (Schedule_store.store_error_to_string error)
+  in
+  let commit_calls = Atomic.make 0 in
+  (match
+     Server_schedule_consumers.consumer.dispatch
+       config
+       ~now:202.0
+       signal
+       running
+       ~commit_acceptance:(fun _detail ->
+         Atomic.incr commit_calls;
+         Error
+           (Schedule_runner.Retryable_dispatch_failure
+              "terminal acceptance commit probe"))
+   with
+   | Error (Schedule_runner.Retryable_dispatch_failure detail) ->
+     check string "terminal result waits for acceptance commit"
+       "terminal acceptance commit probe"
+       detail
+   | Error (Schedule_runner.Terminal_dispatch_rejection detail) ->
+     fail ("terminal retry became a payload rejection: " ^ detail)
+   | Ok _ -> fail "terminal retry returned before acceptance commit");
+  check int "terminal retry invokes one acceptance commit" 1
+    (Atomic.get commit_calls)
 ;;
 
 let test_retry_before_terminal_reconciliation_retains_wake () =
@@ -2427,6 +2593,8 @@ let () =
             test_keeper_purge_follows_terminal_transfer_redirect
         ; test_case "shutdown fence rejects schedule intake before enqueue" `Quick
             test_shutdown_fence_rejects_schedule_intake_before_enqueue
+        ; test_case "transferred retry uses resolved owner shutdown fence" `Quick
+            test_transferred_retry_uses_resolved_owner_shutdown_fence
         ; test_case "shutdown join waits for in-flight schedule intake" `Quick
             test_shutdown_join_waits_for_inflight_schedule_intake
         ; test_case "keeper wake durable state failure retries same occurrence" `Quick
@@ -2440,6 +2608,8 @@ let () =
         ; test_case "terminal retry repairs missing stimulus ledger"
             `Quick
             test_terminal_retry_repairs_missing_stimulus_ledger
+        ; test_case "terminal retry requires acceptance commit" `Quick
+            test_terminal_retry_requires_acceptance_commit
         ; test_case "retry before terminal reconciliation retains wake"
             `Quick
             test_retry_before_terminal_reconciliation_retains_wake

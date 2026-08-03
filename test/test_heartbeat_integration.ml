@@ -2665,6 +2665,85 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
           "failed shutdown prepare left the keeper admission fence closed: \
            Turn_busy owns the slot")
 
+let test_keeper_dormant_shutdown_join_cancel_rolls_back_fence () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "shutdown-dormant-cancel-rollback" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_chat_queue.For_testing.reset ();
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      R.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "operator")
+      in
+      let name = "shutdown-dormant-cancel-rollback" in
+      let meta = make_meta name in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let intake_started, intake_started_u = Eio.Promise.create () in
+      let release_intake, release_intake_u = Eio.Promise.create () in
+      let intake_finished, intake_finished_u = Eio.Promise.create () in
+      Eio.Switch.run @@ fun outer_sw ->
+      Eio.Fiber.fork ~sw:outer_sw (fun () ->
+        (match
+           Masc.Keeper_turn_admission.run_durable_intake_if_open
+             ~base_path:config.base_path
+             ~keeper_name:name
+             (fun () ->
+                Eio.Promise.resolve intake_started_u ();
+                Eio.Promise.await release_intake)
+         with
+         | Masc.Keeper_turn_admission.Intake_committed () -> ()
+         | Masc.Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+           fail
+             ("test intake unexpectedly saw shutdown reservation "
+              ^ Shutdown_types.Operation_id.to_string operation_id));
+        Eio.Promise.resolve intake_finished_u ());
+      Eio.Promise.await intake_started;
+      let exception Cancel_dormant_prepare in
+      (try
+         Eio.Switch.run @@ fun prepare_sw ->
+         Eio.Fiber.fork ~sw:prepare_sw (fun () ->
+           ignore
+             (Shutdown_prepare_join.prepare_dormant
+                ~config
+                ~meta
+                ~request:
+                  { actor = "operator"
+                  ; cleanup_intent = retain_operator_cleanup
+                  }
+              : (Shutdown_types.t, Shutdown_prepare_join.error) result));
+         Eio.Fiber.yield ();
+         check bool "dormant prepare reserved shutdown before joining intake" true
+           (Option.is_some
+              (Masc.Keeper_turn_admission.snapshot_for
+                 ~base_path:config.base_path
+                 ~keeper_name:name)
+                .snapshot_shutdown_operation_id);
+         Eio.Switch.fail prepare_sw Cancel_dormant_prepare
+       with
+       | Cancel_dormant_prepare -> ());
+      Eio.Promise.resolve release_intake_u ();
+      Eio.Promise.await intake_finished;
+      match
+        Masc.Keeper_turn_admission.run_if_free
+          ~base_path:config.base_path
+          ~keeper_name:name
+          (fun () -> ())
+      with
+      | `Ran () -> ()
+      | `Busy (Masc.Keeper_turn_admission.Shutdown_requested operation_id) ->
+        fail
+          ("cancelled dormant prepare left shutdown reservation "
+           ^ Shutdown_types.Operation_id.to_string operation_id)
+      | `Busy (Masc.Keeper_turn_admission.Turn_busy _) ->
+        fail "cancelled dormant prepare left the keeper turn busy")
+
 let install_pending_summary ~base_path ~keeper_name ~bind_exact =
   Approval_queue.For_testing.reset_runtime_state ();
   (match Approval_queue.install_persistence ~base_path with
@@ -4120,6 +4199,8 @@ let () =
         test_keeper_shutdown_prepare_joins_not_started_lane;
       test_case "shutdown prepare failure rolls back admission fence" `Quick
         test_keeper_shutdown_prepare_failure_rolls_back_fence;
+      test_case "cancelled dormant shutdown join rolls back admission fence" `Quick
+        test_keeper_dormant_shutdown_join_cancel_rolls_back_fence;
       test_case "shutdown finalizes idle operation" `Quick
         test_keeper_shutdown_finalizes_idle_operation;
       test_case "destructive shutdown blocks on bound summary" `Quick

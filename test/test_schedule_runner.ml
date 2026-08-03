@@ -328,6 +328,47 @@ let test_tick_records_terminal_work_failure_for_exact_recurrence () =
       (Schedule_domain.execution_status_to_string execution.status)
 ;;
 
+let test_tick_completes_terminal_work_after_acceptance () =
+  with_workspace
+  @@ fun config ->
+  let calls = ref [] in
+  let request =
+    create_ok
+      ~schedule_id:"dispatch-terminal-after-acceptance"
+      ~recurrence:(Interval { interval_sec = 60 })
+      config
+  in
+  let detail = `Assoc [ "kind", `String "consumer.already_completed" ] in
+  let consumer =
+    { (accepting_consumer calls) with
+      dispatch =
+        (fun _config ~now:_ _signal running ~commit_acceptance ->
+           calls := running.schedule_id :: !calls;
+           Result.map
+             (fun acceptance_commit ->
+                Work_completed_after_acceptance { detail; acceptance_commit })
+             (commit_acceptance detail))
+    }
+  in
+  let result = tick_ok config ~now:201.0 ~consumer in
+  let dispatch = List.hd result.dispatches in
+  check_dispatch_status "accepted terminal success is visible" Dispatch_succeeded
+    dispatch.status;
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | None -> fail "completed recurring schedule missing"
+   | Some stored ->
+     check string "completed recurring intent advances" "scheduled"
+       (schedule_status_to_string stored.status);
+     check (float 0.001) "completed next occurrence remains scheduled" 260.0
+       stored.due_at);
+  match latest_execution config ~schedule_id:request.schedule_id with
+  | { status = Execution_succeeded; finished_at = Some _; _ } -> ()
+  | execution ->
+    failf
+      "accepted terminal success stayed %s"
+      (Schedule_domain.execution_status_to_string execution.status)
+;;
+
 let test_tick_marks_unsupported_candidate_failed () =
   with_workspace
   @@ fun config ->
@@ -993,6 +1034,8 @@ let () =
             test_tick_records_async_acceptance_without_claiming_work_success
         ; test_case "records exact recurring terminal work failure" `Quick
             test_tick_records_terminal_work_failure_for_exact_recurrence
+        ; test_case "completes terminal work after acceptance" `Quick
+            test_tick_completes_terminal_work_after_acceptance
         ; test_case "marks unsupported candidate failed" `Quick
             test_tick_marks_unsupported_candidate_failed
         ; test_case "reschedules recurring candidate after signal" `Quick

@@ -794,9 +794,29 @@ let rec resolve_durable_occurrence
        | disposition -> Ok disposition)
 ;;
 
+let resolved_occurrence_owner = function
+  | Pending_at (owner, _)
+  | Terminal_completed_at (owner, _, _)
+  | Terminal_failed_at (owner, _, _, _)
+  | Terminal_cancelled_at (owner, _, _, _)
+  | Absent_at owner -> owner
+  | Transfer_projecting_at (source, _) -> source
+;;
+
+let resolve_keeper_wake_occurrence ~base_path ~keeper_name ~stimulus_id =
+  resolve_durable_occurrence
+    (Hashtbl.create 4)
+    ~read_state:Keeper_registry_event_queue.durable_state_result
+    ~base_path
+    ~occurrence_id:stimulus_id
+    ~visited:[]
+    keeper_name
+;;
+
 let accept_keeper_wake_occurrence
       ~base_path
       ~keeper_name
+      ~expected_owner
       ~stimulus_id
       stimulus
   =
@@ -824,17 +844,20 @@ let accept_keeper_wake_occurrence
       durable_stimulus
       acceptance
   in
-  let cache = Hashtbl.create 4 in
   match
-    resolve_durable_occurrence
-      cache
-      ~read_state:Keeper_registry_event_queue.durable_state_result
-      ~base_path
-      ~occurrence_id:stimulus_id
-      ~visited:[]
-      keeper_name
+    resolve_keeper_wake_occurrence ~base_path ~keeper_name ~stimulus_id
   with
   | Error detail -> retryable_dispatch_failure detail
+  | Ok disposition
+    when not
+           (String.equal
+              expected_owner
+              (resolved_occurrence_owner disposition)) ->
+    retryable_dispatch_failure
+      (Printf.sprintf
+         "scheduled keeper wake owner changed while acquiring intake fence expected=%s actual=%s"
+         expected_owner
+         (resolved_occurrence_owner disposition))
   | Ok (Transfer_projecting_at (source, target)) ->
     retryable_dispatch_failure
       (Printf.sprintf
@@ -861,6 +884,12 @@ let accept_keeper_wake_occurrence
       (Already_failed reason)
   | Ok (Terminal_cancelled_at (owner, durable_stimulus, _, evidence)) ->
     accept_terminal ~owner ~durable_stimulus ~evidence Already_cancelled
+  | Ok (Absent_at owner) when not (String.equal owner keeper_name) ->
+    retryable_dispatch_failure
+      (Printf.sprintf
+         "scheduled keeper wake transferred owner is missing occurrence owner=%s occurrence=%s"
+         owner
+         stimulus_id)
   | Ok (Absent_at _) ->
     (match
        Keeper_registry_event_queue.enqueue_stimulus_durable_result
@@ -921,11 +950,18 @@ let dispatch_keeper_wake
   in
   let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
   let base_path = config.Workspace_utils.base_path in
+  let* initial_disposition =
+    match resolve_keeper_wake_occurrence ~base_path ~keeper_name ~stimulus_id with
+    | Ok disposition -> Ok disposition
+    | Error detail -> retryable_dispatch_failure detail
+  in
+  let intake_owner = resolved_occurrence_owner initial_disposition in
   let dispatch_while_fenced () =
     let* acceptance =
       accept_keeper_wake_occurrence
         ~base_path
         ~keeper_name
+        ~expected_owner:intake_owner
         ~stimulus_id
         stimulus
     in
@@ -982,23 +1018,32 @@ let dispatch_keeper_wake
     | Wake_required | Already_pending _ ->
       let* acceptance_commit = commit_acceptance detail in
       Ok (Schedule_runner.Work_accepted { detail; acceptance_commit })
-    | Already_acked -> Ok (Schedule_runner.Work_completed detail)
-    | Already_failed reason ->
-      Ok (Schedule_runner.Work_failed { error = reason; detail })
-    | Already_cancelled ->
+    | Already_acked ->
+      let* acceptance_commit = commit_acceptance detail in
       Ok
-        (Schedule_runner.Work_failed
+        (Schedule_runner.Work_completed_after_acceptance
+           { detail; acceptance_commit })
+    | Already_failed reason ->
+      let* acceptance_commit = commit_acceptance detail in
+      Ok
+        (Schedule_runner.Work_failed_after_acceptance
+           { error = reason; detail; acceptance_commit })
+    | Already_cancelled ->
+      let* acceptance_commit = commit_acceptance detail in
+      Ok
+        (Schedule_runner.Work_failed_after_acceptance
            { error =
                Printf.sprintf
                  "scheduled keeper occurrence %s was already cancelled"
                  stimulus_id
            ; detail
+           ; acceptance_commit
            })
   in
   match
     Keeper_turn_admission.run_durable_intake_if_open
       ~base_path
-      ~keeper_name
+      ~keeper_name:intake_owner
       dispatch_while_fenced
   with
   | Keeper_turn_admission.Intake_committed result -> result
@@ -1006,7 +1051,7 @@ let dispatch_keeper_wake
     retryable_dispatch_failure
       (Printf.sprintf
          "scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"
-         keeper_name
+         intake_owner
          (Keeper_shutdown_types.Operation_id.to_string operation_id))
 ;;
 

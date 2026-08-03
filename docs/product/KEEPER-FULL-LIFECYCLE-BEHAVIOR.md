@@ -63,16 +63,6 @@ domain validator decides whether the result is accepted. Only intrinsically
 different work such as image, audio, embedding, or another non-text modality
 may require a special Runtime capability.
 
-### Role correction (2026-08-03)
-
-An earlier revision of this document incorrectly listed `verifier` as one of
-the Keepers. That was a role error, not a rename or a migration: the verifier
-is the system LLM completion-authority agent described above. Historical rows
-below are retained as observations, but any `verifier` row must not be read as
-Keeper liveness, Keeper failover, or Keeper-fleet evidence. A fresh proof must
-derive the Keeper roster from the active declarative configuration and record
-the system LLM verifier separately.
-
 ## 5. What "Full Lifecycle works" means
 
 One fresh-state proof must show this uninterrupted sequence:
@@ -368,7 +358,7 @@ Pricing may be measured and displayed later. It does not limit, route, rank, adm
 | 2026-07-27 17:37 KST | authenticated `POST https://ollama.com/api/show` | Qwen 3.5 Cloud and Gemma 4 31B Cloud available; both 262,144 context; tools/thinking/vision declared | High |
 | 2026-07-27 17:38 KST | authenticated `POST https://ollama.com/v1/chat/completions` with `json_object` | Qwen and Gemma returned valid JSON; DeepSeek Flash reached the service but 32 output tokens were insufficient | High |
 | 2026-07-27 17:42 KST | authenticated `json_schema` probe | Qwen and Gemma returned fenced JSON; DeepSeek returned non-JSON text. Native schema is not a portable admission requirement | High |
-| 2026-07-27 17:46 KST | fresh declarative config edit | Keeper TOMLs were selected for autoboot; Runtime assignments were 4 Flash, 2 GLM, 1 Qwen Cloud, 1 Gemma Cloud | High for source, not live; historical role attribution corrected above |
+| 2026-07-27 17:46 KST | fresh declarative config edit | Keeper TOMLs were selected for autoboot; Runtime assignments were 4 Flash, 2 GLM, 1 Qwen Cloud, 1 Gemma Cloud | High for source, not live; not current Keeper-fleet evidence |
 | 2026-07-27 22:24 KST | `GET /health?full=1` | current process reported `status=ok` and `keeper_fibers=8` | High for fiber presence only; Keeper role attribution was not proven |
 | 2026-07-27 22:25 KST | `GET /api/v1/keepers/:name/turn-records?limit=1` over the historical configured roster | seven entries had fresh-runtime turn records; `kinobot-frontend` had none | High for endpoint observation, not current Keeper-fleet proof |
 | 2026-07-27 22:28 KST | `kinobot-frontend` config, composite, turn records, and system log | config said proactive true; effective activation was false; scheduler skipped with `scheduled_autonomous_disabled`; turn record count remained zero | High |

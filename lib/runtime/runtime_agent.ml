@@ -22,21 +22,6 @@ let oas_tool_hook_unset_error () =
      Tool_bridge initialization before Runtime_agent.run_with_masc_tools"
 ;;
 
-let project_masc_tools ~masc_tools ~dispatch =
-  match !oas_tool_of_masc_hook with
-  | None -> Error (oas_tool_hook_unset_error ())
-  | Some oas_tool_of_masc ->
-    Ok
-      (List.map
-         (fun (td : Masc_domain.tool_schema) ->
-            oas_tool_of_masc
-              ~name:td.name
-              ~description:td.description
-              ~input_schema:td.input_schema
-              (fun input -> dispatch ~name:td.name ~args:input))
-         masc_tools)
-;;
-
 let network_error_kind_of_unix_error = function
   | Unix.ECONNREFUSED | Unix.ECONNRESET -> Llm_provider.Http_client.Connection_refused
   | Unix.EPIPE -> Llm_provider.Http_client.End_of_file
@@ -822,16 +807,6 @@ let prefer_cooperative_probe_error probe_error advanced_result =
 ;;
 
 module For_testing = struct
-  let with_oas_tool_of_masc_hook_unset f =
-    let original = !oas_tool_of_masc_hook in
-    Fun.protect
-      ~finally:(fun () -> oas_tool_of_masc_hook := original)
-      (fun () ->
-         oas_tool_of_masc_hook := None;
-         f ())
-  ;;
-
-  let project_masc_tools = project_masc_tools
   let provider_http_observation_transport = provider_http_observation_transport
   let runtime_id_of_config = runtime_id_of_config
   let runtime_observation_for_completed_config =
@@ -1465,9 +1440,19 @@ let run_with_masc_tools
   | [] ->
       run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal
   | _ when provider_supports_inline_tools config.provider_cfg ->
-      (match project_masc_tools ~masc_tools ~dispatch with
-       | Error error -> Error error
-       | Ok oas_tools ->
+      (match !oas_tool_of_masc_hook with
+       | None -> Error (oas_tool_hook_unset_error ())
+       | Some oas_tool_of_masc ->
+         let oas_tools =
+           List.map
+             (fun (td : Masc_domain.tool_schema) ->
+               oas_tool_of_masc
+                 ~name:td.name
+                 ~description:td.description
+                 ~input_schema:td.input_schema
+                 (fun input -> dispatch ~name:td.name ~args:input))
+             masc_tools
+         in
          let config = { config with tools = oas_tools @ config.tools } in
          run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal)
   | _ ->

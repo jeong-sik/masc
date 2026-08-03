@@ -19,4 +19,13 @@
   schedule_service
   schedule_runner
   schedule_runner_status)
- (libraries digestif masc_workspace dated_jsonl masc_log masc_core masc_cancel_safe masc_random_id unix yojson))
+ (libraries
+  digestif
+  masc_workspace
+  dated_jsonl
+  masc_log
+  masc_core
+  masc_cancel_safe
+  masc_random_id
+  unix
+  yojson))

@@ -173,6 +173,7 @@
 ;; by the server instead of reimplementing either contract in shell.
 (executable
  (name keeper_event_queue_v15_cutover_helper)
+ (modules keeper_event_queue_v15_cutover_helper)
  (libraries
   masc.server
   masc.host_config

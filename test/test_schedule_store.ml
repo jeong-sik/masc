@@ -696,7 +696,7 @@ let test_recurring_dispatched_completion_preserves_next_occurrence () =
   | None -> fail "recurring execution missing"
 ;;
 
-let check_reused_occurrence_rejected label request = function
+let check_reused_occurrence_rejected label (request : schedule_request) = function
   | Error
       (Schedule_occurrence_already_used
          { schedule_instance_id; due_at; payload_digest = actual_digest }) ->

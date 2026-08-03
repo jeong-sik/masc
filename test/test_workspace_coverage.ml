@@ -769,7 +769,10 @@ let test_backlog_version_decode_contract () =
   (match decode {|{"tasks": []}|} with
    | Ok b -> Alcotest.failf "absent version must fail, decoded %d" b.version
    | Error _ -> ());
-  (match decode {|{"tasks": [], "version": 899}|} with
+  (match
+     decode
+       {|{"tasks": [], "last_updated": "2026-08-03T00:00:00Z", "version": 899}|}
+   with
    | Ok b -> Alcotest.(check int) "present version round-trips" 899 b.version
    | Error e -> Alcotest.failf "valid version must decode: %s" e);
   (match decode {|{"tasks": [], "version": "899"}|} with

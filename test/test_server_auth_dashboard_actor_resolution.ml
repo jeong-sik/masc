@@ -34,11 +34,9 @@ let request ?token ~actor () =
     "/api/v1/dashboard/briefing"
 
 let resolve ~base_path request =
-  Eio_main.run @@ fun _env ->
   Server_auth.dashboard_actor_resolution_for_request ~base_path request
 
 let project ~base_path request =
-  Eio_main.run @@ fun _env ->
   Server_auth.dashboard_actor_for_request ~base_path request
 
 let loopback_request_authority () =
@@ -299,21 +297,25 @@ let test_admin_token_equality_truth_table () =
   check bool "different-length mismatch" false (equal "admin-secret" "admin-secret-long")
 
 let () =
-  run "server_auth_dashboard_actor_resolution"
-    [ ( "resolution"
-      , [ test_case "anonymous public hint is preserved" `Quick
-            test_anonymous_public_read_preserves_hint
-        ; test_case "rejected credential fails closed" `Quick
-            test_rejected_credential_cannot_supply_actor_hint
-        ; test_case "malformed credential fails closed" `Quick
-            test_malformed_credential_cannot_become_anonymous
-        ; test_case "credential precedence and observer query state" `Quick
-            test_credential_source_precedence_and_observer_query_state
-        ; test_case "MCP auth surfaces preserve typed reasons" `Quick
-            test_mcp_auth_surfaces_preserve_typed_reasons
-        ; test_case "authenticated owner is canonical" `Quick
-            test_authenticated_owner_overrides_request_hint
-        ; test_case "admin token equality truth table" `Quick
-            test_admin_token_equality_truth_table
-        ] )
-    ]
+  Eio_main.run @@ fun _env ->
+  Server_request_authority.with_current
+    (loopback_request_authority ())
+    (fun () ->
+       run "server_auth_dashboard_actor_resolution"
+         [ ( "resolution"
+           , [ test_case "anonymous public hint is preserved" `Quick
+                 test_anonymous_public_read_preserves_hint
+             ; test_case "rejected credential fails closed" `Quick
+                 test_rejected_credential_cannot_supply_actor_hint
+             ; test_case "malformed credential fails closed" `Quick
+                 test_malformed_credential_cannot_become_anonymous
+             ; test_case "credential precedence and observer query state" `Quick
+                 test_credential_source_precedence_and_observer_query_state
+             ; test_case "MCP auth surfaces preserve typed reasons" `Quick
+                 test_mcp_auth_surfaces_preserve_typed_reasons
+             ; test_case "authenticated owner is canonical" `Quick
+                 test_authenticated_owner_overrides_request_hint
+             ; test_case "admin token equality truth table" `Quick
+                 test_admin_token_equality_truth_table
+             ] )
+         ])

@@ -15,6 +15,11 @@ type store_error =
   | Schedule_not_found
   | Invalid_initial_status of string
   | Invalid_status_transition of string
+  | Schedule_occurrence_already_used of
+      { schedule_instance_id : string
+      ; due_at : float
+      ; payload_digest : string
+      }
   | Schedule_not_due_candidate
   | Schedule_not_running
   | Persistence_failed of string
@@ -133,7 +138,8 @@ val update_request :
   (Schedule_domain.schedule_request, store_error) result
 (** Replaces [due_at], [expires_at], and [payload] of a scheduled request.
     Returns [Invalid_status_transition] for due, terminal, or [Running]
-    requests. *)
+    requests. Returns [Schedule_occurrence_already_used] rather than reusing
+    an occurrence identity already present in execution history. *)
 
 val refresh_due :
   Workspace_utils.config ->

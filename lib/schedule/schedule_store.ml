@@ -12,6 +12,11 @@ type store_error =
   | Schedule_not_found
   | Invalid_initial_status of string
   | Invalid_status_transition of string
+  | Schedule_occurrence_already_used of
+      { schedule_instance_id : string
+      ; due_at : float
+      ; payload_digest : string
+      }
   | Schedule_not_due_candidate
   | Schedule_not_running
   | Persistence_failed of string
@@ -88,6 +93,13 @@ let store_error_to_string = function
   | Schedule_not_found -> "schedule not found"
   | Invalid_initial_status reason -> "invalid initial schedule status: " ^ reason
   | Invalid_status_transition reason -> "invalid schedule status transition: " ^ reason
+  | Schedule_occurrence_already_used
+      { schedule_instance_id; due_at; payload_digest } ->
+    Printf.sprintf
+      "schedule occurrence already used: instance=%s due_at=%.17g payload_digest=%s"
+      schedule_instance_id
+      due_at
+      payload_digest
   | Schedule_not_due_candidate -> "schedule is not due"
   | Schedule_not_running -> "schedule is not running"
   | Persistence_failed msg -> "schedule persistence failed: " ^ msg
@@ -509,19 +521,36 @@ let update_request config ~schedule_id ~due_at ~expires_at ~payload =
           (Invalid_status_transition
              "only scheduled requests can be updated")
       else
-        let updated_request =
-          { request with
-            Schedule_domain.due_at
-          ; expires_at
-          ; payload
-          }
-        in
-        let schedules = replace_schedule state.schedules updated_request in
-        let next_state =
-          bump_state state ~schedules ~executions:state.executions
-        in
-        let* () = write_state config next_state in
-        Ok updated_request)
+        let payload_digest = Schedule_domain.payload_digest payload in
+        match
+          execution_for_occurrence
+            state
+            ~schedule_instance_id:request.schedule_instance_id
+            ~schedule_id:request.schedule_id
+            ~due_at
+            ~payload_digest
+        with
+        | Some _ ->
+          Error
+            (Schedule_occurrence_already_used
+               { schedule_instance_id = request.schedule_instance_id
+               ; due_at
+               ; payload_digest
+               })
+        | None ->
+          let updated_request =
+            { request with
+              Schedule_domain.due_at
+            ; expires_at
+            ; payload
+            }
+          in
+          let schedules = replace_schedule state.schedules updated_request in
+          let next_state =
+            bump_state state ~schedules ~executions:state.executions
+          in
+          let* () = write_state config next_state in
+          Ok updated_request)
 ;;
 
 let refresh_due config ~now =

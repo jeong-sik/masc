@@ -696,12 +696,25 @@ let test_recurring_dispatched_completion_preserves_next_occurrence () =
   | None -> fail "recurring execution missing"
 ;;
 
-let test_recurring_dispatched_completion_settles_duplicate_executions () =
+let check_reused_occurrence_rejected label request = function
+  | Error
+      (Schedule_occurrence_already_used
+         { schedule_instance_id; due_at; payload_digest = actual_digest }) ->
+    check string (label ^ " instance") request.schedule_instance_id schedule_instance_id;
+    check (float 0.0) (label ^ " due_at") request.due_at due_at;
+    check string (label ^ " payload digest")
+      (payload_digest request.payload)
+      actual_digest
+  | Error err -> fail (label ^ ": wrong error: " ^ store_error_to_string err)
+  | Ok _ -> fail (label ^ ": reused occurrence identity was accepted")
+;;
+
+let test_update_rejects_dispatched_occurrence_reuse () =
   with_workspace
   @@ fun config ->
   let request =
     make_request
-      ~schedule_id:"accepted-recurring-duplicate"
+      ~schedule_id:"reject-dispatched-occurrence-reuse"
       ~recurrence:(Interval { interval_sec = 60 })
       ()
   in
@@ -709,60 +722,24 @@ let test_recurring_dispatched_completion_settles_duplicate_executions () =
   ignore (refresh_due config ~now:201.0);
   ignore (start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id);
   ignore (accept_running config ~now:203.0 ~schedule_id:request.schedule_id ());
-  (match
-     update_request
-       config
-       ~schedule_id:request.schedule_id
-       ~due_at:request.due_at
-       ~expires_at:request.expires_at
-       ~payload:request.payload
-   with
-   | Ok _ -> ()
-   | Error err -> fail (store_error_to_string err));
-  ignore (refresh_due config ~now:201.0);
-  ignore (start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id);
-  ignore (accept_running config ~now:203.0 ~schedule_id:request.schedule_id ());
-  let digest = payload_digest request.payload in
-  let executions =
-    executions_for_schedule (read_state config) ~schedule_id:request.schedule_id
-  in
-  check int "duplicate occurrence execution count" 2 (List.length executions);
-  check int "duplicate occurrence execution ids are unique" 2
-    (executions
-     |> List.map (fun (execution : execution_record) -> execution.execution_id)
-     |> List.sort_uniq String.compare
-     |> List.length);
-  List.iter
-    (fun (execution : execution_record) ->
-       check string "duplicate occurrence is dispatched" "dispatched"
-         (execution_status_to_string execution.status))
-    executions;
-  (match
-     complete_dispatched_occurrence
-       config
-       ~now:207.0
-       ~schedule_instance_id:request.schedule_instance_id
-       ~schedule_id:request.schedule_id
-       ~due_at:request.due_at
-       ~payload_digest:digest
-       ()
-   with
-   | Ok stored ->
-     check_status "recurring remains scheduled" Scheduled stored.status;
-     check (float 0.001) "next occurrence retained" 260.0 stored.due_at
-   | Error err -> fail (store_error_to_string err));
-  executions_for_schedule (read_state config) ~schedule_id:request.schedule_id
-  |> List.iter (fun (execution : execution_record) ->
-    check string "every duplicate execution succeeded" "succeeded"
-      (execution_status_to_string execution.status))
+  update_request
+    config
+    ~schedule_id:request.schedule_id
+    ~due_at:request.due_at
+    ~expires_at:request.expires_at
+    ~payload:request.payload
+  |> check_reused_occurrence_rejected "dispatched occurrence" request;
+  match get_schedule config ~schedule_id:request.schedule_id with
+  | Some stored -> check (float 0.0) "rejected update keeps next due" 260.0 stored.due_at
+  | None -> fail "rejected update removed the recurring schedule"
 ;;
 
-let test_recurring_completion_ignores_failed_prior_attempt () =
+let test_update_rejects_failed_occurrence_reuse () =
   with_workspace
   @@ fun config ->
   let request =
     make_request
-      ~schedule_id:"accepted-recurring-failed-prior"
+      ~schedule_id:"reject-failed-occurrence-reuse"
       ~recurrence:(Interval { interval_sec = 60 })
       ()
   in
@@ -782,41 +759,16 @@ let test_recurring_completion_ignores_failed_prior_attempt () =
           ~due_at:request.due_at
           ~payload_digest:digest
           ~error:"acceptance follow-up failed"));
-  (match
-     update_request
-       config
-       ~schedule_id:request.schedule_id
-       ~due_at:request.due_at
-       ~expires_at:request.expires_at
-       ~payload:request.payload
-   with
-   | Ok _ -> ()
-   | Error err -> fail (store_error_to_string err));
-  ignore (refresh_due config ~now:205.0);
-  ignore (start_due_candidate config ~now:206.0 ~schedule_id:request.schedule_id);
-  ignore (accept_running config ~now:207.0 ~schedule_id:request.schedule_id ());
-  (match
-     complete_dispatched_occurrence
-       config
-       ~now:208.0
-       ~schedule_instance_id:request.schedule_instance_id
-       ~schedule_id:request.schedule_id
-       ~due_at:request.due_at
-       ~payload_digest:digest
-       ()
-   with
-   | Ok stored ->
-     check_status "recurring remains scheduled" Scheduled stored.status;
-     check (float 0.001) "next occurrence retained" 260.0 stored.due_at
-   | Error err -> fail (store_error_to_string err));
-  let statuses =
-    executions_for_schedule (read_state config) ~schedule_id:request.schedule_id
-    |> List.map (fun (execution : execution_record) -> execution.status)
-  in
-  check int "failed history remains terminal" 1
-    (List.length (List.filter (( = ) Execution_failed) statuses));
-  check int "current duplicate succeeds" 1
-    (List.length (List.filter (( = ) Execution_succeeded) statuses))
+  update_request
+    config
+    ~schedule_id:request.schedule_id
+    ~due_at:request.due_at
+    ~expires_at:request.expires_at
+    ~payload:request.payload
+  |> check_reused_occurrence_rejected "failed occurrence" request;
+  match get_schedule config ~schedule_id:request.schedule_id with
+  | Some stored -> check (float 0.0) "failed reuse keeps next due" 260.0 stored.due_at
+  | None -> fail "failed reuse rejection removed the recurring schedule"
 ;;
 
 let test_batch_settlement_finishes_orphan_execution () =
@@ -1282,10 +1234,10 @@ let () =
             test_dispatched_one_shot_completes_by_exact_occurrence;
           test_case "recurring completion preserves next occurrence" `Quick
             test_recurring_dispatched_completion_preserves_next_occurrence;
-          test_case "recurring completion settles duplicate executions" `Quick
-            test_recurring_dispatched_completion_settles_duplicate_executions;
-          test_case "recurring completion ignores a failed prior attempt" `Quick
-            test_recurring_completion_ignores_failed_prior_attempt;
+          test_case "update rejects dispatched occurrence reuse" `Quick
+            test_update_rejects_dispatched_occurrence_reuse;
+          test_case "update rejects failed occurrence reuse" `Quick
+            test_update_rejects_failed_occurrence_reuse;
           test_case "batch settlement finishes an orphan execution" `Quick
             test_batch_settlement_finishes_orphan_execution;
           test_case "batch settlement preserves valid work beside an error" `Quick

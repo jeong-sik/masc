@@ -21,6 +21,15 @@ fail() {
   exit 1
 }
 
+reject_symlinks_below() {
+  local root="$1"
+  local label="$2"
+  local symlink_path
+  symlink_path="$(find "$root" -type l -print -quit)"
+  [[ -z "$symlink_path" ]] \
+    || fail "$label contains a symlink: $symlink_path"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --base-path)
@@ -122,6 +131,7 @@ run_gate() {
   if [[ -e "$signals_root" || -L "$signals_root" ]]; then
     [[ -d "$signals_root" && ! -L "$signals_root" ]] \
       || fail "schedule signal store is not an exact directory: $signals_root"
+    reject_symlinks_below "$signals_root" "schedule signal store"
     while IFS= read -r -d '' signal_path; do
       signal_file_count=$((signal_file_count + 1))
       [[ -f "$signal_path" && ! -L "$signal_path" ]] \
@@ -146,7 +156,10 @@ run_gate() {
     done < <(find "$signals_root" -name '*.jsonl' -print0)
   fi
 
-  if [[ -d "$keepers_root" ]]; then
+  if [[ -e "$keepers_root" || -L "$keepers_root" ]]; then
+    [[ -d "$keepers_root" && ! -L "$keepers_root" ]] \
+      || fail "Keeper runtime root is not an exact directory: $keepers_root"
+    reject_symlinks_below "$keepers_root" "Keeper runtime root"
     while IFS= read -r -d '' queue_path; do
       queue_count=$((queue_count + 1))
       [[ -f "$queue_path" && ! -L "$queue_path" ]] \
@@ -283,6 +296,14 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   printf '{not-json\n' \
     >"$malformed_queue_root/.masc/keepers/fixture/event-queue-v14.json"
   expect_failure malformed_queue "$malformed_queue_root"
+
+  symlinked_keepers_root="$fixture_root/symlinked-keepers"
+  symlinked_keepers_target="$fixture_root/symlinked-keepers-target"
+  write_schedules "$symlinked_keepers_root" none
+  write_queue "$symlinked_keepers_target" 1 0 0
+  ln -s "$symlinked_keepers_target/.masc/keepers" \
+    "$symlinked_keepers_root/.masc/keepers"
+  expect_failure symlinked_keepers_root "$symlinked_keepers_root"
 
   pre_cut_root="$fixture_root/pre-cut-schedule"
   mkdir -p "$pre_cut_root/.masc"

@@ -3,11 +3,13 @@
 #
 # Usage:
 #   scripts/check-keeper-event-queue-v15-cutover.sh --base-path /path/to/workspace
+#   scripts/check-keeper-event-queue-v15-cutover.sh --base-path /path/to/new-workspace --allow-empty-workspace
 #   scripts/check-keeper-event-queue-v15-cutover.sh --self-test
 
 set -euo pipefail
 
 BASE_PATH="${MASC_BASE_PATH:-$(pwd)}"
+ALLOW_EMPTY_WORKSPACE=0
 SELF_TEST=0
 
 usage() {
@@ -28,6 +30,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --self-test)
       SELF_TEST=1
+      shift
+      ;;
+    --allow-empty-workspace)
+      ALLOW_EMPTY_WORKSPACE=1
       shift
       ;;
     -h|--help)
@@ -57,6 +63,19 @@ run_gate() {
   local pending_count
   local outbox_count
   local accepted_count
+
+  [[ -d "$BASE_PATH" && ! -L "$BASE_PATH" ]] \
+    || fail "base path is not an exact directory: $BASE_PATH"
+  if [[ ! -e "$runtime_root" && ! -L "$runtime_root" ]]; then
+    if [[ "$ALLOW_EMPTY_WORKSPACE" -eq 1 ]]; then
+      printf '[event-queue-v15-cutover] OK: base_path=%s empty_workspace=allowed\n' \
+        "$BASE_PATH"
+      return
+    fi
+    fail "workspace runtime not found: $runtime_root (wrong --base-path? pass --allow-empty-workspace only for an intentional new workspace)"
+  fi
+  [[ -d "$runtime_root" && ! -L "$runtime_root" ]] \
+    || fail "workspace runtime is not an exact directory: $runtime_root"
 
   for schedules_path in \
     "$runtime_root/schedules.json" \
@@ -294,6 +313,14 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   printf '{not-json\n' \
     >"$malformed_signal_root/.masc/schedules/signals/2026-08/04.jsonl"
   expect_failure malformed_signal "$malformed_signal_root"
+
+  missing_runtime_root="$fixture_root/missing-runtime"
+  mkdir -p "$missing_runtime_root"
+  expect_failure missing_runtime "$missing_runtime_root"
+  "$0" \
+    --base-path "$missing_runtime_root" \
+    --allow-empty-workspace \
+    >/dev/null
 
   printf '[event-queue-v15-cutover] self-test OK\n'
   exit 0

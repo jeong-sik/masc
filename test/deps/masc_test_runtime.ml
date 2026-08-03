@@ -4,17 +4,11 @@
     not search parent directories: a test running from a worktree must never
     escape to a sibling or parent checkout's build artifact. *)
 
-let candidate ~env_override ~dune_sourceroot =
+let candidate ~env_override =
   match env_override with
   | Some "" -> Error "MASC_MAIN_EIO_EXE is set but empty"
   | Some path -> Ok path
-  | None ->
-    (match dune_sourceroot with
-     | Some "" -> Error "DUNE_SOURCEROOT is set but empty"
-     | Some root -> Ok (Filename.concat root "_build/default/bin/main_eio.exe")
-     | None ->
-       Error
-         "main_eio executable is unbound; run via Dune or set MASC_MAIN_EIO_EXE")
+  | None -> Error "main_eio executable is unbound; run the test via Dune"
 
 let validate path =
   try
@@ -31,15 +25,14 @@ let validate path =
       (Printf.sprintf "main_eio executable is unusable (%s: %s): %s" operation
          (Unix.error_message error) path)
 
-let resolve ~env_override ~dune_sourceroot =
-  match candidate ~env_override ~dune_sourceroot with
+let resolve ~env_override =
+  match candidate ~env_override with
   | Error _ as error -> error
   | Ok path -> validate path
 
 let find_main_eio_exe () =
   match
     resolve ~env_override:(Sys.getenv_opt "MASC_MAIN_EIO_EXE")
-      ~dune_sourceroot:(Sys.getenv_opt "DUNE_SOURCEROOT")
   with
   | Error detail -> failwith detail
   | Ok path ->

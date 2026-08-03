@@ -382,6 +382,20 @@ let test_consumed_code_is_not_restored_after_store_failure () =
 let test_scope_cannot_escalate_role () =
   check
     bool
+    "omitted authorization scope defaults to tools"
+    true
+    (match Auth_oauth.parse_scopes None with
+     | Ok [ Auth_oauth.Mcp_tools ] -> true
+     | Ok _ | Error _ -> false);
+  check
+    bool
+    "explicitly empty authorization scope is invalid"
+    true
+    (match Auth_oauth.parse_scopes (Some "   ") with
+     | Error Auth_oauth.Invalid_scope -> true
+     | Ok _ | Error _ -> false);
+  check
+    bool
     "worker cannot obtain admin scope"
     true
     (Result.is_error

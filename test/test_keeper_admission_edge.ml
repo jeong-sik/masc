@@ -336,6 +336,30 @@ let test_unreadable_backlog_does_not_silence_other_stimuli () =
     (List.exists (( = ) WO.Scope_message_pending) (run_reasons d))
 ;;
 
+let test_recovery_backlog_is_not_authoritative () =
+  without_overrides @@ fun () ->
+  let recovery =
+    { Workspace.primary_error = "primary backlog is corrupt"
+    ; recovery_path = "/workspace/tasks/backlog.json.last-good"
+    }
+  in
+  let d =
+    decide
+      ~meta:(bootstrapped_meta ())
+      { base_obs with
+        backlog_edge =
+          Inputs.Recovery_backlog
+            { revision = 2
+            ; projection_sha256 = projection_b
+            ; recovery
+            }
+      }
+  in
+  check bool "recovery snapshot does not admit a scheduled edge" false d.WO.should_run;
+  check bool "recovery snapshot is not designed silence" true
+    (List.exists (( = ) WO.Backlog_unreadable) (skip_reasons d))
+;;
+
 (* ==== §3.2: the edge is a revision compare, no clock anywhere ==== *)
 
 let edge ~last_consumed ~last_projection ~version ~projection =
@@ -579,6 +603,10 @@ let () =
             "unreadable backlog does not silence other stimuli"
             `Quick
             test_unreadable_backlog_does_not_silence_other_stimuli
+        ; test_case
+            "recovery backlog is not authoritative"
+            `Quick
+            test_recovery_backlog_is_not_authoritative
         ] )
     ; ( "edge_compare"
       , [ test_case "revision and projection pair" `Quick test_edge_is_pure_revision_compare

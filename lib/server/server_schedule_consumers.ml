@@ -741,12 +741,13 @@ let settlement
            one, which is byte-identical to "this occurrence never existed".
            Absence of evidence is only evidence of absence once the row we know
            we wrote comes back. *)
-        Error
-          (Printf.sprintf
-             "keeper %s reaction ledger returned no stimulus row for occurrence \
-              %s; refusing to read unreadable evidence as absent"
-             keeper_name
-             occurrence_id)
+        Ok
+          (Schedule_runner.Consumer_evidence_unreadable
+             (Printf.sprintf
+                "keeper %s reaction ledger returned no stimulus row for occurrence \
+                 %s; the occurrence predates what this ledger generation can read"
+                keeper_name
+                occurrence_id))
       else
         Ok
           (Schedule_runner.Consumer_lost_occurrence

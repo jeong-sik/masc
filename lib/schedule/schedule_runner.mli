@@ -69,6 +69,19 @@ type settlement_evidence =
   | Consumer_lost_occurrence of string
       (** Neither pending work nor terminal evidence exists for this occurrence.
           The payload is the durable reason, recorded as the failure. *)
+  | Consumer_evidence_unreadable of string
+      (** The consumer cannot see far enough back to answer — its evidence store
+          has moved on (a generation roll, a retention cut) and the occurrence
+          predates what it can read.
+
+          This is deliberately NOT [Consumer_lost_occurrence]. "The work never
+          ran" is a fact; "I cannot tell whether it ran" is not, and writing the
+          second as the first would put a false terminal in the audit record.
+          Such an occurrence is never settled by this sweep, and — because the
+          evidence does not come back — it stays unsettled forever. Callers must
+          therefore report it as a standing condition rather than a per-sweep
+          failure, or the sweep becomes a log generator. Giving these a terminal
+          disposition an operator can act on is issue #26695. *)
 
 type consumer =
   { accepts : Schedule_domain.schedule_request -> (unit, string) result
@@ -131,8 +144,14 @@ type reclaim_outcome =
   ; reclaimed : int
   ; held : int
   ; settled_elsewhere : int
+  ; indeterminate : (string * string) list
+        (** occurrence id paired with why the consumer could not answer. Standing
+            condition, not a per-sweep failure: the same occurrences reappear on
+            every sweep until something outside this path disposes of them. *)
   ; failures : (string * string) list
-        (** occurrence id paired with the error that stopped its reclaim. *)
+        (** occurrence id paired with the error that stopped its reclaim. These
+            are transient — an unreadable queue, a failed store write — and are
+            expected to clear on their own. *)
   }
 
 val reclaim_lost_occurrences :
@@ -153,4 +172,11 @@ val reclaim_lost_occurrences :
     untouched, and a consumer error leaves it untouched as well: an occurrence
     is only ever settled on positive evidence that nothing else can settle it.
     Per-occurrence errors are collected rather than aborting the sweep, so one
-    unreadable consumer cannot strand every other occurrence. *)
+    unreadable consumer cannot strand every other occurrence.
+
+    [indeterminate] and [failures] are separated because they age differently. A
+    failure is transient and worth reporting each time it happens; an
+    indeterminate occurrence recurs on every sweep for as long as the store
+    lives, so reporting it per-sweep would emit an unbounded log stream that
+    someone would eventually silence with deduplication — suppressing the
+    symptom of a disposition that was never designed. Report it as a count. *)

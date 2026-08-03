@@ -52,6 +52,7 @@ type settlement_evidence =
   | Consumer_holds_occurrence
   | Consumer_settled_occurrence
   | Consumer_lost_occurrence of string
+  | Consumer_evidence_unreadable of string
 
 type consumer =
   { accepts : Schedule_domain.schedule_request -> (unit, string) result
@@ -73,6 +74,7 @@ type reclaim_outcome =
   ; reclaimed : int
   ; held : int
   ; settled_elsewhere : int
+  ; indeterminate : (string * string) list
   ; failures : (string * string) list
   }
 
@@ -426,7 +428,13 @@ let tick ?consumer config ~now =
 ;;
 
 let empty_reclaim_outcome =
-  { examined = 0; reclaimed = 0; held = 0; settled_elsewhere = 0; failures = [] }
+  { examined = 0
+  ; reclaimed = 0
+  ; held = 0
+  ; settled_elsewhere = 0
+  ; indeterminate = []
+  ; failures = []
+  }
 ;;
 
 let safe_consumer_settlement consumer config request execution =
@@ -457,6 +465,8 @@ let reclaim_occurrence
   | Ok Consumer_holds_occurrence -> { acc with held = acc.held + 1 }
   | Ok Consumer_settled_occurrence ->
     { acc with settled_elsewhere = acc.settled_elsewhere + 1 }
+  | Ok (Consumer_evidence_unreadable reason) ->
+    { acc with indeterminate = (occurrence_id, reason) :: acc.indeterminate }
   | Ok (Consumer_lost_occurrence reason) ->
     (match
        Schedule_store.fail_dispatched_occurrence
@@ -487,5 +497,9 @@ let reclaim_lost_occurrences ~consumer config ~now =
       Schedule_store.unsettled_dispatched_occurrences state
       |> List.fold_left (reclaim_occurrence config ~now consumer) empty_reclaim_outcome
     in
-    Ok { outcome with failures = List.rev outcome.failures }
+    Ok
+      { outcome with
+        indeterminate = List.rev outcome.indeterminate
+      ; failures = List.rev outcome.failures
+      }
 ;;

@@ -762,6 +762,34 @@ let test_reclaim_leaves_occurrence_alone_when_consumer_errors () =
     (untouched.status = Execution_dispatched)
 ;;
 
+
+(* The generation-pinned-ledger case. It must not settle, and it must not be
+   reported the same way a transient failure is: these occurrences come back on
+   every sweep forever, so folding them into [failures] turns the sweep into a
+   log generator (#26695). *)
+let test_reclaim_reports_unreadable_evidence_without_settling () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    accepted_recurring_occurrence config ~schedule_id:"reclaim-unreadable"
+  in
+  let calls = ref [] in
+  let unreadable_consumer =
+    accepting_consumer
+      ~settlement:(fun _config _request _execution ->
+        Ok (Consumer_evidence_unreadable "ledger generation rolled past it"))
+      calls
+  in
+  let outcome = reclaim_ok ~consumer:unreadable_consumer config ~now:400.0 in
+  check int "occurrence examined" 1 outcome.examined;
+  check int "nothing reclaimed on unreadable evidence" 0 outcome.reclaimed;
+  check int "reported as indeterminate" 1 (List.length outcome.indeterminate);
+  check int "not counted as a transient failure" 0 (List.length outcome.failures);
+  let untouched = latest_execution config ~schedule_id:request.schedule_id in
+  check bool "occurrence stays dispatched" true
+    (untouched.status = Execution_dispatched)
+;;
+
 let () =
   run "Schedule_runner"
     [ ( "tick",
@@ -797,6 +825,8 @@ let () =
             test_reclaim_leaves_held_occurrence_alone
         ; test_case "leaves an occurrence when the consumer cannot answer" `Quick
             test_reclaim_leaves_occurrence_alone_when_consumer_errors
+        ; test_case "reports unreadable evidence without settling" `Quick
+            test_reclaim_reports_unreadable_evidence_without_settling
         ] )
     ; ( "status",
         [ test_case "tracks liveness snapshot" `Quick

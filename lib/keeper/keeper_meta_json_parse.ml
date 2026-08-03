@@ -36,6 +36,32 @@ let int_field fields name =
   | other -> invalidf "field %s must be an integer, got %s" name (Json_util.kind_name other)
 ;;
 
+(* RFC-0357 §3.3: absence-tolerated only for fields listed in
+   [Keeper_meta_json_current_schema.genesis_defaulted_field_names]. An absent
+   field is a pre-RFC meta and decodes as the genesis value; a PRESENT
+   malformed or negative value still fails the decode — corruption must not
+   silently rewind an edge clock. The pair invariant below rejects
+   half-genesis states, so tolerance only ever produces the full genesis
+   pair. *)
+let genesis_int_field fields name ~genesis =
+  match List.assoc_opt name fields with
+  | None -> Ok genesis
+  | Some (`Int value) ->
+    if value >= 0
+    then Ok value
+    else invalidf "field %s must be nonnegative, got %d" name value
+  | Some other ->
+    invalidf "field %s must be an integer, got %s" name (Json_util.kind_name other)
+;;
+
+let genesis_string_field fields name ~genesis =
+  match List.assoc_opt name fields with
+  | None -> Ok genesis
+  | Some (`String value) -> Ok value
+  | Some other ->
+    invalidf "field %s must be a string, got %s" name (Json_util.kind_name other)
+;;
+
 let float_field fields name =
   let* value = required_field fields name in
   let parsed =
@@ -339,10 +365,13 @@ let decode_current_meta fields =
   let* last_proactive_preview = string_field fields "last_proactive_preview" in
   let* consecutive_noop_count = int_field fields "consecutive_noop_count" in
   let* last_consumed_backlog_revision =
-    int_field fields "last_consumed_backlog_revision"
+    genesis_int_field fields "last_consumed_backlog_revision" ~genesis:0
   in
   let* last_consumed_backlog_projection_sha256 =
-    string_field fields "last_consumed_backlog_projection_sha256"
+    genesis_string_field
+      fields
+      "last_consumed_backlog_projection_sha256"
+      ~genesis:""
   in
   let* () =
     if last_consumed_backlog_revision >= 0

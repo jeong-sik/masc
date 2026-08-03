@@ -1721,6 +1721,18 @@ let test_read_backlog_counts_preserves_unreadable_observation () =
      | Keeper_world_observation_inputs.Current_task_missing _
      | Keeper_world_observation_inputs.Current_task_unavailable _ ->
        Alcotest.fail "valid recovery source was not preserved");
+    let meta = keeper_meta_for_self_filter "keeper-backlog-recovery-agent" in
+    let unclaimed, claimable, failed, changed, revision =
+      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    in
+    Alcotest.(check int) "recovery unclaimed count is inert" 0 unclaimed;
+    Alcotest.(check int) "recovery claimable count is inert" 0 claimable;
+    Alcotest.(check int) "recovery failed count is inert" 0 failed;
+    Alcotest.(check bool) "recovery cannot report a backlog edge" false changed;
+    Alcotest.(check (option int))
+      "recovery has no authoritative revision"
+      None
+      revision;
     write_corrupt (Workspace.backlog_recovery_path config);
     let meta = keeper_meta_for_self_filter "keeper-backlog-failure-agent" in
     let unclaimed, claimable, failed, changed, revision =

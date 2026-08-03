@@ -9,16 +9,17 @@ type startup_ready = {
 }
 
 val ready_after_terminal_task :
-  config:Workspace_core.config -> task_id:string -> ready option
+  config:Workspace_core.config -> task_id:string -> (ready option, string) result
 (** Re-read the canonical Task, Goal link, and Goal stores after a terminal
     Task commit. Returns a reconciliation cue only when the triggering Task is
     terminal, belongs to exactly one executing Goal, and every linked Task is
     terminal. This is evidence that Goal-level synthesis is ready, not authority
-    to complete the Goal. *)
+    to complete the Goal. A recovery snapshot is rejected as non-authoritative. *)
 
 val ready_executing_goals :
-  config:Workspace_core.config -> startup_ready list
+  config:Workspace_core.config -> (startup_ready list, string) result
 (** Deterministically scans canonical Goal, Task, and link state for executing
     Goals whose linked Tasks are all terminal. The latest terminal Task
     supplies the stable stimulus id and delivery actor. This is restart
-    reconciliation only; it never mutates Goal or Task state. *)
+    reconciliation only; it never mutates Goal or Task state. A recovery
+    snapshot is rejected rather than treated as current completion evidence. *)

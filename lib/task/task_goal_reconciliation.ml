@@ -42,13 +42,16 @@ let latest_terminal_task tasks =
 ;;
 
 let ready_after_terminal_task ~config ~task_id =
-  let tasks = Workspace.get_tasks_raw config in
-  match
-    List.find_opt
-      (fun (task : Masc_domain.task) -> String.equal task.id task_id)
-      tasks
-  with
-  | Some task when Masc_domain.task_status_is_terminal task.task_status ->
+  let open Result.Syntax in
+  let* backlog = Workspace_backlog.read_backlog_r config in
+  let tasks = backlog.tasks in
+  Ok
+    (match
+       List.find_opt
+         (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+         tasks
+     with
+     | Some task when Masc_domain.task_status_is_terminal task.task_status ->
     let goal_task_links = Workspace_goal_index.read_goal_task_links config in
     let task_goal_index =
       Workspace_goal_index.build_task_goal_index ~goal_task_links ()
@@ -70,17 +73,20 @@ let ready_after_terminal_task ~config ~task_id =
           else None
         | Some _ | None -> None)
      | Some (_ :: _ :: _) | Some [] | None -> None)
-  | Some _ | None -> None
+     | Some _ | None -> None)
 
 let ready_executing_goals ~config =
-  let tasks = Workspace.get_tasks_raw config in
+  let open Result.Syntax in
+  let* backlog = Workspace_backlog.read_backlog_r config in
+  let tasks = backlog.tasks in
   let goal_task_links = Workspace_goal_index.read_goal_task_links config in
   let goal_task_index =
     Workspace_goal_index.build_goal_task_index ~goal_task_links tasks
   in
-  Goal_store.list_goals config ~phase:Goal_phase.Executing ()
-  |> List.sort (fun left right -> String.compare left.Goal_store.id right.Goal_store.id)
-  |> List.filter_map (fun (goal : Goal_store.goal) ->
+  Ok
+    (Goal_store.list_goals config ~phase:Goal_phase.Executing ()
+     |> List.sort (fun left right -> String.compare left.Goal_store.id right.Goal_store.id)
+     |> List.filter_map (fun (goal : Goal_store.goal) ->
        let linked_tasks =
          Workspace_goal_index.tasks_for_goal goal_task_index ~goal_id:goal.id
        in
@@ -100,5 +106,5 @@ let ready_executing_goals ~config =
              { ready =
                  { goal_id = goal.id; triggering_task_id = task.Masc_domain.id }
              ; completing_agent_name
-             })
+             }))
 ;;

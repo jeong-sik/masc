@@ -7,6 +7,7 @@ type keeper_wake_reaction_ledger_status =
 type keeper_wake_occurrence_status =
   | Keeper_wake_awaiting_ack
   | Keeper_wake_already_acked
+  | Keeper_wake_already_failed
   | Keeper_wake_already_cancelled
 
 type keeper_wake_activation_deferred_reason =
@@ -47,3 +48,14 @@ val consumer : Schedule_runner.consumer
 
     The schedule core remains opaque; this adapter is the MASC server layer that
     interprets explicitly supported payload envelopes. *)
+
+module For_testing : sig
+  val settlements_with_read_state :
+    read_state:
+      (base_path:string ->
+       string ->
+       (Keeper_event_queue_state.t, string) result) ->
+    Workspace_utils.config ->
+    Schedule_domain.execution_record list ->
+    (Schedule_runner.settlement_evidence, string) result list
+end

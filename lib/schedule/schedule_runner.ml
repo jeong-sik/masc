@@ -51,6 +51,7 @@ type consumer_dispatch_result =
 type settlement_evidence =
   | Consumer_holds_occurrence
   | Consumer_completed_occurrence
+  | Consumer_failed_occurrence of string
   | Consumer_cancelled_occurrence of string
   | Consumer_lost_occurrence of string
 
@@ -68,12 +69,22 @@ type consumer =
       (settlement_evidence, string) result list
   }
 
+type reclaim_failure =
+  | Occurrence_reclaim_failure of
+      { occurrence_id : string
+      ; error : string
+      }
+  | Settlement_batch_cardinality_mismatch of
+      { expected : int
+      ; actual : int
+      }
+
 type reclaim_outcome =
   { examined : int
   ; reclaimed : int
   ; held : int
   ; settled_elsewhere : int
-  ; failures : (string * string) list
+  ; failures : reclaim_failure list
   }
 
 type runner_error =
@@ -458,8 +469,14 @@ let reclaim_occurrence
     |> Schedule_occurrence_id.to_string
   in
   let acc = { acc with examined = acc.examined + 1 } in
+  let fail acc error =
+    { acc with
+      failures =
+        Occurrence_reclaim_failure { occurrence_id; error } :: acc.failures
+    }
+  in
   match settlement with
-  | Error message -> { acc with failures = (occurrence_id, message) :: acc.failures }
+  | Error message -> fail acc message
   | Ok Consumer_holds_occurrence -> { acc with held = acc.held + 1 }
   | Ok Consumer_completed_occurrence ->
     (match
@@ -472,11 +489,19 @@ let reclaim_occurrence
          ()
      with
      | Ok _ -> { acc with settled_elsewhere = acc.settled_elsewhere + 1 }
-     | Error err ->
-       { acc with
-         failures =
-           (occurrence_id, Schedule_store.store_error_to_string err) :: acc.failures
-       })
+     | Error err -> fail acc (Schedule_store.store_error_to_string err))
+  | Ok (Consumer_failed_occurrence reason) ->
+    (match
+       Schedule_store.fail_dispatched_occurrence
+         config
+         ~now
+         ~schedule_id:execution.schedule_id
+         ~due_at:execution.due_at
+         ~payload_digest:execution.payload_digest
+         ~error:reason
+     with
+     | Ok _ -> { acc with settled_elsewhere = acc.settled_elsewhere + 1 }
+     | Error err -> fail acc (Schedule_store.store_error_to_string err))
   | Ok (Consumer_cancelled_occurrence reason) ->
     (match
        Schedule_store.fail_dispatched_occurrence
@@ -488,11 +513,7 @@ let reclaim_occurrence
          ~error:reason
      with
      | Ok _ -> { acc with settled_elsewhere = acc.settled_elsewhere + 1 }
-     | Error err ->
-       { acc with
-         failures =
-           (occurrence_id, Schedule_store.store_error_to_string err) :: acc.failures
-       })
+     | Error err -> fail acc (Schedule_store.store_error_to_string err))
   | Ok (Consumer_lost_occurrence reason) ->
     (match
        Schedule_store.fail_dispatched_occurrence
@@ -504,11 +525,7 @@ let reclaim_occurrence
          ~error:reason
      with
      | Ok _ -> { acc with reclaimed = acc.reclaimed + 1 }
-     | Error err ->
-       { acc with
-         failures =
-           (occurrence_id, Schedule_store.store_error_to_string err) :: acc.failures
-       })
+     | Error err -> fail acc (Schedule_store.store_error_to_string err))
 ;;
 
 let reclaim_lost_occurrences ~consumer config ~now =
@@ -524,13 +541,29 @@ let reclaim_lost_occurrences ~consumer config ~now =
     let outcome =
       if List.length executions <> List.length settlements
       then
+        let expected = List.length executions in
+        let actual = List.length settlements in
+        let mismatch =
+          Printf.sprintf
+            "consumer settlement batch cardinality mismatch: expected=%d actual=%d"
+            expected
+            actual
+        in
         { empty_reclaim_outcome with
+          examined = expected
+        ;
           failures =
-            List.map
-              (fun execution ->
-                 ( execution.Schedule_domain.execution_id
-                 , "consumer settlement batch cardinality mismatch" ))
-              executions
+            (match executions with
+             | [] ->
+               [ Settlement_batch_cardinality_mismatch { expected; actual } ]
+             | executions ->
+               List.map
+                 (fun execution ->
+                    Occurrence_reclaim_failure
+                      { occurrence_id = execution.Schedule_domain.execution_id
+                      ; error = mismatch
+                      })
+                 executions)
         }
       else
         List.fold_left2

@@ -816,6 +816,69 @@ let test_reclaim_projects_consumer_cancellation () =
     (Some "operator cancelled durable work") settled.error
 ;;
 
+let test_reclaim_projects_consumer_failure () =
+  with_workspace
+  @@ fun config ->
+  let request = accepted_recurring_occurrence config ~schedule_id:"reclaim-failed" in
+  let calls = ref [] in
+  let failed_consumer =
+    accepting_consumer
+      ~settlement:(fun _config _execution ->
+        Ok (Consumer_failed_occurrence "keeper turn failed before schedule settlement"))
+      calls
+  in
+  let outcome = reclaim_ok ~consumer:failed_consumer config ~now:400.0 in
+  check int "failed occurrence examined" 1 outcome.examined;
+  check int "failed occurrence settled" 1 outcome.settled_elsewhere;
+  check int "failure projection has no reclaim error" 0 (List.length outcome.failures);
+  let settled = latest_execution config ~schedule_id:request.schedule_id in
+  check bool "consumer failure fails execution" true
+    (settled.status = Execution_failed);
+  check (option string) "consumer failure reason is preserved"
+    (Some "keeper turn failed before schedule settlement")
+    settled.error
+;;
+
+let test_reclaim_reports_empty_batch_cardinality_mismatch () =
+  with_workspace
+  @@ fun config ->
+  let consumer =
+    { (accepting_consumer (ref [])) with
+      settlements =
+        (fun _config _executions -> [ Ok Consumer_holds_occurrence ])
+    }
+  in
+  let outcome = reclaim_ok ~consumer config ~now:400.0 in
+  check int "empty batch examines no occurrences" 0 outcome.examined;
+  match outcome.failures with
+  | [ Settlement_batch_cardinality_mismatch { expected; actual } ] ->
+    check int "batch failure reports expected cardinality" 0 expected;
+    check int "batch failure reports actual cardinality" 1 actual
+  | _ -> fail "empty batch cardinality mismatch was hidden"
+;;
+
+let test_reclaim_counts_nonempty_batch_cardinality_mismatch () =
+  with_workspace
+  @@ fun config ->
+  ignore
+    (accepted_recurring_occurrence config ~schedule_id:"reclaim-cardinality"
+      : Schedule_domain.schedule_request);
+  let consumer =
+    { (accepting_consumer (ref [])) with
+      settlements = (fun _config _executions -> [])
+    }
+  in
+  let outcome = reclaim_ok ~consumer config ~now:400.0 in
+  check int "mismatched occurrence is examined" 1 outcome.examined;
+  match outcome.failures with
+  | [ Occurrence_reclaim_failure { occurrence_id; error } ] ->
+    check bool "mismatch keeps an occurrence identity" true
+      (String.trim occurrence_id <> "");
+    check bool "mismatch reports exact cardinality" true
+      (String_util.contains_substring error "expected=1 actual=0")
+  | _ -> fail "nonempty batch cardinality mismatch was not occurrence-scoped"
+;;
+
 let test_reclaim_leaves_occurrence_alone_when_consumer_errors () =
   with_workspace
   @@ fun config ->
@@ -876,6 +939,12 @@ let () =
             test_reclaim_then_prune_removes_settled_terminal_request
         ; test_case "projects consumer cancellation to schedule execution" `Quick
             test_reclaim_projects_consumer_cancellation
+        ; test_case "projects consumer failure to schedule execution" `Quick
+            test_reclaim_projects_consumer_failure
+        ; test_case "reports empty settlement batch mismatch" `Quick
+            test_reclaim_reports_empty_batch_cardinality_mismatch
+        ; test_case "counts nonempty settlement batch mismatch" `Quick
+            test_reclaim_counts_nonempty_batch_cardinality_mismatch
         ; test_case "leaves an occurrence when the consumer cannot answer" `Quick
             test_reclaim_leaves_occurrence_alone_when_consumer_errors
         ] )

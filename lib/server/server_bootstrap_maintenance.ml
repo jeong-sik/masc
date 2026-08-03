@@ -57,8 +57,9 @@ let wake_enqueue_counts_of_dispatches dispatches =
           | Error _ -> counts
           | Ok
               (Consumers.Keeper_wake_enqueued
-                { occurrence_status =
+                  { occurrence_status =
                     ( Consumers.Keeper_wake_already_acked
+                    | Consumers.Keeper_wake_already_failed
                     | Consumers.Keeper_wake_already_cancelled )
                 ; _
                 }) ->
@@ -462,11 +463,19 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                  outcome.Schedule_runner.settled_elsewhere;
              (* A transient failure is worth a line each time it happens. *)
              List.iter
-               (fun (occurrence_id, error) ->
-                  Log.Server.warn
-                    "schedule_runner: occurrence reclaim failed occurrence=%s error=%s"
-                    occurrence_id
-                    error)
+               (function
+                 | Schedule_runner.Occurrence_reclaim_failure
+                     { occurrence_id; error } ->
+                   Log.Server.warn
+                     "schedule_runner: occurrence reclaim failed occurrence=%s error=%s"
+                     occurrence_id
+                     error
+                 | Schedule_runner.Settlement_batch_cardinality_mismatch
+                     { expected; actual } ->
+                   Log.Server.warn
+                     "schedule_runner: consumer settlement batch cardinality mismatch expected=%d actual=%d"
+                     expected
+                     actual)
                outcome.Schedule_runner.failures;
            | Error err ->
              Log.Server.warn

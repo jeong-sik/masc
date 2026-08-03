@@ -131,17 +131,20 @@ let keeper_wake_reaction_ledger_status_json_fields = function
 type keeper_wake_occurrence_status =
   | Keeper_wake_awaiting_ack
   | Keeper_wake_already_acked
+  | Keeper_wake_already_failed
   | Keeper_wake_already_cancelled
 
 let keeper_wake_occurrence_status_to_string = function
   | Keeper_wake_awaiting_ack -> "awaiting_ack"
   | Keeper_wake_already_acked -> "already_acked"
+  | Keeper_wake_already_failed -> "already_failed"
   | Keeper_wake_already_cancelled -> "already_cancelled"
 ;;
 
 let keeper_wake_occurrence_status_of_string = function
   | "awaiting_ack" -> Ok Keeper_wake_awaiting_ack
   | "already_acked" -> Ok Keeper_wake_already_acked
+  | "already_failed" -> Ok Keeper_wake_already_failed
   | "already_cancelled" -> Ok Keeper_wake_already_cancelled
   | value -> Error ("unsupported occurrence_status: " ^ value)
 ;;
@@ -290,10 +293,15 @@ let dispatch_receipt_of_detail = function
           Ok ()
         | Keeper_wake_awaiting_ack, Keeper_wake_activation_not_required ->
           Error "awaiting_ack occurrence requires an activation outcome"
-        | (Keeper_wake_already_acked | Keeper_wake_already_cancelled),
+        | ( Keeper_wake_already_acked
+          | Keeper_wake_already_failed
+          | Keeper_wake_already_cancelled ),
           Keeper_wake_activation_not_required ->
           Ok ()
-        | (Keeper_wake_already_acked | Keeper_wake_already_cancelled), _ ->
+        | ( Keeper_wake_already_acked
+          | Keeper_wake_already_failed
+          | Keeper_wake_already_cancelled ),
+          _ ->
           Error "terminal occurrence requires activation_status=not_required"
       in
       Ok
@@ -386,10 +394,40 @@ let record_keeper_wake_stimulus ~base_path ~keeper_name stimulus =
          (Printexc.to_string exn))
 ;;
 
+let ensure_keeper_wake_stimulus_recorded
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+      stimulus
+  =
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+  with
+  | Ok (Keeper_reaction_ledger.Evidence_complete { stimulus_seen = true; _ }) ->
+    Keeper_wake_reaction_ledger_recorded
+  | Ok (Keeper_reaction_ledger.Evidence_complete { stimulus_seen = false; _ }) ->
+    record_keeper_wake_stimulus ~base_path ~keeper_name stimulus
+  | Ok (Keeper_reaction_ledger.Evidence_quarantined { first_reason; _ }) ->
+    Keeper_wake_reaction_ledger_record_failed
+      (Printf.sprintf
+         "scheduled keeper reaction ledger evidence is quarantined: %s"
+         (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason))
+  | Error error ->
+    Keeper_wake_reaction_ledger_record_failed
+      (Printf.sprintf
+         "failed to read scheduled keeper reaction ledger evidence: %s"
+         (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+            error))
+;;
+
 type keeper_wake_acceptance =
   | Wake_required
   | Already_pending of string
   | Already_acked
+  | Already_failed of string
   | Already_cancelled
 
 let activation_deferred_of_paused_dead = function
@@ -502,30 +540,40 @@ let retryable_dispatch_failure detail =
   Error (Schedule_runner.Retryable_dispatch_failure detail)
 ;;
 
-type durable_occurrence_disposition =
+type durable_occurrence_state =
   | Pending
   | Transfer_projecting_to of string
   | Transferred_to of string
-  | Terminally_acked
+  | Terminally_completed
+  | Terminally_failed of string
   | Cancelled of string
 
+type durable_occurrence_disposition =
+  { source : Keeper_event_queue.stimulus
+  ; source_incarnation : int64
+  ; state : durable_occurrence_state
+  }
+
 type resolved_occurrence_disposition =
-  | Pending_at of string
-  | Terminal
+  | Pending_at of string * Keeper_event_queue.stimulus
+  | Terminal_completed
+  | Terminal_failed of string
   | Terminal_cancelled of string
   | Absent_at of string
 
-let disposition_equal left right =
+let occurrence_state_equal left right =
   match left, right with
   | Pending, Pending
-  | Terminally_acked, Terminally_acked -> true
+  | Terminally_completed, Terminally_completed -> true
+  | Terminally_failed left, Terminally_failed right -> String.equal left right
   | Cancelled left, Cancelled right -> String.equal left right
   | Transfer_projecting_to left, Transfer_projecting_to right
   | Transferred_to left, Transferred_to right -> String.equal left right
   | ( Pending
     | Transfer_projecting_to _
     | Transferred_to _
-    | Terminally_acked
+    | Terminally_completed
+    | Terminally_failed _
     | Cancelled _ )
     , _ -> false
 ;;
@@ -536,14 +584,34 @@ let occurrence_source_and_disposition
   =
   match receipt.transition with
   | Keeper_event_queue_state.Cancel_accepted cancellation ->
-    cancellation.source, Cancelled cancellation.reason
+    ( cancellation.source
+    , { source = cancellation.source
+      ; source_incarnation = cancellation.source_incarnation
+      ; state = Cancelled cancellation.reason
+      } )
   | Keeper_event_queue_state.Transfer_accepted transfer ->
     ( transfer.source
-    , if projecting
-      then Transfer_projecting_to transfer.to_keeper
-      else Transferred_to transfer.to_keeper )
+    , { source = transfer.source
+      ; source_incarnation = transfer.source_incarnation
+      ; state =
+          (if projecting
+           then Transfer_projecting_to transfer.to_keeper
+           else Transferred_to transfer.to_keeper)
+      } )
   | Keeper_event_queue_state.Ack_source_terminal terminal ->
-    terminal.source, Terminally_acked
+    let state =
+      match terminal.source_receipt with
+      | Keeper_event_queue_state.Turn_attempt_terminal { detail } ->
+        Terminally_failed detail
+      | Keeper_event_queue_state.Fusion_terminal _
+      | Keeper_event_queue_state.Background_job_terminal _
+      | Keeper_event_queue_state.Hitl_terminal _ -> Terminally_completed
+    in
+    ( terminal.source
+    , { source = terminal.source
+      ; source_incarnation = terminal.source_incarnation
+      ; state
+      } )
 ;;
 
 let durable_occurrence_index state =
@@ -553,17 +621,37 @@ let durable_occurrence_index state =
     | None ->
       Hashtbl.add index occurrence_id disposition;
       Ok ()
-    | Some existing when disposition_equal existing disposition -> Ok ()
-    | Some _ ->
+    | Some existing ->
+      let incarnation_order =
+        Int64.compare disposition.source_incarnation existing.source_incarnation
+      in
+      if incarnation_order > 0
+      then (
+        Hashtbl.replace index occurrence_id disposition;
+        Ok ())
+      else if incarnation_order < 0
+      then Ok ()
+      else if existing.source = disposition.source
+              && occurrence_state_equal existing.state disposition.state
+      then Ok ()
+      else
       Error
         (Printf.sprintf
-           "conflicting durable queue dispositions for occurrence %s"
-           occurrence_id)
+           "conflicting durable queue dispositions for occurrence %s incarnation %Ld"
+           occurrence_id
+           disposition.source_incarnation)
   in
   let rec add_pending = function
     | [] -> Ok ()
-    | (stimulus : Keeper_event_queue.stimulus) :: rest ->
-      let* () = add stimulus.post_id Pending in
+    | (selection : Keeper_event_queue_state.pending_selection) :: rest ->
+      let* () =
+        add
+          selection.source.post_id
+          { source = selection.source
+          ; source_incarnation = selection.admitted_revision
+          ; state = Pending
+          }
+      in
       add_pending rest
   in
   let rec add_receipts ~projecting = function
@@ -576,8 +664,7 @@ let durable_occurrence_index state =
       add_receipts ~projecting rest
   in
   let* () =
-    Keeper_event_queue_state.pending state
-    |> Keeper_event_queue.to_list
+    Keeper_event_queue_state.pending_selections state
     |> add_pending
   in
   let* () =
@@ -625,10 +712,11 @@ let rec resolve_durable_occurrence
     let* index = owner_index_result cache ~read_state ~base_path keeper_name in
     match Hashtbl.find_opt index occurrence_id with
     | None -> Ok (Absent_at keeper_name)
-    | Some Pending -> Ok (Pending_at keeper_name)
-    | Some Terminally_acked -> Ok Terminal
-    | Some (Cancelled reason) -> Ok (Terminal_cancelled reason)
-    | Some (Transfer_projecting_to target) ->
+    | Some { source; state = Pending; _ } -> Ok (Pending_at (keeper_name, source))
+    | Some { state = Terminally_completed; _ } -> Ok Terminal_completed
+    | Some { state = Terminally_failed reason; _ } -> Ok (Terminal_failed reason)
+    | Some { state = Cancelled reason; _ } -> Ok (Terminal_cancelled reason)
+    | Some { source; state = Transfer_projecting_to target; _ } ->
       let* target_disposition =
         resolve_durable_occurrence
           cache
@@ -639,17 +727,33 @@ let rec resolve_durable_occurrence
           target
       in
       (match target_disposition with
-       | Absent_at _ -> Ok (Pending_at target)
-       | (Pending_at _ | Terminal | Terminal_cancelled _) as disposition ->
+       | Absent_at _ -> Ok (Pending_at (target, source))
+       | ( Pending_at _
+         | Terminal_completed
+         | Terminal_failed _
+         | Terminal_cancelled _ ) as disposition ->
          Ok disposition)
-    | Some (Transferred_to target) ->
-      resolve_durable_occurrence
-        cache
-        ~read_state
-        ~base_path
-        ~occurrence_id
-        ~visited:(keeper_name :: visited)
-        target
+    | Some { state = Transferred_to target; _ } ->
+      let target_was_cached = Hashtbl.mem cache target in
+      let resolve_target () =
+        resolve_durable_occurrence
+          cache
+          ~read_state
+          ~base_path
+          ~occurrence_id
+          ~visited:(keeper_name :: visited)
+          target
+      in
+      let* target_disposition = resolve_target () in
+      (match target_disposition with
+       | Absent_at _ when target_was_cached ->
+         (* A transfer is marked projected only after the target commit. A
+            cached target snapshot may predate that commit when the same batch
+            resolved another occurrence first, so absence must be revalidated
+            against a fresh target snapshot before it can become loss proof. *)
+         Hashtbl.remove cache target;
+         resolve_target ()
+       | disposition -> Ok disposition)
 ;;
 
 let accept_keeper_wake_occurrence
@@ -669,9 +773,23 @@ let accept_keeper_wake_occurrence
       keeper_name
   with
   | Error detail -> retryable_dispatch_failure detail
-  | Ok Terminal -> Ok Already_acked
+  | Ok Terminal_completed -> Ok Already_acked
+  | Ok (Terminal_failed reason) -> Ok (Already_failed reason)
   | Ok (Terminal_cancelled _) -> Ok Already_cancelled
-  | Ok (Pending_at owner) -> Ok (Already_pending owner)
+  | Ok (Pending_at (owner, pending_stimulus)) ->
+    (* A prior attempt may have committed the queue entry and then failed the
+       independent reaction-ledger append. Verify the exact stimulus identity
+       and repair only an absent row before reporting durable acceptance. *)
+    (match
+       ensure_keeper_wake_stimulus_recorded
+         ~base_path
+         ~keeper_name:owner
+         ~stimulus_id
+         pending_stimulus
+     with
+     | Keeper_wake_reaction_ledger_recorded -> Ok (Already_pending owner)
+     | Keeper_wake_reaction_ledger_record_failed detail ->
+       retryable_dispatch_failure detail)
   | Ok (Absent_at _) ->
     (match
        Keeper_registry_event_queue.enqueue_stimulus_durable_result
@@ -738,11 +856,12 @@ let dispatch_keeper_wake
     match acceptance with
     | Wake_required | Already_pending _ -> Keeper_wake_awaiting_ack
     | Already_acked -> Keeper_wake_already_acked
+    | Already_failed _ -> Keeper_wake_already_failed
     | Already_cancelled -> Keeper_wake_already_cancelled
   in
   let activation_outcome =
     match acceptance with
-    | Already_acked | Already_cancelled ->
+    | Already_acked | Already_failed _ | Already_cancelled ->
       Keeper_wake_activation_not_required
     | Wake_required ->
       activation_outcome_for_required_wake
@@ -758,7 +877,8 @@ let dispatch_keeper_wake
   let activation_keeper_name =
     match acceptance with
     | Already_pending owner -> owner
-    | Wake_required | Already_acked | Already_cancelled -> keeper_name
+    | Wake_required | Already_acked | Already_failed _ | Already_cancelled ->
+      keeper_name
   in
   log_activation_outcome
     ~schedule_id:request.schedule_id
@@ -784,6 +904,8 @@ let dispatch_keeper_wake
   match acceptance with
   | Wake_required | Already_pending _ -> Ok (Schedule_runner.Work_accepted detail)
   | Already_acked -> Ok (Schedule_runner.Work_completed detail)
+  | Already_failed reason ->
+    Ok (Schedule_runner.Work_failed { error = reason; detail })
   | Already_cancelled ->
     Ok
       (Schedule_runner.Work_failed
@@ -827,7 +949,7 @@ let execution_keeper_name (execution : Schedule_domain.execution_record) =
    occurrence was dispatched. Queue transition receipts retain every transfer
    and terminal disposition, so there is no reaction-ledger retention fallback
    and no elapsed-time guess. *)
-let settlements config executions =
+let settlements_with_read_state ~read_state config executions =
   let base_path = config.Workspace_utils.base_path in
   let cache = Hashtbl.create 8 in
   List.map
@@ -837,7 +959,7 @@ let settlements config executions =
        let* disposition =
          resolve_durable_occurrence
            cache
-           ~read_state:Keeper_registry_event_queue.existing_durable_state_result
+           ~read_state
            ~base_path
            ~occurrence_id
            ~visited:[]
@@ -845,7 +967,9 @@ let settlements config executions =
        in
        match disposition with
        | Pending_at _ -> Ok Schedule_runner.Consumer_holds_occurrence
-       | Terminal -> Ok Schedule_runner.Consumer_completed_occurrence
+       | Terminal_completed -> Ok Schedule_runner.Consumer_completed_occurrence
+       | Terminal_failed reason ->
+         Ok (Schedule_runner.Consumer_failed_occurrence reason)
        | Terminal_cancelled reason ->
          Ok (Schedule_runner.Consumer_cancelled_occurrence reason)
        | Absent_at owner ->
@@ -858,4 +982,13 @@ let settlements config executions =
     executions
 ;;
 
+let settlements =
+  settlements_with_read_state
+    ~read_state:Keeper_registry_event_queue.existing_durable_state_result
+;;
+
 let consumer : Schedule_runner.consumer = { accepts; dispatch; settlements }
+
+module For_testing = struct
+  let settlements_with_read_state = settlements_with_read_state
+end

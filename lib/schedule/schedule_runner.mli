@@ -66,6 +66,9 @@ type settlement_evidence =
   | Consumer_completed_occurrence
       (** The consumer has durable terminal ACK evidence. The runner projects
           that fact to the exact schedule execution as succeeded. *)
+  | Consumer_failed_occurrence of string
+      (** The consumer has durable evidence that its admitted execution failed.
+          The runner projects the exact reason as a failed execution. *)
   | Consumer_cancelled_occurrence of string
       (** The consumer has a durable cancellation with its recorded reason. The
           runner projects it to the exact schedule execution as failed. *)
@@ -89,6 +92,16 @@ type consumer =
             durable owner state once. Evidence is never derived from elapsed
             time or the mutable schedule request. *)
   }
+
+type reclaim_failure =
+  | Occurrence_reclaim_failure of
+      { occurrence_id : string
+      ; error : string
+      }
+  | Settlement_batch_cardinality_mismatch of
+      { expected : int
+      ; actual : int
+      }
 
 type runner_error =
   | Service_error of Schedule_service.service_error
@@ -132,10 +145,10 @@ type reclaim_outcome =
   ; reclaimed : int
   ; held : int
   ; settled_elsewhere : int
-  ; failures : (string * string) list
-        (** occurrence id paired with the error that stopped its reclaim. These
-            are transient — an unreadable queue, a failed store write — and are
-            expected to clear on their own. *)
+  ; failures : reclaim_failure list
+        (** Typed occurrence or batch failures that stopped reconciliation.
+            These failures are transient and are expected to clear on their
+            own. *)
   }
 
 val reclaim_lost_occurrences :
@@ -152,8 +165,9 @@ val reclaim_lost_occurrences :
     consumer no longer has it. Both are needed because the two stores are
     written under separate locks and either side can outlive the other.
 
-    Every verdict other than [Consumer_lost_occurrence] leaves the occurrence
-    untouched, and a consumer error leaves it untouched as well: an occurrence
-    is only ever settled on positive evidence that nothing else can settle it.
-    Per-occurrence errors are collected rather than aborting the sweep, so one
-    unreadable consumer cannot strand every other occurrence. *)
+    Durable completed, failed, and cancelled verdicts project their exact
+    terminal outcome. [Consumer_holds_occurrence] and consumer errors leave the
+    occurrence untouched; [Consumer_lost_occurrence] fails it only on positive
+    evidence that nothing else can settle it. Per-occurrence errors are
+    collected rather than aborting the sweep, so one unreadable consumer cannot
+    strand every other occurrence. *)

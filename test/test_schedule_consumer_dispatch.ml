@@ -225,6 +225,25 @@ let test_keeper_wake_receipt_decoder_rejects_noncanonical_shapes () =
   (match Server_schedule_consumers.dispatch_receipt_of_detail (`Assoc canonical) with
    | Ok _ -> ()
    | Error detail -> fail ("canonical receipt rejected: " ^ detail));
+  let failed_terminal =
+    canonical
+    |> set_receipt_field "occurrence_status" (`String "already_failed")
+    |> set_receipt_field "activation_status" (`String "not_required")
+    |> set_receipt_field "activation_reason" `Null
+    |> set_receipt_field "activation_detail" `Null
+  in
+  (match
+     Server_schedule_consumers.dispatch_receipt_of_detail (`Assoc failed_terminal)
+   with
+   | Ok
+       (Server_schedule_consumers.Keeper_wake_enqueued
+          { occurrence_status =
+              Server_schedule_consumers.Keeper_wake_already_failed
+          ; _
+          }) ->
+     ()
+   | Ok _ -> fail "already_failed receipt decoded to another terminal state"
+   | Error detail -> fail ("already_failed receipt rejected: " ^ detail));
   let reject label fields =
     match Server_schedule_consumers.dispatch_receipt_of_detail (`Assoc fields) with
     | Error _ -> ()
@@ -635,6 +654,7 @@ let test_reclaim_uses_occurrence_keeper_after_recurring_request_update () =
   match single_keeper_settlement_exn config execution with
   | Schedule_runner.Consumer_holds_occurrence -> ()
   | Schedule_runner.Consumer_completed_occurrence
+  | Schedule_runner.Consumer_failed_occurrence _
   | Schedule_runner.Consumer_cancelled_occurrence _ ->
     fail "updated recurring request changed the occurrence owner to settled"
   | Schedule_runner.Consumer_lost_occurrence detail ->
@@ -702,10 +722,10 @@ let test_reclaim_follows_transfer_durable_state () =
      Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
        ~base_path
        target_keeper
-       ~current_owner_nonce:23
-       ~applied_at:203.0
-       ~selection:target_selection
-       ~detail:"scheduled occurrence completed"
+     ~current_owner_nonce:23
+     ~applied_at:203.0
+     ~selection:target_selection
+       ~detail:"scheduled occurrence failed"
    with
    | Ok (Keeper_registry_event_queue.Acked _)
    | Ok (Keeper_registry_event_queue.Already_acked _) -> ()
@@ -715,8 +735,12 @@ let test_reclaim_follows_transfer_durable_state () =
      fail detail
    | Error detail -> fail detail);
   (match single_keeper_settlement_exn config execution with
-   | Schedule_runner.Consumer_completed_occurrence -> ()
-   | _ -> fail "target terminal ACK did not settle the transferred occurrence");
+   | Schedule_runner.Consumer_failed_occurrence detail ->
+     check string
+       "failed turn reason remains typed"
+       "scheduled occurrence failed"
+       detail
+   | _ -> fail "target failed-turn receipt did not preserve failure");
   (match
      Keeper_event_queue_recovery.project_owner_result
        ~base_path
@@ -754,8 +778,176 @@ let test_reclaim_follows_transfer_durable_state () =
   check string "checkpointed transition WAL compacted" ""
     (read_file transition_wal_path);
   match single_keeper_settlement_exn config execution with
-  | Schedule_runner.Consumer_completed_occurrence -> ()
-  | _ -> fail "checkpoint reload lost the terminal occurrence disposition"
+  | Schedule_runner.Consumer_failed_occurrence detail ->
+    check string
+      "checkpoint preserves failed turn reason"
+      "scheduled occurrence failed"
+      detail
+  | _ -> fail "checkpoint reload lost the failed occurrence disposition"
+;;
+
+let test_reclaim_resolves_current_incarnation_after_transfer_back () =
+  with_workspace
+  @@ fun config ->
+  let keeper_a = "schedule-keeper" in
+  let keeper_b = "transfer-return-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let request =
+    create_keeper_wake_schedule
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 3600 })
+      config
+  in
+  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
+  let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
+  let transfer ~from_keeper ~to_keeper ~owner_nonce ~operation_id ~applied_at =
+    let selection = pending_selection_exn ~base_path ~keeper_name:from_keeper in
+    let accepted : Keeper_registry_event_queue.accepted_transfer =
+      { source = selection.source
+      ; source_incarnation = selection.admitted_revision
+      ; owner_nonce
+      ; operator_operation_id = operation_id
+      ; from_keeper
+      ; to_keeper
+      }
+    in
+    (match
+       Keeper_registry_event_queue.transfer_pending_accepted_result
+         ~base_path
+         from_keeper
+         ~current_owner_nonce:owner_nonce
+         ~applied_at
+         ~transfer:accepted
+     with
+     | Ok (Keeper_registry_event_queue.Transition_applied _) -> ()
+     | Ok (Keeper_registry_event_queue.Transition_already_applied _) ->
+       fail "first transfer application was reported as replay"
+     | Ok
+         (Keeper_registry_event_queue.Transition_committed_followup_failed
+            { detail; _ }) ->
+       fail detail
+     | Error detail -> fail detail);
+    match
+      Keeper_event_queue_recovery.project_owner_result
+        ~base_path
+        ~keeper_name:from_keeper
+    with
+    | Ok Keeper_event_queue_recovery.Transition_converged -> ()
+    | Ok _ -> fail "transfer projection did not converge"
+    | Error error ->
+      fail (Keeper_event_queue_recovery.projection_error_to_string error)
+  in
+  transfer
+    ~from_keeper:keeper_a
+    ~to_keeper:keeper_b
+    ~owner_nonce:31
+    ~operation_id:"scheduled-a-to-b"
+    ~applied_at:202.0;
+  transfer
+    ~from_keeper:keeper_b
+    ~to_keeper:keeper_a
+    ~owner_nonce:32
+    ~operation_id:"scheduled-b-to-a"
+    ~applied_at:203.0;
+  match single_keeper_settlement_exn config execution with
+  | Schedule_runner.Consumer_holds_occurrence -> ()
+  | Schedule_runner.Consumer_completed_occurrence
+  | Schedule_runner.Consumer_failed_occurrence _
+  | Schedule_runner.Consumer_cancelled_occurrence _ ->
+    fail "returned current incarnation was mistaken for historical terminal state"
+  | Schedule_runner.Consumer_lost_occurrence detail ->
+    fail ("returned current incarnation was reported lost: " ^ detail)
+;;
+
+let test_reclaim_revalidates_cached_transfer_target_absence () =
+  with_workspace
+  @@ fun config ->
+  let keeper_a = "cached-transfer-source" in
+  let keeper_b = "cached-transfer-target" in
+  let base_path = config.Workspace_utils.base_path in
+  let request_x =
+    create_named_keeper_wake_schedule
+      config
+      ~schedule_id:"cached-target-existing"
+      ~keeper_name:keeper_b
+  in
+  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
+  let execution_x = latest_execution_exn config ~schedule_id:request_x.schedule_id in
+  let stale_b_state =
+    match Keeper_registry_event_queue.existing_durable_state_result ~base_path keeper_b with
+    | Ok state -> state
+    | Error detail -> fail detail
+  in
+  let request_y =
+    create_named_keeper_wake_schedule
+      config
+      ~schedule_id:"cached-target-transferred"
+      ~keeper_name:keeper_a
+  in
+  ignore (tick_ok config ~now:202.0 : Schedule_runner.tick_result);
+  let execution_y = latest_execution_exn config ~schedule_id:request_y.schedule_id in
+  let selection = pending_selection_exn ~base_path ~keeper_name:keeper_a in
+  let transfer : Keeper_registry_event_queue.accepted_transfer =
+    { source = selection.source
+    ; source_incarnation = selection.admitted_revision
+    ; owner_nonce = 41
+    ; operator_operation_id = "cached-a-to-b"
+    ; from_keeper = keeper_a
+    ; to_keeper = keeper_b
+    }
+  in
+  (match
+     Keeper_registry_event_queue.transfer_pending_accepted_result
+       ~base_path
+       keeper_a
+       ~current_owner_nonce:41
+       ~applied_at:203.0
+       ~transfer
+   with
+   | Ok (Keeper_registry_event_queue.Transition_applied _) -> ()
+   | Ok (Keeper_registry_event_queue.Transition_already_applied _) ->
+     fail "first cached transfer was already applied"
+   | Ok
+       (Keeper_registry_event_queue.Transition_committed_followup_failed
+          { detail; _ }) ->
+     fail detail
+   | Error detail -> fail detail);
+  (match
+     Keeper_event_queue_recovery.project_owner_result
+       ~base_path
+       ~keeper_name:keeper_a
+   with
+   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
+   | Ok _ -> fail "cached transfer projection did not converge"
+   | Error error ->
+     fail (Keeper_event_queue_recovery.projection_error_to_string error));
+  let target_reads = ref 0 in
+  let read_state ~base_path requested_keeper =
+    if String.equal requested_keeper keeper_b
+    then (
+      incr target_reads;
+      if Int.equal !target_reads 1
+      then Ok stale_b_state
+      else
+        Keeper_registry_event_queue.existing_durable_state_result
+          ~base_path
+          requested_keeper)
+    else
+      Keeper_registry_event_queue.existing_durable_state_result
+        ~base_path
+        requested_keeper
+  in
+  let settlements =
+    Server_schedule_consumers.For_testing.settlements_with_read_state
+      ~read_state
+      config
+      [ execution_x; execution_y ]
+  in
+  (match settlements with
+   | [ Ok Schedule_runner.Consumer_holds_occurrence
+     ; Ok Schedule_runner.Consumer_holds_occurrence
+     ] -> ()
+   | _ -> fail "fresh transfer target state was not revalidated");
+  check int "stale target absence triggers one exact reread" 2 !target_reads
 ;;
 
 let test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing () =
@@ -790,7 +982,9 @@ let test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing () =
   check int "missing snapshot is one typed consumer failure" 1
     (List.length outcome.failures);
   (match outcome.failures with
-   | [ occurrence_id, detail ] ->
+   | [ Schedule_runner.Occurrence_reclaim_failure
+         { occurrence_id; error = detail }
+     ] ->
      let expected_occurrence_id =
        Schedule_occurrence_id.make
          ~schedule_id:execution.schedule_id
@@ -803,7 +997,9 @@ let test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing () =
        occurrence_id;
      check bool "missing snapshot provenance is explicit" true
        (String_util.contains_substring detail "event queue snapshot is missing")
-   | _ -> fail "expected one missing-snapshot reclaim failure");
+   | [ Schedule_runner.Settlement_batch_cardinality_mismatch _ ]
+   | []
+   | _ :: _ :: _ -> fail "expected one missing-snapshot reclaim failure");
   match
     Schedule_store.execution_for_occurrence
       (Schedule_store.read_state config)
@@ -1306,6 +1502,7 @@ let test_dashboard_live_supported_non_terminal_evidence_reports_absent_supported
   write_empty_file ledger_dir;
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
+  let occurrence_id = single_occurrence_id result in
   check int "one dispatch" 1 (List.length result.dispatches);
   check string "dispatch reports retryable failure" "failed"
     (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
@@ -1318,7 +1515,29 @@ let test_dashboard_live_supported_non_terminal_evidence_reports_absent_supported
    | Some detail ->
      check bool "ledger failure is explicit" true
        (String_util.contains_substring detail "keeper reaction ledger")
-   | None -> fail "ledger failure detail missing")
+   | None -> fail "ledger failure detail missing");
+  Sys.remove ledger_dir;
+  mkdir_p ledger_dir;
+  let retried = tick_ok config ~now:202.0 in
+  check string "retry repairs ledger then succeeds" "succeeded"
+    (Schedule_runner.dispatch_status_to_string (List.hd retried.dispatches).status);
+  check int "retry reuses the pending queue entry" 1
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length);
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id:occurrence_id
+  with
+  | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+    check int "repair writes one canonical stimulus row" 1 evidence.matched_record_count
+  | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
+    fail "repaired occurrence evidence was quarantined"
+  | Error error ->
+    fail
+      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+         error)
 ;;
 
 let test_unattributed_ledger_damage_does_not_block_occurrences () =
@@ -1674,6 +1893,12 @@ let () =
             test_reclaim_uses_occurrence_keeper_after_recurring_request_update
         ; test_case "reclaim follows durable transfer state" `Quick
             test_reclaim_follows_transfer_durable_state
+        ; test_case "reclaim follows current incarnation after transfer back"
+            `Quick
+            test_reclaim_resolves_current_incarnation_after_transfer_back
+        ; test_case "reclaim revalidates cached transfer target absence"
+            `Quick
+            test_reclaim_revalidates_cached_transfer_target_absence
         ; test_case "reclaim keeps occurrence when queue snapshot is missing" `Quick
             test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing
         ; test_case "keeper wake durable state failure retries same occurrence" `Quick

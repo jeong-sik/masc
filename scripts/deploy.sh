@@ -93,11 +93,6 @@ if [ ! -x "$BUILD_CUTOVER_HELPER" ]; then
 fi
 
 prepare_release_under_cutover_lease() {
-    if [ "${MASC_EVENT_QUEUE_V15_CUTOVER_LEASE_OWNER_PID:-}" != "$PPID" ]; then
-        echo "Error: cutover preparation requires the helper-owned BasePath lease" >&2
-        exit 1
-    fi
-
     MASC_EVENT_QUEUE_V15_CUTOVER_HELPER="$BUILD_CUTOVER_HELPER" \
         "$SCRIPT_DIR/check-keeper-event-queue-v15-cutover.sh" \
         --base-path "$BASE_PATH"

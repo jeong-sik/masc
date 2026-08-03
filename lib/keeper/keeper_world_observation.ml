@@ -177,6 +177,7 @@ type skip_reason = Keeper_world_observation_turn_types.skip_reason =
   | Scheduled_autonomous_disabled
   | Reactive_disabled
   | No_actionable_stimulus
+  | Backlog_unreadable
 
 type turn_verdict = Keeper_world_observation_turn_types.turn_verdict =
   | Run of { reasons : turn_reason * turn_reason list }
@@ -1364,8 +1365,14 @@ let keeper_cycle_decision
            observations for the model but no longer admit — a level
            re-admits every heartbeat until the pool empties even after the
            model judged the work not actionable (live: 86% empty turns,
-           #26487's 96 stuck claimables). All-false is a typed skip
-           ([No_actionable_stimulus]), a record of designed silence. *)
+           #26487's 96 stuck claimables). All-false is a typed skip:
+           [No_actionable_stimulus] when the backlog was actually read
+           (designed silence), [Backlog_unreadable] when it was not — a
+           read failure must not be recorded as a considered "nothing to
+           do". Claimable work older than the last consumed revision does
+           not re-admit by itself; any backlog mutation bumps the revision
+           and re-admits (the level→edge contract, documented on
+           [skip_reason] in the .mli). *)
         let is_bootstrap = since_last_scheduled_autonomous = max_int in
         let has_pending_messages = observation.pending_messages <> [] in
         let has_pending_board_events = observation.pending_board_events <> [] in
@@ -1376,8 +1383,14 @@ let keeper_cycle_decision
         let has_actionable_schedule =
           observation.scheduled_automation.due_ready_count > 0
         in
+        (* The reason list IS the admission predicate: an empty list is the
+           only skip path, so a stimulus cannot admit namelessly and a new
+           disjunct cannot be added without naming its reason — the predicate
+           and its explanation can no longer drift apart. *)
         let run_reasons =
           [ (if is_bootstrap then Some Never_started else None)
+          ; (if has_pending_messages then Some Scope_message_pending else None)
+          ; (if has_pending_board_events then Some Board_event_pending else None)
           ; (if has_backlog_edge
              then
                Some
@@ -1390,21 +1403,27 @@ let keeper_cycle_decision
           ]
           |> List.filter_map Fun.id
         in
-        if is_bootstrap
-           || has_pending_messages
-           || has_pending_board_events
-           || has_backlog_edge
-           || has_actionable_schedule
-        then
+        match run_reasons with
+        | first :: rest ->
           { should_run = true
           ; channel = Scheduled_autonomous
-          ; verdict = Run { reasons = Scheduled_autonomous_turn, run_reasons }
+          ; verdict = Run { reasons = Scheduled_autonomous_turn, first :: rest }
           ; since_last_scheduled_autonomous = Some since_last_scheduled_autonomous
           }
-        else
+        | [] ->
+          (* All disjuncts false. Distinguish designed silence from a blind
+             observation: no observed revision means the backlog read failed,
+             so the edge disjunct had no real input — recording that as
+             [No_actionable_stimulus] would present a read failure as a
+             considered "nothing to do". *)
+          let skip_reason =
+            match observation.backlog_revision with
+            | None -> Backlog_unreadable
+            | Some _ -> No_actionable_stimulus
+          in
           { should_run = false
           ; channel = Scheduled_autonomous
-          ; verdict = Skip { reasons = No_actionable_stimulus, [] }
+          ; verdict = Skip { reasons = skip_reason, [] }
           ; since_last_scheduled_autonomous = Some since_last_scheduled_autonomous
           })
     in

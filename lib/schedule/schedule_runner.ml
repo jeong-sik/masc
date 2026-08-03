@@ -507,59 +507,84 @@ let safe_consumer_settlements consumer config executions =
     (fun () -> Ok (consumer.settlements config executions))
 ;;
 
-let reclaim_occurrence
-      config
-      ~now
-      acc
-      (execution : Schedule_domain.execution_record)
-      settlement
-  =
+type reclaim_counter =
+  | Count_reclaimed
+  | Count_settled_elsewhere
+
+type prepared_reclaim =
+  { occurrence_id : string
+  ; settlement : Schedule_store.dispatched_occurrence_settlement
+  ; counter : reclaim_counter
+  }
+
+let add_reclaim_failure acc ~occurrence_id error =
+  { acc with
+    failures = Occurrence_reclaim_failure { occurrence_id; error } :: acc.failures
+  }
+;;
+
+let prepare_reclaim acc (execution : Schedule_domain.execution_record) settlement =
   let occurrence_id = execution.execution_id in
   let acc = { acc with examined = acc.examined + 1 } in
-  let fail acc error =
-    { acc with
-      failures =
-        Occurrence_reclaim_failure { occurrence_id; error } :: acc.failures
-    }
-  in
-  let settle outcome =
-    Schedule_store.settle_dispatched_occurrences
-      config
-      ~now
-      [ { execution_id = execution.execution_id
-        ; schedule_id = execution.schedule_id
-        ; due_at = execution.due_at
-        ; payload_digest = execution.payload_digest
-        ; outcome
-        }
-      ]
+  let prepare counter outcome =
+    ( acc
+    , Some
+        { occurrence_id
+        ; settlement =
+            { execution_id = execution.execution_id
+            ; schedule_id = execution.schedule_id
+            ; due_at = execution.due_at
+            ; payload_digest = execution.payload_digest
+            ; outcome
+            }
+        ; counter
+        } )
   in
   match settlement with
-  | Error message -> fail acc message
-  | Ok Consumer_holds_occurrence -> { acc with held = acc.held + 1 }
+  | Error message -> add_reclaim_failure acc ~occurrence_id message, None
+  | Ok Consumer_holds_occurrence -> { acc with held = acc.held + 1 }, None
   | Ok Consumer_completed_occurrence ->
-    (match settle Schedule_store.Dispatched_occurrence_succeeded
-     with
-     | Ok () -> { acc with settled_elsewhere = acc.settled_elsewhere + 1 }
-     | Error err -> fail acc (Schedule_store.store_error_to_string err))
-  | Ok (Consumer_failed_occurrence reason) ->
-    (match
-       settle (Schedule_store.Dispatched_occurrence_failed reason)
-     with
-     | Ok () -> { acc with settled_elsewhere = acc.settled_elsewhere + 1 }
-     | Error err -> fail acc (Schedule_store.store_error_to_string err))
+    prepare Count_settled_elsewhere Schedule_store.Dispatched_occurrence_succeeded
+  | Ok (Consumer_failed_occurrence reason)
   | Ok (Consumer_cancelled_occurrence reason) ->
-    (match
-       settle (Schedule_store.Dispatched_occurrence_failed reason)
-     with
-     | Ok () -> { acc with settled_elsewhere = acc.settled_elsewhere + 1 }
-     | Error err -> fail acc (Schedule_store.store_error_to_string err))
+    prepare
+      Count_settled_elsewhere
+      (Schedule_store.Dispatched_occurrence_failed reason)
   | Ok (Consumer_lost_occurrence reason) ->
+    prepare Count_reclaimed (Schedule_store.Dispatched_occurrence_failed reason)
+;;
+
+let apply_prepared_reclaims config ~now acc prepared =
+  match prepared with
+  | [] -> acc
+  | _ ->
+    let settlements = List.map (fun item -> item.settlement) prepared in
+    let apply_result acc item = function
+      | Error error ->
+        add_reclaim_failure
+          acc
+          ~occurrence_id:item.occurrence_id
+          (Schedule_store.store_error_to_string error)
+      | Ok () ->
+        (match item.counter with
+         | Count_reclaimed -> { acc with reclaimed = acc.reclaimed + 1 }
+         | Count_settled_elsewhere ->
+           { acc with settled_elsewhere = acc.settled_elsewhere + 1 })
+    in
     (match
-       settle (Schedule_store.Dispatched_occurrence_failed reason)
+       Schedule_store.settle_dispatched_occurrences_collect_errors
+         config
+         ~now
+         settlements
      with
-     | Ok () -> { acc with reclaimed = acc.reclaimed + 1 }
-     | Error err -> fail acc (Schedule_store.store_error_to_string err))
+     | Error error ->
+       let detail = Schedule_store.store_error_to_string error in
+       List.fold_left
+         (fun acc item ->
+            add_reclaim_failure acc ~occurrence_id:item.occurrence_id detail)
+         acc
+         prepared
+     | Ok results -> List.fold_left2 apply_result acc prepared results)
 ;;
 
 let reclaim_lost_occurrences ~consumer config ~now =
@@ -604,11 +629,18 @@ let reclaim_lost_occurrences ~consumer config ~now =
                  executions)
         }
       | Ok settlements ->
-        List.fold_left2
-          (reclaim_occurrence config ~now)
-          empty_reclaim_outcome
-          executions
-          settlements
+        let outcome, prepared_rev =
+          List.fold_left2
+            (fun (acc, prepared) execution settlement ->
+               let acc, item = prepare_reclaim acc execution settlement in
+               match item with
+               | None -> acc, prepared
+               | Some item -> acc, item :: prepared)
+            (empty_reclaim_outcome, [])
+            executions
+            settlements
+        in
+        apply_prepared_reclaims config ~now outcome (List.rev prepared_rev)
     in
     Ok { outcome with failures = List.rev outcome.failures }
 ;;

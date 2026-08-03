@@ -931,6 +931,7 @@ let test_reclaim_settles_duplicate_occurrence_executions_by_id () =
        check bool "both duplicate executions are dispatched" true
          (execution.status = Execution_dispatched))
     before;
+  let version_before_reclaim = (Schedule_store.read_state config).version in
   let lost_consumer =
     accepting_consumer
       ~settlement:(fun _config _execution ->
@@ -942,9 +943,10 @@ let test_reclaim_settles_duplicate_occurrence_executions_by_id () =
   check int "both execution ids reclaimed" 2 outcome.reclaimed;
   check int "exact execution settlement has no failures" 0
     (List.length outcome.failures);
-  Schedule_store.executions_for_schedule
-    (Schedule_store.read_state config)
-    ~schedule_id
+  let after_reclaim = Schedule_store.read_state config in
+  check int "reclaim batch persists once" (version_before_reclaim + 1)
+    after_reclaim.version;
+  Schedule_store.executions_for_schedule after_reclaim ~schedule_id
   |> List.iter (fun (execution : execution_record) ->
     check bool "every duplicate execution becomes terminal" true
       (execution.status = Execution_failed))

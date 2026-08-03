@@ -220,6 +220,16 @@ val settle_dispatched_occurrences :
     occurrence identity. Any invalid settlement leaves the entire batch
     unchanged. *)
 
+val settle_dispatched_occurrences_collect_errors :
+  Workspace_utils.config ->
+  now:float ->
+  dispatched_occurrence_settlement list ->
+  ((unit, store_error) result list, store_error) result
+(** Apply independent settlements under one ledger lock, one parse, and at most
+    one durable write. The ordered inner results preserve per-occurrence
+    failures without making healthy settlements wait for another occurrence;
+    an outer error means the ledger could not be loaded or written. *)
+
 val fail_running :
   Workspace_utils.config ->
   now:float ->

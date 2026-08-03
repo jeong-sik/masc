@@ -954,6 +954,37 @@ let settle_dispatched_occurrences config ~now settlements =
     ~should_cancel:(Fun.const false)
 ;;
 
+let settle_dispatched_occurrences_collect_errors config ~now settlements =
+  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+    let* state = load_for_mutation config in
+    let rec settle next_state changed results = function
+      | [] -> Ok (next_state, changed, List.rev results)
+      | settlement :: rest ->
+        (match settle_dispatched_occurrence_in_state ~now next_state settlement with
+         | Ok (settled_state, _, settlement_changed) ->
+           settle
+             settled_state
+             (changed || settlement_changed)
+             (Ok () :: results)
+             rest
+         | Error error ->
+           settle next_state changed (Error error :: results) rest)
+    in
+    let* next_state, changed, results = settle state false [] settlements in
+    let* () =
+      if changed
+      then
+        write_state
+          config
+          (bump_state
+             state
+             ~schedules:next_state.schedules
+             ~executions:next_state.executions)
+      else Ok ()
+    in
+    Ok results)
+;;
+
 let fail_running config ~now ~schedule_id ~error =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in

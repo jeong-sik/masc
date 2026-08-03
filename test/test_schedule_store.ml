@@ -933,6 +933,50 @@ let test_batch_settlement_finishes_orphan_execution () =
   | None -> fail "orphan execution evidence disappeared"
 ;;
 
+let test_batch_settlement_collects_error_and_persists_valid_execution () =
+  with_workspace
+  @@ fun config ->
+  let request = make_request ~schedule_id:"mixed-batch-settlement" () in
+  ignore (insert_ok config request);
+  ignore (store_ok "refresh_due" (refresh_due config ~now:201.0));
+  ignore
+    (store_ok "start_due_candidate"
+       (start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id));
+  ignore
+    (store_ok "accept_running"
+       (accept_running config ~now:203.0 ~schedule_id:request.schedule_id ()));
+  let before = read_state config in
+  let execution =
+    match last_execution_for_schedule before ~schedule_id:request.schedule_id with
+    | Some execution -> execution
+    | None -> fail "mixed settlement precondition has no execution"
+  in
+  let settlement execution_id =
+    { execution_id
+    ; schedule_id = execution.schedule_id
+    ; due_at = execution.due_at
+    ; payload_digest = execution.payload_digest
+    ; outcome = Dispatched_occurrence_succeeded
+    }
+  in
+  (match
+     settle_dispatched_occurrences_collect_errors
+       config
+       ~now:300.0
+       [ settlement execution.execution_id; settlement "missing-execution" ]
+   with
+   | Ok [ Ok (); Error (Invalid_status_transition _) ] -> ()
+   | Ok _ -> fail "mixed settlement returned the wrong ordered results"
+   | Error error -> fail (store_error_to_string error));
+  let after = read_state config in
+  check int "mixed batch writes once" (before.version + 1) after.version;
+  match last_execution_for_schedule after ~schedule_id:request.schedule_id with
+  | Some execution ->
+    check string "valid settlement persists" "succeeded"
+      (execution_status_to_string execution.status)
+  | None -> fail "valid mixed-batch execution disappeared"
+;;
+
 let test_completion_before_acceptance_is_idempotent () =
   with_workspace
   @@ fun config ->
@@ -1304,6 +1348,8 @@ let () =
             test_recurring_completion_ignores_failed_prior_attempt;
           test_case "batch settlement finishes an orphan execution" `Quick
             test_batch_settlement_finishes_orphan_execution;
+          test_case "batch settlement preserves valid work beside an error" `Quick
+            test_batch_settlement_collects_error_and_persists_valid_execution;
           test_case "completion before acceptance is idempotent" `Quick
             test_completion_before_acceptance_is_idempotent;
           test_case "accepted one-shot failure is terminal" `Quick

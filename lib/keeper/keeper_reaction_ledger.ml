@@ -465,15 +465,17 @@ let cursor_json { cursor_ts; post_id } =
 let record_board_cursor_ack
       ~base_path
       ~keeper_name
+      ?stimulus_id
       ~cursor_ts
       ~post_id
       ()
   =
   let cursor = { cursor_ts; post_id } in
   let stimulus_id =
-    match post_id with
-    | Some post_id -> board_stimulus_id ~post_id
-    | None -> digest_id "cursor" (Printf.sprintf "%.6f" cursor_ts)
+    match stimulus_id, post_id with
+    | Some value, _ -> value
+    | None, Some post_id -> board_stimulus_id ~post_id
+    | None, None -> digest_id "cursor" (Printf.sprintf "%.6f" cursor_ts)
   in
   let recorded_at = Time_compat.now () in
   let json =

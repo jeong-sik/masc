@@ -320,7 +320,25 @@ let () =
     match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
     | Some result ->
       assert (Tool_result.is_success result);
-      assert_contains (status_message result) "Recovered status task"
+      let data = Tool_result.data result in
+      assert_contains (status_message result) "Recovered status task";
+      assert_contains (status_message result) "recovery-backed and non-authoritative";
+      assert (Yojson.Safe.Util.(data |> member "degraded" |> to_bool));
+      assert
+        (Yojson.Safe.Util.(data |> member "backlog_authority" |> to_string)
+         = "recovery_non_authoritative");
+      let revision = Yojson.Safe.Util.(data |> member "revision" |> to_string) in
+      (match
+         Tool_workspace.dispatch
+           ctx
+           ~name:"masc_status"
+           ~args:(`Assoc [ "if_revision", `String revision ])
+       with
+       | Some repeated ->
+         assert
+           (Yojson.Safe.Util.(Tool_result.data repeated |> member "kind" |> to_string)
+            = "snapshot")
+       | None -> failwith "repeated status dispatch returned None")
     | None -> failwith "dispatch returned None")
 ;;
 

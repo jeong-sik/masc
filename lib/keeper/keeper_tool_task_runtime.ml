@@ -349,7 +349,7 @@ let handle_keeper_task_tool_with_outcome
          ~class_:Tool_result.Policy_rejection
          (validation_error_json message)
      | Ok if_revision ->
-       match Workspace.read_backlog_observation_r config with
+       match Workspace.read_backlog_observation_with_source_r config with
      | Error message ->
        let data =
          `Assoc
@@ -365,7 +365,7 @@ let handle_keeper_task_tool_with_outcome
          ~class_:Tool_result.Runtime_failure
          ~message:(Yojson.Safe.to_string data)
          data
-     | Ok backlog ->
+     | Ok { Workspace.observed_backlog = backlog; recovered_from } ->
        let visible (task : Masc_domain.task) =
          match status_filter with
          | Some status ->
@@ -395,25 +395,36 @@ let handle_keeper_task_tool_with_outcome
          Snapshot_protocol.revision_of_json
            ~namespace:"tasks"
            (`Assoc
-             [ "status", Option.fold ~none:`Null ~some:(fun value -> `String value) status_filter
+             [ ( "backlog_authority"
+               , `String
+                   (if Option.is_none recovered_from
+                    then "primary"
+                    else "recovery_non_authoritative") )
+             ; "status", Option.fold ~none:`Null ~some:(fun value -> `String value) status_filter
              ; "include_done", `Bool include_done
              ; "limit", `Int limit
              ; "snapshot", tasks_json
              ])
        in
-       (match
-          Snapshot_protocol.unchanged_if_revision_matches ~revision ~if_revision
-        with
-        | Some response ->
-          Keeper_tool_execution.success_data
-            (Snapshot_protocol.to_yojson response)
-        | None ->
-          Keeper_tool_execution.success_data
-            (Snapshot_protocol.to_yojson
-               (Snapshot_protocol.respond
-                  ~revision
-                  ~if_revision
-                  tasks_json))))
+       let response =
+         match recovered_from with
+         | None -> Snapshot_protocol.respond ~revision ~if_revision tasks_json
+         | Some _ -> Snapshot_protocol.Snapshot { revision; value = tasks_json }
+       in
+       let data =
+         match Snapshot_protocol.to_yojson response with
+         | `Assoc fields ->
+           `Assoc
+             (( "backlog_authority"
+              , `String
+                  (if Option.is_none recovered_from
+                   then "primary"
+                   else "recovery_non_authoritative") )
+              :: ("degraded", `Bool (Option.is_some recovered_from))
+              :: fields)
+         | payload -> payload
+       in
+       Keeper_tool_execution.success_data data)
     | Tasks_audit ->
     let limit = Safe_ops.json_int ~default:20 "limit" args |> max 1 |> min 50 in
     let orphans =

@@ -1,3 +1,10 @@
+---
+rfc: "0340"
+title: "Loopback dashboard Worker credential"
+status: Active
+updated: 2026-08-03
+---
+
 # RFC-0340: Loopback dashboard Worker credential
 
 - Status: Active

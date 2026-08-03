@@ -2836,9 +2836,15 @@ let prepare_config_sync_keeper config name =
       ; proactive = { enabled = false }
       }
   in
-  match Masc.Keeper_meta_store.write_meta config meta with
-  | Ok () -> ()
-  | Error error -> fail ("write meta: " ^ error)
+  (match Masc.Keeper_meta_store.write_meta config meta with
+   | Ok () -> ()
+   | Error error -> fail ("write meta: " ^ error));
+  Masc.Keeper_reaction_ledger.record_board_cursor_ack
+    ~base_path:config.Workspace.base_path
+    ~keeper_name:name
+    ~cursor_ts:0.0
+    ~post_id:None
+    ()
 
 let write_config_sync_toml config name =
   let dir =

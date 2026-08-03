@@ -1669,7 +1669,7 @@ let test_read_backlog_counts_excludes_self_owned_orphan () =
     (* Remove the agent file to simulate a keeper with no active registry record. *)
     let _ = Workspace.end_session config ~agent_name:keeper in
     let meta = keeper_meta_for_self_filter keeper in
-    let _, _, failed, _, _ =
+    let _, _, failed, _, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int) "keeper's own orphan excluded from failed count" 0 failed
@@ -1683,7 +1683,7 @@ let test_read_backlog_counts_falls_back_to_unscoped_claimable_task () =
         ~priority:1 ~description:""
     in
     let meta = keeper_meta_for_goal_filter keeper [ "goal-a" ] in
-    let _, claimable, _, _, _ =
+    let _, claimable, _, _, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -1735,7 +1735,7 @@ let test_read_backlog_counts_preserves_unreadable_observation () =
       revision;
     write_corrupt (Workspace.backlog_recovery_path config);
     let meta = keeper_meta_for_self_filter "keeper-backlog-failure-agent" in
-    let unclaimed, claimable, failed, changed, revision =
+    let unclaimed, claimable, failed, changed, revision, projection_sha256 =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int) "unreadable unclaimed count is inert" 0 unclaimed;
@@ -1746,6 +1746,10 @@ let test_read_backlog_counts_preserves_unreadable_observation () =
       "unreadable backlog has no fabricated revision"
       None
       revision;
+    Alcotest.(check (option string))
+      "unreadable backlog has no fabricated projection"
+      None
+      projection_sha256;
     let board_event : Keeper_world_observation.pending_board_event =
       { event_kind = Board_post_created
       ; post_id = "post-backlog-unreadable"
@@ -1849,7 +1853,7 @@ let test_self_authored_scoped_task_does_not_hide_peer_work () =
       Workspace.add_task config ~goal_id:"goal-b" ~created_by:"peer-keeper"
         ~title:"Peer work outside active goal" ~priority:1 ~description:""
     in
-    let _, claimable, _, _, _ =
+    let _, claimable, _, _, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -1865,24 +1869,28 @@ let test_self_authored_scoped_task_does_not_hide_peer_work () =
 let test_read_backlog_counts_excludes_self_authored_task () =
   with_test_env (fun config ->
     let meta = keeper_meta_for_self_filter "keeper-self-filter-agent" in
-    let _, claimable_before, _, _, _ =
+    let _, claimable_before, _, _, _, projection_before =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     let _ =
       Workspace.add_task config ~created_by:meta.name
         ~title:"self-authored routing task" ~priority:3 ~description:""
     in
-    let unclaimed_after_self, claimable_after_self, _, _, _ =
+    let unclaimed_after_self, claimable_after_self, _, _, _, projection_after_self =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
       "a keeper's own task is not offered back to it as claimable"
       claimable_before claimable_after_self;
+    Alcotest.(check (option string))
+      "self-authored Todo does not move the admission projection"
+      projection_before
+      projection_after_self;
     let _ =
       Workspace.add_task config ~created_by:"peer-keeper"
         ~title:"peer authored task" ~priority:3 ~description:""
     in
-    let unclaimed_after_peer, claimable_after_peer, _, _, _ =
+    let unclaimed_after_peer, claimable_after_peer, _, _, _, projection_after_peer =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -1890,7 +1898,11 @@ let test_read_backlog_counts_excludes_self_authored_task () =
       (claimable_before + 1) claimable_after_peer;
     Alcotest.(check int)
       "the unclaimed count still reports both tasks"
-      (unclaimed_after_self + 1) unclaimed_after_peer
+      (unclaimed_after_self + 1) unclaimed_after_peer;
+    Alcotest.(check bool)
+      "peer-authored Todo moves the admission projection"
+      true
+      (projection_after_peer <> projection_after_self)
   )
 
 let test_keeper_tasks_audit_excludes_self_owned_orphan () =

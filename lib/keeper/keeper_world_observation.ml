@@ -146,6 +146,33 @@ type keeper_cycle_channel =
   | Reactive
   | Scheduled_autonomous
 
+type backlog_consumption_error = Incomplete_backlog_observation
+
+let record_scheduled_backlog_consumption
+      ~(meta : keeper_meta)
+      (observation : world_observation)
+  =
+  match observation.backlog_revision, observation.backlog_projection_sha256 with
+  | None, None -> Ok meta
+  | Some observed, Some projection_sha256 ->
+    let proactive_rt = meta.runtime.proactive_rt in
+    if observed > proactive_rt.last_consumed_backlog_revision
+    then
+      Ok
+        { meta with
+          runtime =
+            { meta.runtime with
+              proactive_rt =
+                { proactive_rt with
+                  last_consumed_backlog_revision = observed
+                ; last_consumed_backlog_projection_sha256 = projection_sha256
+                }
+            }
+        }
+    else Ok meta
+  | None, Some _ | Some _, None -> Error Incomplete_backlog_observation
+;;
+
 type event_queue_trigger =
   Keeper_world_observation_turn_types.event_queue_trigger =
   | Bootstrap_stimulus

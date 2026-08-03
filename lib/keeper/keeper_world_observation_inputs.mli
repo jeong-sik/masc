@@ -23,22 +23,29 @@ type current_task_observation =
 val backlog_updated_since_last_scheduled_autonomous
   :  meta:keeper_meta
   -> backlog:Masc_domain.backlog
+  -> projection_sha256:string
   -> bool
 (** RFC-0357 §3.2 backlog edge:
-    [backlog.version > meta.runtime.proactive_rt.last_consumed_backlog_revision].
-    A monotonic revision compare — wall clocks, ISO8601 parsing, and the
-    zero-point special case of the previous implementation are gone by
-    construction. *)
+    the revision advances and the exact non-self-authored task projection
+    differs from the paired consumed projection. Wall clocks, task titles,
+    and semantic string matching are not inputs. *)
+
+val relevant_backlog_projection_sha256
+  :  meta:keeper_meta
+  -> Masc_domain.task list
+  -> string
+(** Stable SHA-256 of typed task JSON after excluding only self-authored Todo
+    rows. Input list order does not affect the result. *)
 
 val read_backlog_counts
   :  config:Workspace.config
   -> meta:keeper_meta
-  -> int * int * int * bool * int option
-(** [(unclaimed, claimable, failed, backlog_edge, observed_revision)].
-    [observed_revision] is [Some backlog.version] on a successful read and
-    [None] when the read failed — admission records only actually observed
-    revisions, so a failed read can neither fire the edge nor move the
-    consumption clock. *)
+  -> int * int * int * bool * int option * string option
+(** [(unclaimed, claimable, failed, backlog_edge, observed_revision,
+    observed_projection_sha256)]. The revision/projection pair is present only
+    for a valid primary observation. Failed and recovery-only reads carry
+    [None, None], so stale recovery state cannot fire or consume an admission
+    edge. *)
 
 (** [task_is_self_authored_todo ~meta task] is true when an unclaimed [Todo]
     was authored by the keeper's own stable handle ([meta.name]).

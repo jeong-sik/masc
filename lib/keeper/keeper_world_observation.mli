@@ -135,17 +135,20 @@ type world_observation = {
       requests ready to dispatch. *)
 
   backlog_updated_since_last_scheduled_autonomous : bool;
-  (** RFC-0357 §3.2 backlog edge:
-      [backlog.version > proactive_rt.last_consumed_backlog_revision].
-      True exactly when the backlog has a commit this keeper's scheduled
-      channel has not consumed yet. This is an admission input — one turn per
-      backlog change, zero turns for a static backlog. *)
+  (** RFC-0357 §3.2 backlog edge: the commit revision advances and the exact
+      non-self-authored task projection differs from the paired consumed
+      projection. This is one turn per relevant change, zero turns for static
+      or self-produced Todo-only changes. *)
 
   backlog_revision : int option;
   (** The backlog commit revision this observation saw — what a
       scheduled-autonomous admission records as consumed (RFC-0357 §3.3).
       [None] when the backlog read failed: the edge is false and the
       consumption clock must not move on a fabricated value. *)
+
+  backlog_projection_sha256 : string option;
+  (** Exact non-self-authored task projection paired with [backlog_revision].
+      [None] on the same failed-read path. *)
 
   backlog_revision : int option;
   (** The backlog commit revision observed through the recovery-backed read.
@@ -177,6 +180,17 @@ type world_observation = {
 type keeper_cycle_channel =
   | Reactive
   | Scheduled_autonomous
+
+type backlog_consumption_error = Incomplete_backlog_observation
+
+val record_scheduled_backlog_consumption
+  :  meta:Keeper_meta_contract.keeper_meta
+  -> world_observation
+  -> (Keeper_meta_contract.keeper_meta, backlog_consumption_error) result
+(** Record an actually-observed revision/projection pair at scheduled-turn
+    admission. [None, None] is an unreadable observation and leaves meta
+    unchanged; a partial pair is a typed invariant error. Reactive channels
+    must not call this function. *)
 
 type event_queue_trigger =
   | Bootstrap_stimulus

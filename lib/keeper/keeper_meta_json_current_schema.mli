@@ -39,6 +39,7 @@ type field =
   | Last_proactive_preview
   | Consecutive_noop_count
   | Last_consumed_backlog_revision
+  | Last_consumed_backlog_projection_sha256
   | Last_compaction_check_ts
   | Last_compaction_decision
   | Active_goal_ids

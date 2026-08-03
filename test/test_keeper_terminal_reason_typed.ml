@@ -918,6 +918,7 @@ let () =
           Masc.Keeper_world_observation.empty_scheduled_automation_observation
       ; backlog_updated_since_last_scheduled_autonomous = false
       ; backlog_revision = Some 1
+      ; backlog_projection_sha256 = Some (String.make 64 '0')
       ; running_keeper_fiber_count = 0
       ; connected_surfaces = []
       ; connected_surface_failures = []

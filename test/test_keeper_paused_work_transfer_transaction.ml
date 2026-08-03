@@ -841,6 +841,100 @@ let test_stale_source_incarnation_has_no_receipt_or_target_effect () =
     Alcotest.(check int) "stale transfer target effect" 0 (Queue.length (State.pending target)))
 ;;
 
+let with_shutdown_reservation ~base_path ~keeper_name f =
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  (match
+     Keeper_turn_admission.begin_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id
+   with
+   | Keeper_turn_admission.Shutdown_reserved _ -> ()
+   | Keeper_turn_admission.Shutdown_already_reserved _ ->
+     Alcotest.fail "fresh transfer fixture already had a shutdown reservation");
+  Fun.protect
+    ~finally:(fun () ->
+      match
+        Keeper_turn_admission.rollback_shutdown
+          ~base_path
+          ~keeper_name
+          ~operation_id
+      with
+      | Keeper_turn_admission.Shutdown_rolled_back -> ()
+      | Keeper_turn_admission.Shutdown_not_reserved
+      | Keeper_turn_admission.Shutdown_reserved_by_other _ ->
+        Alcotest.fail "transfer fixture did not own its shutdown reservation")
+    (fun () -> f operation_id)
+;;
+
+let assert_uncommitted_transfer config ~from_keeper ~to_keeper request =
+  (match
+     Receipt.load
+       config
+       ~keeper_name:from_keeper
+       ~operator_operation_id:request.Transaction.operator_operation_id
+   with
+   | Ok None -> ()
+   | Ok (Some _) -> Alcotest.fail "shutdown-fenced transfer persisted a receipt"
+   | Error detail -> Alcotest.fail detail);
+  let source =
+    Persistence.load_state_result
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:from_keeper
+    |> require_ok "load shutdown-fenced source"
+  in
+  let target =
+    Persistence.load_state_result
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:to_keeper
+    |> require_ok "load shutdown-fenced target"
+  in
+  Alcotest.(check int)
+    "shutdown fence retains source"
+    1
+    (Queue.length (State.pending source));
+  Alcotest.(check int)
+    "shutdown fence leaves target empty"
+    0
+    (Queue.length (State.pending target))
+;;
+
+let test_source_shutdown_fences_transfer_before_receipt () =
+  with_transfer_lane
+  @@ fun config from_keeper to_keeper _source_meta _target_meta request ->
+  with_shutdown_reservation
+    ~base_path:config.Workspace.base_path
+    ~keeper_name:from_keeper
+  @@ fun operation_id ->
+  (match Transaction.transfer_pending config ~from_keeper ~to_keeper request with
+   | Error
+       { cause = Transaction.Source_transfer_shutdown_reserved actual
+       ; reservation_release = Some Keeper_lifecycle_reservation.Released
+       }
+     when Keeper_shutdown_types.Operation_id.equal actual operation_id -> ()
+   | Error error -> Alcotest.fail (Transaction.error_to_string error)
+   | Ok _ -> Alcotest.fail "source shutdown fence admitted a transfer");
+  assert_uncommitted_transfer config ~from_keeper ~to_keeper request
+;;
+
+let test_target_shutdown_fences_transfer_before_source_ack () =
+  with_transfer_lane
+  @@ fun config from_keeper to_keeper _source_meta _target_meta request ->
+  with_shutdown_reservation
+    ~base_path:config.Workspace.base_path
+    ~keeper_name:to_keeper
+  @@ fun operation_id ->
+  (match Transaction.transfer_pending config ~from_keeper ~to_keeper request with
+   | Error
+       { cause = Transaction.Target_transfer_shutdown_reserved actual
+       ; reservation_release = Some Keeper_lifecycle_reservation.Released
+       }
+     when Keeper_shutdown_types.Operation_id.equal actual operation_id -> ()
+   | Error error -> Alcotest.fail (Transaction.error_to_string error)
+   | Ok _ -> Alcotest.fail "target shutdown fence admitted a transfer");
+  assert_uncommitted_transfer config ~from_keeper ~to_keeper request
+;;
+
 let () =
   Alcotest.run
     "keeper paused-work transfer transaction"
@@ -869,6 +963,14 @@ let () =
             "stale source incarnation has no effect"
             `Quick
             test_stale_source_incarnation_has_no_receipt_or_target_effect
+        ; Alcotest.test_case
+            "source shutdown fences transfer before receipt"
+            `Quick
+            test_source_shutdown_fences_transfer_before_receipt
+        ; Alcotest.test_case
+            "target shutdown fences transfer before source ACK"
+            `Quick
+            test_target_shutdown_fences_transfer_before_source_ack
         ; Alcotest.test_case
             "same transfer replay after target consumption has no effect"
             `Quick

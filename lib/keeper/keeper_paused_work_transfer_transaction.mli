@@ -42,6 +42,7 @@ type failure =
   | Continuation_binding_mismatch
   | Source_queue_validation_failed of string
   | Source_transfer_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Target_transfer_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Committed_projection_failed of
       { stage : projection_stage
       ; detail : string
@@ -91,4 +92,7 @@ val transfer_pending :
 (** Persist a typed [Transfer_owner] receipt before ACKing the exact source
     event, then enqueue that receipt's original stimulus on the
     target lane. Replaying the same receipt completes either interrupted
-    projection without duplicating the target event. *)
+    projection without duplicating the target event. New transactions hold
+    the source lifecycle reservation before both source and target
+    durable-intake fences; the two intake fences are acquired in deterministic
+    Keeper-name order across receipt and queue mutation. *)

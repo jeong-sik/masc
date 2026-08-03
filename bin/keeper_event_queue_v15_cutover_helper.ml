@@ -57,24 +57,18 @@ let validate_signals paths =
   Ok ()
 ;;
 
-let validate_current_queue path =
-  try
-    let json = Yojson.Safe.from_file path in
-    let* (_ : Keeper_event_queue_state.t) =
-      Keeper_event_queue_state.of_yojson json
-      |> Result.map_error (fun detail ->
-        `Msg
-          (Printf.sprintf
-             "current event queue contract rejected path=%s: %s"
-             path
-             detail))
-    in
-    Ok ()
-  with
-  | Sys_error detail ->
-    errorf "current event queue file is unreadable path=%s: %s" path detail
-  | Yojson.Json_error detail ->
-    errorf "current event queue JSON is malformed path=%s: %s" path detail
+let validate_current_queue ~base_path ~keeper_name =
+  Keeper_event_queue_persistence.load_existing_state_result
+    ~base_path
+    ~keeper_name
+  |> Result.map (fun (_ : Keeper_event_queue_state.t) -> ())
+  |> Result.map_error (fun detail ->
+    `Msg
+      (Printf.sprintf
+         "current event queue production load rejected keeper=%s base_path=%s: %s"
+         keeper_name
+         base_path
+         detail))
 ;;
 
 let validate_schedule_ledger path =
@@ -392,20 +386,27 @@ let validate_signals_cmd =
     Term.(ret (const (fun paths -> cmdliner_result (validate_signals paths)) $ signal_files))
 ;;
 
-let current_queue_file =
-  let doc = "Validate one current event-queue v15 snapshot." in
-  Arg.(required & pos 0 (some file) None & info [] ~docv:"QUEUE_FILE" ~doc)
+let current_queue_base_path =
+  let doc = "Workspace BasePath containing the current queue owner." in
+  Arg.(required & opt (some dir) None & info [ "base-path" ] ~docv:"PATH" ~doc)
+;;
+
+let current_queue_keeper_name =
+  let doc = "Exact Keeper owner whose snapshot and transition WAL must load." in
+  Arg.(required & opt (some string) None & info [ "keeper-name" ] ~docv:"KEEPER" ~doc)
 ;;
 
 let validate_current_queue_cmd =
-  let doc = "validate one current event-queue v15 snapshot" in
+  let doc = "validate a current event-queue through the production loader" in
   Cmd.v
     (Cmd.info "validate-current-queue" ~doc)
     Term.(
       ret
         (const
-           (fun path -> cmdliner_result (validate_current_queue path))
-         $ current_queue_file))
+           (fun base_path keeper_name ->
+              cmdliner_result (validate_current_queue ~base_path ~keeper_name))
+         $ current_queue_base_path
+         $ current_queue_keeper_name))
 ;;
 
 let schedule_ledger_file =

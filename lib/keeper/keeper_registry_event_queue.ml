@@ -486,7 +486,12 @@ let enqueue_stimulus_durable_result
   | Error error -> Stimulus_storage_error (durable_intake_error_to_string error)
 ;;
 
-let project_accepted_transfer_durable_result ~base_path name ~transfer =
+let project_accepted_transfer_durable_result
+      ?intake_token
+      ~base_path
+      name
+      ~transfer
+  =
   let validate_target_identity () =
     let config = Workspace.default_config base_path in
     if not (String.equal name transfer.to_keeper)
@@ -508,34 +513,47 @@ let project_accepted_transfer_durable_result ~base_path name ~transfer =
       Error Transfer_target_trace_changed
     | Ok (Some _) -> Ok ()
   in
-  match
-    Keeper_turn_admission.run_durable_intake_if_open
+  let project () =
+    Keeper_event_queue_persistence.project_accepted_transfer_guarded_result
+      ~authorize_first_projection:validate_target_identity
       ~base_path
       ~keeper_name:name
-      (fun _intake_token ->
-         Keeper_event_queue_persistence.project_accepted_transfer_guarded_result
-           ~authorize_first_projection:validate_target_identity
-           ~base_path
-           ~keeper_name:name
-           ~after_commit:(publish_pending ~base_path name)
-           ~transfer)
-  with
-  | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
-    Transfer_projection_shutdown_reserved operation_id
-  | Keeper_turn_admission.Intake_committed
-      (Ok
-        (Keeper_event_queue_persistence.First_projection_rejected detail)) ->
+      ~after_commit:(publish_pending ~base_path name)
+      ~transfer
+  in
+  let interpret = function
+  | Ok (Keeper_event_queue_persistence.First_projection_rejected detail) ->
     Transfer_projection_target_unavailable detail
-  | Keeper_turn_admission.Intake_committed
-      (Ok
-        (Keeper_event_queue_persistence.Transfer_projection_result result)) ->
+  | Ok (Keeper_event_queue_persistence.Transfer_projection_result result) ->
     (match result with
      | Keeper_event_queue_persistence.Transfer_projected ->
        Transfer_projection_committed
      | Keeper_event_queue_persistence.Transfer_already_projected ->
        Transfer_projection_already_committed)
-  | Keeper_turn_admission.Intake_committed (Error detail) ->
+  | Error detail ->
     Transfer_projection_storage_error detail
+  in
+  match intake_token with
+  | Some token ->
+    if
+      Keeper_turn_admission.intake_token_matches
+        token
+        ~base_path
+        ~keeper_name:name
+    then interpret (project ())
+    else
+      Transfer_projection_storage_error
+        "target transfer durable intake token is not live for this Keeper"
+  | None ->
+    (match
+       Keeper_turn_admission.run_durable_intake_if_open
+         ~base_path
+         ~keeper_name:name
+         (fun _intake_token -> project ())
+     with
+     | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+       Transfer_projection_shutdown_reserved operation_id
+     | Keeper_turn_admission.Intake_committed result -> interpret result)
 ;;
 
 let enqueue_hitl_resolution_durable_result
@@ -664,30 +682,46 @@ let cancel_pending_accepted_result
 ;;
 
 let transfer_pending_accepted_result
+      ?intake_token
       ~base_path
       name
       ~current_owner_nonce
       ~applied_at
       ~transfer
   =
-  match
-    Keeper_turn_admission.run_durable_intake_if_open
+  let commit () =
+    Keeper_event_queue_persistence.transfer_pending_accepted_result
       ~base_path
       ~keeper_name:name
-      (fun _intake_token ->
-         Keeper_event_queue_persistence.transfer_pending_accepted_result
-           ~base_path
-           ~keeper_name:name
-           ~current_owner_nonce
-           ~applied_at
-           ~transfer
-           ~after_commit:(publish_pending ~base_path name)
-           ())
-  with
-  | Keeper_turn_admission.Intake_committed result ->
-    Result.map_error (fun detail -> Transfer_pending_storage_error detail) result
-  | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
-    Error (Transfer_pending_shutdown_reserved operation_id)
+      ~current_owner_nonce
+      ~applied_at
+      ~transfer
+      ~after_commit:(publish_pending ~base_path name)
+      ()
+    |> Result.map_error (fun detail -> Transfer_pending_storage_error detail)
+  in
+  match intake_token with
+  | Some token ->
+    if
+      Keeper_turn_admission.intake_token_matches
+        token
+        ~base_path
+        ~keeper_name:name
+    then commit ()
+    else
+      Error
+        (Transfer_pending_storage_error
+           "source transfer durable intake token is not live for this Keeper")
+  | None ->
+    (match
+       Keeper_turn_admission.run_durable_intake_if_open
+         ~base_path
+         ~keeper_name:name
+         (fun _intake_token -> commit ())
+     with
+     | Keeper_turn_admission.Intake_committed result -> result
+     | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+       Error (Transfer_pending_shutdown_reserved operation_id))
 ;;
 
 let ack_pending_source_terminal_result

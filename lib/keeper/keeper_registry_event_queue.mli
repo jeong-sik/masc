@@ -107,6 +107,7 @@ val cancel_pending_accepted_result :
     pending projection when the owner currently has a live registry lane. *)
 
 val transfer_pending_accepted_result :
+  ?intake_token:Keeper_turn_admission.intake_token ->
   base_path:string ->
   string ->
   current_owner_nonce:int ->
@@ -117,7 +118,8 @@ val transfer_pending_accepted_result :
     post-commit source pending projection when the owner is registered. The
     source mutation owns the same durable-intake authority as schedule retry
     repair, so the resolved owner cannot change between retry validation and
-    its acceptance commit. *)
+    its acceptance commit. A live [intake_token] lets a transaction preserve
+    a wider source-and-target intake fence without reacquiring this mutex. *)
 
 val ack_pending_source_terminal_result :
   base_path:string ->
@@ -224,7 +226,8 @@ val enqueue_stimulus_durable_result :
     opaque-event-id API above. *)
 
 val project_accepted_transfer_durable_result :
-  base_path:string
+  ?intake_token:Keeper_turn_admission.intake_token
+  -> base_path:string
   -> string
   -> transfer:accepted_transfer
   -> transfer_projection_result
@@ -234,7 +237,9 @@ val project_accepted_transfer_durable_result :
     durable replay converges even after the target identity rotates. A first
     target effect is authorized against the recorded generation/trace; a target
     shutdown reservation or identity mismatch rejects the
-    projection before any durable mutation. *)
+    projection before any durable mutation. A live [intake_token] lets the
+    caller hold that target fence before committing a corresponding source
+    ACK. *)
 
 val enqueue_hitl_resolution_durable_result :
   base_path:string

@@ -91,6 +91,7 @@ run_gate() {
   local queue_count=0
   local queue_path
   local current_queue_path
+  local keeper_name
   local pending_count
   local outbox_count
   local accepted_count
@@ -132,8 +133,12 @@ run_gate() {
     while IFS= read -r -d '' current_queue_path; do
       [[ -f "$current_queue_path" && ! -L "$current_queue_path" ]] \
         || fail "v15 queue snapshot is not an exact regular file: $current_queue_path"
-      "$CUTOVER_HELPER" validate-current-queue "$current_queue_path" \
-        || fail "v15 queue snapshot is invalid: $current_queue_path"
+      keeper_name="${current_queue_path%/*}"
+      keeper_name="${keeper_name##*/}"
+      "$CUTOVER_HELPER" validate-current-queue \
+        --base-path "$BASE_PATH" \
+        --keeper-name "$keeper_name" \
+        || fail "v15 queue snapshot or v5 transition WAL is invalid: $current_queue_path"
       current_owner_count=$((current_owner_count + 1))
     done < <(find "$keepers_root" -name 'event-queue-v15.json' -print0)
 
@@ -377,6 +382,13 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   printf '{not-json\n' \
     >"$malformed_current_root/.masc/keepers/fixture/event-queue-v15.json"
   expect_failure malformed_current_queue "$malformed_current_root"
+
+  malformed_current_wal_root="$fixture_root/malformed-current-wal"
+  write_schedules "$malformed_current_wal_root" running
+  write_current_queue "$malformed_current_wal_root"
+  printf '{not-json\n' \
+    >"$malformed_current_wal_root/.masc/keepers/fixture/event-queue-transitions-v5.jsonl"
+  expect_failure malformed_current_wal "$malformed_current_wal_root"
 
   malformed_root="$fixture_root/malformed"
   mkdir -p "$malformed_root/.masc"

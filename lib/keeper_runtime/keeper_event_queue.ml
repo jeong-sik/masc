@@ -144,7 +144,6 @@ and connector_attention = {
 }
 
 and scheduled_wake = {
-  schedule_instance_id : string;
   schedule_id : string;
   due_at : float;
   payload_digest : string;
@@ -550,7 +549,6 @@ let payload_to_yojson = function
   | Schedule_due sw ->
     `Assoc
       [ "kind", `String "schedule_due"
-      ; "schedule_instance_id", `String sw.schedule_instance_id
       ; "schedule_id", `String sw.schedule_id
       ; "due_at_unix", `Float sw.due_at
       ; "payload_digest", `String sw.payload_digest
@@ -720,15 +718,12 @@ let payload_of_yojson json =
       (Bg_completed
          { bg_run_id = run_id; bg_kind; bg_outcome; bg_board_post_id = board_post_id })
   | "schedule_due" ->
-    let* schedule_instance_id = string_field ~context "schedule_instance_id" fields in
     let* schedule_id = string_field ~context "schedule_id" fields in
     let* due_at = float_field ~context "due_at_unix" fields in
     let* payload_digest = string_field ~context "payload_digest" fields in
     let* title = optional_string_field ~context "title" fields in
     let* message = string_field ~context "message" fields in
-    Ok
-      (Schedule_due
-         { schedule_instance_id; schedule_id; due_at; payload_digest; title; message })
+    Ok (Schedule_due { schedule_id; due_at; payload_digest; title; message })
   | "connector_attention" ->
     let* event_id = string_field ~context "event_id" fields in
     let* channel = continuation_channel_field fields in

@@ -252,7 +252,6 @@ let keeper_wake_activation_outcome_json_fields = function
 type dispatch_receipt =
   | Keeper_wake_enqueued of
       { keeper_name : string
-      ; schedule_instance_id : string
       ; schedule_id : string
       ; urgency : string
       ; post_id : string
@@ -270,7 +269,6 @@ let dispatch_receipt_of_detail = function
     if String.equal kind keeper_wake_enqueued_kind
     then
       let* keeper_name = keeper_name_field "keeper_name" fields in
-      let* schedule_instance_id = string_field "schedule_instance_id" fields in
       let* schedule_id = string_field "schedule_id" fields in
       let* urgency = string_field "urgency" fields in
       let* post_id = string_field "post_id" fields in
@@ -309,7 +307,6 @@ let dispatch_receipt_of_detail = function
       Ok
         (Keeper_wake_enqueued
            { keeper_name
-           ; schedule_instance_id
            ; schedule_id
            ; urgency
            ; post_id
@@ -327,7 +324,6 @@ let dispatch_receipt_of_detail = function
 let dispatch_receipt_to_yojson = function
   | Keeper_wake_enqueued
       { keeper_name
-      ; schedule_instance_id
       ; schedule_id
       ; urgency
       ; post_id
@@ -347,7 +343,6 @@ let dispatch_receipt_to_yojson = function
            | None -> `Null
            | Some value -> `String value )
        ; "keeper_name", `String keeper_name
-       ; "schedule_instance_id", `String schedule_instance_id
        ; "schedule_id", `String schedule_id
        ; "urgency", `String urgency
        ; "post_id", `String post_id
@@ -941,8 +936,7 @@ let dispatch_keeper_wake
     |> keeper_queue_urgency_of_schedule_urgency
   in
   let wake : Keeper_event_queue.scheduled_wake =
-    { schedule_instance_id = request.Schedule_domain.schedule_instance_id
-    ; schedule_id = request.Schedule_domain.schedule_id
+    { schedule_id = request.Schedule_domain.schedule_id
     ; due_at = request.due_at
     ; payload_digest = Schedule_domain.payload_digest request.payload
     ; title
@@ -1013,7 +1007,6 @@ let dispatch_keeper_wake
          ; "stimulus", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
          ; "stimulus_id", `String stimulus_id
          ; "keeper_name", `String keeper_name
-         ; "schedule_instance_id", `String request.schedule_instance_id
          ; "schedule_id", `String request.schedule_id
          ; "urgency", `String (Keeper_event_queue.urgency_to_string urgency)
          ; "post_id", `String stimulus.post_id
@@ -1077,20 +1070,22 @@ let dispatch config ~now signal request ~commit_acceptance =
        dispatch_keeper_wake config ~now signal request ~commit_acceptance payload)
 ;;
 
-let occurrence_stimulus_id (execution : Schedule_domain.execution_record) =
-  Schedule_occurrence_id.make
-    ~schedule_instance_id:execution.schedule_instance_id
-    ~schedule_id:execution.schedule_id
-    ~due_at:execution.due_at
-    ~payload_digest:execution.payload_digest
-  |> Schedule_occurrence_id.to_string
+let execution_dispatch_receipt (execution : Schedule_domain.execution_record) =
+  match execution.detail with
+  | Some detail -> dispatch_receipt_of_detail detail
+  | None -> Error "schedule dispatch detail is missing"
 ;;
 
-let execution_keeper_name (execution : Schedule_domain.execution_record) =
-  match execution.detail with
-  | Some (`Assoc fields) -> keeper_name_field "keeper_name" fields
-  | Some _ -> Error "schedule dispatch detail must be an object"
-  | None -> Error "schedule dispatch detail is missing keeper_name"
+let occurrence_stimulus_id execution =
+  let* receipt = execution_dispatch_receipt execution in
+  match receipt with
+  | Keeper_wake_enqueued { post_id; _ } -> Ok post_id
+;;
+
+let execution_keeper_name execution =
+  let* receipt = execution_dispatch_receipt execution in
+  match receipt with
+  | Keeper_wake_enqueued { keeper_name; _ } -> Ok keeper_name
 ;;
 
 (* Exact producer snapshot -> durable owner chain. The mutable schedule request
@@ -1103,7 +1098,7 @@ let settlements_with_read_state ~read_state config executions =
   let cache = Hashtbl.create 8 in
   List.map
     (fun (execution : Schedule_domain.execution_record) ->
-       let occurrence_id = occurrence_stimulus_id execution in
+       let* occurrence_id = occurrence_stimulus_id execution in
        let* keeper_name = execution_keeper_name execution in
        let* disposition =
          resolve_durable_occurrence
@@ -1370,7 +1365,6 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
         =
     let settlement outcome : Schedule_store.dispatched_occurrence_settlement =
       { execution_id = execution.execution_id
-      ; schedule_instance_id = execution.schedule_instance_id
       ; schedule_id = execution.schedule_id
       ; due_at = execution.due_at
       ; payload_digest = execution.payload_digest
@@ -1398,11 +1392,11 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
   in
   let settlement_of_execution
         (execution : Schedule_domain.execution_record)
+        occurrence_id
         disposition
     =
     let settlement outcome : Schedule_store.dispatched_occurrence_settlement =
       { execution_id = execution.execution_id
-      ; schedule_instance_id = execution.schedule_instance_id
       ; schedule_id = execution.schedule_id
       ; due_at = execution.due_at
       ; payload_digest = execution.payload_digest
@@ -1423,9 +1417,8 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
     | Transfer_projecting_to target ->
       Error
         (Unprojected_schedule_transfer
-           { keeper_name; target; occurrence_id = occurrence_stimulus_id execution })
+           { keeper_name; target; occurrence_id })
     | Transferred_to target ->
-      let occurrence_id = occurrence_stimulus_id execution in
       let* resolved =
         resolve_durable_occurrence
           transfer_state_cache
@@ -1443,19 +1436,21 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
   let rec preflight settlements = function
     | [] -> Ok (List.rev settlements)
     | (execution : Schedule_domain.execution_record) :: rest ->
-      let occurrence_id = occurrence_stimulus_id execution in
+      let* occurrence_id =
+        occurrence_stimulus_id execution
+        |> Result.map_error (fun detail ->
+          Invalid_execution_detail
+            { occurrence_id = execution.execution_id; detail })
+      in
       (match Hashtbl.find_opt occurrence_index occurrence_id with
        | Some disposition ->
          let* settlement =
            match disposition.source.payload with
            | Keeper_event_queue.Schedule_due wake
-             when String.equal
-                    wake.schedule_instance_id
-                    execution.schedule_instance_id
-                  && String.equal wake.schedule_id execution.schedule_id
+             when String.equal wake.schedule_id execution.schedule_id
                   && Float.equal wake.due_at execution.due_at
                   && String.equal wake.payload_digest execution.payload_digest ->
-             settlement_of_execution execution disposition
+             settlement_of_execution execution occurrence_id disposition
            | Keeper_event_queue.Schedule_due _ ->
              Error
                (Mismatched_schedule_evidence { keeper_name; occurrence_id })

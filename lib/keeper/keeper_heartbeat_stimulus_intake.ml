@@ -410,7 +410,6 @@ let reconcile_spent_selection
        (match
           Schedule_store.execution_for_occurrence
             state
-            ~schedule_instance_id:wake.schedule_instance_id
             ~schedule_id:wake.schedule_id
             ~due_at:wake.due_at
             ~payload_digest:wake.payload_digest

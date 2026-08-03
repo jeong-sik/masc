@@ -473,8 +473,7 @@ let () =
   (* Scheduled wake is a non-board stimulus whose enclosing occurrence id and
      payload both survive restart replay. *)
   let scheduled_wake =
-    { schedule_instance_id = "instance-sched-1"
-    ; schedule_id = "sched-1"
+    { schedule_id = "sched-1"
     ; due_at = 200.0
     ; payload_digest = "digest-1"
     ; title = Some "Scheduled lane wake"

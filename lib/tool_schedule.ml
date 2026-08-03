@@ -338,6 +338,7 @@ let handle_create ~tool_name ~start_time ctx args =
     let* keeper_wake_target =
       Schedule_payload_projection.creation_keeper_wake_target ~payload
     in
+    let* () = validate_keeper_wake_target ctx ~keeper_wake_target args in
     let* source = source_of_arg args in
     let* recurrence = recurrence_of_arg args in
     let requested_at =
@@ -358,17 +359,17 @@ let handle_create ~tool_name ~start_time ctx args =
     let expires_at = optional_float args "expires_at_unix" in
     let create_request () =
       Schedule_service.create
-          ctx.config
-          ?schedule_id
-          ~requested_at
-          ?expires_at
-          ~requested_by
-          ~scheduled_by
-          ~due_at
-          ~payload
-          ~source
-          ~recurrence
-          ()
+        ctx.config
+        ?schedule_id
+        ~requested_at
+        ?expires_at
+        ~requested_by
+        ~scheduled_by
+        ~due_at
+        ~payload
+        ~source
+        ~recurrence
+        ()
     in
     let* () = validate_keeper_wake_target ctx ~keeper_wake_target args in
     (match keeper_wake_target with

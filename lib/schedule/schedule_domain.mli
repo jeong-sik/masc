@@ -67,8 +67,7 @@ type recurrence =
 type payload
 
 type schedule_request =
-  { schedule_instance_id : string
-  ; schedule_id : string
+  { schedule_id : string
   ; requested_by : actor
   ; scheduled_by : actor
   ; requested_at : float
@@ -88,7 +87,6 @@ type execution_status =
 
 type execution_record =
   { execution_id : string
-  ; schedule_instance_id : string
   ; schedule_id : string
   ; started_at : float
   ; finished_at : float option

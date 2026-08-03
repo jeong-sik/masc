@@ -213,8 +213,6 @@ let test_schedule_roundtrip () =
   | Error msg -> fail msg
   | Ok decoded ->
     check string "schedule_id" req.schedule_id decoded.schedule_id;
-    check string "schedule instance id" req.schedule_instance_id
-      decoded.schedule_instance_id;
     check_status "status" req.status decoded.status;
     check string "recurrence" "interval"
       (recurrence_kind_to_string decoded.recurrence);
@@ -269,7 +267,6 @@ let test_execution_record_roundtrip () =
   let req = request () in
   let execution =
     { execution_id = "exec-1"
-    ; schedule_instance_id = req.schedule_instance_id
     ; schedule_id = req.schedule_id
     ; started_at = 201.0
     ; finished_at = Some 202.0
@@ -296,7 +293,6 @@ let test_dispatched_execution_record_roundtrip () =
   let req = request () in
   let execution =
     { execution_id = "exec-dispatched"
-    ; schedule_instance_id = req.schedule_instance_id
     ; schedule_id = req.schedule_id
     ; started_at = 201.0
     ; finished_at = None

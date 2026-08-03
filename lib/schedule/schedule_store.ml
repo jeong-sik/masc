@@ -30,7 +30,6 @@ type dispatched_occurrence_outcome =
 
 type dispatched_occurrence_settlement =
   { execution_id : string
-  ; schedule_instance_id : string
   ; schedule_id : string
   ; due_at : float
   ; payload_digest : string
@@ -316,7 +315,6 @@ let get_schedule config ~schedule_id = find_schedule (read_state config) schedul
 
 let make_execution_record ~now (request : schedule_request) =
   { execution_id = "exec-" ^ Random_id.uuid_v7 ()
-  ; schedule_instance_id = request.schedule_instance_id
   ; schedule_id = request.schedule_id
   ; started_at = now
   ; finished_at = None
@@ -348,30 +346,18 @@ let last_execution_for_schedule state ~schedule_id =
 ;;
 
 let execution_matches_occurrence
-      ~schedule_instance_id
       ~schedule_id
       ~due_at
       ~payload_digest
       (execution : execution_record) =
-  String.equal execution.schedule_instance_id schedule_instance_id
-  && String.equal execution.schedule_id schedule_id
+  String.equal execution.schedule_id schedule_id
   && Float.equal execution.due_at due_at
   && String.equal execution.payload_digest payload_digest
 ;;
 
-let execution_for_occurrence
-      state
-      ~schedule_instance_id
-      ~schedule_id
-      ~due_at
-      ~payload_digest
-  =
+let execution_for_occurrence state ~schedule_id ~due_at ~payload_digest =
   List.find_opt
-    (execution_matches_occurrence
-       ~schedule_instance_id
-       ~schedule_id
-       ~due_at
-       ~payload_digest)
+    (execution_matches_occurrence ~schedule_id ~due_at ~payload_digest)
     state.executions
 ;;
 
@@ -399,7 +385,6 @@ let update_latest_running_execution executions ~schedule_id update =
 
 let update_occurrence_execution
       executions
-      ~schedule_instance_id
       ~schedule_id
       ~due_at
       ~payload_digest
@@ -411,7 +396,6 @@ let update_occurrence_execution
            "schedule occurrence has no matching execution record")
     | execution :: rest
       when execution_matches_occurrence
-             ~schedule_instance_id
              ~schedule_id
              ~due_at
              ~payload_digest
@@ -687,15 +671,7 @@ let advance_current_recurring_occurrence
 ;;
 
 let settle_dispatched_occurrence_in_state ~now state settlement =
-  let { execution_id
-      ; schedule_instance_id
-      ; schedule_id
-      ; due_at
-      ; payload_digest
-      ; outcome
-      }
-    = settlement
-  in
+  let { execution_id; schedule_id; due_at; payload_digest; outcome } = settlement in
   match execution_by_id state ~execution_id with
   | None ->
     Error
@@ -704,7 +680,6 @@ let settle_dispatched_occurrence_in_state ~now state settlement =
   | Some execution
     when not
            (execution_matches_occurrence
-              ~schedule_instance_id
               ~schedule_id
               ~due_at
               ~payload_digest
@@ -737,12 +712,6 @@ let settle_dispatched_occurrence_in_state ~now state settlement =
     let schedules, updated =
       match find_schedule state schedule_id with
       | None -> state.schedules, None
-      | Some request
-        when not
-               (String.equal
-                  request.schedule_instance_id
-                  schedule_instance_id) ->
-        state.schedules, None
       | Some request ->
         let updated =
           match request.recurrence with
@@ -784,7 +753,6 @@ let settle_dispatched_occurrence_in_state ~now state settlement =
 
 let settlement_executions_for_occurrence
       state
-      ~schedule_instance_id
       ~schedule_id
       ~due_at
       ~payload_digest
@@ -792,11 +760,7 @@ let settlement_executions_for_occurrence
   =
   let occurrence_matches =
     List.filter
-      (execution_matches_occurrence
-         ~schedule_instance_id
-         ~schedule_id
-         ~due_at
-         ~payload_digest)
+      (execution_matches_occurrence ~schedule_id ~due_at ~payload_digest)
       state.executions
   in
   let agrees_with_outcome (execution : execution_record) =
@@ -823,7 +787,6 @@ let settlement_executions_for_occurrence
 let settle_dispatched_occurrence
       config
       ~now
-      ~schedule_instance_id
       ~schedule_id
       ~due_at
       ~payload_digest
@@ -839,7 +802,6 @@ let settle_dispatched_occurrence
     let* execution, rest =
       settlement_executions_for_occurrence
         state
-        ~schedule_instance_id
         ~schedule_id
         ~due_at
         ~payload_digest
@@ -850,7 +812,6 @@ let settle_dispatched_occurrence
         ~now
         next_state
         { execution_id = execution.execution_id
-        ; schedule_instance_id
         ; schedule_id
         ; due_at
         ; payload_digest
@@ -892,7 +853,6 @@ let settle_dispatched_occurrence
 let complete_dispatched_occurrence
       config
       ~now
-      ~schedule_instance_id
       ~schedule_id
       ~due_at
       ~payload_digest
@@ -900,7 +860,6 @@ let complete_dispatched_occurrence
   settle_dispatched_occurrence
     config
     ~now
-    ~schedule_instance_id
     ~schedule_id
     ~due_at
     ~payload_digest
@@ -910,7 +869,6 @@ let complete_dispatched_occurrence
 let fail_dispatched_occurrence
       config
       ~now
-      ~schedule_instance_id
       ~schedule_id
       ~due_at
       ~payload_digest
@@ -918,7 +876,6 @@ let fail_dispatched_occurrence
   settle_dispatched_occurrence
     config
     ~now
-    ~schedule_instance_id
     ~schedule_id
     ~due_at
     ~payload_digest
@@ -1037,7 +994,6 @@ let recover_running_on_startup config ~now =
            (match
               execution_for_occurrence
                 { state with executions }
-                ~schedule_instance_id:request.schedule_instance_id
                 ~schedule_id:request.schedule_id
                 ~due_at:request.due_at
                 ~payload_digest:(Schedule_domain.payload_digest request.payload)

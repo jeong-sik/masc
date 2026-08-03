@@ -446,7 +446,6 @@ let test_startup_recovery_uses_exact_occurrence_across_clock_rollback () =
   (match
      execution_for_occurrence
        state
-       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
        ~due_at:advanced.due_at
        ~payload_digest:digest
@@ -458,7 +457,6 @@ let test_startup_recovery_uses_exact_occurrence_across_clock_rollback () =
   match
     execution_for_occurrence
       state
-      ~schedule_instance_id:request.schedule_instance_id
       ~schedule_id:request.schedule_id
       ~due_at:request.due_at
       ~payload_digest:digest
@@ -608,7 +606,6 @@ let test_dispatched_one_shot_completes_by_exact_occurrence () =
      complete_dispatched_occurrence
        config
        ~now:204.0
-       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
        ~due_at:request.due_at
        ~payload_digest:digest
@@ -619,7 +616,6 @@ let test_dispatched_one_shot_completes_by_exact_occurrence () =
   (match
      execution_for_occurrence
        (read_state config)
-       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
        ~due_at:request.due_at
        ~payload_digest:digest
@@ -637,7 +633,6 @@ let test_dispatched_one_shot_completes_by_exact_occurrence () =
      complete_dispatched_occurrence
        config
        ~now:205.0
-       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
        ~due_at:request.due_at
        ~payload_digest:digest
@@ -672,7 +667,6 @@ let test_recurring_dispatched_completion_preserves_next_occurrence () =
      complete_dispatched_occurrence
        config
        ~now:204.0
-       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
        ~due_at:request.due_at
        ~payload_digest:digest
@@ -683,9 +677,8 @@ let test_recurring_dispatched_completion_preserves_next_occurrence () =
      check (float 0.001) "next occurrence retained" next_due_at stored.due_at
    | Error err -> fail (store_error_to_string err));
   match
-   execution_for_occurrence
-     (read_state config)
-      ~schedule_instance_id:request.schedule_instance_id
+    execution_for_occurrence
+      (read_state config)
       ~schedule_id:request.schedule_id
       ~due_at:request.due_at
       ~payload_digest:digest
@@ -741,7 +734,6 @@ let test_recurring_dispatched_completion_settles_duplicate_executions () =
      complete_dispatched_occurrence
        config
        ~now:207.0
-       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
        ~due_at:request.due_at
        ~payload_digest:digest
@@ -777,7 +769,6 @@ let test_recurring_completion_ignores_failed_prior_attempt () =
        (fail_dispatched_occurrence
           config
           ~now:204.0
-          ~schedule_instance_id:request.schedule_instance_id
           ~schedule_id:request.schedule_id
           ~due_at:request.due_at
           ~payload_digest:digest
@@ -799,7 +790,6 @@ let test_recurring_completion_ignores_failed_prior_attempt () =
      complete_dispatched_occurrence
        config
        ~now:208.0
-       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
        ~due_at:request.due_at
        ~payload_digest:digest
@@ -849,7 +839,6 @@ let test_batch_settlement_finishes_orphan_execution () =
     (Yojson.Safe.to_string (state_to_yojson orphan_state));
   let settlement =
     { execution_id = execution.execution_id
-    ; schedule_instance_id = execution.schedule_instance_id
     ; schedule_id = execution.schedule_id
     ; due_at = execution.due_at
     ; payload_digest = execution.payload_digest
@@ -883,7 +872,6 @@ let test_completion_before_acceptance_is_idempotent () =
     (complete_dispatched_occurrence
        config
        ~now:202.5
-       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
        ~due_at:request.due_at
        ~payload_digest:digest
@@ -907,7 +895,6 @@ let test_dispatched_one_shot_failure_is_terminal () =
      fail_dispatched_occurrence
        config
        ~now:204.0
-       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
        ~due_at:request.due_at
        ~payload_digest:digest
@@ -918,7 +905,6 @@ let test_dispatched_one_shot_failure_is_terminal () =
   match
     execution_for_occurrence
       (read_state config)
-      ~schedule_instance_id:request.schedule_instance_id
       ~schedule_id:request.schedule_id
       ~due_at:request.due_at
       ~payload_digest:digest
@@ -1141,9 +1127,7 @@ let test_prune_keeps_terminal_request_with_unsettled_occurrence () =
   check int "execution evidence retained" 1 (List.length state.executions);
   (* The settlement path still resolves, which is the point of retaining it. *)
   match
-    complete_dispatched_occurrence config ~now:400.0
-      ~schedule_instance_id:stored.schedule_instance_id
-      ~schedule_id:stored.schedule_id
+    complete_dispatched_occurrence config ~now:400.0 ~schedule_id:stored.schedule_id
       ~due_at:stored.due_at
       ~payload_digest:(Schedule_domain.payload_digest stored.payload) ()
   with
@@ -1159,9 +1143,7 @@ let test_prune_deletes_terminal_request_once_settled () =
   in
   ignore
     (store_ok "fail_dispatched_occurrence"
-       (fail_dispatched_occurrence config ~now:300.0
-          ~schedule_instance_id:stored.schedule_instance_id
-          ~schedule_id:stored.schedule_id
+       (fail_dispatched_occurrence config ~now:300.0 ~schedule_id:stored.schedule_id
           ~due_at:stored.due_at
           ~payload_digest:(Schedule_domain.payload_digest stored.payload)
           ~error:"consumer lost it"));

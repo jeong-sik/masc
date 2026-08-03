@@ -244,7 +244,6 @@ let bg_stimulus ?bg_run_id ?bg_kind ?bg_outcome ?bg_board_post_id ()
 ;;
 
 let scheduled_wake
-      ?(schedule_instance_id = "instance-sched-1")
       ?(schedule_id = "sched-1")
       ?(due_at = 3000.0)
       ?(payload_digest = "digest-1")
@@ -253,7 +252,7 @@ let scheduled_wake
       ()
   : Keeper_event_queue.scheduled_wake
   =
-  { schedule_instance_id; schedule_id; due_at; payload_digest; title; message }
+  { schedule_id; due_at; payload_digest; title; message }
 ;;
 
 let schedule_stimulus ?schedule_id ?due_at ?payload_digest ?title ?message ()

@@ -6,9 +6,7 @@ let touch_executable path =
   Unix.chmod path 0o755
 
 let with_temp_dir f =
-  let path = Filename.temp_file "masc-test-runtime-" "" in
-  Sys.remove path;
-  mkdir path;
+  let path = Filename.temp_dir "masc-test-runtime-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree path) (fun () -> f path)
 
 let test_requires_explicit_root () =

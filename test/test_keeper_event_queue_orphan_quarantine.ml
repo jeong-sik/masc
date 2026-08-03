@@ -66,14 +66,12 @@ let write_keeper_meta_exn config meta =
 ;;
 
 let write_basepath_keeper_toml base_path name =
-  let keepers_dir =
-    Filename.concat
-      (Filename.concat (Filename.concat base_path Common.masc_dirname) "config")
-      "keepers"
+  let path =
+    Config_dir_resolver.keeper_toml_path_for_base_path ~base_path name
   in
-  Fs_compat.mkdir_p keepers_dir;
+  Fs_compat.mkdir_p (Filename.dirname path);
   Fs_compat.save_file
-    (Filename.concat keepers_dir (name ^ ".toml"))
+    path
     {|[keeper]
 instructions = "example"
 proactive_enabled = false
@@ -235,6 +233,25 @@ let test_exact_owner_presence_requires_exact_authority () =
       | _ -> Alcotest.fail "exact registered owner was not authoritative")
 ;;
 
+let test_non_regular_keeper_declaration_fails_closed () =
+  with_temp_dir "durable-queue-invalid-declaration-" @@ fun base_path ->
+  let config = Workspace.default_config base_path in
+  let keeper_name = "directory-declaration" in
+  let path =
+    Config_dir_resolver.keeper_toml_path_for_base_path
+      ~base_path
+      keeper_name
+  in
+  Fs_compat.mkdir_p path;
+  match
+    Server_bootstrap_maintenance.Recovery_for_testing.exact_owner_presence
+      config
+      keeper_name
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "non-regular Keeper declaration was accepted"
+;;
+
 let () =
   Alcotest.run
     "Keeper_event_queue_orphan_quarantine"
@@ -259,6 +276,10 @@ let () =
             "exact owner presence requires exact authority"
             `Quick
             test_exact_owner_presence_requires_exact_authority
+        ; Alcotest.test_case
+            "non-regular Keeper declaration fails closed"
+            `Quick
+            test_non_regular_keeper_declaration_fails_closed
         ] )
     ]
 ;;

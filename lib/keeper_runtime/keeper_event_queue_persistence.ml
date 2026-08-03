@@ -475,25 +475,10 @@ type orphan_quarantine_result =
   | Orphan_snapshot_absent
   | Orphan_owner_reappeared
 
-let require_directory path =
-  match Unix.lstat path with
-  | { Unix.st_kind = Unix.S_DIR; _ } -> Ok ()
-  | _ -> Error (Printf.sprintf "event queue quarantine path is not a directory: %s" path)
-  | exception Unix.Unix_error (error, operation, argument) ->
-    Error
-      (Printf.sprintf
-         "failed to inspect event queue quarantine directory path=%s operation=%s argument=%s: %s"
-         path
-         operation
-         argument
-         (Unix.error_message error))
-;;
-
-let path_exists_result path =
-  match Unix.lstat path with
-  | _ -> Ok true
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
-  | exception Unix.Unix_error (error, operation, argument) ->
+let exact_path_kind_result path =
+  try Ok (Fs_compat.exact_path_kind ~follow:false path) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Unix.Unix_error (error, operation, argument) ->
     Error
       (Printf.sprintf
          "failed to inspect event queue quarantine path=%s operation=%s argument=%s: %s"
@@ -501,6 +486,30 @@ let path_exists_result path =
          operation
          argument
          (Unix.error_message error))
+  | Sys_error detail ->
+    Error
+      (Printf.sprintf
+         "failed to inspect event queue quarantine path=%s: %s"
+         path
+         detail)
+;;
+
+let require_directory path =
+  match exact_path_kind_result path with
+  | Ok (Fs_compat.Exact_kind Unix.S_DIR) -> Ok ()
+  | Ok
+      ( Fs_compat.Exact_missing
+      | Fs_compat.Exact_kind _
+      | Fs_compat.Exact_unknown ) ->
+    Error (Printf.sprintf "event queue quarantine path is not a directory: %s" path)
+  | Error _ as error -> error
+;;
+
+let path_exists_result path =
+  match exact_path_kind_result path with
+  | Ok Fs_compat.Exact_missing -> Ok false
+  | Ok (Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown) -> Ok true
+  | Error _ as error -> error
 ;;
 
 let quarantine_orphaned_owner_unlocked owner ~confirm_owner_presence =

@@ -156,35 +156,34 @@ let exact_keeper_config_declared_result
       (config : Workspace.config)
       keeper_name
   =
-  let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path
+  let path =
+    Config_dir_resolver.keeper_toml_path_for_base_path
       ~base_path:config.base_path
+      keeper_name
   in
-  let expected_file = keeper_name ^ ".toml" in
-  match Unix.lstat keepers_dir with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  match Fs_compat.exact_path_kind path with
+  | Fs_compat.Exact_missing -> Ok false
+  | Fs_compat.Exact_kind Unix.S_REG -> Ok true
+  | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+    Error
+      (Printf.sprintf
+         "Keeper config declaration is not a regular file: %s"
+         path)
+  | exception Eio.Cancel.Cancelled _ as exn -> raise exn
   | exception Unix.Unix_error (error, operation, argument) ->
     Error
       (Printf.sprintf
-         "failed to inspect Keeper config directory path=%s operation=%s argument=%s: %s"
-         keepers_dir
+         "failed to inspect Keeper config declaration path=%s operation=%s argument=%s: %s"
+         path
          operation
          argument
          (Unix.error_message error))
-  | { Unix.st_kind = Unix.S_DIR; _ } ->
-    (match Safe_ops.list_dir_safe keepers_dir with
-     | Error detail ->
-       Error
-         (Printf.sprintf
-            "failed to list Keeper config directory path=%s: %s"
-            keepers_dir
-            detail)
-     | Ok files -> Ok (List.exists (String.equal expected_file) files))
-  | _ ->
+  | exception Sys_error detail ->
     Error
       (Printf.sprintf
-         "Keeper config path is not a directory: %s"
-         keepers_dir)
+         "failed to inspect Keeper config declaration path=%s: %s"
+         path
+         detail)
 ;;
 
 let exact_durable_owner_result config keeper_name =

@@ -461,10 +461,11 @@ let keeper_toml_path_opt name =
   let path = Filename.concat (keepers_dir ()) (name ^ ".toml") in
   if existing_file path then Some path else None
 
+let keeper_toml_path_for_base_path ~base_path name =
+  Filename.concat (keepers_dir_for_base_path ~base_path) (name ^ ".toml")
+
 let keeper_toml_path_opt_for_base_path ~base_path name =
-  let path =
-    Filename.concat (keepers_dir_for_base_path ~base_path) (name ^ ".toml")
-  in
+  let path = keeper_toml_path_for_base_path ~base_path name in
   if existing_file path then Some path else None
 
 let warnings () =

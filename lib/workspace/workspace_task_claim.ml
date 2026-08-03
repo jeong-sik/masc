@@ -68,9 +68,9 @@ let claim_task_r config ~agent_name ~task_id ()
     | _, Error e -> Error e
     | Ok _, Ok _ -> Ok ()
   in
-  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  let lock_path = backlog_lock_path config in
   let claim_result =
-    with_file_lock config backlog_path (fun () ->
+    with_file_lock config lock_path (fun () ->
     match read_backlog_r config with
     | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
     | Ok backlog ->

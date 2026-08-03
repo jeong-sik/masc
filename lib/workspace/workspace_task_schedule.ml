@@ -172,8 +172,8 @@ let reconcile_all_agent_current_tasks_with_backlog
 ;;
 
 let reconcile_all_agent_current_tasks_with_fresh_backlog ?(touch_last_seen = true) config =
-  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  with_file_lock config backlog_path (fun () ->
+  let lock_path = backlog_lock_path config in
+  with_file_lock config lock_path (fun () ->
     let backlog = read_backlog config in
     reconcile_all_agent_current_tasks_with_backlog config ~touch_last_seen backlog;
     backlog)
@@ -200,7 +200,7 @@ let claim_next_r
   =
   let exception Existing_claim of claim_next_result in
   ensure_initialized config;
-  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  let lock_path = backlog_lock_path config in
   let claim_under_lock () =
     try
       match read_backlog_r config with
@@ -452,7 +452,7 @@ let claim_next_r
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e -> Claim_next_error (Printexc.to_string e), None
   in
-  match with_file_lock_r config backlog_path claim_under_lock with
+  match with_file_lock_r config lock_path claim_under_lock with
   | Ok (result, _) -> result
   | Error err -> Claim_next_error (Masc_domain.masc_error_to_string err)
 ;;

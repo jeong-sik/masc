@@ -9,49 +9,73 @@ include Workspace_state
 open Workspace_backlog
 open Workspace_identity
 
+type update_priority_outcome =
+  | Updated of
+      { task_id : string
+      ; old_priority : int
+      ; new_priority : int
+      }
+  | Not_found of { task_id : string }
+
+type update_priority_error =
+  | Not_initialized
+  | Backlog_read_error of string
+  | Backlog_write_error of string
+  | Lock_error of Masc_domain.masc_error
+  | Unexpected_error of string
+
 let update_priority config ~task_id ~priority =
-  ensure_initialized config;
-
-  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  with_file_lock config backlog_path (fun () ->
-    try
-      let backlog =
+  if not (is_initialized config)
+  then Error Not_initialized
+  else
+    let operation () =
+      try
         match read_backlog_r config with
-        | Ok backlog -> backlog
-        | Error message -> raise (Backlog_read_failed message)
-      in
-
-      let task_opt = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
-
-      match task_opt with
-      | None ->
-          Printf.sprintf "Task %s not found" task_id
-      | Some task ->
-          let old_priority = task.priority in
-          let new_tasks = List.map (fun (t : task) ->
-            if t.id = task_id then { t with priority }
-            else t
-          ) backlog.tasks in
-
-          (* [write_backlog] stamps version/last_updated at the commit point. *)
-          let new_backlog = { backlog with tasks = new_tasks } in
-          write_backlog config new_backlog;
-
-          log_event config (`Assoc [
-            ("type", `String "priority_change");
-            ("task", `String task_id);
-            ("old", `Int old_priority);
-            ("new", `Int priority);
-            ("ts", `String (now_iso ()));
-          ]);
-          (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
-
-          Printf.sprintf "Task %s priority: P%d → P%d" task_id old_priority priority
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | e ->
-      Printf.sprintf "Error: %s" (Printexc.to_string e)
-  )
+        | Error message -> Error (Backlog_read_error message)
+        | Ok backlog ->
+          (match List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks with
+           | None -> Ok (Not_found { task_id })
+           | Some task ->
+             let old_priority = task.priority in
+             let new_tasks =
+               List.map
+                 (fun (t : task) ->
+                    if t.id = task_id then { t with priority } else t)
+                 backlog.tasks
+             in
+             (* [write_backlog] stamps version/last_updated at the commit point. *)
+             let new_backlog = { backlog with tasks = new_tasks } in
+             write_backlog config new_backlog;
+             (* The primary backlog commit is the mutation authority. A
+                post-commit event or wake callback failure must be explicit in
+                telemetry, but must not be returned as a pre-commit error that
+                invites a caller to repeat an already committed update. *)
+             (try
+                log_event config
+                  (`Assoc
+                    [ ("type", `String "priority_change")
+                    ; ("task", `String task_id)
+                    ; ("old", `Int old_priority)
+                    ; ("new", `Int priority)
+                    ; ("ts", `String (now_iso ()))
+                    ]);
+                (Atomic.get Workspace_hooks.on_task_mutation_fn) ()
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Task.error
+                  "priority update committed but post-commit notification failed task=%s: %s"
+                  task_id
+                  (Printexc.to_string exn));
+             Ok (Updated { task_id; old_priority; new_priority = priority }))
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | Backlog_write_failed message -> Error (Backlog_write_error message)
+      | exn -> Error (Unexpected_error (Printexc.to_string exn))
+    in
+    match with_file_lock_r config (backlog_lock_path config) operation with
+    | Ok result -> result
+    | Error error -> Error (Lock_error error)
 
 (** Get raw task list (for orchestrator).
     Requires initialization. *)

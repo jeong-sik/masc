@@ -1066,24 +1066,41 @@ let test_update_priority () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:5 ~description:"" in
     let result = Workspace.update_priority config ~task_id:"task-001" ~priority:1 in
-    Alcotest.(check bool) "priority updated" true (contains_check result);
-    Alcotest.(check bool)
-      "shows old and new"
-      true
-      (str_contains result "P5" && str_contains result "P1"))
+    match result with
+    | Ok (Workspace.Updated { old_priority; new_priority; _ }) ->
+      Alcotest.(check int) "old priority" 5 old_priority;
+      Alcotest.(check int) "new priority" 1 new_priority
+    | Ok (Workspace.Not_found _) -> Alcotest.fail "updated task was reported missing"
+    | Error _ -> Alcotest.fail "priority update failed")
 ;;
 
 let test_update_priority_nonexistent () =
   with_test_env (fun config ->
     let result = Workspace.update_priority config ~task_id:"task-999" ~priority:1 in
-    Alcotest.(check bool) "task not found" true (contains_error result))
+    match result with
+    | Ok (Workspace.Not_found { task_id }) -> Alcotest.(check string) "task id" "task-999" task_id
+    | Ok (Workspace.Updated _) -> Alcotest.fail "missing task was reported updated"
+    | Error _ -> Alcotest.fail "missing task returned a storage error")
 ;;
 
 let test_update_priority_negative () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:5 ~description:"" in
     let result = Workspace.update_priority config ~task_id:"task-001" ~priority:(-1) in
-    Alcotest.(check bool) "negative priority allowed" true (contains_check result))
+    match result with
+    | Ok (Workspace.Updated { new_priority; _ }) ->
+      Alcotest.(check int) "negative priority preserved" (-1) new_priority
+    | Ok (Workspace.Not_found _) -> Alcotest.fail "updated task was reported missing"
+    | Error _ -> Alcotest.fail "negative priority update failed")
+;;
+
+let test_update_priority_corrupt_backlog_is_error () =
+  with_test_env (fun config ->
+    Workspace.write_json config (Workspace.backlog_path config) (`String "corrupt");
+    match Workspace.update_priority config ~task_id:"task-001" ~priority:1 with
+    | Error (Workspace.Backlog_read_error _) -> ()
+    | Ok _ -> Alcotest.fail "corrupt backlog was reported as a successful update"
+    | Error _ -> Alcotest.fail "corrupt backlog returned the wrong typed error")
 ;;
 
 (* ============================================================ *)
@@ -2791,6 +2808,10 @@ let () =
       , [ Alcotest.test_case "basic" `Quick test_update_priority
         ; Alcotest.test_case "nonexistent" `Quick test_update_priority_nonexistent
         ; Alcotest.test_case "negative" `Quick test_update_priority_negative
+        ; Alcotest.test_case
+            "corrupt backlog is an error"
+            `Quick
+            test_update_priority_corrupt_backlog_is_error
         ] )
     ; (* === Cancel Task === *)
       ( "cancel"

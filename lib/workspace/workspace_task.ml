@@ -67,8 +67,8 @@ let recover_owned_task_to_todo_r
            (Masc_domain.System_error.ValidationError
               "reason must be non-empty without surrounding whitespace"))
   in
-  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  with_file_lock_r config backlog_path (fun () ->
+  let lock_path = backlog_lock_path config in
+  with_file_lock_r config lock_path (fun () ->
     let open Result.Syntax in
     let* backlog =
       read_backlog_r config
@@ -239,9 +239,9 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
   if not (is_initialized config)
   then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)
   else (
-    let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+    let lock_path = backlog_lock_path config in
     let result =
-      with_file_lock_r config backlog_path (fun () ->
+      with_file_lock_r config lock_path (fun () ->
       try
         match read_backlog_r config with
         | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
@@ -415,9 +415,9 @@ let link_task_execution_artifacts_r
   if not (is_initialized config)
   then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)
   else (
-    let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+    let lock_path = backlog_lock_path config in
     let result =
-      with_file_lock_r config backlog_path (fun () ->
+      with_file_lock_r config lock_path (fun () ->
       try
         match read_backlog_r config with
         | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))

@@ -112,12 +112,12 @@ let add_task_with_result
       ~description
   =
   ensure_initialized config;
-  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  let lock_path = backlog_lock_path config in
   let actor = Option.value ~default:"system" created_by in
   let goal_id = Workspace_task_classify.trim_opt goal_id in
   let predecessor_task_id = Workspace_task_classify.trim_opt predecessor_task_id in
   try
-    with_file_lock config backlog_path (fun () ->
+    with_file_lock config lock_path (fun () ->
       match read_backlog_r config with
       | Error msg -> Error (Backlog_read_failed msg)
       | Ok backlog ->
@@ -254,9 +254,9 @@ let add_task ?contract ?goal_id ?created_by config ~title ~priority
 (** Add multiple tasks in a batch *)
 let batch_add_tasks_internal_with_result ?created_by config tasks =
   ensure_initialized config;
-  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  let lock_path = backlog_lock_path config in
   let actor = Option.value ~default:"system" created_by in
-  with_file_lock config backlog_path (fun () ->
+  with_file_lock config lock_path (fun () ->
     match read_backlog_r config with
     | Error msg -> Error (Batch_backlog_read_failed msg)
     | Ok backlog ->

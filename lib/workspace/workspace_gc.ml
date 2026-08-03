@@ -71,8 +71,8 @@ let gc config ~days () =
 
   let orphaned = read_orphaned_nonterminal_tasks config in
   let live_tasks_after_gc, archived_tasks, restored =
-    let backlog_lock_path = Filename.concat (tasks_dir config) ".backlog" in
-    with_file_lock config backlog_lock_path (fun () ->
+    let lock_path = backlog_lock_path config in
+    with_file_lock config lock_path (fun () ->
       let backlog =
         match read_backlog_r config with
         | Ok backlog -> backlog

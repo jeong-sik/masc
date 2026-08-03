@@ -486,7 +486,49 @@ and handle_transition ~tool_name ~start_time ctx args =
 let handle_update_priority ~tool_name ~start_time ctx args =
   let task_id = get_string args "task_id" "" in
   let priority = get_int args "priority" 3 in
-  Tool_result.ok ~tool_name ~start_time (Workspace.update_priority ctx.config ~task_id ~priority)
+  match Workspace.update_priority ctx.config ~task_id ~priority with
+  | Ok (Workspace.Updated { task_id; old_priority; new_priority }) ->
+    Tool_result.ok
+      ~tool_name
+      ~start_time
+      (Printf.sprintf "Task %s priority: P%d → P%d" task_id old_priority new_priority)
+  | Ok (Workspace.Not_found { task_id }) ->
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name
+      ~start_time
+      (Printf.sprintf "Task %s not found" task_id)
+  | Error Workspace.Not_initialized ->
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name
+      ~start_time
+      "MASC workspace is not initialized"
+  | Error (Workspace.Backlog_read_error detail) ->
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Transient_error)
+      ~tool_name
+      ~start_time
+      (Printf.sprintf "Task priority update could not read the backlog: %s" detail)
+  | Error (Workspace.Backlog_write_error detail) ->
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Transient_error)
+      ~tool_name
+      ~start_time
+      (Printf.sprintf "Task priority update could not commit the backlog: %s" detail)
+  | Error (Workspace.Lock_error error) ->
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Transient_error)
+      ~tool_name
+      ~start_time
+      (Printf.sprintf "Task priority update could not acquire the backlog lock: %s"
+         (Masc_domain.masc_error_to_string error))
+  | Error (Workspace.Unexpected_error detail) ->
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Runtime_failure)
+      ~tool_name
+      ~start_time
+      (Printf.sprintf "Task priority update failed: %s" detail)
 
 let handle_tasks ~tool_name ~start_time ctx args =
   let include_done = get_bool args "include_done" false in

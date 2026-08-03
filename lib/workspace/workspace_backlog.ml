@@ -7,6 +7,9 @@ open Workspace_utils
 
 let backlog_path = Workspace_utils.backlog_path
 
+let backlog_lock_path config =
+  Filename.concat (Filename.dirname (backlog_path config)) ".backlog"
+
 let backlog_recovery_path config =
   backlog_path config ^ ".last-good"
 

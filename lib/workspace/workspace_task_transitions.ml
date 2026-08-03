@@ -104,10 +104,10 @@ let transition_task_outcome_r
     | _, Error e -> Error e
     | Ok _, Ok _ -> Ok ()
   in
-  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  let lock_path = backlog_lock_path config in
   let committed_verification_submission = ref None in
   let result =
-    with_file_lock_r config backlog_path (fun () ->
+    with_file_lock_r config lock_path (fun () ->
     try
       match read_backlog_r config with
       | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
@@ -709,8 +709,8 @@ let commit_verdict_r
     | Error e -> Error e
     | Ok _ -> Ok ()
   in
-  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  with_file_lock_r config backlog_path (fun () ->
+  let lock_path = backlog_lock_path config in
+  with_file_lock_r config lock_path (fun () ->
     try
       match read_backlog_r config with
       | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))

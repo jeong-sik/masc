@@ -3587,6 +3587,25 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
       check bool
         "post-purge durable intake leaves runtime directory absent"
         false
+        (Sys.file_exists runtime_dir);
+      let replacement = make_meta meta.name in
+      (match Keeper_meta_store.write_meta config replacement with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_durable_result
+           ~base_path:config.base_path
+           meta.name
+           late_stimulus
+       with
+       | Ok () -> ()
+       | Error detail ->
+         fail
+           ("replacement Keeper metadata did not supersede retirement: "
+            ^ detail));
+      check bool
+        "replacement Keeper accepts durable intake"
+        true
         (Sys.file_exists runtime_dir))
 ;;
 

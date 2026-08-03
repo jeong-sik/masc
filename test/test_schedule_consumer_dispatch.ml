@@ -1632,7 +1632,7 @@ let test_shutdown_fence_rejects_schedule_intake_before_enqueue () =
           check string
             "dispatch reports exact shutdown fence"
             (Printf.sprintf
-               "scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"
+               "retryable schedule dispatch failure: scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"
                keeper_name
                (Keeper_shutdown_types.Operation_id.to_string operation_id))
             detail

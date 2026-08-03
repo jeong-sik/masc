@@ -407,8 +407,9 @@ type registry_entry = {
       (** Live turn-scoped switch exposed for operator interrupt.
           [Some sw] while a turn is running; [None] otherwise. *)
   board_wakeups : float StringMap.t;
-  board_cursor_ts : float;
-  board_cursor_post_id : string option;
+  board_cursor : float * string option;
+      (** Restored durable Board cursor. [(0.0, None)] is the valid empty
+          Board head. A registered entry cannot represent a missing cursor. *)
   tool_usage : Keeper_types.tool_call_entry StringMap.t;
   transition_seq : int;
   waiting_for_inference : bool Atomic.t;

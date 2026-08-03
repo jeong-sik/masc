@@ -82,7 +82,7 @@ let prepare_exact ~net candidate =
            ])
        |> Result.get_ok
      in
-     ignore (Keeper_registry.register_offline ~base_path keeper_name meta));
+     ignore (Keeper_registry.For_testing.register_offline ~base_path keeper_name meta));
   Exact_flow.prepare
     ~base_path
     ~keeper_name
@@ -280,7 +280,7 @@ let test_explicit_lane_failover_and_success_provenance () =
         |> Result.get_ok
       in
       ignore
-        (Keeper_registry.register_offline
+        (Keeper_registry.For_testing.register_offline
            ~base_path
            candidate.keeper_name
            meta);

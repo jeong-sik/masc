@@ -73,7 +73,7 @@ val project_owner_result :
   base_path:string ->
   keeper_name:string ->
   (projection_outcome, projection_error) result
-(** Acquire the process-local owner claim and the owner's durable-intake fence,
+(** Acquire the process-local owner claim and the owner's durable-effect fence,
     then inspect the durable outbox. A shutdown that linearizes first returns
     [Owner_shutdown_reserved]; an in-flight projection finishes before the
     shutdown join returns, so it cannot recreate artifacts after purge.

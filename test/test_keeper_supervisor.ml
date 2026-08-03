@@ -758,7 +758,7 @@ let test_reconcile_does_not_double_start_materialized_keeper () =
   let load_or_materialize_keeper_meta _ctx requested =
     materialized := requested :: !materialized;
     let meta = make_meta requested in
-    let _entry = Reg.register_offline ~base_path:config.base_path requested meta in
+    let _entry = Reg.For_testing.register_offline ~base_path:config.base_path requested meta in
     Ok (Some meta)
   in
   KSR.reconcile_keepalive_keepers
@@ -1054,7 +1054,7 @@ let test_fresh_supervision_cohort_keepers_rereads_registry () =
   in
   Reg.For_testing.unregister ~base_path:bp "alpha";
   Reg.For_testing.unregister ~base_path:bp "bravo";
-  let _entry = Reg.register_offline ~base_path:bp "bravo" (make_meta "bravo") in
+  let _entry = Reg.For_testing.register_offline ~base_path:bp "bravo" (make_meta "bravo") in
   let fresh = Sup.fresh_supervision_cohort_keepers ~base_path:bp cohort in
   check (list string) "removed entries omitted"
     [ "bravo" ]
@@ -1637,7 +1637,7 @@ let test_supervised_stop_joins_board_attention_worker () =
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
-      let reg = Reg.register_offline ~base_path:config.base_path name meta in
+      let reg = Reg.For_testing.register_offline ~base_path:config.base_path name meta in
       let ctx : _ Keeper_types_profile.context =
         { config
         ; agent_name = supervisor_agent_name

@@ -24,7 +24,7 @@ let write_initial_meta config meta =
 let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   Log.Keeper.info "create_keeper: starting for name=%s" p.name;
   let task_id = Printf.sprintf "keeper_create_%s" p.name in
-  let tracker = Progress.start_tracking ~task_id ~total_steps:7 () in
+  let tracker = Progress.start_tracking ~task_id ~total_steps:8 () in
   Progress.Tracker.step tracker ~message:"Resolving keeper configuration" ();
   let now_ts = Time_compat.now () in
   let autoboot_enabled =
@@ -335,44 +335,76 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
          tool_result_error
            (Printf.sprintf "declarative keeper config write failed: %s" e)
        | Ok _ ->
-      Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
-      match write_initial_meta ctx.config meta with
-      | Error e ->
-        Otel_metric_store.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
-          ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
-        Log.Keeper.error "create_keeper failed: write_meta error for name=%s: %s" p.name e;
-        Progress.stop_tracking task_id;
-        tool_result_error e
-      | Ok () ->
-        Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
-          p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
-        Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
-        Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
-        let launch_outcome = start_keepalive ctx meta in
-        (match launch_outcome with
-         | Keepalive_started _ ->
-        Progress.Tracker.complete tracker ~message:"Keeper created" ();
-        Log.Keeper.info "create_keeper: completed for name=%s trace_id=%s" p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
-        let json = `Assoc [
-          ("name", `String meta.name);
-          ("agent_name", `String meta.agent_name);
-          ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-          ("generation", `Int meta.runtime.nonce);
-          ("instructions", `String meta.instructions);
-          ("proactive_enabled", `Bool meta.proactive.enabled);
-          ("max_context_override", Json_util.int_opt_to_json meta.max_context_override);
-          ("oas_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) meta.oas_env));
-        ] in
-        tool_result_ok_data json
-         | ( Keepalive_already_registered _
-           | Keepalive_lifecycle_denied _
-           | Keepalive_identity_unrepairable
-           | Keepalive_registration_rejected _
-           | Keepalive_fiber_start_rejected _
-           | Keepalive_lane_ownership_lost
-           | Keepalive_fork_rejected _ ) as rejected ->
-           Progress.stop_tracking task_id;
-           tool_result_error
-             (Printf.sprintf
-                "keeper metadata was created but lane launch failed: %s"
-                (start_keepalive_outcome_to_string rejected)))))
+         Progress.Tracker.step tracker ~message:"Persisting initial Board cursor" ();
+         (match
+            Keeper_board_cursor_genesis.ensure
+              ~base_path:ctx.config.base_path
+              ~keeper_name:p.name
+              ()
+          with
+          | Error error ->
+            let detail = Keeper_board_cursor_genesis.error_to_string error in
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string LifecycleDispatchRejections)
+              ~labels:[ "keeper", p.name; "event", "create_board_cursor_persistence" ]
+              ();
+            Log.Keeper.error
+              "create_keeper failed: initial board cursor persistence error for name=%s: %s"
+              p.name
+              detail;
+            Progress.stop_tracking task_id;
+            tool_result_error
+              (Printf.sprintf
+                 "initial board cursor persistence failed before metadata creation: %s"
+                 detail)
+          | Ok () ->
+            Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
+            (match write_initial_meta ctx.config meta with
+             | Error e ->
+               Otel_metric_store.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
+                 ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
+               Log.Keeper.error
+                 "create_keeper failed: write_meta error for name=%s: %s"
+                 p.name
+                 e;
+               Progress.stop_tracking task_id;
+               tool_result_error e
+             | Ok () ->
+               Log.Keeper.debug
+                 "create_keeper: metadata written for name=%s trace_id=%s"
+                 p.name
+                 (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
+               Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
+               Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
+               let launch_outcome = start_keepalive ctx meta in
+               (match launch_outcome with
+                | Keepalive_started _ ->
+                  Progress.Tracker.complete tracker ~message:"Keeper created" ();
+                  Log.Keeper.info
+                    "create_keeper: completed for name=%s trace_id=%s"
+                    p.name
+                    (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
+                  let json = `Assoc [
+                    ("name", `String meta.name);
+                    ("agent_name", `String meta.agent_name);
+                    ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
+                    ("generation", `Int meta.runtime.nonce);
+                    ("instructions", `String meta.instructions);
+                    ("proactive_enabled", `Bool meta.proactive.enabled);
+                    ("max_context_override", Json_util.int_opt_to_json meta.max_context_override);
+                    ("oas_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) meta.oas_env));
+                  ] in
+                  tool_result_ok_data json
+                | ( Keepalive_already_registered _
+                  | Keepalive_lifecycle_denied _
+                  | Keepalive_identity_unrepairable
+                  | Keepalive_board_cursor_genesis_failed _
+                  | Keepalive_registration_rejected _
+                  | Keepalive_fiber_start_rejected _
+                  | Keepalive_lane_ownership_lost
+                  | Keepalive_fork_rejected _ ) as rejected ->
+                  Progress.stop_tracking task_id;
+                  tool_result_error
+                    (Printf.sprintf
+                       "keeper metadata was created but lane launch failed: %s"
+                       (start_keepalive_outcome_to_string rejected)))))))

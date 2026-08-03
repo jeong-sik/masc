@@ -284,7 +284,7 @@ let register_test_keeper ctx ~keeper_name ~agent_name =
   with
   | Ok meta ->
       ignore
-        (Keeper_registry.register_offline ~base_path:ctx.Task.Tool.config.Workspace.base_path
+        (Keeper_registry.For_testing.register_offline ~base_path:ctx.Task.Tool.config.Workspace.base_path
            keeper_name meta)
   | Error e -> failwith ("failed to build keeper meta: " ^ e)
 

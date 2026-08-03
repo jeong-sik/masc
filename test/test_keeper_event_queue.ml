@@ -2186,7 +2186,7 @@ let () =
       let keeper_name = "keeper-event-queue-durable-offline-test" in
       let meta = meta_for_keeper keeper_name "trace-durable-offline-test" in
       Masc.Keeper_registry.For_testing.clear ();
-      ignore (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
+      ignore (Masc.Keeper_registry.For_testing.register_offline ~base_path keeper_name meta);
       (match
          Masc.Keeper_registry_event_queue.enqueue_durable_result
            ~base_path

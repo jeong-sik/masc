@@ -2450,7 +2450,7 @@ let test_health_json_reuses_canonical_owner_execution_snapshot () =
               ~base_path:config.Workspace.base_path
               meta.name;
             ignore
-              (Keeper_registry.register_offline
+              (Keeper_registry.For_testing.register_offline
                  ~base_path:config.Workspace.base_path
                  meta.name
                  meta);

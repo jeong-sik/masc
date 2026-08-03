@@ -293,6 +293,17 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
               Keeper_metrics.(to_string RestartOutcomes)
               ~labels:[ "keeper", keeper_name; "outcome", "event_queue_unavailable" ]
               ()
+          | Error
+              (Keeper_registry.Restart_board_cursor_unavailable
+                 { keeper_name; reason }) ->
+            Log.Keeper.error
+              "%s: restart refused because durable board cursor is unavailable: %s"
+              keeper_name
+              (Keeper_registry.board_cursor_registration_error_to_string reason);
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartOutcomes)
+              ~labels:[ "keeper", keeper_name; "outcome", "board_cursor_unavailable" ]
+              ()
           | Ok reg ->
             Keeper_registry.restore_supervisor_state
               ~base_path

@@ -472,6 +472,26 @@ let update_entry_if_registered_unit ~base_path name f =
   ignore (update_entry_if_registered ~base_path name (fun entry -> f entry, true))
 ;;
 
+type board_cursor_registration_error =
+  | Board_cursor_missing
+  | Board_cursor_restore_failed of
+      Keeper_reaction_ledger.board_cursor_restore_error
+
+let board_cursor_registration_error_to_string = function
+  | Board_cursor_missing -> "durable board cursor acknowledgement is missing"
+  | Board_cursor_restore_failed error ->
+    Keeper_reaction_ledger.board_cursor_restore_error_to_string error
+;;
+
+let load_board_cursor_result ~base_path ~keeper_name =
+  match
+    Keeper_reaction_ledger.latest_board_cursor_result ~base_path ~keeper_name
+  with
+  | Ok (Some cursor) -> Ok (cursor.cursor_ts, cursor.post_id)
+  | Ok None -> Error Board_cursor_missing
+  | Error error -> Error (Board_cursor_restore_failed error)
+;;
+
 type registration_error =
   | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Registration_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
@@ -479,6 +499,10 @@ type registration_error =
   | Registration_event_queue_unavailable of
       { keeper_name : string
       ; detail : string
+      }
+  | Registration_board_cursor_unavailable of
+      { keeper_name : string
+      ; reason : board_cursor_registration_error
       }
 
 let register_with_state_result
@@ -515,6 +539,10 @@ let register_with_state_result
   with
   | Error detail -> Error (Registration_event_queue_unavailable { keeper_name = name; detail })
   | Ok initial_event_queue ->
+  (match load_board_cursor_result ~base_path ~keeper_name:name with
+  | Error reason ->
+    Error (Registration_board_cursor_unavailable { keeper_name = name; reason })
+  | Ok board_cursor ->
   let entry =
     { base_path
     ; name
@@ -539,8 +567,7 @@ let register_with_state_result
     ; turn_attempt_state = Atomic.make None
     ; current_turn_switch = Atomic.make None
     ; board_wakeups = StringMap.empty
-    ; board_cursor_ts = 0.0
-    ; board_cursor_post_id = None
+    ; board_cursor
     ; tool_usage = StringMap.empty
     ; transition_seq = 0
     ; waiting_for_inference = Atomic.make false
@@ -606,6 +633,7 @@ let register_with_state_result
       name
       (Atomic.get running_count_atomic);
     Ok entry
+  )
 ;;
 
 let register_with_state ~base_path name meta ~phase ~conditions =
@@ -627,6 +655,12 @@ let register_with_state ~base_path name meta ~phase ~conditions =
          "keeper registration event queue unavailable keeper=%s: %s"
          keeper_name
          detail)
+  | Error (Registration_board_cursor_unavailable { keeper_name; reason }) ->
+    invalid_arg
+      (Printf.sprintf
+         "keeper registration board cursor unavailable keeper=%s: %s"
+         keeper_name
+         (board_cursor_registration_error_to_string reason))
   | Error (Registration_shutdown_reserved _) ->
     invalid_arg "unchecked registry registration observed a shutdown fence"
   | Error (Registration_lifecycle_reserved owner) ->
@@ -636,7 +670,17 @@ let register_with_state ~base_path name meta ~phase ~conditions =
          (Keeper_lifecycle_reservation.snapshot_to_string owner))
 ;;
 
-let register ~base_path name meta =
+let persist_test_board_cursor ~base_path ~keeper_name =
+  Keeper_reaction_ledger.record_board_cursor_ack
+    ~base_path
+    ~keeper_name
+    ~cursor_ts:0.0
+    ~post_id:None
+    ()
+;;
+
+let register_for_testing ~base_path name meta =
+  persist_test_board_cursor ~base_path ~keeper_name:name;
   let conditions =
     { Keeper_state_machine.default_conditions with
       fiber_alive = true
@@ -646,7 +690,8 @@ let register ~base_path name meta =
   register_with_state ~base_path name meta ~phase ~conditions
 ;;
 
-let register_offline ~base_path name meta =
+let register_offline_for_testing ~base_path name meta =
+  persist_test_board_cursor ~base_path ~keeper_name:name;
   let conditions =
     { Keeper_state_machine.default_conditions with
       launch_pending = true
@@ -696,6 +741,10 @@ type register_restarting_error =
       { keeper_name : string
       ; detail : string
       }
+  | Restart_board_cursor_unavailable of
+      { keeper_name : string
+      ; reason : board_cursor_registration_error
+      }
 
 let register_restarting ~base_path name meta
   : (registry_entry, register_restarting_error) result
@@ -728,6 +777,10 @@ let register_restarting ~base_path name meta
   with
   | Error detail -> Error (Restart_event_queue_unavailable { keeper_name = name; detail })
   | Ok initial_event_queue ->
+  (match load_board_cursor_result ~base_path ~keeper_name:name with
+  | Error reason ->
+    Error (Restart_board_cursor_unavailable { keeper_name = name; reason })
+  | Ok board_cursor ->
   let new_entry =
     { base_path
     ; name
@@ -752,8 +805,7 @@ let register_restarting ~base_path name meta
     ; turn_attempt_state = Atomic.make None
     ; current_turn_switch = Atomic.make None
     ; board_wakeups = StringMap.empty
-    ; board_cursor_ts = 0.0
-    ; board_cursor_post_id = None
+    ; board_cursor
     ; tool_usage = StringMap.empty
     ; transition_seq = 0
     ; waiting_for_inference = Atomic.make false
@@ -798,6 +850,7 @@ let register_restarting ~base_path name meta
       base_path
       (Keeper_state_machine.phase_to_string phase);
     Ok registered
+  )
 ;;
 
 type unregister_exact_result =

@@ -111,14 +111,21 @@ let event_queue_snapshot_path ~base_path ~keeper_name =
     "event-queue-v15.json"
 ;;
 
-let reaction_ledger_dir ~base_path ~keeper_name =
+let reaction_ledger_dir_for_generation ~generation ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat
        (Filename.concat
           (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
           keeper_name)
        "reaction-ledger")
-    "v5"
+    generation
+;;
+
+let reaction_ledger_dir ~base_path ~keeper_name =
+  reaction_ledger_dir_for_generation
+    ~generation:"v6"
+    ~base_path
+    ~keeper_name
 ;;
 
 let reaction_ledger_store ~base_path ~keeper_name =
@@ -186,7 +193,7 @@ let test_event_queue_stimulus_and_turn_reaction () =
   in
   check int "two rows persisted" 2 (List.length rows);
   let stimulus_row = List.nth rows 0 in
-  check_member_string "stimulus schema" "keeper.reaction_ledger.v5" "schema" stimulus_row;
+  check_member_string "stimulus schema" "keeper.reaction_ledger.v6" "schema" stimulus_row;
   check_member_string "stimulus record kind" "stimulus" "record_kind" stimulus_row;
   check_member_string "board stimulus id" "board:post-42" "stimulus_id" stimulus_row;
   check_member_string
@@ -272,6 +279,311 @@ let test_cursor_ack_is_replayable_state_entry () =
   check_member_string "cursor post id" "post-99" "post_id" (row |> member "cursor");
   check bool "cursor acked" true
     (row |> member "reaction" |> member "cursor_acked" |> to_bool)
+;;
+
+let test_latest_board_cursor_restores_empty_board_head () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "empty-board-cursor-keeper" in
+  (match
+     Keeper_reaction_ledger.latest_board_cursor_result ~base_path ~keeper_name
+   with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "empty ledger must not manufacture a board cursor"
+   | Error error ->
+     fail (Keeper_reaction_ledger.board_cursor_restore_error_to_string error));
+  Keeper_reaction_ledger.record_board_cursor_ack
+    ~base_path
+    ~keeper_name
+    ~cursor_ts:0.0
+    ~post_id:None
+    ();
+  match Keeper_reaction_ledger.latest_board_cursor_result ~base_path ~keeper_name with
+  | Ok (Some cursor) ->
+    check (float 0.0) "empty Board cursor timestamp remains valid" 0.0 cursor.cursor_ts;
+    check (option string) "empty Board cursor has no post id" None cursor.post_id
+  | Ok None -> fail "durable empty Board cursor was not restored"
+  | Error error ->
+    fail (Keeper_reaction_ledger.board_cursor_restore_error_to_string error)
+;;
+
+let test_latest_board_cursor_hard_cuts_v5_namespace () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "v5-cursor-hard-cut" in
+  let v5_store =
+    Dated_jsonl.create
+      ~base_dir:
+        (reaction_ledger_dir_for_generation
+           ~generation:"v5"
+           ~base_path
+           ~keeper_name)
+      ()
+  in
+  Dated_jsonl.append
+    v5_store
+    (`Assoc [ "schema", `String "keeper.reaction_ledger.v5" ]);
+  match Keeper_reaction_ledger.latest_board_cursor_result ~base_path ~keeper_name with
+  | Ok None -> ()
+  | Ok (Some _) -> fail "v5 cursor must not enter the v6 authority namespace"
+  | Error error ->
+    fail
+      ("v5 cursor affected the v6 reader: "
+       ^ Keeper_reaction_ledger.board_cursor_restore_error_to_string error)
+;;
+
+let rewrite_object_field row ~object_name ~field_name replacement =
+  match row with
+  | `Assoc fields ->
+    let rewritten =
+      match List.assoc_opt object_name fields with
+      | Some (`Assoc object_fields) ->
+        let object_fields = List.remove_assoc field_name object_fields in
+        `Assoc
+          (match replacement with
+           | None -> object_fields
+           | Some value -> (field_name, value) :: object_fields)
+      | _ -> failf "%s fixture must contain an object" object_name
+    in
+    `Assoc ((object_name, rewritten) :: List.remove_assoc object_name fields)
+  | _ -> fail "cursor fixture must be an object"
+;;
+
+let rewrite_cursor_post_id row replacement =
+  rewrite_object_field row ~object_name:"cursor" ~field_name:"post_id" replacement
+;;
+
+let check_invalid_cursor_post_id replacement expected_reason =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "invalid-cursor-post-id" in
+  Keeper_reaction_ledger.record_board_cursor_ack
+    ~base_path
+    ~keeper_name
+    ~cursor_ts:42.5
+    ~post_id:(Some "post-cursor")
+    ();
+  let row =
+    read_recent_rows ~base_path ~keeper_name ~limit:1
+    |> latest_row
+    |> fun row -> rewrite_cursor_post_id row replacement
+  in
+  Dated_jsonl.append (reaction_ledger_store ~base_path ~keeper_name) row;
+  match Keeper_reaction_ledger.latest_board_cursor_result ~base_path ~keeper_name with
+  | Error (Keeper_reaction_ledger.Board_cursor_invalid_row reason) ->
+    check string "cursor post id fails closed" expected_reason
+      (Keeper_reaction_ledger.row_quarantine_reason_to_string reason)
+  | Error error ->
+    failf
+      "wrong board cursor restore error: %s"
+      (Keeper_reaction_ledger.board_cursor_restore_error_to_string error)
+  | Ok _ -> fail "invalid cursor post id must not restore"
+;;
+
+let test_latest_board_cursor_requires_post_id_field () =
+  check_invalid_cursor_post_id None "missing_cursor_post_id"
+;;
+
+let test_latest_board_cursor_rejects_wrong_post_id_type () =
+  check_invalid_cursor_post_id (Some (`Bool true)) "invalid_cursor_post_id"
+;;
+
+let test_latest_board_cursor_binds_post_id_identity () =
+  check_invalid_cursor_post_id
+    (Some (`String "post-other"))
+    "event_identity_mismatch"
+;;
+
+let test_latest_board_cursor_binds_missing_post_identity () =
+  check_invalid_cursor_post_id (Some `Null) "event_identity_mismatch"
+;;
+
+let check_invalid_cursor_row ~rewrite expected_reason =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "invalid-cursor-row" in
+  Keeper_reaction_ledger.record_board_cursor_ack
+    ~base_path
+    ~keeper_name
+    ~cursor_ts:42.5
+    ~post_id:(Some "post-cursor")
+    ();
+  let row =
+    read_recent_rows ~base_path ~keeper_name ~limit:1 |> latest_row |> rewrite
+  in
+  Dated_jsonl.append (reaction_ledger_store ~base_path ~keeper_name) row;
+  match Keeper_reaction_ledger.latest_board_cursor_result ~base_path ~keeper_name with
+  | Error (Keeper_reaction_ledger.Board_cursor_invalid_row reason) ->
+    check string "cursor row fails closed" expected_reason
+      (Keeper_reaction_ledger.row_quarantine_reason_to_string reason)
+  | Error error ->
+    failf
+      "wrong board cursor restore error: %s"
+      (Keeper_reaction_ledger.board_cursor_restore_error_to_string error)
+  | Ok _ -> fail "invalid cursor row must not restore"
+;;
+
+let test_latest_board_cursor_binds_exact_timestamp () =
+  let adjacent =
+    Int64.bits_of_float 42.5 |> Int64.succ |> Int64.float_of_bits
+  in
+  check_invalid_cursor_row
+    ~rewrite:(fun row ->
+      rewrite_object_field
+        row
+        ~object_name:"cursor"
+        ~field_name:"cursor_ts"
+        (Some (`Float adjacent)))
+    "event_identity_mismatch"
+;;
+
+let test_latest_board_cursor_requires_board_scope () =
+  check_invalid_cursor_row
+    ~rewrite:(fun row ->
+      rewrite_object_field
+        row
+        ~object_name:"cursor"
+        ~field_name:"scope"
+        (Some (`String "other")))
+    "invalid_cursor_scope"
+;;
+
+let test_latest_board_cursor_requires_positive_ack () =
+  check_invalid_cursor_row
+    ~rewrite:(fun row ->
+      rewrite_object_field
+        row
+        ~object_name:"reaction"
+        ~field_name:"cursor_acked"
+        (Some (`Bool false)))
+    "invalid_cursor_reaction"
+;;
+
+let test_latest_board_cursor_skips_valid_non_cursor_rows () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "cursor-with-newer-stimulus" in
+  Keeper_reaction_ledger.record_board_cursor_ack
+    ~base_path
+    ~keeper_name
+    ~cursor_ts:42.5
+    ~post_id:(Some "post-cursor")
+    ();
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    (board_stimulus ~post_id:"post-newer-stimulus" ());
+  match Keeper_reaction_ledger.latest_board_cursor_result ~base_path ~keeper_name with
+  | Ok (Some cursor) ->
+    check (float 0.0) "newest durable cursor restored" 42.5 cursor.cursor_ts;
+    check (option string) "newest durable cursor post id restored"
+      (Some "post-cursor") cursor.post_id
+  | Ok None -> fail "valid non-cursor row hid the durable cursor"
+  | Error error ->
+    fail (Keeper_reaction_ledger.board_cursor_restore_error_to_string error)
+;;
+
+let test_latest_board_cursor_fails_on_invalid_identified_non_cursor_row () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "cursor-with-invalid-newer-stimulus" in
+  Keeper_reaction_ledger.record_board_cursor_ack
+    ~base_path
+    ~keeper_name
+    ~cursor_ts:42.5
+    ~post_id:(Some "post-cursor")
+    ();
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (`Assoc [ "record_kind", `String "stimulus" ]);
+  match Keeper_reaction_ledger.latest_board_cursor_result ~base_path ~keeper_name with
+  | Error (Keeper_reaction_ledger.Board_cursor_invalid_row reason) ->
+    check string "invalid identified row fails closed" "missing_schema"
+      (Keeper_reaction_ledger.row_quarantine_reason_to_string reason)
+  | Error error ->
+    failf
+      "wrong board cursor restore error: %s"
+      (Keeper_reaction_ledger.board_cursor_restore_error_to_string error)
+  | Ok _ -> fail "invalid identified row must not roll back to an older cursor"
+;;
+
+let test_latest_board_cursor_fails_on_invalid_newer_row () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "cursor-invalid-newer-row" in
+  Keeper_reaction_ledger.record_board_cursor_ack
+    ~base_path
+    ~keeper_name
+    ~cursor_ts:42.5
+    ~post_id:(Some "post-cursor")
+    ();
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (`Assoc [ "schema", `String "keeper.reaction_ledger.v6" ]);
+  match Keeper_reaction_ledger.latest_board_cursor_result ~base_path ~keeper_name with
+  | Error (Keeper_reaction_ledger.Board_cursor_invalid_row reason) ->
+    check string "invalid newer row is fail-closed"
+      "missing_event_id"
+      (Keeper_reaction_ledger.row_quarantine_reason_to_string reason)
+  | Error error ->
+    failf
+      "wrong board cursor restore error: %s"
+      (Keeper_reaction_ledger.board_cursor_restore_error_to_string error)
+  | Ok _ -> fail "invalid newer ledger row must not roll back to an older cursor"
+;;
+
+let test_latest_board_cursor_fails_on_unknown_kind_non_cursor_shape () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "cursor-unknown-kind-newer-row" in
+  Keeper_reaction_ledger.record_board_cursor_ack
+    ~base_path
+    ~keeper_name
+    ~cursor_ts:42.5
+    ~post_id:(Some "post-cursor")
+    ();
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    (board_stimulus ~post_id:"post-unknown-kind" ());
+  let unknown_kind_row =
+    match read_recent_rows ~base_path ~keeper_name ~limit:1 |> latest_row with
+    | `Assoc fields ->
+      `Assoc
+        (("record_kind", `String "future_record_kind")
+         :: List.remove_assoc "record_kind" fields)
+    | _ -> fail "stimulus fixture must be a JSON object"
+  in
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    unknown_kind_row;
+  match Keeper_reaction_ledger.latest_board_cursor_result ~base_path ~keeper_name with
+  | Error (Keeper_reaction_ledger.Board_cursor_invalid_row reason) ->
+    check
+      string
+      "unknown record kind cannot decode as a skippable non-cursor row"
+      "unknown_record_kind"
+      (Keeper_reaction_ledger.row_quarantine_reason_to_string reason)
+  | Error error ->
+    failf
+      "wrong board cursor restore error: %s"
+      (Keeper_reaction_ledger.board_cursor_restore_error_to_string error)
+  | Ok _ -> fail "unknown record kind must not roll back to an older cursor"
+;;
+
+let test_latest_board_cursor_fails_on_malformed_newer_row () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "cursor-malformed-newer-row" in
+  Keeper_reaction_ledger.record_board_cursor_ack
+    ~base_path
+    ~keeper_name
+    ~cursor_ts:42.5
+    ~post_id:(Some "post-cursor")
+    ();
+  let future_month =
+    Filename.concat (reaction_ledger_dir ~base_path ~keeper_name) "9999-12"
+  in
+  mkdir_p future_month;
+  write_file (Filename.concat future_month "31.jsonl") "not-json\n";
+  match Keeper_reaction_ledger.latest_board_cursor_result ~base_path ~keeper_name with
+  | Error (Keeper_reaction_ledger.Board_cursor_malformed_row _) -> ()
+  | Error error ->
+    failf
+      "wrong board cursor restore error: %s"
+      (Keeper_reaction_ledger.board_cursor_restore_error_to_string error)
+  | Ok _ -> fail "malformed newer ledger row must not roll back to an older cursor"
 ;;
 
 let test_summary_marks_unreacted_and_reacted_stimuli () =
@@ -703,7 +1015,7 @@ let test_unknown_reaction_is_quarantined_without_clearing_pending () =
   Dated_jsonl.append
     (reaction_ledger_store ~base_path ~keeper_name)
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v5"
+        [ "schema", `String "keeper.reaction_ledger.v6"
         ; "record_kind", `String "reaction"
         ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
         ; "keeper_name", `String keeper_name
@@ -1035,7 +1347,7 @@ let test_missing_identity_does_not_claim_an_occurrence_identity () =
   Dated_jsonl.append
     (reaction_ledger_store ~base_path ~keeper_name)
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v5"
+        [ "schema", `String "keeper.reaction_ledger.v6"
         ; "record_kind", `String "stimulus"
         ; "event_id", `String "unattributed-event"
         ; "keeper_name", `String keeper_name
@@ -1096,6 +1408,62 @@ let () =
             "cursor ack is replayable state entry"
             `Quick
             test_cursor_ack_is_replayable_state_entry
+        ; test_case
+            "latest board cursor restores an empty Board head"
+            `Quick
+            test_latest_board_cursor_restores_empty_board_head
+        ; test_case
+            "latest board cursor hard-cuts the v5 namespace"
+            `Quick
+            test_latest_board_cursor_hard_cuts_v5_namespace
+        ; test_case
+            "latest board cursor requires a post id field"
+            `Quick
+            test_latest_board_cursor_requires_post_id_field
+        ; test_case
+            "latest board cursor rejects a wrong post id type"
+            `Quick
+            test_latest_board_cursor_rejects_wrong_post_id_type
+        ; test_case
+            "latest board cursor binds the post id identity"
+            `Quick
+            test_latest_board_cursor_binds_post_id_identity
+        ; test_case
+            "latest board cursor binds the missing post identity"
+            `Quick
+            test_latest_board_cursor_binds_missing_post_identity
+        ; test_case
+            "latest board cursor binds the exact timestamp"
+            `Quick
+            test_latest_board_cursor_binds_exact_timestamp
+        ; test_case
+            "latest board cursor requires Board scope"
+            `Quick
+            test_latest_board_cursor_requires_board_scope
+        ; test_case
+            "latest board cursor requires a positive ack"
+            `Quick
+            test_latest_board_cursor_requires_positive_ack
+        ; test_case
+            "latest board cursor skips valid non-cursor rows"
+            `Quick
+            test_latest_board_cursor_skips_valid_non_cursor_rows
+        ; test_case
+            "latest board cursor fails on an invalid identified non-cursor row"
+            `Quick
+            test_latest_board_cursor_fails_on_invalid_identified_non_cursor_row
+        ; test_case
+            "latest board cursor fails on an invalid newer row"
+            `Quick
+            test_latest_board_cursor_fails_on_invalid_newer_row
+        ; test_case
+            "latest board cursor fails on an unknown-kind non-cursor row"
+            `Quick
+            test_latest_board_cursor_fails_on_unknown_kind_non_cursor_shape
+        ; test_case
+            "latest board cursor fails on a malformed newer row"
+            `Quick
+            test_latest_board_cursor_fails_on_malformed_newer_row
         ; test_case
             "summary marks unreacted and reacted stimuli"
             `Quick

@@ -3,7 +3,7 @@
     This is the runtime mirror for the KeeperReactionLiveness L1/L5
     contract: queue-visible stimuli, queue transition reactions, and board
     cursor acknowledgements are written to a replayable JSONL store under
-    [.masc/keepers/<keeper>/reaction-ledger/v5/YYYY-MM/DD.jsonl].  The
+    [.masc/keepers/<keeper>/reaction-ledger/v6/YYYY-MM/DD.jsonl].  The
     generation namespace is a hard boundary: older stores are neither read nor
     written by this module. *)
 
@@ -41,6 +41,17 @@ type row_quarantine_reason
 val stimulus_kind_to_string : stimulus_kind -> string
 val reaction_kind_to_string : reaction_kind -> string
 val row_quarantine_reason_to_string : row_quarantine_reason -> string
+
+type board_cursor_restore_error =
+  | Board_cursor_malformed_row of
+      { path : string
+      ; line_number : int option
+      ; detail : string
+      }
+  | Board_cursor_invalid_row of row_quarantine_reason
+  | Board_cursor_read_error of Dated_jsonl.read_error
+
+val board_cursor_restore_error_to_string : board_cursor_restore_error -> string
 
 val stimulus_kind_of_string : string -> stimulus_kind option
 (** Inverse of {!stimulus_kind_to_string}.  Strings outside the closed sum
@@ -140,7 +151,6 @@ val event_queue_turn_started_seen_for_source_result :
 val record_board_cursor_ack :
   base_path:string ->
   keeper_name:string ->
-  ?stimulus_id:string ->
   cursor_ts:float ->
   post_id:string option ->
   unit ->
@@ -148,6 +158,17 @@ val record_board_cursor_ack :
 (** Append a durable cursor acknowledgement. Callers should write this before
     advancing the in-memory board cursor so every cursor advance has a replayable
     ack row. *)
+
+val latest_board_cursor_result :
+  base_path:string ->
+  keeper_name:string ->
+  (cursor option, board_cursor_restore_error) result
+(** Restore the newest durable board cursor. The scan is newest-first and
+    ignores rows whose closed [record_kind] identifies them as non-cursor
+    state. A malformed row, unknown record kind, or invalid cursor row
+    encountered before the newest cursor is a typed failure, so cursor
+    corruption cannot silently roll the Keeper back to an older cursor.
+    [Ok None] means the current ledger contains no cursor acknowledgement. *)
 
 val summary_for_keeper :
   base_path:string -> keeper_name:string -> limit:int -> Yojson.Safe.t

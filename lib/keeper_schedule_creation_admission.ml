@@ -1,12 +1,12 @@
 let run config ~keeper_name create =
   match
-    Keeper_turn_admission.run_durable_intake_if_open
+    Keeper_turn_admission.run_durable_effect_if_open
       ~base_path:config.Workspace.base_path
       ~keeper_name
       (fun _intake_token -> create ())
   with
-  | Keeper_turn_admission.Intake_committed result -> result
-  | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+  | Keeper_turn_admission.Durable_effect_committed result -> result
+  | Keeper_turn_admission.Durable_effect_shutdown_reserved operation_id ->
     Error
       (Schedule_service.Creation_rejected
          (Printf.sprintf

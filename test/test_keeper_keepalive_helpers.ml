@@ -37,11 +37,9 @@ let make_keepalive_meta ~name ~agent_name =
         ("name", `String name);
         ("agent_name", `String agent_name);
         ("trace_id", `String ("trace-" ^ name));
-        ("sandbox_profile", `String "local");
-        ("network_mode", `String "inherit");
       ]
   in
-  match Keeper_meta_json_parse.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Error err -> fail ("meta_of_json failed: " ^ err)
   | Ok meta -> meta
 
@@ -184,16 +182,13 @@ module KBA = Masc.Keeper_board_audience
 module KBAC = Masc.Keeper_board_attention_candidate
 
 let make_board_resume_meta name =
-  let json =
-    `Assoc
-      [ ("name", `String name)
-      ; ("agent_name", `String ("keeper-" ^ name))
-      ; ("trace_id", `String ("trace-" ^ name))
-      ; ("sandbox_profile", `String "local")
-      ; ("network_mode", `String "inherit")
-      ]
-  in
-  match Keeper_meta_json_parse.meta_of_json json with
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String name
+        ; "trace_id", `String ("trace-" ^ name)
+        ])
+  with
   | Error err -> fail ("meta_of_json failed: " ^ err)
   | Ok meta -> meta
 ;;
@@ -610,6 +605,12 @@ let test_restarting_exact_mention_is_durable_with_deferred_wake () =
        (match Keeper_meta_store.write_meta config meta with
         | Ok () -> ()
         | Error detail -> fail ("write_meta failed: " ^ detail));
+       Keeper_reaction_ledger.record_board_cursor_ack
+         ~base_path:config.base_path
+         ~keeper_name:meta.name
+         ~cursor_ts:0.0
+         ~post_id:None
+         ();
        (match
           Keeper_registry.register_restarting
             ~base_path:config.base_path

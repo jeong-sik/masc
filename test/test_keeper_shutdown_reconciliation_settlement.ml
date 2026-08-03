@@ -281,7 +281,7 @@ let test_vanished_lane_matches_absent_lane () =
     (fun () ->
        let keeper_name = "vanished-lane" in
        let entry =
-         Keeper_registry.register_offline
+         Keeper_registry.For_testing.register_offline
            ~base_path
            keeper_name
            (meta_fixture_exn ~keeper_name)
@@ -319,12 +319,12 @@ let test_replaced_lane_still_fails () =
     (fun () ->
        let keeper_name = "replaced-lane" in
        let meta = meta_fixture_exn ~keeper_name in
-       let original = Keeper_registry.register_offline ~base_path keeper_name meta in
+       let original = Keeper_registry.For_testing.register_offline ~base_path keeper_name meta in
        (* A different lane now owns the keeper. The operation still names the
           lane it owned, so its retained meta must not overwrite the new one. *)
        Keeper_registry.For_testing.unregister ~base_path keeper_name;
        let replacement =
-         Keeper_registry.register_offline ~base_path keeper_name meta
+         Keeper_registry.For_testing.register_offline ~base_path keeper_name meta
        in
        check
          bool

@@ -537,7 +537,7 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
       cleanup_dir base_path)
     (fun () ->
       ignore
-        (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
+        (Masc.Keeper_registry.For_testing.register_offline ~base_path keeper_name meta);
       Masc.Keeper_registry.mark_turn_started ~base_path
         ~wake:Masc.Keeper_registry.Proactive_tick keeper_name;
       let entry =
@@ -599,7 +599,7 @@ let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
       cleanup_dir base_path)
     (fun () ->
       ignore
-        (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
+        (Masc.Keeper_registry.For_testing.register_offline ~base_path keeper_name meta);
       let entry =
         match Masc.Keeper_registry.get ~base_path keeper_name with
         | Some entry -> entry
@@ -636,7 +636,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       cleanup_dir base_path)
     (fun () ->
       ignore
-        (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
+        (Masc.Keeper_registry.For_testing.register_offline ~base_path keeper_name meta);
       Masc.Keeper_registry.mark_turn_started ~base_path
         ~wake:Masc.Keeper_registry.Proactive_tick keeper_name;
       let entry =

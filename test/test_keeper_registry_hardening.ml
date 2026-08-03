@@ -154,8 +154,8 @@ let test_update_entry_exact_preserves_replacement_lane () =
 let test_dispatch_event_exact_preserves_replacement_lane () =
   KR.For_testing.clear ();
   let old_meta = make_meta "alice" in
-  let old_entry = KR.register_offline ~base_path old_meta.name old_meta in
-  let replacement = KR.register_offline ~base_path old_meta.name old_meta in
+  let old_entry = KR.For_testing.register_offline ~base_path old_meta.name old_meta in
+  let replacement = KR.For_testing.register_offline ~base_path old_meta.name old_meta in
   (match KR.dispatch_event_exact old_entry KSM.Fiber_started with
    | Error _ -> ()
    | Ok _ -> fail "stale exact dispatch mutated the replacement lane");
@@ -267,7 +267,7 @@ let test_wakeup_running_reports_typed_outcome () =
    | KR.Deferred_lifecycle _ ->
      fail "running keeper was not signaled");
   let offline_meta = make_meta "offline" in
-  let offline = KR.register_offline ~base_path offline_meta.name offline_meta in
+  let offline = KR.For_testing.register_offline ~base_path offline_meta.name offline_meta in
   Atomic.set offline.fiber_wakeup false;
   (match
      KR.wakeup_running ~intent:KR.Hitl_resolution ~base_path "offline"
@@ -345,7 +345,7 @@ let test_wakeup_running_exact_reports_deferred_outcomes () =
    | KR.Exact_wake_lifecycle_reserved _ ->
      fail "removed exact owner did not report missing");
   let offline_meta = make_meta "exact-offline" in
-  let offline = KR.register_offline ~base_path offline_meta.name offline_meta in
+  let offline = KR.For_testing.register_offline ~base_path offline_meta.name offline_meta in
   (match KR.wakeup_running_exact ~intent:KR.Reactive_signal offline with
    | KR.Exact_wake_not_running phase ->
      check string "exact deferred phase" "offline" (KSM.phase_to_string phase)
@@ -497,6 +497,96 @@ let cleanup_dir path =
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 ;;
 
+let record_board_cursor ~base_path ~keeper_name ~cursor_ts ~post_id =
+  Masc.Keeper_reaction_ledger.record_board_cursor_ack
+    ~base_path
+    ~keeper_name
+    ~cursor_ts
+    ~post_id
+    ()
+;;
+
+let test_registration_requires_durable_board_cursor () =
+  let dir = temp_dir "registry_missing_board_cursor" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.For_testing.clear ();
+      cleanup_dir dir)
+    (fun () ->
+       let meta = make_meta "missing-board-cursor" in
+       match KR.register_offline_if_admitted ~base_path:dir meta.name meta with
+       | Error
+           (KR.Registration_board_cursor_unavailable
+              { keeper_name; reason = KR.Board_cursor_missing }) ->
+         check string "missing cursor keeper is identified" meta.name keeper_name;
+         check bool "failed registration installs no entry" true
+           (Option.is_none (KR.get ~base_path:dir meta.name))
+       | Error error ->
+         failf
+           "wrong registration failure: %s"
+           (match error with
+            | KR.Registration_board_cursor_unavailable { reason; _ } ->
+              KR.board_cursor_registration_error_to_string reason
+            | KR.Registration_shutdown_reserved _ -> "shutdown_reserved"
+            | KR.Registration_lifecycle_reserved _ -> "lifecycle_reserved"
+            | KR.Registration_invalid validation_error ->
+              KR.registry_entry_validation_error_to_string validation_error
+            | KR.Registration_event_queue_unavailable { detail; _ } -> detail)
+       | Ok _ -> fail "registration accepted a Keeper without a durable board cursor")
+;;
+
+let test_registration_and_restart_restore_exact_board_cursor () =
+  let dir = temp_dir "registry_restore_board_cursor" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.For_testing.clear ();
+      cleanup_dir dir)
+    (fun () ->
+       let meta = make_meta "restored-board-cursor" in
+       record_board_cursor
+         ~base_path:dir
+         ~keeper_name:meta.name
+         ~cursor_ts:123.5
+         ~post_id:(Some "post-123");
+       let registered =
+         match KR.register_offline_if_admitted ~base_path:dir meta.name meta with
+         | Ok entry -> entry
+         | Error error ->
+           failf
+             "registration rejected a durable cursor: %s"
+             (match error with
+              | KR.Registration_board_cursor_unavailable { reason; _ } ->
+                KR.board_cursor_registration_error_to_string reason
+              | KR.Registration_shutdown_reserved _ -> "shutdown_reserved"
+              | KR.Registration_lifecycle_reserved _ -> "lifecycle_reserved"
+              | KR.Registration_invalid validation_error ->
+                KR.registry_entry_validation_error_to_string validation_error
+              | KR.Registration_event_queue_unavailable { detail; _ } -> detail)
+       in
+       check (pair (float 0.0) (option string))
+         "registration restores exact cursor"
+         (123.5, Some "post-123")
+         registered.board_cursor;
+       record_board_cursor
+         ~base_path:dir
+         ~keeper_name:meta.name
+         ~cursor_ts:456.75
+         ~post_id:(Some "post-456");
+       let restarting =
+         match KR.register_restarting ~base_path:dir meta.name meta with
+         | Ok entry -> entry
+         | Error (KR.Restart_board_cursor_unavailable { reason; _ }) ->
+           fail (KR.board_cursor_registration_error_to_string reason)
+         | Error (KR.Restart_event_queue_unavailable { detail; _ }) -> fail detail
+         | Error (KR.Restart_shutdown_reserved _) -> fail "restart shutdown reserved"
+         | Error (KR.Restart_lifecycle_reserved _) -> fail "restart lifecycle reserved"
+       in
+       check (pair (float 0.0) (option string))
+         "restart restores the newest exact cursor"
+         (456.75, Some "post-456")
+         restarting.board_cursor)
+;;
+
 let test_reactive_wakeup_defers_offline_lane_after_queue_commit () =
   let dir = temp_dir "registry_reactive_offline_wakeup" in
   Fun.protect
@@ -508,7 +598,7 @@ let test_reactive_wakeup_defers_offline_lane_after_queue_commit () =
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        KR.For_testing.clear ();
        let meta = make_meta "reactive-offline" in
-       let entry = KR.register_offline ~base_path:dir meta.name meta in
+       let entry = KR.For_testing.register_offline ~base_path:dir meta.name meta in
        let stimulus : Keeper_event_queue.stimulus =
          { post_id = "reactive-offline-stimulus"
          ; urgency = Keeper_event_queue.Normal
@@ -545,7 +635,7 @@ let test_goal_assignment_defers_offline_lane_after_queue_commit () =
        let config = Masc.Workspace.default_config dir in
        let meta = make_meta "goal-offline" in
        let entry =
-         KR.register_offline ~base_path:config.base_path meta.name meta
+         KR.For_testing.register_offline ~base_path:config.base_path meta.name meta
        in
        Atomic.set entry.fiber_wakeup false;
        let added =
@@ -586,7 +676,7 @@ let test_goal_reconciliation_enqueues_once_after_last_terminal_task () =
        let meta = make_goal_reconciler_meta () in
        ignore (Masc.Workspace.init config ~agent_name:(Some meta.agent_name));
        Masc.Workspace_metric_hooks.install ();
-       ignore (KR.register_offline ~base_path:config.base_path meta.name meta);
+       ignore (KR.For_testing.register_offline ~base_path:config.base_path meta.name meta);
        let goal, _ =
          match
            Goal_store.upsert_goal
@@ -736,7 +826,7 @@ let test_goal_reconciliation_prefers_authoritative_assignment
        finish "task-001";
        finish "task-002";
        ignore
-         (KR.register_offline
+         (KR.For_testing.register_offline
             ~base_path:config.base_path
             producer_meta.name
             producer_meta);
@@ -747,7 +837,7 @@ let test_goal_reconciliation_prefers_authoritative_assignment
          }
        in
        ignore
-         (KR.register_offline
+         (KR.For_testing.register_offline
             ~base_path:config.base_path
             assigned_meta.name
             assigned_meta);
@@ -832,7 +922,7 @@ let test_goal_reconciliation_restart_scan_retries_missed_delivery () =
        let config = Masc.Workspace.default_config dir in
        let meta = make_goal_reconciler_meta () in
        ignore (Masc.Workspace.init config ~agent_name:(Some meta.agent_name));
-       ignore (KR.register_offline ~base_path:config.base_path meta.name meta);
+       ignore (KR.For_testing.register_offline ~base_path:config.base_path meta.name meta);
        Atomic.set Workspace_hooks.task_terminal_committed_fn
          (fun _config ~agent_name:_ ~task_id:_ ->
             Workspace_hooks.Task_terminal_delivered);
@@ -1422,6 +1512,16 @@ let () =
             "exact wake serializes lifecycle ownership and replacement"
             `Quick
             test_wakeup_running_exact_respects_lifecycle_owner_and_replacement
+        ] )
+    ; ( "board_cursor_registration"
+      , [ test_case
+            "missing durable cursor fails closed"
+            `Quick
+            test_registration_requires_durable_board_cursor
+        ; test_case
+            "registration and restart restore exact durable cursor"
+            `Quick
+            test_registration_and_restart_restore_exact_board_cursor
         ] )
     ; ( "wakeup_callers"
       , [ test_case

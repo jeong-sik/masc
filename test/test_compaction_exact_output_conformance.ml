@@ -129,7 +129,7 @@ let ensure_registered_keeper ~base_path keeper_name =
           ])
       |> Result.get_ok
     in
-    ignore (Keeper_registry.register_offline ~base_path keeper_name meta)
+    ignore (Keeper_registry.For_testing.register_offline ~base_path keeper_name meta)
 ;;
 
 let prepare_exn

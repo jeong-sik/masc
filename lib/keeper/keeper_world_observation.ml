@@ -801,7 +801,7 @@ let pending_board_event_of_stimulus
 ;;
 
 (** Collect recent board activity using cursor-based tracking.
-    Cursor state lives in Keeper_registry as [(updated_at, post_id)].
+    Cursor state is restored into Keeper_registry as [(updated_at, post_id)].
     Returns (structured events, new post count, mention count).
 
     Comment-stream dedup: after the initial cursor + author filter,
@@ -816,31 +816,8 @@ let collect_board_events_with_cursor_policy
   : pending_board_event list * int * int
   =
   try
-    let cursor_ts, cursor_post_id =
-      Keeper_registry.get_board_cursor ~base_path meta.name
-    in
     let base_cursor =
-      if cursor_ts > 0.0
-      then Some (cursor_ts, cursor_post_id)
-      else (
-        let initial_cursor = Board_dispatch.current_post_cursor () in
-        if advance_cursor
-        then (
-          let ts, post_id = initial_cursor in
-          Keeper_registry.set_board_cursor ~base_path meta.name ts post_id;
-          (match post_id with
-           | Some post_id ->
-             Log.Keeper.info
-               "board cursor initialized at current head for %s: (%f, %s)"
-               meta.name
-               ts
-               post_id
-           | None ->
-             Log.Keeper.info
-               "board cursor initialized at empty current head for %s: (%f, no post)"
-               meta.name
-               ts));
-        None)
+      Keeper_registry.get_board_cursor ~base_path meta.name
     in
     let posts =
       match base_cursor with
@@ -1068,7 +1045,6 @@ let collect_board_events_with_cursor_policy
         Keeper_reaction_ledger.record_board_cursor_ack
           ~base_path
           ~keeper_name:meta.name
-          ~stimulus_id:(Keeper_reaction_ledger.board_stimulus_id ~post_id)
           ~cursor_ts:ts
           ~post_id:(Some post_id)
           ();

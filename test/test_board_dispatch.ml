@@ -486,23 +486,20 @@ let test_list_posts_with_sort () =
 
 let board_observation_meta name =
   match
-    Keeper_meta_json_parse.meta_of_json
+    Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [ "name", `String name
         ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
         ; "trace_id", `String ("trace-" ^ name)
-        ; "sandbox_profile", `String "local"
-        ; "network_mode", `String "inherit"
         ])
   with
   | Ok meta -> meta
   | Error message -> Alcotest.failf "board observation meta failed: %s" message
 
-let test_first_board_observation_starts_at_current_head () =
+let test_durable_board_cursor_starts_at_creation_head () =
   let base_path = Sys.getenv "MASC_BASE_PATH" in
   let keeper_name = "cursor-bootstrap" in
   let meta = board_observation_meta keeper_name in
-  ignore (Keeper_registry.For_testing.register ~base_path keeper_name meta);
   Fun.protect
     ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
     (fun () ->
@@ -517,6 +514,23 @@ let test_first_board_observation_starts_at_current_head () =
          | Ok post -> post
          | Error error -> Alcotest.fail (Board.show_board_error error)
        in
+       (match
+          Keeper_board_cursor_genesis.ensure
+            ~base_path
+            ~keeper_name
+            ()
+        with
+        | Ok () -> ()
+        | Error error ->
+          Alcotest.failf
+            "initial Board cursor persistence failed: %s"
+            (Keeper_board_cursor_genesis.error_to_string error));
+       (match Keeper_registry.register_offline_if_admitted ~base_path keeper_name meta with
+        | Ok _ -> ()
+        | Error (Keeper_registry.Registration_board_cursor_unavailable { reason; _ }) ->
+          Alcotest.fail
+            (Keeper_registry.board_cursor_registration_error_to_string reason)
+        | Error _ -> Alcotest.fail "Keeper registration rejected durable Board cursor");
        let events, new_count, mention_count =
          Keeper_world_observation.collect_board_events ~base_path ~meta
        in
@@ -527,7 +541,9 @@ let test_first_board_observation_starts_at_current_head () =
        Alcotest.(check int) "historical post is not counted as new" 0 new_count;
        Alcotest.(check int) "historical mention is not counted" 0 mention_count;
        let cursor_ts, cursor_post_id =
-         Keeper_registry.get_board_cursor ~base_path keeper_name
+         match Keeper_registry.get_board_cursor ~base_path keeper_name with
+         | Some cursor -> cursor
+         | None -> Alcotest.fail "registered Keeper lost its Board cursor"
        in
        Alcotest.(check (float 0.0))
          "cursor starts at exact current Board head"
@@ -562,6 +578,292 @@ let test_first_board_observation_starts_at_current_head () =
            (Board.Post_id.to_string new_post.id)
            event.Keeper_world_observation.post_id
        | _ -> Alcotest.fail "expected exactly one new Board event")
+
+let test_initial_board_cursor_retry_preserves_subscription_head () =
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  let keeper_name = "cursor-create-retry" in
+  let create content =
+    match
+      Board_dispatch.create_post
+        ~author:"external-author"
+        ~content
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let subscription_head = create "subscription head" in
+  let persist () =
+    match
+      Keeper_board_cursor_genesis.ensure
+        ~base_path
+        ~keeper_name
+        ()
+    with
+    | Ok () -> ()
+    | Error error ->
+      Alcotest.failf
+        "initial Board cursor persistence failed: %s"
+        (Keeper_board_cursor_genesis.error_to_string error)
+  in
+  persist ();
+  Unix.sleepf 0.01;
+  ignore (create "post created while metadata write is retried");
+  persist ();
+  match
+    Keeper_reaction_ledger.latest_board_cursor_result ~base_path ~keeper_name
+  with
+  | Ok (Some cursor) ->
+    Alcotest.(check (float 0.0))
+      "retry preserves the original subscription timestamp"
+      subscription_head.updated_at
+      cursor.cursor_ts;
+    Alcotest.(check (option string))
+      "retry preserves the original subscription post"
+      (Some (Board.Post_id.to_string subscription_head.id))
+      cursor.post_id
+  | Ok None -> Alcotest.fail "initial Board cursor disappeared on retry"
+  | Error error ->
+    Alcotest.fail
+      (Keeper_reaction_ledger.board_cursor_restore_error_to_string error)
+
+let test_concurrent_initial_cursor_persistence_samples_once () =
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  let keeper_name = "cursor-create-concurrent" in
+  let first_sample_entered, resolve_first_sample_entered = Eio.Promise.create () in
+  let release_first_sample, resolve_release_first_sample = Eio.Promise.create () in
+  let sample_count = Atomic.make 0 in
+  let current_post_cursor () =
+    let sample_index = Atomic.fetch_and_add sample_count 1 in
+    if sample_index = 0
+    then (
+      Eio.Promise.resolve resolve_first_sample_entered ();
+      Eio.Promise.await release_first_sample;
+      10.0, Some "first-head")
+    else 20.0, Some "second-head"
+  in
+  let persist () =
+    Keeper_board_cursor_genesis.ensure_with
+      ~current_post_cursor
+      ~base_path
+      ~keeper_name
+      ()
+  in
+  Eio.Switch.run @@ fun sw ->
+  let first_done, resolve_first_done = Eio.Promise.create () in
+  let second_done, resolve_second_done = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve_first_done (persist ()));
+  Eio.Promise.await first_sample_entered;
+  Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve_second_done (persist ()));
+  Eio.Fiber.yield ();
+  Eio.Promise.resolve resolve_release_first_sample ();
+  let check_result = function
+    | Ok () -> ()
+    | Error error ->
+      Alcotest.failf
+        "initial cursor persistence failed: %s"
+        (Keeper_board_cursor_genesis.error_to_string error)
+  in
+  check_result (Eio.Promise.await first_done);
+  check_result (Eio.Promise.await second_done);
+  Alcotest.(check int) "subscription head sampled exactly once" 1 (Atomic.get sample_count);
+  match Keeper_reaction_ledger.latest_board_cursor_result ~base_path ~keeper_name with
+  | Ok (Some cursor) ->
+    Alcotest.(check (float 0.0)) "first subscription timestamp wins" 10.0 cursor.cursor_ts;
+    Alcotest.(check (option string))
+      "first subscription identity wins"
+      (Some "first-head")
+      cursor.post_id
+  | Ok None -> Alcotest.fail "concurrent initialization lost the durable cursor"
+  | Error error ->
+    Alcotest.fail
+      (Keeper_reaction_ledger.board_cursor_restore_error_to_string error)
+
+let test_initial_cursor_respects_shutdown_fence () =
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  let keeper_name = "cursor-shutdown-fence" in
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  let sampled = Atomic.make false in
+  ignore
+    (Keeper_turn_admission.begin_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id
+      : Keeper_turn_admission.begin_shutdown_result);
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Keeper_turn_admission.rollback_shutdown
+           ~base_path
+           ~keeper_name
+           ~operation_id
+          : Keeper_turn_admission.rollback_shutdown_result))
+    (fun () ->
+       let result =
+         Keeper_board_cursor_genesis.ensure_with
+           ~current_post_cursor:(fun () ->
+             Atomic.set sampled true;
+             42.0, Some "must-not-be-sampled")
+           ~base_path
+           ~keeper_name
+           ()
+       in
+       (match result with
+        | Error (Keeper_board_cursor_genesis.Shutdown_fenced actual) ->
+          Alcotest.(check bool)
+            "shutdown owner is preserved"
+            true
+            (Keeper_shutdown_types.Operation_id.equal actual operation_id)
+        | Error error ->
+          Alcotest.fail
+            ("unexpected cursor genesis error: "
+             ^ Keeper_board_cursor_genesis.error_to_string error)
+        | Ok () -> Alcotest.fail "shutdown-fenced cursor genesis succeeded");
+       Alcotest.(check bool)
+         "shutdown fence prevents Board sampling"
+         false
+         (Atomic.get sampled);
+       match
+         Keeper_reaction_ledger.latest_board_cursor_result
+           ~base_path
+           ~keeper_name
+       with
+       | Ok None -> ()
+       | Ok (Some _) -> Alcotest.fail "shutdown fence allowed a durable cursor write"
+       | Error error ->
+         Alcotest.fail
+           (Keeper_reaction_ledger.board_cursor_restore_error_to_string error))
+
+let test_shutdown_joins_started_initial_cursor () =
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  let keeper_name = "cursor-shutdown-contention" in
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  let sample_entered, resolve_sample_entered = Eio.Promise.create () in
+  let release_sample, resolve_release_sample = Eio.Promise.create () in
+  let idle_joined = Atomic.make false in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Keeper_turn_admission.rollback_shutdown
+           ~base_path
+           ~keeper_name
+           ~operation_id
+          : Keeper_turn_admission.rollback_shutdown_result))
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       let genesis_done, resolve_genesis_done = Eio.Promise.create () in
+       let idle_done, resolve_idle_done = Eio.Promise.create () in
+       Eio.Fiber.fork ~sw (fun () ->
+         let result =
+           Keeper_board_cursor_genesis.ensure_with
+             ~current_post_cursor:(fun () ->
+               Eio.Promise.resolve resolve_sample_entered ();
+               Eio.Promise.await release_sample;
+               23.0, Some "contention-head")
+             ~base_path
+             ~keeper_name
+             ()
+         in
+         Eio.Promise.resolve resolve_genesis_done result);
+       Eio.Promise.await sample_entered;
+       (match
+          Keeper_turn_admission.begin_shutdown
+            ~base_path
+            ~keeper_name
+            ~operation_id
+        with
+        | Keeper_turn_admission.Shutdown_reserved _ -> ()
+        | Keeper_turn_admission.Shutdown_already_reserved _ ->
+          Alcotest.fail "unexpected existing shutdown owner");
+       Eio.Fiber.fork ~sw (fun () ->
+         Keeper_turn_admission.await_idle_after_shutdown ~base_path ~keeper_name;
+         Atomic.set idle_joined true;
+         Eio.Promise.resolve resolve_idle_done ());
+       Eio.Fiber.yield ();
+       Eio.Fiber.yield ();
+       Alcotest.(check bool)
+         "shutdown cleanup waits for started cursor genesis"
+         false
+         (Atomic.get idle_joined);
+       Eio.Promise.resolve resolve_release_sample ();
+       (match Eio.Promise.await genesis_done with
+        | Ok () -> ()
+        | Error error ->
+          Alcotest.fail
+            ("started cursor genesis failed: "
+             ^ Keeper_board_cursor_genesis.error_to_string error));
+       Eio.Promise.await idle_done;
+       Alcotest.(check bool)
+         "shutdown cleanup joins cursor genesis"
+         true
+         (Atomic.get idle_joined))
+
+let test_initial_cursor_requires_lifecycle_owner () =
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  let keeper_name = "cursor-lifecycle-owner" in
+  let token =
+    match
+      Keeper_lifecycle_reservation.acquire
+        ~base_path
+        ~keeper_name
+        ~expected_generation:0
+        ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
+    with
+    | Ok token -> token
+    | Error _ -> Alcotest.fail "cursor test could not acquire lifecycle ownership"
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Keeper_lifecycle_reservation.release token
+          : Keeper_lifecycle_reservation.release_outcome))
+    (fun () ->
+       let sample () = 17.0, Some "lifecycle-head" in
+       (match
+          Keeper_board_cursor_genesis.ensure_with
+            ~current_post_cursor:sample
+            ~base_path
+            ~keeper_name
+            ()
+        with
+        | Error (Keeper_board_cursor_genesis.Lifecycle_reserved owner) ->
+          Alcotest.(check string)
+            "lifecycle owner is preserved"
+            (Keeper_lifecycle_reservation.owner_id token)
+            owner.owner_id
+        | Error error ->
+          Alcotest.fail
+            ("unexpected cursor genesis error: "
+             ^ Keeper_board_cursor_genesis.error_to_string error)
+        | Ok () -> Alcotest.fail "unowned cursor genesis crossed lifecycle authority");
+       (match
+          Keeper_board_cursor_genesis.ensure_with
+            ~lifecycle_token:token
+            ~current_post_cursor:sample
+            ~base_path
+            ~keeper_name
+            ()
+        with
+        | Ok () -> ()
+        | Error error ->
+          Alcotest.fail
+            ("owned cursor genesis failed: "
+             ^ Keeper_board_cursor_genesis.error_to_string error));
+       match
+         Keeper_reaction_ledger.latest_board_cursor_result
+           ~base_path
+           ~keeper_name
+       with
+       | Ok (Some cursor) ->
+         Alcotest.(check (pair (float 0.0) (option string)))
+           "owned genesis persists the exact cursor"
+           (17.0, Some "lifecycle-head")
+           (cursor.cursor_ts, cursor.post_id)
+       | Ok None -> Alcotest.fail "owned cursor genesis persisted nothing"
+       | Error error ->
+         Alcotest.fail
+           (Keeper_reaction_ledger.board_cursor_restore_error_to_string error))
 
 let test_dashboard_projection_does_not_produce_attention_candidate () =
   let base_path = Sys.getenv "MASC_BASE_PATH" in
@@ -2128,9 +2430,29 @@ let () =
         (with_eio test_list_posts_negative_limit_returns_empty);
       Alcotest.test_case "sort orders" `Quick (with_eio test_list_posts_with_sort);
       Alcotest.test_case
-        "first observation starts at current head"
+        "durable cursor starts at creation head"
         `Quick
-        (with_eio test_first_board_observation_starts_at_current_head);
+        (with_eio test_durable_board_cursor_starts_at_creation_head);
+      Alcotest.test_case
+        "initial cursor retry preserves subscription head"
+        `Quick
+        (with_eio test_initial_board_cursor_retry_preserves_subscription_head);
+      Alcotest.test_case
+        "concurrent initial cursor persistence samples once"
+        `Quick
+        (with_eio test_concurrent_initial_cursor_persistence_samples_once);
+      Alcotest.test_case
+        "initial cursor respects shutdown fence"
+        `Quick
+        (with_eio test_initial_cursor_respects_shutdown_fence);
+      Alcotest.test_case
+        "shutdown joins started initial cursor"
+        `Quick
+        (with_eio test_shutdown_joins_started_initial_cursor);
+      Alcotest.test_case
+        "initial cursor requires lifecycle owner"
+        `Quick
+        (with_eio test_initial_cursor_requires_lifecycle_owner);
       Alcotest.test_case
         "dashboard projection does not produce attention candidate"
         `Quick

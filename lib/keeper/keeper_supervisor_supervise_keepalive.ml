@@ -139,11 +139,23 @@ let supervise_keepalive
   in
   let register_and_launch () =
     match
-      Keeper_registry.register_offline_if_admitted
+      Keeper_board_cursor_genesis.ensure
         ~base_path
-        meta.name
-        meta
+        ~keeper_name:meta.name
+        ()
     with
+    | Error error ->
+      Log.Keeper.error
+        "supervisor Board cursor genesis failed keeper=%s: %s"
+        meta.name
+        (Keeper_board_cursor_genesis.error_to_string error)
+    | Ok () ->
+    (match
+       Keeper_registry.register_offline_if_admitted
+         ~base_path
+         meta.name
+         meta
+     with
     | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
       Log.Keeper.warn
         "supervisor launch skipped %s because shutdown operation %s owns admission"
@@ -164,7 +176,14 @@ let supervise_keepalive
         "supervisor registry event queue unavailable keeper=%s: %s"
         keeper_name
         detail
-    | Ok reg -> launch_registered reg
+    | Error
+        (Keeper_registry.Registration_board_cursor_unavailable
+           { keeper_name; reason }) ->
+      Log.Keeper.error
+        "supervisor registry board cursor unavailable keeper=%s: %s"
+        keeper_name
+        (Keeper_registry.board_cursor_registration_error_to_string reason)
+    | Ok reg -> launch_registered reg)
   in
   match execution_truth with
   | Keeper_activation_readiness.Unknown detail ->

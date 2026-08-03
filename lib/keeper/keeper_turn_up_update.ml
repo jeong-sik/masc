@@ -401,6 +401,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                           (Keepalive_already_registered entry)))
                 | ( Keepalive_lifecycle_denied _
                   | Keepalive_identity_unrepairable
+                  | Keepalive_board_cursor_genesis_failed _
                   | Keepalive_registration_rejected _
                   | Keepalive_fiber_start_rejected _
                   | Keepalive_lane_ownership_lost

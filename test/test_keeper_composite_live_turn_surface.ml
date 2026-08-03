@@ -28,7 +28,6 @@ let make_meta name =
       (`Assoc
         [
           ("name", `String name);
-          ("agent_name", `String ("agent-" ^ name));
           ("trace_id", `String ("trace-" ^ name));
           ("allowed_paths", `List [ `String "*" ]);
         ])
@@ -197,7 +196,7 @@ let test_run_state_waiting_when_running_idle () =
 let test_run_state_suspended_for_non_running_phase () =
   let base = temp_base () in
   let name = "offline-keeper" in
-  ignore (Keeper_registry.register_offline ~base_path:base name (make_meta name));
+  ignore (Keeper_registry.For_testing.register_offline ~base_path:base name (make_meta name));
   let json =
     match Keeper_registry.get ~base_path:base name with
     | Some entry -> Observer.snapshot_to_json (Observer.observe entry)

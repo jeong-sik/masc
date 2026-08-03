@@ -625,7 +625,8 @@ let observe
            }
        | None -> None);
     board_cursor =
-      { bc_ts = entry.board_cursor_ts; bc_post_id = entry.board_cursor_post_id };
+      (let bc_ts, bc_post_id = entry.board_cursor in
+       { bc_ts; bc_post_id });
     board_wakeups = Keeper_registry.StringMap.cardinal entry.board_wakeups;
     fiber_stop_flag = Atomic.get entry.fiber_stop;
     fiber_wakeup_flag = Atomic.get entry.fiber_wakeup;

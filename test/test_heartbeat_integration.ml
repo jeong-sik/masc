@@ -731,9 +731,22 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
         }
       in
       seed_keeper_sandbox_profile ~base_dir keeper_name;
-      ignore
-        (Masc.Keeper_keepalive.start_keepalive ctx meta
-          : Masc.Keeper_keepalive.start_keepalive_outcome);
+      (match Masc.Keeper_keepalive.start_keepalive ctx meta with
+       | Masc.Keeper_keepalive.Keepalive_started _ -> ()
+       | outcome ->
+         fail
+           ("direct keepalive did not materialize its Board cursor: "
+            ^ Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome));
+      (match
+         Masc.Keeper_reaction_ledger.latest_board_cursor_result
+           ~base_path:config.base_path
+           ~keeper_name
+       with
+       | Ok (Some _) -> ()
+       | Ok None -> fail "direct keepalive left no current-generation Board cursor"
+       | Error error ->
+         fail
+           (Masc.Keeper_reaction_ledger.board_cursor_restore_error_to_string error));
       Eio.Time.sleep ctx.clock 0.05;
       (match
          Masc.Keeper_keepalive.stop_keepalive_and_await
@@ -2692,15 +2705,15 @@ let test_keeper_dormant_shutdown_join_cancel_rolls_back_fence () =
       Eio.Switch.run @@ fun outer_sw ->
       Eio.Fiber.fork ~sw:outer_sw (fun () ->
         (match
-           Masc.Keeper_turn_admission.run_durable_intake_if_open
+           Masc.Keeper_turn_admission.run_durable_effect_if_open
              ~base_path:config.base_path
              ~keeper_name:name
              (fun _intake_token ->
                 Eio.Promise.resolve intake_started_u ();
                 Eio.Promise.await release_intake)
          with
-         | Masc.Keeper_turn_admission.Intake_committed () -> ()
-         | Masc.Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+         | Masc.Keeper_turn_admission.Durable_effect_committed () -> ()
+         | Masc.Keeper_turn_admission.Durable_effect_shutdown_reserved operation_id ->
            fail
              ("test intake unexpectedly saw shutdown reservation "
               ^ Shutdown_types.Operation_id.to_string operation_id));

@@ -202,8 +202,8 @@ type turn_attempt = {
   ta_first_started_at : float;
 }
 
-(** Board consumption cursor, mirrored from
-    [registry_entry.board_cursor_ts] / [board_cursor_post_id]. Lets
+(** Board consumption cursor, mirrored from the restored
+    [registry_entry.board_cursor]. Lets
     operators see how far a keeper has consumed the shared board. *)
 type board_cursor = {
   bc_ts : float;

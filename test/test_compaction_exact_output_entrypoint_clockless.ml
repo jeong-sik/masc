@@ -122,7 +122,7 @@ let test_domain_invalid_and_clockless_flow_failure_are_terminal () =
       let meta = make_meta () in
       Masc.Keeper_registry.For_testing.clear ();
       ignore
-        (Masc.Keeper_registry.register_offline
+        (Masc.Keeper_registry.For_testing.register_offline
            ~base_path:exact_flow_base_path
            meta.name
            meta);
@@ -196,7 +196,7 @@ let test_absent_source_authority_is_typed_at_before_dispatch () =
       let meta = make_meta () in
       Masc.Keeper_registry.For_testing.clear ();
       ignore
-        (Masc.Keeper_registry.register_offline
+        (Masc.Keeper_registry.For_testing.register_offline
            ~base_path:exact_flow_base_path
            meta.name
            meta);

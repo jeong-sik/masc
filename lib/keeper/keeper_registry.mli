@@ -20,10 +20,13 @@ include module type of Keeper_registry_types
 
 
 
-(** Register a fresh keeper before its first keepalive fiber launch.
-    The entry starts in [Offline] and must receive [Fiber_started] when the
-    runtime actually launches the fiber. *)
-val register_offline : base_path:string -> string -> keeper_meta -> registry_entry
+type board_cursor_registration_error =
+  | Board_cursor_missing
+  | Board_cursor_restore_failed of
+      Keeper_reaction_ledger.board_cursor_restore_error
+
+val board_cursor_registration_error_to_string :
+  board_cursor_registration_error -> string
 
 type registration_error =
   | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
@@ -32,6 +35,10 @@ type registration_error =
   | Registration_event_queue_unavailable of
       { keeper_name : string
       ; detail : string
+      }
+  | Registration_board_cursor_unavailable of
+      { keeper_name : string
+      ; reason : board_cursor_registration_error
       }
 
 (** Production registration gate: the final registry CAS is serialized with
@@ -56,6 +63,10 @@ type register_restarting_error =
   | Restart_event_queue_unavailable of
       { keeper_name : string
       ; detail : string
+      }
+  | Restart_board_cursor_unavailable of
+      { keeper_name : string
+      ; reason : board_cursor_registration_error
       }
 
 (** Register a keeper that is about to relaunch after a crash.
@@ -418,6 +429,12 @@ module For_testing : sig
       direct fixtures that want a keeper to begin in [Running]. *)
   val register : base_path:string -> string -> keeper_meta -> registry_entry
 
+  (** Register a test fixture in [Offline]. Both test registration helpers
+      explicitly persist the valid empty-Board cursor before installing the
+      entry; production registration never uses this initializer. *)
+  val register_offline :
+    base_path:string -> string -> keeper_meta -> registry_entry
+
   (** Unregister a keeper (removes from registry). *)
   val unregister : base_path:string -> string -> unit
 
@@ -508,8 +525,10 @@ val cleanup_tracking : base_path:string -> string -> unit
 (** Reset tracking only if [entry]'s lane still owns its registry key. *)
 val cleanup_tracking_exact : registry_entry -> exact_update_result
 
-(** Get board event cursor token. Returns [(0.0, None)] if not found. *)
-val get_board_cursor : base_path:string -> string -> float * string option
+(** Get the restored board event cursor token. [None] means the Keeper is not
+    registered; an empty Board is represented by [Some (0.0, None)]. *)
+val get_board_cursor :
+  base_path:string -> string -> (float * string option) option
 
 (** Update board event cursor token. No-op if not found. *)
 val set_board_cursor :

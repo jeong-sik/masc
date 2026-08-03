@@ -535,8 +535,6 @@ let cleanup_tracking ~base_path name =
          { entry with
            board_wakeups = StringMap.empty
          ; tool_usage = StringMap.empty
-         ; board_cursor_ts = 0.0
-         ; board_cursor_post_id = None
          }
      with
      | Ok () -> ()
@@ -553,8 +551,6 @@ let cleanup_tracking_exact (entry : registry_entry) =
     { current with
       board_wakeups = StringMap.empty
     ; tool_usage = StringMap.empty
-    ; board_cursor_ts = 0.0
-    ; board_cursor_post_id = None
     })
 ;;
 
@@ -567,14 +563,14 @@ let clear () =
 
 let get_board_cursor ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  | Some entry -> entry.board_cursor_ts, entry.board_cursor_post_id
-  | None -> 0.0, None
+  | Some entry -> Some entry.board_cursor
+  | None -> None
 ;;
 
 let set_board_cursor ~base_path name ts post_id =
   match
     update_entry ~base_path name (fun e ->
-      { e with board_cursor_ts = ts; board_cursor_post_id = post_id })
+      { e with board_cursor = ts, post_id })
   with
   | Ok () -> ()
   | Error err ->
@@ -1215,7 +1211,8 @@ let get_phase ~base_path name =
 
 module For_testing = struct
   let unsafe_put_entry = unsafe_put_entry
-  let register = register
+  let register = register_for_testing
+  let register_offline = register_offline_for_testing
   let unregister = unregister
   let clear = clear
   let reload_meta_from_disk = reload_meta_from_disk

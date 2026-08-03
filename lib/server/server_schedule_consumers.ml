@@ -1051,13 +1051,13 @@ let dispatch_keeper_wake
            })
   in
   match
-    Keeper_turn_admission.run_durable_intake_if_open
+    Keeper_turn_admission.run_durable_effect_if_open
       ~base_path
       ~keeper_name:intake_owner
       dispatch_while_fenced
   with
-  | Keeper_turn_admission.Intake_committed result -> result
-  | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+  | Keeper_turn_admission.Durable_effect_committed result -> result
+  | Keeper_turn_admission.Durable_effect_shutdown_reserved operation_id ->
     retryable_dispatch_failure
       (Printf.sprintf
          "scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"

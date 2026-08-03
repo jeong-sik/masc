@@ -42,7 +42,6 @@ let make_meta name =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [ "name", `String name
-        ; "agent_name", `String ("agent-" ^ name)
         ; "trace_id", `String ("trace-" ^ name)
         ; "allowed_paths", `List [ `String "*" ]
         ; "autoboot_enabled", `Bool false
@@ -60,6 +59,12 @@ let run_interleaving () =
   Eio_main.run (fun _env ->
     KR.For_testing.clear ();
     Admission.For_testing.reset ();
+    Masc.Keeper_reaction_ledger.record_board_cursor_ack
+      ~base_path
+      ~keeper_name
+      ~cursor_ts:0.0
+      ~post_id:None
+      ();
     let key_lock_taken, set_key_lock_taken = Eio.Promise.create () in
     let release_key_lock, do_release_key_lock = Eio.Promise.create () in
     let registration_done, set_registration_done = Eio.Promise.create () in

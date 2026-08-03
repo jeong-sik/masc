@@ -22,7 +22,7 @@ let ensure_registered_keeper
   | Some _ -> ()
   | None ->
     ignore
-      (Masc.Keeper_registry.register_offline
+      (Masc.Keeper_registry.For_testing.register_offline
          ~base_path
          meta.name
          meta)

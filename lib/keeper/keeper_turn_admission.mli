@@ -80,9 +80,9 @@ type 'a registration_commit_result =
   | Registration_committed of 'a
   | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
-type 'a durable_intake_result =
-  | Intake_committed of 'a
-  | Intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+type 'a durable_effect_result =
+  | Durable_effect_committed of 'a
+  | Durable_effect_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
 type 'a transfer_intake_result =
   | Transfer_intake_committed of 'a
@@ -91,7 +91,7 @@ type 'a transfer_intake_result =
 
 type intake_token
 (** Opaque authority for one currently admitted durable intake. The token is
-    valid only inside the callback passed to [run_durable_intake_if_open]. *)
+    valid only inside the callback passed to [run_durable_effect_if_open]. *)
 
 type slot_snapshot =
   { snapshot_keeper_name : string
@@ -273,15 +273,21 @@ val commit_registration_if_open :
   (unit -> 'a) ->
   'a registration_commit_result
 
-(** Serialize one suspending durable intake effect with shutdown join. The
-    shutdown fence is checked after the intake mutex is acquired: intake that
-    wins commits before [await_idle_after_shutdown] returns, while a shutdown
-    that wins prevents the effect from starting. *)
-val run_durable_intake_if_open :
+(** Serialize a suspending durable Keeper mutation while admission remains
+    open. This boundary is for mutations whose state shutdown cleanup may
+    delete, including registration genesis and external queue intake. The
+    closure runs under one fiber-cooperative mutex and never while [state_mu]
+    is held. A shutdown that linearizes first rejects the closure; a durable
+    mutation that linearizes first finishes before [await_idle_after_shutdown]
+    returns.
+
+    Callers that also own the lifecycle key lock must acquire that lock before
+    this function, preserving lifecycle-key -> admission lock order. *)
+val run_durable_effect_if_open :
   base_path:string ->
   keeper_name:string ->
   (intake_token -> 'a) ->
-  'a durable_intake_result
+  'a durable_effect_result
 
 (** Hold both source and target durable-intake fences in canonical Keeper-name
     order for one transfer effect. Opposing A-to-B and B-to-A operations
@@ -304,10 +310,10 @@ val intake_token_matches :
   bool
 (** [true] only for a live token belonging to the requested Keeper. *)
 
-(** Join the current turn holder and any durable external intake after
+(** Join the current turn holder and any guarded durable mutation after
     admission has been closed. This waits without an invented timeout, then
     immediately releases both slots. Never call from the same admitted turn
-    or intake. *)
+    or guarded durable mutation. *)
 val await_idle_after_shutdown : base_path:string -> keeper_name:string -> unit
 
 val snapshot_for : base_path:string -> keeper_name:string -> slot_snapshot

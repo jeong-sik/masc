@@ -30,7 +30,7 @@ module Event_id_set = Set.Make (String)
 
 (* The storage namespace and row schema advance together. Readers inspect
    exactly this namespace, keeping exact evidence under one authority. *)
-let storage_generation = "v5"
+let storage_generation = "v6"
 let schema = "keeper.reaction_ledger." ^ storage_generation
 
 let stimulus_kind_to_string = function
@@ -462,32 +462,32 @@ let cursor_json { cursor_ts; post_id } =
     ]
 ;;
 
-let record_board_cursor_ack
-      ~base_path
-      ~keeper_name
-      ?stimulus_id
-      ~cursor_ts
-      ~post_id
-      ()
-  =
+let cursor_ts_identity cursor_ts =
+  Printf.sprintf "%016Lx" (Int64.bits_of_float cursor_ts)
+;;
+
+let cursor_stimulus_id ~cursor_ts = function
+  | Some post_id -> board_stimulus_id ~post_id
+  | None -> digest_id "cursor" (cursor_ts_identity cursor_ts)
+;;
+
+let cursor_event_id ~stimulus_id ~cursor_ts =
+  digest_id
+    "krl"
+    (String.concat
+       "|"
+       [ stimulus_id; "cursor_ack"; cursor_ts_identity cursor_ts ])
+;;
+
+let record_board_cursor_ack ~base_path ~keeper_name ~cursor_ts ~post_id () =
   let cursor = { cursor_ts; post_id } in
-  let stimulus_id =
-    match stimulus_id, post_id with
-    | Some value, _ -> value
-    | None, Some post_id -> board_stimulus_id ~post_id
-    | None, None -> digest_id "cursor" (Printf.sprintf "%.6f" cursor_ts)
-  in
+  let stimulus_id = cursor_stimulus_id ~cursor_ts post_id in
   let recorded_at = Time_compat.now () in
   let json =
     `Assoc
       (base_fields
          ~record_kind:"cursor_ack"
-         ~event_id:
-           (digest_id
-              "krl"
-              (String.concat
-                 "|"
-                 [ stimulus_id; "cursor_ack"; Printf.sprintf "%.6f" cursor_ts ]))
+         ~event_id:(cursor_event_id ~stimulus_id ~cursor_ts)
          ~keeper_name
          ~recorded_at
        @ [ "stimulus_id", `String stimulus_id
@@ -585,7 +585,10 @@ type row_quarantine_reason =
   | Event_identity_mismatch
   | Transition_kind_mismatch
   | Missing_cursor
+  | Invalid_cursor_scope
   | Missing_cursor_ts
+  | Missing_cursor_post_id
+  | Invalid_cursor_post_id
   | Non_finite_cursor_ts
   | Non_finite_board_updated_at
   | Invalid_cursor_reaction
@@ -636,10 +639,38 @@ let row_quarantine_reason_to_string = function
   | Event_identity_mismatch -> "event_identity_mismatch"
   | Transition_kind_mismatch -> "transition_kind_mismatch"
   | Missing_cursor -> "missing_cursor"
+  | Invalid_cursor_scope -> "invalid_cursor_scope"
   | Missing_cursor_ts -> "missing_cursor_ts"
+  | Missing_cursor_post_id -> "missing_cursor_post_id"
+  | Invalid_cursor_post_id -> "invalid_cursor_post_id"
   | Non_finite_cursor_ts -> "non_finite_cursor_ts"
   | Non_finite_board_updated_at -> "non_finite_board_updated_at"
   | Invalid_cursor_reaction -> "invalid_cursor_reaction"
+;;
+
+type board_cursor_restore_error =
+  | Board_cursor_malformed_row of
+      { path : string
+      ; line_number : int option
+      ; detail : string
+      }
+  | Board_cursor_invalid_row of row_quarantine_reason
+  | Board_cursor_read_error of Dated_jsonl.read_error
+
+let board_cursor_restore_error_to_string = function
+  | Board_cursor_malformed_row { path; line_number; detail } ->
+    Printf.sprintf
+      "malformed reaction-ledger row path=%s line=%s: %s"
+      path
+      (match line_number with
+       | Some value -> string_of_int value
+       | None -> "unknown")
+      detail
+  | Board_cursor_invalid_row reason ->
+    Printf.sprintf
+      "invalid reaction-ledger row before board cursor: %s"
+      (row_quarantine_reason_to_string reason)
+  | Board_cursor_read_error error -> Dated_jsonl.read_error_to_string error
 ;;
 
 type current_row_metadata =
@@ -846,6 +877,11 @@ let decode_cursor_ack_row metadata row =
     | Some value -> Ok value
     | None -> Error Missing_cursor
   in
+  let* () =
+    match assoc_field "scope" cursor with
+    | Some (`String "board") -> Ok ()
+    | Some _ | None -> Error Invalid_cursor_scope
+  in
   let* cursor_ts =
     require_finite_float
       ~missing:Missing_cursor_ts
@@ -853,26 +889,37 @@ let decode_cursor_ack_row metadata row =
       "cursor_ts"
       cursor
   in
-  let post_id = string_field "post_id" cursor in
+  let* post_id =
+    match assoc_field "post_id" cursor with
+    | None -> Error Missing_cursor_post_id
+    | Some `Null -> Ok None
+    | Some (`String value) when not (String.equal value "") -> Ok (Some value)
+    | Some _ -> Error Invalid_cursor_post_id
+  in
   let* reaction =
     match assoc_field "reaction" row with
     | Some value -> Ok value
     | None -> Error Invalid_cursor_reaction
   in
   let valid_reaction =
-    match string_field "kind" reaction, string_field "source" reaction with
-    | Some "cursor_ack", Some "keeper_world_observation.board_cursor" -> true
+    match
+      ( string_field "kind" reaction
+      , string_field "source" reaction
+      , assoc_field "cursor_acked" reaction )
+    with
+    | ( Some "cursor_ack"
+      , Some "keeper_world_observation.board_cursor"
+      , Some (`Bool true) ) -> true
     | _ -> false
   in
   let expected_event_id =
-    digest_id
-      "krl"
-      (String.concat
-         "|"
-         [ metadata.stimulus_id; "cursor_ack"; Printf.sprintf "%.6f" cursor_ts ])
+    cursor_event_id ~stimulus_id:metadata.stimulus_id ~cursor_ts
   in
+  let expected_stimulus_id = cursor_stimulus_id ~cursor_ts post_id in
   if not valid_reaction
   then Error Invalid_cursor_reaction
+  else if not (String.equal metadata.stimulus_id expected_stimulus_id)
+  then Error Event_identity_mismatch
   else if String.equal metadata.event_id expected_event_id
   then Ok (Current_cursor_ack { metadata; cursor_token = cursor_ts, post_id })
   else Error Event_identity_mismatch
@@ -977,6 +1024,25 @@ let decode_current_row ~keeper_name row =
     decode_reaction_row ~event_id metadata reaction
   | "cursor_ack" -> decode_cursor_ack_row metadata row
   | _ -> Error Unknown_record_kind
+;;
+
+let latest_board_cursor_result ~base_path ~keeper_name =
+  match
+    Dated_jsonl.find_latest_entry_result
+      (store_for_base_path ~base_path ~keeper_name)
+      (function
+        | Dated_jsonl.Malformed_json { path; line_number; detail } ->
+          Some (Error (Board_cursor_malformed_row { path; line_number; detail }))
+        | Dated_jsonl.Parsed row ->
+          (match decode_current_row ~keeper_name row with
+           | Error reason -> Some (Error (Board_cursor_invalid_row reason))
+           | Ok (Current_cursor_ack { cursor_token = cursor_ts, post_id; _ }) ->
+             Some (Ok (Some { cursor_ts; post_id }))
+           | Ok (Current_stimulus _ | Current_reaction _) -> None))
+  with
+  | Error error -> Error (Board_cursor_read_error error)
+  | Ok None -> Ok None
+  | Ok (Some result) -> result
 ;;
 
 type event_queue_reaction_evidence =

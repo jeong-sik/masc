@@ -200,33 +200,24 @@ let complete_schedule_due ~ctx ~keeper_name:_ stimuli =
     | (stimulus : Keeper_event_queue.stimulus) :: rest ->
       (match stimulus.payload with
        | Keeper_event_queue.Schedule_due wake ->
-         (match Schedule_occurrence_id.of_string stimulus.post_id with
-          | Error detail ->
+         (match
+            Schedule_store.complete_dispatched_occurrence
+              ctx.config
+              ~now
+              ~schedule_instance_id:wake.schedule_instance_id
+              ~schedule_id:wake.schedule_id
+              ~due_at:wake.due_at
+              ~payload_digest:wake.payload_digest
+              ()
+          with
+          | Ok _ -> loop rest
+          | Error err ->
             Error
               (Printf.sprintf
-                 "schedule completion rejected invalid occurrence schedule_id=%s occurrence_id=%s: %s"
+                 "schedule completion write failed schedule_id=%s occurrence_id=%s: %s"
                  wake.schedule_id
                  stimulus.post_id
-                 detail)
-          | Ok occurrence_id ->
-            (match
-               Schedule_store.complete_dispatched_occurrence
-                 ctx.config
-                 ~now
-                 ~occurrence_id
-                 ~schedule_id:wake.schedule_id
-                 ~due_at:wake.due_at
-                 ~payload_digest:wake.payload_digest
-                 ()
-             with
-             | Ok _ -> loop rest
-             | Error err ->
-               Error
-                 (Printf.sprintf
-                    "schedule completion write failed schedule_id=%s occurrence_id=%s: %s"
-                    wake.schedule_id
-                    stimulus.post_id
-                    (Schedule_store.store_error_to_string err))))
+                 (Schedule_store.store_error_to_string err)))
        | Keeper_event_queue.Board_signal _
        | Keeper_event_queue.Board_attention _
        | Keeper_event_queue.Fusion_completed _
@@ -250,33 +241,24 @@ let fail_schedule_due ~ctx ~error stimuli =
     | (stimulus : Keeper_event_queue.stimulus) :: rest ->
       (match stimulus.payload with
        | Keeper_event_queue.Schedule_due wake ->
-         (match Schedule_occurrence_id.of_string stimulus.post_id with
-          | Error detail ->
+         (match
+            Schedule_store.fail_dispatched_occurrence
+              ctx.config
+              ~now
+              ~schedule_instance_id:wake.schedule_instance_id
+              ~schedule_id:wake.schedule_id
+              ~due_at:wake.due_at
+              ~payload_digest:wake.payload_digest
+              ~error
+          with
+          | Ok _ -> loop rest
+          | Error err ->
             Error
               (Printf.sprintf
-                 "schedule failure rejected invalid occurrence schedule_id=%s occurrence_id=%s: %s"
+                 "schedule failure write failed schedule_id=%s occurrence_id=%s: %s"
                  wake.schedule_id
                  stimulus.post_id
-                 detail)
-          | Ok occurrence_id ->
-            (match
-               Schedule_store.fail_dispatched_occurrence
-                 ctx.config
-                 ~now
-                 ~occurrence_id
-                 ~schedule_id:wake.schedule_id
-                 ~due_at:wake.due_at
-                 ~payload_digest:wake.payload_digest
-                 ~error
-             with
-             | Ok _ -> loop rest
-             | Error err ->
-               Error
-                 (Printf.sprintf
-                    "schedule failure write failed schedule_id=%s occurrence_id=%s: %s"
-                    wake.schedule_id
-                    stimulus.post_id
-                    (Schedule_store.store_error_to_string err))))
+                 (Schedule_store.store_error_to_string err)))
        | Keeper_event_queue.Board_signal _
        | Keeper_event_queue.Board_attention _
        | Keeper_event_queue.Fusion_completed _

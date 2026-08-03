@@ -58,6 +58,7 @@ run_gate() {
       || fail "schedule ledger is not an exact regular file: $schedules_path"
     jq -e '
       type == "object"
+      and (.schedules | type == "array")
       and (.executions | type == "array")
       and all(.executions[];
         type == "object"
@@ -76,6 +77,15 @@ run_gate() {
       ' "$schedules_path" >&2
       fail "schedule ledger still has $dispatched_count dispatched execution(s)"
     fi
+    jq -e '
+      all(.schedules[];
+        type == "object"
+        and (.schedule_instance_id | type == "string" and length > 0))
+      and all(.executions[];
+        type == "object"
+        and (.schedule_instance_id | type == "string" and length > 0))
+    ' "$schedules_path" >/dev/null \
+      || fail "schedule ledger contains pre-cut rows without a current schedule instance id: $schedules_path"
   fi
 
   if [[ -d "$keepers_root" ]]; then
@@ -116,7 +126,8 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     jq -n --arg status "$status" '
       {version: 1, schedules: [], executions:
         (if $status == "none" then []
-         else [{execution_id: "exec-fixture", schedule_id: "schedule-fixture", status: $status}]
+         else [{execution_id: "exec-fixture", schedule_instance_id: "instance-fixture",
+                schedule_id: "schedule-fixture", status: $status}]
          end)}
     ' >"$target_root/.masc/schedules.json"
   }
@@ -185,6 +196,15 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   printf '{not-json\n' \
     >"$malformed_queue_root/.masc/keepers/fixture/event-queue-v14.json"
   expect_failure malformed_queue "$malformed_queue_root"
+
+  pre_cut_root="$fixture_root/pre-cut-schedule"
+  mkdir -p "$pre_cut_root/.masc"
+  jq -n '
+    {version: 1,
+     schedules: [{schedule_id: "legacy-schedule"}],
+     executions: []}
+  ' >"$pre_cut_root/.masc/schedules.json"
+  expect_failure pre_cut_schedule "$pre_cut_root"
 
   printf '[event-queue-v15-cutover] self-test OK\n'
   exit 0

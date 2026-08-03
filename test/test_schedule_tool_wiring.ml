@@ -451,8 +451,10 @@ let test_due_signal_and_dashboard_projection () =
   check string "signal kind" "schedule.due_candidate"
     (Schedule_runner.signal_kind_to_string signal.kind);
   check string "signal request" request.schedule_id signal.schedule_id;
+  check string "signal schedule instance" request.schedule_instance_id
+    signal.schedule_instance_id;
   let signal_json = Schedule_runner.wake_signal_to_yojson signal in
-  check int "signal field count" 7
+  check int "signal field count" 8
     (Yojson.Safe.Util.to_assoc signal_json |> List.length);
   let dashboard =
     Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config

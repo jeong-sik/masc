@@ -27,6 +27,7 @@ type keeper_wake_activation_outcome =
 type dispatch_receipt =
   | Keeper_wake_enqueued of
       { keeper_name : string
+      ; schedule_instance_id : string
       ; schedule_id : string
       ; urgency : string
       ; post_id : string

@@ -77,8 +77,8 @@ let check_dispatch_status label expected actual =
 
 let test_occurrence_id schedule_id =
   Schedule_occurrence_id.make
+    ~schedule_instance_id:("instance-" ^ schedule_id)
     ~schedule_id
-    ~requested_at:100.0
     ~due_at:200.0
     ~payload_digest:"test-payload"
 ;;
@@ -319,6 +319,7 @@ let test_tick_records_terminal_work_failure_for_exact_recurrence () =
   match
     Schedule_store.execution_for_occurrence
       (Schedule_store.read_state config)
+      ~schedule_instance_id:request.schedule_instance_id
       ~schedule_id:request.schedule_id
       ~due_at:request.due_at
       ~payload_digest:(Schedule_domain.payload_digest request.payload)

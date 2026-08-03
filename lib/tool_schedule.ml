@@ -363,17 +363,17 @@ let handle_create ~tool_name ~start_time ctx args =
           Schedule_service.Creation_rejected detail)
       in
       Schedule_service.create
-        ctx.config
-        ?schedule_id
-        ~requested_at
-        ?expires_at
-        ~requested_by
-        ~scheduled_by
-        ~due_at
-        ~payload
-        ~source
-        ~recurrence
-        ()
+          ctx.config
+          ?schedule_id
+          ~requested_at
+          ?expires_at
+          ~requested_by
+          ~scheduled_by
+          ~due_at
+          ~payload
+          ~source
+          ~recurrence
+          ()
     in
     (match keeper_wake_target with
      | None -> create_request ()

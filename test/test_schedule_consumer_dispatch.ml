@@ -206,6 +206,7 @@ let unsupported_payload =
 let canonical_keeper_wake_receipt_fields () =
   [ "kind", `String "masc.keeper_wake.enqueued"
   ; "keeper_name", `String "schedule-keeper"
+  ; "schedule_instance_id", `String "canonical-instance"
   ; "schedule_id", `String "canonical-schedule"
   ; "urgency", `String "immediate"
   ; "post_id", `String "canonical-occurrence"
@@ -308,17 +309,12 @@ let create_keeper_wake_schedule ?recurrence config =
     fail ("create failed: " ^ Schedule_service.service_error_to_string err)
 ;;
 
-let create_named_keeper_wake_schedule
-      ?(requested_at = 100.0)
-      config
-      ~schedule_id
-      ~keeper_name
-  =
+let create_named_keeper_wake_schedule config ~schedule_id ~keeper_name =
   match
     Schedule_service.create
       config
       ~schedule_id
-      ~requested_at
+      ~requested_at:100.0
       ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent")
       ~due_at:200.0
@@ -329,14 +325,6 @@ let create_named_keeper_wake_schedule
   | Ok request -> request
   | Error error ->
     fail ("create failed: " ^ Schedule_service.service_error_to_string error)
-;;
-
-let schedule_occurrence_id (request : Schedule_domain.schedule_request) =
-  Schedule_occurrence_id.make
-    ~schedule_id:request.schedule_id
-    ~requested_at:request.requested_at
-    ~due_at:request.due_at
-    ~payload_digest:(Schedule_domain.payload_digest request.payload)
 ;;
 
 let create_unsupported_schedule config =
@@ -558,6 +546,8 @@ let test_keeper_wake_consumer_records_dispatch_without_work_success () =
       (receipt |> member "stimulus" |> to_string);
     check string "receipt keeper" "schedule-keeper"
       (receipt |> member "keeper_name" |> to_string);
+    check string "receipt schedule instance" request.schedule_instance_id
+      (receipt |> member "schedule_instance_id" |> to_string);
     check string "receipt schedule" request.schedule_id
       (receipt |> member "schedule_id" |> to_string);
     check string "receipt urgency" "immediate"
@@ -581,6 +571,9 @@ let test_keeper_wake_consumer_records_dispatch_without_work_success () =
       (queue_evidence |> member "matched_payload_kind" |> to_string);
     check string "queue evidence matched schedule" request.schedule_id
       (queue_evidence |> member "matched_schedule_id" |> to_string);
+    check string "queue evidence matched schedule instance"
+      request.schedule_instance_id
+      (queue_evidence |> member "matched_schedule_instance_id" |> to_string);
     check (float 0.001) "queue evidence execution due_at" request.due_at
       (queue_evidence |> member "execution_due_at" |> to_float);
     check string "queue evidence execution digest"
@@ -599,7 +592,7 @@ let test_keeper_wake_consumer_records_dispatch_without_work_success () =
        Schedule_store.complete_dispatched_occurrence
          config
          ~now:202.0
-         ~occurrence_id:(schedule_occurrence_id request)
+         ~schedule_instance_id:request.schedule_instance_id
          ~schedule_id:request.schedule_id
          ~due_at:request.due_at
          ~payload_digest:(Schedule_domain.payload_digest request.payload)
@@ -649,14 +642,10 @@ let test_reused_schedule_id_does_not_match_pruned_terminal_receipt () =
   @@ fun config ->
   let keeper_name = "schedule-keeper" in
   let base_path = config.Workspace_utils.base_path in
-  let first =
-    create_named_keeper_wake_schedule
-      config
-      ~schedule_id:"reused-id"
-      ~keeper_name
-  in
+  let first = create_named_keeper_wake_schedule config ~schedule_id:"reused-id" ~keeper_name in
+  let first_tick = tick_ok config ~now:201.0 in
   let first_signal =
-    match (tick_ok config ~now:201.0).emitted with
+    match first_tick.emitted with
     | [ signal ] -> signal
     | signals -> failf "expected one first signal, got %d" (List.length signals)
   in
@@ -690,7 +679,7 @@ let test_reused_schedule_id_does_not_match_pruned_terminal_receipt () =
      Schedule_store.complete_dispatched_occurrence
        config
        ~now:203.0
-       ~occurrence_id:(schedule_occurrence_id first)
+       ~schedule_instance_id:first.schedule_instance_id
        ~schedule_id:first.schedule_id
        ~due_at:first.due_at
        ~payload_digest:(Schedule_domain.payload_digest first.payload)
@@ -703,24 +692,22 @@ let test_reused_schedule_id_does_not_match_pruned_terminal_receipt () =
    | Ok (_, count) -> failf "expected one pruned schedule, got %d" count
    | Error error -> fail (Schedule_store.store_error_to_string error));
   let second =
-    create_named_keeper_wake_schedule
-      ~requested_at:101.0
-      config
-      ~schedule_id:"reused-id"
-      ~keeper_name
+    create_named_keeper_wake_schedule config ~schedule_id:"reused-id" ~keeper_name
   in
+  check bool "schedule recreation gets a new durable instance" false
+    (String.equal first.schedule_instance_id second.schedule_instance_id);
+  let second_tick = tick_ok config ~now:201.0 in
   let second_signal =
-    match (tick_ok config ~now:201.0).emitted with
+    match second_tick.emitted with
     | [ signal ] -> signal
     | signals -> failf "expected one second signal, got %d" (List.length signals)
   in
   check bool "recreated occurrence has a new identity" false
-    (Schedule_occurrence_id.equal
-       first_signal.occurrence_id
-       second_signal.occurrence_id);
+    (Schedule_occurrence_id.equal first_signal.occurrence_id second_signal.occurrence_id);
   match
     Schedule_store.execution_for_occurrence
       (Schedule_store.read_state config)
+      ~schedule_instance_id:second.schedule_instance_id
       ~schedule_id:second.schedule_id
       ~due_at:second.due_at
       ~payload_digest:(Schedule_domain.payload_digest second.payload)
@@ -1107,8 +1094,16 @@ let test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing () =
    | [ Schedule_runner.Occurrence_reclaim_failure
          { occurrence_id; error = detail }
      ] ->
+     let expected_occurrence_id =
+       Schedule_occurrence_id.make
+         ~schedule_instance_id:execution.schedule_instance_id
+         ~schedule_id:execution.schedule_id
+         ~due_at:execution.due_at
+         ~payload_digest:execution.payload_digest
+       |> Schedule_occurrence_id.to_string
+     in
      check string "failure keeps exact occurrence identity"
-       execution.execution_id
+       expected_occurrence_id
        occurrence_id;
      check string
        "missing snapshot provenance is explicit"
@@ -1125,6 +1120,7 @@ let test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing () =
   match
     Schedule_store.execution_for_occurrence
       (Schedule_store.read_state config)
+      ~schedule_instance_id:execution.schedule_instance_id
       ~schedule_id:execution.schedule_id
       ~due_at:execution.due_at
       ~payload_digest:execution.payload_digest
@@ -1295,13 +1291,12 @@ let test_keeper_purge_preflights_whole_batch () =
     | rows -> failf "expected two dispatched occurrences, got %d" (List.length rows)
   in
   let missing_occurrence =
-    match second.detail with
-    | Some detail ->
-      (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
-       | Ok (Server_schedule_consumers.Keeper_wake_enqueued { post_id; _ }) ->
-         post_id
-       | Error detail -> fail detail)
-    | None -> fail "dispatched execution omitted its receipt"
+    Schedule_occurrence_id.make
+      ~schedule_instance_id:second.schedule_instance_id
+      ~schedule_id:second.schedule_id
+      ~due_at:second.due_at
+      ~payload_digest:second.payload_digest
+    |> Schedule_occurrence_id.to_string
   in
   (match
      Keeper_registry_event_queue.drop_by_post_id
@@ -1331,6 +1326,7 @@ let test_keeper_purge_preflights_whole_batch () =
        match
          Schedule_store.execution_for_occurrence
            state
+           ~schedule_instance_id:execution.schedule_instance_id
            ~schedule_id:execution.schedule_id
            ~due_at:execution.due_at
            ~payload_digest:execution.payload_digest
@@ -2108,6 +2104,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
       (match
          Schedule_store.execution_for_occurrence
            (Schedule_store.read_state config)
+           ~schedule_instance_id:request.schedule_instance_id
            ~schedule_id:request.schedule_id
            ~due_at:request.due_at
            ~payload_digest:(Schedule_domain.payload_digest request.payload)
@@ -2175,6 +2172,7 @@ let test_terminal_reconciliation_before_retry_recreates_wake () =
   match
     Schedule_store.execution_for_occurrence
       (Schedule_store.read_state config)
+      ~schedule_instance_id:request.schedule_instance_id
       ~schedule_id:request.schedule_id
       ~due_at:request.due_at
       ~payload_digest:(Schedule_domain.payload_digest request.payload)
@@ -2446,7 +2444,8 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
     | Error message -> fail ("stale payload parse failed: " ^ message)
   in
   let stale_wake : Keeper_event_queue.scheduled_wake =
-    { schedule_id = request.schedule_id
+    { schedule_instance_id = request.schedule_instance_id
+    ; schedule_id = request.schedule_id
     ; due_at = request.due_at +. 60.0
     ; payload_digest = Schedule_domain.payload_digest stale_payload
     ; title = Some "Scheduled lane wake"
@@ -2939,7 +2938,8 @@ let () =
             test_keeper_wake_consumer_records_dispatch_without_work_success
         ; test_case "recurring wakes keep distinct occurrence ids" `Quick
             test_recurring_wakes_keep_distinct_occurrence_ids
-        ; test_case "reused schedule id ignores pruned terminal receipt" `Quick
+        ; test_case "reused schedule id does not match pruned terminal receipt"
+            `Quick
             test_reused_schedule_id_does_not_match_pruned_terminal_receipt
         ; test_case "reclaim keeps occurrence owner after recurring request update"
             `Quick

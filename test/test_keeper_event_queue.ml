@@ -1065,7 +1065,7 @@ let () =
         | _ -> Alcotest.fail "staged transfer authority was not recoverable"
       in
       let shutdown_operation_id =
-        Keeper_shutdown_types.Operation_id.generate ()
+        Masc.Keeper_shutdown_types.Operation_id.generate ()
       in
       (match
          Masc.Keeper_turn_admission.begin_shutdown
@@ -1097,7 +1097,7 @@ let () =
               Alcotest.(check bool)
                 "transfer reports exact shutdown owner"
                 true
-                (Keeper_shutdown_types.Operation_id.equal
+                (Masc.Keeper_shutdown_types.Operation_id.equal
                    shutdown_operation_id
                    actual_operation_id)
             | _ -> Alcotest.fail "target transfer bypassed shutdown fence");

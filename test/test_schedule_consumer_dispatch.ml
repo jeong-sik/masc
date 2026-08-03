@@ -1166,7 +1166,6 @@ let test_keeper_purge_rejects_unsettled_transfer_redirect () =
       ~keeper_name:source_keeper
   in
   ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
   let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
   let transfer : Keeper_registry_event_queue.accepted_transfer =
     { source = selection.source

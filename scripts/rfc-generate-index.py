@@ -19,22 +19,16 @@ RFC_DIR = Path("docs/rfc")
 README = RFC_DIR / "README.md"
 TABLE_HEADER = "| RFC | Title | Status | Sub-docs |"
 TABLE_SEP = "|---|---|---|---|"
-RFC_NUMBERED_FILE_RE = re.compile(
-    r"^RFC-(?P<number>\d{4})-(?P<slug>.+)\.md$"
-)
+RFC_NUMBERED_FILE_RE = re.compile(r"^RFC-(?P<number>\d{4})-(?P<slug>.+)\.md$")
 RFC_PHASE_FILE_RE = re.compile(
     r"^RFC-(?P<number>\d{4})-phase-(?P<phase>[A-Za-z0-9]+)-"
     r"(?P<slug>.+)\.md$"
 )
-RFC_SLUG_FILE_RE = re.compile(
-    r"^RFC-(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)\.md$"
-)
+RFC_SLUG_FILE_RE = re.compile(r"^RFC-(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)\.md$")
 RFC_REFERENCE_RE = re.compile(
     r"^(?:RFC-)?(?P<number>\d{4})(?:-phase-(?P<phase>[A-Za-z0-9]+))?$"
 )
-RFC_REFERENCE_SLUG_RE = re.compile(
-    r"^(?:RFC-)?(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)$"
-)
+RFC_REFERENCE_SLUG_RE = re.compile(r"^(?:RFC-)?(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)$")
 
 
 @dataclass(frozen=True)
@@ -135,11 +129,9 @@ def parse_file_identity(name: str) -> FileIdentity:
             phase=None,
         )
 
-    # Existing RFC files predate the current filename contract. Keep their
-    # exact filename visible instead of dropping or reinterpreting it.
-    stem = name.removeprefix("RFC-").removesuffix(".md")
-    return FileIdentity(
-        key=f"legacy:{stem}", display_key=stem, number=None, slug=None, phase=None
+    raise ValueError(
+        f"{name}: filename must use RFC-NNNN-<slug>.md, "
+        "RFC-NNNN-phase-<phase>-<slug>.md, or RFC-<slug>.md"
     )
 
 
@@ -185,7 +177,9 @@ def relation_parent(
         parents.add(identity.number)
 
     if len(parents) > 1:
-        issues.append(f"{filename}: conflicting sub-document parents: {sorted(parents)}")
+        issues.append(
+            f"{filename}: conflicting sub-document parents: {sorted(parents)}"
+        )
     parent = next(iter(parents), None)
     if parent is not None and identity.number != parent:
         issues.append(
@@ -228,7 +222,11 @@ def collect_entries() -> tuple[dict[str, RfcEntry], list[str]]:
     for fpath in sorted(RFC_DIR.glob("RFC-*.md")):
         name = fpath.name
         fm = extract_frontmatter(fpath)
-        identity = parse_file_identity(name)
+        try:
+            identity = parse_file_identity(name)
+        except ValueError as error:
+            issues.append(str(error))
+            continue
         parent, relation_issues = relation_parent(identity, fm, name)
         issues.extend(relation_issues)
         entry_key = f"number:{parent}" if parent is not None else identity.key

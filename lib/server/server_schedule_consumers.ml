@@ -563,9 +563,13 @@ type durable_occurrence_state =
   | Pending
   | Transfer_projecting_to of string
   | Transferred_to of string
-  | Terminally_completed
-  | Terminally_failed of string
-  | Cancelled of string
+  | Terminally_completed of terminal_evidence_status
+  | Terminally_failed of string * terminal_evidence_status
+  | Cancelled of string * terminal_evidence_status
+
+and terminal_evidence_status =
+  | Terminal_evidence_pending of string
+  | Terminal_evidence_recorded
 
 type durable_occurrence_disposition =
   { source : Keeper_event_queue.stimulus
@@ -575,23 +579,41 @@ type durable_occurrence_disposition =
 
 type resolved_occurrence_disposition =
   | Pending_at of string * Keeper_event_queue.stimulus
-  | Terminal_completed_at of string * Keeper_event_queue.stimulus
-  | Terminal_failed_at of string * Keeper_event_queue.stimulus * string
-  | Terminal_cancelled_at of string * Keeper_event_queue.stimulus * string
+  | Transfer_projecting_at of string * string
+  | Terminal_completed_at of
+      string * Keeper_event_queue.stimulus * terminal_evidence_status
+  | Terminal_failed_at of
+      string * Keeper_event_queue.stimulus * string * terminal_evidence_status
+  | Terminal_cancelled_at of
+      string * Keeper_event_queue.stimulus * string * terminal_evidence_status
   | Absent_at of string
+
+let terminal_evidence_status_equal left right =
+  match left, right with
+  | Terminal_evidence_recorded, Terminal_evidence_recorded -> true
+  | Terminal_evidence_pending left, Terminal_evidence_pending right ->
+    String.equal left right
+  | Terminal_evidence_recorded, Terminal_evidence_pending _
+  | Terminal_evidence_pending _, Terminal_evidence_recorded -> false
+;;
 
 let occurrence_state_equal left right =
   match left, right with
-  | Pending, Pending
-  | Terminally_completed, Terminally_completed -> true
-  | Terminally_failed left, Terminally_failed right -> String.equal left right
-  | Cancelled left, Cancelled right -> String.equal left right
+  | Pending, Pending -> true
+  | Terminally_completed left, Terminally_completed right ->
+    terminal_evidence_status_equal left right
+  | Terminally_failed (left_reason, left_evidence),
+    Terminally_failed (right_reason, right_evidence)
+  | Cancelled (left_reason, left_evidence),
+    Cancelled (right_reason, right_evidence) ->
+    String.equal left_reason right_reason
+    && terminal_evidence_status_equal left_evidence right_evidence
   | Transfer_projecting_to left, Transfer_projecting_to right
   | Transferred_to left, Transferred_to right -> String.equal left right
   | ( Pending
     | Transfer_projecting_to _
     | Transferred_to _
-    | Terminally_completed
+    | Terminally_completed _
     | Terminally_failed _
     | Cancelled _ )
     , _ -> false
@@ -601,12 +623,17 @@ let occurrence_source_and_disposition
       ~projecting
       (receipt : Keeper_event_queue_state.transition_receipt)
   =
+  let terminal_evidence =
+    if projecting
+    then Terminal_evidence_pending receipt.transition_id
+    else Terminal_evidence_recorded
+  in
   match receipt.transition with
   | Keeper_event_queue_state.Cancel_accepted cancellation ->
     ( cancellation.source
     , { source = cancellation.source
       ; source_incarnation = cancellation.source_incarnation
-      ; state = Cancelled cancellation.reason
+      ; state = Cancelled (cancellation.reason, terminal_evidence)
       } )
   | Keeper_event_queue_state.Transfer_accepted transfer ->
     ( transfer.source
@@ -621,10 +648,11 @@ let occurrence_source_and_disposition
     let state =
       match terminal.source_receipt with
       | Keeper_event_queue_state.Turn_attempt_terminal { detail } ->
-        Terminally_failed detail
+        Terminally_failed (detail, terminal_evidence)
       | Keeper_event_queue_state.Fusion_terminal _
       | Keeper_event_queue_state.Background_job_terminal _
-      | Keeper_event_queue_state.Hitl_terminal _ -> Terminally_completed
+      | Keeper_event_queue_state.Hitl_terminal _ ->
+        Terminally_completed terminal_evidence
     in
     ( terminal.source
     , { source = terminal.source
@@ -732,29 +760,17 @@ let rec resolve_durable_occurrence
     match Hashtbl.find_opt index occurrence_id with
     | None -> Ok (Absent_at keeper_name)
     | Some { source; state = Pending; _ } -> Ok (Pending_at (keeper_name, source))
-    | Some { source; state = Terminally_completed; _ } ->
-      Ok (Terminal_completed_at (keeper_name, source))
-    | Some { source; state = Terminally_failed reason; _ } ->
-      Ok (Terminal_failed_at (keeper_name, source, reason))
-    | Some { source; state = Cancelled reason; _ } ->
-      Ok (Terminal_cancelled_at (keeper_name, source, reason))
-    | Some { source; state = Transfer_projecting_to target; _ } ->
-      let* target_disposition =
-        resolve_durable_occurrence
-          cache
-          ~read_state
-          ~base_path
-          ~occurrence_id
-          ~visited:(keeper_name :: visited)
-          target
-      in
-      (match target_disposition with
-       | Absent_at _ -> Ok (Pending_at (target, source))
-       | ( Pending_at _
-         | Terminal_completed_at _
-         | Terminal_failed_at _
-         | Terminal_cancelled_at _ ) as disposition ->
-         Ok disposition)
+    | Some { source; state = Terminally_completed evidence; _ } ->
+      Ok (Terminal_completed_at (keeper_name, source, evidence))
+    | Some { source; state = Terminally_failed (reason, evidence); _ } ->
+      Ok (Terminal_failed_at (keeper_name, source, reason, evidence))
+    | Some { source; state = Cancelled (reason, evidence); _ } ->
+      Ok (Terminal_cancelled_at (keeper_name, source, reason, evidence))
+    | Some { state = Transfer_projecting_to target; _ } ->
+      (* The source outbox is the sole durable authority until projection
+         retires it. Reading or activating the target here would turn a valid
+         pre-commit absence into either false loss or a speculative wake. *)
+      Ok (Transfer_projecting_at (keeper_name, target))
     | Some { state = Transferred_to target; _ } ->
       let target_was_cached = Hashtbl.mem cache target in
       let resolve_target () =
@@ -784,6 +800,30 @@ let accept_keeper_wake_occurrence
       ~stimulus_id
       stimulus
   =
+  let accept_terminal
+        ~owner
+        ~durable_stimulus
+        ~evidence
+        acceptance
+    =
+    let* () =
+      match evidence with
+      | Terminal_evidence_recorded -> Ok ()
+      | Terminal_evidence_pending transition_id ->
+        Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+          ~base_path
+          ~keeper_name:owner
+          ~expected_transition_id:transition_id
+        |> Result.map_error (fun detail ->
+          Schedule_runner.Retryable_dispatch_failure detail)
+    in
+    accept_with_recorded_stimulus
+      ~base_path
+      ~keeper_name:owner
+      ~stimulus_id
+      durable_stimulus
+      acceptance
+  in
   let cache = Hashtbl.create 4 in
   match
     resolve_durable_occurrence
@@ -795,6 +835,12 @@ let accept_keeper_wake_occurrence
       keeper_name
   with
   | Error detail -> retryable_dispatch_failure detail
+  | Ok (Transfer_projecting_at (source, target)) ->
+    retryable_dispatch_failure
+      (Printf.sprintf
+         "scheduled keeper wake transfer projection pending source=%s target=%s"
+         source
+         target)
   | Ok (Pending_at (owner, durable_stimulus)) ->
     (* A prior attempt may have committed the queue entry and then failed the
        independent reaction-ledger append. Verify the exact stimulus identity
@@ -805,27 +851,16 @@ let accept_keeper_wake_occurrence
       ~stimulus_id
       durable_stimulus
       (Already_pending owner)
-  | Ok (Terminal_completed_at (owner, durable_stimulus)) ->
-    accept_with_recorded_stimulus
-      ~base_path
-      ~keeper_name:owner
-      ~stimulus_id
-      durable_stimulus
-      Already_acked
-  | Ok (Terminal_failed_at (owner, durable_stimulus, reason)) ->
-    accept_with_recorded_stimulus
-      ~base_path
-      ~keeper_name:owner
-      ~stimulus_id
-      durable_stimulus
+  | Ok (Terminal_completed_at (owner, durable_stimulus, evidence)) ->
+    accept_terminal ~owner ~durable_stimulus ~evidence Already_acked
+  | Ok (Terminal_failed_at (owner, durable_stimulus, reason, evidence)) ->
+    accept_terminal
+      ~owner
+      ~durable_stimulus
+      ~evidence
       (Already_failed reason)
-  | Ok (Terminal_cancelled_at (owner, durable_stimulus, _)) ->
-    accept_with_recorded_stimulus
-      ~base_path
-      ~keeper_name:owner
-      ~stimulus_id
-      durable_stimulus
-      Already_cancelled
+  | Ok (Terminal_cancelled_at (owner, durable_stimulus, _, evidence)) ->
+    accept_terminal ~owner ~durable_stimulus ~evidence Already_cancelled
   | Ok (Absent_at _) ->
     (match
        Keeper_registry_event_queue.enqueue_stimulus_durable_result
@@ -1002,12 +1037,13 @@ let settlements_with_read_state ~read_state config executions =
            keeper_name
        in
        match disposition with
-       | Pending_at _ -> Ok Schedule_runner.Consumer_holds_occurrence
+       | Pending_at _ | Transfer_projecting_at _ ->
+         Ok Schedule_runner.Consumer_holds_occurrence
        | Terminal_completed_at _ ->
          Ok Schedule_runner.Consumer_completed_occurrence
-       | Terminal_failed_at (_, _, reason) ->
+       | Terminal_failed_at (_, _, reason, _) ->
          Ok (Schedule_runner.Consumer_failed_occurrence reason)
-       | Terminal_cancelled_at (_, _, reason) ->
+       | Terminal_cancelled_at (_, _, reason, _) ->
          Ok (Schedule_runner.Consumer_cancelled_occurrence reason)
        | Absent_at owner ->
          Ok

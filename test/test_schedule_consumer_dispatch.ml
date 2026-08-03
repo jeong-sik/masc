@@ -1344,6 +1344,13 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
   check int "terminal retry enqueues no second occurrence" 0
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
      |> Keeper_event_queue.length);
+  let durable_state =
+    match Keeper_registry_event_queue.durable_state_result ~base_path keeper_name with
+    | Ok state -> state
+    | Error detail -> fail detail
+  in
+  check int "terminal retry retires the reaction outbox" 0
+    (Keeper_event_queue_state.transition_outbox durable_state |> List.length);
   match
     Keeper_reaction_ledger.event_queue_reaction_evidence_result
       ~base_path

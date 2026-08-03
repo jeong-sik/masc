@@ -496,7 +496,9 @@ let test_meta_json_roundtrip () =
       decoded.runtime.proactive_rt.last_consumed_backlog_projection_sha256
 ;;
 
-let test_meta_json_absent_pair_fails_closed () =
+(* Removing ONE half of the pair leaves a half-genesis state, which the pair
+   invariant rejects even under absence tolerance. *)
+let test_meta_json_half_genesis_fails_closed () =
   let meta = bootstrapped_meta ~last_consumed:42 () in
   let remove field fields =
     List.filter (fun (key, _) -> not (String.equal key field)) fields
@@ -505,8 +507,32 @@ let test_meta_json_absent_pair_fails_closed () =
     (fun field ->
        match Masc.Keeper_meta_json_parse.meta_of_json (json_with_field meta ~f:(remove field)) with
        | Error _ -> ()
-       | Ok _ -> Alcotest.failf "missing current field %s must fail the decode" field)
+       | Ok _ -> Alcotest.failf "half-genesis without %s must fail the decode" field)
     [ "last_consumed_backlog_revision"; "last_consumed_backlog_projection_sha256" ]
+;;
+
+(* A pre-RFC meta lacks BOTH fields and must decode with the genesis pair —
+   owner ruling 2026-08-03: live metas are 10/10 without the pair, and an
+   invalid meta cannot be read or rewritten, so absent=invalid would strand
+   the fleet (#26530 shape). *)
+let test_meta_json_absent_pair_decodes_as_genesis () =
+  let meta = bootstrapped_meta ~last_consumed:42 () in
+  let json =
+    json_with_field meta ~f:(fun fields ->
+      List.filter
+        (fun (key, _) ->
+           not
+             (String.equal key "last_consumed_backlog_revision"
+              || String.equal key "last_consumed_backlog_projection_sha256"))
+        fields)
+  in
+  match Masc.Keeper_meta_json_parse.meta_of_json json with
+  | Error e -> Alcotest.fail ("pre-RFC meta must decode with the genesis pair: " ^ e)
+  | Ok decoded ->
+    check int "absent revision decodes as genesis 0" 0
+      decoded.runtime.proactive_rt.last_consumed_backlog_revision;
+    check string "absent projection decodes as genesis empty" ""
+      decoded.runtime.proactive_rt.last_consumed_backlog_projection_sha256
 ;;
 
 let test_meta_json_missing_required_field_fails () =
@@ -644,9 +670,13 @@ let () =
     ; ( "meta_json"
       , [ test_case "roundtrip" `Quick test_meta_json_roundtrip
         ; test_case
-            "absent pair fails closed"
+            "half genesis fails closed"
             `Quick
-            test_meta_json_absent_pair_fails_closed
+            test_meta_json_half_genesis_fails_closed
+        ; test_case
+            "absent pair decodes as genesis"
+            `Quick
+            test_meta_json_absent_pair_decodes_as_genesis
         ; test_case
             "missing required field fails"
             `Quick

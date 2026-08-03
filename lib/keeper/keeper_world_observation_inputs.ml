@@ -62,14 +62,21 @@ let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta)
 
 (** Read workspace backlog counts. *)
 let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
-  : int * int * int * bool
+  : int * int * int * bool * int option
   =
   try
-    let backlog =
-      match Workspace.read_backlog_observation_r config with
-      | Ok backlog -> backlog
-      | Error message -> raise (Workspace.Backlog_read_failed message)
-    in
+    match Workspace.read_backlog_observation_r config with
+    | Error message ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string ObservationQueryFailures)
+        ~labels:
+          [ ( "operation"
+            , Runtime_observation_query_operation.(to_label Read_backlog_counts) )
+          ]
+        ();
+      Log.Keeper.warn "read_backlog_counts: backlog read failed: %s" message;
+      0, 0, 0, false, None
+    | Ok backlog ->
     let unclaimed_tasks =
       List.filter
         (fun (t : Masc_domain.task) -> t.task_status = Masc_domain.Todo)
@@ -106,7 +113,11 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
     let backlog_updated_since_last_scheduled_autonomous =
       backlog_updated_since_last_scheduled_autonomous ~meta ~backlog
     in
-    (unclaimed, claimable, failed, backlog_updated_since_last_scheduled_autonomous)
+    ( unclaimed
+    , claimable
+    , failed
+    , backlog_updated_since_last_scheduled_autonomous
+    , Some backlog.version )
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->

@@ -1665,7 +1665,7 @@ let test_read_backlog_counts_excludes_self_owned_orphan () =
     (* Remove the agent file to simulate a keeper with no active registry record. *)
     let _ = Workspace.end_session config ~agent_name:keeper in
     let meta = keeper_meta_for_self_filter keeper in
-    let _, _, failed, _ =
+    let _, _, failed, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int) "keeper's own orphan excluded from failed count" 0 failed
@@ -1679,7 +1679,7 @@ let test_read_backlog_counts_falls_back_to_unscoped_claimable_task () =
         ~priority:1 ~description:""
     in
     let meta = keeper_meta_for_goal_filter keeper [ "goal-a" ] in
-    let _, claimable, _, _ =
+    let _, claimable, _, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -1688,7 +1688,7 @@ let test_read_backlog_counts_falls_back_to_unscoped_claimable_task () =
       claimable
   )
 
-let test_read_backlog_counts_never_fabricates_empty_work () =
+let test_read_backlog_counts_preserves_unreadable_observation () =
   with_test_env (fun config ->
     let write_corrupt path =
       Out_channel.with_open_text path (fun channel ->
@@ -1697,11 +1697,48 @@ let test_read_backlog_counts_never_fabricates_empty_work () =
     write_corrupt (Workspace.backlog_path config);
     write_corrupt (Workspace.backlog_recovery_path config);
     let meta = keeper_meta_for_self_filter "keeper-backlog-failure-agent" in
-    match
+    let unclaimed, claimable, failed, changed, revision =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
-    with
-    | exception Workspace.Backlog_read_failed _ -> ()
-    | _ -> Alcotest.fail "Keeper observation fabricated empty work from invalid SSOT")
+    in
+    Alcotest.(check int) "unreadable unclaimed count is inert" 0 unclaimed;
+    Alcotest.(check int) "unreadable claimable count is inert" 0 claimable;
+    Alcotest.(check int) "unreadable failed count is inert" 0 failed;
+    Alcotest.(check bool) "unreadable backlog cannot report an edge" false changed;
+    Alcotest.(check (option int))
+      "unreadable backlog has no fabricated revision"
+      None
+      revision;
+    let board_event : Keeper_world_observation.pending_board_event =
+      { event_kind = Board_post_created
+      ; post_id = "post-backlog-unreadable"
+      ; author = "peer"
+      ; title = "independent stimulus"
+      ; preview = "board event must survive a backlog read failure"
+      ; hearth = None
+      ; post_kind = Board.Human_post
+      ; updated_at = 0.0
+      ; explicit_mention = false
+      ; matched_targets = []
+      ; self_commented = false
+      ; new_external_since = 0
+      ; latest_external_author = None
+      ; latest_external_preview = None
+      }
+    in
+    let observation =
+      Keeper_world_observation.observe
+        ~pending_board_events:(Some [ board_event ])
+        ~config
+        ~meta
+    in
+    Alcotest.(check (option int))
+      "world observation preserves unreadable backlog"
+      None
+      observation.backlog_revision;
+    Alcotest.(check int)
+      "independent board stimulus survives unreadable backlog"
+      1
+      (List.length observation.pending_board_events))
 
 let test_self_authored_scoped_task_does_not_hide_peer_work () =
   with_test_env (fun config ->
@@ -1715,7 +1752,7 @@ let test_self_authored_scoped_task_does_not_hide_peer_work () =
       Workspace.add_task config ~goal_id:"goal-b" ~created_by:"peer-keeper"
         ~title:"Peer work outside active goal" ~priority:1 ~description:""
     in
-    let _, claimable, _, _ =
+    let _, claimable, _, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -1731,14 +1768,14 @@ let test_self_authored_scoped_task_does_not_hide_peer_work () =
 let test_read_backlog_counts_excludes_self_authored_task () =
   with_test_env (fun config ->
     let meta = keeper_meta_for_self_filter "keeper-self-filter-agent" in
-    let _, claimable_before, _, _ =
+    let _, claimable_before, _, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     let _ =
       Workspace.add_task config ~created_by:meta.name
         ~title:"self-authored routing task" ~priority:3 ~description:""
     in
-    let unclaimed_after_self, claimable_after_self, _, _ =
+    let unclaimed_after_self, claimable_after_self, _, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -1748,7 +1785,7 @@ let test_read_backlog_counts_excludes_self_authored_task () =
       Workspace.add_task config ~created_by:"peer-keeper"
         ~title:"peer authored task" ~priority:3 ~description:""
     in
-    let unclaimed_after_peer, claimable_after_peer, _, _ =
+    let unclaimed_after_peer, claimable_after_peer, _, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -2179,8 +2216,8 @@ let () =
       Alcotest.test_case "read backlog counts falls back to unscoped claimable"
         `Quick
         test_read_backlog_counts_falls_back_to_unscoped_claimable_task;
-      Alcotest.test_case "read backlog counts never fabricates empty work" `Quick
-        test_read_backlog_counts_never_fabricates_empty_work;
+      Alcotest.test_case "read backlog counts preserves unreadable observation" `Quick
+        test_read_backlog_counts_preserves_unreadable_observation;
       Alcotest.test_case "self-authored scoped task does not hide peer work"
         `Quick
         test_self_authored_scoped_task_does_not_hide_peer_work;

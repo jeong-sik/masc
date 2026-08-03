@@ -12,10 +12,13 @@ val backlog_updated_since_last_scheduled_autonomous
 val read_backlog_counts
   :  config:Workspace.config
   -> meta:keeper_meta
-  -> int * int * int * bool
-(** Uses the recovery-backed observation contract. Raises
-    {!Workspace.Backlog_read_failed} when neither primary nor recovery is a
-    valid current backlog; it never fabricates zero work. *)
+  -> int * int * int * bool * int option
+(** [(unclaimed, claimable, failed, backlog_changed, observed_revision)].
+    Uses the recovery-backed observation contract. [observed_revision] is
+    [Some backlog.version] after a valid primary or recovery read and [None]
+    when neither source is a valid current backlog. Counts are zero on the
+    latter path but cannot be mistaken for an observed empty backlog because
+    the typed revision is absent. *)
 
 (** [task_is_self_authored_todo ~meta task] is true when an unclaimed [Todo]
     was authored by the keeper's own stable handle ([meta.name]).

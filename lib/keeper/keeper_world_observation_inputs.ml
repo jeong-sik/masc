@@ -203,6 +203,9 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
           ; projection_sha256
           ; updated_since_last_scheduled_autonomous =
               backlog_updated_since_last_scheduled_autonomous
+                ~meta
+                ~backlog
+                ~projection_sha256
           }
       | Some recovery ->
         Log.Keeper.warn

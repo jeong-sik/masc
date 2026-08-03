@@ -50,7 +50,8 @@ type consumer_dispatch_result =
 
 type settlement_evidence =
   | Consumer_holds_occurrence
-  | Consumer_settled_occurrence
+  | Consumer_completed_occurrence
+  | Consumer_cancelled_occurrence of string
   | Consumer_lost_occurrence of string
 
 type consumer =
@@ -460,8 +461,38 @@ let reclaim_occurrence
   match settlement with
   | Error message -> { acc with failures = (occurrence_id, message) :: acc.failures }
   | Ok Consumer_holds_occurrence -> { acc with held = acc.held + 1 }
-  | Ok Consumer_settled_occurrence ->
-    { acc with settled_elsewhere = acc.settled_elsewhere + 1 }
+  | Ok Consumer_completed_occurrence ->
+    (match
+       Schedule_store.complete_dispatched_occurrence
+         config
+         ~now
+         ~schedule_id:execution.schedule_id
+         ~due_at:execution.due_at
+         ~payload_digest:execution.payload_digest
+         ()
+     with
+     | Ok _ -> { acc with settled_elsewhere = acc.settled_elsewhere + 1 }
+     | Error err ->
+       { acc with
+         failures =
+           (occurrence_id, Schedule_store.store_error_to_string err) :: acc.failures
+       })
+  | Ok (Consumer_cancelled_occurrence reason) ->
+    (match
+       Schedule_store.fail_dispatched_occurrence
+         config
+         ~now
+         ~schedule_id:execution.schedule_id
+         ~due_at:execution.due_at
+         ~payload_digest:execution.payload_digest
+         ~error:reason
+     with
+     | Ok _ -> { acc with settled_elsewhere = acc.settled_elsewhere + 1 }
+     | Error err ->
+       { acc with
+         failures =
+           (occurrence_id, Schedule_store.store_error_to_string err) :: acc.failures
+       })
   | Ok (Consumer_lost_occurrence reason) ->
     (match
        Schedule_store.fail_dispatched_occurrence

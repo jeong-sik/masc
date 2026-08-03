@@ -746,6 +746,51 @@ let test_reclaim_leaves_held_occurrence_alone () =
     (untouched.status = Execution_dispatched)
 ;;
 
+let test_reclaim_projects_consumer_completion () =
+  with_workspace
+  @@ fun config ->
+  let request = accepted_recurring_occurrence config ~schedule_id:"reclaim-completed" in
+  let calls = ref [] in
+  let completed_consumer =
+    accepting_consumer
+      ~settlement:(fun _config _execution -> Ok Consumer_completed_occurrence)
+      calls
+  in
+  let outcome = reclaim_ok ~consumer:completed_consumer config ~now:400.0 in
+  check int "completed occurrence examined" 1 outcome.examined;
+  check int "completed occurrence settled" 1 outcome.settled_elsewhere;
+  check int "completion projection has no failure" 0 (List.length outcome.failures);
+  let settled = latest_execution config ~schedule_id:request.schedule_id in
+  check bool "consumer completion leaves dispatched" false
+    (settled.status = Execution_dispatched);
+  check bool "consumer completion succeeds execution" true
+    (settled.status = Execution_succeeded)
+;;
+
+let test_reclaim_projects_consumer_cancellation () =
+  with_workspace
+  @@ fun config ->
+  let request = accepted_recurring_occurrence config ~schedule_id:"reclaim-cancelled" in
+  let calls = ref [] in
+  let cancelled_consumer =
+    accepting_consumer
+      ~settlement:(fun _config _execution ->
+        Ok (Consumer_cancelled_occurrence "operator cancelled durable work"))
+      calls
+  in
+  let outcome = reclaim_ok ~consumer:cancelled_consumer config ~now:400.0 in
+  check int "cancelled occurrence examined" 1 outcome.examined;
+  check int "cancelled occurrence settled" 1 outcome.settled_elsewhere;
+  check int "cancellation projection has no failure" 0 (List.length outcome.failures);
+  let settled = latest_execution config ~schedule_id:request.schedule_id in
+  check bool "consumer cancellation leaves dispatched" false
+    (settled.status = Execution_dispatched);
+  check bool "consumer cancellation fails execution" true
+    (settled.status = Execution_failed);
+  check (option string) "durable cancellation reason is preserved"
+    (Some "operator cancelled durable work") settled.error
+;;
+
 let test_reclaim_leaves_occurrence_alone_when_consumer_errors () =
   with_workspace
   @@ fun config ->
@@ -800,6 +845,10 @@ let () =
             test_reclaim_settles_lost_occurrence
         ; test_case "leaves an occurrence the consumer still holds" `Quick
             test_reclaim_leaves_held_occurrence_alone
+        ; test_case "projects consumer completion to schedule execution" `Quick
+            test_reclaim_projects_consumer_completion
+        ; test_case "projects consumer cancellation to schedule execution" `Quick
+            test_reclaim_projects_consumer_cancellation
         ; test_case "leaves an occurrence when the consumer cannot answer" `Quick
             test_reclaim_leaves_occurrence_alone_when_consumer_errors
         ] )

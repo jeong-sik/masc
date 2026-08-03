@@ -634,7 +634,8 @@ let test_reclaim_uses_occurrence_keeper_after_recurring_request_update () =
      fail (Schedule_service.service_error_to_string error));
   match single_keeper_settlement_exn config execution with
   | Schedule_runner.Consumer_holds_occurrence -> ()
-  | Schedule_runner.Consumer_settled_occurrence ->
+  | Schedule_runner.Consumer_completed_occurrence
+  | Schedule_runner.Consumer_cancelled_occurrence _ ->
     fail "updated recurring request changed the occurrence owner to settled"
   | Schedule_runner.Consumer_lost_occurrence detail ->
     fail ("updated recurring request changed the occurrence owner: " ^ detail)
@@ -714,7 +715,7 @@ let test_reclaim_follows_transfer_durable_state () =
      fail detail
    | Error detail -> fail detail);
   match single_keeper_settlement_exn config execution with
-  | Schedule_runner.Consumer_settled_occurrence -> ()
+  | Schedule_runner.Consumer_completed_occurrence -> ()
   | _ -> fail "target terminal ACK did not settle the transferred occurrence"
 ;;
 

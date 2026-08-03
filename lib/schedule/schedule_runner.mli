@@ -63,9 +63,12 @@ type consumer_dispatch_result =
 type settlement_evidence =
   | Consumer_holds_occurrence
       (** The accepted work is still pending with the consumer. *)
-  | Consumer_settled_occurrence
-      (** The consumer has durable terminal evidence for this occurrence; its own
-          settlement path owns the store write and this one must not race it. *)
+  | Consumer_completed_occurrence
+      (** The consumer has durable terminal ACK evidence. The runner projects
+          that fact to the exact schedule execution as succeeded. *)
+  | Consumer_cancelled_occurrence of string
+      (** The consumer has a durable cancellation with its recorded reason. The
+          runner projects it to the exact schedule execution as failed. *)
   | Consumer_lost_occurrence of string
       (** Neither pending work nor terminal evidence exists for this occurrence.
           The payload is the durable reason, recorded as the failure. *)

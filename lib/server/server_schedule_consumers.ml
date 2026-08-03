@@ -507,26 +507,26 @@ type durable_occurrence_disposition =
   | Transfer_projecting_to of string
   | Transferred_to of string
   | Terminally_acked
-  | Cancelled
+  | Cancelled of string
 
 type resolved_occurrence_disposition =
   | Pending_at of string
   | Terminal
-  | Terminal_cancelled
+  | Terminal_cancelled of string
   | Absent_at of string
 
 let disposition_equal left right =
   match left, right with
   | Pending, Pending
   | Terminally_acked, Terminally_acked
-  | Cancelled, Cancelled -> true
+  | Cancelled left, Cancelled right -> String.equal left right
   | Transfer_projecting_to left, Transfer_projecting_to right
   | Transferred_to left, Transferred_to right -> String.equal left right
   | ( Pending
     | Transfer_projecting_to _
     | Transferred_to _
     | Terminally_acked
-    | Cancelled )
+    | Cancelled _ )
     , _ -> false
 ;;
 
@@ -536,7 +536,7 @@ let occurrence_source_and_disposition
   =
   match receipt.transition with
   | Keeper_event_queue_state.Cancel_accepted cancellation ->
-    cancellation.source, Cancelled
+    cancellation.source, Cancelled cancellation.reason
   | Keeper_event_queue_state.Transfer_accepted transfer ->
     ( transfer.source
     , if projecting
@@ -621,7 +621,7 @@ let rec resolve_durable_occurrence
     | None -> Ok (Absent_at keeper_name)
     | Some Pending -> Ok (Pending_at keeper_name)
     | Some Terminally_acked -> Ok Terminal
-    | Some Cancelled -> Ok Terminal_cancelled
+    | Some (Cancelled reason) -> Ok (Terminal_cancelled reason)
     | Some (Transfer_projecting_to target) ->
       let* target_disposition =
         resolve_durable_occurrence
@@ -633,7 +633,7 @@ let rec resolve_durable_occurrence
       in
       (match target_disposition with
        | Absent_at _ -> Ok (Pending_at target)
-       | (Pending_at _ | Terminal | Terminal_cancelled) as disposition ->
+       | (Pending_at _ | Terminal | Terminal_cancelled _) as disposition ->
          Ok disposition)
     | Some (Transferred_to target) ->
       resolve_durable_occurrence
@@ -661,7 +661,7 @@ let accept_keeper_wake_occurrence
   with
   | Error detail -> retryable_dispatch_failure detail
   | Ok Terminal -> Ok Already_acked
-  | Ok Terminal_cancelled -> Ok Already_cancelled
+  | Ok (Terminal_cancelled _) -> Ok Already_cancelled
   | Ok (Pending_at owner) -> Ok (Already_pending owner)
   | Ok (Absent_at _) ->
     (match
@@ -835,8 +835,9 @@ let settlements config executions =
        in
        match disposition with
        | Pending_at _ -> Ok Schedule_runner.Consumer_holds_occurrence
-       | Terminal | Terminal_cancelled ->
-         Ok Schedule_runner.Consumer_settled_occurrence
+       | Terminal -> Ok Schedule_runner.Consumer_completed_occurrence
+       | Terminal_cancelled reason ->
+         Ok (Schedule_runner.Consumer_cancelled_occurrence reason)
        | Absent_at owner ->
          Ok
            (Schedule_runner.Consumer_lost_occurrence

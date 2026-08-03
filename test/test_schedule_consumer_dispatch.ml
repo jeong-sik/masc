@@ -758,6 +758,66 @@ let test_reclaim_follows_transfer_durable_state () =
   | _ -> fail "checkpoint reload lost the terminal occurrence disposition"
 ;;
 
+let test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let request =
+    create_keeper_wake_schedule
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 3600 })
+      config
+  in
+  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
+  let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
+  let queue_path =
+    Filename.concat
+      (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+      "event-queue-v14.json"
+  in
+  Sys.remove queue_path;
+  let outcome =
+    match
+      Schedule_runner.reclaim_lost_occurrences
+        ~consumer:Server_schedule_consumers.consumer
+        config
+        ~now:202.0
+    with
+    | Ok outcome -> outcome
+    | Error error -> fail (Schedule_runner.runner_error_to_string error)
+  in
+  check int "missing snapshot reclaims nothing" 0 outcome.reclaimed;
+  check int "missing snapshot is one typed consumer failure" 1
+    (List.length outcome.failures);
+  (match outcome.failures with
+   | [ occurrence_id, detail ] ->
+     let expected_occurrence_id =
+       Schedule_occurrence_id.make
+         ~schedule_id:execution.schedule_id
+         ~due_at:execution.due_at
+         ~payload_digest:execution.payload_digest
+       |> Schedule_occurrence_id.to_string
+     in
+     check string "failure keeps exact occurrence identity"
+       expected_occurrence_id
+       occurrence_id;
+     check bool "missing snapshot provenance is explicit" true
+       (String_util.contains_substring detail "event queue snapshot is missing")
+   | _ -> fail "expected one missing-snapshot reclaim failure");
+  match
+    Schedule_store.execution_for_occurrence
+      (Schedule_store.read_state config)
+      ~schedule_id:execution.schedule_id
+      ~due_at:execution.due_at
+      ~payload_digest:execution.payload_digest
+  with
+  | Some retained ->
+    check string "unreadable occurrence remains dispatched"
+      "dispatched"
+      (Schedule_domain.execution_status_to_string retained.status)
+  | None -> fail "missing snapshot caused the occurrence to disappear"
+;;
+
 let test_keeper_wake_durable_state_failure_retries_same_occurrence () =
   with_workspace
   @@ fun config ->
@@ -1614,6 +1674,8 @@ let () =
             test_reclaim_uses_occurrence_keeper_after_recurring_request_update
         ; test_case "reclaim follows durable transfer state" `Quick
             test_reclaim_follows_transfer_durable_state
+        ; test_case "reclaim keeps occurrence when queue snapshot is missing" `Quick
+            test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing
         ; test_case "keeper wake durable state failure retries same occurrence" `Quick
             test_keeper_wake_durable_state_failure_retries_same_occurrence
         ; test_case "cancelled occurrence recovery does not enqueue again"

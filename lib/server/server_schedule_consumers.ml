@@ -592,13 +592,13 @@ let durable_occurrence_index state =
   Ok index
 ;;
 
-let owner_index_result cache ~base_path keeper_name =
+let owner_index_result cache ~read_state ~base_path keeper_name =
   match Hashtbl.find_opt cache keeper_name with
   | Some result -> result
   | None ->
     let result =
       let* state =
-        Keeper_registry_event_queue.durable_state_result ~base_path keeper_name
+        read_state ~base_path keeper_name
         |> Result.map_error (fun detail ->
           Printf.sprintf
             "scheduled keeper wake durable state read failed keeper=%s: %s"
@@ -613,6 +613,7 @@ let owner_index_result cache ~base_path keeper_name =
 
 let rec resolve_durable_occurrence
           cache
+          ~read_state
           ~base_path
           ~occurrence_id
           ~visited
@@ -621,7 +622,7 @@ let rec resolve_durable_occurrence
   if List.exists (String.equal keeper_name) visited
   then Error ("durable queue transfer cycle at keeper " ^ keeper_name)
   else
-    let* index = owner_index_result cache ~base_path keeper_name in
+    let* index = owner_index_result cache ~read_state ~base_path keeper_name in
     match Hashtbl.find_opt index occurrence_id with
     | None -> Ok (Absent_at keeper_name)
     | Some Pending -> Ok (Pending_at keeper_name)
@@ -631,6 +632,7 @@ let rec resolve_durable_occurrence
       let* target_disposition =
         resolve_durable_occurrence
           cache
+          ~read_state
           ~base_path
           ~occurrence_id
           ~visited:(keeper_name :: visited)
@@ -643,6 +645,7 @@ let rec resolve_durable_occurrence
     | Some (Transferred_to target) ->
       resolve_durable_occurrence
         cache
+        ~read_state
         ~base_path
         ~occurrence_id
         ~visited:(keeper_name :: visited)
@@ -659,6 +662,7 @@ let accept_keeper_wake_occurrence
   match
     resolve_durable_occurrence
       cache
+      ~read_state:Keeper_registry_event_queue.durable_state_result
       ~base_path
       ~occurrence_id:stimulus_id
       ~visited:[]
@@ -833,6 +837,7 @@ let settlements config executions =
        let* disposition =
          resolve_durable_occurrence
            cache
+           ~read_state:Keeper_registry_event_queue.existing_durable_state_result
            ~base_path
            ~occurrence_id
            ~visited:[]

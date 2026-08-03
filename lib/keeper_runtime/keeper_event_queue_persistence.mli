@@ -155,6 +155,13 @@ val load_state_result :
     unprojected source-bearing row remains authoritative until the reaction
     projector records and retires it. *)
 
+val load_existing_state_result :
+  base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
+(** Read an already-created durable queue envelope. Unlike {!load_state_result},
+    a missing current snapshot is an explicit [Error] rather than an empty
+    queue. Use this when absence would be interpreted as evidence about prior
+    durable work. *)
+
 val cancel_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->

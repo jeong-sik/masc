@@ -212,7 +212,15 @@ val durable_state_result :
   base_path:string -> string -> (Keeper_event_queue_state.t, string) result
 (** Read the authoritative durable queue envelope, including pending entries,
     transition outbox, and projected typed dispositions. Unlike
-    {!snapshot_result}, this never returns a process-local Atomic projection. *)
+    {!snapshot_result}, this never returns a process-local Atomic projection.
+    A missing snapshot is the valid empty state used before the first durable
+    enqueue. *)
+
+val existing_durable_state_result :
+  base_path:string -> string -> (Keeper_event_queue_state.t, string) result
+(** Read the same durable envelope when the caller is interpreting the absence
+    of prior work. A missing snapshot is an explicit error and therefore cannot
+    become evidence that an occurrence was lost. *)
 
 val reprioritize_pending_result :
   base_path:string ->

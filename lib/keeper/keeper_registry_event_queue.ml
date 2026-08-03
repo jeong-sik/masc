@@ -327,6 +327,12 @@ let durable_state_result ~base_path name =
     ~keeper_name:name
 ;;
 
+let existing_durable_state_result ~base_path name =
+  Keeper_event_queue_persistence.load_existing_state_result
+    ~base_path
+    ~keeper_name:name
+;;
+
 let reprioritize_pending_result
       ~base_path
       name

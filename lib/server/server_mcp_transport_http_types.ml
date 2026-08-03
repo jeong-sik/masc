@@ -8,6 +8,12 @@ type auth_failure =
   ; auth_error_code : string option
   }
 
+let auth_failure_of_masc_error err =
+  { message = Masc_domain.masc_error_to_string err
+  ; auth_error_code = Masc_domain.dashboard_auth_error_code err
+  }
+;;
+
 type runtime = {
   base_path : string;
   sw : Eio.Switch.t;

@@ -77,9 +77,9 @@ let test_error_body_includes_data_when_supplied () =
 
 let test_auth_failure_code_is_nested_in_jsonrpc_error_data () =
   let failure : Server_mcp_transport_http_protocol.auth_failure =
-    { message = "stored token is no longer valid"
-    ; auth_error_code = Some "invalid_token"
-    }
+    Server_mcp_transport_http_types.auth_failure_of_masc_error
+      (Masc_domain.Auth
+         (Masc_domain.Auth_error.InvalidToken "stored token is no longer valid"))
   in
   let body =
     R.error_body
@@ -94,7 +94,7 @@ let test_auth_failure_code_is_nested_in_jsonrpc_error_data () =
       ; ( "error"
         , `Assoc
             [ "code", `Int (-32001)
-            ; "message", `String "stored token is no longer valid"
+            ; "message", `String failure.message
             ; "data", `Assoc [ "auth_error_code", `String "invalid_token" ]
             ] )
       ]

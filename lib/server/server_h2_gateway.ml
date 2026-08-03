@@ -100,12 +100,6 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
         ~status:(status :> H2.Status.t)
         ~extra_headers:(auth_error_headers ~status ~cors)
     in
-    let mcp_auth_failure_of_masc_error err :
-        Server_mcp_transport_http_types.auth_failure =
-      { message = Masc_domain.masc_error_to_string err
-      ; auth_error_code = Masc_domain.dashboard_auth_error_code err
-      }
-    in
     let mcp_auth_error_body failure =
       Server_mcp_transport_http_respond.error_body
         ?data:(Server_mcp_transport_http_protocol.auth_failure_data failure)
@@ -541,10 +535,12 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             | Server_mcp_transport_http.Full
             | Server_mcp_transport_http.Managed_agent ->
                 verify_mcp_auth ~base_path httpun_request
-                |> Result.map_error mcp_auth_failure_of_masc_error
+                |> Result.map_error
+                     Server_mcp_transport_http_types.auth_failure_of_masc_error
             | Server_mcp_transport_http.Operator_remote ->
                 verify_operator_mcp_auth ~base_path httpun_request
-                |> Result.map_error mcp_auth_failure_of_masc_error
+                |> Result.map_error
+                     Server_mcp_transport_http_types.auth_failure_of_masc_error
           in
           (match validate_mcp_session_profile ~profile session_id with
            | Error msg ->
@@ -698,10 +694,12 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             | Server_mcp_transport_http.Full
             | Server_mcp_transport_http.Managed_agent ->
                 verify_mcp_auth ~base_path httpun_request
-                |> Result.map_error mcp_auth_failure_of_masc_error
+                |> Result.map_error
+                     Server_mcp_transport_http_types.auth_failure_of_masc_error
             | Server_mcp_transport_http.Operator_remote ->
                 verify_operator_mcp_auth ~base_path httpun_request
-                |> Result.map_error mcp_auth_failure_of_masc_error
+                |> Result.map_error
+                     Server_mcp_transport_http_types.auth_failure_of_masc_error
           in
           (match auth_result with
            | Error failure ->

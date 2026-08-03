@@ -8,6 +8,11 @@ type auth_failure =
   ; auth_error_code : string option
   }
 
+val auth_failure_of_masc_error : Masc_domain.masc_error -> auth_failure
+(** Encodes one typed authentication failure for the MCP transport. This is
+    the shared HTTP/1.1 and HTTP/2 boundary; callers must not rebuild the wire
+    code independently. *)
+
 type runtime = {
   base_path : string;
   sw : Eio.Switch.t;

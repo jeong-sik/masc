@@ -4017,20 +4017,18 @@ let test_lazy_startup_plan_groups_independent_tasks () =
   let groups = Server_runtime_bootstrap.lazy_startup_plan () in
   Alcotest.(check (list string))
     "group order"
-    [ "initialize"; "tool_state"; "cleanup" ]
+    [ "initialize"; "cleanup" ]
     (List.map
        (fun group -> group.Server_runtime_bootstrap.group_name)
        groups);
   match groups with
-  | [ initialize; tool_state; cleanup ] ->
+  | [ initialize; cleanup ] ->
       check_lazy_group initialize ~name:"initialize" ~execution:"parallel"
         ~tasks:
           [
             "restore_sessions";
             "keeper_history_migration";
           ];
-      check_lazy_group tool_state ~name:"tool_state" ~execution:"serial"
-        ~tasks:[ "tool_metrics_restore" ];
       check_lazy_group cleanup ~name:"cleanup" ~execution:"serial"
         ~tasks:[ "jsonl_prune" ];
       Alcotest.(check (list string))
@@ -4038,7 +4036,6 @@ let test_lazy_startup_plan_groups_independent_tasks () =
         [
           "restore_sessions";
           "keeper_history_migration";
-          "tool_metrics_restore";
           "jsonl_prune";
         ]
         (Server_runtime_bootstrap.lazy_startup_task_names ())

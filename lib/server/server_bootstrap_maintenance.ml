@@ -474,22 +474,23 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                 store lives, because the evidence generation they belong to does
                 not return. Logging them per-sweep would emit an unbounded stream
                 that someone would eventually silence with deduplication —
-                suppressing the symptom of a missing disposition (#26695). Keep
-                the count visible and the identities at debug. *)
-             if outcome.Schedule_runner.indeterminate <> []
-             then (
-               Log.Server.debug
-                 "schedule_runner: %d occurrence(s) indeterminate — consumer \
-                  evidence unreadable"
-                 (List.length outcome.Schedule_runner.indeterminate);
-               List.iter
-                 (fun (occurrence_id, reason) ->
-                    Log.Server.debug
-                      "schedule_runner: occurrence indeterminate occurrence=%s \
-                       reason=%s"
-                      occurrence_id
-                      reason)
-                 outcome.Schedule_runner.indeterminate)
+                suppressing the symptom of a missing disposition (#26695). A
+                level belongs in a gauge, so publish the count every sweep
+                (including 0) and keep the identities at debug. The summary warn
+                above cannot carry it: it only fires when something was
+                reclaimed, and an indeterminate occurrence is never reclaimed,
+                so the steady state would report nothing at all. *)
+             Otel_metric_store.set_gauge
+               Otel_metric_store.metric_schedule_runner_indeterminate_occurrences
+               (float_of_int (List.length outcome.Schedule_runner.indeterminate));
+             List.iter
+               (fun (occurrence_id, reason) ->
+                  Log.Server.debug
+                    "schedule_runner: occurrence indeterminate occurrence=%s \
+                     reason=%s"
+                    occurrence_id
+                    reason)
+               outcome.Schedule_runner.indeterminate
            | Error err ->
              Log.Server.warn
                "schedule_runner: occurrence reclaim sweep failed: %s"

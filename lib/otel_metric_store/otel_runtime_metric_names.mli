@@ -25,6 +25,13 @@ val metric_agent_stale_total : string
     {[ok | error | crash]}. *)
 val metric_schedule_runner_tick_outcomes : string
 
+(** Occurrences the last reclaim sweep examined but could not settle because
+    the consumer's evidence is unreadable. A level, not an event: the same
+    occurrences return on every sweep until they are given a terminal
+    disposition, so the sweep reports how many there are rather than emitting
+    one log line per occurrence per sweep. *)
+val metric_schedule_runner_indeterminate_occurrences : string
+
 (** {1 OCaml GC sampler gauges}
 
     Populated by {!module:Gc_sampler} once per sampling interval from

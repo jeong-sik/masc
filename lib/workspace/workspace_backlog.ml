@@ -41,6 +41,16 @@ let file_stat_opt path =
 let clear_backlog_cache_for path =
   Stdlib.Mutex.protect backlog_cache_mu (fun () -> Hashtbl.remove backlog_cache path)
 
+type backlog_recovery = {
+  primary_error : string;
+  recovery_path : string;
+}
+
+type backlog_observation = {
+  observed_backlog : backlog;
+  recovered_from : backlog_recovery option;
+}
+
 let read_backlog_with_source_r config =
   let path = backlog_path config in
   let recover primary_msg =
@@ -53,7 +63,11 @@ let read_backlog_with_source_r config =
            "read_backlog: primary backlog unreadable, recovered from %s (%s)"
            recovery_path
            primary_msg;
-         Ok (`Recovered (backlog, primary_msg, recovery_path))
+         Ok
+           {
+             observed_backlog = backlog;
+             recovered_from = Some { primary_error = primary_msg; recovery_path };
+           }
        | Error recovery_msg ->
          Error
            (Printf.sprintf
@@ -81,7 +95,8 @@ let read_backlog_with_source_r config =
                 else None))
   in
   match cached with
-  | Some backlog -> Ok (`Primary backlog)
+  | Some backlog ->
+    Ok { observed_backlog = backlog; recovered_from = None }
   | None -> (
       match read_json_result config path with
       | Ok json ->
@@ -94,30 +109,36 @@ let read_backlog_with_source_r config =
                       Hashtbl.replace backlog_cache path
                         { mtime = st.Unix.st_mtime; size = st.Unix.st_size; backlog })
               | None -> ());
-              Ok (`Primary backlog)
+              Ok { observed_backlog = backlog; recovered_from = None }
           | Error primary_msg -> recover primary_msg)
       | Error primary_msg -> recover primary_msg)
 
 let read_backlog_r config =
   match read_backlog_with_source_r config with
-  | Ok (`Primary backlog) -> Ok backlog
-  | Ok (`Recovered (backlog, primary_msg, recovery_path)) ->
+  | Ok { observed_backlog; recovered_from = None } -> Ok observed_backlog
+  | Ok
+      {
+        observed_backlog;
+        recovered_from = Some { primary_error; recovery_path };
+      } ->
     Error
       (Printf.sprintf
          "%s; recovery snapshot at %s revision=%d is available but non-authoritative for mutation"
-         primary_msg
+         primary_error
          recovery_path
-         backlog.version)
+         observed_backlog.version)
   | Error _ as error -> error
+
+let read_backlog_observation_with_source_r = read_backlog_with_source_r
 
 let read_backlog_observation_r config =
   match read_backlog_with_source_r config with
-  | Ok (`Primary backlog | `Recovered (backlog, _, _)) -> Ok backlog
+  | Ok { observed_backlog; _ } -> Ok observed_backlog
   | Error _ as error -> error
 
 let read_backlog config =
   match read_backlog_with_source_r config with
-  | Ok (`Primary backlog | `Recovered (backlog, _, _)) -> backlog
+  | Ok { observed_backlog; _ } -> observed_backlog
   | Error msg ->
       Log.Misc.error "%s" msg;
       { tasks = []; last_updated = now_iso (); version = 1 }
@@ -143,6 +164,12 @@ type write_backlog_outcome =
     across every caller). Callers pass the snapshot they read, with mutated
     [tasks], and never hand-bump. *)
 let write_backlog_result ?after_commit config backlog =
+  if backlog.version = max_int then
+    Error
+      (Printf.sprintf
+         "[write_backlog] revision exhausted at %d; refusing to wrap"
+         backlog.version)
+  else
   let backlog =
     { backlog with version = backlog.version + 1; last_updated = now_iso () }
   in

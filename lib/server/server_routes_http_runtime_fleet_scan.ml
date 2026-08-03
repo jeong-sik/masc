@@ -1359,7 +1359,7 @@ let active_task_owner_fiber_scan config ~executable_names =
   let binding_scan = keeper_agent_bindings config in
   let agent_bindings = binding_scan.enabled_agent_bindings in
   let meta_read_errors = binding_scan.binding_read_errors in
-  match Workspace.read_backlog_observation_r config with
+  match Workspace.read_backlog_observation_with_source_r config with
   | Error err ->
       {
         active_task_owner_without_executable_fibers = [];
@@ -1368,7 +1368,18 @@ let active_task_owner_fiber_scan config ~executable_names =
         active_task_owner_scan_errors =
           ("backlog", err) :: meta_read_errors;
       }
-  | Ok backlog ->
+  | Ok observation ->
+      let backlog = observation.observed_backlog in
+      let backlog_read_errors =
+        match observation.recovered_from with
+        | None -> []
+        | Some recovery ->
+          [ ( "backlog"
+            , Printf.sprintf
+                "primary backlog unavailable; observing recovery snapshot at %s: %s"
+                recovery.recovery_path
+                recovery.primary_error ) ]
+      in
       let pending_rows, blocking_rows, non_keeper_rows =
         backlog.tasks
         |> List.fold_left
@@ -1450,7 +1461,7 @@ let active_task_owner_fiber_scan config ~executable_names =
         active_task_owner_without_executable_fibers = rows;
         completion_authority_pending_tasks = pending_rows;
         non_keeper_active_task_owners = non_keeper_rows;
-        active_task_owner_scan_errors = meta_read_errors;
+        active_task_owner_scan_errors = backlog_read_errors @ meta_read_errors;
       }
 
 let active_task_owner_blocked_name row =
@@ -1574,6 +1585,11 @@ let keeper_fleet_safety_health_json
   let active_task_owner_without_executable_fiber =
     active_task_owner_without_executable_fiber_count > 0
   in
+  let backlog_observation_degraded =
+    List.exists
+      (fun (source, _) -> String.equal source "backlog")
+      active_task_owner_scan.active_task_owner_scan_errors
+  in
   let completion_authority_pending_task_count =
     List.length active_task_owner_scan.completion_authority_pending_tasks
   in
@@ -1628,6 +1644,7 @@ let keeper_fleet_safety_health_json
     if no_executable_keeper_fibers then "blocked"
     else if reaction_capacity_below_target then "degraded"
     else if active_task_owner_without_executable_fiber then "degraded"
+    else if backlog_observation_degraded then "degraded"
     else "ok"
   in
   let blocked_keeper_names =

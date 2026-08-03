@@ -12,6 +12,18 @@ val read_backlog_r : Workspace_utils_backend_setup.config ->
            (Masc_domain.backlog, string) result
 (** Strict authoritative read for code that may make a durable decision or
     mutation. A recovered [.last-good] snapshot is rejected. *)
+type backlog_recovery = {
+  primary_error : string;
+  recovery_path : string;
+}
+type backlog_observation = {
+  observed_backlog : Masc_domain.backlog;
+  recovered_from : backlog_recovery option;
+}
+val read_backlog_observation_with_source_r :
+  Workspace_utils_backend_setup.config -> (backlog_observation, string) result
+(** Read-only observation with explicit recovery provenance. Recovered data is
+    still available to status surfaces, but callers can mark it degraded. *)
 val read_backlog_observation_r : Workspace_utils_backend_setup.config ->
            (Masc_domain.backlog, string) result
 (** Read-only observation. A valid [.last-good] snapshot remains visible when
@@ -50,5 +62,7 @@ val write_backlog_result :
 (** Result-returning variant of {!write_backlog}. [Error] means the primary
     SSOT did not commit. It applies the same single-commit-point stamping
     contract: [version] becomes the input snapshot's version plus one and
-    [last_updated] becomes the commit time. Failures after a primary commit
-    are returned in the corresponding [Ok] fields and logged explicitly. *)
+    [last_updated] becomes the commit time. A [max_int] input revision is
+    rejected before either primary or recovery is written. Failures after a
+    primary commit are returned in the corresponding [Ok] fields and logged
+    explicitly. *)

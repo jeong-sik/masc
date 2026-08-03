@@ -830,6 +830,17 @@ let test_read_backlog_r_rejects_non_authoritative_recovery () =
          "strict error identifies non-authoritative recovery"
          true
          (str_contains msg "non-authoritative for mutation"));
+    (match Workspace.read_backlog_observation_with_source_r config with
+     | Error msg -> Alcotest.failf "source-aware observation failed: %s" msg
+     | Ok observation ->
+       Alcotest.(check int)
+         "source-aware observation keeps recovered revision"
+         committed_revision
+         observation.observed_backlog.version;
+       Alcotest.(check bool)
+         "source-aware observation identifies recovery"
+         true
+         (Option.is_some observation.recovered_from));
     (match Workspace.read_backlog_observation_r config with
      | Error msg -> Alcotest.failf "observation read rejected recovery: %s" msg
      | Ok backlog ->
@@ -843,6 +854,36 @@ let test_read_backlog_r_rejects_non_authoritative_recovery () =
       committed_revision
       backlog.version
   )
+
+let test_write_backlog_result_rejects_revision_overflow () =
+  with_test_env (fun config ->
+    let primary_path = Workspace.backlog_path config in
+    let recovery_path = backlog_recovery_path config in
+    let read_file path = In_channel.with_open_bin path In_channel.input_all in
+    let primary_before = read_file primary_path in
+    let recovery_before = read_file recovery_path in
+    let terminal =
+      {
+        Masc_domain.tasks = [];
+        last_updated = Masc_domain.now_iso ();
+        version = max_int;
+      }
+    in
+    (match Workspace.write_backlog_result config terminal with
+     | Ok _ -> Alcotest.fail "terminal revision wrapped and committed"
+     | Error msg ->
+       Alcotest.(check bool)
+         "terminal revision reports exhaustion"
+         true
+         (str_contains msg "revision exhausted"));
+    Alcotest.(check string)
+      "overflow rejection preserves primary"
+      primary_before
+      (read_file primary_path);
+    Alcotest.(check string)
+      "overflow rejection preserves recovery"
+      recovery_before
+      (read_file recovery_path))
 
 let test_read_backlog_r_rejects_recovery_after_invalid_primary_revision () =
   with_test_env (fun config ->
@@ -2031,6 +2072,8 @@ let () =
         test_read_backlog_r_rejects_non_authoritative_recovery;
       Alcotest.test_case "read_backlog_r rejects invalid-revision recovery" `Quick
         test_read_backlog_r_rejects_recovery_after_invalid_primary_revision;
+      Alcotest.test_case "write_backlog_result rejects revision overflow" `Quick
+        test_write_backlog_result_rejects_revision_overflow;
       Alcotest.test_case "read_backlog_r reports parse error when recovery also invalid" `Quick
         test_read_backlog_r_reports_parse_error_when_recovery_is_also_invalid;
       Alcotest.test_case "fd pressure exn is not broken JSON" `Quick test_fd_pressure_exn_classification;

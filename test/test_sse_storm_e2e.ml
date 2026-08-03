@@ -476,6 +476,44 @@ let test_mcp_reconnect_stays_accepted () =
   let second = run_curl ~headers ~max_time:2.0 ~port ~path:"/mcp" () in
   check_status "follow-up /mcp reconnect accepted" 200 second
 
+let body_contains needle body =
+  let nl = String.length needle and bl = String.length body in
+  let rec scan i = i + nl <= bl && (String.sub body i nl = needle || scan (i + 1)) in
+  nl > 0 && scan 0
+
+(* Guards that /ag-ui/events actually applies the MASC -> AG-UI encoder to the
+   frames it ships, rather than forwarding raw MASC SSE frames.
+
+   Measured with a positive/negative control against a server binary built from
+   this tree (MASC_MAIN_EIO_EXE pinned — the harness otherwise walks up to four
+   directories and can pick the parent checkout's binary):
+     - both encoder call sites wired      -> pass
+     - only the replay call site reverted -> pass
+     - both call sites reverted           -> fail
+   So the frames this test observes arrive on the drain (live) path, and that is
+   the path it pins.  [Last-Event-ID] additionally exercises the replay branch,
+   but replay is not what makes the assertion fire. *)
+let test_ag_ui_frames_are_wire_encoded () =
+  with_server @@ fun ~port ~auth_token ->
+  let sid = initialize_mcp_session ~port ~auth_token in
+  let headers =
+    [
+      ("Accept", "text/event-stream");
+      ("Authorization", "Bearer " ^ auth_token);
+      ("Mcp-Session-Id", sid);
+      ("Last-Event-ID", "0");
+    ]
+  in
+  let res = run_curl ~headers ~max_time:1.0 ~port ~path:"/ag-ui/events" () in
+  check_status "/ag-ui/events connect accepted" 200 res;
+  (* [Ag_ui.of_custom ~name:"MASC_EVENT"] is what the encoder wraps every replayed
+     MASC frame in.  A raw frame would not carry that name. *)
+  if not (body_contains "MASC_EVENT" res.body) then
+    fail
+      (Printf.sprintf
+         "/ag-ui/events frames are not AG-UI encoded (no MASC_EVENT envelope): %S"
+         res.body)
+
 let test_ag_ui_rejects_reconnect_then_recovers () =
   with_server @@ fun ~port ~auth_token ->
   let sid = initialize_mcp_session ~port ~auth_token in
@@ -492,6 +530,13 @@ let test_ag_ui_rejects_reconnect_then_recovers () =
   (* Stay well inside the 1s reconnect guard so the next request is truly immediate. *)
   let first = run_curl ~headers ~max_time:0.2 ~port ~path:"/ag-ui/events?workspace=default" () in
   check_status "first /ag-ui/events connect accepted" 200 first;
+  (* Asserting the status alone let the bridge ship unconverted frames unnoticed.
+     This checks the synthetic prime only — it does NOT cover the drain or replay
+     conversion, which [test_ag_ui_frames_are_wire_encoded] below exercises. *)
+  if not (body_contains "RUN_STARTED" first.body) then
+    fail
+      (Printf.sprintf "/ag-ui/events body is not AG-UI framed (no RUN_STARTED): %S"
+         first.body);
 
   let second = run_curl ~headers ~max_time:0.5 ~port ~path:"/ag-ui/events?workspace=default" () in
   check_status "immediate /ag-ui/events reconnect rejected" 429 second;
@@ -505,5 +550,9 @@ let () =
   run "sse_storm_e2e"
     [
       ("mcp", [test_case "follow-up reconnect accepted" `Slow test_mcp_reconnect_stays_accepted]);
-      ("ag_ui", [test_case "reconnect cooldown + recovery" `Slow test_ag_ui_rejects_reconnect_then_recovers]);
+      ("ag_ui",
+       [
+         test_case "reconnect cooldown + recovery" `Slow test_ag_ui_rejects_reconnect_then_recovers;
+         test_case "frames are AG-UI wire encoded" `Slow test_ag_ui_frames_are_wire_encoded;
+       ]);
     ]

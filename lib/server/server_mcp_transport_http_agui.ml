@@ -22,7 +22,13 @@ let ag_ui_event_of_masc_event event =
         Ag_ui.event_to_sse ag_event
     | None -> event
   with
-  | Yojson.Json_error _ -> event
+  | Yojson.Json_error msg ->
+      (* A frame carrying a [data:] line whose payload is not JSON cannot be
+         wrapped as an AG-UI CUSTOM event.  Passing it through keeps the stream
+         alive, but the client receives a frame outside the AG-UI schema, so the
+         fallback is logged rather than silent. *)
+      Log.Transport.warn "ag_ui_event_of_masc_event: non-JSON data payload, forwarding unconverted: %s" msg;
+      event
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Log.Transport.warn "ag_ui_event_of_masc_event failed: %s" (Printexc.to_string exn);
@@ -116,7 +122,7 @@ let handle_ag_ui_events ~deps request reqd =
               | Some last_id ->
                   let missed = Sse.get_events_after_for_kind Sse.Observer last_id in
                   List.iter (fun ev ->
-                    if not (send_raw info ev) then
+                    if not (send_raw info (ag_ui_event_of_masc_event ev)) then
                       Log.Server.debug "ag-ui replay send failed for session %s" info.session_id
                   ) missed
               | None -> ());
@@ -130,7 +136,7 @@ let handle_ag_ui_events ~deps request reqd =
                         let event = Eio.Stream.take event_stream in
                         (try
                           if not (Atomic.get info.closed || (Atomic.get info.stop)) then
-                            if not (send_raw info event) then
+                            if not (send_raw info (ag_ui_event_of_masc_event event)) then
                               Log.Server.debug "ag-ui drain send failed for session %s"
                                 info.session_id
                         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->

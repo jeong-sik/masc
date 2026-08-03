@@ -35,10 +35,13 @@ val handle_ag_ui_events :
     7. Send a synthetic AG-UI [Run_started] prime event so the client
        can observe the connection has settled.
     8. If [last-event-id] was present, replay missed observer events via
-       {!Sse.get_events_after_for_kind}.
+       {!Sse.get_events_after_for_kind}, each converted to the AG-UI wire
+       format.
     9. Spawn two fibers under the runtime switch:
-       - drain: pulls from per-session stream, writes raw to client,
-         self-terminates on send failure.
+       - drain: pulls from per-session stream, converts each frame to the
+         AG-UI wire format, writes to client, self-terminates on send
+         failure.  A frame whose [data:] payload does not parse as JSON is
+         forwarded unconverted and logged at {!Log.Transport.warn}.
        - ping: sleeps 30s, writes ": ping\\n\\n" comment frame to
          keep middleboxes from idling out the connection.
 

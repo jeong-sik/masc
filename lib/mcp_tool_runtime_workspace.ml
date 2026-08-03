@@ -182,34 +182,22 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
                 agent_name
                 masc_add_task_name))
       else begin
-        let add_result =
-          Workspace_task.add_task
+        match
+          Workspace_task_create.add_task_with_result
             active_config ~title:task_title ~priority:3 ~description:""
-        in
-        (* Extract task ID from result like "Added task-001: title" *)
-        let task_id =
-          try
-            let prefix = "Added " in
-            let idx = ref 0 in
-            while !idx < String.length add_result - String.length prefix &&
-                  not (String.equal (Stdlib.String.sub add_result !idx (String.length prefix)) prefix) do
-              Stdlib.incr idx
-            done;
-            let start = !idx + String.length prefix in
-            let end_idx = match String.index_from_opt add_result start ':' with
-              | Some idx -> idx
-              | None -> String.length add_result
-            in
-            String.sub add_result start (end_idx - start)
-          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ""
-        in
-        if String.equal task_id "" then
+        with
+        | Error error ->
           Some
-            (runtime_ok ~tool_name ~start_time
+            (runtime_err_runtime
+               ~tool_name
+               ~start_time
                (Printf.sprintf
-                  "masc_start partial: session bound as %s, but task creation failed: %s"
-                  agent_name add_result))
-        else begin
+                  "masc_start failed while creating a task after binding session %s: %s"
+                  agent_name
+                  (Workspace_task_create.add_task_error_to_string error)))
+        | Ok created ->
+          let task_id = created.task_id in
+          let add_result = created.summary in
           match
             Workspace_task.claim_task_r active_config ~agent_name ~task_id ()
           with
@@ -267,5 +255,4 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
                      (Printf.sprintf
                         "masc_start complete: project scope set, session bound as %s, task %s created+claimed+set as current."
                         agent_name task_id))
-        end
       end

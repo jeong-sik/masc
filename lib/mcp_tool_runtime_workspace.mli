@@ -43,8 +43,9 @@ val handle_start :
     2. **Bind agent session**: idempotent when already bound.
        Failure surfaces as a startup error.
     3. **Optional task creation**: when [task_title] non-empty,
-       runs [Workspace_task.add_task] + extracts the task id from
-       the [["Added task-NNN: title"]] response prefix.
+       consumes the typed result from
+       {!Workspace_task_create.add_task_with_result}; task creation failure
+       remains an error and never becomes a partial-success message.
 
     {2 Error message wording (pinned)}
 

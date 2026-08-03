@@ -1,9 +1,9 @@
-(** One-shot synthetic MCP full-cycle probe.
+(** Isolated MCP session-bound Task lifecycle smoke.
 
-    This is deliberately not a Keeper. It exercises protocol admission,
-    session identity, typed tool dispatch, workspace persistence, and task
-    completion once inside an isolated workspace. It never starts a provider
-    call, heartbeat, autonomous loop, or autoboot entry. *)
+    This exercises protocol admission, session identity, typed tool dispatch,
+    workspace persistence, and Task completion once inside an isolated
+    workspace. It is not evidence for the product-level Keeper Full Lifecycle
+    contract. *)
 
 open Alcotest
 
@@ -28,9 +28,17 @@ let initialize_request =
       ; ("capabilities", `Assoc [])
       ; ( "clientInfo"
         , `Assoc
-            [ ("name", `String "masc-full-cycle-probe")
+            [ ("name", `String "masc-session-task-smoke")
             ; ("version", `String "1")
             ] )
+      ])
+
+let initialized_notification =
+  Yojson.Safe.to_string
+    (`Assoc
+      [ ("jsonrpc", `String "2.0")
+      ; ("method", `String "notifications/initialized")
+      ; ("params", `Assoc [])
       ])
 
 let tool_request ~id ~name arguments =
@@ -65,6 +73,23 @@ let check_tool_success label response =
   | _ -> failf "%s omitted result.isError: %s" label
            (Yojson.Safe.to_string response)
 
+let check_tool_failure label ~failure_class response =
+  let fields = result_fields_exn label response in
+  (match List.assoc_opt "isError" fields with
+   | Some (`Bool true) -> ()
+   | _ ->
+     failf "%s did not return an MCP tool error: %s" label
+       (Yojson.Safe.to_string response));
+  let actual_failure_class =
+    match List.assoc_opt "_meta" fields with
+    | Some (`Assoc meta_fields) ->
+      (match List.assoc_opt "failure_class" meta_fields with
+       | Some (`String value) -> value
+       | _ -> failf "%s omitted _meta.failure_class" label)
+    | _ -> failf "%s omitted result._meta" label
+  in
+  check string (label ^ " failure class") failure_class actual_failure_class
+
 let structured_content_exn label response =
   let fields = result_fields_exn label response in
   match List.assoc_opt "structuredContent" fields with
@@ -82,31 +107,37 @@ let task_exn config =
   | [ task ] -> task
   | tasks -> failf "expected one synthetic task, got %d" (List.length tasks)
 
-let test_one_shot_protocol_to_durable_outcome () =
+let test_session_task_lifecycle () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
-  let base_path = Filename.temp_dir "masc_full_cycle_probe_" "" in
+  let base_path = Filename.temp_dir "masc_session_task_smoke_" "" in
   Fun.protect
     ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
       let state = Mcp_eio.For_testing.create_state ~base_path () in
-      let session_id = "full-cycle-probe-session" in
+      let session_id = "session-task-smoke" in
       let call request =
         Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:session_id state request
       in
 
       call initialize_request |> check_protocol_success "initialize";
+      (match call initialized_notification with
+       | `Null -> ()
+       | response ->
+         failf
+           "notifications/initialized was not accepted as a notification: %s"
+           (Yojson.Safe.to_string response));
 
       call
         (tool_request ~id:2 ~name:"masc_start"
            (`Assoc
              [ ("path", `String base_path)
-             ; ("task_title", `String "Synthetic full-cycle proof")
-             ; ("_agent_name", `String "full-cycle-probe")
+             ; ("task_title", `String "Synthetic MCP Task lifecycle")
+             ; ("_agent_name", `String "session-task-smoke")
              ]))
       |> check_tool_success "masc_start";
 
@@ -114,7 +145,7 @@ let test_one_shot_protocol_to_durable_outcome () =
       let claimed_task = task_exn config in
       (match claimed_task.Masc_domain.task_status with
        | Masc_domain.Claimed { assignee; _ } ->
-         check string "task owner" "full-cycle-probe" assignee
+         check string "task owner" "session-task-smoke" assignee
        | status ->
          failf "masc_start did not claim the task: %s"
            (Masc_domain.task_status_to_string status));
@@ -128,7 +159,7 @@ let test_one_shot_protocol_to_durable_outcome () =
       check_tool_success "masc_status" status_response;
       let expected_identity_line =
         Printf.sprintf
-          "🧭 You: agent=full-cycle-probe | bound=yes | owned=%s | current=%s"
+          "🧭 You: agent=session-task-smoke | bound=yes | owned=%s | current=%s"
           claimed_task.id
           claimed_task.id
       in
@@ -140,29 +171,80 @@ let test_one_shot_protocol_to_durable_outcome () =
       call
         (tool_request ~id:4 ~name:"masc_transition"
            (`Assoc
-             [ ("agent_name", `String "full-cycle-probe")
+             [ ("agent_name", `String "session-task-smoke")
              ; ("task_id", `String claimed_task.id)
              ; ("action", `String "done")
-             ; ("notes", `String "Synthetic full-cycle proof completed")
+             ; ("notes", `String "Synthetic MCP Task lifecycle completed")
              ]))
       |> check_tool_success "masc_transition done";
 
       let completed_task = task_exn config in
       (match completed_task.Masc_domain.task_status with
        | Masc_domain.Done { assignee; notes; _ } ->
-         check string "completion owner" "full-cycle-probe" assignee;
+         check string "completion owner" "session-task-smoke" assignee;
          check (option string) "durable completion note"
-           (Some "Synthetic full-cycle proof completed") notes
+           (Some "Synthetic MCP Task lifecycle completed") notes
        | status ->
          failf "task did not reach done: %s"
            (Masc_domain.task_status_to_string status));
       check (option string) "current task cleared" None
         (Masc.Task.Planning_eio.get_current_task config))
 
+let test_task_creation_failure_remains_typed_error () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = Filename.temp_dir "masc_session_task_failure_" "" in
+  Fun.protect
+    ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+      let state = Mcp_eio.For_testing.create_state ~base_path () in
+      let call request =
+        Mcp_eio.handle_request
+          ~clock
+          ~sw
+          ~mcp_session_id:"session-task-failure"
+          state
+          request
+      in
+      call initialize_request |> check_protocol_success "initialize";
+      (match call initialized_notification with
+       | `Null -> ()
+       | response ->
+         failf
+           "notifications/initialized was not accepted as a notification: %s"
+           (Yojson.Safe.to_string response));
+      call
+        (tool_request ~id:2 ~name:"masc_start"
+           (`Assoc
+             [ ("path", `String base_path)
+             ; ("_agent_name", `String "session-task-failure")
+             ]))
+      |> check_tool_success "masc_start bootstrap";
+      let config = Mcp_server.workspace_config state in
+      let backlog_path = Masc.Workspace.backlog_path config in
+      Fs_compat.save_file backlog_path "{invalid-primary";
+      Fs_compat.save_file (backlog_path ^ ".last-good") "{invalid-recovery";
+      call
+        (tool_request ~id:3 ~name:"masc_start"
+           (`Assoc
+             [ ("path", `String base_path)
+             ; ("task_title", `String "must not become partial success")
+             ; ("_agent_name", `String "session-task-failure")
+             ]))
+      |> check_tool_failure
+           "masc_start task creation"
+           ~failure_class:"runtime_failure")
+
 let () =
-  run "MCP one-shot full-cycle probe"
+  run "MCP session-bound Task lifecycle smoke"
     [ ( "protocol to durable outcome"
-      , [ test_case "initialize, start, observe, complete" `Quick
-            test_one_shot_protocol_to_durable_outcome
+      , [ test_case "handshake, start, observe, complete" `Quick
+            test_session_task_lifecycle
+        ; test_case "task creation failure stays an error" `Quick
+            test_task_creation_failure_remains_typed_error
         ] )
     ]

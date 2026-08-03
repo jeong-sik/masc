@@ -35,6 +35,18 @@ let cleanup_dir path =
   in
   rm path
 
+let restore_env name = function
+  | Some value -> Unix.putenv name value
+  | None -> Unix.putenv name ""
+
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Fun.protect
+    ~finally:(fun () -> restore_env name previous)
+    (fun () ->
+      restore_env name value;
+      f ())
+
 let make_docker_meta ~name : Keeper_meta_contract.keeper_meta =
   let json =
     `Assoc
@@ -313,6 +325,47 @@ let test_typed_execute_response_cwd_uses_container_path () =
         not_directory_cwd
         not_directory_location_cwd)
 
+let test_prompt_keeps_caller_owned_workspace_generation () =
+  let admitted_base = temp_dir "keeper_prompt_admitted_" in
+  let divergent_base = temp_dir "keeper_prompt_divergent_" in
+  Fun.protect
+    ~finally:(fun () ->
+      Workspace.reset_default_config_cache ();
+      cleanup_dir admitted_base;
+      cleanup_dir divergent_base)
+    (fun () ->
+      with_env "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE" None @@ fun () ->
+      with_env "MASC_BASE_PATH" None @@ fun () ->
+      with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
+      Workspace.reset_default_config_cache ();
+      let config = Workspace.default_config admitted_base in
+      let meta =
+        { (make_docker_meta ~name:"caller-config-pin") with
+          sandbox_profile = Keeper_types_profile_sandbox.Local
+        }
+      in
+      let expected_root =
+        Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
+      in
+      let divergent_root =
+        Filename.concat divergent_base (Keeper_sandbox.host_root_rel_of_meta ~meta)
+      in
+      with_env "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE" (Some "true") @@ fun () ->
+      with_env "MASC_BASE_PATH" (Some divergent_base) @@ fun () ->
+      with_env "MASC_BASE_PATH_INPUT" (Some divergent_base) @@ fun () ->
+      Workspace.reset_default_config_cache ();
+      let prompt =
+        Keeper_run_context.build_base_system_prompt
+          ~config
+          ~profile_defaults:
+            Keeper_types_profile_defaults.empty_keeper_profile_defaults
+          ~meta
+      in
+      check bool "prompt uses the admitted config sandbox root" true
+        (Astring.String.is_infix ~affix:expected_root prompt);
+      check bool "prompt does not resolve a second workspace generation" false
+        (Astring.String.is_infix ~affix:divergent_root prompt))
+
 let test_retired_path_jail_env_detection () =
   let configured value =
     Retired_env_warnings.For_testing.shell_ir_path_jail_env_configured
@@ -377,6 +430,9 @@ let () =
         ; test_case
             "typed Execute Docker cwd response does not leak host"
             `Quick test_typed_execute_response_cwd_uses_container_path
+        ; test_case
+            "Keeper prompt keeps caller-owned workspace generation"
+            `Quick test_prompt_keeps_caller_owned_workspace_generation
         ] )
     ; ( "source-pin"
       , [

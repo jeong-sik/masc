@@ -1612,6 +1612,8 @@ let fsync_parent_directory dir =
     (fun () -> Unix.fsync fd)
 ;;
 
+let fsync_directory = fsync_parent_directory
+
 let rec lock_whole_file fd =
   match Unix.lockf fd Unix.F_LOCK 0 with
   | () -> ()

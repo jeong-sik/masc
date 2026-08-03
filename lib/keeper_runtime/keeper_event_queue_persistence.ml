@@ -475,13 +475,6 @@ type orphan_quarantine_result =
   | Orphan_snapshot_absent
   | Orphan_owner_reappeared
 
-let fsync_directory path =
-  let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
-  Fun.protect
-    ~finally:(fun () -> Unix.close fd)
-    (fun () -> Unix.fsync fd)
-;;
-
 let require_directory path =
   match Unix.lstat path with
   | { Unix.st_kind = Unix.S_DIR; _ } -> Ok ()
@@ -559,8 +552,8 @@ let quarantine_orphaned_owner_unlocked owner ~confirm_owner_presence =
         (try
            Unix.rename owner_dir quarantine_path;
            renamed := true;
-           fsync_directory quarantine_root;
-           fsync_directory keepers_dir;
+           Fs_compat.fsync_directory quarantine_root;
+           Fs_compat.fsync_directory keepers_dir;
            Ok (Orphan_quarantined { quarantine_path })
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn

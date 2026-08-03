@@ -126,6 +126,11 @@ val execution_context : unit -> execution_context
 (** Actual execution context of the current caller. Process-global filesystem
     installation does not imply that a raw Domain has an Eio effect handler. *)
 
+(** Open, fsync, and close one directory. This is a blocking Unix primitive;
+    callers in an Eio fiber must invoke it from an existing system-thread I/O
+    boundary. Filesystems that reject directory fsync raise explicitly. *)
+val fsync_directory : string -> unit
+
 type exact_path_kind =
   | Exact_missing
   | Exact_kind of Unix.file_kind

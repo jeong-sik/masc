@@ -78,6 +78,7 @@ type reclaim_failure =
       { expected : int
       ; actual : int
       }
+  | Settlement_batch_consumer_failure of string
 
 type reclaim_outcome =
   { examined : int
@@ -448,10 +449,8 @@ let empty_reclaim_outcome =
 let safe_consumer_settlements consumer config executions =
   Cancel_safe.protect
     ~on_exn:(fun exn ->
-      List.map
-        (fun _ -> Error ("consumer settlement raised: " ^ Printexc.to_string exn))
-        executions)
-    (fun () -> consumer.settlements config executions)
+      Error ("consumer settlement raised: " ^ Printexc.to_string exn))
+    (fun () -> Ok (consumer.settlements config executions))
 ;;
 
 let reclaim_occurrence
@@ -537,10 +536,14 @@ let reclaim_lost_occurrences ~consumer config ~now =
             (Schedule_store.Corrupt_ledger { primary_err; recovery_err })))
   | Ok state ->
     let executions = Schedule_store.unsettled_dispatched_occurrences state in
-    let settlements = safe_consumer_settlements consumer config executions in
     let outcome =
-      if List.length executions <> List.length settlements
-      then
+      match safe_consumer_settlements consumer config executions with
+      | Error error ->
+        { empty_reclaim_outcome with
+          examined = List.length executions
+        ; failures = [ Settlement_batch_consumer_failure error ]
+        }
+      | Ok settlements when List.length executions <> List.length settlements ->
         let expected = List.length executions in
         let actual = List.length settlements in
         let mismatch =
@@ -565,7 +568,7 @@ let reclaim_lost_occurrences ~consumer config ~now =
                       })
                  executions)
         }
-      else
+      | Ok settlements ->
         List.fold_left2
           (reclaim_occurrence config ~now)
           empty_reclaim_outcome

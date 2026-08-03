@@ -102,6 +102,10 @@ type reclaim_failure =
       { expected : int
       ; actual : int
       }
+  | Settlement_batch_consumer_failure of string
+      (** The consumer raised before returning per-occurrence answers. This is
+          retained even for an empty input batch, where mapping the exception
+          over occurrences would otherwise hide it as a successful no-op. *)
 
 type runner_error =
   | Service_error of Schedule_service.service_error

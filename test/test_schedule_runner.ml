@@ -857,6 +857,24 @@ let test_reclaim_reports_empty_batch_cardinality_mismatch () =
   | _ -> fail "empty batch cardinality mismatch was hidden"
 ;;
 
+let test_reclaim_reports_empty_batch_consumer_exception () =
+  with_workspace
+  @@ fun config ->
+  let consumer =
+    { (accepting_consumer (ref [])) with
+      settlements =
+        (fun _config _executions -> failwith "empty settlement batch exploded")
+    }
+  in
+  let outcome = reclaim_ok ~consumer config ~now:400.0 in
+  check int "empty batch examines no occurrences" 0 outcome.examined;
+  match outcome.failures with
+  | [ Settlement_batch_consumer_failure error ] ->
+    check bool "batch exception remains visible" true
+      (String_util.contains_substring error "empty settlement batch exploded")
+  | _ -> fail "empty batch consumer exception was hidden"
+;;
+
 let test_reclaim_counts_nonempty_batch_cardinality_mismatch () =
   with_workspace
   @@ fun config ->
@@ -943,6 +961,8 @@ let () =
             test_reclaim_projects_consumer_failure
         ; test_case "reports empty settlement batch mismatch" `Quick
             test_reclaim_reports_empty_batch_cardinality_mismatch
+        ; test_case "reports empty settlement batch consumer exception" `Quick
+            test_reclaim_reports_empty_batch_consumer_exception
         ; test_case "counts nonempty settlement batch mismatch" `Quick
             test_reclaim_counts_nonempty_batch_cardinality_mismatch
         ; test_case "leaves an occurrence when the consumer cannot answer" `Quick

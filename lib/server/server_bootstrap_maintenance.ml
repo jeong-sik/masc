@@ -475,7 +475,11 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                    Log.Server.warn
                      "schedule_runner: consumer settlement batch cardinality mismatch expected=%d actual=%d"
                      expected
-                     actual)
+                     actual
+                 | Schedule_runner.Settlement_batch_consumer_failure error ->
+                   Log.Server.warn
+                     "schedule_runner: consumer settlement batch failed: %s"
+                     error)
                outcome.Schedule_runner.failures;
            | Error err ->
              Log.Server.warn

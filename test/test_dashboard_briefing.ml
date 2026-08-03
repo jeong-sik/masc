@@ -40,6 +40,11 @@ let contains str substr =
     true
   with Not_found -> false
 
+let object_has_key label key = function
+  | `Assoc fields -> List.mem_assoc key fields
+  | json ->
+    failf "%s must be an object, got %s" label (Yojson.Safe.to_string json)
+
 let with_test_env f =
   Eio_main.run @@ fun env ->
   Eio_guard.enable ();
@@ -143,25 +148,20 @@ let test_dashboard_briefing_projection () =
         (attention_queue = []);
       check bool "mission summary retains workspace health" true
         (summary |> member "workspace_health" <> `Null);
-      check bool "mission summary omits paused" true
-        (summary |> member "paused" = `Null);
-      check bool "mission summary omits active_agents" true
-        (summary |> member "active_agents" = `Null);
-      check bool "mission summary omits namespace_id" true
-        (summary |> member "namespace_id" = `Null);
-      check bool "mission summary omits namespace" true
-        (summary |> member "namespace" = `Null);
-      check bool "mission summary omits namespace_mode" true
-        (summary |> member "namespace_mode" = `Null);
-      check bool "mission payload omits sessions" true
-        (json |> member "sessions" = `Null);
+      List.iter
+        (fun key ->
+           check bool ("mission summary omits " ^ key) false
+             (object_has_key "mission summary" key summary))
+        [ "paused"; "active_agents"; "namespace_id"; "namespace"; "namespace_mode" ];
+      check bool "mission payload omits sessions" false
+        (object_has_key "mission payload" "sessions" json);
       let alpha_input = alpha_brief |> member "recent_input_preview" |> to_string in
       check bool "recent input preserves exact alpha mention" true
         (contains alpha_input "@llama-local-alpha");
       check bool "recent input excludes unrelated beta mention" false
         (contains alpha_input "@llama-local-beta");
-      check bool "agent brief omits social context" true
-        (alpha_brief |> member "where" = `Null);
+      check bool "agent brief omits social context" false
+        (object_has_key "agent brief" "where" alpha_brief);
       check string "agent brief signal truth" "message"
         (alpha_brief |> member "evidence_source" |> to_string);
       check bool "internal signal includes pending confirm" true

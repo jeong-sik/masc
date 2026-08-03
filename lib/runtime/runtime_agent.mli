@@ -243,6 +243,13 @@ val media_degrade_note :
     was dropped rather than vanishing. [None] when nothing was dropped. *)
 
 module For_testing : sig
+  val with_oas_tool_of_masc_hook_unset : (unit -> 'a) -> 'a
+
+  val project_masc_tools :
+    masc_tools:Masc_domain.tool_schema list ->
+    dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
+    (Agent_sdk.Tool.t list, Agent_sdk.Error.sdk_error) result
+
   val provider_http_observation_transport :
     Llm_provider.Llm_transport.t -> Llm_provider.Llm_transport.t
 

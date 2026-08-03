@@ -38,6 +38,27 @@ let string_contains haystack needle =
     in
     loop 0
 
+let test_unset_oas_tool_projector_returns_typed_error () =
+  let schema : Masc_domain.tool_schema =
+    { name = "test_tool"
+    ; description = "test"
+    ; input_schema = `Assoc [ "type", `String "object" ]
+    }
+  in
+  Runtime_agent.For_testing.with_oas_tool_of_masc_hook_unset (fun () ->
+    match
+      Runtime_agent.For_testing.project_masc_tools
+        ~masc_tools:[ schema ]
+        ~dispatch:(fun ~name:_ ~args:_ ->
+          Tool_result.ok ~tool_name:"test_tool" ~start_time:0.0 "unused")
+    with
+    | Error (Agent_sdk.Error.Internal detail) ->
+      check bool "typed error names the unset projector" true
+        (string_contains detail "runtime_agent_oas_tool_hook_unset")
+    | Error error ->
+      failf "expected typed Internal error, got %s" (Agent_sdk.Error.to_string error)
+    | Ok _ -> fail "unset OAS tool projector unexpectedly succeeded")
+
 let check_contains label ~needle haystack =
   check bool label true (string_contains haystack needle)
 
@@ -468,6 +489,8 @@ let () =
     ; ( "caps_admit_required_modalities"
       , [ test_case "multi-modality predicate" `Quick
             test_caps_admit_required_modalities
+        ; test_case "unset OAS tool projector is a typed error" `Quick
+            test_unset_oas_tool_projector_returns_typed_error
         ] )
     ; ( "media_degrade"
       , [ test_case "strip drops unsupported image" `Quick

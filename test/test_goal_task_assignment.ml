@@ -132,6 +132,18 @@ let test_assignment_reports_goal_link_write_failure () =
     | Error other -> failf "expected Link_write_failed, got %s" (err_to_string other))
 ;;
 
+let test_assignment_rejects_recovered_task_snapshot () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    let task_id = make_unassigned_task config ~title:"t" in
+    Out_channel.with_open_text (Workspace.backlog_path config) (fun oc ->
+      output_string oc "{\"tasks\":[],\"last_updated\":\"now\",\"version\":0}");
+    match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+    | Error (Goal_assignment.Backlog_read_failed _) -> ()
+    | Ok () -> fail "recovered task snapshot authorized a goal-link mutation"
+    | Error other -> failf "expected Backlog_read_failed, got %s" (err_to_string other))
+;;
+
 let () =
   run
     "goal_task_assignment"
@@ -144,6 +156,10 @@ let () =
             "link write failure is reported"
             `Quick
             test_assignment_reports_goal_link_write_failure
+        ; test_case
+            "recovered task snapshot cannot authorize a link"
+            `Quick
+            test_assignment_rejects_recovered_task_snapshot
         ] )
     ]
 ;;

@@ -860,6 +860,10 @@ let test_write_backlog_result_rejects_revision_overflow () =
     let primary_path = Workspace.backlog_path config in
     let recovery_path = backlog_recovery_path config in
     let read_file path = In_channel.with_open_bin path In_channel.input_all in
+    let initial = Workspace.read_backlog config in
+    (match Workspace.write_backlog_result config initial with
+     | Ok _ -> ()
+     | Error msg -> Alcotest.failf "failed to seed recovery fixture: %s" msg);
     let primary_before = read_file primary_path in
     let recovery_before = read_file recovery_path in
     let terminal =

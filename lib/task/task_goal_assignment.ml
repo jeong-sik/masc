@@ -15,6 +15,7 @@
    precondition checks live in a single place. *)
 
 type set_task_goal_error =
+  | Backlog_read_failed of string
   | Unknown_task of string
   | Unknown_goal of string
   | Already_assigned of
@@ -24,6 +25,7 @@ type set_task_goal_error =
   | Link_write_failed of string
 
 let set_task_goal_error_to_string = function
+  | Backlog_read_failed message -> Printf.sprintf "failed to read authoritative backlog: %s" message
   | Unknown_task task_id -> Printf.sprintf "unknown task '%s'" task_id
   | Unknown_goal goal_id -> Printf.sprintf "unknown goal '%s'" goal_id
   | Already_assigned { task_id; existing_goal_ids } ->
@@ -36,12 +38,11 @@ let set_task_goal_error_to_string = function
 ;;
 
 let set_task_goal config ~task_id ~goal_id : (unit, set_task_goal_error) result =
-  let task_exists =
-    Workspace_query.get_tasks_raw config
-    |> List.exists (fun (t : Masc_domain.task) -> String.equal t.id task_id)
-  in
-  if not task_exists then Error (Unknown_task task_id)
-  else (
+  match Workspace.read_backlog_r config with
+  | Error message -> Error (Backlog_read_failed message)
+  | Ok backlog when not (List.exists (fun (t : Masc_domain.task) -> String.equal t.id task_id) backlog.tasks) ->
+    Error (Unknown_task task_id)
+  | Ok _ ->
     match Goal_store.get_goal config ~goal_id with
     | None -> Error (Unknown_goal goal_id)
     | Some _ ->
@@ -55,5 +56,5 @@ let set_task_goal config ~task_id ~goal_id : (unit, set_task_goal_error) result 
        | Error (Workspace_goal_index.Already_linked_to_goals existing_goal_ids) ->
          Error (Already_assigned { task_id; existing_goal_ids })
        | Error (Workspace_goal_index.Link_write_failed msg) ->
-         Error (Link_write_failed msg)))
+         Error (Link_write_failed msg))
 ;;

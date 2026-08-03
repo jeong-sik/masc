@@ -43,7 +43,9 @@ val valid_pkce_value : string -> bool
 
 val parse_scopes : string option -> (scope list, error) result
 (** Parse a space-delimited scope request.  Missing/blank means
-    [[Mcp_tools]]. Duplicate scopes are collapsed in declaration order. *)
+    [[Mcp_tools]]. Duplicate scopes are collapsed in declaration order, and
+    [Mcp_admin] is canonicalized to include [Mcp_tools] because the Admin RBAC
+    role includes tool permission. *)
 
 val effective_role :
   bootstrap_role:Masc_domain.agent_role ->

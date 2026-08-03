@@ -87,6 +87,13 @@ let add_scope_once acc scope =
   if List.exists (equal_scope scope) acc then acc else acc @ [ scope ]
 ;;
 
+let add_scope_with_implications acc = function
+  | Mcp_tools -> add_scope_once acc Mcp_tools
+  | Mcp_admin ->
+    let acc = add_scope_once acc Mcp_tools in
+    add_scope_once acc Mcp_admin
+;;
+
 let parse_scopes raw =
   let values =
     match raw with
@@ -101,8 +108,8 @@ let parse_scopes raw =
   let values = if values = [] then [ scope_to_string Mcp_tools ] else values in
   let rec parse acc = function
     | [] -> Ok acc
-    | "mcp:tools" :: rest -> parse (add_scope_once acc Mcp_tools) rest
-    | "mcp:admin" :: rest -> parse (add_scope_once acc Mcp_admin) rest
+    | "mcp:tools" :: rest -> parse (add_scope_with_implications acc Mcp_tools) rest
+    | "mcp:admin" :: rest -> parse (add_scope_with_implications acc Mcp_admin) rest
     | _ :: _ -> Error Invalid_scope
   in
   parse [] values
@@ -337,9 +344,9 @@ let role_of_string = function
 
 let scopes_of_strings values =
   let rec parse acc = function
-    | [] -> Ok (List.rev acc)
-    | "mcp:tools" :: rest -> parse (Mcp_tools :: acc) rest
-    | "mcp:admin" :: rest -> parse (Mcp_admin :: acc) rest
+    | [] -> Ok acc
+    | "mcp:tools" :: rest -> parse (add_scope_with_implications acc Mcp_tools) rest
+    | "mcp:admin" :: rest -> parse (add_scope_with_implications acc Mcp_admin) rest
     | _ :: _ -> Error (Store_error "invalid OAuth scope")
   in
   parse [] values

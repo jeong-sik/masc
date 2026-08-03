@@ -107,4 +107,6 @@ val explicit_metadata : (string * metadata) list
 
 module For_testing : sig
   val register_metadata : string -> metadata -> unit
+  (** Install an arbitrary fixture entry, bypassing the production catalog
+      ownership check. Production registration uses [register_runtime_metadata]. *)
 end

@@ -176,6 +176,9 @@ let run_child command environment =
   | executable :: _ ->
     (try
        let arguments = Array.of_list command in
+       (* [Process_eio_detached] redirects child output and returns immediately.
+          Cutover preparation must inherit the operator streams and be reaped
+          synchronously, so this helper owns the process group directly. *)
        let pid = Unix.fork () in
        if pid = 0
        then (

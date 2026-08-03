@@ -140,11 +140,12 @@ val terminalize_pending_turn_attempt_result :
 (** Commit a source-bearing terminal receipt for one failed admitted turn and
     publish the post-commit pending projection. *)
 
-(** Enqueue a stimulus on the keeper's event queue. When the keeper is not
-    registered yet, persist the stimulus to the durable snapshot so later
-    registration can replay it instead of dropping the wake at the
-    restart/register boundary. A surrounding durable-intake fence supplies
-    [intake_token]; otherwise this function acquires the Keeper fence itself. *)
+(** Enqueue a stimulus on the keeper's event queue. An owner not registered yet
+    may receive durable work so a later lane can replay it. A finalized
+    remove-meta shutdown record rejects intake while metadata is absent,
+    preventing a removed Keeper's runtime directory from being recreated. A
+    surrounding durable-intake fence supplies [intake_token]; otherwise this
+    function acquires the Keeper fence itself. *)
 val enqueue :
   ?intake_token:Keeper_turn_admission.intake_token ->
   base_path:string -> string -> Keeper_event_queue.stimulus -> unit

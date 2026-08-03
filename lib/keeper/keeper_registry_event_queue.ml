@@ -119,10 +119,65 @@ let enqueue_external_decision queue stimulus =
          stimulus.post_id)
 ;;
 
-let durable_intake_shutdown_detail operation_id =
-  Printf.sprintf
-    "keeper durable intake rejected by shutdown operation=%s"
-    (Keeper_shutdown_types.Operation_id.to_string operation_id)
+type durable_intake_error =
+  | Durable_intake_token_not_live
+  | Durable_intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Durable_intake_keeper_retired of Keeper_shutdown_types.Operation_id.t
+  | Durable_intake_keeper_metadata_read_failed of string
+  | Durable_intake_retirement_read_failed of string
+
+let durable_intake_error_to_string = function
+  | Durable_intake_token_not_live ->
+    "durable intake token is not live for this Keeper"
+  | Durable_intake_shutdown_reserved operation_id ->
+    Printf.sprintf
+      "keeper durable intake rejected by shutdown operation=%s"
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
+  | Durable_intake_keeper_retired operation_id ->
+    Printf.sprintf
+      "keeper durable intake rejected because Keeper was removed by shutdown operation=%s"
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
+  | Durable_intake_keeper_metadata_read_failed detail ->
+    "keeper durable intake rejected because Keeper metadata could not be read: "
+    ^ detail
+  | Durable_intake_retirement_read_failed detail ->
+    "keeper durable intake rejected because Keeper retirement state could not be read: "
+    ^ detail
+;;
+
+let authorize_durable_intake_owner ~base_path ~keeper_name =
+  let config = Workspace.default_config base_path in
+  match Keeper_meta_store.read_meta config keeper_name with
+  | Ok (Some _) -> Ok ()
+  | Error detail -> Error (Durable_intake_keeper_metadata_read_failed detail)
+  | Ok None ->
+    (match Keeper_shutdown_store.list_for_keeper ~config ~keeper_name with
+     | Error error ->
+       Error
+         (Durable_intake_retirement_read_failed
+            (Keeper_shutdown_store.error_to_string error))
+     | Ok operations ->
+       (match
+          List.find_opt
+            (fun (operation : Keeper_shutdown_types.t) ->
+               match operation.phase with
+               | Keeper_shutdown_types.Finalized { meta_removed = true; _ } ->
+                 (match operation.cleanup_intent.meta_disposition with
+                  | Keeper_shutdown_types.Remove_meta -> true
+                  | Keeper_shutdown_types.Retain_operator_pause
+                  | Keeper_shutdown_types.Retain_dead_tombstone -> false)
+               | Keeper_shutdown_types.Prepared
+               | Keeper_shutdown_types.Joined_idle
+               | Keeper_shutdown_types.Finalizing_tasks _
+               | Keeper_shutdown_types.Cleanup_ready _
+               | Keeper_shutdown_types.Reconciliation_required _
+               | Keeper_shutdown_types.Blocked _
+               | Keeper_shutdown_types.Superseded _ -> false)
+            operations
+        with
+        | None -> Ok ()
+        | Some operation ->
+          Error (Durable_intake_keeper_retired operation.operation_id)))
 ;;
 
 let with_durable_intake
@@ -138,18 +193,24 @@ let with_durable_intake
         token
         ~base_path
         ~keeper_name
-    then Ok (operation ())
-    else Error "durable intake token is not live for this Keeper"
+    then (
+      match authorize_durable_intake_owner ~base_path ~keeper_name with
+      | Ok () -> Ok (operation ())
+      | Error _ as error -> error)
+    else Error Durable_intake_token_not_live
   | None ->
     (match
        Keeper_turn_admission.run_durable_intake_if_open
          ~base_path
          ~keeper_name
-         (fun _intake_token -> operation ())
+         (fun _intake_token ->
+            match authorize_durable_intake_owner ~base_path ~keeper_name with
+            | Ok () -> Ok (operation ())
+            | Error _ as error -> error)
      with
-     | Keeper_turn_admission.Intake_committed result -> Ok result
+     | Keeper_turn_admission.Intake_committed result -> result
      | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
-       Error (durable_intake_shutdown_detail operation_id))
+       Error (Durable_intake_shutdown_reserved operation_id))
 ;;
 
 let enqueue_unfenced ~base_path name stimulus =
@@ -186,13 +247,20 @@ let enqueue ?intake_token ~base_path name stimulus =
       (fun () -> enqueue_unfenced ~base_path name stimulus)
   with
   | Ok (Ok ()) -> ()
-  | Ok (Error message) | Error message ->
+  | Ok (Error message) ->
     Log.Keeper.error
       "registry: durable enqueue failed name=%s base_path=%s post_id=%s: %s"
       name
       base_path
       stimulus.Keeper_event_queue.post_id
       message
+  | Error error ->
+    Log.Keeper.error
+      "registry: durable enqueue failed name=%s base_path=%s post_id=%s: %s"
+      name
+      base_path
+      stimulus.Keeper_event_queue.post_id
+      (durable_intake_error_to_string error)
 ;;
 
 let enqueue_durable_result_unfenced ~base_path name stimulus =
@@ -225,7 +293,7 @@ let enqueue_durable_result ?intake_token ~base_path name stimulus =
       (fun () -> enqueue_durable_result_unfenced ~base_path name stimulus)
   with
   | Ok result -> result
-  | Error detail -> Error detail
+  | Error error -> Error (durable_intake_error_to_string error)
 ;;
 
 type enqueue_if_missing_durable_result =
@@ -335,7 +403,7 @@ let enqueue_if_missing_durable_result
            stimulus)
   with
   | Ok result -> result
-  | Error detail -> Storage_error detail
+  | Error error -> Storage_error (durable_intake_error_to_string error)
 ;;
 
 type enqueue_stimulus_durable_result =
@@ -407,7 +475,7 @@ let enqueue_stimulus_durable_result
       (fun () -> enqueue_stimulus_durable_result_unfenced ~base_path name stimulus)
   with
   | Ok result -> result
-  | Error detail -> Stimulus_storage_error detail
+  | Error error -> Stimulus_storage_error (durable_intake_error_to_string error)
 ;;
 
 let project_accepted_transfer_durable_result ~base_path name ~transfer =

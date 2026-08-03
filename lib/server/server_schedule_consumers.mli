@@ -79,6 +79,22 @@ type keeper_purge_error =
       ; occurrence_id : string
       ; detail : string
       }
+  | Projected_transfer_source_read_error of
+      { source_keeper : string
+      ; target_keeper : string
+      ; operation_id : string
+      ; detail : string
+      }
+  | Projected_transfer_source_outbox_pending of
+      { source_keeper : string
+      ; target_keeper : string
+      ; operation_id : string
+      }
+  | Projected_transfer_source_conflict of
+      { source_keeper : string
+      ; target_keeper : string
+      ; operation_id : string
+      }
   | Mismatched_schedule_evidence of
       { keeper_name : string; occurrence_id : string }
   | Non_schedule_evidence of

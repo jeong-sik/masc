@@ -1504,6 +1504,95 @@ let test_keeper_purge_follows_terminal_transfer_redirect () =
       (Schedule_domain.execution_status_to_string execution.status)
 ;;
 
+let test_keeper_purge_blocks_projected_target_with_source_outbox () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace_utils.base_path in
+  let source_keeper = "purge-source-outbox-source" in
+  let target_keeper = "purge-source-outbox-target" in
+  let request =
+    create_named_keeper_wake_schedule
+      config
+      ~schedule_id:"purge-source-outbox-schedule"
+      ~keeper_name:source_keeper
+  in
+  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
+  let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
+  let target_meta = persist_keeper_meta config target_keeper in
+  let transfer : Keeper_registry_event_queue.accepted_transfer =
+    { source = selection.source
+    ; source_incarnation = selection.admitted_revision
+    ; owner_nonce = 49
+    ; operator_operation_id = "purge-source-outbox-transfer"
+    ; from_keeper = source_keeper
+    ; to_keeper = target_keeper
+    ; target_generation = target_meta.runtime.nonce
+    ; target_trace_id = target_meta.runtime.trace_id
+    }
+  in
+  (match
+     Keeper_registry_event_queue.transfer_pending_accepted_result
+       ~base_path
+       source_keeper
+       ~current_owner_nonce:49
+       ~applied_at:202.0
+       ~transfer
+   with
+   | Ok (Keeper_registry_event_queue.Transition_applied _) -> ()
+   | Ok (Keeper_registry_event_queue.Transition_already_applied _) ->
+     fail "first source-outbox transfer was already applied"
+   | Ok
+       (Keeper_registry_event_queue.Transition_committed_followup_failed
+          { detail; _ }) ->
+     fail detail
+   | Error error ->
+     fail (Keeper_registry_event_queue.transfer_pending_error_to_string error));
+  (match
+     Keeper_registry_event_queue.project_accepted_transfer_durable_result
+       ~base_path
+       target_keeper
+       ~transfer
+   with
+   | Keeper_registry_event_queue.Transfer_projection_committed -> ()
+   | Keeper_registry_event_queue.Transfer_projection_already_committed ->
+     fail "first target projection was already committed"
+   | Keeper_registry_event_queue.Transfer_projection_storage_error detail ->
+     fail detail
+   | Keeper_registry_event_queue.Transfer_projection_target_unavailable error ->
+     fail (Keeper_registry_event_queue.transfer_target_error_to_string error)
+   | Keeper_registry_event_queue.Transfer_projection_shutdown_reserved operation_id ->
+     fail
+       (Keeper_shutdown_types.Operation_id.to_string operation_id));
+  (match
+     Server_schedule_consumers.settle_keeper_purge_occurrences
+       config
+       ~keeper_name:target_keeper
+       ~operation_id:"purge-target"
+       ~now:203.0
+   with
+   | Error
+       (Server_schedule_consumers.Projected_transfer_source_outbox_pending
+          { source_keeper = actual_source
+          ; target_keeper = actual_target
+          ; operation_id
+          }) ->
+     check string "blocked purge reports source" source_keeper actual_source;
+     check string "blocked purge reports target" target_keeper actual_target;
+     check string "blocked purge reports operation"
+       transfer.operator_operation_id
+       operation_id
+   | Error error ->
+     fail
+       (Server_schedule_consumers.keeper_purge_error_to_string error)
+   | Ok () -> fail "target purge discarded a live source transfer outbox");
+  check int "blocked target purge preserves projected work" 1
+    (Keeper_registry_event_queue.snapshot ~base_path target_keeper
+     |> Keeper_event_queue.length);
+  let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
+  check string "blocked target purge preserves dispatched execution" "dispatched"
+    (Schedule_domain.execution_status_to_string execution.status)
+;;
+
 let test_shutdown_fence_rejects_schedule_intake_before_enqueue () =
   with_workspace
   @@ fun config ->
@@ -2858,6 +2947,8 @@ let () =
             test_keeper_purge_rejects_unsettled_transfer_redirect
         ; test_case "keeper purge follows terminal transfer redirects" `Quick
             test_keeper_purge_follows_terminal_transfer_redirect
+        ; test_case "keeper purge blocks projected target with source outbox" `Quick
+            test_keeper_purge_blocks_projected_target_with_source_outbox
         ; test_case "shutdown fence rejects schedule intake before enqueue" `Quick
             test_shutdown_fence_rejects_schedule_intake_before_enqueue
         ; test_case "shutdown fence covers direct durable queue producers" `Quick

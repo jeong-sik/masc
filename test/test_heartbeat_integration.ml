@@ -3563,7 +3563,31 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
       check bool
         "delivered dashboard purge released admission fence"
         true
-        (Option.is_none admission.snapshot_shutdown_operation_id))
+        (Option.is_none admission.snapshot_shutdown_operation_id);
+      let late_stimulus : Keeper_event_queue.stimulus =
+        { post_id = "dashboard-purge-late-stimulus"
+        ; urgency = Keeper_event_queue.Normal
+        ; arrived_at = 1.0
+        ; payload = Keeper_event_queue.Bootstrap
+        }
+      in
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_durable_result
+           ~base_path:config.base_path
+           meta.name
+           late_stimulus
+       with
+       | Error detail ->
+         check string "post-purge durable intake reports exact retirement"
+           (Printf.sprintf
+              "keeper durable intake rejected because Keeper was removed by shutdown operation=%s"
+              (Shutdown_types.Operation_id.to_string operation_id))
+           detail
+       | Ok () -> fail "post-purge durable intake recreated the Keeper queue");
+      check bool
+        "post-purge durable intake leaves runtime directory absent"
+        false
+        (Sys.file_exists runtime_dir))
 ;;
 
 let test_keeper_shutdown_cleanup_replays_after_meta_removal () =

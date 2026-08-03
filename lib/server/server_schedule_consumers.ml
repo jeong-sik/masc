@@ -1167,6 +1167,22 @@ type keeper_purge_error =
       ; occurrence_id : string
       ; detail : string
       }
+  | Projected_transfer_source_read_error of
+      { source_keeper : string
+      ; target_keeper : string
+      ; operation_id : string
+      ; detail : string
+      }
+  | Projected_transfer_source_outbox_pending of
+      { source_keeper : string
+      ; target_keeper : string
+      ; operation_id : string
+      }
+  | Projected_transfer_source_conflict of
+      { source_keeper : string
+      ; target_keeper : string
+      ; operation_id : string
+      }
   | Mismatched_schedule_evidence of
       { keeper_name : string; occurrence_id : string }
   | Non_schedule_evidence of
@@ -1230,6 +1246,28 @@ let keeper_purge_error_to_string = function
       target
       occurrence_id
       detail
+  | Projected_transfer_source_read_error
+      { source_keeper; target_keeper; operation_id; detail } ->
+    Printf.sprintf
+      "dashboard Keeper purge cannot inspect projected transfer source source=%s target=%s operation=%s: %s"
+      source_keeper
+      target_keeper
+      operation_id
+      detail
+  | Projected_transfer_source_outbox_pending
+      { source_keeper; target_keeper; operation_id } ->
+    Printf.sprintf
+      "dashboard Keeper purge blocked by projected transfer source outbox source=%s target=%s operation=%s"
+      source_keeper
+      target_keeper
+      operation_id
+  | Projected_transfer_source_conflict
+      { source_keeper; target_keeper; operation_id } ->
+    Printf.sprintf
+      "dashboard Keeper purge found conflicting projected transfer source outbox source=%s target=%s operation=%s"
+      source_keeper
+      target_keeper
+      operation_id
   | Mismatched_schedule_evidence { keeper_name; occurrence_id } ->
     Printf.sprintf
       "dashboard Keeper purge found mismatched schedule evidence keeper=%s occurrence=%s"
@@ -1264,6 +1302,60 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
     durable_occurrence_index queue_state
     |> Result.map_error (fun detail ->
       Durable_queue_index_error { keeper_name; detail })
+  in
+  let source_outbox_status
+        (transfer : Keeper_registry_event_queue.accepted_transfer)
+    =
+    let operation_id = transfer.operator_operation_id in
+    let* source_state =
+      Keeper_registry_event_queue.durable_state_result
+        ~base_path
+        transfer.from_keeper
+      |> Result.map_error (fun detail ->
+        Projected_transfer_source_read_error
+          { source_keeper = transfer.from_keeper
+          ; target_keeper = keeper_name
+          ; operation_id
+          ; detail
+          })
+    in
+    let matching_transfer =
+      Keeper_event_queue_state.transition_outbox source_state
+      |> List.find_map (fun (entry : Keeper_event_queue_state.outbox_entry) ->
+        match entry.receipt.transition with
+        | Keeper_event_queue_state.Transfer_accepted candidate
+          when String.equal candidate.operator_operation_id operation_id ->
+          Some candidate
+        | Keeper_event_queue_state.Cancel_accepted _
+        | Keeper_event_queue_state.Ack_source_terminal _
+        | Keeper_event_queue_state.Transfer_accepted _ -> None)
+    in
+    match matching_transfer with
+    | None -> Ok ()
+    | Some candidate when candidate = transfer ->
+      Error
+        (Projected_transfer_source_outbox_pending
+           { source_keeper = transfer.from_keeper
+           ; target_keeper = keeper_name
+           ; operation_id
+           })
+    | Some _ ->
+      Error
+        (Projected_transfer_source_conflict
+           { source_keeper = transfer.from_keeper
+           ; target_keeper = keeper_name
+           ; operation_id
+           })
+  in
+  let rec preflight_projected_transfer_sources = function
+    | [] -> Ok ()
+    | transfer :: rest ->
+      let* () = source_outbox_status transfer in
+      preflight_projected_transfer_sources rest
+  in
+  let* () =
+    Keeper_event_queue_state.accepted_transfer_projections queue_state
+    |> preflight_projected_transfer_sources
   in
   let purge_reason =
     Printf.sprintf

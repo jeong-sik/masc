@@ -1091,7 +1091,6 @@ let collect_board_events_with_cursor_policy
         Keeper_reaction_ledger.record_board_cursor_ack
           ~base_path
           ~keeper_name:meta.name
-          ~stimulus_id:(Keeper_reaction_ledger.board_stimulus_id ~post_id)
           ~cursor_ts:ts
           ~post_id:(Some post_id)
           ();

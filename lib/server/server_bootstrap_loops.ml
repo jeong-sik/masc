@@ -1497,13 +1497,10 @@ let start_keeper_loops_owned
               (* start_keepalive registers the keeper synchronously via
                  register_offline and then forks the keepalive fiber.  The
                  fiber flips the registry to running asynchronously on the
-                 next Eio tick, so querying is_running here is a race that
-                 keepers with a larger proactive-warmup idx lose
-                 deterministically (verdict=165s / sojin=150s / sangsu=135s
-                 produced the bulk of the false-positive "not in registry"
-                 WARNs).  Check the synchronous is_registered predicate
-                 instead — the running transition is observed later by the
-                 retry loop.  See #7889. *)
+                 next Eio tick, so querying is_running here races that
+                 transition.  Check the synchronous is_registered predicate
+                 instead; the retry loop observes the running transition
+                 later.  See #7889. *)
               let registered =
                 Keeper_registry.is_registered ~base_path:config.base_path m.name
               in

@@ -4,6 +4,21 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+type backlog_edge_observation =
+  | Backlog_read_unavailable of string
+  | Recovery_backlog of
+      { revision : int
+      ; projection_sha256 : string
+      ; recovery : Workspace.backlog_recovery
+      }
+  | Observed_backlog of
+      { revision : int
+      ; projection_sha256 : string
+      ; updated_since_last_scheduled_autonomous : bool
+      }
+val backlog_edge_observation_to_string : backlog_edge_observation -> string
+(** Render model-safe provenance without storage paths or parser error text.
+    Detailed failures stay in logs and metrics. *)
 type current_task_observation =
   | No_current_task
   | Current_task of Masc_domain.task

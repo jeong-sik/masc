@@ -652,6 +652,66 @@ let test_lane_media_degrade_uses_first_candidate_runtime_id () =
         "primary.test_model"
         (string_member "degraded_runtime_id" decision))
 
+let test_run_named_media_degrade_emits_typed_manifest () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    Masc_test_deps.init_eio_clock ~sw env;
+    let manifests = ref [] in
+    let context : Runtime_manifest.turn_context =
+      { manifest_keeper_name = "media-degrade-keeper"
+      ; manifest_agent_name = Some "media-degrade-agent"
+      ; manifest_trace_id = "media-degrade-trace"
+      ; manifest_generation = Some 1
+      ; manifest_keeper_turn_id = Some 1
+      }
+    in
+    let image =
+      Agent_sdk.Types.image_block
+        ~media_type:"image/png"
+        ~data:(Base64.encode_string "synthetic-image")
+        ()
+    in
+    ignore
+      (Driver.run_named
+         ~runtime_id:"resilient"
+         ~keeper_name:"media-degrade-keeper"
+         ~base_path:(Filename.get_temp_dir_name ())
+         ~goal:"inspect the image"
+         ~goal_blocks:[ image ]
+         ~runtime_manifest_context:context
+         ~runtime_manifest_append:(fun manifest -> manifests := manifest :: !manifests)
+         ~body_timeout_s:0.5
+         ~sw
+         ~net:env#net
+         ()
+       : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result);
+    let degraded =
+      List.find_opt
+        (fun (manifest : Runtime_manifest.t) ->
+           manifest.event = Runtime_manifest.Runtime_routed
+           && String.equal manifest.status "degraded")
+        !manifests
+    in
+    match degraded with
+    | None -> Alcotest.fail "run_named omitted the media degradation manifest"
+    | Some manifest ->
+      let decision = Runtime_manifest.public_projection_of_decision manifest.decision in
+      Alcotest.(check string)
+        "typed routing action"
+        "media_degraded_to_text"
+        (string_member "routing_action" decision);
+      Alcotest.(check string)
+        "typed routing reason"
+        "no_configured_runtime_accepts_required_media"
+        (string_member "routing_reason" decision);
+      Alcotest.(check string)
+        "degraded runtime identity"
+        "primary.test_model"
+        (string_member "degraded_runtime_id" decision))
+
 let test_lane_media_reroute_stays_within_lane () =
   with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
     match Runtime.resolve_assignment "resilient" with
@@ -1457,6 +1517,10 @@ let () =
             "lane media degrade uses first candidate runtime id"
             `Quick
             test_lane_media_degrade_uses_first_candidate_runtime_id;
+          Alcotest.test_case
+            "run_named media degrade emits typed manifest"
+            `Quick
+            test_run_named_media_degrade_emits_typed_manifest;
           Alcotest.test_case
             "lane media reroute stays within lane"
             `Quick

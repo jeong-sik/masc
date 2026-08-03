@@ -242,9 +242,7 @@ let with_server f =
     | None -> Alcotest.skip ()
   in
   let log_file = Filename.temp_file "mcp-post-sse-e2e-" ".log" in
-  let base_path = Filename.temp_file "mcp-post-sse-base-" "" in
-  (try Sys.remove base_path with _ -> ());
-  Unix.mkdir base_path 0o755;
+  let base_path = Filename.temp_dir "mcp-post-sse-base-" "" in
   let log_fd =
     Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
   in

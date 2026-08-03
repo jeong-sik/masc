@@ -334,9 +334,7 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
   let exe = Masc_test_runtime.find_main_eio_exe () in
   let port = match find_free_port () with Some p -> p | None -> Alcotest.skip () in
   let log_file = Filename.temp_file "operator-mcp-e2e-" ".log" in
-  let base_path = Filename.temp_file "operator-mcp-base-" "" in
-  (try Sys.remove base_path with _ -> ());
-  Unix.mkdir base_path 0o755;
+  let base_path = Filename.temp_dir "operator-mcp-base-" "" in
   let project_root = Masc_test_deps.find_project_root () in
   let config_dir = Filename.concat project_root "config" in
   let personas_dir = Filename.concat config_dir "personas" in

@@ -162,13 +162,6 @@ let exact_keeper_config_declared_result
       keeper_name
   in
   match Fs_compat.exact_path_kind path with
-  | Fs_compat.Exact_missing -> Ok false
-  | Fs_compat.Exact_kind Unix.S_REG -> Ok true
-  | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
-    Error
-      (Printf.sprintf
-         "Keeper config declaration is not a regular file: %s"
-         path)
   | exception Eio.Cancel.Cancelled _ as exn -> raise exn
   | exception Unix.Unix_error (error, operation, argument) ->
     Error
@@ -184,6 +177,13 @@ let exact_keeper_config_declared_result
          "failed to inspect Keeper config declaration path=%s: %s"
          path
          detail)
+  | Fs_compat.Exact_missing -> Ok false
+  | Fs_compat.Exact_kind Unix.S_REG -> Ok true
+  | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+    Error
+      (Printf.sprintf
+         "Keeper config declaration is not a regular file: %s"
+         path)
 ;;
 
 let exact_durable_owner_result config keeper_name =

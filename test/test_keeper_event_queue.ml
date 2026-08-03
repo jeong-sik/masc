@@ -205,7 +205,9 @@ let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~owner_nonce ~oper
        (Masc.Keeper_registry_event_queue.Transition_committed_followup_failed
           { detail; _ }) ->
      Alcotest.fail detail
-   | Error detail -> Alcotest.fail detail)
+   | Error detail ->
+     Alcotest.fail
+       (Masc.Keeper_registry_event_queue.transfer_pending_error_to_string detail))
 
 let () =
   let open Keeper_event_queue in
@@ -1112,6 +1114,88 @@ let () =
              0
              (Keeper_event_queue_state.accepted_transfer_projections target_state
               |> List.length)));
+
+  (* Source ownership changes use the same durable-intake authority as schedule
+     retry repair. A shutdown reservation is the observable proof that a source
+     transfer cannot bypass that authority. *)
+  let base_path = temp_dir "keeper-event-queue-source-transfer-shutdown-fence" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let from_keeper = "keeper-source-transfer-shutdown-source" in
+      let to_keeper = "keeper-source-transfer-shutdown-target" in
+      let source = board_stim in
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_durable_result
+           ~base_path
+           from_keeper
+           source
+       with
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail);
+      let selection =
+        match
+          load_queue_state ~base_path ~keeper_name:from_keeper
+          |> Keeper_event_queue_state.pending_selections
+        with
+        | [ selection ] -> selection
+        | _ -> Alcotest.fail "source transfer fixture did not contain one pending item"
+      in
+      let transfer : Masc.Keeper_registry_event_queue.accepted_transfer =
+        { source = selection.source
+        ; source_incarnation = selection.admitted_revision
+        ; owner_nonce = 31
+        ; operator_operation_id = "source-transfer-during-shutdown"
+        ; from_keeper
+        ; to_keeper
+        }
+      in
+      let shutdown_operation_id =
+        Masc.Keeper_shutdown_types.Operation_id.generate ()
+      in
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path
+           ~keeper_name:from_keeper
+           ~operation_id:shutdown_operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         Alcotest.fail "fresh source shutdown was already reserved");
+      Fun.protect
+        ~finally:(fun () ->
+          ignore
+            (Masc.Keeper_turn_admission.rollback_shutdown
+               ~base_path
+               ~keeper_name:from_keeper
+               ~operation_id:shutdown_operation_id
+              : Masc.Keeper_turn_admission.rollback_shutdown_result))
+        (fun () ->
+           (match
+              Masc.Keeper_registry_event_queue.transfer_pending_accepted_result
+                ~base_path
+                from_keeper
+                ~current_owner_nonce:31
+                ~applied_at:31.0
+                ~transfer
+            with
+            | Error
+                (Masc.Keeper_registry_event_queue.Transfer_pending_shutdown_reserved
+                   actual_operation_id) ->
+              Alcotest.(check bool)
+                "source transfer reports exact shutdown owner"
+                true
+                (Masc.Keeper_shutdown_types.Operation_id.equal
+                   shutdown_operation_id
+                   actual_operation_id)
+            | Error
+                (Masc.Keeper_registry_event_queue.Transfer_pending_storage_error detail) ->
+              Alcotest.fail detail
+            | Ok _ -> Alcotest.fail "source transfer bypassed shutdown fence");
+           Alcotest.(check int)
+             "shutdown-fenced source transfer retains pending work"
+             1
+             (registry_snapshot ~base_path from_keeper |> Keeper_event_queue.length)));
 
   (* A source shutdown reservation fences the whole recovery transaction. The
      worker cannot load an outbox and later recreate source or target artifacts

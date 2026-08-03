@@ -559,6 +559,7 @@ let test_replay_after_source_ack_projects_target () =
          ~current_owner_nonce:request.owner_nonce
          ~applied_at:receipt.requested_at
          ~transfer:causal
+       |> Result.map_error Keeper_registry_event_queue.transfer_pending_error_to_string
        |> require_ok "simulate committed source ACK");
     let replay =
       Transaction.transfer_pending config ~from_keeper ~to_keeper request
@@ -617,6 +618,7 @@ let test_generic_recovery_preserves_receipted_target_identity () =
        ~current_owner_nonce:request.owner_nonce
        ~applied_at:receipt.requested_at
        ~transfer:causal
+     |> Result.map_error Keeper_registry_event_queue.transfer_pending_error_to_string
      |> require_ok "simulate committed source ACK");
   ignore
     (write_meta

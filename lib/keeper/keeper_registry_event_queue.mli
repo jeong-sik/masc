@@ -54,6 +54,12 @@ type transition_result = Keeper_event_queue_persistence.transition_result =
       ; detail : string
       }
 
+type transfer_pending_error =
+  | Transfer_pending_storage_error of string
+  | Transfer_pending_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+
+val transfer_pending_error_to_string : transfer_pending_error -> string
+
 type source_ack_result =
   | Acked of transition_receipt
   | Already_acked of transition_receipt
@@ -104,9 +110,12 @@ val transfer_pending_accepted_result :
   current_owner_nonce:int ->
   applied_at:float ->
   transfer:accepted_transfer ->
-  (transition_result, string) result
+  (transition_result, transfer_pending_error) result
 (** Commit an exact pending accepted transfer transition and publish the
-    post-commit source pending projection when the owner is registered. *)
+    post-commit source pending projection when the owner is registered. The
+    source mutation owns the same durable-intake authority as schedule retry
+    repair, so the resolved owner cannot change between retry validation and
+    its acceptance commit. *)
 
 val ack_pending_source_terminal_result :
   base_path:string ->

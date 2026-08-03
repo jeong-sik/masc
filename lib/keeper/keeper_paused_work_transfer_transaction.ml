@@ -39,6 +39,7 @@ type failure =
   | Target_owner_identity_changed
   | Continuation_binding_mismatch
   | Source_queue_validation_failed of string
+  | Source_transfer_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Committed_projection_failed of
       { stage : projection_stage
       ; detail : string
@@ -119,6 +120,10 @@ let failure_to_string = function
     "Transfer_owner continuation binding does not match the exact source event"
   | Source_queue_validation_failed detail ->
     "Transfer_owner source queue validation failed: " ^ detail
+  | Source_transfer_shutdown_reserved operation_id ->
+    Printf.sprintf
+      "Transfer_owner source durable intake is shutdown-reserved: operation=%s"
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
   | Committed_projection_failed { stage; detail } ->
     Printf.sprintf
       "Transfer_owner committed receipt but %s projection failed: %s"
@@ -328,8 +333,11 @@ let ack_source config receipt transfer =
         ~current_owner_nonce:current.runtime.nonce
         ~applied_at:receipt.requested_at
         ~transfer:causal
-      |> Result.map_error (fun detail ->
-        Committed_projection_failed { stage = Source_ack; detail })
+      |> Result.map_error (function
+        | Keeper_registry_event_queue.Transfer_pending_storage_error detail ->
+          Committed_projection_failed { stage = Source_ack; detail }
+        | Keeper_registry_event_queue.Transfer_pending_shutdown_reserved operation_id ->
+          Source_transfer_shutdown_reserved operation_id)
     in
     (match outcome with
      | Keeper_registry_event_queue.Transition_applied _

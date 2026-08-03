@@ -210,6 +210,7 @@ let execute_transfer ~base_path ~keeper_name prepared =
       ~current_owner_nonce:transfer.owner_nonce
       ~applied_at:prepared.applied_at
       ~transfer
+    |> Result.map_error Keeper_registry_event_queue.transfer_pending_error_to_string
   in
   match source_result with
   | Keeper_registry_event_queue.Transition_committed_followup_failed _ ->

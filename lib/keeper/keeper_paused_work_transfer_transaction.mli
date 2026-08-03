@@ -41,6 +41,7 @@ type failure =
   | Target_owner_identity_changed
   | Continuation_binding_mismatch
   | Source_queue_validation_failed of string
+  | Source_transfer_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Committed_projection_failed of
       { stage : projection_stage
       ; detail : string

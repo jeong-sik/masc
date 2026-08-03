@@ -699,7 +699,8 @@ let test_reclaim_follows_transfer_durable_state () =
        (Keeper_registry_event_queue.Transition_committed_followup_failed
           { detail; _ }) ->
      fail detail
-   | Error detail -> fail detail);
+   | Error detail ->
+     fail (Keeper_registry_event_queue.transfer_pending_error_to_string detail));
   (match single_keeper_settlement_exn config execution with
    | Schedule_runner.Consumer_holds_occurrence -> ()
    | _ -> fail "unprojected transfer was not retained as durable work");
@@ -825,7 +826,8 @@ let test_reclaim_resolves_current_incarnation_after_transfer_back () =
          (Keeper_registry_event_queue.Transition_committed_followup_failed
             { detail; _ }) ->
        fail detail
-     | Error detail -> fail detail);
+     | Error detail ->
+       fail (Keeper_registry_event_queue.transfer_pending_error_to_string detail));
     match
       Keeper_event_queue_recovery.project_owner_result
         ~base_path
@@ -910,7 +912,8 @@ let test_reclaim_revalidates_cached_transfer_target_absence () =
        (Keeper_registry_event_queue.Transition_committed_followup_failed
           { detail; _ }) ->
      fail detail
-   | Error detail -> fail detail);
+   | Error detail ->
+     fail (Keeper_registry_event_queue.transfer_pending_error_to_string detail));
   (match
      Keeper_event_queue_recovery.project_owner_result
        ~base_path
@@ -1191,7 +1194,8 @@ let test_keeper_purge_rejects_unsettled_transfer_redirect () =
        (Keeper_registry_event_queue.Transition_committed_followup_failed
           { detail; _ }) ->
      fail detail
-   | Error detail -> fail detail);
+   | Error detail ->
+     fail (Keeper_registry_event_queue.transfer_pending_error_to_string detail));
   (match
      Keeper_event_queue_recovery.project_owner_result
        ~base_path
@@ -1255,7 +1259,8 @@ let test_keeper_purge_follows_terminal_transfer_redirect () =
        (Keeper_registry_event_queue.Transition_committed_followup_failed
           { detail; _ }) ->
      fail detail
-   | Error detail -> fail detail);
+   | Error detail ->
+     fail (Keeper_registry_event_queue.transfer_pending_error_to_string detail));
   (match
      Keeper_event_queue_recovery.project_owner_result
        ~base_path
@@ -1401,7 +1406,8 @@ let test_transferred_retry_uses_resolved_owner_shutdown_fence () =
        (Keeper_registry_event_queue.Transition_committed_followup_failed
           { detail; _ }) ->
      fail detail
-   | Error detail -> fail detail);
+   | Error detail ->
+     fail (Keeper_registry_event_queue.transfer_pending_error_to_string detail));
   (match
      Keeper_event_queue_recovery.project_owner_result
        ~base_path

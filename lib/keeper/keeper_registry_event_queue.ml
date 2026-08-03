@@ -61,6 +61,18 @@ type transition_result = Keeper_event_queue_persistence.transition_result =
       ; detail : string
       }
 
+type transfer_pending_error =
+  | Transfer_pending_storage_error of string
+  | Transfer_pending_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+
+let transfer_pending_error_to_string = function
+  | Transfer_pending_storage_error detail -> detail
+  | Transfer_pending_shutdown_reserved operation_id ->
+    Printf.sprintf
+      "source Keeper shutdown owns durable transfer intake operation=%s"
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
+;;
+
 type source_ack_result =
   | Acked of transition_receipt
   | Already_acked of transition_receipt
@@ -423,14 +435,24 @@ let transfer_pending_accepted_result
       ~applied_at
       ~transfer
   =
-  Keeper_event_queue_persistence.transfer_pending_accepted_result
-    ~base_path
-    ~keeper_name:name
-    ~current_owner_nonce
-    ~applied_at
-    ~transfer
-    ~after_commit:(publish_pending ~base_path name)
-    ()
+  match
+    Keeper_turn_admission.run_durable_intake_if_open
+      ~base_path
+      ~keeper_name:name
+      (fun () ->
+         Keeper_event_queue_persistence.transfer_pending_accepted_result
+           ~base_path
+           ~keeper_name:name
+           ~current_owner_nonce
+           ~applied_at
+           ~transfer
+           ~after_commit:(publish_pending ~base_path name)
+           ())
+  with
+  | Keeper_turn_admission.Intake_committed result ->
+    Result.map_error (fun detail -> Transfer_pending_storage_error detail) result
+  | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+    Error (Transfer_pending_shutdown_reserved operation_id)
 ;;
 
 let ack_pending_source_terminal_result

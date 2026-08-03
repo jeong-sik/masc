@@ -3,6 +3,10 @@ open Alcotest
 module WO = Masc.Keeper_world_observation
 module UM = Masc.Keeper_unified_metrics
 
+let check_field label expected name fields =
+  check (option string) label (Some expected) (List.assoc_opt name fields)
+;;
+
 let base_observation : WO.world_observation =
   {
     pending_messages = [];
@@ -221,6 +225,12 @@ let test_board_authors_share_one_neutral_observation_boundary () =
   let { Masc.Keeper_unified_prompt.world_state = human_msg; _ } =
     build_prompt ~meta:minimal_meta obs_human
   in
+  let peer_fields =
+    Masc.Keeper_unified_prompt.For_testing.board_event_fields peer_event
+  in
+  let human_fields =
+    Masc.Keeper_unified_prompt.For_testing.board_event_fields human_event
+  in
   let neutral_boundary = "Rows below are Board context." in
   check bool "automation event uses neutral boundary" true
     (contains_sub neutral_boundary peer_msg);
@@ -235,12 +245,18 @@ let test_board_authors_share_one_neutral_observation_boundary () =
   check bool "external effects stay behind the Gate" true
     (contains_sub "external effects cross the Gate" peer_msg
      && contains_sub "external effects cross the Gate" human_msg);
-  check bool "automation post kind remains context" true
-    (contains_sub "post_kind=\"automation\"" peer_msg);
-  check bool "human post kind remains context" true
-    (contains_sub "post_kind=\"direct\"" human_msg);
-  check bool "exact mention remains context" true
-    (contains_sub "[mentions test-keeper]" peer_msg)
+  check_field
+    "automation post kind remains context"
+    "automation"
+    "post_kind"
+    peer_fields;
+  check_field "human post kind remains context" "direct" "post_kind" human_fields;
+  check_field "explicit mention remains context" "explicit" "mention" peer_fields;
+  check_field
+    "exact mention targets remain context"
+    "test-keeper"
+    "mention_targets"
+    peer_fields
 ;;
 
 let test_board_reaction_event_renders_reaction_context () =
@@ -261,18 +277,13 @@ let test_board_reaction_event_renders_reaction_context () =
       author = "reactor";
     }
   in
-  let obs = { base_observation with pending_board_events = [ reaction_event ] } in
-  let { Masc.Keeper_unified_prompt.world_state = user_msg; _ } =
-    build_prompt ~meta:minimal_meta obs
+  let fields =
+    Masc.Keeper_unified_prompt.For_testing.board_event_fields reaction_event
   in
-  check bool "prompt labels reaction board event" true
-    (contains_sub "event=\"reaction_changed\"" user_msg);
-  check bool "prompt includes reaction target" true
-    (contains_sub "target=\"comment:comment-1\"" user_msg);
-  check bool "prompt includes reaction actor" true
-    (contains_sub "user=\"reactor\"" user_msg);
-  check bool "prompt includes reaction emoji" true
-    (contains_sub "emoji=\"👏\"" user_msg)
+  check_field "prompt labels reaction board event" "reaction_changed" "event" fields;
+  check_field "prompt includes reaction target" "comment:comment-1" "target" fields;
+  check_field "prompt includes reaction actor" "reactor" "user" fields;
+  check_field "prompt includes reaction emoji" "👏" "emoji" fields
 ;;
 
 (* Structured world-state values are observations, not tool instructions. A

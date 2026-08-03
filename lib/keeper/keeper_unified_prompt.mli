@@ -108,3 +108,9 @@ val build_prompt_preview :
   turn_prompt_parts
 (** Build a dashboard preview from current state without inventing a scheduler
     decision. Scheduler wake reasons are absent because no turn fired. *)
+
+module For_testing : sig
+  val board_event_fields :
+    Keeper_world_observation.pending_board_event -> (string * string) list
+  (** Structured Board observation immediately before prompt-field quoting. *)
+end

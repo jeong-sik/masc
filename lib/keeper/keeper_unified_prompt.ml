@@ -243,8 +243,8 @@ let board_event_note_fields = function
   | Keeper_world_observation.Completion_authority_rejected _ -> []
 ;;
 
-let format_board_event_text
-    (event : Keeper_world_observation.pending_board_event) : string =
+let board_event_fields
+    (event : Keeper_world_observation.pending_board_event) =
   let event_label = board_event_kind_label event.event_kind in
   let fields =
     [ "event", event_label
@@ -261,12 +261,12 @@ let format_board_event_text
   in
   let fields =
     if event.explicit_mention then
-      let targets =
+      let mention_fields =
         match event.matched_targets with
-        | [] -> "explicit mention"
-        | xs -> "mentions " ^ String.concat ", " xs
+        | [] -> []
+        | xs -> [ "mention_targets", String.concat ", " xs ]
       in
-      fields @ [ "mention", targets ]
+      fields @ (("mention", "explicit") :: mention_fields)
     else fields
   in
   let fields = fields @ board_event_note_fields event.event_kind in
@@ -285,8 +285,17 @@ let format_board_event_text
       | _ -> fields
     else fields
   in
-  format_prompt_row (fields @ [ "preview", event.preview ])
+  fields @ [ "preview", event.preview ]
 ;;
+
+let format_board_event_text
+    (event : Keeper_world_observation.pending_board_event) : string =
+  format_prompt_row (board_event_fields event)
+;;
+
+module For_testing = struct
+  let board_event_fields = board_event_fields
+end
 
 let format_scheduled_automation_item
     (item : Keeper_world_observation.scheduled_automation_item) : string =

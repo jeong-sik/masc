@@ -10,6 +10,7 @@ import type {
 import { sanitizeDashboardActorName } from '../lib/dashboard-actor'
 import { isAbortError } from '../lib/async-state'
 import {
+  currentCanonicalDashboardActor,
   currentDashboardActorName,
   setCanonicalDashboardActor,
 } from '../lib/dashboard-session-actor'
@@ -25,17 +26,10 @@ function getQueryParams(): URLSearchParams {
 const TOKEN_STORAGE_KEY = 'masc_bearer_token'
 const TOKEN_META_STORAGE_KEY = 'masc_bearer_token_meta'
 
-type StoredTokenSource = 'dev' | 'manual' | 'url'
-
-const STORED_TOKEN_SOURCES = ['dev', 'manual', 'url'] as const
-
-const DEFAULT_STORED_TOKEN_SOURCE: StoredTokenSource = 'manual'
-
-export interface StoredTokenMeta {
-  source: StoredTokenSource
-  actor?: string | null
-  scope?: string | null
-}
+export type StoredTokenMeta =
+  | { source: 'dev'; actor: 'dashboard'; role: 'worker' }
+  | { source: 'manual' }
+  | { source: 'url' }
 
 export interface StoredTokenChange {
   token: string | null
@@ -74,16 +68,16 @@ export function subscribeStoredTokenChanges(
 function normalizeStoredTokenMeta(value: unknown): StoredTokenMeta | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
   const record = value as Record<string, unknown>
-  const source = typeof record.source === 'string' ? record.source : null
-  if (source === null || !(STORED_TOKEN_SOURCES as readonly string[]).includes(source)) return null
-  const actor = sanitizeDashboardActorName(
-    typeof record.actor === 'string' ? record.actor : null,
-  )
-  const scope =
-    typeof record.scope === 'string' && record.scope.trim() !== ''
-      ? record.scope.trim()
-      : null
-  return { source: source as StoredTokenSource, actor, scope }
+  if (record.source === 'manual') return { source: 'manual' }
+  if (record.source === 'url') return { source: 'url' }
+  if (
+    record.source === 'dev'
+    && record.actor === 'dashboard'
+    && record.role === 'worker'
+  ) {
+    return { source: 'dev', actor: 'dashboard', role: 'worker' }
+  }
+  return null
 }
 
 function storedTokenMetaEquals(
@@ -91,9 +85,9 @@ function storedTokenMetaEquals(
   right: StoredTokenMeta | null,
 ): boolean {
   if (left === null || right === null) return left === right
-  return left.source === right.source
-    && (left.actor ?? null) === (right.actor ?? null)
-    && (left.scope ?? null) === (right.scope ?? null)
+  if (left.source !== right.source) return false
+  if (left.source !== 'dev' || right.source !== 'dev') return true
+  return left.actor === right.actor && left.role === right.role
 }
 
 function initTokenFromUrl(): void {
@@ -135,7 +129,7 @@ export function getStoredTokenMeta(): StoredTokenMeta | null {
 
 export function setStoredToken(
   token: string,
-  meta: Partial<StoredTokenMeta> & { source?: StoredTokenSource } = {},
+  meta: StoredTokenMeta = { source: 'manual' },
 ): void {
   const normalizedToken = token.trim()
   if (!normalizedToken) {
@@ -144,11 +138,7 @@ export function setStoredToken(
   }
   const previousToken = getStoredToken()
   const previousMeta = getStoredTokenMeta()
-  const nextMeta = normalizeStoredTokenMeta({
-    source: meta.source ?? DEFAULT_STORED_TOKEN_SOURCE,
-    actor: meta.actor ?? null,
-    scope: meta.scope ?? null,
-  })
+  const nextMeta = normalizeStoredTokenMeta(meta)
   sessionStorage.setItem(TOKEN_STORAGE_KEY, normalizedToken)
   if (nextMeta) {
     sessionStorage.setItem(TOKEN_META_STORAGE_KEY, JSON.stringify(nextMeta))
@@ -186,7 +176,7 @@ export function isRemoteAccess(): boolean {
 export function currentDashboardActor(): string {
   const meta = getStoredTokenMeta()
   const managedActor = meta?.source === 'dev'
-    ? sanitizeDashboardActorName(meta.actor)
+    ? meta.actor
     : null
   if (managedActor) return managedActor
   return currentDashboardActorName()
@@ -200,9 +190,13 @@ type HeaderOptions = {
 export function authHeaders(options: HeaderOptions = {}): Record<string, string> {
   const headers: Record<string, string> = {}
   const token = dashboardBearerToken()
+  const tokenMeta = getStoredTokenMeta()
+  const resolvedImplicitActor = token && tokenMeta?.source !== 'dev'
+    ? currentCanonicalDashboardActor()
+    : currentDashboardActor()
   const agent = options.actorName !== undefined
     ? sanitizeDashboardActorName(options.actorName)
-    : currentDashboardActor()
+    : resolvedImplicitActor
   if (token) headers['Authorization'] = `Bearer ${token}`
   if (options.includeActor !== false && agent) {
     headers['X-MASC-Agent'] = agent
@@ -239,6 +233,7 @@ export class ApiRequestError extends Error {
   timeout: boolean
   detail?: string
   errorCode?: string
+  authErrorCode?: string
 
   constructor(opts: {
     method: string
@@ -249,6 +244,7 @@ export class ApiRequestError extends Error {
     timeoutMs?: number
     detail?: string
     errorCode?: string
+    authErrorCode?: string
   }) {
     const method = opts.method.toUpperCase()
     const timeout = opts.timeout === true
@@ -267,6 +263,7 @@ export class ApiRequestError extends Error {
     this.timeout = timeout
     this.detail = detail
     this.errorCode = opts.errorCode?.trim() || undefined
+    this.authErrorCode = opts.authErrorCode?.trim() || undefined
   }
 }
 
@@ -415,6 +412,7 @@ import { isRecord } from '../lib/type-guards'
 interface ErrorResponseInfo {
   detail?: string
   errorCode?: string
+  authErrorCode?: string
 }
 
 async function errorResponseInfoFromResponse(res: Response): Promise<ErrorResponseInfo> {
@@ -428,14 +426,21 @@ async function errorResponseInfoFromResponse(res: Response): Promise<ErrorRespon
   try {
     const parsed = JSON.parse(rawText) as unknown
     if (isRecord(parsed)) {
+      const errorDetail = typeof parsed.error === 'string' ? parsed.error.trim() : ''
+      const authErrorCode = typeof parsed.auth_error_code === 'string'
+        ? parsed.auth_error_code.trim()
+        : ''
       const errorCode =
-        (typeof parsed.error === 'string' ? parsed.error.trim() : '')
+        authErrorCode
+        || (typeof parsed.error_code === 'string' ? parsed.error_code.trim() : '')
         || (typeof parsed.status === 'string' ? parsed.status.trim() : '')
+        || errorDetail
       const message = typeof parsed.message === 'string' ? parsed.message.trim() : ''
-      if (message || errorCode) {
+      if (message || errorDetail || errorCode) {
         return {
-          detail: message || errorCode || undefined,
+          detail: message || errorDetail || errorCode || undefined,
           errorCode: errorCode || undefined,
+          authErrorCode: authErrorCode || undefined,
         }
       }
     }
@@ -458,6 +463,7 @@ export async function apiRequestErrorFromResponse(
     statusText: res.statusText,
     detail: info.detail,
     errorCode: info.errorCode,
+    authErrorCode: info.authErrorCode,
   })
 }
 

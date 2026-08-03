@@ -29,7 +29,12 @@ val oas_telemetry_provider_param : Httpun.Request.t -> string option
 val resolve_telemetry_n : has_time_window:bool -> n_param:string option -> int
 
 val dashboard_dev_token_path : string -> string
-val ensure_dashboard_dev_token : string -> (string, string) result
+type dashboard_dev_token =
+  Server_routes_http_dashboard_dev_token.dashboard_dev_token
+type dashboard_dev_token_error =
+  Server_routes_http_dashboard_dev_token.token_error
+val ensure_dashboard_dev_token :
+  string -> (dashboard_dev_token, dashboard_dev_token_error) result
 
 val handle_broadcast :
   Mcp_server.server_state -> string -> Httpun.Reqd.t -> string -> unit

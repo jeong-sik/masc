@@ -988,6 +988,27 @@ let resolve_agent_name_for_auth ~base_path request ~token :
     (string option, Masc_domain.masc_error) result =
   resolve_agent_name_for_auth_raw ~base_path request ~token
 
+type request_authorization_actor =
+  | Resolved_request_actor of string
+  | Anonymous_dashboard_actor
+
+let request_authorization_actor_name = function
+  | Resolved_request_actor agent_name -> agent_name
+  | Anonymous_dashboard_actor -> "dashboard"
+;;
+
+let resolve_request_authorization_actor ~token = function
+  | Some agent_name -> Ok (Resolved_request_actor agent_name)
+  | None ->
+    (match token with
+     | None -> Ok Anonymous_dashboard_actor
+     | Some _ ->
+       Error
+         (Masc_domain.Auth
+            (Masc_domain.Auth_error.InvalidToken
+               "Bearer token did not resolve to a credential identity.")))
+;;
+
 let authorize_permission_request ~base_path ~permission request :
     (unit, Masc_domain.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
@@ -1002,23 +1023,12 @@ let authorize_permission_request ~base_path ~permission request :
   in
   let* () = reject_malformed_request_credential credential in
   let* agent_name_opt = resolve_agent_name_for_auth ~base_path request ~token in
-  (* NDT-OK: pre-existing dashboard fallback for non-token dashboard reads.
-     Token-bound requests without a resolved agent fail closed in the guard below. *)
-  let agent_name = Option.value ~default:"dashboard" agent_name_opt in
-  if
-    auth_cfg.enabled && auth_cfg.require_token && token <> None
-    && agent_name_opt = None
-  then
-    Error
-      (Masc_domain.Auth
-         (Masc_domain.Auth_error.Unauthorized
-            { reason = Missing_token
-            ; message =
-                "Agent name required (X-Gate-Agent / X-MASC-Agent or \
-                 token-bound credential)"
-            }))
-  else
-    Auth.check_permission base_path ~agent_name ~token ~permission
+  let* actor = resolve_request_authorization_actor ~token agent_name_opt in
+  Auth.check_permission
+    base_path
+    ~agent_name:(request_authorization_actor_name actor)
+    ~token
+    ~permission
 
 let authorize_read_request ~base_path request : (unit, Masc_domain.masc_error) result =
   authorize_permission_request ~base_path ~permission:Masc_domain.CanReadState request
@@ -1042,24 +1052,10 @@ let authorize_tool_request_with_actor ~base_path ~tool_name ~request_authority r
                { reason = Generic; message = msg }))
   in
   let* agent_name_opt = resolve_agent_name_for_auth ~base_path request ~token in
-  (* NDT-OK: pre-existing dashboard fallback for non-token dashboard tool requests.
-     Token-bound requests without a resolved agent fail closed in the guard below. *)
-  let agent_name = Option.value ~default:"dashboard" agent_name_opt in
-  if
-    auth_cfg.enabled && auth_cfg.require_token && token <> None
-    && agent_name_opt = None
-  then
-    Error
-      (Masc_domain.Auth
-         (Masc_domain.Auth_error.Unauthorized
-            { reason = Missing_token
-            ; message =
-                "Agent name required (X-Gate-Agent / X-MASC-Agent or \
-                 token-bound credential)"
-            }))
-  else (
-    let* () = Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name in
-    Ok agent_name)
+  let* actor = resolve_request_authorization_actor ~token agent_name_opt in
+  let agent_name = request_authorization_actor_name actor in
+  let* () = Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name in
+  Ok agent_name
 
 let authorize_tool_request ~base_path ~tool_name ~request_authority request :
     (unit, Masc_domain.masc_error) result =

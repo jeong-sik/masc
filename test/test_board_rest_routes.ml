@@ -220,13 +220,15 @@ let test_dashboard_dev_token_can_vote_as_credential_owner () =
     match
       Server_routes_http_dashboard_dev_token.ensure_dashboard_dev_token base_path
     with
-    | Error message -> fail message
+    | Error error ->
+      fail
+        (Server_routes_http_dashboard_dev_token.token_error_to_string error)
     | Ok token ->
       match
         Server_auth.authorize_token_bound_permission_request
           ~base_path
           ~permission:Masc_domain.CanVote
-          (reaction_auth_request ~token ())
+          (reaction_auth_request ~token:token.raw ())
       with
       | Ok actor -> check string "dashboard credential owner" "dashboard" actor
       | Error error -> fail (Masc_domain.masc_error_to_string error))

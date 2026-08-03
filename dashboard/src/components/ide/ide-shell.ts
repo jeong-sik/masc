@@ -346,7 +346,7 @@ function disconnectionReasonLabel(): string {
   const hasToken = !!dashboardBearerToken()
   const bootstrap = devTokenBootstrapStatus.value
 
-  if (!hasToken && bootstrap === 'no_endpoint') {
+  if (!hasToken && (bootstrap === 'no_endpoint' || bootstrap === 'invalid_response')) {
     return 'dashboard · auth required'
   }
   if (!hasToken && bootstrap === 'network') {

@@ -14,11 +14,17 @@ val dashboard_dev_token_path : string -> string
 (** [<base_path>/.masc/auth/dashboard.token] — the canonical
     dashboard dev-token file written on boot. *)
 
-val ensure_dashboard_dev_token : string -> (string, string) result
-(** Idempotent boot helper: returns the canonical dashboard dev token
-    string, generating + persisting one to {!dashboard_dev_token_path}
-    on first call. [Error msg] when the auth dir is unwritable. Exposed
-    so the dashboard-keeper-routes test can drive the boot path directly. *)
+type dashboard_dev_token =
+  Server_routes_http_dashboard_dev_token.dashboard_dev_token
+type dashboard_dev_token_error =
+  Server_routes_http_dashboard_dev_token.token_error
+
+val ensure_dashboard_dev_token :
+  string -> (dashboard_dev_token, dashboard_dev_token_error) result
+(** Idempotent boot helper: returns the canonical worker-scoped dashboard
+    dev-token identity, generating + persisting one to
+    {!dashboard_dev_token_path} on first call. Persistence and rotation
+    failures remain typed. *)
 
 module For_testing : sig
   type gate_mode_recovery =

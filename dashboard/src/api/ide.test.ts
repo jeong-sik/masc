@@ -228,7 +228,7 @@ describe('ide API', () => {
   })
 
   it('deleteIdeAnnotation sends the bearer token and appends repo_id param without keeper_id', async () => {
-    setStoredToken('delete-test-token', { source: 'manual', actor: 'dashboard-user' })
+    setStoredToken('delete-test-token', { source: 'manual' })
     stubFetch({}, true)
 
     await deleteIdeAnnotation('ann-1', { repoId: 'masc' })

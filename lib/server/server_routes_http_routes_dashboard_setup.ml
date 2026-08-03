@@ -39,6 +39,10 @@ let oas_telemetry_provider_param req = trimmed_query_param req "provider"
    [Server_routes_http_dashboard_dev_token] (godfile decomp). *)
 
 let dashboard_dev_token_path = Server_routes_http_dashboard_dev_token.dashboard_dev_token_path
+type dashboard_dev_token =
+  Server_routes_http_dashboard_dev_token.dashboard_dev_token
+type dashboard_dev_token_error =
+  Server_routes_http_dashboard_dev_token.token_error
 let ensure_dashboard_dev_token = Server_routes_http_dashboard_dev_token.ensure_dashboard_dev_token
 
 

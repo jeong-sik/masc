@@ -461,7 +461,7 @@ function AccountSettingsSection() {
             ${tokenPresent ? '브라우저에 저장됨' : '저장된 token 없음'}
           </span>
           ${tokenMeta
-            ? html`<span class="set-truth-source mono">source:${tokenMeta.source}${tokenMeta.scope ? ` · scope:${tokenMeta.scope}` : ''}</span>`
+            ? html`<span class="set-truth-source mono">source:${tokenMeta.source}${tokenMeta.source === 'dev' ? ` · role:${tokenMeta.role}` : ''}</span>`
             : null}
         </div>
       <//>

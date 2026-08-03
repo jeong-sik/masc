@@ -243,7 +243,7 @@ describe('MCP 2026-07-28 dashboard client', () => {
     getStoredToken.mockReturnValue(null)
     fetchWithTimeout
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        token: 'loopback-dev-token', actor: 'dashboard', scope: 'admin',
+        token: 'loopback-dev-token', actor: 'dashboard', role: 'worker',
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(okToolResponse())
 
@@ -251,7 +251,7 @@ describe('MCP 2026-07-28 dashboard client', () => {
     await callMcpTool('masc_status', {})
 
     expect(setStoredToken).toHaveBeenCalledWith('loopback-dev-token', {
-      source: 'dev', actor: 'dashboard', scope: 'admin',
+      source: 'dev', actor: 'dashboard', role: 'worker',
     })
     expect(fetchWithTimeout.mock.calls.map(call => call[0]))
       .toEqual(['/api/v1/dashboard/dev-token', '/mcp'])

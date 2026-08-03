@@ -1591,6 +1591,51 @@ let test_execute_tool_generated_agent_name_uses_token_identity () =
 
   cleanup_dir base_path
 
+let test_execute_tool_actor_mismatch_reports_typed_code () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
+  ignore
+    (Masc.Auth.enable_auth
+       base_path
+       ~require_token:true
+       ~agent_name:"bootstrap-admin");
+  let raw_token =
+    match
+      Masc.Auth.create_token
+        base_path
+        ~agent_name:"codex"
+        ~role:Masc_domain.Worker
+    with
+    | Ok (token, _cred) -> token
+    | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err)
+  in
+  let result =
+    Mcp_eio.execute_tool_eio
+      ~sw
+      ~clock
+      ~workspace_scope:(Mcp_server.workspace_scope state)
+      ~auth_token:raw_token
+      state
+      ~name:"masc_status"
+      ~arguments:(`Assoc [ "_agent_name", `String "dashboard" ])
+  in
+  Alcotest.(check bool) "actor mismatch rejected" false (Tool_result.is_success result);
+  Alcotest.(check string)
+    "typed actor mismatch"
+    "actor_mismatch"
+    Yojson.Safe.Util.(Tool_result.data result |> member "auth_error_code" |> to_string);
+  Alcotest.(check string)
+    "actor mismatch is pre-effect"
+    "proven_pre_effect"
+    Yojson.Safe.Util.(Tool_result.data result |> member "effect_disposition" |> to_string);
+  cleanup_dir base_path
+
 let test_execute_tool_internal_agent_name_is_caller_identity () =
   let resolve args =
     Masc.Mcp_server_eio_caller_identity.caller_agent_name_from_arguments
@@ -1630,12 +1675,30 @@ let check_task_still_todo config task_id =
         (Masc_domain.task_status_to_string task.task_status)
   | None -> Alcotest.failf "expected task %s to exist" task_id
 
-let check_auth_preflight_result ~tool_name ok msg =
-  Alcotest.(check bool) (tool_name ^ " rejected before handler") false ok;
+let check_auth_preflight_result ~tool_name result =
+  let msg = Tool_result.message result in
+  Alcotest.(check bool)
+    (tool_name ^ " rejected before handler")
+    false
+    (Tool_result.is_success result);
   Alcotest.(check bool) (tool_name ^ " reports auth/credential blocker") true
     (contains_substring msg "Token required"
      || contains_substring msg "Unauthorized"
-     || contains_substring msg "No credential")
+     || contains_substring msg "No credential");
+  Alcotest.(check (option string))
+    (tool_name ^ " policy rejection class")
+    (Some "policy_rejection")
+    (Option.map
+       Tool_result.tool_failure_class_to_string
+       (Tool_result.failure_class result));
+  Alcotest.(check string)
+    (tool_name ^ " typed auth code")
+    "missing_token"
+    Yojson.Safe.Util.(Tool_result.data result |> member "auth_error_code" |> to_string);
+  Alcotest.(check string)
+    (tool_name ^ " proves no effect")
+    "proven_pre_effect"
+    Yojson.Safe.Util.(Tool_result.data result |> member "effect_disposition" |> to_string)
 
 let check_rejected_without_mutation ~tool_name ok msg =
   Alcotest.(check bool) (tool_name ^ " rejected before mutation") false ok;
@@ -1777,8 +1840,7 @@ let test_execute_tool_claim_next_requires_auth_before_mutation () =
       ~name:"keeper_task_claim"
       ~arguments:(`Assoc [ ("agent_name", `String "uncredentialed-agent") ])
   in
-  check_auth_preflight_result ~tool_name:"keeper_task_claim"
-    (Tool_result.is_success result) ((Tool_result.message result));
+  check_auth_preflight_result ~tool_name:"keeper_task_claim" result;
   check_task_still_todo (Mcp_server.workspace_config state) "task-001";
   Alcotest.(check (option string)) "no current task after rejected claim_next" None
     (Masc.Task.Planning_eio.get_current_task (Mcp_server.workspace_config state));
@@ -1813,8 +1875,7 @@ let test_execute_tool_transition_requires_auth_before_mutation () =
             ("action", `String "claim");
           ])
   in
-  check_auth_preflight_result ~tool_name:"masc_transition"
-    (Tool_result.is_success result) ((Tool_result.message result));
+  check_auth_preflight_result ~tool_name:"masc_transition" result;
   check_task_still_todo (Mcp_server.workspace_config state) "task-001";
   Alcotest.(check (option string)) "no current task after rejected transition" None
     (Masc.Task.Planning_eio.get_current_task (Mcp_server.workspace_config state));
@@ -3051,6 +3112,8 @@ let eio_tests = [
     test_execute_tool_domain_agent_name_does_not_reuse_joined_nickname;
   "generated agent_name uses token identity", `Quick,
     test_execute_tool_generated_agent_name_uses_token_identity;
+  "actor mismatch reports typed code", `Quick,
+    test_execute_tool_actor_mismatch_reports_typed_code;
   "internal _agent_name is caller identity", `Quick,
     test_execute_tool_internal_agent_name_is_caller_identity;
   "explicit generated alias claim_next not rewritten by token", `Quick,

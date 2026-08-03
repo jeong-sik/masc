@@ -78,7 +78,7 @@ function implicitToolActor(): string | null {
   if (!actor) return null
   if (!getStoredToken()) return actor
   const meta = getStoredTokenMeta()
-  if (meta?.source === 'dev' || meta?.actor) return actor
+  if (meta?.source === 'dev') return actor
   return null
 }
 

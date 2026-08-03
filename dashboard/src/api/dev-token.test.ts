@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   devTokenBootstrapStatus,
   ensureDevToken,
+  refreshDevTokenAfterAuthError,
   resetDevTokenBootstrap,
   type DevTokenBootstrapStatus,
 } from './dev-token'
@@ -62,7 +63,7 @@ describe('ensureDevToken', () => {
       .mockResolvedValueOnce(jsonResponse({
         token: 'fresh-dev-token',
         actor: 'dashboard',
-        scope: 'admin',
+        role: 'worker',
       }))
 
     await ensureDevToken()
@@ -76,7 +77,7 @@ describe('ensureDevToken', () => {
     expect(setStoredToken).toHaveBeenCalledWith('fresh-dev-token', {
       source: 'dev',
       actor: 'dashboard',
-      scope: 'admin',
+      role: 'worker',
     })
     expect(devTokenBootstrapStatus.value).toBe('ok')
   })
@@ -85,7 +86,7 @@ describe('ensureDevToken', () => {
     fetchWithTimeout.mockResolvedValueOnce(jsonResponse({
       token: 'loopback-dev-token',
       actor: 'dashboard',
-      scope: 'admin',
+      role: 'worker',
     }))
 
     await ensureDevToken()
@@ -105,5 +106,50 @@ describe('ensureDevToken', () => {
     expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
     expect(setStoredToken).not.toHaveBeenCalled()
     expect(devTokenBootstrapStatus.value).toBe('no_endpoint')
+  })
+
+  it('rejects a bootstrap response without the exact worker identity contract', async () => {
+    fetchWithTimeout.mockResolvedValueOnce(jsonResponse({
+      token: 'overprivileged-token',
+      actor: 'dashboard',
+      role: 'admin',
+    }))
+
+    await ensureDevToken()
+
+    expect(setStoredToken).not.toHaveBeenCalled()
+    expect(devTokenBootstrapStatus.value).toBe('invalid_response')
+  })
+
+  it('refreshes a managed loopback token only for a typed refreshable auth code', async () => {
+    let token: string | null = 'stale-token'
+    let meta: { source: 'dev'; actor: 'dashboard'; role: 'worker' } | null = {
+      source: 'dev',
+      actor: 'dashboard',
+      role: 'worker',
+    }
+    getStoredToken.mockImplementation(() => token)
+    getStoredTokenMeta.mockImplementation(() => meta)
+    clearStoredToken.mockImplementation(() => {
+      token = null
+      meta = null
+    })
+    setStoredToken.mockImplementation((nextToken, nextMeta) => {
+      token = nextToken
+      meta = nextMeta
+    })
+    fetchWithTimeout.mockResolvedValueOnce(jsonResponse({
+      token: 'fresh-token',
+      actor: 'dashboard',
+      role: 'worker',
+    }))
+
+    await expect(refreshDevTokenAfterAuthError('invalid_token')).resolves.toBe(true)
+    expect(token).toBe('fresh-token')
+    expect(clearStoredToken).toHaveBeenCalledTimes(1)
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
+
+    await expect(refreshDevTokenAfterAuthError('insufficient_role')).resolves.toBe(false)
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
   })
 })

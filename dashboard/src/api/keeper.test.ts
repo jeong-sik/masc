@@ -1233,7 +1233,7 @@ describe('streamKeeperMessage', () => {
     window.sessionStorage.setItem('masc_bearer_token', 'stale-token')
     window.sessionStorage.setItem(
       'masc_bearer_token_meta',
-      JSON.stringify({ source: 'dev', actor: 'dashboard', scope: 'worker' }),
+      JSON.stringify({ source: 'dev', actor: 'dashboard', role: 'worker' }),
     )
   }
 
@@ -1255,7 +1255,7 @@ describe('streamKeeperMessage', () => {
       }
       if (url === '/api/v1/dashboard/dev-token') {
         return Promise.resolve(new Response(
-          JSON.stringify({ token: 'fresh-token', actor: 'dashboard', scope: 'worker' }),
+          JSON.stringify({ token: 'fresh-token', actor: 'dashboard', role: 'worker' }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         ))
       }

@@ -208,11 +208,20 @@ let dashboard_dev_token ~port =
       begin
         match Yojson.Safe.from_string result.body with
         | `Assoc fields ->
-            begin
-              match List.assoc_opt "token" fields with
-              | Some (`String token) when String.trim token <> "" -> token
-              | _ -> fail ("dashboard dev-token response missing token: " ^ result.body)
-            end
+          (match
+             ( List.assoc_opt "token" fields
+             , List.assoc_opt "actor" fields
+             , List.assoc_opt "role" fields )
+           with
+           | ( Some (`String token)
+             , Some (`String "dashboard")
+             , Some (`String "worker") )
+             when String.trim token <> "" ->
+             token
+           | _ ->
+             fail
+               ("dashboard dev-token response violates token/actor/role contract: "
+                ^ result.body))
         | _ -> fail ("dashboard dev-token response is not an object: " ^ result.body)
         | exception Yojson.Json_error msg ->
             fail ("dashboard dev-token response is invalid JSON: " ^ msg)
@@ -651,6 +660,23 @@ let test_ag_ui_frames_are_wire_encoded () =
               event_id))
     first_masc_events
 
+let test_dashboard_dev_token_cannot_call_admin_route () =
+  with_server @@ fun ~port ~auth_token ->
+  let result =
+    run_curl
+      ~headers:
+        [ ("Accept", "application/json")
+        ; ("Authorization", "Bearer " ^ auth_token)
+        ; ("Content-Type", "application/json")
+        ]
+      ~method_:"POST"
+      ~body:"{}"
+      ~max_time:2.0
+      ~port
+      ~path:"/api/v1/dashboard/gate/mode"
+      ()
+  in
+  check_status "dashboard Worker token denied CanAdmin route" 403 result
 let test_ag_ui_rejects_reconnect_then_recovers () =
   with_server @@ fun ~port ~auth_token ->
   let sid = initialize_mcp_session ~port ~auth_token in
@@ -730,12 +756,25 @@ let () =
   Random.self_init ();
   run "sse_storm_e2e"
     [
-      ("mcp", [test_case "follow-up reconnect accepted" `Slow test_mcp_reconnect_stays_accepted]);
-      ("ag_ui",
-       [
-         test_case "reconnect cooldown + recovery" `Slow test_ag_ui_rejects_reconnect_then_recovers;
-         test_case "malformed Last-Event-ID is rejected" `Slow
-           test_sse_endpoints_reject_malformed_last_event_id;
-         test_case "frames are AG-UI wire encoded" `Slow test_ag_ui_frames_are_wire_encoded;
-       ]);
-    ]
+      ( "auth"
+      , [ test_case
+            "dev-token cannot call admin route"
+            `Slow
+            test_dashboard_dev_token_cannot_call_admin_route
+        ] )
+    ; ("mcp", [test_case "follow-up reconnect accepted" `Slow test_mcp_reconnect_stays_accepted])
+     ; ( "ag_ui"
+       , [ test_case
+             "reconnect cooldown + recovery"
+             `Slow
+             test_ag_ui_rejects_reconnect_then_recovers
+         ; test_case
+             "malformed Last-Event-ID is rejected"
+             `Slow
+             test_sse_endpoints_reject_malformed_last_event_id
+         ; test_case
+             "frames are AG-UI wire encoded"
+             `Slow
+             test_ag_ui_frames_are_wire_encoded
+         ] )
+     ]

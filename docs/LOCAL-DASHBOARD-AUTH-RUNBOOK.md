@@ -77,7 +77,8 @@ Useful interpretations:
 - `token_bound_admin_http_ready: no`
   - workspace auth may be enabled, but no usable admin bearer source was found
 - `dashboard_dev_token: available=yes`
-  - the easiest local bootstrap path is `GET /api/v1/dashboard/dev-token`
+  - the browser can bootstrap its loopback-only `dashboard` Worker credential;
+    this credential cannot satisfy admin-only lifecycle routes
 - `codex_mcp.token_status=unset` or `invalid_or_expired`
   - Agent-Code MCP is missing a live bearer token; this is not fixed by `agent-code mcp login`
 - `codex_mcp.config.stages[]`
@@ -300,7 +301,8 @@ BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"
 The command prints the raw bearer once, writes the matching private raw-token
 file under the live auth root, and includes a dashboard URL.
 
-If login JSON says `dashboard_dev_token: available=yes`, the easiest local path is the dev-token bootstrap:
+If login JSON says `dashboard_dev_token: available=yes`, the browser dashboard
+automatically bootstraps a `dashboard` Worker credential from:
 
 ```bash
 TOKEN="$(curl -sS http://127.0.0.1:8935/api/v1/dashboard/dev-token | jq -r '.token')"
@@ -308,6 +310,8 @@ printf 'token=%s\n' "$TOKEN"
 ```
 
 This endpoint is loopback-only and disabled when HTTP strict auth is enabled.
+It is suitable for dashboard reads and Worker-authorized operations, not the
+admin-only keeper lifecycle actions covered by this runbook.
 
 If you do not have that path, the reliable local fallback is to seed the auth store directly.
 
@@ -377,7 +381,8 @@ Pass the token once via query string. The dashboard moves it into `sessionStorag
 http://127.0.0.1:8935/dashboard?agent=agent-code-tool-matrix&token=<raw-token>
 ```
 
-For a dev-token bootstrap, use `agent=dashboard-dev` instead.
+Do not paste the dev-token into this admin URL. The loopback dashboard obtains
+its Worker credential directly and binds it to the exact `dashboard` actor.
 
 You can verify the session with:
 
@@ -460,7 +465,8 @@ mv "$BASE_PATH/.masc/auth/config.json.bak" "$BASE_PATH/.masc/auth/config.json"
 rm -f "$BASE_PATH/.masc/auth/agents/agent-code-tool-matrix.json"
 ```
 
-If you used only `dashboard-dev` dev-token bootstrap, there may be no auth files to roll back.
+The automatic dev-token is a persistent `dashboard` Worker credential and is
+independent of the explicit admin credential created by this runbook.
 
 ## 10. Known Failure Modes
 

@@ -478,7 +478,7 @@ let publish_masc_broadcast ~port ~auth_token ~session_id =
     run_curl
       ~headers:
         [ ("Content-Type", "application/json")
-        ; ("Accept", "application/json")
+        ; ("Accept", "application/json, text/event-stream")
         ; ("Authorization", "Bearer " ^ auth_token)
         ; ("Mcp-Session-Id", session_id)
         ]

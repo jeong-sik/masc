@@ -906,6 +906,22 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_verification"
 
+      # MCP identity is session-bound behavior: compile-only coverage cannot
+      # prove that initialize -> start -> status -> transition preserves one
+      # identity through the durable task lifecycle.
+      - name: Run MCP identity full-cycle suite
+        id: mcp_identity_full_cycle_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          identity_targets="@test/runtest-test_client_identity @test/runtest-test_mcp_full_cycle"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${identity_targets}"
+
       # Goal store durability: the suite drives a real workspace and asserts
       # on-disk bytes, not source text — the read path stays lenient while a
       # write over an undecodable store must be refused and must leave both

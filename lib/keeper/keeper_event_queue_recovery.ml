@@ -16,6 +16,7 @@ type projection_outcome =
 
 type projection_error =
   | Owner_unavailable of Persistence.owner_identity_error
+  | Owner_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Executor_unavailable of Executor_pool_ref.strict_submit_error
   | Outbox_unavailable of string
   | Target_transfer_projection_failed of
@@ -68,6 +69,10 @@ type sweep_page =
 let projection_error_to_string = function
   | Owner_unavailable error ->
     Persistence.owner_identity_error_to_string error
+  | Owner_shutdown_reserved operation_id ->
+    Printf.sprintf
+      "event queue transition owner shutdown reserved operation=%s"
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
   | Executor_unavailable error ->
     "event queue transition executor unavailable: "
     ^ Executor_pool_ref.strict_submit_error_to_string error
@@ -216,27 +221,34 @@ let project_transfer_target_result ~base_path (entry : Persistence.outbox_entry)
 let project_claimed_owner owner =
   let base_path = Persistence.owner_identity_base_path owner in
   let keeper_name = Persistence.owner_identity_keeper_name owner in
+  let project_open_owner () =
+    match Persistence.load_state_result ~base_path ~keeper_name with
+    | Error detail -> Error (Outbox_unavailable detail)
+    | Ok state ->
+      (match Keeper_event_queue_state.transition_outbox state with
+       | [] -> Ok No_pending_transition
+       | entry :: _ ->
+         (match project_transfer_target_result ~base_path entry with
+          | Error _ as error -> error
+          | Ok () ->
+            (match
+               Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+                 ~base_path
+                 ~keeper_name
+                 ~expected_transition_id:entry.receipt.transition_id
+             with
+             | Ok () -> Ok Transition_converged
+             | Error detail -> Error (Ledger_projection_failed detail))))
+  in
   match
-    Persistence.load_state_result
+    Keeper_turn_admission.run_durable_intake_if_open
       ~base_path
       ~keeper_name
+      project_open_owner
   with
-  | Error detail -> Error (Outbox_unavailable detail)
-  | Ok state ->
-    (match Keeper_event_queue_state.transition_outbox state with
-     | [] -> Ok No_pending_transition
-     | entry :: _ ->
-       (match project_transfer_target_result ~base_path entry with
-        | Error _ as error -> error
-        | Ok () ->
-          (match
-             Keeper_reaction_ledger.project_event_queue_transition_outbox_result
-               ~base_path
-               ~keeper_name
-               ~expected_transition_id:entry.receipt.transition_id
-           with
-           | Ok () -> Ok Transition_converged
-           | Error detail -> Error (Ledger_projection_failed detail))))
+  | Keeper_turn_admission.Intake_committed result -> result
+  | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+    Error (Owner_shutdown_reserved operation_id)
 ;;
 
 let project_resolved_owner owner =

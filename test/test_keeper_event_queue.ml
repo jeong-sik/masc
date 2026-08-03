@@ -1113,6 +1113,83 @@ let () =
              (Keeper_event_queue_state.accepted_transfer_projections target_state
               |> List.length)));
 
+  (* A source shutdown reservation fences the whole recovery transaction. The
+     worker cannot load an outbox and later recreate source or target artifacts
+     after the shutdown join has allowed purge to continue. *)
+  let base_path = temp_dir "keeper-event-queue-source-shutdown-fence" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let from_keeper = "keeper-source-shutdown-source" in
+      let to_keeper = "keeper-source-shutdown-target" in
+      stage_transfer
+        ~base_path
+        ~from_keeper
+        ~to_keeper
+        ~source:board_stim
+        ~owner_nonce:28
+        ~operation_id:"recovery-during-source-shutdown";
+      let target_dir =
+        Filename.concat
+          (Common.keepers_runtime_dir_of_base ~base_path)
+          to_keeper
+      in
+      Alcotest.(check bool)
+        "target artifacts are absent before source recovery"
+        false
+        (Sys.file_exists target_dir);
+      let shutdown_operation_id =
+        Masc.Keeper_shutdown_types.Operation_id.generate ()
+      in
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path
+           ~keeper_name:from_keeper
+           ~operation_id:shutdown_operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         Alcotest.fail "fresh source shutdown was already reserved");
+      Fun.protect
+        ~finally:(fun () ->
+          ignore
+            (Masc.Keeper_turn_admission.rollback_shutdown
+               ~base_path
+               ~keeper_name:from_keeper
+               ~operation_id:shutdown_operation_id
+              : Masc.Keeper_turn_admission.rollback_shutdown_result))
+        (fun () ->
+           (match
+              with_strict_executor
+              @@ fun () ->
+              Masc.Keeper_event_queue_recovery.project_owner_result
+                ~base_path
+                ~keeper_name:from_keeper
+            with
+            | Error
+                (Masc.Keeper_event_queue_recovery.Owner_shutdown_reserved
+                   actual_operation_id) ->
+              Alcotest.(check bool)
+                "recovery reports exact source shutdown owner"
+                true
+                (Masc.Keeper_shutdown_types.Operation_id.equal
+                   shutdown_operation_id
+                   actual_operation_id)
+            | Error error ->
+              Alcotest.fail
+                (Masc.Keeper_event_queue_recovery.projection_error_to_string error)
+            | Ok _ -> Alcotest.fail "source recovery bypassed shutdown fence");
+           Alcotest.(check bool)
+             "shutdown-fenced recovery creates no target artifacts"
+             false
+             (Sys.file_exists target_dir);
+           Alcotest.(check int)
+             "shutdown-fenced recovery retains source outbox"
+             1
+             (load_queue_state ~base_path ~keeper_name:from_keeper
+              |> Keeper_event_queue_state.transition_outbox
+              |> List.length)));
+
   (* --- transfer recovery failure: target storage failure is typed and keeps
          the source outbox authoritative for a later retry. --- *)
   let base_path = temp_dir "keeper-event-queue-transfer-recovery-failure" in

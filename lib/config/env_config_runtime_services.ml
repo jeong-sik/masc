@@ -1,5 +1,65 @@
 open Env_config_core
 
+(** {1 OAuth Configuration} *)
+
+module OAuth = struct
+  let code_ttl_env = "MASC_OAUTH_CODE_TTL_SEC"
+  let access_token_ttl_env = "MASC_OAUTH_ACCESS_TOKEN_TTL_SEC"
+  let refresh_token_ttl_env = "MASC_OAUTH_REFRESH_TOKEN_TTL_SEC"
+  let max_pending_codes_env = "MASC_OAUTH_MAX_PENDING_CODES"
+  let max_clients_env = "MASC_OAUTH_MAX_CLIENTS"
+
+  let positive_or_default ~name ~default value =
+    if value > 0 then value
+    else (
+      Log.Misc.warn
+        "OAuth env %s must be a positive integer; using default=%d"
+        name
+        default;
+      default)
+
+  (** Enable the OAuth authorization server.
+      @category Security
+      @ops_class operator *)
+  let enabled () = get_bool ~default:false "MASC_OAUTH_ENABLED"
+
+  (** Authorization-code lifetime in seconds.
+      @category Security
+      @ops_class operator *)
+  let code_ttl_sec () =
+    get_int ~default:300 code_ttl_env
+    |> positive_or_default ~name:code_ttl_env ~default:300
+
+  (** Access-token lifetime in seconds.
+      @category Security
+      @ops_class operator *)
+  let access_token_ttl_sec () =
+    get_int ~default:3600 access_token_ttl_env
+    |> positive_or_default ~name:access_token_ttl_env ~default:3600
+
+  (** Refresh-token lifetime in seconds.
+      @category Security
+      @ops_class operator *)
+  let refresh_token_ttl_sec () =
+    get_int ~default:2_592_000 refresh_token_ttl_env
+    |> positive_or_default ~name:refresh_token_ttl_env ~default:2_592_000
+
+  (** Maximum process-local pending authorization codes.
+      @category Security
+      @ops_class operator *)
+  let max_pending_codes () =
+    get_int ~default:128 max_pending_codes_env
+    |> positive_or_default ~name:max_pending_codes_env ~default:128
+
+  (** Maximum durable dynamic-client registrations. Exact idempotent retries
+      remain admissible at capacity; a distinct registration is rejected.
+      @category Security
+      @ops_class operator *)
+  let max_clients () =
+    get_int ~default:128 max_clients_env
+    |> positive_or_default ~name:max_clients_env ~default:128
+end
+
 (** {1 Rate Limit Cleanup Configuration} *)
 
 module RateLimit = struct

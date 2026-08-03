@@ -93,8 +93,9 @@ let direct_turn_task_context
       ~(current_task : Keeper_world_observation_inputs.current_task_observation)
   : string
   =
-  Keeper_unified_prompt.format_current_task_observation current_task
-  |> Option.value ~default:""
+  match Keeper_unified_prompt.format_current_task_observation current_task with
+  | Some rendered -> rendered
+  | None -> ""
 
 let direct_turn_dynamic_context
       ~(current_task : Keeper_world_observation_inputs.current_task_observation)

@@ -10,10 +10,6 @@ include Workspace_bootstrap
 include Workspace_identity
 include Workspace_task_id
 include Workspace_state
-include Workspace_bootstrap
-include Workspace_identity
-include Workspace_task_id
-include Workspace_backlog
 include Workspace_broadcast
 
 (* Agent session binding lifecycle *)

@@ -5,6 +5,37 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
 
+type backlog_edge_observation =
+  | Backlog_read_unavailable of string
+  | Recovery_backlog of
+      { revision : int
+      ; projection_sha256 : string
+      ; recovery : Workspace.backlog_recovery
+      }
+  | Observed_backlog of
+      { revision : int
+      ; projection_sha256 : string
+      ; updated_since_last_scheduled_autonomous : bool
+      }
+
+let backlog_edge_observation_to_string = function
+  | Backlog_read_unavailable _ -> "unavailable"
+  | Recovery_backlog { revision; projection_sha256; recovery = _ } ->
+    Printf.sprintf
+      "recovery(revision=%d; projection=%s)"
+      revision
+      projection_sha256
+  | Observed_backlog { revision; projection_sha256; _ } ->
+    Printf.sprintf "primary(revision=%d; projection=%s)" revision projection_sha256
+(* RFC-0357 §3.2: the backlog edge compares monotonic commit revisions, not
+   wall clocks. The previous ISO8601 comparison against [proactive_rt.last_ts]
+   had four defects this replacement dissolves by construction: same-second
+   ties under a strict [>], NTP rewinds, a [last_ts <= 0.0] arm that degraded
+   to the level check [backlog.tasks <> []], and a parse-failure arm that
+   silently returned [false] forever. [last_consumed_backlog_revision] starts
+   at 0 (never consumed), so a live backlog (version >= 1) admits exactly one
+   turn before the first consumption is recorded — the zero-point arm is not
+   needed. *)
 type current_task_observation =
   | No_current_task
   | Current_task of Masc_domain.task
@@ -164,21 +195,23 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
     let projection_sha256 =
       relevant_backlog_projection_sha256 ~meta backlog.tasks
     in
-    let backlog_updated_since_last_scheduled_autonomous =
-      backlog_updated_since_last_scheduled_autonomous
-        ~meta
-        ~backlog
-        ~projection_sha256
+    let backlog_edge =
+      match recovered_from with
+      | None ->
+        Observed_backlog
+          { revision = backlog.version
+          ; projection_sha256
+          ; updated_since_last_scheduled_autonomous =
+              backlog_updated_since_last_scheduled_autonomous
+          }
+      | Some recovery ->
+        Log.Keeper.warn
+          "read_backlog_counts: using non-authoritative recovery for observation only path=%s primary_error=%s"
+          recovery.recovery_path
+          recovery.primary_error;
+        Recovery_backlog { revision = backlog.version; projection_sha256; recovery }
     in
-    ( unclaimed
-    , claimable
-    , failed
-    , Observed_backlog
-        { revision = backlog.version
-        ; projection_sha256
-        ; updated_since_last_scheduled_autonomous =
-             backlog_updated_since_last_scheduled_autonomous
-        } )
+    unclaimed, claimable, failed, backlog_edge
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
@@ -188,7 +221,7 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
         [ ("operation", Runtime_observation_query_operation.(to_label Read_backlog_counts)) ]
       ();
     Log.Keeper.warn "read_backlog_counts failed: %s" (Printexc.to_string ex);
-    0, 0, 0, Backlog_read_unavailable
+    raise ex
 ;;
 
 (** Resolve the keeper's claimed task to a source-preserving observation. *)

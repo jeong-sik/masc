@@ -357,7 +357,29 @@ let test_recovery_backlog_is_not_authoritative () =
   in
   check bool "recovery snapshot does not admit a scheduled edge" false d.WO.should_run;
   check bool "recovery snapshot is not designed silence" true
-    (List.exists (( = ) WO.Backlog_unreadable) (skip_reasons d))
+    (List.exists (( = ) WO.Backlog_unreadable) (skip_reasons d));
+  let rendered =
+    Inputs.backlog_edge_observation_to_string
+      (Inputs.Recovery_backlog
+         { revision = 2; projection_sha256 = projection_b; recovery })
+  in
+  check bool "recovery provenance stays visible" true
+    (String_util.contains_substring rendered "recovery(revision=2");
+  check bool "recovery path is not model-facing" false
+    (String_util.contains_substring rendered recovery.recovery_path);
+  check bool "primary parser error is not model-facing" false
+    (String_util.contains_substring rendered recovery.primary_error)
+;;
+
+let test_unavailable_backlog_error_is_not_model_facing () =
+  let raw_error = "hostile parser text from backlog" in
+  let rendered =
+    Inputs.backlog_edge_observation_to_string
+      (Inputs.Backlog_read_unavailable raw_error)
+  in
+  check string "typed state remains visible" "unavailable" rendered;
+  check bool "raw parser text stays out of prompt" false
+    (String_util.contains_substring rendered raw_error)
 ;;
 
 (* ==== §3.2: the edge is a revision compare, no clock anywhere ==== *)
@@ -607,6 +629,10 @@ let () =
             "recovery backlog is not authoritative"
             `Quick
             test_recovery_backlog_is_not_authoritative
+        ; test_case
+            "unavailable backlog error is not model-facing"
+            `Quick
+            test_unavailable_backlog_error_is_not_model_facing
         ] )
     ; ( "edge_compare"
       , [ test_case "revision and projection pair" `Quick test_edge_is_pure_revision_compare

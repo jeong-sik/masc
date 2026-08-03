@@ -1047,6 +1047,70 @@ let test_operator_snapshot_default_route_hydrates_first_success () =
   check bool "first response is not the initializing placeholder" false
     (json |> member "status" = `String "initializing")
 
+let test_operator_snapshot_publication_rejects_stale_races () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Dashboard_projection_cache.invalidate_snapshot_json ~config;
+  let lower =
+    Server_dashboard_http_core_operator.begin_operator_snapshot_compute ()
+  in
+  let higher =
+    Server_dashboard_http_core_operator.begin_operator_snapshot_compute ()
+  in
+  let higher_publication =
+    match
+      Server_dashboard_http_core_operator.publish_operator_snapshot_if_current
+        ~compute:higher
+        (`Assoc [ "winner", `String "higher" ])
+    with
+    | Some publication -> publication
+    | None -> fail "higher sequence did not publish"
+  in
+  check bool "lower success is rejected after higher terminalization" true
+    (Option.is_none
+       (Server_dashboard_http_core_operator.publish_operator_snapshot_if_current
+          ~compute:lower
+          (`Assoc [ "winner", `String "lower" ])));
+  check bool "lower error is rejected after higher terminalization" true
+    (Option.is_none
+       (Server_dashboard_http_core_operator.mark_operator_snapshot_error_if_current
+          ~compute:lower
+          (Failure "late lower error")));
+  let canonical =
+    Server_dashboard_http_core_operator.operator_snapshot_publication ()
+  in
+  check int "higher compute remains canonical"
+    higher_publication.compute_sequence canonical.compute_sequence;
+  let old_generation_compute =
+    Server_dashboard_http_core_operator.begin_operator_snapshot_compute ()
+  in
+  let broadcasts = ref [] in
+  let original_broadcast =
+    !(Server_dashboard_http_core_operator.operator_snapshot_broadcast_ref)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Server_dashboard_http_core_operator.operator_snapshot_broadcast_ref
+      := original_broadcast)
+    (fun () ->
+      Server_dashboard_http_core_operator.operator_snapshot_broadcast_ref
+      := (fun publication -> broadcasts := publication :: !broadcasts);
+      Dashboard_projection_cache.invalidate_snapshot_json ~config;
+      check int "one invalidation publishes exactly once" 1
+        (List.length !broadcasts);
+      let invalidation = List.hd !broadcasts in
+      let current =
+        Server_dashboard_http_core_operator.operator_snapshot_publication ()
+      in
+      check int "broadcast is the canonical generation" current.generation
+        invalidation.generation;
+      check int "broadcast is the canonical terminal sequence"
+        current.terminal_sequence invalidation.terminal_sequence;
+      check bool "old-generation completion is rejected" true
+        (Option.is_none
+           (Server_dashboard_http_core_operator.publish_operator_snapshot_if_current
+              ~compute:old_generation_compute
+              (`Assoc [ "winner", `String "old-generation" ]))))
+
 let test_dashboard_query_cache_segment_normalizes_missing_values () =
   check string "missing none" "missing"
     (Server_dashboard_http_core_cache.dashboard_query_cache_segment None);
@@ -3090,7 +3154,9 @@ let () =
             test_composite_blocked_uses_terminal_contract_not_observational_metadata;
         ] );
       ( "dashboard behavior contracts",
-        [ test_case "proof payload exposes submission index" `Quick
+        [ test_case "operator snapshot rejects stale publication races" `Quick
+            test_operator_snapshot_publication_rejects_stale_races;
+          test_case "proof payload exposes submission index" `Quick
             test_dashboard_proof_http_json_surfaces_submission_index;
           test_case "offline keeper composite exposes secret projection" `Quick
             test_offline_keeper_composite_exposes_secret_projection;

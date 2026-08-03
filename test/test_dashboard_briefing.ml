@@ -40,6 +40,11 @@ let contains str substr =
     true
   with Not_found -> false
 
+let object_has_key label key = function
+  | `Assoc fields -> List.mem_assoc key fields
+  | json ->
+    failf "%s must be an object, got %s" label (Yojson.Safe.to_string json)
+
 let with_test_env f =
   Eio_main.run @@ fun env ->
   Eio_guard.enable ();
@@ -126,6 +131,7 @@ let test_dashboard_briefing_projection () =
       in
       let open Yojson.Safe.Util in
       let attention_queue = json |> member "attention_queue" |> to_list in
+      let summary = json |> member "summary" in
       let agent_briefs = json |> member "agent_briefs" |> to_list in
       let internal_signals = json |> member "internal_signals" |> to_list in
       let alpha_brief =
@@ -140,11 +146,22 @@ let test_dashboard_briefing_projection () =
          assertion has moved to internal_signals (see below). *)
       check bool "attention_queue is public-only (empty in clean fixture)" true
         (attention_queue = []);
+      check bool "mission summary retains workspace health" true
+        (summary |> member "workspace_health" <> `Null);
+      List.iter
+        (fun key ->
+           check bool ("mission summary omits " ^ key) false
+             (object_has_key "mission summary" key summary))
+        [ "paused"; "active_agents"; "namespace_id"; "namespace"; "namespace_mode" ];
+      check bool "mission payload omits sessions" false
+        (object_has_key "mission payload" "sessions" json);
       let alpha_input = alpha_brief |> member "recent_input_preview" |> to_string in
       check bool "recent input preserves exact alpha mention" true
         (contains alpha_input "@llama-local-alpha");
       check bool "recent input excludes unrelated beta mention" false
         (contains alpha_input "@llama-local-beta");
+      check bool "agent brief omits social context" false
+        (object_has_key "agent brief" "where" alpha_brief);
       check string "agent brief signal truth" "message"
         (alpha_brief |> member "evidence_source" |> to_string);
       check bool "internal signal includes pending confirm" true

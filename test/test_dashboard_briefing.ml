@@ -126,6 +126,7 @@ let test_dashboard_briefing_projection () =
       in
       let open Yojson.Safe.Util in
       let attention_queue = json |> member "attention_queue" |> to_list in
+      let summary = json |> member "summary" in
       let agent_briefs = json |> member "agent_briefs" |> to_list in
       let internal_signals = json |> member "internal_signals" |> to_list in
       let alpha_brief =
@@ -140,11 +141,25 @@ let test_dashboard_briefing_projection () =
          assertion has moved to internal_signals (see below). *)
       check bool "attention_queue is public-only (empty in clean fixture)" true
         (attention_queue = []);
+      check bool "mission summary omits paused" true
+        (summary |> member "paused" = `Null);
+      check bool "mission summary omits active_agents" true
+        (summary |> member "active_agents" = `Null);
+      check bool "mission summary omits namespace_id" true
+        (summary |> member "namespace_id" = `Null);
+      check bool "mission summary omits namespace" true
+        (summary |> member "namespace" = `Null);
+      check bool "mission summary omits namespace_mode" true
+        (summary |> member "namespace_mode" = `Null);
+      check bool "mission payload omits sessions" true
+        (json |> member "sessions" = `Null);
       let alpha_input = alpha_brief |> member "recent_input_preview" |> to_string in
       check bool "recent input preserves exact alpha mention" true
         (contains alpha_input "@llama-local-alpha");
       check bool "recent input excludes unrelated beta mention" false
         (contains alpha_input "@llama-local-beta");
+      check bool "agent brief omits social context" true
+        (alpha_brief |> member "where" = `Null);
       check string "agent brief signal truth" "message"
         (alpha_brief |> member "evidence_source" |> to_string);
       check bool "internal signal includes pending confirm" true

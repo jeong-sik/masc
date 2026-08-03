@@ -712,7 +712,7 @@ let test_dashboard_dev_token_cannot_reset_workspace () =
     (Some "text/event-stream")
     (header_value result "content-type");
   let response_body =
-    match Sse_jsonrpc_filter.event_data_payload result.body with
+    match Masc.Sse_jsonrpc_filter.event_data_payload result.body with
     | Some body -> body
     | None -> fail "reset denial response has no SSE data payload"
   in

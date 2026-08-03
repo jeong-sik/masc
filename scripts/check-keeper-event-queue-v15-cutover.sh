@@ -10,6 +10,7 @@ set -euo pipefail
 
 BASE_PATH="${MASC_BASE_PATH:-$(pwd)}"
 ALLOW_EMPTY_WORKSPACE=0
+RUNTIME_ABSENT_BEFORE_LEASE=0
 SELF_TEST=0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -46,6 +47,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-empty-workspace)
       ALLOW_EMPTY_WORKSPACE=1
+      shift
+      ;;
+    --runtime-absent-before-lease)
+      RUNTIME_ABSENT_BEFORE_LEASE=1
       shift
       ;;
     -h|--help)
@@ -92,6 +97,10 @@ run_gate() {
 
   [[ -d "$BASE_PATH" && ! -L "$BASE_PATH" ]] \
     || fail "base path is not an exact directory: $BASE_PATH"
+  if [[ "$RUNTIME_ABSENT_BEFORE_LEASE" -eq 1 \
+        && "$ALLOW_EMPTY_WORKSPACE" -ne 1 ]]; then
+    fail "workspace runtime was absent before lease acquisition: $runtime_root (wrong --base-path? pass --allow-empty-workspace only for an intentional new workspace)"
+  fi
   if [[ ! -e "$runtime_root" && ! -L "$runtime_root" ]]; then
     if [[ "$ALLOW_EMPTY_WORKSPACE" -eq 1 ]]; then
       printf '[event-queue-v15-cutover] OK: base_path=%s empty_workspace=allowed\n' \
@@ -232,7 +241,7 @@ run_gate() {
 
 if [[ "$SELF_TEST" -eq 1 ]]; then
   fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/event-queue-v15-cutover.XXXXXX")"
-  trap 'rm -rf "$fixture_root"' EXIT
+  trap 'if [[ -n "${handoff_pid:-}" ]]; then kill "$handoff_pid" 2>/dev/null || true; fi; rm -rf "$fixture_root"' EXIT
 
   write_schedules() {
     local target_root="$1"
@@ -459,19 +468,96 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     --allow-empty-workspace \
     >/dev/null
 
+  leased_empty_root="$fixture_root/leased-empty"
+  mkdir -p "$leased_empty_root"
+  if "$CUTOVER_HELPER" \
+      lease-run \
+      --base-path "$leased_empty_root" \
+      -- \
+      env -u MASC_EVENT_QUEUE_V15_CUTOVER_LEASE_OWNER_PID \
+      "$0" \
+      --base-path "$leased_empty_root" \
+      --allow-empty-workspace \
+      >/dev/null 2>&1
+  then
+    fail "self-test expected an active lease to block allow-empty-workspace"
+  fi
+
+  failed_handoff_root="$fixture_root/failed-handoff"
+  mkdir -p "$failed_handoff_root"
+  if "$CUTOVER_HELPER" \
+      lease-handoff \
+      --base-path "$failed_handoff_root" \
+      --next-executable /usr/bin/true \
+      -- \
+      /usr/bin/false \
+      >/dev/null 2>&1
+  then
+    fail "self-test expected a failed preparation to abort handoff"
+  fi
+  "$CUTOVER_HELPER" \
+    lease-run \
+    --base-path "$failed_handoff_root" \
+    -- \
+    /usr/bin/true \
+    >/dev/null
+
+  handoff_root="$fixture_root/handoff"
+  handoff_ready="$fixture_root/handoff-ready"
+  handoff_next="$fixture_root/handoff-next.sh"
+  mkdir -p "$handoff_root"
+  # Expansion belongs to the generated script.
+  # shellcheck disable=SC2016
+  printf '%s\n' \
+    '#!/bin/sh' \
+    'printf ready >"$MASC_CUTOVER_HANDOFF_READY"' \
+    'sleep 10' \
+    >"$handoff_next"
+  chmod 700 "$handoff_next"
+  MASC_CUTOVER_HANDOFF_READY="$handoff_ready" \
+    "$CUTOVER_HELPER" \
+      lease-handoff \
+      --base-path "$handoff_root" \
+      --next-executable "$CUTOVER_HELPER" \
+      --next-argument=lease-run \
+      --next-argument=--base-path \
+      --next-argument="$handoff_root" \
+      --next-argument=-- \
+      --next-argument="$handoff_next" \
+      -- \
+      /usr/bin/true \
+      >/dev/null 2>&1 &
+  handoff_pid=$!
+  for _ in $(seq 1 50); do
+    [[ -e "$handoff_ready" ]] && break
+    kill -0 "$handoff_pid" 2>/dev/null \
+      || fail "self-test handoff runtime exited before becoming ready"
+    sleep 0.02
+  done
+  [[ -e "$handoff_ready" ]] \
+    || fail "self-test handoff runtime did not become ready"
+  if "$CUTOVER_HELPER" \
+      lease-run \
+      --base-path "$handoff_root" \
+      -- \
+      /usr/bin/true \
+      >/dev/null 2>&1
+  then
+    fail "self-test expected the exec handoff runtime to retain the lease"
+  fi
+  kill "$handoff_pid"
+  wait "$handoff_pid" 2>/dev/null || true
+  handoff_pid=""
+
   printf '[event-queue-v15-cutover] self-test OK\n'
   exit 0
 fi
 
 if [[ "${MASC_EVENT_QUEUE_V15_CUTOVER_LEASE_OWNER_PID:-}" != "$PPID" ]]; then
   runtime_root="$BASE_PATH/.masc"
+  runtime_absent_before_lease=0
   if [[ ! -e "$runtime_root" && ! -L "$runtime_root" ]]; then
-    if [[ "$ALLOW_EMPTY_WORKSPACE" -eq 1 ]]; then
-      printf '[event-queue-v15-cutover] OK: base_path=%s empty_workspace=allowed\n' \
-        "$BASE_PATH"
-      exit 0
-    fi
-    fail "workspace runtime not found: $runtime_root (wrong --base-path? pass --allow-empty-workspace only for an intentional new workspace)"
+    runtime_absent_before_lease=1
   fi
   helper_args=(
     lease-run
@@ -482,6 +568,9 @@ if [[ "${MASC_EVENT_QUEUE_V15_CUTOVER_LEASE_OWNER_PID:-}" != "$PPID" ]]; then
   )
   if [[ "$ALLOW_EMPTY_WORKSPACE" -eq 1 ]]; then
     helper_args+=(--allow-empty-workspace)
+  fi
+  if [[ "$runtime_absent_before_lease" -eq 1 ]]; then
+    helper_args+=(--runtime-absent-before-lease)
   fi
   exec "$CUTOVER_HELPER" "${helper_args[@]}"
 fi

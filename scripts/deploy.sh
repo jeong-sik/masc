@@ -8,9 +8,8 @@
 #   Dev:  8935 (launchd, live development)
 #   Prod: 8945 (this script, Cloudflare tunnel target)
 #
-# Management modes:
-#   manual: preferred default, uses nohup + PID file
-#   launchd: optional legacy mode if com.jeong-sik.masc-prod is already loaded
+# Management mode: manual, using nohup + PID file. A loaded launchd service is
+# rejected because it cannot participate in the atomic BasePath lease handoff.
 
 set -euo pipefail
 
@@ -31,10 +30,10 @@ RUNTIME_ROOT="${BASE_PATH}/.masc"
 PID_FILE="${RUNTIME_ROOT}/masc-prod.pid"
 LOG_DIR="${RUNTIME_ROOT}/logs"
 LAUNCHD_LABEL="com.jeong-sik.masc-prod"
-LAUNCHD_PLIST="$HOME/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
 
 SKIP_BUILD=false
 RESTART_TUNNEL=false
+PREPARE_UNDER_CUTOVER_LEASE=false
 
 preserve_env_override() {
     local name="$1"
@@ -59,6 +58,7 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --skip-build) SKIP_BUILD=true; shift ;;
         --restart-tunnel) RESTART_TUNNEL=true; shift ;;
+        --prepare-under-cutover-lease) PREPARE_UNDER_CUTOVER_LEASE=true; shift ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -92,23 +92,44 @@ if [ ! -x "$BUILD_CUTOVER_HELPER" ]; then
     exit 1
 fi
 
-# --- 2. Detect management mode ---
-USE_LAUNCHD=false
-if launchctl list "$LAUNCHD_LABEL" >/dev/null 2>&1; then
-    USE_LAUNCHD=true
-fi
+prepare_release_under_cutover_lease() {
+    if [ "${MASC_EVENT_QUEUE_V15_CUTOVER_LEASE_OWNER_PID:-}" != "$PPID" ]; then
+        echo "Error: cutover preparation requires the helper-owned BasePath lease" >&2
+        exit 1
+    fi
 
-# --- 3. Stop existing prod (must stop before overwriting binary on macOS) ---
+    MASC_EVENT_QUEUE_V15_CUTOVER_HELPER="$BUILD_CUTOVER_HELPER" \
+        "$SCRIPT_DIR/check-keeper-event-queue-v15-cutover.sh" \
+        --base-path "$BASE_PATH"
+
+    mkdir -p "$RELEASE_DIR"
+    if [ -f "$RELEASE_EXE" ]; then
+        rm -f "$BACKUP_EXE"
+        mv "$RELEASE_EXE" "$BACKUP_EXE"
+        echo "    Previous binary backed up." >&2
+    fi
+    install -m 755 "$BUILD_EXE" "$RELEASE_EXE"
+    echo "    Binary installed to releases/main_eio.exe" >&2
+}
+
 mkdir -p "$RELEASE_DIR"
 RELEASE_EXE="$RELEASE_DIR/main_eio.exe"
 BACKUP_EXE="$RELEASE_DIR/main_eio.exe.prev"
 
-if [ "$USE_LAUNCHD" = true ]; then
-    echo "==> Stopping launchd service..." >&2
-    launchctl unload "$LAUNCHD_PLIST" 2>/dev/null || true
-    wait_port_free
-    echo "    Service stopped." >&2
-elif [ -f "$PID_FILE" ]; then
+if [ "$PREPARE_UNDER_CUTOVER_LEASE" = true ]; then
+    prepare_release_under_cutover_lease
+    exit 0
+fi
+
+# --- 2. Detect management mode ---
+if launchctl list "$LAUNCHD_LABEL" >/dev/null 2>&1; then
+    echo "Error: loaded launchd service cannot receive the atomic BasePath lease handoff" >&2
+    echo "       Unload $LAUNCHD_LABEL and deploy in manual mode." >&2
+    exit 1
+fi
+
+# --- 3. Stop existing prod (must stop before overwriting binary on macOS) ---
+if [ -f "$PID_FILE" ]; then
     OLD_PID="$(cat "$PID_FILE")"
     if kill -0 "$OLD_PID" 2>/dev/null; then
         echo "==> Stopping previous prod (PID $OLD_PID)..." >&2
@@ -125,65 +146,60 @@ elif [ -f "$PID_FILE" ]; then
     wait_port_free
 fi
 
-# The old runtime is stopped before validation.  The gate then acquires the
-# same process-lifetime BasePath lease as the server, so an active or restarting
-# workspace writer makes the deployment fail closed.
+# --- 4. Prepare release and atomically hand the lease to the new runtime ---
+# The helper keeps the POSIX process lock while its preparation child validates
+# and installs the release, then execs the new runtime in that same process.
+# There is no unlock/reacquire window in which an older writer can enter.
+echo "==> Starting prod on :$PROD_PORT with atomic cutover lease handoff..." >&2
+
+# Load secrets needed at runtime (GRAPHQL_API_KEY, SSL_CERT_FILE, etc.)
+# Only repo-local env files are loaded; ~/.zshenv is intentionally skipped
+# to avoid environment contamination from user shell configuration.
+preserve_env_override MASC_CONFIG_DIR
+preserve_env_override MASC_PERSONAS_DIR
+KEEPER_ENV="$REPO_DIR/config/keeper.env"
+if [ -f "$KEEPER_ENV" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$KEEPER_ENV"
+    set +a
+fi
+if [ -f "$REPO_DIR/.env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "$REPO_DIR/.env"
+    set +a
+fi
+restore_env_override MASC_CONFIG_DIR
+restore_env_override MASC_PERSONAS_DIR
+
+if [ ! -d "$RUNTIME_ROOT" ] || [ -L "$RUNTIME_ROOT" ]; then
+    echo "Error: deployment requires an existing exact runtime directory at $RUNTIME_ROOT" >&2
+    exit 1
+fi
+mkdir -p "$LOG_DIR"
+
+MASC_ORCHESTRATOR_ENABLED=0 \
+MASC_CONFIG_DIR="${MASC_CONFIG_DIR:-$BASE_PATH/.masc/config}" \
 MASC_EVENT_QUEUE_V15_CUTOVER_HELPER="$BUILD_CUTOVER_HELPER" \
-    "$SCRIPT_DIR/check-keeper-event-queue-v15-cutover.sh" \
-    --base-path "$BASE_PATH"
+    nohup "$BUILD_CUTOVER_HELPER" \
+        lease-handoff \
+        --base-path "$BASE_PATH" \
+        --next-executable "$RELEASE_EXE" \
+        --next-argument="--port=$PROD_PORT" \
+        --next-argument="--base-path=$BASE_PATH" \
+        -- \
+        "$SCRIPT_DIR/deploy.sh" \
+        --skip-build \
+        --prepare-under-cutover-lease \
+    >> "$LOG_DIR/masc-prod.out.log" \
+    2>> "$LOG_DIR/masc-prod.err.log" &
 
-# --- 4. Copy binary to releases/ ---
-# Note: dune produces read-only executables. Use install(1) which handles
-# permission replacement, or rm-before-cp to avoid "Permission denied".
-if [ -f "$RELEASE_EXE" ]; then
-    rm -f "$BACKUP_EXE"
-    mv "$RELEASE_EXE" "$BACKUP_EXE"
-    echo "    Previous binary backed up." >&2
-fi
+PROD_PID=$!
+echo "$PROD_PID" > "$PID_FILE"
+echo "    Handoff started with PID $PROD_PID" >&2
 
-install -m 755 "$BUILD_EXE" "$RELEASE_EXE"
-echo "    Binary installed to releases/main_eio.exe" >&2
-
-# --- 5. Start prod ---
-if [ "$USE_LAUNCHD" = true ]; then
-    echo "==> Starting via launchd..." >&2
-    launchctl load "$LAUNCHD_PLIST"
-    echo "    Service loaded." >&2
-else
-    echo "==> Starting prod on :$PROD_PORT..." >&2
-
-    # Load secrets needed at runtime (GRAPHQL_API_KEY, SSL_CERT_FILE, etc.)
-    # Only repo-local env files are loaded; ~/.zshenv is intentionally skipped
-    # to avoid environment contamination from user shell configuration.
-    # Required env vars should be set in config/keeper.env or the repo .env files.
-    preserve_env_override MASC_CONFIG_DIR
-    preserve_env_override MASC_PERSONAS_DIR
-    KEEPER_ENV="$REPO_DIR/config/keeper.env"
-    if [ -f "$KEEPER_ENV" ]; then
-        set -a; source "$KEEPER_ENV" 2>/dev/null || true; set +a
-    fi
-    if [ -f "$REPO_DIR/.env" ]; then
-        set -a; source "$REPO_DIR/.env" 2>/dev/null || true; set +a
-    fi
-    restore_env_override MASC_CONFIG_DIR
-    restore_env_override MASC_PERSONAS_DIR
-
-    mkdir -p "$RUNTIME_ROOT" "$LOG_DIR"
-
-    MASC_ORCHESTRATOR_ENABLED=0 \
-    MASC_CONFIG_DIR="${MASC_CONFIG_DIR:-$BASE_PATH/.masc/config}" \
-        nohup "$RELEASE_EXE" \
-            --port="$PROD_PORT" \
-            --base-path="$BASE_PATH" \
-        >> "$LOG_DIR/masc-prod.out.log" \
-        2>> "$LOG_DIR/masc-prod.err.log" &
-
-    PROD_PID=$!
-    echo "$PROD_PID" > "$PID_FILE"
-    echo "    Started with PID $PROD_PID" >&2
-fi
-
-# --- 6. Health check ---
+# --- 5. Health check ---
 echo "==> Health check..." >&2
 HEALTH_OK=false
 for _ in $(seq 1 15); do
@@ -200,41 +216,13 @@ else
     echo "Error: Prod failed health check on :$PROD_PORT" >&2
     echo "    Logs: $LOG_DIR/masc-prod.err.log" >&2
 
-    # Rollback
-    if [ "$USE_LAUNCHD" = true ]; then
-        launchctl unload "$LAUNCHD_PLIST" 2>/dev/null || true
-    else
-        kill "${PROD_PID:-0}" 2>/dev/null || true
-        rm -f "$PID_FILE"
-    fi
-
-    if [ -f "$BACKUP_EXE" ]; then
-        echo "    Rolling back to previous binary..." >&2
-        mv "$BACKUP_EXE" "$RELEASE_EXE"
-        # Restart with previous binary
-        if [ "$USE_LAUNCHD" = true ]; then
-            launchctl load "$LAUNCHD_PLIST"
-        else
-            echo "    Restarting previous binary on :$PROD_PORT..." >&2
-            if [ -f "$HOME/.zshenv" ]; then
-                set -a; source "$HOME/.zshenv" 2>/dev/null || true; set +a
-            fi
-            MASC_ORCHESTRATOR_ENABLED=0 \
-            MASC_CONFIG_DIR="${MASC_CONFIG_DIR:-$BASE_PATH/.masc/config}" \
-                nohup "$RELEASE_EXE" \
-                    --port="$PROD_PORT" \
-                    --base-path="$BASE_PATH" \
-                >> "$LOG_DIR/masc-prod.out.log" \
-                2>> "$LOG_DIR/masc-prod.err.log" &
-            ROLLBACK_PID=$!
-            echo "$ROLLBACK_PID" > "$PID_FILE"
-            echo "    Rollback started with PID $ROLLBACK_PID" >&2
-        fi
-    fi
+    kill "$PROD_PID" 2>/dev/null || true
+    rm -f "$PID_FILE"
+    echo "    Previous binary remains at $BACKUP_EXE; it was not restarted across the hard cut." >&2
     exit 1
 fi
 
-# --- 7. Restart Cloudflare tunnel (optional) ---
+# --- 6. Restart Cloudflare tunnel (optional) ---
 if [ "$RESTART_TUNNEL" = true ]; then
     echo "==> Restarting Cloudflare tunnel..." >&2
     launchctl kickstart -k "gui/$(id -u)/com.jeongsik.masc-cloudflared" 2>/dev/null || true
@@ -246,9 +234,5 @@ echo "" >&2
 echo "Deploy complete." >&2
 echo "  Prod: http://127.0.0.1:$PROD_PORT" >&2
 echo "  Tunnel: https://masc.crying.pictures" >&2
-if [ "$USE_LAUNCHD" = true ]; then
-    echo "  Managed by: launchd ($LAUNCHD_LABEL)" >&2
-else
-    echo "  PID: ${PROD_PID:-?} ($PID_FILE)" >&2
-fi
+echo "  PID: ${PROD_PID:-?} ($PID_FILE)" >&2
 echo "  Logs: $LOG_DIR/masc-prod.{out,err}.log" >&2

@@ -143,12 +143,19 @@ type world_observation = {
   backlog_revision : int option;
   (** The backlog commit revision this observation saw — what a
       scheduled-autonomous admission records as consumed (RFC-0357 §3.3).
-      [None] when the backlog read failed: the edge is false and the
-      consumption clock must not move on a fabricated value. *)
+      [None] when the primary backlog was unavailable or only a recovery
+      snapshot was readable: the edge is false and the consumption clock must
+      not move on a non-authoritative value. *)
 
   backlog_projection_sha256 : string option;
   (** Exact non-self-authored task projection paired with [backlog_revision].
-      [None] on the same failed-read path. *)
+      [None] when the primary backlog was unavailable or only recovery was
+      readable. *)
+
+  backlog_source : Keeper_world_observation_inputs.backlog_observation_source;
+  (** Provenance of the backlog facts. Recovery data remains visible as
+      read-only observation but cannot become an authoritative edge; an
+      unavailable source is explicit rather than an empty-backlog inference. *)
 
   running_keeper_fiber_count : int;
   (** Number of live keeper fibers for this workspace base path. *)

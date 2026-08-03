@@ -95,6 +95,7 @@ let base_obs : WO.world_observation =
   ; backlog_updated_since_last_scheduled_autonomous = false
   ; backlog_revision = Some 1
   ; backlog_projection_sha256 = Some projection_a
+  ; backlog_source = Inputs.Primary
   ; running_keeper_fiber_count = 1
   ; connected_surfaces = []
   ; connected_surface_failures = []
@@ -290,7 +291,11 @@ let test_scheduled_admission_records_exact_pair () =
 let test_unreadable_admission_does_not_move_pair () =
   let before = bootstrapped_meta () in
   let unreadable =
-    { base_obs with backlog_revision = None; backlog_projection_sha256 = None }
+    { base_obs with
+      backlog_revision = None
+    ; backlog_projection_sha256 = None
+    ; backlog_source = Inputs.Unavailable "test backlog read failure"
+    }
   in
   match WO.record_scheduled_backlog_consumption ~meta:before unreadable with
   | Error _ -> Alcotest.fail "complete absent pair was rejected"
@@ -323,6 +328,7 @@ let test_unreadable_backlog_skips_as_unreadable () =
       { base_obs with
         backlog_revision = None
       ; backlog_projection_sha256 = None
+      ; backlog_source = Inputs.Unavailable "test backlog read failure"
       }
   in
   check bool "no turn on a blind observation" false d.WO.should_run;
@@ -342,6 +348,7 @@ let test_unreadable_backlog_does_not_silence_other_stimuli () =
       { mention_obs with
         backlog_revision = None
       ; backlog_projection_sha256 = None
+      ; backlog_source = Inputs.Unavailable "test backlog read failure"
       }
   in
   check bool "message still admits" true d.WO.should_run;
@@ -463,24 +470,17 @@ let test_meta_json_roundtrip () =
       decoded.runtime.proactive_rt.last_consumed_backlog_projection_sha256
 ;;
 
-let test_meta_json_absent_pair_decodes_as_genesis () =
+let test_meta_json_absent_pair_fails_closed () =
   let meta = bootstrapped_meta ~last_consumed:42 () in
-  let json =
-    json_with_field meta ~f:(fun fields ->
-      List.filter
-        (fun (key, _) ->
-           not
-             (String.equal key "last_consumed_backlog_revision"
-              || String.equal key "last_consumed_backlog_projection_sha256"))
-        fields)
+  let remove field fields =
+    List.filter (fun (key, _) -> not (String.equal key field)) fields
   in
-  match Masc.Keeper_meta_json_parse.meta_of_json json with
-  | Error e -> Alcotest.fail ("pre-RFC meta must decode with the genesis pair: " ^ e)
-  | Ok decoded ->
-    check int "absent revision decodes as genesis 0" 0
-      decoded.runtime.proactive_rt.last_consumed_backlog_revision;
-    check string "absent projection decodes as genesis empty" ""
-      decoded.runtime.proactive_rt.last_consumed_backlog_projection_sha256
+  List.iter
+    (fun field ->
+       match Masc.Keeper_meta_json_parse.meta_of_json (json_with_field meta ~f:(remove field)) with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.failf "missing current field %s must fail the decode" field)
+    [ "last_consumed_backlog_revision"; "last_consumed_backlog_projection_sha256" ]
 ;;
 
 let test_meta_json_missing_required_field_fails () =
@@ -527,6 +527,38 @@ let test_meta_json_malformed_fails_closed () =
       (json_with_field meta ~f:malformed_projection)
   with
   | Ok _ -> Alcotest.fail "malformed projection digest must fail the decode"
+  | Error _ -> ();
+  let inconsistent_genesis fields =
+    List.map
+      (fun (key, value) ->
+         if String.equal key "last_consumed_backlog_revision"
+         then key, `Int 0
+         else if String.equal key "last_consumed_backlog_projection_sha256"
+         then key, `String projection_a
+         else key, value)
+      fields
+  in
+  (match
+     Masc.Keeper_meta_json_parse.meta_of_json
+       (json_with_field meta ~f:inconsistent_genesis)
+   with
+   | Ok _ -> Alcotest.fail "genesis revision must not carry a non-empty projection"
+   | Error _ -> ());
+  let inconsistent_consumed fields =
+    List.map
+      (fun (key, value) ->
+         if String.equal key "last_consumed_backlog_revision"
+         then key, `Int 42
+         else if String.equal key "last_consumed_backlog_projection_sha256"
+         then key, `String ""
+         else key, value)
+      fields
+  in
+  match
+    Masc.Keeper_meta_json_parse.meta_of_json
+      (json_with_field meta ~f:inconsistent_consumed)
+  with
+  | Ok _ -> Alcotest.fail "consumed revision must carry its projection"
   | Error _ -> ()
 ;;
 
@@ -582,9 +614,9 @@ let () =
     ; ( "meta_json"
       , [ test_case "roundtrip" `Quick test_meta_json_roundtrip
         ; test_case
-            "absent pair decodes as genesis"
+            "absent pair fails closed"
             `Quick
-            test_meta_json_absent_pair_decodes_as_genesis
+            test_meta_json_absent_pair_fails_closed
         ; test_case
             "missing required field fails"
             `Quick

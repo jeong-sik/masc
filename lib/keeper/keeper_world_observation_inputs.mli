@@ -20,6 +20,13 @@ type current_task_observation =
       ; error : string
       }
 
+type backlog_observation_source =
+  | Primary
+  | Recovery of Workspace.backlog_recovery
+  | Unavailable of string
+
+val backlog_observation_source_to_string : backlog_observation_source -> string
+
 val backlog_updated_since_last_scheduled_autonomous
   :  meta:keeper_meta
   -> backlog:Masc_domain.backlog
@@ -40,12 +47,14 @@ val relevant_backlog_projection_sha256
 val read_backlog_counts
   :  config:Workspace.config
   -> meta:keeper_meta
-  -> int * int * int * bool * int option * string option
+  -> int * int * int * bool * int option * string option * backlog_observation_source
 (** [(unclaimed, claimable, failed, backlog_edge, observed_revision,
-    observed_projection_sha256)]. The revision/projection pair is present only
-    for a valid primary observation. Failed and recovery-only reads carry
-    [None, None], so stale recovery state cannot fire or consume an admission
-    edge. *)
+    observed_projection_sha256, source)]. Counts may come from a recovery
+    snapshot for read-only context, but [observed_revision] and
+    [observed_projection_sha256] are [None] unless the primary SSOT was read;
+    a recovery snapshot can never fire or consume the scheduled edge. An
+    unavailable source returns typed [Unavailable] with no fabricated counts
+    or revision, while independent observation stimuli continue. *)
 
 (** [task_is_self_authored_todo ~meta task] is true when an unclaimed [Todo]
     was authored by the keeper's own stable handle ([meta.name]).

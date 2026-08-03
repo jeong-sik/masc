@@ -21,6 +21,20 @@ type current_task_observation =
       ; error : string
       }
 
+type backlog_observation_source =
+  | Primary
+  | Recovery of Workspace.backlog_recovery
+  | Unavailable of string
+
+let backlog_observation_source_to_string = function
+  | Primary -> "primary"
+  | Recovery { primary_error; recovery_path } ->
+    Printf.sprintf
+      "recovery(path=%s; primary_error=%s)"
+      recovery_path
+      primary_error
+  | Unavailable error -> Printf.sprintf "unavailable(error=%s)" error
+
 (* RFC-0357 §3.2: the backlog edge compares monotonic commit revisions, not
    wall clocks. The previous ISO8601 comparison against [proactive_rt.last_ts]
    had four defects this replacement dissolves by construction: same-second
@@ -102,7 +116,7 @@ let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta)
 
 (** Read workspace backlog counts. *)
 let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
-  : int * int * int * bool * int option * string option
+  : int * int * int * bool * int option * string option * backlog_observation_source
   =
   try
     match Workspace.read_backlog_observation_with_source_r config with
@@ -115,20 +129,20 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
           ]
         ();
       Log.Keeper.warn "read_backlog_counts: backlog read failed: %s" message;
-      0, 0, 0, false, None, None
-    | Ok { Workspace.recovered_from = Some recovery; _ } ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string ObservationQueryFailures)
-        ~labels:
-          [ ( "operation"
-            , Runtime_observation_query_operation.(to_label Read_backlog_counts) )
-          ]
-        ();
-      Log.Keeper.warn
-        "read_backlog_counts: recovery snapshot is non-authoritative: %s"
-        recovery.primary_error;
-      0, 0, 0, false, None, None
-    | Ok { Workspace.observed_backlog = backlog; recovered_from = None } ->
+      (* Primary and recovery are both invalid. Preserve that as [None] so
+         admission can report [Backlog_unreadable] without silencing
+         independent message, board, or schedule stimuli. *)
+      0, 0, 0, false, None, None, Unavailable message
+    | Ok { observed_backlog = backlog; recovered_from } ->
+    let source =
+      match recovered_from with
+      | None -> Primary
+      | Some recovery ->
+        Log.Keeper.warn
+          "read_backlog_counts: using non-authoritative recovery for observation only: %s"
+          (backlog_observation_source_to_string (Recovery recovery));
+         Recovery recovery
+    in
     let unclaimed_tasks =
       List.filter
         (fun (t : Masc_domain.task) -> t.task_status = Masc_domain.Todo)
@@ -165,18 +179,24 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
     let projection_sha256 =
       relevant_backlog_projection_sha256 ~meta backlog.tasks
     in
-    let backlog_updated_since_last_scheduled_autonomous =
-      backlog_updated_since_last_scheduled_autonomous
-        ~meta
-        ~backlog
-        ~projection_sha256
+    let backlog_updated_since_last_scheduled_autonomous, observed_revision, observed_projection =
+      match recovered_from with
+      | Some _ -> false, None, None
+      | None ->
+        ( backlog_updated_since_last_scheduled_autonomous
+            ~meta
+            ~backlog
+            ~projection_sha256
+        , Some backlog.version
+        , Some projection_sha256 )
     in
     ( unclaimed
     , claimable
     , failed
     , backlog_updated_since_last_scheduled_autonomous
-    , Some backlog.version
-    , Some projection_sha256 )
+    , observed_revision
+    , observed_projection
+    , source )
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
@@ -186,11 +206,7 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
         [ ("operation", Runtime_observation_query_operation.(to_label Read_backlog_counts)) ]
       ();
     Log.Keeper.warn "read_backlog_counts failed: %s" (Printexc.to_string ex);
-    (* No observed revision on a failed read: the edge stays false (a read
-       failure is not a backlog change) and admission must not record a
-       fabricated revision 0 — the consumption clock only moves forward on
-       an actually observed commit. *)
-    0, 0, 0, false, None, None
+    0, 0, 0, false, None, None, Unavailable (Printexc.to_string ex)
 ;;
 
 (** Resolve the keeper's claimed task to a source-preserving observation. *)

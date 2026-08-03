@@ -150,12 +150,6 @@ type world_observation = {
   (** Exact non-self-authored task projection paired with [backlog_revision].
       [None] on the same failed-read path. *)
 
-  backlog_revision : int option;
-  (** The backlog commit revision observed through the recovery-backed read.
-      [None] means neither primary nor recovery was a valid current backlog;
-      callers must not interpret the accompanying zero counts as an observed
-      empty backlog. *)
-
   running_keeper_fiber_count : int;
   (** Number of live keeper fibers for this workspace base path. *)
 

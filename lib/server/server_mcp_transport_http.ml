@@ -86,8 +86,6 @@ let sse_ping_interval_s = Server_mcp_transport_http_headers.sse_ping_interval_s
 
 let post_sse_keepalive_interval_s = Float.max 0.1 sse_ping_interval_s
 
-let get_last_event_id = Server_mcp_transport_http_headers.get_last_event_id
-
 let body_jsonrpc_id body_str =
   try
     match Yojson.Safe.from_string body_str with
@@ -577,7 +575,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
     | Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
   in
-  let last_event_id = get_last_event_id request in
+  let last_event_id = Server_mcp_transport_http_headers.get_last_event_id request in
   match validate_mcp_session_profile ~profile session_id with
   | Error msg ->
       let headers =

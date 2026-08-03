@@ -166,7 +166,9 @@ val sse_ping_interval_s : float
     duplicated in {!Server_mcp_transport_http_agui} (the duplicate
     is intentional — see that module's contract). *)
 
-type last_event_id_error = Malformed_last_event_id
+type last_event_id_error =
+  | Malformed_last_event_id
+  | Negative_last_event_id
 (** A malformed [Last-Event-ID] header is a request error, not an
     absent replay cursor. *)
 
@@ -175,6 +177,6 @@ val last_event_id_error_to_string : last_event_id_error -> string
 val get_last_event_id :
   Httpun.Request.t -> (int option, last_event_id_error) result
 (** [get_last_event_id request] parses the [last-event-id] header.
-    [Ok None] means that the header is absent.  A present header that
-    is not an integer is returned as [Error] so callers cannot silently
+    [Ok None] means that the header is absent. A present header that is not a
+    non-negative integer is returned as [Error] so callers cannot silently
     restart replay from the origin. *)

@@ -109,9 +109,6 @@ val should_use_sse_for_body :
   Mcp_transport_protocol.Http_negotiation.accept_mode ->
   bool
 val force_json_response : bool
-val get_last_event_id :
-  Httpun.Request.t ->
-  (int option, Server_mcp_transport_http_headers.last_event_id_error) result
 val mcp_headers : string -> string -> (string * string) list
 val json_headers :
   deps:deps -> string -> string -> string -> (string * string) list

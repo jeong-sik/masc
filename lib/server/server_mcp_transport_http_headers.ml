@@ -211,17 +211,22 @@ let sse_comment_with_retry ~comment =
 
 let sse_ping_interval_s = 30.0
 
-type last_event_id_error = Malformed_last_event_id
+type last_event_id_error =
+  | Malformed_last_event_id
+  | Negative_last_event_id
 
 let last_event_id_error_to_string = function
   | Malformed_last_event_id ->
-      "Last-Event-ID must be an integer when supplied"
+      "Last-Event-ID must be a non-negative integer when supplied"
+  | Negative_last_event_id ->
+      "Last-Event-ID cannot be negative"
 
 let get_last_event_id (request : Httpun.Request.t) =
   match Httpun.Headers.get request.headers "last-event-id" with
   | Some id -> (
       match int_of_string_opt id with
-      | Some event_id -> Ok (Some event_id)
+      | Some event_id when event_id >= 0 -> Ok (Some event_id)
+      | Some _ -> Error Negative_last_event_id
       | None -> Error Malformed_last_event_id)
   | None -> Ok None
 

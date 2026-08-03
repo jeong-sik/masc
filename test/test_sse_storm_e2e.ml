@@ -708,17 +708,23 @@ let check_invalid_request_response label result =
 let test_sse_endpoints_reject_malformed_last_event_id () =
   with_server @@ fun ~port ~auth_token ->
   let sid = initialize_mcp_session ~port ~auth_token in
-  let headers =
+  let headers cursor =
     [ ("Accept", "text/event-stream")
     ; ("Authorization", "Bearer " ^ auth_token)
     ; ("Mcp-Session-Id", sid)
-    ; ("Last-Event-ID", "not-an-integer")
+    ; ("Last-Event-ID", cursor)
     ]
   in
   check_invalid_request_response "malformed /mcp cursor rejected"
-    (run_curl ~headers ~max_time:2.0 ~port ~path:"/mcp" ());
+    (run_curl ~headers:(headers "not-an-integer") ~max_time:2.0 ~port ~path:"/mcp" ());
   check_invalid_request_response "malformed /ag-ui/events cursor rejected"
-    (run_curl ~headers ~max_time:2.0 ~port ~path:"/ag-ui/events" ())
+    (run_curl ~headers:(headers "not-an-integer") ~max_time:2.0 ~port
+       ~path:"/ag-ui/events" ());
+  check_invalid_request_response "negative /mcp cursor rejected"
+    (run_curl ~headers:(headers "-1") ~max_time:2.0 ~port ~path:"/mcp" ());
+  check_invalid_request_response "negative /ag-ui/events cursor rejected"
+    (run_curl ~headers:(headers "-1") ~max_time:2.0 ~port
+       ~path:"/ag-ui/events" ())
 
 let () =
   Random.self_init ();

@@ -156,9 +156,6 @@ let claim_task_r config ~agent_name ~task_id ()
                       task_id)))
          | `Claimed_by other -> Error (Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed { task_id; by = other }))
          | `Pending_verdict verification_id ->
-           (* Previously this arm only blocked the *submitting* worker, and any
-              other agent that claimed became the verifier. No agent claims an
-              obligation now: the verdict is issued by a completion authority. *)
            Error
              (Masc_domain.Task
                 (Masc_domain.Task_error.InvalidState

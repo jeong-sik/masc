@@ -939,11 +939,8 @@ let due_execution_candidates state =
 
 let unsettled_dispatched_occurrences state =
   state.executions
-  |> List.filter_map (fun (execution : execution_record) ->
+  |> List.filter (fun (execution : execution_record) ->
     match execution.status with
-    | Execution_dispatched ->
-      (match find_schedule state execution.schedule_id with
-       | None -> None
-       | Some request -> Some (request, execution))
-    | Execution_running | Execution_succeeded | Execution_failed -> None)
+    | Execution_dispatched -> true
+    | Execution_running | Execution_succeeded | Execution_failed -> false)
 ;;

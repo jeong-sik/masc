@@ -50,9 +50,9 @@ type consumer_dispatch_result =
 
 type settlement_evidence =
   | Consumer_holds_occurrence
-  | Consumer_settled_occurrence
+  | Consumer_completed_occurrence
+  | Consumer_cancelled_occurrence of string
   | Consumer_lost_occurrence of string
-  | Consumer_evidence_unreadable of string
 
 type consumer =
   { accepts : Schedule_domain.schedule_request -> (unit, string) result
@@ -62,11 +62,10 @@ type consumer =
       wake_signal ->
       Schedule_domain.schedule_request ->
       (consumer_dispatch_result, consumer_dispatch_error) result
-  ; settlement :
+  ; settlements :
       Workspace_utils.config ->
-      Schedule_domain.schedule_request ->
-      Schedule_domain.execution_record ->
-      (settlement_evidence, string) result
+      Schedule_domain.execution_record list ->
+      (settlement_evidence, string) result list
   }
 
 type reclaim_outcome =
@@ -74,7 +73,6 @@ type reclaim_outcome =
   ; reclaimed : int
   ; held : int
   ; settled_elsewhere : int
-  ; indeterminate : (string * string) list
   ; failures : (string * string) list
   }
 
@@ -432,25 +430,25 @@ let empty_reclaim_outcome =
   ; reclaimed = 0
   ; held = 0
   ; settled_elsewhere = 0
-  ; indeterminate = []
   ; failures = []
   }
 ;;
 
-let safe_consumer_settlement consumer config request execution =
+let safe_consumer_settlements consumer config executions =
   Cancel_safe.protect
     ~on_exn:(fun exn ->
-      Error ("consumer settlement raised: " ^ Printexc.to_string exn))
-    (fun () -> consumer.settlement config request execution)
+      List.map
+        (fun _ -> Error ("consumer settlement raised: " ^ Printexc.to_string exn))
+        executions)
+    (fun () -> consumer.settlements config executions)
 ;;
 
 let reclaim_occurrence
       config
       ~now
-      consumer
       acc
-      ((request : Schedule_domain.schedule_request),
-       (execution : Schedule_domain.execution_record))
+      (execution : Schedule_domain.execution_record)
+      settlement
   =
   let occurrence_id =
     Schedule_occurrence_id.make
@@ -460,13 +458,41 @@ let reclaim_occurrence
     |> Schedule_occurrence_id.to_string
   in
   let acc = { acc with examined = acc.examined + 1 } in
-  match safe_consumer_settlement consumer config request execution with
+  match settlement with
   | Error message -> { acc with failures = (occurrence_id, message) :: acc.failures }
   | Ok Consumer_holds_occurrence -> { acc with held = acc.held + 1 }
-  | Ok Consumer_settled_occurrence ->
-    { acc with settled_elsewhere = acc.settled_elsewhere + 1 }
-  | Ok (Consumer_evidence_unreadable reason) ->
-    { acc with indeterminate = (occurrence_id, reason) :: acc.indeterminate }
+  | Ok Consumer_completed_occurrence ->
+    (match
+       Schedule_store.complete_dispatched_occurrence
+         config
+         ~now
+         ~schedule_id:execution.schedule_id
+         ~due_at:execution.due_at
+         ~payload_digest:execution.payload_digest
+         ()
+     with
+     | Ok _ -> { acc with settled_elsewhere = acc.settled_elsewhere + 1 }
+     | Error err ->
+       { acc with
+         failures =
+           (occurrence_id, Schedule_store.store_error_to_string err) :: acc.failures
+       })
+  | Ok (Consumer_cancelled_occurrence reason) ->
+    (match
+       Schedule_store.fail_dispatched_occurrence
+         config
+         ~now
+         ~schedule_id:execution.schedule_id
+         ~due_at:execution.due_at
+         ~payload_digest:execution.payload_digest
+         ~error:reason
+     with
+     | Ok _ -> { acc with settled_elsewhere = acc.settled_elsewhere + 1 }
+     | Error err ->
+       { acc with
+         failures =
+           (occurrence_id, Schedule_store.store_error_to_string err) :: acc.failures
+       })
   | Ok (Consumer_lost_occurrence reason) ->
     (match
        Schedule_store.fail_dispatched_occurrence
@@ -493,13 +519,25 @@ let reclaim_lost_occurrences ~consumer config ~now =
          (Schedule_service.Store_error
             (Schedule_store.Corrupt_ledger { primary_err; recovery_err })))
   | Ok state ->
+    let executions = Schedule_store.unsettled_dispatched_occurrences state in
+    let settlements = safe_consumer_settlements consumer config executions in
     let outcome =
-      Schedule_store.unsettled_dispatched_occurrences state
-      |> List.fold_left (reclaim_occurrence config ~now consumer) empty_reclaim_outcome
+      if List.length executions <> List.length settlements
+      then
+        { empty_reclaim_outcome with
+          failures =
+            List.map
+              (fun execution ->
+                 ( execution.Schedule_domain.execution_id
+                 , "consumer settlement batch cardinality mismatch" ))
+              executions
+        }
+      else
+        List.fold_left2
+          (reclaim_occurrence config ~now)
+          empty_reclaim_outcome
+          executions
+          settlements
     in
-    Ok
-      { outcome with
-        indeterminate = List.rev outcome.indeterminate
-      ; failures = List.rev outcome.failures
-      }
+    Ok { outcome with failures = List.rev outcome.failures }
 ;;

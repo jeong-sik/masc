@@ -345,6 +345,24 @@ let tick_ok config ~now =
   | Error err -> fail (Schedule_runner.runner_error_to_string err)
 ;;
 
+let latest_execution_exn config ~schedule_id =
+  match
+    Schedule_store.last_execution_for_schedule
+      (Schedule_store.read_state config)
+      ~schedule_id
+  with
+  | Some execution -> execution
+  | None -> fail ("missing execution for schedule " ^ schedule_id)
+;;
+
+let single_keeper_settlement_exn config execution =
+  match Server_schedule_consumers.consumer.settlements config [ execution ] with
+  | [ Ok settlement ] -> settlement
+  | [ Error detail ] -> fail detail
+  | settlements ->
+    failf "expected one settlement result, got %d" (List.length settlements)
+;;
+
 let single_occurrence_id (result : Schedule_runner.tick_result) =
   match result.emitted with
   | [ signal ] -> Schedule_occurrence_id.to_string signal.occurrence_id
@@ -586,6 +604,119 @@ let test_recurring_wakes_keep_distinct_occurrence_ids () =
   check int "both occurrences remain queued" 2 (List.length queued);
   check (list string) "queue preserves occurrence order" [ first_id; second_id ]
     (List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id) queued)
+;;
+
+let test_reclaim_uses_occurrence_keeper_after_recurring_request_update () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    create_keeper_wake_schedule
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 3600 })
+      config
+  in
+  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
+  let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
+  let updated_payload =
+    match Schedule_domain.payload_of_yojson (keeper_wake_payload_for "next-keeper") with
+    | Ok payload -> payload
+    | Error detail -> fail detail
+  in
+  (match
+     Schedule_service.update
+       config
+       ~schedule_id:request.schedule_id
+       ~due_at:3801.0
+       ~expires_at:None
+       ~payload:updated_payload
+   with
+   | Ok _ -> ()
+   | Error error ->
+     fail (Schedule_service.service_error_to_string error));
+  match single_keeper_settlement_exn config execution with
+  | Schedule_runner.Consumer_holds_occurrence -> ()
+  | Schedule_runner.Consumer_completed_occurrence
+  | Schedule_runner.Consumer_cancelled_occurrence _ ->
+    fail "updated recurring request changed the occurrence owner to settled"
+  | Schedule_runner.Consumer_lost_occurrence detail ->
+    fail ("updated recurring request changed the occurrence owner: " ^ detail)
+;;
+
+let test_reclaim_follows_transfer_durable_state () =
+  with_workspace
+  @@ fun config ->
+  let source_keeper = "schedule-keeper" in
+  let target_keeper = "transferred-schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let request =
+    create_keeper_wake_schedule
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 3600 })
+      config
+  in
+  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
+  let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
+  let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
+  let transfer : Keeper_registry_event_queue.accepted_transfer =
+    { source = selection.source
+    ; source_incarnation = selection.admitted_revision
+    ; owner_nonce = 17
+    ; operator_operation_id = "transfer-scheduled-occurrence"
+    ; from_keeper = source_keeper
+    ; to_keeper = target_keeper
+    }
+  in
+  (match
+     Keeper_registry_event_queue.transfer_pending_accepted_result
+       ~base_path
+       source_keeper
+       ~current_owner_nonce:17
+       ~applied_at:202.0
+       ~transfer
+   with
+   | Ok (Keeper_registry_event_queue.Transition_applied _) -> ()
+   | Ok (Keeper_registry_event_queue.Transition_already_applied _) ->
+     fail "first transfer was already applied"
+   | Ok
+       (Keeper_registry_event_queue.Transition_committed_followup_failed
+          { detail; _ }) ->
+     fail detail
+   | Error detail -> fail detail);
+  (match single_keeper_settlement_exn config execution with
+   | Schedule_runner.Consumer_holds_occurrence -> ()
+   | _ -> fail "unprojected transfer was not retained as durable work");
+  (match
+     Keeper_event_queue_recovery.project_owner_result
+       ~base_path
+       ~keeper_name:source_keeper
+   with
+   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
+   | Ok _ -> fail "transfer projection did not converge"
+   | Error error ->
+     fail (Keeper_event_queue_recovery.projection_error_to_string error));
+  (match single_keeper_settlement_exn config execution with
+   | Schedule_runner.Consumer_holds_occurrence -> ()
+   | _ -> fail "projected target occurrence was not retained as durable work");
+  let target_selection =
+    pending_selection_exn ~base_path ~keeper_name:target_keeper
+  in
+  (match
+     Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
+       ~base_path
+       target_keeper
+       ~current_owner_nonce:23
+       ~applied_at:203.0
+       ~selection:target_selection
+       ~detail:"scheduled occurrence completed"
+   with
+   | Ok (Keeper_registry_event_queue.Acked _)
+   | Ok (Keeper_registry_event_queue.Already_acked _) -> ()
+   | Ok
+       (Keeper_registry_event_queue.Ack_committed_followup_failed
+          { detail; _ }) ->
+     fail detail
+   | Error detail -> fail detail);
+  match single_keeper_settlement_exn config execution with
+  | Schedule_runner.Consumer_completed_occurrence -> ()
+  | _ -> fail "target terminal ACK did not settle the transferred occurrence"
 ;;
 
 let test_keeper_wake_durable_enqueue_failure_retries_same_occurrence () =
@@ -1439,6 +1570,11 @@ let () =
             test_keeper_wake_consumer_records_dispatch_without_work_success
         ; test_case "recurring wakes keep distinct occurrence ids" `Quick
             test_recurring_wakes_keep_distinct_occurrence_ids
+        ; test_case "reclaim keeps occurrence owner after recurring request update"
+            `Quick
+            test_reclaim_uses_occurrence_keeper_after_recurring_request_update
+        ; test_case "reclaim follows durable transfer state" `Quick
+            test_reclaim_follows_transfer_durable_state
         ; test_case "keeper wake durable enqueue retries same occurrence" `Quick
             test_keeper_wake_durable_enqueue_failure_retries_same_occurrence
         ; test_case "cancelled occurrence recovery does not enqueue again"

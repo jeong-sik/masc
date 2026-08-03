@@ -321,6 +321,12 @@ let snapshot_result ~base_path name =
   | Some entry -> Ok (Atomic.get entry.event_queue)
 ;;
 
+let durable_state_result ~base_path name =
+  Keeper_event_queue_persistence.load_state_result
+    ~base_path
+    ~keeper_name:name
+;;
+
 let reprioritize_pending_result
       ~base_path
       name

@@ -123,6 +123,7 @@ val rotate_refresh_token :
   expected_resource:string ->
   refresh_token:string ->
   client_id:string ->
+  scope:string option ->
   resource:string option ->
   (token_pair, error) result
 

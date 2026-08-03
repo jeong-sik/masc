@@ -150,7 +150,8 @@ let render_authorization_form ?error (request : Auth_oauth.authorization_request
     ; {|<label for="bootstrap_token">MASC bearer</label>|}
     ; {|<input id="bootstrap_token" name="bootstrap_token" type="password" autocomplete="off" required>|}
     ; admin_confirmation
-    ; {|<button type="submit">Authorize</button></form></body></html>|}
+    ; {|<button type="submit" name="decision" value="authorize">Authorize</button>|}
+    ; {|<button type="submit" name="decision" value="deny" formnovalidate>Deny</button></form></body></html>|}
     ]
 ;;
 
@@ -193,6 +194,18 @@ let redirect_with_code authorization_request code =
   |> Uri.to_string
 ;;
 
+let redirect_with_error authorization_request error =
+  let params =
+    ("error", Auth_oauth.protocol_error_code error)
+    :: (match authorization_request.Auth_oauth.state with
+        | None -> []
+        | Some state -> [ "state", state ])
+  in
+  Uri.of_string authorization_request.redirect_uri
+  |> fun uri -> Uri.add_query_params' uri params
+  |> Uri.to_string
+;;
+
 type authorization_post_outcome =
   | Authorization_redirect of string
   | Authorization_form_error of
@@ -204,7 +217,9 @@ type authorization_post_outcome =
 let authorize_post ~base_path ~authority ~body =
   let* params = parse_form body in
   let* request = authorization_request_of_params ~base_path ~authority params in
-  if
+  if Option.equal String.equal (param params "decision") (Some "deny")
+  then Ok (Authorization_redirect (redirect_with_error request Auth_oauth.Access_denied))
+  else if
     admin_scope_requested request.scopes
     && not (Option.equal String.equal (param params "confirm_admin") (Some "yes"))
   then
@@ -354,6 +369,7 @@ let token ~base_path ~authority ~body =
       ~expected_resource
       ~refresh_token
       ~client_id
+      ~scope:(param params "scope")
       ~resource:(param params "resource")
   | _ -> Error (Auth_oauth.Invalid_request "grant_type is not supported")
 ;;

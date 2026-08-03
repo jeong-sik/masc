@@ -128,7 +128,7 @@ let accepting_consumer ?(accept = Ok ()) ?dispatch_result ?settlement calls =
   in
   let settlement =
     Option.value
-      ~default:(fun _config _request _execution -> Ok Consumer_holds_occurrence)
+      ~default:(fun _config _execution -> Ok Consumer_holds_occurrence)
       settlement
   in
   { accepts = (fun _request -> accept)
@@ -136,7 +136,9 @@ let accepting_consumer ?(accept = Ok ()) ?dispatch_result ?settlement calls =
       (fun _config ~now:_ _signal request ->
         calls := request.schedule_id :: !calls;
         dispatch_result)
-  ; settlement
+  ; settlements =
+      (fun config executions ->
+         List.map (settlement config) executions)
   }
 ;;
 
@@ -490,7 +492,9 @@ let test_tick_retries_same_occurrence_without_blocking_other_schedule () =
            else (
              incr healthy_calls;
              Ok (Work_completed (`Assoc [ "healthy", `Bool true ]))))
-    ; settlement = (fun _config _request _execution -> Ok Consumer_holds_occurrence)
+    ; settlements =
+        (fun _config executions ->
+           List.map (fun _ -> Ok Consumer_holds_occurrence) executions)
     }
   in
   let first = tick_ok config ~now:201.0 ~consumer in
@@ -709,7 +713,7 @@ let test_reclaim_settles_lost_occurrence () =
   let calls = ref [] in
   let lost_consumer =
     accepting_consumer
-      ~settlement:(fun _config _request _execution ->
+      ~settlement:(fun _config _execution ->
         Ok (Consumer_lost_occurrence "queue entry vanished"))
       calls
   in
@@ -742,6 +746,51 @@ let test_reclaim_leaves_held_occurrence_alone () =
     (untouched.status = Execution_dispatched)
 ;;
 
+let test_reclaim_projects_consumer_completion () =
+  with_workspace
+  @@ fun config ->
+  let request = accepted_recurring_occurrence config ~schedule_id:"reclaim-completed" in
+  let calls = ref [] in
+  let completed_consumer =
+    accepting_consumer
+      ~settlement:(fun _config _execution -> Ok Consumer_completed_occurrence)
+      calls
+  in
+  let outcome = reclaim_ok ~consumer:completed_consumer config ~now:400.0 in
+  check int "completed occurrence examined" 1 outcome.examined;
+  check int "completed occurrence settled" 1 outcome.settled_elsewhere;
+  check int "completion projection has no failure" 0 (List.length outcome.failures);
+  let settled = latest_execution config ~schedule_id:request.schedule_id in
+  check bool "consumer completion leaves dispatched" false
+    (settled.status = Execution_dispatched);
+  check bool "consumer completion succeeds execution" true
+    (settled.status = Execution_succeeded)
+;;
+
+let test_reclaim_projects_consumer_cancellation () =
+  with_workspace
+  @@ fun config ->
+  let request = accepted_recurring_occurrence config ~schedule_id:"reclaim-cancelled" in
+  let calls = ref [] in
+  let cancelled_consumer =
+    accepting_consumer
+      ~settlement:(fun _config _execution ->
+        Ok (Consumer_cancelled_occurrence "operator cancelled durable work"))
+      calls
+  in
+  let outcome = reclaim_ok ~consumer:cancelled_consumer config ~now:400.0 in
+  check int "cancelled occurrence examined" 1 outcome.examined;
+  check int "cancelled occurrence settled" 1 outcome.settled_elsewhere;
+  check int "cancellation projection has no failure" 0 (List.length outcome.failures);
+  let settled = latest_execution config ~schedule_id:request.schedule_id in
+  check bool "consumer cancellation leaves dispatched" false
+    (settled.status = Execution_dispatched);
+  check bool "consumer cancellation fails execution" true
+    (settled.status = Execution_failed);
+  check (option string) "durable cancellation reason is preserved"
+    (Some "operator cancelled durable work") settled.error
+;;
+
 let test_reclaim_leaves_occurrence_alone_when_consumer_errors () =
   with_workspace
   @@ fun config ->
@@ -749,7 +798,7 @@ let test_reclaim_leaves_occurrence_alone_when_consumer_errors () =
   let calls = ref [] in
   let failing_consumer =
     accepting_consumer
-      ~settlement:(fun _config _request _execution ->
+      ~settlement:(fun _config _execution ->
         Error "keeper event queue snapshot read failed: disk gone")
       calls
   in
@@ -762,33 +811,6 @@ let test_reclaim_leaves_occurrence_alone_when_consumer_errors () =
     (untouched.status = Execution_dispatched)
 ;;
 
-
-(* The generation-pinned-ledger case. It must not settle, and it must not be
-   reported the same way a transient failure is: these occurrences come back on
-   every sweep forever, so folding them into [failures] turns the sweep into a
-   log generator (#26695). *)
-let test_reclaim_reports_unreadable_evidence_without_settling () =
-  with_workspace
-  @@ fun config ->
-  let request =
-    accepted_recurring_occurrence config ~schedule_id:"reclaim-unreadable"
-  in
-  let calls = ref [] in
-  let unreadable_consumer =
-    accepting_consumer
-      ~settlement:(fun _config _request _execution ->
-        Ok (Consumer_evidence_unreadable "ledger generation rolled past it"))
-      calls
-  in
-  let outcome = reclaim_ok ~consumer:unreadable_consumer config ~now:400.0 in
-  check int "occurrence examined" 1 outcome.examined;
-  check int "nothing reclaimed on unreadable evidence" 0 outcome.reclaimed;
-  check int "reported as indeterminate" 1 (List.length outcome.indeterminate);
-  check int "not counted as a transient failure" 0 (List.length outcome.failures);
-  let untouched = latest_execution config ~schedule_id:request.schedule_id in
-  check bool "occurrence stays dispatched" true
-    (untouched.status = Execution_dispatched)
-;;
 
 let () =
   run "Schedule_runner"
@@ -823,10 +845,12 @@ let () =
             test_reclaim_settles_lost_occurrence
         ; test_case "leaves an occurrence the consumer still holds" `Quick
             test_reclaim_leaves_held_occurrence_alone
+        ; test_case "projects consumer completion to schedule execution" `Quick
+            test_reclaim_projects_consumer_completion
+        ; test_case "projects consumer cancellation to schedule execution" `Quick
+            test_reclaim_projects_consumer_cancellation
         ; test_case "leaves an occurrence when the consumer cannot answer" `Quick
             test_reclaim_leaves_occurrence_alone_when_consumer_errors
-        ; test_case "reports unreadable evidence without settling" `Quick
-            test_reclaim_reports_unreadable_evidence_without_settling
         ] )
     ; ( "status",
         [ test_case "tracks liveness snapshot" `Quick

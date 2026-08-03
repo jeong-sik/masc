@@ -208,6 +208,12 @@ val enqueue_hitl_resolution_durable_result :
 val snapshot_result :
   base_path:string -> string -> (Keeper_event_queue.t, string) result
 
+val durable_state_result :
+  base_path:string -> string -> (Keeper_event_queue_state.t, string) result
+(** Read the authoritative durable queue envelope, including pending entries,
+    transition outbox, and projected typed dispositions. Unlike
+    {!snapshot_result}, this never returns a process-local Atomic projection. *)
+
 val reprioritize_pending_result :
   base_path:string ->
   string ->

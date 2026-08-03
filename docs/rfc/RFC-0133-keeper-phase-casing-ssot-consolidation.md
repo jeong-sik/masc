@@ -1,5 +1,5 @@
 ---
-rfc: "0132"
+rfc: "0133"
 title: "Keeper Phase Casing SSOT Consolidation"
 status: Implemented
 created: 2026-05-19

@@ -710,7 +710,8 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path
       let backlog_source =
         match observation.backlog_edge with
         | Keeper_world_observation_inputs.Observed_backlog _ -> None
-        | source ->
+        | (Keeper_world_observation_inputs.Backlog_read_unavailable _ as source)
+        | (Keeper_world_observation_inputs.Recovery_backlog _ as source) ->
           Some
             (Keeper_world_observation_inputs.backlog_edge_observation_to_string
                source)

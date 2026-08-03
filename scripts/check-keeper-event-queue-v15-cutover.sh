@@ -79,11 +79,16 @@ run_gate() {
   local signal_row_count=0
   local signal_path
   local rows_in_file
+  local cutover_required=0
+  local current_owner_count=0
+  local legacy_wal_count=0
   local queue_count=0
   local queue_path
+  local current_queue_path
   local pending_count
   local outbox_count
   local accepted_count
+  local unsettled_count_total=0
 
   [[ -d "$BASE_PATH" && ! -L "$BASE_PATH" ]] \
     || fail "base path is not an exact directory: $BASE_PATH"
@@ -97,6 +102,36 @@ run_gate() {
   fi
   [[ -d "$runtime_root" && ! -L "$runtime_root" ]] \
     || fail "workspace runtime is not an exact directory: $runtime_root"
+
+  if [[ -e "$keepers_root" || -L "$keepers_root" ]]; then
+    [[ -d "$keepers_root" && ! -L "$keepers_root" ]] \
+      || fail "Keeper runtime root is not an exact directory: $keepers_root"
+    reject_symlinks_below "$keepers_root" "Keeper runtime root"
+    while IFS= read -r -d '' queue_path; do
+      legacy_wal_count=$((legacy_wal_count + 1))
+      [[ -f "$queue_path" && ! -L "$queue_path" ]] \
+        || fail "v4 transition WAL is not an exact regular file: $queue_path"
+      [[ ! -s "$queue_path" ]] \
+        || fail "v4 transition WAL still contains committed evidence: $queue_path"
+      current_queue_path="$(dirname "$queue_path")/event-queue-v15.json"
+      if [[ ! -e "$current_queue_path" && ! -L "$current_queue_path" ]]; then
+        cutover_required=1
+      fi
+    done < <(find "$keepers_root" -name 'event-queue-transitions-v4.jsonl' -print0)
+
+    while IFS= read -r -d '' queue_path; do
+      current_queue_path="$(dirname "$queue_path")/event-queue-v15.json"
+      if [[ -e "$current_queue_path" || -L "$current_queue_path" ]]; then
+        [[ -f "$current_queue_path" && ! -L "$current_queue_path" ]] \
+          || fail "v15 queue snapshot is not an exact regular file: $current_queue_path"
+        "$CUTOVER_HELPER" validate-current-queue "$current_queue_path" \
+          || fail "v15 queue snapshot is invalid: $current_queue_path"
+        current_owner_count=$((current_owner_count + 1))
+      else
+        cutover_required=1
+      fi
+    done < <(find "$keepers_root" -name 'event-queue-v14.json' -print0)
+  fi
 
   for schedules_path in \
     "$runtime_root/schedules.json" \
@@ -121,7 +156,8 @@ run_gate() {
       || fail "schedule ledger shape is invalid: $schedules_path"
     local unsettled_count
     unsettled_count="$(jq '[.executions[] | select(.status == "running" or .status == "dispatched")] | length' "$schedules_path")"
-    if [[ "$unsettled_count" -ne 0 ]]; then
+    unsettled_count_total=$((unsettled_count_total + unsettled_count))
+    if [[ "$cutover_required" -eq 1 && "$unsettled_count" -ne 0 ]]; then
       jq -r '
         .executions[]
         | select(.status == "running" or .status == "dispatched")
@@ -161,6 +197,10 @@ run_gate() {
       || fail "Keeper runtime root is not an exact directory: $keepers_root"
     reject_symlinks_below "$keepers_root" "Keeper runtime root"
     while IFS= read -r -d '' queue_path; do
+      current_queue_path="$(dirname "$queue_path")/event-queue-v15.json"
+      if [[ -e "$current_queue_path" || -L "$current_queue_path" ]]; then
+        continue
+      fi
       queue_count=$((queue_count + 1))
       [[ -f "$queue_path" && ! -L "$queue_path" ]] \
         || fail "v14 queue snapshot is not an exact regular file: $queue_path"
@@ -182,9 +222,10 @@ run_gate() {
     done < <(find "$keepers_root" -name 'event-queue-v14.json' -print0)
   fi
 
-  printf '[event-queue-v15-cutover] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d v14_owners=%d unsettled=0\n' \
-    "$BASE_PATH" "$schedule_ledger_count" "$signal_file_count" \
-    "$signal_row_count" "$queue_count"
+  printf '[event-queue-v15-cutover] OK: base_path=%s cutover_required=%d schedule_ledgers=%d signal_files=%d signal_rows=%d v14_owners=%d current_owners=%d legacy_wals=%d unsettled=%d\n' \
+    "$BASE_PATH" "$cutover_required" "$schedule_ledger_count" \
+    "$signal_file_count" "$signal_row_count" "$queue_count" \
+    "$current_owner_count" "$legacy_wal_count" "$unsettled_count_total"
 }
 
 if [[ "$SELF_TEST" -eq 1 ]]; then
@@ -245,6 +286,18 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     ' >"$queue_dir/event-queue-v14.json"
   }
 
+  write_current_queue() {
+    local target_root="$1"
+    local queue_dir="$target_root/.masc/keepers/fixture"
+    mkdir -p "$queue_dir"
+    jq -n '
+      {schema: "keeper.event_queue.state.v15", revision: 1,
+       pending: [], last_transition: null,
+       projected_dispositions: [], transition_outbox: [],
+       accepted_transfer_projections: []}
+    ' >"$queue_dir/event-queue-v15.json"
+  }
+
   expect_failure() {
     local case_name="$1"
     local target_root="$2"
@@ -295,6 +348,27 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   write_schedules "$accepted_root" none
   write_queue "$accepted_root" 0 0 1
   expect_failure accepted_transfer "$accepted_root"
+
+  legacy_wal_root="$fixture_root/legacy-wal"
+  write_schedules "$legacy_wal_root" none
+  write_queue "$legacy_wal_root" 0 0 0
+  printf '{"committed":"transition"}\n' \
+    >"$legacy_wal_root/.masc/keepers/fixture/event-queue-transitions-v4.jsonl"
+  expect_failure nonempty_v4_transition_wal "$legacy_wal_root"
+
+  current_root="$fixture_root/current"
+  write_schedules "$current_root" running
+  write_queue "$current_root" 1 1 1
+  write_current_queue "$current_root"
+  : >"$current_root/.masc/keepers/fixture/event-queue-transitions-v4.jsonl"
+  "$0" --base-path "$current_root" >/dev/null
+
+  malformed_current_root="$fixture_root/malformed-current"
+  write_schedules "$malformed_current_root" running
+  write_queue "$malformed_current_root" 1 1 1
+  printf '{not-json\n' \
+    >"$malformed_current_root/.masc/keepers/fixture/event-queue-v15.json"
+  expect_failure malformed_current_queue "$malformed_current_root"
 
   malformed_root="$fixture_root/malformed"
   mkdir -p "$malformed_root/.masc"
@@ -356,6 +430,24 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   printf '{not-json\n' \
     >"$malformed_signal_root/.masc/schedules/signals/2026-08/04.jsonl"
   expect_failure malformed_signal "$malformed_signal_root"
+
+  multiline_signal_root="$fixture_root/multiline-signal"
+  write_schedules "$multiline_signal_root" succeeded
+  write_signal "$multiline_signal_root" true
+  jq '.' "$multiline_signal_root/.masc/schedules/signals/2026-08/04.jsonl" \
+    >"$multiline_signal_root/.masc/schedules/signals/2026-08/04.jsonl.tmp"
+  mv \
+    "$multiline_signal_root/.masc/schedules/signals/2026-08/04.jsonl.tmp" \
+    "$multiline_signal_root/.masc/schedules/signals/2026-08/04.jsonl"
+  expect_failure multiline_signal "$multiline_signal_root"
+
+  multi_value_signal_root="$fixture_root/multi-value-signal"
+  write_schedules "$multi_value_signal_root" succeeded
+  write_signal "$multi_value_signal_root" true
+  signal_fixture="$multi_value_signal_root/.masc/schedules/signals/2026-08/04.jsonl"
+  signal_row="$(cat "$signal_fixture")"
+  printf '%s %s\n' "$signal_row" "$signal_row" >"$signal_fixture"
+  expect_failure multiple_values_on_one_signal_line "$multi_value_signal_root"
 
   missing_runtime_root="$fixture_root/missing-runtime"
   mkdir -p "$missing_runtime_root"

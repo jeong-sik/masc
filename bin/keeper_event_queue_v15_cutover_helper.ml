@@ -57,6 +57,26 @@ let validate_signals paths =
   Ok ()
 ;;
 
+let validate_current_queue path =
+  try
+    let json = Yojson.Safe.from_file path in
+    let* (_ : Keeper_event_queue_state.t) =
+      Keeper_event_queue_state.of_yojson json
+      |> Result.map_error (fun detail ->
+        `Msg
+          (Printf.sprintf
+             "current event queue contract rejected path=%s: %s"
+             path
+             detail))
+    in
+    Ok ()
+  with
+  | Sys_error detail ->
+    errorf "current event queue file is unreadable path=%s: %s" path detail
+  | Yojson.Json_error detail ->
+    errorf "current event queue JSON is malformed path=%s: %s" path detail
+;;
+
 let child_exit_code = function
   | Unix.WEXITED code -> code
   | Unix.WSIGNALED signal | Unix.WSTOPPED signal -> 128 + signal
@@ -139,6 +159,22 @@ let validate_signals_cmd =
     Term.(ret (const (fun paths -> cmdliner_result (validate_signals paths)) $ signal_files))
 ;;
 
+let current_queue_file =
+  let doc = "Validate one current event-queue v15 snapshot." in
+  Arg.(required & pos 0 (some file) None & info [] ~docv:"QUEUE_FILE" ~doc)
+;;
+
+let validate_current_queue_cmd =
+  let doc = "validate one current event-queue v15 snapshot" in
+  Cmd.v
+    (Cmd.info "validate-current-queue" ~doc)
+    Term.(
+      ret
+        (const
+           (fun path -> cmdliner_result (validate_current_queue path))
+         $ current_queue_file))
+;;
+
 let base_path =
   let doc = "Workspace BasePath whose process-lifetime writer lease must be free." in
   Arg.(required & opt (some dir) None & info [ "base-path" ] ~docv:"PATH" ~doc)
@@ -168,5 +204,5 @@ let () =
     (Cmd.eval
        (Cmd.group
           (Cmd.info "masc-keeper-event-queue-v15-cutover-helper" ~doc)
-          [ lease_run_cmd; validate_signals_cmd ]))
+          [ lease_run_cmd; validate_current_queue_cmd; validate_signals_cmd ]))
 ;;

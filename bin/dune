@@ -173,7 +173,14 @@
 ;; by the server instead of reimplementing either contract in shell.
 (executable
  (name keeper_event_queue_v15_cutover_helper)
- (libraries masc.server masc.host_config masc.masc_schedule cmdliner unix yojson))
+ (libraries
+  masc.server
+  masc.host_config
+  masc.keeper_runtime
+  masc.masc_schedule
+  cmdliner
+  unix
+  yojson))
 
 ;; Per-turn timeline tool: masc-trace <base-path> <keeper> <turn_id>
 ;; Reads execution-receipts JSONL and prints rows matching the turn_id.

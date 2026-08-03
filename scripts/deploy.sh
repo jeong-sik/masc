@@ -74,7 +74,10 @@ wait_port_free() {
 if [ "$SKIP_BUILD" = false ]; then
     echo "==> Building MASC MCP..." >&2
     cd "$REPO_DIR"
-    "$REPO_DIR/scripts/dune-local.sh" build bin/main_eio.exe 2>&1
+    "$REPO_DIR/scripts/dune-local.sh" build \
+        bin/main_eio.exe \
+        bin/keeper_event_queue_v15_cutover_helper.exe \
+        2>&1
     echo "    Build complete." >&2
 fi
 

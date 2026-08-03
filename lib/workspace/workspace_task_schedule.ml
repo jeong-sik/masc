@@ -171,14 +171,6 @@ let reconcile_all_agent_current_tasks_with_backlog
   | Sys_error msg -> Log.Misc.error "agent state reconcile scan failed: %s" msg
 ;;
 
-let reconcile_all_agent_current_tasks_with_fresh_backlog ?(touch_last_seen = true) config =
-  let lock_path = backlog_lock_path config in
-  with_file_lock config lock_path (fun () ->
-    let backlog = read_backlog config in
-    reconcile_all_agent_current_tasks_with_backlog config ~touch_last_seen backlog;
-    backlog)
-;;
-
 (** Claim next highest priority unclaimed task.
     Optional [exclude_task_ids] prevents re-claiming known bad tasks in the
     same loop run.  Optional [task_filter] lets callers scope eligible work

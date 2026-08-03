@@ -53,11 +53,6 @@ val reconcile_all_agent_current_tasks_with_backlog
   -> Masc_domain.backlog
   -> unit
 
-val reconcile_all_agent_current_tasks_with_fresh_backlog
-  :  ?touch_last_seen:bool
-  -> config
-  -> Masc_domain.backlog
-
 val claim_next_r
   :  config
   -> agent_name:string

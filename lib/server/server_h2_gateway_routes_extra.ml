@@ -10,11 +10,12 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
     (httpun_meth : [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
                     | `CONNECT | `TRACE | `Other of string ]) =
   let h2_respond_auth_error error =
+    let status = Server_auth.http_status_of_auth_error error in
     h2_respond_json
       h2_reqd
       (Server_auth.auth_error_json error)
-      ~status:(Server_auth.http_status_of_auth_error error :> H2.Status.t)
-      ~extra_headers:cors
+      ~status:(status :> H2.Status.t)
+      ~extra_headers:(Server_auth.auth_error_headers ~status ~cors)
   in
   let with_optional_board_reaction_actor f =
     match config with

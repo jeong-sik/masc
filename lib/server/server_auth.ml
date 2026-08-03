@@ -865,10 +865,10 @@ let auth_error_json err =
   in
   Yojson.Safe.to_string (`Assoc fields)
 
-let generic_bearer_challenge_headers (status : Httpun.Status.t) =
+let auth_error_headers ~(status : Httpun.Status.t) ~cors =
   match status with
-  | `Unauthorized -> [ "www-authenticate", "Bearer" ]
-  | _ -> []
+  | `Unauthorized -> ("www-authenticate", "Bearer") :: cors
+  | _ -> cors
 
 let respond_auth_error request reqd err =
   let status = http_status_of_auth_error err in
@@ -877,8 +877,7 @@ let respond_auth_error request reqd err =
   let headers =
     Httpun.Headers.of_list
       (("content-length", string_of_int (String.length body))
-       :: generic_bearer_challenge_headers status
-       @ cors_headers origin)
+       :: auth_error_headers ~status ~cors:(cors_headers origin))
   in
   let response = Httpun.Response.create ~headers (status :> Httpun.Status.t) in
   Httpun.Reqd.respond_with_string reqd response body

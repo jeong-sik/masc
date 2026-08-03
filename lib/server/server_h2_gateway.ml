@@ -98,7 +98,7 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
         h2_reqd
         (auth_error_json err)
         ~status:(status :> H2.Status.t)
-        ~extra_headers:cors
+        ~extra_headers:(auth_error_headers ~status ~cors)
     in
     let h2_respond_oauth_error error =
       Log.Misc.warn

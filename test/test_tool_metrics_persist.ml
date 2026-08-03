@@ -22,14 +22,7 @@ let eio_test name fn =
     fn ())
 
 let with_tmp_dir f =
-  let dir =
-    Filename.concat
-      (Filename.get_temp_dir_name ())
-      (Printf.sprintf
-         "test-tool-metrics-persist-%d-%d"
-         (Unix.getpid ())
-         (int_of_float (Unix.gettimeofday () *. 1000.0)))
-  in
+  let dir = Filename.temp_dir "test-tool-metrics-persist-" "" in
   P.reset_for_testing ();
   Fun.protect
     ~finally:(fun () ->

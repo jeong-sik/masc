@@ -248,7 +248,8 @@ let test_current_task_unavailable_is_explicit () =
   let task_id = task_id_exn "task-42" in
   let decision = WO.keeper_cycle_decision ~meta base_observation in
   let { Prompt.world_state; _ } =
-    Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~turn_decision:decision
+    Prompt.build_prompt ~meta ~config:(Masc.Workspace.default_config "/tmp/unused")
+      ~turn_decision:decision
       ~current_task:
         (Inputs.Current_task_unavailable
            { task_id; error = "primary and recovery backlog decode failed" })
@@ -265,7 +266,8 @@ let test_current_task_missing_is_explicit () =
   let task_id = task_id_exn "task-42" in
   let decision = WO.keeper_cycle_decision ~meta base_observation in
   let { Prompt.world_state; _ } =
-    Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~turn_decision:decision
+    Prompt.build_prompt ~meta ~config:(Masc.Workspace.default_config "/tmp/unused")
+      ~turn_decision:decision
       ~current_task:(Inputs.Current_task_missing { task_id; recovery = None })
       ~observation:base_observation ()
   in
@@ -283,7 +285,8 @@ let test_recovered_current_task_is_non_authoritative () =
     { recovery_path = "/tmp/backlog.last-good"; primary_error = "decode failed" }
   in
   let { Prompt.world_state; _ } =
-    Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~turn_decision:decision
+    Prompt.build_prompt ~meta ~config:(Masc.Workspace.default_config "/tmp/unused")
+      ~turn_decision:decision
       ~current_task:
         (Inputs.Recovered_current_task { task = recovered_task; recovery })
       ~observation:base_observation ()

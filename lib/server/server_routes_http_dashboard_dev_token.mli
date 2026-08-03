@@ -30,21 +30,14 @@ val request_error_code : request_error -> string
 val request_error_to_string : request_error -> string
 
 val ensure_dashboard_dev_token :
+  ?load:(string -> string) ->
+  ?write:(string -> string -> (unit, string) result) ->
   string -> (dashboard_dev_token, token_error) result
 (** Return the reusable Worker token or resume/create one role-aware rotation.
     Rotation is serialized across Eio and non-Eio callers and is protected
-    against cancellation after the durable transaction starts. *)
-
-val set_dashboard_dev_token_load_for_testing : (string -> string) -> unit
-(** Replace the dev-token file reader for focused failure-path tests. *)
-
-val reset_dashboard_dev_token_load_for_testing : unit -> unit
-(** Restore the production dev-token file reader. *)
-
-val set_dashboard_dev_token_write_for_testing :
-  (string -> string -> (unit, string) result) -> unit
-
-val reset_dashboard_dev_token_write_for_testing : unit -> unit
+    against cancellation after the durable transaction starts. Optional I/O
+    functions are scoped to this call so failure-path tests do not mutate
+    process-global credential behavior. *)
 
 val ensure_dashboard_dev_token_for_authority :
   request_authority:Server_request_authority.authority ->

@@ -75,19 +75,18 @@ let test_read_failure_does_not_mint_credential () =
       let token_path = Dev_token.dashboard_dev_token_path base_path in
       Fs_compat.mkdir_p (Filename.dirname token_path);
       Fs_compat.save_file token_path "stale";
-      Dev_token.set_dashboard_dev_token_load_for_testing (fun _ ->
-        raise (Sys_error "injected read failure"));
-      Fun.protect
-        ~finally:Dev_token.reset_dashboard_dev_token_load_for_testing
-        (fun () ->
-          match Dev_token.ensure_dashboard_dev_token base_path with
-          | Error _ ->
-              check
-                bool
-                "read failure creates no credential store"
-                false
-                (Sys.file_exists (Common.agents_dir_from_base_path ~base_path))
-          | Ok _ -> fail "unreadable dev-token path must fail closed"))
+      match
+        Dev_token.ensure_dashboard_dev_token
+          ~load:(fun _ -> raise (Sys_error "injected read failure"))
+          base_path
+      with
+      | Error _ ->
+        check
+          bool
+          "read failure creates no credential store"
+          false
+          (Sys.file_exists (Common.agents_dir_from_base_path ~base_path))
+      | Ok _ -> fail "unreadable dev-token path must fail closed")
 ;;
 
 let with_temp_base label f =
@@ -187,20 +186,18 @@ let test_rotation_write_failure_reuses_pending_token () =
   with_temp_base "masc-dev-token-pending-" (fun base_path ->
     let admin_raw = create_persisted_dashboard_token base_path Masc_domain.Admin in
     let token_path = Dev_token.dashboard_dev_token_path base_path in
-    Dev_token.set_dashboard_dev_token_write_for_testing (fun path raw ->
+    let write path raw =
       if String.equal path token_path
       then Error "injected canonical token write failure"
       else (
         Auth.save_private_text_file path raw;
-        Ok ()));
-    Fun.protect
-      ~finally:Dev_token.reset_dashboard_dev_token_write_for_testing
-      (fun () ->
-        match Dev_token.ensure_dashboard_dev_token base_path with
-        | Error (Dev_token.Token_file_write_failed _) -> ()
-        | Error error ->
-          failf "unexpected rotation error: %s" (Dev_token.token_error_to_string error)
-        | Ok _ -> fail "injected canonical write failure succeeded");
+        Ok ())
+    in
+    (match Dev_token.ensure_dashboard_dev_token ~write base_path with
+     | Error (Dev_token.Token_file_write_failed _) -> ()
+     | Error error ->
+       failf "unexpected rotation error: %s" (Dev_token.token_error_to_string error)
+     | Ok _ -> fail "injected canonical write failure succeeded");
     let pending_path = Dev_token.dashboard_dev_token_pending_path base_path in
     check bool "pending token retained" true (Sys.file_exists pending_path);
     let pending_raw = String.trim (Fs_compat.load_file pending_path) in

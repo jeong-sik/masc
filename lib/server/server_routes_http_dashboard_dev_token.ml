@@ -108,31 +108,13 @@ type dashboard_dev_token_candidate =
   | Rotate
 
 let default_dashboard_dev_token_load path = Fs_compat.load_file path
-let dashboard_dev_token_load = Atomic.make default_dashboard_dev_token_load
 
 let default_dashboard_dev_token_write path raw =
   Fs_compat.mkdir_p (Filename.dirname path);
   Fs_compat.save_file_atomic_strict path raw
 ;;
 
-let dashboard_dev_token_write = Atomic.make default_dashboard_dev_token_write
 let dashboard_dev_token_mu = Cross_context_mutex.create ()
-
-let set_dashboard_dev_token_load_for_testing load =
-  Atomic.set dashboard_dev_token_load load
-;;
-
-let reset_dashboard_dev_token_load_for_testing () =
-  Atomic.set dashboard_dev_token_load default_dashboard_dev_token_load
-;;
-
-let set_dashboard_dev_token_write_for_testing write =
-  Atomic.set dashboard_dev_token_write write
-;;
-
-let reset_dashboard_dev_token_write_for_testing () =
-  Atomic.set dashboard_dev_token_write default_dashboard_dev_token_write
-;;
 
 let classify_dashboard_dev_token_candidate ~base_path raw =
   let trimmed = String.trim raw in
@@ -154,7 +136,7 @@ let classify_dashboard_dev_token_candidate ~base_path raw =
     | Error error -> Error (Credential_lookup_failed error)
 ;;
 
-let read_dashboard_dev_token ~base_path =
+let read_dashboard_dev_token ~load ~base_path =
   let path = dashboard_dev_token_path base_path in
   try
     if not (Fs_compat.file_exists path)
@@ -162,7 +144,7 @@ let read_dashboard_dev_token ~base_path =
     else
       classify_dashboard_dev_token_candidate
         ~base_path
-        ((Atomic.get dashboard_dev_token_load) path)
+        (load path)
   with
   | Eio.Cancel.Cancelled _ as error -> raise error
   | error ->
@@ -180,13 +162,13 @@ let is_generated_token raw =
        raw
 ;;
 
-let read_rotation_journal ~base_path =
+let read_rotation_journal ~load ~base_path =
   let path = dashboard_dev_token_pending_path base_path in
   try
     if not (Fs_compat.file_exists path)
     then Ok None
     else (
-      let raw = String.trim ((Atomic.get dashboard_dev_token_load) path) in
+      let raw = String.trim (load path) in
       if is_generated_token raw
       then Ok (Some raw)
       else Error (Rotation_journal_invalid { path }))
@@ -198,9 +180,9 @@ let read_rotation_journal ~base_path =
          { path; detail = Printexc.to_string error })
 ;;
 
-let write_private_atomic path raw =
+let write_private_atomic ~write path raw =
   try
-    match (Atomic.get dashboard_dev_token_write) path raw with
+    match write path raw with
     | Ok () -> Ok ()
     | Error detail -> Error detail
   with
@@ -231,7 +213,7 @@ let revoke_dashboard_credential base_path =
          })
 ;;
 
-let resume_rotation ~base_path raw =
+let resume_rotation ~write ~base_path raw =
   let pending_path = dashboard_dev_token_pending_path base_path in
   let token_path = dashboard_dev_token_path base_path in
   let* () = revoke_dashboard_credential base_path in
@@ -244,7 +226,7 @@ let resume_rotation ~base_path raw =
     |> Result.map_error (fun error -> Credential_rotation_failed error)
   in
   let* () =
-    write_private_atomic token_path raw
+    write_private_atomic ~write token_path raw
     |> Result.map_error (fun detail -> Token_file_write_failed { path = token_path; detail })
   in
   let* () =
@@ -255,31 +237,35 @@ let resume_rotation ~base_path raw =
   Ok (dashboard_dev_token raw)
 ;;
 
-let begin_rotation ~base_path =
+let begin_rotation ~write ~base_path =
   let raw = Auth.generate_token () in
   let pending_path = dashboard_dev_token_pending_path base_path in
   let* () =
-    write_private_atomic pending_path raw
+    write_private_atomic ~write pending_path raw
     |> Result.map_error (fun detail ->
       Rotation_journal_write_failed { path = pending_path; detail })
   in
-  resume_rotation ~base_path raw
+  resume_rotation ~write ~base_path raw
 ;;
 
-let ensure_dashboard_dev_token_unlocked base_path =
-  let* pending = read_rotation_journal ~base_path in
+let ensure_dashboard_dev_token_unlocked ~load ~write base_path =
+  let* pending = read_rotation_journal ~load ~base_path in
   match pending with
-  | Some raw -> resume_rotation ~base_path raw
+  | Some raw -> resume_rotation ~write ~base_path raw
   | None ->
-    let* candidate = read_dashboard_dev_token ~base_path in
+    let* candidate = read_dashboard_dev_token ~load ~base_path in
     (match candidate with
      | Reusable raw -> Ok (dashboard_dev_token raw)
-     | Rotate -> begin_rotation ~base_path)
+     | Rotate -> begin_rotation ~write ~base_path)
 ;;
 
-let ensure_dashboard_dev_token base_path =
+let ensure_dashboard_dev_token
+      ?(load = default_dashboard_dev_token_load)
+      ?(write = default_dashboard_dev_token_write)
+      base_path
+  =
   Cross_context_mutex.with_durable_lock dashboard_dev_token_mu (fun () ->
-    ensure_dashboard_dev_token_unlocked base_path)
+    ensure_dashboard_dev_token_unlocked ~load ~write base_path)
 ;;
 
 let ensure_dashboard_dev_token_for_authority ~request_authority ~base_path =

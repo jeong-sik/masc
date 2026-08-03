@@ -237,6 +237,20 @@ val due_execution_candidates :
 (** Returns all due requests. Authorization of dispatched effects belongs to
     the payload consumer. *)
 
+val unsettled_dispatched_occurrences :
+  state ->
+  (Schedule_domain.schedule_request * Schedule_domain.execution_record) list
+(** Every [Execution_dispatched] execution paired with its schedule request.
+
+    These are occurrences a consumer durably accepted and has not settled. The
+    store cannot decide whether the consumer still owns one: that requires
+    decoding the opaque payload to learn which consumer it went to, which is
+    consumer territory. This read exists so the runner can ask the consumer.
+
+    Executions whose schedule request no longer exists are omitted, because
+    [complete_dispatched_occurrence] and [fail_dispatched_occurrence] both
+    require the request row and would return [Schedule_not_found]. *)
+
 val prune_completed :
   Workspace_utils.config ->
   (state * int, store_error) result

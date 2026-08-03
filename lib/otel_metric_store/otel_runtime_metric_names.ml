@@ -22,6 +22,15 @@ let metric_agent_stale_total = Otel_metric_store_core.declare_counter "masc_agen
 let metric_schedule_runner_tick_outcomes =
   Otel_metric_store_core.declare_counter "masc_schedule_runner_tick_outcomes_total"
 
+(* Occurrences examined but not settled because the consumer's evidence is
+   unreadable. Set every sweep, including to 0. A level rather than a log line:
+   the same occurrences come back on every sweep until #26695 gives them a
+   terminal disposition, so logging them per-sweep would be unbounded and
+   logging them only alongside a reclaim would hide them entirely in the steady
+   state, where nothing is ever reclaimed. *)
+let metric_schedule_runner_indeterminate_occurrences =
+  "masc_schedule_runner_indeterminate_occurrences"
+
 let metric_gc_minor_words = "masc_gc_minor_words"
 let metric_gc_major_words = "masc_gc_major_words"
 let metric_gc_heap_words = "masc_gc_heap_words"

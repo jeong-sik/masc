@@ -120,18 +120,55 @@ let replace_json_field key value = function
   | json -> json
 ;;
 
-let accepting_consumer ?(accept = Ok ()) ?dispatch_result calls =
+let accepting_consumer ?(accept = Ok ()) ?dispatch_result ?settlement calls =
   let dispatch_result =
     Option.value
       ~default:(Ok (Work_completed (`Assoc [ "ok", `Bool true ])))
       dispatch_result
+  in
+  let settlement =
+    Option.value
+      ~default:(fun _config _request _execution -> Ok Consumer_holds_occurrence)
+      settlement
   in
   { accepts = (fun _request -> accept)
   ; dispatch =
       (fun _config ~now:_ _signal request ->
         calls := request.schedule_id :: !calls;
         dispatch_result)
+  ; settlement
   }
+;;
+
+let accepted_dispatch = Ok (Work_accepted (`Assoc [ "queued", `Bool true ]))
+
+let reclaim_ok ~consumer config ~now =
+  match reclaim_lost_occurrences ~consumer config ~now with
+  | Ok outcome -> outcome
+  | Error err -> fail (runner_error_to_string err)
+;;
+
+let latest_execution config ~schedule_id =
+  let state = Schedule_store.read_state config in
+  match Schedule_store.last_execution_for_schedule state ~schedule_id with
+  | Some execution -> execution
+  | None -> failf "no execution recorded for %s" schedule_id
+;;
+
+(* Drives a schedule to the state this whole feature exists for: the consumer
+   durably accepted the work, so the execution is [Execution_dispatched] and
+   nothing in the scheduler will ever finish it on its own. *)
+let accepted_recurring_occurrence config ~schedule_id =
+  let calls = ref [] in
+  let request =
+    create_ok ~schedule_id ~recurrence:(Interval { interval_sec = 3600 }) config
+  in
+  let consumer = accepting_consumer ~dispatch_result:accepted_dispatch calls in
+  let _ = tick_ok config ~now:201.0 ~consumer in
+  let accepted = latest_execution config ~schedule_id in
+  check bool "precondition: work accepted but unsettled" true
+    (accepted.status = Execution_dispatched);
+  request
 ;;
 
 let test_tick_emits_due_candidate_once () =
@@ -453,6 +490,7 @@ let test_tick_retries_same_occurrence_without_blocking_other_schedule () =
            else (
              incr healthy_calls;
              Ok (Work_completed (`Assoc [ "healthy", `Bool true ]))))
+    ; settlement = (fun _config _request _execution -> Ok Consumer_holds_occurrence)
     }
   in
   let first = tick_ok config ~now:201.0 ~consumer in
@@ -663,6 +701,95 @@ let test_runner_status_snapshot_tracks_liveness () =
   check int "crash count" 1 (json_int "crash_count" stale)
 ;;
 
+
+let test_reclaim_settles_lost_occurrence () =
+  with_workspace
+  @@ fun config ->
+  let request = accepted_recurring_occurrence config ~schedule_id:"reclaim-lost" in
+  let calls = ref [] in
+  let lost_consumer =
+    accepting_consumer
+      ~settlement:(fun _config _request _execution ->
+        Ok (Consumer_lost_occurrence "queue entry vanished"))
+      calls
+  in
+  let outcome = reclaim_ok ~consumer:lost_consumer config ~now:400.0 in
+  check int "one occurrence examined" 1 outcome.examined;
+  check int "one occurrence reclaimed" 1 outcome.reclaimed;
+  check int "no reclaim failure" 0 (List.length outcome.failures);
+  let settled = latest_execution config ~schedule_id:request.schedule_id in
+  check bool "occurrence is terminal" true (settled.status = Execution_failed);
+  check (option string) "consumer reason is the recorded failure"
+    (Some "queue entry vanished") settled.error;
+  match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+  | None -> fail "schedule row disappeared"
+  | Some stored ->
+    check bool "recurring intent survives the reclaim" false (is_terminal stored.status)
+;;
+
+let test_reclaim_leaves_held_occurrence_alone () =
+  with_workspace
+  @@ fun config ->
+  let request = accepted_recurring_occurrence config ~schedule_id:"reclaim-held" in
+  let calls = ref [] in
+  let holding_consumer = accepting_consumer calls in
+  let outcome = reclaim_ok ~consumer:holding_consumer config ~now:400.0 in
+  check int "occurrence examined" 1 outcome.examined;
+  check int "nothing reclaimed" 0 outcome.reclaimed;
+  check int "occurrence counted as held" 1 outcome.held;
+  let untouched = latest_execution config ~schedule_id:request.schedule_id in
+  check bool "occurrence stays dispatched" true
+    (untouched.status = Execution_dispatched)
+;;
+
+let test_reclaim_leaves_occurrence_alone_when_consumer_errors () =
+  with_workspace
+  @@ fun config ->
+  let request = accepted_recurring_occurrence config ~schedule_id:"reclaim-error" in
+  let calls = ref [] in
+  let failing_consumer =
+    accepting_consumer
+      ~settlement:(fun _config _request _execution ->
+        Error "keeper event queue snapshot read failed: disk gone")
+      calls
+  in
+  let outcome = reclaim_ok ~consumer:failing_consumer config ~now:400.0 in
+  check int "occurrence examined" 1 outcome.examined;
+  check int "nothing reclaimed on an unreadable consumer" 0 outcome.reclaimed;
+  check int "the error is reported" 1 (List.length outcome.failures);
+  let untouched = latest_execution config ~schedule_id:request.schedule_id in
+  check bool "occurrence stays dispatched" true
+    (untouched.status = Execution_dispatched)
+;;
+
+
+(* The generation-pinned-ledger case. It must not settle, and it must not be
+   reported the same way a transient failure is: these occurrences come back on
+   every sweep forever, so folding them into [failures] turns the sweep into a
+   log generator (#26695). *)
+let test_reclaim_reports_unreadable_evidence_without_settling () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    accepted_recurring_occurrence config ~schedule_id:"reclaim-unreadable"
+  in
+  let calls = ref [] in
+  let unreadable_consumer =
+    accepting_consumer
+      ~settlement:(fun _config _request _execution ->
+        Ok (Consumer_evidence_unreadable "ledger generation rolled past it"))
+      calls
+  in
+  let outcome = reclaim_ok ~consumer:unreadable_consumer config ~now:400.0 in
+  check int "occurrence examined" 1 outcome.examined;
+  check int "nothing reclaimed on unreadable evidence" 0 outcome.reclaimed;
+  check int "reported as indeterminate" 1 (List.length outcome.indeterminate);
+  check int "not counted as a transient failure" 0 (List.length outcome.failures);
+  let untouched = latest_execution config ~schedule_id:request.schedule_id in
+  check bool "occurrence stays dispatched" true
+    (untouched.status = Execution_dispatched)
+;;
+
 let () =
   run "Schedule_runner"
     [ ( "tick",
@@ -690,6 +817,16 @@ let () =
             test_recent_signal_decode_error_is_explicit
         ; test_case "occurrence decode rejects tampered facts" `Quick
             test_occurrence_decode_rejects_tampered_facts
+        ] )
+    ; ( "reclaim",
+        [ test_case "settles an occurrence the consumer lost" `Quick
+            test_reclaim_settles_lost_occurrence
+        ; test_case "leaves an occurrence the consumer still holds" `Quick
+            test_reclaim_leaves_held_occurrence_alone
+        ; test_case "leaves an occurrence when the consumer cannot answer" `Quick
+            test_reclaim_leaves_occurrence_alone_when_consumer_errors
+        ; test_case "reports unreadable evidence without settling" `Quick
+            test_reclaim_reports_unreadable_evidence_without_settling
         ] )
     ; ( "status",
         [ test_case "tracks liveness snapshot" `Quick

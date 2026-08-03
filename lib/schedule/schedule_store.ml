@@ -936,3 +936,14 @@ let due_execution_candidates state =
   state.schedules
   |> List.filter is_due_execution_candidate
 ;;
+
+let unsettled_dispatched_occurrences state =
+  state.executions
+  |> List.filter_map (fun (execution : execution_record) ->
+    match execution.status with
+    | Execution_dispatched ->
+      (match find_schedule state execution.schedule_id with
+       | None -> None
+       | Some request -> Some (request, execution))
+    | Execution_running | Execution_succeeded | Execution_failed -> None)
+;;

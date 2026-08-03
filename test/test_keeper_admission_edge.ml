@@ -463,17 +463,35 @@ let test_meta_json_roundtrip () =
       decoded.runtime.proactive_rt.last_consumed_backlog_projection_sha256
 ;;
 
-let test_meta_json_missing_current_field_fails () =
+let test_meta_json_absent_pair_decodes_as_genesis () =
   let meta = bootstrapped_meta ~last_consumed:42 () in
   let json =
     json_with_field meta ~f:(fun fields ->
       List.filter
-        (fun (key, _) -> not (String.equal key "last_consumed_backlog_revision"))
+        (fun (key, _) ->
+           not
+             (String.equal key "last_consumed_backlog_revision"
+              || String.equal key "last_consumed_backlog_projection_sha256"))
         fields)
   in
   match Masc.Keeper_meta_json_parse.meta_of_json json with
+  | Error e -> Alcotest.fail ("pre-RFC meta must decode with the genesis pair: " ^ e)
+  | Ok decoded ->
+    check int "absent revision decodes as genesis 0" 0
+      decoded.runtime.proactive_rt.last_consumed_backlog_revision;
+    check string "absent projection decodes as genesis empty" ""
+      decoded.runtime.proactive_rt.last_consumed_backlog_projection_sha256
+;;
+
+let test_meta_json_missing_required_field_fails () =
+  let meta = bootstrapped_meta ~last_consumed:42 () in
+  let json =
+    json_with_field meta ~f:(fun fields ->
+      List.filter (fun (key, _) -> not (String.equal key "total_turns")) fields)
+  in
+  match Masc.Keeper_meta_json_parse.meta_of_json json with
   | Error _ -> ()
-  | Ok _ -> Alcotest.fail "missing current field must fail the decode"
+  | Ok _ -> Alcotest.fail "missing non-genesis field must fail the decode"
 ;;
 
 let test_meta_json_malformed_fails_closed () =
@@ -564,9 +582,13 @@ let () =
     ; ( "meta_json"
       , [ test_case "roundtrip" `Quick test_meta_json_roundtrip
         ; test_case
-            "missing current field fails"
+            "absent pair decodes as genesis"
             `Quick
-            test_meta_json_missing_current_field_fails
+            test_meta_json_absent_pair_decodes_as_genesis
+        ; test_case
+            "missing required field fails"
+            `Quick
+            test_meta_json_missing_required_field_fails
         ; test_case "malformed fails closed" `Quick test_meta_json_malformed_fails_closed
         ] )
     ]

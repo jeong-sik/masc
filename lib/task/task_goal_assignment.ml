@@ -14,6 +14,8 @@
    handler and the dashboard HTTP route call this one function, so the
    precondition checks live in a single place. *)
 
+module Workspace = Workspace_core
+
 type set_task_goal_error =
   | Backlog_read_failed of string
   | Unknown_task of string

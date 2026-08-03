@@ -196,7 +196,7 @@ let discord_bot_token_opt () = trimmed_env_opt "DISCORD_BOT_TOKEN"
 
 let broadcast_mention_wakeup_action = function
   | Some target when String.trim target <> "" -> `Wake_keeper target
-  | Some _ | None -> `Suppress_no_target
+  | Some _ | None -> `No_keeper_target
 
 module Projection_for_testing = struct
   type queued_chat_projection = {
@@ -1350,9 +1350,9 @@ let start_keeper_loops_owned
     | `Wake_keeper target ->
       Keeper_keepalive.wakeup_keeper ~base_path:(Mcp_server.workspace_config state).base_path target;
       Log.Keeper.info "broadcast mention → wakeup keeper %s" target
-    | `Suppress_no_target ->
+    | `No_keeper_target ->
       Log.Keeper.info
-        "broadcast without mention -> keeper wakeup suppressed (passive fanout)"
+        "broadcast without mention -> passive fanout (no keeper target)"
   in
   Workspace_broadcast.on_broadcast_mention := broadcast_mention_handler;
   (* Orchestrator needs synchronous registration for shutdown hook *)

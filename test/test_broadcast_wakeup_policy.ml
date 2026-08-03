@@ -6,16 +6,16 @@ let test_mention_wakes_target () =
   match Broadcast_wakeup.broadcast_mention_wakeup_action (Some "rondo") with
   | `Wake_keeper "rondo" -> ()
   | `Wake_keeper other -> failf "unexpected wake target: %s" other
-  | `Suppress_no_target -> fail "expected explicit mention to wake target"
+  | `No_keeper_target -> fail "expected explicit mention to wake target"
 
 let test_none_is_passive () =
   match Broadcast_wakeup.broadcast_mention_wakeup_action None with
-  | `Suppress_no_target -> ()
+  | `No_keeper_target -> ()
   | `Wake_keeper target -> failf "unexpected no-target wake: %s" target
 
 let test_blank_is_passive () =
   match Broadcast_wakeup.broadcast_mention_wakeup_action (Some "  ") with
-  | `Suppress_no_target -> ()
+  | `No_keeper_target -> ()
   | `Wake_keeper target -> failf "unexpected blank-target wake: %s" target
 
 let () =

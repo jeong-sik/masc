@@ -82,6 +82,19 @@ let test_codex_discovery_contract () =
        |> List.mem_assoc "resource_documentation"))
 ;;
 
+let test_generic_bearer_challenge () =
+  check
+    (list (pair string string))
+    "generic 401 advertises plain Bearer"
+    [ "www-authenticate", "Bearer" ]
+    (Server_auth.generic_bearer_challenge_headers `Unauthorized);
+  check
+    (list (pair string string))
+    "generic 403 has no authentication challenge"
+    []
+    (Server_auth.generic_bearer_challenge_headers `Forbidden)
+;;
+
 let test_public_listener_cannot_admit_loopback_oauth_by_host () =
   let trust_policy =
     match
@@ -313,6 +326,7 @@ let () =
     "server_oauth_protocol"
     [ ( "protocol"
       , [ test_case "Codex discovery contract" `Quick test_codex_discovery_contract
+        ; test_case "generic Bearer challenge" `Quick test_generic_bearer_challenge
         ; test_case
             "public listener rejects loopback OAuth Host"
             `Quick

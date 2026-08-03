@@ -963,6 +963,7 @@ let rotate_refresh_token
         let* scopes =
           match scope with
           | None -> Ok family.scopes
+          | Some raw when String.equal (String.trim raw) "" -> Error Invalid_scope
           | Some raw ->
             let* requested = parse_scopes (Some raw) in
             let granted requested_scope =

@@ -297,9 +297,14 @@ val respond_public_read_json_value :
 val auth_error_json : Masc_domain.masc_error -> string
 (** Render an auth error as the standard JSON envelope. *)
 
+val generic_bearer_challenge_headers : Httpun.Status.t -> (string * string) list
+(** Plain Bearer challenge for generic 401 responses; MCP resource metadata is
+    added only by MCP transport responders. *)
+
 val respond_auth_error :
   Httpun.Request.t -> Httpun.Reqd.t -> Masc_domain.masc_error -> unit
-(** Compose [http_status_of_auth_error] + [auth_error_json] + CORS. *)
+(** Compose [http_status_of_auth_error] + [auth_error_json] + generic Bearer
+    challenge + CORS. *)
 
 val respond_agent_rate_limited :
   rl_key:string -> Httpun.Request.t -> Httpun.Reqd.t -> unit

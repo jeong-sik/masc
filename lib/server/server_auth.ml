@@ -226,15 +226,19 @@ let with_mcp_expected_resource f =
   Auth_oauth.with_expected_resource (Server_oauth_metadata.resource authority) f
 ;;
 
+let mcp_unauthorized ?(reason = Masc_domain.Auth_error.Generic) message =
+  Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized { reason; message })
+;;
+
 (** Verify Bearer token for MCP endpoints *)
 let verify_mcp_auth_unscoped ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
   let credential = request_auth_credential_from_request request in
-  let* auth_config = ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config in
-  let* () =
-    reject_malformed_request_credential credential
-    |> Result.map_error Masc_domain.masc_error_to_string
+  let* auth_config =
+    ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config
+    |> Result.map_error mcp_unauthorized
   in
+  let* () = reject_malformed_request_credential credential in
   if not auth_config.Masc_domain.enabled then
     Ok None  (* Auth disabled - allow all *)
   else
@@ -243,11 +247,12 @@ let verify_mcp_auth_unscoped ~base_path request =
         Ok None  (* Token not required *)
     | None ->
         Error
-          "Authentication required. Use 'Authorization: Bearer <token>' header."
+          (mcp_unauthorized
+             ~reason:Masc_domain.Auth_error.Missing_token
+             "Authentication required. Use 'Authorization: Bearer <token>' header.")
     | Some token -> (
         let* agent_name =
           resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token)
-          |> Result.map_error Masc_domain.masc_error_to_string
         in
         match agent_name with
         | None ->
@@ -258,12 +263,12 @@ let verify_mcp_auth_unscoped ~base_path request =
                [specs/auth/AuthIdentityFSM.tla] invariant
                [NoSilentRewrite] (I2). *)
             Error
-              "Authentication required. Bearer token did not resolve to \
-               any agent."
+              (Masc_domain.Auth
+                 (Masc_domain.Auth_error.InvalidToken
+                    "Bearer token did not resolve to a credential identity."))
         | Some agent_name ->
             Auth.check_permission base_path ~agent_name ~token:(Some token)
               ~permission:Masc_domain.CanReadState
-            |> Result.map_error Masc_domain.masc_error_to_string
             |> Result.map (fun () -> None))
 
 let verify_mcp_auth ~base_path request =

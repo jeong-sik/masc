@@ -28,6 +28,14 @@ end
 module Http = Http_server_eio
 module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 
+type auth_failure = Server_mcp_transport_http_types.auth_failure =
+  { message : string
+  ; auth_error_code : string option
+  }
+
+val auth_failure_data : auth_failure -> Yojson.Safe.t option
+(** JSON-RPC error data for a typed authentication failure. *)
+
 (** {1 Capability injection record} *)
 
 type deps = Server_mcp_transport_http_types.deps = {
@@ -39,11 +47,11 @@ type deps = Server_mcp_transport_http_types.deps = {
     unit -> (Server_mcp_transport_http_types.runtime, string) result;
   get_base_path : unit -> string;
   verify_mcp_auth :
-    base_path:string -> Httpun.Request.t -> (unit, string) result;
+    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
   verify_mcp_observer_stream_auth :
-    base_path:string -> Httpun.Request.t -> (unit, string) result;
+    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
   verify_operator_mcp_auth :
-    base_path:string -> Httpun.Request.t -> (unit, string) result;
+    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
 }
 (** Transparent alias of {!Server_mcp_transport_http_types.deps}.
     Re-declared here so runtime consumers see the record fields

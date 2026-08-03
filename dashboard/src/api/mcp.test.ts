@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
+  ApiRequestError,
   apiRequestErrorFromResponse,
   fetchWithTimeout,
   reportToolHostFailure,
@@ -13,6 +14,17 @@ const {
   isRemoteAccess,
   setStoredToken,
 } = vi.hoisted(() => ({
+  ApiRequestError: class ApiRequestError extends Error {
+    status?: number
+    authErrorCode?: string
+
+    constructor(opts: { status?: number; detail?: string; authErrorCode?: string }) {
+      super(opts.detail ?? 'API request failed')
+      this.name = 'ApiRequestError'
+      this.status = opts.status
+      this.authErrorCode = opts.authErrorCode
+    }
+  },
   apiRequestErrorFromResponse: vi.fn(async (method: string, path: string, res: Response) =>
     new Error(`${method} ${path}: ${res.status}`)),
   fetchWithTimeout: vi.fn(),
@@ -32,6 +44,7 @@ const {
 }))
 
 vi.mock('./core', () => ({
+  ApiRequestError,
   apiRequestErrorFromResponse,
   fetchWithTimeout,
   DEFAULT_MCP_TIMEOUT_MS: 30000,
@@ -292,5 +305,101 @@ describe('MCP 2026-07-28 dashboard client', () => {
     const body = JSON.parse(toolCall[1].body as string) as { id: unknown }
     expect(getRandomValues).toHaveBeenCalled()
     expect(body.id).toBe('00010203-0405-4607-8809-0a0b0c0d0e0f')
+  })
+
+  it('refreshes a managed token once on a typed MCP auth result', async () => {
+    let token: string | null = 'stale-dev-token'
+    let meta: { source: 'dev'; actor: 'dashboard'; role: 'worker' } | null = {
+      source: 'dev', actor: 'dashboard', role: 'worker',
+    }
+    let revision = 0
+    getStoredToken.mockImplementation(() => token)
+    getStoredTokenMeta.mockImplementation(() => meta)
+    currentStoredTokenRevision.mockImplementation(() => revision)
+    clearStoredToken.mockImplementationOnce(() => {
+      token = null
+      meta = null
+      revision += 1
+    })
+    setStoredToken.mockImplementationOnce((nextToken, nextMeta) => {
+      token = nextToken
+      meta = nextMeta
+      revision += 1
+    })
+    fetchWithTimeout
+      .mockResolvedValueOnce(new Response(`data: ${JSON.stringify({
+        result: {
+          isError: true,
+          content: [{ type: 'text', text: 'authentication rejected' }],
+          structuredContent: { auth_error_code: 'actor_mismatch' },
+        },
+      })}\n`, { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        token: 'fresh-dev-token', actor: 'dashboard', role: 'worker',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(okToolResponse())
+
+    const { callMcpTool } = await import('./mcp')
+    await expect(callMcpTool('masc_status', {})).resolves.toBe('ok')
+
+    expect(callsByMethod('tools/call')).toHaveLength(2)
+    expect(fetchWithTimeout.mock.calls.map(call => call[0]))
+      .toEqual(['/mcp', '/api/v1/dashboard/dev-token', '/mcp'])
+    expect(token).toBe('fresh-dev-token')
+    expect(reportToolHostFailure).not.toHaveBeenCalled()
+  })
+
+  it('refreshes a managed token once on a typed HTTP 401', async () => {
+    let token: string | null = 'stale-dev-token'
+    let meta: { source: 'dev'; actor: 'dashboard'; role: 'worker' } | null = {
+      source: 'dev', actor: 'dashboard', role: 'worker',
+    }
+    let revision = 0
+    getStoredToken.mockImplementation(() => token)
+    getStoredTokenMeta.mockImplementation(() => meta)
+    currentStoredTokenRevision.mockImplementation(() => revision)
+    clearStoredToken.mockImplementationOnce(() => {
+      token = null
+      meta = null
+      revision += 1
+    })
+    setStoredToken.mockImplementationOnce((nextToken, nextMeta) => {
+      token = nextToken
+      meta = nextMeta
+      revision += 1
+    })
+    apiRequestErrorFromResponse.mockImplementationOnce(async (_method, _path, res) => {
+      const payload = await res.json() as {
+        error?: { message?: string; data?: { auth_error_code?: string } }
+      }
+      return new ApiRequestError({
+        status: res.status,
+        detail: payload.error?.message,
+        authErrorCode: payload.error?.data?.auth_error_code,
+      })
+    })
+    fetchWithTimeout
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        jsonrpc: '2.0',
+        id: null,
+        error: {
+          code: -32001,
+          message: 'authentication rejected',
+          data: { auth_error_code: 'token_expired' },
+        },
+      }), { status: 401, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        token: 'fresh-dev-token', actor: 'dashboard', role: 'worker',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(okToolResponse())
+
+    const { callMcpTool } = await import('./mcp')
+    await expect(callMcpTool('masc_status', {})).resolves.toBe('ok')
+
+    expect(callsByMethod('tools/call')).toHaveLength(2)
+    expect(fetchWithTimeout.mock.calls.map(call => call[0]))
+      .toEqual(['/mcp', '/api/v1/dashboard/dev-token', '/mcp'])
+    expect(token).toBe('fresh-dev-token')
+    expect(reportToolHostFailure).not.toHaveBeenCalled()
   })
 })

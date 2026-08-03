@@ -426,16 +426,28 @@ async function errorResponseInfoFromResponse(res: Response): Promise<ErrorRespon
   try {
     const parsed = JSON.parse(rawText) as unknown
     if (isRecord(parsed)) {
+      const jsonRpcError = isRecord(parsed.error) ? parsed.error : null
+      const jsonRpcErrorData = jsonRpcError && isRecord(jsonRpcError.data)
+        ? jsonRpcError.data
+        : null
       const errorDetail = typeof parsed.error === 'string' ? parsed.error.trim() : ''
-      const authErrorCode = typeof parsed.auth_error_code === 'string'
+      const topLevelAuthErrorCode = typeof parsed.auth_error_code === 'string'
         ? parsed.auth_error_code.trim()
         : ''
+      const jsonRpcAuthErrorCode = typeof jsonRpcErrorData?.auth_error_code === 'string'
+        ? jsonRpcErrorData.auth_error_code.trim()
+        : ''
+      const authErrorCode = topLevelAuthErrorCode || jsonRpcAuthErrorCode
       const errorCode =
         authErrorCode
         || (typeof parsed.error_code === 'string' ? parsed.error_code.trim() : '')
         || (typeof parsed.status === 'string' ? parsed.status.trim() : '')
         || errorDetail
-      const message = typeof parsed.message === 'string' ? parsed.message.trim() : ''
+      const topLevelMessage = typeof parsed.message === 'string' ? parsed.message.trim() : ''
+      const jsonRpcMessage = typeof jsonRpcError?.message === 'string'
+        ? jsonRpcError.message.trim()
+        : ''
+      const message = topLevelMessage || jsonRpcMessage
       if (message || errorDetail || errorCode) {
         return {
           detail: message || errorDetail || errorCode || undefined,

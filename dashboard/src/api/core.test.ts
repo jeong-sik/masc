@@ -328,6 +328,26 @@ describe('typed API errors', () => {
     expect(error.detail).toBe('stored token belongs to a different actor')
   })
 
+  it('reads auth_error_code from the JSON-RPC error data contract', async () => {
+    const error = await apiRequestErrorFromResponse(
+      'POST',
+      '/mcp',
+      new Response(JSON.stringify({
+        jsonrpc: '2.0',
+        id: null,
+        error: {
+          code: -32001,
+          message: 'stored token is no longer valid',
+          data: { auth_error_code: 'invalid_token' },
+        },
+      }), { status: 401 }),
+    )
+
+    expect(error.errorCode).toBe('invalid_token')
+    expect(error.authErrorCode).toBe('invalid_token')
+    expect(error.detail).toBe('stored token is no longer valid')
+  })
+
   it('does not reinterpret error prose as a typed error code', async () => {
     const error = await apiRequestErrorFromResponse(
       'POST',

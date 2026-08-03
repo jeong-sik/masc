@@ -768,16 +768,33 @@ let settlement_execution_for_occurrence state ~schedule_id ~due_at ~payload_dige
       (execution_matches_occurrence ~schedule_id ~due_at ~payload_digest)
       state.executions
   in
-  match
-    List.find_opt
+  let unsettled =
+    List.filter
       (fun (execution : execution_record) ->
          match execution.status with
          | Execution_running | Execution_dispatched -> true
          | Execution_succeeded | Execution_failed -> false)
       matches
-  with
-  | Some execution -> Some execution
-  | None -> List.hd_opt matches
+  in
+  let terminal =
+    List.filter
+      (fun (execution : execution_record) ->
+         match execution.status with
+         | Execution_running | Execution_dispatched -> false
+         | Execution_succeeded | Execution_failed -> true)
+      matches
+  in
+  match unsettled, terminal with
+  | [ execution ], _ -> Ok execution
+  | [], [ execution ] -> Ok execution
+  | [], [] ->
+    Error
+      (Invalid_status_transition
+         "schedule occurrence has no matching execution record")
+  | _ ->
+    Error
+      (Invalid_status_transition
+         "schedule occurrence has ambiguous matching execution records")
 ;;
 
 let settle_one_dispatched_occurrence
@@ -791,18 +808,11 @@ let settle_one_dispatched_occurrence
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     let* execution =
-      match
-        settlement_execution_for_occurrence
-          state
-          ~schedule_id
-          ~due_at
-          ~payload_digest
-      with
-      | Some execution -> Ok execution
-      | None ->
-        Error
-          (Invalid_status_transition
-             "schedule occurrence has no matching execution record")
+      settlement_execution_for_occurrence
+        state
+        ~schedule_id
+        ~due_at
+        ~payload_digest
     in
     let* next_state, updated, changed =
       settle_dispatched_occurrence_in_state

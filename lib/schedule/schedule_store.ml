@@ -29,7 +29,8 @@ type dispatched_occurrence_outcome =
   | Dispatched_occurrence_failed of string
 
 type dispatched_occurrence_settlement =
-  { schedule_id : string
+  { execution_id : string
+  ; schedule_id : string
   ; due_at : float
   ; payload_digest : string
   ; outcome : dispatched_occurrence_outcome
@@ -377,6 +378,13 @@ let execution_for_occurrence state ~schedule_id ~due_at ~payload_digest =
     state.executions
 ;;
 
+let execution_by_id state ~execution_id =
+  List.find_opt
+    (fun (execution : execution_record) ->
+       String.equal execution.execution_id execution_id)
+    state.executions
+;;
+
 let update_latest_running_execution executions ~schedule_id update =
   let rec loop acc = function
     | [] ->
@@ -409,6 +417,20 @@ let update_occurrence_execution
              ~due_at
              ~payload_digest
              execution ->
+      Ok (List.rev_append acc (update execution :: rest))
+    | execution :: rest -> loop (execution :: acc) rest
+  in
+  loop [] executions
+;;
+
+let update_execution_by_id executions ~execution_id update =
+  let rec loop acc = function
+    | [] ->
+      Error
+        (Invalid_status_transition
+           "schedule settlement has no matching execution id")
+    | (execution : execution_record) :: rest
+      when String.equal execution.execution_id execution_id ->
       Ok (List.rev_append acc (update execution :: rest))
     | execution :: rest -> loop (execution :: acc) rest
   in
@@ -666,16 +688,23 @@ let advance_current_recurring_occurrence
 ;;
 
 let settle_dispatched_occurrence_in_state ~now state settlement =
-  let { schedule_id; due_at; payload_digest; outcome } = settlement in
-  match
-    find_schedule state schedule_id,
-    execution_for_occurrence state ~schedule_id ~due_at ~payload_digest
-  with
+  let { execution_id; schedule_id; due_at; payload_digest; outcome } = settlement in
+  match find_schedule state schedule_id, execution_by_id state ~execution_id with
   | None, _ -> Error Schedule_not_found
   | Some _, None ->
     Error
       (Invalid_status_transition
-         "schedule occurrence has no matching execution record")
+         "schedule settlement has no matching execution id")
+  | Some _, Some execution
+    when not
+           (execution_matches_occurrence
+              ~schedule_id
+              ~due_at
+              ~payload_digest
+              execution) ->
+    Error
+      (Invalid_status_transition
+         "schedule settlement execution id does not match occurrence identity")
   | Some request, Some { status = Execution_succeeded; _ } ->
     (match outcome with
      | Dispatched_occurrence_succeeded -> Ok (state, request, false)
@@ -712,11 +741,9 @@ let settle_dispatched_occurrence_in_state ~now state settlement =
     in
     let schedules = replace_schedule state.schedules updated in
     let* executions =
-      update_occurrence_execution
+      update_execution_by_id
         state.executions
-        ~schedule_id
-        ~due_at
-        ~payload_digest
+        ~execution_id
         (fun execution ->
            match outcome with
            | Dispatched_occurrence_succeeded ->
@@ -735,11 +762,58 @@ let settle_dispatched_occurrence_in_state ~now state settlement =
     Ok ({ state with schedules; executions }, updated, true)
 ;;
 
-let settle_one_dispatched_occurrence config ~now settlement =
+let settlement_execution_for_occurrence state ~schedule_id ~due_at ~payload_digest =
+  let matches =
+    List.filter
+      (execution_matches_occurrence ~schedule_id ~due_at ~payload_digest)
+      state.executions
+  in
+  match
+    List.find_opt
+      (fun (execution : execution_record) ->
+         match execution.status with
+         | Execution_running | Execution_dispatched -> true
+         | Execution_succeeded | Execution_failed -> false)
+      matches
+  with
+  | Some execution -> Some execution
+  | None -> List.hd_opt matches
+;;
+
+let settle_one_dispatched_occurrence
+      config
+      ~now
+      ~schedule_id
+      ~due_at
+      ~payload_digest
+      ~outcome
+  =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
+    let* execution =
+      match
+        settlement_execution_for_occurrence
+          state
+          ~schedule_id
+          ~due_at
+          ~payload_digest
+      with
+      | Some execution -> Ok execution
+      | None ->
+        Error
+          (Invalid_status_transition
+             "schedule occurrence has no matching execution record")
+    in
     let* next_state, updated, changed =
-      settle_dispatched_occurrence_in_state ~now state settlement
+      settle_dispatched_occurrence_in_state
+        ~now
+        state
+        { execution_id = execution.execution_id
+        ; schedule_id
+        ; due_at
+        ; payload_digest
+        ; outcome
+        }
     in
     let* () =
       if changed
@@ -765,11 +839,10 @@ let complete_dispatched_occurrence
   settle_one_dispatched_occurrence
     config
     ~now
-    { schedule_id
-    ; due_at
-    ; payload_digest
-    ; outcome = Dispatched_occurrence_succeeded
-    }
+    ~schedule_id
+    ~due_at
+    ~payload_digest
+    ~outcome:Dispatched_occurrence_succeeded
 ;;
 
 let fail_dispatched_occurrence
@@ -782,11 +855,10 @@ let fail_dispatched_occurrence
   settle_one_dispatched_occurrence
     config
     ~now
-    { schedule_id
-    ; due_at
-    ; payload_digest
-    ; outcome = Dispatched_occurrence_failed error
-    }
+    ~schedule_id
+    ~due_at
+    ~payload_digest
+    ~outcome:(Dispatched_occurrence_failed error)
 ;;
 
 let settle_dispatched_occurrences config ~now settlements =

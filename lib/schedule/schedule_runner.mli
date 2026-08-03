@@ -43,9 +43,16 @@ type consumer_dispatch_error =
   | Retryable_dispatch_failure of string
   | Terminal_dispatch_rejection of string
 
+type acceptance_commit
+(** Opaque proof that the schedule ledger accepted the durable consumer work.
+    A consumer obtains it only from the runner-provided commit callback. *)
+
 type consumer_dispatch_result =
   | Work_completed of Yojson.Safe.t
-  | Work_accepted of Yojson.Safe.t
+  | Work_accepted of
+      { detail : Yojson.Safe.t
+      ; acceptance_commit : acceptance_commit
+      }
   | Work_failed of
       { error : string
       ; detail : Yojson.Safe.t
@@ -53,9 +60,10 @@ type consumer_dispatch_result =
 
 (** A consumer's answer about one occurrence it durably accepted.
 
-    [Work_accepted] hands ownership of an occurrence to the consumer and the
-    store keeps it [Execution_dispatched] until a correlated completion path
-    settles it. That contract assumes the consumer can still find the work. When
+    [Work_accepted] proves that the runner's schedule-ledger commit ran inside
+    the consumer's producer fence. The store keeps it [Execution_dispatched]
+    until a correlated completion path settles it. That contract assumes the
+    consumer can still find the work. When
     it cannot — its queue entry is gone and it holds no terminal evidence for
     the occurrence — nothing will ever settle it, because the settlement reader
     only runs while the occurrence is a dispatch candidate. This type lets the
@@ -83,6 +91,9 @@ type consumer =
       now:float ->
       wake_signal ->
       Schedule_domain.schedule_request ->
+      commit_acceptance:
+        (Yojson.Safe.t ->
+         (acceptance_commit, consumer_dispatch_error) result) ->
       (consumer_dispatch_result, consumer_dispatch_error) result
   ; settlements :
       Workspace_utils.config ->
@@ -160,8 +171,8 @@ val reclaim_lost_occurrences :
   Workspace_utils.config ->
   now:float ->
   (reclaim_outcome, runner_error) result
-(** Ask the consumer about every occurrence still [Execution_dispatched], and
-    settle the ones it reports as lost through [fail_dispatched_occurrence].
+(** Ask the consumer about every execution still [Execution_dispatched], and
+    settle the exact execution ids it reports as lost.
 
     This is the reverse direction of the consumer-side reconciliation that
     already exists: that one removes a consumer's queue entry once the

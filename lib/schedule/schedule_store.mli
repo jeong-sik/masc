@@ -35,7 +35,8 @@ type dispatched_occurrence_outcome =
   | Dispatched_occurrence_failed of string
 
 type dispatched_occurrence_settlement =
-  { schedule_id : string
+  { execution_id : string
+  ; schedule_id : string
   ; due_at : float
   ; payload_digest : string
   ; outcome : dispatched_occurrence_outcome
@@ -209,8 +210,10 @@ val settle_dispatched_occurrences :
   now:float ->
   dispatched_occurrence_settlement list ->
   (unit, store_error) result
-(** Validate and settle an exact batch under one schedule-ledger lock and one
-    durable write. Any invalid occurrence leaves the entire batch unchanged. *)
+(** Validate and settle an exact execution batch under one schedule-ledger lock
+    and one durable write. Every execution id must agree with the supplied
+    occurrence identity. Any invalid settlement leaves the entire batch
+    unchanged. *)
 
 val fail_running :
   Workspace_utils.config ->

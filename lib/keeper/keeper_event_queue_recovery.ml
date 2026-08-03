@@ -173,14 +173,23 @@ let project_generic_transfer_target_result
       transfer.to_keeper
       ~transfer
   with
-  | Keeper_registry_event_queue.Stimulus_enqueued
-  | Keeper_registry_event_queue.Stimulus_already_present ->
+  | Keeper_registry_event_queue.Transfer_projection_committed
+  | Keeper_registry_event_queue.Transfer_projection_already_committed ->
     wake_transfer_target ~base_path transfer.to_keeper;
     Ok ()
-  | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+  | Keeper_registry_event_queue.Transfer_projection_storage_error detail ->
     Error
       (Target_transfer_projection_failed
          { target_keeper = transfer.to_keeper; detail })
+  | Keeper_registry_event_queue.Transfer_projection_shutdown_reserved operation_id ->
+    Error
+      (Target_transfer_projection_failed
+         { target_keeper = transfer.to_keeper
+         ; detail =
+             Printf.sprintf
+               "target Keeper shutdown owns durable intake operation=%s"
+               (Keeper_shutdown_types.Operation_id.to_string operation_id)
+         })
 ;;
 
 let project_transfer_target_result ~base_path (entry : Persistence.outbox_entry) =

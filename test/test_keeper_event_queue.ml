@@ -1040,6 +1040,79 @@ let () =
         (Keeper_event_queue_state.accepted_transfer_projections recovered_target
          |> List.length));
 
+  (* A target shutdown reservation owns the same durable-intake fence as every
+     transfer producer, so no caller can recreate the purged target queue. *)
+  let base_path = temp_dir "keeper-event-queue-transfer-shutdown-fence" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let from_keeper = "keeper-transfer-shutdown-source" in
+      let to_keeper = "keeper-transfer-shutdown-target" in
+      stage_transfer
+        ~base_path
+        ~from_keeper
+        ~to_keeper
+        ~source:board_stim
+        ~owner_nonce:27
+        ~operation_id:"transfer-during-target-shutdown";
+      let transfer =
+        match
+          load_queue_state ~base_path ~keeper_name:from_keeper
+          |> Keeper_event_queue_state.transition_outbox
+        with
+        | [ { receipt = { transition = Transfer_accepted transfer; _ }; _ } ] ->
+          transfer
+        | _ -> Alcotest.fail "staged transfer authority was not recoverable"
+      in
+      let shutdown_operation_id =
+        Keeper_shutdown_types.Operation_id.generate ()
+      in
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path
+           ~keeper_name:to_keeper
+           ~operation_id:shutdown_operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         Alcotest.fail "fresh target shutdown was already reserved");
+      Fun.protect
+        ~finally:(fun () ->
+          ignore
+            (Masc.Keeper_turn_admission.rollback_shutdown
+               ~base_path
+               ~keeper_name:to_keeper
+               ~operation_id:shutdown_operation_id
+              : Masc.Keeper_turn_admission.rollback_shutdown_result))
+        (fun () ->
+           (match
+              Masc.Keeper_registry_event_queue
+              .project_accepted_transfer_durable_result
+                ~base_path
+                to_keeper
+                ~transfer
+            with
+            | Masc.Keeper_registry_event_queue
+              .Transfer_projection_shutdown_reserved actual_operation_id ->
+              Alcotest.(check bool)
+                "transfer reports exact shutdown owner"
+                true
+                (Keeper_shutdown_types.Operation_id.equal
+                   shutdown_operation_id
+                   actual_operation_id)
+            | _ -> Alcotest.fail "target transfer bypassed shutdown fence");
+           let target_state = load_queue_state ~base_path ~keeper_name:to_keeper in
+           Alcotest.(check int)
+             "shutdown-fenced transfer writes no target stimulus"
+             0
+             (Keeper_event_queue_state.pending target_state
+              |> Keeper_event_queue.length);
+           Alcotest.(check int)
+             "shutdown-fenced transfer writes no target receipt"
+             0
+             (Keeper_event_queue_state.accepted_transfer_projections target_state
+              |> List.length)));
+
   (* --- transfer recovery failure: target storage failure is typed and keeps
          the source outbox authoritative for a later retry. --- *)
   let base_path = temp_dir "keeper-event-queue-transfer-recovery-failure" in

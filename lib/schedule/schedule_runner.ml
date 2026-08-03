@@ -40,9 +40,14 @@ type consumer_dispatch_error =
   | Retryable_dispatch_failure of string
   | Terminal_dispatch_rejection of string
 
+type acceptance_commit = Acceptance_committed
+
 type consumer_dispatch_result =
   | Work_completed of Yojson.Safe.t
-  | Work_accepted of Yojson.Safe.t
+  | Work_accepted of
+      { detail : Yojson.Safe.t
+      ; acceptance_commit : acceptance_commit
+      }
   | Work_failed of
       { error : string
       ; detail : Yojson.Safe.t
@@ -62,6 +67,9 @@ type consumer =
       now:float ->
       wake_signal ->
       Schedule_domain.schedule_request ->
+      commit_acceptance:
+        (Yojson.Safe.t ->
+         (acceptance_commit, consumer_dispatch_error) result) ->
       (consumer_dispatch_result, consumer_dispatch_error) result
   ; settlements :
       Workspace_utils.config ->
@@ -324,7 +332,27 @@ let safe_consumer_dispatch config ~now consumer signal request =
       Error
         (Retryable_dispatch_failure
            ("consumer dispatch raised: " ^ Printexc.to_string exn)))
-    (fun () -> consumer.dispatch config ~now signal request)
+    (fun () ->
+       consumer.dispatch
+         config
+         ~now
+         signal
+         request
+         ~commit_acceptance:(fun detail ->
+           match
+             Schedule_store.accept_running
+               config
+               ~now
+               ~schedule_id:request.Schedule_domain.schedule_id
+               ~detail
+               ()
+           with
+           | Ok _ -> Ok Acceptance_committed
+           | Error error ->
+             Error
+               (Retryable_dispatch_failure
+                  ("schedule acceptance commit failed: "
+                   ^ Schedule_store.store_error_to_string error))))
 ;;
 
 let dispatch_candidate
@@ -368,14 +396,8 @@ let dispatch_candidate
              dispatch_result ~detail
                ~error:(Schedule_store.store_error_to_string err)
                occurrence_id schedule_id Dispatch_failed)
-        | Ok (Work_accepted detail) ->
-          (match Schedule_store.accept_running config ~now ~schedule_id ~detail () with
-           | Ok _ ->
-             dispatch_result ~detail occurrence_id schedule_id Dispatch_succeeded
-           | Error err ->
-             dispatch_result ~detail
-               ~error:(Schedule_store.store_error_to_string err)
-               occurrence_id schedule_id Dispatch_failed)
+        | Ok (Work_accepted { detail; acceptance_commit = Acceptance_committed }) ->
+          dispatch_result ~detail occurrence_id schedule_id Dispatch_succeeded
         | Ok (Work_failed { error; detail }) ->
           (match
              Schedule_store.fail_dispatched_occurrence
@@ -474,56 +496,43 @@ let reclaim_occurrence
         Occurrence_reclaim_failure { occurrence_id; error } :: acc.failures
     }
   in
+  let settle outcome =
+    Schedule_store.settle_dispatched_occurrences
+      config
+      ~now
+      [ { execution_id = execution.execution_id
+        ; schedule_id = execution.schedule_id
+        ; due_at = execution.due_at
+        ; payload_digest = execution.payload_digest
+        ; outcome
+        }
+      ]
+  in
   match settlement with
   | Error message -> fail acc message
   | Ok Consumer_holds_occurrence -> { acc with held = acc.held + 1 }
   | Ok Consumer_completed_occurrence ->
-    (match
-       Schedule_store.complete_dispatched_occurrence
-         config
-         ~now
-         ~schedule_id:execution.schedule_id
-         ~due_at:execution.due_at
-         ~payload_digest:execution.payload_digest
-         ()
+    (match settle Schedule_store.Dispatched_occurrence_succeeded
      with
-     | Ok _ -> { acc with settled_elsewhere = acc.settled_elsewhere + 1 }
+     | Ok () -> { acc with settled_elsewhere = acc.settled_elsewhere + 1 }
      | Error err -> fail acc (Schedule_store.store_error_to_string err))
   | Ok (Consumer_failed_occurrence reason) ->
     (match
-       Schedule_store.fail_dispatched_occurrence
-         config
-         ~now
-         ~schedule_id:execution.schedule_id
-         ~due_at:execution.due_at
-         ~payload_digest:execution.payload_digest
-         ~error:reason
+       settle (Schedule_store.Dispatched_occurrence_failed reason)
      with
-     | Ok _ -> { acc with settled_elsewhere = acc.settled_elsewhere + 1 }
+     | Ok () -> { acc with settled_elsewhere = acc.settled_elsewhere + 1 }
      | Error err -> fail acc (Schedule_store.store_error_to_string err))
   | Ok (Consumer_cancelled_occurrence reason) ->
     (match
-       Schedule_store.fail_dispatched_occurrence
-         config
-         ~now
-         ~schedule_id:execution.schedule_id
-         ~due_at:execution.due_at
-         ~payload_digest:execution.payload_digest
-         ~error:reason
+       settle (Schedule_store.Dispatched_occurrence_failed reason)
      with
-     | Ok _ -> { acc with settled_elsewhere = acc.settled_elsewhere + 1 }
+     | Ok () -> { acc with settled_elsewhere = acc.settled_elsewhere + 1 }
      | Error err -> fail acc (Schedule_store.store_error_to_string err))
   | Ok (Consumer_lost_occurrence reason) ->
     (match
-       Schedule_store.fail_dispatched_occurrence
-         config
-         ~now
-         ~schedule_id:execution.schedule_id
-         ~due_at:execution.due_at
-         ~payload_digest:execution.payload_digest
-         ~error:reason
+       settle (Schedule_store.Dispatched_occurrence_failed reason)
      with
-     | Ok _ -> { acc with reclaimed = acc.reclaimed + 1 }
+     | Ok () -> { acc with reclaimed = acc.reclaimed + 1 }
      | Error err -> fail acc (Schedule_store.store_error_to_string err))
 ;;
 

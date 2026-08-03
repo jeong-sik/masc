@@ -884,6 +884,7 @@ let dispatch_keeper_wake
       ~now
       (signal : Schedule_runner.wake_signal)
       (request : Schedule_domain.schedule_request)
+      ~commit_acceptance
       payload
   =
   let* keeper_name = terminal_dispatch_result (body_keeper_name payload) in
@@ -920,92 +921,96 @@ let dispatch_keeper_wake
   in
   let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
   let base_path = config.Workspace_utils.base_path in
-  let* acceptance =
-    match
-      Keeper_turn_admission.run_durable_intake_if_open
+  let dispatch_while_fenced () =
+    let* acceptance =
+      accept_keeper_wake_occurrence
         ~base_path
         ~keeper_name
-        (fun () ->
-           accept_keeper_wake_occurrence
-             ~base_path
-             ~keeper_name
-             ~stimulus_id
-             stimulus)
-    with
-    | Keeper_turn_admission.Intake_committed result -> result
-    | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
-      retryable_dispatch_failure
-        (Printf.sprintf
-           "scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"
-           keeper_name
-           (Keeper_shutdown_types.Operation_id.to_string operation_id))
-  in
-  let occurrence_status =
+        ~stimulus_id
+        stimulus
+    in
+    let occurrence_status =
+      match acceptance with
+      | Wake_required | Already_pending _ -> Keeper_wake_awaiting_ack
+      | Already_acked -> Keeper_wake_already_acked
+      | Already_failed _ -> Keeper_wake_already_failed
+      | Already_cancelled -> Keeper_wake_already_cancelled
+    in
+    let activation_outcome =
+      match acceptance with
+      | Already_acked | Already_failed _ | Already_cancelled ->
+        Keeper_wake_activation_not_required
+      | Wake_required ->
+        activation_outcome_for_required_wake
+          config
+          ~base_path
+          ~keeper_name
+      | Already_pending owner ->
+        activation_outcome_for_required_wake
+          config
+          ~base_path
+          ~keeper_name:owner
+    in
+    let activation_keeper_name =
+      match acceptance with
+      | Already_pending owner -> owner
+      | Wake_required | Already_acked | Already_failed _ | Already_cancelled ->
+        keeper_name
+    in
+    log_activation_outcome
+      ~schedule_id:request.schedule_id
+      ~keeper_name:activation_keeper_name
+      activation_outcome;
+    let detail =
+      `Assoc
+        ([ "kind", `String keeper_wake_enqueued_kind
+         ; "queue", `String keeper_event_queue_label
+         ; "stimulus", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
+         ; "stimulus_id", `String stimulus_id
+         ; "keeper_name", `String keeper_name
+         ; "schedule_id", `String request.schedule_id
+         ; "urgency", `String (Keeper_event_queue.urgency_to_string urgency)
+         ; "post_id", `String stimulus.post_id
+         ; ( "occurrence_status"
+           , `String (keeper_wake_occurrence_status_to_string occurrence_status) )
+         ]
+         @ keeper_wake_activation_outcome_json_fields activation_outcome
+         @ keeper_wake_reaction_ledger_status_json_fields
+             (Some Keeper_wake_reaction_ledger_recorded))
+    in
     match acceptance with
-    | Wake_required | Already_pending _ -> Keeper_wake_awaiting_ack
-    | Already_acked -> Keeper_wake_already_acked
-    | Already_failed _ -> Keeper_wake_already_failed
-    | Already_cancelled -> Keeper_wake_already_cancelled
+    | Wake_required | Already_pending _ ->
+      let* acceptance_commit = commit_acceptance detail in
+      Ok (Schedule_runner.Work_accepted { detail; acceptance_commit })
+    | Already_acked -> Ok (Schedule_runner.Work_completed detail)
+    | Already_failed reason ->
+      Ok (Schedule_runner.Work_failed { error = reason; detail })
+    | Already_cancelled ->
+      Ok
+        (Schedule_runner.Work_failed
+           { error =
+               Printf.sprintf
+                 "scheduled keeper occurrence %s was already cancelled"
+                 stimulus_id
+           ; detail
+           })
   in
-  let activation_outcome =
-    match acceptance with
-    | Already_acked | Already_failed _ | Already_cancelled ->
-      Keeper_wake_activation_not_required
-    | Wake_required ->
-      activation_outcome_for_required_wake
-        config
-        ~base_path
-        ~keeper_name
-    | Already_pending owner ->
-      activation_outcome_for_required_wake
-        config
-        ~base_path
-        ~keeper_name:owner
-  in
-  let activation_keeper_name =
-    match acceptance with
-    | Already_pending owner -> owner
-    | Wake_required | Already_acked | Already_failed _ | Already_cancelled ->
-      keeper_name
-  in
-  log_activation_outcome
-    ~schedule_id:request.schedule_id
-    ~keeper_name:activation_keeper_name
-    activation_outcome;
-  let detail =
-    `Assoc
-      ([ "kind", `String keeper_wake_enqueued_kind
-       ; "queue", `String keeper_event_queue_label
-       ; "stimulus", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
-       ; "stimulus_id", `String stimulus_id
-       ; "keeper_name", `String keeper_name
-       ; "schedule_id", `String request.schedule_id
-       ; "urgency", `String (Keeper_event_queue.urgency_to_string urgency)
-       ; "post_id", `String stimulus.post_id
-       ; ( "occurrence_status"
-         , `String (keeper_wake_occurrence_status_to_string occurrence_status) )
-       ]
-       @ keeper_wake_activation_outcome_json_fields activation_outcome
-       @ keeper_wake_reaction_ledger_status_json_fields
-           (Some Keeper_wake_reaction_ledger_recorded))
-  in
-  match acceptance with
-  | Wake_required | Already_pending _ -> Ok (Schedule_runner.Work_accepted detail)
-  | Already_acked -> Ok (Schedule_runner.Work_completed detail)
-  | Already_failed reason ->
-    Ok (Schedule_runner.Work_failed { error = reason; detail })
-  | Already_cancelled ->
-    Ok
-      (Schedule_runner.Work_failed
-         { error =
-             Printf.sprintf
-               "scheduled keeper occurrence %s was already cancelled"
-               stimulus_id
-         ; detail
-         })
+  match
+    Keeper_turn_admission.run_durable_intake_if_open
+      ~base_path
+      ~keeper_name
+      dispatch_while_fenced
+  with
+  | Keeper_turn_admission.Intake_committed result -> result
+  | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+    retryable_dispatch_failure
+      (Printf.sprintf
+         "scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"
+         keeper_name
+         (Keeper_shutdown_types.Operation_id.to_string operation_id))
 ;;
 
-let dispatch config ~now signal request =
+let dispatch config ~now signal request ~commit_acceptance =
   match Schedule_payload_projection.dispatch_view_detailed request with
   | Error rejection ->
     Error
@@ -1014,7 +1019,7 @@ let dispatch config ~now signal request =
   | Ok (kind, payload) ->
     (match kind with
      | Schedule_payload_projection.Keeper_wake ->
-       dispatch_keeper_wake config ~now signal request payload)
+       dispatch_keeper_wake config ~now signal request ~commit_acceptance payload)
 ;;
 
 let occurrence_stimulus_id (execution : Schedule_domain.execution_record) =
@@ -1107,7 +1112,8 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
         occurrence_id
         =
     let settlement outcome : Schedule_store.dispatched_occurrence_settlement =
-      { schedule_id = execution.schedule_id
+      { execution_id = execution.execution_id
+      ; schedule_id = execution.schedule_id
       ; due_at = execution.due_at
       ; payload_digest = execution.payload_digest
       ; outcome
@@ -1147,7 +1153,8 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
         disposition
     =
     let settlement outcome : Schedule_store.dispatched_occurrence_settlement =
-      { schedule_id = execution.schedule_id
+      { execution_id = execution.execution_id
+      ; schedule_id = execution.schedule_id
       ; due_at = execution.due_at
       ; payload_digest = execution.payload_digest
       ; outcome

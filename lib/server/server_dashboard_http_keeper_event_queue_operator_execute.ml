@@ -222,8 +222,8 @@ let execute_transfer ~base_path ~keeper_name prepared =
          transfer.to_keeper
          ~transfer
      with
-     | Keeper_registry_event_queue.Stimulus_enqueued
-     | Keeper_registry_event_queue.Stimulus_already_present ->
+     | Keeper_registry_event_queue.Transfer_projection_committed
+     | Keeper_registry_event_queue.Transfer_projection_already_committed ->
        ignore
          (Keeper_registry.wakeup_running
             ~intent:Keeper_registry.Broadcast_signal
@@ -231,10 +231,17 @@ let execute_transfer ~base_path ~keeper_name prepared =
             transfer.to_keeper :
             Keeper_registry.wakeup_outcome);
        Ok (transfer.source, transition_result_json source_result)
-     | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+     | Keeper_registry_event_queue.Transfer_projection_storage_error detail ->
        Ok
          ( transfer.source
-         , target_projection_failure_json source_result detail ))
+         , target_projection_failure_json source_result detail )
+     | Keeper_registry_event_queue.Transfer_projection_shutdown_reserved operation_id ->
+       let detail =
+         Printf.sprintf
+           "target Keeper shutdown owns durable intake operation=%s"
+           (Keeper_shutdown_types.Operation_id.to_string operation_id)
+       in
+       Ok (transfer.source, target_projection_failure_json source_result detail))
 ;;
 
 let execute_reprioritization

@@ -374,10 +374,20 @@ let target_enqueue config receipt transfer =
       transfer.Keeper_paused_work_disposition_receipt.to_keeper
       ~transfer:causal
   with
-  | Keeper_registry_event_queue.Stimulus_enqueued -> Ok Enqueued
-  | Keeper_registry_event_queue.Stimulus_already_present -> Ok Already_present
-  | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+  | Keeper_registry_event_queue.Transfer_projection_committed -> Ok Enqueued
+  | Keeper_registry_event_queue.Transfer_projection_already_committed ->
+    Ok Already_present
+  | Keeper_registry_event_queue.Transfer_projection_storage_error detail ->
     Error (Committed_projection_failed { stage = Target_enqueue; detail })
+  | Keeper_registry_event_queue.Transfer_projection_shutdown_reserved operation_id ->
+    Error
+      (Committed_projection_failed
+         { stage = Target_enqueue
+         ; detail =
+             Printf.sprintf
+               "target Keeper shutdown owns durable intake operation=%s"
+               (Keeper_shutdown_types.Operation_id.to_string operation_id)
+         })
 ;;
 
 let receipt_matches_accepted_transfer

@@ -169,6 +169,12 @@ type enqueue_stimulus_durable_result =
   | Stimulus_already_present
   | Stimulus_storage_error of string
 
+type transfer_projection_result =
+  | Transfer_projection_committed
+  | Transfer_projection_already_committed
+  | Transfer_projection_storage_error of string
+  | Transfer_projection_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+
 val enqueue_stimulus_durable_result :
   base_path:string
   -> string
@@ -185,10 +191,11 @@ val project_accepted_transfer_durable_result :
   base_path:string
   -> string
   -> transfer:accepted_transfer
-  -> enqueue_stimulus_durable_result
+  -> transfer_projection_result
 (** Strict target transfer projection. The exact source and operation identity
     are durably accounted in the target queue state before the pending
-    projection becomes visible. Accounting survives consumption. *)
+    projection becomes visible. Accounting survives consumption. A target
+    shutdown reservation rejects the projection before any durable mutation. *)
 
 val enqueue_hitl_resolution_durable_result :
   base_path:string

@@ -249,6 +249,12 @@ type enqueue_stimulus_durable_result =
   | Stimulus_already_present
   | Stimulus_storage_error of string
 
+type transfer_projection_result =
+  | Transfer_projection_committed
+  | Transfer_projection_already_committed
+  | Transfer_projection_storage_error of string
+  | Transfer_projection_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+
 let enqueue_stimulus_durable_result ~base_path name stimulus =
   match
     Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
@@ -264,16 +270,25 @@ let enqueue_stimulus_durable_result ~base_path name stimulus =
 
 let project_accepted_transfer_durable_result ~base_path name ~transfer =
   match
-    Keeper_event_queue_persistence.project_accepted_transfer_result
+    Keeper_turn_admission.run_durable_intake_if_open
       ~base_path
       ~keeper_name:name
-      ~after_commit:(publish_pending ~base_path name)
-      ~transfer
+      (fun () ->
+         Keeper_event_queue_persistence.project_accepted_transfer_result
+           ~base_path
+           ~keeper_name:name
+           ~after_commit:(publish_pending ~base_path name)
+           ~transfer)
   with
-  | Ok Keeper_event_queue_persistence.Transfer_projected -> Stimulus_enqueued
-  | Ok Keeper_event_queue_persistence.Transfer_already_projected ->
-    Stimulus_already_present
-  | Error detail -> Stimulus_storage_error detail
+  | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+    Transfer_projection_shutdown_reserved operation_id
+  | Keeper_turn_admission.Intake_committed result ->
+    (match result with
+     | Ok Keeper_event_queue_persistence.Transfer_projected ->
+       Transfer_projection_committed
+     | Ok Keeper_event_queue_persistence.Transfer_already_projected ->
+       Transfer_projection_already_committed
+     | Error detail -> Transfer_projection_storage_error detail)
 ;;
 
 let enqueue_hitl_resolution_durable_result

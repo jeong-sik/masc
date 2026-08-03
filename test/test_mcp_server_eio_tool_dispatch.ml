@@ -128,7 +128,7 @@ let test_tool_metadata_does_not_gate_heartbeat () =
   let original_metadata = Tool_catalog.metadata tool_name in
   Fun.protect
     ~finally:(fun () ->
-      Tool_catalog.register_metadata tool_name original_metadata;
+      Tool_catalog.For_testing.register_metadata tool_name original_metadata;
       cleanup_dir base_path)
     (fun () ->
       let state = Mcp_eio.For_testing.create_state ~base_path () in
@@ -154,7 +154,7 @@ let test_tool_metadata_does_not_gate_heartbeat () =
           (Masc_domain.agent_to_yojson { agent with last_seen = stale_last_seen })
       in
       let assert_heartbeat implementation_status label =
-        Tool_catalog.register_metadata
+        Tool_catalog.For_testing.register_metadata
           tool_name
           { original_metadata with implementation_status };
         set_stale_last_seen ();

@@ -986,7 +986,7 @@ let test_resolve_role_workspace_secret_grants_admin () =
   | Ok role -> fail (Printf.sprintf "expected Admin, got %s" (Masc_domain.show_agent_role role))
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
-let test_authorize_unknown_masc_tool_strict_worker_allowed () =
+let test_authorize_unknown_masc_tool_strict_denied () =
   let dir = setup_test_workspace () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
   let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Masc_domain.Worker in
@@ -999,8 +999,9 @@ let test_authorize_unknown_masc_tool_strict_worker_allowed () =
   in
   cleanup_test_workspace dir;
   match result with
-  | Ok () -> ()
-  | Error e -> fail (Masc_domain.masc_error_to_string e)
+  | Ok () -> fail "unregistered masc_* tool should be denied"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
 let test_authorize_unknown_non_masc_tool_strict_denied () =
   let dir = setup_test_workspace () in
@@ -1026,30 +1027,6 @@ let test_authorize_unknown_non_masc_tool_strict_denied () =
         (strict_unknown_tool_denial_count
            ~agent_name:"worker_agent" ~tool_class:"external")
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
-
-let test_authorize_unknown_masc_prefix_strict_worker_allowed () =
-  let prefixes_with_unlisted_tool = [ "masc_unlisted_tool" ] in
-  let dir = setup_test_workspace () in
-  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
-  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Masc_domain.Worker in
-  let result =
-    match create_result with
-    | Ok (raw_token, _) ->
-        List.fold_left
-          (fun acc tool_name ->
-             match acc with
-             | Error _ as e -> e
-             | Ok () ->
-                 Auth.authorize_tool dir ~agent_name:"worker_agent"
-                   ~token:(Some raw_token) ~tool_name)
-          (Ok ())
-          prefixes_with_unlisted_tool
-    | Error e -> Error e
-  in
-  cleanup_test_workspace dir;
-  match result with
-  | Ok () -> ()
-  | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_authorize_retired_dotted_tool_prefixes_strict_denied () =
   let retired_unlisted_tools =
@@ -1124,14 +1101,38 @@ let test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed () =
   | Ok () -> ()
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
-let test_authorize_tool_v2_unknown_internal_worker_allowed () =
+let test_authorize_tool_v2_unknown_internal_denied () =
   let result =
     Auth.authorize_tool_for_role ~agent_name:"worker_agent"
       ~role:Masc_domain.Worker ~tool_name:"masc_unlisted_tool"
   in
   match result with
-  | Ok () -> ()
-  | Error e -> fail (Masc_domain.masc_error_to_string e)
+  | Ok () -> fail "unregistered masc_* tool should be denied"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+let test_authorize_tool_v2_enforces_catalog_permission () =
+  List.iter
+    (fun tool_name ->
+       (match
+          Auth.authorize_tool_for_role
+            ~agent_name:"worker_agent"
+            ~role:Masc_domain.Worker
+            ~tool_name
+        with
+        | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+        | Ok () -> fail (tool_name ^ " unexpectedly accepted Worker")
+        | Error e -> fail (Masc_domain.masc_error_to_string e));
+       match
+         Auth.authorize_tool_for_role
+           ~agent_name:"admin_agent"
+           ~role:Masc_domain.Admin
+           ~tool_name
+       with
+       | Ok () -> ()
+       | Error e -> fail (Masc_domain.masc_error_to_string e))
+    [ "masc_start"; "masc_reset"; "masc_keeper_down" ]
+;;
 
 let test_authorize_tool_v2_unknown_keeper_prefix_strict_denied () =
   let result =
@@ -1260,20 +1261,20 @@ let () =
         `Quick test_resolve_role_rejects_agent_name_impersonation_without_token;
       test_case "resolve_role workspace secret grants admin"
         `Quick test_resolve_role_workspace_secret_grants_admin;
-      test_case "strict unknown masc tool allows worker"
-        `Quick test_authorize_unknown_masc_tool_strict_worker_allowed;
+      test_case "strict unknown masc tool denied"
+        `Quick test_authorize_unknown_masc_tool_strict_denied;
       test_case "strict unknown non-masc tool denied"
         `Quick test_authorize_unknown_non_masc_tool_strict_denied;
-      test_case "strict unknown masc prefix allows worker"
-        `Quick test_authorize_unknown_masc_prefix_strict_worker_allowed;
       test_case "strict retired dotted tool prefixes denied"
         `Quick test_authorize_retired_dotted_tool_prefixes_strict_denied;
       test_case "strict known keeper tool allows worker"
         `Quick test_authorize_known_keeper_tool_strict_worker_allowed;
       test_case "strict v2 known keeper tool allows worker"
         `Quick test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed;
-      test_case "strict v2 unknown internal tool allows worker"
-        `Quick test_authorize_tool_v2_unknown_internal_worker_allowed;
+      test_case "strict v2 unknown internal tool denied"
+        `Quick test_authorize_tool_v2_unknown_internal_denied;
+      test_case "strict v2 catalog permission enforced"
+        `Quick test_authorize_tool_v2_enforces_catalog_permission;
       test_case "strict v2 fake keeper prefix denied"
         `Quick test_authorize_tool_v2_unknown_keeper_prefix_strict_denied;
       test_case "tool auth strict env cannot disable fail-closed"

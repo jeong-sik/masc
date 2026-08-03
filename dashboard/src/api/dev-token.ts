@@ -13,6 +13,7 @@ import {
 const DEV_TOKEN_FETCH_TIMEOUT_MS = 3000
 
 let devTokenBootstrapPromise: Promise<void> | null = null
+let devTokenRefreshPromise: Promise<boolean> | null = null
 
 /**
  * Tracks the outcome of the loopback dev-token bootstrap so the UI can
@@ -134,11 +135,21 @@ export function resetDevTokenBootstrap(): void {
 
 export async function refreshDevTokenAfterAuthError(code: unknown): Promise<boolean> {
   if (!isRefreshableDashboardAuthCode(code)) return false
-  if (isRemoteAccess() || !getStoredToken()) return false
+  if (isRemoteAccess()) return false
   if (getStoredTokenMeta()?.source === 'manual') return false
+  if (devTokenRefreshPromise) return devTokenRefreshPromise
+  if (!getStoredToken()) return false
 
-  clearStoredToken()
-  resetDevTokenBootstrap()
-  await ensureDevToken()
-  return getStoredTokenMeta()?.source === 'dev' && getStoredToken() !== null
+  const refresh = (async () => {
+    clearStoredToken()
+    resetDevTokenBootstrap()
+    await ensureDevToken()
+    return getStoredTokenMeta()?.source === 'dev' && getStoredToken() !== null
+  })()
+  devTokenRefreshPromise = refresh
+  try {
+    return await refresh
+  } finally {
+    if (devTokenRefreshPromise === refresh) devTokenRefreshPromise = null
+  }
 }

@@ -302,6 +302,8 @@ val is_tool_auth_strict_enabled : unit -> bool
 val authorize_tool :
   string -> agent_name:string -> token:string option ->
   tool_name:string -> (unit, masc_error) result
+(** Enforce the exact required permission declared by the registered tool
+    catalog. Unregistered names fail closed; prefixes grant no authority. *)
 
 (** {1 Role Resolution} *)
 
@@ -316,6 +318,7 @@ val resolve_role_with_auth_config :
 val authorize_tool_for_role :
   agent_name:string -> role:agent_role -> tool_name:string ->
   (unit, masc_error) result
+(** Pure role check against the same catalog-owned per-tool permission. *)
 
 val authorize_tool_v2 :
   string -> agent_name:string -> token:string option ->

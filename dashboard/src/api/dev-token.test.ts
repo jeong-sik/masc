@@ -152,4 +152,42 @@ describe('ensureDevToken', () => {
     await expect(refreshDevTokenAfterAuthError('insufficient_role')).resolves.toBe(false)
     expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
   })
+
+  it('coalesces concurrent stale-token recovery onto one refresh', async () => {
+    let token: string | null = 'stale-token'
+    let meta: { source: 'dev'; actor: 'dashboard'; role: 'worker' } | null = {
+      source: 'dev',
+      actor: 'dashboard',
+      role: 'worker',
+    }
+    let resolveFetch!: (response: Response) => void
+    const pendingFetch = new Promise<Response>((resolve) => {
+      resolveFetch = resolve
+    })
+    getStoredToken.mockImplementation(() => token)
+    getStoredTokenMeta.mockImplementation(() => meta)
+    clearStoredToken.mockImplementation(() => {
+      token = null
+      meta = null
+    })
+    setStoredToken.mockImplementation((nextToken, nextMeta) => {
+      token = nextToken
+      meta = nextMeta
+    })
+    fetchWithTimeout.mockReturnValueOnce(pendingFetch)
+
+    const first = refreshDevTokenAfterAuthError('invalid_token')
+    const second = refreshDevTokenAfterAuthError('token_expired')
+    expect(clearStoredToken).toHaveBeenCalledTimes(1)
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
+
+    resolveFetch(jsonResponse({
+      token: 'fresh-token',
+      actor: 'dashboard',
+      role: 'worker',
+    }))
+
+    await expect(Promise.all([first, second])).resolves.toEqual([true, true])
+    expect(token).toBe('fresh-token')
+  })
 })

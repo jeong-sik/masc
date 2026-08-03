@@ -76,7 +76,8 @@ val create :
 val register : t -> unit
 (** Register a tool spec into all dispatch subsystems atomically:
     - [Tool_dispatch.register_module_tag] (tag + schema)
-    - [Tool_catalog.register_metadata] (visibility and semantic flags)
+    - [Tool_catalog.register_runtime_metadata] (visibility and semantic flags,
+      preserving the catalog-owned permission)
 
     @raise Invalid_argument if [name] is empty. *)
 

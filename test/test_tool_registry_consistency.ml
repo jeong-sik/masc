@@ -180,6 +180,19 @@ let test_keeper_schemas_have_explicit_execution_policy () =
     errors
 ;;
 
+let test_every_registered_schema_has_catalog_permission () =
+  init ();
+  let missing =
+    Tool_dispatch.all_schema_names ()
+    |> List.filter (fun name ->
+      Option.is_none (Tool_catalog.registered_metadata name))
+  in
+  Alcotest.(check (list string))
+    "every registered schema has catalog-owned permission metadata"
+    []
+    missing
+;;
+
 let test_retired_tools_are_absent () =
   init ();
   (* Only fully retired tools — no live dispatch handler and no keeper
@@ -240,6 +253,10 @@ let () =
             "Keeper schemas have explicit execution policy"
             `Quick
             test_keeper_schemas_have_explicit_execution_policy
+        ; test_case
+            "every registered schema has catalog permission"
+            `Quick
+            test_every_registered_schema_has_catalog_permission
         ] )
     ; ( "retired_tools"
       , [ test_case "retired tools are absent" `Quick test_retired_tools_are_absent

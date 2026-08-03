@@ -25,6 +25,22 @@ let read_file path =
       let len = in_channel_length ic in
       really_input_string ic len)
 
+let write_file path content =
+  let oc = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let contains_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec loop index =
+    if index + needle_len > haystack_len then false
+    else if String.sub haystack index needle_len = needle then true
+    else loop (index + 1)
+  in
+  String.equal needle "" || loop 0
+
 let trim_cr s =
   let n = String.length s in
   if n > 0 && s.[n - 1] = '\r' then String.sub s 0 (n - 1) else s
@@ -427,7 +443,7 @@ let with_server f =
   end;
   Fun.protect ~finally:cleanup (fun () ->
     let auth_token = dashboard_dev_token ~port in
-    f ~port ~auth_token)
+    f ~port ~auth_token ~base_path)
 
 let check_status label expected result =
   match result.status with
@@ -519,7 +535,7 @@ let publish_masc_broadcast ~port ~auth_token ~session_id =
            result.body)
 
 let test_mcp_reconnect_stays_accepted () =
-  with_server @@ fun ~port ~auth_token ->
+  with_server @@ fun ~port ~auth_token ~base_path:_ ->
   let sid = initialize_mcp_session ~port ~auth_token in
   let headers =
     [
@@ -661,7 +677,7 @@ let test_ag_ui_frames_are_wire_encoded () =
     first_masc_events
 
 let test_dashboard_dev_token_cannot_call_admin_route () =
-  with_server @@ fun ~port ~auth_token ->
+  with_server @@ fun ~port ~auth_token ~base_path:_ ->
   let result =
     run_curl
       ~headers:
@@ -677,8 +693,38 @@ let test_dashboard_dev_token_cannot_call_admin_route () =
       ()
   in
   check_status "dashboard Worker token denied CanAdmin route" 403 result
+let test_dashboard_dev_token_cannot_reset_workspace () =
+  with_server @@ fun ~port ~auth_token ~base_path ->
+  let session_id = initialize_mcp_session ~port ~auth_token in
+  let sentinel =
+    Filename.concat (Filename.concat base_path ".masc") "reset-denial-sentinel"
+  in
+  write_file sentinel "must-survive";
+  let result =
+    run_curl
+      ~headers:
+        [ ("Accept", "application/json, text/event-stream")
+        ; ("Authorization", "Bearer " ^ auth_token)
+        ; ("Content-Type", "application/json")
+        ; ("Mcp-Session-Id", session_id)
+        ]
+      ~method_:"POST"
+      ~body:
+        {|{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"masc_reset","arguments":{"confirm":true}}}|}
+      ~max_time:2.0
+      ~port
+      ~path:"/mcp"
+      ()
+  in
+  check_status "dashboard Worker reset request completed as MCP rejection" 200 result;
+  check bool
+    "reset denial is typed"
+    true
+    (contains_substring ~needle:"\"auth_error_code\":\"insufficient_role\"" result.body);
+  check bool "workspace sentinel survives denied reset" true (Sys.file_exists sentinel);
+  check string "workspace sentinel content survives" "must-survive" (read_file sentinel)
 let test_ag_ui_rejects_reconnect_then_recovers () =
-  with_server @@ fun ~port ~auth_token ->
+  with_server @@ fun ~port ~auth_token ~base_path:_ ->
   let sid = initialize_mcp_session ~port ~auth_token in
   (* /ag-ui/events uses the observer SSE auth path; mirror /mcp by passing the
      dashboard dev token explicitly. *)
@@ -761,6 +807,10 @@ let () =
             "dev-token cannot call admin route"
             `Slow
             test_dashboard_dev_token_cannot_call_admin_route
+        ; test_case
+            "dev-token cannot reset workspace through MCP"
+            `Slow
+            test_dashboard_dev_token_cannot_reset_workspace
         ] )
     ; ("mcp", [test_case "follow-up reconnect accepted" `Slow test_mcp_reconnect_stays_accepted])
      ; ( "ag_ui"

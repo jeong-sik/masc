@@ -55,6 +55,7 @@ type metadata = {
   readonly : bool option;
   mcp_context_required : bool option;
   idempotent : bool option;
+  required_permission : Masc_domain.permission;
 }
 
 type execution_policy_axis =
@@ -128,6 +129,7 @@ let default_metadata =
     readonly = None;
     mcp_context_required = None;
     idempotent = None;
+    required_permission = Masc_domain.CanBroadcast;
   }
 
 (* Runtime-readable so tests and local admin flows can toggle placeholder
@@ -152,6 +154,7 @@ let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden =
     readonly = None;
     mcp_context_required = None;
     idempotent = None;
+    required_permission = Masc_domain.CanBroadcast;
   }
 
 let with_semantic_flags ?readonly ?mcp_context_required ?idempotent meta =
@@ -180,11 +183,16 @@ let with_execution_policy
     meta
 ;;
 
+let with_required_permission required_permission meta =
+  { meta with required_permission }
+;;
+
 let readonly_tool =
   with_execution_policy
     ~readonly:true
     ~idempotent:false
     default_metadata
+  |> with_required_permission Masc_domain.CanReadState
 
 let mutating_tool =
   with_execution_policy
@@ -200,10 +208,13 @@ let masc_workspace_tool =
 
 let read_state_tool = readonly_tool
 let broadcast_tool = masc_workspace_tool
-let add_task_tool = masc_workspace_tool
-let claim_task_tool = masc_workspace_tool
-let complete_task_tool = masc_workspace_tool
-let reset_tool = mutating_tool
+let add_task_tool = with_required_permission Masc_domain.CanAddTask masc_workspace_tool
+let claim_task_tool = with_required_permission Masc_domain.CanClaimTask masc_workspace_tool
+let complete_task_tool = with_required_permission Masc_domain.CanCompleteTask masc_workspace_tool
+let vote_tool = with_required_permission Masc_domain.CanVote masc_workspace_tool
+let init_tool = with_required_permission Masc_domain.CanInit mutating_tool
+let reset_tool = with_required_permission Masc_domain.CanReset mutating_tool
+let admin_tool = with_required_permission Masc_domain.CanAdmin mutating_tool
 
 let hidden_runtime_tool reason meta =
   {
@@ -248,34 +259,44 @@ let explicit_metadata : (string * metadata) list =
        masc_admin_reset, masc_gc_force, masc_workspace_delete, masc_force_unbind,
        masc_execute) removed — no dispatch path, no schema, no caller. *)
     ( "masc_operator_action",
-      hidden_active "Internal operator-action route; hidden from the public tool surface." );
+      with_required_permission
+        Masc_domain.CanAdmin
+        (hidden_active "Internal operator-action route; hidden from the public tool surface.") );
     ( "masc_operator_board_attention_quarantine_requeue",
       with_execution_policy
         ~readonly:false
         ~idempotent:true
-        (hidden_active
+        (with_required_permission
+           Masc_domain.CanAdmin
+           (hidden_active
            ~allow_direct_call_when_hidden:false
-           "Operator-profile-only exact recovery of one Board-attention quarantine.") );
+           "Operator-profile-only exact recovery of one Board-attention quarantine.")) );
     ( "masc_operator_chat_recovery_resolve",
       with_execution_policy
         ~readonly:false
         ~idempotent:false
-        (hidden_active
+        (with_required_permission
+           Masc_domain.CanAdmin
+           (hidden_active
            ~allow_direct_call_when_hidden:false
-           "Operator-profile-only exact recovery of one crash-ambiguous Keeper chat receipt.") );
+           "Operator-profile-only exact recovery of one crash-ambiguous Keeper chat receipt.")) );
     ( "masc_operator_task_recovery_resolve",
       with_execution_policy
         ~readonly:false
         ~idempotent:false
-        (hidden_active
+        (with_required_permission
+           Masc_domain.CanAdmin
+           (hidden_active
            ~allow_direct_call_when_hidden:false
-           "Operator-profile-only exact owner/version recovery of one Task.") );
+           "Operator-profile-only exact owner/version recovery of one Task.")) );
     ( "masc_set_param",
-      hidden_active
-        "Internal HTTP runtime-parameter mutation route; hidden from the public tool surface." );
+      with_required_permission
+        Masc_domain.CanAdmin
+        (hidden_active
+           "Internal HTTP runtime-parameter mutation route; hidden from the public tool surface.") );
     (* Catalog-owned permissions for split/lazily registered tool modules. *)
     ("masc_reset", reset_tool);
-    ("masc_start", with_semantic_flags ~mcp_context_required:true broadcast_tool);
+    ("masc_start", with_semantic_flags ~mcp_context_required:true init_tool);
     ("masc_task_history", read_state_tool);
     ("masc_add_task", add_task_tool);
     ("masc_batch_add_tasks", add_task_tool);
@@ -299,10 +320,10 @@ let explicit_metadata : (string * metadata) list =
     ("masc_keeper_sandbox_status", read_state_tool);
     ("masc_keeper_waiting_inventory", read_state_tool);
     ("masc_keeper_up", broadcast_tool);
-    ("masc_keeper_down", mutating_tool);
+    ("masc_keeper_down", admin_tool);
     ("masc_keeper_compact", broadcast_tool);
-    ("masc_keeper_clear", mutating_tool);
-    ("masc_keeper_reset", mutating_tool);
+    ("masc_keeper_clear", admin_tool);
+    ("masc_keeper_reset", reset_tool);
     ("masc_plan_get_task", read_state_tool);
     ("masc_plan_clear_task", broadcast_tool);
     ("masc_note_add", broadcast_tool);
@@ -330,22 +351,37 @@ let explicit_metadata : (string * metadata) list =
     ("masc_board_sub_board_list", read_state_tool);
     ("masc_board_sub_board_get", read_state_tool);
     ("masc_board_post", broadcast_tool);
+    ("masc_board_post_update", broadcast_tool);
     ("masc_board_comment", broadcast_tool);
-    ("masc_board_vote", broadcast_tool);
-    ("masc_board_comment_vote", broadcast_tool);
-    ("masc_board_reaction", broadcast_tool);
+    ("masc_board_vote", vote_tool);
+    ("masc_board_comment_vote", vote_tool);
+    ("masc_board_reaction", vote_tool);
     ("masc_board_sub_board_create", broadcast_tool);
     ("masc_board_sub_board_update", broadcast_tool);
     ("masc_board_sub_board_delete", broadcast_tool);
-    ("masc_board_cleanup", mutating_tool);
-    ("masc_board_delete", mutating_tool);
+    ("masc_board_cleanup", admin_tool);
+    ("masc_board_delete", admin_tool);
     ("masc_tool_stats", read_state_tool);
+    ("masc_gc", admin_tool);
     ("masc_pause", broadcast_tool);
     ("masc_resume", broadcast_tool);
+    ("masc_pause_status", read_state_tool);
     ("masc_run_get", broadcast_tool);
     ("masc_run_list", read_state_tool);
     ("masc_run_init", broadcast_tool);
     ("masc_run_plan", broadcast_tool);
+    ("masc_schedule_create", broadcast_tool);
+    ("masc_schedule_list", read_state_tool);
+    ("masc_schedule_get", read_state_tool);
+    ("masc_schedule_cancel", broadcast_tool);
+    ("masc_fusion", broadcast_tool);
+    ("masc_fusion_status", read_state_tool);
+    ("masc_library_list", read_state_tool);
+    ("masc_library_read", read_state_tool);
+    ("masc_library_add", broadcast_tool);
+    ("masc_library_promote", broadcast_tool);
+    ("masc_library_search", read_state_tool);
+    ("masc_session", read_state_tool);
     ( "keeper_tasks_list",
       hidden_runtime_tool
         "Keeper task-list runtime tool; callable but hidden from the public MCP schema surface."
@@ -388,11 +424,29 @@ let explicit_metadata : (string * metadata) list =
 let metadata_table : (string, metadata) Hashtbl.t = Hashtbl.create 256
 let () = List.iter (fun (n, m) -> Hashtbl.replace metadata_table n m) explicit_metadata
 
-let register_metadata name (meta : metadata) =
+let register_metadata_for_testing name (meta : metadata) =
   Hashtbl.replace metadata_table name meta
+
+let register_runtime_metadata name (meta : metadata) =
+  match Hashtbl.find_opt metadata_table name with
+  | None ->
+    Error
+      (Printf.sprintf
+         "tool %s has no catalog-owned required permission"
+         name)
+  | Some authority ->
+    Hashtbl.replace
+      metadata_table
+      name
+      { meta with required_permission = authority.required_permission };
+    Ok ()
 
 let registered_metadata name =
   Hashtbl.find_opt metadata_table name
+
+module For_testing = struct
+  let register_metadata = register_metadata_for_testing
+end
 
 (* ================================================================ *)
 (* Public MCP surface — delegates to Tool_catalog_surfaces (SSOT)   *)
@@ -490,6 +544,8 @@ let metadata_to_fields name =
       ("visibility", `String (visibility_to_string meta.visibility));
       ("lifecycle", `String (lifecycle_to_string meta.lifecycle));
       ("implementationStatus", `String (implementation_status_to_string meta.implementation_status));
+      ( "requiredPermission"
+      , `String (Masc_domain.permission_to_string meta.required_permission) );
     ]
   in
   let with_canonical =

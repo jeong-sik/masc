@@ -351,14 +351,14 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-connector-ambient-attention-wake | Connector ambient attention wake: drive an idle keeper turn from external-att... | Draft | - |
 | RFC-connector-deferred-reply-via-chat-queue | Durable Keeper chat receipts and connector delivery settlement | Active | - |
 | RFC-eliminate-substring-destructive-classifier | Withdrawn command-policy classification experiment | Withdrawn | - |
-| RFC-keeper-conversation-hitl-flow | # RFC: Keeper conversation and non-blocking HITL | Draft | - |
-| RFC-keeper-media-degrade-floor | # RFC: Withdraw silent media degradation | Draft | - |
+| RFC-keeper-conversation-hitl-flow | Keeper conversation and non-blocking HITL | Draft | - |
+| RFC-keeper-media-degrade-floor | Withdraw silent media degradation | Draft | - |
 | RFC-keeper-memory-bank-write-reduction | Keeper memory-bank near-dup accumulation — write reduction, not write-boundar... | Superseded | - |
 | RFC-keeper-memory-consolidation | Keeper durable memory consolidation — deprecate memory_bank into Memory OS | Implemented | - |
 | RFC-keeper-memory-panel-real-data | Keeper memory panel: real-data backing (no fabrication, no score resurrection) | Superseded | - |
 | RFC-keeper-runtime-context-observation-phase0 | Keeper runtime context observation Phase 0 | Draft | - |
 | RFC-keeper-vision-delegation-tool | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | - |
-| RFC-memory-os-bounded-context-and-librarian-curator | # RFC: Memory OS 2.0 — bounded working set 전송 계약과 librarian curator 계약 | Draft | - |
+| RFC-memory-os-bounded-context-and-librarian-curator | Memory OS 2.0 — bounded working set 전송 계약과 librarian curator 계약 | Draft | - |
 | RFC-runtime-note-field-and-dashboard-surfacing | Per-runtime note field & dashboard surfacing | Draft | - |
 | RFC-typed-egress-resource-capability | Withdraw product-specific egress effect classification | Withdrawn | - |
 

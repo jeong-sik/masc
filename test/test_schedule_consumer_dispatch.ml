@@ -758,7 +758,7 @@ let test_reclaim_follows_transfer_durable_state () =
   | _ -> fail "checkpoint reload lost the terminal occurrence disposition"
 ;;
 
-let test_keeper_wake_durable_enqueue_failure_retries_same_occurrence () =
+let test_keeper_wake_durable_state_failure_retries_same_occurrence () =
   with_workspace
   @@ fun config ->
   let keeper_owner_path =
@@ -778,8 +778,8 @@ let test_keeper_wake_durable_enqueue_failure_retries_same_occurrence () =
      check bool "storage failure is explicit" true
        (String_util.contains_substring
           message
-          "scheduled keeper wake durable enqueue failed")
-   | _ -> fail "durable enqueue failure must not report dispatch success");
+          "scheduled keeper wake durable state read failed")
+   | _ -> fail "durable state read failure must not report dispatch success");
   (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
    | None -> fail "schedule missing"
    | Some stored ->
@@ -1614,8 +1614,8 @@ let () =
             test_reclaim_uses_occurrence_keeper_after_recurring_request_update
         ; test_case "reclaim follows durable transfer state" `Quick
             test_reclaim_follows_transfer_durable_state
-        ; test_case "keeper wake durable enqueue retries same occurrence" `Quick
-            test_keeper_wake_durable_enqueue_failure_retries_same_occurrence
+        ; test_case "keeper wake durable state failure retries same occurrence" `Quick
+            test_keeper_wake_durable_state_failure_retries_same_occurrence
         ; test_case "cancelled occurrence recovery does not enqueue again"
             `Quick
             test_cancelled_occurrence_recovery_does_not_enqueue_again

@@ -599,6 +599,11 @@ let owner_index_result cache ~base_path keeper_name =
     let result =
       let* state =
         Keeper_registry_event_queue.durable_state_result ~base_path keeper_name
+        |> Result.map_error (fun detail ->
+          Printf.sprintf
+            "scheduled keeper wake durable state read failed keeper=%s: %s"
+            keeper_name
+            detail)
       in
       durable_occurrence_index state
     in

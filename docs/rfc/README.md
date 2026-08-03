@@ -52,7 +52,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0000 | MASC × OAS Consolidated Master Design (SSOT) | Draft | - |
 | 0001 | Withdraw heuristic uncertainty governance | Withdrawn | - |
 | 0002 | Keeper 11-State Machine + Det/NonDet Boundary Formalization | reference | - |
-| 0003 | Withdraw composite lifecycle projection hierarchy | Withdrawn | - |
+| 0003 | Withdraw composite lifecycle projection hierarchy | Withdrawn | RFC-0003-phase-2-turn-observation-lifecycle.md |
 | 0004 | OCaml ↔ TypeScript shared contract — SSE + gRPC-web | Active | - |
 | 0005 | Withdraw the typed command-policy substrate | Withdrawn | - |
 | 0006 | Keeper Surface And Sandbox | Draft | - |
@@ -64,14 +64,14 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0022 | Withdraw MASC attempt budgets and provider demotion | Withdrawn | - |
 | 0024 | Ollama Runtime Integration + KV Cache Optimization | Draft | - |
 | 0025 | Tiered Small-Model Runtime (4B → 9B → 70B+) | Draft | - |
-| 0027 | Retired tension and meta-cognition draft | Superseded | - |
+| 0027 | Withdraw MASC capability profiles (`RFC-0027-capability-typed-runtime.md`)<br>Retired tension and meta-cognition draft (`RFC-0027-tension-type-safety.md`) | Draft<br>Superseded | - |
 | 0029 | Dashboard Fiber-Batched Aggregation | Active | - |
 | 0032 | Environment Knob Unification | Draft | - |
-| 0034 | d — release_stale_claims agent-side sync | Draft | - |
+| 0034 | v2: Withdraw per-Goal Task caps (`RFC-0034-cap-all-callers.md`)<br>Task Oscillation Mitigation (Cooldown + Severe-Level Human Escalation) (`RFC-0034-task-oscillation-mitigation.md`) | Draft<br>Draft | - |
 | 0035 | Cognitive IDE Master Plan Integration | Draft | - |
-| 0036 | oas Cognitive Mapping (companion to RFC-0035) | Draft | - |
-| 0037 | Local-first Keeper Enablement: Harness/User Boundary | Draft | - |
-| 0038 | Withdraw MASC capability-routing plan | Withdrawn | RFC-0038-phase-2-keeper-identity-canonical.md |
+| 0036 | Multi-Keeper Docker Orchestration & Lifecycle Cleanup (`RFC-0036-multi-keeper-docker-orchestration.md`)<br>oas Cognitive Mapping (companion to RFC-0035) (`RFC-0036-oas-cognitive-mapping.md`) | Draft<br>Draft | - |
+| 0037 | Board Multimedia & Vision — Eio/File-Based Adaptation (`RFC-0037-board-multimedia-vision-adapted.md`)<br>Local-first Keeper Enablement: Harness/User Boundary (`RFC-0037-local-first-keeper-enablement-boundary.md`) | Draft<br>Draft | - |
+| 0038 | Opaque Identifier Types for Provider, Runtime, Model (`RFC-0038-opaque-identifier-types.md`)<br>Withdraw MASC capability-routing plan (`RFC-0038-runtime-routing-intent-preservation.md`) | Draft<br>Withdrawn | RFC-0038-phase-2-keeper-identity-canonical.md |
 | 0041 | Withdraw runtime group/item hierarchy | Withdrawn | - |
 | 0042 | Withdraw Keeper terminal-reason hierarchy | Withdrawn | - |
 | 0043 | Distribute legacy metrics backend metric ownership to domain modules | Active | - |
@@ -90,7 +90,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0058 | Withdraw terminal capability hierarchy | Withdrawn | RFC-0058-phase-5-erase-provider-variant.md |
 | 0062 | Typed `Tool_result.t` + Typed `Sdk_*` Blocker Class (Reverse-Engineered Initi... | Draft | - |
 | 0063 | Telemetry Feedback Loop & Cooperative Scheduling Safety | Draft | - |
-| 0064 | Descriptor-Owned Tool Surface | Superseded | - |
+| 0064 | Capacity Probe Adapter (`RFC-0064-capacity-probe-adapter.md`)<br>Descriptor-Owned Tool Surface (`RFC-0064-two-surface-tool-alias.md`) | Active<br>Superseded | - |
 | 0065 | Withdraw policy-bearing tool-selection model | Withdrawn | - |
 | 0067 | Goal-Scope Observation→Claim Atomicity | Draft | - |
 | 0068 | Withdraw operator disposition hierarchy | Withdrawn | - |
@@ -129,8 +129,8 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0104 | Withdraw Task-to-repository authorization | Withdrawn | - |
 | 0105 | OpenAI-compat boundary: Agent_sdk.Error.t → HTTP status + typed envelope | Implemented | - |
 | 0106 | Cancel-safe try-with discipline (Eio.Cancel.Cancelled propagation) | Active | - |
-| 0107 | Outbound HTTP stack consolidation — pooled keep-alive, scoped Switch, Docker ... | Active | - |
-| 0108 | PR / Worktree Operation Safety Gates | Implemented | - |
+| 0107 | Phase C.0 — `Eio_context.get_switch_opt` global access audit (`RFC-0107-eio-context-switch-audit.md`)<br>Outbound HTTP stack consolidation — pooled keep-alive, scoped Switch, Docker ... (`RFC-0107-outbound-http-stack-consolidation.md`) | Evidence<br>Active | RFC-0107-phase-d-pool-design.md |
+| 0108 | Atomic JSONL Append (in-process) (`RFC-0108-atomic-jsonl-append.md`)<br>PR / Worktree Operation Safety Gates (`RFC-0108-pr-worktree-operation-safety-gates.md`) | Active<br>Implemented | - |
 | 0109 | CDAL x Goal Integration Contract | Withdrawn | - |
 | 0110 | Tool-pair atomicity at write boundary — sunset compaction repair fabrication | Superseded | - |
 | 0111 | Goal mint atomicity — auto-goal uniqueness invariant at write boundary | Implemented | - |
@@ -154,7 +154,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0132 | Redaction SSOT — `runtime` boundary-label private type | Implemented | - |
 | 0134 | Persistence read-drop root fix (recovery story for RFC-0044) | Active | - |
 | 0135 | Supersede dashboard-derived Keeper disposition | Superseded | - |
-| 0136 | Keeper Unified Turn — Stage Decomposition of run_keeper_cycle | Implemented | - |
+| 0136 | Keeper Unified Turn — Stage Decomposition of run_keeper_cycle | Implemented | RFC-0136-phase-4-retry-loop.md |
 | 0137 | Host FD pressure observation — retired Keeper-pause proposal | Retired | - |
 | 0138 | Dashboard Snapshot Lock-Free Immutable Architecture | Implemented | - |
 | 0139 | Withdraw parallel agent and judge status hierarchies | Withdrawn | - |
@@ -237,17 +237,17 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0232 | Typed lane event model: parse at the write boundary, never re-derive by strin... | Draft | - |
 | 0233 | Typed turn observability: TurnRecord prompt-block provenance + canonical tool... | Draft | - |
 | 0234 | Withdraw schedule-specific approval hierarchy | Withdrawn | - |
-| 0235 | Voice output transport: browser-addressed audio delivery with device-routed p... | Draft | - |
+| 0235 | Stale-base revert guard: block PRs that silently revert recently-merged work (`RFC-0235-stale-base-revert-guard.md`)<br>Voice output transport: browser-addressed audio delivery with device-routed p... (`RFC-0235-voice-output-browser-transport-device-routing.md`) | Draft<br>Draft | - |
 | 0236 | Voice input transport: browser-captured speech-to-text for the dashboard comp... | Draft | - |
 | 0237 | Eliminate the write_meta ~force escape hatch (route snapshot writes through C... | Draft | - |
-| 0239 | Supersede no-progress pause and semantic debounce guards | Superseded | - |
+| 0239 | Concurrency ownership model (per-site mutex/atomic → protection by construction) (`RFC-0239-concurrency-ownership-model.md`)<br>Supersede no-progress pause and semantic debounce guards (`RFC-0239-semantic-identity-guards-for-keeper-memory-and-anti-thrash.md`) | Draft<br>Superseded | - |
 | 0240 | Tool-pair invariant enforced at write-time (eliminate repair-on-read) | Draft | - |
 | 0241 | external-attention store lifecycle: read-side bound, retention, and typed tai... | Retired | - |
 | 0242 | Retired continuity prose-filter draft | Superseded | - |
 | 0243 | Memory OS confidence mutability via write-side fact upsert | Draft | - |
 | 0244 | Memory OS recall: turn-seeded deterministic lexical retrieval, with provenanc... | Superseded | - |
 | 0245 | Exempt goalless tasks from the per-goal WIP claim cap | Withdrawn | - |
-| 0247 | Memory OS purge + LLM-judgment rebuild — implementation plan (phase of RFC-0247) | Draft | - |
+| 0247 | Memory OS as a brain: typed associative graph, spreading-activation recall, s... (`RFC-0247-memory-os-associative-graph-forgetting-brain.md`)<br>Memory OS purge + LLM-judgment rebuild — implementation plan (phase of RFC-0247) (`RFC-0247-purge-implementation-plan.md`) | Draft<br>Draft | - |
 | 0248 | Board context without local authority classification | Draft | - |
 | 0249 | Remove the dead `stale_factor` field (execute RFC-0239/0243/0244/0247) | Draft | - |
 | 0251 | Memory OS: record well, do not value — remove the scoring layer | Draft | - |
@@ -281,7 +281,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0281 | WebSocket transport SSOT — separate upgrade-attachment from session-protocol,... | Draft | - |
 | 0282 | Reduce Keeper persona to ordinary instructions | Implemented | - |
 | 0283 | Fusion: judge-of-judges 위상 (flat/staged reducer) | Draft | - |
-| 0284 | Supersede command-semantics guidance guards | Superseded | - |
+| 0284 | Fusion 심판 실행 관측 record (judge observation record) (`RFC-0284-fusion-judge-observation-record.md`)<br>Goal-loop status SSE liveness — server-side change detection extends the goal... (`RFC-0284-goal-loop-sse-liveness.md`)<br>Supersede command-semantics guidance guards (`RFC-0284-keeper-guidance-visibility-drift-guard.md`) | Draft<br>Superseded — RFC-0352 Path B (2026-07-21). The goal-loop OODA<br>Superseded | - |
 | 0285 | Memory OS — Self-Observation Claim Volatility (closing RFC-0259's internal-st... | Draft | - |
 | 0286 | Superseded exec and Keeper boundary diagnosis | Superseded | - |
 | 0287 | ws-direct — a single masc-owned WebSocket stack for server and client | Draft | - |
@@ -342,15 +342,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0353 | 실패 분류가 모듈 경계에서 소실되는 결함 (결정 요청) | Draft | - |
 | 0356 | Approval owns the effect (replay the approved payload, do not require byte-id... | Draft | - |
 | 0357 | Scheduled-autonomous 턴은 heartbeat가 아니라 typed stimulus의 변화로 admit한다 | Draft | - |
-| asyn | Offload the structured-log durable append off the emitting fiber | Draft | - |
-| chec | Immutable boot-pinned root capability for checkpoint containment | Draft | - |
-| comp | Compaction must never deadlock: a deterministic structural floor, typed outco... | Draft | - |
-| conn | Durable Keeper chat receipts and connector delivery settlement | Active | - |
-| elim | Withdrawn command-policy classification experiment | Withdrawn | - |
-| keep | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | - |
-| memo | # RFC: Memory OS 2.0 — bounded working set 전송 계약과 librarian curator 계약 | Draft | - |
-| runt | Per-runtime note field & dashboard surfacing | Draft | - |
-| type | Withdraw product-specific egress effect classification | Withdrawn | - |
 
 ### 신규 RFC
 

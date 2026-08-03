@@ -19,13 +19,20 @@ RFC_DIR = Path("docs/rfc")
 README = RFC_DIR / "README.md"
 TABLE_HEADER = "| # | Title | Status | Sub-docs |"
 TABLE_SEP = "|---|---|---|---|"
+RFC_FILE_RE = re.compile(r"^RFC-(\d{4})-.+\.md$")
+
+
+@dataclass(frozen=True)
+class RfcDocument:
+    filename: str
+    title: str
+    status: str
 
 
 @dataclass
 class RfcEntry:
     number: str
-    title: str = "(untitled)"
-    status: str = "Draft"
+    documents: list[RfcDocument] = field(default_factory=list)
     sub_docs: list[str] = field(default_factory=list)
 
 
@@ -48,14 +55,17 @@ def extract_frontmatter(filepath: Path) -> dict[str, str]:
 
 def collect_entries() -> dict[str, RfcEntry]:
     entries: dict[str, RfcEntry] = {}
-    sub_docs: dict[str, list[str]] = {}
 
     for fpath in sorted(RFC_DIR.glob("RFC-*.md")):
         name = fpath.name
-        num = name[4:8]
+        match = RFC_FILE_RE.fullmatch(name)
+        if match is None:
+            continue
+        num = match.group(1)
+        entry = entries.setdefault(num, RfcEntry(number=num))
 
         if "-phase-" in name:
-            sub_docs.setdefault(num, []).append(name)
+            entry.sub_docs.append(name)
             continue
 
         fm = extract_frontmatter(fpath)
@@ -70,11 +80,12 @@ def collect_entries() -> dict[str, RfcEntry]:
             if not title:
                 title = "(untitled)"
 
-        entries[num] = RfcEntry(
-            number=num,
-            title=title,
-            status=fm.get("status", "Draft"),
-            sub_docs=sub_docs.get(num, []),
+        entry.documents.append(
+            RfcDocument(
+                filename=name,
+                title=title,
+                status=fm.get("status", "Draft"),
+            )
         )
 
     return entries
@@ -84,11 +95,23 @@ def generate_table(entries: dict[str, RfcEntry]) -> str:
     lines = [TABLE_HEADER, TABLE_SEP]
     for num in sorted(entries):
         e = entries[num]
-        title = e.title
-        if len(title) > 80:
-            title = title[:77] + "..."
+        if not e.documents:
+            continue
+
+        duplicate_number = len(e.documents) > 1
+        rendered_titles: list[str] = []
+        for document in e.documents:
+            title = document.title
+            if len(title) > 80:
+                title = title[:77] + "..."
+            if duplicate_number:
+                title = f"{title} (`{document.filename}`)"
+            rendered_titles.append(title)
+
+        title = "<br>".join(rendered_titles)
+        status = "<br>".join(document.status for document in e.documents)
         subs = ", ".join(e.sub_docs) if e.sub_docs else "-"
-        lines.append(f"| {num} | {title} | {e.status} | {subs} |")
+        lines.append(f"| {num} | {title} | {status} | {subs} |")
     return "\n".join(lines)
 
 

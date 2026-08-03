@@ -239,6 +239,7 @@ let root_is_initialized config =
 (* Server-level cache for is_initialized — avoids 3 syscalls per request.
    Cache key is (base_path, cluster_name) to handle multi-config scenarios. *)
 type init_cache_entry = {
+  cache_key : string * string;
   cached_result : bool;
   cached_at : float;
 }
@@ -246,12 +247,18 @@ type init_cache_entry = {
 let initialized_cache : init_cache_entry option Atomic.t = Atomic.make None
 let initialized_cache_ttl = 1.0  (* seconds *)
 
+let init_cache_key config =
+  (config.base_path, config.backend_config.Backend_types.cluster_name)
+
 (** Check if current workspace is initialized - backend-agnostic.
     Cached with 1-second TTL to avoid 3 filesystem syscalls per request. *)
 let is_initialized config =
   let now = Time_compat.now () in
+  let cache_key = init_cache_key config in
   match Atomic.get initialized_cache with
-  | Some entry when now -. entry.cached_at < initialized_cache_ttl ->
+  | Some entry
+    when entry.cache_key = cache_key
+         && now -. entry.cached_at < initialized_cache_ttl ->
       entry.cached_result
   | _ ->
       let result =
@@ -268,7 +275,8 @@ let is_initialized config =
             Sys.is_directory (masc_dir config) &&
             Sys.file_exists (state_path config)
       in
-      Atomic.set initialized_cache (Some { cached_result = result; cached_at = now });
+      Atomic.set initialized_cache
+        (Some { cache_key; cached_result = result; cached_at = now });
       result
 
 (** Invalidate the is_initialized cache. Call this when workspace state

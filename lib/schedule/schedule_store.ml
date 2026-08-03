@@ -762,42 +762,21 @@ let settle_dispatched_occurrence_in_state ~now state settlement =
     Ok ({ state with schedules; executions }, updated, true)
 ;;
 
-let settlement_execution_for_occurrence state ~schedule_id ~due_at ~payload_digest =
+let settlement_executions_for_occurrence state ~schedule_id ~due_at ~payload_digest =
   let matches =
     List.filter
       (execution_matches_occurrence ~schedule_id ~due_at ~payload_digest)
       state.executions
   in
-  let unsettled =
-    List.filter
-      (fun (execution : execution_record) ->
-         match execution.status with
-         | Execution_running | Execution_dispatched -> true
-         | Execution_succeeded | Execution_failed -> false)
-      matches
-  in
-  let terminal =
-    List.filter
-      (fun (execution : execution_record) ->
-         match execution.status with
-         | Execution_running | Execution_dispatched -> false
-         | Execution_succeeded | Execution_failed -> true)
-      matches
-  in
-  match unsettled, terminal with
-  | [ execution ], _ -> Ok execution
-  | [], [ execution ] -> Ok execution
-  | [], [] ->
+  match matches with
+  | [] ->
     Error
       (Invalid_status_transition
          "schedule occurrence has no matching execution record")
-  | _ ->
-    Error
-      (Invalid_status_transition
-         "schedule occurrence has ambiguous matching execution records")
+  | execution :: rest -> Ok (execution, rest)
 ;;
 
-let settle_one_dispatched_occurrence
+let settle_dispatched_occurrence
       config
       ~now
       ~schedule_id
@@ -807,17 +786,17 @@ let settle_one_dispatched_occurrence
   =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
-    let* execution =
-      settlement_execution_for_occurrence
+    let* execution, rest =
+      settlement_executions_for_occurrence
         state
         ~schedule_id
         ~due_at
         ~payload_digest
     in
-    let* next_state, updated, changed =
+    let settle_execution next_state execution =
       settle_dispatched_occurrence_in_state
         ~now
-        state
+        next_state
         { execution_id = execution.execution_id
         ; schedule_id
         ; due_at
@@ -825,6 +804,16 @@ let settle_one_dispatched_occurrence
         ; outcome
         }
     in
+    let* next_state, updated, changed = settle_execution state execution in
+    let rec settle next_state updated changed = function
+      | [] -> Ok (next_state, updated, changed)
+      | execution :: rest ->
+        let* next_state, updated, execution_changed =
+          settle_execution next_state execution
+        in
+        settle next_state updated (changed || execution_changed) rest
+    in
+    let* next_state, updated, changed = settle next_state updated changed rest in
     let* () =
       if changed
       then
@@ -846,7 +835,7 @@ let complete_dispatched_occurrence
       ~due_at
       ~payload_digest
       () =
-  settle_one_dispatched_occurrence
+  settle_dispatched_occurrence
     config
     ~now
     ~schedule_id
@@ -862,7 +851,7 @@ let fail_dispatched_occurrence
       ~due_at
       ~payload_digest
       ~error =
-  settle_one_dispatched_occurrence
+  settle_dispatched_occurrence
     config
     ~now
     ~schedule_id

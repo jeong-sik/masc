@@ -188,10 +188,11 @@ val complete_dispatched_occurrence :
   payload_digest:string ->
   unit ->
   (Schedule_domain.schedule_request, store_error) result
-(** Marks one exact running/dispatched occurrence succeeded. Idempotent when
-    that occurrence is already succeeded. A one-shot request becomes
-    [Succeeded]; an already-advanced recurring request keeps its next due row.
-    The original dispatch receipt in the execution detail is preserved. *)
+(** Marks every execution for one exact running/dispatched occurrence
+    succeeded. Idempotent when that occurrence is already succeeded. A one-shot
+    request becomes [Succeeded]; an already-advanced recurring request keeps
+    its next due row. The original dispatch receipt in the execution detail is
+    preserved. *)
 
 val fail_dispatched_occurrence :
   Workspace_utils.config ->
@@ -201,9 +202,9 @@ val fail_dispatched_occurrence :
   payload_digest:string ->
   error:string ->
   (Schedule_domain.schedule_request, store_error) result
-(** Marks one exact running/dispatched occurrence failed. Idempotent when that
-    occurrence is already failed. A recurring schedule continues at its
-    already-computed next occurrence. *)
+(** Marks every execution for one exact running/dispatched occurrence failed.
+    Idempotent when that occurrence is already failed. A recurring schedule
+    continues at its already-computed next occurrence. *)
 
 val settle_dispatched_occurrences :
   Workspace_utils.config ->

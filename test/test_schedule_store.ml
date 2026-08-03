@@ -684,6 +684,61 @@ let test_recurring_dispatched_completion_preserves_next_occurrence () =
   | None -> fail "recurring execution missing"
 ;;
 
+let test_recurring_dispatched_completion_settles_duplicate_executions () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    make_request
+      ~schedule_id:"accepted-recurring-duplicate"
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  ignore (insert_ok config request);
+  ignore (refresh_due config ~now:201.0);
+  ignore (start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id);
+  ignore (accept_running config ~now:203.0 ~schedule_id:request.schedule_id ());
+  (match
+     update_request
+       config
+       ~schedule_id:request.schedule_id
+       ~due_at:request.due_at
+       ~expires_at:request.expires_at
+       ~payload:request.payload
+   with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  ignore (refresh_due config ~now:204.0);
+  ignore (start_due_candidate config ~now:205.0 ~schedule_id:request.schedule_id);
+  ignore (accept_running config ~now:206.0 ~schedule_id:request.schedule_id ());
+  let digest = payload_digest request.payload in
+  let executions =
+    executions_for_schedule (read_state config) ~schedule_id:request.schedule_id
+  in
+  check int "duplicate occurrence execution count" 2 (List.length executions);
+  List.iter
+    (fun (execution : execution_record) ->
+       check string "duplicate occurrence is dispatched" "dispatched"
+         (execution_status_to_string execution.status))
+    executions;
+  (match
+     complete_dispatched_occurrence
+       config
+       ~now:207.0
+       ~schedule_id:request.schedule_id
+       ~due_at:request.due_at
+       ~payload_digest:digest
+       ()
+   with
+   | Ok stored ->
+     check_status "recurring remains scheduled" Scheduled stored.status;
+     check (float 0.001) "next occurrence retained" 260.0 stored.due_at
+   | Error err -> fail (store_error_to_string err));
+  executions_for_schedule (read_state config) ~schedule_id:request.schedule_id
+  |> List.iter (fun (execution : execution_record) ->
+    check string "every duplicate execution succeeded" "succeeded"
+      (execution_status_to_string execution.status))
+;;
+
 let test_completion_before_acceptance_is_idempotent () =
   with_workspace
   @@ fun config ->
@@ -1048,6 +1103,8 @@ let () =
             test_dispatched_one_shot_completes_by_exact_occurrence;
           test_case "recurring completion preserves next occurrence" `Quick
             test_recurring_dispatched_completion_preserves_next_occurrence;
+          test_case "recurring completion settles duplicate executions" `Quick
+            test_recurring_dispatched_completion_settles_duplicate_executions;
           test_case "completion before acceptance is idempotent" `Quick
             test_completion_before_acceptance_is_idempotent;
           test_case "accepted one-shot failure is terminal" `Quick

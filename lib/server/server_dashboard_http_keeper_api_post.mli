@@ -126,8 +126,8 @@ val handle_keeper_directive_post :
   Httpun.Reqd.t ->
   string ->
   unit
-(** A resume body requires [owner_nonce] and a stable
-    [operator_operation_id]; raw action-only resume is rejected. *)
+(** A resume body requires only a stable [operator_operation_id]. The server
+    resolves the current durable generation at the transaction boundary. *)
 
 val handle_keeper_bulk_directive_post :
   sw:Eio.Switch.t ->
@@ -139,12 +139,12 @@ val handle_keeper_bulk_directive_post :
   string ->
   unit
 (** Pause/wakeup accept a [names] list. Resume accepts a [targets] list whose
-    entries carry [name], [owner_nonce], and [operator_operation_id]. *)
+    entries carry [name] and [operator_operation_id]. *)
 
 module For_testing : sig
   val parse_resume_request :
-    Yojson.Safe.t -> (int * string, string) result
+    Yojson.Safe.t -> (string, string) result
 
   val parse_bulk_resume_requests :
-    Yojson.Safe.t -> ((string * int * string) list, string) result
+    Yojson.Safe.t -> ((string * string) list, string) result
 end

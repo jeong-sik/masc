@@ -1079,13 +1079,17 @@ let plain_directive_to_keeper_directive = function
   | Plain_pause -> Keeper_directive.Pause
   | Plain_wakeup -> Keeper_directive.Wakeup
 
+type resume_directive_request =
+  { operator_operation_id : string
+  }
+
 type parsed_keeper_directive =
   | Plain_directive of plain_keeper_directive
-  | Resume_owner of Keeper_paused_work_resume_transaction.request
+  | Resume_owner of resume_directive_request
 
 type bulk_resume_target =
   { name : string
-  ; request : Keeper_paused_work_resume_transaction.request
+  ; operator_operation_id : string
   }
 
 type parsed_bulk_directive =
@@ -1095,17 +1099,10 @@ type parsed_bulk_directive =
       }
   | Bulk_resume_owner of bulk_resume_target list
 
-let required_resume_owner_request json =
-  match
-    Safe_ops.json_int_opt "owner_nonce" json,
-    Safe_ops.json_string_opt "operator_operation_id" json
-  with
-  | Some owner_nonce, Some operator_operation_id ->
-    Ok
-      Keeper_paused_work_resume_transaction.
-        { owner_nonce; operator_operation_id }
-  | None, _ -> Error "resume requires integer \"owner_nonce\""
-  | _, None -> Error "resume requires string \"operator_operation_id\""
+let required_resume_owner_request json : (resume_directive_request, string) result =
+  match Safe_ops.json_string_opt "operator_operation_id" json with
+  | Some operator_operation_id -> Ok { operator_operation_id }
+  | None -> Error "resume requires string \"operator_operation_id\""
 
 let parse_keeper_directive_json json =
   (* STR-OK: HTTP boundary parse of the untrusted wire "action" field into a
@@ -1129,7 +1126,9 @@ let parse_bulk_resume_target = function
     (match Safe_ops.json_string_opt "name" json with
      | Some name when is_valid_keeper_name name ->
        Result.map
-         (fun request -> { name; request })
+         (fun (request : resume_directive_request) ->
+            ({ name; operator_operation_id = request.operator_operation_id }
+             : bulk_resume_target))
          (required_resume_owner_request json)
      | Some _ -> Error "resume target has an invalid keeper name"
      | None -> Error "resume target requires string \"name\"")
@@ -1197,7 +1196,7 @@ module For_testing = struct
   let parse_resume_request json =
     match parse_keeper_directive_json json with
     | Ok (Resume_owner request) ->
-      Ok (request.owner_nonce, request.operator_operation_id)
+      Ok request.operator_operation_id
     | Ok (Plain_directive _) -> Error "request is not Resume_owner"
     | Error _ as error -> error
   ;;
@@ -1208,9 +1207,7 @@ module For_testing = struct
       Ok
         (List.map
            (fun target ->
-              ( target.name
-              , target.request.owner_nonce
-              , target.request.operator_operation_id ))
+              (target.name, target.operator_operation_id))
            targets)
     | Ok (Bulk_plain _) -> Error "request is not bulk Resume_owner"
     | Error _ as error -> error
@@ -1282,8 +1279,23 @@ let resume_result_json ~name
        | None -> []
        | Some message -> [ "error", `String message ])
 
-let run_resume_owner config ~name request =
-  Keeper_paused_work_resume_transaction.resume config ~keeper_name:name request
+let run_resume_owner config ~name (request : resume_directive_request) =
+  match Keeper_meta_store.read_meta config name with
+  | Error detail ->
+    Error
+      Keeper_paused_work_resume_transaction.
+        { cause = Durable_meta_read_failed detail; reservation_release = None }
+  | Ok None ->
+    Error
+      Keeper_paused_work_resume_transaction.
+        { cause = Durable_meta_missing; reservation_release = None }
+  | Ok (Some meta) ->
+    Keeper_paused_work_resume_transaction.resume
+      config
+      ~keeper_name:name
+      { owner_nonce = meta.runtime.nonce
+      ; operator_operation_id = request.operator_operation_id
+      }
 
 let persist_directive_pause ~config ~name
     (meta : Keeper_meta_contract.keeper_meta) =
@@ -1338,9 +1350,8 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
       (match run_resume_owner config ~name request with
        | Error error ->
          Log.Keeper.warn
-           "directive resume_owner rejected for %s generation=%d operation_id=%s: %s"
+           "directive resume_owner rejected for %s operation_id=%s: %s"
            name
-           request.owner_nonce
            request.operator_operation_id
            (Keeper_paused_work_resume_transaction.error_to_string error);
          Http.Response.json_value
@@ -1361,17 +1372,17 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
          (match success.projection with
           | Applied _ ->
             Log.Keeper.info
-              "directive resume_owner applied for %s generation=%d operation_id=%s"
+              "directive resume_owner applied for %s operation_id=%s generation=%d"
               name
-              request.owner_nonce
-              request.operator_operation_id;
+              request.operator_operation_id
+              success.receipt.expected_generation;
             Http.Response.json_value ~compress:true ~request:req response reqd
           | Committed_followup_failed failure ->
             Log.Keeper.warn
-              "directive resume_owner committed with pending projection for %s generation=%d operation_id=%s: %s"
+              "directive resume_owner committed with pending projection for %s operation_id=%s generation=%d: %s"
               name
-              request.owner_nonce
               request.operator_operation_id
+              success.receipt.expected_generation
               (resume_failure_message failure);
             Http.Response.json_value
               ~status:`Accepted
@@ -1488,8 +1499,9 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
        | Ok (Some meta), _ -> proceed (Some meta))
 
 (** Bulk variant of [handle_keeper_directive_post]. Pause and wakeup accept
-    [{names: [name, ...]}]. Resume accepts exact per-owner
-    [{targets: [{name, owner_nonce, operator_operation_id}, ...]}] fences.
+    [{names: [name, ...]}]. Resume accepts
+    [{targets: [{name, operator_operation_id}, ...]}]. The current durable
+    generation is resolved by the server at the transaction boundary.
     Cache invalidation still runs once for the whole batch. *)
 let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_str =
   let parsed =
@@ -1510,7 +1522,12 @@ let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd 
         match parsed with
         | Bulk_resume_owner targets ->
           let process_target target =
-            match run_resume_owner config ~name:target.name target.request with
+            match
+              run_resume_owner
+                config
+                ~name:target.name
+                { operator_operation_id = target.operator_operation_id }
+            with
             | Error error ->
               `Assoc
                 [ "name", `String target.name

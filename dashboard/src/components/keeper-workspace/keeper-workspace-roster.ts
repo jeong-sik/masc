@@ -369,11 +369,7 @@ function lifecycleActions(keeper: Keeper): KeeperActionKey[] {
 }
 
 async function runRosterKeeperAction(keeper: Keeper, action: KeeperActionKey): Promise<void> {
-  if (action === 'resume') {
-    await runKeeperAction(keeper.name, action, keeper.generation)
-  } else {
-    await runKeeperAction(keeper.name, action)
-  }
+  await runKeeperAction(keeper.name, action)
 }
 
 function rosterActivityText(activity: KeeperActivityDisplay): string | null {

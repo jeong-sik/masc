@@ -88,9 +88,7 @@ function lifecycleCommands(keeper: Keeper): WorkspaceCommand[] {
       title: copy.title,
       icon: copy.icon,
       danger: copy.danger,
-      onClick: () => key === 'resume'
-        ? runKeeperAction(keeper.name, key, keeper.generation)
-        : runKeeperAction(keeper.name, key),
+      onClick: () => runKeeperAction(keeper.name, key),
     }
   })
 }

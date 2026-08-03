@@ -1841,7 +1841,7 @@ describe('keeper lifecycle', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await resumeKeeper('janitor', 7, {
+    const result = await resumeKeeper('janitor', {
       operatorOperationId: 'dashboard-resume-test-1',
     })
 
@@ -1850,7 +1850,6 @@ describe('keeper lifecycle', () => {
     expect(url).toBe('/api/v1/keepers/janitor/directive')
     expect(JSON.parse(init.body)).toEqual({
       action: 'resume',
-      owner_nonce: 7,
       operator_operation_id: 'dashboard-resume-test-1',
     })
   })
@@ -1877,7 +1876,7 @@ describe('keeper lifecycle', () => {
       )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await resumeKeeper('offline-janitor', 7, {
+    const result = await resumeKeeper('offline-janitor', {
       operatorOperationId: 'dashboard-resume-offline-1',
     })
 
@@ -1899,8 +1898,8 @@ describe('keeper lifecycle', () => {
       )
     vi.stubGlobal('fetch', fetchMock)
 
-    expect((await resumeKeeper('janitor', 7)).ok).toBe(false)
-    expect((await resumeKeeper('janitor', 7)).ok).toBe(true)
+    expect((await resumeKeeper('janitor')).ok).toBe(false)
+    expect((await resumeKeeper('janitor')).ok).toBe(true)
 
     const firstInit = fetchMock.mock.calls[0]![1] as RequestInit
     const secondInit = fetchMock.mock.calls[1]![1] as RequestInit
@@ -1910,15 +1909,21 @@ describe('keeper lifecycle', () => {
     expect(second.operator_operation_id).toBe(first.operator_operation_id)
   })
 
-  it('refuses resume when the current owner generation is unavailable', async () => {
-    const fetchMock = vi.fn()
+  it('sends resume even when the dashboard has no generation field', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, action: 'resume', name: 'janitor' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await resumeKeeper('janitor', undefined)
+    const result = await resumeKeeper('janitor')
 
-    expect(result.ok).toBe(false)
-    expect(result.error).toContain('current owner generation is unavailable')
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(result.ok).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).toMatchObject({ action: 'resume' })
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).not.toHaveProperty('owner_nonce')
   })
 
   it('sends POST with action=wakeup via directive endpoint', async () => {

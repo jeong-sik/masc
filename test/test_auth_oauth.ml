@@ -382,6 +382,20 @@ let test_consumed_code_is_not_restored_after_store_failure () =
 let test_scope_cannot_escalate_role () =
   check
     bool
+    "omitted authorization scope defaults to tools"
+    true
+    (match Auth_oauth.parse_scopes None with
+     | Ok [ Auth_oauth.Mcp_tools ] -> true
+     | Ok _ | Error _ -> false);
+  check
+    bool
+    "explicitly empty authorization scope is invalid"
+    true
+    (match Auth_oauth.parse_scopes (Some "   ") with
+     | Error Auth_oauth.Invalid_scope -> true
+     | Ok _ | Error _ -> false);
+  check
+    bool
     "worker cannot obtain admin scope"
     true
     (Result.is_error
@@ -722,6 +736,21 @@ let test_refresh_scope_can_reduce_but_not_expand () =
             in
             check string "admin response includes its tools implication"
               "mcp:tools mcp:admin" admin_pair.scope;
+            check
+              bool
+              "an explicitly empty refresh scope is invalid"
+              true
+              (match
+                 Auth_oauth.rotate_refresh_token
+                   ~base_path
+                   ~expected_resource:resource
+                   ~refresh_token:admin_pair.refresh_token
+                   ~client_id:admin_client.client_id
+                   ~scope:(Some "   ")
+                   ~resource:(Some resource)
+               with
+               | Error Auth_oauth.Invalid_scope -> true
+               | Ok _ | Error _ -> false);
             let worker_from_admin =
               Auth_oauth.rotate_refresh_token
                 ~base_path

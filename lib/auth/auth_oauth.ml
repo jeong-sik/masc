@@ -97,7 +97,7 @@ let add_scope_with_implications acc = function
 let parse_scopes raw =
   let values =
     match raw with
-    | None -> []
+    | None -> [ scope_to_string Mcp_tools ]
     | Some value ->
       value
       |> String.split_on_char ' '
@@ -105,14 +105,15 @@ let parse_scopes raw =
         let item = String.trim item in
         if String.equal item "" then None else Some item)
   in
-  let values = if values = [] then [ scope_to_string Mcp_tools ] else values in
   let rec parse acc = function
     | [] -> Ok acc
     | "mcp:tools" :: rest -> parse (add_scope_with_implications acc Mcp_tools) rest
     | "mcp:admin" :: rest -> parse (add_scope_with_implications acc Mcp_admin) rest
     | _ :: _ -> Error Invalid_scope
   in
-  parse [] values
+  match values with
+  | [] -> Error Invalid_scope
+  | _ -> parse [] values
 ;;
 
 let effective_role ~bootstrap_role scopes =
@@ -963,6 +964,7 @@ let rotate_refresh_token
         let* scopes =
           match scope with
           | None -> Ok family.scopes
+          | Some raw when String.equal (String.trim raw) "" -> Error Invalid_scope
           | Some raw ->
             let* requested = parse_scopes (Some raw) in
             let granted requested_scope =

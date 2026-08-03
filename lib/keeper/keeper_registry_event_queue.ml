@@ -147,7 +147,10 @@ let durable_intake_error_to_string = function
 
 let authorize_durable_intake_owner ~base_path ~keeper_name =
   let config = Workspace.default_config base_path in
-  let is_retired_for_identity current_meta (operation : Keeper_shutdown_types.t) =
+  let is_retired_for_identity
+      (current_meta : Keeper_meta_contract.keeper_meta option)
+      (operation : Keeper_shutdown_types.t)
+    =
     match operation.phase with
     | Keeper_shutdown_types.Finalized { meta_removed = true; _ } ->
       (match

@@ -20,7 +20,7 @@ agent completes it through the public MASC command/API/tool surface.
 
 ## 2. The product in one sentence
 
-Give MASC a project, let eight Keepers keep working through typed Runtime slots, and always show what is moving, what is blocked, why, and what happens next.
+Give MASC a project, let the active declarative Keeper fleet keep working through typed Runtime slots, and always show what is moving, what is blocked, why, and what happens next. The application-owned system LLM verifier reviews typed completion evidence outside the Keeper lifecycle.
 
 ## 3. North star
 
@@ -41,18 +41,14 @@ If an LLM cannot produce a valid semantic update, MASC preserves the source, tri
 
 ## 4. Fresh-state fleet
 
-Only these eight Keepers may autoboot in the first proof fleet.
+The first proof fleet is the set of Keeper declarations selected by the active
+workspace configuration. This document describes behavior and evidence; it is
+not a second roster or Runtime-assignment SSOT.
 
-| Keeper | Product role | Primary Runtime slot |
-|---|---|---|
-| `sangsu` | Vincent-facing general collaborator | Ollama Cloud DeepSeek V4 Flash |
-| `kinobot-frontend` | Kidsnote frontend specialist | Ollama Cloud DeepSeek V4 Flash |
-| `rondo` | Long-running general collaborator | Ollama Cloud DeepSeek V4 Flash |
-| `executor` | Action and implementation worker | Ollama Cloud DeepSeek V4 Flash |
-| `analyst` | Analysis and adversarial decomposition | GLM Coding Plan |
-| `taskmaster` | Task, Goal, and Board coordination | GLM Coding Plan |
-| `lane-smith` | Lane and Full Cycle implementation | Ollama Cloud Qwen |
-| `verifier` | Evidence and behavioral verification | Ollama Cloud Gemma |
+The verifier is an application-owned system LLM agent. It is not a Keeper, is
+not registered as a Keeper, does not claim a Keeper lane, and does not use
+Keeper task actions. An authenticated HITL operator is a separate authority
+path. Neither authority belongs in the Keeper roster or Keeper count.
 
 Keeper configuration contains no model or provider policy. Runtime assignment is the only routing SSOT.
 
@@ -67,11 +63,21 @@ domain validator decides whether the result is accepted. Only intrinsically
 different work such as image, audio, embedding, or another non-text modality
 may require a special Runtime capability.
 
+### Role correction (2026-08-03)
+
+An earlier revision of this document incorrectly listed `verifier` as one of
+the Keepers. That was a role error, not a rename or a migration: the verifier
+is the system LLM completion-authority agent described above. Historical rows
+below are retained as observations, but any `verifier` row must not be read as
+Keeper liveness, Keeper failover, or Keeper-fleet evidence. A fresh proof must
+derive the Keeper roster from the active declarative configuration and record
+the system LLM verifier separately.
+
 ## 5. What "Full Lifecycle works" means
 
 One fresh-state proof must show this uninterrupted sequence:
 
-1. The server materializes exactly eight declarative Keepers.
+1. The server materializes every selected declarative Keeper.
 2. Vincent or an agent creates a project Goal and Tasks.
 3. An agent uses MASC to assemble or select the team.
 4. Keepers claim and start distinct work without duplicate ownership.
@@ -83,7 +89,7 @@ One fresh-state proof must show this uninterrupted sequence:
 10. Task, Goal, Board, Schedule, HITL, Fusion, and memory surfaces consume the resulting domain state.
 11. The next Keeper turn uses the updated context.
 12. Vincent and an agent see the same status, reason, receipt, and next action.
-13. All eight Keepers remain alive or visibly blocked with a reason.
+13. Every selected Keeper remains alive or visibly blocked with a reason.
 14. Each Keeper can clearly distinguish its Persona, current Goal, assigned Task, recent decisions, and another Keeper's evidence.
 15. The collaborating agent completes the project through public MASC surfaces; direct filesystem access is used only to verify evidence.
 
@@ -106,21 +112,22 @@ code path.
 
 ### B01. Start a team
 
-**Middle-school explanation:** Ask for a project team and see eight workers appear.
+**Middle-school explanation:** Ask for a project team and see the selected workers appear.
 
-**Vincent sees:** eight named Keepers, their role, current task, state, and next action.
+**Vincent sees:** the selected Keepers, their role, current task, state, and next action.
 
 **Agent can do:** join MASC, inspect the fleet, choose or create work, and delegate without supplying a provider or model.
 
-**Current verdict:** `PARTIAL_LIVE`
+**Current verdict:** `NOT_PROVEN_FRESH`
 
-**Observed:** current runtime materialized exactly eight named Keeper fibers.
-Seven produced turn records. `kinobot-frontend` remained a running but
-non-executing fiber because its config endpoint reported proactive activation
-while the effective Registry projection kept it disabled.
+**Observed:** the historical runtime materialized eight fibers and seven
+produced turn records. The historical roster included a `verifier` entry, but
+that entry was the system LLM verifier rather than a Keeper. This observation
+does not prove the current declarative Keeper roster or its liveness.
 
-**Missing:** all eight Keepers must execute through the same declarative config
-authority without an operator filesystem repair.
+**Missing:** every selected Keeper must execute through the same declarative
+config authority without an operator filesystem repair, and the system LLM
+verifier must be evidenced as a separate lane.
 
 ### B02. Create and finish work
 
@@ -140,10 +147,11 @@ authority without an operator filesystem repair.
 
 **Expected behavior:** every blocked state has a typed reason and next action. No silent failure and no permanent stop from an ordinary provider, parsing, judgment, or capacity failure.
 
-**Current verdict:** `PARTIAL_LIVE`
+**Current verdict:** `NOT_PROVEN_FRESH`
 
-**Observed:** seven Keepers produced repeated turns. `verifier` survived a Gemma
-HTTP 500 once by advancing to GLM and later resumed successful Gemma turns.
+**Observed:** the historical evidence attributed repeated turns and a Gemma
+HTTP 500 to `verifier`. That lane is the system LLM verifier, not a Keeper, so
+the observation is not Keeper liveness evidence.
 
 **Missing:** a post-checkpoint failure must preserve the remaining frozen
 Runtime suffix for the next turn; every blocked Keeper must expose that pending
@@ -159,9 +167,10 @@ of an ordinary text Runtime merely because it lacks native structured output.
 
 **Current verdict:** `WIRED_FAILING_LIVE`
 
-**Observed:** `verifier` produced one Gemma HTTP 500 to GLM success trace.
-Subsequent Gemma failures had no rotation attempt because the next Runtime
-suffix was discarded at the checkpoint boundary.
+**Observed:** the system LLM verifier produced one Gemma HTTP 500 to GLM
+success trace. Subsequent Gemma failures had no rotation attempt because the
+next Runtime suffix was discarded at the checkpoint boundary. This is verifier
+lane evidence, not evidence of a Keeper-to-Keeper verifier.
 
 **Missing:** the next actual turn starts at the preserved successor, a missing
 successor terminates visibly instead of looping, and resumed success updates the
@@ -299,7 +308,7 @@ with immediate equality after an activation config POST.
 - After a semantic context update, the next turn preserves unresolved obligations and completed decisions.
 - A fresh-state Keeper never claims knowledge sourced only from the retired runtime.
 
-**Agent verification:** the collaborating agent asks each of the eight Keepers the same bounded questions and compares typed evidence with the answer:
+**Agent verification:** the collaborating agent asks each selected Keeper the same bounded questions and compares typed evidence with the answer:
 
 1. Who are you and what is your role?
 2. What Goal and Task are you working on now?
@@ -358,12 +367,12 @@ Pricing may be measured and displayed later. It does not limit, route, rank, adm
 | 2026-07-27 17:37 KST | authenticated `POST https://ollama.com/api/show` | Qwen 3.5 Cloud and Gemma 4 31B Cloud available; both 262,144 context; tools/thinking/vision declared | High |
 | 2026-07-27 17:38 KST | authenticated `POST https://ollama.com/v1/chat/completions` with `json_object` | Qwen and Gemma returned valid JSON; DeepSeek Flash reached the service but 32 output tokens were insufficient | High |
 | 2026-07-27 17:42 KST | authenticated `json_schema` probe | Qwen and Gemma returned fenced JSON; DeepSeek returned non-JSON text. Native schema is not a portable admission requirement | High |
-| 2026-07-27 17:46 KST | fresh declarative config edit | exactly eight Keeper TOMLs are selected for autoboot; Runtime assignments are 4 Flash, 2 GLM, 1 Qwen Cloud, 1 Gemma Cloud | High for source, not live |
-| 2026-07-27 22:24 KST | `GET /health?full=1` | current process reported `status=ok` and `keeper_fibers=8` | High for fiber presence only |
-| 2026-07-27 22:25 KST | eight `GET /api/v1/keepers/:name/turn-records?limit=1` calls | seven Keepers had fresh-runtime turn records; `kinobot-frontend` had none | High |
+| 2026-07-27 17:46 KST | fresh declarative config edit | Keeper TOMLs were selected for autoboot; Runtime assignments were 4 Flash, 2 GLM, 1 Qwen Cloud, 1 Gemma Cloud | High for source, not live; historical role attribution corrected above |
+| 2026-07-27 22:24 KST | `GET /health?full=1` | current process reported `status=ok` and `keeper_fibers=8` | High for fiber presence only; Keeper role attribution was not proven |
+| 2026-07-27 22:25 KST | `GET /api/v1/keepers/:name/turn-records?limit=1` over the historical configured roster | seven entries had fresh-runtime turn records; `kinobot-frontend` had none | High for endpoint observation, not current Keeper-fleet proof |
 | 2026-07-27 22:28 KST | `kinobot-frontend` config, composite, turn records, and system log | config said proactive true; effective activation was false; scheduler skipped with `scheduled_autonomous_disabled`; turn record count remained zero | High |
-| 2026-07-27 22:24 KST | eight `GET /api/v1/keepers/:name/compaction-snapshots` calls | every inventory was empty; no live compaction or checkpoint-install proof | High |
-| 2026-07-27 22:25 KST | latest turn records and earlier live trace comparison | seven Keepers used the intended Runtime distribution; verifier had one Gemma-to-GLM recovery, but later post-checkpoint failures did not retain the successor | High |
+| 2026-07-27 22:24 KST | `GET /api/v1/keepers/:name/compaction-snapshots` over the historical configured roster | every inventory was empty; no live compaction or checkpoint-install proof | High for the observed endpoints |
+| 2026-07-27 22:25 KST | latest turn records and earlier live trace comparison | the system LLM verifier had one Gemma-to-GLM recovery, but later post-checkpoint failures did not retain the successor; this is not Keeper failover evidence | High for the trace, not Keeper attribution |
 | 2026-07-27 22:25 KST | fresh turn-record prompt blocks | recall was active, but representative blocks ranged from 1,455 to 9,962 bytes and continued accumulating without a semantic replacement cycle | Medium |
 
 [Official Ollama Qwen 3.5 Cloud model page](https://ollama.com/library/qwen3.5%3Acloud)  

@@ -719,13 +719,12 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path
         observation.unclaimed_task_count > 0
         || observation.claimable_task_count > 0
         || observation.failed_task_count > 0
-        || Option.is_none observation.backlog_revision
         || observation.running_keeper_fiber_count > 0
         || Option.is_some backlog_source
       then (
         let ubuf = Buffer.create 256 in
         Buffer.add_string ubuf "### Namespace State\n";
-        if Option.is_none observation.backlog_revision then
+        if Option.is_some backlog_source then
           Buffer.add_string ubuf
             "- Task backlog: unavailable or recovery-only; task counts are non-authoritative and cannot drive task actions.\n";
         if observation.unclaimed_task_count > 0 then

@@ -204,7 +204,7 @@ def document_for(filepath: Path, frontmatter: dict[str, str]) -> RfcDocument:
             if line.startswith("# "):
                 first_line = line
                 break
-        title = re.sub(r"^# RFC[- ]*\d+[.: —–-]*\s*", "", first_line)
+        title = re.sub(r"^# RFC(?::\s*|[- ]*\d+[.: —–-]*\s*)", "", first_line)
         if not title:
             title = "(untitled)"
 

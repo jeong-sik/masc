@@ -518,7 +518,7 @@ type resolved_occurrence_disposition =
 let disposition_equal left right =
   match left, right with
   | Pending, Pending
-  | Terminally_acked, Terminally_acked
+  | Terminally_acked, Terminally_acked -> true
   | Cancelled left, Cancelled right -> String.equal left right
   | Transfer_projecting_to left, Transfer_projecting_to right
   | Transferred_to left, Transferred_to right -> String.equal left right

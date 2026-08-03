@@ -330,7 +330,7 @@ with immediate equality after an activation config POST.
 
 **Current verdict:** `NOT_PROVEN_FRESH`
 
-**Missing:** eight-Keeper probe after the first successful context-correction cycle.
+**Missing:** selected-Keeper probe after the first successful context-correction cycle.
 
 ## 7. Deliberately outside the MVP
 

@@ -21,13 +21,19 @@ type broadcast_target =
   | Agent_streams
   | Presence_only
 
+type delivery_audience =
+  | Broadcast_audience of broadcast_target
+  | Session_audience of string
+
 type delivery =
   { event_id : int
   ; frame : string
   ; emitted_at : float
+  ; audience : delivery_audience
   }
 (** Canonical occurrence shared by the replay store and live queues.
-    Its id, wire frame, and producer timestamp are allocated once. *)
+    Its id, wire frame, producer timestamp, and exact audience are allocated
+    once. *)
 
 type client = {
   id : int;
@@ -143,7 +149,8 @@ val format_event : ?id:int -> ?event_type:string -> string -> string
 (** [format_event] prefixes every logical line of [data] with [data:] so
     embedded newlines cannot escape the SSE field framing. An omitted [id]
     produces a transport-only frame and does not advance the replay cursor;
-    only replay-buffered canonical deliveries may supply an [id]. *)
+    only deliveries inside the ordered publication boundary may supply an
+    [id]. *)
 val current_id : unit -> int
 
 (** {1 Broadcast} *)
@@ -169,11 +176,11 @@ val remove_external_subscribers : string list -> string list * int
 
 val clients : client_registry_state Atomic.t
 val buffer_event : delivery -> unit
-val get_events_after : int -> delivery list
-val get_events_after_for_kind : session_kind -> int -> delivery list
-(** Replay-buffer lookup filtered for the target session kind. Agent_stream
-    replay only returns JSON-RPC messages; observer replay keeps all durable
-    events; presence replay is empty. *)
+val get_events_after_for_session :
+  session_id:string -> kind:session_kind -> int -> delivery list
+(** Replay-buffer lookup for one exact session. Targeted deliveries are visible
+    only to their named agent-stream session; broadcasts use the same target
+    and JSON-RPC filtering rules as live fan-out. *)
 
 type replay_handoff
 
@@ -184,6 +191,7 @@ val accept_live_delivery : replay_handoff -> delivery -> bool
     register/replay/live overlap without assuming event ids commit in order. *)
 
 val cleanup_expired_events : unit -> int
+val get_events_after_for_test : int -> delivery list
 val event_buffer_events_for_test : unit -> delivery list
 val set_event_buffer_for_test : delivery list -> unit
 val rewrite_event_buffer_for_test : unit -> unit

@@ -234,7 +234,7 @@ let test_broadcast_presence_is_live_only ~auth () =
                 (String.split_on_char '\n' event))
        | None -> Alcotest.fail "expected presence event");
       Alcotest.(check int) "presence not replay buffered" 0
-        (List.length (Sse.get_events_after before_id)))
+        (List.length (Sse.get_events_after_for_test before_id)))
 
 let test_non_jsonrpc_broadcast_does_not_reach_agent_streams ~auth () =
   reset ();
@@ -248,11 +248,15 @@ let test_non_jsonrpc_broadcast_does_not_reach_agent_streams ~auth () =
   Alcotest.(check bool) "agent_stream skipped non-JSON-RPC" true
     (got_workspace = None);
   Alcotest.(check int) "observer replay keeps dashboard event" 1
-    (List.length (Sse.get_events_after_for_kind Observer before_id));
+    (List.length
+       (Sse.get_events_after_for_session ~session_id:"s-nonjson-obs"
+          ~kind:Observer before_id));
   Alcotest.(check int)
     "agent_stream replay skips non-JSON-RPC"
     0
-    (List.length (Sse.get_events_after_for_kind Agent_stream before_id));
+    (List.length
+       (Sse.get_events_after_for_session ~session_id:"s-nonjson-workspace"
+          ~kind:Agent_stream before_id));
   Sse.unregister "s-nonjson-obs";
   Sse.unregister "s-nonjson-workspace"
 

@@ -671,7 +671,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           let replayed =
             match last_event_id with
             | Some last_id ->
-              Sse.get_events_after_for_kind sse_kind last_id
+              Sse.get_events_after_for_session ~session_id ~kind:sse_kind last_id
               |> List.filter (fun delivery ->
                 if send_raw info delivery.Sse.frame
                 then true

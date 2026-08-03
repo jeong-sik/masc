@@ -115,10 +115,15 @@ type broadcast_target =
   | Agent_streams (** Only [Agent_stream] sessions *)
   | Presence_only (** Only [Presence] sessions; never replay-buffered *)
 
+type delivery_audience =
+  | Broadcast_audience of broadcast_target
+  | Session_audience of string
+
 type delivery =
   { event_id : int
   ; frame : string
   ; emitted_at : float
+  ; audience : delivery_audience
   }
 
 (** Maximum concurrent SSE clients -- prevents connection storm on restart.
@@ -364,22 +369,38 @@ let buffer_event delivery =
     in
     { next_state = { events_by_id; count }; result = () })
 
-let event_matches_session_kind kind event =
-  match kind with
-  | Observer -> true
-  | Agent_stream ->
-    Sse_jsonrpc_filter.event_string_jsonrpc_message_for_agent_stream event.frame
-  | Presence -> false
+let session_kind_matches_target target ~jsonrpc_payload kind =
+  match target with
+  | All -> (
+      match kind with
+      | Observer -> true
+      | Agent_stream -> jsonrpc_payload
+      | Presence -> false)
+  | Observers -> kind = Observer
+  | Agent_streams -> kind = Agent_stream && jsonrpc_payload
+  | Presence_only -> kind = Presence
+
+let event_matches_session ~session_id ~kind event =
+  match event.audience with
+  | Session_audience target_session_id ->
+    kind = Agent_stream && String.equal target_session_id session_id
+  | Broadcast_audience target ->
+    let jsonrpc_payload =
+      Sse_jsonrpc_filter.event_string_jsonrpc_message_for_agent_stream event.frame
+    in
+    session_kind_matches_target target ~jsonrpc_payload kind
 
 (** Get events after given ID for replay (MCP spec MUST) *)
-let get_events_after last_id =
+let get_events_after_raw last_id =
   let state = Atomic.get event_buffer in
   let _older_or_equal, _at_last_id, newer = IntMap.split last_id state.events_by_id in
   newer |> IntMap.bindings |> List.map snd
 
-let get_events_after_for_kind kind last_id =
-  get_events_after last_id
-  |> List.filter (event_matches_session_kind kind)
+let get_events_after_for_test = get_events_after_raw
+
+let get_events_after_for_session ~session_id ~kind last_id =
+  get_events_after_raw last_id
+  |> List.filter (event_matches_session ~session_id ~kind)
 
 type replay_handoff = IntSet.t ref
 
@@ -430,12 +451,12 @@ let cleanup_expired_events () =
     that both peek the counter, both get the same value, and then
     both pass it as [~id] would emit events with the **same** id,
     breaking MCP SSE resumability (the [last_event_id] filter in
-    [get_events_after] skips by id, so a duplicate would be
+    replay lookup skips by id, so a duplicate would be
     dropped).
 
     When [~id] is omitted the frame is transport-only: it does not advance the
-    durable replay cursor. Only callers that have committed the same delivery
-    to the replay buffer may attach an id. *)
+    replay cursor. Only callers inside the ordered delivery publication
+    boundary may attach an id. *)
 let format_event ?id ?event_type data =
   (* Hot path: every broadcast goes through here once.  The previous
      three [Printf.sprintf] calls each ran the format interpreter and
@@ -756,15 +777,7 @@ let update_last_event_id session_id event_id =
   | None -> ()
 
 let client_matches_target target ~jsonrpc_payload (client : client) =
-  match target with
-  | All -> (
-      match client.kind with
-      | Observer -> true
-      | Agent_stream -> jsonrpc_payload
-      | Presence -> false)
-  | Observers -> client.kind = Observer
-  | Agent_streams -> client.kind = Agent_stream && jsonrpc_payload
-  | Presence_only -> client.kind = Presence
+  session_kind_matches_target target ~jsonrpc_payload client.kind
 
 (** {1 External Subscriber Hook}
 
@@ -1002,6 +1015,7 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
     { event_id = current_event_id
     ; frame = format_event_yojson ~id:current_event_id ~event_type json
     ; emitted_at = t0
+    ; audience = Broadcast_audience target
     }
   in
   if buffer then
@@ -1106,11 +1120,13 @@ let send_to session_id json =
         { event_id = current_event_id
         ; frame = format_event_yojson ~id:current_event_id ~event_type:"message" json
         ; emitted_at = Time_compat.now ()
+        ; audience = Session_audience session_id
         }
       in
       buffer_event delivery;
       match SMap.find_opt session_id (Atomic.get clients).entries with
       | None -> `Absent
+      | Some client when client.kind <> Agent_stream -> `Wrong_kind client.kind
       | Some client ->
           let queue_len = Eio.Stream.length client.event_stream in
           if queue_len >= stream_capacity then
@@ -1127,6 +1143,15 @@ let send_to session_id json =
   in
   match outcome with
   | `Absent -> ()
+  | `Wrong_kind kind ->
+      let kind_label = match kind with
+        | Observer -> "observer"
+        | Agent_stream -> "agent_stream"
+        | Presence -> "presence"
+      in
+      Log.Server.error
+        "Targeted JSON-RPC delivery rejected for non-agent session %s (%s)"
+        session_id kind_label
   | `Enqueued -> sync_transport_snapshot ()
   | `Full queue_len ->
       Transport_metrics.inc_broadcast_failure ~target:"send_to" ();

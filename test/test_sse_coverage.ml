@@ -3,7 +3,7 @@
     Tests for SSE (Server-Sent Events) functionality:
     - format_event: SSE event formatting
     - max_buffer_size: buffer limit constant
-    - buffer_event, get_events_after: event buffering
+    - buffer_event, replay lookup: event buffering
     - current_id: durable event ID observation
     - register, unregister, exists: client management
     - client_count: statistics
@@ -15,8 +15,10 @@ open Alcotest
 let jsonrpc_notification method_name =
   `Assoc [ ("jsonrpc", `String "2.0"); ("method", `String method_name) ]
 
-let delivery ?(emitted_at = Unix.gettimeofday ()) event_id frame : Masc.Sse.delivery =
-  { event_id; frame; emitted_at }
+let delivery ?(emitted_at = Unix.gettimeofday ())
+    ?(audience = Masc.Sse.Broadcast_audience Masc.Sse.All)
+    event_id frame : Masc.Sse.delivery =
+  { event_id; frame; emitted_at; audience }
 ;;
 
 module Sse = Masc.Sse
@@ -259,13 +261,13 @@ let test_unregister_if_current_replacement_count () =
         before (Sse.client_count ()))
 
 (* ============================================================
-   buffer_event / get_events_after Tests
+   buffer_event / replay lookup Tests
    ============================================================ *)
 
 let test_buffer_event_and_retrieve () =
   let base_id = Sse.current_id () in
   Sse.buffer_event (delivery (base_id + 1000) "test event 1");
-  let events = Sse.get_events_after (base_id + 999) in
+  let events = Sse.get_events_after_for_test (base_id + 999) in
   check bool "has event" true (List.length events >= 1)
 
 let test_buffer_event_preserves_producer_timestamp_after_retry () =
@@ -304,7 +306,8 @@ let test_get_events_after_filters () =
       Sse.buffer_event (delivery 802_000 "event A");
       Sse.buffer_event (delivery 802_001 "event B");
       check (list string) "filtered exact replay" [ "event B" ]
-        (Sse.get_events_after 802_000 |> List.map (fun event -> event.Sse.frame)))
+        (Sse.get_events_after_for_test 802_000
+         |> List.map (fun event -> event.Sse.frame)))
 
 let test_get_events_after_preserves_oldest_first_order () =
   let original_buffer = Sse.event_buffer_events_for_test () in
@@ -317,9 +320,11 @@ let test_get_events_after_preserves_oldest_first_order () =
       Sse.buffer_event (delivery 803_002 "event C");
       check (list string) "all replayed oldest-first"
         [ "event A"; "event B"; "event C" ]
-        (Sse.get_events_after 802_999 |> List.map (fun event -> event.Sse.frame));
+        (Sse.get_events_after_for_test 802_999
+         |> List.map (fun event -> event.Sse.frame));
       check (list string) "tail replayed oldest-first" [ "event B"; "event C" ]
-        (Sse.get_events_after 803_000 |> List.map (fun event -> event.Sse.frame)))
+        (Sse.get_events_after_for_test 803_000
+         |> List.map (fun event -> event.Sse.frame)))
 
 let test_buffer_event_caps_replay_buffer () =
   let original_buffer = Sse.event_buffer_events_for_test () in
@@ -351,13 +356,41 @@ let test_buffer_event_caps_replay_buffer () =
         (List.map (fun (event : Sse.delivery) -> event.frame) buffered);
       check (list string) "replay retained events oldest-first"
         (List.rev expected_newest_first_events)
-        (Sse.get_events_after (base - 1)
+        (Sse.get_events_after_for_test (base - 1)
          |> List.map (fun event -> event.Sse.frame)))
 
 let test_get_events_after_empty () =
   let future_id = Sse.current_id () + 100000 in
-  let events = Sse.get_events_after future_id in
+  let events = Sse.get_events_after_for_test future_id in
   check int "empty for future id" 0 (List.length events)
+
+let test_targeted_replay_is_session_scoped () =
+  let original_buffer = Sse.event_buffer_events_for_test () in
+  Fun.protect
+    ~finally:(fun () -> Sse.set_event_buffer_for_test original_buffer)
+    (fun () ->
+      let event_id = 804_000 in
+      let frame =
+        Sse.format_event ~id:event_id
+          (Yojson.Safe.to_string
+             (jsonrpc_notification "notifications/resources/updated"))
+      in
+      Sse.set_event_buffer_for_test
+        [ delivery
+            ~audience:(Sse.Session_audience "session-a")
+            event_id frame ];
+      check int "target session replays targeted event" 1
+        (List.length
+           (Sse.get_events_after_for_session ~session_id:"session-a"
+              ~kind:Sse.Agent_stream (event_id - 1)));
+      check int "other session cannot replay targeted event" 0
+        (List.length
+           (Sse.get_events_after_for_session ~session_id:"session-b"
+              ~kind:Sse.Agent_stream (event_id - 1)));
+      check int "observer cannot replay targeted JSON-RPC event" 0
+        (List.length
+           (Sse.get_events_after_for_session ~session_id:"session-a"
+              ~kind:Sse.Observer (event_id - 1))))
 
 let test_replay_handoff_deduplicates_exact_ids_only () =
   let replayed = [ delivery 910_010 "ten"; delivery 910_030 "thirty" ] in
@@ -420,7 +453,7 @@ let test_concurrent_broadcast_preserves_replay_and_live_cursor_order () =
           (`Assoc [ "concurrent_sequence", `Int index ]));
       Atomic.set Sse.buffer_commit_test_hook None;
       let buffered_ids =
-        Sse.get_events_after base_id
+        Sse.get_events_after_for_test base_id
         |> List.map (fun (event : Sse.delivery) -> event.event_id)
       in
       let rec drain acc =
@@ -618,6 +651,8 @@ let () =
         test_get_events_after_preserves_oldest_first_order;
       test_case "caps replay buffer" `Quick test_buffer_event_caps_replay_buffer;
       test_case "empty for future" `Quick test_get_events_after_empty;
+      test_case "targeted replay is session scoped" `Quick
+        test_targeted_replay_is_session_scoped;
       test_case "replay handoff deduplicates exact ids" `Quick
         test_replay_handoff_deduplicates_exact_ids_only;
       test_case "cleanup exact under domain contention" `Quick

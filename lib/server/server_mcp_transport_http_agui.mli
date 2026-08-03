@@ -35,7 +35,7 @@ val handle_ag_ui_events :
     7. Send a synthetic AG-UI [Run_started] prime event so the client
        can observe the connection has settled.
     8. If [last-event-id] was present, replay missed observer events via
-       {!Sse.get_events_after_for_kind}, each converted from its canonical
+       {!Sse.get_events_after_for_session}, each converted from its canonical
        typed delivery to the AG-UI wire format. Replay/live overlap is removed
        by exact event id.
     9. Spawn two fibers under the runtime switch:
@@ -88,5 +88,5 @@ val handle_presence_events :
     The stream registers a {!Sse.Presence} session under a namespaced
     session id so the dashboard can keep its durable [/mcp] observer
     stream open while subscribing to live-only presence traffic.
-    Presence events are not replayed from {!Sse.get_events_after};
+    Presence events are not replayed from {!Sse.get_events_after_for_session};
     reconnecting clients receive only future liveness/awareness frames. *)

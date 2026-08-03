@@ -540,6 +540,25 @@ let retryable_dispatch_failure detail =
   Error (Schedule_runner.Retryable_dispatch_failure detail)
 ;;
 
+let accept_with_recorded_stimulus
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+      stimulus
+      acceptance
+  =
+  match
+    ensure_keeper_wake_stimulus_recorded
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+      stimulus
+  with
+  | Keeper_wake_reaction_ledger_recorded -> Ok acceptance
+  | Keeper_wake_reaction_ledger_record_failed detail ->
+    retryable_dispatch_failure detail
+;;
+
 type durable_occurrence_state =
   | Pending
   | Transfer_projecting_to of string
@@ -556,9 +575,9 @@ type durable_occurrence_disposition =
 
 type resolved_occurrence_disposition =
   | Pending_at of string * Keeper_event_queue.stimulus
-  | Terminal_completed
-  | Terminal_failed of string
-  | Terminal_cancelled of string
+  | Terminal_completed_at of string * Keeper_event_queue.stimulus
+  | Terminal_failed_at of string * Keeper_event_queue.stimulus * string
+  | Terminal_cancelled_at of string * Keeper_event_queue.stimulus * string
   | Absent_at of string
 
 let occurrence_state_equal left right =
@@ -713,9 +732,12 @@ let rec resolve_durable_occurrence
     match Hashtbl.find_opt index occurrence_id with
     | None -> Ok (Absent_at keeper_name)
     | Some { source; state = Pending; _ } -> Ok (Pending_at (keeper_name, source))
-    | Some { state = Terminally_completed; _ } -> Ok Terminal_completed
-    | Some { state = Terminally_failed reason; _ } -> Ok (Terminal_failed reason)
-    | Some { state = Cancelled reason; _ } -> Ok (Terminal_cancelled reason)
+    | Some { source; state = Terminally_completed; _ } ->
+      Ok (Terminal_completed_at (keeper_name, source))
+    | Some { source; state = Terminally_failed reason; _ } ->
+      Ok (Terminal_failed_at (keeper_name, source, reason))
+    | Some { source; state = Cancelled reason; _ } ->
+      Ok (Terminal_cancelled_at (keeper_name, source, reason))
     | Some { source; state = Transfer_projecting_to target; _ } ->
       let* target_disposition =
         resolve_durable_occurrence
@@ -729,9 +751,9 @@ let rec resolve_durable_occurrence
       (match target_disposition with
        | Absent_at _ -> Ok (Pending_at (target, source))
        | ( Pending_at _
-         | Terminal_completed
-         | Terminal_failed _
-         | Terminal_cancelled _ ) as disposition ->
+         | Terminal_completed_at _
+         | Terminal_failed_at _
+         | Terminal_cancelled_at _ ) as disposition ->
          Ok disposition)
     | Some { state = Transferred_to target; _ } ->
       let target_was_cached = Hashtbl.mem cache target in
@@ -773,23 +795,37 @@ let accept_keeper_wake_occurrence
       keeper_name
   with
   | Error detail -> retryable_dispatch_failure detail
-  | Ok Terminal_completed -> Ok Already_acked
-  | Ok (Terminal_failed reason) -> Ok (Already_failed reason)
-  | Ok (Terminal_cancelled _) -> Ok Already_cancelled
-  | Ok (Pending_at (owner, pending_stimulus)) ->
+  | Ok (Pending_at (owner, durable_stimulus)) ->
     (* A prior attempt may have committed the queue entry and then failed the
        independent reaction-ledger append. Verify the exact stimulus identity
        and repair only an absent row before reporting durable acceptance. *)
-    (match
-       ensure_keeper_wake_stimulus_recorded
-         ~base_path
-         ~keeper_name:owner
-         ~stimulus_id
-         pending_stimulus
-     with
-     | Keeper_wake_reaction_ledger_recorded -> Ok (Already_pending owner)
-     | Keeper_wake_reaction_ledger_record_failed detail ->
-       retryable_dispatch_failure detail)
+    accept_with_recorded_stimulus
+      ~base_path
+      ~keeper_name:owner
+      ~stimulus_id
+      durable_stimulus
+      (Already_pending owner)
+  | Ok (Terminal_completed_at (owner, durable_stimulus)) ->
+    accept_with_recorded_stimulus
+      ~base_path
+      ~keeper_name:owner
+      ~stimulus_id
+      durable_stimulus
+      Already_acked
+  | Ok (Terminal_failed_at (owner, durable_stimulus, reason)) ->
+    accept_with_recorded_stimulus
+      ~base_path
+      ~keeper_name:owner
+      ~stimulus_id
+      durable_stimulus
+      (Already_failed reason)
+  | Ok (Terminal_cancelled_at (owner, durable_stimulus, _)) ->
+    accept_with_recorded_stimulus
+      ~base_path
+      ~keeper_name:owner
+      ~stimulus_id
+      durable_stimulus
+      Already_cancelled
   | Ok (Absent_at _) ->
     (match
        Keeper_registry_event_queue.enqueue_stimulus_durable_result
@@ -967,10 +1003,11 @@ let settlements_with_read_state ~read_state config executions =
        in
        match disposition with
        | Pending_at _ -> Ok Schedule_runner.Consumer_holds_occurrence
-       | Terminal_completed -> Ok Schedule_runner.Consumer_completed_occurrence
-       | Terminal_failed reason ->
+       | Terminal_completed_at _ ->
+         Ok Schedule_runner.Consumer_completed_occurrence
+       | Terminal_failed_at (_, _, reason) ->
          Ok (Schedule_runner.Consumer_failed_occurrence reason)
-       | Terminal_cancelled reason ->
+       | Terminal_cancelled_at (_, _, reason) ->
          Ok (Schedule_runner.Consumer_cancelled_occurrence reason)
        | Absent_at owner ->
          Ok

@@ -134,7 +134,13 @@ let dispatch
             ~agent_name:requested_agent_name)
         { Tool_agent_timeline.config; agent_name } ~name ~args
     | Mod_schedule ->
-      Tool_schedule.dispatch { Tool_schedule.config; agent_name } ~name ~args
+      Tool_schedule.dispatch
+        { Tool_schedule.config
+        ; agent_name
+        ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+        }
+        ~name
+        ~args
     | Mod_misc -> Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args
     | Mod_library -> Tool_library.dispatch { Tool_library.agent_name } ~name ~args
     (* ── Tier B: Eio-dependent ─────────────────────────────────── *)

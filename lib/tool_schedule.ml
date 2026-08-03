@@ -1,6 +1,12 @@
 type context =
   { config : Workspace.config
   ; agent_name : string
+  ; admit_keeper_wake_creation :
+      Workspace.config ->
+      keeper_name:string ->
+      (unit ->
+       (Schedule_domain.schedule_request, Schedule_service.service_error) result) ->
+      (Schedule_domain.schedule_request, Schedule_service.service_error) result
   }
 
 let ( let* ) = Result.bind
@@ -357,7 +363,6 @@ let handle_create ~tool_name ~start_time ctx args =
         ?schedule_id
         ~requested_at
         ?expires_at
-        ?keeper_wake_target
         ~requested_by
         ~scheduled_by
         ~due_at
@@ -365,9 +370,15 @@ let handle_create ~tool_name ~start_time ctx args =
         ~source
         ~recurrence
         ()
-      |> Result.map_error Schedule_service.service_error_to_string
     in
-    create_request ()
+    (match keeper_wake_target with
+     | None -> create_request ()
+     | Some keeper_name ->
+       ctx.admit_keeper_wake_creation
+         ctx.config
+         ~keeper_name
+         create_request)
+    |> Result.map_error Schedule_service.service_error_to_string
   in
   match result with
   | Error msg -> workflow_error ~tool_name ~start_time msg

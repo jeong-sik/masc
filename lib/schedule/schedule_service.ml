@@ -3,12 +3,6 @@ type service_error =
   | Store_error of Schedule_store.store_error
   | Creation_rejected of string
 
-type keeper_wake_creation_gate =
-  Workspace_utils.config ->
-  keeper_name:string ->
-  (unit -> (Schedule_domain.schedule_request, service_error) result) ->
-  (Schedule_domain.schedule_request, service_error) result
-
 let ( let* ) = Result.bind
 
 let service_error_to_string = function
@@ -16,13 +10,6 @@ let service_error_to_string = function
   | Store_error err -> Schedule_store.store_error_to_string err
   | Creation_rejected detail -> detail
 ;;
-
-let keeper_wake_creation_gate : keeper_wake_creation_gate Atomic.t =
-  Atomic.make (fun _config ~keeper_name:_ _create ->
-    Error (Creation_rejected "keeper-wake creation admission gate is not installed"))
-;;
-
-let set_keeper_wake_creation_gate gate = Atomic.set keeper_wake_creation_gate gate
 
 let map_store = function
   | Ok value -> Ok value
@@ -42,7 +29,6 @@ let create
   ?schedule_id:provided_schedule_id
   ?requested_at
   ?expires_at
-  ?keeper_wake_target
   ~requested_by
   ~scheduled_by
   ~due_at
@@ -54,20 +40,14 @@ let create
   (* NDT-OK: API boundary default; callers may provide requested_at explicitly. *)
   let requested_at = Option.value requested_at ~default:(now ()) in
   let schedule_id = schedule_id provided_schedule_id in
-  let create_request () =
-    let* request =
-      Schedule_domain.create_request ~schedule_id ~requested_by ~scheduled_by
-        ~requested_at ~due_at ?expires_at ~payload ~source ?recurrence ()
-      |> function
-      | Ok request -> Ok request
-      | Error msg -> Error (Invalid_request msg)
-    in
-    Schedule_store.insert_request config request |> map_store
+  let* request =
+    Schedule_domain.create_request ~schedule_id ~requested_by ~scheduled_by
+      ~requested_at ~due_at ?expires_at ~payload ~source ?recurrence ()
+    |> function
+    | Ok request -> Ok request
+    | Error msg -> Error (Invalid_request msg)
   in
-  match keeper_wake_target with
-  | None -> create_request ()
-  | Some keeper_name ->
-    (Atomic.get keeper_wake_creation_gate) config ~keeper_name create_request
+  Schedule_store.insert_request config request |> map_store
 ;;
 
 let list config ?status () =

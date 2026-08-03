@@ -982,7 +982,12 @@ let handle_masc_agent_timeline_with_outcome ~(config : Workspace.config) ~(meta 
 ;;
 
 let handle_masc_schedule_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
-  let ctx : Tool_schedule.context = { config; agent_name = meta.name } in
+  let ctx : Tool_schedule.context =
+    { config
+    ; agent_name = meta.name
+    ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+    }
+  in
   Tool_schedule.dispatch ctx ~name ~args |> dispatch_option_to_execution ~name
 ;;
 

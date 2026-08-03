@@ -8,22 +8,13 @@ type service_error =
   | Store_error of Schedule_store.store_error
   | Creation_rejected of string
 
-type keeper_wake_creation_gate =
-  Workspace_utils.config ->
-  keeper_name:string ->
-  (unit -> (Schedule_domain.schedule_request, service_error) result) ->
-  (Schedule_domain.schedule_request, service_error) result
-
 val service_error_to_string : service_error -> string
-
-val set_keeper_wake_creation_gate : keeper_wake_creation_gate -> unit
 
 val create :
   Workspace_utils.config ->
   ?schedule_id:string ->
   ?requested_at:float ->
   ?expires_at:float ->
-  ?keeper_wake_target:string ->
   requested_by:Schedule_domain.actor ->
   scheduled_by:Schedule_domain.actor ->
   due_at:float ->

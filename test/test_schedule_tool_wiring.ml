@@ -84,7 +84,10 @@ let schedule_tool_name action =
 ;;
 
 let schedule_ctx config : Tool_schedule.context =
-  { config; agent_name = "scheduler-agent" }
+  { config
+  ; agent_name = "scheduler-agent"
+  ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+  }
 ;;
 
 let dispatch_exn config action args =

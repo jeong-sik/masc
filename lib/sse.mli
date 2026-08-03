@@ -153,6 +153,15 @@ val format_event : ?id:int -> ?event_type:string -> string -> string
     produces a transport-only frame and does not advance the replay cursor;
     only deliveries inside the ordered publication boundary may supply an
     [id]. *)
+
+val format_event_yojson
+  :  ?id:int
+  -> ?event_type:string
+  -> Yojson.Safe.t
+  -> string
+(** JSON counterpart of [format_event]. It writes the JSON value directly to
+    the canonical SSE buffer without an intermediate string allocation. *)
+
 val current_id : unit -> int
 
 (** {1 Broadcast} *)

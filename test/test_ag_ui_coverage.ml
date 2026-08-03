@@ -110,8 +110,11 @@ let test_run_error_rejects_custom_envelope () =
 let test_event_to_sse_format () =
   let e = make_event ~thread_id:"workspace-1" Run_started in
   let sse = event_to_sse ~id:17 e in
+  let transport_only_sse = event_to_sse e in
   assert (String.length sse > 0);
   assert (String.starts_with ~prefix:"id: 17\ndata: " sse);
+  assert (String.starts_with ~prefix:"data: " transport_only_sse);
+  assert (not (String.starts_with ~prefix:"id:" transport_only_sse));
   (* SSE ends with double newline *)
   let len = String.length sse in
   assert (String.sub sse (len - 2) 2 = "\n\n")

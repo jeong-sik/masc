@@ -495,11 +495,14 @@ let format_event ?id ?event_type data =
     [to_string] allocation.  Writes JSON bytes directly into the SSE event
     buffer via [Yojson.Safe.to_buffer], cutting one string allocation per
     broadcast (~9/sec → ~9 fewer short-lived strings/sec for GC to collect). *)
-let format_event_yojson ~id ?event_type json =
+let format_event_yojson ?id ?event_type json =
   let buf = Buffer.create 128 in
-  Buffer.add_string buf "id: ";
-  Buffer.add_string buf (string_of_int id);
-  Buffer.add_char buf '\n';
+  Option.iter
+    (fun id ->
+       Buffer.add_string buf "id: ";
+       Buffer.add_string buf (string_of_int id);
+       Buffer.add_char buf '\n')
+    id;
   (match event_type with
    | Some e ->
        Buffer.add_string buf "event: ";

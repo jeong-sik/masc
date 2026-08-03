@@ -162,28 +162,9 @@ let event_to_json (e : event) : Yojson.Safe.t =
     @ optional "name" (fun s -> `String s) e.custom_name
     @ optional "value" (fun j -> j) e.custom_value)
 
-(** Format as SSE data line.
-
-    Builds the [data: <json>\n\n] frame directly into a buffer, skipping the
-    intermediate [Yojson.Safe.to_string] allocation and the [Printf.sprintf]
-    frame allocation — one buffer + one final string instead of two
-    short-lived strings per event.  This is on the per-event streaming hot
-    path: every [keeper_stream_send_event] serializes via this function, so
-    Text_delta/tool-call events each pay this cost once per token/chunk.
-    Mirrors [Sse.format_event_yojson] (sse.ml).  Byte-identical output:
-    [Yojson.Safe.to_buffer] emits the same bytes as [Yojson.Safe.to_string]. *)
+(** Format as SSE data through the transport's canonical JSON encoder. *)
 let event_to_sse ?id (e : event) : string =
-  let buf = Buffer.create 128 in
-  Option.iter
-    (fun id ->
-       Buffer.add_string buf "id: ";
-       Buffer.add_string buf (string_of_int id);
-       Buffer.add_char buf '\n')
-    id;
-  Buffer.add_string buf "data: ";
-  Yojson.Safe.to_buffer buf (event_to_json e);
-  Buffer.add_string buf "\n\n";
-  Buffer.contents buf
+  Sse.format_event_yojson ?id (event_to_json e)
 
 (** Default thread ID for the single-namespace AG-UI bridge. *)
 let default_thread_id = "default"

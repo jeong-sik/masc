@@ -493,30 +493,6 @@ export interface KeeperStreamOutcome {
   terminal: boolean
 }
 
-function keeperStreamErrorMessage(raw: string, status: number): string {
-  let message = raw || `스트리밍 요청 실패 (${status})`
-  try {
-    const parsed = JSON.parse(raw) as { error?: string | { message?: string }; message?: string }
-    if (typeof parsed.error === 'string') {
-      message = parsed.error
-    } else {
-      message = parsed.error?.message ?? parsed.message ?? message
-    }
-  } catch {
-    // Keep raw text fallback.
-  }
-  return message
-}
-
-function authErrorCode(raw: string): unknown {
-  try {
-    const parsed = JSON.parse(raw) as { auth_error_code?: unknown }
-    return parsed.auth_error_code
-  } catch {
-    return null
-  }
-}
-
 export interface StreamKeeperMessageOptions {
   signal?: AbortSignal
   onEvent: (event: KeeperChatStreamEvent) => void
@@ -589,7 +565,8 @@ export async function streamKeeperMessage(
     body.user_blocks = userBlocks.map(streamUserBlockToWire)
   }
   const requestBody = JSON.stringify(body)
-  const postStream = () => fetch('/api/v1/keepers/chat/stream', {
+  const streamPath = '/api/v1/keepers/chat/stream'
+  const postStream = () => fetch(streamPath, {
     method: 'POST',
     headers: {
       ...jsonHeaders(),
@@ -602,20 +579,18 @@ export async function streamKeeperMessage(
   let res = await postStream()
 
   if (!res.ok) {
-    let raw = await res.text()
+    let requestError = await apiRequestErrorFromResponse('POST', streamPath, res)
     if (
       res.status === 401
-      && await refreshDevTokenAfterAuthError(authErrorCode(raw))
+      && await refreshDevTokenAfterAuthError(requestError.authErrorCode)
     ) {
       res = await postStream()
-      if (res.ok) {
-        raw = ''
-      } else {
-        raw = await res.text()
+      if (!res.ok) {
+        requestError = await apiRequestErrorFromResponse('POST', streamPath, res)
       }
     }
     if (!res.ok) {
-      throw new Error(keeperStreamErrorMessage(raw, res.status))
+      throw requestError
     }
   }
 

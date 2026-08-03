@@ -1326,7 +1326,11 @@ describe('streamKeeperMessage', () => {
 
     await expect(
       streamKeeperMessage('sangsu', 'ping', { onEvent: () => {} }),
-    ).rejects.toThrow()
+    ).rejects.toMatchObject({
+      name: 'ApiRequestError',
+      authErrorCode: 'same_origin_blocked',
+      detail: '[AuthError] Forbidden: browser cannot cross-origin HTTP mutation',
+    })
 
     // Only the single chat POST — no dev-token refresh, no retry.
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([

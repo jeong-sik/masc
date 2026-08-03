@@ -373,6 +373,38 @@ supports-multimodal-inputs = false
 [ollama_cloud.ollama-cloud-deepseek-v4-flash]
 max-request-body-bytes = 524288
 
+# Ollama Cloud's 2026-07-31 DeepSeek-V4-Flash build. It is a DIFFERENT model
+# from the untagged `deepseek-v4-flash` above, not a newer alias of it:
+# /api/show reports parameter_size 304180418494 for `:0731` against
+# 158000000000 for the untagged tag, both FP8 and both reporting
+# deepseek4.context_length 1048576 with capabilities [completion tools thinking].
+#
+# It gets its own entry instead of retagging an existing block because
+# [models.deepseek-v4-flash] is bound to BOTH providers
+# ([ollama_cloud.deepseek-v4-flash] and [deepseek.deepseek-v4-flash]) and the
+# `:0731` suffix is an Ollama tag convention — api.deepseek.com/models serves
+# only `deepseek-v4-flash` and `deepseek-v4-pro`, so an in-place retag would
+# 404 the direct lane.
+[models.ollama-cloud-deepseek-v4-flash-0731]
+api-name = "deepseek-v4-flash:0731"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-deepseek-v4-flash-0731.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-image-input = false
+supports-multimodal-inputs = false
+
+# No wizard-default: this adds a selectable lane and deliberately leaves
+# [runtime].default on ollama_cloud.deepseek-v4-flash.
+[ollama_cloud.ollama-cloud-deepseek-v4-flash-0731]
+max-request-body-bytes = 524288
+
 [models.ollama-cloud-deepseek-v4-pro]
 api-name = "deepseek-v4-pro"
 max-context = 524288

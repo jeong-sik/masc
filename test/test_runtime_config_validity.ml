@@ -52,6 +52,13 @@ let ollama_cloud_seed_cases =
     ; thinking = true
     ; vision = false
     }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"
+    ; api_name = "deepseek-v4-flash:0731"
+    ; context = 1048576
+    ; tools = true
+    ; thinking = true
+    ; vision = false
+    }
   ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
     ; api_name = "deepseek-v4-pro"
     ; context = 524288

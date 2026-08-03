@@ -364,7 +364,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 
 ### 신규 RFC
 
-신규 RFC 는 번호를 발급받지 않는다 (번호 allocator 제거됨 — 전역 카운터 TOCTOU 회피). 의미 있는 slug 파일명 `RFC-<slug>.md` 로 작성한다. 본 표의 번호 인덱스는 기존 번호 RFC 만 추적한다.
+신규 RFC 는 번호를 발급받지 않는다 (번호 allocator 제거됨 — 전역 카운터 TOCTOU 회피). 의미 있는 slug 파일명 `RFC-<slug>.md` 로 작성한다. 본 표는 기존 번호 RFC 와 신규 slug RFC 를 함께 추적한다.
 
 ## 검색 / 발견
 

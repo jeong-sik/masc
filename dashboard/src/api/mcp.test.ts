@@ -85,6 +85,7 @@ beforeEach(() => {
 afterEach(async () => {
   const { resetMcpClientState } = await import('./mcp')
   resetMcpClientState()
+  vi.unstubAllGlobals()
   vi.clearAllMocks()
   vi.resetModules()
 })
@@ -273,5 +274,23 @@ describe('MCP 2026-07-28 dashboard client', () => {
     expect(requestIds).toHaveLength(2)
     expect(requestIds.every(id => typeof id === 'string')).toBe(true)
     expect(requestIds[0]).not.toBe(requestIds[1])
+  })
+
+  it('uses Web Crypto random bytes when randomUUID is unavailable', async () => {
+    const getRandomValues = vi.fn((bytes: Uint8Array) => {
+      bytes.forEach((_, index) => { bytes[index] = index })
+      return bytes
+    })
+    vi.stubGlobal('crypto', { getRandomValues })
+    fetchWithTimeout.mockResolvedValueOnce(okToolResponse())
+
+    const { callMcpTool } = await import('./mcp')
+    await expect(callMcpTool('masc_status', {})).resolves.toBe('ok')
+
+    const toolCall = callsByMethod('tools/call')[0]
+    if (!toolCall) throw new Error('tools/call request missing')
+    const body = JSON.parse(toolCall[1].body as string) as { id: unknown }
+    expect(getRandomValues).toHaveBeenCalled()
+    expect(body.id).toBe('00010203-0405-4607-8809-0a0b0c0d0e0f')
   })
 })

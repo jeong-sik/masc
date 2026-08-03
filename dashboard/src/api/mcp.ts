@@ -1,5 +1,6 @@
 // MASC Dashboard — MCP 2026-07-28 over Streamable HTTP
 
+import { v4 as randomUuid } from 'uuid'
 import {
   apiRequestErrorFromResponse,
   fetchWithTimeout,
@@ -246,7 +247,7 @@ async function callMcpToolInternal(
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<string> {
-  const requestId = crypto.randomUUID()
+  const requestId = randomUuid()
   synchronizeMcpAuthRevision()
   try {
     const binding = await ensureBinding()

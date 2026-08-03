@@ -1026,7 +1026,7 @@ let start_keeper_loops_owned
   Keeper_shutdown_finalize.register_completion_handler
     (fun config operation action ->
       Server_dashboard_http_delete_actions.handle_keeper_lifecycle_completion
-        ~now:(Eio.Time.now clock)
+        ~now:(Time_compat.now ())
         config
         operation
         action);

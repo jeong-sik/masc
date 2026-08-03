@@ -4,7 +4,7 @@
     - format_event: SSE event formatting
     - max_buffer_size: buffer limit constant
     - buffer_event, get_events_after: event buffering
-    - current_id, next_id: event ID management
+    - current_id: durable event ID observation
     - register, unregister, exists: client management
     - client_count: statistics
     - client type: record fields
@@ -61,8 +61,12 @@ let run_domains_together count fn =
    ============================================================ *)
 
 let test_format_event_basic () =
+  let before_id = Sse.current_id () in
   let event = Sse.format_event "test data" in
-  check bool "has id" true (String.length event > 0 && String.sub event 0 3 = "id:");
+  check bool "transport-only frame has no id" false
+    (String.starts_with ~prefix:"id:" event);
+  check int "transport-only frame does not consume replay id"
+    before_id (Sse.current_id ());
   check bool "has data" true (String.length event > 0)
 
 let test_format_event_with_id () =
@@ -95,22 +99,12 @@ let test_max_buffer_size_reasonable () =
     (Sse.max_buffer_size >= 50 && Sse.max_buffer_size <= 1000)
 
 (* ============================================================
-   current_id / next_id Tests
+   current_id Tests
    ============================================================ *)
 
 let test_current_id_positive () =
   let id = Sse.current_id () in
   check bool "positive" true (id >= 0)
-
-let test_next_id_increments () =
-  let before = Sse.current_id () in
-  let next = Sse.next_id () in
-  check bool "incremented" true (next > before)
-
-let test_next_id_sequential () =
-  let id1 = Sse.next_id () in
-  let id2 = Sse.next_id () in
-  check bool "sequential" true (id2 > id1)
 
 (* ============================================================
    register / unregister / exists Tests
@@ -587,8 +581,6 @@ let () =
     ];
     "id_management", [
       test_case "current_id positive" `Quick test_current_id_positive;
-      test_case "next_id increments" `Quick test_next_id_increments;
-      test_case "next_id sequential" `Quick test_next_id_sequential;
     ];
     "client_management", [
       test_case "register creates" `Quick test_register_creates_client;

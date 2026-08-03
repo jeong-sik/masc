@@ -433,33 +433,28 @@ let cleanup_expired_events () =
     [get_events_after] skips by id, so a duplicate would be
     dropped).
 
-    When [~id] is omitted (external callers in
-    [server_mcp_transport_http] / [server_mcp_transport_http_agui])
-    this function still allocates a fresh id atomically, preserving
-    their contract. *)
+    When [~id] is omitted the frame is transport-only: it does not advance the
+    durable replay cursor. Only callers that have committed the same delivery
+    to the replay buffer may attach an id. *)
 let format_event ?id ?event_type data =
-  let effective_id =
-    match id with
-    | Some i -> i
-    | None ->
-        (* Atomic fetch_and_add: returns old value, we want new value so +1 *)
-        Atomic.fetch_and_add event_counter 1 + 1
-  in
   (* Hot path: every broadcast goes through here once.  The previous
      three [Printf.sprintf] calls each ran the format interpreter and
      allocated an intermediate string ([id_line], [event_line], the
      concat), so a single broadcast paid for three string allocations
      plus the [%d]/[%s] dispatch overhead before the result string was
      produced.  A single [Buffer] accumulator with primitive
-     [string_of_int] sidesteps the format interpreter entirely and
-     emits exactly the bytes the SSE wire format requires (id-line +
-     optional event-line + one [data:] line per logical data line + blank).
-     Single-line payloads remain byte-for-byte identical to the previous
-     output. *)
+     [string_of_int] sidesteps the format interpreter entirely and emits the
+     SSE wire format (optional id/event lines + one [data:] line per logical
+     data line + blank).
+     Frames with an explicit id remain byte-for-byte identical to the previous
+     canonical output. *)
   let buf = Buffer.create 64 in
-  Buffer.add_string buf "id: ";
-  Buffer.add_string buf (string_of_int effective_id);
-  Buffer.add_char buf '\n';
+  (match id with
+   | None -> ()
+   | Some event_id ->
+       Buffer.add_string buf "id: ";
+       Buffer.add_string buf (string_of_int event_id);
+       Buffer.add_char buf '\n');
   (match event_type with
    | Some e ->
        Buffer.add_string buf "event: ";
@@ -478,15 +473,10 @@ let format_event ?id ?event_type data =
     [to_string] allocation.  Writes JSON bytes directly into the SSE event
     buffer via [Yojson.Safe.to_buffer], cutting one string allocation per
     broadcast (~9/sec → ~9 fewer short-lived strings/sec for GC to collect). *)
-let format_event_yojson ?id ?event_type json =
-  let effective_id =
-    match id with
-    | Some i -> i
-    | None -> Atomic.fetch_and_add event_counter 1 + 1
-  in
+let format_event_yojson ~id ?event_type json =
   let buf = Buffer.create 128 in
   Buffer.add_string buf "id: ";
-  Buffer.add_string buf (string_of_int effective_id);
+  Buffer.add_string buf (string_of_int id);
   Buffer.add_char buf '\n';
   (match event_type with
    | Some e ->

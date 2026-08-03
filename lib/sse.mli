@@ -141,8 +141,9 @@ val data_payload_of_frame : string -> (string, data_payload_error) result
 
 val format_event : ?id:int -> ?event_type:string -> string -> string
 (** [format_event] prefixes every logical line of [data] with [data:] so
-    embedded newlines cannot escape the SSE field framing. *)
-val next_id : unit -> int
+    embedded newlines cannot escape the SSE field framing. An omitted [id]
+    produces a transport-only frame and does not advance the replay cursor;
+    only replay-buffered canonical deliveries may supply an [id]. *)
 val current_id : unit -> int
 
 (** {1 Broadcast} *)

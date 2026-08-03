@@ -217,19 +217,21 @@ let format_prompt_row fields =
   |> ( ^ ) "- "
 ;;
 
-let board_reaction_note (reaction : Keeper_world_observation.board_reaction_event) =
-  Printf.sprintf
-    " reaction=%s target=%s:%s user=%s emoji=%s"
-    (if reaction.reacted then "added" else "removed")
-    (Board.reaction_target_type_to_string reaction.target_type)
-    reaction.target_id
-    reaction.user_id
-    (quote_prompt_field reaction.emoji)
+let board_reaction_fields
+    (reaction : Keeper_world_observation.board_reaction_event) =
+  [ "reaction", if reaction.reacted then "added" else "removed"
+  ; ( "target"
+    , Board.reaction_target_type_to_string reaction.target_type
+      ^ ":"
+      ^ reaction.target_id )
+  ; "user", reaction.user_id
+  ; "emoji", reaction.emoji
+  ]
 ;;
 
-let board_event_note = function
+let board_event_note_fields = function
   | Keeper_world_observation.Board_reaction_changed reaction ->
-    board_reaction_note reaction
+    board_reaction_fields reaction
   | Keeper_world_observation.External_attention
   | Keeper_world_observation.Board_post_created
   | Keeper_world_observation.Board_comment_added
@@ -244,43 +246,46 @@ let board_event_note = function
 let format_board_event_text
     (event : Keeper_world_observation.pending_board_event) : string =
   let event_label = board_event_kind_label event.event_kind in
-  let event_note = board_event_note event.event_kind in
-  let mention_note =
+  let fields =
+    [ "event", event_label
+    ; "post_id", event.post_id
+    ; "post_kind", Board.post_kind_to_string event.post_kind
+    ; "title", Keeper_types_profile.short_preview ~max_len:80 event.title
+    ; "author", event.author
+    ]
+  in
+  let fields =
+    match event.hearth with
+    | Some hearth when String.trim hearth <> "" -> fields @ [ "hearth", hearth ]
+    | _ -> fields
+  in
+  let fields =
     if event.explicit_mention then
       let targets =
         match event.matched_targets with
         | [] -> "explicit mention"
         | xs -> "mentions " ^ String.concat ", " xs
       in
-      " [" ^ targets ^ "]"
-    else ""
+      fields @ [ "mention", targets ]
+    else fields
   in
-  let hearth_note =
-    match event.hearth with
-    | Some hearth when String.trim hearth <> "" -> " {" ^ hearth ^ "}"
-    | _ -> ""
-  in
-  let self_note =
+  let fields = fields @ board_event_note_fields event.event_kind in
+  let fields =
     if event.self_commented && event.new_external_since > 0 then
-      Printf.sprintf " [%d new reply since yours%s]"
-        event.new_external_since
-        (match event.latest_external_author, event.latest_external_preview with
-         | Some a, Some p -> Printf.sprintf ", latest by %s: %s" a p
-         | _ -> "")
-    else ""
+      let fields =
+        fields
+        @ [ "new_replies_since_own", string_of_int event.new_external_since ]
+      in
+      match event.latest_external_author, event.latest_external_preview with
+      | Some author, Some preview ->
+        fields
+        @ [ "latest_external_author", author
+          ; "latest_external_preview", preview
+          ]
+      | _ -> fields
+    else fields
   in
-  Printf.sprintf
-    "- event=%s post_id=%s post_kind=%s title=%S author=%s%s%s%s%s preview: %s"
-    event_label
-    event.post_id
-    (Board.post_kind_to_string event.post_kind)
-    (Keeper_types_profile.short_preview ~max_len:80 event.title)
-    event.author
-    hearth_note
-    mention_note
-    event_note
-    self_note
-    event.preview
+  format_prompt_row (fields @ [ "preview", event.preview ])
 ;;
 
 let format_scheduled_automation_item
@@ -397,14 +402,17 @@ let format_completion_authority_rejection_observations
          match event.event_kind with
          | Keeper_world_observation.Completion_authority_rejected rejection ->
            Some
-             (Printf.sprintf
-                "- post_id=%s task_id=%s verification_id=%s authority_kind=%s authority_actor=%s reason=%s\n"
-                event.post_id
-                rejection.Keeper_event_queue.car_task_id
-                rejection.car_verification_id
-                (Masc_domain.completion_authority_kind rejection.car_authority)
-                (Masc_domain.completion_authority_actor rejection.car_authority)
-                (quote_prompt_field rejection.car_reason))
+             (format_prompt_row
+                [ "post_id", event.post_id
+                ; "task_id", rejection.Keeper_event_queue.car_task_id
+                ; "verification_id", rejection.car_verification_id
+                ; ( "authority_kind"
+                  , Masc_domain.completion_authority_kind rejection.car_authority )
+                ; ( "authority_actor"
+                  , Masc_domain.completion_authority_actor rejection.car_authority )
+                ; "reason", rejection.car_reason
+                ]
+              ^ "\n")
          | Keeper_world_observation.Board_post_created
          | Keeper_world_observation.Board_comment_added
          | Keeper_world_observation.Board_reaction_changed _
@@ -458,11 +466,12 @@ let render_board_observations
    judge for itself whether a new post would repeat earlier content. No
    advisory wording: the rows are data, not instructions. *)
 let format_own_board_post_text (post : Board.post) : string =
-  Printf.sprintf "- post_id=%s updated_at=%s title=%S preview: %s"
-    (Board.Post_id.to_string post.id)
-    (Masc_domain.iso8601_of_unix_seconds post.updated_at)
-    (Keeper_types_profile.short_preview ~max_len:80 post.title)
-    (Keeper_types_profile.short_preview ~max_len:80 post.content)
+  format_prompt_row
+    [ "post_id", Board.Post_id.to_string post.id
+    ; "updated_at", Masc_domain.iso8601_of_unix_seconds post.updated_at
+    ; "title", Keeper_types_profile.short_preview ~max_len:80 post.title
+    ; "preview", Keeper_types_profile.short_preview ~max_len:80 post.content
+    ]
 ;;
 
 let line_block label value =

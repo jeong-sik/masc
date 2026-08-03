@@ -77,12 +77,14 @@ if [ "$SKIP_BUILD" = false ]; then
     "$REPO_DIR/scripts/dune-local.sh" build \
         bin/main_eio.exe \
         bin/keeper_event_queue_v15_cutover_helper.exe \
+        bin/keeper_board_cursor_cutover_check.exe \
         2>&1
     echo "    Build complete." >&2
 fi
 
 BUILD_EXE="$REPO_DIR/_build/default/bin/main_eio.exe"
 BUILD_CUTOVER_HELPER="$REPO_DIR/_build/default/bin/keeper_event_queue_v15_cutover_helper.exe"
+BUILD_BOARD_CURSOR_CUTOVER_CHECK="$REPO_DIR/_build/default/bin/keeper_board_cursor_cutover_check.exe"
 if [ ! -x "$BUILD_EXE" ]; then
     echo "Error: Build artifact not found at $BUILD_EXE" >&2
     exit 1
@@ -91,11 +93,17 @@ if [ ! -x "$BUILD_CUTOVER_HELPER" ]; then
     echo "Error: Event-queue cutover helper not found at $BUILD_CUTOVER_HELPER" >&2
     exit 1
 fi
+if [ ! -x "$BUILD_BOARD_CURSOR_CUTOVER_CHECK" ]; then
+    echo "Error: Board-cursor cutover check not found at $BUILD_BOARD_CURSOR_CUTOVER_CHECK" >&2
+    exit 1
+fi
 
 prepare_release_under_cutover_lease() {
     MASC_EVENT_QUEUE_V15_CUTOVER_HELPER="$BUILD_CUTOVER_HELPER" \
         "$SCRIPT_DIR/check-keeper-event-queue-v15-cutover.sh" \
         --base-path "$BASE_PATH"
+
+    "$BUILD_BOARD_CURSOR_CUTOVER_CHECK" --base-path "$BASE_PATH"
 
     mkdir -p "$RELEASE_DIR"
     if [ -f "$RELEASE_EXE" ]; then

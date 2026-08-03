@@ -584,7 +584,7 @@ let test_registration_rejects_non_loopback_redirect () =
               retry.client_id))))
 ;;
 
-let test_registration_reclaims_inactive_client_at_capacity () =
+let test_registration_rejects_distinct_client_at_capacity () =
   with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
     with_env "MASC_OAUTH_MAX_CLIENTS" "1" (fun () ->
       with_workspace (fun base_path ->
@@ -615,41 +615,34 @@ let test_registration_reclaims_inactive_client_at_capacity () =
                   "exact DCR retry is idempotent"
                   first.client_id
                   repeated.client_id;
-                let second =
-                  Auth_oauth.register_client
-                    ~base_path
-                    ~client_name:(Some "Codex replacement")
-                    ~redirect_uris:[ "http://127.0.0.1:43128/callback/second" ]
-                  |> oauth_ok
-                in
                 check
                   bool
-                  "a distinct registration replaces unused capacity"
+                  "a distinct registration is rejected at capacity"
                   true
-                  (not (String.equal first.client_id second.client_id));
+                  (match
+                     Auth_oauth.register_client
+                       ~base_path
+                       ~client_name:(Some "Codex replacement")
+                       ~redirect_uris:[ "http://127.0.0.1:43128/callback/second" ]
+                   with
+                   | Error Auth_oauth.Temporarily_unavailable -> true
+                   | Ok _ | Error _ -> false);
                 check
                   bool
-                  "the unused registration is reclaimed"
-                  false
+                  "capacity pressure preserves the existing registration"
+                  true
                   (Auth_oauth.find_client ~base_path ~client_id:first.client_id
-                   |> oauth_ok
-                   |> Option.is_some);
-                check
-                  bool
-                  "the second registration remains durable"
-                  true
-                  (Auth_oauth.find_client ~base_path ~client_id:second.client_id
                    |> oauth_ok
                    |> Option.is_some);
                 check
                   string
                   "an exact retry remains admitted at capacity"
-                  second.client_id
+                  first.client_id
                   (let retry =
                      Auth_oauth.register_client
                        ~base_path
-                       ~client_name:(Some "Codex replacement")
-                       ~redirect_uris:[ "http://127.0.0.1:43128/callback/second" ]
+                       ~client_name:(Some "Codex")
+                       ~redirect_uris:[ "http://127.0.0.1:43127/callback/first" ]
                      |> oauth_ok
                    in
                    retry.client_id))))))
@@ -719,13 +712,36 @@ let test_refresh_scope_can_reduce_but_not_expand () =
               |> auth_ok
             in
             let resource = "http://127.0.0.1:8935/mcp" in
+            let admin_only_client, admin_only_pair =
+              issue_pair
+                ~base_path
+                ~bootstrap_credential
+                ~redirect_uri:"http://127.0.0.1:43131/callback/admin-only"
+                ~resource
+                ~scope:"mcp:admin"
+            in
+            check
+              bool
+              "refresh cannot substitute a scope that was never granted"
+              true
+              (match
+                 Auth_oauth.rotate_refresh_token
+                   ~base_path
+                   ~expected_resource:resource
+                   ~refresh_token:admin_only_pair.refresh_token
+                   ~client_id:admin_only_client.client_id
+                   ~scope:(Some "mcp:tools")
+                   ~resource:(Some resource)
+               with
+               | Error Auth_oauth.Invalid_scope -> true
+               | Ok _ | Error _ -> false);
             let client, admin_pair =
               issue_pair
                 ~base_path
                 ~bootstrap_credential
                 ~redirect_uri:"http://127.0.0.1:43131/callback/scope"
                 ~resource
-                ~scope:"mcp:admin"
+                ~scope:"mcp:tools mcp:admin"
             in
             let worker_pair =
               Auth_oauth.rotate_refresh_token
@@ -888,9 +904,9 @@ let () =
             `Quick
             test_code_exchange_rechecks_live_bootstrap
         ; test_case
-            "registration reclaims inactive client at capacity"
+            "registration rejects distinct client at capacity"
             `Quick
-            test_registration_reclaims_inactive_client_at_capacity
+            test_registration_rejects_distinct_client_at_capacity
         ; test_case
             "registration preserves live client at capacity"
             `Quick

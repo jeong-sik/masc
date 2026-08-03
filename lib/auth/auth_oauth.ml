@@ -40,65 +40,18 @@ let protocol_error_code = function
 ;;
 
 module Policy = struct
-  let enabled_env = "MASC_OAUTH_ENABLED"
-  let code_ttl_env = "MASC_OAUTH_CODE_TTL_SEC"
-  let access_token_ttl_env = "MASC_OAUTH_ACCESS_TOKEN_TTL_SEC"
-  let refresh_token_ttl_env = "MASC_OAUTH_REFRESH_TOKEN_TTL_SEC"
-  let max_pending_codes_env = "MASC_OAUTH_MAX_PENDING_CODES"
-  let max_clients_env = "MASC_OAUTH_MAX_CLIENTS"
-
-  let default_code_ttl_sec = 300
-  let default_access_token_ttl_sec = 3600
-  let default_refresh_token_ttl_sec = 2_592_000
-  let default_max_pending_codes = 128
-  let default_max_clients = 128
   let max_redirect_uris = 8
   let max_uri_bytes = 2048
   let max_client_name_bytes = 200
   let max_state_bytes = 1024
 end
 
-let enabled () = Env_config_core.get_bool ~default:false Policy.enabled_env
-
-let positive_config ~default env =
-  match Sys.getenv_opt env with
-  | None -> default
-  | Some raw ->
-    (match int_of_string_opt (String.trim raw) with
-     | Some value when value > 0 -> value
-     | Some _ | None ->
-       Log.Auth.warn
-         "oauth: invalid positive integer config env=%s; using default=%d"
-         env
-         default;
-       default)
-;;
-
-let code_ttl_sec () =
-  positive_config ~default:Policy.default_code_ttl_sec Policy.code_ttl_env
-;;
-
-let access_token_ttl_sec () =
-  positive_config
-    ~default:Policy.default_access_token_ttl_sec
-    Policy.access_token_ttl_env
-;;
-
-let refresh_token_ttl_sec () =
-  positive_config
-    ~default:Policy.default_refresh_token_ttl_sec
-    Policy.refresh_token_ttl_env
-;;
-
-let max_pending_codes () =
-  positive_config
-    ~default:Policy.default_max_pending_codes
-    Policy.max_pending_codes_env
-;;
-
-let max_clients () =
-  positive_config ~default:Policy.default_max_clients Policy.max_clients_env
-;;
+let enabled = Env_config_runtime_services.OAuth.enabled
+let code_ttl_sec = Env_config_runtime_services.OAuth.code_ttl_sec
+let access_token_ttl_sec = Env_config_runtime_services.OAuth.access_token_ttl_sec
+let refresh_token_ttl_sec = Env_config_runtime_services.OAuth.refresh_token_ttl_sec
+let max_pending_codes = Env_config_runtime_services.OAuth.max_pending_codes
+let max_clients = Env_config_runtime_services.OAuth.max_clients
 
 let pkce_s256 verifier =
   Digestif.SHA256.digest_string verifier
@@ -511,54 +464,6 @@ let cleanup_expired_codes_locked current =
     pending_codes
 ;;
 
-let protected_pending_client_ids ~base_path ~current =
-  Stdlib.Mutex.protect pending_mutex (fun () ->
-    cleanup_expired_codes_locked current;
-    Hashtbl.fold
-      (fun _ (grant : pending_grant) client_ids ->
-        if String.equal grant.base_path base_path
-        then grant.request.client_id :: client_ids
-        else client_ids)
-      pending_codes
-      [])
-;;
-
-let live_family_client_ids_locked ~base_path ~current =
-  let entries =
-    Sys.readdir (families_dir base_path)
-    |> Array.to_list
-    |> List.filter (fun path -> Filename.check_suffix path ".json")
-  in
-  let rec collect client_ids = function
-    | [] -> Ok client_ids
-    | entry :: rest ->
-      let path = Filename.concat (families_dir base_path) entry in
-      let* json = load_json_opt path in
-      (match json with
-       | None -> collect client_ids rest
-       | Some json ->
-         let* family = family_of_yojson json in
-         let* access_is_live =
-           let* access_json =
-             load_json_opt (access_path base_path family.current_access_hash)
-           in
-           match access_json with
-           | None -> Ok false
-           | Some access_json ->
-             let* access = access_record_of_yojson access_json in
-             Ok (access.expires_at_unix > current)
-         in
-         let family_is_live =
-           Option.is_none family.revoked_at_unix
-           && (family.refresh_expires_at_unix > current || access_is_live)
-         in
-         collect
-           (if family_is_live then family.client_id :: client_ids else client_ids)
-           rest)
-  in
-  collect [] entries
-;;
-
 let register_client ~base_path ~client_name ~redirect_uris =
   if not (enabled ())
   then Error OAuth_disabled
@@ -622,37 +527,7 @@ let register_client ~base_path ~client_name ~redirect_uris =
         let* () =
           if List.length stored_clients < client_limit
           then Ok ()
-          else
-            let current = now () in
-            let pending_client_ids = protected_pending_client_ids ~base_path ~current in
-            let* live_family_client_ids =
-              live_family_client_ids_locked ~base_path ~current
-            in
-            let protected client_id =
-              List.mem client_id pending_client_ids
-              || List.mem client_id live_family_client_ids
-            in
-            let reclaimable =
-              stored_clients
-              |> List.filter (fun (_, (stored : client)) ->
-                not (protected stored.client_id))
-              |> List.sort (fun (_, (left : client)) (_, (right : client)) ->
-                let by_created = Float.compare left.created_at_unix right.created_at_unix in
-                if by_created <> 0
-                then by_created
-                else String.compare left.client_id right.client_id)
-            in
-            let rec take count acc = function
-              | _ when count = 0 -> Some (List.rev acc)
-              | [] -> None
-              | item :: rest -> take (count - 1) (item :: acc) rest
-            in
-            let reclaim_count = List.length stored_clients - client_limit + 1 in
-            (match take reclaim_count [] reclaimable with
-             | None -> Error Temporarily_unavailable
-             | Some reclaimed ->
-               List.iter (fun (path, _) -> Sys.remove path) reclaimed;
-               Ok ())
+          else Error Temporarily_unavailable
         in
         let* () =
           save_json_private
@@ -765,15 +640,17 @@ let issue_authorization_code
     ; expires_at_unix = issued_at_unix +. float_of_int (code_ttl_sec ())
     }
   in
-  with_store_io ~base_path (fun () ->
-    let* () = activate_client_locked ~base_path ~client_id:request.client_id in
-    Stdlib.Mutex.protect pending_mutex (fun () ->
+  let* () =
+    with_store_io ~base_path (fun () ->
+      activate_client_locked ~base_path ~client_id:request.client_id)
+  in
+  Stdlib.Mutex.protect pending_mutex (fun () ->
       cleanup_expired_codes_locked issued_at_unix;
       if Hashtbl.length pending_codes >= max_pending_codes ()
       then Error Temporarily_unavailable
       else (
         Hashtbl.replace pending_codes hash grant;
-        Ok raw_code)))
+        Ok raw_code))
 ;;
 
 let load_family base_path family_id =
@@ -969,10 +846,8 @@ let exchange_authorization_code
   then Error Invalid_grant
   else
     let hash = token_hash code in
-    let family_id = "mof_" ^ Auth_credential_base.generate_token () in
-    with_store_io ~base_path (fun () ->
-      let* grant =
-        Stdlib.Mutex.protect pending_mutex (fun () ->
+    let claimed_grant =
+      Stdlib.Mutex.protect pending_mutex (fun () ->
           let current = now () in
           cleanup_expired_codes_locked current;
           match Hashtbl.find_opt pending_codes hash with
@@ -997,7 +872,10 @@ let exchange_authorization_code
             else (
               Hashtbl.remove pending_codes hash;
               Ok grant))
-      in
+    in
+    let* grant = claimed_grant in
+    let family_id = "mof_" ^ Auth_credential_base.generate_token () in
+    with_store_io ~base_path (fun () ->
       if
         live_bootstrap_allows
           ~base_path
@@ -1077,8 +955,6 @@ let rotate_refresh_token
             let* requested = parse_scopes (Some raw) in
             let granted requested_scope =
               List.exists (equal_scope requested_scope) family.scopes
-              || (equal_scope requested_scope Mcp_tools
-                  && List.exists (equal_scope Mcp_admin) family.scopes)
             in
             if List.for_all granted requested then Ok requested else Error Invalid_scope
         in

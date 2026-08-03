@@ -270,7 +270,7 @@ let test_current_task_missing_is_explicit () =
     (contains ~needle:"Do not infer or invent task details" world_state)
 
 let test_recovered_current_task_is_non_authoritative () =
-  let task = make_task () in
+  let task = make_task ~task_status:Masc_domain.Todo () in
   let decision = WO.keeper_cycle_decision ~meta base_observation in
   let recovery : Masc.Workspace.backlog_recovery =
     { recovery_path = "/tmp/backlog.last-good"; primary_error = "decode failed" }

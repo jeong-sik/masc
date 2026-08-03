@@ -34,7 +34,7 @@ let task_ownership_json backlog_observation =
       ; "authoritative", `Bool false
       ; "error", `String message
       ]
-  | Ok { observed_backlog = backlog; recovered_from } ->
+  | Ok { Workspace.observed_backlog = backlog; recovered_from } ->
     let items =
       List.filter_map
         (fun (task : Masc_domain.task) ->
@@ -80,7 +80,7 @@ let workspace_json config =
     let task_count, task_count_available, task_count_authoritative, task_count_error =
       match backlog_observation with
       | Error message -> `Null, false, false, `String message
-      | Ok { observed_backlog = backlog; recovered_from } ->
+      | Ok { Workspace.observed_backlog = backlog; recovered_from } ->
         ( `Int (List.length backlog.tasks)
         , true
         , Option.is_none recovered_from

@@ -197,7 +197,7 @@ let read_current_task ~(config : Workspace.config) ~(meta : keeper_meta)
     | ex ->
       let rendered = Printexc.to_string ex in
       record_unavailable rendered;
-      Current_task_unavailable { task_id; error = rendered }
+      raise ex
 ;;
 
 (** Count live keeper fibers for keeper world state.

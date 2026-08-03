@@ -56,9 +56,9 @@ val read_current_task
 (** Resolve [meta.current_task_id] without collapsing absence, recovery, and
     unreadability. A primary task is authoritative; a recovery task is
     explicitly non-authoritative; a missing task id remains visible; and a
-    failed read is counted and returned as [Current_task_unavailable] so an
-    observation failure cannot crash the Keeper cycle. Cancellation is
-    re-raised; its boundary remains observable. *)
+    typed read failure is counted and returned as [Current_task_unavailable]
+    so an expected observation failure cannot crash the Keeper cycle.
+    Cancellation and unexpected exceptions are re-raised. *)
 
 val count_running_keeper_fibers : config:Workspace.config -> int
 (** Count live keeper fibers for [config.base_path].

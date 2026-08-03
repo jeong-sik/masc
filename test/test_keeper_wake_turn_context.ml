@@ -253,7 +253,7 @@ let test_current_task_unavailable_is_explicit () =
     (contains ~needle:"Task task-42 could not be observed" world_state);
   check bool "unavailable is not rendered as absent" true
     (contains ~needle:"does not mean the task is absent" world_state);
-  check bool "unavailable error remains visible" true
+  check bool "storage error is not prompt content" false
     (contains ~needle:"primary and recovery backlog decode failed" world_state)
 
 let test_current_task_missing_is_explicit () =
@@ -268,6 +268,28 @@ let test_current_task_missing_is_explicit () =
     (contains ~needle:"references task-42" world_state);
   check bool "missing record forbids invented details" true
     (contains ~needle:"Do not infer or invent task details" world_state)
+
+let test_recovered_current_task_is_non_authoritative () =
+  let task = make_task () in
+  let decision = WO.keeper_cycle_decision ~meta base_observation in
+  let recovery : Masc.Workspace.backlog_recovery =
+    { recovery_path = "/tmp/backlog.last-good"; primary_error = "decode failed" }
+  in
+  let { Prompt.world_state; _ } =
+    Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~turn_decision:decision
+      ~current_task:(Inputs.Recovered_current_task { task; recovery })
+      ~observation:base_observation ()
+  in
+  check bool "recovery is not asserted as held authority" false
+    (contains ~needle:"Current Task (held by you)" world_state);
+  check bool "recovery authority is explicit" true
+    (contains
+       ~needle:"Current Task (recovery observation; non-authoritative)"
+       world_state);
+  check bool "mutation authority is forbidden" true
+    (contains ~needle:"Do not use this recovery observation as mutation authority" world_state);
+  check bool "primary parser error is not prompt content" false
+    (contains ~needle:"decode failed" world_state)
 
 let test_direct_turn_reuses_current_task_context () =
   let task =
@@ -566,6 +588,8 @@ let () =
             test_current_task_unavailable_is_explicit;
           test_case "dangling task id remains explicit" `Quick
             test_current_task_missing_is_explicit;
+          test_case "recovery task is explicitly non-authoritative" `Quick
+            test_recovered_current_task_is_non_authoritative;
           test_case "direct reply receives the held task and handoff" `Quick
             test_direct_turn_reuses_current_task_context;
           test_case "direct reply invents no task when none is held" `Quick

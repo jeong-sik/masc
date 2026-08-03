@@ -40,8 +40,9 @@ val format_current_task_observation
   :  Keeper_world_observation_inputs.current_task_observation
   -> string option
 (** Render one held task as per-turn observation context. The direct-message
-    lane reuses this renderer so it sees the same task identity, status, and
-    handoff as an autonomous wake without persisting that context. *)
+    lane reuses this renderer so it sees the same task identity, status,
+    provenance, and handoff as an autonomous wake without persisting that
+    context. Storage error text is not model-facing content. *)
 
 val effective_instructions :
   meta:Keeper_meta_contract.keeper_meta ->

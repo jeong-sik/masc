@@ -74,7 +74,7 @@ let format_goal_summaries_for_active_goals
     The scheduled cycle always runs when proactive lifecycle is enabled, and
     the model must see the work it is holding: id, title, status, and the prior
     owner's handoff summary when one exists. *)
-let format_current_task (task : Masc_domain.task) : string =
+let format_current_task_with_heading ~heading (task : Masc_domain.task) : string =
   let status_line =
     match task.Masc_domain.task_status with
     | Masc_domain.Claimed { assignee; claimed_at } ->
@@ -88,7 +88,7 @@ let format_current_task (task : Masc_domain.task) : string =
     | Masc_domain.Cancelled _ -> "cancelled"
   in
   let buf = Buffer.create 256 in
-  Buffer.add_string buf "### Current Task (held by you)\n";
+  Buffer.add_string buf ("### " ^ heading ^ "\n");
   Buffer.add_string buf
     (Printf.sprintf "- %s — %s [%s]\n" task.Masc_domain.id
        task.Masc_domain.title status_line);
@@ -105,6 +105,9 @@ let format_current_task (task : Masc_domain.task) : string =
   Buffer.add_string buf
     "\n";
   Buffer.contents buf
+
+let format_current_task task =
+  format_current_task_with_heading ~heading:"Current Task (held by you)" task
 
 (** Format one conversation endpoint presence line. *)
 let format_surface_presence (p : Gate_surface.surface_presence) : string =
@@ -183,32 +186,28 @@ let quote_prompt_field value =
 let format_current_task_observation = function
   | Keeper_world_observation_inputs.No_current_task -> None
   | Keeper_world_observation_inputs.Current_task task -> Some (format_current_task task)
-  | Keeper_world_observation_inputs.Recovered_current_task { task; recovery } ->
+  | Keeper_world_observation_inputs.Recovered_current_task { task; recovery = _ } ->
     Some
-      (format_current_task task
-       ^ Printf.sprintf
-           "### Current Task Observation Source\n- This task came from the recovery snapshot %s; it is non-authoritative because the primary backlog failed: %s\n\n"
-           recovery.recovery_path
-           recovery.primary_error)
+      (format_current_task_with_heading
+         ~heading:"Current Task (recovery observation; non-authoritative)"
+         task
+       ^ "- The primary backlog is unavailable. Do not use this recovery observation as mutation authority.\n\n")
   | Keeper_world_observation_inputs.Current_task_missing { task_id; recovery = None } ->
     Some
       (Printf.sprintf
          "### Current Task\n- Keeper metadata references %s, but that task is absent from the authoritative backlog. Do not infer or invent task details.\n\n"
          (Keeper_id.Task_id.to_string task_id))
   | Keeper_world_observation_inputs.Current_task_missing
-      { task_id; recovery = Some recovery } ->
+      { task_id; recovery = Some _ } ->
     Some
       (Printf.sprintf
-         "### Current Task\n- Keeper metadata references %s, but it was not found in the recovery snapshot %s. The primary backlog is unavailable, so absence is not authoritative: %s\n\n"
-         (Keeper_id.Task_id.to_string task_id)
-         recovery.recovery_path
-         recovery.primary_error)
-  | Keeper_world_observation_inputs.Current_task_unavailable { task_id; error } ->
+         "### Current Task\n- Keeper metadata references %s, but it was not found in the recovery snapshot. The primary backlog is unavailable, so absence is not authoritative.\n\n"
+         (Keeper_id.Task_id.to_string task_id))
+  | Keeper_world_observation_inputs.Current_task_unavailable { task_id; error = _ } ->
     Some
       (Printf.sprintf
-         "### Current Task\n- Task %s could not be observed because the backlog is unavailable. This does not mean the task is absent; preserve its ownership state.\n- Observation error: %s\n\n"
-         (Keeper_id.Task_id.to_string task_id)
-         error)
+         "### Current Task\n- Task %s could not be observed because the backlog is unavailable. This does not mean the task is absent; preserve its ownership state.\n\n"
+         (Keeper_id.Task_id.to_string task_id))
 ;;
 
 let board_reaction_note (reaction : Keeper_world_observation.board_reaction_event) =

@@ -221,8 +221,10 @@ val project_accepted_transfer_durable_result :
   -> transfer_projection_result
 (** Strict target transfer projection. The exact source and operation identity
     are durably accounted in the target queue state before the pending
-    projection becomes visible. Accounting survives consumption. A target
-    shutdown reservation or target generation/trace mismatch rejects the
+    projection becomes visible. Accounting survives consumption, and an exact
+    durable replay converges even after the target identity rotates. A first
+    target effect is authorized against the recorded generation/trace; a target
+    shutdown reservation or identity mismatch rejects the
     projection before any durable mutation. *)
 
 val enqueue_hitl_resolution_durable_result :

@@ -29,7 +29,7 @@ let rec rm_rf path =
 let snapshot_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-    "event-queue-v14.json"
+    "event-queue-v15.json"
 
 let json_field name = function
   | `Assoc fields -> List.assoc_opt name fields
@@ -1485,25 +1485,25 @@ let () =
         second_transition_id
         retained_transition_id);
 
-  (* --- current-only hard cut: the retired v12 filename is not a read,
-         migration, or overwrite source for the v14 queue. --- *)
-  let base_path = temp_dir "keeper-event-queue-v14-hard-cut" in
+  (* --- current-only hard cut: the retired v14 filename is not a read,
+         migration, or overwrite source for the v15 queue. --- *)
+  let base_path = temp_dir "keeper-event-queue-v15-hard-cut" in
   Fun.protect
     ~finally:(fun () -> rm_rf base_path)
     (fun () ->
-      let keeper_name = "keeper-event-queue-v14-hard-cut-test" in
+      let keeper_name = "keeper-event-queue-v15-hard-cut-test" in
       let keeper_dir =
         Filename.concat
           (Common.keepers_runtime_dir_of_base ~base_path)
           keeper_name
       in
-      let retired_path = Filename.concat keeper_dir "event-queue-v12.json" in
+      let retired_path = Filename.concat keeper_dir "event-queue-v14.json" in
       let retired_wal_path =
-        Filename.concat keeper_dir "event-queue-transitions-v2.jsonl"
+        Filename.concat keeper_dir "event-queue-transitions-v4.jsonl"
       in
       Fs_compat.mkdir_p keeper_dir;
-      write_file retired_path "{retired-v12-evidence";
-      write_file retired_wal_path "{retired-v2-wal-evidence\n";
+      write_file retired_path "{retired-v14-evidence";
+      write_file retired_wal_path "{retired-v4-wal-evidence\n";
       assert (
         is_empty
           (Keeper_event_queue_persistence.load ~base_path ~keeper_name));
@@ -1512,11 +1512,11 @@ let () =
         ~keeper_name
         (enqueue empty board_stim);
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
-      assert (String.equal (read_file retired_path) "{retired-v12-evidence");
+      assert (String.equal (read_file retired_path) "{retired-v14-evidence");
       assert (
         String.equal
           (read_file retired_wal_path)
-          "{retired-v2-wal-evidence\n"));
+          "{retired-v4-wal-evidence\n"));
 
   (* --- strict persisted load rejects malformed current payloads and
          preserves the operator-reset evidence. --- *)
@@ -1680,7 +1680,7 @@ let () =
 
   (* --- A-fix (RFC: keeper-orphan-stimulus-persistence): a consumed stimulus
          is drained from the current queue state on the genuine-ack path. Here
-         the stimulus lives in event-queue-v14.json, mirroring a bootstrap enqueued
+         the stimulus lives in event-queue-v15.json, mirroring a bootstrap enqueued
          by supervisor launch; after ack, [load] must be empty. Without the
          A-fix this returns length 1 and accumulates across restarts. --- *)
   let base_path = temp_dir "keeper-event-queue-ack-drains-pending" in

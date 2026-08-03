@@ -740,6 +740,68 @@ let test_unrelated_enqueue_preserves_source_incarnation () =
        |> List.exists (Queue.stimulus_identity_equal unrelated)))
 ;;
 
+let test_exact_projected_replay_survives_target_identity_rotation () =
+  with_transfer_lane
+  @@ fun config from_keeper to_keeper _source_meta target_meta request ->
+  let transfer : Keeper_registry_event_queue.accepted_transfer =
+    { source = request.source
+    ; source_incarnation = request.source_incarnation
+    ; owner_nonce = request.owner_nonce
+    ; operator_operation_id = request.operator_operation_id
+    ; from_keeper
+    ; to_keeper
+    ; target_generation = target_meta.runtime.nonce
+    ; target_trace_id = target_meta.runtime.trace_id
+    }
+  in
+  let project () =
+    Keeper_registry_event_queue.project_accepted_transfer_durable_result
+      ~base_path:config.Workspace.base_path
+      to_keeper
+      ~transfer
+  in
+  (match project () with
+   | Keeper_registry_event_queue.Transfer_projection_committed -> ()
+   | Keeper_registry_event_queue.Transfer_projection_already_committed ->
+     Alcotest.fail "first target projection was already committed"
+   | Keeper_registry_event_queue.Transfer_projection_storage_error detail ->
+     Alcotest.fail detail
+   | Keeper_registry_event_queue.Transfer_projection_target_unavailable error ->
+     Alcotest.fail (Keeper_registry_event_queue.transfer_target_error_to_string error)
+   | Keeper_registry_event_queue.Transfer_projection_shutdown_reserved operation_id ->
+     Alcotest.fail
+       (Keeper_shutdown_types.Operation_id.to_string operation_id));
+  ignore
+    (write_meta
+       config
+       ~keeper_name:to_keeper
+       ~trace_id:"rotated-target-trace"
+       ~generation:(target_meta.runtime.nonce + 1)
+       ~paused:false :
+      Keeper_meta_contract.keeper_meta);
+  (match project () with
+   | Keeper_registry_event_queue.Transfer_projection_already_committed -> ()
+   | Keeper_registry_event_queue.Transfer_projection_committed ->
+     Alcotest.fail "exact replay committed a second target projection"
+   | Keeper_registry_event_queue.Transfer_projection_storage_error detail ->
+     Alcotest.fail detail
+   | Keeper_registry_event_queue.Transfer_projection_target_unavailable error ->
+     Alcotest.fail (Keeper_registry_event_queue.transfer_target_error_to_string error)
+   | Keeper_registry_event_queue.Transfer_projection_shutdown_reserved operation_id ->
+     Alcotest.fail
+       (Keeper_shutdown_types.Operation_id.to_string operation_id));
+  let target =
+    Persistence.load_state_result
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:to_keeper
+    |> require_ok "load rotated target queue"
+  in
+  Alcotest.(check int)
+    "exact replay keeps one target stimulus"
+    1
+    (Queue.length (State.pending target))
+;;
+
 let test_stale_source_incarnation_has_no_receipt_or_target_effect () =
   with_transfer_lane (fun config from_keeper to_keeper _source_meta _target_meta request ->
     let base_path = config.Workspace.base_path in
@@ -823,6 +885,10 @@ let () =
             "generic recovery preserves receipted target identity"
             `Quick
             test_generic_recovery_preserves_receipted_target_identity
+        ; Alcotest.test_case
+            "exact projected replay survives target identity rotation"
+            `Quick
+            test_exact_projected_replay_survives_target_identity_rotation
         ] )
     ]
 ;;

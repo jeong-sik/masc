@@ -782,7 +782,7 @@ let test_reclaim_follows_transfer_durable_state () =
       (Filename.concat
          (Common.keepers_runtime_dir_of_base ~base_path)
          target_keeper)
-      "event-queue-transitions-v4.jsonl"
+      "event-queue-transitions-v5.jsonl"
   in
   check string "checkpointed transition WAL compacted" ""
     (read_file transition_wal_path);
@@ -985,7 +985,7 @@ let test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing () =
   let queue_path =
     Filename.concat
       (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-      "event-queue-v14.json"
+      "event-queue-v15.json"
   in
   Sys.remove queue_path;
   let outcome =
@@ -1054,7 +1054,7 @@ let test_keeper_purge_settles_owned_occurrence_before_queue_delete () =
   let queue_path =
     Filename.concat
       (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-      "event-queue-v14.json"
+      "event-queue-v15.json"
   in
   Sys.remove queue_path;
   (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
@@ -1141,7 +1141,7 @@ let test_keeper_purge_rejects_missing_owned_snapshot () =
   let queue_path =
     Filename.concat
       (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-      "event-queue-v14.json"
+      "event-queue-v15.json"
   in
   Sys.remove queue_path;
   (match
@@ -1629,7 +1629,7 @@ let test_keeper_wake_durable_state_failure_retries_same_occurrence () =
       "schedule-keeper"
   in
   mkdir_p keeper_owner_path;
-  let queue_path = Filename.concat keeper_owner_path "event-queue-v14.json" in
+  let queue_path = Filename.concat keeper_owner_path "event-queue-v15.json" in
   mkdir_p queue_path;
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
@@ -1753,7 +1753,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
           (Filename.concat
              (Common.keepers_runtime_dir_of_base ~base_path)
              keeper_name)
-          "event-queue-transitions-v4.jsonl"
+          "event-queue-transitions-v5.jsonl"
       in
       check bool "cancellation WAL survives until projection" true
         (Sys.file_exists transition_wal_path

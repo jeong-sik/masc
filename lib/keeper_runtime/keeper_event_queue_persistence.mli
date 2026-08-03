@@ -1,11 +1,11 @@
 (** Durable per-Keeper Event Layer state.
 
-    Current writes use the [keeper.event_queue.state.v14]
-    [event-queue-v14.json] envelope: revision, pending stimuli, the latest
+    Current writes use the [keeper.event_queue.state.v15]
+    [event-queue-v15.json] envelope: revision, pending stimuli, the latest
     projected transition, an operation-indexed ledger of older projected
     dispositions, at most one unprojected transition, and durable
     accepted-transfer target projections. Only this schema and the
-    [event-queue-transitions-v4.jsonl] WAL are queue authority. *)
+    [event-queue-transitions-v5.jsonl] WAL are queue authority. *)
 
 type owner_identity
 type owner_identity_error
@@ -268,6 +268,23 @@ val enqueue_stimulus_if_absent_result :
   (enqueue_stimulus_result, string) result
 (** Atomically enqueue only when the same typed stimulus is absent from the
     full durable state: pending and transition outbox. *)
+
+type 'authorization_error guarded_transfer_projection_result =
+  | Transfer_projection_result of transfer_projection_result
+  | First_projection_rejected of 'authorization_error
+
+val project_accepted_transfer_guarded_result :
+  authorize_first_projection:(unit -> (unit, 'authorization_error) result) ->
+  after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  transfer:accepted_transfer ->
+  ('authorization_error guarded_transfer_projection_result, string) result
+(** Atomically distinguish an exact durable replay from a first target effect.
+    [authorize_first_projection] runs under the target queue lock only when the
+    exact accepted transfer is not already durable. A replay therefore
+    converges after target identity rotation, while a first projection cannot
+    create state for an absent or replaced Keeper. *)
 
 val project_accepted_transfer_result :
   after_commit:(Keeper_event_queue.t -> unit) ->

@@ -340,27 +340,29 @@ let project_accepted_transfer_durable_result ~base_path name ~transfer =
       ~base_path
       ~keeper_name:name
       (fun () ->
-         match validate_target_identity () with
-         | Error detail -> `Target_unavailable detail
-         | Ok () ->
-           `Projection
-             (Keeper_event_queue_persistence.project_accepted_transfer_result
-                ~base_path
-                ~keeper_name:name
-                ~after_commit:(publish_pending ~base_path name)
-                ~transfer))
+         Keeper_event_queue_persistence.project_accepted_transfer_guarded_result
+           ~authorize_first_projection:validate_target_identity
+           ~base_path
+           ~keeper_name:name
+           ~after_commit:(publish_pending ~base_path name)
+           ~transfer)
   with
   | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
     Transfer_projection_shutdown_reserved operation_id
-  | Keeper_turn_admission.Intake_committed (`Target_unavailable detail) ->
+  | Keeper_turn_admission.Intake_committed
+      (Ok
+        (Keeper_event_queue_persistence.First_projection_rejected detail)) ->
     Transfer_projection_target_unavailable detail
-  | Keeper_turn_admission.Intake_committed (`Projection result) ->
+  | Keeper_turn_admission.Intake_committed
+      (Ok
+        (Keeper_event_queue_persistence.Transfer_projection_result result)) ->
     (match result with
-     | Ok Keeper_event_queue_persistence.Transfer_projected ->
+     | Keeper_event_queue_persistence.Transfer_projected ->
        Transfer_projection_committed
-     | Ok Keeper_event_queue_persistence.Transfer_already_projected ->
-       Transfer_projection_already_committed
-     | Error detail -> Transfer_projection_storage_error detail)
+     | Keeper_event_queue_persistence.Transfer_already_projected ->
+       Transfer_projection_already_committed)
+  | Keeper_turn_admission.Intake_committed (Error detail) ->
+    Transfer_projection_storage_error detail
 ;;
 
 let enqueue_hitl_resolution_durable_result

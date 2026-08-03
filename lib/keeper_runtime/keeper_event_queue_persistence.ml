@@ -79,8 +79,8 @@ type transfer_projection_result = State.transfer_projection_result =
   | Transfer_already_projected
 
 
-let snapshot_filename = "event-queue-v14.json"
-let transition_wal_filename = "event-queue-transitions-v4.jsonl"
+let snapshot_filename = "event-queue-v15.json"
+let transition_wal_filename = "event-queue-transitions-v5.jsonl"
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
 
@@ -302,7 +302,7 @@ let bump_revision state =
   else Ok (State.with_revision (Int64.succ (State.revision state)) state)
 ;;
 
-let transition_wal_schema = "masc.keeper_event_queue.transition.v4"
+let transition_wal_schema = "masc.keeper_event_queue.transition.v5"
 
 let transition_wal_entry_to_line owner entry =
   `Assoc
@@ -637,7 +637,7 @@ let commit_transform_unlocked
              (* [load_state_unlocked] above replayed the transition WAL, so
                 [next] already carries that transition's pending mutation and
                 its transition outbox, and the snapshot just written persists
-                both (schema v12). Retire the WAL here, paired with the revision
+                both (schema v15). Retire the WAL here, paired with the revision
                 bump that absorbed it. Leaving it behind is what latches the
                 owner: the next load replays an already-absorbed row against
                 the advanced revision, [commit_transition] rejects it on
@@ -778,7 +778,12 @@ let enqueue_stimulus_if_absent_result
       Ok (State.with_pending pending state, Enqueued))
 ;;
 
-let project_accepted_transfer_result
+type 'authorization_error guarded_transfer_projection_result =
+  | Transfer_projection_result of transfer_projection_result
+  | First_projection_rejected of 'authorization_error
+
+let project_accepted_transfer_guarded_result
+      ~authorize_first_projection
       ~after_commit
       ~base_path
       ~keeper_name
@@ -790,9 +795,31 @@ let project_accepted_transfer_result
     commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
       match State.project_accepted_transfer transfer state with
       | Error _ as error -> error
+      | Ok (next, result) when next == state ->
+        after_commit (State.pending state);
+        Ok (state, Transfer_projection_result result)
       | Ok (next, result) ->
-        if next == state then after_commit (State.pending next);
-        Ok (next, result))
+        (match authorize_first_projection () with
+         | Error error -> Ok (state, First_projection_rejected error)
+         | Ok () -> Ok (next, Transfer_projection_result result)))
+;;
+
+let project_accepted_transfer_result
+      ~after_commit
+      ~base_path
+      ~keeper_name
+      ~transfer
+  =
+  project_accepted_transfer_guarded_result
+    ~authorize_first_projection:(fun () -> Ok ())
+    ~after_commit
+    ~base_path
+    ~keeper_name
+    ~transfer
+  |> Result.bind (function
+    | Transfer_projection_result result -> Ok result
+    | First_projection_rejected _ ->
+      Error "unguarded transfer projection rejected its unconditional authority")
 ;;
 
 let update_result ?after_commit ~base_path ~keeper_name f =

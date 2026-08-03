@@ -36,6 +36,7 @@ type dispatched_occurrence_outcome =
 
 type dispatched_occurrence_settlement =
   { execution_id : string
+  ; schedule_instance_id : string
   ; schedule_id : string
   ; due_at : float
   ; payload_digest : string
@@ -104,13 +105,14 @@ val last_execution_for_schedule :
 
 val execution_for_occurrence :
   state ->
+  schedule_instance_id:string ->
   schedule_id:string ->
   due_at:float ->
   payload_digest:string ->
   Schedule_domain.execution_record option
 (** Exact occurrence lookup. This is the correlation boundary used by
-    asynchronous consumers; schedule id alone is insufficient for recurring
-    work because multiple dispatched executions may coexist. *)
+    asynchronous consumers; the durable schedule instance, public schedule id,
+    due time, and payload digest together identify one persisted occurrence. *)
 
 val insert_request :
   Workspace_utils.config ->
@@ -183,6 +185,7 @@ val accept_running :
 val complete_dispatched_occurrence :
   Workspace_utils.config ->
   now:float ->
+  schedule_instance_id:string ->
   schedule_id:string ->
   due_at:float ->
   payload_digest:string ->
@@ -197,6 +200,7 @@ val complete_dispatched_occurrence :
 val fail_dispatched_occurrence :
   Workspace_utils.config ->
   now:float ->
+  schedule_instance_id:string ->
   schedule_id:string ->
   due_at:float ->
   payload_digest:string ->

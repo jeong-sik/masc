@@ -55,7 +55,8 @@ type payload =
   }
 
 type schedule_request =
-  { schedule_id : string
+  { schedule_instance_id : string
+  ; schedule_id : string
   ; requested_by : actor
   ; scheduled_by : actor
   ; requested_at : float
@@ -75,6 +76,7 @@ type execution_status =
 
 type execution_record =
   { execution_id : string
+  ; schedule_instance_id : string
   ; schedule_id : string
   ; started_at : float
   ; finished_at : float option
@@ -691,6 +693,7 @@ let reschedule_after_due_signal ~now (request : schedule_request) =
 let execution_record_to_yojson (execution : execution_record) =
   `Assoc
     [ "execution_id", `String execution.execution_id
+    ; "schedule_instance_id", `String execution.schedule_instance_id
     ; "schedule_id", `String execution.schedule_id
     ; "started_at", float_to_yojson execution.started_at
     ; "finished_at", option_to_yojson float_to_yojson execution.finished_at
@@ -705,6 +708,7 @@ let execution_record_to_yojson (execution : execution_record) =
 let execution_record_of_yojson = function
   | `Assoc fields ->
     let* execution_id = string_field "execution_id" fields in
+    let* schedule_instance_id = string_field "schedule_instance_id" fields in
     let* schedule_id = string_field "schedule_id" fields in
     let* started_at = float_field "started_at" fields in
     let* finished_at =
@@ -730,6 +734,7 @@ let execution_record_of_yojson = function
     in
     Ok
       { execution_id
+      ; schedule_instance_id
       ; schedule_id
       ; started_at
       ; finished_at
@@ -744,7 +749,8 @@ let execution_record_of_yojson = function
 
 let schedule_request_to_yojson (request : schedule_request) =
   `Assoc
-    [ "schedule_id", `String request.schedule_id
+    [ "schedule_instance_id", `String request.schedule_instance_id
+    ; "schedule_id", `String request.schedule_id
     ; "requested_by", actor_to_yojson request.requested_by
     ; "scheduled_by", actor_to_yojson request.scheduled_by
     ; "requested_at", float_to_yojson request.requested_at
@@ -759,6 +765,7 @@ let schedule_request_to_yojson (request : schedule_request) =
 
 let schedule_request_of_yojson = function
   | `Assoc fields ->
+    let* schedule_instance_id = string_field "schedule_instance_id" fields in
     let* schedule_id = string_field "schedule_id" fields in
     let* requested_by_json = assoc_field "requested_by" fields in
     let* requested_by = actor_of_yojson requested_by_json in
@@ -785,7 +792,8 @@ let schedule_request_of_yojson = function
       | Some value -> recurrence_of_yojson value
     in
     Ok
-      { schedule_id
+      { schedule_instance_id
+      ; schedule_id
       ; requested_by
       ; scheduled_by
       ; requested_at
@@ -817,7 +825,8 @@ let create_request
   let* payload = payload_of_yojson payload in
   let* recurrence = validate_recurrence recurrence in
   Ok
-    { schedule_id
+    { schedule_instance_id = Random_id.uuid_v7 ()
+    ; schedule_id
     ; requested_by
     ; scheduled_by
     ; requested_at

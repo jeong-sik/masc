@@ -2478,6 +2478,7 @@ let schedule_queue_read_error_dashboard_json
 ;;
 
 let schedule_queue_match
+  ~(schedule_instance_id : string)
   ~(schedule_id : string)
   ~(due_at : float)
   ~(payload_digest : string)
@@ -2493,7 +2494,8 @@ let schedule_queue_match
     &&
     match stimulus.payload with
     | Keeper_event_queue.Schedule_due wake ->
-      String.equal wake.schedule_id schedule_id
+      String.equal wake.schedule_instance_id schedule_instance_id
+      && String.equal wake.schedule_id schedule_id
       && Float.equal wake.due_at due_at
       && String.equal wake.payload_digest payload_digest
     | _ -> false)
@@ -2513,6 +2515,10 @@ let schedule_queue_match_fields ~now bucket (stimulus : Keeper_event_queue.stimu
   ; ( "matched_schedule_id"
     , match scheduled_wake with
       | Some wake -> `String wake.schedule_id
+      | None -> `Null )
+  ; ( "matched_schedule_instance_id"
+    , match scheduled_wake with
+      | Some wake -> `String wake.schedule_instance_id
       | None -> `Null )
   ; ( "matched_due_at"
     , match scheduled_wake with
@@ -2550,6 +2556,7 @@ let schedule_keeper_queue_evidence_dashboard_json
         | Ok
             (Server_schedule_consumers.Keeper_wake_enqueued
               { keeper_name
+              ; schedule_instance_id = _
               ; schedule_id
               ; urgency = _
               ; post_id
@@ -2568,7 +2575,12 @@ let schedule_keeper_queue_evidence_dashboard_json
               ~keeper_name
           in
           let pending_match =
-            schedule_queue_match ~schedule_id ~due_at ~payload_digest ~post_id
+            schedule_queue_match
+              ~schedule_instance_id:execution.schedule_instance_id
+              ~schedule_id
+              ~due_at
+              ~payload_digest
+              ~post_id
               ~stimulus_label:stimulus snapshot.pending
           in
           let read_errors =
@@ -2579,6 +2591,7 @@ let schedule_keeper_queue_evidence_dashboard_json
             ; "queue", `String queue
             ; "stimulus", `String stimulus
             ; "keeper_name", `String keeper_name
+            ; "schedule_instance_id", `String execution.schedule_instance_id
             ; "schedule_id", `String schedule_id
             ; "post_id", `String post_id
             ; "execution_due_at", `Float due_at
@@ -2619,6 +2632,7 @@ let schedule_keeper_reaction_evidence_dashboard_json
         | Ok
             (Server_schedule_consumers.Keeper_wake_enqueued
               { keeper_name
+              ; schedule_instance_id
               ; schedule_id
               ; urgency = _
               ; post_id
@@ -2632,6 +2646,7 @@ let schedule_keeper_reaction_evidence_dashboard_json
           let base_fields =
             [ "source", `String "keeper_reaction_ledger"
             ; "keeper_name", `String keeper_name
+            ; "schedule_instance_id", `String schedule_instance_id
             ; "schedule_id", `String schedule_id
             ; "post_id", `String post_id
             ; "stimulus", `String stimulus
@@ -2785,6 +2800,7 @@ let schedule_signal_dashboard_json (signal : Schedule_runner.wake_signal) =
       , `String (Schedule_occurrence_id.to_string signal.occurrence_id) )
     ; "kind", `String kind
     ; "event_type", `String kind
+    ; "schedule_instance_id", `String signal.schedule_instance_id
     ; "schedule_id", `String signal.schedule_id
     ; "emitted_at", `Float signal.emitted_at
     ; "emitted_at_iso", unix_iso_json signal.emitted_at
@@ -2843,7 +2859,8 @@ let schedule_request_dashboard_json
     Schedule_payload_projection.target_summary request
   in
   `Assoc
-    [ "schedule_id", `String request.schedule_id
+    [ "schedule_instance_id", `String request.schedule_instance_id
+    ; "schedule_id", `String request.schedule_id
     ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
     ; "source", `String (Schedule_domain.schedule_source_to_string request.source)
     ; "requested_by", Schedule_domain.actor_to_yojson request.requested_by

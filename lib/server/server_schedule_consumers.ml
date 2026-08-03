@@ -252,6 +252,7 @@ let keeper_wake_activation_outcome_json_fields = function
 type dispatch_receipt =
   | Keeper_wake_enqueued of
       { keeper_name : string
+      ; schedule_instance_id : string
       ; schedule_id : string
       ; urgency : string
       ; post_id : string
@@ -269,6 +270,7 @@ let dispatch_receipt_of_detail = function
     if String.equal kind keeper_wake_enqueued_kind
     then
       let* keeper_name = keeper_name_field "keeper_name" fields in
+      let* schedule_instance_id = string_field "schedule_instance_id" fields in
       let* schedule_id = string_field "schedule_id" fields in
       let* urgency = string_field "urgency" fields in
       let* post_id = string_field "post_id" fields in
@@ -307,6 +309,7 @@ let dispatch_receipt_of_detail = function
       Ok
         (Keeper_wake_enqueued
            { keeper_name
+           ; schedule_instance_id
            ; schedule_id
            ; urgency
            ; post_id
@@ -324,6 +327,7 @@ let dispatch_receipt_of_detail = function
 let dispatch_receipt_to_yojson = function
   | Keeper_wake_enqueued
       { keeper_name
+      ; schedule_instance_id
       ; schedule_id
       ; urgency
       ; post_id
@@ -343,6 +347,7 @@ let dispatch_receipt_to_yojson = function
            | None -> `Null
            | Some value -> `String value )
        ; "keeper_name", `String keeper_name
+       ; "schedule_instance_id", `String schedule_instance_id
        ; "schedule_id", `String schedule_id
        ; "urgency", `String urgency
        ; "post_id", `String post_id
@@ -936,7 +941,8 @@ let dispatch_keeper_wake
     |> keeper_queue_urgency_of_schedule_urgency
   in
   let wake : Keeper_event_queue.scheduled_wake =
-    { schedule_id = request.Schedule_domain.schedule_id
+    { schedule_instance_id = request.Schedule_domain.schedule_instance_id
+    ; schedule_id = request.Schedule_domain.schedule_id
     ; due_at = request.due_at
     ; payload_digest = Schedule_domain.payload_digest request.payload
     ; title
@@ -1007,6 +1013,7 @@ let dispatch_keeper_wake
          ; "stimulus", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
          ; "stimulus_id", `String stimulus_id
          ; "keeper_name", `String keeper_name
+         ; "schedule_instance_id", `String request.schedule_instance_id
          ; "schedule_id", `String request.schedule_id
          ; "urgency", `String (Keeper_event_queue.urgency_to_string urgency)
          ; "post_id", `String stimulus.post_id
@@ -1072,6 +1079,7 @@ let dispatch config ~now signal request ~commit_acceptance =
 
 let occurrence_stimulus_id (execution : Schedule_domain.execution_record) =
   Schedule_occurrence_id.make
+    ~schedule_instance_id:execution.schedule_instance_id
     ~schedule_id:execution.schedule_id
     ~due_at:execution.due_at
     ~payload_digest:execution.payload_digest
@@ -1270,6 +1278,7 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
         =
     let settlement outcome : Schedule_store.dispatched_occurrence_settlement =
       { execution_id = execution.execution_id
+      ; schedule_instance_id = execution.schedule_instance_id
       ; schedule_id = execution.schedule_id
       ; due_at = execution.due_at
       ; payload_digest = execution.payload_digest
@@ -1301,6 +1310,7 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
     =
     let settlement outcome : Schedule_store.dispatched_occurrence_settlement =
       { execution_id = execution.execution_id
+      ; schedule_instance_id = execution.schedule_instance_id
       ; schedule_id = execution.schedule_id
       ; due_at = execution.due_at
       ; payload_digest = execution.payload_digest
@@ -1347,7 +1357,10 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
          let* settlement =
            match disposition.source.payload with
            | Keeper_event_queue.Schedule_due wake
-             when String.equal wake.schedule_id execution.schedule_id
+             when String.equal
+                    wake.schedule_instance_id
+                    execution.schedule_instance_id
+                  && String.equal wake.schedule_id execution.schedule_id
                   && Float.equal wake.due_at execution.due_at
                   && String.equal wake.payload_digest execution.payload_digest ->
              settlement_of_execution execution disposition

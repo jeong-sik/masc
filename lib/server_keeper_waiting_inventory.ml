@@ -664,7 +664,8 @@ let schedule_rows ~keeper_names state =
     ; next_action = schedule_next_action request
     ; detail =
         `Assoc
-          [ "schedule_id", `String request.schedule_id
+          [ "schedule_instance_id", `String request.schedule_instance_id
+          ; "schedule_id", `String request.schedule_id
           ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
           ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
           ; ( "payload_kind"

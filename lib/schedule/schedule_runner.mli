@@ -11,6 +11,7 @@ type signal_kind =
 type wake_signal =
   { occurrence_id : Schedule_occurrence_id.t
   ; kind : signal_kind
+  ; schedule_instance_id : string
   ; schedule_id : string
   ; emitted_at : float
   ; due_at : float

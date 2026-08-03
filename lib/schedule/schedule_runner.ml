@@ -8,6 +8,7 @@ type signal_kind =
 type wake_signal =
   { occurrence_id : Schedule_occurrence_id.t
   ; kind : signal_kind
+  ; schedule_instance_id : string
   ; schedule_id : string
   ; emitted_at : float
   ; due_at : float
@@ -170,6 +171,7 @@ let wake_signal_to_yojson signal =
   `Assoc
     [ "event_type", `String (signal_kind_to_string signal.kind)
     ; "occurrence_id", `String (Schedule_occurrence_id.to_string signal.occurrence_id)
+    ; "schedule_instance_id", `String signal.schedule_instance_id
     ; "schedule_id", `String signal.schedule_id
     ; "emitted_at", `Float signal.emitted_at
     ; "due_at", `Float signal.due_at
@@ -183,6 +185,7 @@ let wake_signal_of_yojson = function
     let* kind_name = string_field "event_type" fields in
     let* kind = signal_kind_of_string kind_name in
     let* occurrence_id = string_field "occurrence_id" fields in
+    let* schedule_instance_id = string_field "schedule_instance_id" fields in
     let* schedule_id = string_field "schedule_id" fields in
     let* emitted_at = float_field "emitted_at" fields in
     let* due_at = float_field "due_at" fields in
@@ -196,13 +199,18 @@ let wake_signal_of_yojson = function
       else Error "payload_digest does not match schedule occurrence payload"
     in
     let expected_occurrence_id =
-      Schedule_occurrence_id.make ~schedule_id ~due_at ~payload_digest
+      Schedule_occurrence_id.make
+        ~schedule_instance_id
+        ~schedule_id
+        ~due_at
+        ~payload_digest
     in
     if String.equal occurrence_id (Schedule_occurrence_id.to_string expected_occurrence_id)
     then
       Ok
         { occurrence_id = expected_occurrence_id
         ; kind
+        ; schedule_instance_id
         ; schedule_id
         ; emitted_at
         ; due_at
@@ -216,6 +224,7 @@ let wake_signal_of_yojson = function
 let occurrence_id (request : Schedule_domain.schedule_request) =
   let payload_digest = Schedule_domain.payload_digest request.payload in
   Schedule_occurrence_id.make
+    ~schedule_instance_id:request.schedule_instance_id
     ~schedule_id:request.schedule_id
     ~due_at:request.due_at
     ~payload_digest
@@ -225,6 +234,7 @@ let make_signal ~now kind (request : Schedule_domain.schedule_request) =
   let payload_digest = Schedule_domain.payload_digest request.payload in
   { occurrence_id = occurrence_id request
   ; kind
+  ; schedule_instance_id = request.schedule_instance_id
   ; schedule_id = request.schedule_id
   ; emitted_at = now
   ; due_at = request.due_at
@@ -412,6 +422,7 @@ let dispatch_candidate
              Schedule_store.complete_dispatched_occurrence
                config
                ~now
+               ~schedule_instance_id:signal.schedule_instance_id
                ~schedule_id
                ~due_at:signal.due_at
                ~payload_digest:signal.payload_digest
@@ -433,6 +444,7 @@ let dispatch_candidate
              Schedule_store.fail_dispatched_occurrence
                config
                ~now
+               ~schedule_instance_id:signal.schedule_instance_id
                ~schedule_id
                ~due_at:signal.due_at
                ~payload_digest:signal.payload_digest
@@ -514,6 +526,7 @@ let reclaim_occurrence
   =
   let occurrence_id =
     Schedule_occurrence_id.make
+      ~schedule_instance_id:execution.schedule_instance_id
       ~schedule_id:execution.schedule_id
       ~due_at:execution.due_at
       ~payload_digest:execution.payload_digest
@@ -531,6 +544,7 @@ let reclaim_occurrence
       config
       ~now
       [ { execution_id = execution.execution_id
+        ; schedule_instance_id = execution.schedule_instance_id
         ; schedule_id = execution.schedule_id
         ; due_at = execution.due_at
         ; payload_digest = execution.payload_digest

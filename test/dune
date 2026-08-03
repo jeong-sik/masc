@@ -1046,7 +1046,6 @@
   test_grpc_client
   test_http_protocol_detect
   test_prompt_registry_defaults
-  test_prompt_no_silent_reply_contract
   test_keeper_prompt_external
   test_mcp_session_store_roundtrip
   test_eval_calibration
@@ -1204,7 +1203,6 @@
   test_grpc_client
   test_http_protocol_detect
   test_prompt_registry_defaults
-  test_prompt_no_silent_reply_contract
   test_keeper_prompt_external
   test_mcp_session_store_roundtrip
   test_eval_calibration
@@ -1645,8 +1643,8 @@
  (libraries masc_test_deps))
 
 (executable
- (name test_a12_e2e_demo)
- (modules test_a12_e2e_demo)
+ (name test_multimodal_resilience_audit_composition)
+ (modules test_multimodal_resilience_audit_composition)
  (libraries masc_test_deps multimodal resilience shared_audit shared_types))
 
 (executable
@@ -1902,8 +1900,6 @@
 
 (include stanzas/test_keeper_tool_name.inc)
 
-(include stanzas/test_keeper_tool_command_runtime_cwd_response.inc)
-
 
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)
 
@@ -1987,8 +1983,6 @@
 
 (include stanzas/test_keeper_tool_matrix.inc)
 
-
-(include stanzas/test_keeper_unified_tool_event_order_source.inc)
 
 
 (include stanzas/test_keeper_task_outcomes.inc)

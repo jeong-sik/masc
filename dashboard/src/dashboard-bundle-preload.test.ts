@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { build } from 'vite'
+import { build, type Rollup } from 'vite'
 import { afterEach, describe, expect, it } from 'vitest'
 
 type ManifestEntry = {
@@ -34,6 +34,41 @@ function dashboardHrefForManifestEntry(entry: ManifestEntry): string {
   return `/dashboard/${entry.file}`
 }
 
+function staticChunkClosure(
+  chunks: Rollup.OutputChunk[],
+  entry: Rollup.OutputChunk,
+): Rollup.OutputChunk[] {
+  const byFileName = new Map(chunks.map(chunk => [chunk.fileName, chunk]))
+  const seen = new Set<string>()
+  const pending = [entry.fileName]
+
+  while (pending.length > 0) {
+    const fileName = pending.pop()
+    if (!fileName || seen.has(fileName)) continue
+    seen.add(fileName)
+    const chunk = byFileName.get(fileName)
+    if (chunk) pending.push(...chunk.imports)
+  }
+
+  return [...seen].flatMap(fileName => {
+    const chunk = byFileName.get(fileName)
+    return chunk ? [chunk] : []
+  })
+}
+
+const LAZY_SCHEMA_MODULE_SUFFIXES = [
+  '/api/schemas/logs.ts',
+  '/api/schemas/provider-logs.ts',
+  '/api/schemas/dashboard-config.ts',
+  '/api/schemas/agent-timeline.ts',
+  '/api/schemas/agent-relations.ts',
+  '/api/schemas/runtime-defaults.ts',
+  '/api/schemas/runtime-resolved.ts',
+  '/api/schemas/keeper-composite.ts',
+  '/api/schemas/keeper-chat-history.ts',
+  '/api/schemas/keeper-transitions.ts',
+] as const
+
 describe('dashboard production bundle preloads', () => {
   afterEach(() => {
     while (outDirs.length > 0) {
@@ -46,7 +81,7 @@ describe('dashboard production bundle preloads', () => {
     const outDir = mkdtempSync(join(tmpdir(), 'masc-dashboard-preload-'))
     outDirs.push(outDir)
 
-    await build({
+    const buildResult = await build({
       configFile: resolve(__dirname, '../vite.config.ts'),
       logLevel: 'silent',
       build: {
@@ -73,6 +108,19 @@ describe('dashboard production bundle preloads', () => {
 
     const preloads = modulePreloads(html)
     expect(preloads).toEqual([dashboardHrefForManifestEntry(vendorEntry)])
+
+    const outputs = (Array.isArray(buildResult) ? buildResult : [buildResult]) as Rollup.RollupOutput[]
+    const chunks = outputs.flatMap(output => output.output)
+      .filter((item): item is Rollup.OutputChunk => item.type === 'chunk')
+    const entryChunk = chunks.find(chunk => chunk.isEntry && chunk.facadeModuleId?.endsWith('/index.html'))
+    if (!entryChunk) throw new Error('dashboard entry chunk missing')
+    const initialModuleIds = staticChunkClosure(chunks, entryChunk)
+      .flatMap(chunk => Object.keys(chunk.modules))
+      .map(moduleId => moduleId.replaceAll('\\', '/'))
+    const eagerSchemas = LAZY_SCHEMA_MODULE_SUFFIXES.filter(suffix => (
+      initialModuleIds.some(moduleId => moduleId.endsWith(suffix))
+    ))
+    expect(eagerSchemas).toEqual([])
   }, 120_000)
 
   it('reads modulepreloads from parsed link attributes', () => {

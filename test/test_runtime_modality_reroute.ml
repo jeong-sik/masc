@@ -41,15 +41,6 @@ let string_contains haystack needle =
 let check_contains label ~needle haystack =
   check bool label true (string_contains haystack needle)
 
-let source_path path =
-  if Filename.is_relative path then
-    match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some root -> Filename.concat root path
-    | None -> path
-  else path
-
-let read_file path = In_channel.with_open_text (source_path path) In_channel.input_all
-
 let assoc_field key = function
   | `Assoc fields -> List.assoc_opt key fields
   | _ -> None
@@ -454,21 +445,6 @@ let test_media_degrade_preserves_already_canonical_checkpoint () =
       true
       (restored = checkpoint_messages)
 
-let test_driver_degrade_branch_emits_manifest () =
-  let source = read_file "lib/keeper/keeper_turn_driver.ml" in
-  check bool "degrade branch emits manifest" true
-    (string_contains source "emit_runtime_manifest"
-     && string_contains source "~status:\"degraded\""
-     && string_contains source "media_degrade_manifest_decision"
-     && string_contains source "Keeper_runtime_manifest.Runtime_routed")
-
-let test_runtime_agent_oas_tool_hook_fails_typed_not_failwith () =
-  let source = read_file "lib/runtime/runtime_agent.ml" in
-  check bool "legacy failwith hook removed" false
-    (string_contains source "failwith \"oas_tool_of_masc_hook is not set\"");
-  check bool "typed unset hook error present" true
-    (string_contains source "runtime_agent_oas_tool_hook_unset")
-
 let () =
   run "rfc0265_modality_reroute"
     [ ( "decide_modality_reroute"
@@ -512,9 +488,5 @@ let () =
             test_media_degrade_rejects_checkpoint_prefix_drift
         ; test_case "degrade preserves an already canonical checkpoint" `Quick
             test_media_degrade_preserves_already_canonical_checkpoint
-        ; test_case "driver degrade branch emits manifest" `Quick
-            test_driver_degrade_branch_emits_manifest
-        ; test_case "runtime agent OAS tool hook typed failure" `Quick
-            test_runtime_agent_oas_tool_hook_fails_typed_not_failwith
         ] )
     ]

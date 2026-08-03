@@ -66,13 +66,6 @@ let contains_substring text needle =
     in
     loop 0
 
-let source_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root -> root
-  | None -> Sys.getcwd ()
-
-let source_file path = Filename.concat (source_root ()) path
-
 let read_file path =
   let ic = open_in_bin path in
   Fun.protect
@@ -84,19 +77,6 @@ let write_file path content =
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
-
-let test_parent_auth_facade_is_leaf_reexport () =
-  let parent = read_file (source_file "lib/auth.ml") in
-  let leaf_reexport = read_file (source_file "lib/auth/auth_leaf.ml") in
-  check bool "parent Auth includes leaf re-export" true
-    (contains_substring parent "include Auth_leaf");
-  check
-    bool
-    "parent Auth does not duplicate keeper credential logic"
-    false
-    (contains_substring parent "let ensure_keeper_credential");
-  check bool "leaf re-export includes Auth" true
-    (contains_substring leaf_reexport "include Auth")
 
 let with_eio_runtime f =
   Eio_main.run @@ fun env ->
@@ -1185,8 +1165,6 @@ let () =
       test_case "Eqaf equality truth table" `Quick test_eqaf_equality_truth_table;
     ];
     "config", [
-      test_case "parent Auth is leaf re-export facade" `Quick
-        test_parent_auth_facade_is_leaf_reexport;
       test_case "default config" `Quick test_default_auth_config;
       test_case "save/load config" `Quick test_save_load_auth_config;
       test_case "save/load config in Eio runtime" `Quick

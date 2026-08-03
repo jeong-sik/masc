@@ -1012,51 +1012,40 @@ let test_dashboard_shell_http_json_prefers_light_last_good_while_prewarming () =
          |> to_bool))
 
 let test_operator_snapshot_default_route_hydrates_first_success () =
-  let http_source =
-    read_file "lib/server/server_dashboard_http_core_operator_snapshot_http.ml"
+  with_test_env @@ fun ~env ~sw ~config ->
+  Dashboard_cache.invalidate_all ();
+  Operator_control.invalidate_snapshot_cache ();
+  Dashboard_projection_cache.invalidate_snapshot_json ~config;
+  let before =
+    Server_dashboard_http_core_operator.operator_snapshot_publication ()
   in
-  let owner_source =
-    read_file "lib/server/server_dashboard_http_core_operator.ml"
+  check bool "invalidation clears the prior successful publication" false
+    before.has_success;
+  let state =
+    Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
   in
-  let refresh_source =
-    read_file "lib/server/server_dashboard_http_core_snapshot_refresh.ml"
+  let json =
+    Server_dashboard_http_core.operator_snapshot_http_json
+      ~state
+      ~sw
+      ~clock:(Eio.Stdenv.clock env)
+      (request "/api/v1/operator")
   in
-  let execution_source =
-    read_file "lib/server/server_dashboard_http_execution_surfaces.ml"
+  let after =
+    Server_dashboard_http_core_operator.operator_snapshot_publication ()
   in
-  check bool "operator snapshot uses generation-aware cache publication" true
-    (contains_substring http_source "operator_snapshot_publication"
-     && contains_substring http_source
-          "(publication : Core_operator.operator_snapshot_publication)"
-     && contains_substring http_source
-          "operator_snapshot_publication_with_freshness"
-     && contains_substring http_source
-          "Printf.sprintf \"default-summary:g%d\"");
-  check bool "operator snapshot no longer serves raw initializing cache" true
-    (not
-       (contains_substring http_source
-          "then cached_surface_json operator_snapshot_cache"));
-  check bool "publication owner replaces immutable records" true
-    (contains_substring owner_source "operator_snapshot_publication_ref :="
-     && contains_substring owner_source "fresh_until_unix"
-     && not
-          (contains_substring owner_source
-             "patch_operator_snapshot_cached_json"));
-  check bool "metadata is finalized before terminal publication" true
-    (contains_substring refresh_source
-       "|> Core_operator_query.with_operator_snapshot_metadata"
-     && not (contains_substring refresh_source "{ publication with json }"));
-  check bool "invalidation SSE uses canonical owner tombstone" true
-    (contains_substring execution_source
-       ".publish_operator_snapshot_invalidation_if_current"
-     && not (contains_substring execution_source "let tombstone =")
-     && not
-          (contains_substring execution_source
-             "patch_operator_snapshot_cache_for_keeper"));
-  check bool "stale publication enters serialized SWR refresh" true
-    (contains_substring http_source "Dashboard_cache.seed_stale_if_missing"
-     && contains_substring http_source
-          "Dashboard_cache.get_or_compute_with_timeout")
+  check bool "first default request publishes a successful snapshot" true
+    after.has_success;
+  check int "first success stays in the invalidated generation"
+    before.generation after.generation;
+  check string "HTTP returns the canonical first-success publication"
+    (Yojson.Safe.to_string
+       (Server_dashboard_http_core_operator.operator_snapshot_publication_json
+          after))
+    (Yojson.Safe.to_string json);
+  let open Yojson.Safe.Util in
+  check bool "first response is not the initializing placeholder" false
+    (json |> member "status" = `String "initializing")
 
 let test_dashboard_query_cache_segment_normalizes_missing_values () =
   check string "missing none" "missing"

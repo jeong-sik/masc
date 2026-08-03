@@ -175,6 +175,25 @@ let () =
                      ~input_schema:empty_schema
                      ~handler_binding:Tag_dispatch
                      ())));
+          test_case "unclassified tool rejected before registry mutation" `Quick (fun () ->
+            let name = "__test_spec_unclassified" in
+            let spec =
+              Tool_spec.create
+                ~name
+                ~description:"unclassified tool"
+                ~module_tag:Tool_dispatch.Mod_misc
+                ~input_schema:empty_schema
+                ~handler_binding:Tag_dispatch
+                ()
+            in
+            check_raises "catalog ownership required"
+              (Invalid_argument
+                 "Tool_spec.register: tool __test_spec_unclassified has no catalog-owned metadata")
+              (fun () -> Tool_spec.register spec);
+            check bool "tag not registered" false
+              (Option.is_some (Tool_dispatch.lookup_tag name));
+            check bool "schema not registered" false
+              (Option.is_some (Tool_dispatch.lookup_schema name)));
         ] );
       ( "register_all",
         [
@@ -232,7 +251,7 @@ let () =
                 ~handler_binding:Tag_dispatch
                 ()
             in
-            register_test_metadata name;
+            register_test_metadata "__test_spec_tag_dispatch";
             Tool_spec.register spec;
             let missing = Tool_spec.verify_handler_coverage () in
             check bool "Tag_dispatch not in missing" false
@@ -248,6 +267,7 @@ let () =
                 ~handler_binding:(Direct (fun ~name:_ ~args:_ -> Some (tool_ok "ok")))
                 ()
             in
+            register_test_metadata name;
             Tool_spec.register spec;
             check bool "handler registered in Tool_dispatch" true
               (Tool_dispatch.is_registered name);

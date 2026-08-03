@@ -865,21 +865,19 @@ let auth_error_json err =
   in
   Yojson.Safe.to_string (`Assoc fields)
 
+let auth_error_headers ~(status : Httpun.Status.t) ~cors =
+  match status with
+  | `Unauthorized -> ("www-authenticate", "Bearer") :: cors
+  | _ -> cors
+
 let respond_auth_error request reqd err =
   let status = http_status_of_auth_error err in
   let origin = get_origin request in
   let body = auth_error_json err in
-  let auth_headers =
-    match status with
-    | `Unauthorized ->
-      let authority = Server_request_authority.current_exn () in
-      [ "www-authenticate", Server_oauth_metadata.challenge_for_authority authority ]
-    | _ -> []
-  in
   let headers =
     Httpun.Headers.of_list
       (("content-length", string_of_int (String.length body))
-       :: auth_headers @ cors_headers origin)
+       :: auth_error_headers ~status ~cors:(cors_headers origin))
   in
   let response = Httpun.Response.create ~headers (status :> Httpun.Status.t) in
   Httpun.Reqd.respond_with_string reqd response body
@@ -940,7 +938,9 @@ let with_admin_auth handler request reqd =
           Http_server_eio.Response.json ~status:`Forbidden
             {|{"error":"MASC_ADMIN_TOKEN not configured"}|} reqd
       | Some _, None ->
-          Http_server_eio.Response.json ~status:`Unauthorized
+          Http_server_eio.Response.json
+            ~status:`Unauthorized
+            ~extra_headers:(auth_error_headers ~status:`Unauthorized ~cors:[])
             {|{"error":"Admin token required"}|} reqd
       | Some expected, Some given ->
           if admin_token_equal expected given then
@@ -1154,6 +1154,7 @@ and with_observer_sse_read_auth handler request reqd =
        | Error msg ->
          Http_server_eio.Response.json
            ~status:`Unauthorized
+           ~extra_headers:(auth_error_headers ~status:`Unauthorized ~cors:[])
            (Yojson.Safe.to_string (`Assoc [ "error", `String msg ]))
            reqd)
   else

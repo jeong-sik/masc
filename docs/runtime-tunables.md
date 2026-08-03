@@ -14,9 +14,9 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 206 unique knobs across 8 modules.
+**Total**: 212 unique knobs across 8 modules.
 
-**Typed getter classification**: 33/119 tagged (`operator`: 33, `algorithm`: 0, `unclassified`: 86).
+**Typed getter classification**: 39/125 tagged (`operator`: 39, `algorithm`: 0, `unclassified`: 86).
 
 ## Env_config_core (23 knobs; typed classification 2/5)
 
@@ -175,23 +175,29 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_WS_ENABLED` | feature_flag | n/a | n/a | 213 | Whether WebSocket transport is enabled. Default: true. Accessor-shaped reader; listener lifecycle is still decided at... |
 | `MASC_WS_PORT` | string_literal | n/a | n/a | 209 | WebSocket server port. Default: 8937. |
 
-## Env_config_runtime_services (13 knobs; typed classification 2/9)
+## Env_config_runtime_services (19 knobs; typed classification 8/15)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_AUTONOMY_QUIET_END` | typed:int | unclassified | unclassified | 25 | Quiet hours end (0-23). |
-| `MASC_AUTONOMY_QUIET_START` | typed:int | unclassified | unclassified | 21 | Quiet hours start (0-23). Keeper suppresses actions in this window. |
-| `MASC_AUTONOMY_VOTE_DECAY_FACTOR` | typed:float | unclassified | unclassified | 33 | {1 Thompson Sampling / Agent Selection Configuration} Primary env vars: MASC_AUTONOMY_*. |
-| `MASC_DASHBOARD_FIXTURE` | string_literal | n/a | n/a | 114 | Dashboard fixture name override. |
-| `MASC_DASHBOARD_FIXTURES_ENABLED` | feature_flag | n/a | n/a | 110 | Whether dashboard fixtures are enabled. Default: false. Re-readable within the process; this does not imply shell-lev... |
-| `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 123 | Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). |
-| `MASC_MAINTENANCE_PULSE_INTERVAL_SEC` | typed:float | Runtime | operator | 46 | Maintenance Pulse interval (seconds). Controls the orphan-observation and channel-dedup consumers. Clamped to >= 1.0 ... |
-| `MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE` | feature_flag | n/a | n/a | 101 | Enable background revalidation when serving stale snapshots. Default: true. Disabling makes stale entries behave like... |
-| `MASC_OPERATOR_CACHE_STALE_GRACE_FACTOR` | typed:float | Timeouts | operator | 95 | Stale-while-revalidate grace factor. After the TTL expires, the previous snapshot is still served for [ttl * factor] ... |
-| `MASC_OPERATOR_CACHE_TTL` | typed:float | unclassified | unclassified | 87 | Operator snapshot cache TTL (seconds). Default: 30. |
-| `MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC` | typed:float | unclassified | unclassified | 8 | Cleanup interval for stale rate limit buckets (seconds) |
-| `MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 12 | Max age for rate limit entries before cleanup (seconds) |
-| `MASC_SCHEDULE_RUNNER_INTERVAL_SEC` | typed:float | unclassified | unclassified | 80 |  |
+| `MASC_AUTONOMY_QUIET_END` | typed:int | unclassified | unclassified | 85 | Quiet hours end (0-23). |
+| `MASC_AUTONOMY_QUIET_START` | typed:int | unclassified | unclassified | 81 | Quiet hours start (0-23). Keeper suppresses actions in this window. |
+| `MASC_AUTONOMY_VOTE_DECAY_FACTOR` | typed:float | unclassified | unclassified | 93 | {1 Thompson Sampling / Agent Selection Configuration} Primary env vars: MASC_AUTONOMY_*. |
+| `MASC_DASHBOARD_FIXTURE` | string_literal | n/a | n/a | 174 | Dashboard fixture name override. |
+| `MASC_DASHBOARD_FIXTURES_ENABLED` | feature_flag | n/a | n/a | 170 | Whether dashboard fixtures are enabled. Default: false. Re-readable within the process; this does not imply shell-lev... |
+| `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 183 | Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). |
+| `MASC_MAINTENANCE_PULSE_INTERVAL_SEC` | typed:float | Runtime | operator | 106 | Maintenance Pulse interval (seconds). Controls the orphan-observation and channel-dedup consumers. Clamped to >= 1.0 ... |
+| `MASC_OAUTH_ACCESS_TOKEN_TTL_SEC` | typed:int | Security | operator | 37 | Access-token lifetime in seconds. @category Security @ops_class operator |
+| `MASC_OAUTH_CODE_TTL_SEC` | typed:int | Security | operator | 30 | Authorization-code lifetime in seconds. @category Security @ops_class operator |
+| `MASC_OAUTH_ENABLED` | typed:bool | Security | operator | 24 | Enable the OAuth authorization server. @category Security @ops_class operator |
+| `MASC_OAUTH_MAX_CLIENTS` | typed:int | Security | operator | 59 | Maximum durable dynamic-client registrations. Exact idempotent retries remain admissible at capacity; a distinct regi... |
+| `MASC_OAUTH_MAX_PENDING_CODES` | typed:int | Security | operator | 51 | Maximum process-local pending authorization codes. @category Security @ops_class operator |
+| `MASC_OAUTH_REFRESH_TOKEN_TTL_SEC` | typed:int | Security | operator | 44 | Refresh-token lifetime in seconds. @category Security @ops_class operator |
+| `MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE` | feature_flag | n/a | n/a | 161 | Enable background revalidation when serving stale snapshots. Default: true. Disabling makes stale entries behave like... |
+| `MASC_OPERATOR_CACHE_STALE_GRACE_FACTOR` | typed:float | Timeouts | operator | 155 | Stale-while-revalidate grace factor. After the TTL expires, the previous snapshot is still served for [ttl * factor] ... |
+| `MASC_OPERATOR_CACHE_TTL` | typed:float | unclassified | unclassified | 147 | Operator snapshot cache TTL (seconds). Default: 30. |
+| `MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC` | typed:float | unclassified | unclassified | 68 | Cleanup interval for stale rate limit buckets (seconds) |
+| `MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 72 | Max age for rate limit entries before cleanup (seconds) |
+| `MASC_SCHEDULE_RUNNER_INTERVAL_SEC` | typed:float | unclassified | unclassified | 140 |  |
 
 ## Env_config_sandbox (15 knobs; typed classification 1/14)
 

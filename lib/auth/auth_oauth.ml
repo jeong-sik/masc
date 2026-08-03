@@ -40,59 +40,18 @@ let protocol_error_code = function
 ;;
 
 module Policy = struct
-  let enabled_env = "MASC_OAUTH_ENABLED"
-  let code_ttl_env = "MASC_OAUTH_CODE_TTL_SEC"
-  let access_token_ttl_env = "MASC_OAUTH_ACCESS_TOKEN_TTL_SEC"
-  let refresh_token_ttl_env = "MASC_OAUTH_REFRESH_TOKEN_TTL_SEC"
-  let max_pending_codes_env = "MASC_OAUTH_MAX_PENDING_CODES"
-
-  let default_code_ttl_sec = 300
-  let default_access_token_ttl_sec = 3600
-  let default_refresh_token_ttl_sec = 2_592_000
-  let default_max_pending_codes = 128
   let max_redirect_uris = 8
   let max_uri_bytes = 2048
   let max_client_name_bytes = 200
   let max_state_bytes = 1024
 end
 
-let enabled () = Env_config_core.get_bool ~default:false Policy.enabled_env
-
-let positive_config ~default env =
-  match Sys.getenv_opt env with
-  | None -> default
-  | Some raw ->
-    (match int_of_string_opt (String.trim raw) with
-     | Some value when value > 0 -> value
-     | Some _ | None ->
-       Log.Auth.warn
-         "oauth: invalid positive integer config env=%s; using default=%d"
-         env
-         default;
-       default)
-;;
-
-let code_ttl_sec () =
-  positive_config ~default:Policy.default_code_ttl_sec Policy.code_ttl_env
-;;
-
-let access_token_ttl_sec () =
-  positive_config
-    ~default:Policy.default_access_token_ttl_sec
-    Policy.access_token_ttl_env
-;;
-
-let refresh_token_ttl_sec () =
-  positive_config
-    ~default:Policy.default_refresh_token_ttl_sec
-    Policy.refresh_token_ttl_env
-;;
-
-let max_pending_codes () =
-  positive_config
-    ~default:Policy.default_max_pending_codes
-    Policy.max_pending_codes_env
-;;
+let enabled = Env_config_runtime_services.OAuth.enabled
+let code_ttl_sec = Env_config_runtime_services.OAuth.code_ttl_sec
+let access_token_ttl_sec = Env_config_runtime_services.OAuth.access_token_ttl_sec
+let refresh_token_ttl_sec = Env_config_runtime_services.OAuth.refresh_token_ttl_sec
+let max_pending_codes = Env_config_runtime_services.OAuth.max_pending_codes
+let max_clients = Env_config_runtime_services.OAuth.max_clients
 
 let pkce_s256 verifier =
   Digestif.SHA256.digest_string verifier
@@ -128,10 +87,17 @@ let add_scope_once acc scope =
   if List.exists (equal_scope scope) acc then acc else acc @ [ scope ]
 ;;
 
+let add_scope_with_implications acc = function
+  | Mcp_tools -> add_scope_once acc Mcp_tools
+  | Mcp_admin ->
+    let acc = add_scope_once acc Mcp_tools in
+    add_scope_once acc Mcp_admin
+;;
+
 let parse_scopes raw =
   let values =
     match raw with
-    | None -> []
+    | None -> [ scope_to_string Mcp_tools ]
     | Some value ->
       value
       |> String.split_on_char ' '
@@ -139,14 +105,15 @@ let parse_scopes raw =
         let item = String.trim item in
         if String.equal item "" then None else Some item)
   in
-  let values = if values = [] then [ scope_to_string Mcp_tools ] else values in
   let rec parse acc = function
     | [] -> Ok acc
-    | "mcp:tools" :: rest -> parse (add_scope_once acc Mcp_tools) rest
-    | "mcp:admin" :: rest -> parse (add_scope_once acc Mcp_admin) rest
+    | "mcp:tools" :: rest -> parse (add_scope_with_implications acc Mcp_tools) rest
+    | "mcp:admin" :: rest -> parse (add_scope_with_implications acc Mcp_admin) rest
     | _ :: _ -> Error Invalid_scope
   in
-  parse [] values
+  match values with
+  | [] -> Error Invalid_scope
+  | _ -> parse [] values
 ;;
 
 let effective_role ~bootstrap_role scopes =
@@ -378,12 +345,17 @@ let role_of_string = function
 
 let scopes_of_strings values =
   let rec parse acc = function
-    | [] -> Ok (List.rev acc)
-    | "mcp:tools" :: rest -> parse (Mcp_tools :: acc) rest
-    | "mcp:admin" :: rest -> parse (Mcp_admin :: acc) rest
+    | [] -> Ok acc
+    | "mcp:tools" :: rest -> parse (add_scope_once acc Mcp_tools) rest
+    | "mcp:admin" :: rest -> parse (add_scope_once acc Mcp_admin) rest
     | _ :: _ -> Error (Store_error "invalid OAuth scope")
   in
-  parse [] values
+  let* scopes = parse [] values in
+  if
+    List.exists (equal_scope Mcp_admin) scopes
+    && not (List.exists (equal_scope Mcp_tools) scopes)
+  then Error (Store_error "invalid OAuth scope closure: mcp:admin requires mcp:tools")
+  else Ok scopes
 ;;
 
 let client_to_yojson (client : client) =
@@ -498,6 +470,13 @@ let family_of_yojson = function
   | _ -> Error (Store_error "invalid OAuth token family record")
 ;;
 
+let cleanup_expired_codes_locked current =
+  Hashtbl.filter_map_inplace
+    (fun _ (grant : pending_grant) ->
+      if grant.expires_at_unix <= current then None else Some grant)
+    pending_codes
+;;
+
 let register_client ~base_path ~client_name ~redirect_uris =
   if not (enabled ())
   then Error OAuth_disabled
@@ -557,6 +536,12 @@ let register_client ~base_path ~client_name ~redirect_uris =
       with
       | Some (_, stored) -> Ok stored
       | None ->
+        let client_limit = max_clients () in
+        let* () =
+          if List.length stored_clients < client_limit
+          then Ok ()
+          else Error Temporarily_unavailable
+        in
         let* () =
           save_json_private
             (client_path base_path client.client_id)
@@ -649,23 +634,12 @@ let validate_authorization_request
           }
 ;;
 
-let cleanup_expired_codes_locked current =
-  Hashtbl.filter_map_inplace
-    (fun _ (grant : pending_grant) ->
-      if grant.expires_at_unix <= current then None else Some grant)
-    pending_codes
-;;
-
 let issue_authorization_code
     ~base_path
     ~(request : authorization_request)
     ~(bootstrap_credential : agent_credential)
   =
   let* role = effective_role ~bootstrap_role:bootstrap_credential.role request.scopes in
-  let* () =
-    with_store_io ~base_path (fun () ->
-      activate_client_locked ~base_path ~client_id:request.client_id)
-  in
   let raw_code = "mac_" ^ Auth_credential_base.generate_token () in
   let hash = token_hash raw_code in
   let issued_at_unix = now () in
@@ -679,13 +653,17 @@ let issue_authorization_code
     ; expires_at_unix = issued_at_unix +. float_of_int (code_ttl_sec ())
     }
   in
+  let* () =
+    with_store_io ~base_path (fun () ->
+      activate_client_locked ~base_path ~client_id:request.client_id)
+  in
   Stdlib.Mutex.protect pending_mutex (fun () ->
-    cleanup_expired_codes_locked issued_at_unix;
-    if Hashtbl.length pending_codes >= max_pending_codes ()
-    then Error Temporarily_unavailable
-    else (
-      Hashtbl.replace pending_codes hash grant;
-      Ok raw_code))
+      cleanup_expired_codes_locked issued_at_unix;
+      if Hashtbl.length pending_codes >= max_pending_codes ()
+      then Error Temporarily_unavailable
+      else (
+        Hashtbl.replace pending_codes hash grant;
+        Ok raw_code))
 ;;
 
 let load_family base_path family_id =
@@ -883,30 +861,30 @@ let exchange_authorization_code
     let hash = token_hash code in
     let claimed_grant =
       Stdlib.Mutex.protect pending_mutex (fun () ->
-        let current = now () in
-        cleanup_expired_codes_locked current;
-        match Hashtbl.find_opt pending_codes hash with
-        | None -> Error Invalid_grant
-        | Some grant ->
-          let resource =
-            match resource with
-            | Some resource -> resource
-            | None -> grant.request.resource
-          in
-          if
-            not (String.equal grant.base_path base_path)
-            || not (String.equal grant.request.client_id client_id)
-            || not (String.equal grant.request.redirect_uri redirect_uri)
-            || not (String.equal grant.request.resource resource)
-            || not (String.equal expected_resource resource)
-            || not
-                 (constant_time_string_equal
-                    grant.request.code_challenge
-                    (pkce_s256 code_verifier))
-          then Error Invalid_grant
-          else (
-            Hashtbl.remove pending_codes hash;
-            Ok grant))
+          let current = now () in
+          cleanup_expired_codes_locked current;
+          match Hashtbl.find_opt pending_codes hash with
+          | None -> Error Invalid_grant
+          | Some grant ->
+            let resource =
+              match resource with
+              | Some resource -> resource
+              | None -> grant.request.resource
+            in
+            if
+              not (String.equal grant.base_path base_path)
+              || not (String.equal grant.request.client_id client_id)
+              || not (String.equal grant.request.redirect_uri redirect_uri)
+              || not (String.equal grant.request.resource resource)
+              || not (String.equal expected_resource resource)
+              || not
+                   (constant_time_string_equal
+                      grant.request.code_challenge
+                      (pkce_s256 code_verifier))
+            then Error Invalid_grant
+            else (
+              Hashtbl.remove pending_codes hash;
+              Ok grant))
     in
     let* grant = claimed_grant in
     let family_id = "mof_" ^ Auth_credential_base.generate_token () in
@@ -935,6 +913,7 @@ let rotate_refresh_token
     ~expected_resource
     ~refresh_token
     ~client_id
+    ~scope
     ~resource
   =
   if not (enabled ())
@@ -982,6 +961,18 @@ let rotate_refresh_token
                    | Some requested -> String.equal family.resource requested) ->
         Error Invalid_grant
       | Some family ->
+        let* scopes =
+          match scope with
+          | None -> Ok family.scopes
+          | Some raw when String.equal (String.trim raw) "" -> Error Invalid_scope
+          | Some raw ->
+            let* requested = parse_scopes (Some raw) in
+            let granted requested_scope =
+              List.exists (equal_scope requested_scope) family.scopes
+            in
+            if List.for_all granted requested then Ok requested else Error Invalid_scope
+        in
+        let* role = effective_role ~bootstrap_role:family.role scopes in
         let old_access_path = access_path base_path family.current_access_hash in
         let* pair =
           mint_pair_locked
@@ -990,8 +981,8 @@ let rotate_refresh_token
             ~client_id:family.client_id
             ~agent_name:family.agent_name
             ~bootstrap_token_hash:family.bootstrap_token_hash
-            ~role:family.role
-            ~scopes:family.scopes
+            ~role
+            ~scopes
             ~resource:family.resource
         in
         (match remove_file_if_exists old_access_path with

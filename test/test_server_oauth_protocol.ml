@@ -1,5 +1,29 @@
 open Alcotest
 
+let () = Mirage_crypto_rng_unix.use_default ()
+
+let rec remove_tree path =
+  if Sys.file_exists path
+  then if Sys.is_directory path
+    then (
+      Array.iter (fun entry -> remove_tree (Filename.concat path entry)) (Sys.readdir path);
+      Unix.rmdir path)
+    else Sys.remove path
+;;
+
+let with_workspace f =
+  let path =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf
+         "masc-oauth-protocol-%d-%Ld"
+         (Unix.getpid ())
+         (Int64.bits_of_float (Unix.gettimeofday ())))
+  in
+  Unix.mkdir path 0o700;
+  Fun.protect ~finally:(fun () -> remove_tree path) (fun () -> f path)
+;;
+
 let authority () =
   match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
   | Ok authority -> authority
@@ -56,6 +80,20 @@ let test_codex_discovery_contract () =
       false
       (Yojson.Safe.Util.to_assoc resource_metadata
        |> List.mem_assoc "resource_documentation"))
+;;
+
+let test_generic_bearer_challenge () =
+  let cors = [ "vary", "Origin" ] in
+  check
+    (list (pair string string))
+    "generic 401 advertises plain Bearer and preserves CORS"
+    [ "www-authenticate", "Bearer"; "vary", "Origin" ]
+    (Server_auth.auth_error_headers ~status:`Unauthorized ~cors);
+  check
+    (list (pair string string))
+    "generic 403 preserves CORS without a challenge"
+    cors
+    (Server_auth.auth_error_headers ~status:`Forbidden ~cors)
 ;;
 
 let test_public_listener_cannot_admit_loopback_oauth_by_host () =
@@ -182,7 +220,61 @@ let test_admin_consent_is_visible_and_explicit () =
     bool
     "admin approval requires a separate checkbox"
     true
-    (contains html {|name="confirm_admin" type="checkbox" value="yes" required|})
+    (contains html {|name="confirm_admin" type="checkbox" value="yes" required|});
+  check
+    bool
+    "consent form offers an explicit denial callback"
+    true
+    (contains html {|name="decision" value="deny" formnovalidate|})
+;;
+
+let test_authorization_denial_redirects_with_state () =
+  with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
+    with_workspace (fun base_path ->
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        Eio_guard.enable ();
+        Fun.protect
+          ~finally:(fun () ->
+            Eio_guard.disable ();
+            Fs_compat.clear_fs ())
+          (fun () ->
+            let redirect_uri = "http://127.0.0.1:43132/callback/deny" in
+            let client =
+              Auth_oauth.register_client
+                ~base_path
+                ~client_name:(Some "Codex")
+                ~redirect_uris:[ redirect_uri ]
+              |> Result.get_ok
+            in
+            let body =
+              Uri.encoded_of_query
+                [ "response_type", [ "code" ]
+                ; "client_id", [ client.client_id ]
+                ; "redirect_uri", [ redirect_uri ]
+                ; "resource", [ "http://127.0.0.1:8935/mcp" ]
+                ; "scope", [ "mcp:tools" ]
+                ; "state", [ "preserved-state" ]
+                ; "code_challenge", [ String.make 43 'a' ]
+                ; "code_challenge_method", [ "S256" ]
+                ; "decision", [ "deny" ]
+                ]
+            in
+            match
+              Server_oauth_service.authorize_post
+                ~base_path
+                ~authority:(authority ())
+                ~body
+            with
+            | Ok (Server_oauth_service.Authorization_redirect location) ->
+              let callback = Uri.of_string location in
+              check (option string) "denial error" (Some "access_denied")
+                (Uri.get_query_param callback "error");
+              check (option string) "denial preserves state" (Some "preserved-state")
+                (Uri.get_query_param callback "state")
+            | Ok (Server_oauth_service.Authorization_form_error _) ->
+              fail "denial rendered a form error instead of redirecting"
+            | Error error -> fail (Auth_oauth.show_error error)))))
 ;;
 
 let grant_types values = [ "grant_types", `List (List.map (fun v -> `String v) values) ]
@@ -235,6 +327,7 @@ let () =
     "server_oauth_protocol"
     [ ( "protocol"
       , [ test_case "Codex discovery contract" `Quick test_codex_discovery_contract
+        ; test_case "generic Bearer challenge" `Quick test_generic_bearer_challenge
         ; test_case
             "public listener rejects loopback OAuth Host"
             `Quick
@@ -249,6 +342,10 @@ let () =
             "admin consent is visible and explicit"
             `Quick
             test_admin_consent_is_visible_and_explicit
+        ; test_case
+            "authorization denial redirects with state"
+            `Quick
+            test_authorization_denial_redirects_with_state
         ; test_case
             "string subset rejects duplicates"
             `Quick

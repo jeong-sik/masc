@@ -201,9 +201,12 @@ Configuration lives in one typed module and is re-read at request boundaries:
 | `MASC_OAUTH_ACCESS_TOKEN_TTL_SEC` | access-token lifetime |
 | `MASC_OAUTH_REFRESH_TOKEN_TTL_SEC` | refresh-token lifetime |
 | `MASC_OAUTH_MAX_PENDING_CODES` | hard bound on process-local grants |
+| `MASC_OAUTH_MAX_CLIENTS` | hard bound on durable dynamic clients |
 
 Defaults are named policy values in the typed configuration module, not literals
-distributed through handlers or stores.
+distributed through handlers or stores. At the dynamic-client bound, the store
+rejects a distinct registration without deleting another client's durable
+identity. An exact retry still returns its existing registration.
 
 ## 7. Threat model and invariants
 

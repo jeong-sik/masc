@@ -183,6 +183,7 @@ let run_child command environment =
        if pid = 0
        then (
          try
+           (* See the parent-side process-group signal forwarding below. *)
            ignore (Unix.setsid ());
            Unix.execvpe executable arguments environment
          with

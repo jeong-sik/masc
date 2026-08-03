@@ -1158,10 +1158,11 @@ let fail_due_candidate config ~now ~schedule_id ~error =
         Ok updated)
 ;;
 
-let has_unsettled_execution executions ~schedule_id =
+let has_unsettled_execution executions ~schedule_instance_id ~schedule_id =
   List.exists
     (fun (execution : execution_record) ->
-       String.equal execution.schedule_id schedule_id
+       String.equal execution.schedule_instance_id schedule_instance_id
+       && String.equal execution.schedule_id schedule_id
        &&
        match execution.status with
        | Execution_running | Execution_dispatched -> true
@@ -1179,13 +1180,17 @@ let prune_completed config =
            match request.status with
            | Scheduled | Due | Running -> true
            | Succeeded | Failed | Cancelled | Expired ->
-             (* A terminal request can still own work nobody has reported on:
+             (* A terminal request instance can still own work nobody has reported on:
                 accept_running advances a recurring request past an occurrence
                 that stays Execution_dispatched, and the request can then be
                 cancelled from Scheduled. Dropping the pair would delete the only
                 durable record of that work, and the settlement functions need
-                this row -- both of them return Schedule_not_found without it. *)
-             has_unsettled_execution state.executions ~schedule_id:request.schedule_id)
+                this exact instance row -- both of them return Schedule_not_found
+                without it. *)
+             has_unsettled_execution
+               state.executions
+               ~schedule_instance_id:request.schedule_instance_id
+               ~schedule_id:request.schedule_id)
         state.schedules
     in
     let after_count = List.length schedules in

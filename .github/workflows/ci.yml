@@ -738,6 +738,12 @@ jobs:
           wait "${heartbeat_pid}" 2>/dev/null || true
           exit "${build_status}"
 
+      - name: Run event queue v15 cutover gate self-test
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          MASC_EVENT_QUEUE_V15_CUTOVER_HELPER: ${{ github.workspace }}/_build/default/bin/keeper_event_queue_v15_cutover_helper.exe
+        run: scripts/check-keeper-event-queue-v15-cutover.sh --self-test
+
       - name: Check keeper event queue projection boundary
         # This parser uses compiler-libs directly, so keep it beside the sole
         # OCaml toolchain instead of bootstrapping another toolchain in Lint.
@@ -1293,10 +1299,6 @@ jobs:
       - name: Run checkpoint installation legacy purge ratchet
         if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
         run: scripts/check-checkpoint-installation-legacy-purge.sh
-
-      - name: Run event queue v15 cutover gate self-test
-        if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
-        run: scripts/check-keeper-event-queue-v15-cutover.sh --self-test
 
       - name: Run keeper cwd leak gate
         if: needs.changes.outputs.keeper_cwd == 'true'

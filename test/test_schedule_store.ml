@@ -1168,6 +1168,50 @@ let test_prune_deletes_terminal_request_once_settled () =
   check int "execution rows removed with it" 0 (List.length state.executions)
 ;;
 
+let test_prune_does_not_bind_orphan_work_to_reused_public_id () =
+  with_workspace
+  @@ fun config ->
+  let old_request =
+    make_request
+      ~schedule_id:"prune-reused-public-id"
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  ignore (insert_ok config old_request);
+  ignore (store_ok "refresh old request" (refresh_due config ~now:201.0));
+  ignore
+    (store_ok
+       "start old occurrence"
+       (start_due_candidate
+          config
+          ~now:202.0
+          ~schedule_id:old_request.schedule_id));
+  ignore
+    (store_ok
+       "dispatch old occurrence"
+       (accept_running config ~now:203.0 ~schedule_id:old_request.schedule_id ()));
+  let old_state = read_state config in
+  Workspace_core.write_text
+    config
+    (schedules_path config)
+    (Yojson.Safe.to_string (state_to_yojson { old_state with schedules = [] }));
+  let new_request = make_request ~schedule_id:old_request.schedule_id () in
+  check bool "public ID reuse mints a new instance" false
+    (String.equal
+       old_request.schedule_instance_id
+       new_request.schedule_instance_id);
+  ignore (insert_ok config new_request);
+  ignore
+    (store_ok
+       "cancel replacement request"
+       (cancel_request config ~schedule_id:new_request.schedule_id));
+  let state, pruned = store_ok "prune replacement request" (prune_completed config) in
+  check int "old orphan does not retain replacement request" 1 pruned;
+  check int "replacement request is removed" 0 (List.length state.schedules);
+  check int "orphan execution is removed with its absent owner" 0
+    (List.length state.executions)
+;;
+
 let () =
   run "Schedule_store"
     [
@@ -1258,6 +1302,10 @@ let () =
             `Quick test_prune_keeps_terminal_request_with_unsettled_occurrence;
           test_case "prune deletes a terminal request once settled" `Quick
             test_prune_deletes_terminal_request_once_settled;
+          test_case
+            "prune scopes unsettled ownership by schedule instance"
+            `Quick
+            test_prune_does_not_bind_orphan_work_to_reused_public_id;
         ] );
     ]
 ;;

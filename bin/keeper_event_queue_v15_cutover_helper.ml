@@ -1,0 +1,172 @@
+open Cmdliner
+
+let ( let* ) = Result.bind
+
+let errorf format = Printf.ksprintf (fun message -> Error (`Msg message)) format
+
+let cmdliner_result = function
+  | Ok value -> `Ok value
+  | Error (`Msg message) -> `Error (false, message)
+;;
+
+let validate_signal_file path =
+  try
+    In_channel.with_open_text path (fun input ->
+      let rec loop line_number row_count =
+        match In_channel.input_line input with
+        | None -> Ok row_count
+        | Some line ->
+          let* json =
+            try Ok (Yojson.Safe.from_string line) with
+            | Yojson.Json_error detail ->
+              errorf
+                "schedule signal JSON is malformed path=%s line=%d: %s"
+                path
+                line_number
+                detail
+          in
+          let* (_ : Schedule_runner.wake_signal) =
+            Schedule_runner.wake_signal_of_yojson json
+            |> Result.map_error (fun detail ->
+              `Msg
+                (Printf.sprintf
+                   "schedule signal contract rejected path=%s line=%d: %s"
+                   path
+                   line_number
+                   detail))
+          in
+          loop (line_number + 1) (row_count + 1)
+      in
+      loop 1 0)
+  with
+  | Sys_error detail ->
+    errorf "schedule signal file is unreadable path=%s: %s" path detail
+;;
+
+let validate_signals paths =
+  let* row_count =
+    List.fold_left
+      (fun result path ->
+         let* count = result in
+         let* file_count = validate_signal_file path in
+         Ok (count + file_count))
+      (Ok 0)
+      paths
+  in
+  Printf.printf "%d\n%!" row_count;
+  Ok ()
+;;
+
+let child_exit_code = function
+  | Unix.WEXITED code -> code
+  | Unix.WSIGNALED signal | Unix.WSTOPPED signal -> 128 + signal
+;;
+
+let run_under_base_path_lease base_path command =
+  match command with
+  | [] -> errorf "lease-run requires a command"
+  | executable :: _ ->
+    let run_dir = (Host_config.host ()).run_dir in
+    (match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+     | Server_startup_takeover.Base_path_already_owned { pid } ->
+       errorf
+         "workspace writer lease is already owned base_path=%s pid=%s"
+         base_path
+         (match pid with
+          | Some value -> string_of_int value
+          | None -> "unknown")
+     | Server_startup_takeover.Base_path_rejected rejection ->
+       errorf
+         "workspace writer lease rejected base_path=%s: %s"
+         base_path
+         (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+     | Server_startup_takeover.Base_path_acquired lease ->
+       let status =
+         try
+           Ok
+             (Fun.protect
+                ~finally:(fun () ->
+                  Server_startup_takeover.release_base_path_lease lease)
+                (fun () ->
+                   let environment =
+                     let lease_owner = Unix.getpid () in
+                     Unix.environment ()
+                     |> Array.to_list
+                     |> List.filter (fun binding ->
+                       not
+                         (String.starts_with
+                            ~prefix:
+                              "MASC_EVENT_QUEUE_V15_CUTOVER_LEASE_OWNER_PID="
+                            binding))
+                     |> fun bindings ->
+                     Array.of_list
+                       (Printf.sprintf
+                          "MASC_EVENT_QUEUE_V15_CUTOVER_LEASE_OWNER_PID=%d"
+                          lease_owner
+                        :: bindings)
+                   in
+                   let pid =
+                     Unix.create_process_env
+                       executable
+                       (Array.of_list command)
+                       environment
+                       Unix.stdin
+                       Unix.stdout
+                       Unix.stderr
+                   in
+                   Unix.waitpid [] pid |> snd))
+         with
+         | Unix.Unix_error (error, syscall, argument) ->
+           errorf
+             "cutover command failed to start or wait syscall=%s argument=%s: %s"
+             syscall
+             argument
+             (Unix.error_message error)
+       in
+       let* status = status in
+       Stdlib.exit (child_exit_code status))
+;;
+
+let signal_files =
+  let doc = "Validate each schedule signal JSONL file with the production decoder." in
+  Arg.(non_empty & pos_all file [] & info [] ~docv:"SIGNAL_FILE" ~doc)
+;;
+
+let validate_signals_cmd =
+  let doc = "validate current schedule signal rows" in
+  Cmd.v
+    (Cmd.info "validate-signals" ~doc)
+    Term.(ret (const (fun paths -> cmdliner_result (validate_signals paths)) $ signal_files))
+;;
+
+let base_path =
+  let doc = "Workspace BasePath whose process-lifetime writer lease must be free." in
+  Arg.(required & opt (some dir) None & info [ "base-path" ] ~docv:"PATH" ~doc)
+;;
+
+let command =
+  let doc = "Command executed while the BasePath writer lease remains held." in
+  Arg.(non_empty & pos_all string [] & info [] ~docv:"COMMAND" ~doc)
+;;
+
+let lease_run_cmd =
+  let doc = "run a cutover check under the canonical BasePath writer lease" in
+  Cmd.v
+    (Cmd.info "lease-run" ~doc)
+    Term.(
+      ret
+        (const
+           (fun base_path command ->
+              cmdliner_result (run_under_base_path_lease base_path command))
+         $ base_path
+         $ command))
+;;
+
+let () =
+  let doc = "typed helpers for the event-queue v15 hard-cut gate" in
+  exit
+    (Cmd.eval
+       (Cmd.group
+          (Cmd.info "masc-keeper-event-queue-v15-cutover-helper" ~doc)
+          [ lease_run_cmd; validate_signals_cmd ]))
+;;

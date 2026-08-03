@@ -79,8 +79,13 @@ if [ "$SKIP_BUILD" = false ]; then
 fi
 
 BUILD_EXE="$REPO_DIR/_build/default/bin/main_eio.exe"
+BUILD_CUTOVER_HELPER="$REPO_DIR/_build/default/bin/keeper_event_queue_v15_cutover_helper.exe"
 if [ ! -x "$BUILD_EXE" ]; then
     echo "Error: Build artifact not found at $BUILD_EXE" >&2
+    exit 1
+fi
+if [ ! -x "$BUILD_CUTOVER_HELPER" ]; then
+    echo "Error: Event-queue cutover helper not found at $BUILD_CUTOVER_HELPER" >&2
     exit 1
 fi
 
@@ -116,6 +121,13 @@ elif [ -f "$PID_FILE" ]; then
     rm -f "$PID_FILE"
     wait_port_free
 fi
+
+# The old runtime is stopped before validation.  The gate then acquires the
+# same process-lifetime BasePath lease as the server, so an active or restarting
+# workspace writer makes the deployment fail closed.
+MASC_EVENT_QUEUE_V15_CUTOVER_HELPER="$BUILD_CUTOVER_HELPER" \
+    "$SCRIPT_DIR/check-keeper-event-queue-v15-cutover.sh" \
+    --base-path "$BASE_PATH"
 
 # --- 4. Copy binary to releases/ ---
 # Note: dune produces read-only executables. Use install(1) which handles

@@ -11,6 +11,9 @@ set -euo pipefail
 BASE_PATH="${MASC_BASE_PATH:-$(pwd)}"
 ALLOW_EMPTY_WORKSPACE=0
 SELF_TEST=0
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CUTOVER_HELPER="${MASC_EVENT_QUEUE_V15_CUTOVER_HELPER:-}"
 
 usage() {
   sed -n '2,/^$/p' "$0"
@@ -56,6 +59,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 command -v jq >/dev/null 2>&1 || fail "jq is required"
+
+if [[ -z "$CUTOVER_HELPER" ]]; then
+  if [[ -x "$REPO_ROOT/_build/default/bin/keeper_event_queue_v15_cutover_helper.exe" ]]; then
+    CUTOVER_HELPER="$REPO_ROOT/_build/default/bin/keeper_event_queue_v15_cutover_helper.exe"
+  else
+    fail "typed cutover helper is required (build bin/keeper_event_queue_v15_cutover_helper.exe or set MASC_EVENT_QUEUE_V15_CUTOVER_HELPER)"
+  fi
+fi
+[[ -x "$CUTOVER_HELPER" ]] || fail "typed cutover helper is not executable: $CUTOVER_HELPER"
 
 run_gate() {
   local runtime_root="$BASE_PATH/.masc"
@@ -136,22 +148,10 @@ run_gate() {
       signal_file_count=$((signal_file_count + 1))
       [[ -f "$signal_path" && ! -L "$signal_path" ]] \
         || fail "schedule signal segment is not an exact regular file: $signal_path"
-      rows_in_file="$(
-        jq -c '
-          if type == "object"
-             and .event_type == "schedule.due_candidate"
-             and (.occurrence_id | type == "string" and length > 0)
-             and (.schedule_instance_id | type == "string" and length > 0)
-             and (.schedule_id | type == "string" and length > 0)
-             and (.emitted_at | type == "number")
-             and (.due_at | type == "number")
-             and (.payload_digest | type == "string" and length > 0)
-             and (.payload | type == "object")
-          then .
-          else error("schedule signal row does not satisfy the current contract")
-          end
-        ' "$signal_path" | wc -l | tr -d ' '
-      )" || fail "schedule signal segment contains malformed or pre-cut rows: $signal_path"
+      rows_in_file="$("$CUTOVER_HELPER" validate-signals "$signal_path")" \
+        || fail "schedule signal segment contains malformed or pre-cut rows: $signal_path"
+      [[ "$rows_in_file" =~ ^[0-9]+$ ]] \
+        || fail "typed signal validator returned an invalid row count: $rows_in_file"
       signal_row_count=$((signal_row_count + rows_in_file))
     done < <(find "$signals_root" -name '*.jsonl' -print0)
   fi
@@ -211,12 +211,13 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     mkdir -p "$signal_dir"
     jq -cn --argjson include_instance "$include_instance" '
       {event_type: "schedule.due_candidate",
-       occurrence_id: "occurrence-fixture",
+       occurrence_id: "bd1ec0652900d5f5d24968875fa05cb6c2386ccd1fa75ca9582eefe93a2a7906",
        schedule_id: "schedule-fixture",
        emitted_at: 1,
        due_at: 1,
-       payload_digest: "payload-fixture",
-       payload: {kind: "fixture"}}
+       payload_digest: "d5cba4a1998d29ccaae48a7f9fef641e4fbb91b11299f8ba03005d5786ff6edc",
+       payload: {kind: "consumer.note", schema_version: 1,
+                 body: {text: "fixture"}}}
       + (if $include_instance
          then {schedule_instance_id: "instance-fixture"}
          else {}
@@ -259,6 +260,16 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     "$safe_root/.masc/schedules.json.last-good"
   write_queue "$safe_root" 0 0 0
   "$0" --base-path "$safe_root" >/dev/null
+  if "$CUTOVER_HELPER" \
+      lease-run \
+      --base-path "$safe_root" \
+      -- \
+      env -u MASC_EVENT_QUEUE_V15_CUTOVER_LEASE_OWNER_PID \
+      "$0" --base-path "$safe_root" \
+      >/dev/null 2>&1
+  then
+    fail "self-test expected an active BasePath writer lease to block cutover"
+  fi
 
   dispatched_root="$fixture_root/dispatched"
   write_schedules "$dispatched_root" dispatched
@@ -328,6 +339,17 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   write_signal "$pre_cut_signal_root" false
   expect_failure pre_cut_signal "$pre_cut_signal_root"
 
+  stale_occurrence_signal_root="$fixture_root/stale-occurrence-signal"
+  write_schedules "$stale_occurrence_signal_root" succeeded
+  write_signal "$stale_occurrence_signal_root" true
+  jq -c '.occurrence_id = "stale-occurrence"' \
+    "$stale_occurrence_signal_root/.masc/schedules/signals/2026-08/04.jsonl" \
+    >"$stale_occurrence_signal_root/.masc/schedules/signals/2026-08/04.jsonl.tmp"
+  mv \
+    "$stale_occurrence_signal_root/.masc/schedules/signals/2026-08/04.jsonl.tmp" \
+    "$stale_occurrence_signal_root/.masc/schedules/signals/2026-08/04.jsonl"
+  expect_failure stale_occurrence_signal "$stale_occurrence_signal_root"
+
   malformed_signal_root="$fixture_root/malformed-signal"
   write_schedules "$malformed_signal_root" succeeded
   mkdir -p "$malformed_signal_root/.masc/schedules/signals/2026-08"
@@ -345,6 +367,29 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
 
   printf '[event-queue-v15-cutover] self-test OK\n'
   exit 0
+fi
+
+if [[ "${MASC_EVENT_QUEUE_V15_CUTOVER_LEASE_OWNER_PID:-}" != "$PPID" ]]; then
+  runtime_root="$BASE_PATH/.masc"
+  if [[ ! -e "$runtime_root" && ! -L "$runtime_root" ]]; then
+    if [[ "$ALLOW_EMPTY_WORKSPACE" -eq 1 ]]; then
+      printf '[event-queue-v15-cutover] OK: base_path=%s empty_workspace=allowed\n' \
+        "$BASE_PATH"
+      exit 0
+    fi
+    fail "workspace runtime not found: $runtime_root (wrong --base-path? pass --allow-empty-workspace only for an intentional new workspace)"
+  fi
+  helper_args=(
+    lease-run
+    --base-path "$BASE_PATH"
+    --
+    "$0"
+    --base-path "$BASE_PATH"
+  )
+  if [[ "$ALLOW_EMPTY_WORKSPACE" -eq 1 ]]; then
+    helper_args+=(--allow-empty-workspace)
+  fi
+  exec "$CUTOVER_HELPER" "${helper_args[@]}"
 fi
 
 run_gate

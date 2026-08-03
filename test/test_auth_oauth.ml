@@ -712,7 +712,7 @@ let test_refresh_scope_can_reduce_but_not_expand () =
               |> auth_ok
             in
             let resource = "http://127.0.0.1:8935/mcp" in
-            let admin_only_client, admin_only_pair =
+            let admin_client, admin_pair =
               issue_pair
                 ~base_path
                 ~bootstrap_credential
@@ -720,21 +720,20 @@ let test_refresh_scope_can_reduce_but_not_expand () =
                 ~resource
                 ~scope:"mcp:admin"
             in
-            check
-              bool
-              "refresh cannot substitute a scope that was never granted"
-              true
-              (match
-                 Auth_oauth.rotate_refresh_token
-                   ~base_path
-                   ~expected_resource:resource
-                   ~refresh_token:admin_only_pair.refresh_token
-                   ~client_id:admin_only_client.client_id
-                   ~scope:(Some "mcp:tools")
-                   ~resource:(Some resource)
-               with
-               | Error Auth_oauth.Invalid_scope -> true
-               | Ok _ | Error _ -> false);
+            check string "admin response includes its tools implication"
+              "mcp:tools mcp:admin" admin_pair.scope;
+            let worker_from_admin =
+              Auth_oauth.rotate_refresh_token
+                ~base_path
+                ~expected_resource:resource
+                ~refresh_token:admin_pair.refresh_token
+                ~client_id:admin_client.client_id
+                ~scope:(Some "mcp:tools")
+                ~resource:(Some resource)
+              |> oauth_ok
+            in
+            check string "admin family can downscope to tools"
+              "mcp:tools" worker_from_admin.scope;
             let client, admin_pair =
               issue_pair
                 ~base_path
@@ -776,6 +775,71 @@ let test_refresh_scope_can_reduce_but_not_expand () =
                with
                | Error Auth_oauth.Invalid_scope -> true
                | Ok _ | Error _ -> false)))))
+;;
+
+let test_stored_admin_scope_requires_canonical_tools_closure () =
+  with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
+    with_workspace (fun base_path ->
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        Eio_guard.enable ();
+        Fun.protect
+          ~finally:(fun () ->
+            Eio_guard.disable ();
+            Fs_compat.clear_fs ())
+          (fun () ->
+            let _, bootstrap_credential =
+              Auth.create_token
+                base_path
+                ~agent_name:"noncanonical-scope-codex"
+                ~role:Masc_domain.Admin
+              |> auth_ok
+            in
+            let resource = "http://127.0.0.1:8935/mcp" in
+            let client, pair =
+              issue_pair
+                ~base_path
+                ~bootstrap_credential
+                ~redirect_uri:"http://127.0.0.1:43132/callback/noncanonical"
+                ~resource
+                ~scope:"mcp:admin"
+            in
+            let families_dir =
+              Filename.concat base_path ".masc/auth/oauth/families"
+            in
+            let family_path =
+              Filename.concat families_dir (Sys.readdir families_dir).(0)
+            in
+            let family_json =
+              family_path |> Fs_compat.load_file |> Yojson.Safe.from_string
+            in
+            let noncanonical =
+              match family_json with
+              | `Assoc fields ->
+                `Assoc
+                  (("scopes", `List [ `String "mcp:admin" ])
+                   :: List.remove_assoc "scopes" fields)
+              | _ -> fail "family store record must be an object"
+            in
+            (match
+               Fs_compat.save_file_atomic
+                 family_path
+                 (Yojson.Safe.pretty_to_string noncanonical)
+             with
+             | Ok () -> ()
+             | Error message -> fail message);
+            check
+              bool
+              "non-canonical durable admin scope fails closed"
+              true
+              (Result.is_error
+                 (Auth_oauth.rotate_refresh_token
+                    ~base_path
+                    ~expected_resource:resource
+                    ~refresh_token:pair.refresh_token
+                    ~client_id:client.client_id
+                    ~scope:None
+                    ~resource:(Some resource)))))))
 ;;
 
 let test_rotation_keeps_one_current_access_record () =
@@ -915,6 +979,10 @@ let () =
             "refresh scope can reduce but not expand"
             `Quick
             test_refresh_scope_can_reduce_but_not_expand
+        ; test_case
+            "stored admin scope requires canonical tools closure"
+            `Quick
+            test_stored_admin_scope_requires_canonical_tools_closure
         ; test_case
             "rotation keeps one current access record"
             `Quick

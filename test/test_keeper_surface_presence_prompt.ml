@@ -59,10 +59,12 @@ let base_observation : WO.world_observation =
     claimable_task_count = 0;
     failed_task_count = 0;
     scheduled_automation = WO.empty_scheduled_automation_observation;
-    backlog_updated_since_last_scheduled_autonomous = false;
-    backlog_revision = Some 1;
-    backlog_projection_sha256 = Some (String.make 64 '0');
-    backlog_source = Masc.Keeper_world_observation_inputs.Primary;
+    backlog_edge =
+      Masc.Keeper_world_observation_inputs.Observed_backlog
+        { revision = 1;
+          projection_sha256 = String.make 64 '0';
+          updated_since_last_scheduled_autonomous = false
+        };
     running_keeper_fiber_count = 0;
     connected_surfaces = [];
     connected_surface_failures = [];

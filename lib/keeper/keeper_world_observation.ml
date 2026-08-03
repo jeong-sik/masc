@@ -126,20 +126,7 @@ type world_observation =
   ; claimable_task_count : int
   ; failed_task_count : int
   ; scheduled_automation : scheduled_automation_observation
-  ; backlog_updated_since_last_scheduled_autonomous : bool
-  ; backlog_revision : int option
-    (** RFC-0357 §3.3: the backlog commit revision this observation saw —
-        what a scheduled-autonomous admission records as consumed. [None]
-        when the primary backlog was unavailable or only a recovery snapshot
-        was readable: the edge is false and the consumption clock must not
-        move on a non-authoritative value. *)
-  ; backlog_projection_sha256 : string option
-    (** Exact derived projection paired with [backlog_revision]. [None] when
-        the primary backlog was unavailable or only recovery was readable. *)
-  ; backlog_source : Keeper_world_observation_inputs.backlog_observation_source
-    (** Provenance of the backlog facts. Recovery data remains visible as
-        read-only observation but cannot become an authoritative edge; an
-        unavailable source is explicit rather than an empty-backlog inference. *)
+  ; backlog_edge : Keeper_world_observation_inputs.backlog_edge_observation
   ; running_keeper_fiber_count : int
   ; connected_surfaces : Gate_surface.surface_presence list
   ; connected_surface_failures : Gate_surface.presence_failure list
@@ -151,31 +138,30 @@ type keeper_cycle_channel =
   | Reactive
   | Scheduled_autonomous
 
-type backlog_consumption_error = Incomplete_backlog_observation
-
 let record_scheduled_backlog_consumption
       ~(meta : keeper_meta)
       (observation : world_observation)
   =
-  match observation.backlog_revision, observation.backlog_projection_sha256 with
-  | None, None -> Ok meta
-  | Some observed, Some projection_sha256 ->
+  match observation.backlog_edge with
+  | Keeper_world_observation_inputs.Backlog_read_unavailable _
+  | Keeper_world_observation_inputs.Recovery_backlog _ ->
+    meta
+  | Keeper_world_observation_inputs.Observed_backlog
+      { revision = observed; projection_sha256; _ } ->
     let proactive_rt = meta.runtime.proactive_rt in
     if observed > proactive_rt.last_consumed_backlog_revision
     then
-      Ok
-        { meta with
-          runtime =
-            { meta.runtime with
-              proactive_rt =
-                { proactive_rt with
-                  last_consumed_backlog_revision = observed
-                ; last_consumed_backlog_projection_sha256 = projection_sha256
-                }
-            }
-        }
-    else Ok meta
-  | None, Some _ | Some _, None -> Error Incomplete_backlog_observation
+      { meta with
+        runtime =
+          { meta.runtime with
+            proactive_rt =
+              { proactive_rt with
+                last_consumed_backlog_revision = observed
+              ; last_consumed_backlog_projection_sha256 = projection_sha256
+              }
+          }
+      }
+    else meta
 ;;
 
 type event_queue_trigger =
@@ -1186,10 +1172,7 @@ let observe
   let ( unclaimed_task_count
       , claimable_task_count
       , failed_task_count
-      , backlog_updated_since_last_scheduled_autonomous
-      , backlog_revision
-      , backlog_projection_sha256
-      , backlog_source )
+      , backlog_edge )
     =
     read_backlog_counts ~config ~meta
   in
@@ -1221,10 +1204,7 @@ let observe
   ; claimable_task_count
   ; failed_task_count
   ; scheduled_automation
-  ; backlog_updated_since_last_scheduled_autonomous
-  ; backlog_revision
-  ; backlog_projection_sha256
-  ; backlog_source
+  ; backlog_edge
   ; running_keeper_fiber_count
   ; connected_surfaces = surface_presence.surfaces
   ; connected_surface_failures = surface_presence.failures
@@ -1238,10 +1218,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   let ( unclaimed_task_count
       , claimable_task_count
       , failed_task_count
-      , backlog_updated_since_last_scheduled_autonomous
-      , backlog_revision
-      , backlog_projection_sha256
-      , backlog_source )
+      , backlog_edge )
     =
     read_backlog_counts ~config ~meta
   in
@@ -1262,10 +1239,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; claimable_task_count
   ; failed_task_count
   ; scheduled_automation
-  ; backlog_updated_since_last_scheduled_autonomous
-  ; backlog_revision
-  ; backlog_projection_sha256
-  ; backlog_source
+  ; backlog_edge
   ; running_keeper_fiber_count = count_running_keeper_fibers ~config
   ; connected_surfaces = surface_presence.surfaces
   ; connected_surface_failures = surface_presence.failures
@@ -1413,7 +1387,12 @@ let keeper_cycle_decision
         let has_pending_messages = observation.pending_messages <> [] in
         let has_pending_board_events = observation.pending_board_events <> [] in
         let has_backlog_edge =
-          observation.backlog_updated_since_last_scheduled_autonomous
+          (match observation.backlog_edge with
+           | Keeper_world_observation_inputs.Backlog_read_unavailable _
+           | Keeper_world_observation_inputs.Recovery_backlog _ -> false
+           | Keeper_world_observation_inputs.Observed_backlog
+               { updated_since_last_scheduled_autonomous; _ } ->
+             updated_since_last_scheduled_autonomous)
           && not reactive_wake
         in
         let has_actionable_schedule =
@@ -1453,9 +1432,12 @@ let keeper_cycle_decision
              [No_actionable_stimulus] would present a read failure as a
              considered "nothing to do". *)
           let skip_reason =
-            match observation.backlog_revision with
-            | None -> Backlog_unreadable
-            | Some _ -> No_actionable_stimulus
+            match observation.backlog_edge with
+            | Keeper_world_observation_inputs.Backlog_read_unavailable _
+            | Keeper_world_observation_inputs.Recovery_backlog _ ->
+              Backlog_unreadable
+            | Keeper_world_observation_inputs.Observed_backlog _ ->
+              No_actionable_stimulus
           in
           { should_run = false
           ; channel = Scheduled_autonomous

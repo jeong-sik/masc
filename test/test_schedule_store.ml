@@ -4,34 +4,14 @@ open Schedule_store
 
 let json = testable Yojson.Safe.pp Yojson.Safe.equal
 
-let temp_dir () =
-  let path = Filename.temp_file "schedule_store_test" "" in
-  Sys.remove path;
-  Unix.mkdir path 0o755;
-  path
-;;
-
-let rm_rf dir =
-  let rec rm path =
-    if Sys.file_exists path then
-      if Sys.is_directory path then begin
-        Sys.readdir path |> Array.iter (fun entry -> rm (Filename.concat path entry));
-        Unix.rmdir path
-      end else
-        Sys.remove path
-  in
-  try rm dir with
-  | _ -> ()
-;;
-
 let with_workspace f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = temp_dir () in
+  let dir = Filename.temp_dir "schedule_store_test" "" in
   Eio.Switch.run
   @@ fun sw ->
-  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace dir);
   let config = Workspace_core.default_config dir in
   ignore (Workspace_core.init config ~agent_name:(Some "test"));
   f config

@@ -813,7 +813,7 @@ let settle_dispatched_occurrence
         ~payload_digest
         ~outcome
     in
-    let settle_execution next_state execution =
+    let settle_execution next_state (execution : execution_record) =
       settle_dispatched_occurrence_in_state
         ~now
         next_state

@@ -810,13 +810,15 @@ let project_accepted_transfer_result
       ~keeper_name
       ~transfer
   =
-  project_accepted_transfer_guarded_result
-    ~authorize_first_projection:(fun () -> Ok ())
-    ~after_commit
-    ~base_path
-    ~keeper_name
-    ~transfer
-  |> Result.bind (function
+  let projection =
+    project_accepted_transfer_guarded_result
+      ~authorize_first_projection:(fun () -> (Ok () : (unit, string) result))
+      ~after_commit
+      ~base_path
+      ~keeper_name
+      ~transfer
+  in
+  Result.bind projection (function
     | Transfer_projection_result result -> Ok result
     | First_projection_rejected _ ->
       Error "unguarded transfer projection rejected its unconditional authority")

@@ -86,6 +86,11 @@ let insert_ok config request =
   | Error err -> fail (store_error_to_string err)
 ;;
 
+let store_ok label = function
+  | Ok value -> value
+  | Error err -> fail (label ^ ": " ^ store_error_to_string err)
+;;
+
 let check_error label expected = function
   | Ok _ -> fail (label ^ ": expected error")
   | Error actual ->
@@ -1027,11 +1032,6 @@ let test_last_good_is_parseable_after_good_write () =
   match Schedule_store.state_of_yojson recovery_json with
   | Ok state -> check int "last-good holds the schedule" 1 (List.length state.schedules)
   | Error msg -> fail (".last-good is not parseable: " ^ msg)
-;;
-
-let store_ok label = function
-  | Ok value -> value
-  | Error err -> fail (label ^ ": " ^ store_error_to_string err)
 ;;
 
 (* Reproduces the live shape: a recurring request advances past an occurrence at

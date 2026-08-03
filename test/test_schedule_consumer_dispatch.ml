@@ -1117,7 +1117,7 @@ let test_keeper_purge_cancels_future_schedule_intent () =
    | Ok () -> ()
    | Error detail -> fail detail);
   List.iter
-    (fun request ->
+    (fun (request : Schedule_domain.schedule_request) ->
        match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
        | Some stored ->
          check string "future target intent is cancelled" "cancelled"

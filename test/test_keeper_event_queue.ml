@@ -133,7 +133,7 @@ let event_queue_test_meta keeper_name trace_id =
 let persist_event_queue_test_meta ~base_path keeper_name =
   let meta = event_queue_test_meta keeper_name ("trace-" ^ keeper_name) in
   (match
-     Keeper_meta_store.write_meta (Workspace.default_config base_path) meta
+     Masc.Keeper_meta_store.write_meta (Workspace.default_config base_path) meta
    with
    | Ok () -> ()
    | Error detail -> Alcotest.fail detail);
@@ -1145,7 +1145,7 @@ let () =
         ~operation_id:"post-purge-transfer-recovery";
       let config = Workspace.default_config base_path in
       let target_meta =
-        match Keeper_meta_store.read_meta config to_keeper with
+        match Masc.Keeper_meta_store.read_meta config to_keeper with
         | Ok (Some meta) -> meta
         | Ok None -> Alcotest.fail "target metadata fixture disappeared"
         | Error detail -> Alcotest.fail detail
@@ -1163,7 +1163,7 @@ let () =
        | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
          Alcotest.fail "fresh post-purge target was already reserved");
       (match
-         Keeper_meta_store.remove_meta_if_identity
+         Masc.Keeper_meta_store.remove_meta_if_identity
            config
            ~name:to_keeper
            ~trace_id:target_meta.runtime.trace_id
@@ -1171,7 +1171,8 @@ let () =
        with
        | Ok () -> ()
        | Error error ->
-         Alcotest.fail (Keeper_meta_store.identity_remove_error_to_string error));
+         Alcotest.fail
+           (Masc.Keeper_meta_store.identity_remove_error_to_string error));
       (match
          Masc.Keeper_turn_admission.rollback_shutdown
            ~base_path

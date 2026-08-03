@@ -254,16 +254,20 @@ type orphan_quarantine_attempt_error =
 let quarantine_absent_durable_owner ~base_path ~config ~keeper_name =
   match
     Executor_pool_ref.submit_strict (fun () ->
-      Keeper_event_queue_persistence.quarantine_orphaned_owner_result
+      Keeper_lifecycle_reservation.with_key_lock
         ~base_path
         ~keeper_name
-        ~confirm_owner_presence:(fun () ->
-          match exact_durable_owner_result config keeper_name with
-          | Error _ as error -> error
-          | Ok (Exact_owner _ | Exact_owner_not_materialized) ->
-            Ok Keeper_event_queue_persistence.Orphan_owner_present
-          | Ok Exact_owner_absent ->
-            Ok Keeper_event_queue_persistence.Orphan_owner_absent))
+        (fun () ->
+           Keeper_event_queue_persistence.quarantine_orphaned_owner_result
+             ~base_path
+             ~keeper_name
+             ~confirm_owner_presence:(fun () ->
+               match exact_durable_owner_result config keeper_name with
+               | Error _ as error -> error
+               | Ok (Exact_owner _ | Exact_owner_not_materialized) ->
+                 Ok Keeper_event_queue_persistence.Orphan_owner_present
+               | Ok Exact_owner_absent ->
+                 Ok Keeper_event_queue_persistence.Orphan_owner_absent)))
   with
   | Ok (Ok outcome) -> Ok outcome
   | Ok (Error detail) -> Error (Quarantine_failed detail)

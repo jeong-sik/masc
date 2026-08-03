@@ -549,12 +549,58 @@ let quarantine_orphaned_owner_unlocked owner ~confirm_owner_presence =
       | Orphan_owner_present -> Ok Orphan_owner_reappeared
       | Orphan_owner_absent ->
         let renamed = ref false in
+        let restore_active_owner () =
+          try
+            Unix.rename quarantine_path owner_dir;
+            renamed := false;
+            Fs_compat.fsync_directory quarantine_root;
+            Fs_compat.fsync_directory keepers_dir;
+            Ok ()
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            Error
+              (Printf.sprintf
+                 "failed to restore active event queue owner source=%s target=%s: %s"
+                 quarantine_path
+                 owner_dir
+                 (Printexc.to_string exn))
+        in
         (try
            Unix.rename owner_dir quarantine_path;
            renamed := true;
-           Fs_compat.fsync_directory quarantine_root;
-           Fs_compat.fsync_directory keepers_dir;
-           Ok (Orphan_quarantined { quarantine_path })
+           let post_confirmation =
+             try confirm_owner_presence () with
+             | Eio.Cancel.Cancelled _ as exn ->
+               (match restore_active_owner () with
+                | Ok () -> raise exn
+                | Error detail -> failwith detail)
+             | exn ->
+               Error
+                 (Printf.sprintf
+                    "event queue owner confirmation raised after quarantine rename keeper=%s: %s"
+                    keeper_name
+                    (Printexc.to_string exn))
+           in
+           (match post_confirmation with
+            | Ok Orphan_owner_present ->
+              (match restore_active_owner () with
+               | Ok () -> Ok Orphan_owner_reappeared
+               | Error detail -> Error detail)
+            | Error detail ->
+              (match restore_active_owner () with
+               | Ok () ->
+                 Error
+                   (Printf.sprintf
+                      "event queue owner confirmation failed after quarantine rename keeper=%s: %s"
+                      keeper_name
+                      detail)
+               | Error restore_detail ->
+                 Error (Printf.sprintf "%s; %s" detail restore_detail))
+            | Ok Orphan_owner_absent ->
+              Fs_compat.fsync_directory quarantine_root;
+              Fs_compat.fsync_directory keepers_dir;
+              Ok (Orphan_quarantined { quarantine_path }))
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->

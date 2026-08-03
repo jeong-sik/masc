@@ -174,9 +174,11 @@ val quarantine_orphaned_owner_result :
   confirm_owner_presence:(unit -> (orphan_owner_presence, string) result) ->
   (orphan_quarantine_result, string) result
 (** Move one exact owner runtime directory out of active event-queue discovery
-    after [confirm_owner_presence] rechecks, under the same durable owner lock,
-    that no registry, metadata, or declarative config authority exists. The
-    snapshot, transition WAL, and sibling runtime evidence move together into
+    after [confirm_owner_presence] verifies before and after the rename, under
+    the same durable owner lock, that no registry, metadata, or declarative
+    config authority exists. A concurrently reappearing owner restores the
+    runtime directory before returning [Orphan_owner_reappeared]. The snapshot,
+    transition WAL, and sibling runtime evidence move together into
     [.masc/keepers/.orphaned-event-queues/<keeper>-<operation-uuid>]. A fresh
     UUID permits a later orphan generation with the same Keeper name to
     converge without overwriting earlier evidence. Both source and target

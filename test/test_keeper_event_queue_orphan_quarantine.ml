@@ -157,6 +157,36 @@ let test_reappeared_owner_fences_quarantine () =
     (Sys.file_exists (snapshot_path ~base_path ~keeper_name))
 ;;
 
+let test_owner_reappearing_after_rename_restores_runtime () =
+  with_temp_dir "event-queue-owner-reappeared-after-rename-" @@ fun base_path ->
+  let keeper_name = "reappeared-after-rename" in
+  let confirmation_count = ref 0 in
+  seed ~base_path ~keeper_name;
+  (match
+     Persistence.quarantine_orphaned_owner_result
+       ~base_path
+       ~keeper_name
+       ~confirm_owner_presence:(fun () ->
+         incr confirmation_count;
+         Ok
+           (if !confirmation_count = 1
+            then Persistence.Orphan_owner_absent
+            else Persistence.Orphan_owner_present))
+   with
+   | Ok Persistence.Orphan_owner_reappeared -> ()
+   | Ok _ -> Alcotest.fail "owner appearing after rename was not restored"
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check int) "owner authority checked twice" 2 !confirmation_count;
+  Alcotest.(check bool)
+    "reappeared owner snapshot restored"
+    true
+    (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
+  Alcotest.(check (list string))
+    "restored owner leaves no quarantined generation"
+    []
+    (Array.to_list (Sys.readdir (quarantine_root ~base_path)))
+;;
+
 let test_exact_owner_presence_requires_exact_authority () =
   with_temp_dir "durable-queue-owner-presence-" @@ fun base_path ->
   let config = Workspace.default_config base_path in
@@ -215,6 +245,10 @@ let () =
             "reappeared owner fences quarantine"
             `Quick
             test_reappeared_owner_fences_quarantine
+        ; Alcotest.test_case
+            "owner reappearing after rename restores runtime"
+            `Quick
+            test_owner_reappearing_after_rename_restores_runtime
         ; Alcotest.test_case
             "reused owner name gets a distinct quarantine"
             `Quick

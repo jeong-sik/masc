@@ -88,19 +88,23 @@ let persist ~(config : Workspace.config)
   in
   let path = Filename.concat keepers_dir (meta.name ^ ".toml") in
   let result =
-    if Fs_compat.file_exists path
-    then
-      let edits = explicit_edits parsed in
-      if edits = []
-      then Ok { path; created = false }
-      else
-        Keeper_toml_loader.edit_keeper_toml_fields ~path edits
-        |> Result.map (fun () -> { path; created = false })
-    else
-      Keeper_toml_loader.create_keeper_toml_file
-        ~path
-        (full_fields parsed meta)
-      |> Result.map (fun () -> { path; created = true })
+    Keeper_lifecycle_reservation.with_key_lock
+      ~base_path:config.base_path
+      ~keeper_name:meta.name
+      (fun () ->
+         if Fs_compat.file_exists path
+         then
+           let edits = explicit_edits parsed in
+           if edits = []
+           then Ok { path; created = false }
+           else
+             Keeper_toml_loader.edit_keeper_toml_fields ~path edits
+             |> Result.map (fun () -> { path; created = false })
+         else
+           Keeper_toml_loader.create_keeper_toml_file
+             ~path
+             (full_fields parsed meta)
+           |> Result.map (fun () -> { path; created = true }))
   in
   Result.map
     (fun outcome ->

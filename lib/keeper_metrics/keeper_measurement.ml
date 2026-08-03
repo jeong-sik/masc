@@ -17,7 +17,6 @@ type timing_measurement = {
   now_ts : float;
   idle_seconds : int;
   since_last_compaction_sec : float;
-  proactive_warmup_elapsed : bool;
 }
 
 type failure_measurement = {
@@ -54,7 +53,6 @@ let capture
       ~now_ts
       ~idle_seconds
       ~since_last_compaction_sec
-      ~proactive_warmup_elapsed
       ~consecutive_hb_failures
       ~consecutive_turn_failures
       ()
@@ -75,7 +73,6 @@ let capture
       { now_ts
       ; idle_seconds
       ; since_last_compaction_sec
-      ; proactive_warmup_elapsed
       }
   ; failures =
       { consecutive_hb_failures
@@ -100,7 +97,6 @@ let measurement_snapshot_to_json (s : measurement_snapshot) : Yojson.Safe.t =
       "now_ts", `Float s.timing.now_ts;
       "idle_seconds", `Int s.timing.idle_seconds;
       "since_last_compaction_sec", `Float s.timing.since_last_compaction_sec;
-      "proactive_warmup_elapsed", `Bool s.timing.proactive_warmup_elapsed;
     ];
     "failures", `Assoc [
       "consecutive_hb_failures", `Int s.failures.consecutive_hb_failures;

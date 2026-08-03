@@ -785,7 +785,6 @@ let record_lifecycle_start_denial
 ;;
 
 let start_keepalive
-      ?(proactive_warmup_sec = 0)
       ?lifecycle_token
       (ctx : _ context)
   (m : keeper_meta)
@@ -1173,7 +1172,7 @@ let start_keepalive
          | Some _ ->
            Atomic.set reg.grpc_close grpc_close
          | None -> ());
-        run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup)
+        run_heartbeat_loop ctx live_meta stop ~wakeup)
              ~cleanup:cleanup_tracking
          with
          | Ok () -> Keepalive_started reg

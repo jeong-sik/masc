@@ -10,32 +10,17 @@
 open Alcotest
 module BE = Masc.Keeper_heartbeat_loop_board_events
 
-let gate
-      ~warm
-      ~paused
-      ()
-  =
-  BE.should_collect_board_events
-    ~proactive_warmup_elapsed:warm
-    ~paused
+let gate ~paused () = BE.should_collect_board_events ~paused
 
-let test_warm_unpaused_collects () =
-  check bool "warmed + unpaused keeper collects board events" true
-    (gate ~warm:true ~paused:false ())
+let test_unpaused_collects () =
+  check bool "unpaused keeper collects board events" true
+    (gate ~paused:false ())
 
-(* The regression: before the fix, a warmed keeper collected (and advanced the
+(* The regression: before the fix, a keeper collected (and advanced the
    cursor) regardless of pause state, dropping board posts for paused keepers. *)
-let test_warm_paused_skips () =
-  check bool "warmed + PAUSED keeper must not collect (cursor stays put)" false
-    (gate ~warm:true ~paused:true ())
-
-let test_cold_unpaused_collects () =
-  check bool "cold + unpaused keeper collects board events" true
-    (gate ~warm:false ~paused:false ())
-
-let test_cold_paused_skips () =
-  check bool "not-yet-warmed + paused keeper does not collect" false
-    (gate ~warm:false ~paused:true ())
+let test_paused_skips () =
+  check bool "PAUSED keeper must not collect (cursor stays put)" false
+    (gate ~paused:true ())
 
 let test_collection_failure_health_degrades_and_clears () =
   let base_path = "/tmp/masc-board-collection-health-test" in
@@ -83,10 +68,8 @@ let () =
     [
       ( "should_collect_board_events",
         [
-          test_case "warm + unpaused -> collect" `Quick test_warm_unpaused_collects;
-          test_case "warm + paused -> skip" `Quick test_warm_paused_skips;
-          test_case "cold + unpaused -> collect" `Quick test_cold_unpaused_collects;
-          test_case "cold + paused -> skip" `Quick test_cold_paused_skips;
+          test_case "unpaused -> collect" `Quick test_unpaused_collects;
+          test_case "paused -> skip" `Quick test_paused_skips;
           test_case "collection failure health degrades and clears" `Quick
             test_collection_failure_health_degrades_and_clears;
         ] );

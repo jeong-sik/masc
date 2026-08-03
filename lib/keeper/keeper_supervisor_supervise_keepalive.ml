@@ -39,12 +39,10 @@ let supervise_keepalive
          event:Keeper_lifecycle_events.lifecycle_event ->
          string -> string -> unit -> unit)
       ~(launch_supervised_fiber :
-         proactive_warmup_sec:int ->
          _ context ->
          keeper_meta ->
          Keeper_registry.registry_entry ->
          (unit, Keeper_state_machine.transition_error) result)
-      ~proactive_warmup_sec
       (ctx : _ context)
       (meta : keeper_meta)
   =
@@ -124,7 +122,7 @@ let supervise_keepalive
         meta
     in
     Keeper_registry.update_meta ~base_path meta.name live_meta;
-    match launch_supervised_fiber ~proactive_warmup_sec ctx live_meta reg with
+    match launch_supervised_fiber ctx live_meta reg with
     | Error _ -> ()
     | Ok () ->
       publish_lifecycle

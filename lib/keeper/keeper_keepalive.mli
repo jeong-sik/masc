@@ -73,7 +73,7 @@ val wakeup_relevant_keeper_for_board_signal :
 (** The heartbeat loop body, extracted for reuse by the supervisor.
     Runs synchronously in the calling fiber until [stop] becomes true. *)
 val run_heartbeat_loop :
-  proactive_warmup_sec:int -> 'a context -> keeper_meta -> bool Atomic.t ->
+  'a context -> keeper_meta -> bool Atomic.t ->
   wakeup:bool Atomic.t -> unit
 
 (** Compute the p-th percentile of a float array.
@@ -96,7 +96,6 @@ val start_keepalive_outcome_to_string : start_keepalive_outcome -> string
     outcome. Rejections remain logged and observable, but are never collapsed
     into [unit]; lifecycle transactions use the result to commit or roll back. *)
 val start_keepalive :
-  ?proactive_warmup_sec:int ->
   ?lifecycle_token:Keeper_lifecycle_reservation.token ->
   'a context ->
   keeper_meta ->

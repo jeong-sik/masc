@@ -9,8 +9,6 @@ open Keeper_meta_contract
 open Keeper_meta_store
 open Keeper_types_profile
 
-let immediate_warmup_sec = 0
-
 let reconcile_keepalive_keepers
       ~publish_lifecycle
       ~supervise_keepalive
@@ -60,7 +58,7 @@ let reconcile_keepalive_keepers
     in
     if not dominated_by_sweep
     then (
-      (try supervise_keepalive ~proactive_warmup_sec:immediate_warmup_sec ctx meta with
+      (try supervise_keepalive ctx meta with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
          inc_reconcile_failure ~name:meta.name ~operation:"supervise_keepalive";

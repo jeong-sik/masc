@@ -149,9 +149,6 @@ module For_testing : sig
     agent_name : string;
   }
 
-  val autoboot_proactive_warmup_sec :
-    base_warmup:int -> stagger_window_sec:int -> keeper_name:string -> int
-
   val board_sse_event_params : Board_dispatch.board_sse_event -> Yojson.Safe.t
 
   val broadcast_mention_wakeup_action :

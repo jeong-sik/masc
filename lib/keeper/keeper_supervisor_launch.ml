@@ -62,7 +62,6 @@ let with_restart_launch_noop_for_test = Keeper_supervisor_restart_noop.with_noop
 let domain_pool_ignored_warning_emitted = Atomic.make false
 
 let launch_supervised_fiber_body
-      ~proactive_warmup_sec
       ctx
       (meta : keeper_meta)
       (reg : Keeper_registry.registry_entry)
@@ -273,7 +272,6 @@ let launch_supervised_fiber_body
              Eio_guard.protect
                (fun () ->
                   Keeper_keepalive.run_heartbeat_loop
-                    ~proactive_warmup_sec
                     ctx
                     meta
                     reg.fiber_stop
@@ -612,7 +610,6 @@ let launch_supervised_fiber_body
     case nothing was forked, no [Started]/[Running] event may be published
     by the caller, and [done_p] has been resolved through the crash path. *)
 let launch_supervised_fiber
-      ~proactive_warmup_sec
       ctx
       (meta : keeper_meta)
       (reg : Keeper_registry.registry_entry)
@@ -666,7 +663,7 @@ let launch_supervised_fiber
     (* Propagate the fork outcome: a rejected [Keeper_lane.fork] returns
        [Error] here so the caller suppresses the Started/Running lifecycle
        for a keeper whose lane was never forked. *)
-    launch_supervised_fiber_body ~proactive_warmup_sec ctx meta reg
+    launch_supervised_fiber_body ctx meta reg
 ;;
 
 (* #10993: persona drift visibility.
@@ -700,11 +697,10 @@ let persona_profile_path_for_drift_check =
 
 let log_persona_drift_if_missing = Startup_helpers.log_persona_drift_if_missing
 
-let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_meta) =
+let supervise_keepalive (ctx : _ context) (meta : keeper_meta) =
   Keeper_supervisor_supervise_keepalive.supervise_keepalive
     ~publish_lifecycle
     ~launch_supervised_fiber
-    ~proactive_warmup_sec
     ctx
     meta
 ;;

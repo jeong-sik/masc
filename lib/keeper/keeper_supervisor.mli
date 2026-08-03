@@ -16,7 +16,7 @@ open Keeper_types_profile
 (** {1 Supervised Execution} *)
 
 val supervise_keepalive :
-  proactive_warmup_sec:int -> 'a context -> keeper_meta -> unit
+  'a context -> keeper_meta -> unit
 (** Start a keeper heartbeat loop inside a supervised fiber.
     Registers in [Keeper_registry] (SSOT) and launches the fiber.
     On fiber termination, resolves the Promise and publishes

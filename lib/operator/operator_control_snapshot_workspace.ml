@@ -15,7 +15,8 @@
 
     Pure helper move — local-only function with no .mli surface. *)
 
-let backlog_authority_fields recovered_from =
+let backlog_authority_fields
+    (recovered_from : Workspace.backlog_recovery option) =
   match recovered_from with
   | None -> [ "authoritative", `Bool true ]
   | Some recovery ->

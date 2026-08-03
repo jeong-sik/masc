@@ -216,9 +216,4 @@ module For_testing : sig
   (** Lookup or insert the registry entry for [base_dir].
       Equivalent to the default-mutex path of {!create}. *)
 
-  val registry_size : unit -> int
-  (** Number of distinct [base_dir] keys currently held by the
-      file-scope mutex registry. *)
-
-  val reset_append_guard : unit -> unit
 end

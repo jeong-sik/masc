@@ -46,19 +46,6 @@ let test_outer_strictly_exceeds_inner () =
     5.0
     (D.shell_prewarm_outer_timeout_sec -. D.shell_prewarm_inner_timeout_sec)
 
-(* --- 3. Module exposes both knobs (smoke check that the API surface
-       used by the call sites compiles) ------------------------------- *)
-
-let test_smoke_call_sites_compile () =
-  (* If the module ever drops these accessors, compile would fail at
-     [server_dashboard_http_execution_surfaces.ml] and
-     [server_runtime_bootstrap.ml]. This test just touches both
-     bindings so a future rename is caught here without needing the
-     full server module to be in scope. *)
-  let _ = D.shell_prewarm_inner_timeout_sec in
-  let _ = D.shell_prewarm_outer_timeout_sec in
-  check bool "both accessors are reachable" true true
-
 let () =
   run "env_config_dashboard_shell_prewarm"
     [
@@ -71,10 +58,5 @@ let () =
         [
           test_case "outer > inner with 5s headroom" `Quick
             test_outer_strictly_exceeds_inner;
-        ] );
-      ( "API surface",
-        [
-          test_case "both accessors reachable" `Quick
-            test_smoke_call_sites_compile;
         ] );
     ]

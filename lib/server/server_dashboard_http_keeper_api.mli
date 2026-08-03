@@ -9,22 +9,6 @@
 module Http = Http_server_eio
 (** Alias used internally for the Eio HTTP server module. *)
 
-(** {1 Route prefix and suffixes} *)
-
-val keeper_api_prefix : string
-(** [/api/v1/keepers/] common prefix for every route below. *)
-
-val keeper_suffix_config : string
-val keeper_suffix_secrets : string
-val keeper_suffix_boot : string
-val keeper_suffix_shutdown : string
-val keeper_suffix_reset : string
-val keeper_suffix_clear : string
-val keeper_suffix_checkpoints : string
-val keeper_suffix_runtime_trace : string
-val keeper_suffix_directive : string
-val keeper_suffix_paused_work : string
-
 (** {1 Trajectory merge}
 
     The dashboard merges the on-disk turn trajectory with internal-history

@@ -45,10 +45,6 @@ let test_local_strictly_less_than_fetch () =
     true
     (C.local_op_timeout_sec < Env_config_core.git_fetch_timeout_sec ())
 
-let test_smoke_call_site_compiles () =
-  let _ = C.local_op_timeout_sec in
-  check bool "accessor is reachable" true true
-
 let () =
   run "env_config_workspace_git_local_timeout"
     [
@@ -60,10 +56,5 @@ let () =
         [
           test_case "local_op < git_fetch" `Quick
             test_local_strictly_less_than_fetch;
-        ] );
-      ( "API surface",
-        [
-          test_case "accessor reachable" `Quick
-            test_smoke_call_site_compiles;
         ] );
     ]

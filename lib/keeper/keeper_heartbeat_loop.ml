@@ -20,7 +20,6 @@ module Cycle = Keeper_heartbeat_loop_cycle
 let effective_keepalive_meta = Keeper_heartbeat_loop_presence.effective_keepalive_meta
 let repair_identity_drift_for_keepalive = Keeper_heartbeat_loop_presence.repair_identity_drift_for_keepalive
 let keeper_agent_status = Keeper_heartbeat_loop_presence.keeper_agent_status
-let note_turn_failures_preserved_after_heartbeat = Keeper_heartbeat_loop_presence.note_turn_failures_preserved_after_heartbeat
 let sync_keeper_presence = Keeper_heartbeat_loop_presence.sync_keeper_presence
 
 (* Pending board-event collection extracted to
@@ -44,8 +43,6 @@ let with_in_turn_liveness_pulse =
    aliases so callers (incl. .mli consumers) stay byte-identical. *)
 module Stimulus_intake = Keeper_heartbeat_stimulus_intake
 
-let stimulus_urgency_to_string = Stimulus_intake.stimulus_urgency_to_string
-let pending_board_event_of_stimulus = Stimulus_intake.pending_board_event_of_stimulus
 let record_event_queue_stimulus_turn_started =
   Stimulus_intake.record_event_queue_stimulus_turn_started
 ;;
@@ -70,7 +67,6 @@ let classify_turn_intake_admission ~lifecycle =
   | Keeper_lifecycle_admission.Autonomous_admitted -> Intake_admitted
 ;;
 
-let consume_single_heartbeat_stimulus = Stimulus_intake.consume_single_heartbeat_stimulus
 let heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake
 
 (* Keepalive scheduling decision (record + decide function) extracted to
@@ -100,7 +96,6 @@ let record_provider_timeout_observation =
    reasons. Labels: [("keeper", <name>); ("reason", <skip_reason>)]. *)
 let proactive_skip_reason_metric = Keeper_metrics.(to_string ProactiveSkip)
 
-let is_provider_timeout_error = Observations.is_provider_timeout_error
 
 (** Run keeper cycle with holder diagnostics. *)
 let run_keeper_cycle = Cycle.run_keeper_cycle

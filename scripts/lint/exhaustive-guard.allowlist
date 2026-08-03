@@ -321,7 +321,6 @@ lib/keeper/keeper_context_core.ml:218
 lib/keeper/keeper_context_core.ml:246
 lib/keeper/keeper_context_core.ml:1394
 lib/keeper_event_queue/keeper_event_queue.ml:83
-lib/keeper/keeper_tool_board_runtime.ml::assoc_value_opt
 lib/keeper/keeper_tool_board_runtime.ml::usable_evidence_json
 lib/keeper/keeper_tool_board_runtime.ml::string_arg
 lib/keeper/keeper_tool_board_runtime.ml::is_digit

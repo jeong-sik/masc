@@ -588,7 +588,6 @@ type msg =
       now : float;
     }
   | Get_metrics_json of Yojson.Safe.t Eio.Promise.u
-  | Reset_counters_for_test
 
 type state = {
   counters : runtime_counter StringMap.t;
@@ -733,8 +732,6 @@ let run_actor () =
     | Get_metrics_json p ->
         handle_get_metrics state p;
         loop state
-    | Reset_counters_for_test ->
-        loop { counters = StringMap.empty; audit_store = None }
   in
   loop { counters = StringMap.empty; audit_store = None }
 
@@ -751,5 +748,3 @@ let runtime_metrics_json () =
   Eio.Stream.add stream (Get_metrics_json u);
   Eio.Promise.await p
 
-let reset_runtime_counters_for_test () =
-  Eio.Stream.add stream Reset_counters_for_test

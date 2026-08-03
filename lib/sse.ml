@@ -459,60 +459,14 @@ let cleanup_expired_events () =
     replay cursor. Only callers inside the ordered delivery publication
     boundary may attach an id. *)
 let format_event ?id ?event_type data =
-  (* Hot path: every broadcast goes through here once.  The previous
-     three [Printf.sprintf] calls each ran the format interpreter and
-     allocated an intermediate string ([id_line], [event_line], the
-     concat), so a single broadcast paid for three string allocations
-     plus the [%d]/[%s] dispatch overhead before the result string was
-     produced.  A single [Buffer] accumulator with primitive
-     [string_of_int] sidesteps the format interpreter entirely and emits the
-     SSE wire format (optional id/event lines + one [data:] line per logical
-     data line + blank).
-     Frames with an explicit id remain byte-for-byte identical to the previous
-     canonical output. *)
-  let buf = Buffer.create 64 in
-  (match id with
-   | None -> ()
-   | Some event_id ->
-       Buffer.add_string buf "id: ";
-       Buffer.add_string buf (string_of_int event_id);
-       Buffer.add_char buf '\n');
-  (match event_type with
-   | Some e ->
-       Buffer.add_string buf "event: ";
-       Buffer.add_string buf e;
-       Buffer.add_char buf '\n'
-   | None -> ());
-  String.split_on_char '\n' data
-  |> List.iter (fun line ->
-       Buffer.add_string buf "data: ";
-       Buffer.add_string buf line;
-       Buffer.add_char buf '\n');
-  Buffer.add_char buf '\n';
-  Buffer.contents buf
+  Sse_wire.format_event ?id ?event_type data
 
 (** Format SSE event from a [Yojson.Safe.t] value without the intermediate
     [to_string] allocation.  Writes JSON bytes directly into the SSE event
     buffer via [Yojson.Safe.to_buffer], cutting one string allocation per
     broadcast (~9/sec → ~9 fewer short-lived strings/sec for GC to collect). *)
 let format_event_yojson ?id ?event_type json =
-  let buf = Buffer.create 128 in
-  Option.iter
-    (fun id ->
-       Buffer.add_string buf "id: ";
-       Buffer.add_string buf (string_of_int id);
-       Buffer.add_char buf '\n')
-    id;
-  (match event_type with
-   | Some e ->
-       Buffer.add_string buf "event: ";
-       Buffer.add_string buf e;
-       Buffer.add_char buf '\n'
-   | None -> ());
-  Buffer.add_string buf "data: ";
-  Yojson.Safe.to_buffer buf json;
-  Buffer.add_string buf "\n\n";
-  Buffer.contents buf
+  Sse_wire.format_event_yojson ?id ?event_type json
 
 (** Get current event ID *)
 let current_id () = Atomic.get event_counter

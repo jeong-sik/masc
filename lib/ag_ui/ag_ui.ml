@@ -164,7 +164,7 @@ let event_to_json (e : event) : Yojson.Safe.t =
 
 (** Format as SSE data through the transport's canonical JSON encoder. *)
 let event_to_sse ?id (e : event) : string =
-  Sse.format_event_yojson ?id (event_to_json e)
+  Sse_wire.format_event_yojson ?id (event_to_json e)
 
 (** Default thread ID for the single-namespace AG-UI bridge. *)
 let default_thread_id = "default"

@@ -108,11 +108,11 @@ val verify_mcp_auth_for_authority :
     rebuilding a fiber-local dependency. *)
 
 val verify_mcp_observer_stream_auth :
-  base_path:string -> Httpun.Request.t -> ('a option, string) result
+  base_path:string -> Httpun.Request.t -> ('a option, Masc_domain.masc_error) result
 (** Variant for the observer SSE stream (allows query token). *)
 
 val verify_operator_mcp_auth :
-  base_path:string -> Httpun.Request.t -> ('a option, string) result
+  base_path:string -> Httpun.Request.t -> ('a option, Masc_domain.masc_error) result
 (** Variant for [/mcp/operator] (admin-tier). *)
 
 (** {1 Dashboard actor identification} *)

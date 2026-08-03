@@ -148,10 +148,6 @@ let mcp_transport_auth_failure_of_masc_error err :
   }
 ;;
 
-let mcp_transport_auth_failure_of_message message :
-    Server_mcp_transport_http.auth_failure =
-  { message; auth_error_code = None }
-;;
 let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
   let mcp_eio_profile_of_transport_profile = function
     | Server_mcp_transport_http.Full -> Mcp_server_eio.Full
@@ -212,12 +208,12 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
       (fun ~base_path request ->
         verify_mcp_observer_stream_auth ~base_path request
         |> Result.map (fun _ -> ())
-        |> Result.map_error mcp_transport_auth_failure_of_message);
+        |> Result.map_error mcp_transport_auth_failure_of_masc_error);
     verify_operator_mcp_auth =
       (fun ~base_path request ->
         verify_operator_mcp_auth ~base_path request
         |> Result.map (fun _ -> ())
-        |> Result.map_error mcp_transport_auth_failure_of_message);
+        |> Result.map_error mcp_transport_auth_failure_of_masc_error);
   }
 
 let mcp_transport_json_headers session_id protocol_version origin =

@@ -284,11 +284,11 @@ let verify_mcp_auth_for_authority ~base_path ~request_authority request =
 let verify_mcp_observer_stream_auth_unscoped ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
   let credential = observer_sse_auth_credential_from_request request in
-  let* auth_config = ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config in
-  let* () =
-    reject_malformed_request_credential credential
-    |> Result.map_error Masc_domain.masc_error_to_string
+  let* auth_config =
+    ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config
+    |> Result.map_error mcp_unauthorized
   in
+  let* () = reject_malformed_request_credential credential in
   if not auth_config.Masc_domain.enabled then
     Ok None
   else
@@ -297,23 +297,25 @@ let verify_mcp_observer_stream_auth_unscoped ~base_path request =
         Ok None
     | None ->
         Error
-          "Authentication required. Use 'Authorization: Bearer <token>' header \
-           or 'token' query param for the observer/presence/cursor SSE stream."
+          (mcp_unauthorized
+             ~reason:Masc_domain.Auth_error.Missing_token
+             "Authentication required. Use 'Authorization: Bearer <token>' header \
+              or 'token' query param for the observer/presence/cursor SSE stream.")
     | Some token -> (
         let* agent_name =
           resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token)
-          |> Result.map_error Masc_domain.masc_error_to_string
         in
         match agent_name with
         | None ->
             (* Fail-closed: see verify_mcp_auth above. *)
             Error
-              "Authentication required. Bearer token did not resolve to \
-               any agent."
+              (Masc_domain.Auth
+                 (Masc_domain.Auth_error.InvalidToken
+                    "Authentication required. Bearer token did not resolve to \
+                     any agent."))
         | Some agent_name ->
             Auth.check_permission base_path ~agent_name ~token:(Some token)
               ~permission:Masc_domain.CanReadState
-            |> Result.map_error Masc_domain.masc_error_to_string
             |> Result.map (fun () -> None))
 
 let verify_mcp_observer_stream_auth ~base_path request =
@@ -326,30 +328,36 @@ let verify_operator_mcp_auth_unscoped ~base_path request =
   let credential = request_auth_credential_from_request request in
   if not auth_config.Masc_domain.enabled then
     Error
-      "/mcp/operator requires workspace auth enabled with require_token=true."
+      (mcp_unauthorized
+         "/mcp/operator requires workspace auth enabled with require_token=true.")
   else if not auth_config.require_token then
-    Error "/mcp/operator requires bearer token auth (require_token=true)."
+    Error
+      (mcp_unauthorized
+         "/mcp/operator requires bearer token auth (require_token=true).")
   else
     match credential with
     | Malformed_credential _ ->
-        Error (malformed_request_credential_error () |> Masc_domain.masc_error_to_string)
+        Error (malformed_request_credential_error ())
     | Absent_credential ->
-        Error "Authentication required. Use 'Authorization: Bearer <token>' header."
+        Error
+          (mcp_unauthorized
+             ~reason:Masc_domain.Auth_error.Missing_token
+             "Authentication required. Use 'Authorization: Bearer <token>' header.")
     | Parsed_credential token -> (
         let* agent_name =
           resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token)
-          |> Result.map_error Masc_domain.masc_error_to_string
         in
         match agent_name with
         | None ->
             (* Fail-closed: see verify_mcp_auth above. *)
             Error
-              "Authentication required. Bearer token did not resolve to \
-               any agent."
+              (Masc_domain.Auth
+                 (Masc_domain.Auth_error.InvalidToken
+                    "Authentication required. Bearer token did not resolve to \
+                     any agent."))
         | Some agent_name ->
             Auth.check_permission base_path ~agent_name ~token:(Some token)
               ~permission:Masc_domain.CanAdmin
-            |> Result.map_error Masc_domain.masc_error_to_string
             |> Result.map (fun () -> None))
 
 let verify_operator_mcp_auth ~base_path request =
@@ -859,8 +867,7 @@ let respond_public_read_json_value ?(status = `OK) request reqd value =
    human-readable [error] string. Clients (dashboard keeper stream retry
    gate) dispatch on the typed code instead of substring-matching the
    message. The code is the same SSOT mapping the dashboard shell
-   summary uses ([Masc_domain.dashboard_auth_error_code]). The legacy
-   [error] field is retained for human display and backward compat. *)
+   summary uses ([Masc_domain.dashboard_auth_error_code]). *)
 let auth_error_json err =
   let base = [ ("error", `String (Masc_domain.masc_error_to_string err)) ] in
   let fields =
@@ -1152,11 +1159,11 @@ and with_observer_sse_read_auth handler request reqd =
          (match check_agent_rate_limit request reqd with
           | Ok () -> handler state request reqd
           | Error () -> ())
-       | Error msg ->
+       | Error err ->
          Http_server_eio.Response.json
            ~status:`Unauthorized
            ~extra_headers:(auth_error_headers ~status:`Unauthorized ~cors:[])
-           (Yojson.Safe.to_string (`Assoc [ "error", `String msg ]))
+           (auth_error_json err)
            reqd)
   else
     with_public_read handler request reqd

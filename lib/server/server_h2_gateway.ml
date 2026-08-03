@@ -427,7 +427,7 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                     h2_reqd
                     (auth_error_json err)
                     ~status:(status :> H2.Status.t)
-                    ~extra_headers:cors
+                    ~extra_headers:(auth_error_headers ~status ~cors)
               | Ok () ->
                   h2_read_body h2_reqd (fun body_str ->
                     match Server_webrtc_transport.handle_offer_request body_str with
@@ -457,7 +457,7 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                     h2_reqd
                     (auth_error_json err)
                     ~status:(status :> H2.Status.t)
-                    ~extra_headers:cors
+                    ~extra_headers:(auth_error_headers ~status ~cors)
               | Ok () ->
                   h2_read_body h2_reqd (fun body_str ->
                     match Server_webrtc_transport.handle_answer_request body_str with

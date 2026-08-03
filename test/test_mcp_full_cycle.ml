@@ -1,154 +1,165 @@
-(** Integration Test: Full MCP Cycle
+(** One-shot synthetic MCP full-cycle probe.
 
-    Tests the complete flow: Agent → MCP Server → Tool → Response
-    Verifies agent identity preservation throughout the cycle.
-
-    @since 0.5.0
-*)
+    This is deliberately not a Keeper. It exercises protocol admission,
+    session identity, typed tool dispatch, workspace persistence, and task
+    completion once inside an isolated workspace. It never starts a provider
+    call, heartbeat, autonomous loop, or autoboot entry. *)
 
 open Alcotest
-open Masc
 
-(** Test fixtures *)
-module Fixtures = struct
-  let make_identity_params ~agent_name =
-    `Assoc [
-      ("agent_name", `String agent_name);
-      ("_agent_name", `String agent_name);
-      ("_channel", `String "internal");
-    ]
+module Mcp_eio = Masc.Mcp_server_eio
+module Mcp_server = Masc.Mcp_server
 
-  let identity_for ?session_key agent_name =
-    let session_key =
-      match session_key with
-      | Some value -> value
-      | None -> "session-" ^ agent_name
-    in
-    Client_identity.from_mcp_params
-      (`Assoc
-        [
-          ("_agent_name", `String agent_name);
-          ("_session_key", `String session_key);
-        ])
-end
+let () = Mirage_crypto_rng_unix.use_default ()
 
-(** Test: Agent identity extracted from MCP params *)
-let test_identity_extraction () =
-  let params = Fixtures.make_identity_params ~agent_name:"integration-agent" in
-  let args = Yojson.Safe.Util.(params |> member "arguments" |> function `Null -> params | x -> x) in
-  let identity = Client_identity.from_mcp_params args in
-  
-  check string "agent_name extracted" "integration-agent" identity.agent_name;
-  match identity.channel with
-  | Some Client_identity.Internal -> ()
-  | _ -> fail "expected Internal channel"
+let temp_dir () =
+  let path = Filename.temp_file "masc_full_cycle_probe_" "" in
+  Unix.unlink path;
+  Unix.mkdir path 0o755;
+  path
 
-(** Test: Agent identity persists in registry *)
-let test_identity_registry_persistence () =
+let cleanup_dir root =
+  let rec remove path =
+    if Sys.is_directory path then begin
+      Array.iter
+        (fun name -> remove (Filename.concat path name))
+        (Sys.readdir path);
+      Unix.rmdir path
+    end else
+      Unix.unlink path
+  in
+  try remove root with Sys_error _ -> ()
+
+let request ~id ~method_ params =
+  Yojson.Safe.to_string
+    (`Assoc
+      [ ("jsonrpc", `String "2.0")
+      ; ("id", `Int id)
+      ; ("method", `String method_)
+      ; ("params", params)
+      ])
+
+let initialize_request =
+  request ~id:1 ~method_:"initialize"
+    (`Assoc
+      [ ("protocolVersion", `String "2025-11-25")
+      ; ("capabilities", `Assoc [])
+      ; ( "clientInfo"
+        , `Assoc
+            [ ("name", `String "masc-full-cycle-probe")
+            ; ("version", `String "1")
+            ] )
+      ])
+
+let tool_request ~id ~name arguments =
+  request ~id ~method_:"tools/call"
+    (`Assoc
+      [ ("name", `String name)
+      ; ("arguments", arguments)
+      ])
+
+let result_fields_exn label = function
+  | `Assoc response_fields ->
+    (match List.assoc_opt "result" response_fields with
+     | Some (`Assoc result_fields) -> result_fields
+     | Some _ -> failf "%s returned a non-object result" label
+     | None ->
+       failf "%s returned no result: %s" label
+         (Yojson.Safe.to_string (`Assoc response_fields)))
+  | response ->
+    failf "%s returned a non-object response: %s" label
+      (Yojson.Safe.to_string response)
+
+let check_protocol_success label response =
+  ignore (result_fields_exn label response)
+
+let check_tool_success label response =
+  let fields = result_fields_exn label response in
+  match List.assoc_opt "isError" fields with
+  | Some (`Bool false) -> ()
+  | Some (`Bool true) ->
+    failf "%s returned a typed tool error: %s" label
+      (Yojson.Safe.to_string response)
+  | _ -> failf "%s omitted result.isError: %s" label
+           (Yojson.Safe.to_string response)
+
+let task_exn config =
+  match Masc.Workspace.get_tasks_raw config with
+  | [ task ] -> task
+  | tasks -> failf "expected one synthetic task, got %d" (List.length tasks)
+
+let test_one_shot_protocol_to_durable_outcome () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let reg = Client_identity.Registry.create () in
-  
-  (* First call - register agent *)
-  let id1 = Fixtures.identity_for "persistent-agent" in
-  let registered = Client_identity.Registry.register reg id1 in
-  
-  (* Simulate second call - should find existing *)
-  let found = Client_identity.Registry.find_by_name reg "persistent-agent" in
-  match found with
-  | Some id2 ->
-      check string "same session_key" registered.session_key id2.session_key;
-      check bool "same agent" true (Client_identity.same_agent registered id2)
-  | None -> fail "identity not found in registry"
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.For_testing.create_state ~base_path () in
+      let session_id = "full-cycle-probe-session" in
+      let call request =
+        Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:session_id state request
+      in
 
-(** Test: Multi-agent scenario - identities don't collide *)
-let test_multi_agent_isolation () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let reg = Client_identity.Registry.create () in
-  
-  let agents = ["agent-a"; "agent-b"; "agent-c"] in
-  let identities = List.map (fun name ->
-    Client_identity.Registry.register reg (Fixtures.identity_for name)
-  ) agents in
-  
-  (* Verify all agents have unique session keys *)
-  let session_keys = List.map (fun id -> id.Client_identity.session_key) identities in
-  let unique_keys = List.sort_uniq String.compare session_keys in
-  check int "all keys unique" 3 (List.length unique_keys);
-  
-  (* Verify each can be found by name *)
-  List.iter (fun name ->
-    match Client_identity.Registry.find_by_name reg name with
-    | Some id -> check string "correct name" name id.agent_name
-    | None -> fail (Printf.sprintf "agent %s not found" name)
-  ) agents
+      call initialize_request |> check_protocol_success "initialize";
 
-(** Test: Capability filtering *)
-let test_capability_filtering () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let reg = Client_identity.Registry.create () in
-  
-  let params_with_caps = `Assoc [
-    ("_agent_name", `String "capable-agent");
-    ("_capabilities", `List [`String "code"; `String "search"; `String "file_ops"]);
-  ] in
-  let id = Client_identity.from_mcp_params params_with_caps in
-  let _ = Client_identity.Registry.register reg id in
-  
-  check bool "has code" true (Client_identity.has_capability id "code");
-  check bool "has search" true (Client_identity.has_capability id "search");
-  check bool "no admin" false (Client_identity.has_capability id "admin")
+      call
+        (tool_request ~id:2 ~name:"masc_start"
+           (`Assoc
+             [ ("path", `String base_path)
+             ; ("task_title", `String "Synthetic full-cycle proof")
+             ; ("_agent_name", `String "full-cycle-probe")
+             ]))
+      |> check_tool_success "masc_start";
 
-(** Test: Concurrent registration safety *)
-let test_concurrent_registration () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let reg = Client_identity.Registry.create () in
-  
-  (* Spawn multiple fibers registering agents *)
-  Eio.Fiber.all (List.init 10 (fun i () ->
-    let name = Printf.sprintf "concurrent-agent-%d" i in
-    let id = Fixtures.identity_for name in
-    let _ = Client_identity.Registry.register reg id in
-    (* Touch a few times *)
-    for _ = 1 to 5 do
-      Client_identity.Registry.touch reg id.session_key ();
-      Eio.Fiber.yield ()
-    done
-  ));
-  
-  check int "all registered" 10 (Client_identity.Registry.count reg)
+      let config = Mcp_server.workspace_config state in
+      let claimed_task = task_exn config in
+      (match claimed_task.Masc_domain.task_status with
+       | Masc_domain.Claimed { assignee; _ } ->
+         check string "task owner" "full-cycle-probe" assignee
+       | status ->
+         failf "masc_start did not claim the task: %s"
+           (Masc_domain.task_status_to_string status));
+      check (option string) "current task persisted"
+        (Some claimed_task.id)
+        (Masc.Task.Planning_eio.get_current_task config);
 
-(** Test: Session key stability across updates *)
-let test_session_key_stability () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let reg = Client_identity.Registry.create () in
-  
-  let id = Fixtures.identity_for "stable-agent" in
-  let original_key = id.session_key in
-  let _ = Client_identity.Registry.register reg id in
-  
-  (* Multiple touches keep the session stable. *)
-  Client_identity.Registry.touch reg original_key ();
-  
-  match Client_identity.Registry.find_by_session reg original_key with
-  | Some updated ->
-      check string "session_key unchanged" original_key updated.session_key
-  | None -> fail "identity lost"
+      call
+        (tool_request ~id:3 ~name:"masc_status"
+           (`Assoc [ ("_agent_name", `String "full-cycle-probe") ]))
+      |> check_tool_success "masc_status";
+
+      call
+        (tool_request ~id:4 ~name:"masc_transition"
+           (`Assoc
+             [ ("agent_name", `String "full-cycle-probe")
+             ; ("task_id", `String claimed_task.id)
+             ; ("action", `String "done")
+             ; ("notes", `String "Synthetic full-cycle proof completed")
+             ; ("_agent_name", `String "full-cycle-probe")
+             ]))
+      |> check_tool_success "masc_transition done";
+
+      let completed_task = task_exn config in
+      (match completed_task.Masc_domain.task_status with
+       | Masc_domain.Done { assignee; notes; _ } ->
+         check string "completion owner" "full-cycle-probe" assignee;
+         check (option string) "durable completion note"
+           (Some "Synthetic full-cycle proof completed") notes
+       | status ->
+         failf "task did not reach done: %s"
+           (Masc_domain.task_status_to_string status));
+      check (option string) "current task cleared" None
+        (Masc.Task.Planning_eio.get_current_task config))
 
 let () =
-  run "MCP Full Cycle" [
-    "identity", [
-      test_case "extraction" `Quick test_identity_extraction;
-      test_case "registry_persistence" `Quick test_identity_registry_persistence;
-      test_case "multi_agent_isolation" `Quick test_multi_agent_isolation;
-      test_case "capability_filtering" `Quick test_capability_filtering;
-    ];
-    "lifecycle", [
-      test_case "concurrent_registration" `Quick test_concurrent_registration;
-      test_case "session_key_stability" `Quick test_session_key_stability;
-    ];
-  ]
+  run "MCP one-shot full-cycle probe"
+    [ ( "protocol to durable outcome"
+      , [ test_case "initialize, start, observe, complete" `Quick
+            test_one_shot_protocol_to_durable_outcome
+        ] )
+    ]

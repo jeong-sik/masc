@@ -122,7 +122,7 @@ RFC-0303이 기각한 것은 **출력 품질 휴리스틱**이다: `made_progres
 ## 8. 검증
 
 - 단위: 빈 observation + gate on → `Skip No_actionable_stimulus`. 각 disjunct 단독 → `Run`. bootstrap은 generation당 1회. §3.3 매트릭스 4행 각각: 연속(변경→재admit)·자기제한(무변경→skip)·크래시 재기동 재소집(durable 소비 revision 이전 값 유지 확인)·실패 턴 비재소집. reactive 턴이 backlog edge를 소비하지 않음(mention 턴 후 미처리 backlog 변경 → scheduled 채널 admit 유지). **빠른 턴 연속성**: admission과 같은 눈금(동일 시각)에 일어난 변경도 revision 증가만으로 재admit — 시각 동률에 의존하는 테스트 금지.
-- 라이브 (감사 Phase 4 완료 기준 그대로): 신호 없는 10분간 provider call 0, heartbeat row는 계속 기록. direct message는 즉시 reactive 턴. 정적 백로그 keeper(#26487의 full-cycle-probe 형태)는 부트 후 autonomous 턴 1회 이하.
+- 라이브: 신호 없는 10분간 provider call 0, heartbeat row는 계속 기록. direct message는 즉시 reactive 턴. Full-cycle 검증은 Keeper를 기동하지 않는 격리 one-shot MCP E2E로만 수행한다.
 - 비용: 신호 없는 날의 scheduled 채널 provider 비용 ≈ $0 (오늘 $78.77의 대조 실측을 병합 후 기록).
 
 ## 9. 비제안

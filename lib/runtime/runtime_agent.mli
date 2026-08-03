@@ -243,8 +243,6 @@ val media_degrade_note :
     was dropped rather than vanishing. [None] when nothing was dropped. *)
 
 module For_testing : sig
-  val with_oas_tool_of_masc_hook_unset : (unit -> 'a) -> 'a
-
   val provider_http_observation_transport :
     Llm_provider.Llm_transport.t -> Llm_provider.Llm_transport.t
 

@@ -25,12 +25,6 @@ let required_string args key =
 let optional_float args key = Json_util.get_float args key
 let optional_int args key = Json_util.get_int args key
 
-let required_float args key =
-  match optional_float args key with
-  | Some value -> Ok value
-  | None -> Error (Printf.sprintf "%s is required" key)
-;;
-
 let parse_due_at_iso8601 value =
   match Time_codec.parse_rfc3339_whole_seconds value with
   | Error Time_codec.Invalid_rfc3339 -> None
@@ -417,15 +411,9 @@ let handle_list ~tool_name ~start_time ctx args =
 ;;
 
 let handle_get ~tool_name ~start_time ctx args =
-  let occurrence_key =
-    let* schedule_id = required_string args "schedule_id" in
-    let* due_at = required_float args "due_at_unix" in
-    let* payload_digest = required_string args "payload_digest" in
-    Ok (schedule_id, due_at, payload_digest)
-  in
-  match occurrence_key with
+  match required_string args "schedule_id" with
   | Error msg -> workflow_error ~tool_name ~start_time msg
-  | Ok (schedule_id, due_at, payload_digest) ->
+  | Ok schedule_id ->
     (match Schedule_store.read_state_result ctx.config with
      | Error err -> schedule_read_runtime_error ~tool_name ~start_time err
      | Ok state ->
@@ -437,22 +425,11 @@ let handle_get ~tool_name ~start_time ctx args =
        with
      | None -> workflow_error ~tool_name ~start_time "schedule not found"
      | Some request ->
-       if not (Float.equal request.due_at due_at)
-          || not
-               (String.equal
-                  (Schedule_domain.payload_digest request.payload)
-                  payload_digest)
-       then
-         workflow_error
-           ~tool_name
-           ~start_time
-           "schedule occurrence is no longer current"
-       else (
-         let last_execution =
-           Schedule_store.last_execution_for_schedule state
-             ~schedule_id:request.Schedule_domain.schedule_id
-         in
-         ok ~tool_name ~start_time (schedule_request_json ?last_execution request)))
+       let last_execution =
+         Schedule_store.last_execution_for_schedule state
+           ~schedule_id:request.Schedule_domain.schedule_id
+       in
+       ok ~tool_name ~start_time (schedule_request_json ?last_execution request))
 ;;
 
 let handle_cancel ~tool_name ~start_time ctx args =

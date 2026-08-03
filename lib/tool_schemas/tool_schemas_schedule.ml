@@ -158,13 +158,8 @@ let list_schema =
 ;;
 
 let get_schema =
-  object_schema ~required:[ "schedule_id"; "due_at_unix"; "payload_digest" ]
-    [ string_prop ~description:"Schedule id from the exact wake occurrence." "schedule_id"
-    ; number_prop ~description:"due_at_unix from the exact wake occurrence." "due_at_unix"
-    ; string_prop
-        ~description:"Payload digest from the exact wake occurrence."
-        "payload_digest"
-    ]
+  object_schema ~required:[ "schedule_id" ]
+    [ string_prop ~description:"Durable schedule id." "schedule_id" ]
 ;;
 
 let cancel_schema =
@@ -203,7 +198,7 @@ let definitions : definition list =
       ~input_schema:list_schema ~read_only:true
   ; definition ~action:Get_request ~id:"get" ~name:"masc_schedule_get"
       ~description:
-        "Read one exact durable scheduled occurrence. The schedule_id, due_at_unix, and payload_digest must all match the current request."
+        "Read the current durable scheduled request by schedule_id. A recurring request may already point at its next occurrence."
       ~input_schema:get_schema ~read_only:true
   ; definition ~action:Cancel_request ~id:"cancel" ~name:"masc_schedule_cancel"
       ~description:

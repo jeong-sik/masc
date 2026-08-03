@@ -562,8 +562,10 @@ let test_scheduled_wake_renders_schedule_pointer () =
      otherwise a Keeper reaches for the wrong one. *)
   check bool "block names the dereference tool" true
     (contains_sub "masc_schedule_get" block);
-  check bool "block rejects a different current occurrence" true
-    (contains_sub "only when that exact occurrence is still current" block);
+  check bool "block names the current durable request semantics" true
+    (contains_sub "returns the current durable request" block);
+  check bool "block names the exact wake-message authority" true
+    (contains_sub "message is the exact wake message" block);
   check bool "block still marks occurrence_id as correlation-only" true
     (contains_sub "never pass it to a Board tool" block)
 ;;

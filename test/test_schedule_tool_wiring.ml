@@ -111,12 +111,12 @@ let create_args ?schedule_id ?(message = "scheduled keeper wake") () =
      | Some value -> [ "schedule_id", `String value ])
 ;;
 
-let create_service_exn config ~schedule_id ~due_at ~payload =
+let create_service_exn config ~schedule_id ~due_at ~payload ?recurrence () =
   match
     Schedule_service.create config ~schedule_id ~requested_at:100.0
       ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent")
-      ~due_at ~payload ~source:Schedule_domain.Operator_request ()
+      ~due_at ~payload ~source:Schedule_domain.Operator_request ?recurrence ()
   with
   | Ok request -> request
   | Error err -> fail (Schedule_service.service_error_to_string err)
@@ -164,8 +164,8 @@ let test_flat_tool_surface () =
   let get_schema : Masc_domain.tool_schema =
     (schedule_definition Tool_schemas_schedule.Get_request).schema
   in
-  check (list string) "get requires the exact occurrence key"
-    [ "schedule_id"; "due_at_unix"; "payload_digest" ]
+  check (list string) "get requires the durable schedule pointer"
+    [ "schedule_id" ]
     (get_schema.input_schema
      |> member "required"
      |> to_list
@@ -185,9 +185,6 @@ let test_create_list_get_cancel () =
     (Tool_result.data create |> member "status" |> to_string);
   check string "created payload support" "supported"
     (Tool_result.data create |> member "payload_support" |> to_string);
-  let payload_digest =
-    Tool_result.data create |> member "payload_digest" |> to_string
-  in
   let list_result =
     dispatch_exn config Tool_schemas_schedule.List_requests
       (`Assoc [ "limit", `Int 10 ])
@@ -197,29 +194,11 @@ let test_create_list_get_cancel () =
     (Tool_result.data list_result |> member "schedules" |> to_list |> List.length);
   let get_result =
     dispatch_exn config Tool_schemas_schedule.Get_request
-      (`Assoc
-        [ "schedule_id", `String "sched-tools"
-        ; "due_at_unix", `Float 200.0
-        ; "payload_digest", `String payload_digest
-        ])
+      (`Assoc [ "schedule_id", `String "sched-tools" ])
   in
   check bool "get succeeds" true (Tool_result.is_success get_result);
   check string "get id" "sched-tools"
     (Tool_result.data get_result |> member "schedule_id" |> to_string);
-  let stale_get_result =
-    dispatch_exn config Tool_schemas_schedule.Get_request
-      (`Assoc
-        [ "schedule_id", `String "sched-tools"
-        ; "due_at_unix", `Float 201.0
-        ; "payload_digest", `String payload_digest
-        ])
-  in
-  check bool "stale occurrence is rejected" false
-    (Tool_result.is_success stale_get_result);
-  check bool "stale occurrence failure is explicit" true
-    (String_util.contains_substring
-       (Tool_result.message stale_get_result)
-       "schedule occurrence is no longer current");
   let cancel_result =
     dispatch_exn config Tool_schemas_schedule.Cancel_request
       (`Assoc
@@ -234,6 +213,43 @@ let test_create_list_get_cancel () =
      |> member "schedule"
      |> member "status"
      |> to_string)
+;;
+
+let test_get_recurring_schedule_after_accept_advance () =
+  with_config
+  @@ fun config ->
+  let schedule_id = "sched-recurring-get-after-accept" in
+  let request : Schedule_domain.schedule_request =
+    create_service_exn
+      config
+      ~schedule_id
+      ~due_at:200.0
+      ~payload:(keeper_wake_payload "run every minute")
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+      ()
+  in
+  (match Schedule_store.refresh_due config ~now:200.0 with
+   | Ok _ -> ()
+   | Error err -> fail (Schedule_store.store_error_to_string err));
+  (match Schedule_store.start_due_candidate config ~now:201.0 ~schedule_id with
+   | Ok _ -> ()
+   | Error err -> fail (Schedule_store.store_error_to_string err));
+  let advanced : Schedule_domain.schedule_request =
+    match Schedule_store.accept_running config ~now:202.0 ~schedule_id () with
+    | Ok stored -> stored
+    | Error err -> fail (Schedule_store.store_error_to_string err)
+  in
+  check bool "recurring request advanced past the fired occurrence" true
+    (advanced.due_at > request.due_at);
+  let get_result =
+    dispatch_exn config Tool_schemas_schedule.Get_request
+      (`Assoc [ "schedule_id", `String schedule_id ])
+  in
+  check bool "advanced recurring request remains readable" true
+    (Tool_result.is_success get_result);
+  let open Yojson.Safe.Util in
+  check (float 0.001) "get returns the current next occurrence" advanced.due_at
+    (Tool_result.data get_result |> member "due_at" |> to_float)
 ;;
 
 let test_create_accepts_explicit_iso8601_offset () =
@@ -456,7 +472,7 @@ let test_due_signal_and_dashboard_projection () =
   @@ fun config ->
   let request =
     create_service_exn config ~schedule_id:"sched-signal" ~due_at:200.0
-      ~payload:(keeper_wake_payload "signal me")
+      ~payload:(keeper_wake_payload "signal me") ()
   in
   let tick =
     match Schedule_runner.tick config ~now:201.0 with
@@ -508,6 +524,8 @@ let () =
     [ ( "wiring"
       , [ test_case "flat tool surface" `Quick test_flat_tool_surface
         ; test_case "create list get cancel" `Quick test_create_list_get_cancel
+        ; test_case "get recurring schedule after accept advance" `Quick
+            test_get_recurring_schedule_after_accept_advance
         ; test_case "create accepts explicit ISO-8601 offset" `Quick
             test_create_accepts_explicit_iso8601_offset
         ; test_case "removed convenience input does not synthesize payload" `Quick

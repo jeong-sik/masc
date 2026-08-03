@@ -1240,7 +1240,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
              error))
 ;;
 
-let test_terminal_retry_repairs_ledger_without_recreating_wake () =
+let test_terminal_reconciliation_before_retry_recreates_wake () =
   with_workspace
   @@ fun config ->
   let keeper_name = "schedule-keeper" in
@@ -1269,35 +1269,13 @@ let test_terminal_retry_repairs_ledger_without_recreating_wake () =
   check int "terminal wake removed before retry" 0
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
      |> Keeper_event_queue.length);
+  rm_rf ledger_dir;
   let retried = tick_ok config ~now:202.0 in
   check string "retry dispatch succeeds" "succeeded"
     (Schedule_runner.dispatch_status_to_string (List.hd retried.dispatches).status);
-  check string "retry observes terminal ACK" "already_acked"
-    Yojson.Safe.Util.
-      ((List.hd retried.dispatches).detail
-       |> Option.value ~default:`Null
-       |> member "occurrence_status"
-       |> to_string);
-  check int "retry does not recreate terminal wake" 0
+  check int "retry recreates wake after terminal ACK" 1
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
      |> Keeper_event_queue.length);
-  (match
-     Keeper_reaction_ledger.event_queue_reaction_evidence_result
-       ~base_path
-       ~keeper_name
-       ~stimulus_id:(single_occurrence_id first)
-   with
-   | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
-     check bool "terminal retry repairs missing stimulus" true evidence.stimulus_seen;
-     check bool "terminal reaction remains recorded" true evidence.event_queue_acked_seen;
-     check int "terminal repair writes one canonical stimulus row" 1
-       evidence.matched_record_count
-   | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
-     fail "terminal retry evidence was quarantined"
-   | Error error ->
-     fail
-       (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
-          error));
   match
     Schedule_store.execution_for_occurrence
       (Schedule_store.read_state config)
@@ -1306,9 +1284,82 @@ let test_terminal_retry_repairs_ledger_without_recreating_wake () =
       ~payload_digest:(Schedule_domain.payload_digest request.payload)
   with
   | Some execution ->
-    check string "retry settles from terminal ACK" "succeeded"
+    check string "retry remains live" "dispatched"
       (Schedule_domain.execution_status_to_string execution.status)
   | None -> fail "retried execution missing"
+;;
+
+let test_terminal_retry_repairs_missing_stimulus_ledger () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let keeper_dir =
+    Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
+      keeper_name
+  in
+  mkdir_p keeper_dir;
+  let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
+  mkdir_p (Filename.dirname ledger_dir);
+  write_empty_file ledger_dir;
+  ignore (create_keeper_wake_schedule config : Schedule_domain.schedule_request);
+  let first = tick_ok config ~now:201.0 in
+  let stimulus_id = single_occurrence_id first in
+  check string "first dispatch is retryable failure" "failed"
+    (Schedule_runner.dispatch_status_to_string (List.hd first.dispatches).status);
+  Sys.remove ledger_dir;
+  mkdir_p ledger_dir;
+  let selection = pending_selection_exn ~base_path ~keeper_name in
+  (match
+     Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
+       ~base_path
+       keeper_name
+       ~current_owner_nonce:91
+       ~applied_at:201.5
+       ~selection
+       ~detail:"terminal before schedule retry"
+   with
+   | Ok (Keeper_registry_event_queue.Acked _)
+   | Ok (Keeper_registry_event_queue.Already_acked _) -> ()
+   | Ok
+       (Keeper_registry_event_queue.Ack_committed_followup_failed
+          { detail; _ }) ->
+     fail detail
+   | Error detail -> fail detail);
+  let retried = tick_ok config ~now:202.0 in
+  (match List.hd retried.dispatches with
+   | { status = Schedule_runner.Dispatch_failed
+     ; detail = Some detail
+     ; error = Some error
+     ; _
+     } ->
+     check string "retry observes terminal failure" "already_failed"
+       Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string);
+     check string "terminal retry needs no activation" "not_required"
+       Yojson.Safe.Util.(detail |> member "activation_status" |> to_string);
+     check bool "terminal failure reason is preserved" true
+       (String_util.contains_substring error "terminal before schedule retry")
+   | _ -> fail "terminal retry did not preserve the failed disposition");
+  check int "terminal retry enqueues no second occurrence" 0
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length);
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+  with
+  | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+    check bool "terminal retry repairs missing stimulus" true evidence.stimulus_seen;
+    check bool "terminal reaction remains recorded" true evidence.event_queue_ack_seen;
+    check int "one stimulus and one terminal reaction remain" 2
+      evidence.matched_record_count
+  | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
+    fail "terminal retry evidence was quarantined"
+  | Error error ->
+    fail
+      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
 ;;
 
 let test_retry_before_terminal_reconciliation_retains_wake () =
@@ -1928,9 +1979,12 @@ let () =
         ; test_case "cancelled occurrence recovery does not enqueue again"
             `Quick
             test_cancelled_occurrence_recovery_does_not_enqueue_again
-        ; test_case "terminal retry repairs ledger without recreating wake"
+        ; test_case "terminal reconciliation before retry recreates wake"
             `Quick
-            test_terminal_retry_repairs_ledger_without_recreating_wake
+            test_terminal_reconciliation_before_retry_recreates_wake
+        ; test_case "terminal retry repairs missing stimulus ledger"
+            `Quick
+            test_terminal_retry_repairs_missing_stimulus_ledger
         ; test_case "retry before terminal reconciliation retains wake"
             `Quick
             test_retry_before_terminal_reconciliation_retains_wake

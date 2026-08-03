@@ -54,3 +54,28 @@ val sync_current_task_id_for_agent_name :
 
 (** Convenience [List.map Keeper_tool_name.to_string]. *)
 val tool_names : Keeper_tool_name.t list -> string list
+
+type activation_error =
+  | Duplicate_registered_name of string
+  | Duplicate_initial_name of string
+  | Unknown_initial_name of string
+  | Unknown_activation_name of string
+
+type active_tool_surface
+
+(** Create one Agent-run-scoped lazy surface. Both the complete registered
+    catalog and the initial discovery surface are exact names. *)
+val create_active_tool_surface
+  :  registered_names:string list
+  -> initial_names:string list
+  -> (active_tool_surface, activation_error) result
+
+(** Activate exact registered names for subsequent SDK turns. *)
+val activate_exact
+  :  active_tool_surface
+  -> names:string list
+  -> (unit, activation_error) result
+
+(** Active names in canonical registration order. *)
+val active_names : active_tool_surface -> string list
+val is_active : active_tool_surface -> string -> bool

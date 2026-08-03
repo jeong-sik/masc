@@ -433,17 +433,17 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (match List.assoc_opt "internal_name" execute_fields with
      | Some (`String internal_name) -> internal_name
      | _ -> fail "discovery_fields missing internal_name");
-  check bool "discovery_fields leaves active_names to shared runtime" true
-    (Option.is_none (List.assoc_opt "active_names" execute_fields));
+  check bool "discovery_fields leaves model_names to shared runtime" true
+    (Option.is_none (List.assoc_opt "model_names" execute_fields));
   let execute = find_descriptor "tool_execute" in
   check string "Execute public alias" "Execute"
     (string_member "public_name" execute);
   check string "Execute executor" "shell_ir"
     (string_member "executor" execute);
   check bool "Execute internal route is not a model name" false
-    (list_member_contains "active_names" "tool_execute" execute);
-  check bool "Execute active public name listed" true
-    (list_member_contains "active_names" "Execute" execute);
+    (list_member_contains "model_names" "tool_execute" execute);
+  check bool "Execute public model name listed" true
+    (list_member_contains "model_names" "Execute" execute);
   check string "Execute model projection" "preferred_public_name"
     (string_member "keeper_model_projection" execute);
   let policy = Yojson.Safe.Util.member "policy" execute in
@@ -500,11 +500,11 @@ let test_keeper_tools_list_json_uses_typed_groups () =
   check bool "Grep policy group omitted" true
     (Yojson.Safe.Util.member "policy_group" grep_policy = `Null);
   check bool "Grep internal route is not a model name" false
-    (list_member_contains "active_names" "tool_search_files" grep);
+    (list_member_contains "model_names" "tool_search_files" grep);
   check bool "Grep preferred model name listed" true
-    (list_member_contains "active_names" "Grep" grep);
+    (list_member_contains "model_names" "Grep" grep);
   check bool "Grep compatibility alias is not a model name" false
-    (list_member_contains "active_names" "Search" grep);
+    (list_member_contains "model_names" "Search" grep);
   let malformed_execute =
     { (descriptor_for_internal "tool_execute") with
       KTD.input_schema =

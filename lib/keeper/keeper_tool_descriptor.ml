@@ -1584,10 +1584,10 @@ let internal_descriptors : t list =
        ~id:"keeper.tools_list"
        ~name:"keeper_tools_list"
        ~description:
-         "List the active keeper tool surface from descriptors and registered schemas. \
-          This is capability introspection, not connector content lookup. Use \
-          keeper_surface_read only for current conversation context. \
-          No arguments."
+         "List registered Keeper tool names and groups for exact activation through \
+          keeper_tool_search. This is capability introspection, not connector \
+          content lookup. Use keeper_surface_read only for current conversation \
+          context. No arguments."
        ~input_schema:empty_object_schema
        ~policy:(read_only_in_process_policy ())
        ~handler:Tool_tools_list
@@ -1597,8 +1597,9 @@ let internal_descriptors : t list =
        ~id:"keeper.tool_search"
        ~name:"keeper_tool_search"
        ~description:
-         "Search keeper tool schemas by free-text query. Returns ranked tool \
-          descriptions and input schemas."
+         "Search registered Keeper tool schemas. Free text returns advisory \
+          candidates; an exact tool name activates only that tool for the next \
+          SDK turn."
        ~input_schema:tool_search_schema
        ~policy:(read_only_in_process_policy ())
        ~handler:Tool_tool_search

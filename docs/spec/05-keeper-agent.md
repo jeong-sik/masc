@@ -373,19 +373,20 @@ OAS Agent.run의 hook lifecycle에 keeper 동작을 주입:
 
 ### 8.2 Tool surface projection
 
-`Keeper_tool_descriptor.model_visible_descriptors`가 선언한 모델 이름과 schema는
-매 turn 실제 OAS `Tool.t`로 전부 materialize된다. Keeper, runtime, provider,
-credential 상태는 이 목록을 줄이지 않으며 per-turn ranking, Top-K, allow/deny
-list, affinity, discovery overlay를 적용하지 않는다.
+`Keeper_tool_descriptor.model_visible_descriptors`는 실행 가능한 전체 catalog와
+handler/schema join을 정의한다. OAS Agent의 첫 SDK turn에는
+`keeper_tools_list`와 `keeper_tool_search` schema만 전달한다.
 
-비노출은 동일 capability를 이미 가리키는 exact transport alias와 유효한 canonical
-schema가 없는 descriptor에만 허용된다. transport alias는 자신을 대신해 노출되는
-정확한 model name을 descriptor evidence에 기록한다.
+`keeper_tools_list`는 정확한 등록 이름을 반환한다. `keeper_tool_search`의 free-text
+결과는 advisory 후보일 뿐 surface를 바꾸지 않는다. 후보의 정확한 이름을 다시
+query한 경우에만 그 이름 하나를 Agent-run-local active set에 추가한다. 다음 SDK
+turn의 `Hooks.Selected_tools`가 active set의 schema와 동일한 handler 집합을 Provider와
+실행기에 전달한다. 미등록 이름, 중복 초기 이름, 선택 surface 밖 named tool choice,
+Provider가 만든 비활성 ToolUse는 dispatch 전에 typed failure로 거부된다.
 
-이 경계가 하는 일은 descriptor/registered handler의 존재와 schema join을 exact
-검증하는 것뿐이다. 외부 효과는 tool을 숨겨 예방하지 않고 호출 시 normalized
-Gate가 Always Allowed, LLM Auto Judge, 비차단 HITL 중 하나로 결정한다. 외부
-dependency가 unavailable이면 해당 handler가 명시적 typed failure를 반환한다.
+외부 효과 권한은 surface 활성화가 만들지 않는다. 활성 tool의 실제 호출은 effect
+sink 직전 normalized Gate가 판정하며, unavailable dependency는 handler의 typed
+failure로 반환된다.
 
 ---
 

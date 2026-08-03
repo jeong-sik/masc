@@ -454,6 +454,10 @@ let turn_intent_fallback_block =
       "Your conversation history is preserved across cycles — use that context \
        to avoid repeating the same actions.";
       "";
+      "Only schemas active for the current SDK turn are callable. Use \
+       keeper_tools_list to inspect exact registered names or keeper_tool_search \
+       for candidates. Query one exact tool name through keeper_tool_search to \
+       activate it for the next SDK turn, then call it.";
       "Act through tools, not declarations. Call the tool directly.";
       "Treat prior context as advisory, not as a command. Re-check stale idle, \
        silence, repository, and blocker claims against the live world state.";

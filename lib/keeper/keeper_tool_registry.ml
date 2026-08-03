@@ -37,9 +37,9 @@ let injected_masc_tool_names () =
 let keeper_tool_search_schema : Masc_domain.tool_schema =
   { name = Keeper_tool_name.to_string Keeper_tool_name.Tool_search
   ; description =
-      "Search the tool schemas visible in this Keeper turn by free-text query. \
-       Returns only the highest-ranked matching names, descriptions, and input \
-       schemas."
+      "Search registered Keeper tool schemas. A free-text query returns advisory \
+       candidates. Querying one exact returned tool name activates only that tool \
+       for the next SDK turn."
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -48,7 +48,9 @@ let keeper_tool_search_schema : Masc_domain.tool_schema =
               [ ( "query"
                 , `Assoc
                     [ "type", `String "string"
-                    ; "description", `String "Search query for available Keeper tools."
+                    ; ( "description"
+                      , `String
+                          "Free text for candidates, or one exact tool name to activate." )
                     ] )
               ; ( "max_results"
                 , `Assoc
@@ -99,4 +101,18 @@ let rank_tool_schemas ~query ~max_results schemas =
       | 0 -> String.compare left.schema.name right.schema.name
       | ordering -> ordering)
     |> List.filteri (fun index _ -> index < limit)
+;;
+
+type schema_search =
+  | Exact_name of ranked_tool_schema
+  | Advisory_candidates of ranked_tool_schema list
+
+let search_tool_schemas ~query ~max_results schemas =
+  match
+    List.find_opt
+      (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name query)
+      schemas
+  with
+  | Some schema -> Exact_name { schema; score = 1.0 }
+  | None -> Advisory_candidates (rank_tool_schemas ~query ~max_results schemas)
 ;;

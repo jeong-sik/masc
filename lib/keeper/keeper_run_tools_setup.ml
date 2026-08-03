@@ -90,6 +90,55 @@ let gate_causal_initial
     ]
 ;;
 
+let initial_discovery_handler = function
+  | Keeper_tool_descriptor.Tool_tools_list | Tool_tool_search -> true
+  | ( Tool_execute
+    | Tool_search_files
+    | Tool_read_file
+    | Tool_edit_file
+    | Tool_write_file
+    | Tool_time_now
+    | Tool_context_status
+    | Tool_artifact_read
+    | Tool_memory_search
+    | Tool_memory_write
+    | Tool_library_search
+    | Tool_library_read
+    | Tool_surface_read
+    | Tool_surface_post
+    | Tool_person_note_set
+    | Tool_ide_annotate
+    | Tool_voice_dispatch
+    | Tool_task_dispatch
+    | Board_tool_dispatch
+    | Tool_masc_board_dispatch
+    | Tool_masc_task_dispatch
+    | Tool_masc_plan_dispatch
+    | Tool_masc_run_dispatch
+    | Tool_masc_agent_dispatch
+    | Tool_masc_workspace_dispatch
+    | Tool_masc_misc_dispatch
+    | Tool_web_search
+    | Tool_web_fetch
+    | Tool_masc_control_dispatch
+    | Tool_masc_agent_timeline_dispatch
+    | Tool_masc_schedule_dispatch
+    | Tool_masc_keeper_dispatch
+    | Tool_masc_fusion_dispatch
+    | Tool_masc_fusion_status
+    | Tool_masc_library_dispatch
+    | Tool_masc_local_runtime_dispatch
+    | Tool_analyze_image ) ->
+    false
+;;
+
+let initial_model_tool_names descriptors =
+  descriptors
+  |> List.filter (fun (descriptor : Keeper_tool_descriptor.t) ->
+    initial_discovery_handler descriptor.runtime_handler)
+  |> List.concat_map Keeper_tool_descriptor.keeper_model_names
+;;
+
 let prepare_agent_setup
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -296,7 +345,7 @@ let prepare_agent_setup
     - operator_only_count
     - invalid_schema_count
   in
-  let all_tool_names =
+  let registered_model_tool_names =
     List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) keeper_tools
   in
   let expected_model_names =
@@ -304,24 +353,60 @@ let prepare_agent_setup
     |> List.concat_map Keeper_tool_descriptor.keeper_model_names
     |> List.sort_uniq String.compare
   in
-  let actual_model_names = List.sort_uniq String.compare all_tool_names in
-  let all_model_eligible_tools_visible =
-    expected_model_names = actual_model_names
-    && List.length actual_model_names = List.length all_tool_names
+  let actual_model_names =
+    List.sort_uniq String.compare registered_model_tool_names
   in
-  if not all_model_eligible_tools_visible
-  then
-    Log.Keeper.emit
-      Log.Error
-      ~keeper_name:meta.name
-      ~category:Log.Tool
-      ~details:
-        (`Assoc
-           [ "error_kind", `String "keeper_model_tool_projection_mismatch"
-           ; "expected_names", Json_util.json_string_list expected_model_names
-           ; "actual_names", Json_util.json_string_list all_tool_names
-           ])
-      "Keeper model tool bundle differs from the descriptor projection";
+  let model_projection_is_exact =
+    expected_model_names = actual_model_names
+    && List.length actual_model_names = List.length registered_model_tool_names
+  in
+  let reject_tool_surface detail =
+    (try keeper_tools_cleanup () with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Keeper.error
+         "keeper tool cleanup after surface rejection raised: %s"
+         (Printexc.to_string exn));
+    Error
+      (Agent_sdk.Error.Config
+         (Agent_sdk.Error.InvalidConfig { field = "keeper.tool_surface"; detail }))
+  in
+  let* () =
+    if model_projection_is_exact
+    then Ok ()
+    else
+      reject_tool_surface
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ "error_kind", `String "keeper_model_tool_projection_mismatch"
+              ; "expected_names", Json_util.json_string_list expected_model_names
+              ; "actual_names", Json_util.json_string_list registered_model_tool_names
+              ]))
+  in
+  let initial_discovery_names =
+    initial_model_tool_names model_visible_descriptors
+  in
+  let* active_tool_surface =
+    match
+      Keeper_agent_tool_surface.create_active_tool_surface
+        ~registered_names:registered_model_tool_names
+        ~initial_names:initial_discovery_names
+    with
+    | Ok surface -> Ok surface
+    | Error error ->
+      let detail =
+        match error with
+        | Duplicate_registered_name name ->
+          Printf.sprintf "duplicate registered model tool %S" name
+        | Duplicate_initial_name name ->
+          Printf.sprintf "duplicate initial discovery tool %S" name
+        | Unknown_initial_name name ->
+          Printf.sprintf "initial discovery tool %S is not registered" name
+        | Unknown_activation_name name ->
+          Printf.sprintf "activation tool %S is not registered" name
+      in
+      reject_tool_surface detail
+  in
   let tool_catalog_schemas =
     keeper_tools
     |> List.map (fun (tool : Agent_sdk.Tool.t) ->
@@ -334,46 +419,59 @@ let prepare_agent_setup
   in
   (local_search_fn_ref
    := fun ~query ~max_results ->
-        let ranked =
-          Keeper_tool_registry.rank_tool_schemas
-            ~query
-            ~max_results
-            tool_catalog_schemas
+        let ranked, exact_activation_name =
+          match
+            Keeper_tool_registry.search_tool_schemas
+              ~query
+              ~max_results
+              tool_catalog_schemas
+          with
+          | Exact_name ranked -> [ ranked ], Some ranked.schema.name
+          | Advisory_candidates ranked -> ranked, None
         in
-        let results =
-          List.map
-            (fun (ranked : Keeper_tool_registry.ranked_tool_schema) ->
-               `Assoc
-                 [ "name", `String ranked.schema.name
-                 ; "score", `Float ranked.score
-                 ; "description", `String ranked.schema.description
-                 ; "input_schema", ranked.schema.input_schema
-                 ; "already_visible", `Bool true
-                 ])
-            ranked
+        let activation_result =
+          match exact_activation_name with
+          | None -> Ok ()
+          | Some name ->
+            Keeper_agent_tool_surface.activate_exact
+              active_tool_surface
+              ~names:[ name ]
         in
-        Keeper_tool_execution.success
-          (Yojson.Safe.to_string
+        (match activation_result with
+         | Error _ ->
+           Keeper_tool_execution.failure_data
+             ~class_:Tool_result.Runtime_failure
+             ~message:"exact tool activation rejected an unregistered name"
+             (`Assoc [ "query", `String query ])
+         | Ok () ->
+           let results =
+             List.map
+               (fun (ranked : Keeper_tool_registry.ranked_tool_schema) ->
+                  `Assoc
+                    [ "name", `String ranked.schema.name
+                    ; "score", `Float ranked.score
+                    ; "description", `String ranked.schema.description
+                    ; "input_schema", ranked.schema.input_schema
+                    ; "activated", `Bool (Option.is_some exact_activation_name)
+                    ])
+               ranked
+           in
+           Keeper_tool_execution.success_data
              (`Assoc
-               [ "ok", `Bool true
-               ; "query", `String query
-               ; "results", `List results
-               ; "result_count", `Int (List.length results)
-               ; "registered_descriptor_count", `Int (List.length registered_descriptors)
-               ; "model_visible_descriptor_count", `Int (List.length model_visible_descriptors)
-               ; "transport_alias_count", `Int transport_alias_count
-               ; "operator_only_count", `Int operator_only_count
-               ; "invalid_schema_count", `Int invalid_schema_count
-               ; "unexplained_exclusion_count", `Int unexplained_exclusion_count
-               ; ( "all_model_eligible_tools_visible"
-                 , `Bool all_model_eligible_tools_visible )
-               ])));
+                [ "query", `String query
+                ; "results", `List results
+                ; "result_count", `Int (List.length results)
+                ; "exact_activation", `Bool (Option.is_some exact_activation_name)
+                ; ( "active_tool_names"
+                  , Json_util.json_string_list
+                      (Keeper_agent_tool_surface.active_names active_tool_surface) )
+                ])));
   Log.Keeper.routine
-    "keeper:%s tool visibility: registered=%d visible=%d transport_alias=%d \
+    "keeper:%s lazy tool surface: registered=%d initial=%d transport_alias=%d \
      operator_only=%d invalid_schema=%d unexplained=%d"
     meta.name
-    (List.length registered_descriptors)
-    (List.length all_tool_names)
+    (List.length registered_model_tool_names)
+    (List.length initial_discovery_names)
     transport_alias_count
     operator_only_count
     invalid_schema_count
@@ -411,7 +509,9 @@ let prepare_agent_setup
         ()
     : string list * turn_lane
     =
-    let schema_filter = all_tool_names in
+    let schema_filter =
+      Keeper_agent_tool_surface.active_names active_tool_surface
+    in
     let lane : Keeper_agent_tool_surface.turn_lane =
       if is_retry
       then Lane_retry
@@ -428,7 +528,6 @@ let prepare_agent_setup
   let ctx : Keeper_run_tools_hooks.ctx =
     { acc
     ; agent_name
-    ; all_tool_names
     ; compute_tool_surface
     ; record_tool_assignment
     ; config

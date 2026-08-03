@@ -23,7 +23,7 @@ type ranked_tool_schema =
   ; score : float
   }
 
-(** Rank the supplied, already-authorized tool schemas against [query] using
+(** Rank registered tool schemas against [query] using
     the repository-wide multilingual text-similarity contract. Zero-score
     entries are omitted and no more than [max_results] (clamped to 1–10) are
     returned. *)
@@ -32,3 +32,15 @@ val rank_tool_schemas :
   max_results:int ->
   Masc_domain.tool_schema list ->
   ranked_tool_schema list
+
+type schema_search =
+  | Exact_name of ranked_tool_schema
+  | Advisory_candidates of ranked_tool_schema list
+
+(** Exact name equality is the only activation-capable outcome. Free text
+    produces advisory candidates. *)
+val search_tool_schemas
+  :  query:string
+  -> max_results:int
+  -> Masc_domain.tool_schema list
+  -> schema_search

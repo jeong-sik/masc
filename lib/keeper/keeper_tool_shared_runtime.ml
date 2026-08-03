@@ -399,34 +399,29 @@ let tag_dispatch_fn
       None)
 ;;
 
-let descriptor_active_names active_name_set descriptor =
-  Keeper_tool_descriptor.keeper_model_names descriptor
-  |> List.filter (fun name -> StringSet.mem name active_name_set)
-;;
-
-let descriptor_discovery_json active_name_set descriptor =
+let descriptor_discovery_json descriptor =
   `Assoc
     (Keeper_tool_descriptor.discovery_fields descriptor
-     @ [ ( "active_names"
+     @ [ ( "model_names"
          , Json_util.json_string_list
-             (descriptor_active_names active_name_set descriptor) )
+             (Keeper_tool_descriptor.keeper_model_names descriptor) )
        ])
 ;;
 
 let keeper_tools_list_json ~(meta : keeper_meta) =
-  let active_name_set =
+  let registered_name_set =
     Keeper_tool_policy.keeper_model_tool_schemas ()
     |> List.fold_left
          (fun names (schema : Masc_domain.tool_schema) ->
             StringSet.add schema.name names)
          StringSet.empty
   in
-  let active_descriptor_names =
+  let registered_descriptor_names =
     Keeper_tool_descriptor.model_visible_descriptors ()
     |> List.concat_map (fun descriptor ->
       Keeper_tool_descriptor.keeper_model_names descriptor
       |> List.filter_map (fun name ->
-        if StringSet.mem name active_name_set then Some (name, descriptor) else None))
+        if StringSet.mem name registered_name_set then Some (name, descriptor) else None))
   in
   let map =
     List.fold_left
@@ -438,7 +433,7 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
          let list = StringMap.find_opt cat acc |> Option.value ~default:[] in
          StringMap.add cat (name :: list) acc)
       StringMap.empty
-      active_descriptor_names
+      registered_descriptor_names
   in
   let assoc =
     StringMap.fold
@@ -447,13 +442,13 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
       []
   in
   let descriptor_surface =
-    active_descriptor_names
+    registered_descriptor_names
     |> List.map snd
     |> List.sort_uniq
          (fun (left : Keeper_tool_descriptor.t)
               (right : Keeper_tool_descriptor.t) ->
             String.compare left.id right.id)
-    |> List.map (descriptor_discovery_json active_name_set)
+    |> List.map descriptor_discovery_json
   in
   Yojson.Safe.to_string
     (`Assoc (assoc @ [ "descriptor_surface", `List descriptor_surface ]))

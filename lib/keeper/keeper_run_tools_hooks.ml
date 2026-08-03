@@ -19,7 +19,6 @@ type agent_setup =
   ; model_input_projection : Agent_sdk.Agent.model_input_projection
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
-  ; all_tool_names : string list
   ; final_oas_turn_ordinal_ref : int option ref
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
@@ -31,7 +30,6 @@ type agent_setup =
 type ctx =
   { acc : hook_accumulator
   ; agent_name : string
-  ; all_tool_names : string list
   ; compute_tool_surface :
       turn:int -> current_tool_choice:Agent_sdk.Types.tool_choice option -> unit ->
       string list * turn_lane
@@ -171,7 +169,6 @@ let assemble_hooks
   let receipt_runtime_observation_ref = ctx.receipt_runtime_observation_ref in
   let receipt_response_text_present_ref = ctx.receipt_response_text_present_ref in
   let tools = ctx.tools in
-  let all_tool_names = ctx.all_tool_names in
   let initial_schema_filter, initial_turn_lane =
     compute_tool_surface
       ~turn:(start_turn_count + 1)
@@ -565,6 +562,7 @@ let assemble_hooks
                   { current_params with
                     extra_system_context = ctx
                   ; tool_choice
+                  ; tool_surface = Agent_sdk.Hooks.Selected_tools schema_filter
                   }
               | _event -> Agent_sdk.Hooks.Continue)
       }
@@ -588,7 +586,6 @@ let assemble_hooks
       ; model_input_projection
       ; gate_replay_evidence
       ; acc
-      ; all_tool_names
       ; final_oas_turn_ordinal_ref
       ; receipt_turn_count_ref
       ; receipt_model_used_ref

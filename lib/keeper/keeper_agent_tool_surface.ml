@@ -52,3 +52,68 @@ let sync_current_task_id_for_agent_name =
 
 let tool_names =
   List.map Keeper_tool_name.to_string
+
+module StringSet = Set_util.StringSet
+
+type activation_error =
+  | Duplicate_registered_name of string
+  | Duplicate_initial_name of string
+  | Unknown_initial_name of string
+  | Unknown_activation_name of string
+
+type active_tool_surface =
+  { registered_names : string list
+  ; registered_set : StringSet.t
+  ; mutex : Stdlib.Mutex.t
+  ; mutable active_set : StringSet.t
+  }
+
+let add_unique ~duplicate names =
+  let rec add set = function
+    | [] -> Ok set
+    | name :: rest ->
+      if StringSet.mem name set
+      then Error (duplicate name)
+      else add (StringSet.add name set) rest
+  in
+  add StringSet.empty names
+;;
+
+let create_active_tool_surface ~registered_names ~initial_names =
+  match add_unique ~duplicate:(fun name -> Duplicate_registered_name name) registered_names with
+  | Error _ as error -> error
+  | Ok registered_set ->
+    (match add_unique ~duplicate:(fun name -> Duplicate_initial_name name) initial_names with
+     | Error _ as error -> error
+     | Ok active_set ->
+       (match List.find_opt (fun name -> not (StringSet.mem name registered_set)) initial_names with
+        | Some name -> Error (Unknown_initial_name name)
+        | None ->
+          Ok
+            { registered_names
+            ; registered_set
+            ; mutex = Stdlib.Mutex.create ()
+            ; active_set
+            }))
+;;
+
+let activate_exact surface ~names =
+  Stdlib.Mutex.protect surface.mutex (fun () ->
+    match List.find_opt (fun name -> not (StringSet.mem name surface.registered_set)) names with
+    | Some name -> Error (Unknown_activation_name name)
+    | None ->
+      surface.active_set
+      <- List.fold_left
+           (fun active name -> StringSet.add name active)
+           surface.active_set
+           names;
+      Ok ())
+;;
+
+let active_names surface =
+  Stdlib.Mutex.protect surface.mutex (fun () ->
+    List.filter (fun name -> StringSet.mem name surface.active_set) surface.registered_names)
+;;
+
+let is_active surface name =
+  Stdlib.Mutex.protect surface.mutex (fun () -> StringSet.mem name surface.active_set)

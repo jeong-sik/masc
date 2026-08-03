@@ -116,7 +116,9 @@ let () =
      See #4579: keeper_tool_dispatch_runtime uses handler registry (Tool_Board only),
      this callback adds tag-registry dispatch for ~190 more tools. *)
   Keeper_tool_shared_runtime.tag_dispatch_fn := Keeper_tag_dispatch.dispatch;
-  Log.Mcp.info "Tag registry initialized: %d tools registered" (tag_registry_count ());
+  Log.Mcp.info
+    "Tool execution registry initialized: %d canonical dispatch entries"
+    (tag_registry_count ());
   (* C-4: Register input schema validation pre-hook.
      Validates tool arguments against their declared input_schema
      before dispatch — catches missing required fields and type mismatches. *)

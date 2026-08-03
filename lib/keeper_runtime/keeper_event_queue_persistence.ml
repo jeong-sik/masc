@@ -378,10 +378,10 @@ let replay_transition_wal_bytes owner state bytes =
     (String.split_on_char '\n' bytes)
 ;;
 
-let replay_wal_unlocked ~path ~surface owner state =
+let read_and_replay_wal_unlocked ~path ~surface owner state =
   let replay_slice slice =
     match slice.Fs_compat.Private_jsonl_slice.bytes with
-    | "" -> Ok state
+    | "" -> Ok (state, false)
     | bytes ->
        (match replay_transition_wal_bytes owner state bytes with
         | Error detail ->
@@ -390,18 +390,7 @@ let replay_wal_unlocked ~path ~surface owner state =
                ~path
                ~surface
                detail)
-        | Ok (replayed, all_rows_already_projected) ->
-          if all_rows_already_projected
-          then
-            (* A projection checkpoint was durable before its WAL retirement.
-               The exact row now proves only the same already-projected
-               transition, so leaving it in place would block the next append
-               (which rightly requires an empty WAL). This is the sole safe
-               read-time compaction: any replay that reconstructs an outbox is
-               still authoritative until [project_transition_outbox_result]
-               records the reaction and retires it. *)
-            compact_wal_unlocked ~surface ~path owner |> Result.map (fun () -> replayed)
-          else Ok replayed)
+        | Ok replayed -> Ok replayed)
   in
   match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
   | Private_file_failed error ->
@@ -433,8 +422,37 @@ let replay_wal_unlocked ~path ~surface owner state =
     replay_slice slice
 ;;
 
+let replay_wal_unlocked ~path ~surface owner state =
+  match read_and_replay_wal_unlocked ~path ~surface owner state with
+  | Error _ as error -> error
+  | Ok (replayed, all_rows_already_projected) ->
+    if all_rows_already_projected
+    then
+      (* A projection checkpoint was durable before its WAL retirement.
+         The exact row now proves only the same already-projected transition,
+         so leaving it in place would block the next append (which rightly
+         requires an empty WAL). This is the sole safe read-time compaction:
+         any replay that reconstructs an outbox is still authoritative until
+         [project_transition_outbox_result] records the reaction and retires
+         it. *)
+      compact_wal_unlocked ~surface ~path owner |> Result.map (fun () -> replayed)
+    else Ok replayed
+;;
+
+let replay_wal_read_only_unlocked ~path ~surface owner state =
+  read_and_replay_wal_unlocked ~path ~surface owner state |> Result.map fst
+;;
+
 let replay_transition_wal_unlocked owner state =
   replay_wal_unlocked
+    ~path:(transition_wal_path_of_owner owner)
+    ~surface:"transition WAL"
+    owner
+    state
+;;
+
+let replay_transition_wal_read_only_unlocked owner state =
+  replay_wal_read_only_unlocked
     ~path:(transition_wal_path_of_owner owner)
     ~surface:"transition WAL"
     owner
@@ -488,6 +506,49 @@ let load_existing_state_result ~base_path ~keeper_name =
             (keeper_name_of_owner owner)
             (snapshot_path_of_owner owner)
             (Printexc.to_string exn)))
+;;
+
+let validate_state_read_only_result_with ~require_existing ~base_path ~keeper_name =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match read_primary_unlocked owner with
+         | Error _ as error -> error
+         | Ok (Primary_current state) ->
+           replay_transition_wal_read_only_unlocked owner state
+         | Ok Primary_missing when require_existing ->
+           Error
+             (Printf.sprintf
+                "event queue snapshot is missing keeper=%s path=%s"
+                (keeper_name_of_owner owner)
+                (snapshot_path_of_owner owner))
+         | Ok Primary_missing ->
+           replay_transition_wal_read_only_unlocked owner State.empty)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue read-only validation raised keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            (snapshot_path_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+let validate_state_read_only_result ~base_path ~keeper_name =
+  validate_state_read_only_result_with
+    ~require_existing:false
+    ~base_path
+    ~keeper_name
+;;
+
+let validate_existing_state_read_only_result ~base_path ~keeper_name =
+  validate_state_read_only_result_with
+    ~require_existing:true
+    ~base_path
+    ~keeper_name
 ;;
 
 

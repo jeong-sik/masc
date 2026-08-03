@@ -128,7 +128,7 @@ run_gate() {
       if [[ ! -e "$current_queue_path" && ! -L "$current_queue_path" ]]; then
         cutover_required=1
       fi
-    done < <(find "$keepers_root" -name 'event-queue-transitions-v4.jsonl' -print0)
+    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-transitions-v4.jsonl' -print0)
 
     while IFS= read -r -d '' current_queue_path; do
       [[ -f "$current_queue_path" && ! -L "$current_queue_path" ]] \
@@ -140,14 +140,30 @@ run_gate() {
         --keeper-name "$keeper_name" \
         || fail "v15 queue snapshot or v5 transition WAL is invalid: $current_queue_path"
       current_owner_count=$((current_owner_count + 1))
-    done < <(find "$keepers_root" -name 'event-queue-v15.json' -print0)
+    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-v15.json' -print0)
+
+    while IFS= read -r -d '' queue_path; do
+      [[ -f "$queue_path" && ! -L "$queue_path" ]] \
+        || fail "v5 transition WAL is not an exact regular file: $queue_path"
+      current_queue_path="$(dirname "$queue_path")/event-queue-v15.json"
+      if [[ -e "$current_queue_path" || -L "$current_queue_path" ]]; then
+        continue
+      fi
+      keeper_name="${queue_path%/*}"
+      keeper_name="${keeper_name##*/}"
+      "$CUTOVER_HELPER" validate-current-wal \
+        --base-path "$BASE_PATH" \
+        --keeper-name "$keeper_name" \
+        || fail "v5 transition WAL is invalid: $queue_path"
+      current_owner_count=$((current_owner_count + 1))
+    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-transitions-v5.jsonl' -print0)
 
     while IFS= read -r -d '' queue_path; do
       current_queue_path="$(dirname "$queue_path")/event-queue-v15.json"
       if [[ ! -e "$current_queue_path" && ! -L "$current_queue_path" ]]; then
         cutover_required=1
       fi
-    done < <(find "$keepers_root" -name 'event-queue-v14.json' -print0)
+    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-v14.json' -print0)
   fi
 
   for schedules_path in \
@@ -217,7 +233,7 @@ run_gate() {
       if [[ "$pending_count" -ne 0 || "$outbox_count" -ne 0 || "$accepted_count" -ne 0 ]]; then
         fail "v14 queue is not drained: $queue_path pending=$pending_count transition_outbox=$outbox_count accepted_transfer_projections=$accepted_count"
       fi
-    done < <(find "$keepers_root" -name 'event-queue-v14.json' -print0)
+    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-v14.json' -print0)
   fi
 
   printf '[event-queue-v15-cutover] OK: base_path=%s cutover_required=%d schedule_ledgers=%d signal_files=%d signal_rows=%d v14_owners=%d current_owners=%d legacy_wals=%d unsettled=%d\n' \
@@ -389,6 +405,19 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   printf '{not-json\n' \
     >"$malformed_current_wal_root/.masc/keepers/fixture/event-queue-transitions-v5.jsonl"
   expect_failure malformed_current_wal "$malformed_current_wal_root"
+
+  wal_only_root="$fixture_root/wal-only"
+  write_schedules "$wal_only_root" running
+  mkdir -p "$wal_only_root/.masc/keepers/fixture"
+  : >"$wal_only_root/.masc/keepers/fixture/event-queue-transitions-v5.jsonl"
+  "$0" --base-path "$wal_only_root" >/dev/null
+
+  malformed_wal_only_root="$fixture_root/malformed-wal-only"
+  write_schedules "$malformed_wal_only_root" running
+  mkdir -p "$malformed_wal_only_root/.masc/keepers/fixture"
+  printf '{not-json\n' \
+    >"$malformed_wal_only_root/.masc/keepers/fixture/event-queue-transitions-v5.jsonl"
+  expect_failure malformed_wal_without_snapshot "$malformed_wal_only_root"
 
   malformed_root="$fixture_root/malformed"
   mkdir -p "$malformed_root/.masc"

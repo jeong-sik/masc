@@ -164,6 +164,18 @@ val load_existing_state_result :
     queue. Use this when absence would be interpreted as evidence about prior
     durable work. *)
 
+val validate_state_read_only_result :
+  base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
+(** Decode a current snapshot when present and replay its v5 WAL without
+    checkpointing or WAL compaction. A missing snapshot starts from the empty
+    state, matching {!load_state_result}. *)
+
+val validate_existing_state_read_only_result :
+  base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
+(** Decode an existing current snapshot and replay its v5 WAL without
+    checkpointing or WAL compaction. A missing snapshot is an explicit error,
+    matching {!load_existing_state_result}. *)
+
 val cancel_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->

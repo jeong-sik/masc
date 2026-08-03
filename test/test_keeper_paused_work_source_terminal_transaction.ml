@@ -519,7 +519,22 @@ let test_terminal_ack_replays_after_projection_and_snapshot_reload () =
         ; "outbox_entry", State.outbox_entry_to_yojson outbox_entry
         ]
     in
-    write_text transition_wal_path (Yojson.Safe.to_string residual_wal_row ^ "\n");
+    let residual_wal_bytes = Yojson.Safe.to_string residual_wal_row ^ "\n" in
+    write_text transition_wal_path residual_wal_bytes;
+    let validated =
+      Persistence.validate_existing_state_read_only_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "validate residual transition WAL without mutation"
+    in
+    (match State.last_transition validated with
+     | Some receipt when State.transition_receipt_equal receipt outbox_entry.receipt -> ()
+     | Some _ | None ->
+       Alcotest.fail "read-only validation lost the projected source ACK witness");
+    Alcotest.(check string)
+      "read-only validation preserves residual WAL bytes"
+      residual_wal_bytes
+      (In_channel.with_open_bin transition_wal_path In_channel.input_all);
     let recovered_after_projection =
       Persistence.load_state_result
         ~base_path:config.Workspace.base_path

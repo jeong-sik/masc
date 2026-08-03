@@ -57,18 +57,30 @@ let validate_signals paths =
   Ok ()
 ;;
 
-let validate_current_queue ~base_path ~keeper_name =
-  Keeper_event_queue_persistence.load_existing_state_result
-    ~base_path
-    ~keeper_name
+let validate_queue ~load ~base_path ~keeper_name =
+  load ~base_path ~keeper_name
   |> Result.map (fun (_ : Keeper_event_queue_state.t) -> ())
   |> Result.map_error (fun detail ->
     `Msg
       (Printf.sprintf
-         "current event queue production load rejected keeper=%s base_path=%s: %s"
+         "current event queue production validation rejected keeper=%s base_path=%s: %s"
          keeper_name
          base_path
          detail))
+;;
+
+let validate_current_queue ~base_path ~keeper_name =
+  validate_queue
+    ~load:Keeper_event_queue_persistence.validate_existing_state_read_only_result
+    ~base_path
+    ~keeper_name
+;;
+
+let validate_current_wal ~base_path ~keeper_name =
+  validate_queue
+    ~load:Keeper_event_queue_persistence.validate_state_read_only_result
+    ~base_path
+    ~keeper_name
 ;;
 
 let validate_schedule_ledger path =
@@ -173,12 +185,26 @@ let run_child command environment =
        (* [Process_eio_detached] redirects child output and returns immediately.
           Cutover preparation must inherit the operator streams and be reaped
           synchronously, so this helper owns the process group directly. *)
-       let pid = Unix.fork () in
+       let forwarded_signals = [ Sys.sigterm; Sys.sigint ] in
+       let previous_signal_mask =
+         Unix.sigprocmask Unix.SIG_BLOCK forwarded_signals
+       in
+       let restore_signal_mask () =
+         (* See the pre-fork signal masking protocol below. *)
+         ignore (Unix.sigprocmask Unix.SIG_SETMASK previous_signal_mask)
+       in
+       let pid =
+         try Unix.fork () with
+         | exn ->
+           restore_signal_mask ();
+           raise exn
+       in
        if pid = 0
        then (
          try
            (* See the parent-side process-group signal forwarding below. *)
            ignore (Unix.setsid ());
+           restore_signal_mask ();
            Unix.execvpe executable arguments environment
          with
          | exn ->
@@ -199,20 +225,31 @@ let run_child command environment =
          signal_process_group signal
        in
        let previous_sigterm =
-         Sys.signal Sys.sigterm (Sys.Signal_handle forward)
+         try Sys.signal Sys.sigterm (Sys.Signal_handle forward) with
+         | exn ->
+           restore_signal_mask ();
+           raise exn
        in
        let previous_sigint =
-         Sys.signal Sys.sigint (Sys.Signal_handle forward)
+         try Sys.signal Sys.sigint (Sys.Signal_handle forward) with
+         | exn ->
+           Sys.set_signal Sys.sigterm previous_sigterm;
+           restore_signal_mask ();
+           raise exn
        in
+       restore_signal_mask ();
        Fun.protect
          ~finally:(fun () ->
+           (* See the pre-fork signal masking protocol above. *)
+           ignore (Unix.sigprocmask Unix.SIG_BLOCK forwarded_signals);
+           (match !forwarded_signal with
+            | Some _ ->
+              (try Unix.kill (-pid) Sys.sigkill with
+               | Unix.Unix_error (Unix.ESRCH, _, _) -> ())
+            | None -> ());
            Sys.set_signal Sys.sigterm previous_sigterm;
            Sys.set_signal Sys.sigint previous_sigint;
-           match !forwarded_signal with
-           | Some _ ->
-             (try Unix.kill (-pid) Sys.sigkill with
-              | Unix.Unix_error (Unix.ESRCH, _, _) -> ())
-           | None -> ())
+           restore_signal_mask ())
          (fun () ->
             let status = waitpid_nointr pid in
             match !forwarded_signal with
@@ -392,12 +429,12 @@ let current_queue_base_path =
 ;;
 
 let current_queue_keeper_name =
-  let doc = "Exact Keeper owner whose snapshot and transition WAL must load." in
+  let doc = "Exact Keeper owner whose snapshot and/or transition WAL must load." in
   Arg.(required & opt (some string) None & info [ "keeper-name" ] ~docv:"KEEPER" ~doc)
 ;;
 
 let validate_current_queue_cmd =
-  let doc = "validate a current event-queue through the production loader" in
+  let doc = "validate a current event-queue through production decode and replay" in
   Cmd.v
     (Cmd.info "validate-current-queue" ~doc)
     Term.(
@@ -405,6 +442,19 @@ let validate_current_queue_cmd =
         (const
            (fun base_path keeper_name ->
               cmdliner_result (validate_current_queue ~base_path ~keeper_name))
+         $ current_queue_base_path
+         $ current_queue_keeper_name))
+;;
+
+let validate_current_wal_cmd =
+  let doc = "validate a v5 WAL with the production empty-state replay path" in
+  Cmd.v
+    (Cmd.info "validate-current-wal" ~doc)
+    Term.(
+      ret
+        (const
+           (fun base_path keeper_name ->
+              cmdliner_result (validate_current_wal ~base_path ~keeper_name))
          $ current_queue_base_path
          $ current_queue_keeper_name))
 ;;
@@ -513,6 +563,7 @@ let () =
           ; lease_handoff_cmd
           ; verify_lease_owner_cmd
           ; validate_current_queue_cmd
+          ; validate_current_wal_cmd
           ; validate_schedule_ledger_cmd
           ; validate_signals_cmd
           ]))

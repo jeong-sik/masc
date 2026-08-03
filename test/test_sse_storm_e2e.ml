@@ -142,32 +142,6 @@ let header_value result name =
   |> List.find_map (fun (key, value) ->
     if String.equal (String.lowercase_ascii key) name then Some value else None)
 
-let find_main_eio_exe () =
-  let env_override = Sys.getenv_opt "MASC_MAIN_EIO_EXE" in
-  let candidates =
-    match env_override with
-    | Some p -> [p]
-    | None ->
-        let build_roots = [ "."; ".."; "../.."; "../../.."; "../../../.." ] in
-        let build_candidates =
-          List.map
-            (fun root -> Filename.concat root "_build/default/bin/main_eio.exe")
-            build_roots
-        in
-        [
-          "./bin/main_eio.exe";
-          "../bin/main_eio.exe";
-          "../../bin/main_eio.exe";
-          "../../../bin/main_eio.exe";
-          "../../../../bin/main_eio.exe";
-        ] @ build_candidates
-  in
-  match List.find_opt Sys.file_exists candidates with
-  | Some path -> path
-  | None ->
-      fail
-        "main_eio executable not found. Set MASC_MAIN_EIO_EXE or build with `dune build bin/main_eio.exe`."
-
 let find_free_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Fun.protect
@@ -396,7 +370,7 @@ let seed_server_config ~base_path =
       (fun () -> output_string oc catalog_overlay_seed)
 
 let with_server f =
-  let exe = find_main_eio_exe () in
+  let exe = Masc_test_runtime.find_main_eio_exe () in
   let port =
     match find_free_port () with
     | Some p -> p

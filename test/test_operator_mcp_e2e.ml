@@ -188,33 +188,6 @@ let contains_substr needle haystack =
   in
   n = 0 || loop 0
 
-let find_main_eio_exe () =
-  let env_override = Sys.getenv_opt "MASC_MAIN_EIO_EXE" in
-  let candidates =
-    match env_override with
-    | Some p -> [ p ]
-    | None ->
-        let build_roots = [ "."; ".."; "../.."; "../../.."; "../../../.." ] in
-        let build_candidates =
-          List.map
-            (fun root -> Filename.concat root "_build/default/bin/main_eio.exe")
-            build_roots
-        in
-        build_candidates
-        @ [
-            "./bin/main_eio.exe";
-            "../bin/main_eio.exe";
-            "../../bin/main_eio.exe";
-            "../../../bin/main_eio.exe";
-            "../../../../bin/main_eio.exe";
-          ]
-  in
-  match List.find_opt Sys.file_exists candidates with
-  | Some path -> path
-  | None ->
-      fail
-        "main_eio executable not found. Set MASC_MAIN_EIO_EXE or build with `dune build bin/main_eio.exe`."
-
 let find_free_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Fun.protect
@@ -358,7 +331,7 @@ let extract_nickname_from_join_result result =
             (Printf.sprintf "failed to extract nickname from join result:\n%s" result))
 
 let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
-  let exe = find_main_eio_exe () in
+  let exe = Masc_test_runtime.find_main_eio_exe () in
   let port = match find_free_port () with Some p -> p | None -> Alcotest.skip () in
   let log_file = Filename.temp_file "operator-mcp-e2e-" ".log" in
   let base_path = Filename.temp_file "operator-mcp-base-" "" in

@@ -897,6 +897,11 @@
  (modules test_time_codec)
  (libraries alcotest masc.time_codec))
 
+(test
+ (name test_masc_test_runtime)
+ (modules test_masc_test_runtime)
+ (libraries alcotest fs_compat masc_test_runtime unix))
+
 ; Group 3: Eio-native tests (single-module, standard deps)
 ; Merged from ~100 individual (test ...) stanzas.
 
@@ -1221,6 +1226,7 @@
   test_board_moderation)
  (libraries
   masc_test_deps
+  masc_test_runtime
   masc.embedded_config
   bigstringaf)
  (deps ../bin/main_eio.exe))

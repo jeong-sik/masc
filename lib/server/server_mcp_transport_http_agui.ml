@@ -6,38 +6,34 @@ open Server_mcp_transport_http_respond
 
 let sse_stream_headers = Server_mcp_transport_http_headers.sse_stream_headers
 
+type ag_ui_encoding_error =
+  | Missing_data_payload
+  | Invalid_json_payload
+
+let ag_ui_encoding_error_to_string = function
+  | Missing_data_payload -> "missing_data_payload"
+  | Invalid_json_payload -> "invalid_json_payload"
+
 let ag_ui_encoding_error kind =
   Ag_ui.of_custom
     ~name:"MASC_EVENT_ENCODING_ERROR"
-    (`Assoc [ "kind", `String kind ])
+    (`Assoc [ "kind", `String (ag_ui_encoding_error_to_string kind) ])
   |> Ag_ui.event_to_sse
 ;;
 
 let ag_ui_event_of_masc_event event =
-  try
-    let lines = String.split_on_char '\n' event in
-    let data_line =
-      List.find_opt
-        (fun l -> String.length l > 6 && String.starts_with ~prefix:"data: " l)
-        lines
-    in
-    match data_line with
-    | Some dl ->
-        let json_str = String.sub dl 6 (String.length dl - 6) in
-        let json = Yojson.Safe.from_string json_str in
+  match Sse.data_payload_of_frame event with
+  | Error Sse.Missing_data_payload ->
+      Log.Transport.warn "ag_ui_event_of_masc_event: frame has no data payload";
+      ag_ui_encoding_error Missing_data_payload
+  | Ok json_str ->
+      (match Yojson.Safe.from_string json_str with
+      | json ->
         let ag_event = Ag_ui.of_custom ~name:"MASC_EVENT" json in
         Ag_ui.event_to_sse ag_event
-    | None ->
-      Log.Transport.warn "ag_ui_event_of_masc_event: frame has no data payload";
-      ag_ui_encoding_error "missing_data_payload"
-  with
-  | Yojson.Json_error msg ->
-      Log.Transport.warn "ag_ui_event_of_masc_event: non-JSON data payload: %s" msg;
-      ag_ui_encoding_error "invalid_json_payload"
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-      Log.Transport.warn "ag_ui_event_of_masc_event failed: %s" (Printexc.to_string exn);
-      ag_ui_encoding_error "encoding_failure"
+      | exception Yojson.Json_error msg ->
+          Log.Transport.warn "ag_ui_event_of_masc_event: non-JSON data payload: %s" msg;
+          ag_ui_encoding_error Invalid_json_payload)
 
 module For_testing = struct
   let ag_ui_event_of_masc_event = ag_ui_event_of_masc_event

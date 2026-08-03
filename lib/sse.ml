@@ -58,6 +58,36 @@ let registration_error_to_string = function
         "SSE registration failed: session belongs to %s but token belongs to %s"
         session_agent token_agent
 
+type data_payload_error = Missing_data_payload
+
+let data_payload_line line =
+  let line_len = String.length line in
+  let line_len =
+    if line_len > 0 && Char.equal line.[line_len - 1] '\r'
+    then line_len - 1
+    else line_len
+  in
+  let prefix = "data:" in
+  let prefix_len = String.length prefix in
+  if line_len >= prefix_len
+     && String.equal (String.sub line 0 prefix_len) prefix
+  then
+    let payload_start =
+      if line_len > prefix_len && Char.equal line.[prefix_len] ' '
+      then prefix_len + 1
+      else prefix_len
+    in
+    Some (String.sub line payload_start (line_len - payload_start))
+  else None
+
+let data_payload_of_frame frame =
+  match
+    String.split_on_char '\n' frame
+    |> List.filter_map data_payload_line
+  with
+  | [] -> Error Missing_data_payload
+  | payload_lines -> Ok (String.concat "\n" payload_lines)
+
 (** Classification of an SSE session's traffic role. *)
 module SMap = Set_util.StringMap
 module IntMap = Map.Make (Int)

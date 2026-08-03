@@ -123,6 +123,14 @@ val cleanup_stale : ?max_age_s:float -> unit -> string list
 
 (** {1 Events} *)
 
+type data_payload_error = Missing_data_payload
+
+val data_payload_of_frame : string -> (string, data_payload_error) result
+(** Extracts and joins the payloads of every [data:] field in one SSE frame.
+    The parser accepts the optional single space after the colon and the
+    LF/CRLF line endings emitted on the wire.  A frame without a [data:]
+    field is rejected; bare JSON is not an SSE frame. *)
+
 val format_event : ?id:int -> ?event_type:string -> string -> string
 val next_id : unit -> int
 val current_id : unit -> int

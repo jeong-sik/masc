@@ -14,6 +14,18 @@ let _dummy_push _s = ()
 let jsonrpc_notification method_name =
   `Assoc [ ("jsonrpc", `String "2.0"); ("method", `String method_name) ]
 
+let test_data_payload_of_frame () =
+  Alcotest.(check (result string reject))
+    "optional space and CRLF"
+    (Ok "first\nsecond")
+    (Sse.data_payload_of_frame "id: 7\r\ndata:first\r\ndata: second\r\n\r\n");
+  Alcotest.(check bool)
+    "bare JSON rejected"
+    true
+    (match Sse.data_payload_of_frame "{\"type\":\"event\"}" with
+     | Error Sse.Missing_data_payload -> true
+     | Ok _ -> false)
+
 let register_exn ~auth ?kind session_id ~last_event_id =
   (* Pre-create the MCP session so registration validates an existing
      session rather than auto-bootstrapping one (security/sse-auth-validation). *)
@@ -262,6 +274,11 @@ let () =
     (fun () ->
       Alcotest.run "sse-stream"
         [
+          ( "frame_parser",
+            [
+              Alcotest.test_case "data payload" `Quick
+                test_data_payload_of_frame;
+            ] );
           ( "try_pop",
             [
               Alcotest.test_case "nonexistent session" `Quick test_try_pop_empty;

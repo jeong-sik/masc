@@ -39,6 +39,8 @@ let contains_substring haystack needle =
   in
   needle_len = 0 || loop 0
 
+let sse_frame json = Printf.sprintf "data: %s\n\n" json
+
 let count_substring haystack needle =
   let haystack_len = String.length haystack in
   let needle_len = String.length needle in
@@ -275,6 +277,7 @@ let test_parse_sse_dashboard_event_known_type () =
         ("type", `String "execution_snapshot");
         ("payload", `Assoc [("keepers", `Int 3)]);
       ])
+    |> sse_frame
   in
   match Ws.parse_sse_dashboard_event event_str with
   | Some parsed ->
@@ -292,6 +295,7 @@ let test_parse_sse_dashboard_event_composite_change_maps_to_composite () =
         ("name", `String "qa-king");
         ("ts_unix", `Float 1_774_000_000.0);
       ])
+    |> sse_frame
   in
   match Ws.parse_sse_dashboard_event event_str with
   | Some parsed ->
@@ -305,6 +309,7 @@ let test_parse_sse_dashboard_event_unknown_type () =
   let event_str =
     Yojson.Safe.to_string
       (`Assoc [("type", `String "not.a.real.event"); ("payload", `Null)])
+    |> sse_frame
   in
   match Ws.parse_sse_dashboard_event event_str with
   | Some parsed ->
@@ -313,7 +318,7 @@ let test_parse_sse_dashboard_event_unknown_type () =
   | None -> Alcotest.fail "expected Some with slice=None, not outright None"
 
 let test_parse_sse_dashboard_event_malformed () =
-  let result = Ws.parse_sse_dashboard_event "not-valid-json{" in
+  let result = Ws.parse_sse_dashboard_event "data: not-valid-json{\n\n" in
   Alcotest.(check bool) "malformed yields None"
     true (Option.is_none result)
 
@@ -321,6 +326,7 @@ let test_parse_sse_dashboard_event_stable_on_repeat () =
   let event_str =
     Yojson.Safe.to_string
       (`Assoc [("type", `String "execution_snapshot"); ("payload", `Int 1)])
+    |> sse_frame
   in
   let extract = function
     | Some (p : Ws.parsed_sse_event) -> Some (p.event_type, p.slice)
@@ -335,10 +341,12 @@ let test_parse_sse_dashboard_event_invalidated_on_new_ref () =
   let e1 =
     Yojson.Safe.to_string
       (`Assoc [("type", `String "execution_snapshot")])
+    |> sse_frame
   in
   let e2 =
     Yojson.Safe.to_string
       (`Assoc [("type", `String "transport_health_snapshot")])
+    |> sse_frame
   in
   let et = function
     | Some (p : Ws.parsed_sse_event) -> Some p.event_type
@@ -408,6 +416,7 @@ let test_parse_cache_counters () =
   let e =
     Yojson.Safe.to_string
       (`Assoc [("type", `String "execution_snapshot")])
+    |> sse_frame
   in
   let (_ : _ option) = Ws.parse_sse_dashboard_event e in (* miss *)
   let (_ : _ option) = Ws.parse_sse_dashboard_event e in (* hit *)
@@ -423,6 +432,7 @@ let test_parse_cache_counters () =
   let e2 =
     Yojson.Safe.to_string
       (`Assoc [("type", `String "execution_snapshot")])
+    |> sse_frame
   in
   let (_ : _ option) = Ws.parse_sse_dashboard_event e2 in (* miss *)
   let misses2 = read_counter misses_name in

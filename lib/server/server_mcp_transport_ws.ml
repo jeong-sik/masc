@@ -645,49 +645,6 @@ type parsed_sse_event = {
 let parse_cache : (string * parsed_sse_event option) Atomic.t =
   Atomic.make ("", None)
 
-(** Extract the JSON body from an SSE-formatted event string.
-
-    [Sse.format_event] emits [data: <body>] today, but the parser should
-    not depend on that line staying in a fixed position.  External
-    subscribers receive the full SSE-formatted string (gRPC stuffs it
-    into payload_json verbatim and lets the gRPC client re-parse), so the
-    WS callback must peel the SSE wrapper before feeding
-    [Yojson.Safe.from_string].
-
-    The earlier implementation skipped this step, so every production
-    parse failed and send_dashboard_delta_for_sse always fell through to
-    raw-SSE-forward — defeating the parse cache, slice-aware fanout
-    (Phase 2 of #10119), and delta-built counter.  Pure-JSON inputs
-    (the unit-test path) still work via the [_ -> Some sse_event]
-    fallback. *)
-let sse_data_prefix = "data:"
-
-let extract_sse_data_payload_line line =
-  if String.starts_with ~prefix:sse_data_prefix line then
-    let line_len = String.length line in
-    let prefix_len = String.length sse_data_prefix in
-    (* Per RFC: a single optional space follows "data:". Fold the skip
-       into the same [String.sub] to avoid an intermediate allocation
-       on the dashboard fanout hot path (~1 alloc per SSE data line). *)
-    let start =
-      if line_len > prefix_len && Char.equal line.[prefix_len] ' '
-      then prefix_len + 1
-      else prefix_len
-    in
-    Some (String.sub line start (line_len - start))
-  else None
-
-let extract_sse_data_line sse_event =
-  match
-    String.split_on_char '\n' sse_event
-    |> List.filter_map extract_sse_data_payload_line
-  with
-  | [] ->
-      (* Not an SSE data event — pass through as-is so unit tests that
-         hand us pure JSON keep working. *)
-      Some sse_event
-  | data_lines -> Some (String.concat "\n" data_lines)
-
 let parse_sse_dashboard_event sse_event =
   let cached_str, cached_val = Atomic.get parse_cache in
   if cached_str == sse_event then begin
@@ -697,9 +654,13 @@ let parse_sse_dashboard_event sse_event =
   else begin
     Transport_metrics.inc_ws_parse_cache_miss ();
     let result =
-      match extract_sse_data_line sse_event with
-      | None -> None
-      | Some json_body ->
+      match Sse.data_payload_of_frame sse_event with
+      | Error Sse.Missing_data_payload ->
+          Log.Server.warn "[mcp-ws] dropping frame without an SSE data field";
+          Transport_metrics.inc_ws_frame_json_parse_failure
+            ~error_kind:Transport_metrics.Other_ws_frame_json_parse_error;
+          None
+      | Ok json_body ->
         match Yojson.Safe.from_string json_body with
         | exception (Yojson.Json_error msg) ->
             (* Iter 28: previously silently dropped — now emit a counter

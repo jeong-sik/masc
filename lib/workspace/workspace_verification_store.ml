@@ -49,15 +49,6 @@ type submitted_evidence_access =
       ; reason : evidence_access_failure
       }
 
-let evidence_read_failure_to_string = function
-  | Evidence_missing -> "missing"
-  | Evidence_not_regular_file -> "not_regular_file"
-  | Evidence_outside_worker_playground -> "outside_worker_playground"
-  | Evidence_invalid_utf8 -> "invalid_utf8"
-  | Evidence_symbolic_link -> "symbolic_link"
-  | Evidence_changed_during_read -> "changed_during_read"
-  | Evidence_read_error detail -> "read_error:" ^ detail
-
 let evidence_read_failure_code = function
   | Evidence_missing -> "missing"
   | Evidence_not_regular_file -> "not_regular_file"

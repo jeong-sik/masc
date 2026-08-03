@@ -1311,7 +1311,7 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
            } ->
          Alcotest.failf
            "Docker-relative artifact snapshot unreadable: %s"
-           (VS.evidence_read_failure_to_string reason)
+           (VS.evidence_read_failure_code reason)
        | VS.Evidence_available { items; _ } ->
          Alcotest.failf
            "expected explicit artifact and note snapshot, got %d items"
@@ -1383,7 +1383,7 @@ let test_submit_snapshot_survives_mutation_deletion_and_authority_cwd () =
                } ->
              Alcotest.failf
                "immutable artifact snapshot unreadable: %s"
-               (VS.evidence_read_failure_to_string reason)
+               (VS.evidence_read_failure_code reason)
            | VS.Evidence_available { items; _ } ->
              Alcotest.failf
                "expected one immutable artifact snapshot, got %d items"
@@ -1656,7 +1656,7 @@ let test_changed_during_read_maps_to_typed_unreadable_reason () =
     "changed_during_read"
     (VS.evidence_read_failure_of_owned_read_failure
        (Fs_compat.Filesystem_identity_changed { path = "artifact.txt" })
-     |> VS.evidence_read_failure_to_string)
+     |> VS.evidence_read_failure_code)
 
 let test_submitted_evidence_requires_exact_task_assignment_identity () =
   with_eio_temp_dir (fun base_path ->

@@ -56,7 +56,9 @@ val submitted_evidence_access_to_yojson :
 val submitted_evidence_access_metadata_to_yojson :
   submitted_evidence_access -> Yojson.Safe.t
 
-val evidence_read_failure_to_string : evidence_read_failure -> string
+val evidence_read_failure_code : evidence_read_failure -> string
+(** Stable bounded code for diagnostics and metadata. Error detail is carried
+    only by the structured durable reason object. *)
 val evidence_access_failure_to_string :
   request_id:string -> evidence_access_failure -> string
 val evidence_read_failure_of_owned_read_failure :

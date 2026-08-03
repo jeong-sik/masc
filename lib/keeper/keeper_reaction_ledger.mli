@@ -38,6 +38,11 @@ type reaction_kind =
 type reaction_decode_error = Unknown_reaction_kind of string
 type row_quarantine_reason
 
+val storage_generation : string
+(** Current reaction-ledger namespace. Deployment checks consume this value
+    from the same module as readers and writers; no second generation literal
+    is maintained. *)
+
 val stimulus_kind_to_string : stimulus_kind -> string
 val reaction_kind_to_string : reaction_kind -> string
 val row_quarantine_reason_to_string : row_quarantine_reason -> string
@@ -169,6 +174,24 @@ val latest_board_cursor_result :
     encountered before the newest cursor is a typed failure, so cursor
     corruption cannot silently roll the Keeper back to an older cursor.
     [Ok None] means the current ledger contains no cursor acknowledgement. *)
+
+type board_cursor_cutover_issue =
+  | Board_cursor_missing of { keeper_name : string }
+  | Board_cursor_unreadable of
+      { keeper_name : string
+      ; error : board_cursor_restore_error
+      }
+
+type board_cursor_cutover_report =
+  { keeper_count : int
+  ; ready_count : int
+  ; issues : board_cursor_cutover_issue list
+  }
+
+val board_cursor_cutover_report :
+  base_path:string -> keeper_names:string list -> board_cursor_cutover_report
+(** Read-only current-generation cursor readiness for an explicit canonical
+    Keeper set. Names are sorted and deduplicated before inspection. *)
 
 val summary_for_keeper :
   base_path:string -> keeper_name:string -> limit:int -> Yojson.Safe.t

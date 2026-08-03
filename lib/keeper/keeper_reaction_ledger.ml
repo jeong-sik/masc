@@ -1045,6 +1045,38 @@ let latest_board_cursor_result ~base_path ~keeper_name =
   | Ok (Some result) -> result
 ;;
 
+type board_cursor_cutover_issue =
+  | Board_cursor_missing of { keeper_name : string }
+  | Board_cursor_unreadable of
+      { keeper_name : string
+      ; error : board_cursor_restore_error
+      }
+
+type board_cursor_cutover_report =
+  { keeper_count : int
+  ; ready_count : int
+  ; issues : board_cursor_cutover_issue list
+  }
+
+let board_cursor_cutover_report ~base_path ~keeper_names =
+  let keeper_names = List.sort_uniq String.compare keeper_names in
+  let ready_count, issues =
+    List.fold_left
+      (fun (ready_count, issues) keeper_name ->
+         match latest_board_cursor_result ~base_path ~keeper_name with
+         | Ok (Some _) -> ready_count + 1, issues
+         | Ok None -> ready_count, Board_cursor_missing { keeper_name } :: issues
+         | Error error ->
+           ready_count, Board_cursor_unreadable { keeper_name; error } :: issues)
+      (0, [])
+      keeper_names
+  in
+  { keeper_count = List.length keeper_names
+  ; ready_count
+  ; issues = List.rev issues
+  }
+;;
+
 type event_queue_reaction_evidence =
   { keeper_name : string
   ; stimulus_id : string

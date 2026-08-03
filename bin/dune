@@ -185,6 +185,16 @@
   unix
   yojson))
 
+;; Read-only deployment gate for the current reaction-ledger Board cursor
+;; generation. The generation is consumed from Keeper_reaction_ledger itself.
+
+(executable
+ (name keeper_board_cursor_cutover_check)
+ (modules keeper_board_cursor_cutover_check)
+ (public_name masc-keeper-board-cursor-cutover-check)
+ (package masc)
+ (libraries masc fs_compat yojson eio eio_main cmdliner))
+
 ;; Per-turn timeline tool: masc-trace <base-path> <keeper> <turn_id>
 ;; Reads execution-receipts JSONL and prints rows matching the turn_id.
 ;; Foundation for the Step 10 turn-tracing CLI; widens to tool_calls

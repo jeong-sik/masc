@@ -966,12 +966,9 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_schedule_runner @test/runtest-test_schedule_store @test/runtest-test_schedule_consumer_dispatch"
 
-      # Keeper registry hardening: identity resolution and goal-reconciliation
-      # routing are executable behavior — the suite drives a real workspace and
-      # asserts which Keeper a durable stimulus is addressed to, never source
-      # text. It is the only suite covering
-      # [Keeper_goal_reconciliation_wake], so that routing stays ungated under
-      # @check.
+      # Keeper registry hardening: identity resolution, goal-reconciliation
+      # routing, and current-generation cursor readiness are executable
+      # behavior. These suites drive real workspaces rather than source text.
       - name: Run keeper registry hardening suite
         id: keeper_registry_hardening_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}
@@ -982,7 +979,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_registry_hardening"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_registry_hardening @test/runtest-test_keeper_reaction_ledger"
 
       # Keeper unified prompt surface: asserts what a Keeper is actually handed
       # on a turn. The schedule wake row carries two ids with different

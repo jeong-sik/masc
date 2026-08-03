@@ -330,6 +330,47 @@ let test_latest_board_cursor_hard_cuts_v5_namespace () =
        ^ Keeper_reaction_ledger.board_cursor_restore_error_to_string error)
 ;;
 
+let test_board_cursor_cutover_report_requires_every_keeper () =
+  with_temp_base @@ fun base_path ->
+  Keeper_reaction_ledger.record_board_cursor_ack
+    ~base_path
+    ~keeper_name:"ready"
+    ~cursor_ts:42.5
+    ~post_id:(Some "post-ready")
+    ();
+  let report =
+    Keeper_reaction_ledger.board_cursor_cutover_report
+      ~base_path
+      ~keeper_names:[ "missing"; "ready"; "ready" ]
+  in
+  check int "deduplicated Keeper count" 2 report.keeper_count;
+  check int "ready Keeper count" 1 report.ready_count;
+  match report.issues with
+  | [ Keeper_reaction_ledger.Board_cursor_missing { keeper_name } ] ->
+    check string "missing Keeper is named" "missing" keeper_name
+  | _ -> fail "cutover report must identify the Keeper without a current cursor"
+;;
+
+let test_board_cursor_cutover_report_surfaces_corruption () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "corrupt" in
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (`Assoc [ "schema", `String "keeper.reaction_ledger.v6" ]);
+  let report =
+    Keeper_reaction_ledger.board_cursor_cutover_report
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+  in
+  check int "corrupt Keeper is not ready" 0 report.ready_count;
+  match report.issues with
+  | [ Keeper_reaction_ledger.Board_cursor_unreadable { keeper_name = actual; error } ] ->
+    check string "corrupt Keeper is named" keeper_name actual;
+    check string "typed corruption reason" "invalid reaction-ledger row before board cursor: missing_event_id"
+      (Keeper_reaction_ledger.board_cursor_restore_error_to_string error)
+  | _ -> fail "cutover report must preserve the typed cursor read error"
+;;
+
 let rewrite_object_field row ~object_name ~field_name replacement =
   match row with
   | `Assoc fields ->
@@ -1416,6 +1457,14 @@ let () =
             "latest board cursor hard-cuts the v5 namespace"
             `Quick
             test_latest_board_cursor_hard_cuts_v5_namespace
+        ; test_case
+            "board cursor cutover requires every Keeper"
+            `Quick
+            test_board_cursor_cutover_report_requires_every_keeper
+        ; test_case
+            "board cursor cutover surfaces corruption"
+            `Quick
+            test_board_cursor_cutover_report_surfaces_corruption
         ; test_case
             "latest board cursor requires a post id field"
             `Quick

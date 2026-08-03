@@ -4,8 +4,23 @@
 
     All values cached at module-init from env vars; the cache
     means a runtime env-var change does not propagate without
-    process restart.  The few [() -> X] re-readers for dashboard
-    fixture selection are documented exceptions. *)
+    process restart.  The [() -> X] re-readers for OAuth request policy and
+    dashboard fixture selection are documented exceptions. *)
+
+(** {1 OAuth} *)
+
+module OAuth : sig
+  val enabled : unit -> bool
+  val code_ttl_sec : unit -> int
+  val access_token_ttl_sec : unit -> int
+  val refresh_token_ttl_sec : unit -> int
+  val max_pending_codes : unit -> int
+  val max_clients : unit -> int
+
+  (** OAuth policy is re-read at request boundaries. Integer values must be
+      positive; malformed or non-positive input is reported and falls back to
+      the documented default. *)
+end
 
 (** {1 Rate limit cleanup} *)
 

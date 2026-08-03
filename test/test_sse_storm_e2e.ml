@@ -459,6 +459,56 @@ let check_status label expected result =
            result.curl_exit
            result.stderr)
 
+let publish_masc_broadcast ~port ~auth_token ~session_id =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+        [ "jsonrpc", `String "2.0"
+        ; "id", `Int 2
+        ; "method", `String "tools/call"
+        ; ( "params"
+          , `Assoc
+              [ "name", `String "masc_broadcast"
+              ; ( "arguments"
+                , `Assoc [ "message", `String "sse-ag-ui-wire-encoding" ] )
+              ] )
+        ])
+  in
+  let result =
+    run_curl
+      ~headers:
+        [ ("Content-Type", "application/json")
+        ; ("Accept", "application/json")
+        ; ("Authorization", "Bearer " ^ auth_token)
+        ; ("Mcp-Session-Id", session_id)
+        ]
+      ~method_:"POST"
+      ~body
+      ~max_time:2.0
+      ~port
+      ~path:"/mcp"
+      ()
+  in
+  check_status "observer source broadcast accepted" 200 result;
+  match Yojson.Safe.from_string result.body with
+  | `Assoc fields when List.mem_assoc "result" fields -> ()
+  | `Assoc fields when List.mem_assoc "error" fields ->
+      fail
+        (Printf.sprintf
+           "observer source broadcast returned an MCP error: %s"
+           result.body)
+  | _ ->
+      fail
+        (Printf.sprintf
+           "observer source broadcast returned an invalid MCP response: %s"
+           result.body)
+  | exception Yojson.Json_error message ->
+      fail
+        (Printf.sprintf
+           "observer source broadcast returned invalid JSON: %s body=%s"
+           message
+           result.body)
+
 let test_mcp_reconnect_stays_accepted () =
   with_server @@ fun ~port ~auth_token ->
   let sid = initialize_mcp_session ~port ~auth_token in
@@ -511,22 +561,17 @@ let is_masc_event = function
     && List.assoc_opt "value" fields <> None
   | _ -> false
 
-(* Guards that /ag-ui/events actually applies the MASC -> AG-UI encoder to the
-   frames it ships, rather than forwarding raw MASC SSE frames.
-
-   Measured with a positive/negative control against a server binary built from
-   this tree (MASC_MAIN_EIO_EXE pinned — the harness otherwise walks up to four
-   directories and can pick the parent checkout's binary):
-     - both encoder call sites wired      -> pass
-     - only the replay call site reverted -> pass
-     - both call sites reverted           -> fail
-   So the frames this test observes arrive on the drain (live) path, and that is
-   the path it pins.  The exact Custom name check prevents the encoding-error
-   envelope from creating a substring false positive.  The numeric [id:] check
-   pins the resumability cursor carried by transformed live/replay frames. *)
+(* Guards that /ag-ui/events applies the MASC -> AG-UI encoder to a deterministic
+   observer replay frame rather than forwarding a raw MASC SSE frame.  The
+   source event is produced through the public MCP dispatch path before the
+   reconnect, so this test does not depend on unrelated startup telemetry or
+   timing.  The exact MASC_EVENT envelope check prevents an encoding-error
+   response from becoming a substring false positive; the numeric [id:] check
+   pins the resumability cursor carried by the transformed frame. *)
 let test_ag_ui_frames_are_wire_encoded () =
   with_server @@ fun ~port ~auth_token ->
   let sid = initialize_mcp_session ~port ~auth_token in
+  publish_masc_broadcast ~port ~auth_token ~session_id:sid;
   let headers =
     [
       ("Accept", "text/event-stream");

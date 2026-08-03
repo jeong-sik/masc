@@ -339,7 +339,7 @@ let test_unreadable_backlog_does_not_silence_other_stimuli () =
 let test_recovery_backlog_is_not_authoritative () =
   without_overrides @@ fun () ->
   let recovery =
-    { Workspace.primary_error = "primary backlog is corrupt"
+    { Masc.Workspace.primary_error = "primary backlog is corrupt"
     ; recovery_path = "/workspace/tasks/backlog.json.last-good"
     }
   in

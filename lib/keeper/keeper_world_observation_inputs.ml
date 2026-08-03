@@ -65,7 +65,11 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
   : int * int * int * bool
   =
   try
-    let backlog = Workspace.read_backlog config in
+    let backlog =
+      match Workspace.read_backlog_observation_r config with
+      | Ok backlog -> backlog
+      | Error message -> raise (Workspace.Backlog_read_failed message)
+    in
     let unclaimed_tasks =
       List.filter
         (fun (t : Masc_domain.task) -> t.task_status = Masc_domain.Todo)
@@ -112,7 +116,7 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
         [ ("operation", Runtime_observation_query_operation.(to_label Read_backlog_counts)) ]
       ();
     Log.Keeper.warn "read_backlog_counts failed: %s" (Printexc.to_string ex);
-    0, 0, 0, false
+    raise ex
 ;;
 
 (** Resolve the keeper's claimed task to its backlog record (RFC-0315). *)
@@ -124,7 +128,11 @@ let read_current_task ~(config : Workspace.config) ~(meta : keeper_meta)
   | Some task_id ->
     let task_id = Keeper_id.Task_id.to_string task_id in
     (try
-       let backlog = Workspace.read_backlog config in
+       let backlog =
+         match Workspace.read_backlog_observation_r config with
+         | Ok backlog -> backlog
+         | Error message -> raise (Workspace.Backlog_read_failed message)
+       in
        List.find_opt
          (fun (t : Masc_domain.task) -> String.equal t.id task_id)
          backlog.tasks
@@ -140,7 +148,7 @@ let read_current_task ~(config : Workspace.config) ~(meta : keeper_meta)
            ]
          ();
        Log.Keeper.warn "read_current_task failed: %s" (Printexc.to_string ex);
-       None)
+       raise ex)
 ;;
 
 (** Count live keeper fibers for keeper world state.

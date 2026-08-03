@@ -641,17 +641,12 @@ let test_backlog_of_yojson_rejects_null_version () =
   ] in
   expect_backlog_decode_error "null revision" json
 
-let test_backlog_of_yojson_missing_last_updated () =
-  (* Missing last_updated should default to "" *)
+let test_backlog_of_yojson_requires_last_updated () =
   let json = `Assoc [
     ("tasks", `List []);
     ("version", `Int 1);
   ] in
-  match Masc_domain.backlog_of_yojson json with
-  | Ok b ->
-    check string "last_updated defaults to empty" "" b.last_updated;
-    check int "version preserved" 1 b.version
-  | Error e -> fail ("expected Ok for missing last_updated, got: " ^ e)
+  expect_backlog_decode_error "missing last_updated" json
 
 let test_backlog_of_yojson_rejects_tasks_without_revision () =
   let json = `Assoc [
@@ -659,36 +654,26 @@ let test_backlog_of_yojson_rejects_tasks_without_revision () =
   ] in
   expect_backlog_decode_error "tasks without revision" json
 
-let test_backlog_of_yojson_truncated_tasks () =
-  (* A valid object with "tasks" missing (truncated JSON).
-     The decoder treats missing tasks key as empty array. *)
+let test_backlog_of_yojson_requires_tasks () =
   let json = `Assoc [
     ("last_updated", `String "2024-01-15T12:00:00Z");
     ("version", `Int 1);
   ] in
-  match Masc_domain.backlog_of_yojson json with
-  | Ok b -> check int "tasks empty when missing" 0 (List.length b.tasks)
-  | Error e -> fail ("expected Ok for missing tasks key, got: " ^ e)
+  expect_backlog_decode_error "missing tasks" json
 
 let test_backlog_of_yojson_rejects_integer () =
   let json = `Int 42 in
   expect_backlog_decode_error "integer document" json
 
-let test_backlog_of_yojson_nested_list () =
-  (* Degenerate input: tasks is a non-list value. The decoder's
-     match `List l -> l | _ -> [] handles this gracefully. *)
+let test_backlog_of_yojson_rejects_non_list_tasks () =
   let json = `Assoc [
     ("tasks", `String "not_a_list");
     ("last_updated", `String "2024-01-15T12:00:00Z");
     ("version", `Int 1);
   ] in
-  match Masc_domain.backlog_of_yojson json with
-  | Ok b -> check int "tasks empty for non-list" 0 (List.length b.tasks)
-  | Error e -> fail ("expected Ok for non-list tasks, got: " ^ e)
+  expect_backlog_decode_error "non-list tasks" json
 
-let test_backlog_of_yojson_corrupt_task_entries () =
-  (* Tasks array contains a mix of valid tasks and corrupt entries.
-     The decoder uses List.filter_map to skip decode failures. *)
+let test_backlog_of_yojson_rejects_corrupt_task_entries () =
   let corrupt_entry = `Assoc [("id", `Int 0)] in
   let valid_entry = `Assoc [
     ("id", `String "task-1");
@@ -704,9 +689,7 @@ let test_backlog_of_yojson_corrupt_task_entries () =
     ("last_updated", `String "2024-01-15T12:00:00Z");
     ("version", `Int 1);
   ] in
-  match Masc_domain.backlog_of_yojson json with
-  | Ok b -> check int "1 valid task survives corruption" 1 (List.length b.tasks)
-  | Error e -> fail ("expected Ok with corrupt entries, got: " ^ e)
+  expect_backlog_decode_error "corrupt task entry" json
 
 (* ============================================================
    masc_error_to_string Tests
@@ -1629,12 +1612,13 @@ let () =
       test_case "rejects negative revision" `Quick test_backlog_of_yojson_rejects_negative_version;
       test_case "requires revision" `Quick test_backlog_of_yojson_requires_version;
       test_case "rejects null revision" `Quick test_backlog_of_yojson_rejects_null_version;
-      test_case "missing last_updated" `Quick test_backlog_of_yojson_missing_last_updated;
+      test_case "requires last_updated" `Quick test_backlog_of_yojson_requires_last_updated;
       test_case "rejects tasks without revision" `Quick test_backlog_of_yojson_rejects_tasks_without_revision;
-      test_case "truncated tasks" `Quick test_backlog_of_yojson_truncated_tasks;
+      test_case "requires tasks" `Quick test_backlog_of_yojson_requires_tasks;
       test_case "rejects integer document" `Quick test_backlog_of_yojson_rejects_integer;
-      test_case "nested list" `Quick test_backlog_of_yojson_nested_list;
-      test_case "corrupt task entries" `Quick test_backlog_of_yojson_corrupt_task_entries;
+      test_case "rejects non-list tasks" `Quick test_backlog_of_yojson_rejects_non_list_tasks;
+      test_case "rejects corrupt task entries" `Quick
+        test_backlog_of_yojson_rejects_corrupt_task_entries;
     ];
     "masc_error_to_string", [
       test_case "not initialized" `Quick test_masc_error_not_initialized;

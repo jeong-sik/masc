@@ -1688,6 +1688,21 @@ let test_read_backlog_counts_falls_back_to_unscoped_claimable_task () =
       claimable
   )
 
+let test_read_backlog_counts_never_fabricates_empty_work () =
+  with_test_env (fun config ->
+    let write_corrupt path =
+      Out_channel.with_open_text path (fun channel ->
+        output_string channel "{\"tasks\":\"not-current\"}")
+    in
+    write_corrupt (Workspace.backlog_path config);
+    write_corrupt (Workspace.backlog_recovery_path config);
+    let meta = keeper_meta_for_self_filter "keeper-backlog-failure-agent" in
+    match
+      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    with
+    | exception Workspace.Backlog_read_failed _ -> ()
+    | _ -> Alcotest.fail "Keeper observation fabricated empty work from invalid SSOT")
+
 let test_self_authored_scoped_task_does_not_hide_peer_work () =
   with_test_env (fun config ->
     let keeper = "keeper-goal-filter-agent" in
@@ -2164,6 +2179,8 @@ let () =
       Alcotest.test_case "read backlog counts falls back to unscoped claimable"
         `Quick
         test_read_backlog_counts_falls_back_to_unscoped_claimable_task;
+      Alcotest.test_case "read backlog counts never fabricates empty work" `Quick
+        test_read_backlog_counts_never_fabricates_empty_work;
       Alcotest.test_case "self-authored scoped task does not hide peer work"
         `Quick
         test_self_authored_scoped_task_does_not_hide_peer_work;

@@ -13,6 +13,9 @@ val read_backlog_counts
   :  config:Workspace.config
   -> meta:keeper_meta
   -> int * int * int * bool
+(** Uses the recovery-backed observation contract. Raises
+    {!Workspace.Backlog_read_failed} when neither primary nor recovery is a
+    valid current backlog; it never fabricates zero work. *)
 
 (** [task_is_self_authored_todo ~meta task] is true when an unclaimed [Todo]
     was authored by the keeper's own stable handle ([meta.name]).
@@ -32,8 +35,9 @@ val read_current_task
   -> meta:keeper_meta
   -> Masc_domain.task option
 (** Resolve [meta.current_task_id] to its backlog record (RFC-0315). [None]
-    when the keeper holds no task, the id is absent from the backlog, or the
-    backlog read fails (failure is logged and counted, never raised). *)
+    only when the keeper holds no task or the id is absent from the observed
+    backlog. A failed primary and recovery read is logged, counted, and raised
+    as {!Workspace.Backlog_read_failed}. *)
 
 val count_running_keeper_fibers : config:Workspace.config -> int
 (** Count live keeper fibers for [config.base_path].

@@ -8,7 +8,6 @@ open Workspace_utils
 open Workspace_state
 open Workspace_backlog
 open Workspace_broadcast
-open Workspace_backlog
 
 (** Initialize MASC workspace state *)
 let init config ~agent_name =
@@ -91,15 +90,6 @@ let init config ~agent_name =
     in
     write_state config state;
     invalidate_initialized_cache ();
-    (* Preserve a migrated backlog when blocking bootstrap has already
-       promoted legacy workspace state into the flattened root namespace. *)
-    if not (path_exists config (backlog_path config))
-    then (
-      (* Genesis snapshot: [write_backlog] stamps the commit, so revision 0
-         here lands on disk as revision 1 — matching the raw genesis files
-         written by bootstrap/init root paths. *)
-      let backlog = { tasks = []; last_updated = ""; version = 0 } in
-      write_backlog config backlog);
     let result = "MASC workspace created!" in
     (* Auto-join if agent specified — uses Workspace_lifecycle.join via the caller *)
     match agent_name with

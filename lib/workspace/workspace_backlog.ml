@@ -136,15 +136,15 @@ let read_backlog_observation_r config =
   | Ok { observed_backlog; _ } -> Ok observed_backlog
   | Error _ as error -> error
 
+exception Backlog_read_failed of string
+exception Backlog_write_failed of string
+
 let read_backlog config =
   match read_backlog_with_source_r config with
   | Ok { observed_backlog; _ } -> observed_backlog
   | Error msg ->
-      Log.Misc.error "%s" msg;
-      { tasks = []; last_updated = now_iso (); version = 1 }
-
-exception Backlog_read_failed of string
-exception Backlog_write_failed of string
+    Log.Misc.error "%s" msg;
+    raise (Backlog_read_failed msg)
 
 type write_backlog_outcome =
   { committed_revision : int

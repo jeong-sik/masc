@@ -6,6 +6,8 @@
 type invalid =
   | Verification_submission_required
   | Verification_pending_verdict
+      (** Agent actions cannot resolve an [AwaitingVerification] obligation;
+          the completion-authority entry point owns its verdict. *)
   | Verdict_authority_identity_required
   | Verdict_rejection_reason_required
   | Verification_id_mismatch of { expected : string; actual : string }

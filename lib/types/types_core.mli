@@ -102,9 +102,8 @@ type task_status =
       ; submitted_at : string
       ; verification_id : string
       }
-      (** No verifier binding: the removed [phase] field made whichever agent won
-          the claim race the approver. [verification_id] joins to the evidence
-          record the authority reads. *)
+      (** No verifier binding. [verification_id] joins to the evidence record
+          the authority reads. *)
   | Done of { assignee : string; completed_at : string; notes : string option }
   | Cancelled of { cancelled_by : string; cancelled_at : string; reason : string option }
 [@@deriving show]

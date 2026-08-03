@@ -35,14 +35,6 @@ type current_task_observation =
       ; error : string
       }
 
-type backlog_edge_observation =
-  | Backlog_read_unavailable
-  | Observed_backlog of
-      { revision : int
-      ; projection_sha256 : string
-       ; updated_since_last_scheduled_autonomous : bool
-       }
-
 val backlog_updated_since_last_scheduled_autonomous
   :  meta:keeper_meta
   -> backlog:Masc_domain.backlog
@@ -65,9 +57,11 @@ val read_backlog_counts
   -> meta:keeper_meta
   -> int * int * int * backlog_edge_observation
 (** [(unclaimed, claimable, failed, backlog_edge)]. Uses the recovery-backed
-    observation contract. A successful read carries one inseparable
-    revision/projection/edge value; when neither source is valid, counts are
-    zero and [Backlog_read_unavailable] prevents admission or consumption. *)
+    observation contract. A successful primary read carries one inseparable
+    revision/projection/edge value. A recovery read carries its revision and
+    projection as read-only facts but cannot form an authoritative edge;
+    [Backlog_read_unavailable] carries the failure rather than fabricating an
+    empty backlog. *)
 
 (** [task_is_self_authored_todo ~meta task] is true when an unclaimed [Todo]
     was authored by the keeper's own stable handle ([meta.name]).

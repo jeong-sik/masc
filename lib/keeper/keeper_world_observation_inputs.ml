@@ -52,23 +52,6 @@ type current_task_observation =
       ; error : string
       }
 
-type backlog_edge_observation =
-  | Backlog_read_unavailable
-  | Observed_backlog of
-      { revision : int
-      ; projection_sha256 : string
-       ; updated_since_last_scheduled_autonomous : bool
-       }
-
-(* RFC-0357 §3.2: the backlog edge compares monotonic commit revisions, not
-   wall clocks. The previous ISO8601 comparison against [proactive_rt.last_ts]
-   had four defects this replacement dissolves by construction: same-second
-   ties under a strict [>], NTP rewinds, a [last_ts <= 0.0] arm that degraded
-   to the level check [backlog.tasks <> []], and a parse-failure arm that
-   silently returned [false] forever. [last_consumed_backlog_revision] starts
-   at 0 (never consumed), so a live backlog (version >= 1) admits exactly one
-    turn before the first consumption is recorded — the zero-point arm is not
-    needed. *)
 let backlog_updated_since_last_scheduled_autonomous
       ~(meta : keeper_meta)
       ~(backlog : Masc_domain.backlog)
@@ -144,7 +127,7 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
   : int * int * int * backlog_edge_observation
   =
   try
-    match Workspace.read_backlog_observation_r config with
+    match Workspace.read_backlog_observation_with_source_r config with
     | Error message ->
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ObservationQueryFailures)
@@ -157,8 +140,8 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
       (* Primary and recovery are both invalid. Preserve the typed unavailable
          state so admission can report [Backlog_unreadable] without silencing
          independent message, board, or schedule stimuli. *)
-      0, 0, 0, Backlog_read_unavailable
-    | Ok backlog ->
+      0, 0, 0, Backlog_read_unavailable message
+    | Ok { observed_backlog = backlog; recovered_from } ->
     let unclaimed_tasks =
       List.filter
         (fun (t : Masc_domain.task) -> t.task_status = Masc_domain.Todo)

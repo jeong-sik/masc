@@ -736,18 +736,6 @@ let test_refresh_scope_can_reduce_but_not_expand () =
             in
             check string "admin response includes its tools implication"
               "mcp:tools mcp:admin" admin_pair.scope;
-            let worker_from_admin =
-              Auth_oauth.rotate_refresh_token
-                ~base_path
-                ~expected_resource:resource
-                ~refresh_token:admin_pair.refresh_token
-                ~client_id:admin_client.client_id
-                ~scope:(Some "mcp:tools")
-                ~resource:(Some resource)
-              |> oauth_ok
-            in
-            check string "admin family can downscope to tools"
-              "mcp:tools" worker_from_admin.scope;
             check
               bool
               "an explicitly empty refresh scope is invalid"
@@ -763,6 +751,18 @@ let test_refresh_scope_can_reduce_but_not_expand () =
                with
                | Error Auth_oauth.Invalid_scope -> true
                | Ok _ | Error _ -> false);
+            let worker_from_admin =
+              Auth_oauth.rotate_refresh_token
+                ~base_path
+                ~expected_resource:resource
+                ~refresh_token:admin_pair.refresh_token
+                ~client_id:admin_client.client_id
+                ~scope:(Some "mcp:tools")
+                ~resource:(Some resource)
+              |> oauth_ok
+            in
+            check string "admin family can downscope to tools"
+              "mcp:tools" worker_from_admin.scope;
             let client, admin_pair =
               issue_pair
                 ~base_path

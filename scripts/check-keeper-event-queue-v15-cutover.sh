@@ -119,15 +119,17 @@ run_gate() {
       fi
     done < <(find "$keepers_root" -name 'event-queue-transitions-v4.jsonl' -print0)
 
+    while IFS= read -r -d '' current_queue_path; do
+      [[ -f "$current_queue_path" && ! -L "$current_queue_path" ]] \
+        || fail "v15 queue snapshot is not an exact regular file: $current_queue_path"
+      "$CUTOVER_HELPER" validate-current-queue "$current_queue_path" \
+        || fail "v15 queue snapshot is invalid: $current_queue_path"
+      current_owner_count=$((current_owner_count + 1))
+    done < <(find "$keepers_root" -name 'event-queue-v15.json' -print0)
+
     while IFS= read -r -d '' queue_path; do
       current_queue_path="$(dirname "$queue_path")/event-queue-v15.json"
-      if [[ -e "$current_queue_path" || -L "$current_queue_path" ]]; then
-        [[ -f "$current_queue_path" && ! -L "$current_queue_path" ]] \
-          || fail "v15 queue snapshot is not an exact regular file: $current_queue_path"
-        "$CUTOVER_HELPER" validate-current-queue "$current_queue_path" \
-          || fail "v15 queue snapshot is invalid: $current_queue_path"
-        current_owner_count=$((current_owner_count + 1))
-      else
+      if [[ ! -e "$current_queue_path" && ! -L "$current_queue_path" ]]; then
         cutover_required=1
       fi
     done < <(find "$keepers_root" -name 'event-queue-v14.json' -print0)

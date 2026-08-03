@@ -147,37 +147,41 @@ let durable_intake_error_to_string = function
 
 let authorize_durable_intake_owner ~base_path ~keeper_name =
   let config = Workspace.default_config base_path in
-  match Keeper_meta_store.read_meta config keeper_name with
-  | Ok (Some _) -> Ok ()
-  | Error detail -> Error (Durable_intake_keeper_metadata_read_failed detail)
-  | Ok None ->
-    (match Keeper_shutdown_store.list_for_keeper ~config ~keeper_name with
-     | Error error ->
-       Error
-         (Durable_intake_retirement_read_failed
-            (Keeper_shutdown_store.error_to_string error))
-     | Ok operations ->
-       (match
-          List.find_opt
-            (fun (operation : Keeper_shutdown_types.t) ->
-               match operation.phase with
-               | Keeper_shutdown_types.Finalized { meta_removed = true; _ } ->
-                 (match operation.cleanup_intent.meta_disposition with
-                  | Keeper_shutdown_types.Remove_meta -> true
-                  | Keeper_shutdown_types.Retain_operator_pause
-                  | Keeper_shutdown_types.Retain_dead_tombstone -> false)
-               | Keeper_shutdown_types.Prepared
-               | Keeper_shutdown_types.Joined_idle
-               | Keeper_shutdown_types.Finalizing_tasks _
-               | Keeper_shutdown_types.Cleanup_ready _
-               | Keeper_shutdown_types.Reconciliation_required _
-               | Keeper_shutdown_types.Blocked _
-               | Keeper_shutdown_types.Superseded _ -> false)
-            operations
-        with
+  let is_retired_for_identity current_meta (operation : Keeper_shutdown_types.t) =
+    match operation.phase with
+    | Keeper_shutdown_types.Finalized { meta_removed = true; _ } ->
+      (match
+         Keeper_shutdown_types.meta_disposition_of_cleanup_reason
+           operation.cleanup_intent.reason
+       with
+       | Keeper_shutdown_types.Remove_meta ->
+         (match current_meta with
+          | None -> true
+          | Some meta ->
+            Int.equal meta.runtime.nonce operation.generation
+            && Keeper_id.Trace_id.equal meta.runtime.trace_id operation.trace_id)
+       | Keeper_shutdown_types.Retain_operator_pause
+       | Keeper_shutdown_types.Retain_dead_tombstone -> false)
+    | Keeper_shutdown_types.Prepared
+    | Keeper_shutdown_types.Joined_idle
+    | Keeper_shutdown_types.Finalizing_tasks _
+    | Keeper_shutdown_types.Cleanup_ready _
+    | Keeper_shutdown_types.Reconciliation_required _
+    | Keeper_shutdown_types.Blocked _
+    | Keeper_shutdown_types.Superseded _ -> false
+  in
+  match Keeper_shutdown_store.list_for_keeper ~config ~keeper_name with
+  | Error error ->
+    Error
+      (Durable_intake_retirement_read_failed
+         (Keeper_shutdown_store.error_to_string error))
+  | Ok operations ->
+    (match Keeper_meta_store.read_meta config keeper_name with
+     | Error detail -> Error (Durable_intake_keeper_metadata_read_failed detail)
+     | Ok current_meta ->
+       (match List.find_opt (is_retired_for_identity current_meta) operations with
         | None -> Ok ()
-        | Some operation ->
-          Error (Durable_intake_keeper_retired operation.operation_id)))
+        | Some operation -> Error (Durable_intake_keeper_retired operation.operation_id)))
 ;;
 
 let with_durable_intake

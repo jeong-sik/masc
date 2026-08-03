@@ -3588,7 +3588,28 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         "post-purge durable intake leaves runtime directory absent"
         false
         (Sys.file_exists runtime_dir);
-      let replacement = make_meta meta.name in
+      let retired_identity = make_meta meta.name in
+      (match Keeper_meta_store.write_meta config retired_identity with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_durable_result
+           ~base_path:config.base_path
+           meta.name
+           late_stimulus
+       with
+       | Error detail ->
+         check string "same identity remains retired"
+           (Printf.sprintf
+              "keeper durable intake rejected because Keeper was removed by shutdown operation=%s"
+              (Shutdown_types.Operation_id.to_string operation_id))
+           detail
+       | Ok () -> fail "retired Keeper identity reopened durable intake");
+      let replacement =
+        make_meta meta.name
+        |> Keeper_meta_contract.map_runtime (fun runtime ->
+          { runtime with nonce = runtime.nonce + 1 })
+      in
       (match Keeper_meta_store.write_meta config replacement with
        | Ok () -> ()
        | Error detail -> fail detail);

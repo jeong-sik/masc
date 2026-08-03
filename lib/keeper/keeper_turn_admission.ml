@@ -457,6 +457,11 @@ type 'a durable_intake_result =
   | Intake_committed of 'a
   | Intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
+type 'a transfer_intake_result =
+  | Transfer_intake_committed of 'a
+  | Transfer_intake_source_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Transfer_intake_target_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+
 let run_durable_intake_if_open ~base_path ~keeper_name intake =
   let slot = slot_for ~base_path ~keeper_name in
   Eio.Mutex.lock slot.intake_mu;
@@ -476,6 +481,66 @@ let run_durable_intake_if_open ~base_path ~keeper_name intake =
        intake_token.intake_active <- false;
        release ();
        raise exn)
+;;
+
+let run_transfer_intake_if_open
+      ~base_path
+      ~from_keeper
+      ~to_keeper
+      operation
+  =
+  let acquire_source_then_target () =
+    match
+      run_durable_intake_if_open
+        ~base_path
+        ~keeper_name:from_keeper
+        (fun source_intake_token ->
+           if String.equal from_keeper to_keeper
+           then
+             Transfer_intake_committed
+               (operation
+                  ~source_intake_token
+                  ~target_intake_token:source_intake_token)
+           else
+             match
+               run_durable_intake_if_open
+                 ~base_path
+                 ~keeper_name:to_keeper
+                 (fun target_intake_token ->
+                    operation ~source_intake_token ~target_intake_token)
+             with
+             | Intake_committed result -> Transfer_intake_committed result
+             | Intake_shutdown_reserved operation_id ->
+               Transfer_intake_target_shutdown_reserved operation_id)
+    with
+    | Intake_committed result -> result
+    | Intake_shutdown_reserved operation_id ->
+      Transfer_intake_source_shutdown_reserved operation_id
+  in
+  let acquire_target_then_source () =
+    match
+      run_durable_intake_if_open
+        ~base_path
+        ~keeper_name:to_keeper
+        (fun target_intake_token ->
+           match
+             run_durable_intake_if_open
+               ~base_path
+               ~keeper_name:from_keeper
+               (fun source_intake_token ->
+                  operation ~source_intake_token ~target_intake_token)
+           with
+           | Intake_committed result -> Transfer_intake_committed result
+           | Intake_shutdown_reserved operation_id ->
+             Transfer_intake_source_shutdown_reserved operation_id)
+    with
+    | Intake_committed result -> result
+    | Intake_shutdown_reserved operation_id ->
+      Transfer_intake_target_shutdown_reserved operation_id
+  in
+  if String.compare from_keeper to_keeper <= 0
+  then acquire_source_then_target ()
+  else acquire_target_then_source ()
 ;;
 
 let intake_token_matches token ~base_path ~keeper_name =

@@ -206,52 +206,73 @@ let target_projection_failure_json source_result detail =
 
 let execute_transfer ~base_path ~keeper_name prepared =
   let transfer = prepared.transfer in
-  let* source_result =
-    Keeper_registry_event_queue.transfer_pending_accepted_result
-      ~base_path
-      keeper_name
-      ~current_owner_nonce:transfer.owner_nonce
-      ~applied_at:prepared.applied_at
-      ~transfer
-    |> Result.map_error Keeper_registry_event_queue.transfer_pending_error_to_string
+  let execute_fenced ~source_intake_token ~target_intake_token =
+    let* source_result =
+      Keeper_registry_event_queue.transfer_pending_accepted_result
+        ~intake_token:source_intake_token
+        ~base_path
+        keeper_name
+        ~current_owner_nonce:transfer.owner_nonce
+        ~applied_at:prepared.applied_at
+        ~transfer
+      |> Result.map_error Keeper_registry_event_queue.transfer_pending_error_to_string
+    in
+    match source_result with
+    | Keeper_registry_event_queue.Transition_committed_followup_failed _ ->
+      Ok (transfer.source, transition_result_json source_result)
+    | Keeper_registry_event_queue.Transition_applied _
+    | Keeper_registry_event_queue.Transition_already_applied _ ->
+      (match
+         Keeper_registry_event_queue.project_accepted_transfer_durable_result
+           ~intake_token:target_intake_token
+           ~base_path
+           transfer.to_keeper
+           ~transfer
+       with
+       | Keeper_registry_event_queue.Transfer_projection_committed
+       | Keeper_registry_event_queue.Transfer_projection_already_committed ->
+         ignore
+           (Keeper_registry.wakeup_running
+              ~intent:Keeper_registry.Broadcast_signal
+              ~base_path
+              transfer.to_keeper :
+              Keeper_registry.wakeup_outcome);
+         Ok (transfer.source, transition_result_json source_result)
+       | Keeper_registry_event_queue.Transfer_projection_storage_error detail ->
+         Ok
+           ( transfer.source
+           , target_projection_failure_json source_result detail )
+       | Keeper_registry_event_queue.Transfer_projection_target_unavailable error ->
+         Ok
+           ( transfer.source
+           , target_projection_failure_json
+               source_result
+               (Keeper_registry_event_queue.transfer_target_error_to_string error) )
+       | Keeper_registry_event_queue.Transfer_projection_shutdown_reserved operation_id ->
+         let detail =
+           Printf.sprintf
+             "target Keeper shutdown owns durable intake operation=%s"
+             (Keeper_shutdown_types.Operation_id.to_string operation_id)
+         in
+         Ok (transfer.source, target_projection_failure_json source_result detail))
   in
-  match source_result with
-  | Keeper_registry_event_queue.Transition_committed_followup_failed _ ->
-    Ok (transfer.source, transition_result_json source_result)
-  | Keeper_registry_event_queue.Transition_applied _
-  | Keeper_registry_event_queue.Transition_already_applied _ ->
-    (match
-       Keeper_registry_event_queue.project_accepted_transfer_durable_result
-         ~base_path
-         transfer.to_keeper
-         ~transfer
-     with
-     | Keeper_registry_event_queue.Transfer_projection_committed
-     | Keeper_registry_event_queue.Transfer_projection_already_committed ->
-       ignore
-         (Keeper_registry.wakeup_running
-            ~intent:Keeper_registry.Broadcast_signal
-            ~base_path
-            transfer.to_keeper :
-            Keeper_registry.wakeup_outcome);
-       Ok (transfer.source, transition_result_json source_result)
-     | Keeper_registry_event_queue.Transfer_projection_storage_error detail ->
-       Ok
-         ( transfer.source
-         , target_projection_failure_json source_result detail )
-     | Keeper_registry_event_queue.Transfer_projection_target_unavailable error ->
-       Ok
-         ( transfer.source
-         , target_projection_failure_json
-             source_result
-             (Keeper_registry_event_queue.transfer_target_error_to_string error) )
-     | Keeper_registry_event_queue.Transfer_projection_shutdown_reserved operation_id ->
-       let detail =
-         Printf.sprintf
-           "target Keeper shutdown owns durable intake operation=%s"
-           (Keeper_shutdown_types.Operation_id.to_string operation_id)
-       in
-       Ok (transfer.source, target_projection_failure_json source_result detail))
+  match
+    Keeper_turn_admission.run_transfer_intake_if_open
+      ~base_path
+      ~from_keeper:keeper_name
+      ~to_keeper:transfer.to_keeper
+      execute_fenced
+  with
+  | Keeper_turn_admission.Transfer_intake_committed result -> result
+  | Keeper_turn_admission.Transfer_intake_source_shutdown_reserved operation_id ->
+    Error
+      (Keeper_registry_event_queue.transfer_pending_error_to_string
+         (Keeper_registry_event_queue.Transfer_pending_shutdown_reserved operation_id))
+  | Keeper_turn_admission.Transfer_intake_target_shutdown_reserved operation_id ->
+    Error
+      (Printf.sprintf
+         "target Keeper shutdown owns durable intake operation=%s"
+         (Keeper_shutdown_types.Operation_id.to_string operation_id))
 ;;
 
 let execute_reprioritization

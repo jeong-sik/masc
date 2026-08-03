@@ -424,6 +424,7 @@ let receipt_matches_accepted_transfer
 ;;
 
 let project_committed_target_if_receipted
+      ?intake_token
       config
       ~(transfer : Keeper_registry_event_queue.accepted_transfer)
   =
@@ -439,7 +440,9 @@ let project_committed_target_if_receipted
   | Some receipt ->
     let* receipt_transfer = transfer_of_receipt receipt in
     if receipt_matches_accepted_transfer receipt receipt_transfer transfer
-    then target_enqueue config receipt receipt_transfer |> Result.map Option.some
+    then
+      target_enqueue ?intake_token config receipt receipt_transfer
+      |> Result.map Option.some
     else Error (Receipt_conflict receipt)
 ;;
 
@@ -538,68 +541,6 @@ let transfer_pending_under_reservation
   | Ok outcome -> outcome
 ;;
 
-type 'a transfer_intake_result =
-  | Transfer_intake_committed of 'a
-  | Transfer_intake_source_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
-  | Transfer_intake_target_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
-
-let run_transfer_intake_if_open
-      ~base_path
-      ~from_keeper
-      ~to_keeper
-      operation
-  =
-  let acquire_source_then_target () =
-    match
-      Keeper_turn_admission.run_durable_intake_if_open
-        ~base_path
-        ~keeper_name:from_keeper
-        (fun source_intake_token ->
-           match
-             Keeper_turn_admission.run_durable_intake_if_open
-               ~base_path
-               ~keeper_name:to_keeper
-               (fun target_intake_token ->
-                  operation ~source_intake_token ~target_intake_token)
-           with
-           | Keeper_turn_admission.Intake_committed result ->
-             Transfer_intake_committed result
-           | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
-             Transfer_intake_target_shutdown_reserved operation_id)
-    with
-    | Keeper_turn_admission.Intake_committed result -> result
-    | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
-      Transfer_intake_source_shutdown_reserved operation_id
-  in
-  let acquire_target_then_source () =
-    match
-      Keeper_turn_admission.run_durable_intake_if_open
-        ~base_path
-        ~keeper_name:to_keeper
-        (fun target_intake_token ->
-           match
-             Keeper_turn_admission.run_durable_intake_if_open
-               ~base_path
-               ~keeper_name:from_keeper
-               (fun source_intake_token ->
-                  operation ~source_intake_token ~target_intake_token)
-           with
-           | Keeper_turn_admission.Intake_committed result ->
-             Transfer_intake_committed result
-           | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
-             Transfer_intake_source_shutdown_reserved operation_id)
-    with
-    | Keeper_turn_admission.Intake_committed result -> result
-    | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
-      Transfer_intake_target_shutdown_reserved operation_id
-  in
-  (* Opposing A→B and B→A transfers must acquire the same first intake mutex;
-     otherwise each can hold its source while waiting for the other's target. *)
-  if String.compare from_keeper to_keeper < 0
-  then acquire_source_then_target ()
-  else acquire_target_then_source ()
-;;
-
 let transfer_pending_with_reservation config ~from_keeper ~to_keeper request =
   match
     Keeper_lifecycle_reservation.acquire
@@ -614,7 +555,7 @@ let transfer_pending_with_reservation config ~from_keeper ~to_keeper request =
   | Ok token ->
     (try
        let outcome =
-         run_transfer_intake_if_open
+         Keeper_turn_admission.run_transfer_intake_if_open
            ~base_path:config.Workspace.base_path
            ~from_keeper
            ~to_keeper
@@ -629,16 +570,17 @@ let transfer_pending_with_reservation config ~from_keeper ~to_keeper request =
        in
        let reservation_release = Keeper_lifecycle_reservation.release token in
        (match outcome with
-        | Transfer_intake_committed (Ok (receipt, commit_status, projection)) ->
+        | Keeper_turn_admission.Transfer_intake_committed
+            (Ok (receipt, commit_status, projection)) ->
           Ok { receipt; commit_status; projection; reservation_release }
-        | Transfer_intake_committed (Error cause) ->
+        | Keeper_turn_admission.Transfer_intake_committed (Error cause) ->
           Error { cause; reservation_release = Some reservation_release }
-        | Transfer_intake_source_shutdown_reserved operation_id ->
+        | Keeper_turn_admission.Transfer_intake_source_shutdown_reserved operation_id ->
           Error
             { cause = Source_transfer_shutdown_reserved operation_id
             ; reservation_release = Some reservation_release
             }
-        | Transfer_intake_target_shutdown_reserved operation_id ->
+        | Keeper_turn_admission.Transfer_intake_target_shutdown_reserved operation_id ->
           Error
             { cause = Target_transfer_shutdown_reserved operation_id
             ; reservation_release = Some reservation_release

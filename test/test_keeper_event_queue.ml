@@ -1370,6 +1370,76 @@ let () =
               |> Keeper_event_queue_state.transition_outbox
               |> List.length)));
 
+  (* Recovery acquires the source and target intake fences as one ordered
+     transaction. A target reservation therefore rejects recovery before the
+     source outbox can be retired. *)
+  let base_path = temp_dir "keeper-event-queue-recovery-target-shutdown-fence" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let from_keeper = "keeper-recovery-target-shutdown-source" in
+      let to_keeper = "keeper-recovery-target-shutdown-target" in
+      stage_transfer
+        ~base_path
+        ~from_keeper
+        ~to_keeper
+        ~source:board_stim
+        ~owner_nonce:28
+        ~operation_id:"recovery-during-target-shutdown";
+      let shutdown_operation_id =
+        Masc.Keeper_shutdown_types.Operation_id.generate ()
+      in
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path
+           ~keeper_name:to_keeper
+           ~operation_id:shutdown_operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         Alcotest.fail "fresh recovery target shutdown was already reserved");
+      Fun.protect
+        ~finally:(fun () ->
+          ignore
+            (Masc.Keeper_turn_admission.rollback_shutdown
+               ~base_path
+               ~keeper_name:to_keeper
+               ~operation_id:shutdown_operation_id
+              : Masc.Keeper_turn_admission.rollback_shutdown_result))
+        (fun () ->
+           (match
+              with_strict_executor
+              @@ fun () ->
+              Masc.Keeper_event_queue_recovery.project_owner_result
+                ~base_path
+                ~keeper_name:from_keeper
+            with
+            | Error
+                (Masc.Keeper_event_queue_recovery.Owner_shutdown_reserved
+                   actual_operation_id) ->
+              Alcotest.(check bool)
+                "recovery reports exact target shutdown owner"
+                true
+                (Masc.Keeper_shutdown_types.Operation_id.equal
+                   shutdown_operation_id
+                   actual_operation_id)
+            | Error error ->
+              Alcotest.fail
+                (Masc.Keeper_event_queue_recovery.projection_error_to_string error)
+            | Ok _ -> Alcotest.fail "recovery bypassed the target shutdown fence");
+           Alcotest.(check int)
+             "target-fenced recovery retains source outbox"
+             1
+             (load_queue_state ~base_path ~keeper_name:from_keeper
+              |> Keeper_event_queue_state.transition_outbox
+              |> List.length);
+           Alcotest.(check int)
+             "target-fenced recovery writes no target stimulus"
+             0
+             (load_queue_state ~base_path ~keeper_name:to_keeper
+              |> Keeper_event_queue_state.pending
+              |> Keeper_event_queue.length)));
+
   (* --- transfer recovery failure: target storage failure is typed and keeps
          the source outbox authoritative for a later retry. --- *)
   let base_path = temp_dir "keeper-event-queue-transfer-recovery-failure" in

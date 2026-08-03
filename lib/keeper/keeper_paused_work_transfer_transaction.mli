@@ -75,6 +75,7 @@ type success =
 val error_to_string : error -> string
 
 val project_committed_target_if_receipted :
+  ?intake_token:Keeper_turn_admission.intake_token ->
   Workspace.config ->
   transfer:Keeper_registry_event_queue.accepted_transfer ->
   (target_projection option, failure) result

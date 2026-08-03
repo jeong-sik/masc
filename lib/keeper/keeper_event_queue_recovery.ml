@@ -169,11 +169,13 @@ let wake_transfer_target ~base_path target_keeper =
 ;;
 
 let project_generic_transfer_target_result
+      ~target_intake_token
       ~base_path
       (transfer : Keeper_registry_event_queue.accepted_transfer)
   =
   match
     Keeper_registry_event_queue.project_accepted_transfer_durable_result
+      ~intake_token:target_intake_token
       ~base_path
       transfer.to_keeper
       ~transfer
@@ -203,7 +205,11 @@ let project_generic_transfer_target_result
          })
 ;;
 
-let project_transfer_target_result ~base_path (entry : Persistence.outbox_entry) =
+let project_transfer_target_result
+      ~target_intake_token
+      ~base_path
+      (entry : Persistence.outbox_entry)
+  =
   match entry.receipt.transition with
   | Persistence.Cancel_accepted _
   | Persistence.Ack_source_terminal _ ->
@@ -211,10 +217,15 @@ let project_transfer_target_result ~base_path (entry : Persistence.outbox_entry)
   | Persistence.Transfer_accepted transfer ->
     (match
        Keeper_paused_work_transfer_transaction.project_committed_target_if_receipted
+         ~intake_token:target_intake_token
          (Workspace.default_config base_path)
          ~transfer
      with
-     | Ok None -> project_generic_transfer_target_result ~base_path transfer
+     | Ok None ->
+       project_generic_transfer_target_result
+         ~target_intake_token
+         ~base_path
+         transfer
      | Ok (Some _) ->
        wake_transfer_target ~base_path transfer.to_keeper;
        Ok ()
@@ -227,14 +238,28 @@ let project_transfer_target_result ~base_path (entry : Persistence.outbox_entry)
 let project_claimed_owner owner =
   let base_path = Persistence.owner_identity_base_path owner in
   let keeper_name = Persistence.owner_identity_keeper_name owner in
-  let project_open_owner _intake_token =
+  let project_open_owner ?target_intake_token () =
     match Persistence.load_state_result ~base_path ~keeper_name with
     | Error detail -> Error (Outbox_unavailable detail)
     | Ok state ->
       (match Keeper_event_queue_state.transition_outbox state with
        | [] -> Ok No_pending_transition
        | entry :: _ ->
-         (match project_transfer_target_result ~base_path entry with
+         let project_target =
+           match entry.receipt.transition, target_intake_token with
+           | Persistence.Transfer_accepted _, Some target_intake_token ->
+             project_transfer_target_result
+               ~target_intake_token
+               ~base_path
+               entry
+           | Persistence.Transfer_accepted _, None ->
+             Error
+               (Outbox_unavailable
+                  "transfer recovery entered without its ordered target intake fence")
+           | (Persistence.Cancel_accepted _ | Persistence.Ack_source_terminal _), _ ->
+             Ok ()
+         in
+         (match project_target with
           | Error _ as error -> error
           | Ok () ->
             (match
@@ -246,15 +271,42 @@ let project_claimed_owner owner =
              | Ok () -> Ok Transition_converged
              | Error detail -> Error (Ledger_projection_failed detail))))
   in
-  match
-    Keeper_turn_admission.run_durable_intake_if_open
-      ~base_path
-      ~keeper_name
-      project_open_owner
-  with
-  | Keeper_turn_admission.Intake_committed result -> result
-  | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
-    Error (Owner_shutdown_reserved operation_id)
+  match Persistence.load_state_result ~base_path ~keeper_name with
+  | Error detail -> Error (Outbox_unavailable detail)
+  | Ok state ->
+    (match Keeper_event_queue_state.transition_outbox state with
+     | { receipt = { transition = Persistence.Transfer_accepted transfer; _ }; _ }
+       :: _ ->
+       (match
+          Keeper_turn_admission.run_transfer_intake_if_open
+            ~base_path
+            ~from_keeper:keeper_name
+            ~to_keeper:transfer.to_keeper
+            (fun ~source_intake_token:_ ~target_intake_token ->
+               project_open_owner ~target_intake_token ())
+        with
+        | Keeper_turn_admission.Transfer_intake_committed result -> result
+        | Keeper_turn_admission.Transfer_intake_source_shutdown_reserved operation_id
+        | Keeper_turn_admission.Transfer_intake_target_shutdown_reserved operation_id ->
+          Error (Owner_shutdown_reserved operation_id))
+     | []
+     | { receipt =
+           { transition =
+               (Persistence.Cancel_accepted _ | Persistence.Ack_source_terminal _)
+           ; _
+           }
+       ; _
+       }
+       :: _ ->
+       (match
+          Keeper_turn_admission.run_durable_intake_if_open
+            ~base_path
+            ~keeper_name
+            (fun _source_intake_token -> project_open_owner ())
+        with
+        | Keeper_turn_admission.Intake_committed result -> result
+        | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+          Error (Owner_shutdown_reserved operation_id)))
 ;;
 
 let project_resolved_owner owner =

@@ -84,6 +84,11 @@ type 'a durable_intake_result =
   | Intake_committed of 'a
   | Intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
+type 'a transfer_intake_result =
+  | Transfer_intake_committed of 'a
+  | Transfer_intake_source_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Transfer_intake_target_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+
 type intake_token
 (** Opaque authority for one currently admitted durable intake. The token is
     valid only inside the callback passed to [run_durable_intake_if_open]. *)
@@ -277,6 +282,20 @@ val run_durable_intake_if_open :
   keeper_name:string ->
   (intake_token -> 'a) ->
   'a durable_intake_result
+
+(** Hold both source and target durable-intake fences in canonical Keeper-name
+    order for one transfer effect. Opposing A-to-B and B-to-A operations
+    therefore cannot form an ABBA wait cycle. The callback receives live
+    owner-specific tokens and must complete every source and target durable
+    mutation before returning. *)
+val run_transfer_intake_if_open :
+  base_path:string ->
+  from_keeper:string ->
+  to_keeper:string ->
+  (source_intake_token:intake_token ->
+   target_intake_token:intake_token ->
+   'a) ->
+  'a transfer_intake_result
 
 val intake_token_matches :
   intake_token ->

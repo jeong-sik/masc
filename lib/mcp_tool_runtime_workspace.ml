@@ -187,14 +187,25 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
             active_config ~title:task_title ~priority:3 ~description:""
         with
         | Error error ->
+          let detail = Workspace_task_create.add_task_error_to_string error in
           Some
-            (runtime_err_runtime
+            (Tool_result.make_err
                ~tool_name
+               ~class_:Tool_result.Runtime_failure
                ~start_time
+               ~data:
+                 (`Assoc
+                   [ ("agent_name", `String agent_name)
+                   ; ( "effect_disposition"
+                     , `String
+                         (Tool_result.failure_effect_disposition_to_string
+                            Tool_result.Proven_post_effect) )
+                   ; ("error", `String detail)
+                   ])
                (Printf.sprintf
                   "masc_start failed while creating a task after binding session %s: %s"
                   agent_name
-                  (Workspace_task_create.add_task_error_to_string error)))
+                  detail))
         | Ok created ->
           let task_id = created.task_id in
           let add_result = created.summary in

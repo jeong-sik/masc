@@ -228,16 +228,24 @@ let test_task_creation_failure_remains_typed_error () =
       let backlog_path = Masc.Workspace.backlog_path config in
       Fs_compat.save_file backlog_path "{invalid-primary";
       Fs_compat.save_file (backlog_path ^ ".last-good") "{invalid-recovery";
-      call
-        (tool_request ~id:3 ~name:"masc_start"
-           (`Assoc
-             [ ("path", `String base_path)
-             ; ("task_title", `String "must not become partial success")
-             ; ("_agent_name", `String "session-task-failure")
-             ]))
-      |> check_tool_failure
-           "masc_start task creation"
-           ~failure_class:"runtime_failure")
+      let response =
+        call
+          (tool_request ~id:3 ~name:"masc_start"
+             (`Assoc
+               [ ("path", `String base_path)
+               ; ("task_title", `String "must not become partial success")
+               ; ("_agent_name", `String "session-task-failure")
+               ]))
+      in
+      check_tool_failure
+        "masc_start task creation"
+        ~failure_class:"runtime_failure"
+        response;
+      let structured = structured_content_exn "masc_start task creation" response in
+      check string "session bind is a proven post-effect" "proven_post_effect"
+        Yojson.Safe.Util.(structured |> member "effect_disposition" |> to_string);
+      check string "bound session identity is preserved" "session-task-failure"
+        Yojson.Safe.Util.(structured |> member "agent_name" |> to_string))
 
 let () =
   run "MCP session-bound Task lifecycle smoke"

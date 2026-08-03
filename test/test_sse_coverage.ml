@@ -15,10 +15,12 @@ open Alcotest
 let jsonrpc_notification method_name =
   `Assoc [ ("jsonrpc", `String "2.0"); ("method", `String method_name) ]
 
-let delivery ?(emitted_at = Unix.gettimeofday ())
-    ?(audience = Masc.Sse.Broadcast_audience Masc.Sse.All)
-    event_id frame : Masc.Sse.delivery =
-  { event_id; frame; emitted_at; audience }
+let delivery ?(emitted_at = Unix.gettimeofday ()) event_id frame : Masc.Sse.delivery =
+  { event_id
+  ; frame
+  ; emitted_at
+  ; audience = Masc.Sse.Broadcast_audience Masc.Sse.All
+  }
 ;;
 
 module Sse = Masc.Sse
@@ -364,34 +366,6 @@ let test_get_events_after_empty () =
   let events = Sse.get_events_after_for_test future_id in
   check int "empty for future id" 0 (List.length events)
 
-let test_targeted_replay_is_session_scoped () =
-  let original_buffer = Sse.event_buffer_events_for_test () in
-  Fun.protect
-    ~finally:(fun () -> Sse.set_event_buffer_for_test original_buffer)
-    (fun () ->
-      let event_id = 804_000 in
-      let frame =
-        Sse.format_event ~id:event_id
-          (Yojson.Safe.to_string
-             (jsonrpc_notification "notifications/resources/updated"))
-      in
-      Sse.set_event_buffer_for_test
-        [ delivery
-            ~audience:(Sse.Session_audience "session-a")
-            event_id frame ];
-      check int "target session replays targeted event" 1
-        (List.length
-           (Sse.get_events_after_for_session ~session_id:"session-a"
-              ~kind:Sse.Agent_stream (event_id - 1)));
-      check int "other session cannot replay targeted event" 0
-        (List.length
-           (Sse.get_events_after_for_session ~session_id:"session-b"
-              ~kind:Sse.Agent_stream (event_id - 1)));
-      check int "observer cannot replay targeted JSON-RPC event" 0
-        (List.length
-           (Sse.get_events_after_for_session ~session_id:"session-a"
-              ~kind:Sse.Observer (event_id - 1))))
-
 let test_replay_handoff_deduplicates_exact_ids_only () =
   let replayed = [ delivery 910_010 "ten"; delivery 910_030 "thirty" ] in
   let handoff = Sse.create_replay_handoff replayed in
@@ -651,8 +625,6 @@ let () =
         test_get_events_after_preserves_oldest_first_order;
       test_case "caps replay buffer" `Quick test_buffer_event_caps_replay_buffer;
       test_case "empty for future" `Quick test_get_events_after_empty;
-      test_case "targeted replay is session scoped" `Quick
-        test_targeted_replay_is_session_scoped;
       test_case "replay handoff deduplicates exact ids" `Quick
         test_replay_handoff_deduplicates_exact_ids_only;
       test_case "cleanup exact under domain contention" `Quick

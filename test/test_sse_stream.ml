@@ -90,15 +90,34 @@ let test_broadcast_multiple_clients_streams ~auth () =
 
 let test_send_to_popable ~auth () =
   reset ();
-  ignore (register_exn ~auth "s-st-1" ~last_event_id:0);
-  ignore (register_exn ~auth "s-st-2" ~last_event_id:0);
-  Sse.send_to "s-st-1" (jsonrpc_notification "notifications/test");
-  let got1 = Sse.try_pop "s-st-1" in
-  let got2 = Sse.try_pop "s-st-2" in
-  Alcotest.(check bool) "target got event" true (got1 <> None);
-  Alcotest.(check bool) "other did not" true (got2 = None);
-  Sse.unregister "s-st-1";
-  Sse.unregister "s-st-2"
+  let original_buffer = Sse.event_buffer_events_for_test () in
+  Fun.protect
+    ~finally:(fun () ->
+      Sse.unregister "s-st-1";
+      Sse.unregister "s-st-2";
+      Sse.set_event_buffer_for_test original_buffer)
+    (fun () ->
+      Sse.set_event_buffer_for_test [];
+      ignore (register_exn ~auth "s-st-1" ~last_event_id:0);
+      ignore (register_exn ~auth "s-st-2" ~last_event_id:0);
+      let before_id = Sse.current_id () in
+      Sse.send_to "s-st-1" (jsonrpc_notification "notifications/test");
+      let got1 = Sse.try_pop "s-st-1" in
+      let got2 = Sse.try_pop "s-st-2" in
+      Alcotest.(check bool) "target got event" true (got1 <> None);
+      Alcotest.(check bool) "other did not" true (got2 = None);
+      Alcotest.(check int) "target replays targeted event" 1
+        (List.length
+           (Sse.get_events_after_for_session ~session_id:"s-st-1"
+              ~kind:Agent_stream before_id));
+      Alcotest.(check int) "other session cannot replay targeted event" 0
+        (List.length
+           (Sse.get_events_after_for_session ~session_id:"s-st-2"
+              ~kind:Agent_stream before_id));
+      Alcotest.(check int) "observer cannot replay targeted event" 0
+        (List.length
+           (Sse.get_events_after_for_session ~session_id:"s-st-1"
+              ~kind:Observer before_id)))
 
 let test_pop_blocks_then_receives ~auth () =
   reset ();

@@ -6,6 +6,13 @@ open Server_mcp_transport_http_respond
 
 let sse_stream_headers = Server_mcp_transport_http_headers.sse_stream_headers
 
+let ag_ui_encoding_error kind =
+  Ag_ui.of_custom
+    ~name:"MASC_EVENT_ENCODING_ERROR"
+    (`Assoc [ "kind", `String kind ])
+  |> Ag_ui.event_to_sse
+;;
+
 let ag_ui_event_of_masc_event event =
   try
     let lines = String.split_on_char '\n' event in
@@ -20,19 +27,21 @@ let ag_ui_event_of_masc_event event =
         let json = Yojson.Safe.from_string json_str in
         let ag_event = Ag_ui.of_custom ~name:"MASC_EVENT" json in
         Ag_ui.event_to_sse ag_event
-    | None -> event
+    | None ->
+      Log.Transport.warn "ag_ui_event_of_masc_event: frame has no data payload";
+      ag_ui_encoding_error "missing_data_payload"
   with
   | Yojson.Json_error msg ->
-      (* A frame carrying a [data:] line whose payload is not JSON cannot be
-         wrapped as an AG-UI CUSTOM event.  Passing it through keeps the stream
-         alive, but the client receives a frame outside the AG-UI schema, so the
-         fallback is logged rather than silent. *)
-      Log.Transport.warn "ag_ui_event_of_masc_event: non-JSON data payload, forwarding unconverted: %s" msg;
-      event
+      Log.Transport.warn "ag_ui_event_of_masc_event: non-JSON data payload: %s" msg;
+      ag_ui_encoding_error "invalid_json_payload"
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Log.Transport.warn "ag_ui_event_of_masc_event failed: %s" (Printexc.to_string exn);
-      event
+      ag_ui_encoding_error "encoding_failure"
+
+module For_testing = struct
+  let ag_ui_event_of_masc_event = ag_ui_event_of_masc_event
+end
 
 let sse_ping_interval_s = 30.0
 

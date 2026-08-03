@@ -218,6 +218,32 @@ let test_protocol_version () =
   assert (String.length protocol_version > 0);
   assert (String.contains protocol_version '.')
 
+let test_http_bridge_wraps_masc_event () =
+  let encoded =
+    Server_mcp_transport_http_agui.For_testing.ag_ui_event_of_masc_event
+      "data: {\"kind\":\"task_updated\"}\n\n"
+  in
+  assert (String_util.contains_substring encoded "MASC_EVENT");
+  assert (not (String.equal encoded "data: {\"kind\":\"task_updated\"}\n\n"))
+
+let test_http_bridge_projects_invalid_json_to_ag_ui_error () =
+  let raw = "data: {not-json}\n\n" in
+  let encoded =
+    Server_mcp_transport_http_agui.For_testing.ag_ui_event_of_masc_event raw
+  in
+  assert (String_util.contains_substring encoded "MASC_EVENT_ENCODING_ERROR");
+  assert (String_util.contains_substring encoded "invalid_json_payload");
+  assert (not (String.equal encoded raw))
+
+let test_http_bridge_projects_missing_data_to_ag_ui_error () =
+  let raw = "event: legacy\n\n" in
+  let encoded =
+    Server_mcp_transport_http_agui.For_testing.ag_ui_event_of_masc_event raw
+  in
+  assert (String_util.contains_substring encoded "MASC_EVENT_ENCODING_ERROR");
+  assert (String_util.contains_substring encoded "missing_data_payload");
+  assert (not (String.equal encoded raw))
+
 (* ---------- Test Runner ---------- *)
 
 let () =
@@ -243,6 +269,11 @@ let () =
     ("of_task_update_done", test_of_task_update_done);
     ("of_task_update_other", test_of_task_update_other);
     ("protocol_version", test_protocol_version);
+    ("http_bridge_wraps_masc_event", test_http_bridge_wraps_masc_event);
+    ( "http_bridge_projects_invalid_json_to_ag_ui_error",
+      test_http_bridge_projects_invalid_json_to_ag_ui_error );
+    ( "http_bridge_projects_missing_data_to_ag_ui_error",
+      test_http_bridge_projects_missing_data_to_ag_ui_error );
   ] in
   let passed = ref 0 in
   let failed = ref 0 in

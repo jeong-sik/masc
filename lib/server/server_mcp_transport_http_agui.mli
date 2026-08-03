@@ -40,8 +40,10 @@ val handle_ag_ui_events :
     9. Spawn two fibers under the runtime switch:
        - drain: pulls from per-session stream, converts each frame to the
          AG-UI wire format, writes to client, self-terminates on send
-         failure.  A frame whose [data:] payload does not parse as JSON is
-         forwarded unconverted and logged at {!Log.Transport.warn}.
+         failure.  A missing or malformed [data:] payload is projected to a
+         schema-valid AG-UI [CUSTOM] event named [MASC_EVENT_ENCODING_ERROR]
+         and logged at {!Log.Transport.warn}; raw MASC frames never cross this
+         endpoint's wire boundary.
        - ping: sleeps 30s, writes ": ping\\n\\n" comment frame to
          keep middleboxes from idling out the connection.
 
@@ -73,6 +75,10 @@ val handle_ag_ui_events :
     while this handler uses a local shadow to keep the AG-UI fiber
     independent of header-module evolution.  A future "let's unify"
     refactor must touch the duplicate explicitly. *)
+
+module For_testing : sig
+  val ag_ui_event_of_masc_event : string -> string
+end
 
 val handle_presence_events :
   deps:Server_mcp_transport_http_types.deps ->

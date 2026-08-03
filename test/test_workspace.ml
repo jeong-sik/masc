@@ -1784,10 +1784,12 @@ let test_read_backlog_counts_preserves_unreadable_observation () =
         ~config
         ~meta
     in
-    Alcotest.(check (option int))
+    Alcotest.(check bool)
       "world observation preserves unreadable backlog"
-      None
-      observation.backlog_revision;
+      true
+      (match observation.backlog_edge with
+       | Keeper_world_observation_inputs.Backlog_read_unavailable -> true
+       | Keeper_world_observation_inputs.Observed_backlog _ -> false);
     Alcotest.(check int)
       "independent board stimulus survives unreadable backlog"
       1

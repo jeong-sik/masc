@@ -134,28 +134,10 @@ type world_observation = {
   (** Durable schedule-store state that needs keeper attention, such as due
       requests ready to dispatch. *)
 
-  backlog_updated_since_last_scheduled_autonomous : bool;
-  (** RFC-0357 §3.2 backlog edge: the commit revision advances and the exact
-      non-self-authored task projection differs from the paired consumed
-      projection. This is one turn per relevant change, zero turns for static
-      or self-produced Todo-only changes. *)
-
-  backlog_revision : int option;
-  (** The backlog commit revision this observation saw — what a
-      scheduled-autonomous admission records as consumed (RFC-0357 §3.3).
-      [None] when the primary backlog was unavailable or only a recovery
-      snapshot was readable: the edge is false and the consumption clock must
-      not move on a non-authoritative value. *)
-
-  backlog_projection_sha256 : string option;
-  (** Exact non-self-authored task projection paired with [backlog_revision].
-      [None] when the primary backlog was unavailable or only recovery was
-      readable. *)
-
-  backlog_source : Keeper_world_observation_inputs.backlog_observation_source;
-  (** Provenance of the backlog facts. Recovery data remains visible as
-      read-only observation but cannot become an authoritative edge; an
-      unavailable source is explicit rather than an empty-backlog inference. *)
+  backlog_edge : Keeper_world_observation_inputs.backlog_edge_observation;
+  (** RFC-0357 §3.2/§3.3 backlog observation. A successful read carries one
+      inseparable revision/projection/edge value; a failed read cannot form a
+      partial pair or advance the consumption clock. *)
 
   running_keeper_fiber_count : int;
   (** Number of live keeper fibers for this workspace base path. *)
@@ -182,16 +164,13 @@ type keeper_cycle_channel =
   | Reactive
   | Scheduled_autonomous
 
-type backlog_consumption_error = Incomplete_backlog_observation
-
 val record_scheduled_backlog_consumption
   :  meta:Keeper_meta_contract.keeper_meta
   -> world_observation
-  -> (Keeper_meta_contract.keeper_meta, backlog_consumption_error) result
+  -> Keeper_meta_contract.keeper_meta
 (** Record an actually-observed revision/projection pair at scheduled-turn
-    admission. [None, None] is an unreadable observation and leaves meta
-    unchanged; a partial pair is a typed invariant error. Reactive channels
-    must not call this function. *)
+    admission. An unreadable observation leaves meta unchanged. Reactive
+    channels must not call this function. *)
 
 type event_queue_trigger =
   | Bootstrap_stimulus

@@ -82,7 +82,7 @@ let never_started_meta () =
 ;;
 
 (* No stimulus anywhere; the backlog exists at revision 1 and has been
-   consumed ([backlog_updated_since_last_scheduled_autonomous = false]). *)
+   consumed. *)
 let base_obs : WO.world_observation =
   { pending_messages = []
   ; pending_board_events = []
@@ -92,10 +92,12 @@ let base_obs : WO.world_observation =
   ; claimable_task_count = 0
   ; failed_task_count = 0
   ; scheduled_automation = WO.empty_scheduled_automation_observation
-  ; backlog_updated_since_last_scheduled_autonomous = false
-  ; backlog_revision = Some 1
-  ; backlog_projection_sha256 = Some projection_a
-  ; backlog_source = Inputs.Primary
+  ; backlog_edge =
+      Inputs.Observed_backlog
+        { revision = 1
+        ; projection_sha256 = projection_a
+        ; updated_since_last_scheduled_autonomous = false
+        }
   ; running_keeper_fiber_count = 1
   ; connected_surfaces = []
   ; connected_surface_failures = []
@@ -105,9 +107,12 @@ let base_obs : WO.world_observation =
 
 let backlog_edge_obs =
   { base_obs with
-    backlog_updated_since_last_scheduled_autonomous = true
-  ; backlog_revision = Some 2
-  ; backlog_projection_sha256 = Some projection_b
+    backlog_edge =
+      Inputs.Observed_backlog
+        { revision = 2
+        ; projection_sha256 = projection_b
+        ; updated_since_last_scheduled_autonomous = true
+        }
   ; claimable_task_count = 1
   ; unclaimed_task_count = 1
   }
@@ -279,45 +284,28 @@ let test_consumed_edge_stays_silent () =
 
 let test_scheduled_admission_records_exact_pair () =
   let before = bootstrapped_meta () in
-  match WO.record_scheduled_backlog_consumption ~meta:before backlog_edge_obs with
-  | Error _ -> Alcotest.fail "complete backlog observation was rejected"
-  | Ok after ->
-    check int "observed revision is recorded" 2
-      after.runtime.proactive_rt.last_consumed_backlog_revision;
-    check string "projection stays paired with revision" projection_b
-      after.runtime.proactive_rt.last_consumed_backlog_projection_sha256
+  let after = WO.record_scheduled_backlog_consumption ~meta:before backlog_edge_obs in
+  check int "observed revision is recorded" 2
+    after.runtime.proactive_rt.last_consumed_backlog_revision;
+  check string "projection stays paired with revision" projection_b
+    after.runtime.proactive_rt.last_consumed_backlog_projection_sha256
 ;;
 
 let test_unreadable_admission_does_not_move_pair () =
   let before = bootstrapped_meta () in
   let unreadable =
-    { base_obs with
-      backlog_revision = None
-    ; backlog_projection_sha256 = None
-    ; backlog_source = Inputs.Unavailable "test backlog read failure"
-    }
+    { base_obs with backlog_edge = Inputs.Backlog_read_unavailable "test failure" }
   in
-  match WO.record_scheduled_backlog_consumption ~meta:before unreadable with
-  | Error _ -> Alcotest.fail "complete absent pair was rejected"
-  | Ok after ->
-    check int "revision stays put" 1
-      after.runtime.proactive_rt.last_consumed_backlog_revision;
-    check string "projection stays put" projection_a
-      after.runtime.proactive_rt.last_consumed_backlog_projection_sha256
-;;
-
-let test_partial_backlog_pair_is_typed_error () =
-  let before = bootstrapped_meta () in
-  let incomplete = { base_obs with backlog_projection_sha256 = None } in
-  match WO.record_scheduled_backlog_consumption ~meta:before incomplete with
-  | Error WO.Incomplete_backlog_observation -> ()
-  | Ok _ -> Alcotest.fail "partial backlog observation was accepted"
+  let after = WO.record_scheduled_backlog_consumption ~meta:before unreadable in
+  check int "revision stays put" 1
+    after.runtime.proactive_rt.last_consumed_backlog_revision;
+  check string "projection stays put" projection_a
+    after.runtime.proactive_rt.last_consumed_backlog_projection_sha256
 ;;
 
 (* ==== read failure is not designed silence ==== *)
 
-(* [backlog_revision = None] models a failed backlog read (the inputs layer
-   maps [read_backlog_r]'s [Error] to [None]). With no other stimulus the
+(* [Backlog_read_unavailable] models a failed backlog read. With no other stimulus the
    skip must say so — recording it as [No_actionable_stimulus] would present
    a blind observation as a considered "nothing to do". *)
 let test_unreadable_backlog_skips_as_unreadable () =
@@ -325,11 +313,7 @@ let test_unreadable_backlog_skips_as_unreadable () =
   let d =
     decide
       ~meta:(bootstrapped_meta ())
-      { base_obs with
-        backlog_revision = None
-      ; backlog_projection_sha256 = None
-      ; backlog_source = Inputs.Unavailable "test backlog read failure"
-      }
+      { base_obs with backlog_edge = Inputs.Backlog_read_unavailable "test failure" }
   in
   check bool "no turn on a blind observation" false d.WO.should_run;
   check bool "skip reason is backlog_unreadable" true
@@ -345,11 +329,7 @@ let test_unreadable_backlog_does_not_silence_other_stimuli () =
   let d =
     decide
       ~meta:(bootstrapped_meta ())
-      { mention_obs with
-        backlog_revision = None
-      ; backlog_projection_sha256 = None
-      ; backlog_source = Inputs.Unavailable "test backlog read failure"
-      }
+      { mention_obs with backlog_edge = Inputs.Backlog_read_unavailable "test failure" }
   in
   check bool "message still admits" true d.WO.should_run;
   check bool "scope_message_pending in reasons" true
@@ -591,10 +571,6 @@ let () =
             "unreadable admission does not move pair"
             `Quick
             test_unreadable_admission_does_not_move_pair
-        ; test_case
-            "partial backlog pair is typed error"
-            `Quick
-            test_partial_backlog_pair_is_typed_error
         ; test_case
             "unreadable backlog skips as unreadable"
             `Quick

@@ -17,12 +17,6 @@ type error =
       { path : string
       ; reason : string
       }
-  | Malformed_artifact_reference of
-      { path : string
-      ; line : int
-      ; offset : int
-      ; detail : string
-      }
   | Malformed_structured_artifact_reference of
       { path : string
       ; line : int
@@ -61,13 +55,6 @@ let error_to_string = function
     Printf.sprintf "durable source stat failed path=%s: %s" path reason
   | Durable_source_read_failed { path; reason } ->
     Printf.sprintf "durable source read failed path=%s: %s" path reason
-  | Malformed_artifact_reference { path; line; offset; detail } ->
-    Printf.sprintf
-      "malformed artifact reference path=%s line=%d offset=%d: %s"
-      path
-      line
-      offset
-      detail
   | Malformed_structured_artifact_reference { path; line; detail } ->
     Printf.sprintf
       "malformed structured artifact reference path=%s line=%d: %s"
@@ -104,40 +91,12 @@ let candidate_snapshot_path ~base_path =
     "candidates.json"
 ;;
 
-let add_references ~path ~line references text =
-  match Tool_output.artifact_refs_in_text text with
-  | Ok found ->
-    Ok
-      (List.fold_left
-         (fun acc reference ->
-            String_set.add reference.Tool_output.sha256 acc)
-         references
-         found)
-  | Error error ->
-    Error
-      (Malformed_artifact_reference
-         { path
-         ; line
-         ; offset = error.offset
-         ; detail = error.detail
-         })
-;;
-
-let contains_substring ~needle text =
-  let needle_length = String.length needle in
-  let text_length = String.length text in
-  let rec loop offset =
-    if offset + needle_length > text_length
-    then false
-    else if String.sub text offset needle_length = needle
-    then true
-    else loop (offset + 1)
-  in
-  needle_length = 0 || loop 0
-;;
-
 let rec references_in_json ~path ~line references = function
-  | `String text -> add_references ~path ~line references text
+  | `String text ->
+    (match Tool_output.decode_from_oas text with
+     | Tool_output.Decoded reference ->
+       Ok (String_set.add reference.Tool_output.sha256 references)
+     | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> Ok references)
   | (`Assoc fields as json) ->
     (match Tool_output.normalized_artifact_ref_of_json json with
      | Tool_output.Decoded_normalized_artifact_ref reference ->
@@ -203,23 +162,7 @@ let references_in_file ~ownership_root path =
                       references
                       (Yojson.Safe.from_string line)
                   with
-                  | Yojson.Json_error detail ->
-                    if contains_substring ~needle:"\"_blob\"" line
-                    then
-                      Error
-                        (Malformed_structured_artifact_reference
-                           { path
-                           ; line = line_number
-                           ; detail =
-                               "unparseable durable row contains a _blob key: "
-                               ^ detail
-                           })
-                    else
-                      add_references
-                        ~path
-                        ~line:line_number
-                        references
-                        line)
+                  | Yojson.Json_error _ -> Ok references)
               in
               line_number + 1, next)
            (1, Ok String_set.empty)

@@ -482,11 +482,11 @@ let test_maintenance_rejects_uncoordinated_cluster_roots () =
         false
         (Sys.file_exists (M.candidate_snapshot_path ~base_path)))
 
-let test_maintenance_malformed_reference_fails_closed () =
+let test_maintenance_marker_shaped_text_has_no_reference_authority () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
       let blob =
-        B.put store ~bytes:"must survive malformed source" ~mime:"text/plain"
+        B.put store ~bytes:"unreferenced marker-shaped prose" ~mime:"text/plain"
         |> stored_ref_exn
       in
       let source =
@@ -495,19 +495,30 @@ let test_maintenance_malformed_reference_fails_closed () =
           "gate/malformed.jsonl"
       in
       Fs_compat.mkdir_p (Filename.dirname source);
-      Fs_compat.save_file source "{\"output\":\"[masc:blob garbage]\"}\n";
-      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
-       | Error (M.Malformed_artifact_reference { path; line; _ }) ->
-         Alcotest.(check string) "exact malformed source" source path;
-         Alcotest.(check int) "exact malformed line" 1 line
-       | Error error ->
-         Alcotest.failf
-           "unexpected maintenance error: %s"
-           (M.error_to_string error)
-       | Ok _ -> Alcotest.fail "malformed reference reached deletion");
+      Fs_compat.save_file
+        source
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ ( "description"
+               , `String
+                   ("Read the example "
+                    ^ O.encode_for_oas (O.Stored blob)
+                    ^ " only as prose") )
+             ; "invalid_example", `String "[masc:blob garbage]"
+             ])
+         ^ "\n");
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "marker-shaped text is not a typed reference"
+        1
+        observed.candidates_recorded;
+      let swept =
+        maintenance_ok ~base_path ~mode:M.Delete_previous_candidates
+      in
+      Alcotest.(check int) "unreferenced blob deleted" 1 swept.deleted;
       Alcotest.(check (option string))
-        "blob retained on malformed reference"
-        (Some "must survive malformed source")
+        "marker-shaped prose owns no blob"
+        None
         (fetch_ok store ~sha256:blob.sha256))
 
 let test_maintenance_does_not_scan_repository_mirrors () =
@@ -668,7 +679,7 @@ let test_maintenance_malformed_normalized_blob_fails_closed () =
         (Some "survive malformed normalized ref")
         (fetch_ok store ~sha256:reference.sha256))
 
-let test_maintenance_truncated_normalized_blob_fails_closed () =
+let test_maintenance_truncated_json_has_no_reference_authority () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
       let reference =
@@ -693,21 +704,13 @@ let test_maintenance_truncated_normalized_blob_fails_closed () =
       Fs_compat.save_file
         tool_call_log
         ("{\"output\":" ^ complete_reference);
-      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
-       | Error
-           (M.Malformed_structured_artifact_reference
-             { path; line; _ }) ->
-         Alcotest.(check string) "exact truncated tool-call log" tool_call_log path;
-         Alcotest.(check int) "exact truncated tool-call line" 1 line
-       | Error error ->
-         Alcotest.failf
-           "unexpected truncated-reference error: %s"
-           (M.error_to_string error)
-       | Ok _ ->
-         Alcotest.fail "truncated normalized reference reached deletion");
+      let swept =
+        maintenance_ok ~base_path ~mode:M.Delete_previous_candidates
+      in
+      Alcotest.(check int) "unreferenced blob deleted" 1 swept.deleted;
       Alcotest.(check (option string))
-        "truncated normalized reference retains every blob"
-        (Some "survive truncated normalized ref")
+        "unparseable JSON owns no blob"
+        None
         (fetch_ok store ~sha256:reference.sha256))
 
 let test_maintenance_unlink_failure_is_typed () =
@@ -999,9 +1002,9 @@ let () =
             `Quick
             test_maintenance_keeps_live_and_deletes_stable_dead_after_restart;
           Alcotest.test_case
-            "maintenance malformed reference fails closed"
+            "marker-shaped text has no reference authority"
             `Quick
-            test_maintenance_malformed_reference_fails_closed;
+            test_maintenance_marker_shaped_text_has_no_reference_authority;
           Alcotest.test_case
             "maintenance keeps wire-capture reference within retention"
             `Quick
@@ -1027,9 +1030,9 @@ let () =
             `Quick
             test_maintenance_malformed_normalized_blob_fails_closed;
           Alcotest.test_case
-            "maintenance truncated normalized blob fails closed"
+            "truncated JSON has no reference authority"
             `Quick
-            test_maintenance_truncated_normalized_blob_fails_closed;
+            test_maintenance_truncated_json_has_no_reference_authority;
           Alcotest.test_case
             "maintenance unlink failure is typed"
             `Quick

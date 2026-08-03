@@ -102,14 +102,3 @@ type decode_result =
   | Decoded of artifact_ref
 
 val decode_from_oas : string -> decode_result
-
-type embedded_reference_error =
-  { offset : int
-  ; detail : string
-  }
-
-val artifact_refs_in_text :
-  string -> (artifact_ref list, embedded_reference_error) result
-(** Parse every exact artifact marker embedded in arbitrary durable text.
-    Marker-shaped malformed content fails the whole scan with its byte offset;
-    it is never treated as an unreferenced blob. *)

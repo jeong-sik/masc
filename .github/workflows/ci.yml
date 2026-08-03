@@ -945,7 +945,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_unified_verification_surface"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_unified_verification_surface @test/runtest-test_schedule_tool_wiring"
 
       - name: Run tool blob retention suite
         id: tool_blob_retention_suite

@@ -160,7 +160,16 @@ let test_flat_tool_surface () =
   check bool "create schema is closed" false
     (create_schema.input_schema |> member "additionalProperties" |> to_bool);
   check int "create schema has no mandatory policy field" 0
-    (create_schema.input_schema |> member "required" |> to_list |> List.length)
+    (create_schema.input_schema |> member "required" |> to_list |> List.length);
+  let get_schema : Masc_domain.tool_schema =
+    (schedule_definition Tool_schemas_schedule.Get_request).schema
+  in
+  check (list string) "get requires the exact occurrence key"
+    [ "schedule_id"; "due_at_unix"; "payload_digest" ]
+    (get_schema.input_schema
+     |> member "required"
+     |> to_list
+     |> List.map to_string)
 ;;
 
 let test_create_list_get_cancel () =
@@ -176,6 +185,9 @@ let test_create_list_get_cancel () =
     (Tool_result.data create |> member "status" |> to_string);
   check string "created payload support" "supported"
     (Tool_result.data create |> member "payload_support" |> to_string);
+  let payload_digest =
+    Tool_result.data create |> member "payload_digest" |> to_string
+  in
   let list_result =
     dispatch_exn config Tool_schemas_schedule.List_requests
       (`Assoc [ "limit", `Int 10 ])
@@ -185,11 +197,29 @@ let test_create_list_get_cancel () =
     (Tool_result.data list_result |> member "schedules" |> to_list |> List.length);
   let get_result =
     dispatch_exn config Tool_schemas_schedule.Get_request
-      (`Assoc [ "schedule_id", `String "sched-tools" ])
+      (`Assoc
+        [ "schedule_id", `String "sched-tools"
+        ; "due_at_unix", `Float 200.0
+        ; "payload_digest", `String payload_digest
+        ])
   in
   check bool "get succeeds" true (Tool_result.is_success get_result);
   check string "get id" "sched-tools"
     (Tool_result.data get_result |> member "schedule_id" |> to_string);
+  let stale_get_result =
+    dispatch_exn config Tool_schemas_schedule.Get_request
+      (`Assoc
+        [ "schedule_id", `String "sched-tools"
+        ; "due_at_unix", `Float 201.0
+        ; "payload_digest", `String payload_digest
+        ])
+  in
+  check bool "stale occurrence is rejected" false
+    (Tool_result.is_success stale_get_result);
+  check bool "stale occurrence failure is explicit" true
+    (String_util.contains_substring
+       (Tool_result.message stale_get_result)
+       "schedule occurrence is no longer current");
   let cancel_result =
     dispatch_exn config Tool_schemas_schedule.Cancel_request
       (`Assoc

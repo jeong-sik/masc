@@ -181,6 +181,13 @@ let quote_prompt_field value =
   Buffer.contents buf
 ;;
 
+let format_prompt_row fields =
+  fields
+  |> List.map (fun (name, value) -> name ^ "=" ^ quote_prompt_field value)
+  |> String.concat " "
+  |> ( ^ ) "- "
+;;
+
 let board_reaction_note (reaction : Keeper_world_observation.board_reaction_event) =
   Printf.sprintf
     " reaction=%s target=%s:%s user=%s emoji=%s"
@@ -254,14 +261,14 @@ let format_scheduled_automation_item
     | None -> "unknown"
     | Some kind -> kind
   in
-  Printf.sprintf
-    "- schedule_id=%s action=%s status=%s payload=%s recurrence=%S due_at=%s"
-    item.schedule_id
-    item.action
-    item.status
-    payload_kind
-    item.recurrence_summary
-    (Masc_domain.iso8601_of_unix_seconds item.due_at)
+  format_prompt_row
+    [ "schedule_id", item.schedule_id
+    ; "action", item.action
+    ; "status", item.status
+    ; "payload", payload_kind
+    ; "recurrence", item.recurrence_summary
+    ; "due_at", Masc_domain.iso8601_of_unix_seconds item.due_at
+    ]
 ;;
 
 let format_scheduled_automation_summary
@@ -312,25 +319,25 @@ let format_scheduled_wake_observations
     Buffer.add_string ubuf
       "Rows below are scheduled work requests, not Board posts. The \
        occurrence_id is correlation metadata only: never pass it to a Board \
-       tool. Pass schedule_id to masc_schedule_get to read the current request, \
-       including its payload body, recurrence, owner, and latest execution. \
-       Before acting on that response, require its due_at and payload_digest to \
-       exactly match this wake row; a recurring or updated schedule may already \
+       tool. Pass schedule_id, due_at_unix, and payload_digest from the row to \
+       masc_schedule_get. The tool returns the request only when that exact \
+       occurrence is still current; a recurring or updated schedule may already \
        point at another occurrence. External effects still cross the Gate.\n";
     List.iter
       (fun (event : Keeper_world_observation.pending_board_event) ->
          match event.event_kind with
          | Keeper_world_observation.Schedule_due wake ->
            Buffer.add_string ubuf
-             (Printf.sprintf
-                "- schedule_id=%s due_at=%.17g payload_digest=%s \
-                 occurrence_id=%s title=%s message=%s\n"
-                wake.Keeper_event_queue.schedule_id
-                wake.due_at
-                wake.payload_digest
-                event.post_id
-                (quote_prompt_field event.title)
-                (quote_prompt_field event.preview))
+             (format_prompt_row
+                [ "schedule_id", wake.Keeper_event_queue.schedule_id
+                ; "due_at_unix", Printf.sprintf "%.17g" wake.due_at
+                ; "payload_digest", wake.payload_digest
+                ; "occurrence_id", event.post_id
+                ; ( "title"
+                  , Option.value wake.title ~default:"Scheduled keeper wake due" )
+                ; "message", wake.message
+                ]);
+           Buffer.add_char ubuf '\n'
          (* [events] is pre-filtered by [is_scheduled_automation_event], so the
             arms below are unreachable. They are enumerated rather than folded
             into a catch-all so that an eleventh constructor fails to compile

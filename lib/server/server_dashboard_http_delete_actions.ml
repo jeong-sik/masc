@@ -488,7 +488,8 @@ let handle_dashboard_keeper_purge_completion ~now config operation =
             ~operation_id
             ~now
         with
-        | Error _ as error -> error
+        | Error error ->
+          Error (Server_schedule_consumers.keeper_purge_error_to_string error)
         | Ok () ->
           (match purge_dashboard_keeper_artifacts config operation with
            | Error _ as error -> error

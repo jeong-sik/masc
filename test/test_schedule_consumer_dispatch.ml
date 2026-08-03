@@ -1050,7 +1050,8 @@ let test_keeper_purge_settles_owned_occurrence_before_queue_delete () =
        ~now:202.0
    with
    | Ok () -> ()
-   | Error detail -> fail detail);
+   | Error error ->
+     fail (Server_schedule_consumers.keeper_purge_error_to_string error));
   let queue_path =
     Filename.concat
       (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
@@ -1115,7 +1116,8 @@ let test_keeper_purge_cancels_future_schedule_intent () =
        ~now:202.0
    with
    | Ok () -> ()
-   | Error detail -> fail detail);
+   | Error error ->
+     fail (Server_schedule_consumers.keeper_purge_error_to_string error));
   List.iter
     (fun (request : Schedule_domain.schedule_request) ->
        match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
@@ -1152,9 +1154,11 @@ let test_keeper_purge_rejects_missing_owned_snapshot () =
        ~now:202.0
    with
    | Ok () -> fail "purge accepted missing schedule evidence"
-   | Error detail ->
-     check bool "missing evidence blocks purge" true
-       (String_util.contains_substring detail "missing durable schedule evidence"));
+   | Error (Server_schedule_consumers.Missing_schedule_evidence _) -> ()
+   | Error error ->
+     failf
+       "unexpected missing-evidence purge error: %s"
+       (Server_schedule_consumers.keeper_purge_error_to_string error));
   let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
   check string "blocked purge keeps occurrence unsettled" "dispatched"
     (Schedule_domain.execution_status_to_string execution.status)
@@ -1211,9 +1215,11 @@ let test_keeper_purge_preflights_whole_batch () =
        ~now:202.0
    with
    | Ok () -> fail "purge accepted a partially invalid evidence batch"
-   | Error detail ->
-     check bool "later missing evidence blocks whole batch" true
-       (String_util.contains_substring detail "missing durable schedule evidence"));
+   | Error (Server_schedule_consumers.Missing_schedule_evidence _) -> ()
+   | Error error ->
+     failf
+       "unexpected batch purge error: %s"
+       (Server_schedule_consumers.keeper_purge_error_to_string error));
   let state = Schedule_store.read_state config in
   List.iter
     (fun (execution : Schedule_domain.execution_record) ->
@@ -1292,9 +1298,11 @@ let test_keeper_purge_rejects_unsettled_transfer_redirect () =
        ~now:203.0
    with
    | Ok () -> fail "purge discarded an unsettled transfer redirect"
-   | Error detail ->
-     check bool "unsettled redirect blocks source purge" true
-       (String_util.contains_substring detail "unsettled transferred"));
+   | Error (Server_schedule_consumers.Pending_transferred_occurrence _) -> ()
+   | Error error ->
+     failf
+       "unexpected transfer purge error: %s"
+       (Server_schedule_consumers.keeper_purge_error_to_string error));
   let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
   check string "blocked source purge preserves dispatched execution" "dispatched"
     (Schedule_domain.execution_status_to_string execution.status)
@@ -1388,7 +1396,8 @@ let test_keeper_purge_follows_terminal_transfer_redirect () =
        ~now:204.0
    with
    | Ok () -> ()
-   | Error detail -> fail detail);
+   | Error error ->
+     fail (Server_schedule_consumers.keeper_purge_error_to_string error));
   match latest_execution_exn config ~schedule_id:request.schedule_id with
   | { status = Schedule_domain.Execution_failed
     ; error = Some detail

@@ -1130,24 +1130,133 @@ let settlements =
     ~read_state:Keeper_registry_event_queue.existing_durable_state_result
 ;;
 
+type keeper_purge_error =
+  | Schedule_ledger_read_error of Schedule_store.read_error
+  | Durable_queue_read_error of { keeper_name : string; detail : string }
+  | Durable_queue_index_error of { keeper_name : string; detail : string }
+  | Invalid_execution_detail of { occurrence_id : string; detail : string }
+  | Pending_transferred_occurrence of
+      { source_keeper : string
+      ; owner : string
+      ; occurrence_id : string
+      }
+  | Projecting_transferred_occurrence of
+      { source_keeper : string
+      ; owner : string
+      ; target : string
+      ; occurrence_id : string
+      }
+  | Missing_transferred_evidence of
+      { source_keeper : string
+      ; owner : string
+      ; occurrence_id : string
+      }
+  | Unprojected_schedule_transfer of
+      { keeper_name : string; target : string; occurrence_id : string }
+  | Transfer_resolution_error of
+      { source_keeper : string
+      ; target : string
+      ; occurrence_id : string
+      ; detail : string
+      }
+  | Mismatched_schedule_evidence of
+      { keeper_name : string; occurrence_id : string }
+  | Non_schedule_evidence of
+      { keeper_name : string; occurrence_id : string }
+  | Missing_schedule_evidence of
+      { keeper_name : string; occurrence_id : string }
+  | Schedule_ledger_write_error of Schedule_store.store_error
+
+let keeper_purge_error_to_string = function
+  | Schedule_ledger_read_error error ->
+    "dashboard Keeper purge cannot read schedule ledger: "
+    ^ Schedule_store.read_error_to_string error
+  | Durable_queue_read_error { keeper_name; detail } ->
+    Printf.sprintf
+      "dashboard Keeper purge cannot read durable queue keeper=%s: %s"
+      keeper_name
+      detail
+  | Durable_queue_index_error { keeper_name; detail } ->
+    Printf.sprintf
+      "dashboard Keeper purge cannot index durable queue keeper=%s: %s"
+      keeper_name
+      detail
+  | Invalid_execution_detail { occurrence_id; detail } ->
+    Printf.sprintf
+      "dashboard Keeper purge cannot decode execution detail occurrence=%s: %s"
+      occurrence_id
+      detail
+  | Pending_transferred_occurrence
+      { source_keeper; owner; occurrence_id } ->
+    Printf.sprintf
+      "dashboard Keeper purge blocked by pending transferred schedule occurrence source=%s owner=%s occurrence=%s"
+      source_keeper
+      owner
+      occurrence_id
+  | Projecting_transferred_occurrence
+      { source_keeper; owner; target; occurrence_id } ->
+    Printf.sprintf
+      "dashboard Keeper purge blocked by projecting transferred schedule occurrence source=%s owner=%s target=%s occurrence=%s"
+      source_keeper
+      owner
+      target
+      occurrence_id
+  | Missing_transferred_evidence
+      { source_keeper; owner; occurrence_id } ->
+    Printf.sprintf
+      "dashboard Keeper purge missing transferred schedule evidence source=%s owner=%s occurrence=%s"
+      source_keeper
+      owner
+      occurrence_id
+  | Unprojected_schedule_transfer { keeper_name; target; occurrence_id } ->
+    Printf.sprintf
+      "dashboard Keeper purge blocked by unprojected schedule transfer keeper=%s target=%s occurrence=%s"
+      keeper_name
+      target
+      occurrence_id
+  | Transfer_resolution_error
+      { source_keeper; target; occurrence_id; detail } ->
+    Printf.sprintf
+      "dashboard Keeper purge cannot resolve transferred schedule occurrence source=%s target=%s occurrence=%s: %s"
+      source_keeper
+      target
+      occurrence_id
+      detail
+  | Mismatched_schedule_evidence { keeper_name; occurrence_id } ->
+    Printf.sprintf
+      "dashboard Keeper purge found mismatched schedule evidence keeper=%s occurrence=%s"
+      keeper_name
+      occurrence_id
+  | Non_schedule_evidence { keeper_name; occurrence_id } ->
+    Printf.sprintf
+      "dashboard Keeper purge found non-schedule evidence for occurrence=%s keeper=%s"
+      occurrence_id
+      keeper_name
+  | Missing_schedule_evidence { keeper_name; occurrence_id } ->
+    Printf.sprintf
+      "dashboard Keeper purge missing durable schedule evidence keeper=%s occurrence=%s"
+      keeper_name
+      occurrence_id
+  | Schedule_ledger_write_error error ->
+    Schedule_store.store_error_to_string error
+;;
+
 let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
   let base_path = config.Workspace_utils.base_path in
   let* schedule_state =
     Schedule_store.read_state_result config
-    |> Result.map_error (fun error ->
-      "dashboard Keeper purge cannot read schedule ledger: "
-      ^ Schedule_store.read_error_to_string error)
+    |> Result.map_error (fun error -> Schedule_ledger_read_error error)
   in
   let executions = Schedule_store.unsettled_dispatched_occurrences schedule_state in
   let* queue_state =
     Keeper_registry_event_queue.durable_state_result ~base_path keeper_name
-    |> Result.map_error (fun detail ->
-      Printf.sprintf
-        "dashboard Keeper purge cannot read durable queue keeper=%s: %s"
-        keeper_name
-        detail)
+    |> Result.map_error (fun detail -> Durable_queue_read_error { keeper_name; detail })
   in
-  let* occurrence_index = durable_occurrence_index queue_state in
+  let* occurrence_index =
+    durable_occurrence_index queue_state
+    |> Result.map_error (fun detail ->
+      Durable_queue_index_error { keeper_name; detail })
+  in
   let purge_reason =
     Printf.sprintf
       "scheduled occurrence cancelled by dashboard Keeper purge operation=%s keeper=%s"
@@ -1175,26 +1284,16 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
       Ok (settlement (Schedule_store.Dispatched_occurrence_failed reason))
     | Pending_at (owner, _) ->
       Error
-        (Printf.sprintf
-           "dashboard Keeper purge blocked by pending transferred schedule occurrence source=%s owner=%s occurrence=%s"
-           keeper_name
-           owner
-           occurrence_id)
+        (Pending_transferred_occurrence
+           { source_keeper = keeper_name; owner; occurrence_id })
     | Transfer_projecting_at (owner, target) ->
       Error
-        (Printf.sprintf
-           "dashboard Keeper purge blocked by projecting transferred schedule occurrence source=%s owner=%s target=%s occurrence=%s"
-           keeper_name
-           owner
-           target
-           occurrence_id)
+        (Projecting_transferred_occurrence
+           { source_keeper = keeper_name; owner; target; occurrence_id })
     | Absent_at owner ->
       Error
-        (Printf.sprintf
-           "dashboard Keeper purge missing transferred schedule evidence source=%s owner=%s occurrence=%s"
-           keeper_name
-           owner
-           occurrence_id)
+        (Missing_transferred_evidence
+           { source_keeper = keeper_name; owner; occurrence_id })
   in
   let settlement_of_execution
         (execution : Schedule_domain.execution_record)
@@ -1221,11 +1320,8 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
            (Schedule_store.Dispatched_occurrence_failed reason))
     | Transfer_projecting_to target ->
       Error
-        (Printf.sprintf
-           "dashboard Keeper purge blocked by unprojected schedule transfer keeper=%s target=%s occurrence=%s"
-           keeper_name
-           target
-           (occurrence_stimulus_id execution))
+        (Unprojected_schedule_transfer
+           { keeper_name; target; occurrence_id = occurrence_stimulus_id execution })
     | Transferred_to target ->
       let occurrence_id = occurrence_stimulus_id execution in
       let* resolved =
@@ -1237,12 +1333,8 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
           ~visited:[ keeper_name ]
           target
         |> Result.map_error (fun detail ->
-          Printf.sprintf
-            "dashboard Keeper purge cannot resolve transferred schedule occurrence source=%s target=%s occurrence=%s: %s"
-            keeper_name
-            target
-            occurrence_id
-            detail)
+          Transfer_resolution_error
+            { source_keeper = keeper_name; target; occurrence_id; detail })
       in
       settlement_of_resolved_disposition execution occurrence_id resolved
   in
@@ -1261,27 +1353,22 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
              settlement_of_execution execution disposition
            | Keeper_event_queue.Schedule_due _ ->
              Error
-               (Printf.sprintf
-                  "dashboard Keeper purge found mismatched schedule evidence keeper=%s occurrence=%s"
-                  keeper_name
-                  occurrence_id)
+               (Mismatched_schedule_evidence { keeper_name; occurrence_id })
            | _ ->
              Error
-               (Printf.sprintf
-                  "dashboard Keeper purge found non-schedule evidence for occurrence=%s keeper=%s"
-                  occurrence_id
-                  keeper_name)
+               (Non_schedule_evidence { keeper_name; occurrence_id })
          in
          preflight (settlement :: settlements) rest
        | None ->
-         let* original_keeper = execution_keeper_name execution in
+         let* original_keeper =
+           execution_keeper_name execution
+           |> Result.map_error (fun detail ->
+             Invalid_execution_detail { occurrence_id; detail })
+         in
          if String.equal original_keeper keeper_name
          then
            Error
-             (Printf.sprintf
-                "dashboard Keeper purge missing durable schedule evidence keeper=%s occurrence=%s"
-                keeper_name
-                occurrence_id)
+             (Missing_schedule_evidence { keeper_name; occurrence_id })
          else preflight settlements rest)
   in
   let* settlements = preflight [] executions in
@@ -1298,7 +1385,7 @@ let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
     ~now
     ~settlements
     ~should_cancel
-  |> Result.map_error Schedule_store.store_error_to_string
+  |> Result.map_error (fun error -> Schedule_ledger_write_error error)
 ;;
 
 let consumer : Schedule_runner.consumer = { accepts; dispatch; settlements }

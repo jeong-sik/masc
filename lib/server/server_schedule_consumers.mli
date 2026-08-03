@@ -49,12 +49,51 @@ val consumer : Schedule_runner.consumer
     The schedule core remains opaque; this adapter is the MASC server layer that
     interprets explicitly supported payload envelopes. *)
 
+type keeper_purge_error =
+  | Schedule_ledger_read_error of Schedule_store.read_error
+  | Durable_queue_read_error of { keeper_name : string; detail : string }
+  | Durable_queue_index_error of { keeper_name : string; detail : string }
+  | Invalid_execution_detail of { occurrence_id : string; detail : string }
+  | Pending_transferred_occurrence of
+      { source_keeper : string
+      ; owner : string
+      ; occurrence_id : string
+      }
+  | Projecting_transferred_occurrence of
+      { source_keeper : string
+      ; owner : string
+      ; target : string
+      ; occurrence_id : string
+      }
+  | Missing_transferred_evidence of
+      { source_keeper : string
+      ; owner : string
+      ; occurrence_id : string
+      }
+  | Unprojected_schedule_transfer of
+      { keeper_name : string; target : string; occurrence_id : string }
+  | Transfer_resolution_error of
+      { source_keeper : string
+      ; target : string
+      ; occurrence_id : string
+      ; detail : string
+      }
+  | Mismatched_schedule_evidence of
+      { keeper_name : string; occurrence_id : string }
+  | Non_schedule_evidence of
+      { keeper_name : string; occurrence_id : string }
+  | Missing_schedule_evidence of
+      { keeper_name : string; occurrence_id : string }
+  | Schedule_ledger_write_error of Schedule_store.store_error
+
+val keeper_purge_error_to_string : keeper_purge_error -> string
+
 val settle_keeper_purge_occurrences :
   Workspace_utils.config ->
   keeper_name:string ->
   operation_id:string ->
   now:float ->
-  (unit, string) result
+  (unit, keeper_purge_error) result
 (** Project every exact unsettled occurrence owned by [keeper_name] into the
     schedule ledger before its durable queue is deleted. Pending work becomes
     an explicit purge cancellation; existing terminal evidence keeps its exact

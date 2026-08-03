@@ -90,8 +90,7 @@ let test_read_failure_does_not_mint_credential () =
 ;;
 
 let with_temp_base label f =
-  let base_path = Filename.temp_file label ".workspace" in
-  Sys.remove base_path;
+  let base_path = Filename.temp_dir label ".workspace" in
   Fun.protect
     ~finally:(fun () -> Fs_compat.remove_tree base_path)
     (fun () -> f base_path)

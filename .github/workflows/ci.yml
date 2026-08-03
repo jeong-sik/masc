@@ -1294,6 +1294,10 @@ jobs:
         if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
         run: scripts/check-checkpoint-installation-legacy-purge.sh
 
+      - name: Run event queue v15 cutover gate self-test
+        if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
+        run: scripts/check-keeper-event-queue-v15-cutover.sh --self-test
+
       - name: Run keeper cwd leak gate
         if: needs.changes.outputs.keeper_cwd == 'true'
         run: scripts/keeper-cwd-leak-gate.sh

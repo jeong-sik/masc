@@ -1694,16 +1694,6 @@ let test_read_backlog_counts_falls_back_to_unscoped_claimable_task () =
 
 let test_read_backlog_counts_preserves_unreadable_observation () =
   with_test_env (fun config ->
-    let task_id =
-      match Keeper_id.Task_id.of_string "task-001" with
-      | Ok task_id -> task_id
-      | Error message -> Alcotest.fail message
-    in
-    let current_task_meta =
-      { (keeper_meta_for_self_filter "keeper-backlog-recovery-agent") with
-        current_task_id = Some task_id
-      }
-    in
     let write_corrupt path =
       Out_channel.with_open_text path (fun channel ->
         output_string channel "{\"tasks\":\"not-current\"}")

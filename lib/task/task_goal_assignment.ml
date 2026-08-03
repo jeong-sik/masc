@@ -38,7 +38,7 @@ let set_task_goal_error_to_string = function
 ;;
 
 let set_task_goal config ~task_id ~goal_id : (unit, set_task_goal_error) result =
-  match Workspace.read_backlog_r config with
+  match Workspace_backlog.read_backlog_r config with
   | Error message -> Error (Backlog_read_failed message)
   | Ok backlog when not (List.exists (fun (t : Masc_domain.task) -> String.equal t.id task_id) backlog.tasks) ->
     Error (Unknown_task task_id)

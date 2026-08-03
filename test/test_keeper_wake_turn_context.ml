@@ -235,7 +235,7 @@ let test_current_task_section_absent_without_task () =
     (contains ~needle:"### Current Task" user)
 
 let task_id_exn value =
-  match Masc.Keeper_id.Task_id.of_string value with
+  match Keeper_id.Task_id.of_string value with
   | Ok task_id -> task_id
   | Error message -> fail message
 

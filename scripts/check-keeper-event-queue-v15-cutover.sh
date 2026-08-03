@@ -44,16 +44,22 @@ command -v jq >/dev/null 2>&1 || fail "jq is required"
 
 run_gate() {
   local runtime_root="$BASE_PATH/.masc"
-  local schedules_path="$runtime_root/schedules.json"
   local keepers_root="$runtime_root/keepers"
-  local unsettled_count=0
+  local schedule_ledger_count=0
+  local schedules_path
   local queue_count=0
   local queue_path
   local pending_count
   local outbox_count
   local accepted_count
 
-  if [[ -e "$schedules_path" || -L "$schedules_path" ]]; then
+  for schedules_path in \
+    "$runtime_root/schedules.json" \
+    "$runtime_root/schedules.json.last-good"; do
+    if [[ ! -e "$schedules_path" && ! -L "$schedules_path" ]]; then
+      continue
+    fi
+    schedule_ledger_count=$((schedule_ledger_count + 1))
     [[ -f "$schedules_path" && ! -L "$schedules_path" ]] \
       || fail "schedule ledger is not an exact regular file: $schedules_path"
     jq -e '
@@ -68,6 +74,7 @@ run_gate() {
           or .status == "failed"))
     ' "$schedules_path" >/dev/null \
       || fail "schedule ledger shape is invalid: $schedules_path"
+    local unsettled_count
     unsettled_count="$(jq '[.executions[] | select(.status == "running" or .status == "dispatched")] | length' "$schedules_path")"
     if [[ "$unsettled_count" -ne 0 ]]; then
       jq -r '
@@ -86,7 +93,7 @@ run_gate() {
         and (.schedule_instance_id | type == "string" and length > 0))
     ' "$schedules_path" >/dev/null \
       || fail "schedule ledger contains pre-cut rows without a current schedule instance id: $schedules_path"
-  fi
+  done
 
   if [[ -d "$keepers_root" ]]; then
     while IFS= read -r -d '' queue_path; do
@@ -111,8 +118,8 @@ run_gate() {
     done < <(find "$keepers_root" -name 'event-queue-v14.json' -print0)
   fi
 
-  printf '[event-queue-v15-cutover] OK: base_path=%s v14_owners=%d unsettled=0\n' \
-    "$BASE_PATH" "$queue_count"
+  printf '[event-queue-v15-cutover] OK: base_path=%s schedule_ledgers=%d v14_owners=%d unsettled=0\n' \
+    "$BASE_PATH" "$schedule_ledger_count" "$queue_count"
 }
 
 if [[ "$SELF_TEST" -eq 1 ]]; then
@@ -162,6 +169,8 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
 
   safe_root="$fixture_root/safe"
   write_schedules "$safe_root" succeeded
+  cp "$safe_root/.masc/schedules.json" \
+    "$safe_root/.masc/schedules.json.last-good"
   write_queue "$safe_root" 0 0 0
   "$0" --base-path "$safe_root" >/dev/null
 
@@ -210,6 +219,15 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
      executions: []}
   ' >"$pre_cut_root/.masc/schedules.json"
   expect_failure pre_cut_schedule "$pre_cut_root"
+
+  pre_cut_recovery_root="$fixture_root/pre-cut-recovery"
+  write_schedules "$pre_cut_recovery_root" succeeded
+  jq -n '
+    {version: 1,
+     schedules: [{schedule_id: "pre-cut-schedule"}],
+     executions: []}
+  ' >"$pre_cut_recovery_root/.masc/schedules.json.last-good"
+  expect_failure pre_cut_recovery "$pre_cut_recovery_root"
 
   printf '[event-queue-v15-cutover] self-test OK\n'
   exit 0

@@ -1015,6 +1015,72 @@ let test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing () =
   | None -> fail "missing snapshot caused the occurrence to disappear"
 ;;
 
+let test_keeper_purge_settles_owned_occurrence_before_queue_delete () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let request = create_keeper_wake_schedule config in
+  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
+  (match
+     Server_schedule_consumers.settle_keeper_purge_occurrences
+       config
+       ~keeper_name
+       ~operation_id:"purge-op-1"
+       ~now:202.0
+   with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  let queue_path =
+    Filename.concat
+      (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+      "event-queue-v14.json"
+  in
+  Sys.remove queue_path;
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | Some stored ->
+     check string "purged one-shot is terminal" "failed"
+       (Schedule_domain.schedule_status_to_string stored.status)
+   | None -> fail "purged schedule missing");
+  match latest_execution_exn config ~schedule_id:request.schedule_id with
+  | { status = Schedule_domain.Execution_failed; error = Some reason; _ } ->
+    check bool "purge operation remains in terminal evidence" true
+      (String_util.contains_substring reason "purge-op-1")
+  | execution ->
+    failf
+      "purged occurrence stayed %s"
+      (Schedule_domain.execution_status_to_string execution.status)
+;;
+
+let test_keeper_purge_rejects_missing_owned_snapshot () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let request = create_keeper_wake_schedule config in
+  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
+  let queue_path =
+    Filename.concat
+      (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+      "event-queue-v14.json"
+  in
+  Sys.remove queue_path;
+  (match
+     Server_schedule_consumers.settle_keeper_purge_occurrences
+       config
+       ~keeper_name
+       ~operation_id:"purge-op-missing"
+       ~now:202.0
+   with
+   | Ok () -> fail "purge accepted missing schedule evidence"
+   | Error detail ->
+     check bool "missing evidence blocks purge" true
+       (String_util.contains_substring detail "missing durable schedule evidence"));
+  let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
+  check string "blocked purge keeps occurrence unsettled" "dispatched"
+    (Schedule_domain.execution_status_to_string execution.status)
+;;
+
 let test_keeper_wake_durable_state_failure_retries_same_occurrence () =
   with_workspace
   @@ fun config ->
@@ -1982,6 +2048,11 @@ let () =
             test_reclaim_revalidates_cached_transfer_target_absence
         ; test_case "reclaim keeps occurrence when queue snapshot is missing" `Quick
             test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing
+        ; test_case "keeper purge settles owned occurrence before queue deletion"
+            `Quick
+            test_keeper_purge_settles_owned_occurrence_before_queue_delete
+        ; test_case "keeper purge rejects missing owned snapshot" `Quick
+            test_keeper_purge_rejects_missing_owned_snapshot
         ; test_case "keeper wake durable state failure retries same occurrence" `Quick
             test_keeper_wake_durable_state_failure_retries_same_occurrence
         ; test_case "cancelled occurrence recovery does not enqueue again"

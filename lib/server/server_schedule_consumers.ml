@@ -1060,6 +1060,116 @@ let settlements =
     ~read_state:Keeper_registry_event_queue.existing_durable_state_result
 ;;
 
+let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
+  let base_path = config.Workspace_utils.base_path in
+  let* schedule_state =
+    Schedule_store.read_state_result config
+    |> Result.map_error (fun error ->
+      "dashboard Keeper purge cannot read schedule ledger: "
+      ^ Schedule_store.read_error_to_string error)
+  in
+  let executions = Schedule_store.unsettled_dispatched_occurrences schedule_state in
+  let* queue_state =
+    Keeper_registry_event_queue.durable_state_result ~base_path keeper_name
+    |> Result.map_error (fun detail ->
+      Printf.sprintf
+        "dashboard Keeper purge cannot read durable queue keeper=%s: %s"
+        keeper_name
+        detail)
+  in
+  let* occurrence_index = durable_occurrence_index queue_state in
+  let purge_reason =
+    Printf.sprintf
+      "scheduled occurrence cancelled by dashboard Keeper purge operation=%s keeper=%s"
+      operation_id
+      keeper_name
+  in
+  let settle_execution (execution : Schedule_domain.execution_record) disposition =
+    let schedule_id = execution.schedule_id in
+    let due_at = execution.due_at in
+    let payload_digest = execution.payload_digest in
+    let store_result = function
+      | Ok _ -> Ok ()
+      | Error error -> Error (Schedule_store.store_error_to_string error)
+    in
+    match disposition.state with
+    | Pending ->
+      Schedule_store.fail_dispatched_occurrence
+        config
+        ~now
+        ~schedule_id
+        ~due_at
+        ~payload_digest
+        ~error:purge_reason
+      |> store_result
+    | Terminally_completed _ ->
+      Schedule_store.complete_dispatched_occurrence
+        config
+        ~now
+        ~schedule_id
+        ~due_at
+        ~payload_digest
+        ()
+      |> store_result
+    | Terminally_failed (reason, _) | Cancelled (reason, _) ->
+      Schedule_store.fail_dispatched_occurrence
+        config
+        ~now
+        ~schedule_id
+        ~due_at
+        ~payload_digest
+        ~error:reason
+      |> store_result
+    | Transfer_projecting_to target ->
+      Error
+        (Printf.sprintf
+           "dashboard Keeper purge blocked by unprojected schedule transfer keeper=%s target=%s occurrence=%s"
+           keeper_name
+           target
+           (occurrence_stimulus_id execution))
+    | Transferred_to _ -> Ok ()
+  in
+  let rec settle = function
+    | [] -> Ok ()
+    | (execution : Schedule_domain.execution_record) :: rest ->
+      let occurrence_id = occurrence_stimulus_id execution in
+      (match Hashtbl.find_opt occurrence_index occurrence_id with
+       | Some disposition ->
+         let* () =
+           match disposition.source.payload with
+           | Keeper_event_queue.Schedule_due wake
+             when String.equal wake.schedule_id execution.schedule_id
+                  && Float.equal wake.due_at execution.due_at
+                  && String.equal wake.payload_digest execution.payload_digest ->
+             settle_execution execution disposition
+           | Keeper_event_queue.Schedule_due _ ->
+             Error
+               (Printf.sprintf
+                  "dashboard Keeper purge found mismatched schedule evidence keeper=%s occurrence=%s"
+                  keeper_name
+                  occurrence_id)
+           | _ ->
+             Error
+               (Printf.sprintf
+                  "dashboard Keeper purge found non-schedule evidence for occurrence=%s keeper=%s"
+                  occurrence_id
+                  keeper_name)
+         in
+         settle rest
+       | None ->
+         let* original_keeper = execution_keeper_name execution in
+         if String.equal original_keeper keeper_name
+         then
+           Error
+             (Printf.sprintf
+                "dashboard Keeper purge missing durable schedule evidence keeper=%s occurrence=%s"
+                keeper_name
+                occurrence_id)
+         else settle rest)
+  in
+  settle executions
+;;
+
 let consumer : Schedule_runner.consumer = { accepts; dispatch; settlements }
 
 module For_testing = struct

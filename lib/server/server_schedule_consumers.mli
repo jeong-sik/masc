@@ -49,6 +49,17 @@ val consumer : Schedule_runner.consumer
     The schedule core remains opaque; this adapter is the MASC server layer that
     interprets explicitly supported payload envelopes. *)
 
+val settle_keeper_purge_occurrences :
+  Workspace_utils.config ->
+  keeper_name:string ->
+  operation_id:string ->
+  now:float ->
+  (unit, string) result
+(** Project every exact unsettled occurrence owned by [keeper_name] into the
+    schedule ledger before its durable queue is deleted. Pending work becomes
+    an explicit purge cancellation; existing terminal evidence keeps its exact
+    outcome. Missing evidence and in-flight transfers fail closed. *)
+
 module For_testing : sig
   val settlements_with_read_state :
     read_state:

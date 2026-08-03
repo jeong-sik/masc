@@ -526,9 +526,19 @@ let run_keeper_cycle
          (keeper_keepalive.ml), not injected into prompt (#6814). *)
                (* RFC-0315: resolve the claimed task and goal titles here (the
                   turn runner owns config), so the prompt can render what the
-                  keeper holds and why it woke. Both reads are total: a failed
-                  backlog read yields None, an unknown goal id remains a bare
-                  id instead of disappearing from the prompt. *)
+                  keeper holds and why it woke. An unknown goal id remains a
+                  bare id instead of disappearing from the prompt.
+                  [read_current_task] is NOT total: it raises
+                  [Workspace.Backlog_read_failed] when neither the primary
+                  backlog nor its recovery snapshot can be read. There is no
+                  [try] here, so that reaches the heartbeat loop's catch-all and
+                  is recorded as [Turn_cycle_crashed] plus a health failure --
+                  an observation input the prompt merely renders is charged to
+                  the turn. Both alternatives are wrong in the way this PR
+                  already rejected elsewhere: raising makes an unreadable
+                  backlog a turn crash, and returning [None] would tell the
+                  keeper it holds no task while it does. Resolving that needs
+                  the prompt layer to be able to say "unreadable". *)
                let current_task =
                  Keeper_world_observation_inputs.read_current_task ~config ~meta
                in

@@ -1105,8 +1105,14 @@ let test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing () =
      check string "failure keeps exact occurrence identity"
        expected_occurrence_id
        occurrence_id;
-     check bool "missing snapshot provenance is explicit" true
-       (String_util.contains_substring detail "event queue snapshot is missing")
+     check string
+       "missing snapshot provenance is explicit"
+       (Printf.sprintf
+          "scheduled keeper wake durable state read failed keeper=%s: event queue snapshot is missing keeper=%s path=%s"
+          keeper_name
+          keeper_name
+          queue_path)
+       detail
    | [ Schedule_runner.Settlement_batch_cardinality_mismatch _ ]
    | [ Schedule_runner.Settlement_batch_consumer_failure _ ]
    | []
@@ -1156,8 +1162,10 @@ let test_keeper_purge_settles_owned_occurrence_before_queue_delete () =
    | None -> fail "purged schedule missing");
   match latest_execution_exn config ~schedule_id:request.schedule_id with
   | { status = Schedule_domain.Execution_failed; error = Some reason; _ } ->
-    check bool "purge operation remains in terminal evidence" true
-      (String_util.contains_substring reason "purge-op-1")
+    check string
+      "purge operation remains in terminal evidence"
+      "scheduled occurrence cancelled by dashboard Keeper purge operation=purge-op-1 keeper=schedule-keeper"
+      reason
   | execution ->
     failf
       "purged occurrence stayed %s"
@@ -1621,8 +1629,13 @@ let test_shutdown_fence_rejects_schedule_intake_before_enqueue () =
        let result = tick_ok config ~now:201.0 in
        (match result.dispatches with
         | [ { status = Schedule_runner.Dispatch_failed; error = Some detail; _ } ] ->
-          check bool "dispatch reports exact shutdown fence" true
-            (String_util.contains_substring detail "rejected by shutdown fence")
+          check string
+            "dispatch reports exact shutdown fence"
+            (Printf.sprintf
+               "scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"
+               keeper_name
+               (Keeper_shutdown_types.Operation_id.to_string operation_id))
+            detail
         | _ -> fail "shutdown-fenced dispatch did not remain retryable");
        check int "shutdown-fenced dispatch writes no queue entry" 0
          (Keeper_registry_event_queue.snapshot ~base_path keeper_name
@@ -1784,8 +1797,13 @@ let test_transferred_retry_uses_resolved_owner_shutdown_fence () =
             ; error = Some detail
             ; _
             } ] ->
-          check bool "retry reports the resolved owner fence" true
-            (String_util.contains_substring detail ("keeper=" ^ target_keeper))
+          check string
+            "retry reports the resolved owner fence"
+            (Printf.sprintf
+               "scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"
+               target_keeper
+               (Keeper_shutdown_types.Operation_id.to_string operation_id))
+            detail
         | _ -> fail "transferred retry bypassed the resolved owner fence");
        check int "target occurrence remains durable" 1
          (Keeper_registry_event_queue.snapshot ~base_path target_keeper
@@ -2214,8 +2232,10 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
        Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string);
      check string "terminal retry needs no activation" "not_required"
        Yojson.Safe.Util.(detail |> member "activation_status" |> to_string);
-     check bool "terminal failure reason is preserved" true
-       (String_util.contains_substring error "terminal before schedule retry")
+     check string
+       "terminal failure reason is preserved"
+       "terminal before schedule retry"
+       error
    | _ -> fail "terminal retry did not preserve the failed disposition");
   check int "terminal retry enqueues no second occurrence" 0
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name

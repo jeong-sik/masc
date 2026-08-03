@@ -1195,10 +1195,10 @@ let () =
            (Masc.Keeper_event_queue_recovery.Target_transfer_projection_failed
               { target_keeper; detail }) ->
          Alcotest.(check string) "post-purge failure target" to_keeper target_keeper;
-         Alcotest.(check bool)
+         Alcotest.(check string)
            "post-purge failure names missing metadata"
-           true
-           (contains_substring ~needle:"metadata is absent" detail)
+           "target Keeper metadata is absent"
+           detail
        | Error error ->
          Alcotest.fail
            (Masc.Keeper_event_queue_recovery.projection_error_to_string error)

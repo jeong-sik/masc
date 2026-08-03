@@ -982,8 +982,10 @@ let test_reclaim_reports_empty_batch_consumer_exception () =
   check int "empty batch examines no occurrences" 0 outcome.examined;
   match outcome.failures with
   | [ Settlement_batch_consumer_failure error ] ->
-    check bool "batch exception remains visible" true
-      (String_util.contains_substring error "empty settlement batch exploded")
+    check string
+      "batch exception remains visible"
+      "consumer settlement raised: Failure(\"empty settlement batch exploded\")"
+      error
   | _ -> fail "empty batch consumer exception was hidden"
 ;;
 
@@ -1004,8 +1006,10 @@ let test_reclaim_counts_nonempty_batch_cardinality_mismatch () =
   | [ Occurrence_reclaim_failure { occurrence_id; error } ] ->
     check bool "mismatch keeps an occurrence identity" true
       (String.trim occurrence_id <> "");
-    check bool "mismatch reports exact cardinality" true
-      (String_util.contains_substring error "expected=1 actual=0")
+    check string
+      "mismatch reports exact cardinality"
+      "consumer settlement batch cardinality mismatch: expected=1 actual=0"
+      error
   | _ -> fail "nonempty batch cardinality mismatch was not occurrence-scoped"
 ;;
 

@@ -28,12 +28,14 @@ type delivery_audience =
 type delivery =
   { event_id : int
   ; frame : string
+  ; payload : Yojson.Safe.t
   ; emitted_at : float
   ; audience : delivery_audience
   }
 (** Canonical occurrence shared by the replay store and live queues.
-    Its id, wire frame, producer timestamp, and exact audience are allocated
-    once. *)
+    Its id, typed payload, wire frame, producer timestamp, and exact audience
+    are allocated once. Transport adapters consume [payload] rather than
+    reparsing [frame]. *)
 
 type client = {
   id : int;

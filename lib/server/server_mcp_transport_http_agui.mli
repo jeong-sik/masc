@@ -39,11 +39,9 @@ val handle_ag_ui_events :
        typed delivery to the AG-UI wire format. Replay/live overlap is removed
        by exact event id.
     9. Spawn two fibers under the runtime switch:
-       - drain: pulls typed deliveries from the per-session stream, converts each frame to the
-         AG-UI wire format, writes to client, self-terminates on send
-         failure.  A missing or malformed [data:] payload is projected to a
-         schema-valid AG-UI [CUSTOM] event named [MASC_EVENT_ENCODING_ERROR]
-         and logged at {!Log.Transport.warn}; raw MASC frames never cross this
+       - drain: pulls typed deliveries from the per-session stream, converts
+         each original JSON payload to the AG-UI wire format, writes to client,
+         and self-terminates on send failure. Raw MASC frames never cross this
          endpoint's wire boundary.
        - ping: sleeps 30s, writes ": ping\\n\\n" comment frame to
          keep middleboxes from idling out the connection.

@@ -18,6 +18,7 @@ let jsonrpc_notification method_name =
 let delivery ?(emitted_at = Unix.gettimeofday ()) event_id frame : Masc.Sse.delivery =
   { event_id
   ; frame
+  ; payload = `String frame
   ; emitted_at
   ; audience = Masc.Sse.Broadcast_audience Masc.Sse.All
   }
@@ -441,6 +442,20 @@ let test_concurrent_broadcast_preserves_replay_and_live_cursor_order () =
       check (list int) "live delivery follows durable cursor order"
         buffered_ids live_ids)
 
+let test_broadcast_preserves_typed_payload () =
+  let session_id = "test_typed_payload_" ^ string_of_int (Random.bits ()) in
+  Fun.protect
+    ~finally:(fun () -> Sse.unregister session_id)
+    (fun () ->
+      let (_client_id, event_stream, _) =
+        register_exn ~kind:Sse.Observer session_id ~last_event_id:0
+      in
+      let expected = `Assoc [ "typed_payload", `String "preserved" ] in
+      Sse.broadcast_to Sse.Observers expected;
+      let actual = (Eio.Stream.take event_stream : Sse.delivery).payload in
+      check bool "delivery retains producer JSON without wire reparse" true
+        (expected = actual))
+
 (* ============================================================
    client Type Tests
    ============================================================ *)
@@ -631,6 +646,8 @@ let () =
         test_cleanup_expired_events_exact_under_domain_contention;
       test_case "concurrent broadcast preserves replay/live cursor order" `Quick
         test_concurrent_broadcast_preserves_replay_and_live_cursor_order;
+      test_case "broadcast preserves typed payload" `Quick
+        test_broadcast_preserves_typed_payload;
     ];
     "broadcast", [
       test_case "sends to clients" `Quick test_broadcast_sends_to_clients;

@@ -122,6 +122,7 @@ type delivery_audience =
 type delivery =
   { event_id : int
   ; frame : string
+  ; payload : Yojson.Safe.t
   ; emitted_at : float
   ; audience : delivery_audience
   }
@@ -1014,6 +1015,7 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
   let delivery =
     { event_id = current_event_id
     ; frame = format_event_yojson ~id:current_event_id ~event_type json
+    ; payload = json
     ; emitted_at = t0
     ; audience = Broadcast_audience target
     }
@@ -1119,6 +1121,7 @@ let send_to session_id json =
       let delivery =
         { event_id = current_event_id
         ; frame = format_event_yojson ~id:current_event_id ~event_type:"message" json
+        ; payload = json
         ; emitted_at = Time_compat.now ()
         ; audience = Session_audience session_id
         }

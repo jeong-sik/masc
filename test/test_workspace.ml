@@ -1808,6 +1808,8 @@ let test_read_current_task_preserves_unavailable_and_missing () =
          "missing task id"
          "task-001"
          (Keeper_id.Task_id.to_string missing)
+     | Keeper_world_observation_inputs.Current_task_missing { recovery = Some _; _ } ->
+       Alcotest.fail "missing task unexpectedly came from a recovery snapshot"
      | Keeper_world_observation_inputs.No_current_task
      | Keeper_world_observation_inputs.Current_task _
      | Keeper_world_observation_inputs.Recovered_current_task _

@@ -190,6 +190,22 @@ let field_name = function
 
 let current_field_names = List.map field_name all_fields
 
+(* RFC-0357 §3.3: the consumption stamp pair shipped after live keeper metas
+   were written. An ABSENT field decodes as its genesis value (revision 0,
+   empty projection digest) instead of invalidating the whole meta: an
+   invalid meta cannot be read or rewritten (write_meta_with_merge fails
+   closed on Read_failed), so absent=invalid would strand every pre-RFC
+   keeper in "runtime reset required" — the 2026-07-31 fleet outage shape,
+   measured live as 10/10 metas lacking the pair. A PRESENT malformed value
+   still fails the decode. Exactly these two fields are absence-tolerated;
+   everything else stays required. Removal is tracked, not aspirational:
+   once every live meta carries the pair (one post-turn write per keeper),
+   issue #26697 shrinks this list back to empty. *)
+let genesis_defaulted_field_names =
+  [ field_name Last_consumed_backlog_revision
+  ; field_name Last_consumed_backlog_projection_sha256
+  ]
+
 let object_of_field_values field_values =
   let supplied = List.map fst field_values in
   if supplied <> all_fields
@@ -227,7 +243,9 @@ let validate_current_object (json : Yojson.Safe.t) =
        in
        let missing =
          List.filter
-           (fun key -> not (List.mem key present))
+           (fun key ->
+              (not (List.mem key present))
+              && not (List.mem key genesis_defaulted_field_names))
            current_field_names
        in
        if outside_current <> []

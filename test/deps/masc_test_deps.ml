@@ -121,6 +121,7 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
                Masc.Keeper_meta_contract.Proactive_never_started)
         | Schema.Last_proactive_reason
         | Schema.Last_proactive_preview
+        | Schema.Last_consumed_backlog_projection_sha256
         | Schema.Last_autonomous_action_at -> `String ""
         | Schema.Last_compaction_decision -> `String "initialized"
         | Schema.Active_goal_ids -> `List []

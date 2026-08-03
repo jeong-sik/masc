@@ -76,4 +76,9 @@ val current_field_names : string list
 val validate_current_object :
   Yojson.Safe.t -> ((string * Yojson.Safe.t) list, validation_error) result
 (** Require exactly the current top-level key set. Every field outside that set
-    has the same [Invalid_current] classification. *)
+    has the same [Invalid_current] classification. One exception: the
+    RFC-0357 §3.3 genesis pair — [last_consumed_backlog_revision] and
+    [last_consumed_backlog_projection_sha256] — may be ABSENT (live metas
+    predate it) and decodes as revision 0 with an empty projection digest;
+    a PRESENT malformed value still fails. Issue #26697 retires the
+    exception once every live meta carries the pair. *)

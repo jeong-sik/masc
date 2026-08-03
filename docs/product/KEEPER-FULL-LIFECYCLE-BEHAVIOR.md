@@ -1,7 +1,7 @@
 # Keeper Full Lifecycle Behavior
 
 Status: Living product SSOT  
-Last evidence update: 2026-07-27 22:28 KST
+Last evidence update: 2026-08-03 19:34 KST
 Evidence rule: source code and green tests are not live proof.
 
 ## 1. Who uses MASC
@@ -361,6 +361,7 @@ Pricing may be measured and displayed later. It does not limit, route, rank, adm
 
 | Checked at | Evidence | Result | Confidence |
 |---|---|---|---|
+| 2026-08-03 19:34 KST | live `GET /health?full=1` | `status=ok`, `overall_status=ok`; configured, materializable, running, and executable Keeper counts were all 8 (`analyst`, `code-reviewer`, `full-cycle-probe`, `kidsnote`, `lane-smith`, `rondo`, `sangsu`, `taskmaster`); `completion_authority_pending=false`; no operator action required | High for the current roster/authority boundary, not full behavior proof |
 | 2026-07-27 17:31 KST | `GET /health?full=1` | old build `0.21.2@b91dcb6995`; `keeper_fibers=0`; five lifecycle authority blockers | High |
 | 2026-07-27 17:33 KST | fresh-state filesystem operation | old `.masc` retired; only active config, Keeper TOML, Persona, and prompts copied | High |
 | 2026-07-27 17:38 KST | GitHub CLI open PR list and close results | all 13 previously open MASC PRs closed as superseded | High |

@@ -551,7 +551,7 @@ let quarantine_orphaned_owner_unlocked owner ~confirm_owner_presence =
         let renamed = ref false in
         let restore_active_owner () =
           try
-            Unix.rename quarantine_path owner_dir;
+            Fs_compat.rename quarantine_path owner_dir;
             renamed := false;
             Fs_compat.fsync_directory quarantine_root;
             Fs_compat.fsync_directory keepers_dir;
@@ -567,14 +567,19 @@ let quarantine_orphaned_owner_unlocked owner ~confirm_owner_presence =
                  (Printexc.to_string exn))
         in
         (try
-           Unix.rename owner_dir quarantine_path;
+           Fs_compat.rename owner_dir quarantine_path;
            renamed := true;
            let post_confirmation =
              try confirm_owner_presence () with
              | Eio.Cancel.Cancelled _ as exn ->
                (match restore_active_owner () with
                 | Ok () -> raise exn
-                | Error detail -> failwith detail)
+                | Error detail ->
+                  Log.Keeper.error
+                    "failed to restore active event queue owner during cancellation keeper=%s detail=%s"
+                    keeper_name
+                    detail;
+                  raise exn)
              | exn ->
                Error
                  (Printf.sprintf

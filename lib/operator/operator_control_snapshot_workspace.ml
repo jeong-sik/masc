@@ -15,14 +15,25 @@
 
     Pure helper move — local-only function with no .mli surface. *)
 
-let task_ownership_json config =
-  match Workspace.read_backlog_observation_r config with
+let backlog_authority_fields recovered_from =
+  match recovered_from with
+  | None -> [ "authoritative", `Bool true ]
+  | Some recovery ->
+    [ "authoritative", `Bool false
+    ; "recovery_path", `String recovery.recovery_path
+    ; "primary_error", `String recovery.primary_error
+    ]
+;;
+
+let task_ownership_json backlog_observation =
+  match backlog_observation with
   | Error message ->
     `Assoc
       [ "available", `Bool false
+      ; "authoritative", `Bool false
       ; "error", `String message
       ]
-  | Ok backlog ->
+  | Ok { observed_backlog = backlog; recovered_from } ->
     let items =
       List.filter_map
         (fun (task : Masc_domain.task) ->
@@ -45,11 +56,12 @@ let task_ownership_json config =
         backlog.tasks
     in
     `Assoc
-      [ "available", `Bool true
-      ; "backlog_version", `Int backlog.version
-      ; "items", `List items
-      ; "count", `Int (List.length items)
-      ]
+      ( [ "available", `Bool true
+        ; "backlog_version", `Int backlog.version
+        ; "items", `List items
+        ; "count", `Int (List.length items)
+        ]
+        @ backlog_authority_fields recovered_from )
 ;;
 
 let workspace_json config =
@@ -63,7 +75,18 @@ let workspace_json config =
   else (
     let state = Workspace.read_state config in
     let tempo = Tempo.get_tempo config in
-    let tasks = Workspace.get_tasks_raw config in
+    let backlog_observation = Workspace.read_backlog_observation_with_source_r config in
+    let task_count, task_count_available, task_count_authoritative, task_count_error =
+      match backlog_observation with
+      | Error message -> `Null, false, false, `String message
+      | Ok { observed_backlog = backlog; recovered_from } ->
+        ( `Int (List.length backlog.tasks)
+        , true
+        , Option.is_none recovered_from
+        , (match recovered_from with
+          | None -> `Null
+          | Some recovery -> `String recovery.primary_error) )
+    in
     let agents = Workspace.get_agents_raw config in
     `Assoc
       [ "initialized", `Bool true
@@ -75,8 +98,11 @@ let workspace_json config =
       ; "paused_at", Json_util.string_opt_to_json state.paused_at
       ; "tempo_interval_s", `Float tempo.current_interval_s
       ; "agent_count", `Int (List.length agents)
-      ; "task_count", `Int (List.length tasks)
-      ; "task_ownership", task_ownership_json config
+      ; "task_count", task_count
+      ; "task_count_available", `Bool task_count_available
+      ; "task_count_authoritative", `Bool task_count_authoritative
+      ; "task_count_error", task_count_error
+      ; "task_ownership", task_ownership_json backlog_observation
       ; "message_seq", `Int state.message_seq
       ])
 ;;

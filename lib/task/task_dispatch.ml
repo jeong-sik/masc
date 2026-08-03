@@ -64,23 +64,31 @@ let add_task config ~title ~priority ~description =
 let get_task config ~task_id =
   match backend () with
   | Jsonl ->
-      let backlog = Workspace.read_backlog config in
-      Ok (List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks)
+      (match Workspace.read_backlog_observation_r config with
+       | Error message -> Error (System (System_error.IoError message))
+       | Ok backlog ->
+         Ok (List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks))
 
 (** List tasks *)
 let list_tasks config ?(include_done=false) ?(include_cancelled=false) () =
   match backend () with
   | Jsonl ->
-      let backlog = Workspace.read_backlog config in
-      let tasks = List.filter (fun (t : task) ->
-        let dominated = match t.task_status with
-          | Done _ -> not include_done
-          | Cancelled _ -> not include_cancelled
-          | Todo | Claimed _ | InProgress _ | AwaitingVerification _ -> false
-        in
-        not dominated
-      ) backlog.tasks in
-      Ok tasks
+      (match Workspace.read_backlog_observation_r config with
+       | Error message -> Error (System (System_error.IoError message))
+       | Ok backlog ->
+         let tasks =
+           List.filter
+             (fun (t : task) ->
+                let dominated =
+                  match t.task_status with
+                  | Done _ -> not include_done
+                  | Cancelled _ -> not include_cancelled
+                  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ -> false
+                in
+                not dominated)
+             backlog.tasks
+         in
+         Ok tasks)
 
 let backlog_lock_path config =
   Filename.concat (Workspace.tasks_dir config) ".backlog"

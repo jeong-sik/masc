@@ -45,8 +45,13 @@ command -v jq >/dev/null 2>&1 || fail "jq is required"
 run_gate() {
   local runtime_root="$BASE_PATH/.masc"
   local keepers_root="$runtime_root/keepers"
+  local signals_root="$runtime_root/schedules/signals"
   local schedule_ledger_count=0
   local schedules_path
+  local signal_file_count=0
+  local signal_row_count=0
+  local signal_path
+  local rows_in_file
   local queue_count=0
   local queue_path
   local pending_count
@@ -95,6 +100,33 @@ run_gate() {
       || fail "schedule ledger contains pre-cut rows without a current schedule instance id: $schedules_path"
   done
 
+  if [[ -e "$signals_root" || -L "$signals_root" ]]; then
+    [[ -d "$signals_root" && ! -L "$signals_root" ]] \
+      || fail "schedule signal store is not an exact directory: $signals_root"
+    while IFS= read -r -d '' signal_path; do
+      signal_file_count=$((signal_file_count + 1))
+      [[ -f "$signal_path" && ! -L "$signal_path" ]] \
+        || fail "schedule signal segment is not an exact regular file: $signal_path"
+      rows_in_file="$(
+        jq -c '
+          if type == "object"
+             and .event_type == "schedule.due_candidate"
+             and (.occurrence_id | type == "string" and length > 0)
+             and (.schedule_instance_id | type == "string" and length > 0)
+             and (.schedule_id | type == "string" and length > 0)
+             and (.emitted_at | type == "number")
+             and (.due_at | type == "number")
+             and (.payload_digest | type == "string" and length > 0)
+             and (.payload | type == "object")
+          then .
+          else error("schedule signal row does not satisfy the current contract")
+          end
+        ' "$signal_path" | wc -l | tr -d ' '
+      )" || fail "schedule signal segment contains malformed or pre-cut rows: $signal_path"
+      signal_row_count=$((signal_row_count + rows_in_file))
+    done < <(find "$signals_root" -name '*.jsonl' -print0)
+  fi
+
   if [[ -d "$keepers_root" ]]; then
     while IFS= read -r -d '' queue_path; do
       queue_count=$((queue_count + 1))
@@ -118,8 +150,9 @@ run_gate() {
     done < <(find "$keepers_root" -name 'event-queue-v14.json' -print0)
   fi
 
-  printf '[event-queue-v15-cutover] OK: base_path=%s schedule_ledgers=%d v14_owners=%d unsettled=0\n' \
-    "$BASE_PATH" "$schedule_ledger_count" "$queue_count"
+  printf '[event-queue-v15-cutover] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d v14_owners=%d unsettled=0\n' \
+    "$BASE_PATH" "$schedule_ledger_count" "$signal_file_count" \
+    "$signal_row_count" "$queue_count"
 }
 
 if [[ "$SELF_TEST" -eq 1 ]]; then
@@ -137,6 +170,26 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
                 schedule_id: "schedule-fixture", status: $status}]
          end)}
     ' >"$target_root/.masc/schedules.json"
+  }
+
+  write_signal() {
+    local target_root="$1"
+    local include_instance="$2"
+    local signal_dir="$target_root/.masc/schedules/signals/2026-08"
+    mkdir -p "$signal_dir"
+    jq -cn --argjson include_instance "$include_instance" '
+      {event_type: "schedule.due_candidate",
+       occurrence_id: "occurrence-fixture",
+       schedule_id: "schedule-fixture",
+       emitted_at: 1,
+       due_at: 1,
+       payload_digest: "payload-fixture",
+       payload: {kind: "fixture"}}
+      + (if $include_instance
+         then {schedule_instance_id: "instance-fixture"}
+         else {}
+         end)
+    ' >"$signal_dir/04.jsonl"
   }
 
   write_queue() {
@@ -169,6 +222,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
 
   safe_root="$fixture_root/safe"
   write_schedules "$safe_root" succeeded
+  write_signal "$safe_root" true
   cp "$safe_root/.masc/schedules.json" \
     "$safe_root/.masc/schedules.json.last-good"
   write_queue "$safe_root" 0 0 0
@@ -228,6 +282,18 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
      executions: []}
   ' >"$pre_cut_recovery_root/.masc/schedules.json.last-good"
   expect_failure pre_cut_recovery "$pre_cut_recovery_root"
+
+  pre_cut_signal_root="$fixture_root/pre-cut-signal"
+  write_schedules "$pre_cut_signal_root" succeeded
+  write_signal "$pre_cut_signal_root" false
+  expect_failure pre_cut_signal "$pre_cut_signal_root"
+
+  malformed_signal_root="$fixture_root/malformed-signal"
+  write_schedules "$malformed_signal_root" succeeded
+  mkdir -p "$malformed_signal_root/.masc/schedules/signals/2026-08"
+  printf '{not-json\n' \
+    >"$malformed_signal_root/.masc/schedules/signals/2026-08/04.jsonl"
+  expect_failure malformed_signal "$malformed_signal_root"
 
   printf '[event-queue-v15-cutover] self-test OK\n'
   exit 0

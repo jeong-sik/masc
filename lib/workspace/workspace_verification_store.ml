@@ -297,20 +297,31 @@ let submitted_evidence_item_of_yojson = function
               })
      | Some (`String "artifact_unreadable") ->
        let open Result.Syntax in
+       let field_names =
+         fields |> List.map fst |> List.sort String.compare
+       in
        let* reason_json =
          match List.assoc_opt "reason" fields with
          | Some reason -> Ok reason
          | None -> Error "submitted evidence snapshot is missing unreadable reason"
        in
-       (match reason_json, List.assoc_opt "reference" fields with
-        | `Assoc [ "code", `String "invalid_reference" ], None ->
+       (match reason_json, List.assoc_opt "reference" fields, field_names with
+        | ( `Assoc [ "code", `String "invalid_reference" ]
+          , None
+          , [ "kind"; "reason" ] ) ->
           Ok Evidence_invalid_reference
-        | `Assoc [ "code", `String "invalid_reference" ], Some _ ->
+        | `Assoc [ "code", `String "invalid_reference" ], Some _, _ ->
           Error "invalid submitted evidence references must not persist the rejected value"
-        | reason_json, _ ->
+        | `Assoc [ "code", `String "invalid_reference" ], None, _ ->
+          Error
+            "invalid submitted evidence references must be payload-free"
+        | reason_json, _, [ "kind"; "reason"; "reference" ] ->
           let* reason = evidence_read_failure_of_yojson reason_json in
           let* reference = string_field "reference" in
-          Ok (Evidence_artifact_unreadable { reference; reason }))
+          Ok (Evidence_artifact_unreadable { reference; reason })
+        | _, _, _ ->
+          Error
+            "submitted evidence unreadable item has unexpected fields")
      | Some (`String kind) ->
        Error (Printf.sprintf "unknown submitted evidence snapshot kind %S" kind)
      | Some value ->

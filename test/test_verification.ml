@@ -401,6 +401,48 @@ let test_unreadable_evidence_uses_structured_current_contract () =
        |> Yojson.Safe.Util.to_string)
   | _ -> Alcotest.fail "expected one readable failure and one invalid reference"
 
+let test_invalid_reference_snapshot_rejects_hidden_payload () =
+  with_eio_temp_dir (fun base_path ->
+    let request_id = "vrf-invalid-reference-hidden-payload" in
+    let output =
+      `Assoc
+        [ ( "submitted_evidence"
+          , `List
+              [ `Assoc
+                  [ "kind", `String "artifact_unreadable"
+                  ; "reason", `Assoc [ "code", `String "invalid_reference" ]
+                  ; "raw_reference", `String "/private/producer/secret.txt"
+                  ]
+              ] )
+        ]
+    in
+    (match
+       V.create_request
+         ~base_path
+         ~request_id
+         ~task_id:"task-001"
+         ~output
+         ~criteria:[]
+         ~worker:"keeper-executor-agent"
+         ()
+     with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.fail detail);
+    match
+      VS.inspect_submitted_evidence_for_authority
+        ~base_path
+        ~request_id
+        ~task_id:"task-001"
+        ~task_worker:"keeper-executor-agent"
+        ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+    with
+    | VS.Evidence_unavailable { reason = VS.Evidence_snapshot_invalid detail; _ } ->
+      Alcotest.(check bool)
+        "hidden invalid-reference payload is rejected"
+        true
+        (contains_substring detail "payload-free")
+    | _ -> Alcotest.fail "hidden invalid-reference payload was accepted")
+
 let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
   with_eio_temp_dir (fun base_path ->
     let config = W.default_config base_path in
@@ -1789,6 +1831,8 @@ let () =
         test_system_llm_review_notes_are_metadata_only;
       Alcotest.test_case "unreadable evidence uses structured current contract" `Quick
         test_unreadable_evidence_uses_structured_current_contract;
+      Alcotest.test_case "invalid reference rejects hidden payload" `Quick
+        test_invalid_reference_snapshot_rejects_hidden_payload;
       Alcotest.test_case "system LLM rejection reaches producer queue" `Quick
         test_system_llm_rejection_is_durably_delivered_to_producer_keeper;
       Alcotest.test_case "system LLM rejection uses registry producer binding" `Quick

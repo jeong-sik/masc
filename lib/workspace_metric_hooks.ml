@@ -255,6 +255,21 @@ let install () =
     | Ok (Some _) -> Ok true
     | Ok None -> Ok false
     | Error detail -> Error detail);
+  Schedule_service.set_keeper_wake_creation_gate (fun config ~keeper_name create ->
+    match
+      Keeper_turn_admission.run_durable_intake_if_open
+        ~base_path:config.base_path
+        ~keeper_name
+        (fun _intake_token -> create ())
+    with
+    | Keeper_turn_admission.Intake_committed result -> result
+    | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+      Error
+        (Schedule_service.Creation_rejected
+           (Printf.sprintf
+              "schedule creation rejected by Keeper shutdown fence keeper=%s operation=%s"
+              keeper_name
+              (Keeper_shutdown_types.Operation_id.to_string operation_id))));
   Atomic.set Workspace_hooks.observe_agent_lifecycle_fn (fun config ~agent_id ~event ~details ->
     observe_agent_lifecycle config ~agent_id ~event ~details);
   Atomic.set Workspace_hooks.observe_task_transition_fn (fun config ~agent_name ~task_id ~transition ~details ->

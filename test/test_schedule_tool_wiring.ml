@@ -37,6 +37,7 @@ let with_config f =
   Eio.Switch.on_release sw (fun () -> rm_rf path);
   let config = Workspace.default_config path in
   ignore (Workspace.init config ~agent_name:(Some "schedule-test"));
+  Workspace_metric_hooks.install ();
   Atomic.set Workspace_hooks.schedule_wake_target_registered_fn (fun config keeper_name ->
     match Keeper_meta_store.read_effective_meta config keeper_name with
     | Ok (Some _) -> Ok true

@@ -352,26 +352,22 @@ let handle_create ~tool_name ~start_time ctx args =
     let schedule_id = string_opt args "schedule_id" in
     let expires_at = optional_float args "expires_at_unix" in
     let create_request () =
-      Schedule_service.create ctx.config ?schedule_id ~requested_at ?expires_at
-        ~requested_by ~scheduled_by ~due_at ~payload ~source ~recurrence ()
+      Schedule_service.create
+        ctx.config
+        ?schedule_id
+        ~requested_at
+        ?expires_at
+        ?keeper_wake_target
+        ~requested_by
+        ~scheduled_by
+        ~due_at
+        ~payload
+        ~source
+        ~recurrence
+        ()
       |> Result.map_error Schedule_service.service_error_to_string
     in
-    match keeper_wake_target with
-     | None -> create_request ()
-     | Some keeper_name ->
-       (match
-          Keeper_turn_admission.run_durable_intake_if_open
-            ~base_path:ctx.config.base_path
-            ~keeper_name
-            (fun _intake_token -> create_request ())
-        with
-        | Keeper_turn_admission.Intake_committed result -> result
-        | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
-          Error
-            (Printf.sprintf
-               "schedule creation rejected by Keeper shutdown fence keeper=%s operation=%s"
-               keeper_name
-               (Keeper_shutdown_types.Operation_id.to_string operation_id)))
+    create_request ()
   in
   match result with
   | Error msg -> workflow_error ~tool_name ~start_time msg

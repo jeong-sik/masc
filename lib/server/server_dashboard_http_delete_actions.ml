@@ -472,7 +472,7 @@ let purge_dashboard_keeper_artifacts config operation =
     Error "dashboard Keeper purge artifacts require a dashboard purge operation"
 ;;
 
-let handle_dashboard_keeper_purge_completion config operation =
+let handle_dashboard_keeper_purge_completion ~now config operation =
   match Event_bus_slots.get_masc () with
   | None -> Error "MASC lifecycle event bus is not installed"
   | Some _ ->
@@ -486,7 +486,7 @@ let handle_dashboard_keeper_purge_completion config operation =
             config
             ~keeper_name:operation.keeper_name
             ~operation_id
-            ~now:(Unix.gettimeofday ())
+            ~now
         with
         | Error _ as error -> error
         | Ok () ->
@@ -515,9 +515,9 @@ let handle_dashboard_keeper_purge_completion config operation =
        Error "dashboard purge completion does not belong to a dashboard purge operation")
 ;;
 
-let handle_keeper_lifecycle_completion config operation = function
+let handle_keeper_lifecycle_completion ~now config operation = function
   | Keeper_shutdown_types.Dashboard_keeper_purged ->
-    handle_dashboard_keeper_purge_completion config operation
+    handle_dashboard_keeper_purge_completion ~now config operation
   | Dead_tombstone_reaped as action ->
     Keeper_supervisor_cleanup_tombstone.handle_completion config operation action
 ;;

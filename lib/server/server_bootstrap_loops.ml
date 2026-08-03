@@ -1024,7 +1024,12 @@ let start_keeper_loops_owned
      receipt is replayed. *)
   Keeper_subprocess_registry.register_default_cleanup_hook ();
   Keeper_shutdown_finalize.register_completion_handler
-    Server_dashboard_http_delete_actions.handle_keeper_lifecycle_completion;
+    (fun config operation action ->
+      Server_dashboard_http_delete_actions.handle_keeper_lifecycle_completion
+        ~now:(Eio.Time.now clock)
+        config
+        operation
+        action);
   let wait_for_lazy_startup () =
     (* Combines #10843 (per-task elapsed diagnostic, merged via #10854) with
        a per-task boot guard.  The diagnostic surface stays as #10854

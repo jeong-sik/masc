@@ -150,7 +150,7 @@ let test_default_metadata_has_no_implicit_execution_policy () =
   match
     Tool_catalog.execution_policy_of_metadata
       ~tool_name:"__unregistered_tool"
-      Tool_catalog.default_metadata
+      (Tool_catalog.default_metadata ~required_permission:Masc_domain.CanAdmin)
   with
   | Ok _ -> Alcotest.fail "default metadata must not invent an execution policy"
   | Error (Tool_catalog.Missing_execution_policy { tool_name; missing_axes }) ->

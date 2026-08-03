@@ -96,21 +96,28 @@ let register (spec : t) =
     invalid_arg "Tool_spec.register: name must not be empty";
   (* 1. Catalog metadata. Registration preserves the typed declaration;
      product-name membership must not override visibility. *)
-  (match
-     Tool_catalog.register_runtime_metadata spec.name
-       { Tool_catalog.default_metadata with
-         visibility = spec.visibility;
-         implementation_status = spec.implementation_status;
-         canonical_name = spec.canonical_name;
-         replacement = spec.replacement;
-         reason = spec.reason;
-         allow_direct_call_when_hidden = spec.allow_direct_call_when_hidden;
-         readonly = Some spec.is_read_only;
-         mcp_context_required = Some spec.mcp_context_required;
-         idempotent = Some spec.is_idempotent }
-   with
-   | Ok () -> ()
-   | Error detail -> invalid_arg ("Tool_spec.register: " ^ detail));
+  (match Tool_catalog.registered_metadata spec.name with
+   | None ->
+     invalid_arg
+       ("Tool_spec.register: tool " ^ spec.name
+        ^ " has no catalog-owned metadata")
+   | Some authority ->
+     match
+       Tool_catalog.register_runtime_metadata spec.name
+         { authority with
+           visibility = spec.visibility;
+           implementation_status = spec.implementation_status;
+           canonical_name = spec.canonical_name;
+           replacement = spec.replacement;
+           reason = spec.reason;
+           allow_direct_call_when_hidden = spec.allow_direct_call_when_hidden;
+           readonly = Some spec.is_read_only;
+           mcp_context_required = Some spec.mcp_context_required;
+           idempotent = Some spec.is_idempotent }
+     with
+     | Ok () -> ()
+     | Error detail -> invalid_arg ("Tool_spec.register: " ^ detail)
+  );
   (* 2. Tag + schema registry. An unclassified tool cannot reach this point. *)
   Tool_dispatch.register_module_tag
     ~schemas:[ to_tool_schema spec ] ~tag:spec.module_tag;

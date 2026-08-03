@@ -49,12 +49,13 @@ type execution_policy_error =
 
 (** {1 Configuration} *)
 
-val default_metadata : metadata
+val default_metadata : required_permission:Masc_domain.permission -> metadata
 
 val hidden_active :
   ?canonical_name:string -> ?replacement:string ->
   ?allow_direct_call_when_hidden:bool ->
-  ?implementation_status:implementation_status -> string -> metadata
+  ?implementation_status:implementation_status ->
+  required_permission:Masc_domain.permission -> string -> metadata
 
 val placeholder_tools_enabled : unit -> bool
 

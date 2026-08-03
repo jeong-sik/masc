@@ -117,7 +117,7 @@ let execution_policy_of_metadata ~tool_name (metadata : metadata) =
 (* Metadata constructors                                            *)
 (* ================================================================ *)
 
-let default_metadata =
+let default_metadata ~required_permission =
   {
     visibility = Default;
     lifecycle = Active;
@@ -129,7 +129,7 @@ let default_metadata =
     readonly = None;
     mcp_context_required = None;
     idempotent = None;
-    required_permission = Masc_domain.CanBroadcast;
+    required_permission;
   }
 
 (* Runtime-readable so tests and local admin flows can toggle placeholder
@@ -142,7 +142,7 @@ let placeholder_tools_enabled () =
   | _ -> true
 
 let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden = true)
-    ?(implementation_status = Real) reason =
+    ?(implementation_status = Real) ~required_permission reason =
   {
     visibility = Hidden;
     lifecycle = Active;
@@ -154,7 +154,7 @@ let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden =
     readonly = None;
     mcp_context_required = None;
     idempotent = None;
-    required_permission = Masc_domain.CanBroadcast;
+    required_permission;
   }
 
 let with_semantic_flags ?readonly ?mcp_context_required ?idempotent meta =
@@ -191,20 +191,19 @@ let readonly_tool =
   with_execution_policy
     ~readonly:true
     ~idempotent:false
-    default_metadata
-  |> with_required_permission Masc_domain.CanReadState
+    (default_metadata ~required_permission:Masc_domain.CanReadState)
 
 let mutating_tool =
   with_execution_policy
     ~readonly:false
     ~idempotent:false
-    default_metadata
+    (default_metadata ~required_permission:Masc_domain.CanBroadcast)
 
 let masc_workspace_tool =
   with_execution_policy
     ~readonly:false
     ~idempotent:false
-    default_metadata
+    (default_metadata ~required_permission:Masc_domain.CanBroadcast)
 
 let read_state_tool = readonly_tool
 let broadcast_tool = masc_workspace_tool
@@ -232,6 +231,7 @@ let explicit_metadata : (string * metadata) list =
   [
     ( "masc_operator_judgment_write",
       hidden_active
+        ~required_permission:Masc_domain.CanAdmin
         "Internal operator-judge write path hidden from the default tool list; use for operator judgment experiments and automation." );
     (* Physically removed: masc_interrupt, masc_approve, masc_reject,
        masc_pending_interrupts, masc_branch (masc-checkpoint CLI removed,
@@ -261,7 +261,9 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_operator_action",
       with_required_permission
         Masc_domain.CanAdmin
-        (hidden_active "Internal operator-action route; hidden from the public tool surface.") );
+        (hidden_active
+           ~required_permission:Masc_domain.CanAdmin
+           "Internal operator-action route; hidden from the public tool surface.") );
     ( "masc_operator_board_attention_quarantine_requeue",
       with_execution_policy
         ~readonly:false
@@ -270,6 +272,7 @@ let explicit_metadata : (string * metadata) list =
            Masc_domain.CanAdmin
            (hidden_active
            ~allow_direct_call_when_hidden:false
+           ~required_permission:Masc_domain.CanAdmin
            "Operator-profile-only exact recovery of one Board-attention quarantine.")) );
     ( "masc_operator_chat_recovery_resolve",
       with_execution_policy
@@ -279,6 +282,7 @@ let explicit_metadata : (string * metadata) list =
            Masc_domain.CanAdmin
            (hidden_active
            ~allow_direct_call_when_hidden:false
+           ~required_permission:Masc_domain.CanAdmin
            "Operator-profile-only exact recovery of one crash-ambiguous Keeper chat receipt.")) );
     ( "masc_operator_task_recovery_resolve",
       with_execution_policy
@@ -288,11 +292,13 @@ let explicit_metadata : (string * metadata) list =
            Masc_domain.CanAdmin
            (hidden_active
            ~allow_direct_call_when_hidden:false
+           ~required_permission:Masc_domain.CanAdmin
            "Operator-profile-only exact owner/version recovery of one Task.")) );
     ( "masc_set_param",
       with_required_permission
         Masc_domain.CanAdmin
         (hidden_active
+           ~required_permission:Masc_domain.CanAdmin
            "Internal HTTP runtime-parameter mutation route; hidden from the public tool surface.") );
     (* Catalog-owned permissions for split/lazily registered tool modules. *)
     ("masc_reset", reset_tool);
@@ -300,6 +306,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_task_history", read_state_tool);
     ("masc_add_task", add_task_tool);
     ("masc_batch_add_tasks", add_task_tool);
+    ("masc_task_set_goal", complete_task_tool);
     ("masc_update_priority", complete_task_tool);
     ("masc_heartbeat", broadcast_tool);
     ("masc_goal_list", read_state_tool);
@@ -490,12 +497,17 @@ let metadata name =
   match Hashtbl.find_opt metadata_table name with
   | Some meta -> meta
   | None ->
+    (* An unclassified tool is never granted a worker-capable permission. The
+       catalog has no evidence for a narrower policy, so the typed fallback
+       is operator-only and registration/authentication still require an
+       explicit catalog entry. *)
+    let fail_closed = default_metadata ~required_permission:Masc_domain.CanAdmin in
     if is_public_mcp name
-    then default_metadata
+    then fail_closed
     else
       (* External MCP discovery remains an explicit public-surface contract.
          It must not be reused as Keeper authorization or model visibility. *)
-      { default_metadata with
+      { fail_closed with
         visibility = Hidden
       ; allow_direct_call_when_hidden = true
       ; reason = Some "Not on the external MCP discovery surface."

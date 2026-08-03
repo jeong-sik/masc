@@ -714,9 +714,48 @@ let test_reclaim_follows_transfer_durable_state () =
           { detail; _ }) ->
      fail detail
    | Error detail -> fail detail);
+  (match single_keeper_settlement_exn config execution with
+   | Schedule_runner.Consumer_completed_occurrence -> ()
+   | _ -> fail "target terminal ACK did not settle the transferred occurrence");
+  (match
+     Keeper_event_queue_recovery.project_owner_result
+       ~base_path
+       ~keeper_name:target_keeper
+   with
+   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
+   | Ok _ -> fail "terminal ACK projection did not converge"
+   | Error error ->
+     fail (Keeper_event_queue_recovery.projection_error_to_string error));
+  let target_state =
+    match
+      Keeper_registry_event_queue.durable_state_result ~base_path target_keeper
+    with
+    | Ok state -> state
+    | Error detail -> fail detail
+  in
+  check int "terminal outbox retired after projection" 0
+    (Keeper_event_queue_state.transition_outbox target_state |> List.length);
+  check int "terminal receipt retained in checkpoint" 1
+    (Keeper_event_queue_state.projected_transition_receipts target_state
+     |> List.filter (fun receipt ->
+       match receipt.Keeper_event_queue_state.transition with
+       | Keeper_event_queue_state.Ack_source_terminal terminal ->
+         String.equal terminal.source.post_id selection.source.post_id
+       | Keeper_event_queue_state.Cancel_accepted _
+       | Keeper_event_queue_state.Transfer_accepted _ -> false)
+     |> List.length);
+  let transition_wal_path =
+    Filename.concat
+      (Filename.concat
+         (Common.keepers_runtime_dir_of_base ~base_path)
+         target_keeper)
+      "event-queue-transitions-v4.jsonl"
+  in
+  check string "checkpointed transition WAL compacted" ""
+    (read_file transition_wal_path);
   match single_keeper_settlement_exn config execution with
   | Schedule_runner.Consumer_completed_occurrence -> ()
-  | _ -> fail "target terminal ACK did not settle the transferred occurrence"
+  | _ -> fail "checkpoint reload lost the terminal occurrence disposition"
 ;;
 
 let test_keeper_wake_durable_enqueue_failure_retries_same_occurrence () =

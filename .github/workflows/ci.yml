@@ -928,7 +928,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_schedule_runner @test/runtest-test_schedule_store"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_schedule_runner @test/runtest-test_schedule_store @test/runtest-test_schedule_consumer_dispatch"
 
       # Keeper registry hardening: identity resolution and goal-reconciliation
       # routing are executable behavior — the suite drives a real workspace and

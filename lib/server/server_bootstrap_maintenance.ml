@@ -162,7 +162,7 @@ let exact_keeper_config_declared_result
       keeper_name
   in
   match Fs_compat.exact_path_kind path with
-  | exception Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception Unix.Unix_error (error, operation, argument) ->
     Error
       (Printf.sprintf

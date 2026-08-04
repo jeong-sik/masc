@@ -1,16 +1,12 @@
-(* Public dashboard read model for autonomous keeper turns. Turn identity is
-   producer-owned in Turn_record; raw traces supply only the final public
-   response for that exact recorded OAS run. *)
+(* Dashboard read model for autonomous keeper turns. Turn identity is
+   producer-owned in Turn_record; raw traces supply the final response and
+   typed work trace for that exact recorded OAS run. *)
 
 type turn =
   { turn_id : string
-  ; agent_name : string
-  ; generation : int
   ; started_at : float
-  ; finished_at : float option
-  ; model : string option
-  ; stop_reason : string option
   ; final_text : string option
+  ; trace : Keeper_chat_blocks.trace_step list
   }
 
 let default_limit = 200
@@ -43,6 +39,60 @@ let check_trace_file ~dir path =
     | exception Unix.Unix_error _ -> Missing_or_non_regular
 ;;
 
+let non_blank value =
+  let value = String.trim value in
+  if String.equal value "" then None else Some value
+;;
+
+let json_of_text value =
+  try Yojson.Safe.from_string value with
+  | Yojson.Json_error _ -> `String value
+;;
+
+let trace_step_of_trajectory = function
+  | Agent_sdk.Trajectory.Think { content; ts } ->
+    Option.map
+      (fun text ->
+        Keeper_chat_blocks.Trace_think
+          { text
+          ; ts = Some (Masc_domain.iso8601_of_unix_seconds ts)
+          ; oas_block_index = None
+          })
+      (non_blank content)
+  | Agent_sdk.Trajectory.Act { tool_call; _ } ->
+    let status =
+      match tool_call.finished_at, tool_call.is_error with
+      | None, _ -> Some Keeper_chat_blocks.Trace_tool_pending
+      | Some _, true -> Some Keeper_chat_blocks.Trace_tool_err
+      | Some _, false -> Some Keeper_chat_blocks.Trace_tool_ok
+    in
+    let dur =
+      Option.map
+        (fun finished_at ->
+          let elapsed_ms =
+            max 0
+              (int_of_float
+                 (((finished_at -. tool_call.started_at) *. 1000.) +. 0.5))
+          in
+          Printf.sprintf "%dms" elapsed_ms)
+        tool_call.finished_at
+    in
+    Some
+      (Keeper_chat_blocks.Trace_tool
+         { name = tool_call.tool_name
+         ; tool_call_id = non_blank tool_call.tool_use_id
+         ; status
+         ; dur
+         ; args = Some tool_call.tool_input
+         ; result = Option.map json_of_text tool_call.tool_result
+         ; ts =
+             Some
+               (Masc_domain.iso8601_of_unix_seconds tool_call.started_at)
+         ; oas_block_index = None
+         })
+  | Agent_sdk.Trajectory.Observe _ | Agent_sdk.Trajectory.Respond _ -> None
+;;
+
 let turn_of_record ~config ~keeper_name (record : Turn_record.t) =
   match record.turn_kind, record.raw_trace_run_ref with
   | Turn_record.Direct, _ -> None
@@ -73,31 +123,37 @@ let turn_of_record ~config ~keeper_name (record : Turn_record.t) =
           run_ref.path;
         None
       | Current_regular_file ->
-        (match Agent_sdk.Raw_trace_query.summarize_run (sdk_run_ref run_ref) with
+        (match Agent_sdk.Raw_trace_query.read_run (sdk_run_ref run_ref) with
          | Error err ->
            Log.Keeper.warn ~keeper_name
-             "autonomous turn source: cannot summarize exact run %s: %s"
+             "autonomous turn source: cannot read exact run %s: %s"
              run_ref.worker_run_id
              (Agent_sdk.Error.to_string err);
            None
-         | Ok summary ->
-           (match summary.started_at with
-            | None ->
-              Log.Keeper.warn ~keeper_name
-                "autonomous turn source: exact run %s has no start timestamp"
-                run_ref.worker_run_id;
-              None
-            | Some started_at ->
-              Some
-                { turn_id = Ids.Turn_ref.to_string record.turn_ref
-                ; agent_name = record.agent_name
-                ; generation = record.generation
-                ; started_at
-                ; finished_at = summary.finished_at
-                ; model = record.model
-                ; stop_reason = record.finish_reason
-                ; final_text = summary.final_text
-                }))
+         | Ok [] ->
+           Log.Keeper.warn ~keeper_name
+             "autonomous turn source: exact run %s has no records"
+             run_ref.worker_run_id;
+           None
+         | Ok ((first : Agent_sdk.Raw_trace.record) :: _ as records) ->
+           let final_text =
+             records
+             |> List.rev
+             |> List.find_opt (fun (row : Agent_sdk.Raw_trace.record) ->
+               row.record_type = Agent_sdk.Raw_trace.Run_finished)
+             |> Option.bind (fun row -> row.final_text)
+           in
+           let trace =
+             Agent_sdk.Trajectory.of_raw_trace_records records
+             |> fun trajectory -> trajectory.steps
+             |> List.filter_map trace_step_of_trajectory
+           in
+           Some
+             { turn_id = Ids.Turn_ref.to_string record.turn_ref
+             ; started_at = first.ts
+             ; final_text
+             ; trace
+             })
 ;;
 
 let load_recent ~config ~keeper_name ?(limit = default_limit) ?since () =

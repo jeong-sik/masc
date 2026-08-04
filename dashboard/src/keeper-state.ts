@@ -1630,16 +1630,12 @@ interface RestChatHistoryMessage {
   // prefers them over its local parser.
   blocks?: unknown
   stream_contract?: unknown
-  // Present only on rows the backend projected from a typed autonomous turn
-  // (Keeper_autonomous_turn_source): a turn the keeper ran on its own, which
-  // by design has no chat-store row. Its presence, not `role`, marks the row.
+  // Present only on rows projected from a typed autonomous turn. Its presence,
+  // not `role`, marks the row; [blocks] carries that exact run's work trace.
   autonomous_turn?: unknown
 }
 
-/** Convert a current-record autonomous turn into a conversation entry.
- *  Marked `autonomous_turn` so the transcript folds consecutive ones into a
- *  single collapsed group: a keeper wakes far more often than anyone talks to
- *  it, and listing each turn inline would bury the conversation. */
+/** Convert a current-record autonomous turn into a conversation entry. */
 function autonomousTurnEntry(
   keeperName: string,
   message: RestChatHistoryMessage,
@@ -1648,14 +1644,20 @@ function autonomousTurnEntry(
   const turnId = asString(message.autonomous_turn.turn_id)
   if (!turnId) return null
   const timestamp = toIsoTimestamp(message.ts)
-  const publicText = message.content ?? '공개된 응답 없음'
+  const text = message.content ?? '텍스트 응답 없음'
+  const normalizedBlocks = normalizeBlocks(message.blocks, 'assistant')
+  const traceSteps = normalizedBlocks
+    ?.flatMap(block => block.t === 'trace' ? block.trace : [])
+  const blocks = normalizedBlocks?.filter(block => block.t !== 'trace')
   return {
-    id: message.id ?? `autonomous-${turnId}`,
+    id: `autonomous-${turnId}`,
     role: 'assistant',
     source: 'autonomous_turn',
     label: keeperName,
-    text: publicText,
+    text,
     rawText: message.content,
+    blocks: blocks && blocks.length > 0 ? blocks : undefined,
+    traceSteps: traceSteps && traceSteps.length > 0 ? traceSteps : undefined,
     timestamp,
     delivery: 'history',
     streamState: null,
@@ -1663,8 +1665,6 @@ function autonomousTurnEntry(
       reason: 'autonomous turns are projected from typed records and exact retained traces, never streamed',
     }),
     details: null,
-    // The public projection intentionally carries no raw thinking or tool
-    // arguments. The typed record owns the exact turn reference.
     surface: null,
     turnRef: turnId,
   }

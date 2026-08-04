@@ -9,29 +9,34 @@ import { chatHistoryEntriesFromRest } from '../keeper-state'
 
 const rawHistory = [
   {
-    id: 'autonomous:trace-fixture#1',
     role: 'assistant',
-    content: 'Checked the board; no action was required.',
+    content: null,
     ts: 1785770777,
+    blocks: [{
+      t: 'trace',
+      trace: [
+        { kind: 'think', text: 'Checking the current task and pending board events.' },
+        {
+          kind: 'tool',
+          name: 'keeper_tasks_list',
+          tool_call_id: 'fixture-tool-1',
+          status: 'ok',
+          dur: '38ms',
+          args: { status: 'pending' },
+          result: { tasks: [] },
+        },
+      ],
+    }],
     autonomous_turn: {
       turn_id: 'trace-fixture#1',
-      agent_name: 'fixture-agent',
-      generation: 4,
-      blocks: [
-        { kind: 'thinking', content: 'PRIVATE_THINKING_MUST_NOT_RENDER' },
-        { kind: 'tool_use', name: 'Read', input: { token: 'PRIVATE_TOOL_ARG' } },
-      ],
     },
   },
   {
-    id: 'autonomous:trace-fixture#2',
     role: 'assistant',
     content: 'Observed one healthy follow-up.',
     ts: 1785770837,
     autonomous_turn: {
       turn_id: 'trace-fixture#2',
-      agent_name: 'fixture-agent',
-      generation: 4,
     },
   },
 ]
@@ -39,12 +44,12 @@ const rawHistory = [
 const entries = chatHistoryEntriesFromRest('fixture-keeper', rawHistory)
 const fixtureStatus =
   entries.length === 2
-  && entries.every(entry => entry.traceSteps === undefined)
+  && entries[0]?.traceSteps?.length === 2
   && entries.map(entry => entry.turnRef).join('|') === 'trace-fixture#1|trace-fixture#2'
     ? 'ok'
     : 'invalid'
 
-function AutonomousPublicHistoryFixture() {
+function AutonomousTurnActivityFixture() {
   return html`
     <main
       class="min-h-screen px-4 py-8"
@@ -55,10 +60,10 @@ function AutonomousPublicHistoryFixture() {
       <section class="mx-auto max-w-[820px]">
         <header class="mb-5">
           <p class="font-mono text-2xs uppercase tracking-[0.2em]" style="color: var(--text-dim);">
-            Keeper Autonomous Public History Contract
+            Keeper Autonomous Turn Activity
           </p>
           <h1 class="mt-2 text-xl font-semibold" style="color: var(--text-main);">
-            Public outcomes only
+            Exact work shown with each autonomous turn
           </h1>
         </header>
         <div
@@ -80,4 +85,4 @@ function AutonomousPublicHistoryFixture() {
 }
 
 const root = document.getElementById('app')
-if (root) render(html`<${AutonomousPublicHistoryFixture} />`, root)
+if (root) render(html`<${AutonomousTurnActivityFixture} />`, root)

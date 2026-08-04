@@ -206,11 +206,8 @@ val exact_direct_mention_present : targets:string list -> string -> bool
 
 (** {1 Prompt Delegation} *)
 
-val keeper_constitution : unit -> string
-
 val build_keeper_system_prompt
   :  instructions:string
-  -> ?persona_extended:string
   -> ?keeper_name:string
   -> ?workspace_root:string
   -> ?active_goals:(string * string) list

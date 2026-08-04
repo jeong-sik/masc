@@ -20,8 +20,6 @@ async function loadLab() {
     LabPerf: () => html`<div data-testid="lab-performance">Performance</div>`,
   }))
   vi.doMock('./memory-subsystems', () => ({
-    MemorySubsystems: () =>
-      html`<div data-testid="lab-memory-subsystems">MemorySubsystems</div>`,
   }))
   vi.doMock('./memory/keeper-memory-health', () => ({
     KeeperMemoryHealth: () => html`<div data-testid="lab-keeper-memory-health">KeeperMemoryHealth</div>`,
@@ -55,7 +53,6 @@ describe('Lab', () => {
     vi.doUnmock('./lab-perf')
     vi.doUnmock('./memory/keeper-memory-health')
     vi.doUnmock('./memory/audit-integrity')
-    vi.doUnmock('./memory-subsystems')
     vi.doUnmock('./common/surface-header')
   })
 
@@ -100,17 +97,6 @@ describe('Lab', () => {
     expect(container.querySelector('[data-testid="lab-audit-integrity"]')).not.toBeNull()
   })
 
-  it('renders the live Memory OS subsystem section', async () => {
-    route.value = { tab: 'lab', params: { section: 'memory-subsystems' } }
-    const { Lab } = await loadLab()
-
-    render(html`<${Lab} />`, container)
-
-    const memory = container.querySelector('[data-testid="lab-memory-subsystems"]')
-    expect(memory).not.toBeNull()
-    expect(container.querySelector('[data-testid="lab-tools"]')).toBeNull()
-  })
-
   it('falls back to tools for unknown lab sections', async () => {
     route.value = { tab: 'lab', params: { section: 'unknown' } }
     const { Lab } = await loadLab()
@@ -118,6 +104,5 @@ describe('Lab', () => {
     render(html`<${Lab} />`, container)
 
     expect(container.querySelector('[data-testid="lab-tools"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="lab-memory-subsystems"]')).toBeNull()
   })
 })

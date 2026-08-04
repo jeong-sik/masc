@@ -1,10 +1,8 @@
 // Autonomous keeper turns in the chat transcript.
 //
-// These rows have no chat-store row by design (RFC-0351 §5 keeps the wake
-// marker and inert prose out of the durable transcript); the backend projects
-// them from the raw-trace store. A keeper wakes far more often than anyone
-// talks to it, so the transcript must fold a run of them into one collapsed
-// unit instead of listing each between two sentences of conversation.
+// These rows have no chat-store row; the backend projects final text and work
+// trace from the exact recorded autonomous run. A keeper wakes far more often
+// than anyone talks to it, so consecutive turns remain collapsed.
 import { describe, expect, it } from 'vitest'
 import type { KeeperConversationEntry } from '../../types'
 import { buildChatRenderUnits } from './primitives'
@@ -75,24 +73,38 @@ describe('buildChatRenderUnits — autonomous turns', () => {
 
 describe('chatHistoryEntriesFromRest — autonomous turn rows', () => {
   const autonomousRow = {
-    id: 'autonomous:turn-1',
     role: 'assistant',
     content: 'no work this cycle',
     ts: 1785770777,
+    blocks: [{
+      t: 'trace',
+      trace: [
+        { kind: 'think', text: '내부 판단 단계 (내용 비공개)' },
+        {
+          kind: 'tool',
+          name: 'keeper_tasks_list',
+          status: 'ok',
+        },
+      ],
+    }],
     autonomous_turn: {
       turn_id: 'trace-test#41',
-      agent_name: 'lane-smith-agent',
-      generation: 9,
-      model: 'GLM-5-Turbo',
-      stop_reason: 'end_turn',
     },
   }
 
-  it('projects the public outcome without raw thinking or tool arguments', () => {
+  it('projects the exact outcome and work trace', () => {
     const [entryOut] = chatHistoryEntriesFromRest('lane-smith', [autonomousRow])
     expect(entryOut?.source).toBe('autonomous_turn')
     expect(entryOut?.text).toBe('no work this cycle')
-    expect(entryOut?.traceSteps).toBeUndefined()
+    expect(entryOut?.blocks).toBeUndefined()
+    expect(entryOut?.traceSteps).toEqual([
+      { kind: 'think', text: '내부 판단 단계 (내용 비공개)' },
+      {
+        kind: 'tool',
+        name: 'keeper_tasks_list',
+        status: 'ok',
+      },
+    ])
     expect(entryOut?.turnRef).toBe('trace-test#41')
   })
 
@@ -129,9 +141,11 @@ describe('chatHistoryEntriesFromRest — autonomous turn rows', () => {
       { ...autonomousRow, id: 'absent', content: null },
       { ...autonomousRow, id: 'empty', content: '' },
     ])
-    expect(absent?.text).toBe('공개된 응답 없음')
+    expect(absent?.text).toBe('텍스트 응답 없음')
     expect(absent?.rawText).toBeNull()
+    expect(absent?.delivery).toBe('no_reply')
     expect(empty?.text).toBe('')
     expect(empty?.rawText).toBe('')
+    expect(empty?.delivery).toBe('history')
   })
 })

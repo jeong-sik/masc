@@ -12,7 +12,7 @@
         { "type": "descriptor_id", "value": "agent.execute" }
       ],
       "required_selectors": [
-        { "type": "eval_tag", "value": "capability_introspection" },
+        { "type": "descriptor_id", "value": "agent.search_files" },
         { "type": "descriptor_id", "value": "agent.read_file" }
       ],
       "max_tool_calls": 3,
@@ -22,13 +22,13 @@
       ],
       "arg_checks": [
         {
-          "selector": { "type": "eval_tag", "value": "capability_introspection" },
-          "path": "$.query",
+          "selector": { "type": "descriptor_id", "value": "agent.search_files" },
+          "path": "$.pattern",
           "contains": "prompt_fingerprint"
         },
         {
           "selector": { "type": "descriptor_id", "value": "agent.read_file" },
-          "path": "$.path",
+          "path": "$.file_path",
           "contains": "keeper_tool_call_log"
         }
       ],
@@ -61,7 +61,7 @@
       "keeper_profiles": ["bench-verifier"],
       "forbidden_tools": [],
       "required_selectors": [
-        { "type": "eval_tag", "value": "capability_introspection" },
+        { "type": "descriptor_id", "value": "agent.search_files" },
         { "type": "descriptor_id", "value": "agent.read_file" }
       ],
       "max_tool_calls": 4,
@@ -71,13 +71,13 @@
       ],
       "arg_checks": [
         {
-          "selector": { "type": "eval_tag", "value": "capability_introspection" },
-          "path": "$.query",
+          "selector": { "type": "descriptor_id", "value": "agent.search_files" },
+          "path": "$.pattern",
           "contains": "keeper_agent_run"
         },
         {
           "selector": { "type": "descriptor_id", "value": "agent.read_file" },
-          "path": "$.path",
+          "path": "$.file_path",
           "contains": "keeper_agent_run.ml"
         }
       ],
@@ -94,7 +94,7 @@
       "keeper_profiles": ["bench-executor", "bench-verifier"],
       "forbidden_tools": [],
       "required_selectors": [
-        { "type": "eval_tag", "value": "capability_introspection" },
+        { "type": "descriptor_id", "value": "agent.search_files" },
         { "type": "descriptor_id", "value": "agent.execute" },
         { "type": "descriptor_id", "value": "masc.board.post" }
       ],

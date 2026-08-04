@@ -113,8 +113,6 @@ type t =
   | MemoryActivityEmitFailures
   | SupervisorSweepFailures
   | TomlReconcileSweepFailures
-  | TomlReconcileDedup
-  | ReconcileDisabled
   | ToolUsageFlushFailures
   | TurnTimeoutCommitted
   | TurnErrorAfterTools

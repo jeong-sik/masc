@@ -7,7 +7,7 @@ HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-5188}"
 FIXTURE_URL="http://${HOST}:${PORT}/dashboard/dev-fixtures/keeper-autonomous-public-history-fixture.html"
 SERVER_LOG="${TMPDIR:-/tmp}/masc-autonomous-public-history-vite-${PORT}.log"
-SCREENSHOT="${TMPDIR:-/tmp}/masc-autonomous-public-history-expanded.png"
+SCREENSHOT="${TMPDIR:-/tmp}/masc-autonomous-turn-activity-expanded.png"
 
 server_pid=""
 cleanup() {
@@ -63,19 +63,24 @@ with sync_playwright() as playwright:
         group = page.locator('.chat-block-trace-hd', has_text='자율턴')
         assert group.get_attribute("aria-expanded") == "false"
         before = page.locator("body").inner_text()
-        assert "PRIVATE_THINKING_MUST_NOT_RENDER" not in before
-        assert "PRIVATE_TOOL_ARG" not in before
+        assert "내부 판단 단계" not in before
+        assert "keeper_tasks_list" not in before
         group.click()
         assert group.get_attribute("aria-expanded") == "true"
-        page.get_by_text("Checked the board; no action was required.", exact=True).last.wait_for()
+        page.get_by_text("텍스트 응답 없음", exact=True).last.wait_for()
         page.get_by_text("Observed one healthy follow-up.", exact=True).last.wait_for()
-        after = page.locator("body").inner_text()
-        assert "PRIVATE_THINKING_MUST_NOT_RENDER" not in after
-        assert "PRIVATE_TOOL_ARG" not in after
+        page.get_by_text("내부 판단 단계 (내용 비공개)", exact=True).wait_for()
+        activity = page.locator('[data-chat-work-trace]')
+        tool = activity.locator('[data-chat-trace-step="tool"]')
+        assert "keeper_tasks_list" in tool.inner_text()
+        assert tool.get_attribute("data-chat-trace-link-state") == "structural"
+        assert "조인 불가" not in page.locator("body").inner_text()
+        assert '"status": "pending"' not in page.locator("body").inner_text()
+        assert '"tasks": []' not in page.locator("body").inner_text()
         page.screenshot(path=screenshot, full_page=True)
     finally:
         browser.close()
 PY
 
-printf 'autonomous public history interaction passed\n'
+printf 'autonomous turn activity interaction passed\n'
 printf 'screenshot=%s\n' "${SCREENSHOT}"

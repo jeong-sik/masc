@@ -468,11 +468,11 @@ derive_final_result() {
     read_search_prompt_fingerprint)
       printf '%s' "${tool_calls_json}" | jq -c '
         def search_hit:
-          any(.[]; .tool_name == "keeper_tool_search"
-                    and ((.input.query // "") | tostring | contains("prompt_fingerprint")));
+          any(.[]; .tool_name == "tool_search_files"
+                    and ((.input.pattern // "") | tostring | contains("prompt_fingerprint")));
         def read_hit:
           any(.[]; .tool_name == "tool_read_file"
-                    and ((.input.path // "") | tostring | contains("keeper_tool_call_log")));
+                    and ((.input.file_path // "") | tostring | contains("keeper_tool_call_log")));
         {
           status: (if search_hit and read_hit then "completed" else "incomplete" end),
           evidence_found: ((if search_hit then 1 else 0 end) + (if read_hit then 1 else 0 end))
@@ -501,11 +501,11 @@ derive_final_result() {
             .key > $idx
             and .value.tool_name == "tool_read_file"
             and .value.success
-            and ((.value.input.path // "") | tostring | contains("keeper_agent_run.ml"))
+            and ((.value.input.file_path // "") | tostring | contains("keeper_agent_run.ml"))
           );
         def searched:
-          any(.[]; .tool_name == "keeper_tool_search"
-                    and ((.input.query // "") | tostring | contains("keeper_agent_run")));
+          any(.[]; .tool_name == "tool_search_files"
+                    and ((.input.pattern // "") | tostring | contains("keeper_agent_run")));
         (failure_index) as $idx
         | {
             status: (if ($idx != null and searched and recovered_after_failure($idx))
@@ -517,7 +517,7 @@ derive_final_result() {
     multi_step_board_update)
       printf '%s' "${tool_calls_json}" | jq -c '
         def search_hit:
-          any(.[]; .tool_name == "keeper_tool_search");
+          any(.[]; .tool_name == "tool_search_files");
         def bash_hit:
           any(.[]; .tool_name == "tool_execute" and .success);
         def board_hit:

@@ -106,7 +106,7 @@
   test_server_dashboard_http_keeper_api_trace
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
-  test_keeper_reconcile_state
+  test_keeper_running_reconcile_attempt
   test_attempt_state
   test_runtime_attempt_fsm
   test_runtime_lane_preference
@@ -130,7 +130,6 @@
   test_dashboard_perf
   test_dashboard_tool_host_events
   test_dashboard_nav_event
-  test_server_dashboard_http_memory_subsystems
   test_server_dashboard_http_keeper_memory_health
   test_keeper_exact_flow_detail
   test_server_dashboard_http_audit_integrity
@@ -202,7 +201,6 @@
   test_keeper_lifecycle_registry_dispatch
   test_keeper_lifecycle_chaos
   test_keeper_generation_lineage
-  test_keeper_deliberation
   test_keeper_registry_provenance
   test_keeper_registry_hardening
   test_keeper_fd_pressure_fleet
@@ -277,7 +275,6 @@
   test_tool_output_washing_e2e
   test_keeper_compaction_unit
   test_keeper_context_core_dedup
-  test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
@@ -304,7 +301,6 @@
   test_keeper_typed_labels
   test_exec_shell_command_gate
   test_keeper_classifier_helper
-  test_keeper_unified_persona_block
   test_persona_crud_profile_shape
   test_turn_id_propagation
   test_auth_strict_mode
@@ -409,7 +405,7 @@
   test_server_dashboard_http_keeper_api_trace
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
-  test_keeper_reconcile_state
+  test_keeper_running_reconcile_attempt
   test_attempt_state
   test_runtime_attempt_fsm
   test_runtime_lane_preference
@@ -433,7 +429,6 @@
   test_dashboard_perf
   test_dashboard_tool_host_events
   test_dashboard_nav_event
-  test_server_dashboard_http_memory_subsystems
   test_server_dashboard_http_keeper_memory_health
   test_keeper_exact_flow_detail
   test_server_dashboard_http_audit_integrity
@@ -505,7 +500,6 @@
   test_keeper_lifecycle_registry_dispatch
   test_keeper_lifecycle_chaos
   test_keeper_generation_lineage
-  test_keeper_deliberation
   test_keeper_registry_provenance
   test_keeper_registry_hardening
   test_keeper_fd_pressure_fleet
@@ -580,7 +574,6 @@
   test_tool_output_washing_e2e
   test_keeper_compaction_unit
   test_keeper_context_core_dedup
-  test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
@@ -608,7 +601,6 @@
   test_keeper_typed_labels
   test_exec_shell_command_gate
   test_keeper_classifier_helper
-  test_keeper_unified_persona_block
   test_persona_crud_profile_shape
   test_turn_id_propagation
   test_auth_strict_mode
@@ -998,7 +990,7 @@
   test_eio_guard_yield_meter
   test_board_dispatch
   test_board_sort
-  test_vote_ts_preservation_10086
+  test_board_vote_persistence
   test_board_karma_ledger
   test_workspace_task_delete
   test_workspace_task_lifecycle
@@ -1153,7 +1145,7 @@
   test_eio_guard_yield_meter
   test_board_dispatch
   test_board_sort
-  test_vote_ts_preservation_10086
+  test_board_vote_persistence
   test_board_karma_ledger
   test_workspace_task_delete
   test_workspace_task_lifecycle
@@ -1692,7 +1684,7 @@
 
 (include stanzas/test_board_persistence_load_contract.inc)
 
-(include stanzas/test_board_post_origin.inc)
+(include stanzas/test_board_persistence_schema.inc)
 
 (include stanzas/test_board_sse_canonical_event_type.inc)
 
@@ -2564,3 +2556,18 @@
 (include stanzas/test_keeper_chat_admission_contention.inc)
 
 (include stanzas/test_dashboard_continuity_briefs.inc)
+
+; The tool-call quality benchmark reads its case set and evidence fixture from
+; repo-root JSON (benchmarks/data, test/fixtures) rather than from sandbox
+; deps, so under the shared group stanza dune had no reason to re-run it when
+; those files changed — an edit that broke a case definition kept a cached
+; pass. Declaring the two files as deps puts them in the action hash, which is
+; what makes the registry coherence checks in this suite fire on case-set
+; edits (#26811).
+(test
+ (name test_tool_call_quality_benchmark)
+ (modules test_tool_call_quality_benchmark)
+ (deps
+  %{workspace_root}/benchmarks/data/tool_call_quality_cases.json
+  %{workspace_root}/test/fixtures/tool_call_quality_benchmark/evidence_runs.json)
+ (libraries alcotest masc_test_deps))

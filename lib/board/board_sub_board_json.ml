@@ -3,7 +3,7 @@
    - Access mode <-> string conversion ([sub_board_access] variant).
    - [sub_board] record <-> Yojson.Safe.t (used by HTTP routes, the
      board tool surface, and the JSONL store rewrite path).
-   - Owner-injecting member-list parser (strict + lenient).
+   - Owner-injecting strict member-list parser.
 
    Extracted from [Board_core] (godfile decomp). Pure mapping. *)
 
@@ -20,6 +20,10 @@ let sub_board_access_of_string_opt = function
   | "members_only" -> Some Members_only
   | "owner_only" -> Some Owner_only
   | _ -> None
+;;
+
+let valid_sub_board_slug_pattern =
+  Re.Pcre.re {|^[a-z0-9][a-z0-9_-]*$|} |> Re.compile
 ;;
 
 let sub_board_to_yojson (sb : sub_board) : Yojson.Safe.t =
@@ -59,37 +63,91 @@ let parse_sub_board_members ~owner members =
   loop [] members
 ;;
 
-let parse_sub_board_members_lenient ~owner members =
-  members
-  |> List.filter_map (fun member_name ->
-    match Agent_id.of_string member_name with
-    | Ok member_id -> Some member_id
-    | Error _ -> None)
-  |> fun parsed -> dedupe_agent_ids (owner :: parsed)
-;;
-
 let sub_board_of_yojson (json : Yojson.Safe.t) : sub_board option =
-  let open Safe_ops in
   match json with
-  | `Assoc _ ->
-    let id_s = json_string_opt "id" json |> Option.value ~default:"" in
-    let slug = json_string_opt "slug" json |> Option.value ~default:"" in
-    let name = json_string_opt "name" json |> Option.value ~default:"" in
-    let description = json_string_opt "description" json |> Option.value ~default:"" in
-    let owner_s = json_string_opt "owner" json |> Option.value ~default:"" in
-    let access_s = json_string_opt "access" json |> Option.value ~default:"open" in
-    let created_at = json_float_opt "created_at" json |> Option.value ~default:0.0 in
-    let post_count = json_int_opt "post_count" json |> Option.value ~default:0 in
-    let member_names = json_string_list "members" json in
-    (match
-       ( Sub_board_id.of_string id_s
-       , Agent_id.of_string owner_s
-       , sub_board_access_of_string_opt access_s )
-     with
-     | Ok id, Ok owner, Some access when slug <> "" ->
-       let members = parse_sub_board_members_lenient ~owner member_names in
-       Some
-         { id; slug; name; description; owner; members; access; created_at; post_count }
-     | _ -> None)
+  | `Assoc fields ->
+    let allowed =
+      [ "id"
+      ; "slug"
+      ; "name"
+      ; "description"
+      ; "owner"
+      ; "members"
+      ; "access"
+      ; "created_at"
+      ; "post_count"
+      ]
+    in
+    let rec has_exact_fields seen = function
+      | [] -> true
+      | (name, _) :: rest ->
+        if List.mem name seen || not (List.mem name allowed)
+        then false
+        else has_exact_fields (name :: seen) rest
+    in
+    if not (has_exact_fields [] fields)
+    then None
+    else
+      (match
+         ( List.assoc_opt "id" fields
+         , List.assoc_opt "slug" fields
+         , List.assoc_opt "name" fields
+         , List.assoc_opt "description" fields
+         , List.assoc_opt "owner" fields
+         , List.assoc_opt "members" fields
+         , List.assoc_opt "access" fields
+         , List.assoc_opt "created_at" fields
+         , List.assoc_opt "post_count" fields )
+       with
+       | ( Some (`String id_raw)
+         , Some (`String slug)
+         , Some (`String name)
+         , Some (`String description)
+         , Some (`String owner_raw)
+         , Some (`List member_json)
+         , Some (`String access_raw)
+         , Some (`Float created_at)
+         , Some (`Int 0) )
+         when Float.is_finite created_at && Float.compare created_at 0.0 > 0 ->
+         let member_names =
+           let rec loop acc = function
+             | [] -> Some (List.rev acc)
+             | `String member :: rest -> loop (member :: acc) rest
+             | _ -> None
+           in
+           loop [] member_json
+         in
+         (match
+            ( Sub_board_id.of_string id_raw
+            , Agent_id.of_string owner_raw
+            , sub_board_access_of_string_opt access_raw
+            , member_names )
+          with
+          | Ok id, Ok owner, Some access, Some member_names
+            when String.equal id_raw (Sub_board_id.to_string id)
+                 && String.equal owner_raw (Agent_id.to_string owner)
+                 && String.length slug >= 1
+                 && String.length slug <= 64
+                 && Re.execp valid_sub_board_slug_pattern slug ->
+            (match parse_sub_board_members ~owner member_names with
+             | Ok members
+               when List.equal
+                      String.equal
+                      member_names
+                      (List.map Agent_id.to_string members) ->
+               Some
+                 { id
+                 ; slug
+                 ; name
+                 ; description
+                 ; owner
+                 ; members
+                 ; access
+                 ; created_at
+                 ; post_count = 0
+                 }
+             | Ok _ | Error _ -> None)
+          | _ -> None)
+       | _ -> None)
   | _ -> None
 ;;

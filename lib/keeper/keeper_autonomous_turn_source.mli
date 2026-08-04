@@ -1,27 +1,20 @@
-(** Public dashboard read model for autonomous keeper turns.
+(** Dashboard read model for autonomous keeper turns.
 
     The current {!Turn_record.t} owns the closed turn kind, keeper/agent
     identity, generation, and exact OAS raw-trace run reference. This reader
-    selects only [Autonomous] records and summarizes only that recorded run.
-    It never scans or concatenates provider runs and never projects thinking,
-    tool arguments, tool results, or other raw trace blocks onto the public
-    chat endpoint. *)
+    selects only [Autonomous] records and projects only that recorded run.
+    Final text and typed execution steps come from the same exact raw trace;
+    it never scans or concatenates provider runs. *)
 
 type turn =
   { turn_id : string
-  ; agent_name : string
-  ; generation : int
   ; started_at : float
-  ; finished_at : float option
-  ; model : string option
-  ; stop_reason : string option
   ; final_text : string option
+  ; trace : Keeper_chat_blocks.trace_step list
   }
 
 val default_limit : int
-(** Newest current-schema turn records inspected per request. Raw trace file
-    retention uses the same bound, so the endpoint does not imply reach beyond
-    the files the writer keeps. *)
+(** Newest current-schema turn records inspected per request. *)
 
 val load_recent :
   config:Workspace.config ->

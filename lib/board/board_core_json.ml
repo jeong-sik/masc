@@ -134,19 +134,52 @@ let reaction_toggle_result_to_yojson (result : reaction_toggle_result) : Yojson.
 ;;
 
 let reaction_of_yojson (json : Yojson.Safe.t) : reaction option =
-  match
-    ( Safe_ops.json_string_opt "target_type" json
-    , Safe_ops.json_string_opt "target_id" json
-    , Safe_ops.json_string_opt "user_id" json
-    , Safe_ops.json_string_opt "emoji" json
-    , Safe_ops.json_float_opt "created_at" json )
-  with
-  | Some target_type_raw, Some target_id, Some user_id_raw, Some emoji, Some created_at ->
-    (match
-       reaction_target_type_of_string_opt target_type_raw, Agent_id.of_string user_id_raw
-     with
-     | Some target_type, Ok user_id ->
-       Some { target_type; target_id; user_id; emoji; created_at }
-     | _ -> None)
+  match json with
+  | `Assoc fields ->
+    let allowed = [ "target_type"; "target_id"; "user_id"; "emoji"; "created_at" ] in
+    let rec has_exact_fields seen = function
+      | [] -> true
+      | (name, _) :: rest ->
+        if List.mem name seen || not (List.mem name allowed)
+        then false
+        else has_exact_fields (name :: seen) rest
+    in
+    if not (has_exact_fields [] fields)
+    then None
+    else
+      (match
+         ( List.assoc_opt "target_type" fields
+         , List.assoc_opt "target_id" fields
+         , List.assoc_opt "user_id" fields
+         , List.assoc_opt "emoji" fields
+         , List.assoc_opt "created_at" fields )
+       with
+       | ( Some (`String target_type_raw)
+         , Some (`String target_id_raw)
+         , Some (`String user_id_raw)
+         , Some (`String emoji)
+         , Some (`Float created_at) )
+         when Float.is_finite created_at && Float.compare created_at 0.0 > 0 ->
+         let target =
+           match target_type_raw with
+           | "post" ->
+             (match Post_id.of_string target_id_raw with
+              | Ok id when String.equal target_id_raw (Post_id.to_string id) ->
+                Some (Reaction_post, Post_id.to_string id)
+              | Ok _ | Error _ -> None)
+           | "comment" ->
+             (match Comment_id.of_string target_id_raw with
+              | Ok id when String.equal target_id_raw (Comment_id.to_string id) ->
+                Some (Reaction_comment, Comment_id.to_string id)
+              | Ok _ | Error _ -> None)
+           | _ -> None
+         in
+         (match target, Agent_id.of_string user_id_raw with
+          | Some (target_type, target_id), Ok user_id
+            when String.equal user_id_raw (Agent_id.to_string user_id)
+                 && List.exists (String.equal emoji) board_reaction_emojis ->
+            Some { target_type; target_id; user_id; emoji; created_at }
+          | Some _, Ok _ | Some _, Error _ | None, _ -> None)
+       | _ -> None)
   | _ -> None
 ;;

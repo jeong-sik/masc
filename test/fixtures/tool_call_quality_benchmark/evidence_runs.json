@@ -21,15 +21,14 @@
       },
       "tool_calls": [
         {
-          "tool_name": "keeper_tools_list",
+          "tool_name": "tool_search_files",
           "success": true,
           "duration_ms": 24.0,
           "route_evidence": {
-            "descriptor_id": "keeper.tools_list",
-            "eval_tags": ["capability_introspection"]
+            "descriptor_id": "agent.search_files"
           },
           "input": {
-            "query": "prompt_fingerprint keeper_tool_call_log"
+            "pattern": "prompt_fingerprint keeper_tool_call_log"
           }
         },
         {
@@ -41,7 +40,7 @@
             "eval_tags": []
           },
           "input": {
-            "path": "lib/keeper_tool_call_log.ml"
+            "file_path": "lib/keeper_tool_call_log.ml"
           }
         }
       ]
@@ -67,15 +66,14 @@
       },
       "tool_calls": [
         {
-          "tool_name": "keeper_tools_list",
+          "tool_name": "tool_search_files",
           "success": true,
           "duration_ms": 23.0,
           "route_evidence": {
-            "descriptor_id": "keeper.tools_list",
-            "eval_tags": ["capability_introspection"]
+            "descriptor_id": "agent.search_files"
           },
           "input": {
-            "query": "prompt_fingerprint keeper_tool_call_log"
+            "pattern": "prompt_fingerprint keeper_tool_call_log"
           }
         },
         {
@@ -87,7 +85,7 @@
             "eval_tags": []
           },
           "input": {
-            "path": "lib/keeper_tool_call_log.ml"
+            "file_path": "lib/keeper_tool_call_log.ml"
           }
         }
       ]
@@ -113,15 +111,14 @@
       },
       "tool_calls": [
         {
-          "tool_name": "keeper_tools_list",
+          "tool_name": "tool_search_files",
           "success": true,
           "duration_ms": 19.0,
           "route_evidence": {
-            "descriptor_id": "keeper.tools_list",
-            "eval_tags": ["capability_introspection"]
+            "descriptor_id": "agent.search_files"
           },
           "input": {
-            "query": "prompt_fingerprint keeper_tool_call_log"
+            "pattern": "prompt_fingerprint keeper_tool_call_log"
           }
         },
         {
@@ -133,7 +130,7 @@
             "eval_tags": []
           },
           "input": {
-            "cmd": "rg prompt_fingerprint lib"
+            "argv": ["rg", "prompt_fingerprint", "lib"]
           }
         },
         {
@@ -145,7 +142,7 @@
             "eval_tags": []
           },
           "input": {
-            "path": "lib/keeper_tool_call_log.ml"
+            "file_path": "lib/keeper_tool_call_log.ml"
           }
         }
       ]
@@ -200,19 +197,18 @@
             "eval_tags": []
           },
           "input": {
-            "path": "lib/missing_file.ml"
+            "file_path": "lib/missing_file.ml"
           }
         },
         {
-          "tool_name": "keeper_tools_list",
+          "tool_name": "tool_search_files",
           "success": true,
           "duration_ms": 20.0,
           "route_evidence": {
-            "descriptor_id": "keeper.tools_list",
-            "eval_tags": ["capability_introspection"]
+            "descriptor_id": "agent.search_files"
           },
           "input": {
-            "query": "keeper_agent_run prompt_fingerprint"
+            "pattern": "keeper_agent_run prompt_fingerprint"
           }
         },
         {
@@ -224,7 +220,7 @@
             "eval_tags": []
           },
           "input": {
-            "path": "lib/keeper/keeper_agent_run.ml"
+            "file_path": "lib/keeper/keeper_agent_run.ml"
           }
         }
       ]
@@ -258,19 +254,18 @@
             "eval_tags": []
           },
           "input": {
-            "path": "lib/missing_file.ml"
+            "file_path": "lib/missing_file.ml"
           }
         },
         {
-          "tool_name": "keeper_tools_list",
+          "tool_name": "tool_search_files",
           "success": true,
           "duration_ms": 24.0,
           "route_evidence": {
-            "descriptor_id": "keeper.tools_list",
-            "eval_tags": ["capability_introspection"]
+            "descriptor_id": "agent.search_files"
           },
           "input": {
-            "query": "keeper_agent_run prompt_fingerprint"
+            "pattern": "keeper_agent_run prompt_fingerprint"
           }
         },
         {
@@ -282,7 +277,7 @@
             "eval_tags": []
           },
           "input": {
-            "path": "lib/keeper/keeper_agent_run.ml"
+            "file_path": "lib/keeper/keeper_agent_run.ml"
           }
         },
         {
@@ -294,7 +289,7 @@
             "eval_tags": []
           },
           "input": {
-            "path": "lib/keeper/keeper_agent_run.ml"
+            "file_path": "lib/keeper/keeper_agent_run.ml"
           }
         }
       ]

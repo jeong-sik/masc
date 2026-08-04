@@ -76,7 +76,6 @@ type SurfaceSectionId =
   | 'tools'
   | 'harness'
   | 'performance'
-  | 'memory-subsystems'
   | 'keeper-memory-health'
   | 'audit-integrity'
   // code (Stage 5 IDE plane — shell only in PR-1, 4-pane content in PR-2+)
@@ -457,12 +456,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'performance' },
     },
     {
-      id: 'memory-subsystems',
-      label: 'Memory OS',
-      description: 'Recall quality and delegation requests.',
-      params: { section: 'memory-subsystems' },
-    },
-    {
       id: 'keeper-memory-health',
       label: '키퍼 메모리 상태',
       description: 'Per-keeper fact-store size, GC statistics, and cadence counter.',
@@ -561,8 +554,10 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   'connectors:connector-telegram': { section: 'connector-status', params: { connector: 'telegram' } },
 
   // Keeper v2 parity: the old Lab Memory Explore route used hard-coded sample
-  // graph data. Collapse legacy links into the backed Memory OS projection.
-  'lab:memory-explore': { section: 'memory-subsystems' },
+  // graph data, and the Memory OS section that replaced it served only
+  // delegation requests, which nothing writes. Point legacy links at the
+  // backed per-keeper memory projection.
+  'lab:memory-explore': { section: 'keeper-memory-health' },
 
   // Keeper v2 parity: Design Canvas was a static preview over prototype
   // fixture data. Collapse legacy links into the backed Lab tools inventory.

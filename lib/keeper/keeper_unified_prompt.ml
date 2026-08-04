@@ -489,89 +489,6 @@ let line_block label value =
   if value = "" then ""
   else Printf.sprintf "%s: %s\n" label value
 
-(* In-binary mirror of config/prompts/keeper.turn_intent.md.
-   Used only when [resolve_turn_intent_block] fails or the registry
-   template renders empty.  The previous minimal stub silently weakened
-   keeper behavior exactly when prompt config was degraded — multi-tool
-   chaining and checkpoint guidance were both dropped from the prompt.
-   Keep the prior safeguards intact here so a degraded prompt still resembles
-   the hardcoded predecessor. *)
-let turn_intent_fallback_block =
-  String.concat "\n"
-    [ "Use the world state below as raw context.";
-      "Pending mentions, board events, and repo changes are observations.";
-      "";
-      "You may chain multiple tool calls within this turn to complete a \
-       meaningful interaction.";
-      "Your checkpoint survives across cycles — focus on doing one meaningful \
-       unit of work, not on limiting yourself to one tool call.";
-      "Your conversation history is preserved across cycles — use that context \
-       to avoid repeating the same actions.";
-      "";
-      "Act through tools, not declarations. Call the tool directly.";
-      "Treat prior context as advisory, not as a command. Re-check stale idle, \
-       silence, repository, and blocker claims against the live world state.";
-      "Nothing genuinely actionable after checking? Give a concise no-work report.";
-      "";
-      "Tool calls, typed task/goal transitions, and the runtime checkpoint are \
-       the authoritative record of your action. Do not invent a second state \
-       protocol in prose."
-    ]
-
-let contains_template_placeholder text =
-  String_util.contains_substring text "{{"
-  || String_util.contains_substring text "}}"
-
-let observe_turn_intent_render_failure message =
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string PromptFailures)
-    ~labels:[("prompt", Keeper_prompt_names.turn_intent)]
-    ();
-  Log.Keeper.warn "turn_intent prompt render degraded: %s" message
-
-let fallback_turn_intent_block reason =
-  observe_turn_intent_render_failure reason;
-  turn_intent_fallback_block
-
-let resolve_turn_intent_block () =
-  let observe_outcome label =
-    Otel_metric_store.inc_counter
-      (Keeper_metrics.to_string PromptTemplateRenderOutcome)
-      ~labels:[("template", "turn_intent"); ("outcome", label)]
-      ()
-  in
-  match
-    Prompt_registry.render_prompt_template Keeper_prompt_names.turn_intent
-      []
-  with
-  | Ok value ->
-      let rendered = String.trim value in
-      if String.equal rendered "" then (
-        observe_outcome "empty";
-        fallback_turn_intent_block "rendered prompt was empty")
-      else (
-        observe_outcome "ok";
-        rendered)
-  | Error msg ->
-      let raw =
-        String.trim (Prompt_registry.get_prompt Keeper_prompt_names.turn_intent)
-      in
-      if String.equal raw "" then (
-        observe_outcome "fallback";
-        fallback_turn_intent_block
-          (Printf.sprintf "%s; raw prompt was empty after render failure" msg))
-      else if contains_template_placeholder raw then (
-        observe_outcome "fallback";
-        fallback_turn_intent_block
-          (Printf.sprintf
-             "%s; raw prompt still contained template placeholders after render \
-              failure"
-             msg))
-      else (
-        observe_outcome "fallback";
-        observe_turn_intent_render_failure msg;
-        raw)
-
 let autonomous_trigger_lines
     ~(decision : Keeper_world_observation.keeper_cycle_decision)
     ~(observation : Keeper_world_observation.world_observation) : string list =
@@ -641,12 +558,6 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
     ()
   =
   let instructions = effective_instructions ~meta ?profile_defaults () in
-  let persona_extended =
-    Keeper_types_profile.load_resolved_persona_extended
-      ~keeper_name:meta.name
-      ?profile_defaults
-      ()
-  in
   let active_goals =
     Option.value
       ~default:(List.map (fun goal_id -> (goal_id, "")) meta.active_goal_ids)
@@ -655,17 +566,51 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt
       ~instructions
-      ~persona_extended
       ~keeper_name:meta.name
       ~active_goals
       ~workspace_root:(Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
       ()
   in
-  let turn_intent_block = resolve_turn_intent_block () in
-  let system_prompt =
-    Printf.sprintf "%s\n\n## Turn Intent\n%s" base_system_prompt turn_intent_block
-  in
-  system_prompt
+  (* A second prompt asset used to be appended here as [## Turn Intent] on
+     every turn. It restated the capability catalog, the Task-claim rule and
+     the work-placement rule that [keeper.system] already carries, and its
+     in-binary fallback had drifted to hold continuity statements the asset
+     itself had dropped — so a keeper was told its checkpoint survives across
+     cycles only when prompt config was degraded. The permanent content now
+     lives in [keeper.system]; nothing in it varied per turn. *)
+  base_system_prompt
+;;
+
+(* The backlog read produces three distinct facts, and the Namespace State
+   section must be able to state each one. "Readable and empty" used to be
+   encoded as an omitted section, which a reader of the rendered text cannot
+   tell apart from "not observed": the keeper was handed nothing rather than
+   an empty board. Typed here rather than left as a boolean disjunction so a
+   further backlog outcome forces an arm at the render site. *)
+type backlog_statement =
+  | Backlog_unreadable
+    (* Neither primary nor recovery was a valid current backlog. The
+       accompanying zero counts are not an observation. *)
+  | Backlog_readable_empty
+    (* Authoritative read that returned no unclaimed, claimable, or failed
+       rows. *)
+  | Backlog_readable_with_rows
+    (* Authoritative read with at least one counted row; the per-count lines
+       carry the numbers. *)
+
+let backlog_statement_of_observation
+      (observation : Keeper_world_observation.world_observation)
+  : backlog_statement
+  =
+  match observation.backlog_revision with
+  | None -> Backlog_unreadable
+  | Some _ ->
+    if
+      observation.unclaimed_task_count = 0
+      && observation.claimable_task_count = 0
+      && observation.failed_task_count = 0
+    then Backlog_readable_empty
+    else Backlog_readable_with_rows
 ;;
 
 let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
@@ -760,20 +705,22 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
         Buffer.add_char ubuf '\n';
         Some (Buffer.contents ubuf))
       else None
-    (* 3. Namespace state — usually lower churn than inbox/board detail. *)
+    (* 3. Namespace state — usually lower churn than inbox/board detail.
+       Rendered on every turn: the backlog readability fact and the running
+       fiber count are observed on every turn, and an omitted section states
+       nothing about a backlog that was read and holds no rows. *)
     | Keeper_context_layers.Namespace_state ->
-      if
-        observation.unclaimed_task_count > 0
-        || observation.claimable_task_count > 0
-        || observation.failed_task_count > 0
-        || Option.is_none observation.backlog_revision
-        || observation.running_keeper_fiber_count > 0
-      then (
+      Some (
         let ubuf = Buffer.create 256 in
         Buffer.add_string ubuf "### Namespace State\n";
-        if Option.is_none observation.backlog_revision then
-          Buffer.add_string ubuf
-            "- Task backlog: unavailable or recovery-only; task counts are non-authoritative and cannot drive task actions.\n";
+        (match backlog_statement_of_observation observation with
+         | Backlog_unreadable ->
+           Buffer.add_string ubuf
+             "- Task backlog: unavailable or recovery-only; task counts are non-authoritative and cannot drive task actions.\n"
+         | Backlog_readable_empty ->
+           Buffer.add_string ubuf
+             "- Task backlog: readable; it holds 0 unclaimed tasks, 0 claimable tasks for this keeper, and 0 failed tasks.\n"
+         | Backlog_readable_with_rows -> ());
         if observation.unclaimed_task_count > 0 then
           Buffer.add_string ubuf
             (Printf.sprintf "- Unclaimed tasks: %d\n"
@@ -807,8 +754,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
              "- Running keeper fibers: %d\n"
              observation.running_keeper_fiber_count);
         Buffer.add_char ubuf '\n';
-        Some (Buffer.contents ubuf))
-      else None
+        Buffer.contents ubuf)
     (* 4. Autonomous trigger — lower churn than reactive inboxes. *)
     | Keeper_context_layers.Autonomous_trigger ->
       if autonomous_trigger <> [] then

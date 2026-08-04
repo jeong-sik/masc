@@ -12,6 +12,7 @@ val post_origin_to_yojson : post_origin -> Yojson.Safe.t
 val comment_to_yojson : comment -> Yojson.Safe.t
 val reaction_to_yojson : reaction -> Yojson.Safe.t
 val reaction_of_yojson : Yojson.Safe.t -> reaction option
+(** Accepts only the exact current {!reaction_to_yojson} persistence shape. *)
 val reaction_summary_to_yojson : reaction_summary -> Yojson.Safe.t
 val reaction_toggle_result_to_yojson : reaction_toggle_result -> Yojson.Safe.t
 val reaction_target_type_to_string : reaction_target_type -> string

@@ -1,4 +1,4 @@
-(** Exact-run and public-redaction guards for Keeper_autonomous_turn_source. *)
+(** Exact-run activity projection guards for Keeper_autonomous_turn_source. *)
 
 open Masc
 
@@ -75,6 +75,17 @@ let run_lines ~worker_run_id ~start_seq ~base_ts ~prompt ~final_text =
       ; "tool_execution_mode", `String "serial"
       ]
   ; raw_record ~worker_run_id ~seq:(start_seq + 3) ~ts:(base_ts +. 3.)
+      ~record_type:Agent_sdk.Raw_trace.Tool_execution_finished
+      [ "tool_name", `String "Read"
+      ; "tool_result", `String {|{"files":["target.ml"]}|}
+      ; "tool_error", `Bool false
+      ; "tool_use_id", `String ("tool-" ^ worker_run_id)
+      ; "tool_turn", `Int 1
+      ; "tool_planned_index", `Int 0
+      ; "tool_batch_index", `Int 0
+      ; "tool_batch_size", `Int 1
+      ]
+  ; raw_record ~worker_run_id ~seq:(start_seq + 4) ~ts:(base_ts +. 4.)
       ~record_type:Agent_sdk.Raw_trace.Run_finished
       [ "final_text", `String final_text; "stop_reason", `String "end_turn" ]
   ]
@@ -94,7 +105,7 @@ let run_ref ~path ~worker_run_id ~start_seq =
   { Turn_record.worker_run_id
   ; path
   ; start_seq
-  ; end_seq = start_seq + 3
+  ; end_seq = start_seq + 4
   ; agent_name
   ; session_id = trace_id
   }
@@ -147,7 +158,7 @@ let trace_path config suffix =
   Filename.concat (ensure_trace_dir config) ("turn-0000000000000-" ^ suffix ^ ".jsonl")
 ;;
 
-let test_projects_only_public_exact_run () =
+let test_projects_exact_run_outcome_and_activity () =
   with_workspace @@ fun config ->
   let path = trace_path config "exact" in
   let first = run_lines ~worker_run_id:"run-first" ~start_seq:1 ~base_ts:1000.
@@ -161,11 +172,23 @@ let test_projects_only_public_exact_run () =
   match Keeper_autonomous_turn_source.load_recent ~config ~keeper_name () with
   | [ turn ] ->
     Alcotest.(check string) "typed turn ref" "trace-test-0000#41" turn.turn_id;
-    Alcotest.(check string) "agent identity" agent_name turn.agent_name;
-    Alcotest.(check int) "generation" 9 turn.generation;
     Alcotest.(check (option string)) "only selected run outcome"
       (Some "selected outcome") turn.final_text;
-    Alcotest.(check (float 0.001)) "selected run timestamp" 2000. turn.started_at
+    Alcotest.(check (float 0.001)) "selected run timestamp" 2000. turn.started_at;
+    (match turn.trace with
+     | [ Keeper_chat_blocks.Trace_think thinking
+       ; Keeper_chat_blocks.Trace_tool tool
+       ] ->
+       Alcotest.(check string) "thinking content is not public"
+         "내부 판단 단계 (내용 비공개)" thinking.text;
+       Alcotest.(check string) "tool name" "Read" tool.name;
+       Alcotest.(check (option string)) "tool id is not public" None tool.tool_call_id;
+       Alcotest.(check (option string)) "tool duration" (Some "1000ms") tool.dur;
+       Alcotest.(check bool) "tool input is not public" true (tool.args = None);
+       Alcotest.(check bool) "tool result is not public" true (tool.result = None)
+     | trace ->
+       Alcotest.failf "expected think + tool trace, got %d step(s)"
+         (List.length trace))
   | turns -> Alcotest.failf "expected one exact turn, got %d" (List.length turns)
 ;;
 
@@ -280,8 +303,8 @@ let test_absent_session_identity_is_rejected () =
 let () =
   Alcotest.run "keeper_autonomous_turn_source"
     [ ( "load_recent"
-      , [ Alcotest.test_case "projects only the exact public run" `Quick
-            test_projects_only_public_exact_run
+      , [ Alcotest.test_case "projects exact run outcome and activity" `Quick
+            test_projects_exact_run_outcome_and_activity
         ; Alcotest.test_case "typed direct kind defeats marker spoof" `Quick
             test_direct_marker_spoof_is_excluded
         ; Alcotest.test_case "rejects trace paths outside keeper store" `Quick

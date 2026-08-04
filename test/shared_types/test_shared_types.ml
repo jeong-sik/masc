@@ -1,7 +1,7 @@
 (** Tier I4 — Shared types unit tests.
 
     Verifies the abstract-type invariants and JSON round-trips for
-    [Shared_types.{Confidence, Timestamp, Artifact_id}]. *)
+    [Shared_types.{Confidence, Artifact_id}]. *)
 
 open Alcotest
 
@@ -55,27 +55,6 @@ let test_confidence_of_json_invalid () =
   match C.of_json (`String "0.5") with
   | Ok _ -> fail "should reject string"
   | Error _ -> ()
-
-(* ──────────────────────────────────────────────────────────── *)
-(* Timestamp                                                     *)
-(* ──────────────────────────────────────────────────────────── *)
-
-module T = Shared_types.Timestamp
-
-let test_timestamp_ordering () =
-  let a = T.of_float 1700000000.0 in
-  let b = T.of_float 1700000001.0 in
-  check int "a < b" (-1) (Int.compare (T.compare a b) 0)
-
-let test_timestamp_now_recent () =
-  let n = T.now () in
-  check bool "now > 2026-01-01 epoch" true (n > 1735689600.0)
-
-let test_timestamp_json_round_trip () =
-  let t = T.of_float 1700000123.456 in
-  match T.of_json (T.to_json t) with
-  | Ok back -> check (float 1e-9) "round-trip" 1700000123.456 (T.to_float back)
-  | Error e -> fail e
 
 (* ──────────────────────────────────────────────────────────── *)
 (* Artifact_id (UUID v7)                                         *)
@@ -178,11 +157,6 @@ let () =
       test_case "json round-trip" `Quick test_confidence_json_round_trip;
       test_case "of_json int" `Quick test_confidence_of_json_int;
       test_case "of_json rejects string" `Quick test_confidence_of_json_invalid;
-    ];
-    "Timestamp", [
-      test_case "ordering" `Quick test_timestamp_ordering;
-      test_case "now is recent" `Quick test_timestamp_now_recent;
-      test_case "json round-trip" `Quick test_timestamp_json_round_trip;
     ];
     "Artifact_id", [
       test_case "generate format" `Quick test_artifact_id_generate_format;

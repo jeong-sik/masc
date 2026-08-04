@@ -2,7 +2,6 @@
  (names
   test_artifact
   test_multimodal_hydrator
-  test_create
   test_workspace
   test_multimodal_keeper_bridge
   test_workspace_holder

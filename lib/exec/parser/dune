@@ -6,7 +6,7 @@
  (name masc_exec_bash_parser)
  (public_name masc.masc_exec_bash_parser)
  (wrapped true)
- (libraries masc_exec masc_core masc_exec_shell_words))
+ (libraries masc_exec masc_core))
 
 (ocamllex bash_lexer)
 

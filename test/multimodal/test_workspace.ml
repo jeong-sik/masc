@@ -1,19 +1,26 @@
 (* Cycle 24-25 / Tier A7 — Multimodal.Workspace tests. *)
 
 module W = Multimodal.Workspace
-module C = Multimodal.Create
 module A = Multimodal.Artifact
 module P = Multimodal.Payload
 module Aid = Shared_types.Artifact_id
 
+let make_artifact ~id ~kind ~payload ~metadata ts =
+  { A.id
+  ; kind
+  ; payload
+  ; metadata
+  ; provenance = A.provenance_empty ~created_by:"executor" ~created_at:ts
+  }
+
 let make_doc id ts =
-  C.create_doc ~id ~payload:(P.Blob_ref (Aid.to_string id))
+  make_artifact ~id ~kind:A.Doc
+    ~payload:(P.Blob_ref (Aid.to_string id))
     ~metadata:(`Assoc [ ("title", `String ("doc-" ^ Aid.to_string id)) ])
-    ~created_by:"executor" ~created_at:ts ()
+    ts
 
 let make_image id ts =
-  C.create_image ~id ~payload:(P.Streaming 0) ~created_by:"executor"
-    ~created_at:ts ()
+  make_artifact ~id ~kind:A.Image ~payload:(P.Streaming 0) ~metadata:`Null ts
 
 (* ─── empty / size / add ──────────────────────────────────────── *)
 

@@ -9,7 +9,6 @@ code_refs:
   - lib/keeper/keeper_world_observation.ml
   - lib/keeper/keeper_heartbeat_stimulus_intake.ml
   - lib/process/process_eio_detached.ml
-  - lib/process/bg_task.ml
 ---
 
 # External Tool Surface Audit
@@ -98,17 +97,18 @@ https://ocaml-multicore.github.io/eio/eio/Eio/Fiber/index.html
 Status: P0 design blocker before generic subprocess spawn
 
 `lib/process/process_eio_detached.ml` uses `Unix.fork` in both
-`spawn_detached` and `spawn_detached_devnull`. `lib/process/bg_task.ml` then
-uses `Thread.create` for the exit watcher. That shape is acceptable only if the
-runtime is known not to have spawned OCaml domains or threads before fork. A
-keeper/server process using Eio and background workers cannot assume that.
+`spawn_detached` and `spawn_detached_devnull`. Any executor layered on top that
+uses `Thread.create` for an exit watcher inherits a shape that is acceptable
+only if the runtime is known not to have spawned OCaml domains or threads
+before fork. A keeper/server process using Eio and background workers cannot
+assume that.
 
 The practical risk is not theoretical:
 
 - `Unix.fork` can fail once any domain has been spawned.
 - if any `Thread` module thread has been spawned, the fork child may be
   corrupted.
-- after `bg_task` starts one watcher thread, future forks are in the
+- once any watcher thread is started, future forks are in the
   thread-after-fork danger zone.
 
 Do not wire `masc_bg_spawn` to this detached subprocess substrate as-is.

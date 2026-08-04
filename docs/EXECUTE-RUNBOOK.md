@@ -31,8 +31,8 @@ background task lifecycle are not part of the callable surface.
 - `Grep` owns file/content search. Execute owns typed command execution.
 - Does not cover: the runtime verifier itself or the approval layer for MCP
   tools.
-- Async boundary: background shell lifecycle primitives live in `Bg_task`;
-  they are not exposed through the typed `Execute` callable surface.
+- Async boundary: the typed `Execute` callable surface is synchronous. There is
+  no background shell lifecycle surface anywhere below it.
 
 ## Current Rollout State
 
@@ -121,10 +121,9 @@ rejects legacy background flags and accepts only typed command fields:
 `stdout`, and `stderr`. It does not expose `job_id`, `request_id`, `poll`, or
 `cancel` fields.
 
-Background shell lifecycle support exists below that boundary in `Bg_task`
-(`spawn` / `read` / `kill` / `list`). Keeper-turn async messaging is a separate
-surface (`keeper_msg`, `keeper_msg_result`, `keeper_msg_cancel`,
-`keeper_msg_list`) and is serialized through `Keeper_turn_admission`.
+Keeper-turn async messaging is a separate surface (`keeper_msg`,
+`keeper_msg_result`, `keeper_msg_cancel`, `keeper_msg_list`) and is serialized
+through `Keeper_turn_admission`.
 
 Verification:
 

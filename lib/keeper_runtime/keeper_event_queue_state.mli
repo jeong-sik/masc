@@ -32,7 +32,6 @@ type accepted_transfer =
 
 type source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
-  | Background_job_terminal of Keeper_event_queue.bg_job_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
   | Turn_attempt_terminal of { detail : string }
 (** Closed terminal source evidence. The first three families are intrinsically
@@ -227,8 +226,8 @@ val accepted_pending_source_terminal_ack_replay :
 
 val source_terminal_receipt_of_stimulus :
   Keeper_event_queue.stimulus -> (source_terminal_receipt, string) result
-(** Accept only [Fusion_completed], [Bg_completed], or [Hitl_resolved] and
-    retain their exact typed terminal payload. *)
+(** Accept only [Fusion_completed] or [Hitl_resolved] and retain their exact
+    typed terminal payload. *)
 
 val mark_transition_projected : transition_id:string -> t -> (t, string) result
 (** Atomically retire a durable outbox entry after an external projector has

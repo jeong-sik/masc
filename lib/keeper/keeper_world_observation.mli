@@ -22,7 +22,6 @@ type pending_board_event_kind =
   | Board_comment_added
   | Board_reaction_changed of board_reaction_event
   | Fusion_completed
-  | Bg_completed
   | Schedule_due of Keeper_event_queue.scheduled_wake
       (** The consumed wake, kept typed. The exact occurrence key is
           [(schedule_id, due_at, payload_digest)]; [schedule_id] alone can point
@@ -281,16 +280,6 @@ val pending_board_event_of_fusion_completion :
   Keeper_event_queue.fusion_completion ->
   pending_board_event
 
-(** RFC-0290: build the actionable [pending_board_event] for a completed
-    background job. Mirrors {!pending_board_event_of_fusion_completion}: the
-    synthetic System_post event wakes the keeper with the job outcome.
-    [bg_board_post_id = ""] falls back to a synthetic [bg-run:<id>] post id. *)
-val pending_board_event_of_bg_job_completion :
-  meta:Keeper_meta_contract.keeper_meta ->
-  arrived_at:float ->
-  Keeper_event_queue.bg_job_completion ->
-  pending_board_event
-
 (** Build the actionable observation for a direct scheduled keeper wake. *)
 val pending_board_event_of_scheduled_wake :
   meta:Keeper_meta_contract.keeper_meta ->
@@ -309,7 +298,7 @@ val pending_board_event_of_external_attention :
 
 (** Convert a queued Event Layer stimulus into structured turn activity
     for the next keeper prompt. [Board_signal], [Fusion_completed] (RFC-0266),
-    [Bg_completed] (RFC-0290), and [Schedule_due] produce [Some];
+    and [Schedule_due] produce [Some];
     [Bootstrap] returns [None] (no prompt injection).
     [Error unavailable] means the underlying board read for [Board_signal] /
     [Board_attention] failed (board-unavailable-result). Callers classify via

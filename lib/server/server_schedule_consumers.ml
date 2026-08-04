@@ -655,7 +655,6 @@ let occurrence_source_and_disposition
       | Keeper_event_queue_state.Turn_attempt_terminal { detail } ->
         Terminally_failed (detail, terminal_evidence)
       | Keeper_event_queue_state.Fusion_terminal _
-      | Keeper_event_queue_state.Background_job_terminal _
       | Keeper_event_queue_state.Hitl_terminal _ ->
         Terminally_completed terminal_evidence
     in

@@ -10,6 +10,11 @@ module Tool_capability = Tool_capability
 (** Helper: minimal input_schema for test tools. *)
 let empty_schema = `Assoc [ ("type", `String "object") ]
 
+let register_test_metadata name =
+  Tool_catalog.For_testing.register_metadata name
+    (Tool_catalog.default_metadata ~required_permission:Masc_domain.CanAdmin)
+;;
+
 let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
 ;;
@@ -73,6 +78,7 @@ let () =
                 ~handler_binding:Tag_dispatch
                 ()
             in
+            register_test_metadata "__test_spec_tag_reg";
             Tool_spec.register spec;
             check bool "tag registered" true
               (Option.is_some (Tool_dispatch.lookup_tag "__test_spec_tag_reg"));
@@ -89,6 +95,7 @@ let () =
                 ~handler_binding:Tag_dispatch
                 ()
             in
+            register_test_metadata "__test_spec_schema_reg";
             Tool_spec.register spec;
             check bool "schema registered" true
               (Option.is_some (Tool_dispatch.lookup_schema "__test_spec_schema_reg")));
@@ -103,6 +110,7 @@ let () =
                 ~is_read_only:true
                 ()
             in
+            register_test_metadata "__test_spec_ro";
             Tool_spec.register spec;
             check bool "is_read_only" true
               (Tool_capability.has Tool_capability.Read_only "__test_spec_ro"));
@@ -116,6 +124,7 @@ let () =
                 ~handler_binding:Tag_dispatch
                 ()
             in
+            register_test_metadata "__test_spec_rw";
             Tool_spec.register spec;
             check bool "not read_only" false
               (Tool_capability.has Tool_capability.Read_only "__test_spec_rw"));
@@ -130,6 +139,7 @@ let () =
                 ~mcp_context_required:true
                 ()
             in
+            register_test_metadata "__test_spec_mcp_context";
             Tool_spec.register spec;
             check bool "is_mcp_context_required" true
               (Tool_capability.has Tool_capability.Mcp_context_required "__test_spec_mcp_context");
@@ -148,6 +158,7 @@ let () =
                 ~reason:"test hidden"
                 ()
             in
+            register_test_metadata "__test_spec_catalog";
             Tool_spec.register spec;
             let meta = Tool_catalog.metadata "__test_spec_catalog" in
             check bool "hidden" true (meta.visibility = Tool_catalog.Hidden);
@@ -164,6 +175,25 @@ let () =
                      ~input_schema:empty_schema
                      ~handler_binding:Tag_dispatch
                      ())));
+          test_case "unclassified tool rejected before registry mutation" `Quick (fun () ->
+            let name = "__test_spec_unclassified" in
+            let spec =
+              Tool_spec.create
+                ~name
+                ~description:"unclassified tool"
+                ~module_tag:Tool_dispatch.Mod_misc
+                ~input_schema:empty_schema
+                ~handler_binding:Tag_dispatch
+                ()
+            in
+            check_raises "catalog ownership required"
+              (Invalid_argument
+                 "Tool_spec.register: tool __test_spec_unclassified has no catalog-owned metadata")
+              (fun () -> Tool_spec.register spec);
+            check bool "tag not registered" false
+              (Option.is_some (Tool_dispatch.lookup_tag name));
+            check bool "schema not registered" false
+              (Option.is_some (Tool_dispatch.lookup_schema name)));
         ] );
       ( "register_all",
         [
@@ -180,6 +210,8 @@ let () =
                     ())
                 [ "__test_spec_bulk_a"; "__test_spec_bulk_b"; "__test_spec_bulk_c" ]
             in
+            List.iter register_test_metadata
+              [ "__test_spec_bulk_a"; "__test_spec_bulk_b"; "__test_spec_bulk_c" ];
             Tool_spec.register_all specs;
             List.iter
               (fun name ->
@@ -219,6 +251,7 @@ let () =
                 ~handler_binding:Tag_dispatch
                 ()
             in
+            register_test_metadata "__test_spec_tag_dispatch";
             Tool_spec.register spec;
             let missing = Tool_spec.verify_handler_coverage () in
             check bool "Tag_dispatch not in missing" false
@@ -234,6 +267,7 @@ let () =
                 ~handler_binding:(Direct (fun ~name:_ ~args:_ -> Some (tool_ok "ok")))
                 ()
             in
+            register_test_metadata name;
             Tool_spec.register spec;
             check bool "handler registered in Tool_dispatch" true
               (Tool_dispatch.is_registered name);

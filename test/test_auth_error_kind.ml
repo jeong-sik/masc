@@ -63,6 +63,14 @@ let test_classify_forbidden () =
         "Forbidden should classify as Forbidden, got %s"
         (Aek.to_string other)
 
+let test_classify_same_origin_blocked () =
+  match Aek.classify (Masc_domain.Auth Masc_domain.Auth_error.SameOriginBlocked) with
+  | Aek.Forbidden -> ()
+  | other ->
+      Alcotest.failf
+        "SameOriginBlocked should classify as Forbidden, got %s"
+        (Aek.to_string other)
+
 let test_classify_agent_not_found () =
   match Aek.classify (Masc_domain.Agent (Masc_domain.Agent_error.NotFound "x")) with
   | Aek.Agent_not_found -> ()
@@ -121,6 +129,7 @@ let suite =
   ; test_case "classify TokenExpired" `Quick test_classify_token_expired
   ; test_case "classify Unauthorized" `Quick test_classify_unauthorized
   ; test_case "classify Forbidden" `Quick test_classify_forbidden
+  ; test_case "classify SameOriginBlocked" `Quick test_classify_same_origin_blocked
   ; test_case "classify AgentNotFound" `Quick test_classify_agent_not_found
   ; test_case "classify IoError" `Quick test_classify_io_error
   ; test_case "classify InvalidJson" `Quick test_classify_invalid_json

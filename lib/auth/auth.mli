@@ -14,6 +14,10 @@ val generate_token : unit -> string
 (** Generate a cryptographically random token: exactly 64 lowercase hex
     characters encoding 32 random bytes. *)
 
+val is_generated_token_shape : string -> bool
+(** [is_generated_token_shape raw] checks the exact lexical shape produced by
+    {!generate_token}. It does not establish token provenance or validity. *)
+
 val sha256_hash : string -> string
 (** Hash a token/secret with SHA-256 and return exactly 64 lowercase hex
     characters. Secret comparisons use Eqaf on this fixed-width form. *)
@@ -302,6 +306,8 @@ val is_tool_auth_strict_enabled : unit -> bool
 val authorize_tool :
   string -> agent_name:string -> token:string option ->
   tool_name:string -> (unit, masc_error) result
+(** Enforce the exact required permission declared by the registered tool
+    catalog. Unregistered names fail closed; prefixes grant no authority. *)
 
 (** {1 Role Resolution} *)
 
@@ -316,6 +322,7 @@ val resolve_role_with_auth_config :
 val authorize_tool_for_role :
   agent_name:string -> role:agent_role -> tool_name:string ->
   (unit, masc_error) result
+(** Pure role check against the same catalog-owned per-tool permission. *)
 
 val authorize_tool_v2 :
   string -> agent_name:string -> token:string option ->

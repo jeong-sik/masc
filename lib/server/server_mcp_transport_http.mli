@@ -19,6 +19,11 @@ type runtime = Server_mcp_transport_http_types.runtime = {
   clear_resource_subscriptions_for_session : string -> unit;
 }
 
+type auth_failure = Server_mcp_transport_http_types.auth_failure =
+  { message : string
+  ; auth_error_code : string option
+  }
+
 type deps = {
   get_origin : Httpun.Request.t -> string;
   cors_headers : string -> (string * string) list;
@@ -26,11 +31,12 @@ type deps = {
   is_ready : unit -> bool;
   get_runtime_result : unit -> (runtime, string) result;
   get_base_path : unit -> string;
-  verify_mcp_auth : base_path:string -> Httpun.Request.t -> (unit, string) result;
+  verify_mcp_auth :
+    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
   verify_mcp_observer_stream_auth :
-    base_path:string -> Httpun.Request.t -> (unit, string) result;
+    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
   verify_operator_mcp_auth :
-    base_path:string -> Httpun.Request.t -> (unit, string) result;
+    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
 }
 
 val mcp_protocol_versions : string list

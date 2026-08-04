@@ -80,7 +80,10 @@ function authBadgeSummary(): {
     }
   }
   // No token and bootstrap failed — show actionable prompt
-  if (!hasToken && (bootstrap === 'no_endpoint' || bootstrap === 'network')) {
+  if (
+    !hasToken
+    && (bootstrap === 'no_endpoint' || bootstrap === 'invalid_response' || bootstrap === 'network')
+  ) {
     return {
       dotColor: 'bg-[var(--color-status-err)] shadow-[0_0_6px_rgb(var(--err-glow)/0.45)]',
       label: 'Login required',

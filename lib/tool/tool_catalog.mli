@@ -27,6 +27,7 @@ type metadata = {
   readonly : bool option;
   mcp_context_required : bool option;
   idempotent : bool option;
+  required_permission : Masc_domain.permission;
 }
 
 type execution_policy_axis =
@@ -48,12 +49,13 @@ type execution_policy_error =
 
 (** {1 Configuration} *)
 
-val default_metadata : metadata
+val default_metadata : required_permission:Masc_domain.permission -> metadata
 
 val hidden_active :
   ?canonical_name:string -> ?replacement:string ->
   ?allow_direct_call_when_hidden:bool ->
-  ?implementation_status:implementation_status -> string -> metadata
+  ?implementation_status:implementation_status ->
+  required_permission:Masc_domain.permission -> string -> metadata
 
 val placeholder_tools_enabled : unit -> bool
 
@@ -92,9 +94,9 @@ val metadata_to_fields : string -> (string * Yojson.Safe.t) list
 val public_contract_fields : string -> (string * Yojson.Safe.t) list
 (** Minimal metadata for public contract responses. *)
 
-val register_metadata : string -> metadata -> unit
-(** Register runtime metadata for a tool. Called by [Tool_spec.register].
-    Overwrites any previous entry for the same name. *)
+val register_runtime_metadata : string -> metadata -> (unit, string) result
+(** Register runtime visibility/execution metadata while preserving the
+    catalog-owned required permission. Unclassified tool names fail closed. *)
 
 val registered_metadata : string -> metadata option
 (** Explicit or [Tool_spec]-registered metadata, without surface-derived
@@ -102,3 +104,9 @@ val registered_metadata : string -> metadata option
 
 val explicit_metadata : (string * metadata) list
 (** Explicitly configured tool metadata entries (for test verification). *)
+
+module For_testing : sig
+  val register_metadata : string -> metadata -> unit
+  (** Install an arbitrary fixture entry, bypassing the production catalog
+      ownership check. Production registration uses [register_runtime_metadata]. *)
+end

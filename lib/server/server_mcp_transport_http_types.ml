@@ -3,6 +3,17 @@ type tool_profile =
   | Managed_agent
   | Operator_remote
 
+type auth_failure =
+  { message : string
+  ; auth_error_code : string option
+  }
+
+let auth_failure_of_masc_error err =
+  { message = Masc_domain.masc_error_to_string err
+  ; auth_error_code = Masc_domain.dashboard_auth_error_code err
+  }
+;;
+
 type runtime = {
   base_path : string;
   sw : Eio.Switch.t;
@@ -26,9 +37,10 @@ type deps = {
   is_ready : unit -> bool;
   get_runtime_result : unit -> (runtime, string) result;
   get_base_path : unit -> string;
-  verify_mcp_auth : base_path:string -> Httpun.Request.t -> (unit, string) result;
+  verify_mcp_auth :
+    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
   verify_mcp_observer_stream_auth :
-    base_path:string -> Httpun.Request.t -> (unit, string) result;
+    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
   verify_operator_mcp_auth :
-    base_path:string -> Httpun.Request.t -> (unit, string) result;
+    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
 }

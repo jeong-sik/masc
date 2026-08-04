@@ -150,7 +150,7 @@ let test_default_metadata_has_no_implicit_execution_policy () =
   match
     Tool_catalog.execution_policy_of_metadata
       ~tool_name:"__unregistered_tool"
-      Tool_catalog.default_metadata
+      (Tool_catalog.default_metadata ~required_permission:Masc_domain.CanAdmin)
   with
   | Ok _ -> Alcotest.fail "default metadata must not invent an execution policy"
   | Error (Tool_catalog.Missing_execution_policy { tool_name; missing_axes }) ->
@@ -178,6 +178,19 @@ let test_keeper_schemas_have_explicit_execution_policy () =
     "every Keeper schema has total catalog-owned execution policy"
     []
     errors
+;;
+
+let test_every_registered_schema_has_catalog_permission () =
+  init ();
+  let missing =
+    Tool_dispatch.all_schema_names ()
+    |> List.filter (fun name ->
+      Option.is_none (Tool_catalog.registered_metadata name))
+  in
+  Alcotest.(check (list string))
+    "every registered schema has catalog-owned permission metadata"
+    []
+    missing
 ;;
 
 let test_retired_tools_are_absent () =
@@ -240,6 +253,10 @@ let () =
             "Keeper schemas have explicit execution policy"
             `Quick
             test_keeper_schemas_have_explicit_execution_policy
+        ; test_case
+            "every registered schema has catalog permission"
+            `Quick
+            test_every_registered_schema_has_catalog_permission
         ] )
     ; ( "retired_tools"
       , [ test_case "retired tools are absent" `Quick test_retired_tools_are_absent

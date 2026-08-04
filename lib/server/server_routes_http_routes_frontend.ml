@@ -111,7 +111,7 @@ let websocket_upgrade_authorized ~base_path ~request_authority request =
        let message =
          Printf.sprintf
            "%s Same-origin WebSocket upgrade rejected: %s"
-           token_error
+           (Masc_domain.masc_error_to_string token_error)
            (Masc_domain.masc_error_to_string origin_error)
        in
        Error (websocket_auth_error message))

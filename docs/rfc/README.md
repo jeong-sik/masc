@@ -329,7 +329,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0335 | TOML as the Single Settings Source | Draft | - |
 | 0337 | Withdraw deterministic evidence-gate semantics | Withdrawn | - |
 | 0338 | Lane-per-keeper durable persistence isolation | Draft | - |
-| 0340 | Dashboard dev-token privilege reduction — demote from Admin, close the rebind... | Draft | - |
+| 0340 | Loopback dashboard Worker credential | Active | - |
 | 0341 | Keeper lifecycle projection SSOT | Draft | - |
 | 0342 | Capability catalog overlay, deployment capability declarations, and boot posture | Draft | - |
 | 0343 | Repo location SSOT (collapse dual-authority, attribute by git-remote) | Draft | - |

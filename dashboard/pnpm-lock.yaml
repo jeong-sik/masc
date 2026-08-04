@@ -78,6 +78,9 @@ importers:
       shiki:
         specifier: ^4.0.2
         version: 4.0.2
+      uuid:
+        specifier: ^14.0.0
+        version: 14.0.0
       valibot:
         specifier: ^1.4.2
         version: 1.4.2(typescript@6.0.3)

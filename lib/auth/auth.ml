@@ -196,28 +196,9 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
         { reason = Missing_token; message = "Token required" })))
 ;;
 
-(** Tool auth is always strict: unknown internal tools require at least
-    worker-level permission, and unknown external tools are denied. *)
+(** Tool auth is always strict: the catalog owns every callable tool name and
+    its typed permission. Unregistered names are denied regardless of prefix. *)
 let is_tool_auth_strict_enabled () = true
-
-(* #10205 finding 1: SSOT for the internal-tool prefix vocabulary.
-   Unmapped dotted game-view namespaces ([decision.], [experiment.], [client.])
-   were retired from the MCP front door; do not preserve them as implicit
-   strict-auth internals.  Keeper runtime tools are NOT a prefix: a [keeper_*]
-   prefix alone is not enough to cross auth — the catalog must own the tool.
-   That check stays separate. *)
-let internal_tool_prefixes = [ "masc_" ]
-
-let has_internal_tool_prefix tool_name =
-  List.exists
-    (fun pref -> String.starts_with ~prefix:pref tool_name)
-    internal_tool_prefixes
-;;
-
-let is_known_or_internal_tool_name tool_name =
-  has_internal_tool_prefix tool_name
-  || Option.is_some (Tool_catalog.registered_metadata tool_name)
-;;
 
 let unknown_tool_class tool_name =
   if String.trim tool_name = "" then "empty" else "external"
@@ -232,14 +213,19 @@ let record_strict_unknown_tool_denial ~agent_name ~tool_name =
 
 (** Check permission for a tool call *)
 let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) result =
-  if is_known_or_internal_tool_name tool_name
-  then check_permission config ~agent_name ~token ~permission:CanBroadcast
-  else (
+  match Tool_catalog.registered_metadata tool_name with
+  | Some metadata ->
+    check_permission
+      config
+      ~agent_name
+      ~token
+      ~permission:metadata.required_permission
+  | None ->
     let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
     Error
       (Auth
          (Auth_error.Forbidden
-            { agent = agent_name; action = "use unknown non-masc tool: " ^ tool_name })))
+            { agent = agent_name; action = "use unregistered tool: " ^ tool_name }))
 ;;
 
 (* ============================================ *)
@@ -281,25 +267,25 @@ let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
 ;;
 
 let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) result =
-  if is_known_or_internal_tool_name tool_name
-  then
-    if has_permission role CanBroadcast
+  match Tool_catalog.registered_metadata tool_name with
+  | Some metadata ->
+    if has_permission role metadata.required_permission
     then Ok ()
     else Error (Auth (Auth_error.Forbidden { agent = agent_name; action = tool_name }))
-  else (
+  | None ->
     let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
     Error
       (Auth
          (Auth_error.Forbidden
-            { agent = agent_name; action = "use unknown non-masc tool: " ^ tool_name })))
+            { agent = agent_name; action = "use unregistered tool: " ^ tool_name }))
 ;;
 
 (** Role-based tool authorization.
     Resolves the caller role and enforces generic internal-tool access.
     Invalid/expired tokens are rejected (not silently downgraded).
 
-    Known or [masc_*] tools require at least Worker; unknown external tools are
-    forbidden. *)
+    Each registered tool requires its catalog-owned typed permission; every
+    unregistered name is forbidden. *)
 let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) result =
   match resolve_role config ~agent_name ~token with
   | Error e -> Error e
@@ -367,5 +353,3 @@ let is_auth_enabled config : bool =
   let cfg = load_auth_config config in
   cfg.enabled
 ;;
-
-

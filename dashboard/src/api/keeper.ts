@@ -12,14 +12,9 @@ import type {
   KeeperQueueReceiptFailureKind,
   KeeperUserInputBlock,
 } from '../types'
-import type { DashboardAuthErrorCode } from '../types/dashboard-execution'
 import {
   currentDashboardActor,
   apiRequestErrorFromResponse,
-  clearStoredToken,
-  getStoredToken,
-  getStoredTokenMeta,
-  isRemoteAccess,
   jsonHeaders,
   post,
   runOperatorAction,
@@ -28,7 +23,7 @@ import {
   fetchJsonWithTimeout,
   DEFAULT_GET_TIMEOUT_MS,
 } from './core'
-import { ensureDevToken, resetDevTokenBootstrap } from './dev-token'
+import { refreshDevTokenAfterAuthError } from './dev-token'
 import { isKeeperChatReceiptId, parseKeeperQueueRevision } from '../lib/keeper-chat-receipt'
 import type {
   KeeperCompositeSnapshot,
@@ -498,64 +493,6 @@ export interface KeeperStreamOutcome {
   terminal: boolean
 }
 
-function keeperStreamErrorMessage(raw: string, status: number): string {
-  let message = raw || `스트리밍 요청 실패 (${status})`
-  try {
-    const parsed = JSON.parse(raw) as { error?: string | { message?: string }; message?: string }
-    if (typeof parsed.error === 'string') {
-      message = parsed.error
-    } else {
-      message = parsed.error?.message ?? parsed.message ?? message
-    }
-  } catch {
-    // Keep raw text fallback.
-  }
-  return message
-}
-
-/**
- * Auth error codes that mean the stored bearer token is stale or wrong for
- * the requested actor — minting a fresh dev token and retrying can recover.
- * `same_origin_blocked` / `insufficient_role` / `missing_token` are NOT here:
- * a token refresh cannot fix a CORS rejection, a role shortfall, or a request
- * that simply omitted the token.
- */
-const STALE_TOKEN_AUTH_CODES: ReadonlySet<DashboardAuthErrorCode> = new Set([
-  'invalid_token',
-  'token_expired',
-  'actor_mismatch',
-])
-
-/**
- * Decide whether a 401 body signals a stale/wrong bearer token.
- * Primary gate: the typed `auth_error_code` field in the JSON body
- * (server SSOT: `lib/types/masc_error.ml:dashboard_auth_error_code`,
- * emitted by `lib/server/server_auth.ml:auth_error_json`).
- */
-function isStaleTokenAuthError(raw: string): boolean {
-  try {
-    const parsed = JSON.parse(raw) as { auth_error_code?: unknown }
-    const code = parsed.auth_error_code
-    if (typeof code === 'string') {
-      return STALE_TOKEN_AUTH_CODES.has(code as DashboardAuthErrorCode)
-    }
-  } catch {
-    return false
-  }
-  return false
-}
-
-async function refreshLoopbackDevTokenAfterMismatch(): Promise<boolean> {
-  if (isRemoteAccess() || !getStoredToken()) return false
-  const meta = getStoredTokenMeta()
-  if (meta?.source === 'manual') return false
-
-  clearStoredToken()
-  resetDevTokenBootstrap()
-  await ensureDevToken()
-  return getStoredToken() !== null
-}
-
 export interface StreamKeeperMessageOptions {
   signal?: AbortSignal
   onEvent: (event: KeeperChatStreamEvent) => void
@@ -628,7 +565,8 @@ export async function streamKeeperMessage(
     body.user_blocks = userBlocks.map(streamUserBlockToWire)
   }
   const requestBody = JSON.stringify(body)
-  const postStream = () => fetch('/api/v1/keepers/chat/stream', {
+  const streamPath = '/api/v1/keepers/chat/stream'
+  const postStream = () => fetch(streamPath, {
     method: 'POST',
     headers: {
       ...jsonHeaders(),
@@ -641,21 +579,18 @@ export async function streamKeeperMessage(
   let res = await postStream()
 
   if (!res.ok) {
-    let raw = await res.text()
+    let requestError = await apiRequestErrorFromResponse('POST', streamPath, res)
     if (
       res.status === 401
-      && isStaleTokenAuthError(raw)
-      && await refreshLoopbackDevTokenAfterMismatch()
+      && await refreshDevTokenAfterAuthError(requestError.authErrorCode)
     ) {
       res = await postStream()
-      if (res.ok) {
-        raw = ''
-      } else {
-        raw = await res.text()
+      if (!res.ok) {
+        requestError = await apiRequestErrorFromResponse('POST', streamPath, res)
       }
     }
     if (!res.ok) {
-      throw new Error(keeperStreamErrorMessage(raw, res.status))
+      throw requestError
     }
   }
 

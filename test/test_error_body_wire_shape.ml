@@ -75,6 +75,32 @@ let test_error_body_includes_data_when_supplied () =
   in
   check json_testable "data field included when supplied" expected body
 
+let test_auth_failure_code_is_nested_in_jsonrpc_error_data () =
+  let failure : Server_mcp_transport_http_protocol.auth_failure =
+    Server_mcp_transport_http_types.auth_failure_of_masc_error
+      (Masc_domain.Auth
+         (Masc_domain.Auth_error.InvalidToken "stored token is no longer valid"))
+  in
+  let body =
+    R.error_body
+      ?data:(Server_mcp_transport_http_protocol.auth_failure_data failure)
+      ~code:C.Auth_error
+      failure.message
+  in
+  let expected =
+    `Assoc
+      [ "jsonrpc", `String "2.0"
+      ; "id", `Null
+      ; ( "error"
+        , `Assoc
+            [ "code", `Int (-32001)
+            ; "message", `String failure.message
+            ; "data", `Assoc [ "auth_error_code", `String "invalid_token" ]
+            ] )
+      ]
+  in
+  check json_testable "typed auth code uses JSON-RPC error.data" expected body
+
 let test_wire_byte_change_documented () =
   (* PR-2 wire-byte change regression guard — outlives the legacy
      factories removed in PR-4. Pre-PR-2 bodies omitted "id";
@@ -111,6 +137,8 @@ let () =
             test_error_body_echoes_request_id;
           test_case "data field when supplied" `Quick
             test_error_body_includes_data_when_supplied;
+          test_case "typed auth code in error.data" `Quick
+            test_auth_failure_code_is_nested_in_jsonrpc_error_data;
           test_case "PR-2 wire-byte change is intentional (regression guard)"
             `Quick test_wire_byte_change_documented;
         ] );

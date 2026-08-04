@@ -34,11 +34,9 @@ let request ?token ~actor () =
     "/api/v1/dashboard/briefing"
 
 let resolve ~base_path request =
-  Eio_main.run @@ fun _env ->
   Server_auth.dashboard_actor_resolution_for_request ~base_path request
 
 let project ~base_path request =
-  Eio_main.run @@ fun _env ->
   Server_auth.dashboard_actor_for_request ~base_path request
 
 let loopback_request_authority () =
@@ -158,7 +156,53 @@ let expect_observer_rejected ~base_path request message =
 let expect_observer_admitted ~base_path request message =
   match Server_auth.verify_mcp_observer_stream_auth ~base_path request with
   | Ok _ -> ()
-  | Error err -> failf "%s: %s" message err
+  | Error err ->
+      failf "%s: %s" message (Masc_domain.masc_error_to_string err)
+
+let test_mcp_auth_surfaces_preserve_typed_reasons () =
+  with_temp_base_path @@ fun base_path ->
+  Masc.Auth.save_auth_config
+    base_path
+    { Masc_domain.default_auth_config with enabled = true; require_token = true };
+  let observer = observer_request () in
+  (match Server_auth.verify_mcp_observer_stream_auth ~base_path observer with
+   | Error
+       (Masc_domain.Auth
+          (Masc_domain.Auth_error.Unauthorized
+             { reason = Masc_domain.Auth_error.Missing_token; _ })) ->
+       ()
+   | Error err ->
+       failf "observer error lost its typed reason: %s"
+         (Masc_domain.masc_error_to_string err)
+   | Ok _ -> fail "observer auth admitted a request without a token");
+  let operator =
+    Httpun.Request.create `GET "/mcp/operator"
+  in
+  (match Server_auth.verify_operator_mcp_auth ~base_path operator with
+   | Error
+       (Masc_domain.Auth
+          (Masc_domain.Auth_error.Unauthorized
+             { reason = Masc_domain.Auth_error.Missing_token; _ })) ->
+       ()
+   | Error err ->
+       failf "operator error lost its typed reason: %s"
+         (Masc_domain.masc_error_to_string err)
+   | Ok _ -> fail "operator auth admitted a request without a token");
+  let deps = Server_routes_http_common.mcp_transport_http_deps () in
+  let expect_transport_code label result =
+    match result with
+    | Error { Server_mcp_transport_http_types.auth_error_code = Some code; _ } ->
+        check string label "missing_token" code
+    | Error { auth_error_code = None; message } ->
+        failf "%s lost auth_error_code: %s" label message
+    | Ok () -> failf "%s admitted a request without a token" label
+  in
+  expect_transport_code
+    "observer transport auth code"
+    (deps.verify_mcp_observer_stream_auth ~base_path observer);
+  expect_transport_code
+    "operator transport auth code"
+    (deps.verify_operator_mcp_auth ~base_path operator)
 
 let test_credential_source_precedence_and_observer_query_state () =
   with_temp_base_path @@ fun base_path ->
@@ -253,19 +297,25 @@ let test_admin_token_equality_truth_table () =
   check bool "different-length mismatch" false (equal "admin-secret" "admin-secret-long")
 
 let () =
-  run "server_auth_dashboard_actor_resolution"
-    [ ( "resolution"
-      , [ test_case "anonymous public hint is preserved" `Quick
-            test_anonymous_public_read_preserves_hint
-        ; test_case "rejected credential fails closed" `Quick
-            test_rejected_credential_cannot_supply_actor_hint
-        ; test_case "malformed credential fails closed" `Quick
-            test_malformed_credential_cannot_become_anonymous
-        ; test_case "credential precedence and observer query state" `Quick
-            test_credential_source_precedence_and_observer_query_state
-        ; test_case "authenticated owner is canonical" `Quick
-            test_authenticated_owner_overrides_request_hint
-        ; test_case "admin token equality truth table" `Quick
-            test_admin_token_equality_truth_table
-        ] )
-    ]
+  Eio_main.run @@ fun _env ->
+  Server_request_authority.with_current
+    (loopback_request_authority ())
+    (fun () ->
+       run "server_auth_dashboard_actor_resolution"
+         [ ( "resolution"
+           , [ test_case "anonymous public hint is preserved" `Quick
+                 test_anonymous_public_read_preserves_hint
+             ; test_case "rejected credential fails closed" `Quick
+                 test_rejected_credential_cannot_supply_actor_hint
+             ; test_case "malformed credential fails closed" `Quick
+                 test_malformed_credential_cannot_become_anonymous
+             ; test_case "credential precedence and observer query state" `Quick
+                 test_credential_source_precedence_and_observer_query_state
+             ; test_case "MCP auth surfaces preserve typed reasons" `Quick
+                 test_mcp_auth_surfaces_preserve_typed_reasons
+             ; test_case "authenticated owner is canonical" `Quick
+                 test_authenticated_owner_overrides_request_hint
+             ; test_case "admin token equality truth table" `Quick
+                 test_admin_token_equality_truth_table
+             ] )
+         ])

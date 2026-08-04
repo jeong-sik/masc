@@ -110,6 +110,26 @@ let execute_tool_eio
       ~data:(`String msg)
       msg
   in
+  let auth_error_result err =
+    let message = Masc_domain.masc_error_to_string err in
+    let fields =
+      [ ( "effect_disposition"
+        , `String
+            (Tool_result.failure_effect_disposition_to_string
+               Tool_result.Proven_pre_effect) )
+      ]
+      @
+      match Masc_domain.dashboard_auth_error_code err with
+      | Some code -> [ "auth_error_code", `String code ]
+      | None -> []
+    in
+    Tool_result.make_err
+      ~tool_name:name
+      ~class_:Tool_result.Policy_rejection
+      ~start_time:(Time_compat.now ())
+      ~data:(`Assoc fields)
+      message
+  in
   let with_non_public_tool_audit ~agent_name (result : Tool_result.result) =
     if is_non_public_tool
     then (
@@ -169,7 +189,7 @@ let execute_tool_eio
      | Error err ->
        with_non_public_tool_audit
          ~agent_name
-         (runtime_error_result (Masc_domain.masc_error_to_string err))
+         (auth_error_result err)
      | Ok () ->
           (match owner_keeper_identity with
            | Some (keeper_name, keeper_id)

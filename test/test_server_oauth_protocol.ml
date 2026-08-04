@@ -154,14 +154,18 @@ let test_registration_browser_origin_boundary () =
        ~request_authority:authority
        (registration_request ~origin:"http://127.0.0.1:8935" ())
      |> Result.is_ok);
-  check
-    bool
-    "cross-origin browser registration is rejected before allocation"
-    true
-    (Server_auth.ensure_same_origin_if_browser_request
+  (match
+     Server_auth.ensure_same_origin_if_browser_request
        ~request_authority:authority
        (registration_request ~origin:"https://evil.example" ())
-     |> Result.is_error)
+   with
+   | Error (Masc_domain.Auth Masc_domain.Auth_error.SameOriginBlocked) -> ()
+   | Error error ->
+     failf
+       "cross-origin browser registration returned the wrong typed error: %s"
+       (Masc_domain.masc_error_to_string error)
+   | Ok () ->
+     fail "cross-origin browser registration was admitted before allocation")
 ;;
 
 let test_form_parser_rejects_ambiguity () =

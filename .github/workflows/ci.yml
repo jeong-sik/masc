@@ -797,17 +797,19 @@ jobs:
         run: |
           opam exec -- dune exec --root . test/test_workspace_coverage.exe -- test revision
 
-      - name: Run OAuth authentication suites
-        # These two suites are introduced by this PR and cover the dual-auth
-        # admission path. @check compiles them but never runs them, so without
-        # this step the 19 cases are dead weight: the Unbound_request_authority
-        # regression that broke /mcp initialize was exactly the class they
-        # assert on.
-        # See: test/test_auth_oauth.ml, test/test_server_oauth_protocol.ml.
+      - name: Run MCP authentication contract suites
+        # @check compiles these suites but never runs them. Exercise both the
+        # dual-auth admission path and the typed HTTP/JSON-RPC auth envelope so
+        # a transport can neither lose the code nor pass with dead assertions.
         run: |
           opam exec -- dune build --root . \
+            @test/runtest-test_auth \
             @test/runtest-test_auth_oauth \
-            @test/runtest-test_server_oauth_protocol
+            @test/runtest-test_server_oauth_protocol \
+            @test/runtest-test_server_auth_dashboard_actor_resolution \
+            @test/runtest-test_error_body_wire_shape \
+            @test/runtest-test_tool_registry_consistency \
+            @test/runtest-test_tool_spec
 
       - name: Run paused-work transfer and source-ACK suites
         id: paused_work_transfer_and_operator_suites

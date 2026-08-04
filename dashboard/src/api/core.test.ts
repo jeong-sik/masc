@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiRequestError,
+  apiRequestErrorFromResponse,
   authHeaders,
   clearStoredToken,
   confirmOperatorAction,
@@ -39,25 +40,25 @@ describe('stored token metadata', () => {
   it('persists token metadata and prefers the managed dev actor', () => {
     setStoredToken('loopback-dev-token', {
       source: 'dev',
-      actor: 'dashboard-dev!!!',
-      scope: 'admin',
+      actor: 'dashboard',
+      role: 'worker',
     })
 
     expect(getStoredToken()).toBe('loopback-dev-token')
     expect(getStoredTokenMeta()).toEqual({
       source: 'dev',
-      actor: 'dashboard-dev',
-      scope: 'admin',
+      actor: 'dashboard',
+      role: 'worker',
     })
-    expect(currentDashboardActor()).toBe('dashboard-dev')
+    expect(currentDashboardActor()).toBe('dashboard')
     expect(authHeaders()).toMatchObject({
       Authorization: 'Bearer loopback-dev-token',
-      'X-MASC-Agent': 'dashboard-dev',
+      'X-MASC-Agent': 'dashboard',
     })
   })
 
   it('clears both the token and metadata together', () => {
-    setStoredToken('manual-token', { source: 'manual', actor: 'dashboard-user' })
+    setStoredToken('manual-token', { source: 'manual' })
     clearStoredToken()
 
     expect(getStoredToken()).toBeNull()
@@ -69,9 +70,13 @@ describe('stored token metadata', () => {
     const unsubscribe = subscribeStoredTokenChanges(listener)
     const revisionBeforeChanges = currentStoredTokenRevision()
 
-    setStoredToken('manual-token', { source: 'manual', actor: 'dashboard-user' })
-    setStoredToken(' manual-token ', { source: 'manual', actor: 'dashboard-user' })
-    setStoredToken('manual-token', { source: 'manual', actor: 'dashboard-user-2' })
+    setStoredToken('manual-token', { source: 'manual' })
+    setStoredToken(' manual-token ', { source: 'manual' })
+    setStoredToken('manual-token', {
+      source: 'dev',
+      actor: 'dashboard',
+      role: 'worker',
+    })
     clearStoredToken()
     clearStoredToken()
     unsubscribe()
@@ -80,11 +85,11 @@ describe('stored token metadata', () => {
     expect(currentStoredTokenRevision()).toBe(revisionBeforeChanges + 3)
     expect(listener).toHaveBeenNthCalledWith(1, {
       token: 'manual-token',
-      meta: { source: 'manual', actor: 'dashboard-user', scope: null },
+      meta: { source: 'manual' },
     })
     expect(listener).toHaveBeenNthCalledWith(2, {
       token: 'manual-token',
-      meta: { source: 'manual', actor: 'dashboard-user-2', scope: null },
+      meta: { source: 'dev', actor: 'dashboard', role: 'worker' },
     })
     expect(listener).toHaveBeenNthCalledWith(3, {
       token: null,
@@ -97,6 +102,18 @@ describe('stored token metadata', () => {
 
     expect(dashboardBearerToken()).toBeNull()
     expect(authHeaders()).not.toHaveProperty('Authorization')
+  })
+
+  it('omits a guessed actor until a manual token has a server-resolved owner', () => {
+    setStoredToken('manual-token', { source: 'manual' })
+
+    expect(authHeaders()).toEqual({ Authorization: 'Bearer manual-token' })
+
+    setCanonicalDashboardActor('codex')
+    expect(authHeaders()).toEqual({
+      Authorization: 'Bearer manual-token',
+      'X-MASC-Agent': 'codex',
+    })
   })
 })
 
@@ -292,6 +309,55 @@ describe('post', () => {
       target_id: 'keeper-one',
       payload: {},
     })).rejects.toBeInstanceOf(OperatorActionSchemaDriftError)
+  })
+})
+
+describe('typed API errors', () => {
+  it('uses auth_error_code as authority and keeps error prose as detail', async () => {
+    const error = await apiRequestErrorFromResponse(
+      'POST',
+      '/mcp',
+      new Response(JSON.stringify({
+        error: 'stored token belongs to a different actor',
+        auth_error_code: 'actor_mismatch',
+      }), { status: 401 }),
+    )
+
+    expect(error.errorCode).toBe('actor_mismatch')
+    expect(error.authErrorCode).toBe('actor_mismatch')
+    expect(error.detail).toBe('stored token belongs to a different actor')
+  })
+
+  it('reads auth_error_code from the JSON-RPC error data contract', async () => {
+    const error = await apiRequestErrorFromResponse(
+      'POST',
+      '/mcp',
+      new Response(JSON.stringify({
+        jsonrpc: '2.0',
+        id: null,
+        error: {
+          code: -32001,
+          message: 'stored token is no longer valid',
+          data: { auth_error_code: 'invalid_token' },
+        },
+      }), { status: 401 }),
+    )
+
+    expect(error.errorCode).toBe('invalid_token')
+    expect(error.authErrorCode).toBe('invalid_token')
+    expect(error.detail).toBe('stored token is no longer valid')
+  })
+
+  it('does not reinterpret error prose as a typed error code', async () => {
+    const error = await apiRequestErrorFromResponse(
+      'POST',
+      '/mcp',
+      new Response(JSON.stringify({ error: 'invalid_token' }), { status: 401 }),
+    )
+
+    expect(error.errorCode).toBe('invalid_token')
+    expect(error.authErrorCode).toBeUndefined()
+    expect(error.detail).toBe('invalid_token')
   })
 })
 

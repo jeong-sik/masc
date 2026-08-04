@@ -680,7 +680,7 @@ describe('SettingsSurface', () => {
 
   it('renders token presence and source without re-projecting the bearer secret into the DOM', () => {
     const secret = 'masc-secret-that-must-not-enter-dom'
-    setStoredToken(secret, { source: 'manual', scope: 'admin' })
+    setStoredToken(secret, { source: 'manual' })
     shellAuthSummary.value = {
       enabled: true,
       require_token: true,
@@ -697,7 +697,7 @@ describe('SettingsSurface', () => {
     const presence = container.querySelector('[data-testid="settings-account-token-presence"]')
     expect(presence?.textContent).toContain('브라우저에 저장됨')
     expect(presence?.textContent).toContain('source:manual')
-    expect(presence?.textContent).toContain('scope:admin')
+    expect(presence?.textContent).not.toContain('role:')
     expect(container.querySelector('input[aria-label="Dashboard API token"]')).toBeNull()
     expect(container.innerHTML).not.toContain(secret)
   })
@@ -922,7 +922,11 @@ describe('SettingsSurface', () => {
         ? new URL(requestUrl).pathname
         : requestUrl.split('?')[0] ?? requestUrl
       if (path === '/api/v1/dashboard/dev-token') {
-        return new Response(JSON.stringify({ token: 'dev-token', actor: 'dashboard' }), {
+        return new Response(JSON.stringify({
+          token: 'dev-token',
+          actor: 'dashboard',
+          role: 'worker',
+        }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         })

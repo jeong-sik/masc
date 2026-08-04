@@ -1,4 +1,5 @@
 import { signal, type ReadonlySignal } from '@preact/signals'
+import type { DashboardAuthErrorCode } from '../types/dashboard-execution'
 import {
   clearStoredToken,
   currentDashboardActor,
@@ -12,6 +13,7 @@ import {
 const DEV_TOKEN_FETCH_TIMEOUT_MS = 3000
 
 let devTokenBootstrapPromise: Promise<void> | null = null
+let devTokenRefreshPromise: Promise<boolean> | null = null
 
 /**
  * Tracks the outcome of the loopback dev-token bootstrap so the UI can
@@ -20,6 +22,7 @@ let devTokenBootstrapPromise: Promise<void> | null = null
  *   fetching   — in-flight
  *   ok         — token stored
  *   no_endpoint — /dev-token returned 404 (loopback disabled or strict auth)
+ *   invalid_response — endpoint response violated the exact token contract
  *   network    — fetch threw (server down, CORS, DNS)
  */
 export type DevTokenBootstrapStatus =
@@ -27,6 +30,7 @@ export type DevTokenBootstrapStatus =
   | 'fetching'
   | 'ok'
   | 'no_endpoint'
+  | 'invalid_response'
   | 'network'
 
 export const devTokenBootstrapStatus: ReadonlySignal<DevTokenBootstrapStatus> =
@@ -35,7 +39,20 @@ export const devTokenBootstrapStatus: ReadonlySignal<DevTokenBootstrapStatus> =
 interface DevTokenBootstrapPayload {
   token?: unknown
   actor?: unknown
-  scope?: unknown
+  role?: unknown
+}
+
+const REFRESHABLE_AUTH_CODES: ReadonlySet<DashboardAuthErrorCode> = new Set([
+  'invalid_token',
+  'token_expired',
+  'actor_mismatch',
+])
+
+export function isRefreshableDashboardAuthCode(
+  value: unknown,
+): value is DashboardAuthErrorCode {
+  return typeof value === 'string'
+    && REFRESHABLE_AUTH_CODES.has(value as DashboardAuthErrorCode)
 }
 
 function isRetryableDevTokenStatus(status: number): boolean {
@@ -55,7 +72,7 @@ function shouldRefreshDevToken(): boolean {
   if (isRemoteAccess() || actor !== 'dashboard') return false
   // Loopback dashboard sessions should self-heal if they are still holding
   // a borrowed non-dashboard token (for example an old MCP-client paste/URL token).
-  return meta == null || meta.actor == null || meta.actor !== actor
+  return meta == null || meta.source === 'url'
 }
 
 /** Fetch the loopback-only dev token once per page load and stash it so
@@ -88,26 +105,19 @@ export async function ensureDevToken(): Promise<void> {
       }
       const payload = (await res.json()) as DevTokenBootstrapPayload
       const token = typeof payload.token === 'string' ? payload.token.trim() : ''
-      if (!token) {
-        ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'no_endpoint'
+      if (!token || payload.actor !== 'dashboard' || payload.role !== 'worker') {
+        ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'invalid_response'
         devTokenBootstrapPromise = null
         return
       }
-      const actor = typeof payload.actor === 'string' ? payload.actor.trim() : 'dashboard'
-      const scope =
-        typeof payload.scope === 'string' && payload.scope.trim() !== ''
-          ? payload.scope.trim()
-          : null
       if (
         token !== storedToken
         || storedMeta?.source !== 'dev'
-        || storedMeta.actor !== actor
-        || (storedMeta.scope ?? null) !== scope
       ) {
         setStoredToken(token, {
           source: 'dev',
-          actor,
-          scope,
+          actor: 'dashboard',
+          role: 'worker',
         })
       }
       ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'ok'
@@ -121,4 +131,25 @@ export async function ensureDevToken(): Promise<void> {
 
 export function resetDevTokenBootstrap(): void {
   devTokenBootstrapPromise = null
+}
+
+export async function refreshDevTokenAfterAuthError(code: unknown): Promise<boolean> {
+  if (!isRefreshableDashboardAuthCode(code)) return false
+  if (isRemoteAccess()) return false
+  if (getStoredTokenMeta()?.source === 'manual') return false
+  if (devTokenRefreshPromise) return devTokenRefreshPromise
+  if (!getStoredToken()) return false
+
+  const refresh = (async () => {
+    clearStoredToken()
+    resetDevTokenBootstrap()
+    await ensureDevToken()
+    return getStoredTokenMeta()?.source === 'dev' && getStoredToken() !== null
+  })()
+  devTokenRefreshPromise = refresh
+  try {
+    return await refresh
+  } finally {
+    if (devTokenRefreshPromise === refresh) devTokenRefreshPromise = null
+  }
 }

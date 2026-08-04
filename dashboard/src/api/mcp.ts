@@ -1,6 +1,8 @@
 // MASC Dashboard — MCP 2026-07-28 over Streamable HTTP
 
+import { v4 as randomUuid } from 'uuid'
 import {
+  ApiRequestError,
   apiRequestErrorFromResponse,
   fetchWithTimeout,
   DEFAULT_MCP_TIMEOUT_MS,
@@ -10,7 +12,11 @@ import {
   getStoredToken,
   getStoredTokenMeta,
 } from './core'
-import { ensureDevToken, resetDevTokenBootstrap } from './dev-token'
+import {
+  ensureDevToken,
+  refreshDevTokenAfterAuthError,
+  resetDevTokenBootstrap,
+} from './dev-token'
 import { reportToolHostFailure } from './tool-host-failure'
 import { showActionToast } from '../components/common/toast'
 import { errorToString } from '../lib/format-string'
@@ -78,7 +84,7 @@ function implicitToolActor(): string | null {
   if (!actor) return null
   if (!getStoredToken()) return actor
   const meta = getStoredTokenMeta()
-  if (meta?.source === 'dev' || meta?.actor) return actor
+  if (meta?.source === 'dev') return actor
   return null
 }
 
@@ -223,8 +229,24 @@ interface McpCallResponse {
   result?: {
     content?: Array<{ type?: string; text?: string }>
     isError?: boolean
+    structuredContent?: unknown
   }
   error?: { message?: string }
+}
+
+class McpToolCallError extends Error {
+  readonly authErrorCode: unknown
+
+  constructor(message: string, authErrorCode: unknown) {
+    super(message)
+    this.name = 'McpToolCallError'
+    this.authErrorCode = authErrorCode
+  }
+}
+
+function structuredAuthErrorCode(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  return (value as Record<string, unknown>).auth_error_code
 }
 
 function parseMcpHttpResponse(raw: string): McpCallResponse {
@@ -237,7 +259,10 @@ function extractMcpText(res: McpCallResponse): string {
   if (res.error?.message) throw new Error(res.error.message)
   if (res.result?.isError) {
     const err = res.result.content?.[0]?.text ?? 'MCP tool call failed'
-    throw new Error(err)
+    throw new McpToolCallError(
+      err,
+      structuredAuthErrorCode(res.result.structuredContent),
+    )
   }
   return res.result?.content?.[0]?.text ?? ''
 }
@@ -245,12 +270,13 @@ function extractMcpText(res: McpCallResponse): string {
 async function callMcpToolInternal(
   toolName: string,
   args: Record<string, unknown>,
+  allowAuthRecovery = true,
 ): Promise<string> {
-  const requestId = String(Math.floor(Date.now() % 1000000))
+  const requestId = randomUuid()
   synchronizeMcpAuthRevision()
+  const explicitActor = explicitToolActor(args)
   try {
     const binding = await ensureBinding()
-    const explicitActor = explicitToolActor(args)
     const actor = explicitActor ?? implicitToolActor()
     const toolArgs =
       explicitActor == null && actor
@@ -263,11 +289,24 @@ async function callMcpToolInternal(
         name: toolName,
         arguments: toolArgs,
       },
-      id: Number.parseInt(requestId, 10),
+      id: requestId,
     }, binding, DEFAULT_MCP_TIMEOUT_MS, actor)
     const parsed = parseMcpHttpResponse(text)
     return extractMcpText(parsed)
   } catch (err) {
+    const authErrorCode = err instanceof McpToolCallError
+      ? err.authErrorCode
+      : err instanceof ApiRequestError && err.status === 401
+        ? err.authErrorCode
+        : null
+    if (
+      allowAuthRecovery
+      && explicitActor === null
+      && await refreshDevTokenAfterAuthError(authErrorCode)
+    ) {
+      observedTokenRevision = currentStoredTokenRevision()
+      return callMcpToolInternal(toolName, args, false)
+    }
     const message = errorToString(err)
     if (shouldReportToolHostFailure(message)) {
       await bestEffortReportToolHostFailure({

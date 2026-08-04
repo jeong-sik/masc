@@ -47,8 +47,8 @@ let test_has_unknown_tool_returns_false () =
 
 let test_has_catalog_metadata () =
   let name = "__cap_catalog_tool" in
-  Tool_catalog.register_metadata name
-    { Tool_catalog.default_metadata with
+  Tool_catalog.For_testing.register_metadata name
+    { (Tool_catalog.default_metadata ~required_permission:Masc_domain.CanAdmin) with
       readonly = Some true;
       mcp_context_required = Some true;
       idempotent = Some true;
@@ -64,9 +64,9 @@ let test_has_catalog_metadata () =
 
 let test_read_only_does_not_imply_idempotent () =
   let name = "__cap_read_only_not_idempotent" in
-  Tool_catalog.register_metadata
+  Tool_catalog.For_testing.register_metadata
     name
-    { Tool_catalog.default_metadata with
+    { (Tool_catalog.default_metadata ~required_permission:Masc_domain.CanAdmin) with
       readonly = Some true
     ; idempotent = None
     };

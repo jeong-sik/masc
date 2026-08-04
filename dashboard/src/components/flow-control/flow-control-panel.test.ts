@@ -20,6 +20,7 @@ const {
   maintenanceLoading,
   shellAuthSummary,
   operatorSnapshot,
+  dashboardAuthAccess,
 } = vi.hoisted(() => ({
   fetchPauseStatus: vi.fn().mockResolvedValue(undefined),
   pauseWorkspace: vi.fn().mockResolvedValue(undefined),
@@ -31,6 +32,7 @@ const {
   maintenanceLoading: { value: false },
   shellAuthSummary: { value: null },
   operatorSnapshot: { value: null as MockOperatorSnapshot },
+  dashboardAuthAccess: vi.fn(),
 }))
 
 vi.mock('./flow-control-state', () => ({
@@ -53,12 +55,7 @@ vi.mock('../../operator-store', () => ({
 }))
 
 vi.mock('../../lib/dashboard-auth-access', () => ({
-  dashboardAuthAccess: () => ({
-    allowed: true,
-    required_role: 'worker',
-    effective_role: 'worker',
-    reason: null,
-  }),
+  dashboardAuthAccess,
 }))
 
 import { FlowControlPanel } from './flow-control-panel'
@@ -80,6 +77,12 @@ describe('FlowControlPanel', () => {
     maintenanceLoading.value = false
     shellAuthSummary.value = null
     operatorSnapshot.value = null
+    dashboardAuthAccess.mockImplementation((_summary, requiredRole: 'worker' | 'admin') => ({
+      allowed: requiredRole === 'worker',
+      required_role: requiredRole,
+      effective_role: 'worker',
+      reason: requiredRole === 'worker' ? null : 'admin role is required',
+    }))
   })
 
   afterEach(() => {
@@ -114,6 +117,18 @@ describe('FlowControlPanel', () => {
     expect(status).not.toBeNull()
     expect(status!.textContent).toContain('oas_runtime')
     expect(status!.textContent).toContain('1 active inference')
+  })
+
+  it('keeps worker flow controls enabled but disables admin-only GC', async () => {
+    render(html`<${FlowControlPanel} />`, container)
+    await flushUi()
+
+    const buttons = Array.from(container.querySelectorAll('button'))
+    const pause = buttons.find((button) => button.textContent?.includes('Pause'))
+    const gc = buttons.find((button) => button.textContent?.includes('Run GC'))
+    expect(pause?.disabled).toBe(false)
+    expect(gc?.disabled).toBe(true)
+    expect(dashboardAuthAccess).toHaveBeenCalledWith(null, 'admin')
   })
 
 })

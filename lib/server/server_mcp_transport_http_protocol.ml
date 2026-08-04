@@ -10,6 +10,17 @@ module Http_negotiation = Mcp_transport_protocol.Http_negotiation
    Brings in Mcp_eio alias, Hashtbl tables, mutex, and all session functions. *)
 include Server_mcp_transport_http_session
 
+type auth_failure = Server_mcp_transport_http_types.auth_failure =
+  { message : string
+  ; auth_error_code : string option
+  }
+
+let auth_failure_data failure =
+  Option.map
+    (fun code -> `Assoc [ "auth_error_code", `String code ])
+    failure.auth_error_code
+;;
+
 type deps = Server_mcp_transport_http_types.deps = {
   get_origin : Httpun.Request.t -> string;
   cors_headers : string -> (string * string) list;
@@ -18,11 +29,12 @@ type deps = Server_mcp_transport_http_types.deps = {
   get_runtime_result :
     unit -> (Server_mcp_transport_http_types.runtime, string) result;
   get_base_path : unit -> string;
-  verify_mcp_auth : base_path:string -> Httpun.Request.t -> (unit, string) result;
+  verify_mcp_auth :
+    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
   verify_mcp_observer_stream_auth :
-    base_path:string -> Httpun.Request.t -> (unit, string) result;
+    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
   verify_operator_mcp_auth :
-    base_path:string -> Httpun.Request.t -> (unit, string) result;
+    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
 }
 
 let method_from_body body_str =

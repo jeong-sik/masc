@@ -34,6 +34,7 @@ export function FlowControlPanel() {
   const isRunning = state === 'running'
   const isInitializing = state === 'initializing'
   const mutationAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
+  const maintenanceAccess = dashboardAuthAccess(shellAuthSummary.value, 'admin')
   const inferenceInflight = operatorSnapshot.value?.inference_inflight ?? null
   return html`
     <div class="v2-command-surface flex flex-col gap-4">
@@ -66,7 +67,7 @@ export function FlowControlPanel() {
       <details>
         <summary class="cursor-pointer text-sm text-[var(--color-fg-secondary)] font-medium select-none py-1">Maintenance</summary>
         <div class="mt-3 flex flex-wrap gap-2">
-          <${ActionButton} variant="ghost" size="md" disabled=${maintenanceLoading.value || !mutationAccess.allowed}
+          <${ActionButton} variant="ghost" size="md" disabled=${maintenanceLoading.value || !maintenanceAccess.allowed}
             onClick=${async () => {
               const confirmed = await requestConfirm({ title: 'Maintenance', message: 'Run GC?' })
               if (confirmed) void runGarbageCollection()

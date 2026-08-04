@@ -275,9 +275,17 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
     let* () =
       match auth_result with
       | Ok () -> Ok ()
-      | Error msg ->
-          respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps ~request_authority
-            request reqd ~session_id ~protocol_version msg;
+      | Error failure ->
+          respond_mcp_error
+            ?data:(auth_failure_data failure)
+            ~code:Mcp_error_code.Auth_error
+            ~deps
+            ~request_authority
+            request
+            reqd
+            ~session_id
+            ~protocol_version
+            failure.message;
           Error ()
     in
     let otel_transport_context =
@@ -600,9 +608,17 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           safe_respond_with_string reqd response body
       | Ok () ->
       (match auth_result with
-      | Error msg ->
-          respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps ~request_authority
-            request reqd ~session_id ~protocol_version msg
+      | Error failure ->
+          respond_mcp_error
+            ?data:(auth_failure_data failure)
+            ~code:Mcp_error_code.Auth_error
+            ~deps
+            ~request_authority
+            request
+            reqd
+            ~session_id
+            ~protocol_version
+            failure.message
       | Ok () ->
           (match last_event_id with
           | Error error ->
@@ -756,9 +772,17 @@ let handle_get_operator_mcp ~deps request reqd =
   let protocol_version = get_protocol_version_for_session ~session_id request in
   let base_path = deps.get_base_path () in
   match deps.verify_operator_mcp_auth ~base_path request with
-  | Error msg ->
-      respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps ~request_authority
-        request reqd ~session_id ~protocol_version msg
+  | Error failure ->
+      respond_mcp_error
+        ?data:(auth_failure_data failure)
+        ~code:Mcp_error_code.Auth_error
+        ~deps
+        ~request_authority
+        request
+        reqd
+        ~session_id
+        ~protocol_version
+        failure.message
   | Ok () ->
       handle_get_mcp ~deps ~profile:Operator_remote request reqd
 
@@ -776,11 +800,19 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
         deps.verify_operator_mcp_auth ~base_path request
   in
   match auth_result with
-  | Error msg ->
+  | Error failure ->
       let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
       let protocol_version = get_protocol_version_for_session ~session_id request in
-      respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps ~request_authority
-        request reqd ~session_id ~protocol_version msg
+      respond_mcp_error
+        ?data:(auth_failure_data failure)
+        ~code:Mcp_error_code.Auth_error
+        ~deps
+        ~request_authority
+        request
+        reqd
+        ~session_id
+        ~protocol_version
+        failure.message
   | Ok () -> (
       match get_session_id_any request with
       | Some session_id -> (

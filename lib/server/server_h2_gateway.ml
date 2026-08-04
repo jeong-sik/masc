@@ -100,6 +100,13 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
         ~status:(status :> H2.Status.t)
         ~extra_headers:(auth_error_headers ~status ~cors)
     in
+    let mcp_auth_error_body failure =
+      Server_mcp_transport_http_respond.error_body
+        ?data:(Server_mcp_transport_http_protocol.auth_failure_data failure)
+        ~code:Mcp_error_code.Auth_error
+        failure.message
+      |> Yojson.Safe.to_string
+    in
     let h2_respond_oauth_error error =
       Log.Misc.warn
         "oauth_http: request rejected error=%s"
@@ -527,8 +534,12 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             | Server_mcp_transport_http.Full
             | Server_mcp_transport_http.Managed_agent ->
                 verify_mcp_auth ~base_path httpun_request
+                |> Result.map_error
+                     Server_mcp_transport_http_types.auth_failure_of_masc_error
             | Server_mcp_transport_http.Operator_remote ->
                 verify_operator_mcp_auth ~base_path httpun_request
+                |> Result.map_error
+                     Server_mcp_transport_http_types.auth_failure_of_masc_error
           in
           (match validate_mcp_session_profile ~profile session_id with
            | Error msg ->
@@ -543,8 +554,8 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                       ~extra_headers:(cors @ mcp_headers session_id protocol_version)
                 | Ok () ->
                     (match auth_result with
-                     | Error msg ->
-                         let body = json_rpc_error Mcp_error_code.Auth_error msg in
+                     | Error failure ->
+                         let body = mcp_auth_error_body failure in
                          h2_respond_json h2_reqd body ~status:`Unauthorized
                            ~extra_headers:
                              (( "www-authenticate"
@@ -682,12 +693,16 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             | Server_mcp_transport_http.Full
             | Server_mcp_transport_http.Managed_agent ->
                 verify_mcp_auth ~base_path httpun_request
+                |> Result.map_error
+                     Server_mcp_transport_http_types.auth_failure_of_masc_error
             | Server_mcp_transport_http.Operator_remote ->
                 verify_operator_mcp_auth ~base_path httpun_request
+                |> Result.map_error
+                     Server_mcp_transport_http_types.auth_failure_of_masc_error
           in
           (match auth_result with
-           | Error msg ->
-               let body = json_rpc_error Mcp_error_code.Auth_error msg in
+           | Error failure ->
+               let body = mcp_auth_error_body failure in
                h2_respond_json h2_reqd body ~status:`Unauthorized
                  ~extra_headers:
                    (( "www-authenticate"

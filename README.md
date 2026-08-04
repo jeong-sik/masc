@@ -106,8 +106,8 @@ Then open `http://127.0.0.1:8935/dashboard`. Options: `--team <preset>` (see
   login — this is the path to actually see the dashboard.
 - **`--docker`** builds a self-contained image and reproducibly boots the server
   + the team; the container binds a network address, so the dashboard shell
-  serves but its live data needs an admin token (the zero-auth loopback dev-token
-  is intentionally not exposed on a non-loopback bind). Use it to verify the
+  serves but its live data needs an explicit bearer token (the loopback
+  dev-token is intentionally not exposed on a non-loopback bind). Use it to verify the
   install/boot; use native to browse the dashboard.
 
 For the `curl | bash` installer, add `--team classic` to seed the same team:

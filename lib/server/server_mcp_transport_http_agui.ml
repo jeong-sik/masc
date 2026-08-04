@@ -39,9 +39,17 @@ let handle_ag_ui_events ~deps request reqd =
   (* workspace query param ignored — namespace retired *)
   let last_event_id = Server_mcp_transport_http_headers.get_last_event_id request in
   match deps.verify_mcp_observer_stream_auth ~base_path request with
-  | Error msg ->
-      respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps ~request_authority
-        request reqd ~session_id ~protocol_version msg
+  | Error failure ->
+      respond_mcp_error
+        ?data:(auth_failure_data failure)
+        ~code:Mcp_error_code.Auth_error
+        ~deps
+        ~request_authority
+        request
+        reqd
+        ~session_id
+        ~protocol_version
+        failure.message
   | Ok () ->
       (match last_event_id with
       | Error error ->
@@ -181,9 +189,17 @@ let handle_presence_events ~deps request reqd =
   in
   let base_path = deps.get_base_path () in
   match deps.verify_mcp_observer_stream_auth ~base_path request with
-  | Error msg ->
-      respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps ~request_authority
-        request reqd ~session_id:raw_session_id ~protocol_version msg
+  | Error failure ->
+      respond_mcp_error
+        ?data:(auth_failure_data failure)
+        ~code:Mcp_error_code.Auth_error
+        ~deps
+        ~request_authority
+        request
+        reqd
+        ~session_id:raw_session_id
+        ~protocol_version
+        failure.message
   | Ok () ->
       let token = Server_auth.observer_sse_auth_token_from_request request in
       let auth = { Sse.config = base_path; token } in

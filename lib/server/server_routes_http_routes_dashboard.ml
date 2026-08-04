@@ -669,10 +669,10 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/workspace" (fun request reqd ->
        with_public_read handle_dashboard_workspace request reqd)
-  (* Dev-only shared bearer for the dashboard UI. Served exclusively when the
+  (* Dev-only Worker bearer for the dashboard UI. Served exclusively when the
      server binds to loopback and strict-auth env overrides are disabled, so
-     that a LAN deployment never hands out a token over the wire. The token is
-     canonicalized to the [dashboard] actor and persisted at
+     that a LAN deployment never hands out a credential over the wire. The
+     token is canonicalized to the [dashboard] actor and persisted at
      [.masc/auth/dashboard.token]. *)
   |> Http.Router.get "/api/v1/dashboard/dev-token" (fun request reqd ->
        if (not (http_auth_bind_is_loopback ()))
@@ -689,9 +689,14 @@ let add_routes ~sw ~clock router =
            in
            begin
              match raw_result with
-             | Ok raw ->
+             | Ok token ->
                Http.Response.json_value ~request:req
-                 (`Assoc [ ("token", `String raw) ]) reqd
+                 (`Assoc
+                    [ "token", `String token.raw
+                    ; "actor", `String token.actor
+                    ; ( "role"
+                      , `String (Masc_domain.agent_role_to_string token.role) )
+                    ]) reqd
              | Error err ->
                let status =
                  Server_routes_http_dashboard_dev_token.request_error_status err

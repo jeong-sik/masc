@@ -193,13 +193,22 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
         | None -> Server_mcp_transport_http.default_base_path ());
     verify_mcp_auth =
       (fun ~base_path request ->
-        Result.map (fun _ -> ()) (verify_mcp_auth ~base_path request));
+        verify_mcp_auth ~base_path request
+        |> Result.map (fun _ -> ())
+        |> Result.map_error
+             Server_mcp_transport_http_types.auth_failure_of_masc_error);
     verify_mcp_observer_stream_auth =
       (fun ~base_path request ->
-        Result.map (fun _ -> ()) (verify_mcp_observer_stream_auth ~base_path request));
+        verify_mcp_observer_stream_auth ~base_path request
+        |> Result.map (fun _ -> ())
+        |> Result.map_error
+             Server_mcp_transport_http_types.auth_failure_of_masc_error);
     verify_operator_mcp_auth =
       (fun ~base_path request ->
-        Result.map (fun _ -> ()) (verify_operator_mcp_auth ~base_path request));
+        verify_operator_mcp_auth ~base_path request
+        |> Result.map (fun _ -> ())
+        |> Result.map_error
+             Server_mcp_transport_http_types.auth_failure_of_masc_error);
   }
 
 let mcp_transport_json_headers session_id protocol_version origin =

@@ -27,9 +27,7 @@ let () =
     (E.dashboard_auth_error_code (E.Auth (E.Auth_error.TokenExpired "agent")));
   check "same_origin_blocked" (Some "same_origin_blocked")
     (E.dashboard_auth_error_code
-       (E.Auth
-          (E.Auth_error.Forbidden
-             { agent = "browser"; action = "cross-origin HTTP mutation" })));
+       (E.Auth E.Auth_error.SameOriginBlocked));
   check "insufficient_role" (Some "insufficient_role")
     (E.dashboard_auth_error_code
        (E.Auth (E.Auth_error.Forbidden { agent = "alice"; action = "delete" })));

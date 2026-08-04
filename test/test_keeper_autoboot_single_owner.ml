@@ -1,79 +1,181 @@
 open Alcotest
 
-let load_source relative_path =
-  let root = Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:(Sys.getcwd ()) in
-  let path = Filename.concat root relative_path in
-  In_channel.with_open_bin path In_channel.input_all
+module Workspace = Masc.Workspace
+module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
+module Keeper_runtime = Masc.Keeper_runtime
+module Keeper_registry = Masc.Keeper_registry
+
+let rec remove_tree path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
 ;;
 
-let count_occurrences ~needle source =
-  let needle_length = String.length needle in
-  let rec loop offset count =
-    if offset + needle_length > String.length source
-    then count
-    else if String.sub source offset needle_length = needle
-    then loop (offset + needle_length) (count + 1)
-    else loop (offset + 1) count
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/" || Sys.file_exists path
+  then ()
+  else (
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755)
+;;
+
+let write_file path content =
+  Out_channel.with_open_bin path (fun channel -> output_string channel content)
+;;
+
+let restore_env name = function
+  | Some value -> Unix.putenv name value
+  | None -> Unix.putenv name ""
+;;
+
+let write_keeper_toml ?autoboot_enabled config_root ~name =
+  let keepers_dir = Filename.concat config_root "keepers" in
+  mkdir_p keepers_dir;
+  let autoboot_line =
+    match autoboot_enabled with
+    | None -> ""
+    | Some value ->
+      Printf.sprintf "autoboot_enabled = %s\n" (string_of_bool value)
   in
-  if needle_length = 0 then 0 else loop 0 0
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    (Printf.sprintf
+       {|
+[keeper]
+name = "%s"
+instructions = "test keeper"
+%s
+|}
+       name
+       autoboot_line)
 ;;
 
-let check_absent ~source label needle =
-  check int label 0 (count_occurrences ~needle source)
+let make_meta ?(paused = false) name =
+  let json =
+    `Assoc
+      [ "name", `String name
+      ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
+      ; "trace_id", `String ("trace-" ^ name)
+      ; "sandbox_profile", `String "local"
+      ; "network_mode", `String "inherit"
+      ]
+  in
+  match Keeper_meta_json_parse.meta_of_json json with
+  | Error error -> fail ("meta_of_json failed: " ^ error)
+  | Ok meta -> { meta with paused }
 ;;
 
-let test_tool_dispatch_has_no_fleet_start_authority () =
-  let source = load_source "lib/keeper/keeper_tool_surface.ml" in
-  check_absent
-    ~source
-    "Keeper tools do not start keepalives"
-    "Keeper_keepalive.start_keepalive";
-  check_absent
-    ~source
-    "Keeper tools do not start the supervisor"
-    "start_supervisor_sweep"
+let write_meta_exn config meta =
+  match Keeper_meta_store.write_meta config meta with
+  | Ok () -> ()
+  | Error error -> fail ("write_meta failed: " ^ error)
 ;;
 
-let test_runtime_has_no_fleet_start_authority () =
-  let source = load_source "lib/keeper/keeper_runtime.ml" in
-  check_absent
-    ~source
-    "Keeper runtime does not start keepalives"
-    "Keeper_supervisor.supervise_keepalive"
+let config_root config =
+  Filename.concat (Workspace.masc_root_dir config) "config"
 ;;
 
-let test_server_subsystem_owns_boot_and_supervisor_once () =
-  let source = load_source "lib/server/server_bootstrap_loops.ml" in
-  check int
-    "one Keeper autoboot subsystem"
-    1
-    (count_occurrences ~needle:"fork_subsystem \"keeper_autoboot\"" source);
-  check int
-    "one direct keepalive start site"
-    1
-    (count_occurrences ~needle:"Keeper_keepalive.start_keepalive\n" source);
-  check int
-    "one supervisor start site"
-    1
-    (count_occurrences ~needle:"Keeper_runtime.start_supervisor_sweep" source)
+let test_configured_keeper_names_use_workspace_base_path () =
+  let base_a = Filename.temp_dir "masc-autoboot-a-" "" in
+  let base_b = Filename.temp_dir "masc-autoboot-b-" "" in
+  let config_a = Workspace.default_config base_a in
+  let config_b = Workspace.default_config base_b in
+  let original_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  let original_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      restore_env "MASC_CONFIG_DIR" original_config_dir;
+      restore_env "MASC_BASE_PATH" original_base_path;
+      Config_dir_resolver.reset ();
+      remove_tree base_a;
+      remove_tree base_b)
+    (fun () ->
+      write_keeper_toml (config_root config_a) ~name:"alpha";
+      write_keeper_toml (config_root config_b) ~name:"bravo";
+      write_keeper_toml
+        (config_root config_a)
+        ~name:"shared"
+        ~autoboot_enabled:true;
+      write_keeper_toml
+        (config_root config_b)
+        ~name:"shared"
+        ~autoboot_enabled:false;
+      Unix.putenv "MASC_CONFIG_DIR" "";
+      Unix.putenv "MASC_BASE_PATH" base_b;
+      Config_dir_resolver.reset ();
+      check
+        (list string)
+        "ambient resolver observes the other workspace"
+        [ "bravo"; "shared" ]
+        (Masc.Keeper_types_profile.discover_keepers_toml
+           (Config_dir_resolver.keepers_dir ())
+         |> List.map Masc.Keeper_types_profile.keeper_toml_discovery_name);
+      check
+        (list string)
+        "autoboot discovery remains owned by Workspace.config"
+        [ "alpha"; "shared" ]
+        (Keeper_meta_store.configured_keeper_names config_a);
+      check
+        (list string)
+        "boot admission remains owned by Workspace.config"
+        [ "alpha"; "shared" ]
+        (Keeper_runtime.bootable_keeper_names config_a))
+;;
+
+let test_operator_paused_keeper_is_not_bootable () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Filename.temp_dir "masc-autoboot-paused-" "" in
+  let config = Workspace.default_config base_path in
+  let keeper_name = "manual-only" in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Workspace.reset config);
+      Keeper_registry.For_testing.clear ();
+      Keeper_runtime.reset_test_state base_path;
+      remove_tree base_path)
+    (fun () ->
+      write_keeper_toml (config_root config) ~name:keeper_name;
+      ignore (Workspace.init config ~agent_name:None);
+      write_meta_exn config (make_meta ~paused:true keeper_name);
+      check
+        bool
+        "paused keeper remains configured"
+        true
+        (List.mem keeper_name (Keeper_meta_store.configured_keeper_names config));
+      check
+        bool
+        "operator pause excludes keeper from server-owned autoboot"
+        false
+        (List.mem keeper_name (Keeper_runtime.bootable_keeper_names config));
+      match Keeper_runtime.autoboot_exclusion_reason config keeper_name with
+      | Some Keeper_runtime.Paused -> ()
+      | Some reason ->
+        failf
+          "paused keeper had the wrong exclusion reason: %s"
+          (Keeper_runtime.autoboot_exclusion_reason_to_string reason)
+      | None -> fail "paused keeper had no typed autoboot exclusion")
 ;;
 
 let () =
   run
-    "keeper autoboot single owner"
-    [ ( "ownership"
+    "keeper autoboot ownership"
+    [ ( "policy"
       , [ test_case
-            "tool dispatch has no fleet-start authority"
+            "Workspace.config owns autoboot discovery"
             `Quick
-            test_tool_dispatch_has_no_fleet_start_authority
+            test_configured_keeper_names_use_workspace_base_path
         ; test_case
-            "runtime has no fleet-start authority"
+            "operator pause survives restart admission"
             `Quick
-            test_runtime_has_no_fleet_start_authority
-        ; test_case
-            "server subsystem owns boot and supervisor once"
-            `Quick
-            test_server_subsystem_owns_boot_and_supervisor_once
+            test_operator_paused_keeper_is_not_bootable
         ] )
     ]
 ;;

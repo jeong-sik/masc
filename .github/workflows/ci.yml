@@ -809,6 +809,14 @@ jobs:
             @test/runtest-test_auth_oauth \
             @test/runtest-test_server_oauth_protocol
 
+      - name: Run Keeper autoboot ownership suite
+        # The public Keeper runtime API hard-cuts tool-owned fleet bootstrap.
+        # Execute the surviving behavior contract as well: server autoboot
+        # discovery is scoped to Workspace.config and preserves operator pause.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_autoboot_single_owner
+
       - name: Run paused-work transfer and source-ACK suites
         id: paused_work_transfer_and_operator_suites
         if: ${{ always() && steps.build_step.outcome == 'success' }}

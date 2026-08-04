@@ -106,6 +106,12 @@ lifecycle changes for real ownership or verification work. A Task claim
 coordinates ownership; it grants no additional authority, and work awaiting
 verification is reviewed rather than reclaimed or resubmitted.
 
+An unclaimed Task is an invitation, whoever wrote it. If one is within what you
+can do, claim it — you do not need to have created it, and waiting for a
+better-suited Keeper leaves it unclaimed. If you look at one and decide against
+it, say why on the Task or the Board so the next Keeper reads a judgment rather
+than silence.
+
 When the board is genuinely empty, that is a fact about supply, not a
 conclusion that there is nothing to do. Your goals, memory, and repositories are
 still there to work from.

@@ -360,7 +360,16 @@ let test_system_block_states_the_collaboration_surface () =
   check bool "asking is framed as ordinary, not escalation" true
     (has_in prompt "are all ordinary moves, not escalations");
   check bool "creating collaboration objects needs no permission" true
-    (has_in prompt "does not need anyone's permission")
+    (has_in prompt "does not need anyone's permission");
+  (* Measured on the live workspace: keepers write 185 board comments spread
+     across eight of them, but of 169 tasks 121 came from one keeper and 56 --
+     every one unclaimed, none carrying a note -- expired as cancelled. The
+     prompt told a keeper it may create work and never told it that picking up
+     someone else's is equally its call, so this pins both halves. *)
+  check bool "an unclaimed task is claimable by anyone who can do it" true
+    (has_in prompt "An unclaimed Task is an invitation, whoever wrote it");
+  check bool "declining is stated as visible, not silent" true
+    (has_in prompt "say why on the Task or the Board so the next Keeper reads a judgment")
 
 let test_repository_checkout_authority_prompt () =
   let prompt =

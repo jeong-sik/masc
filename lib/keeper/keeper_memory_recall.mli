@@ -10,6 +10,22 @@ open Keeper_types_profile
 
 (** {1 File Reading} *)
 
+type tail_completion =
+  | Complete
+  | Partial_last_line
+(** Whether the last returned line was newline-terminated in the file.
+    [Partial_last_line] means an append was in flight during the read: the
+    row is not lost, it is simply not finished yet. This is what separates a
+    truncated write at the tail of an append-only log from real corruption,
+    which [Read_drop_reason.Tail_partial_write] exists to classify. *)
+
+val read_file_tail_lines_with_completion :
+  string -> max_bytes:int -> max_lines:int
+  -> (string list * tail_completion, Keeper_memory_recall_exn_class.t) result
+(** As {!read_file_tail_lines_result}, and additionally reports whether the
+    final line was terminated. The window's leading partial line is already
+    dropped by the reader; this covers the trailing end. *)
+
 val read_file_tail_lines_result :
   string -> max_bytes:int -> max_lines:int
   -> (string list, Keeper_memory_recall_exn_class.t) result

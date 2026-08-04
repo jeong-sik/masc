@@ -2056,6 +2056,17 @@ let model_visible_descriptors () =
     | [], _ :: _ -> true)
 ;;
 
+let model_visible_schemas () =
+  model_visible_descriptors ()
+  |> List.concat_map (fun descriptor ->
+    keeper_model_names descriptor
+    |> List.map (fun name ->
+      { Masc_domain.name
+      ; description = descriptor.description
+      ; input_schema = descriptor.input_schema
+      }))
+;;
+
 let public_names_of_descriptor d = d.public_name :: d.public_aliases
 
 let public_names () = List.concat_map public_names_of_descriptor public_descriptors

@@ -3135,7 +3135,10 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
 let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojson.Safe.t =
   let actor_name = dashboard_actor_name actor in
   let ctx : Tool_misc.context =
-    { config; agent_name = actor_name }
+    { config
+    ; agent_name = actor_name
+    ; help_schemas = Config.raw_all_tool_schemas
+    }
   in
   let run phase f =
     match timing with

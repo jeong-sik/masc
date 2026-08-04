@@ -879,8 +879,13 @@ let handle_masc_workspace_with_outcome ~(config : Workspace.config) ~(meta : kee
    back edge that previously cycled Config → ... →
    Keeper_tool_in_process_runtime. *)
 let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
-  let ctx : Tool_misc.context = { config; agent_name = meta.name } in
-  Tool_misc.dispatch_for_keeper ctx ~name ~args
+  let ctx : Tool_misc.context =
+    { config
+    ; agent_name = meta.name
+    ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ()
+    }
+  in
+  Tool_misc.dispatch ctx ~name ~args
   |> dispatch_option_to_execution ~name
 ;;
 

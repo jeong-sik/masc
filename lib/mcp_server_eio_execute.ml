@@ -375,7 +375,10 @@ let execute_tool_eio
                      ~args:coerced_args
                  | Mod_misc ->
                    Tool_misc.dispatch
-                     { Tool_misc.config; agent_name }
+                     { Tool_misc.config
+                     ; agent_name
+                     ; help_schemas = Config.raw_all_tool_schemas
+                     }
                      ~name
                      ~args:coerced_args
                  | Mod_library ->

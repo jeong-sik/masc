@@ -358,6 +358,37 @@ let test_registered_cluster_model_projections_are_explicit () =
     ]
 ;;
 
+let test_keeper_management_projection_is_explicit () =
+  let check_projection internal_name expected =
+    let descriptor = required_internal_descriptor internal_name in
+    Alcotest.(check bool)
+      (internal_name ^ " model projection")
+      true
+      (descriptor.keeper_model_projection = expected)
+  in
+  List.iter
+    (fun name -> check_projection name Descriptor.Internal_name)
+    [ "masc_keeper_delegate"
+    ; "masc_keeper_delegate_status"
+    ; "masc_keeper_delegate_cancel"
+    ];
+  List.iter
+    (fun name -> check_projection name Descriptor.Operator_only)
+    [ "masc_keeper_waiting_inventory"
+    ; "masc_keeper_list"
+    ; "masc_keeper_delegate_list"
+    ; "masc_keeper_compact"
+    ; "masc_keeper_clear"
+    ; "masc_keeper_sandbox_start"
+    ; "masc_keeper_sandbox_stop"
+    ; "masc_keeper_reset"
+    ; "masc_keeper_persona_audit"
+    ; "masc_keeper_status"
+    ; "masc_keeper_down"
+    ; "masc_keeper_up"
+    ]
+;;
+
 let test_all_keeper_shard_schemas_are_descriptor_backed () =
   Tool_shard.all_keeper_tool_schemas
   |> List.iter (fun (schema : Masc_domain.tool_schema) ->
@@ -1535,6 +1566,10 @@ let () =
             "registered cluster model projections are explicit"
             `Quick
             test_registered_cluster_model_projections_are_explicit
+        ; test_case
+            "Keeper management projection is explicit"
+            `Quick
+            test_keeper_management_projection_is_explicit
         ; test_case
             "all Keeper shard schemas are descriptor-backed"
             `Quick

@@ -1,7 +1,7 @@
 (** Unified Tool Registry Ratchet — P0-1.
 
-    Single registration flow that fills dispatch-tag/schema gaps across
-    [Keeper_tool_name], [Config.raw_all_tool_schemas], and the keeper task runtime.
+    Single registration flow that fills dispatch-tag/schema gaps from
+    [Config.raw_all_tool_schemas] and [Keeper_tool_descriptor].
 
     The flow is invoked once at startup by the MCP composition root; it is
     idempotent and preserves tags already registered via [Tool_spec]. *)
@@ -13,8 +13,8 @@ val tag_of_name : string -> Tool_dispatch.module_tag option
     registration. *)
 
 val register_all : unit -> unit
-(** Register tags (+ placeholder schemas where needed) for all names in the
-    unified name sources that are not already present in the tag registry. *)
+(** Register tags and their owning schemas for all names in the unified name
+    sources that are not already present in the tag registry. *)
 
 val visible_schemas_missing_tags : unit -> string list
 (** Return the names of LLM-visible schemas that still lack a dispatch tag.

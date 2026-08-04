@@ -151,8 +151,13 @@ let test_flat_tool_surface () =
     names;
   check (list string) "public schedule surface" names
     Tool_catalog_surfaces.public_schedule_surface_tools;
-  check (list string) "keeper schedule surface" names
-    Tool_catalog_surfaces.keeper_schedule_surface_tools;
+  let keeper_schedule_tools =
+    Keeper_tool_descriptor.model_visible_descriptors ()
+    |> List.concat_map Keeper_tool_descriptor.keeper_model_names
+    |> List.filter (String.starts_with ~prefix:"masc_schedule_")
+  in
+  check (list string) "descriptor-projected keeper schedule surface" names
+    keeper_schedule_tools;
   List.iter
     (fun name ->
        check bool ("tool_inventory includes: " ^ name) true

@@ -1,9 +1,8 @@
-(** Keeper tool catalog facade.
+(** Keeper handler schema catalog.
 
-    Schema families remain split by domain for maintainability, but they do
-    not grant, revoke, or restrict Keeper capabilities.  Every catalogued
-    schema is projected into one immutable, de-duplicated model catalog;
-    external effects are decided by the Gate at execution time. *)
+    Schema families remain split by domain for maintainability. This catalog
+    describes handler inputs; model exposure is owned exclusively by
+    [Keeper_tool_descriptor]. *)
 
 include Tool_shard_types
 
@@ -34,5 +33,3 @@ let all_keeper_tool_schemas : Masc_domain.tool_schema list =
   |> List.concat
   |> dedupe_schemas
 ;;
-
-let keeper_model_tools : Masc_domain.tool_schema list = all_keeper_tool_schemas

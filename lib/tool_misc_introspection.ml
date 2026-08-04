@@ -52,14 +52,40 @@ let tool_inventory_json _ctx ~include_hidden =
   List.iter
     (fun (seed : Capability_registry.capability_seed) ->
       let s = Capability_registry.surface_to_string seed.projection.surface in
-      if not (String.equal s "public_mcp") then (
-        add_surface seed.projection.tool_name s;
-        add_surface seed.projection.backend_tool_name s))
+      if not (String.equal s "public_mcp") then
+        add_surface seed.projection.tool_name s)
     (Capability_registry.all_projection_seeds_from Config.raw_all_tool_schemas);
+  let projection_schemas =
+    Capability_registry.all_projection_seeds_from Config.raw_all_tool_schemas
+    |> List.map (fun (seed : Capability_registry.capability_seed) ->
+           { Masc_domain.name = seed.projection.tool_name
+           ; description = seed.projection.description
+           ; input_schema = seed.projection.input_schema
+           })
+  in
+  let projection_names =
+    projection_schemas
+    |> List.fold_left
+         (fun names (schema : Masc_domain.tool_schema) ->
+           Set_util.StringSet.add schema.name names)
+         Set_util.StringSet.empty
+  in
+  let dedupe_schemas schemas =
+    let seen = Hashtbl.create 256 in
+    List.filter
+      (fun (schema : Masc_domain.tool_schema) ->
+        if Hashtbl.mem seen schema.name then false
+        else (
+          Hashtbl.add seen schema.name ();
+          true))
+      schemas
+  in
   let schemas =
-    Config.raw_all_tool_schemas
+    Config.raw_all_tool_schemas @ projection_schemas
+    |> dedupe_schemas
     |> List.filter (fun (schema : Masc_domain.tool_schema) ->
-           Tool_catalog.is_visible ~include_hidden schema.name)
+           Set_util.StringSet.mem schema.name projection_names
+           || Tool_catalog.is_visible ~include_hidden schema.name)
     |> List.sort (fun (left : Masc_domain.tool_schema) right -> String.compare left.name right.name)
   in
   let rows =

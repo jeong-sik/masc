@@ -1490,10 +1490,16 @@ let masc_schedule_descriptor (definition : Tool_schemas_schedule.definition) =
     ()
 ;;
 
-let masc_keeper_descriptor ?(polling_read = false) id name description ~readonly =
+let masc_keeper_descriptor
+    ?(polling_read = false)
+    ~keeper_model_projection
+    id
+    name
+    description
+    ~readonly =
   cluster_descriptor
     ~polling_read
-    ~keeper_model_projection:Internal_name
+    ~keeper_model_projection
     ~id:("masc.keeper." ^ id)
     ~name
     ~description
@@ -1946,8 +1952,15 @@ let internal_descriptors : t list =
       "Read workspace configuration." ~readonly:true
   ; masc_misc_descriptor "dashboard" "masc_dashboard"
       "Read workspace dashboard summary." ~readonly:true
-  ; masc_misc_descriptor "keeper_waiting_inventory" "masc_keeper_waiting_inventory"
-      "Read keeper waiting inventory." ~readonly:true
+  ; cluster_descriptor
+      ~keeper_model_projection:Operator_only
+      ~id:"masc.misc.keeper_waiting_inventory"
+      ~name:"masc_keeper_waiting_inventory"
+      ~description:"Read keeper waiting inventory."
+      ~handler:Tool_masc_misc_dispatch
+      ~readonly:true
+      ~inline_safe:false
+      ()
   ; masc_misc_descriptor "tool_help" "masc_tool_help"
       "Read help text for a tool name." ~readonly:true
   ; masc_misc_descriptor "gc" "masc_gc"
@@ -1968,35 +1981,35 @@ let internal_descriptors : t list =
   @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions
   @ [
   (* ── RFC-0182 §3.1 — masc_keeper cluster ──── *)
-    masc_keeper_descriptor "list" "masc_keeper_list"
+    masc_keeper_descriptor ~keeper_model_projection:Operator_only "list" "masc_keeper_list"
       "List configured keepers with optional detailed metadata." ~readonly:true
-  ; masc_keeper_descriptor "delegate_status" "masc_keeper_delegate_status"
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate_status" "masc_keeper_delegate_status"
       "Read one Keeper invocation by exact typed run_ref." ~readonly:true
       ~polling_read:true
-  ; masc_keeper_descriptor "delegate_cancel" "masc_keeper_delegate_cancel"
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate_cancel" "masc_keeper_delegate_cancel"
       "Request cancellation of one Keeper invocation by exact typed run_ref." ~readonly:false
-  ; masc_keeper_descriptor "delegate_list" "masc_keeper_delegate_list"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "delegate_list" "masc_keeper_delegate_list"
       "List non-terminal Keeper invocations with an optional typed target filter." ~readonly:true
-  ; masc_keeper_descriptor "compact" "masc_keeper_compact"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "compact" "masc_keeper_compact"
       "Run operator-requested context compaction on a keeper." ~readonly:false
-  ; masc_keeper_descriptor "clear" "masc_keeper_clear"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "clear" "masc_keeper_clear"
       "Last-resort context clear (drops conversation, requires reason)." ~readonly:false
-  ; masc_keeper_descriptor "sandbox_start" "masc_keeper_sandbox_start"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "sandbox_start" "masc_keeper_sandbox_start"
       "Start the managed sandbox container for a keeper." ~readonly:false
-  ; masc_keeper_descriptor "sandbox_stop" "masc_keeper_sandbox_stop"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "sandbox_stop" "masc_keeper_sandbox_stop"
       "Stop the managed sandbox container(s) for a keeper or fleet." ~readonly:false
-  ; masc_keeper_descriptor "reset" "masc_keeper_reset"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "reset" "masc_keeper_reset"
       "Reset a keeper's runtime state (usage counters, last_model_used)." ~readonly:false
-  ; masc_keeper_descriptor "persona_audit" "masc_keeper_persona_audit"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "persona_audit" "masc_keeper_persona_audit"
       "Audit configured keepers vs personas." ~readonly:true
-  ; masc_keeper_descriptor "status" "masc_keeper_status"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "status" "masc_keeper_status"
       "Detailed single-keeper status (defaults to self when name is empty)." ~readonly:true
-  ; masc_keeper_descriptor "down" "masc_keeper_down"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "down" "masc_keeper_down"
       "Stop keeper keepalive, optionally remove meta and session directory." ~readonly:false
   (* RFC-0182 Phase 5 PR-B: Eio-bound keeper tools (require sw + clock). *)
-  ; masc_keeper_descriptor "delegate" "masc_keeper_delegate"
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate" "masc_keeper_delegate"
       "Submit a typed non-blocking Keeper invocation and return its durable run_ref." ~readonly:false
-  ; masc_keeper_descriptor "up" "masc_keeper_up"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "up" "masc_keeper_up"
       "Bring a keeper online (create new or update existing)." ~readonly:false
   ]
   @ masc_board_descriptors

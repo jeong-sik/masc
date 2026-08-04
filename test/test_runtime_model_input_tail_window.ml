@@ -366,12 +366,20 @@ let test_never_returns_an_over_budget_projection () =
      refuse. *)
   let history = atoms (5 * k) in
   let reserved_bytes = 1_000 in
+  let projected_count = ref 0 in
   List.iter
     (fun capacity_bytes ->
        match project ~capacity_bytes ~reserved_bytes history with
-       | Ok projected -> fits_budget ~capacity_bytes ~reserved_bytes projected
+       | Ok projected ->
+         incr projected_count;
+         fits_budget ~capacity_bytes ~reserved_bytes projected
        | Error _ -> ())
-    [ 5_000; 20_000; 60_000; 150_000; 400_000; 900_000; 2_000_000 ]
+    [ 5_000; 20_000; 60_000; 150_000; 400_000; 900_000; 2_000_000 ];
+  (* Without this the case passes vacuously: a projection that refused every
+     capacity would assert nothing at all. *)
+  Alcotest.(check bool)
+    "at least one capacity produced a projection to check" true
+    (!projected_count > 0)
 ;;
 
 let has_tag tag messages =

@@ -25,6 +25,17 @@
     quantized cut fits, an exact cut is used instead — correctness outranks
     cache reuse.
 
+    Two properties of that quantization are worth stating because they are
+    costs, not guarantees. History growth moves the cut in one direction
+    only, but the budget also depends on inputs that shrink: pinned context
+    is re-assembled each turn, so a smaller pinned block can move the cut
+    back and change the prefix once. The cost of that is a cache miss, never
+    a refusal. And because a window is a fixed atom count against a byte
+    budget, a jump can free far more room than it needed — a keeper whose
+    atoms are heavy transmits well under its budget right after a jump and
+    refills toward it, the same sawtooth an atom-count window had, now
+    bounded in the unit the target actually refuses on.
+
     Messages carrying OAS extra-system-context provenance are never counted
     as atoms and never dropped; that block is re-assembled fresh each turn by
     the keeper hooks and must survive the cut. When the cut leaves a

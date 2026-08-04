@@ -25,7 +25,7 @@ New-claim criteria:
 
 Category criteria — choose the FIRST that fits:
 - code_change: a concrete, lasting change to code or configuration (a file/function was modified, a setting now has value X), described so it is verifiable later.
-- constraint: a rule, limit, policy, invariant, or boundary that bounds future action (must / must not / only / at most). Includes a decision that establishes such a rule.
+- constraint: a rule, limit, policy, invariant, or boundary that bounds action (must / must not / only / at most), stated by an external source — an operator instruction, configuration, or documented policy. Record it with its source as an observation about where the rule came from; the stored claim carries no authority of its own. A keeper's own turn decision to skip, defer, or omit scheduled work is not a constraint — do not promote it into one.
 - blocker: a specific external obstacle that prevents progress and persists beyond this turn (a dependency is missing, an API is down, a credential is absent). Not the keeper merely having no task to do.
 - goal: a durable objective or target the agent is working toward, beyond the current turn.
 - preference: a stable, stated preference about how work should be done (style, tooling, process) that holds across turns.

@@ -92,7 +92,7 @@ export async function resumeWorkspace(): Promise<void> {
 // ── Maintenance ─────────────────────────────────
 
 export async function runGarbageCollection(): Promise<void> {
-  const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
+  const access = dashboardAuthAccess(shellAuthSummary.value, 'admin')
   if (!access.allowed) {
     showToast(access.reason ?? 'Missing permission to run GC.', 'error', 6000)
     return

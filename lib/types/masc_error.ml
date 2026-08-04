@@ -130,6 +130,7 @@ module Auth_error = struct
   type t =
     | Unauthorized of { reason: unauthorized_reason; message: string }
     | Forbidden of { agent: string; action: string }
+    | SameOriginBlocked
     | TokenExpired of string
     | InvalidToken of string
 
@@ -141,6 +142,8 @@ module Auth_error = struct
   let to_string = function
     | Unauthorized { message; _ } -> Printf.sprintf "[AuthError] Unauthorized: %s" message
     | Forbidden { agent; action } -> Printf.sprintf "[AuthError] Forbidden: %s cannot %s" agent action
+    | SameOriginBlocked ->
+        "[AuthError] Forbidden: browser cannot perform a cross-origin HTTP mutation"
     | TokenExpired agent ->
         Printf.sprintf "[AuthError] Token expired for %s." agent
     | InvalidToken reason -> Printf.sprintf "[AuthError] Invalid token: %s" reason
@@ -205,7 +208,7 @@ let to_yojson err =
   `String (to_string err)
 
 let code = function
-  | Auth (Auth_error.Forbidden _) -> 403
+  | Auth (Auth_error.Forbidden _ | Auth_error.SameOriginBlocked) -> 403
   | Auth (Auth_error.Unauthorized _
          | Auth_error.TokenExpired _
          | Auth_error.InvalidToken _) -> 401
@@ -239,18 +242,12 @@ let code = function
 
    The match is exhaustive on the outer [t] so a new auth-relevant
    variant trips Warning 8 here instead of silently falling through.
-   The [Forbidden { agent = "browser"; action = "cross-origin HTTP
-   mutation" }] arm matches the literal action string produced in
-   [Server_auth.ensure_same_origin_browser_request]; that string pair
-   is a pre-existing coupling carried over verbatim from #21040, not a
-   new substring classifier. *)
+   [SameOriginBlocked] is a distinct typed producer outcome; this mapping
+   therefore cannot drift when a human-readable error message changes. *)
 let dashboard_auth_error_code : t -> string option = function
   | Auth (Auth_error.InvalidToken _) -> Some "invalid_token"
   | Auth (Auth_error.TokenExpired _) -> Some "token_expired"
-  | Auth
-      (Auth_error.Forbidden
-         { agent = "browser"; action = "cross-origin HTTP mutation" }) ->
-      Some "same_origin_blocked"
+  | Auth Auth_error.SameOriginBlocked -> Some "same_origin_blocked"
   | Auth (Auth_error.Forbidden _) -> Some "insufficient_role"
   | Auth (Auth_error.Unauthorized { reason; _ }) ->
       Some (Auth_error.unauthorized_reason_to_string reason)
@@ -268,6 +265,7 @@ let is_retryable = function
   | Task _ | Agent _ -> false
   | Auth (Auth_error.TokenExpired _) -> true
   | Auth (Auth_error.Unauthorized _ | Auth_error.Forbidden _
+         | Auth_error.SameOriginBlocked
          | Auth_error.InvalidToken _) -> false
   | System (System_error.IoError _ | System_error.StorageError _
            | System_error.LockContention _) -> true

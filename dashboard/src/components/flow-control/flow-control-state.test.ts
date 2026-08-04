@@ -6,12 +6,14 @@ const {
   namespaceTruthInitializing,
   serverStatus,
   shellAuthSummary,
+  showToast,
 } = vi.hoisted(() => ({
   callMcpTool: vi.fn(),
   namespaceTruth: { value: null as unknown },
   namespaceTruthInitializing: { value: false },
   serverStatus: { value: null as unknown },
   shellAuthSummary: { value: null as unknown },
+  showToast: vi.fn(),
 }))
 
 vi.mock('../../api/mcp', () => ({
@@ -28,9 +30,12 @@ vi.mock('../../store', () => ({
   shellAuthSummary,
 }))
 
+vi.mock('../common/toast', () => ({ showToast }))
+
 import {
   fetchPauseStatus,
   flowState,
+  runGarbageCollection,
 } from './flow-control-state'
 
 describe('flow-control-state', () => {
@@ -46,6 +51,7 @@ describe('flow-control-state', () => {
       auth_error_detail: null,
     }
     flowState.value = 'unknown'
+    showToast.mockReset()
   })
 
   afterEach(() => {
@@ -132,5 +138,30 @@ describe('flow-control-state', () => {
     callMcpTool.mockResolvedValueOnce(JSON.stringify({ status: 'running', paused: false }))
     await fetchPauseStatus()
     expect(flowState.value).toBe('running')
+  })
+
+  it('rejects garbage collection for a worker before calling MCP', async () => {
+    await runGarbageCollection()
+
+    expect(callMcpTool).not.toHaveBeenCalled()
+    expect(showToast).toHaveBeenCalledWith(
+      'Current role is worker; admin role is required.',
+      'error',
+      6000,
+    )
+  })
+
+  it('runs garbage collection for an admin', async () => {
+    shellAuthSummary.value = {
+      effective_role: 'admin',
+      default_role: 'worker',
+      auth_error_code: null,
+      auth_error_detail: null,
+    }
+    callMcpTool.mockResolvedValueOnce('{"removed":0}')
+
+    await runGarbageCollection()
+
+    expect(callMcpTool).toHaveBeenCalledWith('masc_gc', {})
   })
 })

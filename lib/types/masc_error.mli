@@ -40,6 +40,7 @@ module Auth_error : sig
   type t =
     | Unauthorized of { reason: unauthorized_reason; message: string }
     | Forbidden of { agent: string; action: string }
+    | SameOriginBlocked
     | TokenExpired of string
     | InvalidToken of string
   val unauthorized_reason_to_string : unauthorized_reason -> string
@@ -88,8 +89,7 @@ val dashboard_auth_error_code : t -> string option
     {ul
     {- ["invalid_token"] for [Auth (InvalidToken _)];}
     {- ["token_expired"] for [Auth (TokenExpired _)];}
-    {- ["same_origin_blocked"] for the browser cross-origin
-       [Auth (Forbidden _)] case;}
+    {- ["same_origin_blocked"] for [Auth SameOriginBlocked];}
     {- ["insufficient_role"] for any other [Auth (Forbidden _)];}
     {- the [unauthorized_reason] code
        (["actor_mismatch"] / ["missing_token"] / ["unknown"]) for

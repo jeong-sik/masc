@@ -5,6 +5,8 @@ import { requestConfirm } from './confirm-dialog'
 import { runGarbageCollection } from '../flow-control/flow-control-state'
 import { missionAgentBriefs, missionKeeperBriefs } from '../../mission-signals'
 import { formatCommandTargetSection, formatCommandTargetSummary } from '../../runtime-counts'
+import { shellAuthSummary } from '../../store'
+import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 
 interface CommandPaletteAction {
   id: string
@@ -59,6 +61,8 @@ export function CommandPalette({ openOnMount = false }: CommandPaletteProps = {}
   // Sync data whenever the mission snapshot changes
   useEffect(() => {
     if (!ready || !ref.current) return
+
+    const maintenanceAccess = dashboardAuthAccess(shellAuthSummary.value, 'admin')
 
     const baseActions: CommandPaletteAction[] = [
       {
@@ -125,7 +129,10 @@ export function CommandPalette({ openOnMount = false }: CommandPaletteProps = {}
           navigate('code', next)
         }
       },
-      {
+    ]
+
+    if (maintenanceAccess.allowed) {
+      baseActions.push({
         id: 'action-gc',
         title: '유지보수: GC (Garbage Collection) 실행',
         section: 'System Ops',
@@ -134,8 +141,8 @@ export function CommandPalette({ openOnMount = false }: CommandPaletteProps = {}
           const confirmed = await requestConfirm({ title: '유지보수', message: 'GC를 실행합니까?' })
           if (confirmed) void runGarbageCollection()
         }
-      }
-    ]
+      })
+    }
 
     // Add Agents dynamically
     const agents = missionAgentBriefs.value || []
@@ -163,7 +170,7 @@ export function CommandPalette({ openOnMount = false }: CommandPaletteProps = {}
 
     ref.current.data = [...baseActions, ...agentActions, ...keeperActions]
 
-  }, [ready, route.value, missionAgentBriefs.value, missionKeeperBriefs.value])
+  }, [ready, route.value, missionAgentBriefs.value, missionKeeperBriefs.value, shellAuthSummary.value])
 
   useEffect(() => {
     if (!ready || !openOnMount) return

@@ -46,7 +46,9 @@ let classify : Masc_domain.t -> t = function
   | Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _) -> Token_mismatch
   | Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired _) -> Token_expired
   | Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized _) -> Unauthorized
-  | Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _) -> Forbidden
+  | Masc_domain.Auth
+      (Masc_domain.Auth_error.Forbidden _
+      | Masc_domain.Auth_error.SameOriginBlocked) -> Forbidden
   | Masc_domain.Agent (Masc_domain.Agent_error.NotFound _) -> Agent_not_found
   | Masc_domain.System (Masc_domain.System_error.IoError _) -> Io_error
   | Masc_domain.System (Masc_domain.System_error.InvalidJson _) -> Invalid_json

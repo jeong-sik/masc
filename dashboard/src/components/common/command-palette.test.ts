@@ -10,6 +10,12 @@ const runGarbageCollection = vi.fn().mockResolvedValue(undefined)
 const route = signal<any>({ tab: 'code', params: { section: 'ide-shell' }, postId: null })
 const missionAgentBriefs = signal<any[]>([])
 const missionKeeperBriefs = signal<any[]>([])
+const shellAuthSummary = signal<any>({
+  effective_role: 'worker',
+  default_role: 'worker',
+  auth_error_code: null,
+  auth_error_detail: null,
+})
 
 async function loadPalette() {
   vi.resetModules()
@@ -22,6 +28,7 @@ async function loadPalette() {
     missionAgentBriefs,
     missionKeeperBriefs,
   }))
+  vi.doMock('../../store', () => ({ shellAuthSummary }))
   return import('./command-palette')
 }
 
@@ -34,6 +41,12 @@ describe('CommandPalette', () => {
     missionAgentBriefs.value = []
     missionKeeperBriefs.value = []
     route.value = { tab: 'code', params: { section: 'ide-shell' }, postId: null }
+    shellAuthSummary.value = {
+      effective_role: 'worker',
+      default_role: 'worker',
+      auth_error_code: null,
+      auth_error_detail: null,
+    }
   })
 
   afterEach(() => {
@@ -45,6 +58,7 @@ describe('CommandPalette', () => {
     vi.doUnmock('./confirm-dialog')
     vi.doUnmock('../flow-control/flow-control-state')
     vi.doUnmock('../../mission-signals')
+    vi.doUnmock('../../store')
   })
 
   it('loads the web component lazily and wires navigation commands without reserved hotkeys', async () => {
@@ -106,6 +120,12 @@ describe('CommandPalette', () => {
   })
 
   it('runs maintenance actions only after confirmation', async () => {
+    shellAuthSummary.value = {
+      effective_role: 'admin',
+      default_role: 'worker',
+      auth_error_code: null,
+      auth_error_detail: null,
+    }
     const { CommandPalette } = await loadPalette()
 
     render(html`<${CommandPalette} />`, container)
@@ -124,6 +144,19 @@ describe('CommandPalette', () => {
     await palette?.data?.find((item) => item.id === 'action-gc')?.handler()
     expect(runGarbageCollection).toHaveBeenCalledTimes(1)
 
+  })
+
+  it('does not expose admin-only garbage collection to a worker', async () => {
+    const { CommandPalette } = await loadPalette()
+
+    render(html`<${CommandPalette} />`, container)
+    await waitFor(() => {
+      const palette = container.querySelector('ninja-keys') as (HTMLElement & {
+        data?: Array<{ id: string }>
+      }) | null
+      expect(palette?.data?.length).toBeGreaterThan(0)
+      expect(palette?.data?.some((item) => item.id === 'action-gc')).toBe(false)
+    })
   })
 
   it('labels mission entities as command targets, not live runtime counts', async () => {

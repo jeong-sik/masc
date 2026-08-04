@@ -60,6 +60,9 @@ let test_auth_other_non_retryable () =
             (E.Auth_error.Forbidden { agent = "a"; action = "x" }))));
   assert (
     not
+      (E.is_retryable (E.Auth E.Auth_error.SameOriginBlocked)));
+  assert (
+    not
       (E.is_retryable (E.Auth (E.Auth_error.InvalidToken "x"))))
 
 (* ── (3) System: transient I/O retryable, others not ──── *)

@@ -720,8 +720,7 @@ let ensure_same_origin_browser_request ~request_authority request :
          "explicit_trusted_host");
     Error
       (Masc_domain.Auth
-         (Masc_domain.Auth_error.Forbidden
-            { agent = "browser"; action = "cross-origin HTTP mutation" }))
+         Masc_domain.Auth_error.SameOriginBlocked)
   | Multiple_origins | Malformed_origin ->
     Error
       (Masc_domain.Auth
@@ -748,8 +747,7 @@ let ensure_same_origin_if_browser_request ~request_authority request :
          "explicit_trusted_host");
     Error
       (Masc_domain.Auth
-         (Masc_domain.Auth_error.Forbidden
-            { agent = "browser"; action = "cross-origin HTTP mutation" }))
+         Masc_domain.Auth_error.SameOriginBlocked)
   | Multiple_origins | Malformed_origin ->
     Error
       (Masc_domain.Auth
@@ -773,7 +771,9 @@ let http_status_of_auth_error = function
       (Masc_domain.Auth_error.Unauthorized _
       | Masc_domain.Auth_error.InvalidToken _
       | Masc_domain.Auth_error.TokenExpired _) -> `Unauthorized
-  | Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _) -> `Forbidden
+  | Masc_domain.Auth
+      (Masc_domain.Auth_error.Forbidden _
+      | Masc_domain.Auth_error.SameOriginBlocked) -> `Forbidden
   | Masc_domain.Task (Masc_domain.Task_error.NotFound _) -> `Not_found
   | Masc_domain.Agent (Masc_domain.Agent_error.NotFound _) -> `Not_found
   | Masc_domain.Task

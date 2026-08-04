@@ -559,9 +559,18 @@ let translate_input_for_descriptor descriptor input =
   | Shape_changing { translate; _ } -> translate input
 ;;
 
+type capability_identity =
+  | Internal_name_identity
+  | Named_capability of string
+
+let capability_id_of_identity ~internal_name = function
+  | Internal_name_identity -> internal_name
+  | Named_capability capability_id -> capability_id
+;;
+
 let descriptor_with_public_aliases
       ?(examples = [])
-      ?capability_id
+      ~capability_identity
       ~keeper_model_projection
       ~input_schema_source
       ~public_aliases
@@ -579,7 +588,9 @@ let descriptor_with_public_aliases
       ~input_translation
       ()
   =
-  let capability_id = Option.value capability_id ~default:internal_name in
+  let capability_id =
+    capability_id_of_identity ~internal_name capability_identity
+  in
   let receipt_labels =
     [ "descriptor_id", id
     ; "capability_id", capability_id
@@ -626,7 +637,7 @@ let descriptor_with_public_aliases
 
 let descriptor
       ?(examples = [])
-      ?capability_id
+      ~capability_identity
       ~keeper_model_projection
       ~input_schema_source
       ~id
@@ -644,7 +655,7 @@ let descriptor
   =
   descriptor_with_public_aliases
     ~examples
-    ?capability_id
+    ~capability_identity
     ~keeper_model_projection
     ~input_schema_source
     ~public_aliases:[]
@@ -672,6 +683,7 @@ let with_model_output_projection model_output_projection descriptor =
 
 let public_descriptors =
   [ descriptor
+      ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
       ~input_schema_source:Descriptor_owned
       ~id:"agent.execute"
@@ -705,6 +717,7 @@ let public_descriptors =
       ~input_translation:(Identity Validate_once_before_translation)
       ()
   ; descriptor_with_public_aliases
+      ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
       ~input_schema_source:Descriptor_owned
       ~id:"agent.search_files"
@@ -737,6 +750,7 @@ let public_descriptors =
            })
       ()
   ; descriptor
+      ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
       ~input_schema_source:Descriptor_owned
       ~id:"agent.read_file"
@@ -765,6 +779,7 @@ let public_descriptors =
            })
       ()
   ; descriptor
+      ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
       ~input_schema_source:Descriptor_owned
       ~id:"agent.edit_file"
@@ -793,6 +808,7 @@ let public_descriptors =
            })
       ()
   ; descriptor
+      ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
       ~input_schema_source:Descriptor_owned
       ~id:"agent.write_file"
@@ -819,6 +835,7 @@ let public_descriptors =
            })
       ()
   ; descriptor
+      ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
       ~input_schema_source:Descriptor_owned
       ~id:"agent.search_web"
@@ -843,6 +860,7 @@ let public_descriptors =
       ~input_translation:(Identity Validate_once_before_translation)
       ()
   ; descriptor
+      ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
       ~input_schema_source:Descriptor_owned
       ~id:"agent.fetch_web"
@@ -1202,14 +1220,14 @@ let write_in_process_policy ?(retryable = false) ?(inline_safe = false) ()
     ()
 ;;
 
-let in_process_descriptor_with_schema_source_and_capability
-      ?capability_id
+let in_process_descriptor_with_schema_source
+      ~capability_identity
       ~keeper_model_projection
       ~input_schema_source ~id ~name ~description ~input_schema ~policy ~handler
       ()
   =
   descriptor
-    ?capability_id
+    ~capability_identity
     ~keeper_model_projection
     ~input_schema_source
     ~id
@@ -1226,25 +1244,11 @@ let in_process_descriptor_with_schema_source_and_capability
     ()
 ;;
 
-let in_process_descriptor_with_schema_source ~keeper_model_projection
-      ~input_schema_source ~id ~name ~description ~input_schema ~policy ~handler
-  =
-  in_process_descriptor_with_schema_source_and_capability
-    ~keeper_model_projection
-    ~input_schema_source
-    ~id
-    ~name
-    ~description
-    ~input_schema
-    ~policy
-    ~handler
-    ()
-;;
-
 let in_process_descriptor ~keeper_model_projection ~id ~name ~description
       ~input_schema ~policy ~handler
   =
   in_process_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
     ~keeper_model_projection
     ~input_schema_source:Descriptor_owned
     ~id
@@ -1253,6 +1257,7 @@ let in_process_descriptor ~keeper_model_projection ~id ~name ~description
     ~input_schema
     ~policy
     ~handler
+    ()
 ;;
 
 (* Cluster-dispatched tools (board / voice / task) share a single
@@ -1269,12 +1274,23 @@ let cluster_policy ?(polling_read = false) ~readonly ~inline_safe () =
   else write_in_process_policy ~inline_safe ()
 ;;
 
-let cluster_descriptor_with_schema_source ?(polling_read = false)
-      ?capability_id ~keeper_model_projection ~input_schema_source ~input_schema ~id ~name
-      ~description ~handler ~readonly ~inline_safe () =
+let cluster_descriptor_with_schema_source
+      ?(polling_read = false)
+      ~capability_identity
+      ~keeper_model_projection
+      ~input_schema_source
+      ~input_schema
+      ~id
+      ~name
+      ~description
+      ~handler
+      ~readonly
+      ~inline_safe
+      ()
+  =
   let policy = cluster_policy ~polling_read ~readonly ~inline_safe () in
-  in_process_descriptor_with_schema_source_and_capability
-    ?capability_id
+  in_process_descriptor_with_schema_source
+    ~capability_identity
     ~keeper_model_projection
     ~input_schema_source
     ~id
@@ -1286,7 +1302,8 @@ let cluster_descriptor_with_schema_source ?(polling_read = false)
     ()
 ;;
 
-let cluster_descriptor ?(polling_read = false) ?capability_id ~keeper_model_projection ~id ~name
+let cluster_descriptor ?(polling_read = false) ~capability_identity
+      ~keeper_model_projection ~id ~name
       ~description ~handler ~readonly ~inline_safe ()
   =
   let input_schema_source, input_schema =
@@ -1298,7 +1315,7 @@ let cluster_descriptor ?(polling_read = false) ?capability_id ~keeper_model_proj
   in
   cluster_descriptor_with_schema_source
     ~polling_read
-    ?capability_id
+    ~capability_identity
     ~keeper_model_projection
     ~input_schema_source
     ~input_schema
@@ -1325,7 +1342,7 @@ let board_descriptor board_name description ~readonly =
            capability_id)
   in
   cluster_descriptor
-    ~capability_id
+    ~capability_identity:(Named_capability capability_id)
     ~keeper_model_projection:Internal_name
     ~id:("keeper.board." ^ operation)
     ~name
@@ -1354,6 +1371,7 @@ let masc_board_descriptor board_name =
       schema.input_schema
   in
   in_process_descriptor_with_schema_source
+       ~capability_identity:Internal_name_identity
        ~keeper_model_projection
        ~input_schema_source:Canonical_registry
        ~id:("masc.board." ^ Tool_name.Board_name.operation_name board_name)
@@ -1362,6 +1380,7 @@ let masc_board_descriptor board_name =
        ~input_schema
        ~policy
        ~handler:Tool_masc_board_dispatch
+       ()
 ;;
 
 let masc_board_descriptors =
@@ -1370,6 +1389,7 @@ let masc_board_descriptors =
 
 let voice_descriptor name description ~readonly =
   cluster_descriptor
+    ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("keeper.voice." ^ String.sub name (String.length "keeper_voice_")
          (String.length name - String.length "keeper_voice_"))
@@ -1381,9 +1401,9 @@ let voice_descriptor name description ~readonly =
     ()
 ;;
 
-let task_descriptor ?capability_id id name description ~readonly =
+let task_descriptor ~capability_identity id name description ~readonly =
   cluster_descriptor
-    ?capability_id
+    ~capability_identity
     ~keeper_model_projection:Internal_name
     ~id:("keeper.task." ^ id)
     ~name
@@ -1403,6 +1423,7 @@ let task_descriptor ?capability_id id name description ~readonly =
    through the existing typed dispatcher. *)
 let masc_task_descriptor id name description ~readonly =
   cluster_descriptor
+    ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.task." ^ id)
     ~name
@@ -1415,6 +1436,7 @@ let masc_task_descriptor id name description ~readonly =
 
 let masc_task_transport_descriptor id name description ~readonly =
   cluster_descriptor
+    ~capability_identity:Internal_name_identity
     ~keeper_model_projection:
       (Transport_alias { projected_by = "keeper_tasks_list" })
     ~id:("masc.task." ^ id)
@@ -1428,6 +1450,7 @@ let masc_task_transport_descriptor id name description ~readonly =
 
 let masc_plan_descriptor id name description ~readonly =
   cluster_descriptor
+    ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.plan." ^ id)
     ~name
@@ -1440,6 +1463,7 @@ let masc_plan_descriptor id name description ~readonly =
 
 let masc_run_descriptor name description ~readonly =
   cluster_descriptor
+    ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.run." ^ String.sub name (String.length "masc_run_")
          (String.length name - String.length "masc_run_"))
@@ -1453,6 +1477,7 @@ let masc_run_descriptor name description ~readonly =
 
 let masc_agent_descriptor id name description ~readonly =
   cluster_descriptor
+    ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.agent." ^ id)
     ~name
@@ -1466,6 +1491,7 @@ let masc_agent_descriptor id name description ~readonly =
 let masc_workspace_descriptor id name description ~readonly
   =
   cluster_descriptor
+    ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.workspace." ^ id)
     ~name
@@ -1480,6 +1506,7 @@ let masc_workspace_descriptor id name description ~readonly
    misc / control / agent_timeline / local_runtime). *)
 let masc_misc_descriptor id name description ~readonly =
   cluster_descriptor
+    ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.misc." ^ id)
     ~name
@@ -1493,6 +1520,7 @@ let masc_misc_descriptor id name description ~readonly =
 let masc_control_descriptor operation =
   let schema = Tool_schemas_misc.control_schema operation in
   cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Operator_only
     ~input_schema_source:Canonical_registry
     ~input_schema:schema.input_schema
@@ -1507,6 +1535,7 @@ let masc_control_descriptor operation =
 
 let masc_agent_timeline_descriptor name description ~readonly =
   cluster_descriptor
+    ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:"masc.agent_timeline"
     ~name
@@ -1520,6 +1549,7 @@ let masc_agent_timeline_descriptor name description ~readonly =
 let masc_schedule_descriptor (definition : Tool_schemas_schedule.definition) =
   let schema : Masc_domain.tool_schema = definition.schema in
   cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~input_schema_source:Canonical_registry
     ~input_schema:schema.input_schema
@@ -1541,6 +1571,7 @@ let masc_keeper_descriptor
     ~readonly =
   cluster_descriptor
     ~polling_read
+    ~capability_identity:Internal_name_identity
     ~keeper_model_projection
     ~id:("masc.keeper." ^ id)
     ~name
@@ -1568,6 +1599,7 @@ let masc_library_descriptor (definition : Tool_schemas_library.definition) =
     | Tool_schemas_library.Promote_document -> Internal_name, schema.description
   in
   cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
     ~keeper_model_projection
     ~input_schema_source:Canonical_registry
     ~input_schema:schema.input_schema
@@ -1588,6 +1620,7 @@ let masc_local_runtime_descriptor
       (definition : Tool_schemas_local_runtime.definition) =
   let schema = definition.schema in
   cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~input_schema_source:Canonical_registry
     ~input_schema:schema.input_schema
@@ -1659,6 +1692,7 @@ let internal_descriptors : t list =
       ~handler:Tool_artifact_read
     |> with_model_output_projection Tool_output.bounded_inline_model_projection
   ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
       ~input_schema_source:memory_search_schema_source
       ~id:"keeper.memory.search"
@@ -1668,7 +1702,9 @@ let internal_descriptors : t list =
       ~input_schema:memory_search_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_memory_search
+      ()
   ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
       ~input_schema_source:memory_write_schema_source
       ~id:"keeper.memory.write"
@@ -1677,6 +1713,7 @@ let internal_descriptors : t list =
       ~input_schema:memory_write_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_memory_write
+      ()
     (* ── library (RFC-0179 PR-3) ──────────────────────────────── *)
   ; in_process_descriptor
       ~keeper_model_projection:Internal_name
@@ -1736,6 +1773,7 @@ let internal_descriptors : t list =
       ~handler:Tool_person_note_set
     (* ── IDE (RFC-0179 PR-3) ──────────────────────────────────── *)
   ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
       ~input_schema_source:ide_annotate_schema_source
       ~id:"keeper.ide.annotate"
@@ -1744,6 +1782,7 @@ let internal_descriptors : t list =
       ~input_schema:ide_annotate_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_ide_annotate
+      ()
     (* ── fusion deliberation (RFC-0252) ───────────────────────── *)
   ; in_process_descriptor
       ~keeper_model_projection:Internal_name
@@ -1831,33 +1870,37 @@ let internal_descriptors : t list =
       ~readonly:false
     (* ── task / broadcast cluster (RFC-0179 PR-3, 6 tools) ────── *)
   ; task_descriptor
-      ~capability_id:"masc_tasks"
+      ~capability_identity:(Named_capability "masc_tasks")
       "list"
       "keeper_tasks_list"
       "List MASC tasks visible to this keeper."
       ~readonly:true
   ; task_descriptor
+      ~capability_identity:Internal_name_identity
       "audit"
       "keeper_tasks_audit"
       "Audit MASC task state for stale claims and verification gaps."
       ~readonly:true
   ; task_descriptor
-      ~capability_id:"masc_broadcast"
+      ~capability_identity:(Named_capability "masc_broadcast")
       "broadcast"
       "keeper_broadcast"
       "Broadcast a workspace message to the MASC workspace."
       ~readonly:false
   ; task_descriptor
+      ~capability_identity:Internal_name_identity
       "claim"
       "keeper_task_claim"
       "Claim ownership of a MASC task."
       ~readonly:false
   ; task_descriptor
+      ~capability_identity:Internal_name_identity
       "create"
       "keeper_task_create"
       "Create a new MASC task on the board."
       ~readonly:false
   ; task_descriptor
+      ~capability_identity:Internal_name_identity
       "done"
       "keeper_task_done"
       "Mark the claimed MASC task as done."
@@ -1997,6 +2040,7 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "dashboard" "masc_dashboard"
       "Read workspace dashboard summary." ~readonly:true
   ; cluster_descriptor
+      ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Operator_only
       ~id:"masc.misc.keeper_waiting_inventory"
       ~name:"masc_keeper_waiting_inventory"

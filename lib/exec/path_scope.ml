@@ -59,19 +59,7 @@ let normalize_cwd cwd =
 let starts_with_dir ~prefix abs =
   abs = prefix || String.starts_with ~prefix:(prefix ^ "/") abs
 
-let lexical_normalize_abs abs =
-  let parts = String.split_on_char '/' abs in
-  let stack = ref [] in
-  List.iter
-    (function
-      | "" | "." -> ()
-      | ".." ->
-          (match !stack with
-           | _ :: rest -> stack := rest
-           | [] -> ())
-      | part -> stack := part :: !stack)
-    parts;
-  "/" ^ String.concat "/" (List.rev !stack)
+let lexical_normalize_abs = Common.lexical_normalize_abs
 
 let lexical_abs ~cwd raw =
   let abs =

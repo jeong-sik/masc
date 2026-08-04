@@ -8,6 +8,10 @@ val incomplete_tool_transcript_kind : string
 (** Canonical wire kind for structural transcript corruption rejected before
     provider dispatch. *)
 
+val network_error_kind_to_string : Llm_provider.Http_client.network_error_kind -> string
+(** [network_error_kind_to_string kind] is the wire spelling of a transport
+    failure kind. *)
+
 type provider_rejection = {
   provider_label : string;
   reason : string;

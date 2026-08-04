@@ -140,20 +140,7 @@ let set_store_for_testing = set_store
 (* Local by design: this guard needs absolute lexical cleanup that composes with
    existing-prefix realpath for paths that may not exist yet. Env/basepath
    normalizers deliberately carry broader policy such as HOME expansion. *)
-let lexical_normalize_abs abs =
-  let parts = String.split_on_char '/' abs in
-  let stack = ref [] in
-  List.iter
-    (function
-      | "" | "." -> ()
-      | ".." ->
-        (match !stack with
-         | _ :: rest -> stack := rest
-         | [] -> ())
-      | part -> stack := part :: !stack)
-    parts;
-  "/" ^ String.concat "/" (List.rev !stack)
-;;
+let lexical_normalize_abs = Common.lexical_normalize_abs
 
 let lexical_abs ?cwd raw =
   let abs =

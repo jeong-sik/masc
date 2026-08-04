@@ -110,3 +110,20 @@ let truncate_response ?(max_bytes=max_tool_output_bytes) ~total_count response =
     let truncated = String.sub response 0 max_bytes in
     Printf.sprintf "%s\n\n... [truncated: %d/%d bytes shown, total_count=%d]"
       truncated max_bytes len total_count
+
+(* Resolves [.] and [..] textually. No filesystem access, so a symlinked
+   component is not followed. *)
+let lexical_normalize_abs abs =
+  let parts = String.split_on_char '/' abs in
+  let stack = ref [] in
+  List.iter
+    (function
+      | "" | "." -> ()
+      | ".." ->
+        (match !stack with
+         | _ :: rest -> stack := rest
+         | [] -> ())
+      | part -> stack := part :: !stack)
+    parts;
+  "/" ^ String.concat "/" (List.rev !stack)
+;;

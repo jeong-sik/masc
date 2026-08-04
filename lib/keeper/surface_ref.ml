@@ -40,16 +40,7 @@ let opt_string_field key = function
 let string_assoc_json fields =
   `Assoc (List.map (fun (key, value) -> (key, `String value)) fields)
 
-let string_assoc_of_json = function
-  | `Assoc fields ->
-      Ok
-        (List.filter_map
-           (fun (key, value) ->
-             match value with
-             | `String s -> Some (key, s)
-             | _ -> None)
-           fields)
-  | _ -> Error "expected string object"
+let string_assoc_of_json = Json_util.string_assoc_of_json
 
 let required_string key = function
   | `Assoc fields -> (

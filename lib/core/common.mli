@@ -91,3 +91,8 @@ val truncate_response :
     {!max_tool_output_bytes}). Otherwise returns the first [max_bytes]
     characters followed by a machine-readable truncation suffix that
     records the original length and [total_count]. *)
+
+val lexical_normalize_abs : string -> string
+(** [lexical_normalize_abs abs] collapses [.], [..] and repeated separators in
+    [abs] textually. It does not touch the filesystem, so symlinked components
+    are left unresolved. *)

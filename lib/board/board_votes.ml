@@ -605,14 +605,7 @@ let comments_jsonl_snapshot store =
   ) store.comments;
   Buffer.contents buf
 
-let reactions_jsonl_snapshot store =
-  let buf = Buffer.create 4096 in
-  Hashtbl.iter
-    (fun _ (reaction : reaction) ->
-       Buffer.add_string buf (Yojson.Safe.to_string (reaction_to_yojson reaction));
-       Buffer.add_char buf '\n')
-    store.reactions;
-  Buffer.contents buf
+let reactions_jsonl_snapshot store = Board_core_persist.reactions_jsonl_unlocked store
 
 let save_jsonl_snapshot ~where ~path content =
   try

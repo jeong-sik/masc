@@ -347,3 +347,15 @@ let normalize_string_list items =
   |> List.map String.trim
   |> List.filter (fun item -> not (String.equal item ""))
   |> dedupe_keep_order
+
+let string_assoc_of_json = function
+  | `Assoc fields ->
+    Ok
+      (List.filter_map
+         (fun (key, value) ->
+           match value with
+           | `String s -> Some (key, s)
+           | _ -> None)
+         fields)
+  | _ -> Error "expected string object"
+;;

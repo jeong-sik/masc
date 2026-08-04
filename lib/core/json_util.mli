@@ -166,3 +166,8 @@ val normalize_string_list : string list -> string list
 (** [normalize_string_list items] trims each item, drops the ones that
     are empty after trimming, and removes duplicates while preserving
     the order of first occurrence. *)
+
+val string_assoc_of_json : Yojson.Safe.t -> ((string * string) list, string) result
+(** [string_assoc_of_json json] keeps the members of a JSON object whose value
+    is a string and drops the others. Returns [Error] when [json] is not an
+    object. *)

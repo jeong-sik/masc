@@ -42,7 +42,6 @@
   workspace_task_verification
   workspace_verification_store
   event_kind
-  workspace_git
   mention
   workspace_resilience
   workspace_goal_index

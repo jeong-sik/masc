@@ -6,8 +6,8 @@
     checkpoint round-trips. This keeps the bytes off the lossy {!Payload}
     [Lazy_payload] path ([Payload.of_json] rebuilds an empty closure): a
     checkpoint persists only the handle and the bytes are reloaded on demand.
-    Mirrors the content-addressed atomic-write pattern of [Review_artifact_store]
-    (SHA-256 hashing + [Fs_compat.save_file_atomic]). *)
+    Content addressing is SHA-256 hashing over the raw bytes, written through
+    [Fs_compat.save_file_atomic]. *)
 
 type handle = private string
 (** Opaque content hash (SHA-256 hex). Produced by {!store}; reconstruct a

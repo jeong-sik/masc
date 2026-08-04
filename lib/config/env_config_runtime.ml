@@ -609,41 +609,6 @@ module Sidecar = struct
       (get_float ~default:10.0 "MASC_SIDECAR_SCHEMA_TIMEOUT_SEC")
 end
 
-(** {1 Workspace local git operation timeouts}
-
-    Inline literals extracted from {!Workspace_git} (#10426 audit).
-    These sites share the same semantic bucket: local-only git
-    operations such as [rev-parse], [status], and [branch] with no
-    network IO.  Network-bound git ops (fetch, push) already use
-    {!Env_config_core.git_fetch_timeout_sec}, which is the long
-    counterpart and is intentionally a separate knob.
-
-    The two budgets must remain separable: bundling local + network
-    under one knob would force an operator who needs to extend a
-    flaky [git fetch] over a slow proxy to also extend every
-    [git rev-parse] subprocess on hot paths, padding tail latency
-    needlessly.  Conversely, an operator narrowing local ops on a
-    fast workstation would not expect to also narrow network ops. *)
-
-module Workspace_git = struct
-  (** Budget (seconds) for local-only git operations under
-      [Masc_exec.Exec_gate.run_argv*] in {!Workspace_git}: [rev-parse],
-      [status], [branch], etc.
-
-      Default 30.0 preserves the four inline literals.  Floor 5.0
-      keeps the budget above subprocess startup + small index
-      reads even on a busy system; misconfiguring lower than that
-      would silently kill perfectly healthy commands.
-
-      Network-bound ops (fetch, push) intentionally use a separate
-      knob — see {!Env_config_core.git_fetch_timeout_sec}.
-      @category Timeouts
-      @ops_class operator *)
-  let local_op_timeout_sec =
-    Float.max 5.0
-      (get_float ~default:30.0 "MASC_WORKSPACE_GIT_LOCAL_OP_TIMEOUT_SEC")
-end
-
 module Workspace_file = struct
   (** Maximum bytes served by the IDE workspace file endpoint in one
       response. The route rejects larger files instead of materializing

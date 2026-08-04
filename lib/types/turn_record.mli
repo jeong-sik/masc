@@ -75,8 +75,10 @@ type raw_trace_run_ref =
   ; end_seq : int
   ; agent_name : string
     (* OAS runtime identity for the dispatched run. This is intentionally a
-       different namespace from [t.agent_name], which is the Keeper identity. *)
+       different namespace from [t.agent_name], which is the Keeper identity;
+       the autonomous-turn reader validates it against the selected raw rows. *)
   ; session_id : string
+    (* Matches [t.trace_id] and the selected raw rows. *)
   }
 
 type t =

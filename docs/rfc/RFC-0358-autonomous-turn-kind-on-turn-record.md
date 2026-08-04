@@ -20,8 +20,11 @@ related: ["0351", "0233"]
 | `raw_trace_run_ref` | exact OAS run ref option | 완료된 provider dispatch result |
 
 `raw_trace_run_ref`는 `worker_run_id`, `path`, `start_seq`, `end_seq`,
-`agent_name`, `session_id`를 보존한다. Decoder는 run ref의 agent/session
-identity가 record의 agent/trace identity와 다르면 현재 record로 인정하지 않는다.
+`agent_name`, `session_id`를 보존한다. Record의 `agent_name`은 Keeper identity이고
+run ref의 `agent_name`은 OAS runtime identity이므로 서로 비교하지 않는다. Decoder는
+run ref의 session identity가 record의 trace identity와 다르면 현재 record로
+인정하지 않는다. Reader는 선택된 raw row의 OAS runtime/session identity가 run ref와
+다르면 해당 turn을 투영하지 않는다.
 필드가 없는 과거 row를 읽는 migration이나 fallback은 없다.
 
 ## 2. 읽기 경계
@@ -59,5 +62,6 @@ projection이며 keeper prompt 입력이 아니다.
 - 한 trace file에 여러 provider run이 있어도 record가 지목한 run만 투영한다.
 - Public autonomous row의 activity trace에는 raw thinking, tool call id,
   arguments, result가 없다.
-- Agent/session identity mismatch와 keeper trace directory 밖 path를 거부한다.
+- Raw row와 run ref의 OAS runtime/session identity mismatch 및 keeper trace
+  directory 밖 path를 거부한다.
 - Autonomous row volume은 200개의 direct conversation slot을 소비하지 않는다.

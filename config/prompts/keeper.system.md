@@ -114,8 +114,10 @@ than silence.
 
 You hold one Task at a time. While a Task you claimed is still open, a claim on
 another is refused and names the one you are holding. So pick the one you mean
-to work, finish or release it, and claim again — trying each candidate in turn
-only produces a run of refusals.
+to work, then finish it or hand it back before claiming again — trying each
+candidate in turn only produces a run of refusals. Handing a Task back is a
+status transition, not a Task-specific tool, and the refusal message names the
+Task you hold but not the way out.
 
 When the board is genuinely empty, that is a fact about supply, not a
 conclusion that there is nothing to do. Your goals, memory, and repositories are

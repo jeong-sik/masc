@@ -1800,7 +1800,7 @@ let test_transferred_retry_uses_resolved_owner_shutdown_fence () =
           check string
             "retry reports the resolved owner fence"
             (Printf.sprintf
-               "scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"
+               "retryable schedule dispatch failure: scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"
                target_keeper
                (Keeper_shutdown_types.Operation_id.to_string operation_id))
             detail

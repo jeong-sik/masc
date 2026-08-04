@@ -908,8 +908,10 @@ let test_source_shutdown_fences_transfer_before_receipt () =
   @@ fun operation_id ->
   (match Transaction.transfer_pending config ~from_keeper ~to_keeper request with
    | Error
-       { cause = Transaction.Source_transfer_shutdown_reserved actual
-       ; reservation_release = Some Keeper_lifecycle_reservation.Released
+       { cause =
+           Transaction.Admission_busy
+             (Keeper_turn_admission.Shutdown_requested actual)
+       ; reservation_release = None
        }
      when Keeper_shutdown_types.Operation_id.equal actual operation_id -> ()
    | Error error -> Alcotest.fail (Transaction.error_to_string error)
@@ -964,7 +966,7 @@ let () =
             `Quick
             test_stale_source_incarnation_has_no_receipt_or_target_effect
         ; Alcotest.test_case
-            "source shutdown fences transfer before receipt"
+            "source shutdown fences transfer before turn admission"
             `Quick
             test_source_shutdown_fences_transfer_before_receipt
         ; Alcotest.test_case

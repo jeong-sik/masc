@@ -1284,11 +1284,6 @@ let activate_owner_state
   }
 ;;
 
-(* bootstrap_keepers removed: the keeper_autoboot subsystem in
-   start_keeper_loops now handles keeper startup in a dedicated
-   fiber with a 5-second delay, avoiding runtime bootstrap contention with
-   the 7+ dashboard refresh loops that start alongside it. *)
-
 let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_request_handler
     ~make_h2_request_handler ~make_h2_error_handler () =
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =

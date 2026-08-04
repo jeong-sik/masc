@@ -356,27 +356,6 @@ let handle_keeper_sandbox_stop ctx args : tool_result =
    recovery is autonomous (next turn's observation) or operator-driven
    (keeper_chat/board), not blocker-driven. *)
 
-(* Recurring loop tools (#3190) removed: zero callers. *)
-
-let should_bootstrap_existing_keepalives name args =
-  match name with
-  | "masc_keeper_delegate" ->
-      (match Keeper_invocation_contract.request_of_json args with
-       | Ok request ->
-         not (String.equal (String.trim (Keeper_invocation_contract.prompt request)) "")
-       | Error _ -> false)
-  | "masc_keeper_msg" ->
-      not (String.equal (String.trim (get_string args "message" "")) "")
-  | _ -> false
-
-let maybe_bootstrap_existing_keepalives ctx ~name ~args =
-  if should_bootstrap_existing_keepalives name args
-  then
-    (try start_existing_keepalives ctx
-     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-       Log.Keeper.error "start_existing_keepalives failed: %s"
-         (Stdlib.Printexc.to_string exn))
-
 (** Keeper tools are scoped to the caller's current base_path.
     Do not retarget requests across other base_path registries. *)
 let resolve_ctx ctx ~name:_ _args = ctx
@@ -640,7 +619,6 @@ let handle_keeper_clear ctx args : tool_result =
   keeper_clear_body ~config:ctx.config args
 
 let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
-  maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
   match name with
   | "masc_persona_list" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_list ctx args))
@@ -692,7 +670,6 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
 
 let dispatch_keeper_msg ~submitted_by ?continuation_channel ctx ~args : tool_result =
   let name = "masc_keeper_msg" in
-  maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
   tool_result_with_tool_name
     ~tool_name:name
@@ -711,7 +688,6 @@ let dispatch_keeper_msg_stream
   : tool_result option
   =
   let name = "masc_keeper_msg" in
-  maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
   Some
     (tool_result_with_tool_name
@@ -733,7 +709,6 @@ let dispatch_keeper_msg_stream_if_free
       ~args
   =
   let name = "masc_keeper_msg" in
-  maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
   match
     handle_keeper_msg_stream_if_free

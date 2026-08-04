@@ -282,14 +282,6 @@ let internal_timer_entries =
       "Stalled session threshold (seconds, 5 min)";
   ]
 
-let keeper_bootstrap_entries =
-  [
-    entry ~default:"10000" "MASC_KEEPER_BOOTSTRAP_MAX_SCAN"
-      "Max keeper meta files to scan during bootstrap";
-    entry ~default:"3600.0" "MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC"
-      "Keeper stale turn threshold (seconds)";
-  ]
-
 let keeper_grpc_entries =
   [
     entry ~default:"5.0" "MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC"
@@ -542,7 +534,7 @@ let all_categories () =
     category "inference"
       (model_routing_entries @ oas_sse_entries @ local_runtime_entries);
     category "keeper"
-      (keeper_entries @ keeper_bootstrap_entries
+      (keeper_entries
        @ keeper_keepalive_entries @ keeper_metrics_entries
        @ keeper_health_entries
        @ docker_playground_entries

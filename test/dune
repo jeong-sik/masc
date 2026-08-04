@@ -1885,7 +1885,7 @@
 
 (include stanzas/test_keeper_agent_runtime_status.inc)
 
-(include stanzas/test_keeper_autoboot_supervisor_start_10125.inc)
+(include stanzas/test_keeper_autoboot_single_owner.inc)
 
 (include stanzas/test_keeper_checkpoint_classify.inc)
 
@@ -2091,8 +2091,6 @@
 (include stanzas/test_sse_storm_e2e.inc)
 
 (include stanzas/test_start_masc_script.inc)
-
-(include stanzas/test_supervisor_start_predicate.inc)
 
 (include stanzas/test_system_log_atomicity.inc)
 

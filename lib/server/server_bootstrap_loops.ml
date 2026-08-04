@@ -1626,20 +1626,13 @@ let start_keeper_loops_owned
                in
                retry_loop 1))
           unbooted);
-      (* #10125: start the supervisor sweep here, after autoboot
-         completes.  Without this call the sweep would only fire
-         on the first [masc_keeper_msg] tool dispatch (the single
-         caller of [start_existing_keepalives] in [keeper_tool_surface.ml]
-         — see #10125 timeline 2026-04-24, where 14 keepers ran
-         under autoboot but the sweep never came up because no
-         operator [masc_keeper_msg] arrived after the restart;
-         four hours later the entire fleet was dead with no
-         supervisor to recover them).
-
-         [start_supervisor_sweep] is idempotent — its internal
-         [supervisor_sweep_running] guard makes a second call a
-         noop, so this stays correct if [masc_keeper_msg] later
-         races into [start_existing_keepalives] anyway. *)
+      (* Keeper lifecycle startup has one owner: this subsystem boots the
+         configured roster and then starts its supervisor. The sweep starts
+         even for an empty roster; it is the recovery authority for keepers
+         materialized or registered after boot. This preserves the #10125
+         incident fix: a transiently empty/failed initial pass must not leave
+         the fleet without recovery. Tool dispatch has no fleet-start
+         authority. *)
       (try Keeper_runtime.start_supervisor_sweep keeper_boot_ctx with
        | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->

@@ -1,9 +1,9 @@
-(** Keeper Runtime — keeper reconciliation and keepalive bootstrap.
+(** Keeper Runtime — keeper reconciliation and supervisor runtime.
 
     Reconciles persisted keeper meta against on-disk personality / TOML and
-    materialises boot-time defaults; spawns supervisor sweeps and existing
-    keepalives during server bootstrap.  Runtime-only mutable state stays
-    behind keeper runtime/execution modules. *)
+    materialises boot-time defaults; supplies the supervisor sweep used by the
+    server-owned Keeper bootstrap. Runtime-only mutable state stays behind
+    keeper runtime/execution modules. *)
 
 (** {1 Personality compare helpers}
 
@@ -155,20 +155,6 @@ val load_or_materialize_boot_meta :
 
 (** {1 Supervisor sweep state} *)
 
-type keeper_bootstrap_stats = {
-  scanned : int;         (** Keepers inspected during boot. *)
-  started : int;         (** Keepers whose keepalive fiber was spawned. *)
-  stale : int;           (** Keepers skipped because last heartbeat is stale. *)
-  recovering : int;      (** Keepers re-entering the failing-recovery loop. *)
-}
-(** Counts emitted by [bootstrap_existing_keepers] for telemetry. *)
-
-val bootstrap_existing_keepers :
-  [> float Eio.Time.clock_ty ] Keeper_types_profile.context ->
-  keeper_bootstrap_stats
-(** Walk every bootable keeper and start/recover its keepalive fiber.
-    Returns counts for the boot summary log line. *)
-
 val supervisor_sweep_running : string -> bool
 (** [true] when a supervisor sweep is currently registered for the
     keeper. *)
@@ -189,33 +175,8 @@ val supervisor_sweep_age_seconds : base_path:string -> float option
 (** Seconds since the supervisor-sweep marker was last touched, or
     [None] when no marker exists. *)
 
-(** {1 Keepalive bootstrap registry} *)
-
-val has_boot_entries : Workspace.config -> bool
-(** [true] when at least one configured keeper is a bootstrap candidate,
-    including an invalid profile that must keep the supervisor alive so a
-    repaired file can be admitted without a server restart. *)
-
-val should_start_supervisor_sweep :
-  config:Workspace.config -> stats:keeper_bootstrap_stats -> bool
-(** Policy gate: should the supervisor sweep run given [config] and the
-    bootstrap stats? *)
-
-val maybe_start_supervisor_sweep :
-  [> float Eio.Time.clock_ty ] Keeper_types_profile.context ->
-  keeper_bootstrap_stats -> unit
-(** Start the supervisor sweep when [should_start_supervisor_sweep]
-    returns [true]; otherwise no-op. *)
-
-val start_existing_keepalives :
-  [> float Eio.Time.clock_ty ] Keeper_types_profile.context -> unit
-(** Top-level entry: bootstrap every existing keeper's keepalive plus
-    the supervisor sweep when applicable. *)
-
 val stop_keepalive : ?base_path:string -> string -> unit
-(** Stop the keepalive fiber for [keeper_name] and clear the
-    bootstrap-done marker so a future restart can re-bootstrap. *)
+(** Stop the keepalive fiber for [keeper_name]. *)
 
 val reset_test_state : string -> unit
-(** Clear in-memory state for [keeper_name] in tests; not safe in
-    production. *)
+(** Clear in-memory state for [base_path] in tests; not safe in production. *)

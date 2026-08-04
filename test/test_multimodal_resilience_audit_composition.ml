@@ -1,25 +1,16 @@
-(* Tier A12 — E2E demo: "website with hero image" scenario.
+(* Composition tests for multimodal artifacts, typed recovery, and audit chains.
 
-   Cycle 27 / final 17-tier monolith milestone.
-
-   Scope (Crew dropped per #11941):
-     1. Autonomous: working_context["autonomous_meta"] payload that
-        Tier A5 wirein would persist after Keeper Running tick.
-     2. Multimodal: Workspace receives code (HTML) + image (hero PNG)
+   Scope:
+     1. Multimodal: Workspace receives code (HTML) + image (hero PNG)
         artifacts; image's provenance edge references code.
-     3. Resilience: fail closed on untyped error text, then derive a
+     2. Resilience: fail closed on untyped error text, then derive a
         Degradation L2 strategy from typed transient evidence.
-     4. Shared_audit: chain seven audit envelopes across all phases
+     3. Shared_audit: chain seven audit envelopes across the scenario
         and verify Merkle integrity; tamper-detect the chain.
 
-   This test does NOT spin up an actual Keeper subprocess or LLM —
-   it exercises the building blocks (workspace + recovery +
-   degradation + audit) in the order the integrated runtime would
-   trigger them. The entire 17-tier architecture is exercised
-   end-to-end through pure-data composition.
-
-   No CREW (Tier A8/A9 dropped, A10/A10b/A10c CANCELLED). The
-   17-tier monolith terminates here. *)
+   This is deliberately not an E2E test: it exercises the production
+   building blocks directly without claiming to cover Keeper, wire, or
+   persistence boundaries. *)
 
 module Aid = Shared_types.Artifact_id
 module W = Multimodal.Workspace
@@ -37,36 +28,6 @@ let check_int label expected actual =
   if expected <> actual then
     failwith
       (Printf.sprintf "%s: expected %d, got %d" label expected actual)
-
-(* ── Phase 1: Autonomous meta ────────────────────────────────── *)
-
-let test_phase_1_autonomous_meta () =
-  (* This is the JSON sub-tree that Tier A5's wirein writes to
-     working_context["autonomous_meta"] after each Running tick. *)
-  let meta =
-    `Assoc
-      [
-        ("phase", `String "intending");
-        ( "intent",
-          `String "build a marketing landing page with hero image"
-        );
-        ( "planned_artifacts",
-          `List [ `String "code:html"; `String "image:hero" ] );
-      ]
-  in
-  let working_context = `Assoc [ ("autonomous_meta", meta) ] in
-  match working_context with
-  | `Assoc kv ->
-      check_bool "autonomous_meta present"
-        (List.mem_assoc "autonomous_meta" kv);
-      let m = List.assoc "autonomous_meta" kv in
-      let phase =
-        match m with
-        | `Assoc mkv -> List.assoc "phase" mkv
-        | _ -> failwith "autonomous_meta not object"
-      in
-      check_bool "phase = intending" (phase = `String "intending")
-  | _ -> failwith "expected object"
 
 (* ── Phase 2: Multimodal workspace ───────────────────────────── *)
 
@@ -226,11 +187,6 @@ let phase_5_build_chain () =
   in
   (List.rev envelopes_rev, List.length phases)
 
-let test_phase_5_chain_length () =
-  let envelopes, expected = phase_5_build_chain () in
-  check_int "chain length matches phase list" expected
-    (List.length envelopes)
-
 let test_phase_5_chain_verification () =
   let envelopes, _ = phase_5_build_chain () in
   match S.verify_chain envelopes with
@@ -257,34 +213,11 @@ let test_phase_6_tamper_detection () =
   | Error (_, _) -> check_bool "tamper detected" true
   | Ok () -> failwith "tamper NOT detected"
 
-(* ── Phase 7: PartialSuccess outcome composition ─────────────── *)
-
-let test_phase_7_partial_success_shape () =
-  let outcome_meta =
-    `Assoc
-      [
-        ("verdict", `String "partial_success");
-        ("planned_artifacts", `Int 2);
-        ("delivered_artifacts", `Int 1);
-        ("fallback_substitutions", `Int 1);
-        ("degradation_level_reached", `String "L2");
-        ("audit_chain_length", `Int 7);
-      ]
-  in
-  match outcome_meta with
-  | `Assoc kv ->
-      check_bool "verdict present"
-        (List.mem_assoc "verdict" kv);
-      check_bool "verdict = partial_success"
-        (List.assoc "verdict" kv = `String "partial_success")
-  | _ -> failwith "expected object"
-
 (* ── Driver ─────────────────────────────────────────────────── *)
 
 let () =
   let cases =
     [
-      ("phase_1_autonomous_meta", test_phase_1_autonomous_meta);
       ("phase_2_workspace_size", test_phase_2_workspace_size);
       ("phase_2_kind_partition", test_phase_2_kind_partition);
       ("phase_2_provenance_dag", test_phase_2_provenance_dag);
@@ -296,11 +229,8 @@ let () =
         test_phase_4_degradation_l2_yields_tame_strategy );
       ( "phase_4_degradation_l4_no_retry",
         test_phase_4_degradation_l4_no_retry );
-      ("phase_5_chain_length", test_phase_5_chain_length);
       ("phase_5_chain_verification", test_phase_5_chain_verification);
       ("phase_6_tamper_detection", test_phase_6_tamper_detection);
-      ( "phase_7_partial_success_shape",
-        test_phase_7_partial_success_shape );
     ]
   in
   List.iter
@@ -311,5 +241,5 @@ let () =
         exit 1)
     cases;
   Printf.printf
-    "test_a12_e2e_demo: %d phases passed (Tier A12 — 17-tier monolith terminus)\n"
+    "test_multimodal_resilience_audit_composition: %d checks passed\n"
     (List.length cases)

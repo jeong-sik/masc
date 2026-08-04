@@ -807,6 +807,15 @@ let prefer_cooperative_probe_error probe_error advanced_result =
 ;;
 
 module For_testing = struct
+  let with_oas_tool_of_masc_hook_unset f =
+    let original = !oas_tool_of_masc_hook in
+    Fun.protect
+      ~finally:(fun () -> oas_tool_of_masc_hook := original)
+      (fun () ->
+         oas_tool_of_masc_hook := None;
+         f ())
+  ;;
+
   let provider_http_observation_transport = provider_http_observation_transport
   let runtime_id_of_config = runtime_id_of_config
   let runtime_observation_for_completed_config =

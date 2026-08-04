@@ -60,6 +60,15 @@ let test_notes_hash_length () =
   let h = Cal.notes_hash ~task_title:"t" ~notes:"n" in
   check int "SHA256 hex = 64 chars" 64 (String.length h)
 
+let expected_default_notes_hash =
+  "1c82730a31bb70ffd25a1f14e8e6791aac785d8b7c56523313e3b994493b8666"
+
+let test_notes_hash_known_vector () =
+  check string "SHA256(title + newline + notes)" expected_default_notes_hash
+    (Cal.notes_hash
+       ~task_title:"Fix auth bug"
+       ~notes:"Implemented JWT refresh token rotation")
+
 (* ================================================================ *)
 (* Record verdict tests                                              *)
 (* ================================================================ *)
@@ -105,13 +114,12 @@ let test_record_verdict_hash_matches () =
   let req = make_req () in
   let result = make_result () in
   Cal.record_verdict ~task_id:"task-3" ~req ~result ();
-  let expected_hash = Cal.notes_hash
-    ~task_title:req.task_title ~notes:req.completion_notes in
   let store = Cal.get_store () in
   let records = Dated_jsonl.read_recent store 10 in
   let first = List.hd records in
   let stored_hash = Yojson.Safe.Util.(first |> member "notes_hash" |> to_string) in
-  check string "notes_hash matches" expected_hash stored_hash;
+  check string "record stores the independently pinned hash"
+    expected_default_notes_hash stored_hash;
   Cal.reset_store_for_testing ()
 
 (* ================================================================ *)
@@ -608,6 +616,7 @@ let () =
       test_case "deterministic" `Quick test_notes_hash_deterministic;
       test_case "sensitive" `Quick test_notes_hash_sensitive;
       test_case "length" `Quick test_notes_hash_length;
+      test_case "known vector" `Quick test_notes_hash_known_vector;
     ];
     "record_verdict", [
       test_case "writes to store" `Quick test_record_verdict_writes;

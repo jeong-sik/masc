@@ -1049,7 +1049,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          request_cap_targets="@test/runtest-test_runtime_config_validity @test/runtest-test_keeper_turn_driver_failover @test/runtest-test_keeper_vision_tool"
+          request_cap_targets="@test/runtest-test_runtime_config_validity @test/runtest-test_keeper_turn_driver_failover @test/runtest-test_keeper_vision_tool @test/runtest-test_runtime_modality_reroute"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${request_cap_targets}"
 
       - name: Run operator control suite

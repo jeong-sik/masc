@@ -15,7 +15,6 @@ let run
   ~(turn_effect_record : Keeper_run_prompt.turn_effect_record)
   ~post_turn_t0
   ~inference_telemetry
-  ?deliberation_execution
   ()
   =
   (* (1) deterministic write and (2) LLM librarian extraction run on this
@@ -26,47 +25,6 @@ let run
      per-keeper mutex (RFC-0257's fairness boundary is unchanged); meta/config
      are immutable snapshots, so using them after the turn returns does not
      race a later turn. *)
-  let det_write_series () =
-    (* Advisory delegation request drafts: keep review artifact persistence on
-       the bounded post-turn memory lane, not on the decision-record append
-       path. Deterministic (no provider call), so it stays in this unit rather
-       than the librarian one. *)
-    (try
-       match deliberation_execution with
-       | None -> ()
-       | Some execution -> (
-         match
-           Keeper_delegation_request_store.write_execution_result
-             ~base_path:config.Workspace.base_path
-             ~requester:meta.name
-             execution
-         with
-         | Ok [] -> ()
-         | Ok stored ->
-           Log.Keeper.info ~keeper_name:meta.name
-             "delegation_requests wrote=%d dir=%s"
-             (List.length stored)
-            (Keeper_delegation_request_store.requests_dir
-                ~base_path:config.Workspace.base_path)
-         | Error msg ->
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string DispatchEventFailures)
-             ~labels:[ "keeper", meta.name; "site", "delegation_requests" ]
-             ();
-           Log.Keeper.warn ~keeper_name:meta.name
-             "delegation_requests failed: %s"
-             msg)
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string DispatchEventFailures)
-         ~labels:[ "keeper", meta.name; "site", "delegation_requests" ]
-         ();
-       Log.Keeper.warn ~keeper_name:meta.name
-         "delegation_requests failed: %s"
-         (Printexc.to_string exn))
-  in
   (* The librarian toggle is owned at this admission boundary. Disabled or
      invalid configuration must not submit a lane unit, read the current
      snapshot, advance cadence, or emit Librarian runtime failures. *)
@@ -158,16 +116,6 @@ let run
            Keeper_metrics.(to_string MemoryOsInertTurnExtractionSkipped)
            ~labels:[ "keeper", meta.name ]
            ())
-  in
-  (* RFC-0257: detach onto the per-keeper memory lane. When the executor
-     switch is not initialized (tests, early startup) the lane runs units
-     inline, so no memory work is lost. *)
-  let (_ : Keeper_memory_lane.outcome) =
-    Keeper_memory_lane.submit
-      ~base_path:config.Workspace.base_path
-      ~keeper_name:meta.name
-      ~lane:Keeper_memory_lane.Deterministic
-      det_write_series
   in
   submit_librarian_if_enabled ();
   (* Post-turn timing evidence is logged to decisions.jsonl. The keyword

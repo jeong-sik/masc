@@ -5,7 +5,6 @@
     instead of string literals. *)
 
 let system = "keeper.system"
-let deliberation = "keeper.deliberation"
 let reply_guidelines = "keeper.reply_guidelines"
 let recovery_block = "keeper.recovery_block"
 let board_attention_judgment_batch = "keeper.board_attention_judgment_batch"

@@ -154,7 +154,6 @@ describe('lab navigation', () => {
       'tools',
       'harness',
       'performance',
-      'memory-subsystems',
       'keeper-memory-health',
       'audit-integrity',
     ])
@@ -163,13 +162,9 @@ describe('lab navigation', () => {
       'Tools',
       'Safety Harness',
       'Performance',
-      'Memory OS',
       '키퍼 메모리 상태',
       '감사 무결성',
     ])
-    expect(labSections.find(item => item.id === 'memory-subsystems')?.description).toBe(
-      'Recall quality and delegation requests.',
-    )
     expect(labSections.find(item => item.id === 'performance')?.description).toBe(
       'FPS meter, VirtualList, content-visibility, native dialog, and observer probes.',
     )
@@ -181,7 +176,7 @@ describe('lab navigation', () => {
       keeper: 'sangsu',
       view: 'stale',
     })).toEqual({
-      section: 'memory-subsystems',
+      section: 'keeper-memory-health',
       keeper: 'sangsu',
     })
   })

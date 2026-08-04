@@ -34,7 +34,6 @@ import {
   fetchKeeperConfig,
   fetchKeeperCostMetrics,
   fetchKeeperDecisions,
-  fetchMemorySubsystems,
   fetchRuntimeProviders,
   fetchRuntimeTomlConfig,
   fetchRuntimeDefaults,
@@ -979,28 +978,6 @@ describe('fetchKeeperTurnTranscript', () => {
     expect(result.found).toBe(false)
     expect(result.user).toEqual([])
     expect(result.assistant).toEqual([])
-  })
-})
-
-describe('fetchMemorySubsystems', () => {
-  it('builds the query string from the provided limit', async () => {
-    const rawResponse = {
-      generated_at: '2026-05-06T00:00:00Z',
-    }
-    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
-      new Response(JSON.stringify(rawResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    ))
-    vi.stubGlobal('fetch', fetchMock)
-
-    await fetchMemorySubsystems({ limit: 100 })
-
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const requestUrl = new URL(fetchMock.mock.calls[0]?.[0] as string, 'http://dashboard.local')
-    expect(requestUrl.pathname).toBe('/api/v1/dashboard/memory-subsystems')
-    expect(requestUrl.searchParams.get('limit')).toBe('100')
   })
 })
 

@@ -130,7 +130,6 @@
   test_dashboard_perf
   test_dashboard_tool_host_events
   test_dashboard_nav_event
-  test_server_dashboard_http_memory_subsystems
   test_server_dashboard_http_keeper_memory_health
   test_keeper_exact_flow_detail
   test_server_dashboard_http_audit_integrity
@@ -202,7 +201,6 @@
   test_keeper_lifecycle_registry_dispatch
   test_keeper_lifecycle_chaos
   test_keeper_generation_lineage
-  test_keeper_deliberation
   test_keeper_registry_provenance
   test_keeper_registry_hardening
   test_keeper_fd_pressure_fleet
@@ -431,7 +429,6 @@
   test_dashboard_perf
   test_dashboard_tool_host_events
   test_dashboard_nav_event
-  test_server_dashboard_http_memory_subsystems
   test_server_dashboard_http_keeper_memory_health
   test_keeper_exact_flow_detail
   test_server_dashboard_http_audit_integrity
@@ -503,7 +500,6 @@
   test_keeper_lifecycle_registry_dispatch
   test_keeper_lifecycle_chaos
   test_keeper_generation_lineage
-  test_keeper_deliberation
   test_keeper_registry_provenance
   test_keeper_registry_hardening
   test_keeper_fd_pressure_fleet

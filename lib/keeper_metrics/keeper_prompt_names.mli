@@ -9,7 +9,6 @@ val system : string
     [world], [capabilities], and [core_behavior] keys, which each restated
     the same rule families in a different wording. *)
 
-val deliberation : string
 val reply_guidelines : string
 val recovery_block : string
 val board_attention_judgment_batch : string

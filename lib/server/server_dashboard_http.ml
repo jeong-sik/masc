@@ -192,7 +192,6 @@ let dashboard_memory_http_json ?config request : Yojson.Safe.t =
     ()
 ;;
 
-include Server_dashboard_http_memory_subsystems
 
 (** Read the resolved-history page bounds. [?limit=<rows>] caps the returned
     decisions and [?window=<minutes>] caps how far back they may be dated,

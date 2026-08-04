@@ -19,7 +19,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(message_count : int)
     ~(handoff_json : Yojson.Safe.t option)
     ?(count_completed_turn = true)
-    ?deliberation_execution () : unit =
+    () : unit =
   let now_ts = Time_compat.now () in
   let _observation = observation in
   let turn_mode = turn_mode_of_result result in
@@ -120,19 +120,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
           | Some outcome ->
               `String (proactive_cycle_outcome_to_string outcome)
           | None -> `Null );
-        ( "action_source",
-          match deliberation_execution with
-          | Some execution ->
-              Keeper_deliberation.action_source_of_execution_result execution
-              |> Keeper_deliberation.action_source_to_json
-          | None -> `Null );
-        ( "deliberation_execution",
-          match deliberation_execution with
-          | Some execution ->
-              Keeper_deliberation.execution_result_to_json execution
-          | None -> `Null );
-        Keeper_delegation_request.delegation_request_field ~requester:meta.name
-          deliberation_execution;
         ("runtime",
          match result.runtime_observation with
          | Some observation -> redacted_runtime_observation_to_json observation

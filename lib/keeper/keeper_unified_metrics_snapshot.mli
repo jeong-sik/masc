@@ -13,6 +13,5 @@ val append_metrics_snapshot :
   message_count:int ->
   handoff_json:Yojson.Safe.t option ->
   ?count_completed_turn:bool ->
-  ?deliberation_execution:Keeper_deliberation.execution_result ->
   unit ->
   unit

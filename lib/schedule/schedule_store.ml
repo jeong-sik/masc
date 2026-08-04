@@ -319,57 +319,11 @@ let make_wake_record ~now (request : schedule_request) =
   }
 ;;
 
-let compare_wake_desc (left : wake_record) (right : wake_record) =
-  match compare right.started_at left.started_at with
-  | 0 ->
-    (match compare right.due_at left.due_at with
-     | 0 -> String.compare right.payload_digest left.payload_digest
-     | cmp -> cmp)
-  | cmp -> cmp
-;;
-
-let wakes_for_schedule state ~schedule_id =
-  state.wakes
-  |> List.filter (fun (wake : wake_record) ->
-    String.equal wake.schedule_id schedule_id)
-  |> List.sort compare_wake_desc
-;;
-
 let last_wake_for_schedule_instance state ~schedule_instance_id ~schedule_id =
-  match
-    wakes_for_schedule state ~schedule_id
-    |> List.filter (fun (wake : wake_record) ->
-      String.equal wake.schedule_instance_id schedule_instance_id)
-  with
-  | [] -> None
-  | wake :: _ -> Some wake
-;;
-
-let wake_matches_occurrence
-      ~schedule_instance_id
-      ~schedule_id
-      ~due_at
-      ~payload_digest
-      (wake : wake_record) =
-  String.equal wake.schedule_instance_id schedule_instance_id
-  && String.equal wake.schedule_id schedule_id
-  && Float.equal wake.due_at due_at
-  && String.equal wake.payload_digest payload_digest
-;;
-
-let wake_for_occurrence
-      state
-      ~schedule_instance_id
-      ~schedule_id
-      ~due_at
-      ~payload_digest
-  =
   List.find_opt
-    (wake_matches_occurrence
-       ~schedule_instance_id
-       ~schedule_id
-       ~due_at
-       ~payload_digest)
+    (fun (wake : wake_record) ->
+       String.equal wake.schedule_instance_id schedule_instance_id
+       && String.equal wake.schedule_id schedule_id)
     state.wakes
 ;;
 
@@ -496,53 +450,57 @@ let update_request config ~schedule_id ~due_at ~expires_at ~payload =
 let refresh_due config ~now =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
-    let changed = ref 0 in
-    let schedules =
-      List.map
-        (fun request ->
+    let schedules, changed =
+      List.fold_right
+        (fun request (schedules, changed) ->
           let updated = Schedule_domain.mark_due ~now request in
-          if updated.Schedule_domain.status <> request.Schedule_domain.status then
-            incr changed;
-          updated)
+          let changed =
+            if updated.Schedule_domain.status <> request.Schedule_domain.status
+            then changed + 1
+            else changed
+          in
+          updated :: schedules, changed)
         state.schedules
+        ([], 0)
     in
-    if !changed = 0 then
+    if changed = 0 then
       Ok (state, 0)
     else (
       let next_state =
         bump_state state ~schedules ~wakes:state.wakes
       in
       let* () = write_state config next_state in
-      Ok (next_state, !changed)))
+      Ok (next_state, changed)))
 ;;
 
 let reschedule_due_recurring config ~now ~schedule_ids =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
-    let ids = Hashtbl.create (List.length schedule_ids) in
-    List.iter (fun schedule_id -> Hashtbl.replace ids schedule_id ()) schedule_ids;
-    let changed = ref 0 in
-    let schedules =
-      List.map
-        (fun (request : schedule_request) ->
-          if not (Hashtbl.mem ids request.schedule_id) then
-            request
+    let schedules, changed =
+      List.fold_right
+        (fun (request : schedule_request) (schedules, changed) ->
+          if
+            not
+              (List.exists
+                 (String.equal request.schedule_id)
+                 schedule_ids)
+          then
+            request :: schedules, changed
           else
             match Schedule_domain.reschedule_after_due_signal ~now request with
-            | None -> request
-            | Some updated ->
-              incr changed;
-              updated)
+            | None -> request :: schedules, changed
+            | Some updated -> updated :: schedules, changed + 1)
         state.schedules
+        ([], 0)
     in
-    if !changed = 0 then
+    if changed = 0 then
       Ok (state, 0)
     else (
       let next_state =
         bump_state state ~schedules ~wakes:state.wakes
       in
       let* () = write_state config next_state in
-      Ok (next_state, !changed)))
+      Ok (next_state, changed)))
 ;;
 
 let start_due_candidate config ~now ~schedule_id =
@@ -684,12 +642,17 @@ let recover_running_on_startup config ~now =
         (match request.status with
          | Running ->
            (match
-              wake_for_occurrence
-                { state with wakes }
-                ~schedule_instance_id:request.schedule_instance_id
-                ~schedule_id:request.schedule_id
-                ~due_at:request.due_at
-                ~payload_digest:(Schedule_domain.payload_digest request.payload)
+              List.find_opt
+                (fun (wake : wake_record) ->
+                   String.equal
+                     wake.schedule_instance_id
+                     request.schedule_instance_id
+                   && String.equal wake.schedule_id request.schedule_id
+                   && Float.equal wake.due_at request.due_at
+                   && String.equal
+                        wake.payload_digest
+                        (Schedule_domain.payload_digest request.payload))
+                wakes
             with
             | Some { status = Wake_running; _ } ->
               let* wakes =

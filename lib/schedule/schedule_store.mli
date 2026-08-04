@@ -48,17 +48,6 @@ type read_error =
 
 val read_error_to_string : read_error -> string
 
-(** Outcome of loading the durable ledger. [Fresh] is a legitimately absent file
-    (empty store); [Corrupt] is a present-but-unparseable file that must not be
-    silently defaulted or overwritten. *)
-type load_outcome =
-  | Loaded of state
-  | Fresh
-  | Corrupt of
-      { primary_err : string
-      ; recovery_err : string option
-      }
-
 (** Raised by [read_state]/[list_schedules]/[get_schedule] on a corrupt ledger.
     Read paths have no [result] channel, so they fail loud instead of returning
     an empty list. Mutating paths report [Corrupt_ledger] instead. *)
@@ -68,44 +57,25 @@ exception
     ; recovery_err : string option
     }
 
-val schedules_path : Workspace_utils.config -> string
-
-(** Total load that distinguishes a fresh (absent) ledger from a corrupt
-    (present-but-unparseable) one. Performs no writes. *)
-val load : Workspace_utils.config -> load_outcome
-
-(** Read-only snapshot. Returns the empty [default_state] for a [Fresh] store and
+(** Read-only snapshot. Returns an empty state for an absent store and
     raises {!Corrupt_ledger_exn} for a corrupt one. Never writes to disk. *)
 val read_state : Workspace_utils.config -> state
 
-(** Result-returning read-only snapshot. Returns the empty [default_state] for a
-    [Fresh] store and [Error (Corrupt_read_ledger _)] for a corrupt one. Never
+(** Result-returning read-only snapshot. Returns an empty state for an absent
+    store and [Error (Corrupt_read_ledger _)] for a corrupt one. Never
     writes to disk. *)
 val read_state_result : Workspace_utils.config -> (state, read_error) result
 
-val default_state : unit -> state
-val state_to_yojson : state -> Yojson.Safe.t
 val state_of_yojson : Yojson.Safe.t -> (state, string) result
 
 val list_schedules : Workspace_utils.config -> Schedule_domain.schedule_request list
 val get_schedule :
   Workspace_utils.config -> schedule_id:string -> Schedule_domain.schedule_request option
-val wakes_for_schedule :
-  state -> schedule_id:string -> Schedule_domain.wake_record list
 val last_wake_for_schedule_instance :
   state ->
   schedule_instance_id:string ->
   schedule_id:string ->
   Schedule_domain.wake_record option
-
-val wake_for_occurrence :
-  state ->
-  schedule_instance_id:string ->
-  schedule_id:string ->
-  due_at:float ->
-  payload_digest:string ->
-  Schedule_domain.wake_record option
-(** Exact wake occurrence lookup used for dispatch deduplication. *)
 
 val insert_request :
   Workspace_utils.config ->
@@ -205,7 +175,7 @@ val fail_due_candidate :
 
 val due_wake_candidates :
   state -> Schedule_domain.schedule_request list
-(** Returns all due requests. Authorization of dispatched effects belongs to
+(** Returns all due requests. Authorization of downstream effects belongs to
     the payload consumer. *)
 
 val cancel_matching :

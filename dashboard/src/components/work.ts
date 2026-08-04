@@ -237,10 +237,16 @@ function goalProgressCounts(goalTasks: Task[]): GoalProgressCounts {
   return counts
 }
 
-function taskFromGoalTreeTask(task: GoalTreeTask): Task | null {
+// `containingGoalId` is the id of the tree node the task hangs under. The
+// backend tree projection carries no per-task goal_id, so without it a
+// tree-only task renders unlinked and its owning-goal jump is dead — visible
+// on any task older than the execution snapshot's window, which reaches the
+// surface through the tree alone.
+function taskFromGoalTreeTask(task: GoalTreeTask, containingGoalId: string): Task | null {
   const status = normalizeGoalStoreTaskStatus(task.status)
   const normalized = normalizeTask({
     ...task,
+    goal_id: task.goal_id ?? containingGoalId,
     status: status.status,
     status_raw: status.status_raw,
   })
@@ -268,7 +274,7 @@ function collectGoalTreeTasks(
     seen.add(node.id)
     return [
       ...node.tasks
-        .map(taskFromGoalTreeTask)
+        .map(task => taskFromGoalTreeTask(task, node.id))
         .filter((task): task is Task => task !== null),
       ...collectGoalTreeTasks(node.children, seen),
     ]

@@ -1184,6 +1184,41 @@ describe('Work', () => {
         expect(selectedTask.value?.completed_at).toBe('2026-01-02')
       })
 
+      it('links a tree task to its containing node when the projection carries no goal_id', () => {
+        // The backend tree projection has no per-task goal_id. A task that
+        // reaches the surface only through the tree — anything older than the
+        // execution snapshot window — would otherwise render unlinked, with a
+        // dead jump to its owning goal. The containing node is that goal.
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              tasks: [
+                goalTreeTask({
+                  id: 'T-orphan',
+                  title: 'Tree only cancellation',
+                  goal_id: null,
+                  status: 'cancelled',
+                }),
+              ],
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, total_tasks: 1, done_tasks: 0 }),
+        }
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('work-view-kanban'))
+
+        const col = screen.getByTestId('kanban-col-cancelled')
+        const card = col.querySelector('[data-kanban-task-id="T-orphan"]') as HTMLElement
+        expect(card).toBeTruthy()
+        fireEvent.click(card)
+        expect(selectedTask.value?.goal_id).toBe('G-1')
+      })
+
       it('keeps unscoped execution tasks visible in kanban instead of requiring a goal_id', () => {
         goals.value = [
           { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },

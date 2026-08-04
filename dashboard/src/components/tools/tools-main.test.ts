@@ -179,8 +179,7 @@ describe('Tools', () => {
             requested_at_iso: '2026-06-13T00:00:00Z',
             due_at_iso: '2026-06-13T01:00:00Z',
             expires_at_iso: '2026-06-13T02:00:00Z',
-            last_execution: {
-              execution_id: 'exec-1',
+            last_wake: {
               schedule_id: 'sched-1',
               started_at_iso: '2026-06-13T00:30:00Z',
               finished_at_iso: '2026-06-13T00:30:01Z',

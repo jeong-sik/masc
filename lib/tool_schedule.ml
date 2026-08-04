@@ -225,7 +225,7 @@ let validate_keeper_wake_target ctx ~keeper_wake_target args =
              detail))
 ;;
 
-let schedule_request_json ?last_execution (request : Schedule_domain.schedule_request) =
+let schedule_request_json ?last_wake (request : Schedule_domain.schedule_request) =
   let next_due_at =
     match request.status with
     | Schedule_domain.Scheduled | Schedule_domain.Due -> Some request.due_at
@@ -284,10 +284,10 @@ let schedule_request_json ?last_execution (request : Schedule_domain.schedule_re
            , match payload_summary with
              | None -> `Null
              | Some summary -> `String summary )
-         ; ( "last_execution"
-           , match last_execution with
+         ; ( "last_wake"
+           , match last_wake with
              | None -> `Null
-             | Some execution -> Schedule_domain.execution_record_to_yojson execution
+             | Some wake -> Schedule_domain.wake_record_to_yojson wake
            )
          ])
   | other -> other
@@ -424,13 +424,13 @@ let handle_list ~tool_name ~start_time ctx args =
        let schedules =
          request_rows
          |> List.map (fun (request : Schedule_domain.schedule_request) ->
-           let last_execution =
-             Schedule_store.last_execution_for_schedule_instance
+           let last_wake =
+             Schedule_store.last_wake_for_schedule_instance
                state
                ~schedule_instance_id:request.Schedule_domain.schedule_instance_id
                ~schedule_id:request.Schedule_domain.schedule_id
            in
-           schedule_request_json ?last_execution request)
+           schedule_request_json ?last_wake request)
        in
        ok ~tool_name ~start_time
          (`Assoc
@@ -457,12 +457,12 @@ let handle_get ~tool_name ~start_time ctx args =
        with
      | None -> workflow_error ~tool_name ~start_time "schedule not found"
      | Some request ->
-       let last_execution =
-         Schedule_store.last_execution_for_schedule_instance state
+       let last_wake =
+         Schedule_store.last_wake_for_schedule_instance state
            ~schedule_instance_id:request.Schedule_domain.schedule_instance_id
            ~schedule_id:request.Schedule_domain.schedule_id
        in
-       ok ~tool_name ~start_time (schedule_request_json ?last_execution request))
+       ok ~tool_name ~start_time (schedule_request_json ?last_wake request))
 ;;
 
 let handle_cancel ~tool_name ~start_time ctx args =

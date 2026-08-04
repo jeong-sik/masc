@@ -52,7 +52,7 @@ val due_candidates :
   Workspace_utils.config ->
   now:float ->
   (Schedule_domain.schedule_request list, service_error) result
-(** Refreshes due state and returns visible execution candidates. No execution
+(** Refreshes due state and returns visible wake candidates. No wake
     is performed here. *)
 
 val prune :

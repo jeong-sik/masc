@@ -3481,7 +3481,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
        | Ok None -> fail "pending dashboard operation was not discoverable"
        | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
       Shutdown_finalize.register_completion_handler
-        (Dashboard_delete.handle_keeper_lifecycle_completion ~now:0.0);
+        Dashboard_delete.handle_keeper_lifecycle_completion;
       let finalized =
         match Shutdown_finalize.run ~config ~entry:None pending with
         | Ok finalized -> finalized

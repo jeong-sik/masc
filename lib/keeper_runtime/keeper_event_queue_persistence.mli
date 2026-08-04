@@ -166,6 +166,7 @@ type orphan_quarantine_result =
       ; detail : string
       }
   | Orphan_snapshot_absent
+  | Orphan_pending_delivery_retained
   | Orphan_owner_reappeared
 
 val quarantine_orphaned_owner_result :
@@ -173,16 +174,20 @@ val quarantine_orphaned_owner_result :
   keeper_name:string ->
   confirm_owner_presence:(unit -> (orphan_owner_presence, string) result) ->
   (orphan_quarantine_result, string) result
-(** Move one exact owner runtime directory out of active event-queue discovery
+(** Move one exact owner's event-queue snapshot and transition WAL out of
+    active event-queue discovery
     after [confirm_owner_presence] verifies before and after the rename, under
     the same durable owner lock, that no registry, metadata, or declarative
     config authority exists. A concurrently reappearing owner restores the
-    runtime directory before returning [Orphan_owner_reappeared]. The snapshot,
-    transition WAL, and sibling runtime evidence move together into
+    event-queue files before returning [Orphan_owner_reappeared]. Pending
+    delivery is never quarantined: it is the public pre-registration replay
+    contract and returns [Orphan_pending_delivery_retained]. The snapshot and
+    transition WAL move together into
     [.masc/keepers/.orphaned-event-queues/<keeper>-<operation-uuid>]. A fresh
     UUID permits a later orphan generation with the same Keeper name to
-    converge without overwriting earlier evidence. Both source and target
-    parents are fsynced. *)
+    converge without overwriting earlier evidence. Sibling runtime stores stay
+    in the active owner directory under their own locks. Source and target
+    directories are fsynced. *)
 
 val cancel_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->

@@ -29,6 +29,24 @@ let seed ~base_path ~keeper_name =
   | Error detail -> Alcotest.fail detail
 ;;
 
+let seed_empty_snapshot ~base_path ~keeper_name =
+  seed ~base_path ~keeper_name;
+  match
+    Persistence.drop_by_post_id
+      ~base_path
+      ~keeper_name
+      ~post_id:stimulus.post_id
+      ()
+  with
+  | Ok [ removed ]
+    when Keeper_event_queue.stimulus_identity_equal removed stimulus -> ()
+  | Ok removed ->
+    Alcotest.failf
+      "expected to remove one exact pending stimulus, removed=%d"
+      (List.length removed)
+  | Error detail -> Alcotest.fail detail
+;;
+
 let snapshot_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat
@@ -91,10 +109,13 @@ let quarantine_absent_owner ~base_path ~keeper_name =
   | Error detail -> Alcotest.fail detail
 ;;
 
-let test_absent_owner_moves_full_runtime_directory () =
+let test_absent_owner_moves_only_event_queue_files () =
   with_temp_dir "event-queue-orphan-quarantine-" @@ fun base_path ->
   let keeper_name = "orphan-owner" in
-  seed ~base_path ~keeper_name;
+  seed_empty_snapshot ~base_path ~keeper_name;
+  let owner_dir = Filename.dirname (snapshot_path ~base_path ~keeper_name) in
+  let chat_store_path = Filename.concat owner_dir "chat-queue.sqlite3" in
+  Fs_compat.save_file chat_store_path "sibling-store-must-remain-active";
   let quarantine_path = quarantine_absent_owner ~base_path ~keeper_name in
   Alcotest.(check string)
     "quarantine remains under the dedicated root"
@@ -108,6 +129,14 @@ let test_absent_owner_moves_full_runtime_directory () =
     "quarantined snapshot preserved"
     true
     (Sys.file_exists (Filename.concat quarantine_path "event-queue-v14.json"));
+  Alcotest.(check bool)
+    "sibling chat store remains active"
+    true
+    (Sys.file_exists chat_store_path);
+  Alcotest.(check string)
+    "sibling chat store bytes remain unchanged"
+    "sibling-store-must-remain-active"
+    (Fs_compat.load_file chat_store_path);
   Alcotest.(check (list string))
     "quarantined owner leaves discovery"
     []
@@ -117,9 +146,9 @@ let test_absent_owner_moves_full_runtime_directory () =
 let test_reused_owner_name_gets_distinct_quarantine () =
   with_temp_dir "event-queue-reused-orphan-quarantine-" @@ fun base_path ->
   let keeper_name = "reused-orphan-owner" in
-  seed ~base_path ~keeper_name;
+  seed_empty_snapshot ~base_path ~keeper_name;
   let first_path = quarantine_absent_owner ~base_path ~keeper_name in
-  seed ~base_path ~keeper_name;
+  seed_empty_snapshot ~base_path ~keeper_name;
   let second_path = quarantine_absent_owner ~base_path ~keeper_name in
   Alcotest.(check bool)
     "reused owner name preserves both quarantine generations"
@@ -141,7 +170,7 @@ let test_reused_owner_name_gets_distinct_quarantine () =
 let test_reappeared_owner_fences_quarantine () =
   with_temp_dir "event-queue-owner-reappeared-" @@ fun base_path ->
   let keeper_name = "reappeared-owner" in
-  seed ~base_path ~keeper_name;
+  seed_empty_snapshot ~base_path ~keeper_name;
   (match
      Persistence.quarantine_orphaned_owner_result
        ~base_path
@@ -161,7 +190,7 @@ let test_owner_reappearing_after_rename_restores_runtime () =
   with_temp_dir "event-queue-owner-reappeared-after-rename-" @@ fun base_path ->
   let keeper_name = "reappeared-after-rename" in
   let confirmation_count = ref 0 in
-  seed ~base_path ~keeper_name;
+  seed_empty_snapshot ~base_path ~keeper_name;
   (match
      Persistence.quarantine_orphaned_owner_result
        ~base_path
@@ -185,6 +214,43 @@ let test_owner_reappearing_after_rename_restores_runtime () =
     "restored owner leaves no quarantined generation"
     []
     (Array.to_list (Sys.readdir (quarantine_root ~base_path)))
+;;
+
+let test_pending_delivery_survives_until_future_registration () =
+  with_temp_dir "event-queue-future-registration-" @@ fun base_path ->
+  let keeper_name = "future-owner" in
+  seed ~base_path ~keeper_name;
+  (match
+     Persistence.quarantine_orphaned_owner_result
+       ~base_path
+       ~keeper_name
+       ~confirm_owner_presence:(fun () -> Ok Persistence.Orphan_owner_absent)
+   with
+   | Ok Persistence.Orphan_pending_delivery_retained -> ()
+   | Ok _ -> Alcotest.fail "pending pre-registration delivery was quarantined"
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check bool)
+    "pending snapshot remains in active discovery"
+    true
+    (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
+  let meta =
+    make_keeper_meta
+      ~name:keeper_name
+      ~trace_id:"trace-future-owner"
+      ()
+  in
+  let entry = Keeper_registry.For_testing.register ~base_path keeper_name meta in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.unregister ~base_path keeper_name)
+    (fun () ->
+      match Keeper_event_queue.to_list (Atomic.get entry.event_queue) with
+      | [ replayed ]
+        when Keeper_event_queue.stimulus_identity_equal replayed stimulus -> ()
+      | replayed ->
+        Alcotest.failf
+          "future registration replayed the wrong pending set count=%d"
+          (List.length replayed))
 ;;
 
 let test_exact_owner_presence_requires_exact_authority () =
@@ -257,9 +323,9 @@ let () =
     "Keeper_event_queue_orphan_quarantine"
     [ ( "quarantine"
       , [ Alcotest.test_case
-            "absent owner moves full runtime directory"
+            "absent owner moves only event queue files"
             `Quick
-            test_absent_owner_moves_full_runtime_directory
+            test_absent_owner_moves_only_event_queue_files
         ; Alcotest.test_case
             "reappeared owner fences quarantine"
             `Quick
@@ -272,6 +338,10 @@ let () =
             "reused owner name gets a distinct quarantine"
             `Quick
             test_reused_owner_name_gets_distinct_quarantine
+        ; Alcotest.test_case
+            "pending delivery survives future registration"
+            `Quick
+            test_pending_delivery_survives_until_future_registration
         ; Alcotest.test_case
             "exact owner presence requires exact authority"
             `Quick

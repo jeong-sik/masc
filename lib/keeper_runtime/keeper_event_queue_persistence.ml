@@ -473,6 +473,7 @@ type orphan_quarantine_result =
       ; detail : string
       }
   | Orphan_snapshot_absent
+  | Orphan_pending_delivery_retained
   | Orphan_owner_reappeared
 
 let exact_path_kind_result path =
@@ -516,6 +517,7 @@ let quarantine_orphaned_owner_unlocked owner ~confirm_owner_presence =
   let keeper_name = keeper_name_of_owner owner in
   let owner_dir = keeper_runtime_dir_of_owner owner in
   let snapshot_path = snapshot_path_of_owner owner in
+  let transition_wal_path = transition_wal_path_of_owner owner in
   let keepers_dir = Filename.dirname owner_dir in
   let quarantine_root =
     Filename.concat keepers_dir ".orphaned-event-queues"
@@ -530,6 +532,10 @@ let quarantine_orphaned_owner_unlocked owner ~confirm_owner_presence =
   if not snapshot_exists
   then Ok Orphan_snapshot_absent
   else
+    let* state = load_state_unlocked owner in
+    if not (Keeper_event_queue.is_empty (State.pending state))
+    then Ok Orphan_pending_delivery_retained
+    else
     let* () = require_directory owner_dir in
     let* () =
       try
@@ -557,31 +563,122 @@ let quarantine_orphaned_owner_unlocked owner ~confirm_owner_presence =
       match owner_presence with
       | Orphan_owner_present -> Ok Orphan_owner_reappeared
       | Orphan_owner_absent ->
-        let renamed = ref false in
-        let restore_active_owner () =
-          try
-            Fs_compat.rename quarantine_path owner_dir;
-            renamed := false;
-            Fs_compat.fsync_directory quarantine_root;
-            Fs_compat.fsync_directory keepers_dir;
-            Ok ()
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn ->
-            Error
-              (Printf.sprintf
-                 "failed to restore active event queue owner source=%s target=%s: %s"
-                 quarantine_path
-                 owner_dir
-                 (Printexc.to_string exn))
+        let quarantine_created = ref false in
+        let moved_files = ref [] in
+        let remove_empty_quarantine () =
+          if !quarantine_created
+          then (
+            Unix.rmdir quarantine_path;
+            quarantine_created := false)
         in
-        (try
-           Fs_compat.rename owner_dir quarantine_path;
-           renamed := true;
+        let move_if_present source filename =
+          let* exists = path_exists_result source in
+          if not exists
+          then Ok ()
+          else
+            let target = Filename.concat quarantine_path filename in
+            try
+              Fs_compat.rename source target;
+              moved_files := (source, target) :: !moved_files;
+              Ok ()
+            with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
+              Error
+                (Printf.sprintf
+                   "failed to move event queue file source=%s target=%s: %s"
+                   source
+                   target
+                   (Printexc.to_string exn))
+        in
+        let restore_active_files () =
+          let restore_one (source, target) =
+            match path_exists_result source with
+            | Error _ as error -> error
+            | Ok true ->
+              Error
+                (Printf.sprintf
+                   "refusing to overwrite active event queue file during restore: %s"
+                   source)
+            | Ok false ->
+              (try
+                 Fs_compat.rename target source;
+                 Ok ()
+               with
+               | Eio.Cancel.Cancelled _ as exn -> raise exn
+               | exn ->
+                 Error
+                   (Printf.sprintf
+                      "failed to restore active event queue file source=%s target=%s: %s"
+                      target
+                      source
+                      (Printexc.to_string exn)))
+          in
+          let rec restore = function
+            | [] -> Ok ()
+            | move :: rest ->
+              let* () = restore_one move in
+              restore rest
+          in
+          let* () = restore !moved_files in
+          moved_files := [];
+          (try
+             remove_empty_quarantine ();
+             Fs_compat.fsync_directory owner_dir;
+             Fs_compat.fsync_directory quarantine_root;
+             Fs_compat.fsync_directory keepers_dir;
+             Ok ()
+           with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn ->
+             Error
+               (Printf.sprintf
+                  "failed to finalize restored event queue files keeper=%s: %s"
+                  keeper_name
+                  (Printexc.to_string exn)))
+        in
+        let restore_or_append detail =
+          match restore_active_files () with
+          | Ok () -> Error detail
+          | Error restore_detail ->
+            Error (Printf.sprintf "%s; %s" detail restore_detail)
+        in
+        let move_queue_files () =
+          let* () =
+            try
+              Fs_compat.mkdir_p quarantine_path;
+              quarantine_created := true;
+              require_directory quarantine_path
+            with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
+              Error
+                (Printf.sprintf
+                   "failed to create event queue quarantine generation path=%s: %s"
+                   quarantine_path
+                   (Printexc.to_string exn))
+          in
+          let* () = move_if_present snapshot_path snapshot_filename in
+          move_if_present transition_wal_path transition_wal_filename
+        in
+        (match
+           try move_queue_files () with
+           | Eio.Cancel.Cancelled _ as exn ->
+             (match restore_active_files () with
+              | Ok () | Error _ -> raise exn)
+           | exn -> Error (Printexc.to_string exn)
+         with
+         | Error detail ->
+           if !moved_files = []
+           then (
+             (try remove_empty_quarantine () with _ -> ());
+             Error detail)
+           else restore_or_append detail
+         | Ok () ->
            let post_confirmation =
              try confirm_owner_presence () with
              | Eio.Cancel.Cancelled _ as exn ->
-               (match restore_active_owner () with
+               (match restore_active_files () with
                 | Ok () -> raise exn
                 | Error detail ->
                   Log.Keeper.error
@@ -598,40 +695,35 @@ let quarantine_orphaned_owner_unlocked owner ~confirm_owner_presence =
            in
            (match post_confirmation with
             | Ok Orphan_owner_present ->
-              (match restore_active_owner () with
+              (match restore_active_files () with
                | Ok () -> Ok Orphan_owner_reappeared
                | Error detail -> Error detail)
             | Error detail ->
-              (match restore_active_owner () with
-               | Ok () ->
-                 Error
-                   (Printf.sprintf
-                      "event queue owner confirmation failed after quarantine rename keeper=%s: %s"
-                      keeper_name
-                      detail)
-               | Error restore_detail ->
-                 Error (Printf.sprintf "%s; %s" detail restore_detail))
+              restore_or_append
+                (Printf.sprintf
+                   "event queue owner confirmation failed after quarantine move keeper=%s: %s"
+                   keeper_name
+                   detail)
             | Ok Orphan_owner_absent ->
-              Fs_compat.fsync_directory quarantine_root;
-              Fs_compat.fsync_directory keepers_dir;
-              Ok (Orphan_quarantined { quarantine_path }))
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
-           let detail =
-             Printf.sprintf
-               "event queue orphan quarantine failed keeper=%s source=%s target=%s: %s"
-               keeper_name
-               owner_dir
-               quarantine_path
-               (Printexc.to_string exn)
-           in
-           if !renamed
-           then
-             Ok
-               (Orphan_quarantine_visible_sync_unconfirmed
-                  { quarantine_path; detail })
-           else Error detail)
+              (try
+                 Fs_compat.fsync_directory quarantine_path;
+                 Fs_compat.fsync_directory owner_dir;
+                 Fs_compat.fsync_directory quarantine_root;
+                 Fs_compat.fsync_directory keepers_dir;
+                 Ok (Orphan_quarantined { quarantine_path })
+               with
+               | Eio.Cancel.Cancelled _ as exn -> raise exn
+               | exn ->
+                 let detail =
+                   Printf.sprintf
+                     "event queue orphan quarantine visible but sync unconfirmed keeper=%s path=%s: %s"
+                     keeper_name
+                     quarantine_path
+                     (Printexc.to_string exn)
+                 in
+                 Ok
+                   (Orphan_quarantine_visible_sync_unconfirmed
+                      { quarantine_path; detail }))))
 ;;
 
 let quarantine_orphaned_owner_result

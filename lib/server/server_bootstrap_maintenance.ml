@@ -350,6 +350,10 @@ let recover_projected_durable_demand_owner
           Log.Server.info
             "keeper durable demand recovery converged keeper=%s reason=orphan_snapshot_absent"
             keeper_name
+        | Ok Keeper_event_queue_persistence.Orphan_pending_delivery_retained ->
+          Log.Server.info
+            "keeper durable demand recovery retained keeper=%s reason=pending_pre_registration_delivery"
+            keeper_name
         | Ok Keeper_event_queue_persistence.Orphan_owner_reappeared ->
           Log.Server.info
             "keeper durable demand recovery retained keeper=%s reason=owner_reappeared"

@@ -828,6 +828,16 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_turn_outcome @test/runtest-test_keeper_paused_work_transfer_transaction @test/runtest-test_keeper_paused_work_source_terminal_transaction @test/runtest-test_keeper_paused_work_operator"
 
+      - name: Run keeper autoboot ownership suite
+        id: keeper_autoboot_ownership_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_autoboot_single_owner"
+
       # NOTE: the "Shell IR differential-safety harness gate" step was removed
       # here. #24332 (nonhierarchical Gate refactor) retired the entire
       # shell_ir risk/typed subsystem (Shell_ir_risk, Shell_ir_typed,

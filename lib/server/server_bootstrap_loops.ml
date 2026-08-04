@@ -1627,8 +1627,12 @@ let start_keeper_loops_owned
                retry_loop 1))
           unbooted);
       (* Keeper lifecycle startup has one owner: this subsystem boots the
-         configured roster and then starts its supervisor. Tool dispatch has
-         no fleet-start authority. *)
+         configured roster and then starts its supervisor. The sweep starts
+         even for an empty roster; it is the recovery authority for keepers
+         materialized or registered after boot. This preserves the #10125
+         incident fix: a transiently empty/failed initial pass must not leave
+         the fleet without recovery. Tool dispatch has no fleet-start
+         authority. *)
       (try Keeper_runtime.start_supervisor_sweep keeper_boot_ctx with
        | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->

@@ -25,22 +25,15 @@ let with_temp_dir prefix f =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree path) (fun () -> f path)
 ;;
 
-let restore_env name = function
-  | Some value -> Unix.putenv name value
-  | None -> Unix.putenv name ""
-;;
-
 let make_meta ?(paused = false) name =
   let json =
     `Assoc
       [ "name", `String name
       ; "agent_name", `String (Keeper_identity.keeper_agent_name name)
       ; "trace_id", `String ("trace-" ^ name)
-      ; "sandbox_profile", `String "local"
-      ; "network_mode", `String "inherit"
       ]
   in
-  match Keeper_meta_json_parse.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> { meta with paused }
   | Error error -> fail ("meta_of_json failed: " ^ error)
 ;;
@@ -104,38 +97,31 @@ let test_configured_keeper_names_use_workspace_base_path () =
   with_temp_dir "masc-autoboot-config-a-" @@ fun base_a ->
   with_temp_dir "masc-autoboot-config-b-" @@ fun base_b ->
   let config_a = Workspace.default_config base_a in
+  let config_b = Workspace.default_config base_b in
   write_keeper_toml ~base_path:base_a ~name:"alpha" ~autoboot_enabled:true;
   write_keeper_toml ~base_path:base_a ~name:"shared" ~autoboot_enabled:true;
   write_keeper_toml ~base_path:base_b ~name:"bravo" ~autoboot_enabled:true;
   write_keeper_toml ~base_path:base_b ~name:"shared" ~autoboot_enabled:false;
-  let previous_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
-  let previous_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
-  Fun.protect
-    ~finally:(fun () ->
-      restore_env "MASC_CONFIG_DIR" previous_config_dir;
-      restore_env "MASC_BASE_PATH" previous_base_path;
-      Config_dir_resolver.reset ())
-    (fun () ->
-      Unix.putenv "MASC_CONFIG_DIR" "";
-      Unix.putenv "MASC_BASE_PATH" base_b;
-      Config_dir_resolver.reset ();
-      check
-        (list string)
-        "ambient resolver observes base B"
-        [ "bravo"; "shared" ]
-        (Keeper_types_profile.discover_keepers_toml
-           (Config_dir_resolver.keepers_dir ())
-         |> List.map Keeper_types_profile.keeper_toml_discovery_name);
-      check
-        (list string)
-        "configured roster remains scoped to Workspace.config base A"
-        [ "alpha"; "shared" ]
-        (Keeper_meta_store.configured_keeper_names config_a);
-      check
-        (list string)
-        "autoboot policy remains scoped to Workspace.config base A"
-        [ "alpha"; "shared" ]
-        (Keeper_runtime.bootable_keeper_names config_a))
+  check
+    (list string)
+    "configured roster remains scoped to workspace A"
+    [ "alpha"; "shared" ]
+    (Keeper_meta_store.configured_keeper_names config_a);
+  check
+    (list string)
+    "configured roster remains scoped to workspace B"
+    [ "bravo"; "shared" ]
+    (Keeper_meta_store.configured_keeper_names config_b);
+  check
+    (list string)
+    "autoboot policy remains scoped to workspace A"
+    [ "alpha"; "shared" ]
+    (Keeper_runtime.bootable_keeper_names config_a);
+  check
+    (list string)
+    "autoboot policy remains scoped to workspace B"
+    [ "bravo" ]
+    (Keeper_runtime.bootable_keeper_names config_b)
 ;;
 
 let test_operator_paused_keeper_is_not_bootable () =

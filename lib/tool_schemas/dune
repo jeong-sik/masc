@@ -9,7 +9,6 @@
   tool_schemas_misc
   tool_schemas_workspace_core
   tool_schemas_workspace_extra
-  tool_schemas_inline_infra
   tool_schemas_inline_episodes
   tool_schemas_inline
   tool_schemas_run

@@ -10,7 +10,6 @@
     - Mcp_server_eio_call_tool: Tool call handler (retry, timeout, result envelope)
     - Mcp_server_eio_tool_profile: Profile/schema/annotation/pagination helpers
     - Mcp_server_eio_protocol: JSON-RPC handlers, subscriptions, transport
-    - Mcp_session_store: durable MCP session helpers
 *)
 
 (** {1 Re-exported Types} *)
@@ -67,16 +66,6 @@ let is_valid_request_id = Mcp_transport_protocol.is_valid_request_id
 let validate_initialize_params = Mcp_transport_protocol.validate_initialize_params
 let has_field = Mcp_transport_protocol.has_field
 let get_field = Mcp_transport_protocol.get_field
-
-type mcp_session_record = Mcp_session_store.mcp_session_record =
-  { id : string
-  ; agent_name : string option
-  ; created_at : float
-  ; last_seen : float
-  }
-
-let mcp_session_to_json = Mcp_session_store.mcp_session_to_json
-let mcp_session_of_json = Mcp_session_store.mcp_session_of_json
 
 (* Tag registry initialization.
    Most modules register via Tool_spec.register at module load time.

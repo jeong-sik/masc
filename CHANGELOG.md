@@ -3054,8 +3054,8 @@ had the full Phase 2 release to migrate.
   handlers, schemas, permission entries, and dispatch arms for 25+
   system-internal tools (agent eval, error tracking, lock/unlock,
   cancellation, subscription, progress, feature_flags, init,
-  governance_set, set_workspace, etc.). keeper_denied surface reduced to
-  `masc_reset`, `masc_spawn` only. masc_heartbeat dispatch relocated
+  governance_set, set_workspace, etc.). keeper_denied surface was reduced to
+  the remaining lifecycle controls. masc_heartbeat dispatch relocated
   from deleted tool_heartbeat.ml to tool_workspace.ml.
 
 ### Added

@@ -179,7 +179,6 @@ let label_words_from_identifier ident =
 let custom_tool_titles : (string * string) list = [
   (* Workspace lifecycle *)
   ("masc_status", "Project Status");
-  ("masc_reset", "Reset Project");
   ("masc_check", "Check Preconditions");
   (* Task management *)
   ("masc_tasks", "List Tasks");

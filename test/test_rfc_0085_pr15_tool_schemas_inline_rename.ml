@@ -2,9 +2,8 @@ open Alcotest
 
 (** RFC-0085 PR-15 — Retroactive regression test.
 
-    Original PR-15 (#15483) renamed 4 misleading underscore-prefix
-    bindings in [tool_schemas/tool_schemas_inline.ml] and
-    [tool_schemas/tool_schemas_inline_infra.ml] but shipped *no* test.
+    Original PR-15 (#15483) renamed misleading underscore-prefix
+    bindings in [tool_schemas/tool_schemas_inline.ml] but shipped *no* test.
     Each identifier is actively used (List.mem / list concat) so the
     underscore prefix violated OCaml convention (intentionally-unused).
 
@@ -18,20 +17,12 @@ let retired_identifiers =
   ; ( "lib/tool_schemas/tool_schemas_inline.ml"
     , "_inline_workspace_from_codegen"
     )
-  ; ( "lib/tool_schemas/tool_schemas_inline_infra.ml"
-    , "_codegen_inline_infra_names"
-    )
-  ; ( "lib/tool_schemas/tool_schemas_inline_infra.ml"
-    , "_inline_infra_from_codegen"
-    )
   ]
 ;;
 
 let active_identifiers =
   [ "lib/tool_schemas/tool_schemas_inline.ml", "inline_workspace_codegen_names"
   ; "lib/tool_schemas/tool_schemas_inline.ml", "inline_workspace_from_codegen"
-  ; "lib/tool_schemas/tool_schemas_inline_infra.ml", "mcp_session_action_enum_strings"
-  ; "lib/tool_schemas/tool_schemas_inline_infra.ml", "schemas"
   ]
 ;;
 

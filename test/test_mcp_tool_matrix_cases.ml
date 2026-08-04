@@ -86,7 +86,6 @@ let strict_success_names =
 
 let strict_guard_cases =
   [
-    ("masc_reset", [ "confirm" ]);
     ("masc_keeper_delegate", [ "requires Eio context" ]);
   ]
 

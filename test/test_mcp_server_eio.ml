@@ -2294,15 +2294,13 @@ let test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal
          tools/list: the Agent_internal surface was removed and
          include_agent_internal adds no schema (see
          mcp_server_eio_tool_profile.ml), so the Full-profile is_public_mcp
-         filter still drops them. Pin that tool_execute and masc_session remain
-         outside external MCP discovery even when the flag is set. A prior half-finished refactor left a
+         filter still drops them. Pin that tool_execute remains outside external
+         MCP discovery even when the flag is set. A prior half-finished refactor left a
          contradictory "tool_execute listed = true" assertion here against the
          identical [List.mem] expression; it could never co-pass with the
          hidden check below and is removed. *)
       Alcotest.(check bool) "retired tool_execute not externally discovered" false
-        (List.mem "tool_execute" names);
-      Alcotest.(check bool) "masc_session not externally discovered" false
-        (List.mem "masc_session" names))
+        (List.mem "tool_execute" names))
 
 let test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execute
     () =

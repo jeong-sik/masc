@@ -23,7 +23,7 @@ module Float = Stdlib.Float
 
     Usage:
     - record_call is called on every tools/call dispatch
-    - get_stats / get_top_n / get_unused_since provide reporting
+    - get_stats / get_top_n / get_never_called provide reporting
     - Data resets on server restart (the date-split Telemetry_eio store is durable)
 *)
 
@@ -53,7 +53,7 @@ type call_stats =
 
 (** Global registry — process-lifetime. Protected by [registry_mu] against
     concurrent access from tool dispatch (write path via [record_call]) and
-    HTTP dashboard handlers (read path via [get_stats]/[stats_report]).
+    HTTP dashboard handlers (read path via [get_stats]).
 
     Within a single Eio domain the RMW in [record_call] (find_opt → replace
     → mutate fields) happens to be atomic today only because none of the
@@ -185,21 +185,6 @@ let get_top_n n : (string * call_stats) list =
   take [] n all
 ;;
 
-(** Get tool names not called since the given Unix timestamp.
-    Only includes tools that are registered (have been called at least once)
-    but not recently. *)
-let get_unused_since (cutoff : float) : string list =
-  with_registry_ro (fun () ->
-    Hashtbl.fold
-      (fun name stats acc ->
-         if Stdlib.Float.compare (Atomic.get stats.last_called_at) cutoff < 0
-         then name :: acc
-         else acc)
-      registry
-      [])
-  |> List.sort String.compare
-;;
-
 (** Get tools that have never been called (not in registry at all)
     compared against a list of all known tool names *)
 let get_never_called (all_tool_names : string list) : string list =
@@ -216,49 +201,6 @@ let total_calls () : int =
 
 (** Number of distinct tools that have been called *)
 let distinct_tools_called () : int = with_registry_ro (fun () -> Hashtbl.length registry)
-
-(** Convert call_stats to JSON *)
-let stats_to_json (name, (stats : call_stats)) : Yojson.Safe.t =
-  let calls = Atomic.get stats.call_count in
-  `Assoc
-    [ "name", `String name
-    ; "call_count", `Int calls
-    ; "success_count", `Int (Atomic.get stats.success_count)
-    ; "deferred_count", `Int (Atomic.get stats.deferred_count)
-    ; "failure_count", `Int (Atomic.get stats.failure_count)
-    ; ( "avg_duration_ms"
-      , `Int (if calls > 0 then Atomic.get stats.total_duration_ms / calls else 0) )
-    ; "last_called_at", `Float (Atomic.get stats.last_called_at)
-    ; ( "last_assignment_id"
-      , Json_util.string_opt_to_json (Atomic.get stats.last_assignment_id) )
-    ; ( "by_source"
-      , `Assoc
-          [ "external_mcp", `Int (Atomic.get stats.external_mcp_count)
-          ; "agent_internal", `Int (Atomic.get stats.agent_internal_count)
-          ] )
-    ]
-;;
-
-(** Generate a full stats report as JSON *)
-let stats_report ~top_n ~all_tool_names : Yojson.Safe.t =
-  let bounded_top_n = max 1 (min 100 top_n) in
-  let top_tools = get_top_n bounded_top_n in
-  let cutoff_30d = Time_compat.now () -. Masc_time_constants.days_to_seconds 30 in
-  let unused_30d = get_unused_since cutoff_30d in
-  let never_called = get_never_called all_tool_names in
-  `Assoc
-    [ "total_calls", `Int (total_calls ())
-    ; "distinct_tools_called", `Int (distinct_tools_called ())
-    ; "total_tools_available", `Int (List.length all_tool_names)
-    ; "top_n_requested", `Int bounded_top_n
-    ; "top_tools", `List (List.map stats_to_json top_tools)
-    ; "top_20", `List (List.map stats_to_json top_tools)
-    ; "unused_30d", `List (List.map (fun s -> `String s) unused_30d)
-    ; "unused_30d_count", `Int (List.length unused_30d)
-    ; "never_called", `List (List.map (fun s -> `String s) never_called)
-    ; "never_called_count", `Int (List.length never_called)
-    ]
-;;
 
 (** Reset all counters (for testing) *)
 let reset () = with_registry_rw (fun () -> Hashtbl.clear registry)

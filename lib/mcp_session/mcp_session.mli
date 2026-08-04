@@ -2,31 +2,6 @@
 
     MCP Spec 2025-03-26: session IDs must be visible ASCII (0x21–0x7E). *)
 
-(** {1 Session action variant}
-
-    Variant SSOT for the [masc_session] tool action. Adding a constructor
-    forces recompilation of [action_to_string] and extends
-    [valid_action_strings]; the schema in [tool_schemas_inline_infra.ml] and
-    the dispatcher in [mcp_tool_runtime.ml] both consume this type via
-    {!action_of_string_opt}. *)
-
-type action =
-  | Get
-  | Create
-  | List
-  | Cleanup
-  | Remove
-
-val action_to_string : action -> string
-
-val action_of_string_opt : string -> action option
-(** Case-insensitive, trimmed lookup. Returns [None] for unknown input. *)
-
-val all_actions : action list
-
-val valid_action_strings : string list
-(** [List.map action_to_string all_actions]. Useful for schema enums. *)
-
 (** {1 Session IDs (MCP spec)} *)
 
 val is_valid : string -> bool

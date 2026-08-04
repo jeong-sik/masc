@@ -574,29 +574,6 @@ let () =
     | None -> failwith "dispatch returned None")
 ;;
 
-(* Test dispatch reset without confirm *)
-let () =
-  test "dispatch_reset_no_confirm" (fun () ->
-    let ctx = make_test_ctx () in
-    let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
-    let args = `Assoc [] in
-    match Tool_workspace.dispatch ctx ~name:"masc_reset" ~args with
-    | Some r -> let success = Tool_result.is_success r in
-      assert (not success) (* Should fail without confirm *)
-    | None -> failwith "dispatch returned None")
-;;
-
-(* Test dispatch reset with confirm *)
-let () =
-  test "dispatch_reset_with_confirm" (fun () ->
-    let ctx = make_test_ctx () in
-    let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
-    let args = `Assoc [ "confirm", `Bool true ] in
-    match Tool_workspace.dispatch ctx ~name:"masc_reset" ~args with
-    | Some r -> let success = Tool_result.is_success r in assert success
-    | None -> failwith "dispatch returned None")
-;;
-
 let () =
   test "dispatch_removed_named_workspace_tools" (fun () ->
     let ctx = make_test_ctx () in

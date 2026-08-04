@@ -1047,7 +1047,6 @@
   test_http_protocol_detect
   test_prompt_registry_defaults
   test_keeper_prompt_external
-  test_mcp_session_store_roundtrip
   test_eval_calibration
   test_goal_tools
   test_goal_upsert_fsm_bypass_10247
@@ -1204,7 +1203,6 @@
   test_http_protocol_detect
   test_prompt_registry_defaults
   test_keeper_prompt_external
-  test_mcp_session_store_roundtrip
   test_eval_calibration
   test_goal_tools
   test_goal_upsert_fsm_bypass_10247
@@ -2413,8 +2411,7 @@
  (modules test_rfc_0085_pr15_tool_schemas_inline_rename)
  (libraries alcotest ast_grep)
  (deps
-  ../lib/tool_schemas/tool_schemas_inline.ml
-  ../lib/tool_schemas/tool_schemas_inline_infra.ml))
+  ../lib/tool_schemas/tool_schemas_inline.ml))
 
 ; RFC-0085 PR-14 — dispatch / dispatch_structured / guarded_dispatch
 ; 3-step chain inlined; guarded_dispatch is the only dispatch entry.

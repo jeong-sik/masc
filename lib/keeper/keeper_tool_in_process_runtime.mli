@@ -212,15 +212,14 @@ val handle_masc_agent_with_outcome
 
 (** RFC-0182 §3.1 — [handle_masc_workspace_with_outcome] is the descriptor-projection
     cluster handler for [masc_status] / [masc_heartbeat] / [masc_check] /
-    [masc_reset] / [masc_goal_*]. Constructs a [Tool_workspace.context] from
+    [masc_goal_*]. Constructs a [Tool_workspace.context] from
     [config + meta.name] and calls [Tool_workspace.dispatch]. *)
 val handle_masc_workspace_with_outcome
   : config:Workspace.config -> meta:keeper_meta -> name:string -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
 
 (** RFC-0182 §3.1 — [handle_masc_misc_with_outcome] is the descriptor-projection
-    cluster handler for [masc_config] / [masc_dashboard] /
-    [masc_tool_stats] / [masc_tool_help] /
+    cluster handler for [masc_config] / [masc_dashboard] / [masc_tool_help] /
     [masc_web_search] / [masc_web_fetch].
     Constructs a [Tool_misc.context] from [config + meta.name] and calls
     [Tool_misc.dispatch]. *)

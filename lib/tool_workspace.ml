@@ -16,7 +16,7 @@ module Int = Stdlib.Int
 module Float = Stdlib.Float
 
 (** Tool_workspace - Workspace management operations
-    Handles: status, reset, init, check
+    Handles: status, init, check
     Note: stateful workspace helpers remain in server dispatch modules
 *)
 
@@ -525,21 +525,6 @@ let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
        ())
 ;;
 
-let handle_reset ~tool_name ~start_time ctx args =
-  let confirm = get_bool args "confirm" false in
-  if not confirm
-  then
-    (* RFC-0189: missing required [confirm=true] safety gate.
-       [Workflow_rejection] — operator can address by passing the
-       expected argument. *)
-    Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
-      ~tool_name
-      ~start_time
-      "This will DELETE the entire .masc/ folder!\nCall with confirm=true to proceed."
-  else Tool_result.ok ~tool_name ~start_time (Workspace.reset ctx.config)
-;;
-
 (* ── State inspection (shared by status and check) ──────── *)
 
 type agent_state =
@@ -622,7 +607,6 @@ let dispatch_bindings : (string * dispatch_handler) list =
   ; "masc_goal_list", Workspace_goals.handle_goal_list
   ; "masc_goal_upsert", Workspace_goals.handle_goal_upsert
   ; "masc_goal_transition", Workspace_goals.handle_goal_transition
-  ; "masc_reset", handle_reset
   ; "masc_check", handle_check
   ]
 ;;

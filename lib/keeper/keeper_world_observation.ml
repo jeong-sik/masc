@@ -126,7 +126,6 @@ type world_observation =
   ; claimable_task_count : int
   ; failed_task_count : int
   ; scheduled_automation : scheduled_automation_observation
-  ; backlog_updated_since_last_scheduled_autonomous : bool
   ; backlog_revision : int option
   ; running_keeper_fiber_count : int
   ; connected_surfaces : Gate_surface.surface_presence list
@@ -1142,7 +1141,6 @@ let observe
   let ( unclaimed_task_count
       , claimable_task_count
       , failed_task_count
-      , backlog_updated_since_last_scheduled_autonomous
       , backlog_revision )
     =
     read_backlog_counts ~config ~meta
@@ -1175,7 +1173,6 @@ let observe
   ; claimable_task_count
   ; failed_task_count
   ; scheduled_automation
-  ; backlog_updated_since_last_scheduled_autonomous
   ; backlog_revision
   ; running_keeper_fiber_count
   ; connected_surfaces = surface_presence.surfaces
@@ -1190,7 +1187,6 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   let ( unclaimed_task_count
       , claimable_task_count
       , failed_task_count
-      , backlog_updated_since_last_scheduled_autonomous
       , backlog_revision )
     =
     read_backlog_counts ~config ~meta
@@ -1212,7 +1208,6 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; claimable_task_count
   ; failed_task_count
   ; scheduled_automation
-  ; backlog_updated_since_last_scheduled_autonomous
   ; backlog_revision
   ; running_keeper_fiber_count = count_running_keeper_fibers ~config
   ; connected_surfaces = surface_presence.surfaces

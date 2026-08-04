@@ -740,8 +740,7 @@ let write_tasks config tasks =
   Workspace.write_backlog config { backlog with tasks }
 ;;
 
-(* RFC-0357 §3.2 — the backlog revision is the scheduled-turn edge clock, so
-   every commit must advance [version] by exactly one, stamped at the single
+(* Every commit must advance [version] by exactly one, stamped at the single
    commit point rather than by caller convention. A caller that kept a manual
    bump would surface here as a +2 jump. *)
 let test_backlog_version_monotonic_per_commit () =

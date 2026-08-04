@@ -65,7 +65,6 @@ let base_observation : WO.world_observation =
     claimable_task_count = 0;
     failed_task_count = 0;
     scheduled_automation = WO.empty_scheduled_automation_observation;
-    backlog_updated_since_last_scheduled_autonomous = false;
     backlog_revision = Some 1;
     running_keeper_fiber_count = 0;
     connected_surfaces = [];

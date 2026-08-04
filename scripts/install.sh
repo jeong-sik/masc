@@ -834,29 +834,6 @@ if [ -e "$DEST" ]; then
   fi
 fi
 
-if [ "$SKIP_DL" -ne 1 ]; then
-  log "downloading $URL"
-  if [ "$DRY_RUN" -eq 1 ]; then
-    log "[dry-run] would download to $DEST"
-  else
-    mkdir -p "$PREFIX"
-    tmp="$DEST.partial"
-    PARTIAL_FILES+=("$tmp")
-    fetch_release_checksums
-    curl -fL \
-      --max-time "$MASC_INSTALL_BINARY_DOWNLOAD_TIMEOUT_S" \
-      --retry "$MASC_INSTALL_CURL_RETRIES" \
-      --progress-bar \
-      -o "$tmp" \
-      "$URL" \
-      || die "download failed (asset missing for $VERSION?)"
-    verify_checksum "$tmp" "$ASSET"
-    chmod +x "$tmp"
-    mv "$tmp" "$DEST"
-    log "installed: $DEST"
-  fi
-fi
-
 install_release_companion() {
   local asset="$1" dest="$2"
   local url="$RELEASE_BASE_URL/$VERSION/$asset"
@@ -886,8 +863,33 @@ install_release_companion() {
   log "installed: $dest"
 }
 
+# Install and verify the cutover authorities before replacing the main binary.
+# A failed companion download must leave the currently installed runtime intact.
 install_release_companion "$CUTOVER_HELPER_ASSET" "$CUTOVER_HELPER_DEST"
 install_release_companion "$CUTOVER_GATE_ASSET" "$CUTOVER_GATE_DEST"
+
+if [ "$SKIP_DL" -ne 1 ]; then
+  log "downloading $URL"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "[dry-run] would download to $DEST"
+  else
+    mkdir -p "$PREFIX"
+    tmp="$DEST.partial"
+    PARTIAL_FILES+=("$tmp")
+    fetch_release_checksums
+    curl -fL \
+      --max-time "$MASC_INSTALL_BINARY_DOWNLOAD_TIMEOUT_S" \
+      --retry "$MASC_INSTALL_CURL_RETRIES" \
+      --progress-bar \
+      -o "$tmp" \
+      "$URL" \
+      || die "download failed (asset missing for $VERSION?)"
+    verify_checksum "$tmp" "$ASSET"
+    chmod +x "$tmp"
+    mv "$tmp" "$DEST"
+    log "installed: $DEST"
+  fi
+fi
 
 # --- 4. seed minimum config ---------------------------------------------------
 if [ "$SEED_CONFIG" -eq 1 ]; then

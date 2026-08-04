@@ -101,7 +101,6 @@ let queued_cancellations ~base_path ~keeper_name =
     | Event_queue.Board_attention _
     | Event_queue.Bootstrap
     | Event_queue.Fusion_completed _
-    | Event_queue.Bg_completed _
     | Event_queue.Schedule_due _
     | Event_queue.Connector_attention _
     | Event_queue.Hitl_resolved _

@@ -104,7 +104,6 @@ let is_task_cancellation_event (event : pending_board_event) =
   | Board_comment_added
   | Board_reaction_changed _
   | Fusion_completed
-  | Bg_completed
   | Schedule_due _
   | External_attention
   | Goal_assigned

@@ -484,7 +484,6 @@ let format_task_cancellation_observations
          | Keeper_world_observation.Board_comment_added
          | Keeper_world_observation.Board_reaction_changed _
          | Keeper_world_observation.Fusion_completed
-         | Keeper_world_observation.Bg_completed
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention
          | Keeper_world_observation.Goal_assigned

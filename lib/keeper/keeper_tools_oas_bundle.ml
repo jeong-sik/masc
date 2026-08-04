@@ -45,7 +45,6 @@ let make_tool_bundle
       ~(publication_recovery :
           Keeper_publication_recovery_availability.turn_context)
       ~(ctx_snapshot : Keeper_types.working_context)
-      ?search_fn
       ?clock
       ?continuation_channel
       ?gate_context
@@ -249,7 +248,6 @@ let make_tool_bundle
                  ~publication_recovery
                  ~ctx_snapshot
                    ?turn_sandbox_factory
-                 ?search_fn
                  ?clock
                  ?continuation_channel
                  ?gate_context:gate_context_provider
@@ -296,7 +294,6 @@ let make_tools
       ~(publication_recovery :
           Keeper_publication_recovery_availability.turn_context)
       ~(ctx_snapshot : Keeper_types.working_context)
-      ?search_fn
       ?clock
       ()
   : Agent_sdk.Tool.t list
@@ -306,7 +303,6 @@ let make_tools
      ~meta
      ~publication_recovery
      ~ctx_snapshot
-     ?search_fn
      ?clock
      ())
     .tools

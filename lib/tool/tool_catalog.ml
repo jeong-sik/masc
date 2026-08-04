@@ -422,7 +422,6 @@ let explicit_metadata : (string * metadata) list =
        permission authority here; descriptor policy remains the SSOT for
        execution axes such as readonly/idempotent. *)
     ("keeper_time_now", keeper_shard_read);
-    ("keeper_tool_search", keeper_shard_read);
     ("keeper_context_status", keeper_shard_read);
     ("keeper_artifact_read", keeper_shard_read);
     ("keeper_memory_search", keeper_shard_read);

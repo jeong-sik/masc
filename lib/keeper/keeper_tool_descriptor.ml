@@ -65,7 +65,6 @@ type runtime_handler =
   | Tool_write_file
   | Tool_time_now
   | Tool_tools_list
-  | Tool_tool_search
   | Tool_context_status
   | Tool_artifact_read
   | Tool_memory_search
@@ -185,7 +184,6 @@ let runtime_handler_to_string = function
   | Tool_write_file -> "tool_write_file"
   | Tool_time_now -> "tool_time_now"
   | Tool_tools_list -> "tool_tools_list"
-  | Tool_tool_search -> "tool_tool_search"
   | Tool_context_status -> "tool_context_status"
   | Tool_artifact_read -> "tool_artifact_read"
   | Tool_memory_search -> "tool_memory_search"
@@ -250,7 +248,6 @@ let keeper_tool_group_of_runtime_handler = function
   | Tool_masc_library_dispatch -> Memory_group
   | Tool_time_now
   | Tool_tools_list
-  | Tool_tool_search
   | Tool_context_status
   | Tool_ide_annotate -> Meta_group
 ;;
@@ -985,10 +982,6 @@ let base_schema_input name =
     ( Missing_canonical_registry
     , unavailable_input_schema ("missing base tool schema for " ^ name) )
 
-let tool_search_schema =
-  Keeper_tool_registry.keeper_tool_search_schema.input_schema
-;;
-
 let artifact_read_schema =
   `Assoc
     [ "type", `String "object"
@@ -1591,17 +1584,6 @@ let internal_descriptors : t list =
        ~input_schema:empty_object_schema
        ~policy:(read_only_in_process_policy ())
        ~handler:Tool_tools_list
-     |> with_eval_tags [ "capability_introspection" ])
-  ; (in_process_descriptor
-       ~keeper_model_projection:Internal_name
-       ~id:"keeper.tool_search"
-       ~name:"keeper_tool_search"
-       ~description:
-         "Search keeper tool schemas by free-text query. Returns ranked tool \
-          descriptions and input schemas."
-       ~input_schema:tool_search_schema
-       ~policy:(read_only_in_process_policy ())
-       ~handler:Tool_tool_search
      |> with_eval_tags [ "capability_introspection" ])
     (* ── memory / context (RFC-0179 PR-3) ─────────────────────── *)
   ; in_process_descriptor

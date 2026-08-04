@@ -131,29 +131,6 @@ let constraints_from_meta (meta : Tool_catalog.metadata) =
 
 let manual_help_entry name =
   match name with
-  | "keeper_tool_search" ->
-      Some
-        {
-          name;
-          short_description = "Search active Keeper tools by natural language query.";
-          when_to_use = "Use when you need to identify a relevant tool from the active Keeper schema by describing the capability you need.";
-          key_constraints =
-            [
-              "A non-empty query is required.";
-              "Returns up to 10 matching results per query.";
-            ];
-          details_markdown =
-            "Ranked multilingual text search over the tool schemas visible in the current Keeper turn. Returns matching names, descriptions, and input schemas without dumping the full catalog.";
-          doc_refs = [];
-          prompt_hints = [];
-          examples = [ "query='find a tool that edits files in place'" ];
-          alternatives = [];
-          (* masc_tool_help would be a natural sibling here but
-             its schema lives on a different surface from this
-             registry. Keeping alternatives empty preserves the
-             "no dangling references" invariant pinned in
-             test_alternatives_never_dangling. *)
-        }
   | "masc_tool_help" ->
       Some
         {

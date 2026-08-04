@@ -16,8 +16,6 @@ type context =
       Keeper_publication_recovery_availability.turn_context
   ; ctx_work : Keeper_types.working_context
   ; turn_sandbox_factory : Keeper_sandbox_factory.t option
-  ; search_fn :
-      query:string -> max_results:int -> Keeper_tool_execution.t
   ; sw : Eio.Switch.t option
   ; clock : float Eio.Time.clock_ty Eio.Resource.t option
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option

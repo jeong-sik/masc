@@ -23,8 +23,6 @@ val make_keeper_tool_handler
        Keeper_publication_recovery_availability.turn_context
   -> ctx_snapshot:Keeper_types.working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
-  -> ?search_fn:
-       (query:string -> max_results:int -> Keeper_tool_execution.t)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:(unit -> Keeper_gate.causal_context)

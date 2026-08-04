@@ -21,11 +21,11 @@
       },
       "tool_calls": [
         {
-          "tool_name": "keeper_tool_search",
+          "tool_name": "keeper_tools_list",
           "success": true,
           "duration_ms": 24.0,
           "route_evidence": {
-            "descriptor_id": "keeper.tool_search",
+            "descriptor_id": "keeper.tools_list",
             "eval_tags": ["capability_introspection"]
           },
           "input": {
@@ -67,11 +67,11 @@
       },
       "tool_calls": [
         {
-          "tool_name": "keeper_tool_search",
+          "tool_name": "keeper_tools_list",
           "success": true,
           "duration_ms": 23.0,
           "route_evidence": {
-            "descriptor_id": "keeper.tool_search",
+            "descriptor_id": "keeper.tools_list",
             "eval_tags": ["capability_introspection"]
           },
           "input": {
@@ -113,11 +113,11 @@
       },
       "tool_calls": [
         {
-          "tool_name": "keeper_tool_search",
+          "tool_name": "keeper_tools_list",
           "success": true,
           "duration_ms": 19.0,
           "route_evidence": {
-            "descriptor_id": "keeper.tool_search",
+            "descriptor_id": "keeper.tools_list",
             "eval_tags": ["capability_introspection"]
           },
           "input": {
@@ -204,11 +204,11 @@
           }
         },
         {
-          "tool_name": "keeper_tool_search",
+          "tool_name": "keeper_tools_list",
           "success": true,
           "duration_ms": 20.0,
           "route_evidence": {
-            "descriptor_id": "keeper.tool_search",
+            "descriptor_id": "keeper.tools_list",
             "eval_tags": ["capability_introspection"]
           },
           "input": {
@@ -262,11 +262,11 @@
           }
         },
         {
-          "tool_name": "keeper_tool_search",
+          "tool_name": "keeper_tools_list",
           "success": true,
           "duration_ms": 24.0,
           "route_evidence": {
-            "descriptor_id": "keeper.tool_search",
+            "descriptor_id": "keeper.tools_list",
             "eval_tags": ["capability_introspection"]
           },
           "input": {

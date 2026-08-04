@@ -13,20 +13,6 @@ open Keeper_tool_shared_runtime
 include Keeper_tool_registry
 include Keeper_tool_policy
 
-let unavailable_tool_search ~query:_ ~max_results:_ =
-  let data =
-    `Assoc
-      [ "ok", `Bool false
-      ; "error", `String "tool_search_unavailable"
-      ; "reason", `String "catalog_provider_not_injected"
-      ]
-  in
-  Keeper_tool_execution.failure_data
-    ~class_:Tool_result.Runtime_failure
-    ~message:(Yojson.Safe.to_string data)
-    data
-;;
-
 type executed_tool_result = Keeper_tool_execution.t
 
 (* Descriptor and registered-only routes are distinct dispatch sources.
@@ -116,7 +102,6 @@ let execute_keeper_tool_call_with_outcome
           Keeper_publication_recovery_availability.turn_context)
       ~(ctx_work : working_context)
       ?turn_sandbox_factory
-      ?search_fn
       (* RFC-0182 Phase 5 PR-A.2: optional Eio resources threaded to
          Keeper_tool_runtime.context for Eio-bound descriptor handlers. *)
       ?sw
@@ -133,11 +118,6 @@ let execute_keeper_tool_call_with_outcome
   : executed_tool_result
   =
   let args = input in
-  let effective_search_fn =
-         match search_fn with
-         | Some f -> f
-         | None -> unavailable_tool_search
-       in
        let keeper_tool_runtime_context =
          Keeper_tool_runtime.
                        { config
@@ -145,7 +125,6 @@ let execute_keeper_tool_call_with_outcome
                        ; publication_recovery
                        ; ctx_work
                        ; turn_sandbox_factory
-           ; search_fn = effective_search_fn
            ; (* RFC-0182 Phase 5 PR-A.2: Eio resources threaded from
                 caller via labeled ? params.  Callers without Eio
                 context (OAS handler, tests) leave them unset. *)
@@ -217,7 +196,6 @@ let execute_keeper_tool_call
           Keeper_publication_recovery_availability.turn_context)
       ~(ctx_work : working_context)
       ?turn_sandbox_factory
-      ?search_fn
       ~(name : string)
       ~(input : Yojson.Safe.t)
       ()
@@ -230,7 +208,6 @@ let execute_keeper_tool_call
       ~publication_recovery
       ~ctx_work
                   ?turn_sandbox_factory
-      ?search_fn
       ~name
       ~input
       ()

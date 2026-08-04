@@ -769,7 +769,6 @@ let check_eval_tags tool_name expected =
 
 let test_route_evidence_records_descriptor_eval_tags () =
   check_eval_tags "keeper_tools_list" [ "capability_introspection" ];
-  check_eval_tags "keeper_tool_search" [ "capability_introspection" ];
   check_eval_tags "keeper_surface_read" [ "surface_context_read" ];
   check_eval_tags "masc_agent_card" [ "agent_profile_lookup" ];
   check_eval_tags "keeper_time_now" []

@@ -458,8 +458,6 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("priority", `Int 3);
           ("description", `String "tool matrix task body");
         ]
-  | "keeper_tool_search" ->
-      `Assoc [ ("query", `String "tool matrix") ]
   | other -> failwith ("missing keeper arguments contract for " ^ other)
 
 let keeper_expectation_for_name name =

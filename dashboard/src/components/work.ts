@@ -698,6 +698,11 @@ interface WkaBlockerTask {
   readonly title: string
   readonly blocker: string
   readonly goalId: string
+  /** Set only for status=cancelled. A cancellation and a stall both landed in
+   *  this list under the same 차단 label, which made an operator unable to tell
+   *  "someone ended this" from "this is stuck", and the canceller was never
+   *  shown even though the API sends it. */
+  readonly cancelledBy?: string
 }
 
 interface WkaBacklogTask {
@@ -1105,9 +1110,9 @@ function WorkAside({
                 onClick=${() => onJump(t.goalId)}
                 data-testid="wka-blocker-item"
               >
-                <span class="wka-todo-k">차단</span>
+                <span class="wka-todo-k">${t.cancelledBy === undefined ? '차단' : '취소'}</span>
                 <span class="wka-todo-t">${t.title}</span>
-                <span class="wka-todo-m">${t.blocker}</span>
+                <span class="wka-todo-m">${t.cancelledBy === undefined ? t.blocker : `${t.cancelledBy} · ${t.blocker}`}</span>
               </button>
             `)}
             ${backlog.length > 0 ? (() => {
@@ -1239,18 +1244,23 @@ function WorkSurfaceV2() {
     })
   }, [allTasks, claimed])
 
-  const liveTasks = claimedTasks.filter(t => t.status !== 'cancelled')
   // KPI semantics: when a Goal Store tree summary is present, use its active
   // goal count; otherwise fall back to the execution goal list. Task counts are
-  // always derived from the merged live task set so execution and tree tasks
-  // are counted consistently.
+  // always derived from the merged task set so execution and tree tasks are
+  // counted consistently.
+  //
+  // The "전체 작업" tile counts every task. It previously ran off a set with
+  // cancelled filtered out while `done` stayed in, so a total labelled 전체 was
+  // short by exactly the cancelled tasks — the same tasks the rest of this view
+  // was hiding. The remaining sub-counts filter on status, which no cancelled
+  // task matches, so they need no separate set.
   const totals = useMemo(() => ({
     goals: goalTreeSnapshot?.summary.active_goals ?? goalList.length,
-    tasks: liveTasks.length,
-    wip: liveTasks.filter(t => t.status === 'in_progress' || t.status === 'claimed').length,
-    verify: liveTasks.filter(t => t.status === 'awaiting_verification').length,
+    tasks: claimedTasks.length,
+    wip: claimedTasks.filter(t => t.status === 'in_progress' || t.status === 'claimed').length,
+    verify: claimedTasks.filter(t => t.status === 'awaiting_verification').length,
     backlog: claimedTasks.filter(t => isClaimableBacklogTask(t)).length,
-  }), [goalTreeSnapshot, goalList, liveTasks, claimedTasks])
+  }), [goalTreeSnapshot, goalList, claimedTasks])
 
   // Goal title lookup: prefer execution-side goalList titles, but fall back
   // to Goal Store tree titles so tree-only goals still render context.
@@ -1355,6 +1365,7 @@ function WorkSurfaceV2() {
         title: t.title,
         blocker: blockerNoteForTask(t) ?? '',
         goalId: t.goal_id ?? '',
+        cancelledBy: t.status === 'cancelled' ? (t.cancelled_by ?? undefined) : undefined,
       })),
   [claimedTasks])
 
@@ -1387,11 +1398,12 @@ function WorkSurfaceV2() {
     backlog: totals.backlog,
   }), [totals])
 
-  // Flat list of all non-cancelled tasks with goal context injected.
+  // Flat list of every task with goal context injected, cancelled included:
+  // KANBAN_COLUMNS now has a column for it, so filtering here would leave that
+  // column permanently empty.
   // Used by KanbanView to group by status column.
   const kanbanTasks = useMemo((): ReadonlyArray<KanbanTask> =>
     claimedTasks
-      .filter(t => t.status !== 'cancelled')
       .map(t => ({
         ...t,
         _goalId: t.goal_id ?? '',

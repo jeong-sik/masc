@@ -778,6 +778,68 @@ describe('Work', () => {
         expect(blockerItems[0]?.textContent).toContain('dependency unavailable')
       })
 
+      it('labels a cancellation 취소 and names the canceller, distinct from 차단', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        // Both rows land in the same aside list. Before, both read 차단 with no
+        // actor, so an operator could not tell a stalled task from one another
+        // keeper deliberately ended.
+        tasks.value = [
+          {
+            id: 'J-blocked',
+            title: 'Stalled Task',
+            goal_id: 'G-1',
+            status: 'blocked',
+            handoff_context: { summary: '', reason: 'dependency unavailable' },
+          },
+          {
+            id: 'J-cancelled',
+            title: 'Ended Task',
+            goal_id: 'G-1',
+            status: 'cancelled',
+            cancelled_by: 'keeper-rondo-agent',
+            handoff_context: { summary: '', reason: 'BLOCKED: service absent from sandbox' },
+          },
+        ]
+
+        render(html`<${Work} />`)
+
+        const items = Array.from(
+          screen.getByTestId('work-aside').querySelectorAll('[data-testid="wka-blocker-item"]'),
+        )
+        expect(items.length).toBe(2)
+
+        const blocked = items.find(el => el.textContent?.includes('Stalled Task'))
+        const cancelled = items.find(el => el.textContent?.includes('Ended Task'))
+        expect(blocked?.textContent).toContain('차단')
+        expect(blocked?.textContent).not.toContain('취소')
+        expect(cancelled?.textContent).toContain('취소')
+        expect(cancelled?.textContent).toContain('keeper-rondo-agent')
+        expect(cancelled?.textContent).toContain('BLOCKED: service absent from sandbox')
+      })
+
+      it('counts cancelled tasks in the 전체 작업 total', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        // done and cancelled are both terminal. The total counted done and
+        // dropped cancelled, so a tile labelled 전체 was short by exactly the
+        // tasks this view was hiding elsewhere.
+        tasks.value = [
+          { id: 'J-1', title: 'Todo', goal_id: 'G-1', status: 'todo' },
+          { id: 'J-2', title: 'Done', goal_id: 'G-1', status: 'done' },
+          { id: 'J-3', title: 'Cancelled', goal_id: 'G-1', status: 'cancelled', cancelled_by: 'keeper-rondo-agent' },
+        ]
+
+        render(html`<${Work} />`)
+
+        expect(screen.getByTestId('kpi-tasks').textContent).toBe('3')
+        // Sub-counts filter on status, so none of them absorb the cancellation.
+        expect(screen.getByTestId('kpi-wip').textContent).toBe('0')
+        expect(screen.getByTestId('kpi-verify').textContent).toBe('0')
+      })
+
       it('surfaces claimable backlog tasks as a single aggregate claim button', () => {
         goals.value = [
           { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
@@ -900,8 +962,7 @@ describe('Work', () => {
           { id: 'J-1', title: 'Todo task', goal_id: 'G-1', status: 'todo' },
           { id: 'J-2', title: 'In progress', goal_id: 'G-1', status: 'in_progress' },
           { id: 'J-3', title: 'Done task', goal_id: 'G-1', status: 'done' },
-          // Cancelled tasks must not appear in kanban
-          { id: 'J-4', title: 'Cancelled task', goal_id: 'G-1', status: 'cancelled' },
+          { id: 'J-4', title: 'Cancelled task', goal_id: 'G-1', status: 'cancelled', cancelled_by: 'keeper-rondo-agent' },
         ]
 
         render(html`<${Work} />`)
@@ -929,6 +990,7 @@ describe('Work', () => {
         expect(screen.getByTestId('kanban-col-in_progress')).toBeTruthy()
         expect(screen.getByTestId('kanban-col-awaiting_verification')).toBeTruthy()
         expect(screen.getByTestId('kanban-col-done')).toBeTruthy()
+        expect(screen.getByTestId('kanban-col-cancelled')).toBeTruthy()
 
         // Tasks appear in the correct columns (by data-testid selector)
         const todoCol = screen.getByTestId('kanban-col-todo')
@@ -942,8 +1004,12 @@ describe('Work', () => {
         expect(wipCol.textContent).toContain('In progress')
         expect(doneCol.textContent).toContain('Done task')
 
-        // Cancelled task must be absent from all columns
-        expect(board.textContent).not.toContain('Cancelled task')
+        // A cancellation is terminal like done, and gets a column for the same
+        // reason: hiding it made an ended task indistinguishable from one that
+        // was never picked up.
+        const cancelledCol = screen.getByTestId('kanban-col-cancelled')
+        expect(cancelledCol.querySelector('.wk-kcol-dot.cancelled')).toBeTruthy()
+        expect(cancelledCol.textContent).toContain('Cancelled task')
       })
 
       it('switches back to list view on clicking the 리스트 button', () => {
@@ -968,13 +1034,14 @@ describe('Work', () => {
         goals.value = [
           { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
-        // One task per non-cancelled status
+        // One task per status
         tasks.value = [
           { id: 'T-todo',   title: 'Todo item',   goal_id: 'G-1', status: 'todo' },
           { id: 'T-claim',  title: 'Claimed item', goal_id: 'G-1', status: 'claimed', assignee: 'keeper-x' },
           { id: 'T-wip',    title: 'WIP item',    goal_id: 'G-1', status: 'in_progress', assignee: 'keeper-y' },
           { id: 'T-verify', title: 'Verify item', goal_id: 'G-1', status: 'awaiting_verification', assignee: 'keeper-z' },
           { id: 'T-done',   title: 'Done item',   goal_id: 'G-1', status: 'done', assignee: 'keeper-w' },
+          { id: 'T-cancel', title: 'Cancelled item', goal_id: 'G-1', status: 'cancelled', cancelled_by: 'keeper-rondo-agent' },
         ]
 
         render(html`<${Work} />`)
@@ -982,8 +1049,7 @@ describe('Work', () => {
 
         const board = screen.getByTestId('work-kanban')
         const cards = board.querySelectorAll('[data-testid="kanban-card"]')
-        // All 5 non-cancelled tasks present
-        expect(cards.length).toBe(5)
+        expect(cards.length).toBe(6)
 
         // Each card sits inside the correct column
         const colFor = (status: string) => board.querySelector(`[data-testid="kanban-col-${status}"]`)
@@ -992,6 +1058,7 @@ describe('Work', () => {
         expect(colFor('in_progress')?.querySelector('[data-kanban-task-id="T-wip"]')).toBeTruthy()
         expect(colFor('awaiting_verification')?.querySelector('[data-kanban-task-id="T-verify"]')).toBeTruthy()
         expect(colFor('done')?.querySelector('[data-kanban-task-id="T-done"]')).toBeTruthy()
+        expect(colFor('cancelled')?.querySelector('[data-kanban-task-id="T-cancel"]')).toBeTruthy()
       })
 
       it('renders an owning-goal jump button on kanban cards that returns to the list view', () => {

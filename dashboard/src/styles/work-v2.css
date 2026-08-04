@@ -1570,6 +1570,7 @@
 .wk-kcol-dot.paused { background: var(--color-status-warn, var(--status-warn)); }
 .wk-kcol-dot.unknown { background: var(--color-fg-disabled); }
 .wk-kcol-dot.done { background: var(--color-status-ok); }
+.wk-kcol-dot.cancelled { background: var(--color-fg-disabled); }
 
 .wk-kcol-title {
   font-family: var(--font-display);
@@ -1630,6 +1631,13 @@
   border-left-color: var(--color-status-ok);
   opacity: 0.86;
 }
+/* Terminal like .done, but the work did not land: struck through and dimmed
+   further so a cancelled card is not read as a completed one at a glance. */
+.wk-kcard.cancelled {
+  border-left-color: var(--color-fg-disabled);
+  opacity: 0.7;
+}
+.wk-kcard.cancelled .wk-kcard-title { text-decoration: line-through; }
 
 .wk-kcard:hover {
   border-color: var(--color-border-strong);

@@ -5,7 +5,9 @@
     projected transition, an operation-indexed ledger of older projected
     dispositions, at most one unprojected transition, and durable
     accepted-transfer target projections. Only this schema and the
-    [event-queue-transitions-v5.jsonl] WAL are queue authority. *)
+    [event-queue-transitions-v5.jsonl] WAL are queue authority. Every WAL row
+    carries the complete pre-transition state needed for snapshot-independent
+    recovery. *)
 
 type owner_identity
 type owner_identity_error
@@ -161,7 +163,8 @@ val load_state_result :
 val load_existing_state_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
 (** Read already-created durable queue state. A current snapshot or v5 WAL is
-    durable owner evidence; a WAL-only owner is replayed from the empty state.
+    durable owner evidence; a WAL-only owner is replayed from the row's exact
+    complete pre-transition state.
     Unlike {!load_state_result}, absence of both artifacts is an explicit
     [Error]. Use this when absence would be interpreted as evidence about prior
     durable work. *)
@@ -169,13 +172,14 @@ val load_existing_state_result :
 val validate_state_read_only_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
 (** Decode a current snapshot when present and replay its v5 WAL without
-    checkpointing or WAL compaction. A missing snapshot starts from the empty
-    state, matching {!load_state_result}. *)
+    checkpointing or WAL compaction. A missing snapshot starts from the WAL
+    row's exact complete pre-transition state, matching {!load_state_result}. *)
 
 val validate_existing_state_read_only_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
 (** Decode existing durable state and replay its v5 WAL without checkpointing
-    or WAL compaction. A WAL-only owner is replayed from the empty state;
+    or WAL compaction. A WAL-only owner is replayed from the row's exact
+    complete pre-transition state;
     absence of both artifacts is an explicit error, matching
     {!load_existing_state_result}. *)
 

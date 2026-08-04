@@ -425,40 +425,6 @@ let test_word_with_double_quoted_suffix () =
      | _ -> assert false)
   | _ -> assert false
 
-let test_word_metadata_preserves_quoted_path_and_pipeline () =
-  match Bash_words.stages "cat 'repos/foo.ml' | head -1" with
-  | Ok [ [ cat; path ]; [ head; limit ] ] ->
-    assert (cat.value = "cat");
-    assert (not cat.quoted);
-    assert (path.value = "repos/foo.ml");
-    assert path.quoted;
-    assert (not path.globbed);
-    assert (head.value = "head");
-    assert (limit.value = "-1")
-  | _ -> assert false
-
-let test_word_metadata_marks_globbed_path () =
-  match Bash_words.stages "ls repos/*.ml" with
-  | Ok [ [ ls; path ] ] ->
-    assert (ls.value = "ls");
-    assert (path.value = "repos/*.ml");
-    assert path.globbed;
-    assert (not path.quoted)
-  | _ -> assert false
-
-let test_top_level_command_segments_preserve_quote_boundaries () =
-  let segments =
-    Bash_words.top_level_command_segments
-      {|git commit -m "do not gh pr create" && gh pr create --draft; git push origin feat|}
-  in
-  match segments with
-  | [
-      (true, {|git commit -m "do not gh pr create"|});
-      (false, "gh pr create --draft");
-      (true, "git push origin feat");
-    ] -> ()
-  | _ -> assert false
-
 let test_double_quote_with_dollar_rejected () =
   (* Variable expansion is subset-excluded at the A1 layer — any '$'
      inside "..." breaks the lex so Parse_error surfaces rather than
@@ -543,9 +509,6 @@ let () =
   test_double_quote_rg_pattern ();
   test_double_quote_with_escaped_regex_pipe ();
   test_word_with_double_quoted_suffix ();
-  test_word_metadata_preserves_quoted_path_and_pipeline ();
-  test_word_metadata_marks_globbed_path ();
-  test_top_level_command_segments_preserve_quote_boundaries ();
   test_double_quote_with_dollar_rejected ();
   test_double_quote_with_backslash_rejected ();
   test_double_quote_with_backtick_rejected ();

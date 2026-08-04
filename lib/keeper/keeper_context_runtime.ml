@@ -278,10 +278,10 @@ let dispatch_post_turn_lifecycle_events
 let generate_trace_id = Keeper_identity.generate_trace_id
 
 let keeper_board_write_tool_names =
-  [ "keeper_board_post"
-  ; "keeper_board_comment"
-  ; "keeper_board_vote"
-  ; "keeper_board_curation_submit"
+  [ "masc_board_post"
+  ; "masc_board_comment"
+  ; "masc_board_vote"
+  ; "masc_board_curation_submit"
   ]
 
 let canonical_tool_name name = Keeper_tool_resolution.canonical_tool_name name
@@ -290,10 +290,10 @@ let keeper_tool_name_matches tool name =
   String.equal (canonical_tool_name name) tool
 
 let keeper_action_kind_of_tool_names tool_names =
-  [ "keeper_board_post", "post"
-  ; "keeper_board_comment", "comment"
-  ; "keeper_board_vote", "vote"
-  ; "keeper_board_curation_submit", "curation"
+  [ "masc_board_post", "post"
+  ; "masc_board_comment", "comment"
+  ; "masc_board_vote", "vote"
+  ; "masc_board_curation_submit", "curation"
   ]
   |> List.find_map (fun (tool, action_kind) ->
     if List.exists (keeper_tool_name_matches tool) tool_names then Some action_kind

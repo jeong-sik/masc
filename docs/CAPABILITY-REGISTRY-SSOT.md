@@ -43,7 +43,7 @@ Example:
 
 - capability `masc_board_post`
   - public MCP projection: `masc_board_post`
-  - keeper projection: `keeper_board_post`
+  - keeper projection: `masc_board_post`
 
 ## Audience Split
 

@@ -24,6 +24,11 @@ let find_tool_schema schemas name =
   | Some s -> s
   | None -> Alcotest.failf "tool schema %S not found" name
 
+let keeper_board_tools =
+  Tool_name.Board_name.all
+  |> List.filter_map Tool_shard_types.keeper_board_schema
+;;
+
 let limit_type schema =
   match schema.Masc_domain.input_schema with
   | `Assoc fields ->
@@ -128,13 +133,13 @@ let () =
             `Quick
             (case Tool_shard_types.base_tools "keeper_memory_search")
         ; test_case
-            "keeper_board_list"
+            "masc_board_list"
             `Quick
-            (case Tool_shard_types.board_tools "keeper_board_list")
+            (case keeper_board_tools "masc_board_list")
         ; test_case
-            "keeper_board_search"
+            "masc_board_search"
             `Quick
-            (case Tool_shard_types.board_tools "keeper_board_search")
+            (case keeper_board_tools "masc_board_search")
         ] )
     ; ( "limit description asks for a bare integer, not a numeric string"
       , [ test_case
@@ -142,12 +147,12 @@ let () =
             `Quick
             (desc_case Tool_shard_types.base_tools "keeper_memory_search")
         ; test_case
-            "keeper_board_list"
+            "masc_board_list"
             `Quick
-            (desc_case Tool_shard_types.board_tools "keeper_board_list")
+            (desc_case keeper_board_tools "masc_board_list")
         ; test_case
-            "keeper_board_search"
+            "masc_board_search"
             `Quick
-            (desc_case Tool_shard_types.board_tools "keeper_board_search")
+            (desc_case keeper_board_tools "masc_board_search")
         ] )
     ]

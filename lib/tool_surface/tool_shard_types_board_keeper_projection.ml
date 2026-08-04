@@ -1,14 +1,18 @@
-(** Tool_shard_types_schemas_board — [board_tools] keeper_board_* schemas. *)
+(** Keeper-model input projections for Board capabilities.
+
+    Public Board names and schemas are owned by [Board_tool_registry]. This
+    module contains only the deliberately narrower Keeper-model input shape;
+    it is not part of the public or global schema aggregate. *)
 
 open Tool_shard_types_enum_mirrors
 
-let board_tools : Masc_domain.tool_schema list =
-  [ { name = "keeper_board_post_get"
+let schemas : Masc_domain.tool_schema list =
+  [ { name = "masc_board_post_get"
     ; description =
         "Read one existing board post by exact post_id, including comments and votes. \
-         Use only after you already have a post_id from keeper_board_list, \
-         keeper_board_search, or the current board activity context. If no post_id is \
-         visible, call keeper_board_list or keeper_board_search first; never call this \
+         Use only after you already have a post_id from masc_board_list, \
+         masc_board_search, or the current board activity context. If no post_id is \
+         visible, call masc_board_list or masc_board_search first; never call this \
          tool with empty arguments. Returns post content, author, timestamp, vote_count, \
          and comment thread."
     ; input_schema =
@@ -22,8 +26,8 @@ let board_tools : Masc_domain.tool_schema list =
                       ; ( "description"
                         , `String
                             "Required exact board post ID (format: p-xxxx). Get it \
-                             from keeper_board_list, keeper_board_search, or visible \
-                             board activity context before calling keeper_board_post_get."
+                             from masc_board_list, masc_board_search, or visible \
+                             board activity context before calling masc_board_post_get."
                         )
                       ] )
                 ] )
@@ -31,7 +35,7 @@ let board_tools : Masc_domain.tool_schema list =
           ; "additionalProperties", `Bool false
           ]
     }
-  ; { name = "keeper_board_post"
+  ; { name = "masc_board_post"
     ; description =
         "Create a new board post. Author is auto-filled from keeper identity. Use \
          hearth to target a topic channel (e.g. 'code-review', 'research', 'ops'); \
@@ -109,10 +113,10 @@ let board_tools : Masc_domain.tool_schema list =
           ; "additionalProperties", `Bool false
           ]
     }
-  ; { name = "keeper_board_list"
+  ; { name = "masc_board_list"
     ; description =
         "List recent MASC Board posts and discover post_id values for follow-up \
-         keeper_board_post_get, keeper_board_comment, or keeper_board_vote calls. Use this \
+         masc_board_post_get, masc_board_comment, or masc_board_vote calls. Use this \
          when you need board state, recent posts, or a post_id and do not already have \
          one. Filter by hearth (topic channel) to see specific topics. Returns post_id, \
          author, hearth, timestamp, vote_count, comment_count, and content preview for \
@@ -189,18 +193,18 @@ let board_tools : Masc_domain.tool_schema list =
                       [ "type", `String "string"
                       ; ( "description"
                         , `String
-                            "Optional producer revision from the previous keeper_board_list snapshot; matching revisions return unchanged." )
+                            "Optional producer revision from the previous masc_board_list snapshot; matching revisions return unchanged." )
                       ] )
                 ] )
           ; "additionalProperties", `Bool false
           ]
     }
-  ; { name = "keeper_board_comment"
+  ; { name = "masc_board_comment"
     ; description =
         "Add a comment to one existing board post by exact post_id. Use to respond to \
          questions, provide feedback, or continue a discussion thread only after the \
-         post_id is visible from board activity, keeper_board_list, keeper_board_search, \
-         or keeper_board_post_get."
+         post_id is visible from board activity, masc_board_list, masc_board_search, \
+         or masc_board_post_get."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -212,8 +216,8 @@ let board_tools : Masc_domain.tool_schema list =
                       ; ( "description"
                         , `String
                             "Required exact board post ID (format: p-xxxx). Get it \
-                             from keeper_board_list, keeper_board_search, \
-                             keeper_board_post_get, or visible board activity context." )
+                             from masc_board_list, masc_board_search, \
+                             masc_board_post_get, or visible board activity context." )
                       ] )
                 ; ( "content"
                   , `Assoc
@@ -225,12 +229,12 @@ let board_tools : Masc_domain.tool_schema list =
           ; "additionalProperties", `Bool false
           ]
     }
-  ; { name = "keeper_board_vote"
+  ; { name = "masc_board_vote"
     ; description =
         "Vote on one existing board post by exact post_id. Use to signal \
          agreement/support or disagreement with a proposal or finding only after the \
-         post_id is visible from board activity, keeper_board_list, keeper_board_search, \
-         or keeper_board_post_get."
+         post_id is visible from board activity, masc_board_list, masc_board_search, \
+         or masc_board_post_get."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -242,8 +246,8 @@ let board_tools : Masc_domain.tool_schema list =
                       ; ( "description"
                         , `String
                             "Required exact board post ID (format: p-xxxx). Get it \
-                             from keeper_board_list, keeper_board_search, \
-                             keeper_board_post_get, or visible board activity context." )
+                             from masc_board_list, masc_board_search, \
+                             masc_board_post_get, or visible board activity context." )
                       ] )
                 ; (* Issue #8506: derive from local mirror that tracks
            [Board_votes.valid_vote_direction_strings]. *)
@@ -260,7 +264,7 @@ let board_tools : Masc_domain.tool_schema list =
           ; "additionalProperties", `Bool false
           ]
     }
-  ; { name = "keeper_board_stats"
+  ; { name = "masc_board_stats"
     ; description =
         "Get board activity statistics: total posts, comments, votes, active hearths. \
          Use to understand overall board health and engagement levels."
@@ -271,11 +275,11 @@ let board_tools : Masc_domain.tool_schema list =
           ; "additionalProperties", `Bool false
           ]
     }
-  ; { name = "keeper_board_search"
+  ; { name = "masc_board_search"
     ; description =
         "Search board posts by keyword across titles and content and discover post_id \
-         values for follow-up keeper_board_post_get, keeper_board_comment, or \
-         keeper_board_vote calls. Use when looking for specific topics, past \
+         values for follow-up masc_board_post_get, masc_board_comment, or \
+         masc_board_vote calls. Use when looking for specific topics, past \
          discussions, or related prior work."
     ; input_schema =
         `Assoc
@@ -323,7 +327,7 @@ let board_tools : Masc_domain.tool_schema list =
           ; "additionalProperties", `Bool false
           ]
     }
-  ; { name = "keeper_board_curation_read"
+  ; { name = "masc_board_curation_read"
     ; description =
         "Read the latest AI curation snapshot for the board, including summary, \
          recommended ordering, highlights, tag suggestions, answer matches, health \
@@ -336,7 +340,7 @@ let board_tools : Masc_domain.tool_schema list =
           ; "additionalProperties", `Bool false
           ]
     }
-  ; { name = "keeper_board_curation_submit"
+  ; { name = "masc_board_curation_submit"
     ; description =
         "Submit an AI curation snapshot for the current board window. Use after reading \
          recent board activity to publish a summary, recommended reading order, \
@@ -396,4 +400,11 @@ let board_tools : Masc_domain.tool_schema list =
           ]
     }
   ]
+;;
+
+let keeper_board_schema board_name =
+  let name = Tool_name.Board_name.to_string board_name in
+  List.find_opt
+    (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
+    schemas
 ;;

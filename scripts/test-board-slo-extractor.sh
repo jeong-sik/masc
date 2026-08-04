@@ -62,8 +62,8 @@ mkdir -p \
   "$masc_dir/playground/docker/verifier/repos/masc/.worktrees/task-b"
 
 cat >"$masc_dir/tool_calls/$tool_month/$tool_day.jsonl" <<JSONL
-{"ts":$now,"tool":"keeper_board_post","success":true,"duration_ms":10}
-{"ts":$now,"tool":"keeper_board_comment","success":true,"duration_ms":20}
+{"ts":$now,"tool":"masc_board_post","success":true,"duration_ms":10}
+{"ts":$now,"tool":"masc_board_comment","success":true,"duration_ms":20}
 {"ts":$now,"tool":"Execute","success":true,"duration_ms":30}
 {"ts":$now,"tool":"Execute","success":false,"duration_ms":40}
 {"ts":$old,"tool":"Execute","success":true,"duration_ms":50}

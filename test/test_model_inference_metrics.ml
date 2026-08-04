@@ -278,7 +278,7 @@ let success_entry_without_model ~runtime_id ~ts ?(tool_count = 1) () =
     ("trace_id", `String trace_id);
     ("turn_id", `Int keeper_turn_id);
     ("tool_call_count", `Int tool_count);
-    ("tools_used", `List [ `String "keeper_board_comment" ]);
+    ("tools_used", `List [ `String "masc_board_comment" ]);
     ( "telemetry",
       `Assoc [
         ("model_used", `Null);

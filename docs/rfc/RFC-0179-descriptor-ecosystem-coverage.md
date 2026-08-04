@@ -30,7 +30,7 @@ After that work landed, an audit (2026-05-26) of the broader tool ecosystem foun
 | `keeper_*` internal workspace collaboration | ~37 | 0 |
 | **Total** | **~286** | **7 (~2.5%)** |
 
-The 26 legacy match arms in `Agent_tool_dispatch_runtime.execute_keeper_tool_call` (lines 427-503) dispatch the bulk of workspace collaboration tools (`keeper_time_now`, `keeper_broadcast`, `keeper_task_*` cluster of 9, `keeper_voice_*` cluster of 6, `keeper_memory_*`, `keeper_library_*`, `keeper_board_*`, etc.) by string match. They do not flow through `Agent_tool_runtime.handle_internal`.
+The 26 legacy match arms in `Agent_tool_dispatch_runtime.execute_keeper_tool_call` (lines 427-503) dispatch the bulk of workspace collaboration tools (`keeper_time_now`, `keeper_broadcast`, `keeper_task_*` cluster of 9, `keeper_voice_*` cluster of 6, `keeper_memory_*`, `keeper_library_*`, `masc_board_*`, etc.) by string match. They do not flow through `Agent_tool_runtime.handle_internal`.
 
 PR #18677 (merged 2026-05-26) removed three executor enum cases (`In_process`, `Gh_cli`, `Oas_bridge`) on YAGNI grounds because no descriptor used them. That decision was correct *for the current 7-descriptor scope* but contradicts any extension of the spine to workspace collaboration tools — most of which would target `In_process`.
 

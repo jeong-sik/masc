@@ -23,8 +23,9 @@ val select_named_schemas :
 val base_tools : Masc_domain.tool_schema list
 (** Pure: base tool schemas (always-on tools every keeper sees). *)
 
-val board_tools : Masc_domain.tool_schema list
-(** Pure: keeper_board tool schemas. *)
+val keeper_board_schema : Tool_name.Board_name.t -> Masc_domain.tool_schema option
+(** Narrower Keeper-model projection for Board capabilities. [None]
+    means the canonical Board input schema is already the Keeper projection. *)
 
 val filesystem_tools : Masc_domain.tool_schema list
 (** Pure: file tool schemas. *)

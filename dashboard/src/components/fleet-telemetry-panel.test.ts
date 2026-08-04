@@ -454,7 +454,7 @@ describe('FleetTelemetryPanel', () => {
           tool_call_count: 3,
           top_tools: [
             { tool: 'masc_status', count: 2 },
-            { tool: 'keeper_board_post', count: 1 },
+            { tool: 'masc_board_post', count: 1 },
           ],
         },
         metrics_series: [
@@ -478,7 +478,7 @@ describe('FleetTelemetryPanel', () => {
       tool_calls: 3,
       tool_activity_known: true,
     })
-    expect(rows[0]?.recent_tools).toEqual(['masc_status', 'keeper_board_post'])
+    expect(rows[0]?.recent_tools).toEqual(['masc_status', 'masc_board_post'])
   })
 
   it('keeps unknown display model and uses freshest keeper activity helpers for fleet rows', async () => {

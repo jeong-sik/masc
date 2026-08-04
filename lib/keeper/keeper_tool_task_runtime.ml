@@ -292,7 +292,6 @@ let task_op_of_keeper_tool = function
   | Keeper_tool_name.Task_create -> Some Task_create
   | Keeper_tool_name.Task_claim -> Some Task_claim
   | Keeper_tool_name.Task_done -> Some Task_done
-  | _ -> None
 ;;
 
 let task_op_of_name name =

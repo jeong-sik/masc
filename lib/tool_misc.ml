@@ -116,13 +116,25 @@ let strip_mcp_prefix name =
   then String.sub name plen (String.length name - plen)
   else name
 
-let handle_tool_help ~tool_name ~start_time _ctx args : Tool_result.result =
+(* TEL-OK: schema selection and help formatting are read-only; the shared
+   tool-dispatch wrapper owns tool-call telemetry for both projections. *)
+let keeper_model_help_schemas () =
+  Keeper_tool_descriptor.model_visible_descriptors ()
+  |> List.concat_map (fun (descriptor : Keeper_tool_descriptor.t) ->
+    Keeper_tool_descriptor.keeper_model_names descriptor
+    |> List.map (fun name ->
+      { Masc_domain.name
+      ; description = descriptor.description
+      ; input_schema = descriptor.input_schema
+      }))
+
+let handle_tool_help ~schemas ~tool_name ~start_time _ctx args : Tool_result.result =
   let raw_name = String.trim (get_string args "tool_name" "") in
   if String.equal raw_name "" then
     workflow_err ~tool_name ~start_time "tool_name is required"
   else
     let tool_name = strip_mcp_prefix raw_name in
-    match Tool_help_registry.find_entry Config.raw_all_tool_schemas tool_name with
+    match Tool_help_registry.find_entry schemas tool_name with
     | None ->
         workflow_err ~tool_name ~start_time
           (Printf.sprintf "unknown tool: %s" raw_name)
@@ -158,7 +170,7 @@ let tool_inventory_json ctx ~include_hidden =
 (* Dispatch (facade)                                                *)
 (* ================================================================ *)
 
-let dispatch ctx ~name ~args : Tool_result.result option =
+let dispatch_with_help_schemas ~help_schemas ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   match name with
   | "masc_config" ->
@@ -169,12 +181,26 @@ let dispatch ctx ~name ~args : Tool_result.result option =
       Some (handle_keeper_waiting_inventory ~tool_name:name ~start_time:start ctx args)
   | "masc_gc" -> Some (handle_gc ~tool_name:name ~start_time:start ctx args)
   | "masc_tool_help" ->
-      Some (handle_tool_help ~tool_name:name ~start_time:start ctx args)
+      Some (handle_tool_help ~schemas:help_schemas ~tool_name:name ~start_time:start ctx args)
   | "masc_web_search" ->
       Some (handle_web_search ~tool_name:name ~start_time:start ctx args)
   | "masc_web_fetch" ->
       Some (handle_web_fetch ~tool_name:name ~start_time:start ctx args)
   | _ -> None
+
+let dispatch ctx ~name ~args =
+  dispatch_with_help_schemas
+    ~help_schemas:Config.raw_all_tool_schemas
+    ctx
+    ~name
+    ~args
+
+let dispatch_for_keeper ctx ~name ~args =
+  dispatch_with_help_schemas
+    ~help_schemas:(keeper_model_help_schemas ())
+    ctx
+    ~name
+    ~args
 
 let schemas = Tool_schemas_misc.schemas
 

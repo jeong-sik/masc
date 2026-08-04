@@ -76,7 +76,7 @@ let test_representative_tools_across_categories () =
   let representatives =
     [
       "keeper_time_now",      "base_tools";
-      "keeper_board_post",    "board_tools";
+      "masc_board_post",    "board_tools";
       "tool_read_file",       "filesystem_tools";
       "tool_search_files",         "search_files_tools";
       "keeper_task_claim",    "taskboard_tools";

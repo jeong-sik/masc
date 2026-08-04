@@ -1256,7 +1256,7 @@ describe('AgentRoster live-only cards', () => {
         status: 'idle',
         phase: 'Running',
         pipeline_stage: 'idle',
-        recent_tool_names: ['keeper_board_list'],
+        recent_tool_names: ['masc_board_list'],
       } as Keeper,
     ]
 

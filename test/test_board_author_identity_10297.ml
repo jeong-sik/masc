@@ -1,6 +1,6 @@
 (** #10297 — pin the dispatcher's identity-enforcement contract for
-    [keeper_board_post] / [keeper_board_comment] /
-    [keeper_board_vote] / [keeper_board_comment_vote].
+    [masc_board_post] / [masc_board_comment] /
+    [masc_board_vote] / [masc_board_comment_vote].
 
     Pre-fix [ensure_board_post_author] only consulted the runtime
     contract's [agent_name] when the caller's [author] argument was

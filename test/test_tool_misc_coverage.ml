@@ -103,6 +103,33 @@ let () = test "dispatch_unknown_tool" (fun () ->
   assert (Tool_misc.dispatch ctx ~name:"unknown_tool" ~args = None)
 )
 
+let tool_help_description dispatch ctx name =
+  match
+    dispatch
+      ctx
+      ~name:"masc_tool_help"
+      ~args:(`Assoc [ "tool_name", `String name ])
+  with
+  | Some result when Tool_result.is_success result ->
+    Json_util.get_string (Tool_result.data result) "short_description"
+    |> Option.value ~default:""
+  | Some result ->
+    Alcotest.failf "tool help failed: %s" (Tool_result.message result)
+  | None -> Alcotest.fail "masc_tool_help was not dispatched"
+
+let () = test "keeper_tool_help_uses_descriptor_projection" (fun () ->
+  let ctx = make_test_ctx () in
+  let public_description =
+    tool_help_description Tool_misc.dispatch ctx "masc_board_post"
+  in
+  let keeper_description =
+    tool_help_description Tool_misc.dispatch_for_keeper ctx "masc_board_post"
+  in
+  assert (str_contains public_description "MASC internal board");
+  assert (String.equal keeper_description "Create a new board post.");
+  assert (not (str_contains keeper_description "`body`"))
+)
+
 (* Test dispatch dashboard — may require Eio runtime; skip gracefully if unavailable *)
 let () = test "dispatch_dashboard" (fun () ->
   let ctx = make_test_ctx () in

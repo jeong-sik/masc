@@ -46,7 +46,7 @@ let raw_all_tool_schemas : Masc_domain.tool_schema list =
        dispatch metadata stay coherent. The earlier #9912 patch only
        registered [Tool_shard.base_tools] (5 always-present tools); #10101
        observed 11 other shard categories still missing
-       (keeper_task_claim, tool_edit_file, keeper_board_*, ...). *)
+       (keeper_task_claim, tool_edit_file, Keeper Board projections, ...). *)
     (Tool_shard.all_keeper_tool_schemas
      @ Tools.raw_schemas
      @ Tool_schemas_misc.schemas

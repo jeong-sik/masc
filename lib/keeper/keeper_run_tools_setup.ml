@@ -13,7 +13,7 @@ open Keeper_agent_prompt_metrics
    evidence to be turn-local. The capture did not match. Measured on live
    pending approvals 2026-07-28: [history_messages] was 1,278,158 B of a
    1,300,053 B bundle (98%), and 88.7% of that was three read-only polls
-   replayed in full - masc_status x308, keeper_board_list x200,
+   replayed in full - masc_status x308, masc_board_list x200,
    keeper_tasks_list x380. Every request raised inside a turn therefore
    exceeded the judge model's prompt limit and was quarantined (#26081).
 

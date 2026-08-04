@@ -358,14 +358,14 @@ Keeper: $keeper
 Goal: create explicit product and design-domain board evidence for the fleet readiness audit.
 
 Required action:
-1. Call keeper_board_post exactly once.
+1. Call masc_board_post exactly once.
 2. Use hearth: product-design
 3. The post must include one concrete product decision or risk, one concrete design decision or risk, and one next action that another keeper or operator can verify.
 4. Do not edit files. Do not create a PR in this run.
 5. After the tool call, reply with one compact JSON object:
-   {"run_id":"$RUN_ID","keeper":"$keeper","hearth":"product-design","keeper_board_post":true,"product_evidence":true,"design_evidence":true,"blocker":null}
+   {"run_id":"$RUN_ID","keeper":"$keeper","hearth":"product-design","masc_board_post":true,"product_evidence":true,"design_evidence":true,"blocker":null}
 
-If keeper_board_post is unavailable or policy-blocked, stop and reply with the exact blocker instead of substituting another surface.
+If masc_board_post is unavailable or policy-blocked, stop and reply with the exact blocker instead of substituting another surface.
 EOF
 }
 

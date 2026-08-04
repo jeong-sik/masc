@@ -160,22 +160,6 @@ val handle_task
   -> args:Yojson.Safe.t
   -> string
 
-(** [handle_board] dispatches to
-    [Keeper_tool_board_runtime.handle_keeper_board_tool] by [name]. Caller
-    must pass a name in the board cluster. *)
-val handle_board
-  :  meta:keeper_meta
-  -> name:string
-  -> args:Yojson.Safe.t
-  -> string
-
-(** [handle_masc_board] admits only Board operations whose typed Keeper
-    projection is [Direct_masc], binds runtime-owned identity to [meta.name],
-    and explicitly rejects wrapper-backed or unknown routes. *)
-val handle_masc_board : meta:keeper_meta -> name:string -> args:Yojson.Safe.t -> string
-val handle_masc_board_with_outcome
-  : meta:keeper_meta -> name:string -> args:Yojson.Safe.t -> Keeper_tool_execution.t
-
 (** RFC-0182 §3.1 — [handle_masc_task_with_outcome] is the descriptor-projection
     cluster handler for [masc_task_*] tools (add_task / batch_add_tasks /
     claim_next / task_history / tasks / transition / update_priority).

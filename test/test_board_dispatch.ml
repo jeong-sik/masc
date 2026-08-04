@@ -59,7 +59,7 @@ let seed_post_without_kind () =
         ("score", `Int 0);
         ("reply_count", `Int 0);
         ("pinned", `Bool false);
-        ("meta", `Assoc [ ("source", `String "keeper_board_post") ]);
+        ("meta", `Assoc [ ("source", `String "masc_board_post") ]);
       ]
   in
   Fs_compat.append_file path (Yojson.Safe.to_string json ^ "\n");
@@ -677,7 +677,7 @@ let test_recent_sort_bypasses_hot_cutoff () =
     (String.equal hot_post_id cold_post_id)
 
 let test_list_posts_with_filters () =
-  let keeper_meta = `Assoc [ ("source", `String "keeper_board_post") ] in
+  let keeper_meta = `Assoc [ ("source", `String "masc_board_post") ] in
   let scoped_authors = [ "filter-human"; "filter-harness-bot"; "filter-keeper" ] in
   let is_scoped_author (p : Board.post) =
     List.mem (Board.Agent_id.to_string p.author) scoped_authors

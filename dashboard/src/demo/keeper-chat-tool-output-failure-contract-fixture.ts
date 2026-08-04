@@ -92,7 +92,7 @@ export const coverageGapEntries: KeeperConversationEntry[] = [
     id: 'tool-tc-coverage-gap',
     role: 'tool',
     source: 'tool_result',
-    label: 'keeper_board_comment',
+    label: 'masc_board_comment',
     text: '{"post_id":"post-7","body":"ack"}',
     rawText: '{"post_id":"post-7","body":"ack"}',
     timestamp: '2026-07-05T15:11:30.000Z',
@@ -121,7 +121,7 @@ export const coverageGapEntries: KeeperConversationEntry[] = [
     traceSteps: [
       {
         kind: 'tool',
-        name: 'keeper_board_comment',
+        name: 'masc_board_comment',
         toolCallId: 'tc-coverage-gap',
         args: '{"post_id":"post-7","body":"ack"}',
         ts: '2026-07-05T15:11:30.000Z',

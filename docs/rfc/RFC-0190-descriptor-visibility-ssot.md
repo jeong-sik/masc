@@ -25,7 +25,7 @@ Result:
 | Direction | Count | Examples |
 |---|---|---|
 | surface ∖ descriptor | **8** | `masc_start`, `masc_bind`, `masc_unbind`, `masc_broadcast`, `masc_messages`, `masc_agents`, `masc_keeper_sandbox_status`, `masc_keeper_create_from_persona` |
-| descriptor ∖ surface | 82 | `keeper_board_*` (managed-keeper twins), `masc_board_delete`, `masc_config`, `masc_get_metrics`, … (intentionally not operator-visible) |
+| descriptor ∖ surface | 82 | `masc_board_*`, `masc_board_delete`, `masc_config`, `masc_get_metrics`, … (intentionally not operator-visible) |
 | intersect | 46 | already descriptor-backed surface entries |
 
 The retired persona-generate surface is guarded by `scripts/lint/no-retired-tool-husks.sh`; it is not a descriptor target. For the current live surface, this RFC applies to the remaining **8** lifecycle/persona-create tools that never entered the descriptor system because their handlers live in `lib/mcp_tool_runtime.ml` (MCP server-level inline path), not in `Tool_workspace.dispatch` or the cluster `*_dispatch_ref` references the descriptor `runtime_handler` enum routes to.

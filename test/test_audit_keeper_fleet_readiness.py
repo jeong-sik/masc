@@ -97,7 +97,7 @@ def write_ready_keeper(root: Path, name: str) -> None:
             {
                 "ts_unix": time.time(),
                 "event": "tool_exec",
-                "tool": "keeper_board_post",
+                "tool": "masc_board_post",
                 "ok": True,
             }
         )
@@ -436,7 +436,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 root,
                 "alpha",
                 "p-design",
-                meta={"tags": ["design"], "source": "keeper_board_post"},
+                meta={"tags": ["design"], "source": "masc_board_post"},
             )
             args = audit_args(root, expected_keepers=1)
             args.require_product_evidence = True
@@ -533,7 +533,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             write_ready_keeper(root, "alpha")
-            write_persistent_work_evidence(root, "alpha", tool="keeper_board_get")
+            write_persistent_work_evidence(root, "alpha", tool="masc_board_list")
             args = audit_args(root, expected_keepers=1)
             args.require_persistent_work_evidence = True
 

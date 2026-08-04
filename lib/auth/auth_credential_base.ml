@@ -6,9 +6,21 @@ open Masc_domain
 (* Crypto utilities                             *)
 (* ============================================ *)
 
-(** Generate a cryptographically random token (hex string) *)
+(** Generated bearer-token shape authority. *)
+let generated_token_bytes = 32
+
+(** Generate a cryptographically random token (hex string). *)
 let generate_token () =
-  Random_id.hex ~bytes:32
+  Random_id.hex ~bytes:generated_token_bytes
+;;
+
+let is_generated_token_shape raw =
+  String.length raw = 2 * generated_token_bytes
+  && String.for_all
+       (function
+         | '0' .. '9' | 'a' .. 'f' -> true
+         | _ -> false)
+       raw
 ;;
 
 (** SHA256 hash of a string using Digestif *)

@@ -153,15 +153,6 @@ let read_dashboard_dev_token ~load ~base_path =
          { path; detail = Printexc.to_string error })
 ;;
 
-let is_generated_token raw =
-  String.length raw = 64
-  && String.for_all
-       (function
-         | '0' .. '9' | 'a' .. 'f' -> true
-         | _ -> false)
-       raw
-;;
-
 let read_rotation_journal ~load ~base_path =
   let path = dashboard_dev_token_pending_path base_path in
   try
@@ -169,7 +160,7 @@ let read_rotation_journal ~load ~base_path =
     then Ok None
     else (
       let raw = String.trim (load path) in
-      if is_generated_token raw
+      if Auth.is_generated_token_shape raw
       then Ok (Some raw)
       else Error (Rotation_journal_invalid { path }))
   with

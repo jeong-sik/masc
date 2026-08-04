@@ -14,6 +14,10 @@ val generate_token : unit -> string
 (** Generate a cryptographically random token: exactly 64 lowercase hex
     characters encoding 32 random bytes. *)
 
+val is_generated_token_shape : string -> bool
+(** [is_generated_token_shape raw] checks the exact lexical shape produced by
+    {!generate_token}. It does not establish token provenance or validity. *)
+
 val sha256_hash : string -> string
 (** Hash a token/secret with SHA-256 and return exactly 64 lowercase hex
     characters. Secret comparisons use Eqaf on this fixed-width form. *)

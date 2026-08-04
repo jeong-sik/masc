@@ -15,6 +15,8 @@ type stream_protocol_error_kind =
   | Sse_parse_failed
   | Ndjson_parse_failed
   | Sse_unknown_event_type
+  | Sse_unsupported_part
+  | Sse_unsupported_response
   | Sse_stream_incomplete
 
 type stream_protocol_error = {
@@ -129,6 +131,8 @@ let stream_protocol_error_kind_to_string = function
   | Sse_parse_failed -> "sse_parse_failed"
   | Ndjson_parse_failed -> "ndjson_parse_failed"
   | Sse_unknown_event_type -> "sse_unknown_event_type"
+  | Sse_unsupported_part -> "sse_unsupported_part"
+  | Sse_unsupported_response -> "sse_unsupported_response"
   | Sse_stream_incomplete -> "sse_stream_incomplete"
 
 let stream_protocol_error_summary error =

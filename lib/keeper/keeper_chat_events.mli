@@ -25,6 +25,8 @@ type stream_protocol_error_kind =
   | Sse_parse_failed
   | Ndjson_parse_failed
   | Sse_unknown_event_type
+  | Sse_unsupported_part
+  | Sse_unsupported_response
   | Sse_stream_incomplete
 
 type stream_protocol_error = {

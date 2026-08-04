@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
-readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.12"
+readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.13"
 # v0.231.0 is a hard-cut wave: checkpoint schema is v9 only (v1-v8
 # rejected; #2867), provider_config.output_schema is removed in favor of
 # response_format = JsonSchema as the single structured-output request state
@@ -70,12 +70,18 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.12"
 # [NDJSONError] stream event (#2916). MASC consumes that event at its typed
 # streaming boundary; the pin must move with the public constructor.
 # Previous pin: v0.231.11 (6ab2e84e1).
-readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.12"
+# v0.231.13 preserves terminal stop semantics (#2927), uses OS entropy for
+# session identifiers (#2928), and makes unsupported Gemini stream parts and
+# response shapes explicit typed events (#2930). MASC consumes those events as
+# capability failures rather than dropping them or relabelling them as parse
+# errors.
+# Previous pin: v0.231.12 (966cd3f61).
+readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.13"
 # TRACK_REF consumed by check-oas-pin.sh / oas-drift-check.sh /
 # sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584). Use main
 # for merge-ready pins. A blocked Draft cross-repo PR may temporarily declare
 # the exact refs/pull/<number>/head review ref; CI rejects that ref once the PR
 # is no longer both Draft and blocked-on-oas.
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="966cd3f61cd5e9e21c8390513dfa27894aeb6230"
-readonly OAS_AGENT_SDK_MIN_VERSION="0.231.12"
+readonly OAS_AGENT_SDK_SHA="59ccced68c2dc96389a91eee24d0b2c6bd5c53a6"
+readonly OAS_AGENT_SDK_MIN_VERSION="0.231.13"

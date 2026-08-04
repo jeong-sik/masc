@@ -609,7 +609,7 @@ let is_masc_event = function
    response from becoming a substring false positive; the numeric [id:] check
    pins the resumability cursor carried by the transformed frame. *)
 let test_ag_ui_frames_are_wire_encoded () =
-  with_server @@ fun ~port ~auth_token ->
+  with_server @@ fun ~port ~auth_token ~base_path:_ ->
   let sid = initialize_mcp_session ~port ~auth_token in
   publish_masc_broadcast ~port ~auth_token ~session_id:sid;
   let headers =
@@ -788,7 +788,7 @@ let check_invalid_request_response label result =
         (Printf.sprintf "%s returned a non-object body: %s" label result.body)
 
 let test_sse_endpoints_reject_malformed_last_event_id () =
-  with_server @@ fun ~port ~auth_token ->
+  with_server @@ fun ~port ~auth_token ~base_path:_ ->
   let sid = initialize_mcp_session ~port ~auth_token in
   let headers cursor =
     [ ("Accept", "text/event-stream")

@@ -474,6 +474,14 @@ let install () =
         { degraded_kind = "cancellation_author_lookup_failed"
         ; degraded_detail = Printf.sprintf "author=%s: %s" author detail
         }
+    | Keeper_task_cancellation_wake.Canceller_lookup_failed { agent_name; detail } ->
+      (* Degraded rather than silent: nothing was enqueued because the
+         self-cancellation check could not be decided, and the ambiguous
+         identity behind it needs repair. *)
+      Some
+        { degraded_kind = "cancellation_canceller_lookup_failed"
+        ; degraded_detail = Printf.sprintf "canceller=%s: %s" agent_name detail
+        }
     | Keeper_task_cancellation_wake.Enqueue_failed { keeper_name; detail } ->
       Some
         { degraded_kind = "cancellation_author_storage_error"

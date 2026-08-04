@@ -206,6 +206,34 @@ let test_handoff_reason_reaches_the_author_when_the_status_carries_none () =
     | queued -> failf "expected one queued cancellation, got %d" (List.length queued))
 ;;
 
+(* [Keeper_identity.keeper_agent_name] strips a leading [keeper-], so lanes
+   [alpha] and [keeper-alpha] both canonicalise to [keeper-alpha-agent] and both
+   satisfy the meta constraint. Resolving that agent name is therefore
+   [Ambiguous]. Collapsing the error into [None] fell through to comparing the
+   raw agent name against the author lane, which does not match, so a Keeper
+   was woken about a cancellation it may have made itself. Nothing is enqueued
+   while the identity is unresolvable. *)
+let test_ambiguous_canceller_suppresses_delivery () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:"alpha" ~agent_name:"keeper-alpha-agent";
+    ensure_keeper config ~keeper_name:"keeper-alpha" ~agent_name:"keeper-alpha-agent";
+    seed_task
+      config
+      ~task_id:"task-175"
+      ~created_by:(Some "alpha")
+      ~status:(cancelled ~by:"keeper-alpha-agent" ~reason:(Some "superseded"));
+    let outcome =
+      Wake.notify_author
+        ~config
+        ~cancelling_agent_name:"keeper-alpha-agent"
+        ~task_id:"task-175"
+    in
+    check string "the ambiguity is reported, not discarded" "canceller_lookup_failed"
+      (Wake.outcome_label outcome);
+    check int "nothing queued while the self-check is undecidable" 0
+      (List.length (queued_cancellations ~base_path:config.base_path ~keeper_name:"alpha")))
+;;
+
 let test_author_without_a_keeper_lane_is_not_an_error () =
   with_workspace (fun config ->
     ensure_keeper config ~keeper_name:"rondo" ~agent_name:"keeper-rondo-agent";
@@ -338,6 +366,8 @@ let () =
     ; ( "declined"
       , [ test_case "handoff reason reaches the author" `Quick
             test_handoff_reason_reaches_the_author_when_the_status_carries_none
+        ; test_case "ambiguous canceller suppresses delivery" `Quick
+            test_ambiguous_canceller_suppresses_delivery
         ; test_case "author without a keeper lane" `Quick
             test_author_without_a_keeper_lane_is_not_an_error
         ; test_case "task without author" `Quick test_task_without_author_has_no_addressee

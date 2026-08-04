@@ -12,6 +12,10 @@ type outcome =
       { author : string
       ; detail : string
       }
+  | Canceller_lookup_failed of
+      { agent_name : string
+      ; detail : string
+      }
   | Enqueue_failed of
       { keeper_name : string
       ; detail : string
@@ -26,6 +30,7 @@ let outcome_label = function
   | Author_not_a_keeper _ -> "author_not_a_keeper"
   | Backlog_read_failed _ -> "backlog_read_failed"
   | Author_lookup_failed _ -> "author_lookup_failed"
+  | Canceller_lookup_failed _ -> "canceller_lookup_failed"
   | Enqueue_failed _ -> "enqueue_failed"
 ;;
 
@@ -160,27 +165,36 @@ let notify_author ~config ~cancelling_agent_name ~task_id =
               | Error detail -> Author_lookup_failed { author; detail }
               | Ok None -> Author_not_a_keeper { author }
               | Ok (Some author_keeper) ->
-                let canceller_keeper =
-                  match
-                    keeper_of_canceller ~config ~agent_name:cancelling_agent_name
-                  with
-                  | Ok (Some keeper_name) -> Some keeper_name
-                  | Ok None | Error _ -> None
-                in
-                let is_self =
-                  match canceller_keeper with
-                  | Some canceller -> String.equal canceller author_keeper
-                  | None -> String.equal cancelling_agent_name author
-                in
-                if is_self
-                then Self_cancelled
-                else
-                  enqueue
-                    ~config
-                    ~keeper_name:author_keeper
-                    ~cancellation:
-                      { tc_task_id = task_id
-                      ; tc_cancelled_by = cancelled_by
-                      ; tc_reason = reason
-                      }))))
+                (* An unresolvable canceller is reported, never discarded.
+                   Two Keeper names that differ only by the [keeper-] prefix —
+                   [alpha] and [keeper-alpha] — both canonicalise to
+                   [keeper-alpha-agent], so the binding is [Ambiguous] and the
+                   author may be one of the candidates. Collapsing that into
+                   [None] fell through to comparing the raw agent name against
+                   the author lane, which misses the match and wakes a Keeper
+                   about its own cancellation. Since the self-check cannot be
+                   decided, nothing is enqueued and the ambiguity is surfaced
+                   for repair. *)
+                match
+                  keeper_of_canceller ~config ~agent_name:cancelling_agent_name
+                with
+                | Error detail ->
+                  Canceller_lookup_failed { agent_name = cancelling_agent_name; detail }
+                | Ok canceller_keeper ->
+                  let is_self =
+                    match canceller_keeper with
+                    | Some canceller -> String.equal canceller author_keeper
+                    | None -> String.equal cancelling_agent_name author
+                  in
+                  if is_self
+                  then Self_cancelled
+                  else
+                    enqueue
+                      ~config
+                      ~keeper_name:author_keeper
+                      ~cancellation:
+                        { tc_task_id = task_id
+                        ; tc_cancelled_by = cancelled_by
+                        ; tc_reason = reason
+                        }))))
 ;;

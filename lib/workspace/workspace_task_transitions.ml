@@ -37,10 +37,31 @@ type verification_submission =
    Exhaustive on [task_action]: a new action must state its own wording, or
    state which channel already carries it. [reason] rides along on the two
    actions that stop work in progress — it is the only place the "why" reaches
-   a reader who is not polling the backlog. *)
-let transition_broadcast_content ~action ~task_id ~reason : string option =
-  let with_reason verb =
+   a reader who is not polling the backlog.
+
+   The "why" arrives on either of two arguments depending on the entry point.
+   [release_task_r] takes no [reason] at all and forwards only
+   [handoff_context], so the production release tool — which requires a handoff
+   context for a strict release — reached this function with an empty [reason]
+   and published a bare "Released <id>", dropping the explanation it was given.
+   [handoff_context.reason] is the same concept under a different argument, not
+   a second one being folded in, so it is read when [reason] is empty. *)
+let transition_broadcast_content ~action ~task_id ~reason ~handoff_context
+  : string option
+  =
+  let stated_reason =
     match String.trim reason with
+    | "" ->
+      (match (handoff_context : Masc_domain.task_handoff_context option) with
+       | None -> ""
+       | Some context ->
+         (match context.reason with
+          | Some context_reason -> String.trim context_reason
+          | None -> ""))
+    | reason -> reason
+  in
+  let with_reason verb =
+    match stated_reason with
     | "" -> Some (Printf.sprintf "%s %s" verb task_id)
     | reason -> Some (Printf.sprintf "%s %s - %s" verb task_id reason)
   in
@@ -485,7 +506,13 @@ let transition_task_outcome_r
              never be woken about a cancellation that did happen, which is the
              failure this change exists to remove. [Eio.Cancel.Cancelled] still
              propagates: a cancelled fiber must not be resumed. *)
-          (match transition_broadcast_content ~action ~task_id ~reason with
+          (match
+             transition_broadcast_content
+               ~action
+               ~task_id
+               ~reason
+               ~handoff_context:backlog_update.persisted_handoff_context
+           with
            | None -> ()
            | Some content ->
              (try

@@ -182,6 +182,61 @@ let test_submit_defers_to_board () =
       (contents config ~baseline_seq))
 ;;
 
+(* [release_task_r] takes no [reason]: it forwards only [handoff_context], and
+   the production release tool requires one for a strict release. Driving the
+   real wrapper here rather than [transition] pins the entry point that was
+   publishing a bare "Released <id>" while holding the explanation. *)
+let test_release_wrapper_broadcasts_its_handoff_reason () =
+  with_test_env (fun config ~baseline_seq ->
+    seed config
+      (make_task ~id:"task-10" ~status:(D.Claimed { assignee = owner; claimed_at = now }));
+    let handoff : D.task_handoff_context =
+      { summary = "sandbox lacks the request-menu service"
+      ; reason = Some "cannot verify without the service"
+      ; next_step = Some "re-file once the sandbox ships it"
+      ; failure_mode = None
+      ; reclaim_policy = None
+      ; evidence_refs = []
+      ; updated_at = None
+      ; updated_by = None
+      }
+    in
+    check_ok "release"
+      (Workspace.release_task_r config ~agent_name:owner ~task_id:"task-10"
+         ~handoff_context:handoff ());
+    Alcotest.(check (list string))
+      "the handoff reason reaches the message log"
+      [ "Released task-10 - cannot verify without the service" ]
+      (contents config ~baseline_seq))
+;;
+
+(* An explicit [reason] outranks the handoff context: the caller stated why for
+   this transition, while the handoff context describes the work's state. *)
+let test_explicit_reason_outranks_handoff_context () =
+  with_test_env (fun config ~baseline_seq ->
+    seed config
+      (make_task ~id:"task-11" ~status:(D.InProgress { assignee = owner; started_at = now }));
+    check_ok "cancel"
+      (Workspace.transition_task_r config ~agent_name:owner ~task_id:"task-11"
+         ~action:D.Cancel ~notes:""
+         ~reason:"superseded by task-12"
+         ~handoff_context:
+           { summary = "partial"
+           ; reason = Some "older note"
+           ; next_step = None
+           ; failure_mode = None
+           ; reclaim_policy = None
+           ; evidence_refs = []
+           ; updated_at = None
+           ; updated_by = None
+           }
+         ());
+    Alcotest.(check (list string))
+      "the stated reason wins"
+      [ "Cancelled task-11 - superseded by task-12" ]
+      (contents config ~baseline_seq))
+;;
+
 (* The idempotent no-op returns before the commit, so it must not manufacture a
    message for a transition that never happened. *)
 let test_noop_transition_is_silent () =
@@ -221,6 +276,10 @@ let () =
         ; Alcotest.test_case "claim and start" `Quick test_claim_and_start_broadcast
         ; Alcotest.test_case "submit defers to its Board post" `Quick
             test_submit_defers_to_board
+        ; Alcotest.test_case "release wrapper carries its handoff reason" `Quick
+            test_release_wrapper_broadcasts_its_handoff_reason
+        ; Alcotest.test_case "explicit reason outranks handoff context" `Quick
+            test_explicit_reason_outranks_handoff_context
         ] )
     ; ( "uncommitted transitions"
       , [ Alcotest.test_case "no-op is silent" `Quick test_noop_transition_is_silent

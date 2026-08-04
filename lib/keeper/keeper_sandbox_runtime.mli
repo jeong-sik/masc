@@ -368,6 +368,12 @@ val ensure_keeper_sandbox_image_present_with_class_optional
 val docker_image_preflight_error_code : classified_error -> string
 val docker_image_preflight_failure_message : prefix:string -> classified_error -> string
 
+(** [docker_image_preflight_failure_message] applied with the
+    ["docker_container_start_failed"] prefix, for callers that abort a
+    container start because the image preflight returned
+    [Error classified_error]. *)
+val image_preflight_start_error : classified_error -> string
+
 (** Returns the [--security-opt seccomp=...] argv fragment when the
     runtime passes; [Error _] when something is missing.
 

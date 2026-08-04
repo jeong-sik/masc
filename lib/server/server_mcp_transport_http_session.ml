@@ -2,12 +2,6 @@ open Result.Syntax
 
 module SMap = Set_util.StringMap
 
-let rec atomic_update atomic f =
-  let old_val = Atomic.get atomic in
-  let new_val = f old_val in
-  if Atomic.compare_and_set atomic old_val new_val then ()
-  else atomic_update atomic f
-
 let mcp_protocol_versions = Mcp_transport_protocol.supported_protocol_versions
 
 let mcp_protocol_version_default = Mcp_transport_protocol.default_protocol_version
@@ -81,18 +75,18 @@ let record_mcp_server_session_duration ?error_type session_id =
 
 let remember_session_activity ?otel_transport_context session_id =
   let now = Unix.gettimeofday () in
-  atomic_update session_started_at (fun map ->
+  Atomic_util.update session_started_at (fun map ->
     if SMap.mem session_id map then map else SMap.add session_id now map);
-  atomic_update session_last_active_sse (fun map -> SMap.add session_id now map);
+  Atomic_util.update session_last_active_sse (fun map -> SMap.add session_id now map);
   match otel_transport_context with
   | None -> ()
   | Some transport ->
-    atomic_update session_transport_context (fun map ->
+    Atomic_util.update session_transport_context (fun map ->
       SMap.add session_id transport map)
 
 let remember_protocol_version ?otel_transport_context session_id version =
   if is_valid_protocol_version version then begin
-    atomic_update protocol_version_by_session (fun map -> SMap.add session_id version map);
+    Atomic_util.update protocol_version_by_session (fun map -> SMap.add session_id version map);
     remember_session_activity ?otel_transport_context session_id
   end
 
@@ -143,18 +137,18 @@ let ensure_sse_backing_session_for_known_transport_session
     ()
 
 let remember_mcp_profile ?otel_transport_context session_id profile =
-  atomic_update mcp_profile_by_session (fun map -> SMap.add session_id profile map);
+  Atomic_util.update mcp_profile_by_session (fun map -> SMap.add session_id profile map);
   if is_known_session session_id then
     remember_session_activity ?otel_transport_context session_id
 
 let forget_mcp_session session_id =
   record_mcp_server_session_duration session_id;
   Client_registry_eio.unregister_mcp_session session_id;
-  atomic_update protocol_version_by_session (fun map -> SMap.remove session_id map);
-  atomic_update mcp_profile_by_session (fun map -> SMap.remove session_id map);
-  atomic_update session_last_active_sse (fun map -> SMap.remove session_id map);
-  atomic_update session_started_at (fun map -> SMap.remove session_id map);
-  atomic_update session_transport_context (fun map -> SMap.remove session_id map)
+  Atomic_util.update protocol_version_by_session (fun map -> SMap.remove session_id map);
+  Atomic_util.update mcp_profile_by_session (fun map -> SMap.remove session_id map);
+  Atomic_util.update session_last_active_sse (fun map -> SMap.remove session_id map);
+  Atomic_util.update session_started_at (fun map -> SMap.remove session_id map);
+  Atomic_util.update session_transport_context (fun map -> SMap.remove session_id map)
 
 (* ===== File persistence ===== *)
 
@@ -330,7 +324,7 @@ let load_sessions_from_file () =
                           | Some value -> value
                           | None -> t
                         in
-                        atomic_update protocol_version_by_session
+                        Atomic_util.update protocol_version_by_session
                           (fun map -> SMap.add sid v map);
                         let profile =
                           match profile_str with
@@ -339,16 +333,16 @@ let load_sessions_from_file () =
                         in
                         (match profile with
                          | Some profile ->
-                             atomic_update mcp_profile_by_session
+                             Atomic_util.update mcp_profile_by_session
                                (fun map -> SMap.add sid profile map)
                          | None -> ());
-                        atomic_update session_last_active_sse
+                        Atomic_util.update session_last_active_sse
                           (fun map -> SMap.add sid t map);
-                        atomic_update session_started_at
+                        Atomic_util.update session_started_at
                           (fun map -> SMap.add sid started_at map);
                         (match transport_context fields with
                          | Some transport ->
-                             atomic_update session_transport_context
+                             Atomic_util.update session_transport_context
                                (fun map -> SMap.add sid transport map)
                          | None -> ())
                       end
@@ -376,7 +370,7 @@ let reap_stale_sessions ~is_active_session =
     SMap.fold (fun sid _ (stale_acc, grace_acc) ->
       if is_active_session sid then begin
         (* Active right now — refresh timestamp, keep session *)
-        atomic_update session_last_active_sse
+        Atomic_util.update session_last_active_sse
           (fun map -> SMap.add sid now map);
         (stale_acc, grace_acc)
       end else begin

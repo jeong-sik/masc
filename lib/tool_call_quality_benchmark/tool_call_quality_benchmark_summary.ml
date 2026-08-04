@@ -48,18 +48,12 @@ let percentile95_int_option values =
       | Some v -> Stdlib.Float.of_int v
       | None -> 0.0
 
-let normalize_string_list items =
-  items
-  |> List.map String.trim
-  |> List.filter (fun item -> not (String.equal item ""))
-  |> Json_util.dedupe_keep_order
-
 let model_label (run : evidence_run) = run.provider ^ ":" ^ run.model
 
 let normalize_filter_set values =
   let table = Hashtbl.create 8 in
   values
-  |> normalize_string_list
+  |> Json_util.normalize_string_list
   |> List.iter (fun value -> Hashtbl.replace table value ());
   table
 

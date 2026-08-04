@@ -17,11 +17,6 @@ let sync_suffix = "/sync"
 let extract_repo_id path =
   extract_path_param ~prefix:repositories_prefix path
 
-let path_parts rest =
-  rest
-  |> String.split_on_char '/'
-  |> List.filter (fun part -> String.trim part <> "")
-
 let extract_repo_id_for_sync path =
   match extract_path_param ~prefix:repositories_prefix path with
   | None -> None

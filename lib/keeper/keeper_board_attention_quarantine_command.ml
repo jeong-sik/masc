@@ -492,14 +492,7 @@ let audit config ~actor command ~outcome =
   | exn -> Error (Printexc.to_string exn)
 ;;
 
-let audit_json = function
-  | Ok () -> `Assoc [ "recorded", `Bool true ]
-  | Error detail ->
-    `Assoc
-      [ "recorded", `Bool false
-      ; "error", `String (Observability_redact.redact_text detail)
-      ]
-;;
+let audit_json = Audit_log.write_result_to_json
 
 let wake_to_string = function
   | Wake.Signaled -> "signaled"

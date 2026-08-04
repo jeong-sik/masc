@@ -300,6 +300,11 @@ let strip_trailing_cr s =
   let len = String.length s in
   if len > 0 && s.[len - 1] = '\r' then String.sub s 0 (len - 1) else s
 
+let first_line text =
+  match String.index_opt text '\n' with
+  | Some i -> String.sub text 0 i
+  | None -> text
+
 (* XML 1.0 entity escape.  Order matters: [&] first so that the
    ampersands introduced by the other replacements are not
    double-escaped. *)

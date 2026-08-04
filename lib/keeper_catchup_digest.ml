@@ -177,11 +177,6 @@ let json_num_field name json =
   | _ -> None
 ;;
 
-let string_opt_to_json = function
-  | Some s -> `String s
-  | None -> `Null
-;;
-
 (* ── Fail-visible day-partitioned reader ─────────────────────────── *)
 
 (* A parse or IO failure is appended to [errs] (fail-visible), never
@@ -658,11 +653,11 @@ let task_snapshot_to_json (s : task_snapshot) =
   `Assoc
     [ "title", `String s.title
     ; "status", `String s.status
-    ; "assignee", string_opt_to_json s.assignee
-    ; "submitted_at", string_opt_to_json s.submitted_at
-    ; "verification_id", string_opt_to_json s.verification_id
-    ; "handoff_summary", string_opt_to_json s.handoff_summary
-    ; "handoff_next_step", string_opt_to_json s.handoff_next_step
+    ; "assignee", Json_util.string_opt_to_json s.assignee
+    ; "submitted_at", Json_util.string_opt_to_json s.submitted_at
+    ; "verification_id", Json_util.string_opt_to_json s.verification_id
+    ; "handoff_summary", Json_util.string_opt_to_json s.handoff_summary
+    ; "handoff_next_step", Json_util.string_opt_to_json s.handoff_next_step
     ; "handoff_evidence_refs", `List (List.map (fun ref_ -> `String ref_) s.handoff_evidence_refs)
     ]
 ;;

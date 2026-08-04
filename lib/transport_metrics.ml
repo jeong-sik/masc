@@ -415,13 +415,8 @@ let inc_agent_stale () = Otel_metric_store.inc_counter Otel_metric_store.metric_
 
 (** {1 Transport Health JSON Snapshot} *)
 
-let assoc_field key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
-;;
-
 let int_field key json =
-  match assoc_field key json with
+  match Json_util.assoc_member_opt key json with
   | Some (`Int value) -> value
   | Some (`Intlit raw) -> Safe_ops.int_of_string_with_default ~default:0 raw
   | _ -> 0

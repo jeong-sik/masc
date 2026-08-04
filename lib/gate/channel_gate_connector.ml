@@ -27,6 +27,15 @@ module type S = sig
   val connected : unit -> bool
 end
 
+(* Wire vocabulary of the [status] field every connector emits from
+   [status_json]. Kept here, next to [S], so the connectors and the
+   dashboard read the same four values. *)
+let connector_state_label ~available ~connected ~stale =
+  if not available then "offline"
+  else if stale then "stale"
+  else if connected then "connected"
+  else "disconnected"
+
 (* Module-level registry: [register] runs during startup while [find]/[all]
    are also reachable from HTTP handlers and tests. Use Stdlib.Mutex because
    callers do not always have an Eio context, and keep the critical sections

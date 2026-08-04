@@ -29,13 +29,6 @@ let init_acc =
   ; ma_last_handoff = None
   }
 
-let nonempty_string_opt key json =
-  match Safe_ops.json_string_opt key json with
-  | Some value ->
-      let value = String.trim value in
-      if value = "" then None else Some value
-  | None -> None
-
 let string_list_member_opt key json =
   match Json_util.assoc_member_opt key json with
   | Some (`List values) ->
@@ -48,11 +41,6 @@ let string_list_member_opt key json =
       in
       decode [] values
   | _ -> None
-
-let ratio_json numerator denominator =
-  if denominator = 0
-  then `Null
-  else `Float (float_of_int numerator /. float_of_int denominator)
 
 let compute_metrics_window
     ~(parsed_metrics : Yojson.Safe.t list)
@@ -94,7 +82,7 @@ let compute_metrics_window
             in
             (match
                Safe_ops.json_float_opt "ts_unix" json,
-               nonempty_string_opt "trace_id" json,
+               Safe_ops.json_string_nonempty_opt "trace_id" json,
                Safe_ops.json_int_opt "generation" json,
                Safe_ops.json_int_opt "latency_ms" json,
                Safe_ops.json_int_opt "tool_call_count" json,
@@ -125,10 +113,10 @@ let compute_metrics_window
                  in
                  let handoff_obj = member "handoff" json in
                  let handoff_prev_trace_id =
-                   nonempty_string_opt "prev_trace_id" handoff_obj
+                   Safe_ops.json_string_nonempty_opt "prev_trace_id" handoff_obj
                  in
                  let handoff_new_trace_id =
-                   nonempty_string_opt "new_trace_id" handoff_obj
+                   Safe_ops.json_string_nonempty_opt "new_trace_id" handoff_obj
                  in
                  let handoff_new_generation =
                    Safe_ops.json_int_opt "to_generation" handoff_obj
@@ -350,14 +338,14 @@ let compute_metrics_window
       ; "handoff_count", `Int acc.ma_handoff_count
       ; "fallback_count", `Int acc.ma_fallback_count
       ; ( "fallback_rate"
-        , ratio_json
+        , Json_util.int_ratio_json
             acc.ma_fallback_count
             acc.ma_fallback_observed_points )
       ; "fallback_observed_points", `Int acc.ma_fallback_observed_points
       ; ( "intervention_share"
-        , ratio_json acc.ma_proactive_points interaction_points )
+        , Json_util.int_ratio_json acc.ma_proactive_points interaction_points )
       ; ( "intervention_per_turn"
-        , ratio_json acc.ma_proactive_points acc.ma_turn_points )
+        , Json_util.int_ratio_json acc.ma_proactive_points acc.ma_turn_points )
       ; "tool_call_count", `Int acc.ma_tool_call_count
       ; "top_work_kinds", `List top_work_kinds
       ; "top_tools", `List top_tools

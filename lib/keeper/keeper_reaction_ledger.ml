@@ -72,11 +72,6 @@ let reaction_kind_of_string = function
   | other -> Error (Unknown_reaction_kind other)
 ;;
 
-let option_json f = function
-  | Some value -> f value
-  | None -> `Null
-;;
-
 let digest_id prefix payload = prefix ^ ":" ^ Digest.to_hex (Digest.string payload)
 let board_stimulus_id ~post_id = "board:" ^ post_id
 
@@ -241,7 +236,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
              ; "post_id", `String stimulus.post_id
              ; "urgency", `String (urgency_to_string stimulus.urgency)
              ; "arrived_at_unix", `Float stimulus.arrived_at
-             ; "board_updated_at_unix", option_json (fun value -> `Float value) board_updated_at
+             ; "board_updated_at_unix", Json_util.option_to_yojson (fun value -> `Float value) board_updated_at
              ; "payload_preview", `String (stimulus_payload_preview stimulus.payload)
              ] )
        ])

@@ -15,9 +15,6 @@ type focus_payload = {
   task_id: string option;
 }
 
-let exec_gate_raw_source argv =
-  String.concat " " (List.map Filename.quote argv)
-
 (** {1 Non-blocking Shell Execution} *)
 
 (** Run argv and get single line (Eio-native, no shell) *)
@@ -25,7 +22,7 @@ let run_argv_line argv =
   let output =
     Masc_exec.Exec_gate.run_argv
       ~actor:(Masc_exec.Agent_id.of_string "system/notify")
-      ~raw_source:(exec_gate_raw_source argv)
+      ~raw_source:(Masc_exec.Exec_gate.raw_source_of_argv argv)
       ~summary:"notify argv"
 
       argv
@@ -44,7 +41,7 @@ let run_argv_ignore argv =
      let status, _output =
        Masc_exec.Exec_gate.run_argv_with_status
          ~actor:(Masc_exec.Agent_id.of_string "system/notify")
-         ~raw_source:(exec_gate_raw_source argv)
+         ~raw_source:(Masc_exec.Exec_gate.raw_source_of_argv argv)
          ~summary:"notify argv"
 
          argv

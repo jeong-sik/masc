@@ -412,6 +412,18 @@ let report_persistence_read_drop ~on_drop ~surface ~reason ~path ~detail =
     surface reason path detail;
   on_drop ()
 
+(* The counted variant of [report_persistence_read_drop]: the [on_drop]
+   callback existed so callers could supply the counter, and every JSONL
+   surface supplied the same one. *)
+let report_persistence_read_drop_counted ~surface ~reason ~path ~detail =
+  report_persistence_read_drop
+    ~on_drop:(fun () ->
+      Otel_metric_store_core.inc_counter
+        Otel_metric_names.metric_persistence_read_drops
+        ~labels:[ ("surface", surface); ("reason", reason) ]
+        ())
+    ~surface ~reason ~path ~detail
+
 let result_to_option_logged ~on_drop ~surface ~reason ~path = function
   | Ok value -> Some value
   | Error detail ->
@@ -559,6 +571,16 @@ let json_string_opt key json =
   match safe_member key json with
   | `String s -> Some s
   | _ -> None
+
+(* Trimmed variant of json_string_opt: whitespace-only values are dropped
+   rather than surfaced as an empty string, and the returned value is the
+   trimmed one. *)
+let json_string_nonempty_opt key json =
+  match json_string_opt key json with
+  | Some value ->
+      let value = String.trim value in
+      if value = "" then None else Some value
+  | None -> None
 
 (* String-coercing *_opt variants mirror json_int/json_float/json_bool:
    accept stringified numerics/bools from small-LLM callers. Missing key

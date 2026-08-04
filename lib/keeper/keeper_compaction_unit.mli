@@ -69,6 +69,11 @@ type provider_transcript_error =
   | Unresolved_tool_results of { tool_use_ids : string list }
 [@@deriving show]
 
+val messages_of_closed_unit : closed_unit -> Agent_sdk.Types.message list
+(** Flatten a unit back to the messages it holds: the single message of
+    [Ordinary_message], or the message list of [Closed_tool_cycle] in its
+    original order. *)
+
 val partition
   :  ?quarantine:bool
   -> Agent_sdk.Types.message list

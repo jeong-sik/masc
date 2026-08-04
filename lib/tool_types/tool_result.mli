@@ -198,3 +198,13 @@ val make_err_of_exn
   -> start_time:float
   -> exn
   -> result
+
+(** {1 Class-specialised constructors} *)
+
+(** {!make_err} with [~class_:Workflow_rejection] and the default [`Null]
+    data payload. *)
+val workflow_err : tool_name:string -> start_time:float -> string -> result
+
+(** {!make_err} with [~class_:Runtime_failure] and the default [`Null]
+    data payload. *)
+val runtime_err : tool_name:string -> start_time:float -> string -> result

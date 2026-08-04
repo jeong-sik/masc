@@ -207,6 +207,12 @@ val log_gate_decision :
   confirmation_state:string ->
   unit -> unit
 
+val write_result_to_json : (unit, string) result -> Yojson.Safe.t
+(** Render the result of an audit write as a two-field JSON receipt.
+    [Ok ()] becomes [{"recorded": true}]; [Error detail] becomes
+    [{"recorded": false, "error": <detail>}] with the detail passed through
+    {!Observability_redact.redact_text}. *)
+
 (** {1 Maintenance} *)
 
 (** {1 Statistics} *)

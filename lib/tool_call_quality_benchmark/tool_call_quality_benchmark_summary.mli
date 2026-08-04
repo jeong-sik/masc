@@ -12,10 +12,10 @@
     {!Tool_call_quality_benchmark} (the facade that wires all
     three together).
 
-    Internal: 19 helpers stay private (\[avg_float\],
+    Internal: 18 helpers stay private (\[avg_float\],
     \[avg_int_option\], \[avg_float_option\],
     \[percentile95_int_option\], \[dedupe_keep_order\],
-    \[normalize_string_list\], \[model_label\],
+    \[model_label\],
     \[normalize_filter_set\], \[keep_run\],
     \[group_scores_by_case\], \[modal_ratio\], \[tool_sequence\],
     \[summary_key_of_run\], \[summary_key_of_score\],

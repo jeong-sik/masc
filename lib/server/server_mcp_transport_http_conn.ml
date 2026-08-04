@@ -48,12 +48,6 @@ let make_sse_conn ~session_id ~client_id ~writer ~mutex () =
 
 module SMap = Set_util.StringMap
 
-let rec atomic_update atomic f =
-  let old_val = Atomic.get atomic in
-  let new_val = f old_val in
-  if Atomic.compare_and_set atomic old_val new_val then ()
-  else atomic_update atomic f
-
 let sse_conn_by_session : sse_conn_info SMap.t Atomic.t = Atomic.make SMap.empty
 
 type sse_connect_guard_state = {
@@ -108,7 +102,7 @@ let guard_expired ~now ~session_id state =
 (** Register an SSE connection under [sse_registry_mutex].
     All call sites must use this instead of direct [Hashtbl.replace]. *)
 let register_sse_conn ~session_id ~info =
-  atomic_update sse_conn_by_session (fun map -> SMap.add session_id info map)
+  Atomic_util.update sse_conn_by_session (fun map -> SMap.add session_id info map)
 
 (* Claim the single close of [info]: returns [true] for exactly one caller even
    under concurrent close paths (a disconnect on one domain racing eviction or
@@ -145,7 +139,7 @@ let close_sse_conn info =
 
 let stop_sse_session_impl ~clear_guard session_id =
   let info_opt = ref None in
-  atomic_update sse_conn_by_session (fun map ->
+  Atomic_util.update sse_conn_by_session (fun map ->
     match SMap.find_opt session_id map with
     | None -> map
     | Some info ->
@@ -153,7 +147,7 @@ let stop_sse_session_impl ~clear_guard session_id =
         SMap.remove session_id map
   );
   if clear_guard then
-    atomic_update sse_connect_guard_by_session (fun map -> SMap.remove session_id map);
+    Atomic_util.update sse_connect_guard_by_session (fun map -> SMap.remove session_id map);
   match !info_opt with
   | None -> ()
   | Some info -> close_sse_conn info
@@ -172,13 +166,13 @@ let stop_sse_session_preserve_guard session_id =
 let stop_sse_session_evict session_id
     ~(reason : Session_lifecycle_event.evict_reason) =
   let info_opt = ref None in
-  atomic_update sse_conn_by_session (fun map ->
+  Atomic_util.update sse_conn_by_session (fun map ->
     match SMap.find_opt session_id map with
     | None -> map
     | Some info ->
         info_opt := Some info;
         SMap.remove session_id map);
-  atomic_update sse_connect_guard_by_session (fun map ->
+  Atomic_util.update sse_connect_guard_by_session (fun map ->
     SMap.remove session_id map);
   (match !info_opt with
    | None -> ()
@@ -229,7 +223,7 @@ let reap_stale_guards () =
     ) (Atomic.get sse_connect_guard_by_session) []
   in
   if stale <> [] then
-    atomic_update sse_connect_guard_by_session (fun map ->
+    Atomic_util.update sse_connect_guard_by_session (fun map ->
       List.fold_left (fun acc sid -> SMap.remove sid acc) map stale
     );
   List.length stale
@@ -298,7 +292,7 @@ let prune_connect_times ~now times =
 let check_sse_connect_guard session_id =
   let now = Time_compat.now () in
   let result = ref (Ok ()) in
-  atomic_update sse_connect_guard_by_session (fun map ->
+  Atomic_util.update sse_connect_guard_by_session (fun map ->
     let state =
       match SMap.find_opt session_id map with
       | Some v ->

@@ -142,14 +142,6 @@ let int_field name fields =
   | None -> Error ("missing field: " ^ name)
 ;;
 
-let float_field name fields =
-  match List.assoc_opt name fields with
-  | Some (`Float value) -> Ok value
-  | Some (`Int value) -> Ok (float_of_int value)
-  | Some _ -> Error ("expected float field: " ^ name)
-  | None -> Error ("missing field: " ^ name)
-;;
-
 let list_field name fields =
   match List.assoc_opt name fields with
   | Some (`List value) -> Ok value
@@ -170,7 +162,7 @@ let collect_results parse rows =
 let state_of_yojson = function
   | `Assoc fields ->
     let* version = int_field "version" fields in
-    let* updated_at = float_field "updated_at" fields in
+    let* updated_at = Schedule_domain.float_field "updated_at" fields in
     let* schedules_json = list_field "schedules" fields in
     let* wakes_json = list_field "wakes" fields in
     let* schedules =

@@ -19,6 +19,11 @@ type observation =
   | Owned_directory_missing
   | Owned_directory of Unix.stats
 
+val file_kind_to_string : Unix.file_kind -> string
+(** Render a [Unix.file_kind] as the lowercase snake_case name of the
+    constructor ([S_REG] becomes ["regular_file"], [S_FIFO] becomes
+    ["fifo"]). *)
+
 val rejection_to_string : rejection -> string
 
 val paths

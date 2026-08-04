@@ -372,6 +372,12 @@ let extract_path_param ~prefix path =
     if String.length param > 0 then Some param else None
   else None
 
+(** Split a path remainder on '/' and drop segments that are blank after trim. *)
+let path_parts rest =
+  rest
+  |> String.split_on_char '/'
+  |> List.filter (fun part -> String.trim part <> "")
+
 (** Standard query param: limit with default 50, clamped 1..200. *)
 let standard_limit request =
   int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200

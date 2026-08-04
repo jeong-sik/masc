@@ -182,6 +182,9 @@ val model_schema_errors : t -> string list
     missing/structurally invalid schemas are excluded. *)
 val model_visible_descriptors : unit -> t list
 
+(** Exact schema projection admitted by the Keeper model surface. *)
+val model_visible_schemas : unit -> Masc_domain.tool_schema list
+
 (** The sole active Keeper model name. Empty only for an exact
     [Operator_only], [Transport_alias], or a descriptor without a resolved
     schema. *)

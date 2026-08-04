@@ -94,7 +94,10 @@ let make_test_ctx () =
   Unix.mkdir tmp 0o755;
   let config = Workspace.default_config tmp in
   let _ = Workspace.init config ~agent_name:(Some "test-agent") in
-  { Tool_misc.config; agent_name = "test-agent" }
+  { Tool_misc.config
+  ; agent_name = "test-agent"
+  ; help_schemas = Config.raw_all_tool_schemas
+  }
 
 (* Test dispatch returns None for unknown tool *)
 let () = test "dispatch_unknown_tool" (fun () ->
@@ -122,8 +125,11 @@ let () = test "keeper_tool_help_uses_descriptor_projection" (fun () ->
   let public_description =
     tool_help_description Tool_misc.dispatch ctx "masc_board_post"
   in
+  let keeper_ctx =
+    { ctx with help_schemas = Keeper_tool_descriptor.model_visible_schemas () }
+  in
   let keeper_description =
-    tool_help_description Tool_misc.dispatch_for_keeper ctx "masc_board_post"
+    tool_help_description Tool_misc.dispatch keeper_ctx "masc_board_post"
   in
   assert (str_contains public_description "MASC internal board");
   assert (String.equal keeper_description "Create a new board post.");

@@ -744,7 +744,7 @@ let test_route_evidence_records_masc_board_descriptor () =
         (Some "in_process")
         (Safe_ops.json_string_opt "executor" evidence);
       Alcotest.(check (option string)) "runtime handler"
-        (Some "tool_masc_board_dispatch")
+        (Some "tool_board_dispatch")
         (Safe_ops.json_string_opt "runtime_handler" evidence)
     | _ -> Alcotest.fail "expected exactly one entry")
 

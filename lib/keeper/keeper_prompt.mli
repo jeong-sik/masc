@@ -4,16 +4,16 @@
 
 val exact_direct_mention_present : targets:string list -> string -> bool
 
-val keeper_constitution : unit -> string
+val system_prompt_body : unit -> string
+(** The shared [keeper.system] block, read from the prompt registry. *)
 
 val ensure_critical_prompt_anchors : string -> string
 (** Append a minimal technical recovery block when the keeper system prompt
-    lost critical continuity/world anchors. Normal prompts are returned
+    lost the critical [<system>] anchor. Normal prompts are returned
     unchanged. *)
 
 val build_keeper_system_prompt :
   instructions:string ->
-  ?persona_extended:string ->
   ?keeper_name:string ->
   ?workspace_root:string ->
   ?active_goals:(string * string) list ->

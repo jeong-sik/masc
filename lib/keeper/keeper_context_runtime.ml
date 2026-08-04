@@ -414,8 +414,6 @@ let exact_direct_mention_present ~(targets : string list) (content : string) :
   Mention.any_mentioned ~targets content
 
 (* Delegate to Keeper_prompt — single source of truth for keeper prompts. *)
-let keeper_constitution = Keeper_prompt.keeper_constitution
-
 let build_keeper_system_prompt = Keeper_prompt.build_keeper_system_prompt
 
 let append_trait_clause ~(base : string) ~(clause : string) : string =

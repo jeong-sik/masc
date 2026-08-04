@@ -4,14 +4,9 @@
   "paths": [
     "analysis.dry_run.md",
     "behavior/conversation_routing.md",
-    "behavior/continuity_contract.md",
-    "behavior/profile_policy.md",
     "dashboard.gate_judge.md",
     "deliberation.decision.md",
     "keeper.board_attention_judgment_batch.md",
-    "keeper.capabilities.md",
-    "keeper.constitution.md",
-    "keeper.core_behavior.md",
     "keeper.deliberation.md",
     "keeper.gate_judgment.md",
     "keeper.librarian.current_selection.md",
@@ -20,8 +15,7 @@
     "keeper.memory_os_recall.unavailable.md",
     "keeper.recovery_block.md",
     "keeper.reply_guidelines.md",
-    "keeper.turn_intent.md",
-    "keeper.world.md",
+    "keeper.system.md",
     "system.orchestrator.md",
     "verification.anti_rationalization.md"
   ]

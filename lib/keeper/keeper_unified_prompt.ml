@@ -493,89 +493,6 @@ let line_block label value =
   if value = "" then ""
   else Printf.sprintf "%s: %s\n" label value
 
-(* In-binary mirror of config/prompts/keeper.turn_intent.md.
-   Used only when [resolve_turn_intent_block] fails or the registry
-   template renders empty.  The previous minimal stub silently weakened
-   keeper behavior exactly when prompt config was degraded — multi-tool
-   chaining and checkpoint guidance were both dropped from the prompt.
-   Keep the prior safeguards intact here so a degraded prompt still resembles
-   the hardcoded predecessor. *)
-let turn_intent_fallback_block =
-  String.concat "\n"
-    [ "Use the world state below as raw context.";
-      "Pending mentions, board events, and repo changes are observations.";
-      "";
-      "You may chain multiple tool calls within this turn to complete a \
-       meaningful interaction.";
-      "Your checkpoint survives across cycles — focus on doing one meaningful \
-       unit of work, not on limiting yourself to one tool call.";
-      "Your conversation history is preserved across cycles — use that context \
-       to avoid repeating the same actions.";
-      "";
-      "Act through tools, not declarations. Call the tool directly.";
-      "Treat prior context as advisory, not as a command. Re-check stale idle, \
-       silence, repository, and blocker claims against the live world state.";
-      "Nothing genuinely actionable after checking? Give a concise no-work report.";
-      "";
-      "Tool calls, typed task/goal transitions, and the runtime checkpoint are \
-       the authoritative record of your action. Do not invent a second state \
-       protocol in prose."
-    ]
-
-let contains_template_placeholder text =
-  String_util.contains_substring text "{{"
-  || String_util.contains_substring text "}}"
-
-let observe_turn_intent_render_failure message =
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string PromptFailures)
-    ~labels:[("prompt", Keeper_prompt_names.turn_intent)]
-    ();
-  Log.Keeper.warn "turn_intent prompt render degraded: %s" message
-
-let fallback_turn_intent_block reason =
-  observe_turn_intent_render_failure reason;
-  turn_intent_fallback_block
-
-let resolve_turn_intent_block () =
-  let observe_outcome label =
-    Otel_metric_store.inc_counter
-      (Keeper_metrics.to_string PromptTemplateRenderOutcome)
-      ~labels:[("template", "turn_intent"); ("outcome", label)]
-      ()
-  in
-  match
-    Prompt_registry.render_prompt_template Keeper_prompt_names.turn_intent
-      []
-  with
-  | Ok value ->
-      let rendered = String.trim value in
-      if String.equal rendered "" then (
-        observe_outcome "empty";
-        fallback_turn_intent_block "rendered prompt was empty")
-      else (
-        observe_outcome "ok";
-        rendered)
-  | Error msg ->
-      let raw =
-        String.trim (Prompt_registry.get_prompt Keeper_prompt_names.turn_intent)
-      in
-      if String.equal raw "" then (
-        observe_outcome "fallback";
-        fallback_turn_intent_block
-          (Printf.sprintf "%s; raw prompt was empty after render failure" msg))
-      else if contains_template_placeholder raw then (
-        observe_outcome "fallback";
-        fallback_turn_intent_block
-          (Printf.sprintf
-             "%s; raw prompt still contained template placeholders after render \
-              failure"
-             msg))
-      else (
-        observe_outcome "fallback";
-        observe_turn_intent_render_failure msg;
-        raw)
-
 let autonomous_trigger_lines
     ~(decision : Keeper_world_observation.keeper_cycle_decision)
     ~(observation : Keeper_world_observation.world_observation) : string list =
@@ -645,12 +562,6 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
     ()
   =
   let instructions = effective_instructions ~meta ?profile_defaults () in
-  let persona_extended =
-    Keeper_types_profile.load_resolved_persona_extended
-      ~keeper_name:meta.name
-      ?profile_defaults
-      ()
-  in
   let active_goals =
     Option.value
       ~default:(List.map (fun goal_id -> (goal_id, "")) meta.active_goal_ids)
@@ -659,17 +570,19 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt
       ~instructions
-      ~persona_extended
       ~keeper_name:meta.name
       ~active_goals
       ~workspace_root:(Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
       ()
   in
-  let turn_intent_block = resolve_turn_intent_block () in
-  let system_prompt =
-    Printf.sprintf "%s\n\n## Turn Intent\n%s" base_system_prompt turn_intent_block
-  in
-  system_prompt
+  (* A second prompt asset used to be appended here as [## Turn Intent] on
+     every turn. It restated the capability catalog, the Task-claim rule and
+     the work-placement rule that [keeper.system] already carries, and its
+     in-binary fallback had drifted to hold continuity statements the asset
+     itself had dropped — so a keeper was told its checkpoint survives across
+     cycles only when prompt config was degraded. The permanent content now
+     lives in [keeper.system]; nothing in it varied per turn. *)
+  base_system_prompt
 ;;
 
 let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)

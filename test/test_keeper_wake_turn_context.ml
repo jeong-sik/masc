@@ -17,8 +17,12 @@ module Prompt = Masc.Keeper_unified_prompt
 module Turn = Masc.Keeper_turn
 module Inputs = Masc.Keeper_world_observation_inputs
 
+(* Repo-root sentinel: the one shared keeper prompt file. A sentinel that no
+   longer exists makes [repo_root] fall back to the dune sandbox cwd, which
+   loads an empty prompt registry and turns every shared-contract assertion
+   below into a comparison of two empty blocks. *)
 let has_repo_prompts root =
-  Sys.file_exists (Filename.concat root "config/prompts/keeper.core_behavior.md")
+  Sys.file_exists (Filename.concat root "config/prompts/keeper.system.md")
 
 let repo_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -378,9 +382,17 @@ let test_direct_and_autonomous_share_system_prompt () =
     "stable contract is byte-identical across turn entrypoints"
     autonomous_system_prompt
     direct_system_prompt;
-  check bool "shared contract carries repository discovery policy" true
+  (* The discovery sentence this used to match was cut in masc#26579; the
+     policy it stated — an unregistered or unavailable checkout is handled
+     explicitly, and absent evidence blocks rather than licenses a guess —
+     is now stated in the merged [keeper.system] body. *)
+  check bool "shared contract carries repository checkout policy" true
     (contains
-       ~needle:"A repository you have not worked on yet has no checkout there"
+       ~needle:"handle a behind, diverged, dirty, unregistered, or unavailable"
+       direct_system_prompt);
+  check bool "shared contract refuses to infer checkout state" true
+    (contains
+       ~needle:"Missing, ambiguous, or stale checkout evidence is a blocker"
        direct_system_prompt)
 
 let test_unresolved_goal_keeps_one_stable_safety_contract () =
@@ -424,10 +436,19 @@ let test_unresolved_goal_keeps_one_stable_safety_contract () =
     (contains ~needle:"- missing-goal\n" direct_system_prompt);
   check bool "identity anchor is preserved" true
     (contains ~needle:"<identity_anchor>" direct_system_prompt);
-  check bool "world contract is preserved" true
-    (contains ~needle:"<world>" direct_system_prompt);
+  (* The shared block is one [<system>] element now. Its former
+     [<world>]/[<capabilities>] tags are gone, so the two contracts they
+     wrapped are pinned by their own sentences instead of by a tag name. *)
+  check bool "shared system block is preserved" true
+    (contains ~needle:"<system>" direct_system_prompt);
+  check bool "ownership contract is preserved" true
+    (contains
+       ~needle:"MASC owns Board, Task, Goal, Schedule"
+       direct_system_prompt);
   check bool "capability contract is preserved" true
-    (contains ~needle:"<capabilities>" direct_system_prompt)
+    (contains
+       ~needle:"The active typed schema is the sole callable catalog"
+       direct_system_prompt)
 
 (* --- 2. Threaded turn decision --- *)
 

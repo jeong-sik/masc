@@ -1,9 +1,12 @@
 (** Tier C C-5a: smoke test for the externalized behavior prompt
-    loader.  Verifies that the demonstration migration
-    ([profile_policy]) loads from
+    loader.  Verifies that [conversation_routing] loads from
     [config/prompts/behavior/*.md] (relative to the repo root, which
     Config_dir_resolver locates via [_build/] proximity) and yields
-    non-empty bodies. *)
+    non-empty bodies.
+
+    [profile_policy] and [continuity_contract] were the other two behavior
+    blocks; both were merged into the single [keeper.system] prompt, so
+    [conversation_routing] is now the only file this loader serves. *)
 
 module Lib = Masc
 
@@ -123,16 +126,15 @@ let test_loads_block name expected_substring =
             ("expected " ^ name
              ^ ".md to load from config/prompts/behavior/"))
 
-let test_loads_profile_policy () =
-  test_loads_block "profile_policy" "reasoning"
-
-let test_loads_continuity_contract () =
-  test_loads_block "continuity_contract" "Continuity"
-
 let test_loads_conversation_routing () =
   test_loads_block "conversation_routing" "Conversations are independent contexts"
 
-let test_system_prompt_includes_continuity_contract () =
+(* The continuity contract and the constitution used to be separate blocks
+   spliced into the system prompt by [Keeper_prompt]. They now live inside the
+   single [keeper.system] body, so this pins the same two guarantees at their
+   merged location: the direct-reply response contract and runtime-owned
+   continuity. *)
+let test_system_prompt_includes_continuity_and_reply_contract () =
   with_repo_root_cwd (fun () ->
       Lib.Keeper_prompt_external.reset_cache ();
       let prompt =
@@ -141,11 +143,12 @@ let test_system_prompt_includes_continuity_contract () =
           ()
       in
       Alcotest.(check bool)
-        "continuity contract present" true
-        (contains_substring prompt "When <direct_reply_mode> is present");
+        "direct-reply response contract present" true
+        (contains_substring prompt "is present, follow its response contract");
       Alcotest.(check bool)
-        "constitution still present" true
-        (contains_substring prompt "Continuity rules"))
+        "runtime-owned continuity still present" true
+        (contains_substring prompt
+           "The runtime owns continuity, through the checkpoint"))
 
 (* Pin the persona [instructions] channel end-to-end at the render boundary. *)
 let test_system_prompt_includes_instructions () =
@@ -177,8 +180,11 @@ let test_missing_returns_none () =
 let test_cache_is_used () =
   with_repo_root_cwd (fun () ->
       Lib.Keeper_prompt_external.reset_cache ();
-      let first = Lib.Keeper_prompt_external.get "profile_policy" in
-      let second = Lib.Keeper_prompt_external.get "profile_policy" in
+      (* An existing block: two [None]s would compare equal and prove nothing
+         about caching. *)
+      let first = Lib.Keeper_prompt_external.get "conversation_routing" in
+      Alcotest.(check bool) "fixture block exists" true (Option.is_some first);
+      let second = Lib.Keeper_prompt_external.get "conversation_routing" in
       Alcotest.(check (option string))
         "cache returns identical content" first second)
 
@@ -192,8 +198,15 @@ let test_source_has_no_generic_behavior_fallbacks () =
         "profile policy generic fallback removed" false
         (contains_substring src
            "Maintain high standard of reasoning, factual grounding, and clear communication.");
+      (* The drift marker moved with its only remaining caller: [Keeper_prompt]
+         no longer splices behavior blocks, [Keeper_unified_prompt] splices
+         conversation_routing. A missing behavior file must still render an
+         operator-visible marker rather than in-source prose. *)
       Alcotest.(check bool)
         "missing behavior marker present" true
+        (contains_substring unified_prompt_src "Behavior prompt config drift");
+      Alcotest.(check bool)
+        "retired behavior splice not resurrected in Keeper_prompt" false
         (contains_substring src "Behavior prompt config drift");
       Alcotest.(check bool)
         "connected surface behavior fallback removed" false
@@ -212,14 +225,10 @@ let () =
     [
       ( "load",
         [
-          Alcotest.test_case "loads profile_policy" `Quick
-            test_loads_profile_policy;
-          Alcotest.test_case "loads continuity_contract" `Quick
-            test_loads_continuity_contract;
           Alcotest.test_case "loads conversation_routing" `Quick
             test_loads_conversation_routing;
-          Alcotest.test_case "system prompt includes continuity_contract"
-            `Quick test_system_prompt_includes_continuity_contract;
+          Alcotest.test_case "system prompt includes continuity and reply contract"
+            `Quick test_system_prompt_includes_continuity_and_reply_contract;
           Alcotest.test_case "system prompt includes persona instructions"
             `Quick test_system_prompt_includes_instructions;
           Alcotest.test_case "missing returns None" `Quick

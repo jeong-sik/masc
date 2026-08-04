@@ -11,8 +11,11 @@ module Prompt = Masc.Keeper_unified_prompt
 module KTP = Masc.Keeper_types_profile
 module Inputs = Masc.Keeper_world_observation_inputs
 
+(* Repo-root sentinel: the one shared keeper prompt file. A sentinel that no
+   longer exists makes [repo_root] fall back to the dune sandbox cwd, so
+   [with_repo_prompt_config] points the registry at an empty directory. *)
 let has_repo_prompts root =
-  Sys.file_exists (Filename.concat root "config/prompts/keeper.core_behavior.md")
+  Sys.file_exists (Filename.concat root "config/prompts/keeper.system.md")
 
 let repo_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -247,7 +250,7 @@ let test_profile_defaults_feed_identity_prompt () =
     system_prompt ~profile_defaults base_observation
   in
   check bool "profile instructions in system prompt" true
-    (contains ~needle:"Instructions:\nsoul instructions" system)
+    (contains ~needle:"Custom instructions:\nsoul instructions" system)
 
 let test_no_goal_prompt_blocks_repo_creation_question () =
   with_repo_prompt_config @@ fun () ->
@@ -307,11 +310,17 @@ let test_local_keeper_sees_its_host_root () =
 let test_docker_root_is_not_promised_as_execution_operand () =
   with_repo_prompt_config (fun () ->
     let rendered, _ = sandbox_root_for Masc.Keeper_types_profile.Docker in
-    check bool "docker prompt forbids absolute execution operands" true
+    (* The caveat is two lines of the [<workspace>] block: the absolute root
+       is not a typed cwd, and argv path operands stay relative. Both are
+       required — dropping either one hands a Docker keeper a path it cannot
+       execute against (#10650). *)
+    check bool "docker prompt forbids the absolute root as a typed cwd" true
       (contains
          ~needle:
-           "never place this absolute path in a typed cwd or an argv operand"
+           "Pass a relative typed `cwd` (usually `.`), not this absolute root."
          rendered);
+    check bool "docker prompt keeps argv path operands relative" true
+      (contains ~needle:"Prefer relative argv path operands." rendered);
     let config = Masc.Workspace.default_config "/tmp/unused" in
     let docker_meta =
       { meta with

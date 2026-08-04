@@ -475,17 +475,25 @@ let masc_goal_list_schema =
 let tool_edit_file_schema =
   find_schema_exn "tool_edit_file" Config.raw_all_tool_schemas
 
-let masc_board_post_schema =
-  find_schema_exn "masc_board_post" Config.raw_all_tool_schemas
+let keeper_model_board_post_schema =
+  find_schema_exn
+    "masc_board_post"
+    (Keeper_tool_descriptor.model_visible_schemas ())
 
-let masc_board_list_schema =
-  find_schema_exn "masc_board_list" Config.raw_all_tool_schemas
+let keeper_model_board_list_schema =
+  find_schema_exn
+    "masc_board_list"
+    (Keeper_tool_descriptor.model_visible_schemas ())
 
-let masc_board_search_schema =
-  find_schema_exn "masc_board_search" Config.raw_all_tool_schemas
+let keeper_model_board_search_schema =
+  find_schema_exn
+    "masc_board_search"
+    (Keeper_tool_descriptor.model_visible_schemas ())
 
-let masc_board_post_get_schema =
-  find_schema_exn "masc_board_post_get" Config.raw_all_tool_schemas
+let keeper_model_board_post_get_schema =
+  find_schema_exn
+    "masc_board_post_get"
+    (Keeper_tool_descriptor.model_visible_schemas ())
 
 let keeper_memory_search_schema =
   find_schema_exn "keeper_memory_search" Config.raw_all_tool_schemas
@@ -572,7 +580,7 @@ let check_masc_board_post_sources_preserved forwarded =
 let test_validate_args_masc_board_post_accepts_sources_array () =
   match
     Tool_input_validation.validate_args
-      ~schema:masc_board_post_schema
+      ~schema:keeper_model_board_post_schema
       ~name:"masc_board_post"
       ~args:masc_board_post_sources_args
       ()
@@ -586,7 +594,7 @@ let test_validate_args_masc_board_post_accepts_sources_array () =
 let test_registered_hook_masc_board_post_accepts_sources_array () =
   let blocked, forwarded =
     run_registered_hook
-      ~schema:masc_board_post_schema
+      ~schema:keeper_model_board_post_schema
       ~tool_name:"masc_board_post"
       ~args:masc_board_post_sources_args
       ()
@@ -603,7 +611,7 @@ let test_registered_hook_masc_board_post_accepts_sources_array () =
 let test_validate_args_masc_board_list_accepts_compact () =
   match
     Tool_input_validation.validate_args
-      ~schema:masc_board_list_schema
+      ~schema:keeper_model_board_list_schema
       ~name:"masc_board_list"
       ~args:(`Assoc [ "limit", `Int 5; "compact", `Bool false ])
       ()
@@ -617,7 +625,7 @@ let test_validate_args_masc_board_list_accepts_compact () =
 let test_validate_args_masc_board_search_accepts_compact () =
   match
     Tool_input_validation.validate_args
-      ~schema:masc_board_search_schema
+      ~schema:keeper_model_board_search_schema
       ~name:"masc_board_search"
       ~args:(`Assoc [ "query", `String "x"; "compact", `Bool false ])
       ()
@@ -633,7 +641,7 @@ let test_validate_args_masc_board_search_accepts_compact () =
 let test_validate_args_masc_board_list_rejects_unknown_field () =
   match
     Tool_input_validation.validate_args
-      ~schema:masc_board_list_schema
+      ~schema:keeper_model_board_list_schema
       ~name:"masc_board_list"
       ~args:(`Assoc [ "limit", `Int 5; "definitely_not_a_field", `Bool true ])
       ()
@@ -1749,7 +1757,7 @@ let test_typed_tool_contract_rejection_corpus () =
       , [ "evidence_refs" ] )
     ; ( "masc_board_post_get missing post_id"
       , "masc_board_post_get"
-      , masc_board_post_get_schema
+      , keeper_model_board_post_get_schema
       , `Assoc []
       , [ "post_id" ] )
     ; ( "masc_transition retired alias fields"
@@ -1791,13 +1799,16 @@ let test_keeper_tool_schemas_pin_required_fields () =
   assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "evidence_refs";
   assert_schema_requires
     "masc_board_post_get schema"
-    masc_board_post_get_schema
+    keeper_model_board_post_get_schema
     "post_id";
-  assert_schema_requires "masc_board_post schema" masc_board_post_schema "content";
+  assert_schema_requires
+    "Keeper-model masc_board_post schema"
+    keeper_model_board_post_schema
+    "content";
   Alcotest.(check bool)
     "masc_board_post schema does not require hearth"
     false
-    (List.mem "hearth" (schema_required_fields masc_board_post_schema))
+    (List.mem "hearth" (schema_required_fields keeper_model_board_post_schema))
 
 (* ================================================================ *)
 (* Test: oneOf with empty/null values (regression guard)             *)

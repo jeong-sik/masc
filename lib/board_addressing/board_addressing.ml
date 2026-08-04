@@ -26,7 +26,59 @@ let trim_token_edges value =
   if !last < !first then "" else String.sub value !first (!last - !first + 1)
 ;;
 
+(* Markdown code spans and fences are not address text. A comment that
+   mentions `@internals/libs/datadogRum`, `@/lib/constants` or `@@` is
+   discussing code, and tokenizing inside those regions turns every such
+   comment into Malformed_targets and rejects it whole. Live board comments
+   carry exactly those three shapes.
+
+   Blanking rather than deleting keeps the surrounding text separated: a
+   fence between two words must not join them into one token. Content is
+   replaced with spaces so offsets and word boundaries survive.
+
+   An unterminated backtick blanks to end of text. That is the fail-closed
+   direction for this function: an author who opened a code span and did not
+   close it addressed nobody after it. *)
+let blank_code_regions text =
+  let length = String.length text in
+  let buffer = Bytes.of_string text in
+  let blank_range start stop =
+    for index = start to min stop (length - 1) do
+      Bytes.set buffer index ' '
+    done
+  in
+  let run_length_at index =
+    let rec count offset =
+      if index + offset < length && text.[index + offset] = '`' then count (offset + 1)
+      else offset
+    in
+    count 0
+  in
+  let rec scan index =
+    if index >= length then ()
+    else if text.[index] = '`' then (
+      let opener = run_length_at index in
+      let body = index + opener in
+      let rec find_close cursor =
+        if cursor >= length then None
+        else if text.[cursor] = '`' && run_length_at cursor = opener then Some cursor
+        else find_close (cursor + 1)
+      in
+      match find_close body with
+      | Some closer ->
+        blank_range index (closer + opener - 1);
+        scan (closer + opener)
+      | None ->
+        blank_range index (length - 1);
+        ())
+    else scan (index + 1)
+  in
+  scan 0;
+  Bytes.to_string buffer
+;;
+
 let tokens_of_text text =
+  let text = blank_code_regions text in
   text
   |> String.map (function
     | '\t' | '\n' | '\r' -> ' '

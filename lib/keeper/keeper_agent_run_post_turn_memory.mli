@@ -20,7 +20,6 @@ val run :
   turn_effect_record:Keeper_run_prompt.turn_effect_record ->
   post_turn_t0:float ->
   inference_telemetry:Agent_sdk.Types.inference_telemetry option ->
-  ?deliberation_execution:Keeper_deliberation.execution_result ->
   unit ->
   unit
 (** Run the full post-turn memory series.
@@ -37,10 +36,6 @@ val run :
     ([Keeper_types_profile.load_resolved_persona_extended]); the resolved
     persona text rides the Librarian input so curation judges importance
     through the keeper's identity.
-
-    [deliberation_execution], when available, is persisted as advisory
-    delegation request artifacts on this post-turn memory lane rather than on
-    the decision-record append path.
 
     The post-turn entrypoint owns Librarian admission and its execution fence.
     Disabled or invalid configuration does not submit a Librarian unit or read

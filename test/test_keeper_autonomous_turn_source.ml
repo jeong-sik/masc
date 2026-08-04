@@ -1,4 +1,4 @@
-(** Exact-run and public-redaction guards for Keeper_autonomous_turn_source. *)
+(** Exact-run activity projection guards for Keeper_autonomous_turn_source. *)
 
 open Masc
 
@@ -75,6 +75,17 @@ let run_lines ~worker_run_id ~start_seq ~base_ts ~prompt ~final_text =
       ; "tool_execution_mode", `String "serial"
       ]
   ; raw_record ~worker_run_id ~seq:(start_seq + 3) ~ts:(base_ts +. 3.)
+      ~record_type:Agent_sdk.Raw_trace.Tool_execution_finished
+      [ "tool_name", `String "Read"
+      ; "tool_result", `String {|{"files":["target.ml"]}|}
+      ; "tool_error", `Bool false
+      ; "tool_use_id", `String ("tool-" ^ worker_run_id)
+      ; "tool_turn", `Int 1
+      ; "tool_planned_index", `Int 0
+      ; "tool_batch_index", `Int 0
+      ; "tool_batch_size", `Int 1
+      ]
+  ; raw_record ~worker_run_id ~seq:(start_seq + 4) ~ts:(base_ts +. 4.)
       ~record_type:Agent_sdk.Raw_trace.Run_finished
       [ "final_text", `String final_text; "stop_reason", `String "end_turn" ]
   ]
@@ -94,7 +105,7 @@ let run_ref ~path ~worker_run_id ~start_seq =
   { Turn_record.worker_run_id
   ; path
   ; start_seq
-  ; end_seq = start_seq + 3
+  ; end_seq = start_seq + 4
   ; agent_name
   ; session_id = trace_id
   }
@@ -147,7 +158,7 @@ let trace_path config suffix =
   Filename.concat (ensure_trace_dir config) ("turn-0000000000000-" ^ suffix ^ ".jsonl")
 ;;
 
-let test_projects_only_public_exact_run () =
+let test_projects_exact_run_outcome_and_activity () =
   with_workspace @@ fun config ->
   let path = trace_path config "exact" in
   let first = run_lines ~worker_run_id:"run-first" ~start_seq:1 ~base_ts:1000.
@@ -161,11 +172,23 @@ let test_projects_only_public_exact_run () =
   match Keeper_autonomous_turn_source.load_recent ~config ~keeper_name () with
   | [ turn ] ->
     Alcotest.(check string) "typed turn ref" "trace-test-0000#41" turn.turn_id;
-    Alcotest.(check string) "agent identity" agent_name turn.agent_name;
-    Alcotest.(check int) "generation" 9 turn.generation;
     Alcotest.(check (option string)) "only selected run outcome"
       (Some "selected outcome") turn.final_text;
-    Alcotest.(check (float 0.001)) "selected run timestamp" 2000. turn.started_at
+    Alcotest.(check (float 0.001)) "selected run timestamp" 2000. turn.started_at;
+    (match turn.trace with
+     | [ Keeper_chat_blocks.Trace_think thinking
+       ; Keeper_chat_blocks.Trace_tool tool
+       ] ->
+       Alcotest.(check string) "thinking content is not public"
+         "내부 판단 단계 (내용 비공개)" thinking.text;
+       Alcotest.(check string) "tool name" "Read" tool.name;
+       Alcotest.(check (option string)) "tool id is not public" None tool.tool_call_id;
+       Alcotest.(check (option string)) "tool duration" (Some "1000ms") tool.dur;
+       Alcotest.(check bool) "tool input is not public" true (tool.args = None);
+       Alcotest.(check bool) "tool result is not public" true (tool.result = None)
+     | trace ->
+       Alcotest.failf "expected think + tool trace, got %d step(s)"
+         (List.length trace))
   | turns -> Alcotest.failf "expected one exact turn, got %d" (List.length turns)
 ;;
 
@@ -216,16 +239,87 @@ let test_since_and_limit_use_current_records () =
     (List.map (fun (turn : Keeper_autonomous_turn_source.turn) -> turn.final_text) turns)
 ;;
 
+(* The reader above can only project turns whose record carries an exact run
+   reference, so the writer-side acceptance rule belongs to the same guard set.
+   [Keeper_turn_driver] mints the OAS runtime identity as "oas-<runtime_id>",
+   which never equals the keeper agent identity; comparing the two rejected
+   every reference and left every autonomous turn unprojectable. *)
+let sdk_run_ref ~agent_name ~session_id : Agent_sdk.Raw_trace.run_ref =
+  { worker_run_id = "wr-exact-run"
+  ; path = "/keepers/" ^ keeper_name ^ "/raw-traces/turn-exact.jsonl"
+  ; start_seq = 1
+  ; end_seq = 4
+  ; agent_name
+  ; session_id
+  }
+;;
+
+let test_runtime_identity_is_recorded_not_compared () =
+  let runtime_agent_name = "oas-ollama_cloud.deepseek-v4-flash" in
+  match
+    Keeper_agent_run.For_testing.turn_record_raw_trace_run_ref
+      ~expected_session_id:trace_id
+      (sdk_run_ref ~agent_name:runtime_agent_name ~session_id:(Some trace_id))
+  with
+  | Error detail -> Alcotest.failf "runtime identity was compared, not recorded: %s" detail
+  | Ok (recorded : Turn_record.raw_trace_run_ref) ->
+    Alcotest.(check string) "records the runtime identity verbatim" runtime_agent_name
+      recorded.agent_name;
+    Alcotest.(check string) "records the keeper session identity" trace_id
+      recorded.session_id
+;;
+
+let test_keeper_agent_identity_is_also_accepted () =
+  match
+    Keeper_agent_run.For_testing.turn_record_raw_trace_run_ref
+      ~expected_session_id:trace_id
+      (sdk_run_ref ~agent_name ~session_id:(Some trace_id))
+  with
+  | Error detail -> Alcotest.failf "expected the reference to be recorded: %s" detail
+  | Ok (recorded : Turn_record.raw_trace_run_ref) ->
+    Alcotest.(check string) "records the supplied identity" agent_name recorded.agent_name
+;;
+
+let test_session_identity_mismatch_is_rejected () =
+  match
+    Keeper_agent_run.For_testing.turn_record_raw_trace_run_ref
+      ~expected_session_id:trace_id
+      (sdk_run_ref ~agent_name ~session_id:(Some "trace-other-9999"))
+  with
+  | Ok _ -> Alcotest.fail "a foreign session identity was recorded"
+  | Error _ -> ()
+;;
+
+let test_absent_session_identity_is_rejected () =
+  match
+    Keeper_agent_run.For_testing.turn_record_raw_trace_run_ref
+      ~expected_session_id:trace_id
+      (sdk_run_ref ~agent_name ~session_id:None)
+  with
+  | Ok _ -> Alcotest.fail "a reference without session identity was recorded"
+  | Error _ -> ()
+;;
+
 let () =
   Alcotest.run "keeper_autonomous_turn_source"
     [ ( "load_recent"
-      , [ Alcotest.test_case "projects only the exact public run" `Quick
-            test_projects_only_public_exact_run
+      , [ Alcotest.test_case "projects exact run outcome and activity" `Quick
+            test_projects_exact_run_outcome_and_activity
         ; Alcotest.test_case "typed direct kind defeats marker spoof" `Quick
             test_direct_marker_spoof_is_excluded
         ; Alcotest.test_case "rejects trace paths outside keeper store" `Quick
             test_missing_or_outside_trace_is_skipped
         ; Alcotest.test_case "since and limit use current records" `Quick
             test_since_and_limit_use_current_records
+        ] )
+    ; ( "exact_run_reference"
+      , [ Alcotest.test_case "records the OAS runtime identity" `Quick
+            test_runtime_identity_is_recorded_not_compared
+        ; Alcotest.test_case "records a keeper-shaped identity" `Quick
+            test_keeper_agent_identity_is_also_accepted
+        ; Alcotest.test_case "rejects a foreign session identity" `Quick
+            test_session_identity_mismatch_is_rejected
+        ; Alcotest.test_case "rejects an absent session identity" `Quick
+            test_absent_session_identity_is_rejected
         ] )
     ]

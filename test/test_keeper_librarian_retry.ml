@@ -7,7 +7,7 @@ module Budget = Masc.Keeper_memory_os_budget
 
 (* Render tests resolve the real repo templates so template <-> code
    variable drift fails here instead of as a live [Prompt_render_failed]
-   (same pattern as test_keeper_unified_persona_block). *)
+   (same pattern as test_keeper_prompt_metrics). *)
 let has_prompt_root path =
   Sys.file_exists
     (Filename.concat path "config/prompts/keeper.librarian.current_selection.md")

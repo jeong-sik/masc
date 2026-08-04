@@ -3313,6 +3313,7 @@ function ToolTraceStep({
   traceStep,
   orderIndex,
   orderKind = 'tool',
+  structuralSummary = false,
 }: {
   entry: KeeperConversationEntry | null
   output: ToolCallEntry | null
@@ -3322,14 +3323,17 @@ function ToolTraceStep({
   traceStep?: ChatTraceToolStep
   orderIndex?: number
   orderKind?: 'tool' | 'tool-entry'
+  structuralSummary?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const name = traceStep?.name || entry?.label || 'tool'
   const callId = toolTraceCallId(entry, traceStep)
   const displayArgs = prettyJsonish(entry?.text || traceStep?.args || '')
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
-  const unlinkedTraceTool = isUnlinkedTraceTool(entry, traceStep)
-  const sourceBadge = toolTraceSourceBadge(entry, traceStep)
+  const unlinkedTraceTool = !structuralSummary && isUnlinkedTraceTool(entry, traceStep)
+  const sourceBadge = structuralSummary
+    ? { label: 'activity', title: 'source: autonomous activity summary', tone: 'tool' as const }
+    : toolTraceSourceBadge(entry, traceStep)
   let status: ToolTraceDisplayStatus
   if (unlinkedTraceTool) {
     status = 'unlinked'
@@ -3354,7 +3358,7 @@ function ToolTraceStep({
   const hasResult = resultView !== null && resultView.text.trim() !== ''
   // Expandable when there is anything to show: args, a result, or a still-pending
   // call (so the operator can open it and see "출력 대기 중…").
-  const hasBody = unlinkedTraceTool || !isEmptyArgs || hasResult || output === null
+  const hasBody = !structuralSummary && (unlinkedTraceTool || !isEmptyArgs || hasResult || output === null)
 
   return html`
     <div
@@ -3366,7 +3370,7 @@ function ToolTraceStep({
       data-chat-trace-tool-call-id=${callId ?? undefined}
       data-chat-trace-oas-block-index=${traceStep?.oasBlockIndex ?? undefined}
       data-chat-trace-entry-id=${entry?.id ?? undefined}
-      data-chat-trace-link-state=${unlinkedTraceTool ? 'unlinked' : entry ? 'joined' : 'trace-only'}
+      data-chat-trace-link-state=${structuralSummary ? 'structural' : unlinkedTraceTool ? 'unlinked' : entry ? 'joined' : 'trace-only'}
       data-chat-trace-output-state=${status}
       data-chat-trace-output-coverage=${coverageState}
     >
@@ -3558,6 +3562,7 @@ function ToolTraceCard({
   toolOutputHydrationContract?: ToolCallOutputHydrationContract | null
 }) {
   const liveTurn = assistant !== null && !turnComplete
+  const structuralSummary = assistant?.source === 'autonomous_turn'
   const userToggledRef = useRef(false)
   const [open, setOpen] = useState(() => !liveTurn)
   useEffect(() => {
@@ -3609,7 +3614,7 @@ function ToolTraceCard({
     (s) => s.output === null && s.entry !== null && turnComplete && coverageStateForEntry(s.entry) === 'hydration-failed',
   ).length
   const unlinkedN = orderedToolSteps.filter(
-    (s) => s.kind === 'tool' && s.entry === null && !s.step.toolCallId?.trim(),
+    (s) => !structuralSummary && s.kind === 'tool' && s.entry === null && !s.step.toolCallId?.trim(),
   ).length
   const totalMs = orderedToolSteps.reduce(
     (sum, s) => sum + (s.output?.duration_ms ?? (s.kind === 'tool' ? traceStepDurationMs(s.step.dur) : 0)),
@@ -3688,6 +3693,7 @@ function ToolTraceCard({
                           hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}
                           traceStep=${item.step}
                           orderIndex=${index}
+                          structuralSummary=${structuralSummary}
                           orderKind="tool"
                         />`
                       })()
@@ -3794,9 +3800,8 @@ function autonomousGroupSpanLabel(entries: KeeperConversationEntry[]): string | 
 /** A run of consecutive autonomous turns, collapsed into a single row. Starts
  *  closed: these turns are the keeper working on its own, and the transcript's
  *  subject is the conversation around them. Expanding renders each turn through
- *  TurnWorkBundle — the same component a direct turn uses. Public autonomous
- *  rows contain only their visible outcome; raw thinking and tool arguments
- *  never cross the history endpoint. */
+ *  TurnWorkBundle — the same component a direct turn uses. Each expanded row
+ *  renders the exact run's final text and typed work trace. */
 function AutonomousTurnGroup({
   entries,
   showMetadata,
@@ -3832,18 +3837,27 @@ function AutonomousTurnGroup({
         ${span ? html`<span class="chat-block-trace-meta">${span}</span>` : null}
       </button>
       ${open
-        ? entries.map((entry) => html`<${TurnWorkBundle}
-            key=${entry.id}
-            tools=${[]}
-            assistant=${entry}
-            showMetadata=${showMetadata}
-            variant=${variant}
-            showSourceBadge=${showSourceBadge}
-            toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
-            toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
-            toolOutputHydrationContract=${toolOutputHydrationContract}
-            action=${action}
-          />`)
+        ? entries.map((entry) => (entry.traceSteps?.length ?? 0) > 0
+          ? html`<${TurnWorkBundle}
+              key=${entry.id}
+              tools=${[]}
+              assistant=${entry}
+              showMetadata=${showMetadata}
+              variant=${variant}
+              showSourceBadge=${showSourceBadge}
+              toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
+              toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
+              toolOutputHydrationContract=${toolOutputHydrationContract}
+              action=${action}
+            />`
+          : html`<${ChatMessageSurface}
+              key=${entry.id}
+              entry=${entry}
+              showMetadata=${showMetadata !== false}
+              variant=${variant}
+              showSourceBadge=${showSourceBadge}
+              action=${action}
+            />`)
         : null}
     </div>
   `

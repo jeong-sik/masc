@@ -1,4 +1,4 @@
-(** Board persisted-row schema, typed origin codec, and secondary indexes.
+(** Board persisted-row schemas, typed origin codec, and secondary indexes.
 
     Pins the board-side half of the turn-identity contract:
     - {!Board_core_json.post_to_yojson} / {!Board_votes_json.post_of_yojson}
@@ -8,7 +8,8 @@
       fields reject the row.
     - {!Board_core.find_post_by_turn_ref} / {!find_post_by_run_id} are exact
       O(1) index lookups (RFC §7.6 guard #2/#3, no meta_json scan, no window),
-      and the indexes are rebuilt on load. *)
+      and the indexes are rebuilt on load.
+    - reactions and sub-boards accept only their current writer shapes. *)
 
 open Masc
 
@@ -19,7 +20,7 @@ let set_temp_base () =
   let dir =
     Filename.concat
       (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc-test-board-origin-%06x" (Random.bits ()))
+      (Printf.sprintf "masc-test-board-persistence-schema-%06x" (Random.bits ()))
   in
   Unix.putenv "MASC_BASE_PATH" dir;
   dir
@@ -236,6 +237,163 @@ let test_current_comment_schema_is_exact () =
     (Option.is_none (decode_comment (prepend_field json ("unknown", `Int 1))))
 ;;
 
+let test_current_reaction_schema_is_exact () =
+  let store = Board_core.create_store () in
+  let post = create_no_origin store ~content:"reaction parent" in
+  let user_id =
+    match Board.Agent_id.of_string "reaction-user" with
+    | Ok user_id -> user_id
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let reaction : Board.reaction =
+    { target_type = Board.Reaction_post
+    ; target_id = Board.Post_id.to_string post.id
+    ; user_id
+    ; emoji = "👍"
+    ; created_at = Time_compat.now ()
+    }
+  in
+  let json = Board_core.reaction_to_yojson reaction in
+  let decode_reaction = Board_core.reaction_of_yojson in
+  Alcotest.(check bool)
+    "canonical reaction round trip"
+    true
+    (Option.is_some (decode_reaction json));
+  List.iter
+    (fun field ->
+       Alcotest.(check bool)
+         (field ^ " is required")
+         true
+         (Option.is_none (decode_reaction (remove_key json field))))
+    [ "target_type"; "target_id"; "user_id"; "emoji"; "created_at" ];
+  let rejected label candidate =
+    Alcotest.(check bool) label true (Option.is_none (decode_reaction candidate))
+  in
+  rejected "unknown field rejected" (prepend_field json ("unknown", `Int 1));
+  rejected
+    "duplicate field rejected"
+    (prepend_field json ("emoji", `String "👍"));
+  rejected
+    "uppercase target type rejected"
+    (replace_key json "target_type" (`String "POST"));
+  rejected
+    "non-canonical target id rejected"
+    (replace_key json "target_id" (`String " padded "));
+  rejected
+    "non-canonical user id rejected"
+    (replace_key json "user_id" (`String " reaction-user "));
+  rejected
+    "unsupported emoji rejected"
+    (replace_key json "emoji" (`String "x"));
+  rejected "integer timestamp rejected" (replace_key json "created_at" (`Int 1));
+  rejected "zero timestamp rejected" (replace_key json "created_at" (`Float 0.0))
+;;
+
+let test_current_sub_board_schema_is_exact () =
+  let store = Board_core.create_store () in
+  let sub_board =
+    match
+      Board_core.create_sub_board
+        store
+        ~slug:"current-space"
+        ~name:"Current"
+        ~description:"Exact current sub-board"
+        ~owner:"space-owner"
+        ~members:[ "space-member" ]
+        ()
+    with
+    | Ok sub_board -> sub_board
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let json = Board_core.sub_board_to_yojson sub_board in
+  let decode_sub_board = Board_core.sub_board_of_yojson in
+  Alcotest.(check bool)
+    "canonical sub-board round trip"
+    true
+    (Option.is_some (decode_sub_board json));
+  List.iter
+    (fun field ->
+       Alcotest.(check bool)
+         (field ^ " is required")
+         true
+         (Option.is_none (decode_sub_board (remove_key json field))))
+    [ "id"
+    ; "slug"
+    ; "name"
+    ; "description"
+    ; "owner"
+    ; "members"
+    ; "access"
+    ; "created_at"
+    ; "post_count"
+    ];
+  let rejected label candidate =
+    Alcotest.(check bool) label true (Option.is_none (decode_sub_board candidate))
+  in
+  rejected "unknown field rejected" (prepend_field json ("unknown", `Int 1));
+  rejected
+    "duplicate field rejected"
+    (prepend_field json ("slug", `String "current-space"));
+  rejected "uppercase slug rejected" (replace_key json "slug" (`String "Current"));
+  rejected "uppercase access rejected" (replace_key json "access" (`String "OPEN"));
+  rejected "integer timestamp rejected" (replace_key json "created_at" (`Int 1));
+  rejected "nonzero derived count rejected" (replace_key json "post_count" (`Int 1));
+  rejected
+    "owner must remain first member"
+    (replace_key json "members" (`List [ `String "space-member" ]));
+  rejected
+    "duplicate member rejected"
+    (replace_key
+       json
+       "members"
+       (`List
+          [ `String "space-owner"
+          ; `String "space-member"
+          ; `String "space-member"
+          ]));
+  rejected
+    "malformed member rejected"
+    (replace_key
+       json
+       "members"
+       (`List [ `String "space-owner"; `String "not valid" ]))
+;;
+
+let test_sub_board_update_rejects_invalid_members () =
+  let store = Board_core.create_store () in
+  let sub_board =
+    match
+      Board_core.create_sub_board
+        store
+        ~slug:"update-space"
+        ~name:"Before"
+        ~description:""
+        ~owner:"update-owner"
+        ~members:[ "existing-member" ]
+        ()
+    with
+    | Ok sub_board -> sub_board
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let sub_board_id = Board.Sub_board_id.to_string sub_board.id in
+  (match
+     Board_core.update_sub_board
+       store
+       ~sub_board_id
+       ~members:[ "replacement"; "not valid" ]
+       ()
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "invalid member update must fail");
+  match Board_core.get_sub_board store ~sub_board_id with
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+  | Ok current ->
+    Alcotest.(check (list string))
+      "failed update preserves members"
+      [ "update-owner"; "existing-member" ]
+      (List.map Board.Agent_id.to_string current.members)
+;;
+
 (* Producer side (RFC-0233 §7): the keeper-authored origin constructor used by
    keeper_speech (request-help posts) and keeper_alert. Pins that a keeper post
    carries [origin.turn_ref = Some _] and a typed [source], with
@@ -335,8 +493,8 @@ let test_index_pruned_on_sweep () =
 
 let () =
   Alcotest.run
-    "board_post_origin"
-    [ ( "codec"
+    "board_persistence_schema"
+    [ ( "current rows"
       , [ Alcotest.test_case "origin round trip" `Quick (with_eio test_codec_round_trip)
         ; Alcotest.test_case "absent origin -> None" `Quick (with_eio test_codec_absent_origin)
         ; Alcotest.test_case
@@ -351,6 +509,18 @@ let () =
             "current comment schema is exact"
             `Quick
             (with_eio test_current_comment_schema_is_exact)
+        ; Alcotest.test_case
+            "current reaction schema is exact"
+            `Quick
+            (with_eio test_current_reaction_schema_is_exact)
+        ; Alcotest.test_case
+            "current sub-board schema is exact"
+            `Quick
+            (with_eio test_current_sub_board_schema_is_exact)
+        ; Alcotest.test_case
+            "sub-board update rejects invalid members"
+            `Quick
+            (with_eio test_sub_board_update_rejects_invalid_members)
         ; Alcotest.test_case
             "keeper-authored origin carries turn_ref"
             `Quick

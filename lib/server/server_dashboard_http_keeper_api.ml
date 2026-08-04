@@ -1035,34 +1035,29 @@ let keeper_chat_history_freshness config name =
   Printf.sprintf "%s|%s|%s" chat_stamp trace_stamp turn_record_stamp
 ;;
 
-(* An autonomous turn is not a chat row and must not become one (see
-   {!Keeper_autonomous_turn_source}): it carries [autonomous_turn] so the
-   dashboard groups it instead of rendering it as conversation. [content]
-   repeats the terminal text so a client that ignores the field shows the
-   turn's outcome rather than an empty bubble. *)
+(* An autonomous turn is not a chat-store row (see
+   {!Keeper_autonomous_turn_source}): this read projection carries a typed
+   [autonomous_turn] identity so the dashboard groups it separately from
+   conversation. Final text and work trace come from the same exact OAS run. *)
 let autonomous_turn_json (turn : Keeper_autonomous_turn_source.turn) =
-  let optional_fields =
-    List.filter_map Fun.id
-      [ Option.map (fun ts -> "finished_at", `Float ts) turn.finished_at
-      ; Option.map (fun model -> "model", `String model) turn.model
-      ; Option.map (fun reason -> "stop_reason", `String reason) turn.stop_reason
-      ]
+  let trace_fields =
+    match turn.trace with
+    | [] -> []
+    | trace ->
+      [ ( "blocks"
+        , Keeper_chat_blocks.blocks_to_yojson
+            [ Keeper_chat_blocks.Trace { trace } ] ) ]
   in
   `Assoc
-    [ "id", `String ("autonomous:" ^ turn.turn_id)
-    ; "role", `String "assistant"
-    ; "ts", `Float turn.started_at
-    ; ( "content"
-      , match turn.final_text with
-        | Some text -> `String text
-        | None -> `Null )
-    ; ( "autonomous_turn"
-      , `Assoc
-          (("turn_id", `String turn.turn_id)
-           :: ("agent_name", `String turn.agent_name)
-           :: ("generation", `Int turn.generation)
-           :: optional_fields) )
-    ]
+    ([ "role", `String "assistant"
+     ; "ts", `Float turn.started_at
+     ; ( "content"
+       , match turn.final_text with
+         | Some text -> `String text
+         | None -> `Null )
+     ; "autonomous_turn", `Assoc [ "turn_id", `String turn.turn_id ]
+     ]
+     @ trace_fields)
 ;;
 
 let keeper_chat_history_json config name =

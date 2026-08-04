@@ -19,12 +19,7 @@ include Board_core
 
 let vote_direction_to_string = function Up -> "up" | Down -> "down"
 
-(* Issue #8506: Variant SSOT for vote_direction. Adding a constructor
-   forces [vote_direction_to_string] exhaustiveness AND extends
-   [valid_vote_direction_strings]; the schema in [tool_shard.ml]
-   mirrors this list (cycle-aware, sync test). Previously
-   server_bootstrap_loops.ml re-implemented the same match inline 4
-   times — those call sites now use this helper. *)
+(* Variant witness used to derive the schema enum from the canonical encoder. *)
 let all_vote_directions = [ Up; Down ]
 let valid_vote_direction_strings =
   List.map vote_direction_to_string all_vote_directions
@@ -44,12 +39,8 @@ let vote_log_path () =
     (Common.masc_dir_from_base_path ~base_path:base)
     "board_votes.jsonl"
 
-(* #10086: [ts] is the cast timestamp supplied by the caller.  Both
-   the append (line-append on cast) and the rewrite (atomic flush
-   from the in-memory store) MUST serialize the same [ts] for a
-   given (target, voter) pair — otherwise analytics keyed on vote
-   recency (hot ranking, vote-velocity windows) see fabricated
-   timestamps advancing on every flush cycle. *)
+(* Append and snapshot writers persist the cast timestamp stored for the exact
+   [(target, voter)] vote identity. *)
 let append_vote_log ~target ~voter ~direction ~ts =
   try
     ensure_masc_dir ();
@@ -61,7 +52,6 @@ let append_vote_log ~target ~voter ~direction ~ts =
       ("ts", `Float ts);
     ] in
     Fs_compat.append_file path (Yojson.Safe.to_string json ^ "\n");
-    rotate_if_needed path
   with Sys_error msg -> Log.BoardLog.error "persist error (append_vote_log): %s" msg
 
 let vote_log_jsonl store =
@@ -69,10 +59,9 @@ let vote_log_jsonl store =
   Hashtbl.iter
     (fun target (direction, ts) ->
       let voter =
-        match String.rindex_opt target ':' with
-        | Some idx when idx + 1 < String.length target ->
-            String.sub target (idx + 1) (String.length target - idx - 1)
-        | _ -> ""
+        match Board_vote_key.of_string target with
+        | Some vote -> Board_vote_key.voter vote |> Agent_id.to_string
+        | None -> invalid_arg (Printf.sprintf "invalid in-memory vote key: %S" target)
       in
       let json =
         `Assoc
@@ -80,11 +69,7 @@ let vote_log_jsonl store =
             ("target", `String target);
             ("voter", `String voter);
             ("direction", `String (vote_direction_to_string direction));
-            (* #10086: persist the cast ts stored alongside the
-               direction, NOT [Time_compat.now ()].  The previous
-               behaviour rewrote every row's timestamp on each
-               flush cycle, destroying audit and feeding wrong
-               values to hot-ranking / recency scoring. *)
+            (* Snapshot rewrites preserve the cast timestamp. *)
             ("ts", `Float ts);
           ]
       in
@@ -104,6 +89,49 @@ let save_vote_log_jsonl content =
 
 let rewrite_vote_log store =
   save_vote_log_jsonl (vote_log_jsonl store)
+
+let persisted_vote_direction_of_string_opt = function
+  | "up" -> Some Up
+  | "down" -> Some Down
+  | _ -> None
+
+let persisted_vote_row_of_yojson = function
+  | `Assoc fields ->
+    let has_exact_fields =
+      let allowed = [ "target"; "voter"; "direction"; "ts" ] in
+      let rec loop seen = function
+        | [] -> true
+        | (name, _) :: rest ->
+          if List.mem name seen || not (List.mem name allowed)
+          then false
+          else loop (name :: seen) rest
+      in
+      loop [] fields
+    in
+    if not has_exact_fields
+    then None
+    else
+      (match
+         ( List.assoc_opt "target" fields
+         , List.assoc_opt "voter" fields
+         , List.assoc_opt "direction" fields
+         , List.assoc_opt "ts" fields )
+       with
+       | ( Some (`String target)
+         , Some (`String voter)
+         , Some (`String direction_raw)
+         , Some (`Float ts) )
+         when Float.is_finite ts && Float.compare ts 0.0 > 0 ->
+         (match
+            Board_vote_key.of_string target,
+            persisted_vote_direction_of_string_opt direction_raw
+          with
+          | Some vote, Some direction
+            when String.equal voter (Agent_id.to_string (Board_vote_key.voter vote)) ->
+            Some (vote, direction, ts)
+          | Some _, Some _ | Some _, None | None, _ -> None)
+       | _ -> None)
+  | _ -> None
 
 (* [vote_outcome] carries the information needed to run post-lock vote hooks. *)
 type vote_outcome = {
@@ -143,7 +171,9 @@ let current_vote_for_post store ~voter ~post_id
         let post_key = Post_id.to_string pid in
         if not (Hashtbl.mem store.posts post_key) then Error (Post_not_found post_id)
         else
-          let vote_key = "post:" ^ post_key ^ ":" ^ Agent_id.to_string agent in
+          let vote_key =
+            Board_vote_key.post ~post_id:pid ~voter:agent |> Board_vote_key.to_string
+          in
           Ok (Option.map fst (Hashtbl.find_opt store.vote_log vote_key)))
 
 let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
@@ -159,7 +189,9 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
           match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
           | None -> Error (Post_not_found post_id)
           | Some post ->
-              let vote_key = "post:" ^ Post_id.to_string pid ^ ":" ^ voter in
+              let vote_key =
+                Board_vote_key.post ~post_id:pid ~voter:agent |> Board_vote_key.to_string
+              in
               let now = Time_compat.now () in
               match Hashtbl.find_opt store.vote_log vote_key with
               | Some (prev, _prev_ts) when (=) prev direction ->
@@ -226,7 +258,8 @@ let current_vote_for_comment store ~voter ~comment_id
           Error (Comment_not_found comment_id)
         else
           let vote_key =
-            "comment:" ^ comment_key ^ ":" ^ Agent_id.to_string agent
+            Board_vote_key.comment ~comment_id:cid ~voter:agent
+            |> Board_vote_key.to_string
           in
           Ok (Option.map fst (Hashtbl.find_opt store.vote_log vote_key)))
 
@@ -243,7 +276,10 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
         match Hashtbl.find_opt store.comments (Comment_id.to_string cid) with
         | None -> Error (Comment_not_found comment_id)
         | Some cmt ->
-            let vote_key = "comment:" ^ Comment_id.to_string cid ^ ":" ^ voter in
+            let vote_key =
+              Board_vote_key.comment ~comment_id:cid ~voter:agent
+              |> Board_vote_key.to_string
+            in
             let now = Time_compat.now () in
             match Hashtbl.find_opt store.vote_log vote_key with
             | Some (prev, _prev_ts) when (=) prev direction ->
@@ -335,36 +371,88 @@ let recalculate_reply_counts store =
   let total = Hashtbl.fold (fun _ (p : post) acc -> acc + p.reply_count) store.posts 0 in
   Log.BoardLog.debug "recalculated reply_counts: %d total comments across posts" total
 
+let vote_target_exists store vote =
+  let target_id = Board_vote_key.target_id vote in
+  match Board_vote_key.target_kind vote with
+  | Board_vote_key.Post -> Hashtbl.mem store.posts target_id
+  | Board_vote_key.Comment -> Hashtbl.mem store.comments target_id
+;;
+
+let recalculate_vote_counts store =
+  Hashtbl.iter
+    (fun key (post : post) ->
+       Hashtbl.replace store.posts key { post with votes_up = 0; votes_down = 0 })
+    store.posts;
+  Hashtbl.iter
+    (fun key (comment : comment) ->
+       Hashtbl.replace store.comments key { comment with votes_up = 0; votes_down = 0 })
+    store.comments;
+  Hashtbl.iter
+    (fun key (direction, ts) ->
+       match Board_vote_key.of_string key with
+       | None -> ()
+       | Some vote ->
+         let target_id = Board_vote_key.target_id vote in
+         (match Board_vote_key.target_kind vote with
+          | Board_vote_key.Post ->
+            (match Hashtbl.find_opt store.posts target_id with
+             | None -> ()
+             | Some post ->
+               let votes_up, votes_down =
+                 match direction with
+                 | Up -> post.votes_up + 1, post.votes_down
+                 | Down -> post.votes_up, post.votes_down + 1
+               in
+               Hashtbl.replace
+                 store.posts
+                 target_id
+                 { post
+                   with
+                   votes_up
+                 ; votes_down
+                 ; updated_at = Float.max post.updated_at ts
+                 })
+          | Board_vote_key.Comment ->
+            (match Hashtbl.find_opt store.comments target_id with
+             | None -> ()
+             | Some comment ->
+               let votes_up, votes_down =
+                 match direction with
+                 | Up -> comment.votes_up + 1, comment.votes_down
+                 | Down -> comment.votes_up, comment.votes_down + 1
+               in
+               Hashtbl.replace
+                 store.comments
+                 target_id
+                 { comment with votes_up; votes_down })))
+    store.vote_log;
+  invalidate_post_caches store;
+  invalidate_comment_caches store
+;;
+
 let load_persisted_votes store =
   let path = vote_log_path () in
-  if not (Fs_compat.file_exists path) then Ok 0
+  if not (Fs_compat.file_exists path)
+  then (
+    recalculate_vote_counts store;
+    Ok 0)
   else begin
     try
       let loaded = ref 0 in
       let lines = Fs_compat.load_jsonl path in
-      List.iter (fun json ->
-        match Safe_ops.json_string_opt "target" json,
-              Safe_ops.json_string_opt "direction" json with
-        | Some target, Some dir_str ->
-          (match vote_direction_of_string_opt dir_str with
+      List.iter
+        (fun json ->
+           match persisted_vote_row_of_yojson json with
            | None -> ()
-           | Some direction ->
-             (* #10086: legacy rows persisted before this fix may have
-                [ts] overwritten by a prior flush cycle.  Use the
-                recorded value when present; fall back to 0.0 rather
-                than [Time_compat.now ()] — loading a ledger at server
-                start time must NOT advance the ts of every pre-fix
-                vote to "now".  Downstream readers treat ts=0.0 as
-                "unknown cast time". *)
-             let ts =
-               match Safe_ops.json_float_opt "ts" json with
-               | Some t -> t
-               | None -> 0.0
-             in
-             Hashtbl.replace store.vote_log target (direction, ts);
-             Stdlib.incr loaded)
-        | _ -> ()
-      ) lines;
+           | Some (vote, direction, ts) when vote_target_exists store vote ->
+             Hashtbl.replace
+               store.vote_log
+               (Board_vote_key.to_string vote)
+               (direction, ts);
+             Stdlib.incr loaded
+           | Some _ -> ())
+        lines;
+      recalculate_vote_counts store;
       if !loaded > 0 then
         Log.BoardLog.info "loaded %d vote entries from %s" !loaded path
       else
@@ -557,16 +645,17 @@ let delete_post store ~post_id : (unit, board_error) Result.t =
         let vote_keys =
           Hashtbl.fold
             (fun key _ acc ->
-               if
-                 String.starts_with ~prefix:("post:" ^ post_key ^ ":") key
-                 || List.exists
-                      (fun comment_key ->
-                         String.starts_with
-                           ~prefix:("comment:" ^ comment_key ^ ":")
-                           key)
-                      comment_ids
-               then key :: acc
-               else acc)
+               match Board_vote_key.of_string key with
+               | Some vote ->
+                 let target_id = Board_vote_key.target_id vote in
+                 (match Board_vote_key.target_kind vote with
+                  | Board_vote_key.Post when String.equal target_id post_key ->
+                    key :: acc
+                  | Board_vote_key.Comment
+                    when List.exists (String.equal target_id) comment_ids ->
+                    key :: acc
+                  | Board_vote_key.Post | Board_vote_key.Comment -> acc)
+               | None -> acc)
             store.vote_log
             []
         in
@@ -702,53 +791,28 @@ let karma_score_for_direction = function
   | Up -> 1
   | Down -> 0
 
-(** Parse a vote-log key into [(target_kind, target_id, voter)].
-
-    Key format: ["post:<id>:<voter>"] or ["comment:<id>:<voter>"].
-    Both [<id>] and [<voter>] are safe for the ID character set but
-    voter may contain a colon in namespace:agent form, so we split
-    only on the first two colons and keep the remainder as voter. *)
-let parse_vote_key key =
-  match String.index_opt key ':' with
-  | None -> None
-  | Some i1 ->
-      let kind = String.sub key 0 i1 in
-      let rest1 = String.sub key (i1 + 1) (String.length key - i1 - 1) in
-      (match String.index_opt rest1 ':' with
-      | None -> None
-      | Some i2 ->
-          let target_id = String.sub rest1 0 i2 in
-          let voter =
-            String.sub rest1 (i2 + 1) (String.length rest1 - i2 - 1)
-          in
-          if kind = "" || target_id = "" || voter = "" then None
-          else Some (kind, target_id, voter))
-
-let canonical_vote_voter voter =
-  match Agent_id.of_string voter with
-  | Ok agent -> Agent_id.to_string agent
-  | Error _ -> String.trim voter
-
 let karma_event_of_vote store key (direction, ts) =
   let delta = karma_score_for_direction direction in
   if delta = 0 then None
   else
-    match parse_vote_key key with
+    match Board_vote_key.of_string key with
     | None -> None
-    | Some (kind, target_id, voter_raw) ->
-        let recipient_opt =
-          match kind with
-          | "post" ->
-              (match Hashtbl.find_opt store.posts target_id with
-               | Some (p : post) -> Some (Agent_id.to_string p.author)
-               | None -> None)
-          | "comment" ->
-              (match Hashtbl.find_opt store.comments target_id with
-               | Some (c : comment) -> Some (Agent_id.to_string c.author)
-               | None -> None)
-          | _ -> None
+    | Some vote ->
+        let target_id = Board_vote_key.target_id vote in
+        let voter = Board_vote_key.voter vote |> Agent_id.to_string in
+        let kind, recipient_opt =
+          match Board_vote_key.target_kind vote with
+          | Board_vote_key.Post ->
+            ( "post"
+            , match Hashtbl.find_opt store.posts target_id with
+              | Some (p : post) -> Some (Agent_id.to_string p.author)
+              | None -> None )
+          | Board_vote_key.Comment ->
+            ( "comment"
+            , match Hashtbl.find_opt store.comments target_id with
+              | Some (c : comment) -> Some (Agent_id.to_string c.author)
+              | None -> None )
         in
-        let voter = canonical_vote_voter voter_raw in
         match recipient_opt with
         | None -> None
         | Some recipient when String.equal recipient voter ->

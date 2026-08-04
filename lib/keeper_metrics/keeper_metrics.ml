@@ -122,8 +122,6 @@ type t =
   | MemoryActivityEmitFailures
   | SupervisorSweepFailures
   | TomlReconcileSweepFailures
-  | TomlReconcileDedup
-  | ReconcileDisabled
   | ToolUsageFlushFailures
   | TurnTimeoutCommitted
   | TurnErrorAfterTools
@@ -332,8 +330,6 @@ let to_string = function
   | MemoryActivityEmitFailures -> "masc_keeper_memory_activity_emit_failures_total"
   | SupervisorSweepFailures -> "masc_keeper_supervisor_sweep_failures_total"
   | TomlReconcileSweepFailures -> "masc_keeper_toml_reconcile_sweep_failures_total"
-  | TomlReconcileDedup -> "masc_keeper_toml_reconcile_dedup_total"
-  | ReconcileDisabled -> "masc_keeper_reconcile_disabled_total"
   | ToolUsageFlushFailures -> "masc_keeper_tool_usage_flush_failures_total"
   | TurnTimeoutCommitted -> "masc_keeper_turn_timeout_committed_total"
   | TurnErrorAfterTools -> "masc_keeper_turn_error_after_tools_total"

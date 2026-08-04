@@ -4,16 +4,15 @@
     All keeper prompt lookups must reference these constants
     instead of string literals. *)
 
-val constitution : string
-val world : string
-val capabilities : string
-val deliberation : string
+val system : string
+(** Shared keeper system prompt. Merged from the former [constitution],
+    [world], [capabilities], and [core_behavior] keys, which each restated
+    the same rule families in a different wording. *)
+
 val reply_guidelines : string
-val core_behavior : string
 val recovery_block : string
 val board_attention_judgment_batch : string
 val gate_judgment : string
-val turn_intent : string
 val librarian_system : string
 val librarian_current_selection : string
 val memory_os_recall_context : string

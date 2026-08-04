@@ -648,91 +648,27 @@ let start_supervisor_sweep ctx =
                  PR #14857. *)
               match entry.phase with
               | Keeper_state_machine.Running ->
-                  (* TOML mtime probe — best effort. Used by
-                     [Keeper_reconcile_state] to (a) clear a parked
-                     keeper when the user edits the TOML, and (b)
-                     record the mtime at failure time so a later edit
-                     re-arms the reconciler. If the path cannot be
-                     resolved or stat fails, we still attempt one
-                     reconcile and let any [Error] flow through the
-                     standard back-off. *)
-                  let toml_mtime =
-                    match keeper_toml_path_opt_for_config ctx.config entry.name with
-                    | None -> 0.0
-                    | Some path ->
-                        (try (Unix.stat path).Unix.st_mtime
-                         with Unix.Unix_error _ -> 0.0)
-                  in
-                  let _reset_happened : bool =
-                    Keeper_reconcile_state.reset_on_mtime_change
-                      ~keeper:entry.name
-                      ~new_mtime:toml_mtime
-                  in
-                  if Keeper_reconcile_state.is_disabled ~keeper:entry.name
-                  then
-                    (* Parked: skip the reconcile call entirely. The
-                       reconcile-disabled counter was incremented once when
-                       the threshold crossed; we do not double-count per
-                       sweep. *)
-                    ()
-                  else
-                    (match ensure_keeper_meta ctx.config entry.name with
-                     | Ok updated_meta ->
-                         (* Propagate the updated meta back into the registry so
-                            subsequent turns observe the new runtime_id (and
-                            any other reconciled fields) immediately.  Without
-                            this the file is updated but the in-memory
-                            [registry_entry.meta] stays stale until restart. *)
-                         Keeper_registry.update_meta_from_persisted
-                           ~base_path
-                           entry.name
-                           updated_meta;
-                         Keeper_reconcile_state.record_success ~keeper:entry.name
-                     | Error e ->
-                         let outcome =
-                           Keeper_reconcile_state.record_failure
-                             ~keeper:entry.name
-                             ~error:e
-                             ~toml_mtime
-                         in
-                         (* Three-way branch is exhaustive over
-                            [Keeper_reconcile_state.record_outcome] so
-                            the compiler flags any new variant. *)
-                         (match outcome with
-                          | `First ->
-                              Log.Keeper.warn "TOML reconcile failed for %s: %s"
-                                entry.name e
-                          | `Repeated ->
-                              Otel_metric_store.inc_counter
-                                Keeper_metrics.(to_string TomlReconcileDedup)
-                                ~labels:
-                                  [ "keeper", entry.name
-                                  ; "outcome", "repeated"
-                                  ]
-                                ();
-                              Log.Keeper.warn
-                                "TOML reconcile still failing for %s (dedup): %s"
-                                entry.name e
-                          | `Threshold_disable ->
-                              (* One explicit escalation at the moment
-                                 the reconciler parks this keeper. *)
-                              Otel_metric_store.inc_counter
-                                Keeper_metrics.(to_string TomlReconcileDedup)
-                                ~labels:
-                                  [ "keeper", entry.name
-                                  ; "outcome", "threshold_disable"
-                                  ]
-                                ();
-                              Otel_metric_store.inc_counter
-                                Keeper_metrics.(to_string ReconcileDisabled)
-                                ~labels:[ "keeper", entry.name ]
-                                ();
-                              Log.Keeper.error
-                                "TOML reconcile disabled for %s after %d \
-                                 consecutive failures (resumes on TOML edit): %s"
-                                entry.name
-                                Keeper_reconcile_state.default_disable_threshold
-                                e))
+                  (match
+                     remember_boot_meta_result
+                       ctx
+                       entry.name
+                       (ensure_keeper_meta_with_cause ctx.config entry.name)
+                   with
+                   | Ok updated_meta ->
+                       (* Propagate the updated meta back into the registry so
+                          subsequent turns observe the new runtime_id (and
+                          any other reconciled fields) immediately.  Without
+                          this the file is updated but the in-memory
+                          [registry_entry.meta] stays stale until restart. *)
+                       Keeper_registry.update_meta_from_persisted
+                         ~base_path
+                         entry.name
+                         updated_meta
+                   | Error e ->
+                       Log.Keeper.warn
+                         "TOML reconcile failed for %s: %s"
+                         entry.name
+                         e)
               | Keeper_state_machine.Offline
               | Keeper_state_machine.Failing
               | Keeper_state_machine.Overflowed

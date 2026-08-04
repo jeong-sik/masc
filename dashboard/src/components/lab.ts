@@ -6,13 +6,11 @@ import { LabPerf } from './lab-perf'
 import { KeeperMemoryHealth } from './memory/keeper-memory-health'
 import { AuditIntegrity } from './memory/audit-integrity'
 import { SurfaceHeader } from './common/surface-header'
-import { MemorySubsystems } from './memory-subsystems'
 
 type LabSection =
   | 'tools'
   | 'harness'
   | 'performance'
-  | 'memory-subsystems'
   | 'keeper-memory-health'
   | 'audit-integrity'
 
@@ -21,7 +19,6 @@ function currentSection(): LabSection {
   if (
     section === 'harness'
     || section === 'performance'
-    || section === 'memory-subsystems'
     || section === 'keeper-memory-health'
     || section === 'audit-integrity'
   ) {
@@ -46,10 +43,6 @@ export function Lab() {
 
       ${section === 'performance' ? html`
         <${LabPerf} />
-      ` : null}
-
-      ${section === 'memory-subsystems' ? html`
-        <${MemorySubsystems} />
       ` : null}
 
       ${section === 'keeper-memory-health' ? html`

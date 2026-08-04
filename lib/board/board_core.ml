@@ -778,24 +778,29 @@ let update_sub_board
       | None ->
         Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id))
       | Some sb ->
-        let members =
+        let members_result =
           match members with
-          | None -> sb.members
-          | Some raw ->
-            (match parse_sub_board_members ~owner:sb.owner raw with
-             | Ok m -> m
-             | Error _ -> sb.members)
+          | None -> Ok sb.members
+          | Some raw -> parse_sub_board_members ~owner:sb.owner raw
         in
-        let updated =
-          { sb with
-            name = Option.value ~default:sb.name (Option.map String.trim name)
-          ; description = Option.value ~default:sb.description (Option.map String.trim description)
-          ; members
-          ; access = Option.value ~default:sb.access access
-          }
-        in
-        Hashtbl.replace store.sub_boards (Sub_board_id.to_string sb.id) updated;
-        Ok updated)
+        (match members_result with
+         | Error _ as error -> error
+         | Ok members ->
+           let updated =
+             { sb with
+               (* DET-OK: omitted text fields preserve existing typed values. *)
+               name = Option.value ~default:sb.name (Option.map String.trim name)
+             ; description =
+                 Option.value
+                   ~default:sb.description
+                   (Option.map String.trim description)
+             ; members
+             (* DET-OK: omitted access keeps the existing typed policy. *)
+             ; access = Option.value ~default:sb.access access
+             }
+           in
+           Hashtbl.replace store.sub_boards (Sub_board_id.to_string sb.id) updated;
+           Ok updated))
   in
   Result.iter (fun _ -> rewrite_sub_boards store) result;
   result

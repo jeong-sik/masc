@@ -1,9 +1,9 @@
 (** Pure durable state machine for one Keeper event queue owner.
 
-    [event-queue-v15.json] is the sole authority for pending stimuli and
-    source-bearing transition projection work. This module performs no I/O;
-    persistence supplies the atomic file boundary and publishes [pending] into
-    the live registry only after a durable commit. *)
+    The current snapshot and source-bearing transition WAL jointly form the
+    durable authority. This module performs no I/O; persistence supplies the
+    atomic file boundary and publishes [pending] into the live registry only
+    after a durable commit. *)
 
 type accepted_cancellation =
   { source : Keeper_event_queue.stimulus

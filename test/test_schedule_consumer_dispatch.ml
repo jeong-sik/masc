@@ -370,14 +370,15 @@ let tick_ok config ~now =
   | Error err -> fail (Schedule_runner.runner_error_to_string err)
 ;;
 
-let latest_execution_exn config ~schedule_id =
+let latest_execution_exn config (request : Schedule_domain.schedule_request) =
   match
-    Schedule_store.last_execution_for_schedule
+    Schedule_store.last_execution_for_schedule_instance
       (Schedule_store.read_state config)
-      ~schedule_id
+      ~schedule_instance_id:request.schedule_instance_id
+      ~schedule_id:request.schedule_id
   with
   | Some execution -> execution
-  | None -> fail ("missing execution for schedule " ^ schedule_id)
+  | None -> fail ("missing execution for schedule " ^ request.schedule_id)
 ;;
 
 let single_keeper_settlement_exn config execution =
@@ -466,7 +467,9 @@ let test_keeper_wake_consumer_records_dispatch_without_work_success () =
      check string "one-shot remains running until work completion" "running"
        (Schedule_domain.schedule_status_to_string stored.status));
   (match
-     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
+     Schedule_store.last_execution_for_schedule_instance
+       (Schedule_store.read_state config)
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
    with
    | None -> fail "missing execution record"
@@ -728,7 +731,7 @@ let test_reclaim_uses_occurrence_keeper_after_recurring_request_update () =
       config
   in
   ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
+  let execution = latest_execution_exn config request in
   let updated_payload =
     match Schedule_domain.payload_of_yojson (keeper_wake_payload_for "next-keeper") with
     | Ok payload -> payload
@@ -767,7 +770,7 @@ let test_reclaim_follows_transfer_durable_state () =
       config
   in
   ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
+  let execution = latest_execution_exn config request in
   let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
   let target_meta = persist_keeper_meta config target_keeper in
   let transfer : Keeper_registry_event_queue.accepted_transfer =
@@ -896,7 +899,7 @@ let test_reclaim_resolves_current_incarnation_after_transfer_back () =
       config
   in
   ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
+  let execution = latest_execution_exn config request in
   let meta_a = persist_keeper_meta config keeper_a in
   let meta_b = persist_keeper_meta config keeper_b in
   let transfer ~from_keeper ~to_keeper ~owner_nonce ~operation_id ~applied_at =
@@ -976,7 +979,7 @@ let test_reclaim_revalidates_cached_transfer_target_absence () =
       ~keeper_name:keeper_b
   in
   ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  let execution_x = latest_execution_exn config ~schedule_id:request_x.schedule_id in
+  let execution_x = latest_execution_exn config request_x in
   let stale_b_state =
     match Keeper_registry_event_queue.existing_durable_state_result ~base_path keeper_b with
     | Ok state -> state
@@ -989,7 +992,7 @@ let test_reclaim_revalidates_cached_transfer_target_absence () =
       ~keeper_name:keeper_a
   in
   ignore (tick_ok config ~now:202.0 : Schedule_runner.tick_result);
-  let execution_y = latest_execution_exn config ~schedule_id:request_y.schedule_id in
+  let execution_y = latest_execution_exn config request_y in
   let selection = pending_selection_exn ~base_path ~keeper_name:keeper_a in
   let target_meta = persist_keeper_meta config keeper_b in
   let transfer : Keeper_registry_event_queue.accepted_transfer =
@@ -1070,11 +1073,16 @@ let test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing () =
       config
   in
   ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
+  let execution = latest_execution_exn config request in
   let queue_path =
     Filename.concat
       (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
       "event-queue-v15.json"
+  in
+  let wal_path =
+    Filename.concat
+      (Filename.dirname queue_path)
+      "event-queue-transitions-v5.jsonl"
   in
   Sys.remove queue_path;
   let outcome =
@@ -1108,10 +1116,11 @@ let test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing () =
      check string
        "missing snapshot provenance is explicit"
        (Printf.sprintf
-          "scheduled keeper wake durable state read failed keeper=%s: event queue snapshot is missing keeper=%s path=%s"
+          "scheduled keeper wake durable state read failed keeper=%s: event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
           keeper_name
           keeper_name
-          queue_path)
+          queue_path
+          wal_path)
        detail
    | [ Schedule_runner.Settlement_batch_cardinality_mismatch _ ]
    | [ Schedule_runner.Settlement_batch_consumer_failure _ ]
@@ -1130,6 +1139,149 @@ let test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing () =
       "dispatched"
       (Schedule_domain.execution_status_to_string retained.status)
   | None -> fail "missing snapshot caused the occurrence to disappear"
+;;
+
+let test_wal_only_owner_is_recovered_and_settled () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let request = create_keeper_wake_schedule config in
+  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
+  let execution = latest_execution_exn config request in
+  let state =
+    Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+    |> Result.fold ~ok:Fun.id ~error:fail
+  in
+  let selection =
+    match Keeper_event_queue_state.pending_selections state with
+    | [ selection ] -> selection
+    | selections ->
+      failf "expected one WAL-only fixture selection, got %d" (List.length selections)
+  in
+  let source_terminal : Keeper_event_queue_state.accepted_source_terminal =
+    { source = selection.source
+    ; source_incarnation = selection.admitted_revision
+    ; owner_nonce = 0
+    ; operator_operation_id = "wal-only-terminal"
+    ; source_receipt =
+        Keeper_event_queue_state.Turn_attempt_terminal
+          { detail = "wal-only terminal failure" }
+    }
+  in
+  (match
+     Keeper_event_queue_persistence.ack_pending_source_terminal_result
+       ~base_path
+       ~keeper_name
+       ~current_owner_nonce:0
+       ~acked_at:202.0
+       ~source_terminal
+       ()
+   with
+   | Ok _ -> ()
+   | Error detail -> fail detail);
+  let checkpoint =
+    Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+    |> Result.fold ~ok:Fun.id ~error:fail
+  in
+  let entry =
+    match Keeper_event_queue_state.transition_outbox checkpoint with
+    | [ entry ] -> entry
+    | entries ->
+      failf "expected one WAL-only fixture outbox, got %d" (List.length entries)
+  in
+  let keeper_dir =
+    Filename.concat
+      (Common.keepers_runtime_dir_of_base ~base_path)
+      keeper_name
+  in
+  let snapshot_path = Filename.concat keeper_dir "event-queue-v15.json" in
+  let wal_path = Filename.concat keeper_dir "event-queue-transitions-v5.jsonl" in
+  let wal_row =
+    `Assoc
+      [ "schema", `String "masc.keeper_event_queue.transition.v5"
+      ; "base_path", `String base_path
+      ; "keeper_name", `String keeper_name
+      ; "outbox_entry", Keeper_event_queue_state.outbox_entry_to_yojson entry
+      ]
+    |> Yojson.Safe.to_string
+    |> fun row -> row ^ "\n"
+  in
+  Sys.remove snapshot_path;
+  write_file wal_path "{malformed\n";
+  (match
+     Keeper_event_queue_persistence.load_existing_state_result
+       ~base_path
+       ~keeper_name
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "malformed WAL-only owner was accepted");
+  write_file wal_path wal_row;
+  let validated =
+    Keeper_event_queue_persistence.validate_existing_state_read_only_result
+      ~base_path
+      ~keeper_name
+    |> Result.fold ~ok:Fun.id ~error:fail
+  in
+  check int "read-only WAL-only validation restores the committed outbox" 1
+    (List.length (Keeper_event_queue_state.transition_outbox validated));
+  check string "read-only WAL-only validation preserves bytes" wal_row
+    (read_file wal_path);
+  let recovered =
+    Keeper_event_queue_persistence.load_existing_state_result
+      ~base_path
+      ~keeper_name
+    |> Result.fold ~ok:Fun.id ~error:fail
+  in
+  check int "WAL-only loader restores the committed outbox" 1
+    (List.length (Keeper_event_queue_state.transition_outbox recovered));
+  let discovery =
+    Keeper_event_queue_persistence.discover_keeper_names_with_durable_state
+      ~base_path
+  in
+  check (option string) "WAL-only discovery has no error" None discovery.read_error;
+  check bool "WAL-only owner is discovered" true
+    (List.mem keeper_name discovery.keeper_names);
+  (match Keeper_event_queue_recovery.project_owner_result ~base_path ~keeper_name with
+   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
+   | Ok Keeper_event_queue_recovery.No_pending_transition ->
+     fail "WAL-only recovery skipped the committed outbox"
+   | Ok Keeper_event_queue_recovery.Claim_busy ->
+     fail "WAL-only recovery unexpectedly found a busy owner"
+   | Error error -> fail (Keeper_event_queue_recovery.projection_error_to_string error));
+  let projected =
+    Keeper_event_queue_persistence.load_existing_state_result
+      ~base_path
+      ~keeper_name
+    |> Result.fold ~ok:Fun.id ~error:fail
+  in
+  check int "WAL-only recovery retires the outbox" 0
+    (List.length (Keeper_event_queue_state.transition_outbox projected));
+  let outcome =
+    Schedule_runner.reclaim_lost_occurrences
+      ~consumer:Server_schedule_consumers.consumer
+      config
+      ~now:203.0
+    |> Result.fold
+         ~ok:Fun.id
+         ~error:(fun error -> fail (Schedule_runner.runner_error_to_string error))
+  in
+  check int "WAL-only occurrence is settled" 1 outcome.settled_elsewhere;
+  match
+    Schedule_store.execution_for_occurrence
+      (Schedule_store.read_state config)
+      ~schedule_instance_id:execution.schedule_instance_id
+      ~schedule_id:execution.schedule_id
+      ~due_at:execution.due_at
+      ~payload_digest:execution.payload_digest
+  with
+  | Some settled ->
+    check string "WAL-only terminal failure is preserved" "failed"
+      (Schedule_domain.execution_status_to_string settled.status);
+    check (option string) "WAL-only failure detail is preserved"
+      (Some "wal-only terminal failure")
+      settled.error
+  | None -> fail "WAL-only recovery lost the schedule execution"
 ;;
 
 let test_keeper_purge_settles_owned_occurrence_before_queue_delete () =
@@ -1160,7 +1312,7 @@ let test_keeper_purge_settles_owned_occurrence_before_queue_delete () =
      check string "purged one-shot is terminal" "failed"
        (Schedule_domain.schedule_status_to_string stored.status)
    | None -> fail "purged schedule missing");
-  match latest_execution_exn config ~schedule_id:request.schedule_id with
+  match latest_execution_exn config request with
   | { status = Schedule_domain.Execution_failed; error = Some reason; _ } ->
     check string
       "purge operation remains in terminal evidence"
@@ -1258,7 +1410,7 @@ let test_keeper_purge_rejects_missing_owned_snapshot () =
      failf
        "unexpected missing-evidence purge error: %s"
        (Server_schedule_consumers.keeper_purge_error_to_string error));
-  let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
+  let execution = latest_execution_exn config request in
   check string "blocked purge keeps occurrence unsettled" "dispatched"
     (Schedule_domain.execution_status_to_string execution.status)
 ;;
@@ -1404,7 +1556,7 @@ let test_keeper_purge_rejects_unsettled_transfer_redirect () =
      failf
        "unexpected transfer purge error: %s"
        (Server_schedule_consumers.keeper_purge_error_to_string error));
-  let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
+  let execution = latest_execution_exn config request in
   check string "blocked source purge preserves dispatched execution" "dispatched"
     (Schedule_domain.execution_status_to_string execution.status)
 ;;
@@ -1499,7 +1651,7 @@ let test_keeper_purge_follows_terminal_transfer_redirect () =
    | Ok () -> ()
    | Error error ->
      fail (Server_schedule_consumers.keeper_purge_error_to_string error));
-  match latest_execution_exn config ~schedule_id:request.schedule_id with
+  match latest_execution_exn config request with
   | { status = Schedule_domain.Execution_failed
     ; error = Some detail
     ; _ } ->
@@ -1596,7 +1748,7 @@ let test_keeper_purge_blocks_projected_target_with_source_outbox () =
   check int "blocked target purge preserves projected work" 1
     (Keeper_registry_event_queue.snapshot ~base_path target_keeper
      |> Keeper_event_queue.length);
-  let execution = latest_execution_exn config ~schedule_id:request.schedule_id in
+  let execution = latest_execution_exn config request in
   check string "blocked target purge preserves dispatched execution" "dispatched"
     (Schedule_domain.execution_status_to_string execution.status)
 ;;
@@ -2391,8 +2543,9 @@ let test_due_schedule_wakes_live_keeper_with_proactive_disabled () =
        check bool "due schedule signals the live owner" true
          (Atomic.get entry.fiber_wakeup);
        match
-         Schedule_store.last_execution_for_schedule
+         Schedule_store.last_execution_for_schedule_instance
            (Schedule_store.read_state config)
+           ~schedule_instance_id:request.schedule_instance_id
            ~schedule_id:request.schedule_id
        with
        | Some { detail = Some detail; _ } ->
@@ -2741,7 +2894,9 @@ let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
      check string "schedule failed" "failed"
        (Schedule_domain.schedule_status_to_string stored.status));
   (match
-     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
+     Schedule_store.last_execution_for_schedule_instance
+       (Schedule_store.read_state config)
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
    with
    | None -> fail "missing unsupported execution"
@@ -2754,7 +2909,7 @@ let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
              ~field:"masc.keeper_wake payload body.keeper_name"))
        execution.error);
   let queue_discovery =
-    Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
+    Keeper_event_queue_persistence.discover_keeper_names_with_durable_state
       ~base_path:config.Workspace_utils.base_path
   in
   check bool "invalid keeper wake creates no durable queue owner" false
@@ -2954,6 +3109,8 @@ let () =
             test_reclaim_revalidates_cached_transfer_target_absence
         ; test_case "reclaim keeps occurrence when queue snapshot is missing" `Quick
             test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing
+        ; test_case "WAL-only owner is recovered and settled" `Quick
+            test_wal_only_owner_is_recovered_and_settled
         ; test_case "keeper purge settles owned occurrence before queue deletion"
             `Quick
             test_keeper_purge_settles_owned_occurrence_before_queue_delete

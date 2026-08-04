@@ -371,7 +371,8 @@ let test_startup_recovery_returns_only_running_schedule_to_due () =
      check_status "interrupted returned to due" Due recovered.status;
      check_status "other due schedule untouched" Due untouched.status
    | _ -> fail "startup recovery schedules missing");
-  (match last_execution_for_schedule (read_state config)
+  (match last_execution_for_schedule_instance (read_state config)
+           ~schedule_instance_id:interrupted.schedule_instance_id
            ~schedule_id:interrupted.schedule_id with
    | Some execution ->
      check string "interrupted attempt failed" "failed"
@@ -512,7 +513,9 @@ let test_start_and_complete_persist_execution_record () =
    | Error err -> fail (store_error_to_string err));
   let completed_state = read_state config in
   match
-    last_execution_for_schedule completed_state ~schedule_id:req.schedule_id
+    last_execution_for_schedule_instance completed_state
+      ~schedule_instance_id:req.schedule_instance_id
+      ~schedule_id:req.schedule_id
   with
   | None -> fail "missing completed execution"
   | Some completed ->
@@ -547,8 +550,9 @@ let test_accept_running_persists_unfinished_dispatched_execution () =
    | Ok stored -> check_status "one-shot remains running" Running stored.status
    | Error err -> fail (store_error_to_string err));
   (match
-     last_execution_for_schedule
+     last_execution_for_schedule_instance
        (read_state config)
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
    with
    | None -> fail "accepted execution missing"
@@ -770,7 +774,12 @@ let test_batch_settlement_finishes_orphan_execution () =
        (accept_running config ~now:203.0 ~schedule_id:request.schedule_id ()));
   let state = read_state config in
   let execution =
-    match last_execution_for_schedule state ~schedule_id:request.schedule_id with
+    match
+      last_execution_for_schedule_instance
+        state
+        ~schedule_instance_id:request.schedule_instance_id
+        ~schedule_id:request.schedule_id
+    with
     | Some execution -> execution
     | None -> fail "orphan settlement precondition has no execution"
   in
@@ -794,7 +803,12 @@ let test_batch_settlement_finishes_orphan_execution () =
   let settled = read_state config in
   check int "orphan settlement does not recreate schedule" 0
     (List.length settled.schedules);
-  match last_execution_for_schedule settled ~schedule_id:request.schedule_id with
+  match
+    last_execution_for_schedule_instance
+      settled
+      ~schedule_instance_id:request.schedule_instance_id
+      ~schedule_id:request.schedule_id
+  with
   | Some execution ->
     check string "orphan execution becomes terminal" "failed"
       (execution_status_to_string execution.status);
@@ -817,7 +831,12 @@ let test_batch_settlement_collects_error_and_persists_valid_execution () =
        (accept_running config ~now:203.0 ~schedule_id:request.schedule_id ()));
   let before = read_state config in
   let execution =
-    match last_execution_for_schedule before ~schedule_id:request.schedule_id with
+    match
+      last_execution_for_schedule_instance
+        before
+        ~schedule_instance_id:request.schedule_instance_id
+        ~schedule_id:request.schedule_id
+    with
     | Some execution -> execution
     | None -> fail "mixed settlement precondition has no execution"
   in
@@ -841,7 +860,12 @@ let test_batch_settlement_collects_error_and_persists_valid_execution () =
    | Error error -> fail (store_error_to_string error));
   let after = read_state config in
   check int "mixed batch writes once" (before.version + 1) after.version;
-  match last_execution_for_schedule after ~schedule_id:request.schedule_id with
+  match
+    last_execution_for_schedule_instance
+      after
+      ~schedule_instance_id:request.schedule_instance_id
+      ~schedule_id:request.schedule_id
+  with
   | Some execution ->
     check string "valid settlement persists" "succeeded"
       (execution_status_to_string execution.status)
@@ -926,7 +950,10 @@ let test_fail_due_candidate_records_failed_execution () =
    | Some stored -> check_status "stored failed" Failed stored.status
    | None -> fail "schedule missing");
   (match
-     last_execution_for_schedule (read_state config) ~schedule_id:req.schedule_id
+     last_execution_for_schedule_instance
+       (read_state config)
+       ~schedule_instance_id:req.schedule_instance_id
+       ~schedule_id:req.schedule_id
    with
    | None -> fail "missing failed execution"
    | Some execution ->
@@ -1181,6 +1208,14 @@ let test_prune_does_not_bind_orphan_work_to_reused_public_id () =
        old_request.schedule_instance_id
        new_request.schedule_instance_id);
   ignore (insert_ok config new_request);
+  (match
+     last_execution_for_schedule_instance
+       (read_state config)
+       ~schedule_instance_id:new_request.schedule_instance_id
+       ~schedule_id:new_request.schedule_id
+   with
+   | None -> ()
+   | Some _ -> fail "reused public ID inherited the prior instance execution");
   ignore
     (store_ok
        "cancel replacement request"

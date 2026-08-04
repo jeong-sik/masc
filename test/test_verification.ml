@@ -592,7 +592,8 @@ let test_system_llm_rejection_prefers_registered_producer_binding () =
                 rejection.car_task_id
             | _ -> Alcotest.fail "registered producer rejection was not queued");
          let discovery =
-           Keeper_event_queue_persistence.discover_keeper_names_with_snapshots ~base_path
+           Keeper_event_queue_persistence.discover_keeper_names_with_durable_state
+             ~base_path
          in
          (match discovery.read_error with
           | Some detail -> Alcotest.fail detail

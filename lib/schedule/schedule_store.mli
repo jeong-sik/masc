@@ -105,8 +105,11 @@ val get_schedule :
   Workspace_utils.config -> schedule_id:string -> Schedule_domain.schedule_request option
 val executions_for_schedule :
   state -> schedule_id:string -> Schedule_domain.execution_record list
-val last_execution_for_schedule :
-  state -> schedule_id:string -> Schedule_domain.execution_record option
+val last_execution_for_schedule_instance :
+  state ->
+  schedule_instance_id:string ->
+  schedule_id:string ->
+  Schedule_domain.execution_record option
 
 val execution_for_occurrence :
   state ->

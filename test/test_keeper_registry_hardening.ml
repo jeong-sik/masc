@@ -792,7 +792,7 @@ let test_goal_reconciliation_prefers_authoritative_assignment
          check int "assignment scan error is classified as failed" 1 summary.failed_count;
          check int "assignment scan error is not unresolved" 0 summary.unresolved_count);
        let discovery =
-         Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
+         Keeper_event_queue_persistence.discover_keeper_names_with_durable_state
            ~base_path:config.base_path
        in
        match discovery.read_error with

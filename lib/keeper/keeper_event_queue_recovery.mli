@@ -28,7 +28,7 @@ type projection_error =
   | Unexpected_projection_failure of Eio.Exn.with_bt
 
 type discovery_error =
-  | Snapshot_discovery_failed of string
+  | Durable_state_discovery_failed of string
   | Sweep_execution_failed of Eio.Exn.with_bt
   | Sweep_executor_unavailable of Executor_pool_ref.strict_submit_error
 

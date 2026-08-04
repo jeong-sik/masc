@@ -3122,7 +3122,9 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
                (List.map
                   (fun (request : Schedule_domain.schedule_request) ->
                      let last_execution =
-                       Schedule_store.last_execution_for_schedule state
+                       Schedule_store.last_execution_for_schedule_instance state
+                         ~schedule_instance_id:
+                           request.Schedule_domain.schedule_instance_id
                          ~schedule_id:request.Schedule_domain.schedule_id
                      in
                      schedule_request_dashboard_json ~now ~config ?last_execution request)

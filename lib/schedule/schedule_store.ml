@@ -353,8 +353,12 @@ let executions_for_schedule state ~schedule_id =
   |> List.sort compare_execution_desc
 ;;
 
-let last_execution_for_schedule state ~schedule_id =
-  match executions_for_schedule state ~schedule_id with
+let last_execution_for_schedule_instance state ~schedule_instance_id ~schedule_id =
+  match
+    executions_for_schedule state ~schedule_id
+    |> List.filter (fun (execution : execution_record) ->
+      String.equal execution.schedule_instance_id schedule_instance_id)
+  with
   | [] -> None
   | execution :: _ -> Some execution
 ;;
@@ -660,7 +664,12 @@ let accept_running config ~now ~schedule_id ?detail () =
     | Some request ->
       if request.status <> Running
       then (
-        match last_execution_for_schedule state ~schedule_id with
+        match
+          last_execution_for_schedule_instance
+            state
+            ~schedule_instance_id:request.schedule_instance_id
+            ~schedule_id
+        with
         | Some
             { status =
                 (Execution_dispatched | Execution_succeeded | Execution_failed)

@@ -31,7 +31,7 @@ type projection_error =
   | Unexpected_projection_failure of Eio.Exn.with_bt
 
 type discovery_error =
-  | Snapshot_discovery_failed of string
+  | Durable_state_discovery_failed of string
   | Sweep_execution_failed of Eio.Exn.with_bt
   | Sweep_executor_unavailable of Executor_pool_ref.strict_submit_error
 
@@ -99,15 +99,15 @@ let projection_error_to_string = function
 ;;
 
 let discovery_error_to_string = function
-  | Snapshot_discovery_failed detail ->
-    "event queue snapshot discovery failed: " ^ detail
+  | Durable_state_discovery_failed detail ->
+    "durable event queue state discovery failed: " ^ detail
   | Sweep_execution_failed (exn, backtrace) ->
     Printf.sprintf
-      "event queue snapshot sweep raised: %s\n%s"
+      "durable event queue state sweep raised: %s\n%s"
       (Printexc.to_string exn)
       (Printexc.raw_backtrace_to_string backtrace)
   | Sweep_executor_unavailable error ->
-    "event queue snapshot sweep executor unavailable: "
+    "durable event queue state sweep executor unavailable: "
     ^ Executor_pool_ref.strict_submit_error_to_string error
 ;;
 
@@ -374,7 +374,7 @@ let project_discovery_inline
     ~base_path
     ~budget
     ~cursor
-    (discovery : Persistence.snapshot_discovery) =
+    (discovery : Persistence.durable_state_discovery) =
   let names, selected, deferred, next_cursor =
     ordered_owner_page ~budget ~cursor discovery.keeper_names
   in
@@ -389,7 +389,7 @@ let project_discovery_inline
     ; failures = []
     ; discovery_error =
         Option.map
-          (fun detail -> Snapshot_discovery_failed detail)
+          (fun detail -> Durable_state_discovery_failed detail)
           discovery.read_error
     }
   in
@@ -429,7 +429,7 @@ let project_discovered_bounded ~base_path ~budget ~cursor =
   match
     Executor_pool_ref.submit_strict (fun () ->
       let discovery =
-        Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
+        Keeper_event_queue_persistence.discover_keeper_names_with_durable_state
           ~base_path
       in
       project_discovery_inline ~base_path ~budget ~cursor discovery)

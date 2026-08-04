@@ -66,10 +66,19 @@ done
 command -v jq >/dev/null 2>&1 || fail "jq is required"
 
 if [[ -z "$CUTOVER_HELPER" ]]; then
-  if [[ -x "$REPO_ROOT/_build/default/bin/keeper_event_queue_v15_cutover_helper.exe" ]]; then
+  if [[ -x "$SCRIPT_DIR/masc-keeper-event-queue-v15-cutover-helper" ]]; then
+    CUTOVER_HELPER="$SCRIPT_DIR/masc-keeper-event-queue-v15-cutover-helper"
+  elif [[ "${BASH_SOURCE[0]##*/}" == masc-check-keeper-event-queue-v15-cutover-* ]]; then
+    release_suffix="${BASH_SOURCE[0]##*/}"
+    release_suffix="${release_suffix#masc-check-keeper-event-queue-v15-cutover-}"
+    release_helper="$SCRIPT_DIR/masc-keeper-event-queue-v15-cutover-helper-$release_suffix"
+    [[ -x "$release_helper" ]] \
+      || fail "paired release cutover helper is missing or not executable: $release_helper"
+    CUTOVER_HELPER="$release_helper"
+  elif [[ -x "$REPO_ROOT/_build/default/bin/keeper_event_queue_v15_cutover_helper.exe" ]]; then
     CUTOVER_HELPER="$REPO_ROOT/_build/default/bin/keeper_event_queue_v15_cutover_helper.exe"
   else
-    fail "typed cutover helper is required (build bin/keeper_event_queue_v15_cutover_helper.exe or set MASC_EVENT_QUEUE_V15_CUTOVER_HELPER)"
+    fail "typed cutover helper is required beside this gate, in the build tree, or via MASC_EVENT_QUEUE_V15_CUTOVER_HELPER"
   fi
 fi
 [[ -x "$CUTOVER_HELPER" ]] || fail "typed cutover helper is not executable: $CUTOVER_HELPER"

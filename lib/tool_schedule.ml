@@ -425,8 +425,9 @@ let handle_list ~tool_name ~start_time ctx args =
          request_rows
          |> List.map (fun (request : Schedule_domain.schedule_request) ->
            let last_execution =
-             Schedule_store.last_execution_for_schedule
+             Schedule_store.last_execution_for_schedule_instance
                state
+               ~schedule_instance_id:request.Schedule_domain.schedule_instance_id
                ~schedule_id:request.Schedule_domain.schedule_id
            in
            schedule_request_json ?last_execution request)
@@ -457,7 +458,8 @@ let handle_get ~tool_name ~start_time ctx args =
      | None -> workflow_error ~tool_name ~start_time "schedule not found"
      | Some request ->
        let last_execution =
-         Schedule_store.last_execution_for_schedule state
+         Schedule_store.last_execution_for_schedule_instance state
+           ~schedule_instance_id:request.Schedule_domain.schedule_instance_id
            ~schedule_id:request.Schedule_domain.schedule_id
        in
        ok ~tool_name ~start_time (schedule_request_json ?last_execution request))

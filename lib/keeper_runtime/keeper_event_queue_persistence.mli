@@ -138,13 +138,14 @@ type snapshot_with_errors =
   ; read_errors : snapshot_read_error list
   }
 
-type snapshot_discovery =
+type durable_state_discovery =
   { keeper_names : string list
   ; read_error : string option
   }
 
 val snapshot_read_error_kind_to_string : snapshot_read_error_kind -> string
-val discover_keeper_names_with_snapshots : base_path:string -> snapshot_discovery
+val discover_keeper_names_with_durable_state :
+  base_path:string -> durable_state_discovery
 val load_snapshot_with_errors :
   base_path:string -> keeper_name:string -> snapshot_with_errors
 
@@ -159,9 +160,10 @@ val load_state_result :
 
 val load_existing_state_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
-(** Read an already-created durable queue envelope. Unlike {!load_state_result},
-    a missing current snapshot is an explicit [Error] rather than an empty
-    queue. Use this when absence would be interpreted as evidence about prior
+(** Read already-created durable queue state. A current snapshot or v5 WAL is
+    durable owner evidence; a WAL-only owner is replayed from the empty state.
+    Unlike {!load_state_result}, absence of both artifacts is an explicit
+    [Error]. Use this when absence would be interpreted as evidence about prior
     durable work. *)
 
 val validate_state_read_only_result :
@@ -172,9 +174,10 @@ val validate_state_read_only_result :
 
 val validate_existing_state_read_only_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
-(** Decode an existing current snapshot and replay its v5 WAL without
-    checkpointing or WAL compaction. A missing snapshot is an explicit error,
-    matching {!load_existing_state_result}. *)
+(** Decode existing durable state and replay its v5 WAL without checkpointing
+    or WAL compaction. A WAL-only owner is replayed from the empty state;
+    absence of both artifacts is an explicit error, matching
+    {!load_existing_state_result}. *)
 
 val cancel_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->

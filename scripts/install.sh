@@ -695,6 +695,9 @@ detect_asset() {
 }
 
 ASSET=$(detect_asset)
+PLATFORM_SUFFIX="${ASSET#masc-}"
+CUTOVER_HELPER_ASSET="masc-keeper-event-queue-v15-cutover-helper-$PLATFORM_SUFFIX"
+CUTOVER_GATE_ASSET="masc-check-keeper-event-queue-v15-cutover-$PLATFORM_SUFFIX"
 log "platform: $ASSET"
 
 
@@ -765,6 +768,8 @@ fetch_release_checksums() {
 # --- 3. download binary -------------------------------------------------------
 URL="$RELEASE_BASE_URL/$VERSION/$ASSET"
 DEST="$PREFIX/masc"
+CUTOVER_HELPER_DEST="$PREFIX/masc-keeper-event-queue-v15-cutover-helper"
+CUTOVER_GATE_DEST="$PREFIX/masc-check-keeper-event-queue-v15-cutover"
 
 model_catalog_env_value() {
   if [ -n "${OAS_MODEL_CATALOG:-}" ]; then
@@ -851,6 +856,38 @@ if [ "$SKIP_DL" -ne 1 ]; then
     log "installed: $DEST"
   fi
 fi
+
+install_release_companion() {
+  local asset="$1" dest="$2"
+  local url="$RELEASE_BASE_URL/$VERSION/$asset"
+  if [ "$SKIP_DL" -eq 1 ] && [ -x "$dest" ]; then
+    log "release companion already present: $dest"
+    return 0
+  fi
+  log "downloading $url"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "[dry-run] would download to $dest"
+    return 0
+  fi
+  mkdir -p "$PREFIX"
+  local tmp="$dest.partial"
+  PARTIAL_FILES+=("$tmp")
+  fetch_release_checksums
+  curl -fL \
+    --max-time "$MASC_INSTALL_BINARY_DOWNLOAD_TIMEOUT_S" \
+    --retry "$MASC_INSTALL_CURL_RETRIES" \
+    --progress-bar \
+    -o "$tmp" \
+    "$url" \
+    || die "download failed (asset missing for $VERSION?): $asset"
+  verify_checksum "$tmp" "$asset"
+  chmod +x "$tmp"
+  mv "$tmp" "$dest"
+  log "installed: $dest"
+}
+
+install_release_companion "$CUTOVER_HELPER_ASSET" "$CUTOVER_HELPER_DEST"
+install_release_companion "$CUTOVER_GATE_ASSET" "$CUTOVER_GATE_DEST"
 
 # --- 4. seed minimum config ---------------------------------------------------
 if [ "$SEED_CONFIG" -eq 1 ]; then

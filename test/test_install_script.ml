@@ -228,6 +228,14 @@ let release_workflow () =
   read_file (Filename.concat (source_root ()) ".github/workflows/release.yml")
 ;;
 
+let railway_workflow () =
+  read_file (Filename.concat (source_root ()) ".github/workflows/deploy-railway.yml")
+;;
+
+let dockerfile () = read_file (Filename.concat (source_root ()) "Dockerfile")
+let dockerignore () = read_file (Filename.concat (source_root ()) ".dockerignore")
+let railway_config () = read_file (Filename.concat (source_root ()) "railway.toml")
+
 let project_version () =
   let raw = read_file (Filename.concat (source_root ()) "dune-project") in
   let prefix = "(version " in
@@ -320,6 +328,27 @@ let stage_release_mirror base_path =
   let asset = Filename.concat dir (platform_release_asset ()) in
   unlink_if_exists asset;
   Unix.symlink (Unix.realpath (real_masc_binary ())) asset;
+  let suffix =
+    let name = platform_release_asset () in
+    String.sub name 5 (String.length name - 5)
+  in
+  let helper =
+    Filename.concat
+      dir
+      ("masc-keeper-event-queue-v15-cutover-helper-" ^ suffix)
+  in
+  unlink_if_exists helper;
+  Unix.symlink (Unix.realpath (real_masc_binary ())) helper;
+  let gate =
+    Filename.concat
+      dir
+      ("masc-check-keeper-event-queue-v15-cutover-" ^ suffix)
+  in
+  unlink_if_exists gate;
+  Unix.symlink
+    (Unix.realpath
+       (Filename.concat (source_root ()) "scripts/check-keeper-event-queue-v15-cutover.sh"))
+    gate;
   "file://" ^ Filename.concat base_path ".release"
 ;;
 
@@ -428,7 +457,19 @@ let test_release_requires_advertised_binary_assets () =
   assert_contains
     "release checks advertised asset list"
     workflow
-      "for asset in masc-macos-arm64 masc-linux-x64; do";
+    "for arch in macos-arm64 linux-x64; do";
+  assert_contains
+    "release builds the typed cutover helper"
+    workflow
+    "bin/keeper_event_queue_v15_cutover_helper.exe";
+  assert_contains
+    "release requires the typed cutover helper asset"
+    workflow
+    "masc-keeper-event-queue-v15-cutover-helper-$arch";
+  assert_contains
+    "release requires the cutover gate asset"
+    workflow
+    "masc-check-keeper-event-queue-v15-cutover-$arch";
   assert_contains
     "release fails when required asset is absent"
     workflow
@@ -437,6 +478,65 @@ let test_release_requires_advertised_binary_assets () =
     "release hashes seeded model catalog overlay"
     workflow
     "(cd ../config && sha256sum oas-models-overlay.toml) >> SHA256SUMS"
+;;
+
+let test_installer_fetches_cutover_companions () =
+  let script = install_script () in
+  assert_contains
+    "installer derives the platform helper asset"
+    script
+    {|CUTOVER_HELPER_ASSET="masc-keeper-event-queue-v15-cutover-helper-$PLATFORM_SUFFIX"|};
+  assert_contains
+    "installer derives the platform gate asset"
+    script
+    {|CUTOVER_GATE_ASSET="masc-check-keeper-event-queue-v15-cutover-$PLATFORM_SUFFIX"|};
+  assert_contains
+    "installer installs the helper beside the gate"
+    script
+    {|CUTOVER_HELPER_DEST="$PREFIX/masc-keeper-event-queue-v15-cutover-helper"|};
+  assert_contains
+    "installer installs the gate beside the helper"
+    script
+    {|CUTOVER_GATE_DEST="$PREFIX/masc-check-keeper-event-queue-v15-cutover"|}
+;;
+
+let test_railway_runtime_enforces_cutover_before_main () =
+  let workflow = railway_workflow () in
+  let image = dockerfile () in
+  let context = dockerignore () in
+  let railway = railway_config () in
+  assert_contains
+    "Railway builds the typed cutover helper"
+    workflow
+    "bin/keeper_event_queue_v15_cutover_helper.exe";
+  assert_contains
+    "Railway uploads the typed cutover helper"
+    workflow
+    "masc-keeper-event-queue-v15-cutover-helper";
+  assert_contains
+    "Railway proves an unsafe v14 image is rejected"
+    workflow
+    "Reject unsafe cutover image";
+  assert_contains
+    "image ships the read-only cutover gate"
+    image
+    "/app/masc-check-keeper-event-queue-v15-cutover";
+  assert_contains
+    "image enters through the lease handoff wrapper"
+    image
+    {|ENTRYPOINT ["/usr/bin/tini", "--", "/app/masc-cutover-entrypoint"]|};
+  assert_contains
+    "Docker context includes the main release executable"
+    context
+    "!masc-linux-x64";
+  assert_contains
+    "Docker context includes the cutover helper"
+    context
+    "!masc-keeper-event-queue-v15-cutover-helper";
+  assert_not_contains
+    "Railway does not bypass the image entrypoint with a direct main command"
+    railway
+    "startCommand"
 ;;
 
 let test_binary_checks_use_install_environment () =
@@ -1242,6 +1342,14 @@ let () =
             "binary checks use install environment"
             `Quick
             test_binary_checks_use_install_environment
+        ; test_case
+            "Railway runtime enforces cutover before main"
+            `Quick
+            test_railway_runtime_enforces_cutover_before_main
+        ; test_case
+            "installer fetches cutover companions"
+            `Quick
+            test_installer_fetches_cutover_companions
         ; test_case
             "--force refreshes same-version existing binary"
             `Quick

@@ -163,11 +163,16 @@ let reclaim_ok ~consumer config ~now =
   | Error err -> fail (runner_error_to_string err)
 ;;
 
-let latest_execution config ~schedule_id =
+let latest_execution config (request : Schedule_domain.schedule_request) =
   let state = Schedule_store.read_state config in
-  match Schedule_store.last_execution_for_schedule state ~schedule_id with
+  match
+    Schedule_store.last_execution_for_schedule_instance
+      state
+      ~schedule_instance_id:request.schedule_instance_id
+      ~schedule_id:request.schedule_id
+  with
   | Some execution -> execution
-  | None -> failf "no execution recorded for %s" schedule_id
+  | None -> failf "no execution recorded for %s" request.schedule_id
 ;;
 
 (* Drives a schedule to the state this whole feature exists for: the consumer
@@ -180,7 +185,7 @@ let accepted_recurring_occurrence config ~schedule_id =
   in
   let consumer = accepting_consumer ~accepted_detail calls in
   let _ = tick_ok config ~now:201.0 ~consumer in
-  let accepted = latest_execution config ~schedule_id in
+  let accepted = latest_execution config request in
   check bool "precondition: work accepted but unsettled" true
     (accepted.status = Execution_dispatched);
   request
@@ -231,7 +236,9 @@ let test_tick_dispatches_due_candidate_to_success () =
      check string "stored succeeded" "succeeded"
        (schedule_status_to_string stored.status));
   (match
-     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
+     Schedule_store.last_execution_for_schedule_instance
+       (Schedule_store.read_state config)
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
    with
    | None -> fail "missing execution record"
@@ -267,8 +274,9 @@ let test_tick_records_async_acceptance_without_claiming_work_success () =
      check string "one-shot remains running" "running"
        (schedule_status_to_string stored.status));
   (match
-     Schedule_store.last_execution_for_schedule
+     Schedule_store.last_execution_for_schedule_instance
        (Schedule_store.read_state config)
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
    with
    | None -> fail "accepted execution missing"
@@ -363,7 +371,7 @@ let test_tick_completes_terminal_work_after_acceptance () =
        (schedule_status_to_string stored.status);
      check (float 0.001) "completed next occurrence remains scheduled" 260.0
        stored.due_at);
-  match latest_execution config ~schedule_id:request.schedule_id with
+  match latest_execution config request with
   | { status = Execution_succeeded; finished_at = Some _; _ } -> ()
   | execution ->
     failf
@@ -389,7 +397,9 @@ let test_tick_marks_unsupported_candidate_failed () =
    | Some stored ->
      check string "stored failed" "failed" (schedule_status_to_string stored.status));
   (match
-     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
+     Schedule_store.last_execution_for_schedule_instance
+       (Schedule_store.read_state config)
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
    with
    | None -> fail "missing unsupported execution"
@@ -455,7 +465,9 @@ let test_tick_dispatches_recurring_candidate_to_next_due () =
        (schedule_status_to_string stored.status);
      check (float 0.001) "next due" 260.0 stored.due_at);
   (match
-     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
+     Schedule_store.last_execution_for_schedule_instance
+       (Schedule_store.read_state config)
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
    with
    | None -> fail "missing recurring execution"
@@ -513,7 +525,9 @@ let test_tick_marks_terminal_dispatch_rejection_failed () =
    | Some stored ->
      check string "stored failed" "failed" (schedule_status_to_string stored.status));
   (match
-     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
+     Schedule_store.last_execution_for_schedule_instance
+       (Schedule_store.read_state config)
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
    with
    | None -> fail "missing failed execution"
@@ -776,7 +790,7 @@ let test_reclaim_settles_lost_occurrence () =
   check int "one occurrence examined" 1 outcome.examined;
   check int "one occurrence reclaimed" 1 outcome.reclaimed;
   check int "no reclaim failure" 0 (List.length outcome.failures);
-  let settled = latest_execution config ~schedule_id:request.schedule_id in
+  let settled = latest_execution config request in
   check bool "occurrence is terminal" true (settled.status = Execution_failed);
   check (option string) "consumer reason is the recorded failure"
     (Some "queue entry vanished") settled.error;
@@ -796,7 +810,7 @@ let test_reclaim_leaves_held_occurrence_alone () =
   check int "occurrence examined" 1 outcome.examined;
   check int "nothing reclaimed" 0 outcome.reclaimed;
   check int "occurrence counted as held" 1 outcome.held;
-  let untouched = latest_execution config ~schedule_id:request.schedule_id in
+  let untouched = latest_execution config request in
   check bool "occurrence stays dispatched" true
     (untouched.status = Execution_dispatched)
 ;;
@@ -815,7 +829,7 @@ let test_reclaim_projects_consumer_completion () =
   check int "completed occurrence examined" 1 outcome.examined;
   check int "completed occurrence settled" 1 outcome.settled_elsewhere;
   check int "completion projection has no failure" 0 (List.length outcome.failures);
-  let settled = latest_execution config ~schedule_id:request.schedule_id in
+  let settled = latest_execution config request in
   check bool "consumer completion leaves dispatched" false
     (settled.status = Execution_dispatched);
   check bool "consumer completion succeeds execution" true
@@ -862,7 +876,7 @@ let test_reclaim_projects_consumer_cancellation () =
   check int "cancelled occurrence examined" 1 outcome.examined;
   check int "cancelled occurrence settled" 1 outcome.settled_elsewhere;
   check int "cancellation projection has no failure" 0 (List.length outcome.failures);
-  let settled = latest_execution config ~schedule_id:request.schedule_id in
+  let settled = latest_execution config request in
   check bool "consumer cancellation leaves dispatched" false
     (settled.status = Execution_dispatched);
   check bool "consumer cancellation fails execution" true
@@ -886,7 +900,7 @@ let test_reclaim_projects_consumer_failure () =
   check int "failed occurrence examined" 1 outcome.examined;
   check int "failed occurrence settled" 1 outcome.settled_elsewhere;
   check int "failure projection has no reclaim error" 0 (List.length outcome.failures);
-  let settled = latest_execution config ~schedule_id:request.schedule_id in
+  let settled = latest_execution config request in
   check bool "consumer failure fails execution" true
     (settled.status = Execution_failed);
   check (option string) "consumer failure reason is preserved"
@@ -1030,7 +1044,7 @@ let test_reclaim_leaves_occurrence_alone_when_consumer_errors () =
   check int "occurrence examined" 1 outcome.examined;
   check int "nothing reclaimed on an unreadable consumer" 0 outcome.reclaimed;
   check int "the error is reported" 1 (List.length outcome.failures);
-  let untouched = latest_execution config ~schedule_id:request.schedule_id in
+  let untouched = latest_execution config request in
   check bool "occurrence stays dispatched" true
     (untouched.status = Execution_dispatched)
 ;;

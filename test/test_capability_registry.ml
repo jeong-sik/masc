@@ -54,6 +54,70 @@ let test_spawned_agent_surface_stays_curated () =
   check bool "contains masc_status" true
     (List.mem "mcp__masc__masc_status" names)
 
+let test_keeper_surface_is_exact_descriptor_projection () =
+  let projected_names =
+    Lib.Capability_registry.all_projection_seeds_from
+      Lib.Config.raw_all_tool_schemas
+    |> List.filter_map (fun (seed : Lib.Capability_registry.capability_seed) ->
+      match seed.projection.surface with
+      | Lib.Capability_registry.Keeper -> Some seed.projection.tool_name
+      | Lib.Capability_registry.Public_mcp
+      | Lib.Capability_registry.Spawned_agent_mcp
+      | Lib.Capability_registry.Local_worker -> None)
+    |> List.sort_uniq String.compare
+  in
+  let descriptor_names =
+    Lib.Keeper_tool_descriptor.model_visible_descriptors ()
+    |> List.concat_map Lib.Keeper_tool_descriptor.keeper_model_names
+    |> List.sort_uniq String.compare
+  in
+  check (list string)
+    "Keeper capability surface is the descriptor projection"
+    descriptor_names
+    projected_names
+
+let test_keeper_projection_uses_descriptor_capability_identity () =
+  Lib.Capability_registry.all_projection_seeds_from
+    Lib.Config.raw_all_tool_schemas
+  |> List.iter (fun (seed : Lib.Capability_registry.capability_seed) ->
+    match seed.projection.surface with
+    | Lib.Capability_registry.Keeper ->
+      (match
+         Lib.Keeper_tool_descriptor_resolution.descriptor_for_tool_name
+           seed.projection.tool_name
+       with
+       | None ->
+         failf
+           "Keeper projection %S has no descriptor"
+           seed.projection.tool_name
+       | Some descriptor ->
+         check string
+           (seed.projection.tool_name ^ " capability identity")
+           descriptor.Lib.Keeper_tool_descriptor.capability_id
+           seed.capability_id)
+    | Lib.Capability_registry.Public_mcp
+    | Lib.Capability_registry.Spawned_agent_mcp
+    | Lib.Capability_registry.Local_worker -> ())
+
+let test_inventory_marks_only_projected_keeper_names () =
+  let open Yojson.Safe.Util in
+  let rows =
+    Lib.Tool_misc_introspection.tool_inventory_json () ~include_hidden:false
+    |> member "tools"
+    |> to_list
+  in
+  let surfaces name =
+    rows
+    |> List.find (fun row -> row |> member "name" |> to_string = name)
+    |> member "surfaces"
+    |> to_list
+    |> List.map to_string
+  in
+  check bool "public Write alias is Keeper-visible" true
+    (List.mem "keeper" (surfaces "Write"));
+  check bool "internal write backend is not a second Keeper tool" false
+    (List.mem "keeper" (surfaces "tool_write_file"))
+
 let () =
   Alcotest.run "capability_registry"
     [
@@ -70,5 +134,11 @@ let () =
             test_local_worker_projection_exposes_internal_and_auditable_tools;
           test_case "spawned agent surface stays curated" `Quick
             test_spawned_agent_surface_stays_curated;
+          test_case "Keeper surface is the exact descriptor projection" `Quick
+            test_keeper_surface_is_exact_descriptor_projection;
+          test_case "Keeper capability identity is descriptor-owned" `Quick
+            test_keeper_projection_uses_descriptor_capability_identity;
+          test_case "inventory marks only exact Keeper projections" `Quick
+            test_inventory_marks_only_projected_keeper_names;
         ] );
     ]

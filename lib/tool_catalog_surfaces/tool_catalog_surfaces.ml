@@ -35,7 +35,6 @@ let schedule_request_surface_tools =
 ;;
 
 let public_schedule_surface_tools = schedule_request_surface_tools
-let keeper_schedule_surface_tools = schedule_request_surface_tools
 (* TEL-OK: pure surface membership constants; tool-call telemetry is emitted by
    the dispatch/runtime boundary. *)
 

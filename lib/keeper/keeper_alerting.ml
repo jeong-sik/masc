@@ -14,8 +14,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_memory
 
-let keeper_model_tools = Tool_shard.keeper_model_tools
-
 let merge_usage
     (a : Agent_sdk.Types.api_usage)
     (b : Agent_sdk.Types.api_usage) : Agent_sdk.Types.api_usage =

@@ -33,6 +33,30 @@ let test_model_surface_exposes_working_capability_families () =
     ; "masc_fusion"
     ]
 
+let test_model_surface_exposes_delegation_not_keeper_administration () =
+  let names = Masc.Keeper_tool_policy.keeper_model_tool_names () in
+  List.iter
+    (fun name -> check_member (name ^ " is model-visible") name true names)
+    [ "masc_keeper_delegate"
+    ; "masc_keeper_delegate_status"
+    ; "masc_keeper_delegate_cancel"
+    ];
+  List.iter
+    (fun name -> check_member (name ^ " is operator-only") name false names)
+    [ "masc_keeper_waiting_inventory"
+    ; "masc_keeper_list"
+    ; "masc_keeper_delegate_list"
+    ; "masc_keeper_compact"
+    ; "masc_keeper_clear"
+    ; "masc_keeper_sandbox_start"
+    ; "masc_keeper_sandbox_stop"
+    ; "masc_keeper_reset"
+    ; "masc_keeper_persona_audit"
+    ; "masc_keeper_status"
+    ; "masc_keeper_down"
+    ; "masc_keeper_up"
+    ]
+
 let () =
   Alcotest.run "keeper_tool_policy_masc_surface"
     [
@@ -48,5 +72,9 @@ let () =
             "exposes code web media voice and Fusion"
             `Quick
             test_model_surface_exposes_working_capability_families;
+          test_case
+            "exposes delegation without Keeper administration"
+            `Quick
+            test_model_surface_exposes_delegation_not_keeper_administration;
         ] );
     ]

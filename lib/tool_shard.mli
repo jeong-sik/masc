@@ -12,10 +12,6 @@ val base_tools : Masc_domain.tool_schema list
 val board_tools : Masc_domain.tool_schema list
 
 val all_keeper_tool_schemas : Masc_domain.tool_schema list
-(** Every schema family exposed by the Keeper catalog, de-duplicated by exact
-    tool name while preserving catalog order. *)
-
-val keeper_model_tools : Masc_domain.tool_schema list
-(** The complete flat Keeper model catalog.  Equal to
-    [all_keeper_tool_schemas]; execution-time external effects pass through
-    the Gate instead of a catalog-membership hierarchy. *)
+(** Every Keeper-handler schema family, de-duplicated by exact internal tool
+    name while preserving catalog order. Model visibility is owned solely by
+    [Keeper_tool_descriptor.keeper_model_names]. *)

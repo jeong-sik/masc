@@ -304,7 +304,7 @@ Producer
 |---|---|
 | owner queue and fencing | `keeper_runtime/keeper_event_queue*` |
 | async durable request | `keeper/keeper_msg_async*` |
-| exact current work projection | `keeper/keeper_current_operations*` |
+| exact current work projection | none — see PURGE-MANIFEST §3.1 |
 | Gate and HITL | `keeper_gate*`, `keeper_approval_queue*`, `hitl_summary_worker*` |
 | structural compaction | `keeper_compaction_unit*`, `keeper_compact_policy*` |
 | LLM compaction | `keeper_compaction_llm_summarizer*`, `keeper_manual_compaction*` |

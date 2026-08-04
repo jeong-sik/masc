@@ -1,8 +1,0 @@
-(test
- (name test_keeper_compaction_live_delta)
- (libraries
-  agent_sdk
-  alcotest
-  masc
-  masc.keeper_checkpoint_ref
-  masc.keeper_registry))

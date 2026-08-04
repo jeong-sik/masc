@@ -12,6 +12,17 @@ module Mcp_server = Masc.Mcp_server
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
+(* The verification hooks in [Workspace_hooks] default to a fail-closed
+   [Error "... hook is not installed"], so a Task submission reaches durable
+   storage only in a process that installed the real implementations.
+   Production installs them through [Workspace_metric_hooks.install] in
+   [Mcp_server.create_state_eio]'s [on_backend_ready] callback; the harness
+   below builds its config through the non-Eio [For_testing.create_state],
+   which never fires that callback. Installing the same function here is what
+   makes [submit_for_verification] exercise the production persistence
+   boundary instead of the unwired default. *)
+let () = Masc.Workspace_metric_hooks.install ()
+
 let request ~id ~method_ params =
   Yojson.Safe.to_string
     (`Assoc

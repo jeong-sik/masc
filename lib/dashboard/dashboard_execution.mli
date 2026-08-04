@@ -19,6 +19,26 @@ val task_json :
   Masc_domain.task ->
   Yojson.Safe.t
 
+(** How many terminal tasks inside the recency window the execution payload
+    carries. *)
+val recent_terminal_limit : int
+
+(** [recent_terminal_tasks ~cutoff tasks] selects the tasks that reached a
+    terminal status at or after [cutoff], newest terminal timestamp first,
+    bounded by {!recent_terminal_limit}.
+
+    Ordering is part of the contract. Truncating in backlog order — insertion
+    order — surfaced the oldest of the qualifying tasks once more than the limit
+    ended inside the window, so a panel labelled "recent" omitted the most
+    recent entries. A task whose terminal timestamp does not parse is left out
+    rather than pinned to an invented time.
+
+    Pure, so the ordering is testable without booting Eio. *)
+val recent_terminal_tasks :
+  cutoff:float ->
+  Masc_domain.task list ->
+  Masc_domain.task list
+
 (** #9766: per-render phase timing surfaced in the [slow render] WARN.
     Pure value type so unit tests can pin the formatter without
     booting Eio. *)

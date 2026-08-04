@@ -124,6 +124,7 @@ type trace_tool_status =
 type trace_step =
   | Trace_think of {
       text : string;
+      content_withheld : bool;
       ts : string option;
       oas_block_index : int option;
     }
@@ -322,9 +323,15 @@ let trace_status_to_yojson = function
 ;;
 
 let trace_step_to_yojson = function
-  | Trace_think { text; ts; oas_block_index } ->
+  | Trace_think { text; content_withheld; ts; oas_block_index } ->
+    (* Mirrors the [Thinking { redacted }] wire rule: the flag is only emitted
+       when true, and [text] is forced to "" at the boundary regardless of the
+       in-memory record, so a caller-side bug cannot ship reasoning text behind
+       a flag that claims the content was not carried. *)
+    let wire_text = if content_withheld then "" else text in
     `Assoc
-      ([ ("kind", `String "think"); ("text", `String text) ]
+      ([ ("kind", `String "think"); ("text", `String wire_text) ]
+       @ (if content_withheld then [ ("content_withheld", `Bool true) ] else [])
        @ opt_string_field "ts" ts
        @ opt_int_field "oas_block_index" oas_block_index)
   | Trace_reason { text; detail; ts } ->
@@ -644,12 +651,23 @@ let block_of_yojson json : chat_block option =
           | Some (`Int i) -> Some i
           | _ -> None
         in
+        let get_step_bool key =
+          match List.assoc_opt key step_fields with
+          | Some (`Bool b) -> b
+          | _ -> false
+        in
         (match get_step_string "kind" with
           | Some "think" ->
+            (* "text" stays required so a payload that merely omits it is
+               rejected rather than silently read as a withheld step. The
+               in-memory record cannot hold text alongside the flag: a payload
+               carrying both loses the text here, matching the encoder. *)
             Option.bind (get_step_string "text") (fun text ->
+              let content_withheld = get_step_bool "content_withheld" in
               Some
                 (Trace_think
-                   { text
+                   { text = (if content_withheld then "" else text)
+                   ; content_withheld
                    ; ts = get_step_string "ts"
                    ; oas_block_index =
                        (match get_step_int "oas_block_index" with

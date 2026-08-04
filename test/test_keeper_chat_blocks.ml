@@ -228,6 +228,7 @@ let test_dashboard_rich_blocks_roundtrip () =
               B.Trace_think
                 {
                   text = "checking";
+                  content_withheld = false;
                   ts = Some "2026-07-01T00:00:00Z";
                   oas_block_index = Some 0;
                 };
@@ -485,6 +486,115 @@ let test_thinking_block_requires_content () =
        (`List [ `Assoc [ ("t", `String "thinking"); ("redacted", `Bool true) ] ])
      = None)
 
+let withheld_think_trace steps = [ B.Trace { trace = steps } ]
+
+let test_withheld_think_step_roundtrip () =
+  (* The public autonomous projection admits the step and its timestamp with no
+     reasoning text (RFC-0358 §2). The flag is what states that, so it has to
+     survive the wire in both directions. *)
+  let original =
+    withheld_think_trace
+      [ B.Trace_think
+          { text = ""
+          ; content_withheld = true
+          ; ts = Some "2026-08-04T00:00:00Z"
+          ; oas_block_index = None
+          }
+      ]
+  in
+  Alcotest.(check (list yojson_testable))
+    "withheld think step json shape"
+    [ `Assoc
+        [ ("t", `String "trace")
+        ; ( "trace"
+          , `List
+              [ `Assoc
+                  [ ("kind", `String "think")
+                  ; ("text", `String "")
+                  ; ("content_withheld", `Bool true)
+                  ; ("ts", `String "2026-08-04T00:00:00Z")
+                  ]
+              ] )
+        ]
+    ]
+    (blocks_to_json_list original);
+  match B.blocks_of_yojson (`List (blocks_to_json_list original)) with
+  | Some [ B.Trace { trace = [ B.Trace_think { text = ""; content_withheld = true; _ } ] } ]
+    -> ()
+  | _ -> Alcotest.fail "withheld think step should roundtrip with content_withheld=true"
+
+let test_withheld_think_step_encoder_scrubs_smuggled_text () =
+  (* Mirrors the [Thinking { redacted }] guarantee: a caller that builds the
+     flag alongside real reasoning must not be able to ship it. *)
+  let original =
+    withheld_think_trace
+      [ B.Trace_think
+          { text = "leaked reasoning"
+          ; content_withheld = true
+          ; ts = None
+          ; oas_block_index = None
+          }
+      ]
+  in
+  Alcotest.(check (list yojson_testable))
+    "withheld think step with smuggled text is scrubbed on encode"
+    [ `Assoc
+        [ ("t", `String "trace")
+        ; ( "trace"
+          , `List
+              [ `Assoc
+                  [ ("kind", `String "think")
+                  ; ("text", `String "")
+                  ; ("content_withheld", `Bool true)
+                  ]
+              ] )
+        ]
+    ]
+    (blocks_to_json_list original)
+
+let test_withheld_think_step_decoder_scrubs_smuggled_text () =
+  match
+    B.blocks_of_yojson
+      (`List
+         [ `Assoc
+             [ ("t", `String "trace")
+             ; ( "trace"
+               , `List
+                   [ `Assoc
+                       [ ("kind", `String "think")
+                       ; ("text", `String "leaked reasoning")
+                       ; ("content_withheld", `Bool true)
+                       ]
+                   ] )
+             ]
+         ])
+  with
+  | Some [ B.Trace { trace = [ B.Trace_think { text = ""; content_withheld = true; _ } ] } ]
+    -> ()
+  | _ ->
+    Alcotest.fail
+      "decoder must scrub think text when content_withheld=true, not preserve it"
+
+let test_withheld_think_step_still_requires_text_field () =
+  (* Omitting "text" stays a decode failure. Otherwise a truncated or malformed
+     payload would be read as a legitimate withheld step. *)
+  Alcotest.(check bool) "think step without text rejected even when withheld"
+    true
+    (B.blocks_of_yojson
+       (`List
+          [ `Assoc
+              [ ("t", `String "trace")
+              ; ( "trace"
+                , `List
+                    [ `Assoc
+                        [ ("kind", `String "think")
+                        ; ("content_withheld", `Bool true)
+                        ]
+                    ] )
+              ]
+          ])
+     = None)
+
 let () =
   Alcotest.run "keeper_chat_blocks"
     [
@@ -557,5 +667,13 @@ let () =
             test_redacted_thinking_block_decoder_scrubs_smuggled_content;
           Alcotest.test_case "thinking block requires content" `Quick
             test_thinking_block_requires_content;
+          Alcotest.test_case "withheld think step roundtrip" `Quick
+            test_withheld_think_step_roundtrip;
+          Alcotest.test_case "withheld think encoder scrubs smuggled text" `Quick
+            test_withheld_think_step_encoder_scrubs_smuggled_text;
+          Alcotest.test_case "withheld think decoder scrubs smuggled text" `Quick
+            test_withheld_think_step_decoder_scrubs_smuggled_text;
+          Alcotest.test_case "withheld think step still requires text field" `Quick
+            test_withheld_think_step_still_requires_text_field;
         ] );
     ]

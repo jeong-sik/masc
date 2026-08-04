@@ -92,9 +92,11 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
   if (kind === 'think') {
     const text = stringValue(raw.text)
     if (text === undefined) return null
-    const step: ChatTraceStep = { kind, text }
+    const contentWithheld = raw.content_withheld === true || raw.contentWithheld === true
+    const step: ChatTraceStep = { kind, text: contentWithheld ? '' : text }
     const ts = stringValue(raw.ts)
     const oasBlockIndex = numberValue(raw.oasBlockIndex)
+    if (contentWithheld) step.contentWithheld = true
     if (ts !== undefined) step.ts = ts
     if (oasBlockIndex !== undefined) step.oasBlockIndex = oasBlockIndex
     return step

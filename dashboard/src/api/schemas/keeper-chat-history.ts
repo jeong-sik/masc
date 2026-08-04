@@ -94,6 +94,7 @@ const KeeperChatTraceStepSchema = union([
   object({
     kind: literal('think'),
     text: string(),
+    content_withheld: optional(boolean()),
     ts: optional(string()),
     oas_block_index: optional(number()),
     oasBlockIndex: optional(number()),

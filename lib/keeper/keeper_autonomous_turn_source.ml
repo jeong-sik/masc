@@ -62,9 +62,13 @@ let check_raw_trace_identity
 
 let trace_step_of_trajectory = function
   | Agent_sdk.Trajectory.Think { ts; _ } ->
+    (* RFC-0358 §2 admits the step and its timestamp, not the reasoning. The
+       flag carries that fact; the label a reader shows for it belongs to the
+       reader, not to this projection. *)
     Some
       (Keeper_chat_blocks.Trace_think
-         { text = "내부 판단 단계 (내용 비공개)"
+         { text = ""
+         ; content_withheld = true
          ; ts = Some (Masc_domain.iso8601_of_unix_seconds ts)
          ; oas_block_index = None
          })

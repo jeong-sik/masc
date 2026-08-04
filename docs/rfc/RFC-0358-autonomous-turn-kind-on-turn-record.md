@@ -34,6 +34,13 @@ run ref의 session identity가 record의 trace identity와 다르면 현재 reco
 단일 exact run을 `Raw_trace_query.read_run`으로 읽고 허용된 activity field만
 투영한다. 한 파일의 여러 provider run을 합치지 않는다.
 
+Thinking 단계의 존재는 `Trace_think`의 `content_withheld = true`로 나른다.
+문구가 아니라 flag가 그 사실을 나르므로, 표시 문구는 읽는 쪽이 정하고 서버는
+언어를 소유하지 않는다. Encoder와 decoder 양쪽이 `content_withheld = true ==>
+text = ""`를 강제해 caller 실수로도 reasoning text가 이 경계를 넘지 못한다.
+`thinking_block`의 `redacted`(provider가 signature만 보낸 경우)와는 원인이
+다르므로 같은 field로 합치지 않는다.
+
 Public `/chat/history`에는 final text, timestamp, `turn_ref`와 exact run의
 content-free activity trace만 투영한다. Activity trace는 thinking 단계의 존재와
 timestamp, tool name/status/duration만 포함한다. Raw thinking, assistant blocks,

@@ -180,8 +180,9 @@ let test_projects_exact_run_outcome_and_activity () =
      | [ Keeper_chat_blocks.Trace_think thinking
        ; Keeper_chat_blocks.Trace_tool tool
        ] ->
-       Alcotest.(check string) "thinking content is not public"
-         "내부 판단 단계 (내용 비공개)" thinking.text;
+       Alcotest.(check bool) "thinking step declares withheld content" true
+         thinking.content_withheld;
+       Alcotest.(check string) "thinking content is not public" "" thinking.text;
        Alcotest.(check string) "tool name" "Read" tool.name;
        Alcotest.(check (option string)) "tool id is not public" None tool.tool_call_id;
        Alcotest.(check (option string)) "tool duration" (Some "1000ms") tool.dur;

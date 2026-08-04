@@ -27,7 +27,41 @@ let canonical : (string * R.t) list =
   ; (* RFC-0134 PR-1. *)
     "Concurrent_removal", R.Concurrent_removal
   ; "Transient_fd_pressure", R.Transient_fd_pressure
+  ; (* RFC-0134, same not-a-loss family: the final line of an append-only
+       file caught mid-write by a tail reader. *)
+    "Tail_partial_write", R.Tail_partial_write
   ]
+;;
+
+(* [canonical] is hand-maintained, so a new constructor is only covered once
+   it is listed above. This pins the count so adding a variant without
+   listing it fails here rather than silently skipping the round-trip and
+   wire-stability checks. *)
+let test_canonical_covers_every_constructor () =
+  Alcotest.(check int) "canonical entry count" 12 (List.length canonical)
+;;
+
+(* The reason exists to keep an append-race off the data-integrity counter,
+   so the one thing that must never drift is its distinctness from
+   [Entry_load_error]: the live decision-log reader picks between exactly
+   these two by line position. *)
+let test_tail_partial_write_is_its_own_reason () =
+  Alcotest.(check string)
+    "wire string"
+    "tail_partial_write"
+    (R.to_wire R.Tail_partial_write);
+  Alcotest.(check bool)
+    "round-trips"
+    true
+    (R.equal R.Tail_partial_write (R.of_wire (R.to_wire R.Tail_partial_write)));
+  Alcotest.(check bool)
+    "distinct from entry_load_error"
+    false
+    (R.equal R.Tail_partial_write R.Entry_load_error);
+  Alcotest.(check string)
+    "matches the Safe_ops constant byte for byte"
+    Safe.persistence_read_drop_reason_tail_partial_write
+    (R.to_wire R.Tail_partial_write)
 ;;
 
 let test_canonical_round_trip () =
@@ -147,6 +181,14 @@ let () =
             "new variants are disjoint from pre-existing"
             `Quick
             test_rfc_0134_new_variants_disjoint
+        ; Alcotest.test_case
+            "tail_partial_write round-trips and stays off entry_load_error"
+            `Quick
+            test_tail_partial_write_is_its_own_reason
+        ; Alcotest.test_case
+            "canonical list covers every constructor"
+            `Quick
+            test_canonical_covers_every_constructor
         ] )
     ]
 ;;

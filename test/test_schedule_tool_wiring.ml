@@ -151,8 +151,13 @@ let test_flat_tool_surface () =
     names;
   check (list string) "public schedule surface" names
     Tool_catalog_surfaces.public_schedule_surface_tools;
-  check (list string) "keeper schedule surface" names
-    Tool_catalog_surfaces.keeper_schedule_surface_tools;
+  let keeper_schedule_tools =
+    Keeper_tool_descriptor.model_visible_descriptors ()
+    |> List.concat_map Keeper_tool_descriptor.keeper_model_names
+    |> List.filter (String.starts_with ~prefix:"masc_schedule_")
+  in
+  check (list string) "descriptor-projected keeper schedule surface" names
+    keeper_schedule_tools;
   List.iter
     (fun name ->
        check bool ("tool_inventory includes: " ^ name) true
@@ -499,9 +504,21 @@ let test_due_signal_and_dashboard_projection () =
   check string "signal request" request.schedule_id signal.schedule_id;
   check string "signal schedule instance" request.schedule_instance_id
     signal.schedule_instance_id;
-  let signal_json = Schedule_runner.wake_signal_to_yojson signal in
+  let signal_json =
+    match
+      Dated_jsonl.read_recent
+        (Dated_jsonl.create ~base_dir:(Schedule_runner.signals_dir config) ())
+        1
+    with
+    | [ row ] -> row
+    | rows -> failf "expected one persisted wake signal, got %d" (List.length rows)
+  in
   check int "signal field count" 8
     (Yojson.Safe.Util.to_assoc signal_json |> List.length);
+  (match Schedule_runner.wake_signal_of_yojson signal_json with
+   | Ok persisted ->
+     check string "persisted signal request" signal.schedule_id persisted.schedule_id
+   | Error detail -> failf "persisted wake signal did not decode: %s" detail);
   let dashboard =
     Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
   in

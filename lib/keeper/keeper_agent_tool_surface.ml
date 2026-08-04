@@ -49,6 +49,3 @@ let sync_current_task_id_from_backlog =
 
 let sync_current_task_id_for_agent_name =
   Keeper_current_task_reconcile.sync_current_task_id_for_agent_name
-
-let tool_names =
-  List.map Keeper_tool_name.to_string

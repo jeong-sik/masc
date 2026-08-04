@@ -83,6 +83,10 @@ function turnRecordsPayload() {
       record: {
         execution_ids: [],
         keeper: keeper.id,
+        agent_name: `keeper-${keeper.id}-agent`,
+        generation: 1,
+        turn_kind: 'autonomous',
+        raw_trace_run_ref: null,
         trace_id: 'trace-a',
         absolute_turn: 7,
         turn_ref: 'trace-a#7',
@@ -193,6 +197,10 @@ describe('MemoryInspector pure projections', () => {
     record: {
       execution_ids: [],
       keeper: 'keeper',
+      agent_name: 'keeper-keeper-agent',
+      generation: 1,
+      turn_kind: 'autonomous',
+      raw_trace_run_ref: null,
       trace_id: 'trace',
       absolute_turn: turn,
       turn_ref: `trace#${turn}`,

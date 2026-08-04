@@ -1,4 +1,4 @@
-(** Keeper-owned MCP tool-name vocabulary.
+(** Typed vocabulary for Keeper task and board runtime adapters.
 
     Lives on the keeper side of the Tool/Keeper boundary: the tool dispatch
     substrate routes opaque tool names and the keeper subsystem owns the typed
@@ -6,7 +6,6 @@
     the reverse. See the implementation header for the #19797 history. *)
 
 type t =
-  | Execute
   | Board_comment
   | Board_comment_vote
   | Board_curation_read
@@ -23,41 +22,11 @@ type t =
   | Board_sub_board_update
   | Board_vote
   | Broadcast
-  | Context_status
-  | Artifact_read
-  | Fs_edit
-  | Fs_write
-  | Fs_read
-  | Ide_annotate
-  | Handoff
-  | Library_read
-  | Library_search
-  | Memory_search
-  | Memory_write
-  | Keeper_delegate
-  | Search_files
-  | Surface_read
-  | Surface_post
-  | Person_note_set
   | Task_claim
   | Task_create
   | Task_done
   | Tasks_audit
   | Tasks_list
-  | Time_now
-  | Tools_list
-  | Persona_create
-  | Persona_update
-  | Persona_delete
-  | Voice_agent
-  | Voice_listen
-  | Voice_session_end
-  | Voice_session_start
-  | Voice_sessions
-  | Voice_speak
-
-val all : t list
-(** All keeper tool-name variants. *)
 
 val to_string : t -> string
 val of_string : string -> t option

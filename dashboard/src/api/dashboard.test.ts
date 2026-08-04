@@ -495,6 +495,10 @@ describe('keeper tool telemetry fetchers', () => {
           {
             record: {
               keeper: 'keeper-alpha',
+              agent_name: 'keeper-keeper-alpha-agent',
+              generation: 1,
+              turn_kind: 'autonomous',
+              raw_trace_run_ref: null,
               trace_id: 'trace-grounded',
               absolute_turn: 7,
               turn_ref: 'trace-grounded#7',
@@ -515,6 +519,10 @@ describe('keeper tool telemetry fetchers', () => {
             // decode to undefined, never a fabricated "stop"/placeholder.
             record: {
               keeper: 'keeper-alpha',
+              agent_name: 'keeper-keeper-alpha-agent',
+              generation: 1,
+              turn_kind: 'autonomous',
+              raw_trace_run_ref: null,
               trace_id: 'trace-grounded',
               absolute_turn: 8,
               turn_ref: 'trace-grounded#8',

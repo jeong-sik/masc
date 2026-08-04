@@ -456,6 +456,7 @@ let explicit_metadata : (string * metadata) list =
     ("keeper_board_sub_board_create", keeper_shard_write);
     ("keeper_board_sub_board_update", keeper_shard_write);
     ("keeper_board_sub_board_delete", keeper_shard_write);
+    ("analyze_image", keeper_shard_read);
     ("tool_edit_file", keeper_shard_write);
     ("tool_write_file", keeper_shard_write);
     ( "tool_execute",

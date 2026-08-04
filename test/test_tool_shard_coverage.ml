@@ -1,7 +1,4 @@
-(** Coverage for the immutable Keeper tool catalog facade.
-
-    Schema families are organizational only: the model projection is the
-    complete de-duplicated catalog and contains no runtime membership state. *)
+(** Coverage for the immutable Keeper handler schema catalog. *)
 
 module Tool_shard = Masc.Tool_shard
 module Tool_shard_types = Tool_shard_types
@@ -58,18 +55,13 @@ let family_catalog =
   |> List.concat
 ;;
 
-let test_complete_flat_model_catalog () =
+let test_complete_flat_schema_catalog () =
   let expected_names = family_catalog |> schema_names |> dedupe_names in
   let catalog_names = schema_names Tool_shard.all_keeper_tool_schemas in
-  let model_names = schema_names Tool_shard.keeper_model_tools in
   Alcotest.(check (list string))
     "catalog contains every schema family exactly once"
     expected_names
-    catalog_names;
-  Alcotest.(check (list string))
-    "model projection is the complete flat catalog"
     catalog_names
-    model_names
 ;;
 
 let test_catalog_names_are_unique () =
@@ -80,16 +72,16 @@ let test_catalog_names_are_unique () =
     (List.length names)
 ;;
 
-let test_voice_tools_are_model_visible () =
-  let model_names = schema_names Tool_shard.keeper_model_tools in
+let test_voice_schemas_are_registered () =
+  let catalog_names = schema_names Tool_shard.all_keeper_tool_schemas in
   let voice_names = schema_names Tool_shard_types.voice_tools in
   Alcotest.(check bool) "voice catalog is non-empty" true (voice_names <> []);
   List.iter
     (fun name ->
        Alcotest.(check bool)
-         (name ^ " is model-visible")
+         (name ^ " has a handler schema")
          true
-         (List.mem name model_names))
+         (List.mem name catalog_names))
     voice_names
 ;;
 
@@ -250,14 +242,14 @@ let () =
     "Keeper tool catalog"
     [ ( "flat_catalog"
       , [ Alcotest.test_case
-            "complete model projection"
+            "complete schema catalog"
             `Quick
-            test_complete_flat_model_catalog
+            test_complete_flat_schema_catalog
         ; Alcotest.test_case "unique exact names" `Quick test_catalog_names_are_unique
         ; Alcotest.test_case
-            "voice is model-visible"
+            "voice schemas are registered"
             `Quick
-            test_voice_tools_are_model_visible
+            test_voice_schemas_are_registered
         ; Alcotest.test_case
             "runtime admin tools absent"
             `Quick

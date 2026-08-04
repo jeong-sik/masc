@@ -51,6 +51,3 @@ val sync_current_task_id_for_agent_name :
   config:Workspace.config ->
   agent_name:string ->
   unit
-
-(** Convenience [List.map Keeper_tool_name.to_string]. *)
-val tool_names : Keeper_tool_name.t list -> string list

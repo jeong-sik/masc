@@ -20,9 +20,6 @@ val schedule_request_surface_tools : string list
 val public_schedule_surface_tools : string list
 (** Schedule tools visible to external MCP clients. *)
 
-val keeper_schedule_surface_tools : string list
-(** Schedule tools visible to keeper-standard projections. *)
-
 val spawned_agent_surface_tools : string list
 (** Tools visible to spawned worker agents. *)
 

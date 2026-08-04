@@ -44,7 +44,3 @@ val resolve_keeper_read_path :
   (string, Keeper_alerting_path.keeper_path_rejection) result
 val process_status_to_json : Unix.process_status -> Yojson.Safe.t
 val extract_user_messages : working_context -> string list
-
-(** {1 Re-exported Utilities} *)
-
-val keeper_model_tools : Masc_domain.tool_schema list

@@ -378,4 +378,64 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     )
     expect(out).toBeNull()
   })
+
+  // The backend projects autonomous turns onto the history response
+  // (server_dashboard_http_keeper_api.ml :1043-1065). `object()` strips
+  // keys it does not declare, so before `autonomous_turn` was declared the
+  // consumer's `isRecord(message.autonomous_turn)` branch never ran and
+  // every autonomous turn rendered as an ordinary assistant bubble.
+  it('preserves the autonomous_turn projection instead of stripping it', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        id: 'autonomous:turn-42',
+        role: 'assistant',
+        content: 'checked the release branches',
+        autonomous_turn: {
+          turn_id: 'turn-42',
+          agent_name: 'oas-ollama_cloud.example',
+          generation: 3,
+          finished_at: 1_712_000_001.5,
+          model: 'example-model',
+          stop_reason: 'end_turn',
+        },
+      }),
+    )
+    expect(out).not.toBeNull()
+    expect(out?.autonomous_turn).toEqual({
+      turn_id: 'turn-42',
+      agent_name: 'oas-ollama_cloud.example',
+      generation: 3,
+      finished_at: 1_712_000_001.5,
+      model: 'example-model',
+      stop_reason: 'end_turn',
+    })
+  })
+
+  // `final_text = None` is projected as JSON null, which a required
+  // `string()` rejected — dropping exactly the turns that produced no
+  // terminal text.
+  it('accepts an autonomous turn whose content is null', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        role: 'assistant',
+        content: null,
+        autonomous_turn: { turn_id: 'turn-43', agent_name: 'oas-x', generation: 1 },
+      }),
+    )
+    expect(out).not.toBeNull()
+    expect(out?.content).toBeNull()
+  })
+
+  // A backend that adds a field to the projection must not cost the row:
+  // the consumer reads `autonomous_turn` tolerantly, as it does for
+  // `audio` and `delivery_key`.
+  it('keeps a row whose autonomous_turn carries an unrecognised field', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        role: 'assistant',
+        autonomous_turn: { turn_id: 'turn-44', agent_name: 'oas-x', generation: 1, future: 'x' },
+      }),
+    )
+    expect(out).not.toBeNull()
+  })
 })

@@ -8,6 +8,39 @@ open Workspace_backlog
 
 include Workspace_task_transitions
 
+(** Delete one Task under the canonical backlog lock and clear any agent cache
+    that still points at it in the same commit boundary. *)
+let delete_task_r config ~task_id : unit Masc_domain.masc_result =
+  with_file_lock_r config (backlog_lock_path config) (fun () ->
+    let open Result.Syntax in
+    let* backlog =
+      read_backlog_r config
+      |> Result.map_error (fun message ->
+        Masc_domain.System (Masc_domain.System_error.IoError message))
+    in
+    let task_opt =
+      List.find_opt (fun (task : task) -> String.equal task.id task_id) backlog.tasks
+    in
+    let tasks =
+      List.filter (fun (task : task) -> not (String.equal task.id task_id)) backlog.tasks
+    in
+    let status =
+      match task_opt with
+      | Some task -> task.task_status
+      | None -> Masc_domain.Todo
+    in
+    let after_commit () =
+      Task_cache_invariant.clear_stale_agent_task_for_task
+        config
+        ~task_id
+        ~status
+        ~module_name:"workspace_task.delete_task_r"
+    in
+    write_backlog ~after_commit config { backlog with tasks };
+    Ok ())
+  |> Workspace_task_verification.flatten_lock_result
+;;
+
 (** Release task back to backlog - transition wrapper *)
 let release_task_r config ~agent_name ~task_id ?expected_version ?handoff_context ()
   : string Masc_domain.masc_result

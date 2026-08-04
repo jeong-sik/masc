@@ -621,7 +621,7 @@ let add_delete_action_routes router =
                  respond_error ~request:req reqd (invalid_request "task_id")
              | Some task_id ->
              let config = (Mcp_server.workspace_config state) in
-             match Task.Dispatch.delete_task config ~task_id with
+             match Workspace.delete_task_r config ~task_id with
              | Ok () -> respond_ok ~request:req reqd
              | Error err ->
                  respond_error ~status:`Not_found ~request:req reqd

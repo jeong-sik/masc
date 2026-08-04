@@ -72,26 +72,9 @@ val serialized_bytes : working_context -> int
 
 val create_session : session_id:string -> base_dir:string -> session_context
 
-(** {1 History migration} *)
-
-(** Stats returned by [migrate_session_history_logs]. *)
-type history_migration_stats =
-  { moved_lines : int
-  ; dropped_lines : int
-  ; kept_lines : int
-  ; malformed_lines : int
-  }
-
 (** [true] iff [text] looks like a Current World State system
-    context block (used to drop legacy world-state echoes from
-    history.jsonl). *)
+    context block. *)
 val has_world_state_signature : string -> bool
-
-(** Move every internal-history entry from [history.jsonl] to
-    [history.internal.jsonl], drop world-state echoes, and dedupe
-    the merged internal log. *)
-val migrate_session_history_logs :
-  session_dir:string -> history_migration_stats
 
 (** {1 JSONL persistence} *)
 

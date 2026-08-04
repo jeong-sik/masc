@@ -622,11 +622,7 @@ let lazy_startup_plan () =
       {
         group_name = "initialize";
         execution = Parallel;
-        task_names =
-          [
-            "restore_sessions";
-            "keeper_history_migration";
-          ];
+        task_names = [ "restore_sessions" ];
       };
       {
         group_name = "tool_state";
@@ -1089,7 +1085,6 @@ let start_owner_lazy_tasks ~sw state =
   in
   let task_fn = function
     | "restore_sessions" -> fun () -> restore_persisted_sessions state
-    | "keeper_history_migration" -> fun () -> startup_migrate_keeper_histories state
     | "tool_metrics_restore" -> fun () -> restore_tool_metrics_from_disk state
     | "jsonl_prune" -> fun () -> startup_prune_jsonl state
     | task_name ->

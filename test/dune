@@ -997,7 +997,7 @@
   test_board_sort
   test_vote_ts_preservation_10086
   test_board_karma_ledger
-  test_task_dispatch
+  test_workspace_task_delete
   test_workspace_task_lifecycle
   test_workspace_task_verification_phase_e
   test_verify_handoff_tool
@@ -1156,7 +1156,7 @@
   test_board_sort
   test_vote_ts_preservation_10086
   test_board_karma_ledger
-  test_task_dispatch
+  test_workspace_task_delete
   test_workspace_task_lifecycle
   test_workspace_task_verification_phase_e
   test_verify_handoff_tool

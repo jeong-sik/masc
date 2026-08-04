@@ -82,7 +82,7 @@ MASC가 명시적으로 **하지 않는 것**:
 | HTTP/2 | h2-eio (h2c) | `MASC_USE_H2=1`로 활성화. SSE 멀티플렉싱 (브라우저 6-conn 제한 회피). |
 | TLS | mirage-crypto + tls-eio | 인증서: `SSL_CERT_FILE` 환경변수. |
 | JSON | yojson | JSON 파싱/생성. `Yojson.Safe.t` 표준 사용. |
-| Supabase pgvector | external service | Vector/knowledge integration. Current Board/session runtime state is not stored in PostgreSQL. |
+| Supabase pgvector | external service | Vector/knowledge integration. Board/session runtime state lives under the workspace `.masc` directory. |
 | SQLite | sqlite3 | 로컬 경량 저장 (일부 모듈). |
 | Protocol | MCP JSON-RPC | `tools/call`, `tools/list` over SSE + POST. |
 | gRPC | grpc-direct (h2-eio) | Agent-to-Agent 통신. proto 정의: `proto/`. |

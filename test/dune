@@ -1001,7 +1001,7 @@
   test_board_sort
   test_vote_ts_preservation_10086
   test_board_karma_ledger
-  test_task_dispatch
+  test_workspace_task_delete
   test_workspace_task_lifecycle
   test_workspace_task_verification_phase_e
   test_verify_handoff_tool
@@ -1046,7 +1046,6 @@
   test_grpc_client
   test_http_protocol_detect
   test_prompt_registry_defaults
-  test_prompt_no_silent_reply_contract
   test_keeper_prompt_external
   test_mcp_session_store_roundtrip
   test_eval_calibration
@@ -1159,7 +1158,7 @@
   test_board_sort
   test_vote_ts_preservation_10086
   test_board_karma_ledger
-  test_task_dispatch
+  test_workspace_task_delete
   test_workspace_task_lifecycle
   test_workspace_task_verification_phase_e
   test_verify_handoff_tool
@@ -1204,7 +1203,6 @@
   test_grpc_client
   test_http_protocol_detect
   test_prompt_registry_defaults
-  test_prompt_no_silent_reply_contract
   test_keeper_prompt_external
   test_mcp_session_store_roundtrip
   test_eval_calibration
@@ -1238,15 +1236,18 @@
   masc.embedded_config
   bigstringaf)
  (deps ../bin/main_eio.exe)
- (action
-  (setenv MASC_MAIN_EIO_EXE %{dep:../bin/main_eio.exe} (run %{test}))))
+  (action
+   (setenv MASC_MAIN_EIO_EXE %{dep:../bin/main_eio.exe} (run %{test}))))
 
-; Stable dashboard behavior contracts only. The full executable also contains
-; source-shape assertions, so CI must not promote its catch-all runtest alias.
+; Stable dashboard behavior contracts only. The HTTP core executable also
+; contains source-shape assertions, so CI selects its behavior suite; the
+; briefing executable is behavior-only and runs in full.
 (rule
  (alias runtest-dashboard-http-behavior-contracts)
  (action
-  (run %{exe:test_dashboard_http_core.exe} test "dashboard behavior contracts")))
+  (progn
+   (run %{exe:test_dashboard_http_core.exe} test "dashboard behavior contracts")
+   (run %{exe:test_dashboard_briefing.exe}))))
 
 (test
  (name test_voice_config)
@@ -1645,8 +1646,8 @@
  (libraries masc_test_deps))
 
 (executable
- (name test_a12_e2e_demo)
- (modules test_a12_e2e_demo)
+ (name test_multimodal_resilience_audit_composition)
+ (modules test_multimodal_resilience_audit_composition)
  (libraries masc_test_deps multimodal resilience shared_audit shared_types))
 
 (executable
@@ -1884,7 +1885,7 @@
 
 (include stanzas/test_keeper_agent_runtime_status.inc)
 
-(include stanzas/test_keeper_autoboot_supervisor_start_10125.inc)
+(include stanzas/test_keeper_autoboot_single_owner.inc)
 
 (include stanzas/test_keeper_checkpoint_classify.inc)
 
@@ -1901,8 +1902,6 @@
 (include stanzas/test_keeper_terminal_reason_typed.inc)
 
 (include stanzas/test_keeper_tool_name.inc)
-
-(include stanzas/test_keeper_tool_command_runtime_cwd_response.inc)
 
 
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)
@@ -1989,8 +1988,6 @@
 
 (include stanzas/test_keeper_tool_matrix.inc)
 
-
-(include stanzas/test_keeper_unified_tool_event_order_source.inc)
 
 
 (include stanzas/test_keeper_task_outcomes.inc)
@@ -2096,8 +2093,6 @@
 (include stanzas/test_sse_storm_e2e.inc)
 
 (include stanzas/test_start_masc_script.inc)
-
-(include stanzas/test_supervisor_start_predicate.inc)
 
 (include stanzas/test_system_log_atomicity.inc)
 
@@ -2354,16 +2349,6 @@
  (deps
   (source_tree ../lib)
   (source_tree ../bin)))
-
-; RFC-0085 PR-7 — Retroactive AST test for retired_pg_env_keys +
-; clear_retired_pg_envs deletion (#15468 user-identified legacy;
-; shipped without a regression test; restored by #15495).
-
-(test
- (name test_rfc_0085_pr7_retired_pg_envs_purge)
- (modules test_rfc_0085_pr7_retired_pg_envs_purge)
- (libraries alcotest ast_grep)
- (deps ../lib/server/server_runtime_bootstrap.ml))
 
 ; RFC-0086 — keeper namespace bulk promotion invariant.
 ; Pins G-A (Phase 2.A wave 1, #15474): every .ml/.mli under

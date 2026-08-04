@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { build } from 'vite'
+import { build, type Rollup } from 'vite'
 import { afterEach, describe, expect, it } from 'vitest'
 
 type ManifestEntry = {
@@ -34,6 +34,32 @@ function dashboardHrefForManifestEntry(entry: ManifestEntry): string {
   return `/dashboard/${entry.file}`
 }
 
+function staticChunkClosure(
+  chunks: Rollup.OutputChunk[],
+  entry: Rollup.OutputChunk,
+): Rollup.OutputChunk[] {
+  const byFileName = new Map(chunks.map(chunk => [chunk.fileName, chunk]))
+  const seen = new Set<string>()
+  const pending = [entry.fileName]
+
+  while (pending.length > 0) {
+    const fileName = pending.pop()
+    if (!fileName || seen.has(fileName)) continue
+    seen.add(fileName)
+    const chunk = byFileName.get(fileName)
+    if (chunk) pending.push(...chunk.imports)
+  }
+
+  return [...seen].flatMap(fileName => {
+    const chunk = byFileName.get(fileName)
+    return chunk ? [chunk] : []
+  })
+}
+
+function isValibotModule(moduleId: string): boolean {
+  return moduleId.includes('/node_modules/') && moduleId.includes('/valibot/')
+}
+
 describe('dashboard production bundle preloads', () => {
   afterEach(() => {
     while (outDirs.length > 0) {
@@ -46,7 +72,7 @@ describe('dashboard production bundle preloads', () => {
     const outDir = mkdtempSync(join(tmpdir(), 'masc-dashboard-preload-'))
     outDirs.push(outDir)
 
-    await build({
+    const buildResult = await build({
       configFile: resolve(__dirname, '../vite.config.ts'),
       logLevel: 'silent',
       build: {
@@ -73,6 +99,20 @@ describe('dashboard production bundle preloads', () => {
 
     const preloads = modulePreloads(html)
     expect(preloads).toEqual([dashboardHrefForManifestEntry(vendorEntry)])
+
+    const outputs = (Array.isArray(buildResult) ? buildResult : [buildResult]) as Rollup.RollupOutput[]
+    const chunks = outputs.flatMap(output => output.output)
+      .filter((item): item is Rollup.OutputChunk => item.type === 'chunk')
+    const entryChunk = chunks.find(chunk => chunk.isEntry && chunk.facadeModuleId?.endsWith('/index.html'))
+    if (!entryChunk) throw new Error('dashboard entry chunk missing')
+    const initialModuleIds = staticChunkClosure(chunks, entryChunk)
+      .flatMap(chunk => Object.keys(chunk.modules))
+      .map(moduleId => moduleId.replaceAll('\\', '/'))
+    const allModuleIds = chunks
+      .flatMap(chunk => Object.keys(chunk.modules))
+      .map(moduleId => moduleId.replaceAll('\\', '/'))
+    expect(allModuleIds.some(isValibotModule)).toBe(true)
+    expect(initialModuleIds.some(isValibotModule)).toBe(false)
   }, 120_000)
 
   it('reads modulepreloads from parsed link attributes', () => {

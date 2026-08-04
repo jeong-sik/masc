@@ -1,8 +1,7 @@
 (** Dashboard namespace-truth read-model regression tests. *)
 
 let () =
-  Masc.Server_startup_state.mark_state_ready
-    ~backend:Masc.Server_startup_state.Filesystem_backend
+  Masc.Server_startup_state.mark_state_ready ()
   |> Result.get_ok
 
 module Lib = Masc

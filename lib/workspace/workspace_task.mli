@@ -21,6 +21,11 @@ include module type of Workspace_task_classify
 include module type of Workspace_task_create
 include module type of Workspace_task_claim
 
+val delete_task_r : config -> task_id:string -> unit Masc_domain.masc_result
+(** Delete one Task under the canonical backlog lock and clear any agent
+    [current_task] cache that still points at it after the backlog commit.
+    Missing Task ids are idempotent; read/write failures remain typed. *)
+
 (** {1 Task transitions} *)
 
 (** Typed transition result. [noop = true] marks the idempotent case

@@ -165,7 +165,7 @@ run_tlc_buggy "$REPO_ROOT/specs/auth" "AuthIdentityFSM.tla"
 run_tlc "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
 run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
 
-# Server lifecycle product invariants across lifecycle/backend/readiness axes.
+# Server lifecycle product invariants across lifecycle/lazy/readiness axes.
 run_tlc "$REPO_ROOT/specs/server-state" "ServerState.tla"
 run_tlc_buggy "$REPO_ROOT/specs/server-state" "ServerState.tla"
 

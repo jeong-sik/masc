@@ -26,8 +26,6 @@
       "lib/config/env_config_core.ml:555:get_bool ~default:true telemetry_enabled_env_key",
       "lib/config/env_config_core.ml:570:get_int ~default:1000 \"MASC_PUBSUB_MAX_MESSAGES\"",
       "lib/config/env_config_core.ml:577:get_string ~default:\"local\" \"MASC_KEEPER_DEFAULT_SANDBOX_PROFILE\"",
-      "lib/config/env_config_keeper.ml:24:get_float_nonneg ~default:3600.0 \"MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC\"",
-      "lib/config/env_config_keeper.ml:28:let max_scan = get_int_nonneg ~default:10000 \"MASC_KEEPER_BOOTSTRAP_MAX_SCAN\"",
       "lib/config/env_config_keeper.ml:41:(get_float ~default:0.25 \"MASC_KEEPER_BOOTSTRAP_LAZY_STARTUP_POLL_INTERVAL_SEC\")",
       "lib/config/env_config_keeper.ml:53:(get_float ~default:0.25 \"MASC_KEEPER_BOOTSTRAP_LISTENER_RETRY_INTERVAL_SEC\")"
     ],

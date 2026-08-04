@@ -5,10 +5,8 @@
  (public_name masc.task_handlers)
  (wrapped true)
  (modules
-  task
   anti_rationalization
   planning_eio
-  task_dispatch
   task_goal_assignment
   task_goal_reconciliation
   tool_task

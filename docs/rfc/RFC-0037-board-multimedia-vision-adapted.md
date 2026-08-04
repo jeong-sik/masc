@@ -17,12 +17,12 @@ An external 2025-05 plan document (~2040 lines) proposes adding image / video / 
 | Plan section | Verifiable claims sampled | Stale or unverified |
 |---|---|---|
 | §1 codebase analysis | 7 | 6 (paths wrong, nonexistent frontend files) |
-| §3 architecture stack | 5 | 4 (Dream/Opium → actual httpun, Lwt → actual Eio, Redis/RabbitMQ → unused, PostgreSQL → unused) + 1 ignored existing abstraction (`provider_adapter.ml`) |
+| §3 architecture stack | 5 | 4 framework/concurrency/infrastructure mismatches + 1 ignored existing abstraction (`provider_adapter.ml`) |
 | §5 cost / model selection | 7 | 5/5 pricing claims with no Evidence Record + 2/2 model IDs (`model-a-sonnet`, `model-d`) predate Agent-LLM-A 4.X family |
 | §6 phase tables | repeats §3 stack | propagates |
 | §7.1 frontend file targets | 7 | 3 inexistent (`post-editor.ts`, `comment-form.ts`, `comment-tree.ts`) |
 | §7.1 backend file targets | 3 | 2 inexistent (`lib/board_store.ml`, `lib/board_handler.ml`) — actual: `lib/board.ml`, `lib/board_dispatch.ml`, `lib/board_core.ml` |
-| §7.2 SQL migration | 4 statements | N/A — board uses file-based store with TTL sweeper, no PostgreSQL |
+| §7.2 persistence migration | 4 statements | N/A — board uses its file-based store with TTL sweeper |
 | §7.3 keeper protocol | 1 | mismatched — `ws://` callback channel proposed; actual: internal masc tool calls + workspace broadcast |
 
 The plan's **intent** (give board posts a media surface and automate analysis) is sound and unblocks several user requests. The **prescription** has to be rewritten against masc's actual stack before any line of code lands.
@@ -32,18 +32,17 @@ The plan's **intent** (give board posts a media surface and automate analysis) i
 **Goals**
 
 - G1. Establish a minimal `Board_attachment_meta` carrier that lets a post reference attachments without changing `Board_types.post`, by reusing the existing `meta_json : Yojson.Safe.t option` field (`board_types.mli:83`).
-- G2. Build the upload / storage path on the same file-based primitives that already protect post bodies (atomic writes, `expires_at` TTL, sharded paths). No PostgreSQL, no MinIO, no S3 in the initial scope.
+- G2. Build the upload / storage path on the same file-based primitives that already protect post bodies (atomic writes, `expires_at` TTL, sharded paths).
 - G3. Reach AI vision through `provider_adapter.ml` extension, not a parallel `VisionProvider` hierarchy. Reuse `auth_mode` / `model_family` / `model_policy` SSOTs.
 - G4. Treat model IDs and pricing as **fetched at PR time** with Evidence Record entries, not committed in this RFC.
 
 **Non-Goals**
 
-- N1. PostgreSQL schema, migrations, or any DB-backed persistence. The board is file-based; cross-stack rewrites are out of scope.
-- N2. MinIO, S3, CloudFront, Cloudflare Images. Cloud storage is a future RFC if production volume justifies it.
-- N3. Redis, RabbitMQ, SQS, or any external message broker. masc's workspace broadcast is the existing primitive.
-- N4. Python sidecar workers (Sharp, libvips, image-optimization daemon). The OCaml monorepo serves the surface; image variant generation is deferred to a later phase if measured load justifies it.
-- N5. Frontend implementation files that the external plan named but that don't exist (`post-editor.ts`, `comment-form.ts`, `comment-tree.ts`). Frontend work goes through actual files (`board-surface.ts`, `post-detail.ts`).
-- N6. A `Vision Worker (Python)` cross-language process. provider_adapter is in OCaml.
+- N1. MinIO, S3, CloudFront, Cloudflare Images. Cloud storage is a future RFC if production volume justifies it.
+- N2. Redis, RabbitMQ, SQS, or any external message broker. masc's workspace broadcast is the existing primitive.
+- N3. Python sidecar workers (Sharp, libvips, image-optimization daemon). The OCaml monorepo serves the surface; image variant generation is deferred to a later phase if measured load justifies it.
+- N4. Frontend implementation files that the external plan named but that don't exist (`post-editor.ts`, `comment-form.ts`, `comment-tree.ts`). Frontend work goes through actual files (`board-surface.ts`, `post-detail.ts`).
+- N5. A `Vision Worker (Python)` cross-language process. provider_adapter is in OCaml.
 
 ## 3. Verified state of board surface as of 2026-05-07
 

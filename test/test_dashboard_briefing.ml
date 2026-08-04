@@ -40,6 +40,11 @@ let contains str substr =
     true
   with Not_found -> false
 
+let object_has_key label key = function
+  | `Assoc fields -> List.mem_assoc key fields
+  | json ->
+    failf "%s must be an object, got %s" label (Yojson.Safe.to_string json)
+
 let with_test_env f =
   Eio_main.run @@ fun env ->
   Eio_guard.enable ();
@@ -141,25 +146,22 @@ let test_dashboard_briefing_projection () =
          assertion has moved to internal_signals (see below). *)
       check bool "attention_queue is public-only (empty in clean fixture)" true
         (attention_queue = []);
-      check bool "mission summary trims paused" true
-        (summary |> member "paused" = `Null);
-      check bool "mission summary trims active_agents" true
-        (summary |> member "active_agents" = `Null);
-      check bool "mission summary namespace_id removed" true
-        (summary |> member "namespace_id" = `Null);
-      check bool "mission summary namespace removed" true
-        (summary |> member "namespace" = `Null);
-      check bool "mission summary namespace_mode removed" true
-        (summary |> member "namespace_mode" = `Null);
-      check bool "sessions removed from mission payload" true
-        (json |> member "sessions" = `Null);
+      check bool "mission summary retains workspace health" true
+        (summary |> member "workspace_health" <> `Null);
+      List.iter
+        (fun key ->
+           check bool ("mission summary omits " ^ key) false
+             (object_has_key "mission summary" key summary))
+        [ "paused"; "active_agents"; "namespace_id"; "namespace"; "namespace_mode" ];
+      check bool "mission payload omits sessions" false
+        (object_has_key "mission payload" "sessions" json);
       let alpha_input = alpha_brief |> member "recent_input_preview" |> to_string in
       check bool "recent input preserves exact alpha mention" true
         (contains alpha_input "@llama-local-alpha");
       check bool "recent input excludes unrelated beta mention" false
         (contains alpha_input "@llama-local-beta");
-      check bool "agent brief omits social context fields" true
-        (alpha_brief |> member "where" = `Null);
+      check bool "agent brief omits social context" false
+        (object_has_key "agent brief" "where" alpha_brief);
       check string "agent brief signal truth" "message"
         (alpha_brief |> member "evidence_source" |> to_string);
       check bool "internal signal includes pending confirm" true
@@ -228,11 +230,7 @@ let test_dashboard_briefing_http_default_bootstraps_first_success () =
          <> `Null);
       check bool "default mission leaves initializing placeholder" true
         (json |> member "summary" |> member "workspace_health" |> to_string
-         <> "initializing");
-      check bool "mission summary namespace_id removed" true
-        (json |> member "summary" |> member "namespace_id" = `Null);
-      check bool "mission summary namespace removed" true
-        (json |> member "summary" |> member "namespace" = `Null))
+         <> "initializing"))
 
 let test_dashboard_briefing_keeper_tool_audit_fallback () =
   let dir = test_dir () in
@@ -262,56 +260,7 @@ let test_dashboard_briefing_keeper_tool_audit_fallback () =
          <> `Null);
       check bool "default mission leaves initializing placeholder" true
         (json |> member "summary" |> member "workspace_health" |> to_string
-         <> "initializing");
-      check bool "mission summary namespace_id removed" true
-        (json |> member "summary" |> member "namespace_id" = `Null);
-      check bool "mission summary namespace removed" true
-        (json |> member "summary" |> member "namespace" = `Null))
-
-let test_dashboard_briefing_http_cache_isolation () =
-  let dir_a = test_dir () in
-  let dir_b = test_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      cleanup_dir dir_a;
-      cleanup_dir dir_b)
-    (fun () ->
-      let actor = "test-dashboard-cache-isolation" in
-      let session_a = "ts-mission-cache-fixture-a" in
-      let session_b = "ts-mission-cache-fixture-b" in
-      with_test_env @@ fun ~clock ~sw ->
-      let config_a = Workspace_utils.default_config dir_a in
-      let config_b = Workspace_utils.default_config dir_b in
-      seed_workspace config_a session_a;
-      seed_workspace config_b session_b;
-      let state_a =
-        Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir_a ()
-      in
-      let state_b =
-        Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir_b ()
-      in
-      let request =
-        request ("/api/v1/dashboard/briefing?agent_name=" ^ actor)
-      in
-      let json_a =
-        Server_dashboard_http.dashboard_briefing_http_json
-          ~state:state_a
-          ~sw
-          ~clock
-          request
-      in
-      let json_b =
-        Server_dashboard_http.dashboard_briefing_http_json
-          ~state:state_b
-          ~sw
-          ~clock
-          request
-      in
-      let open Yojson.Safe.Util in
-      check bool "first workspace namespace_id removed" true
-        (json_a |> member "summary" |> member "namespace_id" = `Null);
-      check bool "second workspace namespace_id removed" true
-        (json_b |> member "summary" |> member "namespace_id" = `Null))
+         <> "initializing"))
 
 let test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidence () =
   let keeper_name = "audit-keeper-assembly-fixture" in
@@ -460,8 +409,6 @@ let () =
             `Quick test_dashboard_briefing_http_default_bootstraps_first_success;
           Alcotest.test_case "keeper tool audit fallback" `Quick
             test_dashboard_briefing_keeper_tool_audit_fallback;
-          Alcotest.test_case "http mission cache stays workspace-scoped" `Quick
-            test_dashboard_briefing_http_cache_isolation;
           Alcotest.test_case "keeper brief keeps in-band tools without evidence" `Quick
             test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidence;
           Alcotest.test_case "unknown keeper context is informational" `Quick

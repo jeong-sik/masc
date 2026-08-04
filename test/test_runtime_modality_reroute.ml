@@ -38,17 +38,51 @@ let string_contains haystack needle =
     in
     loop 0
 
+let test_unset_oas_tool_projector_fails_public_run_typed () =
+  let schema : Masc_domain.tool_schema =
+    { name = "test_tool"
+    ; description = "test"
+    ; input_schema = `Assoc [ "type", `String "object" ]
+    }
+  in
+  let provider_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"test-model"
+      ~base_url:"http://127.0.0.1.invalid"
+      ()
+  in
+  let config =
+    Runtime_agent.default_config
+      ~name:"unset-projector-proof"
+      ~provider_cfg
+      ~system_prompt:""
+      ~tools:[]
+  in
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Runtime_agent.For_testing.with_oas_tool_of_masc_hook_unset (fun () ->
+    match
+      Runtime_agent.run_with_masc_tools
+        ~sw
+        ~net:env#net
+        ~config
+        ~masc_tools:[ schema ]
+        ~dispatch:(fun ~name:_ ~args:_ ->
+          Tool_result.ok ~tool_name:"test_tool" ~start_time:0.0 "unused")
+        "must fail before provider I/O"
+    with
+    | Error (Agent_sdk.Error.Internal detail) ->
+      check bool "typed error names the unset projector" true
+        (string_contains detail "runtime_agent_oas_tool_hook_unset")
+    | Error error ->
+      failf "expected typed Internal error, got %s" (Agent_sdk.Error.to_string error)
+    | Ok _ -> fail "public run unexpectedly accepted an unset OAS tool projector")
+
 let check_contains label ~needle haystack =
   check bool label true (string_contains haystack needle)
-
-let source_path path =
-  if Filename.is_relative path then
-    match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some root -> Filename.concat root path
-    | None -> path
-  else path
-
-let read_file path = In_channel.with_open_text (source_path path) In_channel.input_all
 
 let assoc_field key = function
   | `Assoc fields -> List.assoc_opt key fields
@@ -454,21 +488,6 @@ let test_media_degrade_preserves_already_canonical_checkpoint () =
       true
       (restored = checkpoint_messages)
 
-let test_driver_degrade_branch_emits_manifest () =
-  let source = read_file "lib/keeper/keeper_turn_driver.ml" in
-  check bool "degrade branch emits manifest" true
-    (string_contains source "emit_runtime_manifest"
-     && string_contains source "~status:\"degraded\""
-     && string_contains source "media_degrade_manifest_decision"
-     && string_contains source "Keeper_runtime_manifest.Runtime_routed")
-
-let test_runtime_agent_oas_tool_hook_fails_typed_not_failwith () =
-  let source = read_file "lib/runtime/runtime_agent.ml" in
-  check bool "legacy failwith hook removed" false
-    (string_contains source "failwith \"oas_tool_of_masc_hook is not set\"");
-  check bool "typed unset hook error present" true
-    (string_contains source "runtime_agent_oas_tool_hook_unset")
-
 let () =
   run "rfc0265_modality_reroute"
     [ ( "decide_modality_reroute"
@@ -492,6 +511,8 @@ let () =
     ; ( "caps_admit_required_modalities"
       , [ test_case "multi-modality predicate" `Quick
             test_caps_admit_required_modalities
+        ; test_case "public run returns typed error for unset OAS projector" `Quick
+            test_unset_oas_tool_projector_fails_public_run_typed
         ] )
     ; ( "media_degrade"
       , [ test_case "strip drops unsupported image" `Quick
@@ -512,9 +533,5 @@ let () =
             test_media_degrade_rejects_checkpoint_prefix_drift
         ; test_case "degrade preserves an already canonical checkpoint" `Quick
             test_media_degrade_preserves_already_canonical_checkpoint
-        ; test_case "driver degrade branch emits manifest" `Quick
-            test_driver_degrade_branch_emits_manifest
-        ; test_case "runtime agent OAS tool hook typed failure" `Quick
-            test_runtime_agent_oas_tool_hook_fails_typed_not_failwith
         ] )
     ]

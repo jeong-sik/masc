@@ -567,70 +567,9 @@ let load_or_materialize_boot_meta (ctx : _ context) name
   in
   remember_boot_meta_result ctx name result
 
-type keeper_bootstrap_stats = {
-  scanned: int;
-  started: int;
-  stale: int;
-  recovering: int;
-}
-
-let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
-  if not Env_config.KeeperBootstrap.enabled then
-    { scanned = 0; started = 0; stale = 0; recovering = 0 }
-  else
-    let now_ts = Time_compat.now () in
-    let proactive_warmup_sec = keeper_bootstrap_proactive_warmup_sec () in
-    let stale_turn_sec =
-      max 0.0 Env_config.KeeperBootstrap.stale_turn_seconds
-    in
-    let max_scan =
-      max 0 Env_config.KeeperBootstrap.max_scan
-    in
-    let entries = bootstrap_candidate_keeper_names ctx.config |> take max_scan in
-    let (scanned, started, stale, recovering) =
-      List.fold_left
-        (fun (scanned_acc, started_acc, stale_acc, recovering_acc) name ->
-          match load_or_materialize_boot_meta ctx name with
-          | Error _ ->
-              (scanned_acc + 1, started_acc, stale_acc, recovering_acc)
-          | Ok { meta = m; materialized } ->
-              if m.paused then
-                (scanned_acc + 1, started_acc, stale_acc, recovering_acc)
-              else
-              let stale_now =
-                (not materialized)
-                && stale_turn_sec > 0.0
-                && (m.runtime.usage.last_turn_ts <= 0.0
-                    || now_ts -. m.runtime.usage.last_turn_ts >= stale_turn_sec)
-              in
-              let already_running =
-                Keeper_registry.is_running ~base_path:ctx.config.base_path m.name
-              in
-              let started_here =
-                if materialized then
-                  Keeper_registry.is_running
-                    ~base_path:ctx.config.base_path m.name
-                else if already_running then false
-                else (
-                  Keeper_supervisor.supervise_keepalive
-                    ~proactive_warmup_sec ctx m;
-                  Keeper_registry.is_running
-                    ~base_path:ctx.config.base_path m.name
-                )
-              in
-              ( scanned_acc + 1,
-                started_acc + (if started_here then 1 else 0),
-                stale_acc + (if stale_now then 1 else 0),
-                recovering_acc + (if stale_now && started_here then 1 else 0) ))
-        (0, 0, 0, 0)
-        entries
-    in
-    { scanned; started; stale; recovering }
-
 (** Start the supervisor sweep Pulse loop.
-    Runs alongside existing keepalive bootstrap, scanning for
-    zombie fibers and restarting them with exponential backoff.
-    Called once from start_existing_keepalives after bootstrap. *)
+    Runs alongside server-owned autoboot, scanning for zombie fibers and
+    restarting them with exponential backoff. *)
 let supervisor_sweeps : (string, Pulse.t) Hashtbl.t =
   Hashtbl.create 4
 let supervisor_sweeps_mu = Eio.Mutex.create ()
@@ -873,64 +812,9 @@ let supervisor_sweep_age_seconds ~(base_path : string) : float option =
     let now = Unix.gettimeofday () in
     Some (now -. last)
 
-let existing_keepalive_bootstrap_done : (string, unit) Hashtbl.t =
-  Hashtbl.create 4
-
-let has_boot_entries config =
-  bootstrap_candidate_keeper_names config <> []
-
-(* #10125: extracted predicate so it can be unit-tested without
-   spinning up an Eio + Pulse runtime.  See [maybe_start_supervisor_sweep]
-   for the WHY. *)
-let should_start_supervisor_sweep
-    ~(config : Workspace.config)
-    ~(stats : keeper_bootstrap_stats) : bool =
-  stats.started > 0
-  || Keeper_registry.count_running ~base_path:config.base_path () > 0
-  || has_boot_entries config
-
-let maybe_start_supervisor_sweep ctx (stats : keeper_bootstrap_stats) =
-  (* #10125: supervisor startup is decoupled from bootstrap success.
-     If there are bootable keepers on disk OR any are already running
-     OR any started this boot, run the sweep.  The supervisor can
-     recover keepers that bootstrap failed to load — exactly what
-     the sweep is for — so a transient bootstrap failure must not
-     silently disable auto-recovery for the rest of the server
-     lifetime (2026-04-24 incident: 14 keeper meta files on disk,
-     every bootstrap entry hit a transient
-     [load_or_materialize_boot_meta] error, fleet stayed dead 4h+). *)
-  if should_start_supervisor_sweep ~config:ctx.config ~stats
-  then start_supervisor_sweep ctx
-
-let start_existing_keepalives ctx =
-  let base_path = ctx.config.base_path in
-  (* Atomic check-and-set: eliminates TOCTOU race on the gate. *)
-  let should_run =
-    if Hashtbl.mem existing_keepalive_bootstrap_done base_path then false
-    else begin
-      Hashtbl.replace existing_keepalive_bootstrap_done base_path ();
-      true
-    end
-  in
-  if not should_run then ()
-  else begin
-    try
-      let stats = bootstrap_existing_keepers ctx in
-      if keeper_debug then
-        Log.Keeper.debug "bootstrap_existing_keepers scanned=%d started=%d stale=%d recovering=%d"
-          stats.scanned stats.started stats.stale
-          stats.recovering;
-      maybe_start_supervisor_sweep ctx stats
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      (* Retry bootstrap on next keeper tool call if this attempt failed. *)
-      Hashtbl.remove existing_keepalive_bootstrap_done base_path;
-      raise exn
-  end
-
 let stop_keepalive ?base_path name =
   Keeper_keepalive.stop_keepalive ?base_path name
 
 let reset_test_state base_path =
   stop_supervisor_sweep base_path;
-  clear_boot_meta_failures_for_base_path base_path;
-  Hashtbl.remove existing_keepalive_bootstrap_done base_path
+  clear_boot_meta_failures_for_base_path base_path

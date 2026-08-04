@@ -103,7 +103,6 @@ val bootstrap_prompt_state : Mcp_server.server_state -> unit
 (** {1 Startup Tasks} *)
 
 val startup_prune_jsonl : Mcp_server.server_state -> unit
-val startup_migrate_keeper_histories : Mcp_server.server_state -> unit
 val sync_bootable_keeper_credentials : Mcp_server.server_state -> unit
 
 type lazy_startup_execution =
@@ -149,9 +148,7 @@ type owner_initialization_error =
   | Lazy_startup_barrier_failed of Server_startup_state.lazy_prepare_error
   | Readiness_transition_failed of Server_startup_state.state_ready_error
   | Readiness_publication_failed of
-      { expected_backend_mode : string
-      ; observed_backend_mode : string
-      ; observed_phase : Server_startup_state.phase
+      { observed_phase : Server_startup_state.phase
       }
 
 exception Owner_initialization_failed of owner_initialization_error
@@ -192,16 +189,15 @@ val activate_owner_state
   -> proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
   -> initialized_owner_state
   -> activated_owner_state
-(** Shared HTTP/stdio commit protocol: restore the durable Gate, schedule the
-    bounded legacy-temp migration in an observed maintenance fiber under the
-    exclusive BasePath lease, publish the lazy-task barrier, claim canonical
+(** Shared HTTP/stdio commit protocol: restore the durable Gate, publish the
+    lazy-task barrier under the exclusive BasePath lease, claim canonical
     persistence ownership, then immediately start the affine Keeper token.
     Current request writers use a disjoint staging namespace, so forensic
     cleanup cannot hold readiness. Readiness remains an explicit transport
     commit after its required surfaces are installed. *)
 
 val mark_owner_state_ready
-  :  Mcp_server.server_state
+  :  unit
   -> (unit, owner_initialization_error) result
 (** Publish and verify readiness after the transport has installed every
     surface required by its own serving contract. *)

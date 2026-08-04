@@ -1666,9 +1666,6 @@ let test_set_pinned_persistence_failure_rolls_back () =
   | Ok fetched ->
       Alcotest.(check bool) "pinned rolled back" false fetched.pinned
 
-let test_flush () =
-  Board_dispatch.flush ()
-
 (** {1 Validation} *)
 
 let test_empty_content () =
@@ -2204,7 +2201,6 @@ let () =
       Alcotest.test_case "set_pinned missing post" `Quick (with_eio test_set_pinned_missing_post);
       Alcotest.test_case "set_pinned append failure rolls back" `Quick
         (with_eio test_set_pinned_persistence_failure_rolls_back);
-      Alcotest.test_case "flush" `Quick (with_eio test_flush);
     ];
     "validation", [
       Alcotest.test_case "empty content" `Quick (with_eio test_empty_content);

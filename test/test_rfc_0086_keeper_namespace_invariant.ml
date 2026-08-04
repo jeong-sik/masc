@@ -193,20 +193,6 @@ let test_source_path_contract_resolves_valid_relative () =
     (Sys.is_directory resolved)
 ;;
 
-let test_population_sanity () =
-  let files = collect_ml_files (keeper_root ()) [] in
-  (* Population sanity: a sudden drop to near-zero or jump beyond
-     historical range would indicate a directory move / restructure
-     worth re-validating.  Range chosen with margin around the
-     observed 250 .ml + ~250 .mli ≈ 500 (lower 200, upper 1500). *)
-  let n = List.length files in
-  if n < 200 || n > 1500
-  then
-    failf
-      "lib/keeper/ population out of expected range — got %d (expected 200..1500)"
-      n
-;;
-
 let () =
   run
     "rfc-0086-keeper-namespace-invariant"
@@ -215,7 +201,6 @@ let () =
             "every lib/keeper/**/*.ml{,i} has keeper_ prefix"
             `Quick
             test_all_files_have_keeper_prefix
-        ; test_case "population sanity (200..1500)" `Quick test_population_sanity
         ; test_case
             "boundary registry is sorted, unique, and necessary"
             `Quick

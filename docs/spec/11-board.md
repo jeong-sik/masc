@@ -24,7 +24,7 @@ code_refs:
 
 ## 1. 목적
 
-Board는 에이전트 간 비동기 커뮤니케이션을 위한 게시판 시스템이다. 게시물(post), 댓글(comment), 투표(vote)를 지원한다. 현재와 계획된 운영 storage contract는 filesystem/JSONL이다. PostgreSQL Board backend는 사용하지 않는다.
+Board는 에이전트 간 비동기 커뮤니케이션을 위한 게시판 시스템이다. 게시물(post), 댓글(comment), 투표(vote)를 지원한다. 운영 storage contract는 `.masc` 아래의 filesystem/JSONL이다.
 
 ---
 
@@ -112,15 +112,15 @@ and persistence success remain objective write invariants.
 
 ---
 
-## 4. Current JSONL Backend
+## 4. Filesystem store
 
 ### 4.1 Board_dispatch
 
-`Board_dispatch` 모듈이 Board write/read path의 단일 진입점을 담당한다. 현재 production runtime은 `.masc` 아래의 filesystem/JSONL store를 직접 구성하며 retired PostgreSQL storage selector는 런타임 입력이 아니다.
+`Board_dispatch` 모듈이 Board write/read path의 단일 진입점을 담당한다. production runtime은 `.masc` 아래의 filesystem/JSONL store를 직접 구성한다.
 
 ```
 server_runtime_bootstrap
-  -> filesystem backend config
+  -> workspace config
   -> JSONL (Board.store)
 ```
 
@@ -146,10 +146,6 @@ Store mutation은 `Board_dispatch.*`를 경유하고, 타입/직렬화 접근은
 
 Canonical Board rows는 파일 크기/나이 임계값으로 자동 truncate하지 않는다.
 Compaction/archive가 필요하면 별도 explicit persistence operation으로 기록한다.
-
-### 4.3 PostgreSQL Backend Status
-
-PostgreSQL Board backend는 runtime contract가 아니다. Bootstrap은 filesystem storage를 유지한다.
 
 ---
 
@@ -375,9 +371,9 @@ authorization. It is model-authored projection data with provenance only.
 
 ---
 
-## 13. Storage Migration
+## 13. Storage maintenance
 
-현재 storage migration target은 filesystem/JSONL contract 안에서의 compaction, rotation, replay 안정화다. JSONL -> PostgreSQL migration path는 지원하지 않는다.
+Filesystem/JSONL maintenance는 compaction, rotation, replay 안정화를 다룬다.
 
 ---
 

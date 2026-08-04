@@ -74,6 +74,8 @@ type raw_trace_run_ref =
   ; start_seq : int
   ; end_seq : int
   ; agent_name : string
+    (* OAS runtime identity for the dispatched run. This is intentionally a
+       different namespace from [t.agent_name], which is the Keeper identity. *)
   ; session_id : string
   }
 

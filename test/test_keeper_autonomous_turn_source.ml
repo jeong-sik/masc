@@ -4,6 +4,7 @@ open Masc
 
 let keeper_name = "keeper-autonomous-source"
 let agent_name = "keeper-autonomous-agent"
+let runtime_agent_name = "oas-test-runtime"
 let trace_id = "trace-test-0000"
 
 let temp_dir () =
@@ -43,7 +44,7 @@ let raw_record ~worker_run_id ~seq ~ts ~record_type fields =
      :: ("worker_run_id", `String worker_run_id)
      :: ("seq", `Int seq)
      :: ("ts", `Float ts)
-     :: ("agent_name", `String agent_name)
+     :: ("agent_name", `String runtime_agent_name)
      :: ("session_id", `String trace_id)
      :: ("record_type", `String (Agent_sdk.Raw_trace.record_type_to_string record_type))
      :: fields)
@@ -106,7 +107,7 @@ let run_ref ~path ~worker_run_id ~start_seq =
   ; path
   ; start_seq
   ; end_seq = start_seq + 4
-  ; agent_name
+  ; agent_name = runtime_agent_name
   ; session_id = trace_id
   }
 ;;

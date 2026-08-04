@@ -585,6 +585,38 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
   base_system_prompt
 ;;
 
+(* The backlog read produces three distinct facts, and the Namespace State
+   section must be able to state each one. "Readable and empty" used to be
+   encoded as an omitted section, which a reader of the rendered text cannot
+   tell apart from "not observed": the keeper was handed nothing rather than
+   an empty board. Typed here rather than left as a boolean disjunction so a
+   further backlog outcome forces an arm at the render site. *)
+type backlog_statement =
+  | Backlog_unreadable
+    (* Neither primary nor recovery was a valid current backlog. The
+       accompanying zero counts are not an observation. *)
+  | Backlog_readable_empty
+    (* Authoritative read that returned no unclaimed, claimable, or failed
+       rows. *)
+  | Backlog_readable_with_rows
+    (* Authoritative read with at least one counted row; the per-count lines
+       carry the numbers. *)
+
+let backlog_statement_of_observation
+      (observation : Keeper_world_observation.world_observation)
+  : backlog_statement
+  =
+  match observation.backlog_revision with
+  | None -> Backlog_unreadable
+  | Some _ ->
+    if
+      observation.unclaimed_task_count = 0
+      && observation.claimable_task_count = 0
+      && observation.failed_task_count = 0
+    then Backlog_readable_empty
+    else Backlog_readable_with_rows
+;;
+
 let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
@@ -677,20 +709,22 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
         Buffer.add_char ubuf '\n';
         Some (Buffer.contents ubuf))
       else None
-    (* 3. Namespace state — usually lower churn than inbox/board detail. *)
+    (* 3. Namespace state — usually lower churn than inbox/board detail.
+       Rendered on every turn: the backlog readability fact and the running
+       fiber count are observed on every turn, and an omitted section states
+       nothing about a backlog that was read and holds no rows. *)
     | Keeper_context_layers.Namespace_state ->
-      if
-        observation.unclaimed_task_count > 0
-        || observation.claimable_task_count > 0
-        || observation.failed_task_count > 0
-        || Option.is_none observation.backlog_revision
-        || observation.running_keeper_fiber_count > 0
-      then (
+      Some (
         let ubuf = Buffer.create 256 in
         Buffer.add_string ubuf "### Namespace State\n";
-        if Option.is_none observation.backlog_revision then
-          Buffer.add_string ubuf
-            "- Task backlog: unavailable or recovery-only; task counts are non-authoritative and cannot drive task actions.\n";
+        (match backlog_statement_of_observation observation with
+         | Backlog_unreadable ->
+           Buffer.add_string ubuf
+             "- Task backlog: unavailable or recovery-only; task counts are non-authoritative and cannot drive task actions.\n"
+         | Backlog_readable_empty ->
+           Buffer.add_string ubuf
+             "- Task backlog: readable; it holds 0 unclaimed tasks, 0 claimable tasks for this keeper, and 0 failed tasks.\n"
+         | Backlog_readable_with_rows -> ());
         if observation.unclaimed_task_count > 0 then
           Buffer.add_string ubuf
             (Printf.sprintf "- Unclaimed tasks: %d\n"
@@ -724,8 +758,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
              "- Running keeper fibers: %d\n"
              observation.running_keeper_fiber_count);
         Buffer.add_char ubuf '\n';
-        Some (Buffer.contents ubuf))
-      else None
+        Buffer.contents ubuf)
     (* 4. Autonomous trigger — lower churn than reactive inboxes. *)
     | Keeper_context_layers.Autonomous_trigger ->
       if autonomous_trigger <> [] then

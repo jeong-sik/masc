@@ -238,6 +238,71 @@ let test_namespace_state_names_running_keeper_fibers () =
   check bool "legacy active agents label absent" false
     (contains ~needle:"- Active agents:" user)
 
+(* An authoritative backlog holding no rows must be a statement, not the
+   absence of a section. While it was encoded as an omission the keeper read
+   nothing at all for that case, so "read the board, it is empty" and "the
+   board was never observed" arrived as the same bytes. *)
+let readable_empty_line =
+  "- Task backlog: readable; it holds 0 unclaimed tasks, 0 claimable tasks \
+   for this keeper, and 0 failed tasks."
+
+let unavailable_line = "- Task backlog: unavailable or recovery-only"
+
+let test_readable_empty_backlog_is_stated () =
+  (* base_observation: backlog_revision = Some 1, every count 0, no fibers. *)
+  let user = user_message base_observation in
+  check bool "namespace state section present" true
+    (contains ~needle:"### Namespace State" user);
+  check bool "readable empty backlog stated" true
+    (contains ~needle:readable_empty_line user);
+  check bool "unavailable wording absent" false
+    (contains ~needle:unavailable_line user);
+  check bool "running fiber count still rendered" true
+    (contains ~needle:"- Running keeper fibers: 0" user)
+
+let test_readable_empty_backlog_stated_with_running_fibers () =
+  let user =
+    user_message { base_observation with running_keeper_fiber_count = 2 }
+  in
+  check bool "readable empty backlog stated alongside fibers" true
+    (contains ~needle:readable_empty_line user);
+  check bool "fiber count rendered" true
+    (contains ~needle:"- Running keeper fibers: 2" user)
+
+let test_unavailable_backlog_keeps_non_authoritative_wording () =
+  let user = user_message { base_observation with backlog_revision = None } in
+  check bool "unavailable wording present" true
+    (contains ~needle:unavailable_line user);
+  check bool "counts declared non-authoritative" true
+    (contains
+       ~needle:"task counts are non-authoritative and cannot drive task actions"
+       user);
+  check bool "readable claim absent when unreadable" false
+    (contains ~needle:readable_empty_line user)
+
+let test_backlog_with_rows_omits_readable_empty_statement () =
+  let user =
+    user_message
+      {
+        base_observation with
+        unclaimed_task_count = 3;
+        claimable_task_count = 1;
+      }
+  in
+  check bool "counted rows rendered" true
+    (contains ~needle:"- Unclaimed tasks: 3" user);
+  check bool "readable empty statement absent" false
+    (contains ~needle:readable_empty_line user);
+  check bool "unavailable wording absent" false
+    (contains ~needle:unavailable_line user)
+
+let test_failed_only_backlog_omits_readable_empty_statement () =
+  let user = user_message { base_observation with failed_task_count = 2 } in
+  check bool "failed count rendered" true
+    (contains ~needle:"- Failed tasks: 2" user);
+  check bool "readable empty statement absent" false
+    (contains ~needle:readable_empty_line user)
+
 let test_profile_defaults_feed_identity_prompt () =
   with_repo_prompt_config @@ fun () ->
   let profile_defaults =
@@ -374,5 +439,18 @@ let () =
             test_profile_defaults_feed_identity_prompt;
           test_case "no-goal prompt blocks repo creation question" `Quick
             test_no_goal_prompt_blocks_repo_creation_question;
+        ] );
+      ( "namespace state backlog statement",
+        [
+          test_case "readable empty backlog is stated" `Quick
+            test_readable_empty_backlog_is_stated;
+          test_case "readable empty backlog stated with running fibers" `Quick
+            test_readable_empty_backlog_stated_with_running_fibers;
+          test_case "unavailable backlog keeps non-authoritative wording" `Quick
+            test_unavailable_backlog_keeps_non_authoritative_wording;
+          test_case "backlog with rows omits readable empty statement" `Quick
+            test_backlog_with_rows_omits_readable_empty_statement;
+          test_case "failed-only backlog omits readable empty statement" `Quick
+            test_failed_only_backlog_omits_readable_empty_statement;
         ] );
     ]

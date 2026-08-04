@@ -1113,19 +1113,6 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd (fun body_str ->
              handle_dashboard_link_previews state req reqd body_str))
          request reqd)
-  |> Http.Router.get "/api/v1/dashboard/memory-subsystems" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let config = (Mcp_server.workspace_config state) in
-         let cache_key =
-           Printf.sprintf "memory_subsystems:%s" config.base_path
-         in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               dashboard_memory_subsystems_http_json ~config req))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-memory-health" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_path = (Mcp_server.workspace_config state).base_path in

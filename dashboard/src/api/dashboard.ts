@@ -327,8 +327,6 @@ export {
 } from './dashboard-telemetry'
 
 export type {
-  MemorySubsystemsDelegationRequest,
-  MemorySubsystemsResponse,
   KeeperMemoryHealthAlert,
   KeeperMemoryHealthAlertCode,
   KeeperMemoryHealthAlertSeverity,
@@ -350,7 +348,6 @@ export type {
   AuditLedgerParams,
 } from './dashboard-misc'
 export {
-  fetchMemorySubsystems,
   fetchKeeperMemoryHealth,
   fetchAuditIntegrity,
   fetchVerificationRequests,

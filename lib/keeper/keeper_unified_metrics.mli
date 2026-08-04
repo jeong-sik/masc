@@ -163,7 +163,6 @@ val append_metrics_snapshot :
   message_count:int ->
   handoff_json:Yojson.Safe.t option ->
   ?count_completed_turn:bool ->
-  ?deliberation_execution:Keeper_deliberation.execution_result ->
   unit ->
   unit
 
@@ -178,7 +177,6 @@ val append_decision_record :
   ?degraded_retry_runtime:string ->
   ?fallback_reason:string ->
   ?turn_mode:turn_mode ->
-  ?deliberation_execution:Keeper_deliberation.execution_result ->
   ?result:Keeper_agent_run.run_result option ->
   ?error:string ->
   ?terminal_reason:Keeper_turn_terminal.t ->

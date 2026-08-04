@@ -23,8 +23,7 @@ let append_decision_record
     ?degraded_retry_runtime
     ?fallback_reason
     ?turn_mode
-    ?deliberation_execution
-    ?(result : Keeper_agent_run.run_result option = None)
+      ?(result : Keeper_agent_run.run_result option = None)
     ?error
     ?terminal_reason
     () : unit =
@@ -190,19 +189,6 @@ let append_decision_record
         ("claim_absolute_available", `Bool (observation.unclaimed_task_count > 0));
         ("claim_matched_available", `Bool (observation.claimable_task_count > 0));
         ("claim_was_available", `Bool (observation.claimable_task_count > 0));
-        ( "action_source",
-          match deliberation_execution with
-          | Some execution ->
-              Keeper_deliberation.action_source_of_execution_result execution
-              |> Keeper_deliberation.action_source_to_json
-          | None -> `Null );
-        ( "deliberation_execution",
-          match deliberation_execution with
-          | Some execution ->
-              Keeper_deliberation.execution_result_to_json execution
-          | None -> `Null );
-        Keeper_delegation_request.delegation_request_field ~requester:meta.name
-          deliberation_execution;
         ( "response_preview", Json_util.string_opt_to_json response_preview );
         ( "response_preview_2000",
           match result with

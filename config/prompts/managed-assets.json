@@ -4,7 +4,6 @@
   "paths": [
     "behavior/conversation_routing.md",
     "keeper.board_attention_judgment_batch.md",
-    "keeper.deliberation.md",
     "keeper.gate_judgment.md",
     "keeper.librarian.current_selection.md",
     "keeper.librarian.system.md",

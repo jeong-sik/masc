@@ -6,48 +6,6 @@
 import { get, type AbortableRequestOptions } from './core'
 import { asNumber, isRecord } from '../components/common/normalize'
 
-// --- Memory Subsystems ---
-
-export interface MemorySubsystemsDelegationRequest {
-  id: string
-  requester: string
-  topic: string
-  promotion_state: string
-  dir: string
-  json_path: string
-  task_seed_md_path: string
-  created_at: number | null
-}
-
-export interface MemorySubsystemsResponse {
-  generated_at: string
-  delegation_requests?: {
-    total: number
-    shown: number
-    limit: number
-    index_path: string
-    items: MemorySubsystemsDelegationRequest[]
-    error?: string | null
-  }
-}
-
-interface MemorySubsystemsQuery {
-  limit?: number
-  signal?: AbortSignal
-}
-
-export function fetchMemorySubsystems(
-  opts?: MemorySubsystemsQuery,
-): Promise<MemorySubsystemsResponse> {
-  const params = new URLSearchParams()
-  if (opts?.limit != null) params.set('limit', String(opts.limit))
-  const qs = params.toString()
-  return get<MemorySubsystemsResponse>(
-    `/api/v1/dashboard/memory-subsystems${qs ? `?${qs}` : ''}`,
-    { signal: opts?.signal },
-  )
-}
-
 // --- Keeper Memory Health ---
 
 export type KeeperMemoryHealthAlertCode =

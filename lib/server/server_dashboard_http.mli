@@ -6,7 +6,6 @@
     - {!Server_dashboard_http_runtime_info}
     - {!Server_dashboard_http_execution_surfaces}
     - {!Server_dashboard_http_namespace_truth}
-    - {!Server_dashboard_http_memory_subsystems}
 
     Plus 21 own helpers + 1 type — board / memory /
     Gate / verification / planning / goals /
@@ -73,11 +72,6 @@ val dashboard_board_json :
 
 val dashboard_memory_http_json :
   ?config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
-
-val dashboard_memory_subsystems_http_json :
-  config:Workspace_utils.config ->
-  Httpun.Request.t ->
-  Yojson.Safe.t
 
 val dashboard_gate_http_json :
   Httpun.Request.t -> base_path:string -> Yojson.Safe.t
